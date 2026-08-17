@@ -1,0 +1,62 @@
+[package]
+name = "gestionfil"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "ERP Gestion Fil - Polyfashions Carpet Morocco"
+# Le paquet expose trois binaires ; `cargo run` sans argument demarre le serveur.
+default-run = "gestionfil"
+
+[[bin]]
+name = "gestionfil"
+path = "src/main.rs"
+
+[[bin]]
+name = "gestionfil-admin"
+path = "src/bin/admin.rs"
+
+[[bin]]
+name = "gestionfil-import"
+path = "src/bin/import.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# sqlx en mode requetes dynamiques (pas de macros query!) : la couche SQL est
+# deja validee par db/tests/run-tests.ps1, et cela evite d'exiger une base
+# accessible a la compilation.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio", "sqlite", "macros", "chrono", "json"
+] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+jsonwebtoken = "9"
+argon2 = "0.5"
+password-hash = { version = "0.5", features = ["rand_core"] }
+rand = "0.8"
+
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Lecture du classeur GESTION Fil.xlsx (import de reprise)
+calamine = "0.26"
+
+thiserror = "2"
+anyhow = "1"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rpassword = "7"
+
+[dev-dependencies]
+http-body-util = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

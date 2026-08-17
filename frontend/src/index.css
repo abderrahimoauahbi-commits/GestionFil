@@ -1,0 +1,284 @@
+@import "tailwindcss";
+
+/* =============================================================================
+   Jetons de design
+   -----------------------------------------------------------------------------
+   Palette definie en HSL pour que les variantes (survol, bordure, etat actif)
+   se derivent par decalage de luminosite plutot que par une liste de couleurs
+   figees. Le theme sombre ne redefinit que les jetons, jamais les composants.
+   ========================================================================== */
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, monospace;
+
+  /* Rayon court : un tableau de bord d'administration se lit mieux avec des
+     angles nets qu'avec des cartes arrondies facon site vitrine. */
+  --radius: 0.375rem;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-lg: calc(var(--radius) + 2px);
+}
+
+:root {
+  /* Le fond de page est legerement gris : les cartes blanches s'en detachent
+     sans avoir besoin d'ombre, et la page cesse d'etre un aplat uniforme. */
+  --fond: 210 20% 97%;
+  --texte: 215 28% 17%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 215 28% 17%;
+
+  --attenue: 210 20% 97%;
+  --attenue-texte: 215 14% 45%;
+
+  --accent: 215 28% 17%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 217 80% 45%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 70% 45%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 60% 35%;
+  --alerte: 32 90% 45%;
+  --info: 205 80% 42%;
+
+  /* Deux niveaux de trait : `bordure` cerne les blocs, `ligne` separe les
+     lignes d'un tableau. Un seul niveau donne soit des tableaux zebres de
+     traits noirs, soit des cartes sans contour. */
+  --bordure: 215 20% 88%;
+  --ligne: 215 20% 93%;
+  --champ: 215 18% 84%;
+  --anneau: 217 80% 45%;
+
+  --barre: 215 30% 15%;
+  --barre-texte: 210 20% 94%;
+  --barre-attenue: 215 16% 62%;
+  --barre-actif: 215 28% 24%;
+
+  color-scheme: light;
+}
+
+.sombre {
+  --fond: 222 30% 9%;
+  --texte: 210 20% 92%;
+
+  --surface: 220 26% 13%;
+  --surface-texte: 210 20% 92%;
+
+  --attenue: 218 24% 17%;
+  --attenue-texte: 215 15% 62%;
+
+  --accent: 210 20% 92%;
+  --accent-texte: 222 30% 9%;
+
+  --primaire: 214 90% 62%;
+  --primaire-texte: 222 40% 10%;
+
+  --danger: 0 65% 55%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 50% 48%;
+  --alerte: 35 85% 58%;
+  --info: 205 80% 58%;
+
+  --bordure: 218 20% 24%;
+  --ligne: 218 20% 19%;
+  --champ: 218 20% 26%;
+  --anneau: 214 90% 62%;
+
+  --barre: 222 32% 8%;
+  --barre-texte: 210 20% 92%;
+  --barre-attenue: 215 14% 55%;
+  --barre-actif: 218 24% 18%;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-fond: hsl(var(--fond));
+  --color-texte: hsl(var(--texte));
+  --color-surface: hsl(var(--surface));
+  --color-surface-texte: hsl(var(--surface-texte));
+  --color-attenue: hsl(var(--attenue));
+  --color-attenue-texte: hsl(var(--attenue-texte));
+  --color-accent: hsl(var(--accent));
+  --color-accent-texte: hsl(var(--accent-texte));
+  --color-primaire: hsl(var(--primaire));
+  --color-primaire-texte: hsl(var(--primaire-texte));
+  --color-danger: hsl(var(--danger));
+  --color-danger-texte: hsl(var(--danger-texte));
+  --color-succes: hsl(var(--succes));
+  --color-alerte: hsl(var(--alerte));
+  --color-info: hsl(var(--info));
+  --color-bordure: hsl(var(--bordure));
+  --color-ligne: hsl(var(--ligne));
+  --color-champ: hsl(var(--champ));
+  --color-anneau: hsl(var(--anneau));
+  --color-barre: hsl(var(--barre));
+  --color-barre-texte: hsl(var(--barre-texte));
+  --color-barre-attenue: hsl(var(--barre-attenue));
+  --color-barre-actif: hsl(var(--barre-actif));
+}
+
+/* ========================================================================== */
+
+* {
+  border-color: hsl(var(--bordure));
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: hsl(var(--fond));
+  color: hsl(var(--texte));
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/* Zones sures des ecrans a encoche : indispensable en usage tablette. */
+:root {
+  --marge-sure-bas: env(safe-area-inset-bottom, 0px);
+  --marge-sure-haut: env(safe-area-inset-top, 0px);
+}
+
+/* Les tableaux larges defilent DANS leur conteneur : la page elle-meme ne doit
+   jamais defiler horizontalement, sous peine de rendre la navigation penible
+   sur tablette. */
+.defilement-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.defilement-x::-webkit-scrollbar {
+  height: 6px;
+}
+.defilement-x::-webkit-scrollbar-thumb {
+  background: hsl(var(--bordure));
+  border-radius: 3px;
+}
+
+/* =============================================================================
+   Quadrillage des tableaux
+   -----------------------------------------------------------------------------
+   Un tableau de gestion se lit en suivant une ligne sur quinze colonnes ET en
+   comparant une colonne sur cinquante lignes. Les deux mouvements ont besoin
+   d'un guide : filet horizontal entre les lignes, filet vertical entre les
+   colonnes. Le zebrage, lui, salit la lecture des nombres.
+
+   `--filet` vaut `ligne` par defaut ; un tableau peut le redefinir localement.
+   ========================================================================== */
+.grille {
+  --filet: hsl(var(--ligne));
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.grille > thead > tr > th,
+.grille > tbody > tr > td,
+.grille > tfoot > tr > td {
+  border-bottom: 1px solid var(--filet);
+  border-right: 1px solid var(--filet);
+}
+
+/* Derniere colonne : pas de trait a droite, le contour de la carte suffit. */
+.grille > thead > tr > th:last-child,
+.grille > tbody > tr > td:last-child,
+.grille > tfoot > tr > td:last-child {
+  border-right: 0;
+}
+
+/* Derniere ligne : idem en bas. */
+.grille > tbody > tr:last-child > td {
+  border-bottom: 0;
+}
+
+/* L'en-tete se detache d'un trait plus marque. */
+.grille > thead > tr > th {
+  border-bottom-color: hsl(var(--bordure));
+}
+
+/* Cible tactile minimale de 44 px : saisie au magasin, souvent avec des gants. */
+@media (pointer: coarse) {
+  button,
+  a[role="button"],
+  input,
+  select,
+  [role="option"] {
+    min-height: 44px;
+  }
+}
+
+/* Barre de titre Tauri : la fenetre est sans decoration native, on rend cette
+   bande deplacable. */
+.zone-glisser {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.zone-glisser button,
+.zone-glisser a,
+.zone-glisser input {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+@media print {
+  .sans-impression,
+  .impression-masquee {
+    display: none !important;
+  }
+
+  /* Un document imprimable sort de la coquille de l'application : sans cela,
+     l'entete, la navigation et les marges de l'ecran partent a l'imprimante
+     avec lui, et le bon tient sur deux pages au lieu d'une. */
+  .zone-impression {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    background: #fff;
+    color: #000;
+    box-shadow: none;
+  }
+
+  /* Les couleurs de fond des tableaux sont supprimees par defaut a
+     l'impression : on force celles qui portent du sens (entetes, totaux). */
+  .zone-impression * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Une ligne de tableau ne doit jamais etre coupee entre deux pages. */
+  .zone-impression tr {
+    break-inside: avoid;
+  }
+
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+}
+
+@keyframes apparition {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.apparition {
+  animation: apparition 0.15s ease-out;
+}

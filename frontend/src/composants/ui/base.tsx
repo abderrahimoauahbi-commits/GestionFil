@@ -1,0 +1,295 @@
+/**
+ * Primitives d'interface.
+ *
+ * Construites sur Radix UI : accessibilite clavier, gestion du focus, ARIA et
+ * portails sont deleguees a une bibliotheque qui les traite correctement.
+ * L'apparence reste entierement pilotee par les jetons de theme, de sorte que
+ * le mode sombre ne demande aucune modification de composant.
+ */
+import * as React from 'react'
+import { Slot } from '@radix-ui/react-slot'
+import { cva, type VariantProps } from 'class-variance-authority'
+import { Loader2 } from 'lucide-react'
+import { cn } from '../../lib/utils'
+
+// ============================================================================
+// Bouton
+// ============================================================================
+
+// Densite d'un tableau de bord d'administration : hauteurs reduites, texte 13 px.
+// Un ERP se consulte huit heures par jour — chaque pixel de hauteur en trop est
+// une ligne de moins a l'ecran.
+const varianteBouton = cva(
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius)] ' +
+    'text-[13px] font-medium transition-colors outline-none ' +
+    'focus-visible:ring-2 focus-visible:ring-anneau focus-visible:ring-offset-1 focus-visible:ring-offset-fond ' +
+    'disabled:pointer-events-none disabled:opacity-50 ' +
+    '[&_svg]:size-3.5 [&_svg]:shrink-0',
+  {
+    variants: {
+      variante: {
+        principal: 'bg-accent text-accent-texte hover:bg-accent/90',
+        primaire: 'bg-primaire text-primaire-texte hover:bg-primaire/90',
+        contour: 'border border-bordure bg-surface hover:bg-attenue',
+        discret: 'hover:bg-attenue hover:text-texte',
+        danger: 'bg-danger text-danger-texte hover:bg-danger/90',
+        lien: 'text-primaire underline-offset-4 hover:underline',
+      },
+      taille: {
+        xs: 'h-6 px-2 text-[11px] [&_svg]:size-3',
+        sm: 'h-7 px-2.5 text-xs',
+        md: 'h-8 px-3',
+        lg: 'h-9 px-4 text-sm',
+        icone: 'h-7 w-7 p-0',
+        'icone-xs': 'h-6 w-6 p-0 [&_svg]:size-3',
+      },
+    },
+    defaultVariants: { variante: 'principal', taille: 'md' },
+  },
+)
+
+export interface BoutonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof varianteBouton> {
+  asChild?: boolean
+  chargement?: boolean
+}
+
+export const Bouton = React.forwardRef<HTMLButtonElement, BoutonProps>(
+  ({ className, variante, taille, asChild, chargement, children, disabled, ...props }, ref) => {
+    const Composant = asChild ? Slot : 'button'
+    return (
+      <Composant
+        ref={ref}
+        className={cn(varianteBouton({ variante, taille }), className)}
+        disabled={disabled || chargement}
+        {...props}
+      >
+        {chargement ? (
+          <>
+            <Loader2 className="animate-spin" />
+            {children}
+          </>
+        ) : (
+          children
+        )}
+      </Composant>
+    )
+  },
+)
+Bouton.displayName = 'Bouton'
+
+// ============================================================================
+// Champs de saisie
+// ============================================================================
+
+const classeChamp =
+  'flex h-8 w-full rounded-[var(--radius)] border border-champ bg-surface px-2.5 py-1 text-[13px] ' +
+  'transition-colors placeholder:text-attenue-texte ' +
+  'focus-visible:border-anneau focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau/20 ' +
+  'disabled:cursor-not-allowed disabled:bg-attenue disabled:text-attenue-texte ' +
+  'aria-[invalid=true]:border-danger aria-[invalid=true]:ring-danger/25'
+
+export const Champ = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, ...props }, ref) => (
+    <input ref={ref} className={cn(classeChamp, className)} {...props} />
+  ),
+)
+Champ.displayName = 'Champ'
+
+export const Zone = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement>
+>(({ className, ...props }, ref) => (
+  <textarea ref={ref} className={cn(classeChamp, 'h-auto min-h-20 py-2', className)} {...props} />
+))
+Zone.displayName = 'Zone'
+
+/** Selecteur natif : sur tablette, le selecteur du systeme est plus facile a
+ *  manipuler qu'une liste personnalisee, et il reste accessible au clavier. */
+export const Selecteur = React.forwardRef<
+  HTMLSelectElement,
+  React.SelectHTMLAttributes<HTMLSelectElement>
+>(({ className, children, ...props }, ref) => (
+  <select ref={ref} className={cn(classeChamp, 'pr-8', className)} {...props}>
+    {children}
+  </select>
+))
+Selecteur.displayName = 'Selecteur'
+
+export function Etiq({
+  className,
+  obligatoire,
+  children,
+  ...props
+}: React.LabelHTMLAttributes<HTMLLabelElement> & { obligatoire?: boolean }) {
+  return (
+    <label
+      className={cn(
+        'mb-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-attenue-texte',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      {obligatoire && <span className="text-danger">*</span>}
+    </label>
+  )
+}
+
+// ============================================================================
+// Surfaces
+// ============================================================================
+
+export function Carte({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      // Pas d'ombre : sur un fond legerement gris, un simple contour suffit a
+      // detacher la carte, et l'ecran reste net meme avec dix blocs empiles.
+      className={cn(
+        'rounded-[var(--radius)] border border-bordure bg-surface text-surface-texte',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+export function CarteEntete({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn(
+        'flex min-h-9 items-center justify-between gap-3 border-b border-bordure bg-attenue px-3 py-1.5',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+export function CarteTitre({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
+  return (
+    <h3
+      className={cn(
+        'text-[10px] font-semibold uppercase tracking-wider text-attenue-texte',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+export function CarteCorps({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn('p-2.5', className)} {...props} />
+}
+
+// ============================================================================
+// Badge
+// ============================================================================
+
+const varianteBadge = cva(
+  'inline-flex items-center gap-1 rounded-[var(--radius-sm)] px-1.5 py-px text-[10px] font-medium whitespace-nowrap',
+  {
+    variants: {
+      ton: {
+        neutre: 'bg-attenue text-attenue-texte',
+        accent: 'bg-accent text-accent-texte',
+        info: 'bg-info/15 text-info',
+        succes: 'bg-succes/15 text-succes',
+        alerte: 'bg-alerte/20 text-alerte',
+        danger: 'bg-danger/15 text-danger',
+        contour: 'border border-bordure text-attenue-texte',
+      },
+    },
+    defaultVariants: { ton: 'neutre' },
+  },
+)
+
+export function Badge({
+  className,
+  ton,
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement> & VariantProps<typeof varianteBadge>) {
+  return <span className={cn(varianteBadge({ ton }), className)} {...props} />
+}
+
+// ============================================================================
+// Etats
+// ============================================================================
+
+export function Squelette({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn('animate-pulse rounded-md bg-attenue', className)} {...props} />
+}
+
+export function Chargement({ texte = 'Chargement...' }: { texte?: string }) {
+  return (
+    <div className="flex items-center justify-center gap-3 py-12 text-sm text-attenue-texte">
+      <Loader2 className="size-4 animate-spin" />
+      {texte}
+    </div>
+  )
+}
+
+export function EtatVide({
+  titre,
+  description,
+  action,
+  icone: Icone,
+}: {
+  titre: string
+  description?: string
+  action?: React.ReactNode
+  icone?: React.ComponentType<{ className?: string }>
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-bordure py-14 text-center">
+      {Icone && <Icone className="size-8 text-attenue-texte" />}
+      <div>
+        <p className="font-medium text-texte">{titre}</p>
+        {description && <p className="mt-1 text-sm text-attenue-texte">{description}</p>}
+      </div>
+      {action}
+    </div>
+  )
+}
+
+// ============================================================================
+// Messages
+// ============================================================================
+
+const varianteAlerte = cva('flex gap-3 rounded-[var(--radius)] border p-3 text-sm', {
+  variants: {
+    ton: {
+      info: 'border-info/30 bg-info/10 text-info',
+      succes: 'border-succes/30 bg-succes/10 text-succes',
+      alerte: 'border-alerte/30 bg-alerte/10 text-alerte',
+      danger: 'border-danger/30 bg-danger/10 text-danger',
+    },
+  },
+  defaultVariants: { ton: 'info' },
+})
+
+export function Alerte({
+  className,
+  ton,
+  titre,
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof varianteAlerte> & { titre?: string }) {
+  return (
+    <div role="status" className={cn(varianteAlerte({ ton }), className)} {...props}>
+      <div className="min-w-0 flex-1">
+        {titre && <p className="font-semibold">{titre}</p>}
+        <div className={titre ? 'mt-0.5' : undefined}>{children}</div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Separateur
+// ============================================================================
+
+export function Separateur({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn('h-px w-full bg-bordure', className)} {...props} />
+}

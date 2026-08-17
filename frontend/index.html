@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover"
+    />
+    <meta name="description" content="ERP Gestion Fil - Polyfashions Carpet Morocco" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icone-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Gestion Fil" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <title>Gestion Fil</title>
+
+    <script>
+      // Applique le theme AVANT le premier rendu : sans cela, un utilisateur en
+      // mode sombre voit un eclair blanc a chaque chargement.
+      (function () {
+        try {
+          var choix = localStorage.getItem('gestionfil.theme') || 'systeme'
+          var sombre =
+            choix === 'sombre' ||
+            (choix === 'systeme' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (sombre) document.documentElement.classList.add('sombre')
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

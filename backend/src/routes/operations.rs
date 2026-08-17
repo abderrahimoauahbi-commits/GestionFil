@@ -1,0 +1,146 @@
+//! Endpoints d'ecriture : cascades et calculs.
+//!
+//! Les operations irreversibles (validation d'une reception, cloture d'un
+//! inventaire) exigent la permission VALIDER, distincte d'ECRIRE : c'est sur
+//! cette separation que repose toute la segregation des taches du CDC B4.
+
+use crate::auth::{rbac::module, rbac::Action, Utilisateur};
+use crate::domain::{classification, inventaire, mrp, plan_achat, reception, transfert};
+use crate::error::AppResult;
+use crate::state::AppState;
+use axum::extract::{Path, Query, State};
+use axum::Json;
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+#[derive(Debug, Deserialize)]
+pub struct ParamsPlanAchat {
+    pub id_plan: Option<String>,
+}
+
+pub async fn figer_recettes(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLANS, Action::Ecrire).await?;
+    let n = mrp::figer_recettes(&state.db, &user, &id).await?;
+    Ok(Json(json!({ "id_plan": id, "recettes_figees": n })))
+}
+
+pub async fn calculer_mrp(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MRP, Action::Ecrire).await?;
+    let r = mrp::calculer(&state.db, &user, &id).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+pub async fn snapshot_mrp(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MRP, Action::Ecrire).await?;
+    let n = mrp::prendre_snapshot(&state.db, &user, &id).await?;
+    Ok(Json(json!({ "id_plan": id, "lignes_figees": n })))
+}
+
+pub async fn generer_plan_achat(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(p): Query<ParamsPlanAchat>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
+    let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref()).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DemandeConversion {
+    /// Propositions a convertir. Vide ou absent : toutes celles ouvertes.
+    pub propositions: Option<Vec<String>>,
+}
+
+/// Convertit des propositions d'achat en bons de commande.
+///
+/// Deux permissions sont exigees, et ce n'est pas une precaution excessive :
+/// l'operation consomme des propositions ET cree des engagements. Qui n'a que
+/// l'une des deux ne doit pas pouvoir franchir la frontiere entre les deux.
+pub async fn convertir_plan_achat(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(d): Json<DemandeConversion>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
+    user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
+    let r = plan_achat::convertir(&state.db, &user, d.propositions.as_deref()).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+pub async fn valider_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
+    let r = reception::valider(&state.db, &user, &id).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+/// Expedition : la marchandise quitte le magasin source.
+///
+/// L'ancien nom `valider` est conserve comme alias, mais il decrivait mal ce
+/// qui se passe — il ecrivait les DEUX mouvements d'un coup, et la marchandise
+/// arrivait a destination avant d'avoir voyage.
+pub async fn expedier_transfert(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Valider).await?;
+    let r = transfert::expedier(&state.db, &user, &id).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+/// Reception : quelqu'un constate l'arrivee au magasin destinataire.
+pub async fn receptionner_transfert(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Valider).await?;
+    let r = transfert::receptionner(&state.db, &user, &id).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+pub async fn ouvrir_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Ecrire).await?;
+    let n = inventaire::ouvrir(&state.db, &user, &id).await?;
+    Ok(Json(json!({ "id_inventaire": id, "lignes_a_compter": n })))
+}
+
+pub async fn cloturer_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+    let r = inventaire::cloturer(&state.db, &user, &id).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+pub async fn classifier(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::CATALOGUE, Action::Ecrire).await?;
+    let r = classification::classifier(&state.db, &user).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}

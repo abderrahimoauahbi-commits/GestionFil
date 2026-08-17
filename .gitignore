@@ -1,0 +1,64 @@
+# =============================================================================
+# Ce qui ne doit JAMAIS entrer dans l'historique
+# =============================================================================
+
+# --- Secrets ----------------------------------------------------------------
+# JWT_SECRET et chaine de connexion. Un secret commis reste dans l'historique
+# meme apres suppression : le retirer d'un depot deja pousse impose de le
+# considerer comme compromis et de le regenerer.
+.env*
+
+# --- Bases de donnees -------------------------------------------------------
+# gestionfil.db porte les DONNEES REELLES de l'usine : stocks, prix d'achat,
+# valorisation, comptes utilisateurs et journal d'audit nominatif. Une base
+# commise est une base publiee le jour ou le depot part chez un hebergeur, et
+# git ne desapprend pas.
+#
+# Le schema, lui, EST versionne : db/*.sql le reconstruit entierement, et
+# `db/build.ps1 -Demo` en fabrique un jeu de demonstration. C'est la recette
+# qu'on garde, jamais le plat.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Classeurs sources ------------------------------------------------------
+# Le classeur de reprise porte les memes donnees que la base.
+*.xlsx
+~$*
+
+# --- Artefacts de compilation -----------------------------------------------
+# On versionne ce qu'on ECRIT, jamais ce qu'un outil regenere. Un fichier
+# genere commis diverge du jour ou quelqu'un compile sans le regenerer, et
+# produit alors des conflits que personne ne sait arbitrer : les deux versions
+# sont « justes », elles sortent seulement de deux machines differentes.
+node_modules/
+dist/
+build/
+target/
+backend/target-essai/
+frontend/src-tauri/target/
+*.pdb
+
+# Cache incremental de TypeScript : une empreinte de la derniere compilation.
+*.tsbuildinfo
+
+# Tauri regenere entierement gen/schemas a chaque build, depuis Cargo.toml et
+# les capacites declarees. 320 Ko de JSON qui se reconstruisent en une commande.
+frontend/src-tauri/gen/
+
+# Couverture et rapports de test
+coverage/
+.nyc_output/
+
+# --- Traces d'execution -----------------------------------------------------
+*.log
+srv*.err
+srv*.out
+
+# --- Environnements de developpement ---------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

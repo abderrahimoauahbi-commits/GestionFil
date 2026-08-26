@@ -161,6 +161,15 @@ export function Formulaire({
                     {c.cleCreation && !creation ? 'non modifiable' : 'lecture seule'}
                   </span>
                 )}
+                {c.aide && (
+                  /* La note vit dans l'etiquette, a gauche, et non sous le
+                     champ. Sous le champ, elle poussait le suivant d'une ligne
+                     et espacait tout le formulaire ; ici elle occupe une place
+                     deja disponible et ne deplace rien. */
+                  <span className="ml-1 font-normal normal-case text-attenue-texte">
+                    — {c.aide}
+                  </span>
+                )}
               </Etiq>
 
               {type === 'booleen' ? (
@@ -216,7 +225,6 @@ export function Formulaire({
                 />
               )}
 
-              {c.aide && <p className="mt-1 text-xs text-attenue-texte">{c.aide}</p>}
             </div>
           )
         })}

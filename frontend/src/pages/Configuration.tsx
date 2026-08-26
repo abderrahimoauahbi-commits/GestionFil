@@ -392,7 +392,7 @@ export function Configuration() {
           {q.isLoading && <Chargement texte="Lecture des parametres…" />}
 
           {recherche ? (
-            <Carte>
+            <Carte repliable="configuration.1">
               <CarteEntete>
                 <CarteTitre>
                   {resultats.length} reglage(s) pour « {recherche} »
@@ -452,7 +452,7 @@ export function Configuration() {
               })}
 
               {(orphelins[section] ?? []).length > 0 && (
-                <Carte>
+                <Carte repliable="configuration.2">
                   <CarteEntete className="flex-col items-start gap-1">
                     <CarteTitre>Autres reglages</CarteTitre>
                     <p className="text-[11px] text-attenue-texte">
@@ -644,7 +644,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
         ferme automatiquement le precedent, sans jamais le reecrire.
       </Alerte>
 
-      <Carte>
+      <Carte repliable="configuration.3">
         <CarteEntete>
           <CarteTitre>Devises</CarteTitre>
         </CarteEntete>
@@ -698,7 +698,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
       </Carte>
 
       {devise && (
-        <Carte>
+        <Carte repliable="configuration.4">
           <CarteEntete>
             <CarteTitre>Historique — {devise.code_devise}</CarteTitre>
           </CarteEntete>

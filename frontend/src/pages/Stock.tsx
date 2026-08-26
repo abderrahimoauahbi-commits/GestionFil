@@ -16,11 +16,10 @@ import { api } from '../api/client'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
-  FiltrePersonnalise,
-  appliquerConditions,
-  type ChampFiltrable,
-  type Condition,
-} from '../composants/FiltrePersonnalise'
+  PanneauFiltres,
+  useFiltres,
+  type ChampFiltre,
+} from '../composants/PanneauFiltres'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { Etiquette, fmt } from '../components/ui'
 
@@ -123,75 +122,24 @@ const STATUTS = [
 ]
 
 /** Ce sur quoi une question peut porter, avec le type qui decide des operateurs. */
-const CHAMPS_FILTRABLES: ChampFiltrable[] = [
-  { champ: 'code_reference', libelle: 'Reference', type: 'texte' },
-  { champ: 'designation', libelle: 'Designation', type: 'texte' },
-  { champ: 'fournisseur_nom', libelle: 'Fournisseur', type: 'texte' },
-  { champ: 'stock_mrp_kg', libelle: 'Stock disponible', type: 'nombre', unite: 'kg' },
-  { champ: 'encours_kg', libelle: 'En-cours fournisseur', type: 'nombre', unite: 'kg' },
-  { champ: 'besoin_12m_kg', libelle: 'Besoin 12 mois', type: 'nombre', unite: 'kg' },
-  { champ: 'stock_projete_kg', libelle: 'Stock projete', type: 'nombre', unite: 'kg' },
-  { champ: 'jours_couverture', libelle: 'Couverture', type: 'nombre', unite: 'jours' },
-  { champ: 'conso_mensuelle_kg', libelle: 'Consommation mensuelle', type: 'nombre', unite: 'kg' },
-  {
-    champ: 'statut',
-    libelle: 'Statut',
-    type: 'liste',
-    options: [
-      { valeur: 'RUPTURE', libelle: 'Rupture' },
-      { valeur: 'CRITIQUE', libelle: 'Critique' },
-      { valeur: 'ATTENTION', libelle: 'Attention' },
-      { valeur: 'OK', libelle: 'Situation normale' },
-    ],
-  },
-  {
-    champ: 'statut_physique',
-    libelle: 'Couche physique',
-    type: 'liste',
-    options: [
-      { valeur: 'RUPTURE', libelle: 'Magasin vide' },
-      { valeur: 'CRITIQUE', libelle: 'Sous le minimum' },
-      { valeur: 'OK', libelle: 'Suffisant' },
-    ],
-  },
-  {
-    champ: 'sur_stock',
-    libelle: 'Sur-stock',
-    type: 'liste',
-    options: [
-      { valeur: '1', libelle: 'Au-dela du maximum' },
-      { valeur: '0', libelle: 'Dans les bornes' },
-    ],
-  },
-  { champ: 'stock_physique_net_kg', libelle: 'Stock physique net', type: 'nombre', unite: 'kg' },
-  { champ: 'stock_min_kg', libelle: 'Stock minimum', type: 'nombre', unite: 'kg' },
-  { champ: 'encours_retarde_kg', libelle: 'En-cours en retard', type: 'nombre', unite: 'kg' },
-  {
-    champ: 'classe_abc',
-    libelle: 'Classe ABC',
-    type: 'liste',
-    options: [
-      { valeur: 'A', libelle: 'A' },
-      { valeur: 'B', libelle: 'B' },
-      { valeur: 'C', libelle: 'C' },
-    ],
-  },
-  {
-    champ: 'source_conso',
-    libelle: 'Source de consommation',
-    type: 'liste',
-    options: [
-      { valeur: 'REELLE', libelle: 'Reelle' },
-      { valeur: 'PREVISIONNELLE_MRP', libelle: 'Previsionnelle (MRP)' },
-      { valeur: 'INDETERMINEE', libelle: 'Indeterminee' },
-    ],
-  },
+/**
+ * Filtres du stock projete.
+ *
+ * Uniquement des axes que l'on choisit, jamais de comparateur a saisir : sur
+ * cet ecran, les questions reelles sont « quelles references en tension »,
+ * « chez quel fournisseur », « quelle classe » — pas « couverture < 42 ».
+ */
+const CHAMPS_FILTRABLES: ChampFiltre<LigneProjete>[] = [
+  { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
+  { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', valeur: (l) => l.fournisseur_nom },
+  { cle: 'classe', libelle: 'Classe ABC', type: 'liste', valeur: (l) => l.classe_abc },
+  { cle: 'reference', libelle: 'Reference', type: 'texte', valeur: (l) => l.code_reference },
 ]
 
 export function Stock() {
   const [filtre, setFiltre] = useState('')
   const [recherche, setRecherche] = useState('')
-  const [conditions, setConditions] = useState<Condition[]>([])
+  const filtres = useFiltres(CHAMPS_FILTRABLES)
 
   // Un seul appel, sans filtre serveur : le jeu tient largement en memoire, et
   // le garder entier permet de compter chaque statut sans quatre requetes.
@@ -231,8 +179,8 @@ export function Stock() {
           (l.designation ?? '').toLowerCase().includes(f) ||
           (l.fournisseur_nom ?? '').toLowerCase().includes(f),
       )
-    return appliquerConditions(base, conditions, CHAMPS_FILTRABLES)
-  }, [toutes, filtre, recherche, conditions])
+    return base.filter(filtres.retenir)
+  }, [toutes, filtre, recherche, filtres])
 
   const groupes: GroupeRail[] = [
     {
@@ -361,15 +309,18 @@ export function Stock() {
                 placeholder: 'Reference, fournisseur…',
               }}
             />
-            <FiltrePersonnalise
+            <PanneauFiltres
               champs={CHAMPS_FILTRABLES}
-              conditions={conditions}
-              surChangement={setConditions}
+              lignes={toutes}
+              valeurs={filtres.valeurs}
+              definir={filtres.definir}
+              reinitialiser={filtres.reinitialiser}
+              actifs={filtres.actifs}
             />
           </div>
         }
       >
-        {conditions.length > 0 && (
+        {filtres.actifs > 0 && (
           <div className="mb-2 text-[12px] text-attenue-texte">
             {lignes.length} reference(s) sur {toutes.length} apres filtrage.
           </div>

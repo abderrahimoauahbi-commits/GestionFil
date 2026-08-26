@@ -363,7 +363,7 @@ export function ReceptionNouvelle() {
 
       <div className="space-y-3">
         {/* ---- En-tete ---------------------------------------------------- */}
-        <Carte>
+        <Carte repliable="receptionnouvelle.1">
           <CarteEntete>
             <CarteTitre>En-tete</CarteTitre>
           </CarteEntete>
@@ -453,7 +453,7 @@ export function ReceptionNouvelle() {
         ) : (
           <>
             {/* ---- Barre de reprise ---------------------------------------- */}
-            <Carte>
+            <Carte repliable="receptionnouvelle.2">
               <CarteEntete>
                 <CarteTitre>Reprise des commandes de {fournisseur?.nom}</CarteTitre>
               </CarteEntete>
@@ -531,7 +531,7 @@ export function ReceptionNouvelle() {
             </Carte>
 
             {/* ---- Grille -------------------------------------------------- */}
-            <Carte>
+            <Carte repliable="receptionnouvelle.3">
               <CarteEntete>
                 <CarteTitre>
                   Lignes de la reception
@@ -879,7 +879,7 @@ function PanneauDetail({
   ]
 
   return (
-    <Carte>
+    <Carte repliable="receptionnouvelle.4">
       <CarteEntete>
         <CarteTitre>
           Ligne {rang} — {ligne.code_reference}

@@ -1,0 +1,71 @@
+/* =============================================================================
+   Jetons des graphiques
+   -----------------------------------------------------------------------------
+   Les series ne prennent PAS la couleur d'accent du theme : celle-ci change
+   avec la palette (bleu, vert, ...) et repeindrait les series a chaque
+   changement d'habillage, alors qu'une couleur de serie doit designer toujours
+   la meme chose.
+
+   Ce jeu de trois teintes est valide pour l'ecart perceptif, y compris en
+   vision des couleurs deficiente, sur fond clair ET sur fond sombre
+   (ecart minimal 9,2 / 9,4 en deuteranopie ; 24,0 / 20,9 en vision normale).
+   L'ordre est fixe : la serie 1 est toujours bleue, jamais recyclee.
+
+   Sur fond clair, l'aqua passe sous 3:1 de contraste : les graphiques portent
+   donc systematiquement des etiquettes lisibles et une vue tableau. C'est la
+   contrepartie exigee, pas une option.
+   ========================================================================== */
+.viz {
+  --viz-serie-1: #2a78d6;
+  --viz-serie-2: #eb6834;
+  --viz-serie-3: #1baf7a;
+
+  --viz-grille: hsl(var(--ligne));
+  --viz-axe: hsl(var(--bordure));
+  --viz-encre: hsl(var(--texte));
+  --viz-encre-attenuee: hsl(var(--attenue-texte));
+  --viz-surface: hsl(var(--surface));
+
+  /* Etats : reserves, jamais reutilises comme couleur de serie. */
+  --viz-critique: hsl(var(--danger));
+  --viz-alerte: hsl(var(--alerte));
+  --viz-bon: hsl(var(--succes));
+}
+
+.sombre .viz {
+  --viz-serie-1: #3987e5;
+  --viz-serie-2: #d95926;
+  --viz-serie-3: #199e70;
+}
+
+/* Chiffres alignes en colonne : indispensable des qu'on compare. */
+.viz {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Les marques qui se chevauchent portent un liseré a la couleur du fond, pour
+   que la superposition reste lisible. */
+.viz .marque-anneau {
+  stroke: var(--viz-surface);
+  stroke-width: 2;
+}
+
+.viz .grille-ligne {
+  stroke: var(--viz-grille);
+  stroke-width: 1;
+}
+
+.viz .axe-ligne {
+  stroke: var(--viz-axe);
+  stroke-width: 1;
+}
+
+/* Cible de survol : plus large que la marque, invisible. */
+.viz .cible {
+  fill: transparent;
+  cursor: default;
+}
+.viz .cible:hover + .marque,
+.viz .rangee:hover .marque {
+  filter: brightness(1.08);
+}

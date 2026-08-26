@@ -15,11 +15,10 @@ import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
-  FiltrePersonnalise,
-  appliquerConditions,
-  type ChampFiltrable,
-  type Condition,
-} from '../composants/FiltrePersonnalise'
+  PanneauFiltres,
+  useFiltres,
+  type ChampFiltre,
+} from '../composants/PanneauFiltres'
 
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { Alerte, Badge, Bouton, Chargement } from '../composants/ui/base'
@@ -59,25 +58,15 @@ const LIBELLE: Record<string, string> = {
   ANNULE: 'Annule',
 }
 
-const CHAMPS_TRANSFERT: ChampFiltrable[] = [
-  { champ: 'numero_transfert', libelle: 'Numero', type: 'texte' },
-  { champ: 'date_transfert', libelle: 'Date', type: 'date' },
-  { champ: 'code_magasin_source', libelle: 'Magasin source', type: 'texte' },
-  { champ: 'code_magasin_dest', libelle: 'Magasin destinataire', type: 'texte' },
-  { champ: 'nb_lignes', libelle: 'Nombre de lignes', type: 'nombre' },
-  { champ: 'auteur', libelle: 'Auteur', type: 'texte' },
-  { champ: 'observations', libelle: 'Observations', type: 'texte' },
-  {
-    champ: 'statut',
-    libelle: 'Statut',
-    type: 'liste',
-    options: [
-      { valeur: 'BROUILLON', libelle: 'En preparation' },
-      { valeur: 'VALIDE', libelle: 'En transit' },
-      { valeur: 'TERMINE', libelle: 'Recu' },
-      { valeur: 'ANNULE', libelle: 'Annule' },
-    ],
-  },
+/* Des axes que l'on choisit, pas de comparateur a saisir : les valeurs
+   des listes sortent des lignes affichees. */
+const CHAMPS_TRANSFERT: ChampFiltre<Transfert>[] = [
+  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (l) => l.date_transfert },
+  { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
+  { cle: 'source', libelle: 'Magasin source', type: 'liste', valeur: (l) => l.code_magasin_source },
+  { cle: 'dest', libelle: 'Magasin destinataire', type: 'liste', valeur: (l) => l.code_magasin_dest },
+  { cle: 'auteur', libelle: 'Auteur', type: 'liste', valeur: (l) => l.auteur },
+  { cle: 'numero', libelle: 'Numero', type: 'texte', valeur: (l) => l.numero_transfert },
 ]
 
 const TON: Record<string, 'neutre' | 'info' | 'succes' | 'danger' | 'alerte'> = {
@@ -95,7 +84,7 @@ export function Transferts() {
   const confirmation = useConfirmation()
   const naviguer = useNavigate()
   const [statut, setStatut] = useState('')
-  const [conditions, setConditions] = useState<Condition[]>([])
+  const filtres = useFiltres(CHAMPS_TRANSFERT)
 
   const q = useQuery({
     queryKey: ['transferts'],
@@ -226,11 +215,8 @@ export function Transferts() {
     m[t.statut] = (m[t.statut] ?? 0) + 1
     return m
   }, {})
-  const vus = appliquerConditions(
-    tous.filter((t) => !statut || t.statut === statut),
-    conditions,
-    CHAMPS_TRANSFERT,
-  )
+  const filtrables = tous.filter((t) => !statut || t.statut === statut)
+  const vus = filtrables.filter(filtres.retenir)
 
   const groupes: GroupeRail[] = [
     { entrees: [{ cle: '', libelle: 'Tous les transferts', compte: tous.length }] },
@@ -298,10 +284,13 @@ export function Transferts() {
         rail={
           <div className="space-y-3">
             <RailLateral groupes={groupes} actif={statut} surChoix={setStatut} />
-            <FiltrePersonnalise
+            <PanneauFiltres
               champs={CHAMPS_TRANSFERT}
-              conditions={conditions}
-              surChangement={setConditions}
+              lignes={filtrables}
+              valeurs={filtres.valeurs}
+              definir={filtres.definir}
+              reinitialiser={filtres.reinitialiser}
+              actifs={filtres.actifs}
             />
           </div>
         }

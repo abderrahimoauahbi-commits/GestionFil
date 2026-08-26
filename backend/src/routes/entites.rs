@@ -18,19 +18,33 @@ use std::collections::HashMap;
 
 /// Extrait les filtres de la chaine de requete.
 ///
-/// Tout parametre inconnu de `limite`, `recherche` et `actif` est traite comme
-/// une egalite sur colonne, validee ensuite contre la liste blanche de
-/// l'entite.
+/// Tout parametre inconnu de `limite`, `offset`, `recherche`, `actif`, `tri` et
+/// `sens` est traite comme une egalite sur colonne, validee ensuite contre la
+/// liste blanche de l'entite.
+///
+/// `offset` a un effet de bord assume : sa presence fait passer la reponse en
+/// enveloppe paginee. C'est ce qui permet d'ajouter la pagination sans casser
+/// les ecrans qui attendent un tableau.
 fn filtre(params: HashMap<String, String>) -> Filtre {
     let mut f = Filtre {
         limite: 500,
+        offset: None,
         recherche: None,
         actif: None,
         egalites: Vec::new(),
+        tri: None,
+        sens: None,
     };
     for (cle, valeur) in params {
         match cle.as_str() {
             "limite" => f.limite = valeur.parse().unwrap_or(500),
+            "offset" => f.offset = Some(valeur.parse().unwrap_or(0)),
+            "tri" => {
+                if !valeur.trim().is_empty() {
+                    f.tri = Some(valeur.trim().to_string())
+                }
+            }
+            "sens" => f.sens = Some(valeur.to_lowercase()),
             "recherche" => {
                 if !valeur.trim().is_empty() {
                     f.recherche = Some(valeur.trim().to_string())

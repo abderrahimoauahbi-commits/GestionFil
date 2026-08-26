@@ -18,11 +18,10 @@ import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
-  FiltrePersonnalise,
-  appliquerConditions,
-  type ChampFiltrable,
-  type Condition,
-} from '../composants/FiltrePersonnalise'
+  PanneauFiltres,
+  useFiltres,
+  type ChampFiltre,
+} from '../composants/PanneauFiltres'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
@@ -53,25 +52,15 @@ interface Inventaire extends Record<string, unknown> {
   responsable: string | null
 }
 
-const CHAMPS_INVENTAIRE: ChampFiltrable[] = [
-  { champ: 'numero_inventaire', libelle: 'Numero', type: 'texte' },
-  { champ: 'date_inventaire', libelle: 'Date', type: 'date' },
-  { champ: 'type_inventaire', libelle: "Type d'inventaire", type: 'texte' },
-  { champ: 'code_magasin', libelle: 'Magasin', type: 'texte' },
-  { champ: 'nb_lignes', libelle: 'Lignes', type: 'nombre' },
-  { champ: 'nb_a_compter', libelle: 'Restant a compter', type: 'nombre' },
-  { champ: 'responsable', libelle: 'Responsable', type: 'texte' },
-  {
-    champ: 'statut',
-    libelle: 'Statut',
-    type: 'liste',
-    options: [
-      { valeur: 'BROUILLON', libelle: 'Brouillon' },
-      { valeur: 'EN_COURS', libelle: 'En cours' },
-      { valeur: 'CLOTURE', libelle: 'Cloture' },
-      { valeur: 'ANNULE', libelle: 'Annule' },
-    ],
-  },
+/* Des axes que l'on choisit, pas de comparateur a saisir : les valeurs
+   des listes sortent des lignes affichees. */
+const CHAMPS_INVENTAIRE: ChampFiltre<Inventaire>[] = [
+  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (l) => l.date_inventaire },
+  { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
+  { cle: 'magasin', libelle: 'Magasin', type: 'liste', valeur: (l) => l.code_magasin },
+  { cle: 'type', libelle: "Type d'inventaire", type: 'liste', valeur: (l) => l.type_inventaire },
+  { cle: 'responsable', libelle: 'Responsable', type: 'liste', valeur: (l) => l.responsable },
+  { cle: 'numero', libelle: 'Numero', type: 'texte', valeur: (l) => l.numero_inventaire },
 ]
 
 interface LigneInv extends Record<string, unknown> {
@@ -105,7 +94,7 @@ export function Inventaires() {
   const [selection, setSelection] = useState<string | null>(null)
   const [creation, setCreation] = useState(false)
   const [statut, setStatut] = useState('')
-  const [conditions, setConditions] = useState<Condition[]>([])
+  const filtres = useFiltres(CHAMPS_INVENTAIRE)
 
   const qInv = useQuery({
     queryKey: ['inventaires'],
@@ -325,11 +314,8 @@ export function Inventaires() {
     m[i.statut] = (m[i.statut] ?? 0) + 1
     return m
   }, {})
-  const vus = appliquerConditions(
-    tous.filter((i) => !statut || i.statut === statut),
-    conditions,
-    CHAMPS_INVENTAIRE,
-  )
+  const filtrables = tous.filter((i) => !statut || i.statut === statut)
+  const vus = filtrables.filter(filtres.retenir)
 
   const groupes: GroupeRail[] = [
     { entrees: [{ cle: '', libelle: 'Tous les inventaires', compte: tous.length }] },
@@ -387,10 +373,13 @@ export function Inventaires() {
         rail={
           <div className="space-y-3">
             <RailLateral groupes={groupes} actif={statut} surChoix={setStatut} />
-            <FiltrePersonnalise
+            <PanneauFiltres
               champs={CHAMPS_INVENTAIRE}
-              conditions={conditions}
-              surChangement={setConditions}
+              lignes={filtrables}
+              valeurs={filtres.valeurs}
+              definir={filtres.definir}
+              reinitialiser={filtres.reinitialiser}
+              actifs={filtres.actifs}
             />
           </div>
         }
@@ -433,7 +422,7 @@ export function Inventaires() {
           />
         ) : (
           <div className="space-y-4">
-            <Carte>
+            <Carte repliable="inventaires.1">
               <CarteCorps className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">

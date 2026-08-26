@@ -671,7 +671,7 @@ export function BonCommande() {
       )}
 
       <div className="space-y-3">
-        <Carte>
+        <Carte repliable="boncommande.1">
           <CarteEntete>
             <CarteTitre>En-tete</CarteTitre>
             <Badge ton={TON[bc.statut] ?? 'neutre'}>{bc.statut}</Badge>
@@ -756,7 +756,7 @@ export function BonCommande() {
           </CarteCorps>
         </Carte>
 
-        <Carte>
+        <Carte repliable="boncommande.2">
           <CarteEntete>
             <CarteTitre>Lignes</CarteTitre>
             {modifiable && (

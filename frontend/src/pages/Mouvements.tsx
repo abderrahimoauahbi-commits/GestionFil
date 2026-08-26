@@ -13,11 +13,10 @@ import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
-  FiltrePersonnalise,
-  appliquerConditions,
-  type ChampFiltrable,
-  type Condition,
-} from '../composants/FiltrePersonnalise'
+  PanneauFiltres,
+  useFiltres,
+  type ChampFiltre,
+} from '../composants/PanneauFiltres'
 
 import { Panneau } from '../components/Formulaire'
 import { TableDroits, type Colonne } from '../components/TableDroits'
@@ -40,19 +39,20 @@ interface LigneLivre extends Record<string, unknown> {
   signe: number
 }
 
-/** Le grand livre est immuable : on ne le corrige pas, on l'interroge. */
-const CHAMPS_MVT: ChampFiltrable[] = [
-  { champ: 'numero_mouvement', libelle: 'Numero', type: 'texte' },
-  { champ: 'date_mouvement', libelle: 'Date', type: 'date' },
-  { champ: 'code_reference', libelle: 'Reference', type: 'texte' },
-  { champ: 'code_type_mvt', libelle: 'Type de mouvement', type: 'texte' },
-  { champ: 'code_magasin', libelle: 'Magasin', type: 'texte' },
-  { champ: 'quantite_kg', libelle: 'Quantite', type: 'nombre', unite: 'kg' },
-  { champ: 'prix_kg_mad', libelle: 'Prix', type: 'nombre', unite: 'MAD/kg' },
-  { champ: 'total_mad', libelle: 'Total', type: 'nombre', unite: 'MAD' },
-  { champ: 'lot_fournisseur', libelle: 'Lot fournisseur', type: 'texte' },
-  { champ: 'numero_of', libelle: "Numero d'OF", type: 'texte' },
-  { champ: 'utilisateur', libelle: 'Saisi par', type: 'texte' },
+/**
+ * Le grand livre est immuable : on ne le corrige pas, on l'interroge.
+ *
+ * Les valeurs des listes sortent des lignes affichees : un magasin sans
+ * mouvement ne figure pas au filtre, puisque le choisir ne montrerait rien.
+ */
+const CHAMPS_MVT: ChampFiltre<LigneLivre>[] = [
+  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (l) => l.date_mouvement },
+  { cle: 'type', libelle: 'Type', type: 'liste', valeur: (l) => l.code_type_mvt },
+  { cle: 'magasin', libelle: 'Magasin', type: 'liste', valeur: (l) => l.code_magasin },
+  { cle: 'reference', libelle: 'Reference', type: 'liste', valeur: (l) => l.code_reference },
+  { cle: 'lot', libelle: 'Lot', type: 'texte', valeur: (l) => l.lot_fournisseur },
+  { cle: 'of', libelle: "N° d'OF", type: 'texte', valeur: (l) => l.numero_of },
+  { cle: 'utilisateur', libelle: 'Saisi par', type: 'liste', valeur: (l) => l.utilisateur },
 ]
 
 interface TypeMvt {
@@ -118,7 +118,7 @@ export function Mouvements() {
   const [saisieOuverte, setSaisieOuverte] = useState(false)
   const [filtreRef, setFiltreRef] = useState('')
   const [sens, setSens] = useState('')
-  const [conditions, setConditions] = useState<Condition[]>([])
+  const filtres = useFiltres(CHAMPS_MVT)
 
   const params = new URLSearchParams({ limite: '300' })
   if (filtreRef) params.set('code_reference', filtreRef)
@@ -228,15 +228,12 @@ export function Mouvements() {
     },
   ]
 
-  const lignesVues = appliquerConditions(
-    toutesLignes.filter((l) => {
-      if (!sens) return true
-      if (sens.startsWith('T:')) return l.code_type_mvt === sens.slice(2)
-      return sens === 'ENTREE' ? l.signe > 0 : l.signe < 0
-    }),
-    conditions,
-    CHAMPS_MVT,
-  )
+  const lignesSens = toutesLignes.filter((l) => {
+    if (!sens) return true
+    if (sens.startsWith('T:')) return l.code_type_mvt === sens.slice(2)
+    return sens === 'ENTREE' ? l.signe > 0 : l.signe < 0
+  })
+  const lignesVues = lignesSens.filter(filtres.retenir)
 
   return (
     <div>
@@ -264,15 +261,18 @@ export function Mouvements() {
                 placeholder: 'Reference exacte…',
               }}
             />
-            <FiltrePersonnalise
+            <PanneauFiltres
               champs={CHAMPS_MVT}
-              conditions={conditions}
-              surChangement={setConditions}
+              lignes={lignesSens}
+              valeurs={filtres.valeurs}
+              definir={filtres.definir}
+              reinitialiser={filtres.reinitialiser}
+              actifs={filtres.actifs}
             />
           </div>
         }
       >
-        {(conditions.length > 0 || sens) && (
+        {(filtres.actifs > 0 || sens) && (
           <div className="mb-2 text-[12px] text-attenue-texte">
             {lignesVues.length} ligne(s) sur {toutesLignes.length} apres filtrage.
           </div>

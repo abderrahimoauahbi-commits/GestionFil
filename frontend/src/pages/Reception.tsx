@@ -619,7 +619,7 @@ export function Reception() {
       )}
 
       <div className="space-y-3">
-        <Carte>
+        <Carte repliable="reception.1">
           <CarteEntete>
             <CarteTitre>En-tete</CarteTitre>
             <Badge ton={TON[rec.statut] ?? 'neutre'}>{rec.statut}</Badge>
@@ -686,7 +686,7 @@ export function Reception() {
           </CarteCorps>
         </Carte>
 
-        <Carte>
+        <Carte repliable="reception.2">
           <CarteEntete>
             <CarteTitre>Pesees</CarteTitre>
             {modifiable && (

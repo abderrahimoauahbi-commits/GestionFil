@@ -339,7 +339,7 @@ export function Equivalences() {
                 <strong>{groupe.qualification}</strong> — {EXPLICATION[groupe.qualification]}
               </Alerte>
 
-              <Carte>
+              <Carte repliable="equivalences.1">
                 <CarteEntete>
                   <CarteTitre>
                     {groupe.libelle} · {groupe.nb_references} reference(s)

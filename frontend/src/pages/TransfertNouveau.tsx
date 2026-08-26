@@ -409,7 +409,7 @@ export function TransfertNouveau() {
 
       <fieldset disabled={parti} className="contents">
         <div className="space-y-3">
-          <Carte>
+          <Carte repliable="transfertnouveau.1">
             <CarteEntete>
               <CarteTitre>En-tete</CarteTitre>
             </CarteEntete>
@@ -505,7 +505,7 @@ export function TransfertNouveau() {
               Choisissez le magasin source : seules ses references en stock pourront etre chargees.
             </Alerte>
           ) : (
-            <Carte>
+            <Carte repliable="transfertnouveau.2">
               <CarteEntete>
                 <CarteTitre>
                   Lignes{lignes.length > 0 && ` (${lignes.length})`}

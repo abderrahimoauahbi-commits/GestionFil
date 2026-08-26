@@ -25,13 +25,12 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
-import { PageAvecRail, RailLateral } from '../composants/RailLateral'
 import {
-  FiltrePersonnalise,
-  appliquerConditions,
-  type ChampFiltrable,
-  type Condition,
-} from '../composants/FiltrePersonnalise'
+  dansPeriode,
+  SelecteurPeriode,
+  type Periode,
+} from '../composants/SelecteurPeriode'
+import { PageAvecRail, RailLateral } from '../composants/RailLateral'
 import {
   Alerte,
   Badge,
@@ -56,15 +55,6 @@ const MODULE = 'MRP'
  * dynamiques et n'y figurent pas : filtrer « le besoin de mars » se fait en
  * lisant la colonne, pas en composant une condition sur un nom de mois.
  */
-const CHAMPS_BESOIN: ChampFiltrable[] = [
-  { champ: 'code_reference', libelle: 'Reference', type: 'texte' },
-  { champ: 'designation', libelle: 'Designation', type: 'texte' },
-  { champ: 'categorie', libelle: 'Categorie', type: 'texte' },
-  { champ: 'fournisseur', libelle: 'Fournisseur', type: 'texte' },
-  { champ: 'unite', libelle: 'Unite', type: 'texte' },
-  { champ: 'total', libelle: 'Besoin total sur la periode', type: 'nombre', unite: 'kg' },
-]
-
 type Statut = 'BROUILLON' | 'SIMULATION' | 'EN_COURS' | 'CLOTURE'
 
 const LIBELLE_STATUT: Record<string, string> = {
@@ -150,8 +140,10 @@ export function Besoins() {
   const droits = useDroits(MODULE)
   const qc = useQueryClient()
   const [idPlan, setIdPlan] = useState<string>('')
-  const [conditions, setConditions] = useState<Condition[]>([])
   const [filtre, setFiltre] = useState('')
+  const [categorie, setCategorie] = useState('')
+  const [fournisseur, setFournisseur] = useState('')
+  const [periode, setPeriode] = useState<Periode>({ debut: null, fin: null })
 
   const qPlans = useQuery({
     queryKey: ['plans'],
@@ -213,6 +205,25 @@ export function Besoins() {
   }, [d])
 
   /** Besoins pivotes : une ligne par reference, une colonne par mois. */
+  /* Valeurs disponibles pour les filtres, tirees du dossier lui-meme : sur un
+     plan donne, seules certaines categories et certains fournisseurs
+     apparaissent, et proposer les autres menerait a un tableau vide. */
+  const axes = useMemo(() => {
+    const c = new Set<string>()
+    const f = new Set<string>()
+    const mo = new Set<string>()
+    for (const b of d?.besoins ?? []) {
+      if (b.categorie) c.add(b.categorie)
+      if (b.fournisseur) f.add(b.fournisseur)
+      if (b.annee_mois) mo.add(b.annee_mois)
+    }
+    return {
+      categories: [...c].sort(),
+      fournisseurs: [...f].sort(),
+      mois: [...mo].sort(),
+    }
+  }, [d])
+
   const besoins = useMemo(() => {
     const m = new Map<
       string,
@@ -228,6 +239,13 @@ export function Besoins() {
       }
     >()
     for (const b of d?.besoins ?? []) {
+      /* Categorie, fournisseur et periode s'appliquent AVANT le pivot : filtrer
+         apres laisserait les totaux calcules sur toute la duree du plan, donc
+         un total qui ne correspond pas aux colonnes affichees. */
+      if (categorie && b.categorie !== categorie) continue
+      if (fournisseur && b.fournisseur !== fournisseur) continue
+      if (!dansPeriode(b.annee_mois, periode)) continue
+
       let e = m.get(b.code_reference)
       if (!e) {
         e = {
@@ -256,15 +274,14 @@ export function Besoins() {
           b.categorie.toLowerCase().includes(q),
       )
       .sort((a, b) => b.total - a.total)
-  }, [d, filtre])
+  }, [d, filtre, categorie, fournisseur, periode])
 
   // Le filtre personnalise s'applique APRES le pivot : il porte sur la ligne
-  // telle qu'elle est affichee — une reference et son total — et non sur les
-  // besoins mensuels bruts, qui sont plusieurs lignes pour une seule reference.
-  const besoinsFiltres = useMemo(
-    () => appliquerConditions(besoins, conditions, CHAMPS_BESOIN),
-    [besoins, conditions],
-  )
+  /* Les filtres — categorie, fournisseur, periode — s'appliquent AVANT le
+     pivot, dans `besoins` : les appliquer ici, sur la ligne pivotee, laisserait
+     des totaux calcules sur toute la duree du plan alors que les colonnes n'en
+     montrent qu'une partie. */
+  const besoinsFiltres = besoins
 
   const totalKg = besoins.reduce((s, b) => s + b.total, 0)
   const totalM2 = production.reduce((s, p) => s + p.total, 0)
@@ -368,11 +385,6 @@ export function Besoins() {
             actif={planVise}
             surChoix={setIdPlan}
           />
-          <FiltrePersonnalise
-            champs={CHAMPS_BESOIN}
-            conditions={conditions}
-            surChangement={setConditions}
-          />
           </div>
         }
       >
@@ -383,7 +395,7 @@ export function Besoins() {
       ) : (
         <div className="space-y-3">
           {/* --- Bandeau de contexte ---------------------------------------- */}
-          <Carte>
+          <Carte repliable="besoins.1">
             <CarteCorps className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
               <span className="flex items-center gap-1.5">
                 <Badge ton={TON_STATUT[plan.statut] ?? 'neutre'}>
@@ -440,7 +452,7 @@ export function Besoins() {
           )}
 
           {/* --- 1. Production ---------------------------------------------- */}
-          <Carte>
+          <Carte repliable="besoins.2">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <Factory className="size-3.5" />
@@ -520,7 +532,7 @@ export function Besoins() {
           </Carte>
 
           {/* --- 2. Besoins matiere ----------------------------------------- */}
-          <Carte>
+          <Carte repliable="besoins.3">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <Package className="size-3.5" />
@@ -538,7 +550,38 @@ export function Besoins() {
                   value={filtre}
                   onChange={(e) => setFiltre(e.target.value)}
                   placeholder="Reference, designation, fournisseur..."
-                  className="w-64"
+                  className="w-56"
+                />
+                <select
+                  value={categorie}
+                  onChange={(e) => setCategorie(e.target.value)}
+                  className={CLASSE_FILTRE}
+                  aria-label="Categorie"
+                >
+                  <option value="">Toutes categories</option>
+                  {axes.categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={fournisseur}
+                  onChange={(e) => setFournisseur(e.target.value)}
+                  className={CLASSE_FILTRE}
+                  aria-label="Fournisseur"
+                >
+                  <option value="">Tous fournisseurs</option>
+                  {axes.fournisseurs.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+                <SelecteurPeriode
+                  mois={axes.mois}
+                  valeur={periode}
+                  surChangement={setPeriode}
                 />
                 <span className="text-[11px] text-attenue-texte">
                   {besoinsFiltres.length} ref. ·{' '}
@@ -653,3 +696,7 @@ export function Besoins() {
     </div>
   )
 }
+
+const CLASSE_FILTRE =
+  'h-8 rounded-[var(--radius-sm)] border border-champ bg-surface px-2 text-[12px] ' +
+  'text-texte outline-none focus:border-primaire'

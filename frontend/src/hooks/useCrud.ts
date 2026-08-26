@@ -10,6 +10,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, ErreurApi } from '../api/client'
 
+/** Enveloppe paginee du registre generique. */
+interface Page<T> {
+  lignes: T[]
+  total: number
+  limite: number
+  offset: number
+}
+
 export function useCrud<T>(chemin: string, filtres: Record<string, string> = {}) {
   const qc = useQueryClient()
   const [erreur, setErreur] = useState<string | null>(null)
@@ -20,10 +28,25 @@ export function useCrud<T>(chemin: string, filtres: Record<string, string> = {})
   )
   const cle = [chemin, params.toString()]
 
-  const liste = useQuery({
+  /* Le serveur renvoie un tableau nu, SAUF si l'appelant a passe `offset` :
+     il repond alors `{ lignes, total }`, le total portant sur le filtre et non
+     sur la page. On normalise ici pour que les ecrans manipulent toujours un
+     tableau, et que `total` soit disponible quand il existe. */
+  const brut = useQuery({
     queryKey: cle,
-    queryFn: () => api.get<T[]>(`/api/${chemin}?${params}`),
+    queryFn: () => api.get<T[] | Page<T>>(`/api/${chemin}?${params}`),
   })
+
+  const paginee = !Array.isArray(brut.data) && brut.data != null
+  const donnees: T[] | undefined = Array.isArray(brut.data)
+    ? brut.data
+    : (brut.data as Page<T> | undefined)?.lignes
+
+  const liste = { ...brut, data: donnees }
+  /** Nombre de lignes correspondant au filtre, hors pagination. */
+  const total: number | undefined = paginee
+    ? (brut.data as Page<T>).total
+    : donnees?.length
 
   const rafraichir = () => {
     void qc.invalidateQueries({ queryKey: [chemin] })
@@ -74,6 +97,7 @@ export function useCrud<T>(chemin: string, filtres: Record<string, string> = {})
 
   return {
     liste,
+    total,
     creer,
     modifier,
     supprimer,

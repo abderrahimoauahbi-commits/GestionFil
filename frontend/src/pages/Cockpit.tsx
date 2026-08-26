@@ -24,8 +24,10 @@
  *     lu, et le jour ou un compteur monte, personne ne le voit.
  */
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowRight,
@@ -56,6 +58,11 @@ import {
 } from '../composants/ui/base'
 import { Infobulle } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { BarresEmpilees, BarresRangees } from '../composants/graphiques/Graphiques'
+import { Layers, Package, ShoppingCart } from 'lucide-react'
+import { BarreRepartition, CarteStat } from '../composants/CarteStat'
+import { Pareto } from '../composants/graphiques/Pareto'
+import { BullesFournisseurs, type Fournisseur } from '../composants/graphiques/BullesFournisseurs'
 
 const MODULE = 'COCKPIT'
 
@@ -371,6 +378,8 @@ export function Cockpit() {
         description="Ce qui attend une decision, et ce qui menace le plan de production. Tout est recalcule a l'ouverture."
       />
 
+      <ChiffresCles />
+
       {qKpi.isLoading ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -447,9 +456,24 @@ export function Cockpit() {
         </p>
       ) : null}
 
+      {/* ---- Tableau de bord ----------------------------------------------- */}
+      <TitreBande texte="Concentration et dependances" />
+      <Concentration />
+
+      <TitreBande texte="Ou part la matiere" />
+      <TableauDeBord />
+
       {/* ---- Mur de risques ------------------------------------------------ */}
-      <TitreBande texte="Risque de rupture sur 12 mois" />
-      <Carte>
+      {/* L'horizon vient du plan, jamais d'une constante : un plan de six mois
+          affiche six colonnes, et annoncer « 12 mois » au-dessus serait faux. */}
+      <TitreBande
+        texte={
+          colonnes.length
+            ? `Risque de rupture sur ${colonnes.length} mois`
+            : 'Risque de rupture'
+        }
+      />
+      <Carte repliable="cockpit.1">
         <CarteEntete>
           <CarteTitre>Tenue du plan de production</CarteTitre>
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-attenue-texte">
@@ -566,7 +590,7 @@ export function Cockpit() {
 
       {/* ---- Controles de coherence ---------------------------------------- */}
       <TitreBande texte="Sante du referentiel" />
-      <Carte>
+      <Carte repliable="cockpit.2">
         <CarteEntete>
           <CarteTitre>Controles metier</CarteTitre>
           <Badge ton={autres.length ? 'alerte' : 'succes'}>
@@ -689,6 +713,325 @@ function MargeDecision({ jours }: { jours: number | null }) {
         +{jours} j
       </div>
       <div className="text-[10px] text-attenue-texte">pour commander</div>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tableau de bord                                                             */
+/* -------------------------------------------------------------------------- */
+
+interface StatQualite {
+  code_qualite: string
+  qualite_nom: string
+  statut: string
+  cout_matiere_m2_mad: number | null
+  kg_m2_total: number | null
+  taux_realisation_pct: number | null
+}
+
+interface StatRole {
+  code_qualite: string
+  code_role: string
+  role_libelle: string
+  cout_m2_mad: number | null
+}
+
+/**
+ * Deux graphiques, et deux seulement.
+ *
+ * Le premier classe les qualites par cout matiere : c'est la question que pose
+ * un directeur devant une gamme de dix-huit produits. Le second decompose ce
+ * cout entre les trois roles qui pesent le plus — poil, trame, chaine — parce
+ * que savoir *qu'une* qualite coute cher ne dit pas *ou* passe l'argent.
+ *
+ * Pas de troisieme graphique tant qu'aucune sortie de production n'est saisie :
+ * un camembert de consommation sur zero mouvement ne montrerait que du vide.
+ */
+function TableauDeBord() {
+  const { peut } = useAuth()
+  const q = useQuery({
+    queryKey: ['stats', 'qualites'],
+    queryFn: () =>
+      api.get<{ qualites: StatQualite[]; roles: StatRole[] }>('/api/stats/qualites'),
+    enabled: peut('QUALITES', 'LIRE'),
+    staleTime: 5 * 60_000,
+  })
+
+  const qualites = q.data?.qualites ?? []
+  const roles = q.data?.roles ?? []
+
+  const couts = useMemo(
+    () =>
+      qualites
+        .filter((x) => (x.cout_matiere_m2_mad ?? 0) > 0)
+        .map((x) => ({
+          cle: x.code_qualite,
+          libelle: x.qualite_nom || x.code_qualite,
+          valeur: x.cout_matiere_m2_mad as number,
+        })),
+    [qualites],
+  )
+
+  /* Les trois roles les plus lourds, tous produits confondus : ce sont eux qui
+     serviront de series. Les choisir globalement, et non qualite par qualite,
+     garde la meme couleur pour le meme role d'une barre a l'autre. */
+  const composition = useMemo(() => {
+    const poids = new Map<string, { libelle: string; total: number }>()
+    for (const r of roles) {
+      const v = r.cout_m2_mad ?? 0
+      const e = poids.get(r.code_role) ?? { libelle: r.role_libelle || r.code_role, total: 0 }
+      e.total += v
+      poids.set(r.code_role, e)
+    }
+    const majeurs = [...poids.entries()]
+      .sort((a, b) => b[1].total - a[1].total)
+      .slice(0, 3)
+      .map(([cle, v]) => ({ cle, libelle: v.libelle }))
+
+    const parQualite = new Map<string, Record<string, number>>()
+    for (const r of roles) {
+      if (!majeurs.some((m) => m.cle === r.code_role)) continue
+      const parts = parQualite.get(r.code_qualite) ?? {}
+      parts[r.code_role] = (parts[r.code_role] ?? 0) + (r.cout_m2_mad ?? 0)
+      parQualite.set(r.code_qualite, parts)
+    }
+
+    const donnees = [...parQualite.entries()]
+      .map(([code, parts]) => ({
+        cle: code,
+        libelle: qualites.find((x) => x.code_qualite === code)?.qualite_nom || code,
+        parts,
+      }))
+      .filter((d) => Object.values(d.parts).some((v) => v > 0))
+
+    return { series: majeurs, donnees }
+  }, [roles, qualites])
+
+  if (q.isLoading) return <Squelette className="h-56 w-full" />
+  if (!couts.length) {
+    return (
+      <Alerte ton="info" titre="Pas encore de cout matiere">
+        Le cout par metre carre se calcule a partir du CMUP des composants. Il apparaitra des la
+        premiere reception valorisee sur chaque reference de recette.
+      </Alerte>
+    )
+  }
+
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      <BarresRangees
+        titre="Cout matiere par qualite"
+        sousTitre="CMUP des composants, rapporte au metre carre"
+        unite="MAD/m2"
+        donnees={couts}
+      />
+      {composition.donnees.length > 0 && (
+        <BarresEmpilees
+          titre="Ou passe le cout"
+          sousTitre="Les trois roles les plus lourds de la gamme"
+          unite="MAD/m2"
+          series={composition.series}
+          donnees={composition.donnees}
+        />
+      )}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Concentration de la valeur et dependance fournisseur                        */
+/* -------------------------------------------------------------------------- */
+
+interface LigneProjetee {
+  code_reference: string
+  designation: string | null
+  valeur_totale_mad: number | null
+  classe_abc: string | null
+  statut: string | null
+  jours_couverture: number | null
+  stock_projete_kg: number | null
+  fournisseur_nom: string | null
+}
+
+/**
+ * Deux questions de direction, cote a cote : sur quelles references l'argent
+ * est-il immobilise, et de qui depend-on pour le racheter.
+ */
+function Concentration() {
+  const { peut } = useAuth()
+  const client = useQueryClient()
+  const [calcul, setCalcul] = useState(false)
+
+  const qStock = useQuery({
+    queryKey: ['stock-projete-cockpit'],
+    queryFn: () => api.get<LigneProjetee[]>('/api/stock/projete?limite=2000'),
+    enabled: peut('STOCK', 'LIRE'),
+    staleTime: 60_000,
+  })
+  const qFour = useQuery({
+    queryKey: ['fournisseurs-scorecard'],
+    queryFn: () => api.get<Fournisseur[]>('/api/fournisseurs/scorecard'),
+    enabled: peut('FOURNISSEURS', 'LIRE'),
+    staleTime: 5 * 60_000,
+  })
+
+  const lignes = qStock.data ?? []
+  const classeCalculee = lignes.some((l) => l.classe_abc)
+
+  const lancerClassification = async () => {
+    setCalcul(true)
+    try {
+      await api.post('/api/classification', {})
+      await client.invalidateQueries()
+      toast.success('Classification ABC / XYZ calculee')
+    } catch (e) {
+      toast.error('Classification refusee', { description: String(e) })
+    } finally {
+      setCalcul(false)
+    }
+  }
+
+  if (qStock.isLoading) return <Squelette className="h-64 w-full" />
+
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      <Pareto
+        titre="Concentration de la valeur"
+        sousTitre="Part cumulee du stock valorise, references triees par valeur"
+        unite="MAD"
+        donnees={lignes.map((l) => ({
+          cle: l.code_reference,
+          libelle: l.code_reference,
+          valeur: l.valeur_totale_mad ?? 0,
+        }))}
+        action={
+          classeCalculee ? undefined : (
+            <div className="border-t border-ligne pt-2 text-[11px] text-attenue-texte">
+              Les classes A, B et C ne sont pas encore attribuees : la courbe montre la
+              concentration reelle, mais aucune reference ne porte sa classe.
+              {peut('CATALOGUE', 'ECRIRE') && (
+                <button
+                  type="button"
+                  onClick={() => void lancerClassification()}
+                  disabled={calcul}
+                  className="ml-2 rounded-[3px] border border-bordure px-2 py-0.5 text-[11px]
+                             text-texte hover:bg-attenue disabled:opacity-50"
+                >
+                  {calcul ? 'Calcul en cours...' : 'Calculer la classification'}
+                </button>
+              )}
+            </div>
+          )
+        }
+      />
+      {qFour.data && <BullesFournisseurs donnees={qFour.data} />}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Chiffres cles                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * La premiere rangee du poste de travail : cinq chiffres, lisibles de loin.
+ *
+ * Chacun porte une seconde ligne factuelle plutot qu'une variation. Le systeme
+ * ne garde pas d'historique de ces indicateurs : afficher « +8 % » sous un
+ * chiffre qu'on ne sait pas comparer a hier serait une invention, et un tableau
+ * de bord qui invente une fois n'est plus cru sur le reste.
+ */
+function ChiffresCles() {
+  const { peut } = useAuth()
+  const naviguer = useNavigate()
+
+  const q = useQuery({
+    queryKey: ['cockpit'],
+    queryFn: () => api.get<Record<string, number | string | null>>('/api/cockpit'),
+    enabled: peut('COCKPIT', 'LIRE'),
+  })
+
+  const k = q.data
+  if (q.isLoading) {
+    return (
+      <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Squelette key={i} className="h-[68px]" />
+        ))}
+      </div>
+    )
+  }
+  if (!k) return null
+
+  const n = (c: string) => Number(k[c] ?? 0)
+  const ok = n('nb_ok')
+  const attention = n('nb_attention')
+  const critiques = n('nb_critiques')
+  const bloquants = n('nb_controles_bloquants') + n('nb_controles_critiques')
+
+  return (
+    <div className="mb-3 flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <CarteStat
+          Icone={Package}
+          libelle="References suivies"
+          valeur={fmt.nombre(n('nb_references'), 0)}
+          precision={`${ok} au vert · ${attention} en attention`}
+          ton="primaire"
+          surClic={() => naviguer('/stock')}
+        />
+        <CarteStat
+          Icone={TrendingDown}
+          libelle="Sous le minimum"
+          valeur={fmt.nombre(n('nb_refs_sous_minimum'), 0)}
+          precision="Stock magasin sous le seuil calcule"
+          ton={n('nb_refs_sous_minimum') > 0 ? 'danger' : 'succes'}
+          surClic={() => naviguer('/stock')}
+          aide="Veto physique : le magasin est court, quelle que soit la couverture."
+        />
+        <CarteStat
+          Icone={Layers}
+          libelle="Sur-stock"
+          valeur={fmt.nombre(n('nb_sur_stock'), 0)}
+          precision="Au-dela du stock maximum"
+          ton={n('nb_sur_stock') > 0 ? 'alerte' : 'succes'}
+          surClic={() => naviguer('/stock')}
+          aide="Sujet de tresorerie, jamais de rupture : les deux axes sont distincts."
+        />
+        <CarteStat
+          Icone={ShoppingCart}
+          libelle="Budget a engager"
+          valeur={fmt.nombre(Math.round(n('budget_a_engager_mad')), 0)}
+          unite="MAD"
+          precision={`${n('nb_propositions_a_traiter')} proposition(s) a traiter`}
+          ton="primaire"
+          surClic={() => naviguer('/plan-achat')}
+        />
+        <CarteStat
+          Icone={AlertTriangle}
+          libelle="Controles en anomalie"
+          valeur={fmt.nombre(n('nb_alertes_ouvertes'), 0)}
+          precision={bloquants > 0 ? `${bloquants} bloquant(s) ou critique(s)` : 'Aucun bloquant'}
+          ton={bloquants > 0 ? 'danger' : n('nb_alertes_ouvertes') > 0 ? 'alerte' : 'succes'}
+          aide="Coherence des donnees, verifiee en permanence."
+        />
+      </div>
+
+      {ok + attention + critiques > 0 && (
+        <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
+          <p className="mb-2 text-[11px] uppercase tracking-wide text-attenue-texte">
+            Etat du catalogue suivi
+          </p>
+          <BarreRepartition
+            parts={[
+              { libelle: 'Au vert', valeur: ok, ton: 'succes' },
+              { libelle: 'En attention', valeur: attention, ton: 'alerte' },
+              { libelle: 'Critique ou rupture', valeur: critiques, ton: 'danger' },
+            ]}
+          />
+        </div>
+      )}
     </div>
   )
 }

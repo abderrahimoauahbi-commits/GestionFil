@@ -6,7 +6,7 @@
 
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
 use crate::domain::{classification, inventaire, mrp, plan_achat, reception, transfert};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -143,4 +143,93 @@ pub async fn classifier(
     user.exiger(&state.db, module::CATALOGUE, Action::Ecrire).await?;
     let r = classification::classifier(&state.db, &user).await?;
     Ok(Json(serde_json::to_value(r)?))
+}
+
+/// Suppression definitive d'une reference jamais utilisee.
+///
+/// La suppression ordinaire du registre est *logique* : elle desactive, parce
+/// que mouvements, recettes et commandes passees pointent vers la reference et
+/// que les effacer romprait l'historique (R03).
+///
+/// Reste le cas d'une reference creee par erreur — une faute de frappe qui a
+/// produit un doublon — qui n'a jamais servi a rien. La desactiver laisse une
+/// ligne morte dans le catalogue pour toujours. Ici, l'effacer ne detruit
+/// aucune histoire, puisqu'il n'y en a pas.
+///
+/// Les usages sont recomptes ICI, jamais sur la foi de l'appelant : l'ecran
+/// n'affiche le bouton que lorsqu'il aboutira, mais c'est le serveur qui
+/// tranche.
+pub async fn supprimer_reference_definitivement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::CATALOGUE, Action::Ecrire).await?;
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+
+    let retenants: [(&str, &str); 7] = [
+        ("ligne_mouvement", "mouvement(s) de stock"),
+        ("recette", "ligne(s) de recette"),
+        ("ligne_bc", "ligne(s) de bon de commande"),
+        ("ligne_reception", "ligne(s) de reception"),
+        ("plan_achat", "proposition(s) d'achat"),
+        ("historique_prix", "entree(s) d'historique de prix"),
+        ("ligne_inventaire", "ligne(s) d'inventaire"),
+    ];
+
+    let mut motifs: Vec<String> = Vec::new();
+    for (table, libelle) in retenants {
+        let n: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM {table} WHERE code_reference = ?1"
+        ))
+        .bind(&code)
+        .fetch_one(&mut *tx)
+        .await?;
+        if n > 0 {
+            motifs.push(format!("{n} {libelle}"));
+        }
+    }
+
+    let stock: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(quantite_kg), 0) FROM stock_magasin WHERE code_reference = ?1",
+    )
+    .bind(&code)
+    .fetch_one(&mut *tx)
+    .await?;
+    if stock.abs() > 0.0001 {
+        motifs.push(format!("{stock} kg en stock"));
+    }
+
+    if !motifs.is_empty() {
+        return Err(AppError::RegleMetier(format!(
+            "{code} ne peut pas etre supprimee : elle est retenue par {}. \
+             Desactivez-la plutot, son passage doit rester lisible.",
+            motifs.join(", ")
+        )));
+    }
+
+    /* Le rattachement a un groupe d'equivalence ne porte pas d'histoire : il se
+       defait sans perte, et le laisser empecherait la suppression par cle
+       etrangere. */
+    sqlx::query("DELETE FROM reference_groupe_equiv WHERE code_reference = ?1")
+        .bind(&code)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM stock_magasin WHERE code_reference = ?1 AND quantite_kg = 0")
+        .bind(&code)
+        .execute(&mut *tx)
+        .await?;
+
+    let res = sqlx::query("DELETE FROM reference WHERE code_reference = ?1")
+        .bind(&code)
+        .execute(&mut *tx)
+        .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::Introuvable(format!("Reference {code}")));
+    }
+
+    tx.commit().await?;
+    Ok(Json(json!({ "code_reference": code, "supprime": true, "mode": "definitive" })))
 }

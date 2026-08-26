@@ -63,8 +63,29 @@ export interface ColonneDT<L> {
   filtre?: 'texte' | 'liste'
 }
 
+/**
+ * Delegation au serveur.
+ *
+ * Fournie, la table cesse de filtrer, trier et paginer elle-meme : elle affiche
+ * la page recue et remonte les intentions. C'est indispensable des que la table
+ * depasse quelques milliers de lignes — tout charger pour filtrer dans le
+ * navigateur tient a 120 references et s'effondre a 20 000.
+ */
+export interface ModeServeur {
+  /** Nombre de lignes correspondant au filtre, toutes pages confondues. */
+  total: number
+  page: number
+  taille: number
+  surPage: (page: number) => void
+  surTaille: (taille: number) => void
+  surRecherche: (motif: string) => void
+  surTri: (champ: string | null, sens: 'asc' | 'desc') => void
+}
+
 interface Props<L> {
   module: string
+  /** Absent : la table travaille en memoire, comme avant. */
+  serveur?: ModeServeur
   colonnes: ColonneDT<L>[]
   lignes: L[] | undefined
   chargement?: boolean
@@ -105,6 +126,7 @@ export function DataTable<L extends Record<string, unknown>>({
   videAction,
   barreOutils,
   hauteurMax,
+  serveur,
 }: Props<L>) {
   const droits = useDroits(module)
   const [tri, setTri] = React.useState<SortingState>([])
@@ -148,11 +170,43 @@ export function DataTable<L extends Record<string, unknown>>({
     onGlobalFilterChange: setFiltre,
     onColumnFiltersChange: setFiltresColonne,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+    // En mode serveur, les modeles locaux sont retires : les garder ferait
+    // filtrer une seconde fois la page deja filtree, et paginer une page.
+    ...(serveur
+      ? {
+          manualSorting: true,
+          manualFiltering: true,
+          manualPagination: true,
+          rowCount: serveur.total,
+        }
+      : {
+          getSortedRowModel: getSortedRowModel(),
+          getFilteredRowModel: getFilteredRowModel(),
+          getPaginationRowModel: getPaginationRowModel(),
+        }),
     initialState: { pagination: { pageSize: tailleParDefaut } },
   })
+
+  /* Remontee des intentions au parent. Le tri est traduit tel quel ; la
+     recherche est laissee au parent, qui l'amortit avant d'appeler le serveur. */
+  const premierRendu = React.useRef(true)
+  React.useEffect(() => {
+    if (!serveur) return
+    if (premierRendu.current) {
+      premierRendu.current = false
+      return
+    }
+    const t = tri[0]
+    serveur.surTri(t?.id ?? null, t?.desc ? 'desc' : 'asc')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tri])
+
+  React.useEffect(() => {
+    if (!serveur) return
+    const t = window.setTimeout(() => serveur.surRecherche(filtre), 250)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtre])
 
   /** Valeurs distinctes d'une colonne, pour alimenter son filtre en liste. */
   const valeursDistinctes = React.useCallback(
@@ -191,8 +245,10 @@ export function DataTable<L extends Record<string, unknown>>({
   }
 
   const rangs = table.getRowModel().rows
-  const total = table.getFilteredRowModel().rows.length
-  const pagination = table.getState().pagination
+  const total = serveur ? serveur.total : table.getFilteredRowModel().rows.length
+  const pagination = serveur
+    ? { pageIndex: serveur.page, pageSize: serveur.taille }
+    : table.getState().pagination
 
   const meta = (id: string) =>
     (definitions.find((d) => d.id === id)?.meta ?? {}) as {
@@ -475,7 +531,11 @@ export function DataTable<L extends Record<string, unknown>>({
               </span>
               <select
                 value={pagination.pageSize}
-                onChange={(e) => table.setPageSize(Number(e.target.value))}
+                onChange={(e) => {
+                  const t = Number(e.target.value)
+                  if (serveur) serveur.surTaille(t)
+                  else table.setPageSize(t)
+                }}
                 aria-label="Lignes par page"
                 className="h-8 rounded-[var(--radius)] border border-champ bg-surface px-2 text-xs outline-none
                            focus-visible:border-anneau focus-visible:ring-2 focus-visible:ring-anneau/25"
@@ -489,7 +549,7 @@ export function DataTable<L extends Record<string, unknown>>({
               </select>
             </div>
 
-            {table.getPageCount() > 1 && (
+            {Math.max(1, Math.ceil(total / pagination.pageSize)) > 1 && (
               <div className="flex items-center gap-1">
                 <Bouton
                   variante="contour"
@@ -503,20 +563,24 @@ export function DataTable<L extends Record<string, unknown>>({
                 <Bouton
                   variante="contour"
                   taille="icone"
-                  onClick={() => table.previousPage()}
+                  onClick={() =>
+                    serveur ? serveur.surPage(serveur.page - 1) : table.previousPage()
+                  }
                   disabled={!table.getCanPreviousPage()}
                   aria-label="Page precedente"
                 >
                   <ChevronLeft />
                 </Bouton>
                 <Badge ton="contour" className="px-2.5 py-1 tabular-nums">
-                  {pagination.pageIndex + 1} / {table.getPageCount()}
+                  {pagination.pageIndex + 1} / {Math.max(1, Math.ceil(total / pagination.pageSize))}
                 </Badge>
                 <Bouton
                   variante="contour"
                   taille="icone"
-                  onClick={() => table.nextPage()}
-                  disabled={!table.getCanNextPage()}
+                  onClick={() =>
+                    serveur ? serveur.surPage(serveur.page + 1) : table.nextPage()
+                  }
+                  disabled={pagination.pageIndex + 1 >= Math.max(1, Math.ceil(total / pagination.pageSize))}
                   aria-label="Page suivante"
                 >
                   <ChevronRight />
@@ -525,7 +589,7 @@ export function DataTable<L extends Record<string, unknown>>({
                   variante="contour"
                   taille="icone"
                   onClick={() => table.lastPage()}
-                  disabled={!table.getCanNextPage()}
+                  disabled={pagination.pageIndex + 1 >= Math.max(1, Math.ceil(total / pagination.pageSize))}
                   aria-label="Derniere page"
                 >
                   <ChevronsRight />

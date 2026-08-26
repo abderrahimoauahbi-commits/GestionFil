@@ -1,0 +1,699 @@
+/* =============================================================================
+   Palettes de l'atelier
+   -----------------------------------------------------------------------------
+   Une palette est une famille de couleurs, declinee en clair et en sombre. Elle
+   se combine au reglage clair / sombre / systeme : la famille dit *quelle*
+   teinte, le mode dit *quelle luminosite*.
+
+   Pourquoi plusieurs, et pourquoi pas celle de l'editeur par defaut : un ERP
+   n'est pas un editeur de code. On y lit des colonnes de nombres pendant des
+   heures, pas des lignes de syntaxe coloree. Trois consequences :
+
+   - Le fond ne doit etre ni noir pur ni blanc pur. Sur du noir pur, le texte
+     clair « bave » (halo) et les chiffres deviennent penibles a comparer ; sur
+     du blanc pur, l'ecran eblouit dans un bureau eclaire.
+   - Les gris doivent porter une legere teinte. Un gris parfaitement neutre
+     donne un rendu terne, et les bordures y disparaissent.
+   - Les couleurs d'etat (rupture, alerte, conforme) doivent rester lisibles
+     SANS se confondre avec la couleur d'accent, qui sert a la selection.
+
+   Ordre du cascade : importe apres `atelier.css`. `.atelier[data-palette=...]`
+   a une specificite superieure a `.atelier`, et `.atelier.sombre[data-palette]`
+   superieure a `.atelier.sombre` : les familles l'emportent donc toujours.
+   ========================================================================== */
+
+/* =============================================================================
+   ARDOISE — par defaut
+   -----------------------------------------------------------------------------
+   Gris-bleu froid, accent bleu calme. C'est la famille des outils de gestion
+   modernes : assez douce pour une journee entiere, assez contrastee pour un
+   tableau dense. Recommandee.
+   ========================================================================== */
+.atelier,
+.atelier[data-palette="ardoise"] {
+  --fond: 220 20% 97%;
+  --texte: 214 28% 15%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 214 28% 15%;
+
+  --attenue: 216 25% 92%;
+  --attenue-texte: 212 13% 41%;
+
+  --accent: 210 64% 40%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 210 64% 40%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 3 71% 41%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 157 61% 30%;
+  --alerte: 40 100% 30%;
+  --info: 207 75% 41%;
+
+  --bordure: 214 20% 89%;
+  --ligne: 215 22% 93%;
+  --champ: 214 18% 80%;
+  --anneau: 210 64% 40%;
+
+  --barre: 218 24% 96%;
+  --barre-texte: 214 28% 15%;
+  --barre-attenue: 212 13% 45%;
+  --barre-actif: 216 25% 92%;
+
+  --at-titre: 218 24% 95%;
+  --at-activite: 218 24% 95%;
+  --at-lateral: 219 26% 96%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 219 26% 96%;
+  --at-etat: 218 24% 95%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 218 24% 93%;
+  --at-liste-survol: 216 25% 92%;
+  --at-liste-selection: 213 55% 89%;
+  --at-liste-selection-texte: 214 40% 18%;
+  --at-badge: 210 64% 40%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+.atelier.sombre,
+.atelier.sombre[data-palette="ardoise"] {
+  --fond: 214 18% 11%;
+  --texte: 213 24% 89%;
+
+  --surface: 216 18% 14%;
+  --surface-texte: 213 24% 89%;
+
+  --attenue: 217 16% 18%;
+  --attenue-texte: 212 15% 60%;
+
+  --accent: 210 63% 60%;
+  --accent-texte: 214 40% 10%;
+
+  --primaire: 210 63% 60%;
+  --primaire-texte: 214 40% 10%;
+
+  --danger: 3 84% 68%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 155 47% 55%;
+  --alerte: 36 71% 59%;
+  --info: 208 72% 65%;
+
+  --bordure: 215 16% 20%;
+  --ligne: 218 16% 16%;
+  --champ: 215 14% 27%;
+  --anneau: 210 63% 60%;
+
+  --barre: 215 19% 9%;
+  --barre-texte: 213 24% 89%;
+  --barre-attenue: 212 15% 58%;
+  --barre-actif: 217 16% 18%;
+
+  --at-titre: 215 19% 9%;
+  --at-activite: 215 19% 9%;
+  --at-lateral: 215 18% 10%;
+  --at-editeur: 214 18% 13%;
+  --at-panneau: 215 18% 10%;
+  --at-etat: 215 19% 9%;
+  --at-onglet-actif: 214 18% 13%;
+  --at-onglet-inactif: 215 19% 9%;
+  --at-liste-survol: 217 16% 18%;
+  --at-liste-selection: 211 51% 24%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 210 63% 60%;
+  --at-badge-texte: 214 40% 10%;
+
+  color-scheme: dark;
+}
+
+/* =============================================================================
+   GRAPHITE
+   -----------------------------------------------------------------------------
+   La palette de l'editeur : gris neutres, accent bleu vif. Austere, tres
+   familiere a qui vient de VS Code. Conservee pour ceux qui la preferent.
+   ========================================================================== */
+.atelier[data-palette="graphite"] {
+  --fond: 0 0% 100%;
+  --texte: 0 0% 23%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 0 0% 23%;
+
+  --attenue: 0 0% 91%;
+  --attenue-texte: 0 0% 38%;
+
+  --accent: 210 100% 36%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 210 100% 36%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 100% 35%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 120 61% 30%;
+  --alerte: 44 100% 30%;
+  --info: 210 100% 36%;
+
+  --bordure: 0 0% 90%;
+  --ligne: 0 0% 93%;
+  --champ: 0 0% 80%;
+  --anneau: 210 100% 36%;
+
+  --barre: 0 0% 97%;
+  --barre-texte: 0 0% 23%;
+  --barre-attenue: 0 0% 45%;
+  --barre-actif: 0 0% 91%;
+
+  --at-titre: 0 0% 97%;
+  --at-activite: 0 0% 97%;
+  --at-lateral: 0 0% 97%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 0 0% 97%;
+  --at-etat: 0 0% 97%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 0 0% 93%;
+  --at-liste-survol: 0 0% 91%;
+  --at-liste-selection: 213 45% 89%;
+  --at-liste-selection-texte: 0 0% 12%;
+  --at-badge: 210 100% 36%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+.atelier.sombre[data-palette="graphite"] {
+  --fond: 0 0% 12%;
+  --texte: 0 0% 80%;
+
+  --surface: 0 0% 12%;
+  --surface-texte: 0 0% 80%;
+
+  --attenue: 200 5% 17%;
+  --attenue-texte: 0 0% 62%;
+
+  --accent: 207 100% 42%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 207 100% 42%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 85% 62%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 117 42% 67%;
+  --alerte: 49 100% 40%;
+  --info: 213 100% 61%;
+
+  --bordure: 0 0% 17%;
+  --ligne: 240 2% 15%;
+  --champ: 0 0% 24%;
+  --anneau: 207 100% 42%;
+
+  --barre: 0 0% 9%;
+  --barre-texte: 0 0% 80%;
+  --barre-attenue: 0 0% 62%;
+  --barre-actif: 200 5% 17%;
+
+  --at-titre: 0 0% 9%;
+  --at-activite: 0 0% 9%;
+  --at-lateral: 0 0% 9%;
+  --at-editeur: 0 0% 12%;
+  --at-panneau: 0 0% 9%;
+  --at-etat: 0 0% 9%;
+  --at-onglet-actif: 0 0% 12%;
+  --at-onglet-inactif: 0 0% 9%;
+  --at-liste-survol: 200 5% 17%;
+  --at-liste-selection: 205 92% 19%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 207 100% 42%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: dark;
+}
+
+/* =============================================================================
+   ATELIER — neutres chauds, accent vert
+   -----------------------------------------------------------------------------
+   Gris legerement chauds, moins de bleu : reposant en fin de journee, et plus
+   proche du papier pour les ecrans qui accompagnent un bon imprime. L'accent
+   vert distingue nettement la selection des couleurs d'etat.
+   ========================================================================== */
+.atelier[data-palette="chaud"] {
+  --fond: 45 20% 96%;
+  --texte: 40 12% 15%;
+
+  --surface: 40 33% 99%;
+  --surface-texte: 40 12% 15%;
+
+  --attenue: 44 18% 91%;
+  --attenue-texte: 40 8% 39%;
+
+  --accent: 157 40% 30%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 157 40% 30%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 5 66% 42%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 55% 28%;
+  --alerte: 32 82% 34%;
+  --info: 205 60% 38%;
+
+  --bordure: 44 16% 87%;
+  --ligne: 44 18% 92%;
+  --champ: 42 14% 78%;
+  --anneau: 157 40% 30%;
+
+  --barre: 44 20% 94%;
+  --barre-texte: 40 12% 15%;
+  --barre-attenue: 40 8% 42%;
+  --barre-actif: 44 18% 90%;
+
+  --at-titre: 44 20% 94%;
+  --at-activite: 44 20% 94%;
+  --at-lateral: 45 20% 95%;
+  --at-editeur: 40 33% 99%;
+  --at-panneau: 45 20% 95%;
+  --at-etat: 44 20% 94%;
+  --at-onglet-actif: 40 33% 99%;
+  --at-onglet-inactif: 44 18% 91%;
+  --at-liste-survol: 44 18% 89%;
+  --at-liste-selection: 152 30% 85%;
+  --at-liste-selection-texte: 157 45% 16%;
+  --at-badge: 157 40% 30%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+.atelier.sombre[data-palette="chaud"] {
+  --fond: 40 8% 11%;
+  --texte: 44 15% 87%;
+
+  --surface: 40 8% 14%;
+  --surface-texte: 44 15% 87%;
+
+  --attenue: 40 7% 19%;
+  --attenue-texte: 42 9% 60%;
+
+  --accent: 155 42% 52%;
+  --accent-texte: 157 45% 10%;
+
+  --primaire: 155 42% 52%;
+  --primaire-texte: 157 45% 10%;
+
+  --danger: 5 78% 66%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 44% 56%;
+  --alerte: 33 72% 58%;
+  --info: 205 62% 62%;
+
+  --bordure: 40 7% 21%;
+  --ligne: 40 7% 17%;
+  --champ: 40 7% 28%;
+  --anneau: 155 42% 52%;
+
+  --barre: 40 8% 9%;
+  --barre-texte: 44 15% 87%;
+  --barre-attenue: 42 9% 58%;
+  --barre-actif: 40 7% 19%;
+
+  --at-titre: 40 8% 9%;
+  --at-activite: 40 8% 9%;
+  --at-lateral: 40 8% 10%;
+  --at-editeur: 40 8% 13%;
+  --at-panneau: 40 8% 10%;
+  --at-etat: 40 8% 9%;
+  --at-onglet-actif: 40 8% 13%;
+  --at-onglet-inactif: 40 8% 9%;
+  --at-liste-survol: 40 7% 19%;
+  --at-liste-selection: 157 38% 20%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 155 42% 52%;
+  --at-badge-texte: 157 45% 10%;
+
+  color-scheme: dark;
+}
+
+/* =============================================================================
+   CONTRASTE — atelier eclaire, vue fatiguee
+   -----------------------------------------------------------------------------
+   Contraste pousse au maximum utile, bordures franches. Pour un poste en bord
+   de ligne, sous eclairage industriel ou en plein jour, ou les palettes douces
+   deviennent illisibles. Respecte le niveau AAA sur le texte courant.
+   ========================================================================== */
+.atelier[data-palette="contraste"] {
+  --fond: 0 0% 100%;
+  --texte: 0 0% 0%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 0 0% 0%;
+
+  --attenue: 0 0% 93%;
+  --attenue-texte: 0 0% 25%;
+
+  --accent: 214 88% 32%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 214 88% 32%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 100% 30%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 150 100% 21%;
+  --alerte: 30 100% 25%;
+  --info: 214 88% 32%;
+
+  --bordure: 0 0% 46%;
+  --ligne: 0 0% 66%;
+  --champ: 0 0% 30%;
+  --anneau: 214 88% 32%;
+
+  --barre: 0 0% 96%;
+  --barre-texte: 0 0% 0%;
+  --barre-attenue: 0 0% 28%;
+  --barre-actif: 0 0% 88%;
+
+  --at-titre: 0 0% 96%;
+  --at-activite: 0 0% 96%;
+  --at-lateral: 0 0% 98%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 0 0% 98%;
+  --at-etat: 0 0% 96%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 0 0% 90%;
+  --at-liste-survol: 0 0% 88%;
+  --at-liste-selection: 214 88% 32%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 0 0% 0%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+.atelier.sombre[data-palette="contraste"] {
+  --fond: 0 0% 4%;
+  --texte: 0 0% 100%;
+
+  --surface: 0 0% 4%;
+  --surface-texte: 0 0% 100%;
+
+  --attenue: 0 0% 16%;
+  --attenue-texte: 0 0% 82%;
+
+  --accent: 210 100% 70%;
+  --accent-texte: 0 0% 0%;
+
+  --primaire: 210 100% 70%;
+  --primaire-texte: 0 0% 0%;
+
+  --danger: 0 100% 72%;
+  --danger-texte: 0 0% 0%;
+
+  --succes: 130 90% 66%;
+  --alerte: 50 100% 60%;
+  --info: 210 100% 70%;
+
+  --bordure: 0 0% 54%;
+  --ligne: 0 0% 34%;
+  --champ: 0 0% 62%;
+  --anneau: 210 100% 70%;
+
+  --barre: 0 0% 0%;
+  --barre-texte: 0 0% 100%;
+  --barre-attenue: 0 0% 80%;
+  --barre-actif: 0 0% 18%;
+
+  --at-titre: 0 0% 0%;
+  --at-activite: 0 0% 0%;
+  --at-lateral: 0 0% 2%;
+  --at-editeur: 0 0% 4%;
+  --at-panneau: 0 0% 2%;
+  --at-etat: 0 0% 0%;
+  --at-onglet-actif: 0 0% 4%;
+  --at-onglet-inactif: 0 0% 0%;
+  --at-liste-survol: 0 0% 18%;
+  --at-liste-selection: 210 100% 70%;
+  --at-liste-selection-texte: 0 0% 0%;
+  --at-badge: 0 0% 100%;
+  --at-badge-texte: 0 0% 0%;
+
+  color-scheme: dark;
+}
+
+/* Bordures franches : en mode contraste, un filet a 1 px sur fond clair se
+   perd. On le rend systematiquement visible. */
+.atelier[data-palette="contraste"] .grille {
+  --filet: hsl(var(--bordure));
+}
+
+/* =============================================================================
+   DIVALTO — barre de chrome coloree
+   -----------------------------------------------------------------------------
+   Le parti pris des ERP de gestion francais : zone de travail blanche, chrome
+   (barre de titre, barre d'etat, rail) en bleu soutenu. L'interet n'est pas
+   decoratif — la bande coloree separe nettement l'application de son contenu,
+   et le regard retrouve la zone de donnees sans la chercher.
+
+   Le bleu est pousse assez fonce pour porter du texte blanc a 7:1, sinon les
+   libelles de la barre d'etat deviennent illisibles a 11 px.
+   ========================================================================== */
+.atelier[data-palette="divalto"] {
+  --fond: 210 27% 96%;
+  --texte: 210 30% 13%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 210 30% 13%;
+
+  --attenue: 210 30% 92%;
+  --attenue-texte: 210 15% 40%;
+
+  --accent: 207 88% 34%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 207 88% 34%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 2 70% 42%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 58% 29%;
+  --alerte: 36 92% 32%;
+  --info: 207 88% 34%;
+
+  --bordure: 210 24% 86%;
+  --ligne: 210 26% 92%;
+  --champ: 210 20% 76%;
+  --anneau: 207 88% 34%;
+
+  /* Chrome bleu, texte blanc. */
+  --barre: 207 88% 27%;
+  --barre-texte: 0 0% 100%;
+  --barre-attenue: 207 40% 82%;
+  --barre-actif: 207 80% 34%;
+
+  --at-titre: 207 88% 27%;
+  --at-activite: 207 88% 27%;
+  --at-lateral: 210 27% 96%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 210 27% 96%;
+  --at-etat: 207 88% 27%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 210 27% 91%;
+  --at-liste-survol: 210 30% 90%;
+  --at-liste-selection: 207 60% 87%;
+  --at-liste-selection-texte: 207 70% 18%;
+  --at-badge: 36 92% 45%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+.atelier.sombre[data-palette="divalto"] {
+  --fond: 210 24% 12%;
+  --texte: 208 25% 90%;
+
+  --surface: 210 24% 15%;
+  --surface-texte: 208 25% 90%;
+
+  --attenue: 210 20% 20%;
+  --attenue-texte: 208 16% 62%;
+
+  --accent: 205 80% 62%;
+  --accent-texte: 210 40% 10%;
+
+  --primaire: 205 80% 62%;
+  --primaire-texte: 210 40% 10%;
+
+  --danger: 2 82% 68%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 46% 56%;
+  --alerte: 38 78% 58%;
+  --info: 205 80% 62%;
+
+  --bordure: 210 18% 22%;
+  --ligne: 210 18% 18%;
+  --champ: 210 16% 30%;
+  --anneau: 205 80% 62%;
+
+  --barre: 208 45% 16%;
+  --barre-texte: 208 25% 92%;
+  --barre-attenue: 208 20% 66%;
+  --barre-actif: 208 40% 22%;
+
+  --at-titre: 208 45% 16%;
+  --at-activite: 208 45% 16%;
+  --at-lateral: 210 24% 11%;
+  --at-editeur: 210 24% 14%;
+  --at-panneau: 210 24% 11%;
+  --at-etat: 208 45% 16%;
+  --at-onglet-actif: 210 24% 14%;
+  --at-onglet-inactif: 210 24% 11%;
+  --at-liste-survol: 210 20% 20%;
+  --at-liste-selection: 207 55% 25%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 38 78% 52%;
+  --at-badge-texte: 210 40% 10%;
+
+  color-scheme: dark;
+}
+
+/* Le chrome bleu porte ses propres boutons : le survol clair par defaut y
+   disparaitrait. */
+.atelier[data-palette="divalto"] header,
+.atelier[data-palette="divalto"] footer {
+  color: hsl(var(--barre-texte));
+}
+
+/* =============================================================================
+   INDUSTRIAL SLATE
+   -----------------------------------------------------------------------------
+   Les teintes Slate/Blue/Red/Amber/Emerald de Tailwind, aux valeurs exactes
+   demandees. Concue en sombre d'abord (Slate 900 / 800 / 700 / 100 / 400), avec
+   une declinaison claire tiree des memes echelles.
+
+   Une correction dans la variante claire : les accents sont pris au cran 600 ou
+   700, pas au cran 500. Blue 500 sur fond blanc tombe sous le seuil de
+   contraste pour du texte, et un libelle de 11 px y devient illisible. Les
+   memes couleurs, un cran plus fonce.
+   ========================================================================== */
+.atelier[data-palette="slate"] {
+  --fond: 210 40% 98%;
+  --texte: 222 47% 11%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 222 47% 11%;
+
+  --attenue: 214 32% 91%;
+  --attenue-texte: 215 16% 47%;
+
+  --accent: 224 76% 48%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 224 76% 48%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 72% 51%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 160 84% 31%;
+  --alerte: 32 95% 44%;
+  --info: 224 76% 48%;
+
+  --bordure: 214 32% 91%;
+  --ligne: 210 40% 96%;
+  --champ: 213 27% 84%;
+  --anneau: 224 76% 48%;
+
+  --barre: 210 40% 96%;
+  --barre-texte: 222 47% 11%;
+  --barre-attenue: 215 16% 47%;
+  --barre-actif: 214 32% 91%;
+
+  --at-titre: 210 40% 96%;
+  --at-activite: 210 40% 96%;
+  --at-lateral: 210 40% 98%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 210 40% 98%;
+  --at-etat: 210 40% 96%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 210 40% 94%;
+  --at-liste-survol: 214 32% 91%;
+  --at-liste-selection: 214 95% 89%;
+  --at-liste-selection-texte: 224 64% 25%;
+  --at-badge: 224 76% 48%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+.atelier.sombre[data-palette="slate"] {
+  /* Slate 950 — le fond descend d'un cran sous les panneaux, ce qui detache
+     les surfaces sans avoir a poser une ombre. */
+  --fond: 229 84% 5%;
+  /* Slate 200 */
+  --texte: 214 32% 91%;
+
+  /* Slate 900 */
+  --surface: 222 47% 11%;
+  --surface-texte: 214 32% 91%;
+
+  /* Slate 800 */
+  --attenue: 217 33% 17%;
+  /* Slate 400 */
+  --attenue-texte: 213 20% 65%;
+
+  /* Blue 600 */
+  --accent: 221 83% 53%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 221 83% 53%;
+  --primaire-texte: 0 0% 100%;
+
+  /* Red 500 — reserve a l'alerte vitale, jamais decoratif */
+  --danger: 0 84% 60%;
+  --danger-texte: 0 0% 100%;
+
+  /* Emerald 500 / Amber 500 */
+  --succes: 160 84% 39%;
+  --alerte: 38 92% 50%;
+  --info: 221 83% 53%;
+
+  /* Slate 800 pour les bordures, Slate 500 pour les filets internes */
+  --bordure: 217 33% 17%;
+  --ligne: 222 40% 13%;
+  --champ: 215 16% 35%;
+  --anneau: 221 83% 53%;
+
+  --barre: 229 84% 4%;
+  --barre-texte: 214 32% 91%;
+  --barre-attenue: 213 20% 65%;
+  --barre-actif: 217 33% 17%;
+
+  --at-titre: 229 84% 4%;
+  --at-activite: 229 84% 4%;
+  --at-lateral: 222 47% 9%;
+  --at-editeur: 222 47% 11%;
+  --at-panneau: 222 47% 9%;
+  --at-etat: 229 84% 4%;
+  --at-onglet-actif: 222 47% 11%;
+  --at-onglet-inactif: 229 60% 7%;
+  --at-liste-survol: 217 33% 17%;
+  --at-liste-selection: 221 60% 22%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 221 83% 53%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: dark;
+}

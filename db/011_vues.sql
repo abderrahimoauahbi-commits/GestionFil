@@ -98,16 +98,31 @@ WHERE lpp.m2_prevus > 0
 GROUP BY pp.id_plan, lpp.rang_mois, rc.code_reference;
 
 -- -----------------------------------------------------------------------------
--- v_besoin_12m : besoins figes des plans VALIDE couvrant la date du jour (R08)
+-- v_besoin_12m : besoins figes des plans EN_COURS couvrant la date du jour (R08)
 -- -----------------------------------------------------------------------------
+-- Le nom est trompeur et le reste pour l'instant : la vue ne couvre PAS douze
+-- mois, elle couvre l'horizon du plan en service, quel qu'il soit. Le renommer
+-- toucherait le service Rust et six ecrans ; la correction du calcul, elle, ne
+-- pouvait pas attendre.
 DROP VIEW IF EXISTS v_besoin_12m;
 CREATE VIEW v_besoin_12m AS
+WITH horizon AS (
+    -- Nombre de mois REELLEMENT couverts par chaque plan. C'est le plan qui
+    -- donne le denominateur, jamais une constante : un plan de six mois divise
+    -- par six. Diviser par douze halvait la consommation mensuelle, doublait la
+    -- couverture affichee, et retardait d'autant le declenchement des alertes
+    -- — verifie : facteur exactement 2,0 sur un plan de six mois.
+    SELECT id_plan, COUNT(DISTINCT annee_mois) AS mois
+      FROM besoin_mrp
+     GROUP BY id_plan
+)
 SELECT
     bm.code_reference,
-    ROUND(SUM(bm.quantite_kg), 4)        AS besoin_12m_kg,
-    ROUND(SUM(bm.quantite_kg) / 12.0, 4) AS besoin_mensuel_moyen_kg
+    ROUND(SUM(bm.quantite_kg), 4)                  AS besoin_12m_kg,
+    ROUND(SUM(bm.quantite_kg) / MAX(h.mois, 1), 4) AS besoin_mensuel_moyen_kg
 FROM besoin_mrp bm
 JOIN plan_production pp ON pp.id_plan = bm.id_plan
+JOIN horizon h          ON h.id_plan  = bm.id_plan
 WHERE pp.statut = 'EN_COURS'
   AND date('now') BETWEEN pp.date_debut AND pp.date_fin
 GROUP BY bm.code_reference;

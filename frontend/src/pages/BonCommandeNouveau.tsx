@@ -350,7 +350,7 @@ export function BonCommandeNouveau() {
       )}
 
       <div className="space-y-3">
-        <Carte>
+        <Carte repliable="boncommandenouveau.1">
           <CarteEntete>
             <CarteTitre>En-tete</CarteTitre>
             {fournisseur && (
@@ -439,7 +439,7 @@ export function BonCommandeNouveau() {
         )}
 
         {entete.code_fournisseur && (
-          <Carte>
+          <Carte repliable="boncommandenouveau.2">
             <CarteEntete>
               <CarteTitre>A commander chez {fournisseur?.nom}</CarteTitre>
               <div className="flex items-center gap-2">

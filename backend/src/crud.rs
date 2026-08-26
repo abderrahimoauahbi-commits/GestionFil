@@ -310,10 +310,18 @@ async fn valider_charge(
 
 pub struct Filtre {
     pub limite: i64,
+    /// Rang de depart. Sa PRESENCE fait basculer la reponse en enveloppe
+    /// paginee `{ lignes, total }` — les appelants qui l'ignorent continuent de
+    /// recevoir un tableau nu, sans rien changer chez eux.
+    pub offset: Option<i64>,
     pub recherche: Option<String>,
     pub actif: Option<i64>,
     /// Filtres exacts colonne = valeur, valides contre la liste blanche.
     pub egalites: Vec<(String, String)>,
+    /// Colonne de tri, validee contre la liste blanche de l'entite.
+    pub tri: Option<String>,
+    /// `desc` pour l'ordre inverse ; toute autre valeur vaut ascendant.
+    pub sens: Option<String>,
 }
 
 pub async fn lister(
@@ -363,14 +371,30 @@ pub async fn lister(
         format!("WHERE {}", conditions.join(" AND "))
     };
 
+    /* Tri demande par l'appelant, valide contre la liste blanche de l'entite :
+       une colonne de tri arrive dans le SQL sans passer par un parametre lie,
+       donc elle ne peut jamais venir telle quelle du client. */
+    let tri = match &f.tri {
+        Some(c) if e.creation.contains(&c.as_str()) || c == e.cle => {
+            let sens = if f.sens.as_deref() == Some("desc") { "DESC" } else { "ASC" };
+            format!("c.{c} {sens}")
+        }
+        Some(c) => return Err(AppError::Invalide(format!("tri inconnu : {c}"))),
+        None => e.tri.to_string(),
+    };
+
+    let limite = f.limite.clamp(1, 5000);
+    let offset = f.offset.unwrap_or(0).max(0);
+
     let sql = format!(
-        "SELECT {} FROM {} c {} {} ORDER BY {} LIMIT {}",
+        "SELECT {} FROM {} c {} {} ORDER BY {} LIMIT {} OFFSET {}",
         e.selection,
         e.table,
         jointures(e.table),
         ou,
-        e.tri,
-        f.limite.clamp(1, 5000)
+        tri,
+        limite,
+        offset
     );
 
     let mut q = sqlx::query(&sql);
@@ -381,7 +405,28 @@ pub async fn lister(
 
     let mut valeur = lignes_en_json(&rows);
     user.masquer(db, e.module, &mut valeur).await?;
-    Ok(valeur)
+
+    if f.offset.is_none() {
+        return Ok(valeur);
+    }
+
+    /* Le total porte sur le filtre, pas sur la page : sans lui le client ne
+       peut ni afficher « 1 a 25 sur 8 431 », ni savoir s'il reste des pages.
+       Il est compte avec exactement les memes conditions et les memes valeurs
+       liees, sinon les deux chiffres divergeraient en silence. */
+    let sql_total = format!(
+        "SELECT COUNT(*) FROM {} c {} {}",
+        e.table,
+        jointures(e.table),
+        ou
+    );
+    let mut qt = sqlx::query_scalar::<_, i64>(&sql_total);
+    for v in &valeurs {
+        qt = qt.bind(v);
+    }
+    let total: i64 = qt.fetch_one(db).await?;
+
+    Ok(json!({ "lignes": valeur, "total": total, "limite": limite, "offset": offset }))
 }
 
 pub async fn lire(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResult<Value> {

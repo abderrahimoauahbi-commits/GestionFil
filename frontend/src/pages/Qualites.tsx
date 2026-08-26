@@ -38,6 +38,7 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { PageAvecRail } from '../composants/RailLateral'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { SelecteurReference } from '../composants/SelecteurReference'
@@ -1091,13 +1092,14 @@ export function Qualites() {
       )}
 
       <div className="space-y-3">
-        {/* --- Entete et densites, cote a cote ------------------------------
-            Les deux blocs se lisent ensemble : on ajuste une densite en gardant
-            le poids commercial de l'entete sous les yeux. Ils passent l'un sous
-            l'autre en dessous de 1536 px : en deca, l'entete a lui seul occupe
-            deja deux colonnes et le tout deviendrait illisible. */}
-        <div className="grid items-start gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
-        <Carte>
+                {/* Entete et densites tiennent la barre laterale : ce sont les
+            parametres de la qualite, consultes puis laisses de cote. La
+            composition, elle, se travaille ligne a ligne et prend la place. */}
+        <PageAvecRail
+          large
+          rail={
+            <div className="flex flex-col gap-3">
+        <Carte repliable="qualites.1">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <FileText className="size-3.5" />
@@ -1241,7 +1243,7 @@ export function Qualites() {
         </Carte>
 
         {/* --- Lignes ------------------------------------------------------ */}
-        <Carte>
+        <Carte repliable="qualites.2">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <Layers className="size-3.5" />
@@ -1268,7 +1270,6 @@ export function Qualites() {
               )}
             </div>
           </CarteEntete>
-
           <CarteCorps>
             {edition !== '' && qDensites.isLoading ? (
               <Chargement texte="Chargement de la composition..." />
@@ -1312,10 +1313,13 @@ export function Qualites() {
 
           </CarteCorps>
         </Carte>
-        </div>
+            </div>
+          }
+        >
 
-        {/* --- Composition ------------------------------------------------- */}
-        <Carte>
+        {/* Colonne droite : la composition, qui est le vrai plan de travail de
+            cet ecran. */}
+        <Carte repliable="qualites.3">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <Boxes className="size-3.5" />
@@ -1356,7 +1360,6 @@ export function Qualites() {
               )}
             </div>
           </CarteEntete>
-
           <CarteCorps>
             {edition !== '' && qComposition.isLoading ? (
               <Chargement texte="Chargement de la composition..." />
@@ -1402,6 +1405,7 @@ export function Qualites() {
 
           </CarteCorps>
         </Carte>
+        </PageAvecRail>
 
         {/* --- Pied : verifications et validation unique -------------------- */}
         {modifiable && (

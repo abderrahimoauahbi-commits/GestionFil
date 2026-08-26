@@ -41,6 +41,16 @@ import {
   Sun,
   Truck,
   Users,
+  Coins,
+  FileSpreadsheet,
+  Library,
+  Receipt,
+  ScrollText,
+  Ship,
+  SlidersHorizontal,
+  Sparkles,
+  Warehouse,
+  type LucideIcon,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -57,43 +67,149 @@ import {
   MenuTitre,
 } from './ui/surcouches'
 
+/**
+ * Modules metier de l'ERP.
+ *
+ * Le rail de gauche porte ces sept entrees et rien d'autre : ce sont les
+ * grandes fonctions de l'entreprise, pas des vues d'outil. Le sous-menu du
+ * module actif s'affiche dans le bandeau superieur.
+ *
+ * Une precision de vocabulaire qui compte ici : dans cette usine, « qualite »
+ * designe une **qualite de tapis** (SH, LP, ...), pas le controle qualite. Les
+ * qualites sont donc rangees en Production, et le controle qualite reste ou il
+ * se pratique — dans la reception, au moment de la pesee.
+ */
+export type Section =
+  | 'PILOTAGE'
+  | 'STOCK'
+  | 'MRP'
+  | 'PRODUCTION'
+  | 'ACHATS'
+  | 'FINANCE'
+  | 'ADMIN'
+
+export const MODULES: {
+  id: Section
+  libelle: string
+  resume: string
+  Icone: LucideIcon
+}[] = [
+  { id: 'PILOTAGE', libelle: 'Pilotage', resume: 'Indicateurs et alertes', Icone: Gauge },
+  { id: 'STOCK', libelle: 'Stock', resume: 'Mouvements, inventaires, receptions', Icone: Boxes },
+  { id: 'MRP', libelle: 'MRP', resume: 'Plans, besoins, stock projete', Icone: Calculator },
+  { id: 'PRODUCTION', libelle: 'Production', resume: 'Qualites et compositions', Icone: Factory },
+  { id: 'ACHATS', libelle: 'Achats', resume: "Plan d'achat, commandes, fournisseurs", Icone: ShoppingCart },
+  { id: 'FINANCE', libelle: 'Finance', resume: 'Valorisation, classification, rapports', Icone: Calculator },
+  { id: 'ADMIN', libelle: 'Parametres', resume: 'Referentiels, droits, audit', Icone: Settings },
+]
+
 export interface EntreeNav {
   vers: string
   libelle: string
+  /** Module de droits, utilise par la grille d'habilitations. */
   module: string
-  Icone: React.ComponentType<{ className?: string }>
-  groupe: 'Pilotage' | 'Magasin' | 'Production' | 'Achats' | 'Configuration'
+  Icone: LucideIcon
+  /** Section du menu : determine sous quelle icone du rail l'ecran se range. */
+  section: Section
   /** Presente dans la barre du bas sur mobile. */
   principale?: boolean
+  /** Ecran declare mais pas encore construit : affiche grise, non ouvrable. */
+  aVenir?: string
+  /**
+   * Roles autorises, quand la permission de module ne suffit pas a decider.
+   * Absent : tout role ayant la permission de lecture voit l'entree.
+   */
+  roles?: string[]
+}
+
+/**
+ * Un ecran est-il accessible a cet utilisateur ?
+ *
+ * Deux conditions, et la seconde n'est pas redondante : la grille de droits
+ * raisonne par module, or certains ecrans ne se decident que par role. Les
+ * filtrer au seul module ferait apparaitre une entree qui repond 403.
+ */
+export function estAccessible(
+  entree: EntreeNav,
+  peut: (module: string, action: 'LIRE') => boolean,
+  role: string | undefined,
+): boolean {
+  if (!peut(entree.module, 'LIRE')) return false
+  if (entree.roles && !entree.roles.includes(role ?? '')) return false
+  return true
 }
 
 export const NAVIGATION: EntreeNav[] = [
-  { vers: '/', libelle: 'Cockpit', module: 'COCKPIT', Icone: Gauge, groupe: 'Pilotage', principale: true },
-  { vers: '/stock', libelle: 'Stock projete', module: 'STOCK', Icone: PackageSearch, groupe: 'Pilotage' },
-  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, groupe: 'Pilotage' },
+  /* --- 1. Pilotage ------------------------------------------------------- */
+  { vers: '/', libelle: 'Cockpit', module: 'COCKPIT', Icone: Gauge, section: 'PILOTAGE', principale: true },
+  { vers: '/stock', libelle: 'Stock projete', module: 'STOCK', Icone: PackageSearch, section: 'MRP' },
+  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'PILOTAGE' },
+  {
+    vers: '/assistant',
+    libelle: 'Assistant',
+    module: 'COCKPIT',
+    Icone: Sparkles,
+    section: 'PILOTAGE',
+    roles: ['DIRECTION'],
+  },
 
-  { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: Boxes, groupe: 'Magasin', principale: true },
-  { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, groupe: 'Magasin' },
-  { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardList, groupe: 'Magasin' },
-  { vers: '/receptions', libelle: 'Receptions', module: 'RECEPTIONS', Icone: Package, groupe: 'Magasin', principale: true },
+  /* --- 2. Stock ---------------------------------------------------------- */
+  { vers: '/etat-stock', libelle: 'Etat de stock', module: 'STOCK', Icone: Warehouse, section: 'STOCK', principale: true },
+  { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: Boxes, section: 'STOCK', principale: true },
+  { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
+  { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardList, section: 'STOCK' },
+  { vers: '/receptions', libelle: 'Receptions', module: 'RECEPTIONS', Icone: Package, section: 'STOCK', principale: true },
 
-  { vers: '/qualites', libelle: 'Qualites', module: 'QUALITES', Icone: Factory, groupe: 'Production' },
-  { vers: '/recettes', libelle: 'Compositions', module: 'RECETTES', Icone: FileText, groupe: 'Production' },
-  { vers: '/plans', libelle: 'Plans', module: 'PLANS', Icone: LayoutGrid, groupe: 'Production' },
-  { vers: '/besoins', libelle: 'Production & Besoins', module: 'MRP', Icone: Calculator, groupe: 'Production', principale: true },
+  /* --- 3. Production ----------------------------------------------------- */
+  { vers: '/qualites', libelle: 'Qualites', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
+  { vers: '/recettes', libelle: 'Compositions', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
+  { vers: '/plans', libelle: 'Plans', module: 'PLANS', Icone: LayoutGrid, section: 'MRP' },
+  { vers: '/besoins', libelle: 'Calcul des besoins', module: 'MRP', Icone: Calculator, section: 'MRP', principale: true },
 
-  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, groupe: 'Achats' },
-  { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: FileText, groupe: 'Achats' },
-  { vers: '/catalogue', libelle: 'Catalogue', module: 'CATALOGUE', Icone: Package, groupe: 'Achats', principale: true },
-  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, groupe: 'Achats' },
+  /* --- 4. Achats --------------------------------------------------------- */
+  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'ACHATS' },
+  { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
+  { vers: '/catalogue', libelle: 'Catalogue', module: 'CATALOGUE', Icone: Package, section: 'ACHATS', principale: true },
+  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'ACHATS' },
+  { vers: '/equivalences', libelle: 'Equivalences', module: 'CATALOGUE', Icone: Link2, section: 'ACHATS' },
 
-  { vers: '/configuration', libelle: 'Configuration', module: 'PARAMETRES', Icone: Settings, groupe: 'Configuration' },
-  { vers: '/equivalences', libelle: 'Equivalences', module: 'CATALOGUE', Icone: Link2, groupe: 'Configuration' },
+  /* --- 5. Finance & valorisation ----------------------------------------- */
+  { vers: '/valorisation', libelle: 'Valorisation stock', module: 'VALORISATION', Icone: Coins, section: 'FINANCE' },
+  {
+    vers: '/classification',
+    libelle: 'Analyse ABC / XYZ',
+    module: 'STOCK',
+    Icone: BarChart3,
+    section: 'FINANCE',
+    aVenir: "Les colonnes existent, mais la classification n'a jamais ete calculee sur cette base.",
+  },
+  {
+    vers: '/rapports',
+    libelle: 'Rapports',
+    module: 'VALORISATION',
+    Icone: FileSpreadsheet,
+    section: 'FINANCE',
+    aVenir: "Export comptable et valorisation globale : format a arreter avec la DAF.",
+  },
+  {
+    vers: '/landed-cost',
+    libelle: 'Cout de revient complet',
+    module: 'VALORISATION',
+    Icone: Ship,
+    section: 'FINANCE',
+    aVenir: "Necessite les frais de transport et de douane, qui vivent dans l'ERP transitaire.",
+  },
 
-  { vers: '/utilisateurs', libelle: 'Utilisateurs', module: 'UTILISATEURS', Icone: Users, groupe: 'Configuration' },
+  /* --- 6. Parametres & administration ------------------------------------ */
+  { vers: '/referentiels', libelle: 'Referentiels', module: 'CATALOGUE', Icone: Library, section: 'ADMIN' },
+  { vers: '/utilisateurs', libelle: 'Utilisateurs & droits', module: 'UTILISATEURS', Icone: Users, section: 'ADMIN' },
+  { vers: '/parametres', libelle: 'Parametres systeme', module: 'PARAMETRES', Icone: Settings, section: 'ADMIN' },
+  { vers: '/configuration', libelle: 'Champs & affichage', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'ADMIN' },
+  { vers: '/audit', libelle: "Journal d'audit", module: 'AUDIT', Icone: ScrollText, section: 'ADMIN' },
 ]
 
-const GROUPES = ['Pilotage', 'Magasin', 'Production', 'Achats', 'Configuration'] as const
+/** Sections dans l'ordre du rail. */
+const GROUPES = MODULES.map((m) => m.id)
 
 interface Controle {
   code: string
@@ -108,7 +224,7 @@ export function Coquille() {
   const emplacement = useLocation()
   const [tiroir, setTiroir] = useState(false)
 
-  const accessibles = NAVIGATION.filter((e) => peut(e.module, 'LIRE'))
+  const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
   const principales = accessibles.filter((e) => e.principale).slice(0, 4)
   const courante = accessibles.find(
     (e) =>
@@ -144,12 +260,12 @@ export function Coquille() {
     )
 
   /** Un groupe de la navigation, en menu deroulant. */
-  const groupeMenu = (groupe: string) => {
-    const entrees = accessibles.filter((e) => e.groupe === groupe)
+  const groupeMenu = (section: Section) => {
+    const entrees = accessibles.filter((e) => e.section === section)
     if (!entrees.length) return null
     const actif = entrees.some((e) => e.vers === courante?.vers)
     return (
-      <Menu key={groupe}>
+      <Menu key={section}>
         <MenuDeclencheur asChild>
           <button
             className={cn(
@@ -160,7 +276,7 @@ export function Coquille() {
                 : 'text-attenue-texte hover:bg-attenue hover:text-texte',
             )}
           >
-            {groupe}
+            {MODULES.find((m) => m.id === section)?.libelle ?? section}
             <ChevronDown className="size-3 opacity-60" />
           </button>
         </MenuDeclencheur>
@@ -217,11 +333,11 @@ export function Coquille() {
                 {e.libelle}
               </NavLink>
             ))}
-          {GROUPES.filter((g) => g !== 'Pilotage').map(groupeMenu)}
+          {GROUPES.filter((g) => g !== 'PILOTAGE').map(groupeMenu)}
           {/* Pilotage hors cockpit : rattache au premier groupe pour ne pas
               multiplier les menus a une seule entree. */}
           {accessibles
-            .filter((e) => e.groupe === 'Pilotage' && e.vers !== '/')
+            .filter((e) => e.section === 'PILOTAGE' && e.vers !== '/')
             .map((e) => (
               <NavLink key={e.vers} to={e.vers} className={({ isActive }) => lienNav(isActive)}>
                 <e.Icone className="size-3.5" />
@@ -356,13 +472,13 @@ export function Coquille() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {GROUPES.map((groupe) => {
-                const entrees = accessibles.filter((e) => e.groupe === groupe)
+              {GROUPES.map((section) => {
+                const entrees = accessibles.filter((e) => e.section === section)
                 if (!entrees.length) return null
                 return (
-                  <div key={groupe}>
+                  <div key={section}>
                     <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                      {groupe}
+                      {MODULES.find((m) => m.id === section)?.libelle ?? section}
                     </div>
                     <div className="space-y-0.5">
                       {entrees.map((e) => (

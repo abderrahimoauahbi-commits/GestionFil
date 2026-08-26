@@ -6,6 +6,7 @@
 //!   * `operations`  — cascades et calculs (MRP, reception, transfert, ...)
 
 mod admin;
+mod assistant;
 mod auth_routes;
 mod consultation;
 mod entites;
@@ -45,6 +46,9 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/sante", get(consultation::sante))
+        // --- Assistant de direction (lecture seule, role DIRECTION) -----------
+        .route("/api/assistant", get(assistant::catalogue))
+        .route("/api/assistant/{id}", get(assistant::repondre))
         // --- Authentification -------------------------------------------------
         .route("/api/auth/connexion", post(auth_routes::connexion))
         .route("/api/auth/moi", get(auth_routes::moi))
@@ -199,6 +203,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/audit", get(consultation::audit))
         .route("/api/classification", post(operations::classifier))
+        // Doit preceder la route generique /api/{entite}/{id}.
+        .route("/api/catalogue/{code}/usages", get(consultation::usages_reference))
+        .route("/api/catalogue/{code}/definitivement",
+               axum::routing::delete(operations::supprimer_reference_definitivement))
         // --- CRUD generique ---------------------------------------------------
         // Enregistre en dernier : les segments statiques ci-dessus ont priorite
         // sur ce motif dynamique.

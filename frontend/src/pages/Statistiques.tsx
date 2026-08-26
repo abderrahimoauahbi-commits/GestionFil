@@ -266,7 +266,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         />
       </div>
 
-      <Carte>
+      <Carte repliable="statistiques.1">
         <CarteEntete>
           <CarteTitre>Flux par mois et par type</CarteTitre>
         </CarteEntete>
@@ -325,7 +325,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         </CarteCorps>
       </Carte>
 
-      <Carte>
+      <Carte repliable="statistiques.2">
         <CarteEntete>
           <CarteTitre>Par reference</CarteTitre>
           <span className="text-[11px] text-attenue-texte">
@@ -461,7 +461,7 @@ function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
         confondre revient a reprocher a un fournisseur une variation du marche des devises.
       </Alerte>
 
-      <Carte>
+      <Carte repliable="statistiques.3">
         <CarteEntete>
           <CarteTitre>Derive du prix d'achat</CarteTitre>
           <span className="text-[11px] text-attenue-texte">
@@ -542,7 +542,7 @@ function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
       </Carte>
 
       {choisie && (
-        <Carte>
+        <Carte repliable="statistiques.4">
           <CarteEntete>
             <CarteTitre>Historique mensuel — {choisie}</CarteTitre>
           </CarteEntete>
@@ -642,7 +642,7 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
         />
       </div>
 
-      <Carte>
+      <Carte repliable="statistiques.5">
         <CarteEntete>
           <CarteTitre>Fiche de performance</CarteTitre>
           <span className="text-[11px] text-attenue-texte">
@@ -755,7 +755,7 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
       </Carte>
 
       {choisi && (
-        <Carte>
+        <Carte repliable="statistiques.6">
           <CarteEntete>
             <CarteTitre>Tendance mensuelle — {choisi}</CarteTitre>
           </CarteEntete>
@@ -880,7 +880,7 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
         </Alerte>
       )}
 
-      <Carte>
+      <Carte repliable="statistiques.7">
         <CarteEntete>
           <CarteTitre>Cout et production par qualite</CarteTitre>
         </CarteEntete>
@@ -985,7 +985,7 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
       </Carte>
 
       {choisie && (
-        <Carte>
+        <Carte repliable="statistiques.8">
           <CarteEntete>
             <CarteTitre>Ventilation par role — {choisie}</CarteTitre>
             <span className="text-[11px] text-attenue-texte">

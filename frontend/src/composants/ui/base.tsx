@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 // ============================================================================
@@ -141,8 +141,67 @@ export function Etiq({
 // Surfaces
 // ============================================================================
 
-export function Carte({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
+/* -------------------------------------------------------------------------- */
+/* Repli                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Etat de repli partage entre `Carte`, `CarteEntete` et `CarteCorps`.
+ *
+ * Passer par un contexte plutot que par des props evite d'avoir a cabler trois
+ * composants a chaque usage : declarer `repliable` sur la carte suffit, le
+ * chevron apparait dans son en-tete et son corps se retire.
+ */
+const ContexteRepli = React.createContext<{
+  replie: boolean
+  basculer: () => void
+} | null>(null)
+
+const CLE_REPLI = 'gestionfil.cartes.repliees'
+
+function repliesEnregistres(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(CLE_REPLI) ?? '{}') as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
+
+export function Carte({
+  className,
+  repliable,
+  replieParDefaut = false,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & {
+  /**
+   * Identifiant de memoire. Present, la carte devient repliable et son etat
+   * survit d'une session a l'autre — sans quoi le geste serait a refaire a
+   * chaque ouverture et personne ne s'en servirait.
+   */
+  repliable?: string
+  replieParDefaut?: boolean
+}) {
+  const [replie, setReplie] = React.useState(
+    () => (repliable ? (repliesEnregistres()[repliable] ?? replieParDefaut) : false),
+  )
+
+  const basculer = React.useCallback(() => {
+    if (!repliable) return
+    setReplie((r) => {
+      const suivant = !r
+      try {
+        localStorage.setItem(
+          CLE_REPLI,
+          JSON.stringify({ ...repliesEnregistres(), [repliable]: suivant }),
+        )
+      } catch {
+        /* sans memoire, le repli fonctionne quand meme */
+      }
+      return suivant
+    })
+  }, [repliable])
+
+  const carte = (
     <div
       // Pas d'ombre : sur un fond legerement gris, un simple contour suffit a
       // detacher la carte, et l'ecran reste net meme avec dix blocs empiles.
@@ -153,9 +212,19 @@ export function Carte({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
       {...props}
     />
   )
+
+  if (!repliable) return carte
+  return (
+    <ContexteRepli.Provider value={{ replie, basculer }}>{carte}</ContexteRepli.Provider>
+  )
 }
 
-export function CarteEntete({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+export function CarteEntete({
+  className,
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  const repli = React.useContext(ContexteRepli)
   return (
     <div
       className={cn(
@@ -163,7 +232,26 @@ export function CarteEntete({ className, ...props }: React.HTMLAttributes<HTMLDi
         className,
       )}
       {...props}
-    />
+    >
+      {repli && (
+        <button
+          type="button"
+          onClick={repli.basculer}
+          aria-expanded={!repli.replie}
+          aria-label={repli.replie ? 'Deplier' : 'Replier'}
+          className="-ml-1 grid size-5 shrink-0 place-items-center rounded-[3px]
+                     text-attenue-texte hover:bg-surface hover:text-texte"
+        >
+          <ChevronDown
+            className={cn(
+              'size-3.5 transition-transform duration-100',
+              repli.replie && '-rotate-90',
+            )}
+          />
+        </button>
+      )}
+      {children}
+    </div>
   )
 }
 
@@ -180,6 +268,10 @@ export function CarteTitre({ className, ...props }: React.HTMLAttributes<HTMLHea
 }
 
 export function CarteCorps({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  const repli = React.useContext(ContexteRepli)
+  // Demonte plutot que masque : un formulaire replie ne doit pas continuer a
+  // recevoir le focus au clavier.
+  if (repli?.replie) return null
   return <div className={cn('p-2.5', className)} {...props} />
 }
 

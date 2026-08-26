@@ -856,7 +856,7 @@ export function Plans() {
 
       <div className="space-y-3">
         {/* --- Entete ------------------------------------------------------ */}
-        <Carte>
+        <Carte repliable="plans.1">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <FileText className="size-3.5" />
@@ -973,7 +973,7 @@ export function Plans() {
         </Carte>
 
         {/* --- Recettes retenues ------------------------------------------- */}
-        <Carte>
+        <Carte repliable="plans.2">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <Layers className="size-3.5" />
@@ -1045,7 +1045,7 @@ export function Plans() {
 
         {/* --- Saisonnalite ------------------------------------------------ */}
         {lignes.length > 0 && (
-          <Carte>
+          <Carte repliable="plans.3">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 Saisonnalite — profil annuel
@@ -1143,7 +1143,7 @@ export function Plans() {
 
         {/* --- Grille deduite ---------------------------------------------- */}
         {lignes.length > 0 && periode.length > 0 && (
-          <Carte>
+          <Carte repliable="plans.4">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 Plan deploye — m² par mois

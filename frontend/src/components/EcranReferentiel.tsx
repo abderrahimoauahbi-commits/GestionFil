@@ -7,13 +7,13 @@
  * formulaire desactive ce que l'utilisateur ne peut pas modifier.
  */
 import { useState } from 'react'
-import { MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useDroits } from '../auth/AuthContext'
 import { useCrud } from '../hooks/useCrud'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Bouton } from '../composants/ui/base'
+import { Bouton, Carte, CarteCorps } from '../composants/ui/base'
 import {
   Menu,
   MenuContenu,
@@ -21,7 +21,7 @@ import {
   MenuElement,
   useConfirmation,
 } from '../composants/ui/surcouches'
-import { Formulaire, Panneau, type ChampDef } from './Formulaire'
+import { Formulaire, type ChampDef } from './Formulaire'
 
 interface Props<L extends Record<string, unknown>> {
   titre: string
@@ -34,6 +34,19 @@ interface Props<L extends Record<string, unknown>> {
   filtres?: Record<string, string>
   libelleUnite?: string
   titreCarte?: (ligne: L) => React.ReactNode
+  /**
+   * Actions propres a l'ecran, ajoutees au menu de ligne apres les actions
+   * communes. Rendues seulement si l'utilisateur peut ecrire.
+   */
+  actionsExtra?: (ligne: L) => React.ReactNode
+  /**
+   * Delegue recherche, tri et pagination au serveur.
+   *
+   * A activer des qu'un referentiel peut depasser quelques milliers de lignes.
+   * Sans lui, tout est charge puis filtre dans le navigateur : parfait sur 120
+   * references, intenable sur 20 000.
+   */
+  serveur?: boolean
 }
 
 export function EcranReferentiel<L extends Record<string, unknown>>({
@@ -47,13 +60,36 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
   filtres = {},
   libelleUnite = 'enregistrement',
   titreCarte,
+  actionsExtra,
+  serveur = false,
 }: Props<L>) {
   const droits = useDroits(module)
   const [edition, setEdition] = useState<L | null>(null)
   const [creation, setCreation] = useState(false)
   const confirmation = useConfirmation()
 
-  const crud = useCrud<L>(chemin, filtres)
+  const [page, setPage] = useState(0)
+  const [taille, setTaille] = useState(25)
+  const [recherche, setRecherche] = useState('')
+  const [tri, setTri] = useState<{ champ: string | null; sens: 'asc' | 'desc' }>({
+    champ: null,
+    sens: 'asc',
+  })
+
+  /* Changer de filtre, de recherche ou de tri ramene a la premiere page :
+     rester en page 7 d'un resultat qui n'en compte plus que 2 afficherait un
+     tableau vide sans rien expliquer. */
+  const filtresServeur = serveur
+    ? {
+        ...filtres,
+        limite: String(taille),
+        offset: String(page * taille),
+        ...(recherche ? { recherche } : {}),
+        ...(tri.champ ? { tri: tri.champ, sens: tri.sens } : {}),
+      }
+    : filtres
+
+  const crud = useCrud<L>(chemin, filtresServeur)
 
   const fermer = () => {
     setEdition(null)
@@ -113,10 +149,56 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
                 Desactiver
               </MenuElement>
             )}
+            {actionsExtra?.(ligne)}
           </MenuContenu>
         </Menu>
       )
     : undefined
+
+  /* Saisie en PAGE, pas en panneau lateral.
+     Une fiche de catalogue porte une vingtaine de champs ; dans un tiroir de
+     420 px, ils s'empilent sur trois ecrans de haut et l'on perd de vue la
+     liste comme le formulaire. La fiche prend donc toute la place, et la liste
+     s'efface le temps de la saisie. Rien ne change cote droits : le formulaire
+     est le meme, et c'est le serveur qui tranche a l'enregistrement. */
+  if (creation || edition) {
+    return (
+      <div>
+        <EnTetePage
+          titre={creation ? `Nouveau ${libelleUnite}` : `${String(edition?.[cle])}`}
+          description={
+            creation
+              ? `Creation d'un ${libelleUnite}`
+              : 'Les champs grises sont des identifiants ou des valeurs calculees.'
+          }
+          actions={
+            <Bouton variante="contour" onClick={fermer}>
+              <ArrowLeft />
+              Retour a la liste
+            </Bouton>
+          }
+        />
+
+        <Carte>
+          <CarteCorps>
+            <Formulaire
+              module={module}
+              champs={champs}
+              valeurs={creation ? {} : (edition as Record<string, unknown>)}
+              creation={creation}
+              enCours={crud.enCours}
+              erreur={crud.erreur}
+              surAnnuler={fermer}
+              surValider={enregistrer}
+              libelleValider={creation ? 'Creer' : 'Enregistrer'}
+            />
+          </CarteCorps>
+        </Carte>
+
+        {confirmation.element}
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -147,10 +229,30 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
         actions={actions}
         titreCarte={titreCarte}
         placeholderRecherche={`Filtrer les ${libelleUnite}s...`}
-        videTitre={`Aucun ${libelleUnite}`}
-        videDescription={
-          droits.peutEcrire ? 'Commencez par en creer un.' : undefined
+        serveur={
+          serveur
+            ? {
+                total: crud.total ?? 0,
+                page,
+                taille,
+                surPage: setPage,
+                surTaille: (t) => {
+                  setTaille(t)
+                  setPage(0)
+                },
+                surRecherche: (m) => {
+                  setRecherche(m)
+                  setPage(0)
+                },
+                surTri: (champ, sens) => {
+                  setTri({ champ, sens })
+                  setPage(0)
+                },
+              }
+            : undefined
         }
+        videTitre={`Aucun ${libelleUnite}`}
+        videDescription={droits.peutEcrire ? 'Commencez par en creer un.' : undefined}
         videAction={
           droits.peutEcrire && (
             <Bouton variante="contour" onClick={() => setCreation(true)}>
@@ -160,30 +262,6 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
           )
         }
       />
-
-      {(creation || edition) && (
-        <Panneau
-          titre={creation ? `Nouveau ${libelleUnite}` : `Modifier ${String(edition?.[cle])}`}
-          sous_titre={
-            creation
-              ? undefined
-              : 'Les champs grises sont des identifiants ou des valeurs calculees.'
-          }
-          surFermeture={fermer}
-        >
-          <Formulaire
-            module={module}
-            champs={champs}
-            valeurs={creation ? {} : (edition as Record<string, unknown>)}
-            creation={creation}
-            enCours={crud.enCours}
-            erreur={crud.erreur}
-            surAnnuler={fermer}
-            surValider={enregistrer}
-            libelleValider={creation ? 'Creer' : 'Enregistrer'}
-          />
-        </Panneau>
-      )}
 
       {confirmation.element}
     </div>

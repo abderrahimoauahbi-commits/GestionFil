@@ -1402,3 +1402,78 @@ pub async fn audit(
 
     Ok(Json(lignes_en_json(&rows)))
 }
+
+/// Usages d'une reference du catalogue, et verdict de suppression.
+///
+/// Les cles etrangeres empechent deja de supprimer une reference utilisee, mais
+/// elles le disent en « FOREIGN KEY constraint failed » — un message qui ne
+/// nomme ni la reference ni ce qui la retient. Cet endpoint compte les usages
+/// AVANT, pour que l'ecran puisse expliquer, et pour ne proposer le bouton que
+/// lorsqu'il aboutira.
+///
+/// Le stock est traite a part : une reference a stock nul mais ayant deja
+/// bouge reste indelebile, parce que son passage figure au grand livre.
+pub async fn usages_reference(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::CATALOGUE, Action::Lire).await?;
+
+    let ligne = sqlx::query(
+        "SELECT
+           (SELECT COUNT(*) FROM ligne_mouvement WHERE code_reference = ?1) AS mouvements,
+           (SELECT COUNT(*) FROM recette         WHERE code_reference = ?1) AS recettes,
+           (SELECT COUNT(*) FROM ligne_bc        WHERE code_reference = ?1) AS lignes_bc,
+           (SELECT COUNT(*) FROM ligne_reception WHERE code_reference = ?1) AS receptions,
+           (SELECT COUNT(*) FROM plan_achat      WHERE code_reference = ?1) AS propositions,
+           (SELECT COUNT(*) FROM historique_prix WHERE code_reference = ?1) AS prix,
+           (SELECT COUNT(*) FROM ligne_inventaire WHERE code_reference = ?1) AS inventaires,
+           (SELECT COUNT(*) FROM reference_groupe_equiv WHERE code_reference = ?1) AS equivalences,
+           (SELECT COALESCE(SUM(quantite_kg), 0) FROM stock_magasin
+             WHERE code_reference = ?1) AS stock_kg,
+           (SELECT COUNT(*) FROM reference WHERE code_reference = ?1) AS existe",
+    )
+    .bind(&code)
+    .fetch_one(&state.db)
+    .await?;
+
+    let mut valeur = lignes_en_json(std::slice::from_ref(&ligne));
+    let mut obj = valeur
+        .get_mut(0)
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+
+    let compte = |cle: &str| obj.get(cle).and_then(|v| v.as_i64()).unwrap_or(0);
+    if compte("existe") == 0 {
+        return Err(AppError::Introuvable(format!("Reference {code}")));
+    }
+
+    /* Le rattachement a un groupe d'equivalence ne retient pas la reference :
+       il se defait sans perte. Tout le reste porte de l'histoire. */
+    let retenants = [
+        ("mouvements", "mouvement(s) de stock"),
+        ("recettes", "ligne(s) de recette"),
+        ("lignes_bc", "ligne(s) de bon de commande"),
+        ("receptions", "ligne(s) de reception"),
+        ("propositions", "proposition(s) d'achat"),
+        ("prix", "entree(s) d'historique de prix"),
+        ("inventaires", "ligne(s) d'inventaire"),
+    ];
+
+    let motifs: Vec<String> = retenants
+        .iter()
+        .filter(|(cle, _)| compte(cle) > 0)
+        .map(|(cle, libelle)| format!("{} {libelle}", compte(cle)))
+        .collect();
+
+    let stock = obj.get("stock_kg").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let mut motifs = motifs;
+    if stock.abs() > 0.0001 {
+        motifs.push(format!("{stock} kg en stock"));
+    }
+
+    obj.insert("supprimable".into(), json!(motifs.is_empty()));
+    obj.insert("motifs".into(), json!(motifs));
+    Ok(Json(Value::Object(obj)))
+}

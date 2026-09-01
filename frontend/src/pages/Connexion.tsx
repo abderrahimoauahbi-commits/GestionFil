@@ -186,7 +186,7 @@ export function Connexion() {
               <pre className="overflow-x-auto rounded-[3px] bg-attenue p-2 font-mono text-[11px] text-texte">
 {`cd backend
 $env:GESTIONFIL_MOT_DE_PASSE = "au moins douze caracteres"
-cargo run --bin gestionfil-admin -- definir-mot-de-passe superviseur`}
+cargo run --bin gestionfil-admin -- definir-mot-de-passe admin`}
               </pre>
               <p>
                 Cette commande ne s execute que sur le serveur, par quelqu un qui a deja acces aux

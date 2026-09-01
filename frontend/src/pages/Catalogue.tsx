@@ -263,6 +263,8 @@ export function Catalogue() {
         }
       >
         <EcranReferentiel<Reference>
+          exportable="catalogue-references"
+          imprimable="Catalogue references"
           // Remonter la categorie dans la cle force le rechargement : sans cela,
           // l'ecran garderait la liste precedente en changeant de filtre.
           key={categorie}

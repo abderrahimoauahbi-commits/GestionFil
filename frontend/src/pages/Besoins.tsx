@@ -44,6 +44,7 @@ import {
 } from '../composants/ui/base'
 import { Aide } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { exporterCsv } from '../lib/export'
 
 const MODULE = 'MRP'
 
@@ -286,32 +287,31 @@ export function Besoins() {
   const totalM2 = production.reduce((s, p) => s + p.total, 0)
 
   /** Export CSV : ce que les acheteurs ouvrent dans Excel pour consulter. */
+  /* L'export passe par l'utilitaire partage : meme mise en forme que les
+     vingt-cinq autres tableaux, et surtout la virgule decimale posee cellule
+     par cellule. L'ancienne version l'appliquait par expression reguliere sur
+     le fichier entier, ce qui transformait aussi les codes de reference
+     contenant un point suivi d'un chiffre. */
   function exporter() {
-    const sep = ';'
-    const enTete = [
-      'Code Ref', 'Designation', 'Categorie', 'Fournisseur', 'Unite',
-      ...mois.map((m) => libelleMois(m.annee_mois)),
-      'Total kg',
-    ]
-    const lignes = besoinsFiltres.map((b) => [
-      b.code_reference, b.designation, b.categorie, b.fournisseur, b.unite,
-      ...mois.map((m) => (b.par_mois.get(m.rang_mois) ?? 0).toFixed(3)),
-      b.total.toFixed(3),
-    ])
-    // Le point-virgule et la virgule decimale sont ce qu'attend un Excel
-    // francophone ; le BOM lui evite de mal lire les accents.
-    const csv =
-      '﻿' +
-      [enTete, ...lignes]
-        .map((l) => l.map((c) => String(c).replace(/;/g, ',')).join(sep))
-        .join('\r\n')
-        .replace(/(\d)\.(\d)/g, '$1,$2')
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `besoins-${d?.plan?.libelle ?? 'plan'}.csv`.replace(/[^\w.-]+/g, '-')
-    a.click()
-    URL.revokeObjectURL(url)
+    exporterCsv(
+      `besoins-${plan?.libelle ?? 'plan'}`,
+      [
+        { champ: 'code_reference', entete: 'Code Ref' },
+        { champ: 'designation', entete: 'Designation' },
+        { champ: 'categorie', entete: 'Categorie' },
+        { champ: 'fournisseur', entete: 'Fournisseur' },
+        { champ: 'unite', entete: 'Unite' },
+        ...mois.map((m) => ({
+          champ: `m${m.rang_mois}`,
+          entete: libelleMois(m.annee_mois),
+          numerique: true,
+          valeurExport: (b: (typeof besoinsFiltres)[number]) =>
+            b.par_mois.get(m.rang_mois) ?? 0,
+        })),
+        { champ: 'total', entete: 'Total kg', numerique: true },
+      ],
+      besoinsFiltres,
+    )
   }
 
   if (qPlans.isLoading) return <Chargement />

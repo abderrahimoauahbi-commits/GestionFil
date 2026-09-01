@@ -296,6 +296,8 @@ export function Transferts() {
         }
       >
       <DataTable<Transfert>
+          exportable="transferts"
+          imprimable="Transferts"
         module={MODULE}
         colonnes={colonnes}
         lignes={vus}

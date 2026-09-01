@@ -386,6 +386,8 @@ export function Inventaires() {
       >
       <div className="space-y-4">
         <DataTable<Inventaire>
+          exportable="inventaires"
+          imprimable="Inventaires"
           module={MODULE}
           colonnes={colonnesInv}
           lignes={vus}

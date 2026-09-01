@@ -121,6 +121,8 @@ export function Fournisseurs() {
 
   return (
     <EcranReferentiel<Fournisseur>
+          exportable="fournisseurs"
+          imprimable="Fournisseurs"
       titre="Fournisseurs"
       module={MODULE}
       chemin="fournisseurs"

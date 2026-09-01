@@ -271,6 +271,8 @@ export function HistoriquePrix() {
         )}
 
         <TableDroits
+          exportable="historique-des-prix"
+          imprimable="Historique des prix"
           module={MODULE}
           colonnes={colonnes}
           lignes={vues}

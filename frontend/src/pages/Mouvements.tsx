@@ -282,6 +282,8 @@ export function Mouvements() {
           </div>
         )}
         <TableDroits
+          exportable="mouvements-de-stock"
+          imprimable="Mouvements de stock"
           module={MODULE}
           colonnes={colonnes}
           lignes={lignesVues}

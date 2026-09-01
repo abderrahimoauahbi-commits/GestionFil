@@ -198,6 +198,8 @@ export function Recettes() {
       </Carte>
 
       <DataTable
+          exportable="recettes"
+          imprimable="Recettes"
         module={MODULE}
         colonnes={colonnes}
         lignes={lignes}

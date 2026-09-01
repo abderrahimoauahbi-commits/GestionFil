@@ -56,6 +56,10 @@ interface Props<L extends Record<string, unknown>> {
    * amorce, pas un verrou.
    */
   rechercheInitiale?: string
+  /** Sujet du fichier CSV. Sa presence affiche le bouton d'export. */
+  exportable?: string
+  /** Titre de l'etat imprime. */
+  imprimable?: string
 }
 
 export function EcranReferentiel<L extends Record<string, unknown>>({
@@ -72,6 +76,8 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
   actionsExtra,
   serveur = false,
   rechercheInitiale = '',
+  exportable,
+  imprimable,
 }: Props<L>) {
   const droits = useDroits(module)
   const [edition, setEdition] = useState<L | null>(null)
@@ -234,6 +240,8 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
       />
 
       <DataTable<L>
+        exportable={exportable}
+        imprimable={imprimable}
         module={module}
         colonnes={colonnes}
         lignes={crud.liste.data}

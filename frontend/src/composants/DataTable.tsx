@@ -33,6 +33,8 @@ import {
   ChevronsRight,
   ChevronsUpDown,
   Columns3,
+  Download,
+  Printer,
   Filter,
   Inbox,
   Search,
@@ -40,6 +42,8 @@ import {
 } from 'lucide-react'
 import { useDroits } from '../auth/AuthContext'
 import { cn } from '../lib/utils'
+import { exporterCsv } from '../lib/export'
+import { TableauImprimable } from './Etat'
 import { Badge, Bouton, Champ, Chargement, EtatVide, Selecteur, Squelette } from './ui/base'
 import { Menu, MenuContenu, MenuDeclencheur, MenuElement, MenuTitre } from './ui/surcouches'
 import {
@@ -121,6 +125,24 @@ interface Props<L> {
   barreOutils?: React.ReactNode
   /** Hauteur maximale du corps ; l'en-tete reste fixe au defilement. */
   hauteurMax?: string
+  /**
+   * Sujet du fichier exporte. Sa PRESENCE affiche le bouton d'export.
+   *
+   * L'export part des COLONNES VISIBLES, donc de celles que les droits
+   * laissent passer : un magasinier exporte le meme tableau que celui qu'il
+   * lit, sans les montants. Exporter les colonnes declarees plutot que les
+   * colonnes visibles ferait sortir par un fichier ce que l'ecran masque.
+   */
+  exportable?: string
+  /**
+   * Titre de l'etat imprime. Sa PRESENCE affiche le bouton d'impression.
+   *
+   * L'impression ne quitte pas l'ecran : le tableau visible est rendu une
+   * seconde fois, invisible a l'ecran et seul visible au papier. C'est ce qui
+   * permet d'imprimer CE QU'ON REGARDE — filtres, tri et colonnes compris —
+   * plutot qu'un etat separe qu'il faudrait re-parametrer.
+   */
+  imprimable?: string
 }
 
 export function DataTable<L extends Record<string, unknown>>({
@@ -142,6 +164,8 @@ export function DataTable<L extends Record<string, unknown>>({
   videAction,
   barreOutils,
   hauteurMax,
+  exportable,
+  imprimable,
   serveur,
 }: Props<L>) {
   const droits = useDroits(module)
@@ -312,6 +336,50 @@ export function DataTable<L extends Record<string, unknown>>({
           )}
 
           {barreOutils}
+
+          {imprimable && (
+            <Bouton
+              variante="contour"
+              taille="md"
+              disabled={!rangs.length}
+              onClick={() => window.print()}
+              title="Imprimer le tableau tel qu il est affiche"
+            >
+              <Printer />
+              <span className="hidden sm:inline">Imprimer</span>
+            </Bouton>
+          )}
+
+          {exportable && (
+            <Bouton
+              variante="contour"
+              taille="md"
+              disabled={!rangs.length}
+              onClick={() =>
+                exporterCsv(
+                  exportable,
+                  visibles.map((c) => ({
+                    champ: c.champ,
+                    entete: c.entete,
+                    numerique: c.numerique,
+                    // `valeurTri` porte deja la valeur brute quand l'affichage
+                    // differe — une date formatee, un statut traduit. C'est
+                    // exactement ce qu'un tableur doit recevoir : le rendu JSX
+                    // ne s'exporte pas.
+                    valeurExport: c.valeurTri,
+                  })),
+                  // Les lignes AFFICHEES, filtres et tri compris : on exporte
+                  // ce qu'on voit. Exporter la table entiere surprendrait
+                  // apres avoir pose trois filtres.
+                  rangs.map((r) => r.original),
+                )
+              }
+              title="Telecharger au format CSV, lisible par Excel"
+            >
+              <Download />
+              <span className="hidden sm:inline">Exporter</span>
+            </Bouton>
+          )}
 
           <div className="ml-auto flex items-center gap-1.5">
             <span className="hidden text-[11px] tabular-nums text-attenue-texte sm:inline">
@@ -512,6 +580,30 @@ export function DataTable<L extends Record<string, unknown>>({
               </tbody>
             </table>
           </div>
+
+          {/* --- Version papier ------------------------------------------
+              Rendue en permanence mais invisible a l'ecran : `@media print`
+              masque tout le reste et ne laisse qu'elle. La produire seulement
+              au clic obligerait a un aller-retour de rendu avant l'appel a
+              `window.print()`, pendant lequel le navigateur capture parfois une
+              page encore vide. */}
+          {imprimable && (
+            <TableauImprimable
+              titre={imprimable}
+              colonnes={visibles.map((c) => ({
+                entete: c.entete,
+                numerique: c.numerique,
+                valeur: (l: L) => {
+                  const v = c.valeurTri ? c.valeurTri(l) : l[c.champ]
+                  return v == null ? '' : String(v)
+                },
+              }))}
+              lignes={rangs.map((r) => r.original)}
+              resume={`${rangs.length} ligne(s)${
+                total !== rangs.length ? ` sur ${total}` : ''
+              }${filtre ? ` — recherche « ${filtre} »` : ''}`}
+            />
+          )}
 
           {/* --- Cartes : telephone et tablette portrait ------------------ */}
           <div className="space-y-2 md:hidden">

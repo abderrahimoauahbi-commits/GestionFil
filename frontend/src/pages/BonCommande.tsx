@@ -14,11 +14,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Save, Send, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Plus, Printer, Save, Send, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { useOuvrirVue } from '../lib/navigation'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
@@ -130,6 +131,7 @@ export function BonCommande() {
   const { moi } = useAuth()
   const qc = useQueryClient()
   const naviguer = useNavigate()
+  const ouvrir = useOuvrirVue()
   const confirmation = useConfirmation()
   const [saisie, setSaisie] = useState(false)
   const [entete, setEntete] = useState({
@@ -613,6 +615,13 @@ export function BonCommande() {
               <ArrowLeft />
               Retour
             </Bouton>
+            {/* L'impression reste ouverte sur un brouillon : on imprime pour
+                relire avant d'engager, pas seulement pour envoyer. Le document
+                porte alors la mention « brouillon ». */}
+            <Bouton variante="contour" onClick={() => ouvrir(`/bons-commande/${id}/etat`)}>
+              <Printer />
+              Imprimer
+            </Bouton>
             {modifiable && (
               <Bouton variante="contour" onClick={() => setSaisie(true)}>
                 <Plus />
@@ -768,6 +777,8 @@ export function BonCommande() {
           </CarteEntete>
           <CarteCorps className="p-0">
             <DataTable<LigneBc>
+          exportable="lignes-du-bon"
+          imprimable="Lignes du bon"
               module={MODULE}
               colonnes={colonnes}
               lignes={lignesAffichees}

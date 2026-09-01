@@ -629,6 +629,8 @@ export function Plans() {
         />
 
         <DataTable
+          exportable="plans-de-production"
+          imprimable="Plans de production"
           module={MODULE}
           colonnes={colonnes}
           lignes={qPlans.data}

@@ -60,6 +60,8 @@ pub fn router(state: AppState) -> Router {
                get(admin::lire_droits).put(admin::enregistrer_droits))
         .route("/api/admin/utilisateurs/{id}/droits/appliquer-modele",
                post(admin::appliquer_modele_role))
+        .route("/api/admin/sauvegardes",
+             get(admin::lister_sauvegardes).post(admin::sauvegarder))
         .route("/api/admin/champs", get(admin::lister_champs))
         .route("/api/admin/roles", get(admin::lister_roles))
         .route("/api/admin/registre", get(entites::registre))

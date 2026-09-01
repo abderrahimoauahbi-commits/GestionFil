@@ -734,6 +734,8 @@ export function Qualites() {
         />
 
         <DataTable
+          exportable="composition-qualite"
+          imprimable="Composition qualite"
           module={MODULE}
           colonnes={colonnes}
           lignes={qQualites.data}

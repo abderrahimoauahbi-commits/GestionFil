@@ -698,6 +698,8 @@ export function Reception() {
           </CarteEntete>
           <CarteCorps className="p-0">
             <DataTable<LigneRec>
+          exportable="lignes-de-reception"
+          imprimable="Lignes de reception"
               module={MODULE}
               colonnes={colonnes}
               lignes={lignesAffichees}

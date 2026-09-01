@@ -35,6 +35,7 @@ import {
   Monitor,
   Moon,
   Package,
+  Printer,
   PackageSearch,
   ShieldAlert,
   ShoppingCart,
@@ -47,6 +48,7 @@ import {
   Ship,
   SlidersHorizontal,
   Layers,
+  ShieldCheck,
   Sparkles,
   TrendingUp,
   Undo2,
@@ -158,6 +160,10 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 1. General -------------------------------------------------------- */
   { vers: '/', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', principale: true },
   { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'GENERAL' },
+  // La coherence est un ecran de pilotage, pas d'administration : c'est la
+  // direction et l'assistante qui corrigent les anomalies, pas l'informaticien.
+  { vers: '/controles', libelle: 'Controles de coherence', module: 'COCKPIT', Icone: ShieldCheck, section: 'GENERAL' },
+  { vers: '/etats', libelle: 'Etats imprimables', module: 'COCKPIT', Icone: Printer, section: 'GENERAL' },
   {
     vers: '/assistant',
     libelle: 'Assistant',

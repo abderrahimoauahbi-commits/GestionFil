@@ -492,6 +492,8 @@ export function Stock() {
           </div>
         )}
         <TableDroits
+          exportable="etat-des-stocks"
+          imprimable="Etat des stocks"
           module={MODULE}
           menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
           colonnes={colonnes}

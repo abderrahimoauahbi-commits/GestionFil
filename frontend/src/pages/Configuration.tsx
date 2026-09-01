@@ -33,6 +33,7 @@ import {
   ScrollText,
   ShieldCheck,
   TrendingUp,
+  DatabaseBackup,
   Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -100,6 +101,7 @@ type CleSection =
   | 'utilisateurs'
   | 'comptes'
   | 'audit'
+  | 'sauvegardes'
 
 /**
  * Les quatre familles du rail, dans l'ordre ou on les parcourt en installant
@@ -287,6 +289,13 @@ const SECTIONS: Section[] = [
     libelle: 'Devises et taux',
     resume: 'Cours de change en vigueur et leur historique',
     Icone: Coins,
+  },
+  {
+    cle: 'sauvegardes',
+    famille: 'Parametres systeme',
+    libelle: 'Sauvegardes',
+    resume: 'Copies de la base, manuelles et automatiques',
+    Icone: DatabaseBackup,
   },
   {
     cle: 'comptes',
@@ -494,6 +503,8 @@ export function Configuration() {
             <Audit />
           ) : section === 'utilisateurs' ? (
             <Referentiels cles={['roles-utilisateur', 'transitions']} />
+          ) : section === 'sauvegardes' ? (
+            <SectionSauvegardes modifiable={droits.peutEcrire} />
           ) : section === 'devises' ? (
             <SectionDevises modifiable={droits.peutEcrire} />
           ) : (
@@ -846,6 +857,205 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
       {!devise && (
         <Alerte ton="info">Choisissez une devise pour voir et modifier ses taux.</Alerte>
       )}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Sauvegardes                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Declencher une copie de la base, et voir celles qui existent.
+ *
+ * LE FICHIER NE SE TELECHARGE PAS DEPUIS CET ECRAN, et c'est deliberé. Une
+ * sauvegarde contient les prix, les empreintes de mots de passe et onze mille
+ * lignes d'audit nominatif. La faire transiter par le navigateur la rendrait
+ * accessible a quiconque obtiendrait un jeton d'administrateur. Elle reste sur
+ * le serveur ; on la recupere par le systeme de fichiers, en ayant deja acces
+ * a la machine. L'ecran affiche le chemin exact pour que ce soit immediat.
+ */
+function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
+  const qc = useQueryClient()
+  const [retour, setRetour] = useState<string | null>(null)
+
+  const q = useQuery({
+    queryKey: ['sauvegardes'],
+    queryFn: () => api.get<{ fichier: string; octets: number; date: string }[]>(
+      '/api/admin/sauvegardes',
+    ),
+  })
+
+  const creer = useMutation({
+    mutationFn: () => api.post<{ fichier: string; chemin: string; octets: number }>(
+      '/api/admin/sauvegardes',
+      {},
+    ),
+    onSuccess: (r) => {
+      setRetour(`${r.fichier} — ${(r.octets / 1e6).toFixed(1)} Mo`)
+      void qc.invalidateQueries({ queryKey: ['sauvegardes'] })
+    },
+    onError: (e) => setRetour(e instanceof ErreurApi ? e.message : 'Sauvegarde impossible.'),
+  })
+
+  const liste = q.data ?? []
+
+  return (
+    <div className="space-y-3">
+      <Carte>
+        <CarteEntete className="flex-col items-start gap-1">
+          <CarteTitre>Sauvegarder maintenant</CarteTitre>
+          <p className="text-[11px] leading-relaxed text-attenue-texte">
+            Ecrit une copie complete et coherente de la base, sans interrompre le travail en
+            cours. A faire avant toute operation risquee : import, changement de parametre
+            structurant, reprise de donnees.
+          </p>
+        </CarteEntete>
+        <CarteCorps className="flex flex-wrap items-center gap-3">
+          <Bouton onClick={() => creer.mutate()} disabled={!modifiable || creer.isPending}>
+            <DatabaseBackup />
+            {creer.isPending ? 'Ecriture en cours…' : 'Sauvegarder'}
+          </Bouton>
+          {!modifiable && (
+            <span className="text-[12px] text-attenue-texte">
+              Votre role peut consulter les sauvegardes, pas en declencher.
+            </span>
+          )}
+          {retour && <span className="text-[12px] text-texte">{retour}</span>}
+        </CarteCorps>
+      </Carte>
+
+      <Carte>
+        <CarteEntete className="flex-col items-start gap-1">
+          <CarteTitre>Sauvegarde automatique</CarteTitre>
+        </CarteEntete>
+        <CarteCorps className="space-y-2 text-[12px] leading-relaxed text-attenue-texte">
+          <p>
+            Une copie est ecrite <span className="text-texte">a chaque arret du serveur</span>.
+            C est le moment retenu plutot qu une heure fixe : le serveur de l usine n est pas
+            allume la nuit, une tache programmee a deux heures ne se declencherait jamais.
+          </p>
+          <p>
+            Les <span className="text-texte">dix dernieres</span> sont conservees ; les plus
+            anciennes sont effacees automatiquement. Un echec de sauvegarde n empeche jamais le
+            serveur de s arreter — il est journalise.
+          </p>
+          <p className="text-danger">
+            Ces copies vivent sur le meme disque que la base. Elles protegent d une fausse
+            manoeuvre, pas d une panne de disque ni d un vol : recopiez regulierement le dossier
+            vers un support externe.
+          </p>
+        </CarteCorps>
+      </Carte>
+
+      <Carte>
+        <CarteEntete>
+          <CarteTitre>
+            Sauvegardes presentes {liste.length > 0 && `— ${liste.length}`}
+          </CarteTitre>
+        </CarteEntete>
+        <CarteCorps className="p-0">
+          {q.isLoading ? (
+            <div className="p-3"><Chargement texte="Lecture du dossier…" /></div>
+          ) : !liste.length ? (
+            <p className="p-3 text-[12px] text-attenue-texte">
+              Aucune sauvegarde. La premiere sera ecrite au prochain arret du serveur, ou
+              maintenant avec le bouton ci-dessus.
+            </p>
+          ) : (
+            <table className="grille w-full text-[12px]">
+              <thead>
+                <tr className="bg-attenue">
+                  <th className="px-2.5 py-1.5 text-left font-semibold">Fichier</th>
+                  <th className="px-2.5 py-1.5 text-left font-semibold">Date</th>
+                  <th className="px-2.5 py-1.5 text-right font-semibold">Taille</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liste.map((s, i) => (
+                  <tr key={s.fichier} className="hover:bg-attenue/60">
+                    <td className="px-2.5 py-1 font-mono text-[11px]">
+                      {s.fichier}
+                      {i === 0 && (
+                        <span className="ml-2 rounded-[3px] bg-succes/12 px-1.5 py-px text-[10px] font-medium text-succes">
+                          la plus recente
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2.5 py-1 tabular-nums">{s.date}</td>
+                    <td className="px-2.5 py-1 text-right tabular-nums">
+                      {(s.octets / 1e6).toFixed(1)} Mo
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="border-t border-bordure px-3 py-2 font-mono text-[11px] text-attenue-texte">
+            db/sauvegardes/
+          </p>
+        </CarteCorps>
+      </Carte>
+
+      {/* --- Restauration -------------------------------------------------
+          Elle ne se fait PAS depuis cet ecran, et ce n'est pas un oubli : le
+          serveur tient le fichier de base ouvert, il ne peut pas le remplacer
+          sous lui-meme. La commande s'execute sur la machine, serveur arrete,
+          par quelqu'un qui a deja acces aux fichiers — la meme exigence que
+          pour la reprise du mot de passe administrateur. */}
+      <Carte>
+        <CarteEntete className="flex-col items-start gap-1">
+          <CarteTitre>Restaurer une sauvegarde</CarteTitre>
+        </CarteEntete>
+        <CarteCorps className="space-y-2 text-[12px] leading-relaxed text-attenue-texte">
+          <p>
+            La restauration ne se declenche pas depuis l application : le serveur tient le fichier
+            ouvert et ne peut pas le remplacer sous lui-meme. Elle se fait sur la machine, serveur
+            arrete.
+          </p>
+          <pre className="overflow-x-auto rounded-[3px] bg-attenue p-2 font-mono text-[11px] text-texte">
+{`cd backend
+cargo run --bin gestionfil-admin -- lister-sauvegardes
+cargo run --bin gestionfil-admin -- restaurer gestionfil-AAAAMMJJhhmmss.db`}
+          </pre>
+          <p>
+            La commande <span className="text-texte">verifie la sauvegarde avant de la poser</span>
+            {' '}et refuse si elle est corrompue. La base remplacee n est pas effacee : elle est
+            mise de cote sous le nom{' '}
+            <span className="font-mono text-texte">gestionfil-remplacee-*.db</span>, ce qui rend
+            l operation reversible.
+          </p>
+        </CarteCorps>
+      </Carte>
+
+      {/* --- Maintenance --------------------------------------------------- */}
+      <Carte>
+        <CarteEntete className="flex-col items-start gap-1">
+          <CarteTitre>Diagnostic et maintenance</CarteTitre>
+        </CarteEntete>
+        <CarteCorps className="space-y-2 text-[12px] leading-relaxed text-attenue-texte">
+          <p>
+            <span className="font-mono text-texte">diagnostic</span> verifie l integrite physique,
+            les cles etrangeres et les 29 controles metier — <span className="text-texte">sans
+            rien modifier</span>.
+          </p>
+          <p>
+            <span className="font-mono text-texte">reparer</span> reindexe, recalcule les
+            statistiques et compacte le fichier. Il ne corrige{' '}
+            <span className="text-texte">aucune donnee metier</span> : une anomalie de coherence se
+            corrige dans l application, par quelqu un qui sait ce que la ligne devrait porter.
+          </p>
+          <pre className="overflow-x-auto rounded-[3px] bg-attenue p-2 font-mono text-[11px] text-texte">
+{`cargo run --bin gestionfil-admin -- diagnostic
+cargo run --bin gestionfil-admin -- reparer`}
+          </pre>
+          <p>
+            Les anomalies de coherence se lisent aussi a l ecran, dans{' '}
+            <span className="text-texte">General - Controles de coherence</span>, avec le detail
+            des lignes concernees.
+          </p>
+        </CarteCorps>
+      </Carte>
     </div>
   )
 }

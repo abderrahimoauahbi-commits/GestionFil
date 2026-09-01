@@ -262,6 +262,26 @@ body {
     break-inside: avoid;
   }
 
+  /* L'entete du tableau se repete en haut de chaque page. Sans cela, la
+     deuxieme page d'un etat de deux cents mouvements arrive sans nom de
+     colonne, et devient illisible. */
+  .zone-impression thead {
+    display: table-header-group;
+  }
+
+  /* Le pied de page suit le document plutot que de se repeter : un etat de
+     trois pages n'a pas besoin de trois fois la mention d'edition, mais il
+     doit la porter au moins une fois. */
+  .zone-impression tfoot {
+    display: table-row-group;
+  }
+
+  /* Un titre ne reste jamais seul en bas de page. */
+  .zone-impression h2,
+  .zone-impression h3 {
+    break-after: avoid;
+  }
+
   @page {
     size: A4;
     margin: 12mm;

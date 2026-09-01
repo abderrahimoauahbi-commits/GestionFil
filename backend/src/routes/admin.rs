@@ -4,6 +4,7 @@
 
 use super::json::lignes_en_json;
 use crate::auth::{password, rbac::module, rbac::Action, Utilisateur};
+use crate::domain::sauvegarde;
 use crate::db::maintenant;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -417,4 +418,31 @@ async fn appliquer_modele(
     .execute(&mut *tx)
     .await?
     .rows_affected())
+}
+
+/* -------------------------------------------------------------------------- */
+/* Sauvegarde                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/// Declenche une sauvegarde et rend son emplacement.
+///
+/// Reservee a l'ecriture sur PARAMETRES, donc a l'administrateur systeme et a
+/// la direction. Lire la liste demande seulement la lecture : savoir QUAND la
+/// derniere sauvegarde a eu lieu interesse tout le monde, la declencher non.
+pub async fn sauvegarder(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PARAMETRES, Action::Ecrire).await?;
+    let r = sauvegarde::creer(&state.db, &state.config.database_url).await?;
+    Ok(Json(serde_json::to_value(r)?))
+}
+
+pub async fn lister_sauvegardes(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PARAMETRES, Action::Lire).await?;
+    let liste = sauvegarde::lister(&state.config.database_url)?;
+    Ok(Json(serde_json::to_value(liste)?))
 }

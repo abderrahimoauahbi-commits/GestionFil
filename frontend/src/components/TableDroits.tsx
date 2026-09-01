@@ -14,6 +14,10 @@ interface Props<L> {
   cle: (ligne: L) => string
   surClic?: (ligne: L) => void
   menuContextuel?: (ligne: L) => React.ReactNode
+  /** Sujet du fichier CSV. Sa presence affiche le bouton d'export. */
+  exportable?: string
+  /** Titre de l'etat imprime. */
+  imprimable?: string
   texteVide?: string
   titreCarte?: (ligne: L) => React.ReactNode
 }

@@ -11,6 +11,23 @@ import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
 import { Cockpit } from './pages/Cockpit'
 import { HistoriquePrix } from './pages/HistoriquePrix'
+import { BonCommandeEtat } from './pages/BonCommandeEtat'
+import { Controles } from './pages/Controles'
+import { Etats } from './pages/Etats'
+import {
+  EtatCatalogue,
+  EtatComptage,
+  EtatFournisseurs,
+  EtatMouvements,
+  EtatPlanAchat,
+  EtatStockImprime,
+} from './pages/EtatsListes'
+import {
+  EtatBesoins,
+  EtatInventaire,
+  EtatPlanProduction,
+  EtatReception,
+} from './pages/EtatsDocuments'
 import { MatricePrix } from './pages/MatricePrix'
 import { Statistiques } from './pages/Statistiques'
 import { Equivalences } from './pages/Equivalences'
@@ -113,6 +130,18 @@ const ECRANS = (
       <Route path="transferts/:id/bon-reception" element={<ExigeModule module="MOUVEMENTS"><BonTransfert type="reception" /></ExigeModule>} />
       <Route path="configuration" element={<ExigeModule module="PARAMETRES"><Configuration /></ExigeModule>} />
       <Route path="equivalences" element={<ExigeModule module="CATALOGUE"><Equivalences /></ExigeModule>} />
+      <Route path="etats" element={<ExigeModule module="COCKPIT"><Etats /></ExigeModule>} />
+      <Route path="etats/stock" element={<ExigeModule module="STOCK"><EtatStockImprime /></ExigeModule>} />
+      <Route path="etats/comptage" element={<ExigeModule module="INVENTAIRE"><EtatComptage /></ExigeModule>} />
+      <Route path="etats/plan-achat" element={<ExigeModule module="PLAN_ACHAT"><EtatPlanAchat /></ExigeModule>} />
+      <Route path="etats/receptions" element={<ExigeModule module="RECEPTIONS"><EtatReception /></ExigeModule>} />
+      <Route path="etats/inventaire" element={<ExigeModule module="INVENTAIRE"><EtatInventaire /></ExigeModule>} />
+      <Route path="etats/plan-production" element={<ExigeModule module="PLANS"><EtatPlanProduction /></ExigeModule>} />
+      <Route path="etats/besoins" element={<ExigeModule module="MRP"><EtatBesoins /></ExigeModule>} />
+      <Route path="etats/mouvements" element={<ExigeModule module="MOUVEMENTS"><EtatMouvements /></ExigeModule>} />
+      <Route path="etats/catalogue" element={<ExigeModule module="CATALOGUE"><EtatCatalogue /></ExigeModule>} />
+      <Route path="etats/fournisseurs" element={<ExigeModule module="FOURNISSEURS"><EtatFournisseurs /></ExigeModule>} />
+      <Route path="controles" element={<ExigeModule module="COCKPIT"><Controles /></ExigeModule>} />
       <Route path="matrice-prix" element={<ExigeModule module="CATALOGUE"><MatricePrix /></ExigeModule>} />
       <Route path="historique-prix" element={<ExigeModule module="CATALOGUE"><HistoriquePrix /></ExigeModule>} />
       <Route path="statistiques" element={<ExigeModule module="MOUVEMENTS"><Statistiques /></ExigeModule>} />
@@ -134,6 +163,7 @@ const ECRANS = (
       <Route path="plan-achat" element={<ExigeModule module="PLAN_ACHAT"><PlanAchat /></ExigeModule>} />
       <Route path="bons-commande" element={<ExigeModule module="BONS_COMMANDE"><BonsCommande /></ExigeModule>} />
       <Route path="bons-commande/nouveau" element={<ExigeModule module="BONS_COMMANDE"><BonCommandeNouveau /></ExigeModule>} />
+      <Route path="bons-commande/:id/etat" element={<ExigeModule module="BONS_COMMANDE"><BonCommandeEtat /></ExigeModule>} />
       <Route path="bons-commande/:id" element={<ExigeModule module="BONS_COMMANDE"><BonCommande /></ExigeModule>} />
       <Route path="assistant" element={<ExigeModule module="COCKPIT"><Assistant /></ExigeModule>} />
       <Route path="etat-stock" element={<ExigeModule module="STOCK"><EtatStock /></ExigeModule>} />

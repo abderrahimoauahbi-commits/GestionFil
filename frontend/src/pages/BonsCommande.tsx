@@ -284,6 +284,8 @@ export function BonsCommande() {
       )}
 
       <DataTable<Bc>
+          exportable="bons-de-commande"
+          imprimable="Bons de commande"
         module={MODULE}
         colonnes={colonnes}
         lignes={lignes}

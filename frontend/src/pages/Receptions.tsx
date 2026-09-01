@@ -336,6 +336,8 @@ export function Receptions() {
       )}
 
       <DataTable<Reception>
+          exportable="receptions"
+          imprimable="Receptions"
         module={MODULE}
         colonnes={colonnes}
         lignes={lignes}

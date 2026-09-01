@@ -774,6 +774,8 @@ export function PlanAchat() {
       )}
 
       <DataTable<Proposition>
+          exportable="plan-achat"
+          imprimable="Plan achat"
         module={MODULE}
         colonnes={colonnes}
         lignes={lignes}

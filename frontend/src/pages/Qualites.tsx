@@ -33,14 +33,17 @@ import {
   Search,
   Save,
   Trash2,
+  Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { SelecteurReference } from '../composants/SelecteurReference'
+import { CoherenceRecettes } from '../composants/CoherenceRecettes'
 import {
   Alerte,
   Badge,
@@ -212,6 +215,7 @@ const nombreOuRien = (v: string) => (v.trim() === '' ? undefined : Number(v))
 
 export function Qualites() {
   const droits = useDroits(MODULE)
+  const ouvrirEtat = useOuvrirVue()
   const qc = useQueryClient()
   const confirmation = useConfirmation()
 
@@ -733,6 +737,12 @@ export function Qualites() {
           }
         />
 
+        {/* Le controle du classeur, avant la liste : on regarde ce qui cloche
+            avant d'ouvrir une qualite au hasard. */}
+        <div className="mb-3">
+          <CoherenceRecettes />
+        </div>
+
         <DataTable
           exportable="composition-qualite"
           imprimable="Composition qualite"
@@ -756,6 +766,15 @@ export function Qualites() {
           }
           actions={(q) => (
             <div className="flex justify-end gap-0.5">
+            <Bouton
+              variante="discret"
+              taille="icone-xs"
+              onClick={() => ouvrirEtat(`/etats/qualite/${q.code_qualite}`)}
+              aria-label="Imprimer"
+              title="Imprimer la fiche qualite"
+            >
+              <Printer />
+            </Bouton>
               <Bouton
                 variante="discret"
                 taille="icone-xs"

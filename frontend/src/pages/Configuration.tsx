@@ -34,6 +34,7 @@ import {
   ShieldCheck,
   TrendingUp,
   DatabaseBackup,
+  Palette,
   Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -58,6 +59,7 @@ import {
 import { Infobulle } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { Audit } from './Audit'
+import { ReglageApparence } from '../composants/ReglageApparence'
 import { Referentiels } from './Referentiels'
 import { Utilisateurs } from './Utilisateurs'
 
@@ -102,6 +104,7 @@ type CleSection =
   | 'comptes'
   | 'audit'
   | 'sauvegardes'
+  | 'apparence'
 
 /**
  * Les quatre familles du rail, dans l'ordre ou on les parcourt en installant
@@ -289,6 +292,13 @@ const SECTIONS: Section[] = [
     libelle: 'Devises et taux',
     resume: 'Cours de change en vigueur et leur historique',
     Icone: Coins,
+  },
+  {
+    cle: 'apparence',
+    famille: 'Entreprise',
+    libelle: 'Apparence',
+    resume: 'Couleurs, densite des tableaux, barre de navigation',
+    Icone: Palette,
   },
   {
     cle: 'sauvegardes',
@@ -503,6 +513,8 @@ export function Configuration() {
             <Audit />
           ) : section === 'utilisateurs' ? (
             <Referentiels cles={['roles-utilisateur', 'transitions']} />
+          ) : section === 'apparence' ? (
+            <ReglageApparence />
           ) : section === 'sauvegardes' ? (
             <SectionSauvegardes modifiable={droits.peutEcrire} />
           ) : section === 'devises' ? (

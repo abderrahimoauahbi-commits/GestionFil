@@ -1,16 +1,19 @@
 /**
- * Les quatre etats qui portent sur un objet choisi.
+ * Les etats qui portent sur UN objet : cette reception, ce plan, cet inventaire.
  *
- * Ils different des etats de situation par un point : ils demandent d'abord
- * QUOI imprimer — quelle reception, quel inventaire, quel plan. Le selecteur
- * vit hors de la zone imprimable, il ne part donc pas au papier.
+ * ILS S'OUVRENT DEPUIS LA LIGNE. Le bouton d'impression vit sur la ligne du
+ * document, dans la liste : on imprime le bon qu'on regarde, pas un bon qu'il
+ * faut d'abord retrouver dans un selecteur. L'identifiant vient donc de
+ * l'adresse.
  *
- * POURQUOI ILS SONT ICI ET PAS DANS `EtatsListes`. Ce fichier-la contient des
- * etats sans parametre, qu'on ouvre et qu'on imprime. Melanger les deux
- * familles obligerait chaque lecteur a chercher lequel attend un choix.
+ * LE SELECTEUR RESTE, EN REPLI. Ouvrir l'etat sans identifiant — par un lien
+ * garde en favori, ou depuis la barre d'adresse — ne doit pas donner une page
+ * vide : on propose alors le choix, et le plus recent par defaut. Il vit hors
+ * de la zone imprimable et ne part jamais au papier.
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
@@ -79,6 +82,7 @@ interface LigneRecept {
 }
 
 export function EtatReception() {
+  const { id: idUrl } = useParams<{ id: string }>()
   const [id, setId] = useState('')
 
   const qListe = useQuery({
@@ -91,7 +95,7 @@ export function EtatReception() {
     return [...l].sort((a, b) => (b.date_reception ?? '').localeCompare(a.date_reception ?? ''))
   }, [qListe.data])
 
-  const choisi = id || liste[0]?.id_reception || ''
+  const choisi = idUrl || id || liste[0]?.id_reception || ''
   const r = liste.find((x) => x.id_reception === choisi)
 
   const qLignes = useQuery({
@@ -109,6 +113,7 @@ export function EtatReception() {
 
   return (
     <div>
+      {!idUrl && (
       <Choix
         libelle="Reception a imprimer :"
         valeur={choisi}
@@ -118,6 +123,7 @@ export function EtatReception() {
           libelle: `${x.numero_reception} — ${(x.date_reception ?? '').slice(0, 10)} — ${x.fournisseur_nom ?? '?'} (${x.statut})`,
         }))}
       />
+      )}
 
       {!r ? null : (
         <EtatImprimable
@@ -261,6 +267,7 @@ interface LigneInv {
 
 export function EtatInventaire() {
   const droits = useDroits('INVENTAIRE')
+  const { id: idUrl } = useParams<{ id: string }>()
   const [id, setId] = useState('')
   const [seulsEcarts, setSeulsEcarts] = useState(false)
 
@@ -274,7 +281,7 @@ export function EtatInventaire() {
     return [...l].sort((a, b) => (b.date_inventaire ?? '').localeCompare(a.date_inventaire ?? ''))
   }, [qListe.data])
 
-  const choisi = id || liste[0]?.id_inventaire || ''
+  const choisi = idUrl || id || liste[0]?.id_inventaire || ''
   const inv = liste.find((x) => x.id_inventaire === choisi)
 
   const qLignes = useQuery({
@@ -297,6 +304,7 @@ export function EtatInventaire() {
 
   return (
     <div>
+      {!idUrl && (
       <Choix
         libelle="Inventaire :"
         valeur={choisi}
@@ -306,6 +314,7 @@ export function EtatInventaire() {
           libelle: `${x.numero_inventaire} — ${(x.date_inventaire ?? '').slice(0, 10)} — ${x.code_magasin} (${x.statut})`,
         }))}
       />
+      )}
       <label className="sans-impression mb-3 flex items-center gap-2 text-[12px] text-attenue-texte">
         <input
           type="checkbox"
@@ -439,6 +448,7 @@ interface Dossier {
 }
 
 export function EtatPlanProduction() {
+  const { id: idUrl } = useParams<{ id: string }>()
   const [id, setId] = useState('')
 
   const qPlans = useQuery({
@@ -450,7 +460,7 @@ export function EtatPlanProduction() {
     return Array.isArray(d) ? d : ((d as unknown as { lignes?: Plan[] })?.lignes ?? [])
   }, [qPlans.data])
 
-  const choisi = id || liste.find((p) => p.statut === 'EN_COURS')?.id_plan || liste[0]?.id_plan || ''
+  const choisi = idUrl || id || liste.find((p) => p.statut === 'EN_COURS')?.id_plan || liste[0]?.id_plan || ''
 
   /* Le serveur rend le dossier a plat : une ligne par qualite et par mois.
      Le papier veut une ligne par qualite et une colonne par mois — le pivot se
@@ -494,6 +504,7 @@ export function EtatPlanProduction() {
 
   return (
     <div>
+      {!idUrl && (
       <Choix
         libelle="Plan :"
         valeur={choisi}
@@ -503,6 +514,7 @@ export function EtatPlanProduction() {
           libelle: `${p.libelle} — ${p.statut} — ${p.date_debut} au ${p.date_fin}`,
         }))}
       />
+      )}
 
       <EtatImprimable
         titre="Plan de production"
@@ -588,8 +600,9 @@ export function EtatBesoins() {
     const d = qPlans.data
     return Array.isArray(d) ? d : ((d as unknown as { lignes?: Plan[] })?.lignes ?? [])
   }, [qPlans.data])
+  const { id: idUrl } = useParams<{ id: string }>()
   const [id, setId] = useState('')
-  const choisi = id || liste.find((p) => p.statut === 'EN_COURS')?.id_plan || liste[0]?.id_plan || ''
+  const choisi = idUrl || id || liste.find((p) => p.statut === 'EN_COURS')?.id_plan || liste[0]?.id_plan || ''
 
   const q = useQuery({
     queryKey: ['plan-besoins', choisi],
@@ -630,6 +643,7 @@ export function EtatBesoins() {
 
   return (
     <div>
+      {!idUrl && (
       <Choix
         libelle="Plan :"
         valeur={choisi}
@@ -639,6 +653,7 @@ export function EtatBesoins() {
           libelle: `${p.libelle} — ${p.statut}`,
         }))}
       />
+      )}
 
       <EtatImprimable
         titre="Besoins matiere"

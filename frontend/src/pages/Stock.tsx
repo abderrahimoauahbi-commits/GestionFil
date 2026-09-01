@@ -56,6 +56,12 @@ interface LigneProjete {
   seuil_critique_jours: number | null
   seuil_alerte_jours: number | null
   conso_mensuelle_kg: number | null
+  classe_xyz: string | null
+  delai_livraison_jours: number | null
+  unite_catalogue: string | null
+  cmup_mad: number | null
+  valeur_totale_mad: number | null
+  date_derniere_sortie: string | null
   source_conso: string | null
   statut: string
   classe_abc: string | null
@@ -451,6 +457,115 @@ export function Stock() {
       entete: 'Fournisseur',
       rendu: (l) => fmt.texte(l.fournisseur_nom),
       secondaire: true,
+    },
+
+    /* --- Les colonnes du classeur qui manquaient ------------------------
+       La vue en expose trente-six, l'ecran n'en montrait sept. Celles-ci
+       sont marquees `secondaire` : elles apparaissent au-dela de 1280 px et
+       restent accessibles par le menu de colonnes. Une tablette de magasin
+       garde ses sept colonnes lisibles ; un poste de bureau voit tout. */
+    {
+      champ: 'classe_abc',
+      entete: 'ABC / XYZ',
+      largeur: '78px',
+      secondaire: true,
+      // Les deux classements ensemble : la valeur ET la regularite. Une
+      // reference AX se pilote au fil de l'eau, une AZ demande un stock de
+      // securite — c'est le croisement qui dit la politique, pas chaque
+      // lettre prise seule.
+      rendu: (l) =>
+        !l.classe_abc ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <span
+            className={cn(
+              'inline-block rounded-[3px] px-1.5 py-px font-medium',
+              l.classe_abc === 'A' ? 'bg-primaire/15 text-primaire' : 'text-attenue-texte',
+            )}
+          >
+            {l.classe_abc}
+            {l.classe_xyz ?? ''}
+          </span>
+        ),
+    },
+    {
+      champ: 'stock_physique_net_kg',
+      entete: 'Physique (kg)',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => fmt.nombre(l.stock_physique_net_kg ?? 0, 1),
+    },
+    {
+      champ: 'stock_min_kg',
+      entete: 'Minimum (kg)',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => (l.stock_min_kg == null ? '—' : fmt.nombre(l.stock_min_kg, 1)),
+    },
+    {
+      champ: 'conso_mensuelle_kg',
+      entete: 'Conso / mois',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) =>
+        l.conso_mensuelle_kg == null ? '—' : fmt.nombre(l.conso_mensuelle_kg, 1),
+    },
+    {
+      champ: 'besoin_12m_kg',
+      entete: 'Besoin horizon',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => (l.besoin_12m_kg == null ? '—' : fmt.nombre(l.besoin_12m_kg, 1)),
+    },
+    {
+      champ: 'delai_livraison_jours',
+      entete: 'Delai (j)',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => l.delai_livraison_jours ?? '—',
+    },
+    {
+      champ: 'unite_catalogue',
+      entete: 'Unite',
+      secondaire: true,
+      rendu: (l) => fmt.texte(l.unite_catalogue),
+    },
+    {
+      champ: 'cmup_mad',
+      entete: 'CMUP',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => (l.cmup_mad == null ? '—' : fmt.nombre(l.cmup_mad, 2)),
+    },
+    {
+      champ: 'valeur_totale_mad',
+      entete: 'Valeur (MAD)',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => (l.valeur_totale_mad == null ? '—' : fmt.nombre(l.valeur_totale_mad, 2)),
+    },
+    {
+      champ: 'sur_stock',
+      entete: 'Sur-stock',
+      largeur: '80px',
+      secondaire: true,
+      // Le sur-stock est un drapeau SEPARE du statut, pas une valeur de
+      // l'echelle : une reference peut etre en sur-stock ET en alerte, si le
+      // stock dort dans le mauvais magasin.
+      rendu: (l) =>
+        l.sur_stock ? (
+          <span className="rounded-[3px] bg-alerte/12 px-1.5 py-px text-[11px] text-alerte">
+            oui
+          </span>
+        ) : (
+          <span className="text-attenue-texte">—</span>
+        ),
+    },
+    {
+      champ: 'date_derniere_sortie',
+      entete: 'Derniere sortie',
+      secondaire: true,
+      rendu: (l) => fmt.date(l.date_derniere_sortie),
     },
   ]
 

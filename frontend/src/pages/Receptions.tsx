@@ -12,8 +12,9 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { FileText, Plus, Trash2 } from 'lucide-react'
+import { FileText, Plus, Printer, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
@@ -68,6 +69,7 @@ const LIBELLE: Record<string, string> = {
 
 export function Receptions() {
   const droits = useDroits(MODULE)
+  const ouvrirEtat = useOuvrirVue()
   const qc = useQueryClient()
   const naviguer = useNavigate()
   const confirmation = useConfirmation()
@@ -350,6 +352,15 @@ export function Receptions() {
         videDescription="Une reception se rattache a un bon de commande envoye, ou se saisit librement."
         actions={(r) => (
           <div className="flex justify-end gap-0.5">
+            <Bouton
+              variante="discret"
+              taille="icone-xs"
+              onClick={() => ouvrirEtat(`/etats/receptions/${r.id_reception}`)}
+              aria-label="Imprimer"
+              title="Imprimer le bon de reception"
+            >
+              <Printer />
+            </Bouton>
             <Bouton
               variante="discret"
               taille="icone-xs"

@@ -302,3 +302,29 @@ body {
 .apparition {
   animation: apparition 0.15s ease-out;
 }
+
+/* =============================================================================
+   Densite des tableaux
+   -----------------------------------------------------------------------------
+   Un seul reglage, applique par une variable plutot que par des classes
+   conditionnelles dans chaque tableau : les vingt-cinq ecrans en heritent sans
+   qu'aucun ait a connaitre la preference.
+
+   Le padding VERTICAL seul change. L'horizontal reste fixe : reduire aussi les
+   marges laterales collerait les colonnes de chiffres entre elles, et c'est
+   precisement ce qu'on cherche a eviter en mode compact.
+   ========================================================================== */
+:root {
+  --densite-y: 5px;
+}
+:root[data-densite='compacte'] {
+  --densite-y: 2px;
+}
+:root[data-densite='aeree'] {
+  --densite-y: 9px;
+}
+
+table.grille td {
+  padding-top: var(--densite-y);
+  padding-bottom: var(--densite-y);
+}

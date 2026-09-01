@@ -13,11 +13,19 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Coins, TrendingDown, TrendingUp } from 'lucide-react'
+import { Calculator, Coins, TrendingDown, TrendingUp } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
-import { Alerte, Badge, Squelette } from '../composants/ui/base'
+import {
+  Alerte,
+  Badge,
+  Carte,
+  CarteCorps,
+  CarteEntete,
+  CarteTitre,
+  Squelette,
+} from '../composants/ui/base'
 import { BarresRangees } from '../composants/graphiques/Graphiques'
 import { cn, fmt } from '../lib/utils'
 
@@ -120,6 +128,57 @@ export function Valorisation() {
           pour zero dans le total ci-dessus, qui est donc un plancher, pas une estimation.
         </Alerte>
       )}
+
+      {/* --- Methode et hypotheses -----------------------------------------
+          Le bloc du classeur, et il n'est pas decoratif : un chiffre de
+          valorisation sans sa methode n'est pas exploitable par un comptable.
+          Il faut pouvoir dire SUR QUOI il repose — quelle formule, quelle
+          devise pivot, quelle date — avant de le porter dans un bilan. */}
+      <Carte repliable="valorisation.methode">
+        <CarteEntete>
+          <CarteTitre className="flex items-center gap-1.5">
+            <Calculator className="size-3.5" />
+            Methode et hypotheses
+          </CarteTitre>
+        </CarteEntete>
+        <CarteCorps className="grid gap-x-8 gap-y-2 text-[12px] md:grid-cols-2">
+          <div>
+            <div className="text-[11px] text-attenue-texte">Methode</div>
+            <div className="font-medium">CMUP — cout moyen unitaire pondere</div>
+          </div>
+          <div>
+            <div className="text-[11px] text-attenue-texte">Formule</div>
+            <div className="font-mono text-[11px]">
+              (qte x CMUP + entree x prix) / (qte + entree)
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-attenue-texte">Assiette</div>
+            <div>
+              Entrees <span className="font-medium">valorisees</span> seulement — une sortie ne
+              modifie jamais le CMUP (regle R04)
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-attenue-texte">Devise pivot</div>
+            <div>
+              <span className="font-medium">MAD</span> — conversion au taux en vigueur a la date
+              de reception, fige sur la ligne
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-attenue-texte">Unite</div>
+            <div>
+              <span className="font-medium">Kilogramme</span> — toute quantite y est ramenee a la
+              saisie (regle R01)
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-attenue-texte">Date de valorisation</div>
+            <div className="font-medium">{new Date().toLocaleDateString('fr-FR')}</div>
+          </div>
+        </CarteCorps>
+      </Carte>
 
       <BarresRangees
         titre="Ou dort la valeur"

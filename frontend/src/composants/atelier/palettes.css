@@ -20,6 +20,12 @@
    Ordre du cascade : importe apres `atelier.css`. `.atelier[data-palette=...]`
    a une specificite superieure a `.atelier`, et `.atelier.sombre[data-palette]`
    superieure a `.atelier.sombre` : les familles l'emportent donc toujours.
+
+   PORTEE. Chaque selecteur existe en deux versions : `:root[data-palette]` pour
+   l'application entiere — navigateur comme bureau — et `.atelier[data-palette]`
+   pour l'atelier a onglets, qui peut porter sa propre famille. La seconde gagne
+   par specificite quand les deux s'appliquent, ce qui laisse l'atelier libre de
+   se distinguer sans figer le reste.
    ========================================================================== */
 
 /* =============================================================================
@@ -29,6 +35,8 @@
    modernes : assez douce pour une journee entiere, assez contrastee pour un
    tableau dense. Recommandee.
    ========================================================================== */
+:root,
+:root[data-palette="ardoise"],
 .atelier,
 .atelier[data-palette="ardoise"] {
   --fond: 220 20% 97%;
@@ -80,6 +88,8 @@
   color-scheme: light;
 }
 
+:root.sombre,
+:root.sombre[data-palette="ardoise"],
 .atelier.sombre,
 .atelier.sombre[data-palette="ardoise"] {
   --fond: 214 18% 11%;
@@ -137,6 +147,7 @@
    La palette de l'editeur : gris neutres, accent bleu vif. Austere, tres
    familiere a qui vient de VS Code. Conservee pour ceux qui la preferent.
    ========================================================================== */
+:root[data-palette="graphite"],
 .atelier[data-palette="graphite"] {
   --fond: 0 0% 100%;
   --texte: 0 0% 23%;
@@ -187,6 +198,7 @@
   color-scheme: light;
 }
 
+:root.sombre[data-palette="graphite"],
 .atelier.sombre[data-palette="graphite"] {
   --fond: 0 0% 12%;
   --texte: 0 0% 80%;
@@ -244,6 +256,7 @@
    proche du papier pour les ecrans qui accompagnent un bon imprime. L'accent
    vert distingue nettement la selection des couleurs d'etat.
    ========================================================================== */
+:root[data-palette="chaud"],
 .atelier[data-palette="chaud"] {
   --fond: 45 20% 96%;
   --texte: 40 12% 15%;
@@ -294,6 +307,7 @@
   color-scheme: light;
 }
 
+:root.sombre[data-palette="chaud"],
 .atelier.sombre[data-palette="chaud"] {
   --fond: 40 8% 11%;
   --texte: 44 15% 87%;
@@ -351,6 +365,7 @@
    de ligne, sous eclairage industriel ou en plein jour, ou les palettes douces
    deviennent illisibles. Respecte le niveau AAA sur le texte courant.
    ========================================================================== */
+:root[data-palette="contraste"],
 .atelier[data-palette="contraste"] {
   --fond: 0 0% 100%;
   --texte: 0 0% 0%;
@@ -401,6 +416,7 @@
   color-scheme: light;
 }
 
+:root.sombre[data-palette="contraste"],
 .atelier.sombre[data-palette="contraste"] {
   --fond: 0 0% 4%;
   --texte: 0 0% 100%;
@@ -453,6 +469,7 @@
 
 /* Bordures franches : en mode contraste, un filet a 1 px sur fond clair se
    perd. On le rend systematiquement visible. */
+:root[data-palette="contraste"],
 .atelier[data-palette="contraste"] .grille {
   --filet: hsl(var(--bordure));
 }
@@ -468,6 +485,7 @@
    Le bleu est pousse assez fonce pour porter du texte blanc a 7:1, sinon les
    libelles de la barre d'etat deviennent illisibles a 11 px.
    ========================================================================== */
+:root[data-palette="divalto"],
 .atelier[data-palette="divalto"] {
   --fond: 210 27% 96%;
   --texte: 210 30% 13%;
@@ -519,6 +537,7 @@
   color-scheme: light;
 }
 
+:root.sombre[data-palette="divalto"],
 .atelier.sombre[data-palette="divalto"] {
   --fond: 210 24% 12%;
   --texte: 208 25% 90%;
@@ -571,7 +590,9 @@
 
 /* Le chrome bleu porte ses propres boutons : le survol clair par defaut y
    disparaitrait. */
+:root[data-palette="divalto"],
 .atelier[data-palette="divalto"] header,
+:root[data-palette="divalto"],
 .atelier[data-palette="divalto"] footer {
   color: hsl(var(--barre-texte));
 }
@@ -588,6 +609,7 @@
    contraste pour du texte, et un libelle de 11 px y devient illisible. Les
    memes couleurs, un cran plus fonce.
    ========================================================================== */
+:root[data-palette="slate"],
 .atelier[data-palette="slate"] {
   --fond: 210 40% 98%;
   --texte: 222 47% 11%;
@@ -638,6 +660,7 @@
   color-scheme: light;
 }
 
+:root.sombre[data-palette="slate"],
 .atelier.sombre[data-palette="slate"] {
   /* Slate 950 — le fond descend d'un cran sous les panneaux, ce qui detache
      les surfaces sans avoir a poser une ombre. */
@@ -696,4 +719,382 @@
   --at-badge-texte: 0 0% 100%;
 
   color-scheme: dark;
+}
+
+/* =============================================================================
+   GLASSIER — surfaces translucides
+   -----------------------------------------------------------------------------
+   Fonds bleu-violet tres pales, surfaces blanches legerement transparentes,
+   accent indigo lumineux. La seule famille qui pose un flou d'arriere-plan sur
+   les cartes et les menus.
+
+   ATTENTION, ET C'EST POURQUOI ELLE N'EST PAS PAR DEFAUT : la transparence
+   reduit le contraste entre une cellule et ce qui passe dessous. Sur une
+   colonne de nombres lue huit heures par jour, cela fatigue. Elle convient a un
+   poste de direction qui consulte, moins a un poste de saisie.
+   ========================================================================== */
+:root[data-palette="glassier"],
+.atelier[data-palette="glassier"] {
+  --fond: 226 60% 95%;
+  --texte: 234 45% 14%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 234 45% 14%;
+
+  --attenue: 230 55% 91%;
+  --attenue-texte: 232 24% 34%;
+
+  --accent: 262 83% 58%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 262 83% 58%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 350 78% 51%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 160 70% 34%;
+  --alerte: 33 96% 44%;
+  --info: 217 91% 60%;
+
+  --bordure: 228 40% 88%;
+  --ligne: 228 44% 94%;
+  --champ: 228 34% 82%;
+  --anneau: 262 83% 58%;
+
+  --barre: 228 52% 97%;
+  --barre-texte: 232 32% 18%;
+  --barre-attenue: 231 16% 48%;
+  --barre-actif: 228 44% 92%;
+
+  --at-titre: 228 52% 97%;
+  --at-activite: 228 52% 97%;
+  --at-lateral: 228 50% 97%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 228 50% 97%;
+  --at-etat: 228 52% 96%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 228 46% 94%;
+  --at-liste-survol: 228 44% 93%;
+  --at-liste-selection: 234 68% 91%;
+  --at-liste-selection-texte: 235 45% 25%;
+  --at-badge: 262 83% 58%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-palette="glassier"],
+.atelier.sombre[data-palette="glassier"] {
+  /* #070b1a, la nappe sombre sous le verre. */
+  --fond: 227 55% 6%;
+  --texte: 0 0% 100%;
+
+  /* #0b1022, la surface fermee des zones de donnees. */
+  --surface: 227 51% 9%;
+  --surface-texte: 0 0% 100%;
+
+  --attenue: 221 33% 20%;
+  /* Slate-200, le texte secondaire de la reference. */
+  --attenue-texte: 213 27% 84%;
+
+  /* #667eea, le bleu du degrade d'accent. */
+  --accent: 262 90% 72%;
+  --accent-texte: 227 55% 8%;
+
+  --primaire: 262 90% 72%;
+  --primaire-texte: 227 55% 8%;
+
+  --danger: 350 82% 68%;
+  --danger-texte: 222 47% 11%;
+
+  --succes: 158 64% 58%;
+  --alerte: 38 92% 62%;
+  --info: 199 89% 66%;
+
+  --bordure: 221 30% 26%;
+  --ligne: 220 34% 17%;
+  --champ: 221 28% 34%;
+  --anneau: 262 90% 72%;
+
+  --barre: 222 45% 13%;
+  --barre-texte: 0 0% 100%;
+  --barre-attenue: 213 27% 78%;
+  --barre-actif: 221 33% 22%;
+
+  --at-titre: 222 45% 13%;
+  --at-activite: 222 45% 13%;
+  --at-lateral: 222 44% 14%;
+  --at-editeur: 219 40% 11%;
+  --at-panneau: 222 44% 14%;
+  --at-etat: 222 47% 12%;
+  --at-onglet-actif: 220 38% 17%;
+  --at-onglet-inactif: 222 45% 13%;
+  --at-liste-survol: 221 33% 20%;
+  /* #764ba2, le violet du degrade, reserve a la selection. */
+  --at-liste-selection: 270 37% 32%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 262 90% 72%;
+  --at-badge-texte: 227 55% 8%;
+
+  color-scheme: dark;
+}
+
+/* -----------------------------------------------------------------------------
+   LE VERRE LIQUIDE
+   -----------------------------------------------------------------------------
+   Ce n'est pas le verre depoli du glassmorphisme de 2020, et la difference est
+   la seule chose qui compte ici.
+
+   LE VERRE DEPOLI FLOUTE ET CACHE : beaucoup de flou, peu de transparence, un
+   bord discret. Le fond disparait sous une vitre laiteuse.
+
+   LE VERRE LIQUIDE REFRACTE ET MONTRE : peu de flou, beaucoup de saturation, et
+   surtout UN BORD QUI PREND LA LUMIERE. C'est le lisere lumineux, pas le flou,
+   qui fait lire la matiere comme du verre epais. On voit le fond a travers, un
+   peu deforme, plus vif que la realite.
+
+   Trois couches, dans cet ordre :
+     1. le TEINT       — rgb(255 255 255 / .15), presque rien, juste un voile ;
+     2. la REFRACTION  — blur(2px) saturate(180%) brightness(112%) : le fond
+                         reste lisible a travers, mais plus dense en couleur ;
+     3. la LUMIERE     — un bord blanc franc, un halo interne haut, et un lisere
+                         degrade oriente en diagonale. C'est la signature.
+
+   ET UN FOND QUI VAUT LA PEINE D'ETRE REFRACTE. Un verre pose sur du gris ne
+   montre rien. D'ou la nappe de couleurs saturees en dessous : sans elle, tout
+   ce qui precede ne se voit pas.
+
+   La refraction geometrique d'Apple — le fond reellement DEFORME au bord, par
+   un filtre SVG de deplacement — n'est pas ici : elle exige une carte de
+   deplacement aux dimensions exactes de chaque element, ce qu'une grille dont
+   les cartes changent de taille ne peut pas fournir, et elle ne fonctionne que
+   sur les moteurs Chromium. Le lisere diagonal en donne la lecture pour un
+   cout nul.
+   -------------------------------------------------------------------------- */
+
+/* --- 1. La nappe -----------------------------------------------------------
+   Quatre halos larges, poses aux quatre coins pour qu'aucune zone de travail ne
+   soit uniforme : c'est le mouvement du fond qui anime le verre quand on fait
+   defiler. Fixe, pour que le fond ne defile pas avec le contenu. */
+:root[data-palette="glassier"] body,
+.atelier[data-palette="glassier"] {
+  background-color: #e7ecfb;
+  background-image:
+    radial-gradient(at 6% 2%, rgb(167 139 250 / 0.55) 0px, transparent 48%),
+    radial-gradient(at 94% 6%, rgb(34 211 238 / 0.42) 0px, transparent 44%),
+    radial-gradient(at 80% 92%, rgb(244 114 182 / 0.40) 0px, transparent 46%),
+    radial-gradient(at 14% 96%, rgb(96 165 250 / 0.45) 0px, transparent 46%);
+  background-attachment: fixed;
+}
+
+:root.sombre[data-palette="glassier"] body,
+.atelier.sombre[data-palette="glassier"] {
+  background-color: #070b1a;
+  background-image:
+    radial-gradient(at 6% 2%, rgb(124 58 237 / 0.60) 0px, transparent 46%),
+    radial-gradient(at 94% 6%, rgb(6 182 212 / 0.42) 0px, transparent 42%),
+    radial-gradient(at 80% 92%, rgb(219 39 119 / 0.38) 0px, transparent 44%),
+    radial-gradient(at 14% 96%, rgb(37 99 235 / 0.48) 0px, transparent 46%);
+  background-attachment: fixed;
+}
+
+/* La coquille de l'application peint `bg-fond` sur toute sa hauteur, par-dessus
+   le body. Sans cette regle, la nappe existe et ne se voit jamais : elle est
+   simplement recouverte par un aplat de la couleur de fond. */
+:root[data-palette="glassier"] .bg-fond {
+  background-color: transparent;
+}
+
+/* --- 2. Les rayons ---------------------------------------------------------
+   Le verre epais arrondit beaucoup : un angle vif casse l'illusion de matiere. */
+:root[data-palette="glassier"],
+.atelier[data-palette="glassier"] {
+  --radius: 22px;
+  --radius-sm: 12px;
+}
+
+/* --- 3. Le chrome, en verre liquide ---------------------------------------
+   Barres, cartes d'indicateurs, graphiques, menus et tiroirs. Une carte QUI
+   PORTE UN TABLEAU en est exclue : elle recoit plus bas un verre plus ferme,
+   parce qu'on y lit des chiffres. */
+:root[data-palette="glassier"] header,
+:root[data-palette="glassier"] aside,
+:root[data-palette="glassier"] footer,
+:root[data-palette="glassier"] .carte:not(:has(table)),
+:root[data-palette="glassier"] .viz,
+:root[data-palette="glassier"] [role="dialog"],
+:root[data-palette="glassier"] [data-radix-popper-content-wrapper] > * {
+  position: relative;
+  background-color: rgb(255 255 255 / 0.15);
+  backdrop-filter: blur(2px) saturate(180%) brightness(112%);
+  -webkit-backdrop-filter: blur(2px) saturate(180%) brightness(112%);
+  border: 1px solid rgb(255 255 255 / 0.65);
+  box-shadow:
+    /* l'ombre portee : le verre flotte au-dessus de la nappe */
+    0 8px 32px rgb(31 38 135 / 0.22),
+    /* le rai de lumiere sur l'arete haute */
+    inset 0 1px 1px rgb(255 255 255 / 0.85),
+    /* l'illumination interne, qui donne l'epaisseur */
+    inset 0 4px 20px rgb(255 255 255 / 0.32),
+    /* le retour de lumiere sur l'arete basse, plus faible */
+    inset 0 -1px 1px rgb(255 255 255 / 0.35);
+}
+
+:root.sombre[data-palette="glassier"] header,
+:root.sombre[data-palette="glassier"] aside,
+:root.sombre[data-palette="glassier"] footer,
+:root.sombre[data-palette="glassier"] .carte:not(:has(table)),
+:root.sombre[data-palette="glassier"] .viz,
+:root.sombre[data-palette="glassier"] [role="dialog"],
+:root.sombre[data-palette="glassier"] [data-radix-popper-content-wrapper] > * {
+  background-color: rgb(255 255 255 / 0.07);
+  backdrop-filter: blur(3px) saturate(190%) brightness(118%);
+  -webkit-backdrop-filter: blur(3px) saturate(190%) brightness(118%);
+  border: 1px solid rgb(255 255 255 / 0.28);
+  box-shadow:
+    0 8px 32px rgb(0 0 0 / 0.50),
+    inset 0 1px 1px rgb(255 255 255 / 0.45),
+    inset 0 4px 20px rgb(255 255 255 / 0.10),
+    inset 0 -1px 1px rgb(255 255 255 / 0.14);
+}
+
+/* --- 4. Le lisere diagonal -------------------------------------------------
+   LA SIGNATURE DU VERRE LIQUIDE. Une bordure uniforme donne une vitre ; une
+   bordure dont la lumiere tourne donne une piece de verre eclairee par le haut
+   a gauche. Technique du bord en degrade : un fond degrade dans le rembourrage,
+   decoupe en son centre par un masque, ne laissant que l'epaisseur du bord.
+
+   `pointer-events: none` est indispensable — sans lui le lisere couvrirait
+   toute la carte et avalerait les clics. */
+:root[data-palette="glassier"] header::before,
+:root[data-palette="glassier"] aside::before,
+:root[data-palette="glassier"] .carte:not(:has(table))::before,
+:root[data-palette="glassier"] .viz::before,
+:root[data-palette="glassier"] [role="dialog"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgb(255 255 255 / 0.95) 0%,
+    rgb(255 255 255 / 0.25) 28%,
+    rgb(255 255 255 / 0) 52%,
+    rgb(255 255 255 / 0.3) 76%,
+    rgb(255 255 255 / 0.8) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+:root.sombre[data-palette="glassier"] header::before,
+:root.sombre[data-palette="glassier"] aside::before,
+:root.sombre[data-palette="glassier"] .carte:not(:has(table))::before,
+:root.sombre[data-palette="glassier"] .viz::before,
+:root.sombre[data-palette="glassier"] [role="dialog"]::before {
+  background: linear-gradient(
+    135deg,
+    rgb(255 255 255 / 0.6) 0%,
+    rgb(255 255 255 / 0.12) 30%,
+    rgb(255 255 255 / 0) 54%,
+    rgb(255 255 255 / 0.14) 78%,
+    rgb(255 255 255 / 0.45) 100%
+  );
+}
+
+/* --- 5. Les surfaces de donnees -------------------------------------------
+   ELLES NE SUIVENT PAS LA MEME REGLE, ET C'EST VOULU. Le verre liquide laisse
+   passer le fond ; sur une colonne de nombres a douze pixels, ce fond passe
+   AU TRAVERS du chiffre et le rend penible a relire. Donc : beaucoup de flou
+   (le fond devient une teinte unie), et une opacite qui tient le contraste.
+   Le cadre reste en verre, le contenu redevient lisible. */
+:root[data-palette="glassier"] .carte:has(table) {
+  position: relative;
+  background-color: rgb(255 255 255 / 0.72);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  border: 1px solid rgb(255 255 255 / 0.7);
+  box-shadow:
+    0 8px 32px rgb(31 38 135 / 0.18),
+    inset 0 1px 1px rgb(255 255 255 / 0.9);
+}
+
+:root.sombre[data-palette="glassier"] .carte:has(table) {
+  background-color: rgb(11 16 34 / 0.72);
+  border: 1px solid rgb(255 255 255 / 0.2);
+  box-shadow:
+    0 8px 32px rgb(0 0 0 / 0.45),
+    inset 0 1px 1px rgb(255 255 255 / 0.3);
+}
+
+/* L'entete de colonne colle en haut au defilement : elle doit etre plus dense
+   que les lignes, sans quoi les lignes defilent en transparence derriere elle. */
+:root[data-palette="glassier"] table.grille thead tr {
+  background-color: rgb(255 255 255 / 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+:root.sombre[data-palette="glassier"] table.grille thead tr {
+  background-color: rgb(11 16 34 / 0.9);
+}
+
+/* --- 6. Les champs ---------------------------------------------------------
+   Une saisie est une surface de donnees, elle aussi : on y relit ce qu'on vient
+   de taper. Verre net, sans refraction. */
+:root[data-palette="glassier"] input,
+:root[data-palette="glassier"] select,
+:root[data-palette="glassier"] textarea {
+  background-color: rgb(255 255 255 / 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-color: rgb(255 255 255 / 0.75);
+}
+
+:root.sombre[data-palette="glassier"] input,
+:root.sombre[data-palette="glassier"] select,
+:root.sombre[data-palette="glassier"] textarea {
+  background-color: rgb(11 16 34 / 0.7);
+  border-color: rgb(255 255 255 / 0.2);
+}
+
+/* --- 7. Retenue ------------------------------------------------------------
+   Un fond fixe se comporte comme du parallaxe au defilement, et les couches de
+   flou coutent au compositeur. Quand le systeme demande de reduire les
+   animations, on libere le fond. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-palette="glassier"] body {
+    background-attachment: scroll;
+  }
+}
+
+/* Le repli des navigateurs sans `backdrop-filter` : sans lui, les surfaces a
+   15 % de blanc laisseraient lire le fond a travers le texte. */
+@supports not (backdrop-filter: blur(1px)) {
+  :root[data-palette="glassier"] header,
+  :root[data-palette="glassier"] aside,
+  :root[data-palette="glassier"] footer,
+  :root[data-palette="glassier"] .carte,
+  :root[data-palette="glassier"] .viz,
+  :root[data-palette="glassier"] [role="dialog"] {
+    background-color: rgb(255 255 255 / 0.88);
+  }
+  :root.sombre[data-palette="glassier"] header,
+  :root.sombre[data-palette="glassier"] aside,
+  :root.sombre[data-palette="glassier"] footer,
+  :root.sombre[data-palette="glassier"] .carte,
+  :root.sombre[data-palette="glassier"] .viz,
+  :root.sombre[data-palette="glassier"] [role="dialog"] {
+    background-color: rgb(11 16 34 / 0.9);
+  }
 }

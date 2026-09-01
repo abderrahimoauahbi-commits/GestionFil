@@ -404,4 +404,10 @@ SELECT 'C25', 'Stock mobilisable face a un equivalent en tension',        'ATTEN
 SELECT 'C26', 'Groupe d''equivalence limite a un seul fournisseur',        'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c26) UNION ALL
 SELECT 'C27', 'Ecart majeur : couverture confortable, magasin sous le minimum', 'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c27) UNION ALL
 SELECT 'C28', 'Commande en retard, retiree du calcul de couverture',      'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c28) UNION ALL
-SELECT 'C29', 'Besoins plus anciens que le plan : projection perimee',    'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c29);
+SELECT 'C29', 'Besoins plus anciens que le plan : projection perimee',    'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c29) UNION ALL
+-- Les trois derniers viennent de la feuille Tests du classeur (T12, T17, T19).
+-- Leurs vues de detail sont definies dans 016_controles_classeur.sql, charge
+-- juste avant celui-ci lors de la construction.
+SELECT 'C30', 'Delai fournisseur absent, nul ou negatif',                'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c30) UNION ALL
+SELECT 'C31', 'Reception validee non repercutee au stock',               'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c31) UNION ALL
+SELECT 'C32', 'Reception valorisee absente de l''historique des prix',   'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c32);

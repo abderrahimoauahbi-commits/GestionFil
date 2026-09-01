@@ -43,8 +43,10 @@ import {
   Sparkles,
   Trash2,
   Undo2,
+  Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
@@ -176,6 +178,7 @@ const enteteVide = (): Entete => ({
 
 export function Plans() {
   const droits = useDroits(MODULE)
+  const ouvrirEtat = useOuvrirVue()
   const qc = useQueryClient()
   const confirmation = useConfirmation()
 
@@ -651,6 +654,15 @@ export function Plans() {
           }
           actions={(p) => (
             <div className="flex justify-end gap-0.5">
+            <Bouton
+              variante="discret"
+              taille="icone-xs"
+              onClick={() => ouvrirEtat(`/etats/plan-production/${p.id_plan}`)}
+              aria-label="Imprimer"
+              title="Imprimer le plan"
+            >
+              <Printer />
+            </Bouton>
               <Bouton
                 variante="discret"
                 taille="icone-xs"

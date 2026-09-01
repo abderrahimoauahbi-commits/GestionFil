@@ -233,3 +233,86 @@ pub async fn supprimer_reference_definitivement(
     tx.commit().await?;
     Ok(Json(json!({ "code_reference": code, "supprime": true, "mode": "definitive" })))
 }
+
+
+/* -------------------------------------------------------------------------- */
+/* Frais d'approche                                                            */
+/* -------------------------------------------------------------------------- */
+
+#[derive(Debug, serde::Deserialize)]
+pub struct NouveauFrais {
+    pub id_reception: String,
+    pub type_frais: String,
+    pub libelle: Option<String>,
+    pub montant_devise: f64,
+    pub code_devise: String,
+    pub taux_change: f64,
+    pub cle_repartition: Option<String>,
+    pub reference_externe: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Enregistre un frais d'approche sur une reception.
+///
+/// LE FRAIS PORTE SUR L'ENVOI, PAS SUR LA LIGNE. Un conteneur transporte dix
+/// references ; le fret se repartit entre elles selon la cle choisie. Demander
+/// la repartition a la saisie obligerait a la refaire a chaque correction.
+///
+/// LA RECEPTION DOIT ETRE VALIDEE. Avant validation, les quantites pesees
+/// peuvent encore changer : repartir un fret sur des poids provisoires
+/// donnerait un cout de revient qu'il faudrait recalculer sans que rien ne le
+/// signale.
+pub async fn creer_frais_approche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(f): Json<NouveauFrais>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::VALORISATION, Action::Ecrire).await?;
+
+    if f.montant_devise < 0.0 {
+        return Err(AppError::Invalide("le montant ne peut pas etre negatif".into()));
+    }
+    if f.taux_change <= 0.0 {
+        return Err(AppError::Invalide("le taux de change doit etre positif".into()));
+    }
+
+    let statut: Option<String> =
+        sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = ?1")
+            .bind(&f.id_reception)
+            .fetch_optional(&state.db)
+            .await?;
+    match statut.as_deref() {
+        None => return Err(AppError::Invalide("reception introuvable".into())),
+        Some("VALIDE") => {}
+        Some(autre) => {
+            return Err(AppError::Invalide(format!(
+                "la reception est en statut {autre} : les frais ne se repartissent que sur une                  reception validee, dont les poids ne bougent plus"
+            )))
+        }
+    }
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+
+    sqlx::query(
+        "INSERT INTO frais_approche (id_reception, type_frais, libelle, montant_devise,
+                                     code_devise, taux_change, cle_repartition,
+                                     reference_externe, id_utilisateur, notes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 'POIDS'), ?8, ?9, ?10)",
+    )
+    .bind(&f.id_reception)
+    .bind(&f.type_frais)
+    .bind(&f.libelle)
+    .bind(f.montant_devise)
+    .bind(&f.code_devise)
+    .bind(f.taux_change)
+    .bind(&f.cle_repartition)
+    .bind(&f.reference_externe)
+    .bind(&user.id)
+    .bind(&f.notes)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(Json(serde_json::json!({ "enregistre": true })))
+}

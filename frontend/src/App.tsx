@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { FournisseurTheme, useTheme } from './composants/Theme'
+import { FournisseurApparence } from './composants/Apparence'
 import { Coquille } from './composants/Coquille'
 import { Atelier } from './composants/atelier/Atelier'
 import { estBureau } from './lib/utils'
@@ -28,6 +29,10 @@ import {
   EtatPlanProduction,
   EtatReception,
 } from './pages/EtatsDocuments'
+import { AnalyseAbcXyz } from './pages/AnalyseAbcXyz'
+import { CoutRevient } from './pages/CoutRevient'
+import { RapportsFinanciers } from './pages/RapportsFinanciers'
+import { QualiteEtat } from './pages/QualiteEtat'
 import { MatricePrix } from './pages/MatricePrix'
 import { Statistiques } from './pages/Statistiques'
 import { Equivalences } from './pages/Equivalences'
@@ -134,6 +139,14 @@ const ECRANS = (
       <Route path="etats/stock" element={<ExigeModule module="STOCK"><EtatStockImprime /></ExigeModule>} />
       <Route path="etats/comptage" element={<ExigeModule module="INVENTAIRE"><EtatComptage /></ExigeModule>} />
       <Route path="etats/plan-achat" element={<ExigeModule module="PLAN_ACHAT"><EtatPlanAchat /></ExigeModule>} />
+      {/* Les etats de DOCUMENT portent l'identifiant de leur objet : ils
+          s'ouvrent depuis la ligne, pas depuis un selecteur. Le segment reste
+          optionnel pour que l'adresse nue propose encore le choix. */}
+      <Route path="etats/receptions/:id" element={<ExigeModule module="RECEPTIONS"><EtatReception /></ExigeModule>} />
+      <Route path="etats/inventaire/:id" element={<ExigeModule module="INVENTAIRE"><EtatInventaire /></ExigeModule>} />
+      <Route path="etats/plan-production/:id" element={<ExigeModule module="PLANS"><EtatPlanProduction /></ExigeModule>} />
+      <Route path="etats/besoins/:id" element={<ExigeModule module="MRP"><EtatBesoins /></ExigeModule>} />
+      <Route path="etats/qualite/:code" element={<ExigeModule module="QUALITES"><QualiteEtat /></ExigeModule>} />
       <Route path="etats/receptions" element={<ExigeModule module="RECEPTIONS"><EtatReception /></ExigeModule>} />
       <Route path="etats/inventaire" element={<ExigeModule module="INVENTAIRE"><EtatInventaire /></ExigeModule>} />
       <Route path="etats/plan-production" element={<ExigeModule module="PLANS"><EtatPlanProduction /></ExigeModule>} />
@@ -167,6 +180,9 @@ const ECRANS = (
       <Route path="bons-commande/:id" element={<ExigeModule module="BONS_COMMANDE"><BonCommande /></ExigeModule>} />
       <Route path="assistant" element={<ExigeModule module="COCKPIT"><Assistant /></ExigeModule>} />
       <Route path="etat-stock" element={<ExigeModule module="STOCK"><EtatStock /></ExigeModule>} />
+      <Route path="rapports" element={<ExigeModule module="VALORISATION"><RapportsFinanciers /></ExigeModule>} />
+      <Route path="landed-cost" element={<ExigeModule module="VALORISATION"><CoutRevient /></ExigeModule>} />
+      <Route path="classification" element={<ExigeModule module="STOCK"><AnalyseAbcXyz /></ExigeModule>} />
       <Route path="valorisation" element={<ExigeModule module="CATALOGUE"><Valorisation /></ExigeModule>} />
       <Route path="audit" element={<ExigeModule module="AUDIT"><Audit /></ExigeModule>} />
       <Route path="parametres" element={<Navigate to="/configuration" replace />} />
@@ -255,6 +271,7 @@ function Aiguillage() {
 export function App() {
   return (
     <FournisseurTheme>
+      <FournisseurApparence>
       <QueryClientProvider client={client}>
         <FournisseurInfobulle delayDuration={300}>
           <BrowserRouter>
@@ -265,6 +282,7 @@ export function App() {
           </BrowserRouter>
         </FournisseurInfobulle>
       </QueryClientProvider>
+      </FournisseurApparence>
     </FournisseurTheme>
   )
 }

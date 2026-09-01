@@ -183,6 +183,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cockpit", get(consultation::cockpit))
         .route("/api/cockpit/risques", get(consultation::risques_rupture))
         .route("/api/cockpit/analyse", get(consultation::cockpit_analyse))
+        .route("/api/coherence-recettes", get(consultation::coherence_recettes))
+        .route("/api/risques-sourcing", get(consultation::risques_sourcing))
+        .route("/api/analyse-abc-xyz", get(consultation::analyse_abc_xyz))
+        .route("/api/cout-revient", get(consultation::cout_revient))
+        .route("/api/frais-approche",
+             get(consultation::frais_approche).post(operations::creer_frais_approche))
         .route("/api/stats/mouvements", get(consultation::stats_mouvements))
         .route("/api/stats/prix", get(consultation::stats_prix))
         .route("/api/stats/fournisseurs", get(consultation::stats_fournisseurs))

@@ -337,84 +337,107 @@ export function DataTable<L extends Record<string, unknown>>({
 
           {barreOutils}
 
-          {imprimable && (
-            <Bouton
-              variante="contour"
-              taille="md"
-              disabled={!rangs.length}
-              onClick={() => window.print()}
-              title="Imprimer le tableau tel qu il est affiche"
-            >
-              <Printer />
-              <span className="hidden sm:inline">Imprimer</span>
-            </Bouton>
-          )}
+          {/* --- Outils de sortie --------------------------------------------
+              Groupes a droite, en un bloc segmente : trois boutons pleins et
+              libelles cote a cote encombraient la barre au point de repousser
+              les filtres hors de vue sur un portable. Ici ce sont des icones
+              dans un cadre unique — visibles quand on les cherche, muettes
+              quand on ne les cherche pas.
 
-          {exportable && (
-            <Bouton
-              variante="contour"
-              taille="md"
-              disabled={!rangs.length}
-              onClick={() =>
-                exporterCsv(
-                  exportable,
-                  visibles.map((c) => ({
-                    champ: c.champ,
-                    entete: c.entete,
-                    numerique: c.numerique,
-                    // `valeurTri` porte deja la valeur brute quand l'affichage
-                    // differe — une date formatee, un statut traduit. C'est
-                    // exactement ce qu'un tableur doit recevoir : le rendu JSX
-                    // ne s'exporte pas.
-                    valeurExport: c.valeurTri,
-                  })),
-                  // Les lignes AFFICHEES, filtres et tri compris : on exporte
-                  // ce qu'on voit. Exporter la table entiere surprendrait
-                  // apres avoir pose trois filtres.
-                  rangs.map((r) => r.original),
-                )
-              }
-              title="Telecharger au format CSV, lisible par Excel"
-            >
-              <Download />
-              <span className="hidden sm:inline">Exporter</span>
-            </Bouton>
-          )}
-
-          <div className="ml-auto flex items-center gap-1.5">
+              L'INTITULE RESTE AU SURVOL, pas dans le bouton. Une icone
+              d'imprimante et une fleche descendante se reconnaissent ; ce qui
+              se devine moins, c'est CE QUI part au papier ou au fichier, et
+              c'est cela que l'infobulle precise. */}
+          <div className="ml-auto flex items-center gap-2">
             <span className="hidden text-[11px] tabular-nums text-attenue-texte sm:inline">
               {total} ligne{total > 1 ? 's' : ''}
             </span>
-            {visibles.length > 4 && (
-              <Menu>
-                <MenuDeclencheur asChild>
-                  <Bouton variante="contour" taille="md">
-                    <Columns3 />
-                    <span className="hidden sm:inline">Colonnes</span>
-                  </Bouton>
-                </MenuDeclencheur>
-                <MenuContenu className="max-h-80 overflow-y-auto">
-                  <MenuTitre>Colonnes affichees</MenuTitre>
-                  {table.getAllLeafColumns().map((col) => (
-                    <MenuElement
-                      key={col.id}
-                      onSelect={(e) => {
-                        e.preventDefault()
-                        col.toggleVisibility()
-                      }}
+
+            <div className="flex items-center overflow-hidden rounded-[var(--radius-sm)] border border-bordure">
+              {visibles.length > 4 && (
+                <Menu>
+                  <MenuDeclencheur asChild>
+                    <button
+                      type="button"
+                      title="Choisir les colonnes affichees"
+                      aria-label="Colonnes"
+                      className="grid size-7 place-items-center text-attenue-texte
+                                 transition-colors hover:bg-attenue hover:text-texte"
                     >
-                      <input
-                        type="checkbox"
-                        readOnly
-                        checked={col.getIsVisible()}
-                        className="size-3.5"
-                      />
-                      {visibles.find((v) => v.champ === col.id)?.entete ?? col.id}
-                    </MenuElement>
-                  ))}
-                </MenuContenu>
-              </Menu>
-            )}
+                      <Columns3 className="size-3.5" />
+                    </button>
+                  </MenuDeclencheur>
+                  <MenuContenu className="max-h-80 overflow-y-auto">
+                    <MenuTitre>Colonnes affichees</MenuTitre>
+                    {table.getAllLeafColumns().map((col) => (
+                      <MenuElement
+                        key={col.id}
+                        onSelect={(e) => {
+                          e.preventDefault()
+                          col.toggleVisibility()
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          readOnly
+                          checked={col.getIsVisible()}
+                          className="size-3.5"
+                        />
+                        {visibles.find((v) => v.champ === col.id)?.entete ?? col.id}
+                      </MenuElement>
+                    ))}
+                  </MenuContenu>
+                </Menu>
+              )}
+
+              {imprimable && (
+                <button
+                  type="button"
+                  disabled={!rangs.length}
+                  onClick={() => window.print()}
+                  title="Imprimer la liste telle qu elle est affichee"
+                  aria-label="Imprimer la liste"
+                  className="grid size-7 place-items-center border-l border-bordure
+                             text-attenue-texte transition-colors hover:bg-attenue
+                             hover:text-texte disabled:pointer-events-none disabled:opacity-40"
+                >
+                  <Printer className="size-3.5" />
+                </button>
+              )}
+
+              {exportable && (
+                <button
+                  type="button"
+                  disabled={!rangs.length}
+                  onClick={() =>
+                    exporterCsv(
+                      exportable,
+                      visibles.map((c) => ({
+                        champ: c.champ,
+                        entete: c.entete,
+                        numerique: c.numerique,
+                        // `valeurTri` porte deja la valeur brute quand
+                        // l'affichage differe — une date formatee, un statut
+                        // traduit. C'est ce qu'un tableur doit recevoir : le
+                        // rendu JSX ne s'exporte pas.
+                        valeurExport: c.valeurTri,
+                      })),
+                      // Les lignes AFFICHEES, filtres et tri compris : on
+                      // exporte ce qu'on voit. Exporter la table entiere
+                      // surprendrait apres avoir pose trois filtres.
+                      rangs.map((r) => r.original),
+                    )
+                  }
+                  title="Telecharger la liste au format CSV, lisible par Excel"
+                  aria-label="Exporter la liste"
+                  className="grid size-7 place-items-center border-l border-bordure
+                             text-attenue-texte transition-colors hover:bg-attenue
+                             hover:text-texte disabled:pointer-events-none disabled:opacity-40"
+                >
+                  <Download className="size-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -544,7 +567,7 @@ export function DataTable<L extends Record<string, unknown>>({
                           <td
                             key={cellule.id}
                             className={cn(
-                              'px-2.5 py-[5px] align-middle',
+                              'px-2.5 align-middle',
                               m.numerique && 'text-right tabular-nums',
                               m.secondaire && 'hidden xl:table-cell',
                             )}
@@ -555,7 +578,7 @@ export function DataTable<L extends Record<string, unknown>>({
                       })}
                       {actions && (
                         <td
-                          className="px-2 py-[5px] text-right"
+                          className="px-2 text-right"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {actions(rang.original)}

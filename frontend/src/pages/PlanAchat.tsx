@@ -19,7 +19,7 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, FileCheck2, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart } from 'lucide-react'
+import { AlertTriangle, Ban, FileCheck2, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -65,6 +65,11 @@ interface Proposition extends Record<string, unknown> {
   date_besoin_prevue: string
   urgence: string
   risque_identifie: string | null
+  classe_abc: string | null
+  classe_xyz: string | null
+  tier: string | null
+  risque_source: string | null
+  nb_sources: number | null
   action_recommandee: string | null
   statut: string
   numero_bc: string | null
@@ -383,6 +388,61 @@ export function PlanAchat() {
             aria-label={`Selectionner ${p.code_reference}`}
           />
         ) : null,
+    },
+    {
+      champ: 'classe_abc',
+      entete: 'ABC',
+      largeur: '54px',
+      secondaire: true,
+      // La classe est un rang, pas une note : A ne veut pas dire « bon » mais
+      // « porte l'essentiel du budget ». On la teinte donc par le poids, pas
+      // par une echelle de gravite.
+      rendu: (p) =>
+        !p.classe_abc ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <span
+            className={cn(
+              'inline-block rounded-[3px] px-1.5 py-px text-[11px] font-medium',
+              p.classe_abc === 'A'
+                ? 'bg-primaire/15 text-primaire'
+                : p.classe_abc === 'B'
+                  ? 'bg-attenue text-texte'
+                  : 'text-attenue-texte',
+            )}
+          >
+            {p.classe_abc}
+            {p.classe_xyz && <span className="opacity-60">{p.classe_xyz}</span>}
+          </span>
+        ),
+    },
+    {
+      champ: 'risque_source',
+      entete: 'Source',
+      largeur: '128px',
+      // C'est la colonne qui manquait : elle dit si un ennui chez ce
+      // fournisseur arrete la ligne, ou si une alternative existe.
+      rendu: (p) =>
+        !p.risque_source ? (
+          <span className="text-attenue-texte">—</span>
+        ) : p.risque_source === 'MONO_SOURCE' ? (
+          <span className="inline-flex items-center gap-1 rounded-[3px] bg-danger/12 px-1.5 py-px text-[11px] font-medium text-danger">
+            <AlertTriangle className="size-3" />
+            mono-source
+          </span>
+        ) : (
+          <span className="text-[11px] text-succes">
+            {p.nb_sources} sources
+          </span>
+        ),
+    },
+    {
+      champ: 'action_recommandee',
+      entete: 'Action',
+      secondaire: true,
+      rendu: (p) => (
+        <span className="text-[11px] text-attenue-texte">{p.action_recommandee ?? '—'}</span>
+      ),
     },
     {
       champ: 'urgence',

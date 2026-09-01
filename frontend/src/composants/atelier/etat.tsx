@@ -92,6 +92,14 @@ const DYNAMIQUES: {
     decrire: () => ({ titre: 'Nouveau transfert', Icone: Truck }),
   },
   {
+    motif: /^\/etats\/qualite\/([^/]+)$/,
+    decrire: (m) => ({ titre: `Fiche ${m[1]}`, detail: 'Impression', Icone: FileText }),
+  },
+  {
+    motif: /^\/etats\/([a-z-]+)\/[^/]+$/,
+    decrire: (m) => ({ titre: `Etat ${m[1].replace('-', ' ')}`, detail: 'Impression', Icone: FileText }),
+  },
+  {
     motif: /^\/bons-commande\/([^/]+)\/etat$/,
     decrire: () => ({ titre: 'Bon de commande', detail: 'Impression', Icone: FileText }),
   },

@@ -35,7 +35,7 @@ import {
   Monitor,
   Moon,
   Package,
-  Printer,
+  Palette,
   PackageSearch,
   ShieldAlert,
   ShoppingCart,
@@ -59,6 +59,10 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { cn, estBureau } from '../lib/utils'
 import { useTheme } from './Theme'
+import { BarreLaterale } from './BarreLaterale'
+import { NavigationEntete } from './NavigationEntete'
+import { PanneauApparence } from './PanneauApparence'
+import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
 import {
   Aide,
@@ -105,6 +109,7 @@ export type Section =
   | 'ACHATS'
   | 'STOCK'
   | 'FINANCE'
+  | 'PARAMETRES'
 
 export const MODULES: {
   id: Section
@@ -118,6 +123,7 @@ export const MODULES: {
   { id: 'ACHATS',     libelle: 'Achats',     resume: "Plan d'achat, commandes, receptions",       Icone: ShoppingCart },
   { id: 'STOCK',      libelle: 'Stock',      resume: 'Etat, mouvements, transferts, inventaires', Icone: Boxes },
   { id: 'FINANCE',    libelle: 'Finance',    resume: 'Valorisation, classification, rapports',    Icone: Coins },
+  { id: 'PARAMETRES', libelle: 'Parametres', resume: 'Apparence, entreprise, droits, sauvegardes', Icone: SlidersHorizontal },
 ]
 
 export interface EntreeNav {
@@ -163,7 +169,6 @@ export const NAVIGATION: EntreeNav[] = [
   // La coherence est un ecran de pilotage, pas d'administration : c'est la
   // direction et l'assistante qui corrigent les anomalies, pas l'informaticien.
   { vers: '/controles', libelle: 'Controles de coherence', module: 'COCKPIT', Icone: ShieldCheck, section: 'GENERAL' },
-  { vers: '/etats', libelle: 'Etats imprimables', module: 'COCKPIT', Icone: Printer, section: 'GENERAL' },
   {
     vers: '/assistant',
     libelle: 'Assistant',
@@ -172,10 +177,7 @@ export const NAVIGATION: EntreeNav[] = [
     section: 'GENERAL',
     roles: ['DIRECTION'],
   },
-  // Une seule porte vers tous les reglages. L'ancienne section Administration
-  // n'existe plus : comptes, droits et journal d'audit sont des PARAMETRES, et
-  // les separer obligeait a se rappeler lequel des deux menus les portait.
-  { vers: '/configuration', libelle: 'Parametres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'GENERAL' },
+
 
   /* --- 2. Catalogue ------------------------------------------------------ */
   { vers: '/catalogue', libelle: 'References', module: 'CATALOGUE', Icone: Package, section: 'CATALOGUE', principale: true },
@@ -239,8 +241,6 @@ export const NAVIGATION: EntreeNav[] = [
     module: 'STOCK',
     Icone: BarChart3,
     section: 'FINANCE',
-    aVenir:
-      "Les colonnes existent, mais la classification n'a jamais ete calculee : les 124 references ont classe_abc a NULL.",
   },
   {
     vers: '/landed-cost',
@@ -248,7 +248,7 @@ export const NAVIGATION: EntreeNav[] = [
     module: 'VALORISATION',
     Icone: Ship,
     section: 'FINANCE',
-    aVenir: "Necessite les frais de transport et de douane, qui vivent dans l'ERP transitaire.",
+
   },
   {
     vers: '/rapports',
@@ -256,9 +256,15 @@ export const NAVIGATION: EntreeNav[] = [
     module: 'VALORISATION',
     Icone: FileSpreadsheet,
     section: 'FINANCE',
-    aVenir: 'Export comptable et valorisation globale : format a arreter avec la DAF.',
   },
 
+
+  /* --- Reglages ----------------------------------------------------------
+     Ils ne sont PAS un module metier : on n'y passe pas sa journee, on y va
+     quand quelque chose doit changer. Les ranger avec le pilotage les mettait
+     au meme rang que le plan d'achat, ce qu'ils ne sont pas. La barre les
+     place donc en pied, separes du reste par un filet. */
+  { vers: '/configuration', libelle: 'Parametres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'PARAMETRES' },
 ]
 
 /** Sections dans l'ordre du rail. */
@@ -276,6 +282,8 @@ export function Coquille() {
   const { theme, definir } = useTheme()
   const emplacement = useLocation()
   const [tiroir, setTiroir] = useState(false)
+  const [apparence, setApparence] = useState(false)
+  const reglages = useApparence()
 
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
   const principales = accessibles.filter((e) => e.principale).slice(0, 4)
@@ -361,48 +369,16 @@ export function Coquille() {
         : 'text-attenue-texte hover:bg-attenue hover:text-texte',
     )
 
-  /** Un groupe de la navigation, en menu deroulant. */
-  const groupeMenu = (section: Section) => {
-    const entrees = accessibles.filter((e) => e.section === section)
-    if (!entrees.length) return null
-    const actif = entrees.some((e) => e.vers === courante?.vers)
-    return (
-      <Menu key={section}>
-        <MenuDeclencheur asChild>
-          <button
-            className={cn(
-              'flex items-center gap-1 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-[13px]',
-              'whitespace-nowrap transition-colors',
-              actif
-                ? 'bg-attenue font-medium text-texte'
-                : 'text-attenue-texte hover:bg-attenue hover:text-texte',
-            )}
-          >
-            {MODULES.find((m) => m.id === section)?.libelle ?? section}
-            <ChevronDown className="size-3 opacity-60" />
-          </button>
-        </MenuDeclencheur>
-        <MenuContenu align="start" className="w-56">
-          {entrees.map((e) => (
-            <MenuElement key={e.vers} asChild disabled={Boolean(e.aVenir)}>
-              <LienNav e={e} end={e.vers === '/'}>
-                <e.Icone />
-                {e.libelle}
-                {e.vers === courante?.vers && (
-                  <Badge ton="contour" className="ml-auto">
-                    ici
-                  </Badge>
-                )}
-              </LienNav>
-            </MenuElement>
-          ))}
-        </MenuContenu>
-      </Menu>
-    )
-  }
 
   return (
-    <div className="flex h-full flex-col bg-fond">
+    <div className="flex h-full bg-fond">
+      {/* La navigation passe en COLONNE. Sept modules et vingt-neuf ecrans ne
+          tiennent pas sur une ligne : la barre du haut les repliait en menus
+          deroulants, et il fallait deux clics et une memoire du rangement pour
+          atteindre un ecran. */}
+      {reglages.disposition !== 'entete' && <BarreLaterale />}
+
+      <div className="flex min-w-0 flex-1 flex-col">
       {/* --- Bandeau superieur : marque, navigation, alertes, profil ------- */}
       <header
         className={cn(
@@ -425,28 +401,26 @@ export function Coquille() {
 
         <div className="mx-1 hidden h-5 w-px shrink-0 bg-bordure xl:block" />
 
-        {/* Navigation en clair au-dela de 1280 px */}
-        <nav className="hidden min-w-0 flex-1 items-center gap-0.5 xl:flex">
-          {accessibles
-            .filter((e) => e.vers === '/')
-            .map((e) => (
-              <NavLink key={e.vers} to={e.vers} end className={({ isActive }) => lienNav(isActive)}>
-                <e.Icone className="size-3.5" />
-                {e.libelle}
-              </NavLink>
-            ))}
-          {GROUPES.filter((g) => g !== 'GENERAL').map(groupeMenu)}
-          {/* Pilotage hors cockpit : rattache au premier groupe pour ne pas
-              multiplier les menus a une seule entree. */}
-          {accessibles
-            .filter((e) => e.section === 'GENERAL' && e.vers !== '/')
-            .map((e) => (
-              <LienNav key={e.vers} e={e} className={({ isActive }) => lienNav(isActive)}>
-                <e.Icone className="size-3.5" />
-                {e.libelle}
-              </LienNav>
-            ))}
-        </nav>
+        {/* La navigation vit desormais dans la barre laterale. Il reste ici
+            le fil d'Ariane de l'ecran courant, qui dit OU l'on est — la barre
+            dit ou l'on peut aller, ce n'est pas la meme question. */}
+        {reglages.disposition === 'laterale' ? (
+          /* La barre laterale porte deja la navigation : l'entete ne dit plus
+             que l'ecran courant. Ou l'on peut aller et ou l'on est sont deux
+             questions differentes, et les melanger encombre. */
+          <div className="hidden min-w-0 flex-1 items-center gap-1.5 text-[13px] md:flex">
+            <span className="truncate font-medium text-texte">
+              {courante?.libelle ?? 'Gestion Fil'}
+            </span>
+            {courante && (
+              <span className="truncate text-attenue-texte">
+                · {MODULES.find((m) => m.id === courante.section)?.libelle}
+              </span>
+            )}
+          </div>
+        ) : (
+          <NavigationEntete accessibles={accessibles} courante={courante} />
+        )}
 
         {/* Navigation repliee en dessous de 1280 px */}
         <div className="min-w-0 flex-1 xl:hidden">
@@ -461,6 +435,17 @@ export function Coquille() {
             <ChevronDown className="size-3 opacity-60" />
           </Bouton>
         </div>
+
+        {/* Apparence : un tiroir plutot qu'une page, pour que le tableau
+            reste visible pendant qu'on regle sa couleur. */}
+        <button
+          onClick={() => setApparence(true)}
+          aria-label="Apparence"
+          title="Theme, caracteres, disposition"
+          className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-attenue-texte transition-colors hover:bg-attenue hover:text-texte"
+        >
+          <Palette className="size-4" />
+        </button>
 
         {/* Alertes */}
         <Menu>
@@ -612,6 +597,28 @@ export function Coquille() {
           <Outlet key={emplacement.pathname} />
         </div>
       </main>
+
+      {reglages.piedVisible && (
+        <footer className="sans-impression flex h-7 shrink-0 items-center gap-4 border-t border-bordure bg-barre px-3 text-[11px] text-attenue-texte">
+          <span className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                'size-1.5 rounded-full',
+                bloquantes.length ? 'bg-danger' : alertes.length ? 'bg-alerte' : 'bg-succes',
+              )}
+            />
+            {alertes.length
+              ? `${alertes.length} controle(s) en anomalie`
+              : `${qControles.data?.length ?? 0} controles au vert`}
+          </span>
+          <span className="ml-auto">{moi?.login} · {moi?.role}</span>
+        </footer>
+      )}
+      </div>
+
+      {/* Le tiroir d'apparence : hors de la colonne de contenu, il se pose
+          par-dessus tout et n'entre dans aucun flux. */}
+      <PanneauApparence ouvert={apparence} surFermeture={() => setApparence(false)} />
 
       {/* --- Barre du bas : mobile ---------------------------------------- */}
       {principales.length > 1 && (

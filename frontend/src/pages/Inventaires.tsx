@@ -11,8 +11,9 @@
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ClipboardCheck, FolderOpen, Plus } from 'lucide-react'
+import { ClipboardCheck, FolderOpen, Plus, Printer } from 'lucide-react'
 import { toast } from 'sonner'
+import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
@@ -89,6 +90,7 @@ const TOLERANCE_PCT = 2
 
 export function Inventaires() {
   const droits = useDroits(MODULE)
+  const ouvrirEtat = useOuvrirVue()
   const qc = useQueryClient()
   const confirmation = useConfirmation()
   const [selection, setSelection] = useState<string | null>(null)
@@ -397,24 +399,35 @@ export function Inventaires() {
           placeholderRecherche="Filtrer les inventaires..."
           tailleParDefaut={10}
           videTitre="Aucun inventaire"
-          actions={
-            droits.peutEcrire
-              ? (i) =>
-                  i.statut === 'BROUILLON' ? (
-                    <Bouton
-                      variante="contour"
-                      taille="sm"
-                      onClick={() => {
-                        setSelection(i.id_inventaire)
-                        ouvrir.mutate(i.id_inventaire)
-                      }}
-                    >
-                      <FolderOpen />
-                      Ouvrir
-                    </Bouton>
-                  ) : null
-              : undefined
-          }
+          actions={(i) => (
+            <div className="flex justify-end gap-0.5">
+              {/* Le proces-verbal s'imprime des l'ouverture du comptage, pas
+                  seulement apres cloture : c'est le document qu'on emporte
+                  pour faire signer les ecarts au fur et a mesure. */}
+              <Bouton
+                variante="discret"
+                taille="icone-xs"
+                onClick={() => ouvrirEtat(`/etats/inventaire/${i.id_inventaire}`)}
+                aria-label="Imprimer"
+                title="Imprimer le proces-verbal"
+              >
+                <Printer />
+              </Bouton>
+              {droits.peutEcrire && i.statut === 'BROUILLON' && (
+                <Bouton
+                  variante="contour"
+                  taille="sm"
+                  onClick={() => {
+                    setSelection(i.id_inventaire)
+                    ouvrir.mutate(i.id_inventaire)
+                  }}
+                >
+                  <FolderOpen />
+                  Ouvrir
+                </Bouton>
+              )}
+            </div>
+          )}
         />
 
         {!inventaire ? (

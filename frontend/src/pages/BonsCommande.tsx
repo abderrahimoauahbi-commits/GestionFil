@@ -13,8 +13,9 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { FileText, Plus, Trash2 } from 'lucide-react'
+import { FileText, Plus, Printer, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
@@ -80,6 +81,7 @@ const LIBELLE: Record<string, string> = {
 
 export function BonsCommande() {
   const droits = useDroits(MODULE)
+  const ouvrirEtat = useOuvrirVue()
   const qc = useQueryClient()
   const naviguer = useNavigate()
   const confirmation = useConfirmation()
@@ -298,6 +300,15 @@ export function BonsCommande() {
         videDescription="Les bons naissent du plan d'achat, ou se creent a la main."
         actions={(b) => (
           <div className="flex justify-end gap-0.5">
+            <Bouton
+              variante="discret"
+              taille="icone-xs"
+              onClick={() => ouvrirEtat(`/bons-commande/${b.id_bc}/etat`)}
+              aria-label="Imprimer"
+              title="Imprimer le bon"
+            >
+              <Printer />
+            </Bouton>
             <Bouton
               variante="discret"
               taille="icone-xs"

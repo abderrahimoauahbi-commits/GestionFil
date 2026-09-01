@@ -206,7 +206,11 @@ export function Carte({
       // Pas d'ombre : sur un fond legerement gris, un simple contour suffit a
       // detacher la carte, et l'ecran reste net meme avec dix blocs empiles.
       className={cn(
-        'rounded-[var(--radius)] border border-bordure bg-surface text-surface-texte',
+        // La classe `carte` ne style rien ici : elle donne aux familles de
+        // couleurs un point d'accroche pour traiter les cartes autrement que
+        // le reste — c'est ce dont Glassier a besoin pour poser du verre sur
+        // les cartes sans en poser sur les cellules d'un tableau.
+        'carte rounded-[var(--radius)] border border-bordure bg-surface text-surface-texte',
         className,
       )}
       {...props}

@@ -1,0 +1,109 @@
+/* -----------------------------------------------------------------------------
+   Le verre.
+   -----------------------------------------------------------------------------
+   Valeurs reprises de la specification de reference du tableau de bord
+   glassmorphique, et non inventees : fond indigo profond, halos bleu et violet,
+   surfaces a 10 % de blanc, flou de 16 px avec saturation a 150 %, bordure
+   blanche a 25 %, rayon de 16 px, ombre portee a 32 px.
+
+   LA REGLE QUI COMPTE, et qui est celle de la source : le verre habille le
+   CHROME — barre laterale, barre du haut, cartes d'indicateurs. Les surfaces
+   DENSES EN DONNEES restent quasi opaques, a 90 %, pour tenir un contraste de
+   4,5:1. Un flou derriere un petit chiffre produit un halo qui le rend penible
+   a lire, et c'est exactement ce qu'on fait ici huit heures par jour.
+   -------------------------------------------------------------------------- */
+
+/* Le fond : sans lui le flou ne floute rien. */
+:root[data-palette="glassier"] body,
+.atelier[data-palette="glassier"] {
+  background-color: #f2f4fb;
+  background-image:
+    radial-gradient(at 15% 12%, rgb(102 126 234 / 0.30) 0px, transparent 55%),
+    radial-gradient(at 85% 8%, rgb(118 75 162 / 0.26) 0px, transparent 50%),
+    radial-gradient(at 55% 92%, rgb(102 126 234 / 0.18) 0px, transparent 52%);
+  background-attachment: fixed;
+}
+
+:root.sombre[data-palette="glassier"] body,
+.atelier.sombre[data-palette="glassier"] {
+  background-color: #0f172a;
+  background-image:
+    radial-gradient(at 15% 12%, rgb(102 126 234 / 0.38) 0px, transparent 55%),
+    radial-gradient(at 85% 8%, rgb(118 75 162 / 0.32) 0px, transparent 50%),
+    radial-gradient(at 55% 92%, rgb(102 126 234 / 0.22) 0px, transparent 52%);
+  background-attachment: fixed;
+}
+
+/* Le chrome : barres, cartes d'indicateurs, graphiques, menus, tiroirs.
+   Une carte QUI PORTE UN TABLEAU en est exclue : c'est une surface de donnees,
+   traitee plus bas. Le faire ici, par `:has`, evite de flouter une surface pour
+   la deflouter ensuite — et evite surtout la dizaine de couches de flou que
+   compterait un ecran de saisie. */
+:root[data-palette="glassier"] header,
+:root[data-palette="glassier"] aside,
+:root[data-palette="glassier"] footer,
+:root[data-palette="glassier"] .carte:not(:has(table)),
+:root[data-palette="glassier"] .viz,
+:root[data-palette="glassier"] [role="dialog"],
+:root[data-palette="glassier"] [data-radix-popper-content-wrapper] > * {
+  background-color: rgb(255 255 255 / 0.55);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border-color: rgb(255 255 255 / 0.60);
+  box-shadow: 0 8px 32px rgb(15 23 42 / 0.10);
+}
+
+:root.sombre[data-palette="glassier"] header,
+:root.sombre[data-palette="glassier"] aside,
+:root.sombre[data-palette="glassier"] footer,
+:root.sombre[data-palette="glassier"] .carte:not(:has(table)),
+:root.sombre[data-palette="glassier"] .viz,
+:root.sombre[data-palette="glassier"] [role="dialog"],
+:root.sombre[data-palette="glassier"] [data-radix-popper-content-wrapper] > * {
+  background-color: rgb(255 255 255 / 0.10);
+  border-color: rgb(255 255 255 / 0.25);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.35);
+}
+
+/* Le rayon de la source : 16 px sur les cadres, 10 sur les petits elements. */
+:root[data-palette="glassier"],
+.atelier[data-palette="glassier"] {
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+
+/* LES DONNEES RESTENT LISIBLES. La regle de la source, appliquee telle quelle :
+   une surface dense en donnees n'est pas du verre. 90 % d'opacite tiennent le
+   contraste de 4,5:1 qu'un petit chiffre reclame. */
+:root[data-palette="glassier"] .carte:has(table),
+:root[data-palette="glassier"] table.grille thead tr {
+  background-color: rgb(255 255 255 / 0.90);
+}
+
+:root.sombre[data-palette="glassier"] .carte:has(table),
+:root.sombre[data-palette="glassier"] table.grille thead tr {
+  /* #111928 a 90 %, la valeur de la reference pour tenir 4,5:1. */
+  background-color: rgb(17 25 40 / 0.90);
+}
+
+/* Les champs de saisie aussi : on y lit et on y ecrit des chiffres. */
+:root[data-palette="glassier"] input,
+:root[data-palette="glassier"] select,
+:root[data-palette="glassier"] textarea {
+  background-color: rgb(255 255 255 / 0.85);
+  backdrop-filter: none;
+}
+
+:root.sombre[data-palette="glassier"] input,
+:root.sombre[data-palette="glassier"] select,
+:root.sombre[data-palette="glassier"] textarea {
+  background-color: rgb(17 25 40 / 0.85);
+}
+
+/* Un fond fixe se comporte comme du parallaxe au defilement : on le libere
+   quand le systeme demande de reduire les animations. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-palette="glassier"] body {
+    background-attachment: scroll;
+  }
+}

@@ -799,6 +799,12 @@ pub async fn propositions_achat(
                 bc.numero_bc, bc.statut AS statut_bc,
                 ro.designation AS designation_origine,
                 uf.login AS figee_par,
+                -- Le bloc « RISQUES IDENTIFIES » du classeur, joint ici plutot
+                -- que servi par une seconde route : l'acheteur decide sur une
+                -- seule ligne, il ne doit pas croiser deux tableaux pour savoir
+                -- si la reference qu'il commande a une alternative.
+                rs.classe_abc, rs.classe_xyz, rs.tier, rs.risque_source,
+                rs.nb_sources, rs.action_recommandee, rs.budget_annuel_mad,
                 (SELECT COUNT(*) FROM v_equivalence e
                   WHERE e.code_reference = pa.code_reference)         AS nb_equivalents,
                 (SELECT ROUND(COALESCE(MAX(e.equivalent_stock_kg), 0), 3)
@@ -837,6 +843,7 @@ pub async fn propositions_achat(
                     ELSE 'SOUS_DIMENSIONNEE'
                 END                                                   AS etat_figement
            FROM plan_achat pa
+          LEFT JOIN v_risque_sourcing rs ON rs.code_reference = pa.code_reference
            JOIN reference r    ON r.code_reference     = pa.code_reference
            JOIN fournisseur f  ON f.code_fournisseur   = pa.code_fournisseur
            LEFT JOIN reference ro    ON ro.code_reference = pa.code_reference_origine
@@ -938,6 +945,116 @@ pub async fn kpi_plan_achat(
     });
     user.masquer(&state.db, module::PLAN_ACHAT, &mut sortie).await?;
     Ok(Json(sortie))
+}
+
+/// L'analyse ABC / XYZ, reference par reference.
+///
+/// Les deux classements ne disent pas la meme chose : ABC pese, XYZ mesure la
+/// regularite. C'est leur CROISEMENT qui commande une politique — une reference
+/// AZ traitee comme une AX se met en rupture, une CZ traitee comme une AX
+/// immobilise du capital pour rien. La vue rend donc la politique deduite, pas
+/// seulement les deux lettres.
+pub async fn analyse_abc_xyz(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let lignes = sqlx::query("SELECT * FROM v_analyse_abc_xyz ORDER BY rang")
+        .fetch_all(&state.db)
+        .await?;
+    let mut valeur = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::STOCK, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
+/// Le cout de revient rendu magasin, ligne de reception par ligne.
+///
+/// Prix d'achat plus quote-part des frais d'approche. C'est le seul chiffre qui
+/// permette de comparer deux fournisseurs eloignes : un prix depart usine plus
+/// bas peut couter plus cher rendu, et le prix d'achat seul ne le montre jamais.
+pub async fn cout_revient(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::VALORISATION, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT * FROM v_cout_revient ORDER BY date_reception DESC, code_reference",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut valeur = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::VALORISATION, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
+/// Les frais d'approche saisis, par reception.
+pub async fn frais_approche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(f): Query<Filtres>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::VALORISATION, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT fa.*, rc.numero_reception, rc.date_reception, fo.nom AS fournisseur_nom
+           FROM frais_approche fa
+           JOIN reception rc ON rc.id_reception = fa.id_reception
+           LEFT JOIN fournisseur fo ON fo.code_fournisseur = rc.code_fournisseur
+          WHERE (?1 IS NULL OR fa.id_reception = ?1)
+          ORDER BY fa.date_frais DESC
+          LIMIT ?2",
+    )
+    .bind(&f.code_reference)
+    .bind(f.limite())
+    .fetch_all(&state.db)
+    .await?;
+    let mut valeur = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::VALORISATION, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
+/// Le controle de coherence des recettes, qualite par qualite.
+///
+/// Le controle C01 rend un COMPTE d'anomalies ; celui-ci rend le DETAIL que le
+/// classeur affiche : combien de roles sur combien sont composes a 100 %, et le
+/// nom de ceux qui echouent avec leur somme. « 6 anomalies » ne se corrige pas ;
+/// « SH : 7 roles sur 8, Franges a 0 % » se corrige.
+pub async fn coherence_recettes(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::QUALITES, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT * FROM v_coherence_recette ORDER BY verdict DESC, code_qualite",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut valeur = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::QUALITES, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
+/// Les risques de sourcing, reference par reference.
+///
+/// Classe ABC, palier de montant, nombre de sources et action recommandee —
+/// le bloc « RISQUES IDENTIFIES » du plan d'achat. Le risque n'est PAS
+/// l'urgence : une reference calme et mono-source ne presse pas, mais elle
+/// merite qu'on qualifie une seconde source avant qu'elle presse.
+pub async fn risques_sourcing(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT * FROM v_risque_sourcing
+          ORDER BY CASE tier WHEN 'TIER_1' THEN 1 WHEN 'TIER_2' THEN 2
+                             WHEN 'TIER_3' THEN 3 ELSE 4 END,
+                   budget_annuel_mad DESC",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut valeur = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut valeur).await?;
+    Ok(Json(valeur))
 }
 
 /// Les six zones du cockpit, en un seul appel.

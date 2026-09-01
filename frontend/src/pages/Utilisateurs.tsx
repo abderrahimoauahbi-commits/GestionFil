@@ -5,6 +5,9 @@ import { api, ErreurApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
 import { Bouton, Chargement, Etiquette, Message, Vide, fmt } from '../components/ui'
+import { Champ, Etiq } from '../composants/ui/base'
+import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { KeyRound } from 'lucide-react'
 
 interface Utilisateur {
   id_utilisateur: string
@@ -32,6 +35,8 @@ export function Utilisateurs() {
   const peutEcrire = peut('UTILISATEURS', 'ECRIRE')
 
   const [creation, setCreation] = useState(false)
+  /** Compte dont on redefinit le mot de passe. Null : aucun. */
+  const [reinit, setReinit] = useState<Utilisateur | null>(null)
   const [retour, setRetour] = useState<{ ton: 'succes' | 'erreur'; texte: string } | null>(null)
 
   const qUsers = useQuery({
@@ -123,6 +128,15 @@ export function Utilisateurs() {
                 >
                   Droits par champ
                 </Link>
+                {/* La reinitialisation est ouverte AUSSI sur son propre
+                    compte : un administrateur doit pouvoir changer son mot de
+                    passe sans passer par la ligne de commande du serveur. */}
+                {peutEcrire && (
+                  <Bouton variante="secondaire" onClick={() => setReinit(u)}>
+                    <KeyRound />
+                    {u.mot_de_passe_a_definir === 1 ? 'Definir le mot de passe' : 'Reinitialiser'}
+                  </Bouton>
+                )}
                 {peutEcrire && u.id_utilisateur !== moi?.id && (
                   <Bouton
                     variante="secondaire"
@@ -136,6 +150,18 @@ export function Utilisateurs() {
             </div>
           ))}
         </div>
+      )}
+
+      {reinit && (
+        <FormulaireMotDePasse
+          utilisateur={reinit}
+          surFermeture={() => setReinit(null)}
+          surSucces={(message) => {
+            setReinit(null)
+            setRetour({ ton: 'succes', texte: message })
+            void qc.invalidateQueries({ queryKey: ['utilisateurs'] })
+          }}
+        />
       )}
 
       {creation && (
@@ -297,5 +323,118 @@ function FormulaireCreation({
         </form>
       </div>
     </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reinitialisation d'un mot de passe                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Poser ou remplacer le mot de passe d'un compte.
+ *
+ * POURQUOI CET ECRAN EXISTE. La route serveur savait deja le faire ; rien ne
+ * l'appelait. Un administrateur qui perdait son mot de passe devait ouvrir une
+ * console sur la machine du serveur et lancer l'outil en ligne de commande —
+ * autant dire que le compte etait perdu.
+ *
+ * LA REGLE DES DOUZE CARACTERES EST VERIFIEE DEUX FOIS. Ici pour le dire tout
+ * de suite, et par le serveur qui seul decide. Le controle d'ecran evite un
+ * aller-retour ; il ne remplace pas celui du serveur, qu'un appel direct
+ * contournerait.
+ */
+function FormulaireMotDePasse({
+  utilisateur,
+  surFermeture,
+  surSucces,
+}: {
+  utilisateur: Utilisateur
+  surFermeture: () => void
+  surSucces: (message: string) => void
+}) {
+  const [mdp, setMdp] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [erreur, setErreur] = useState<string | null>(null)
+
+  const enregistrer = useMutation({
+    mutationFn: () =>
+      api.patch(`/api/admin/utilisateurs/${utilisateur.id_utilisateur}`, {
+        mot_de_passe: mdp,
+      }),
+    onSuccess: () => surSucces(`Mot de passe defini pour ${utilisateur.login}.`),
+    onError: (e) =>
+      setErreur(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.'),
+  })
+
+  const trop_court = mdp.length > 0 && mdp.length < 12
+  const discordant = confirmation.length > 0 && mdp !== confirmation
+  const pret = mdp.length >= 12 && mdp === confirmation
+
+  return (
+    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
+      <DialogueContenu
+        titre={`Mot de passe — ${utilisateur.login}`}
+        description={`${utilisateur.nom} · ${utilisateur.role_libelle}`}
+      >
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            setErreur(null)
+            enregistrer.mutate()
+          }}
+        >
+          {erreur && <Message ton="erreur">{erreur}</Message>}
+
+          <div>
+            <Etiq>Nouveau mot de passe</Etiq>
+            <Champ
+              type="password"
+              autoFocus
+              value={mdp}
+              onChange={(e) => setMdp(e.target.value)}
+              autoComplete="new-password"
+            />
+            <p
+              className={
+                trop_court ? 'mt-1 text-[11px] text-danger' : 'mt-1 text-[11px] text-attenue-texte'
+              }
+            >
+              {mdp.length} caractere(s) — 12 au minimum.
+            </p>
+          </div>
+
+          <div>
+            <Etiq>Confirmation</Etiq>
+            <Champ
+              type="password"
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+              autoComplete="new-password"
+            />
+            {discordant && (
+              <p className="mt-1 text-[11px] text-danger">Les deux saisies different.</p>
+            )}
+          </div>
+
+          {/* Un mot de passe pose ici ne transite pas par un courriel et n'est
+              affiche nulle part ensuite : il faut le transmettre a la personne
+              par un autre canal. Le dire evite de le chercher apres coup. */}
+          <p className="text-[11px] text-attenue-texte">
+            Le mot de passe n est stocke que sous forme d empreinte Argon2. Il ne sera plus
+            affichable : notez-le avant de valider, et transmettez-le a la personne concernee.
+          </p>
+
+          <div className="flex justify-end gap-2">
+            <Bouton type="button" variante="secondaire" onClick={surFermeture}>
+              Annuler
+            </Bouton>
+            <Bouton type="submit" disabled={!pret || enregistrer.isPending}>
+              {enregistrer.isPending ? 'Enregistrement…' : 'Enregistrer'}
+            </Bouton>
+          </div>
+        </form>
+      </DialogueContenu>
+    </Dialogue>
   )
 }

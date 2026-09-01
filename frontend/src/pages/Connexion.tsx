@@ -139,7 +139,61 @@ export function Connexion() {
               {!envoi && <LogIn />}
               Se connecter
             </Bouton>
+
+            {/* Effacer plutot que « annuler ». Il n'y a pas d'ecran precedent
+                ou revenir : la seule chose qu'on puisse annuler, c'est sa
+                saisie. Nommer le bouton par ce qu'il fait vaut mieux que par
+                un verbe generique qui promet un retour inexistant.
+                Hors application de bureau, il ferme aussi la fenetre quand le
+                navigateur le permet. */}
+            <button
+              type="button"
+              onClick={() => {
+                setLogin('')
+                setMotDePasse('')
+                setErreur(null)
+                setVisible(false)
+              }}
+              className="w-full rounded-[var(--radius)] py-2 text-[13px] text-attenue-texte
+                         transition-colors hover:bg-attenue hover:text-texte"
+            >
+              Effacer la saisie
+            </button>
           </form>
+
+          {/* --- Mot de passe perdu -----------------------------------------
+              L'ERP n'envoie pas de courriel et n'a pas de question secrete :
+              la recuperation passe donc par une PERSONNE, pas par un lien.
+              Le dire ici evite de chercher un « mot de passe oublie ? » qui
+              n'existera jamais, et evite surtout de croire le compte perdu. */}
+          <details className="mt-5 rounded-[var(--radius)] border border-bordure bg-surface/60 p-3">
+            <summary className="cursor-pointer text-[12px] font-medium text-texte">
+              Mot de passe perdu ?
+            </summary>
+            <div className="mt-2 flex flex-col gap-2 text-[12px] leading-relaxed text-attenue-texte">
+              <p>
+                Demandez a l administrateur systeme de le redefinir depuis
+                <span className="text-texte"> Parametres → Utilisateurs et droits</span>. Il prend
+                effet immediatement.
+              </p>
+              <p>
+                <span className="font-medium text-texte">
+                  Si c est le compte administrateur lui-meme qui est perdu
+                </span>{' '}
+                — le seul cas ou personne ne peut plus rien redefinir — la reprise se fait sur la
+                machine du serveur, avec un acces au dossier de l application :
+              </p>
+              <pre className="overflow-x-auto rounded-[3px] bg-attenue p-2 font-mono text-[11px] text-texte">
+{`cd backend
+$env:GESTIONFIL_MOT_DE_PASSE = "au moins douze caracteres"
+cargo run --bin gestionfil-admin -- definir-mot-de-passe superviseur`}
+              </pre>
+              <p>
+                Cette commande ne s execute que sur le serveur, par quelqu un qui a deja acces aux
+                fichiers : c est ce qui la rend sure. Aucun lien de reinitialisation ne circule.
+              </p>
+            </div>
+          </details>
 
           <p className="mt-6 text-center text-xs text-attenue-texte">
             {estBureau() ? 'Application de bureau' : 'Application web'} · version 0.1.0

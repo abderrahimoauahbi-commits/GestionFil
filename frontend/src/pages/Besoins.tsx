@@ -30,7 +30,6 @@ import {
   SelecteurPeriode,
   type Periode,
 } from '../composants/SelecteurPeriode'
-import { PageAvecRail, RailLateral } from '../composants/RailLateral'
 import {
   Alerte,
   Badge,
@@ -339,6 +338,22 @@ export function Besoins() {
         description="m² planifies par qualite, et matiere necessaire par reference, sur les mois de la periode."
         actions={
           <>
+            {/* Le choix du plan remonte ici : c'est le contexte de TOUT l'ecran,
+                pas un filtre parmi d'autres. Un rail de 240 px pour une liste
+                deroulante prenait un sixieme de la largeur au tableau, qui en a
+                besoin — il porte un mois par colonne. */}
+            <select
+              value={planVise}
+              onChange={(e) => setIdPlan(e.target.value)}
+              className={CLASSE_FILTRE + ' max-w-[22rem] font-medium'}
+              aria-label="Plan de production"
+            >
+              {qPlans.data.map((p) => (
+                <option key={p.id_plan} value={p.id_plan}>
+                  {p.libelle} (v{p.numero_version}) — {LIBELLE_STATUT[p.statut] ?? p.statut}
+                </option>
+              ))}
+            </select>
             {droits.peutEcrire && plan && plan.statut !== 'CLOTURE' && (
               <Bouton
                 variante="contour"
@@ -358,36 +373,6 @@ export function Besoins() {
         }
       />
 
-      <PageAvecRail
-        large
-        rail={
-          <div className="space-y-3">
-          <RailLateral
-            groupes={[
-              {
-                titre: 'Plans de production',
-                entrees: qPlans.data.map((p) => ({
-                  cle: p.id_plan,
-                  libelle: `${p.libelle} (v${p.numero_version})`,
-                  resume: LIBELLE_STATUT[p.statut] ?? p.statut,
-                  // Le plan EN SERVICE est celui qui alimente reellement le MRP :
-                  // le distinguer evite de lire les besoins d'un plan cloture en
-                  // croyant regarder ceux de l'atelier.
-                  ton:
-                    p.statut === 'EN_COURS'
-                      ? ('succes' as const)
-                      : p.statut === 'CLOTURE'
-                        ? ('neutre' as const)
-                        : ('info' as const),
-                })),
-              },
-            ]}
-            actif={planVise}
-            surChoix={setIdPlan}
-          />
-          </div>
-        }
-      >
       {qDossier.isLoading ? (
         <Chargement texte="Chargement du plan et des besoins..." />
       ) : !plan ? (
@@ -401,7 +386,6 @@ export function Besoins() {
                 <Badge ton={TON_STATUT[plan.statut] ?? 'neutre'}>
                   {LIBELLE_STATUT[plan.statut] ?? plan.statut}
                 </Badge>
-                <span className="font-medium">{plan.libelle}</span>
                 {plan.scenario_nom && (
                   <span className="text-attenue-texte">· {plan.scenario_nom}</span>
                 )}
@@ -692,7 +676,6 @@ export function Besoins() {
           </Carte>
         </div>
       )}
-      </PageAvecRail>
     </div>
   )
 }

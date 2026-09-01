@@ -31,8 +31,10 @@ import type { ReactNode } from 'react'
 import {
   ClipboardList,
   FileText,
+  Library,
   Package,
   Receipt,
+  ScrollText,
   type LucideIcon,
   ShieldCheck,
   Truck,
@@ -88,6 +90,22 @@ const DYNAMIQUES: {
   {
     motif: /^\/transferts\/nouveau$/,
     decrire: () => ({ titre: 'Nouveau transfert', Icone: Truck }),
+  },
+  {
+    motif: /^\/utilisateurs\/([^/]+)\/droits$/,
+    decrire: () => ({ titre: 'Droits par champ', detail: 'Utilisateurs', Icone: ShieldCheck }),
+  },
+  {
+    motif: /^\/utilisateurs$/,
+    decrire: () => ({ titre: 'Utilisateurs et droits', detail: 'Parametres', Icone: ShieldCheck }),
+  },
+  {
+    motif: /^\/audit$/,
+    decrire: () => ({ titre: "Journal d'audit", detail: 'Parametres', Icone: ScrollText }),
+  },
+  {
+    motif: /^\/referentiels$/,
+    decrire: () => ({ titre: 'Referentiels', detail: 'Parametres', Icone: Library }),
   },
   {
     motif: /^\/receptions\/nouvelle$/,

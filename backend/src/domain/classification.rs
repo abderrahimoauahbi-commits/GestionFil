@@ -48,18 +48,41 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     let seuil_x: f64 = lire_param(&mut tx, "P_SeuilXYZ_X").await?;
     let seuil_y: f64 = lire_param(&mut tx, "P_SeuilXYZ_Y").await?;
 
-    // ---- ABC : valeur de consommation sur 12 mois glissants -----------------
+    // ---- ABC : valeur de consommation annuelle ------------------------------
+    //
+    // DEUX CORRECTIONS PAR RAPPORT A LA PREMIERE VERSION, toutes deux constatees
+    // en confrontant le resultat au classeur.
+    //
+    // LE REPLI SUR LE BESOIN PLANIFIE. La version precedente ne lisait que les
+    // sorties reelles du grand livre. Tant que la production n'y ecrit pas, la
+    // requete ne rend rien et la classification annonce « 124 references sans
+    // historique » — ce qu'elle a fait pendant des mois sans que personne
+    // s'en apercoive, les colonnes restant a NULL.
+    //
+    // Le reste de l'ERP applique deja la bonne regle : `v_stock_projete` retient
+    // le MAXIMUM entre consommation constatee et besoin planifie. Une reference
+    // qu'on n'a pas encore consommee mais que le plan reclame n'est pas une
+    // reference sans demande. On reprend donc `conso_mensuelle_kg` de cette vue
+    // plutot que de refaire un calcul qui divergerait du sien.
+    //
+    // LA CONVERSION DE DEVISE. `prix_catalogue_kg` ne convertit que l'UNITE, pas
+    // la monnaie : pour 107 references sur 119 il porte des dollars. Le
+    // multiplier par une quantite donnait une « valeur MAD » neuf fois trop
+    // basse, et faussait le rang de toute reference sans CMUP.
     let mut consos: Vec<ConsoAnnuelle> = sqlx::query_as(
-        "SELECT lm.code_reference,
-                SUM(lm.quantite_kg * COALESCE(r.cmup_mad, r.prix_catalogue_kg, 0)) AS valeur_mad
-           FROM ligne_mouvement lm
-           JOIN mouvement       m  ON m.id_mouvement   = lm.id_mouvement
-           JOIN type_mouvement  tm ON tm.code_type_mvt = m.code_type_mvt
-           JOIN reference       r  ON r.code_reference = lm.code_reference
-          WHERE tm.signe = -1
-            AND m.code_type_mvt = 'SORTIE_PROD'
-            AND m.date_mouvement >= datetime('now','-12 months')
-          GROUP BY lm.code_reference
+        "SELECT sp.code_reference,
+                sp.conso_mensuelle_kg * 12
+                  * COALESCE(r.cmup_mad,
+                             r.prix_catalogue_kg * COALESCE(
+                                 (SELECT tc.taux FROM taux_change tc
+                                   WHERE tc.code_devise = r.code_devise_catalogue
+                                     AND date('now') BETWEEN tc.date_debut
+                                                         AND COALESCE(tc.date_fin, '9999-12-31')
+                                   LIMIT 1), 1.0),
+                             0) AS valeur_mad
+           FROM v_stock_projete sp
+           JOIN reference r ON r.code_reference = sp.code_reference
+          WHERE sp.conso_mensuelle_kg IS NOT NULL
           ORDER BY valeur_mad DESC",
     )
     .fetch_all(&mut *tx)
@@ -89,17 +112,30 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     }
 
     // ---- XYZ : coefficient de variation sur 12 mois glissants ---------------
+    // Meme repli pour la regularite : les sorties reelles quand il y en a, le
+    // besoin planifie sinon. UNION ALL puis MAX par mois — une reference qui a
+    // les deux garde la plus forte des deux valeurs, comme pour la moyenne.
     let mensuelles: Vec<ConsoMensuelle> = sqlx::query_as(
-        "SELECT lm.code_reference,
-                strftime('%Y-%m', m.date_mouvement) AS mois,
-                SUM(lm.quantite_kg) AS quantite_kg
-           FROM ligne_mouvement lm
-           JOIN mouvement      m  ON m.id_mouvement   = lm.id_mouvement
-           JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
-          WHERE tm.signe = -1
-            AND m.code_type_mvt = 'SORTIE_PROD'
-            AND m.date_mouvement >= datetime('now','-12 months')
-          GROUP BY lm.code_reference, mois",
+        "SELECT code_reference, mois, MAX(quantite_kg) AS quantite_kg
+           FROM (
+             SELECT lm.code_reference,
+                    strftime('%Y-%m', m.date_mouvement) AS mois,
+                    SUM(lm.quantite_kg)                 AS quantite_kg
+               FROM ligne_mouvement lm
+               JOIN mouvement      m  ON m.id_mouvement   = lm.id_mouvement
+               JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
+              WHERE tm.signe = -1
+                AND m.code_type_mvt = 'SORTIE_PROD'
+                AND m.date_mouvement >= datetime('now','-12 months')
+              GROUP BY lm.code_reference, mois
+             UNION ALL
+             SELECT bm.code_reference, bm.annee_mois, SUM(bm.quantite_kg)
+               FROM besoin_mrp bm
+               JOIN plan_production pp ON pp.id_plan = bm.id_plan
+                                      AND pp.statut  = 'EN_COURS'
+              GROUP BY bm.code_reference, bm.annee_mois
+           )
+          GROUP BY code_reference, mois",
     )
     .fetch_all(&mut *tx)
     .await?;
@@ -142,10 +178,18 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
 
     let mut sans_historique = 0usize;
     for code in &references {
-        let abc = classes_abc.get(code).copied();
+        // Une reference sans aucune consommation est classee C, pas laissee
+        // vide. Elle est au bas du Pareto par definition — c'est zero pour cent
+        // de la valeur consommee — et le dire permet aux ecrans de couvrir tout
+        // le catalogue. Laisser NULL forcait chaque graphique a inventer une
+        // categorie « non classe » qui ne veut rien dire pour l'acheteur.
+        // `sans_historique` continue de compter ces references a part : le
+        // chiffre reste lisible dans le compte rendu.
+        let abc = classes_abc.get(code).copied().or(Some("C"));
         let xyz = classes_xyz.get(code).copied();
-        if abc.is_none() {
+        if !classes_abc.contains_key(code) {
             sans_historique += 1;
+            nc += 1;
         }
         sqlx::query(
             "UPDATE reference

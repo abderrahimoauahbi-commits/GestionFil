@@ -81,10 +81,12 @@ export function HistoriquePrix() {
      table — un resume qui ignorerait les filtres dirait autre chose que le
      tableau juste en dessous. */
   const resume = useMemo(() => {
+    const compares = vues.filter((l) => l.prix_precedent_mad != null).length
     const avecEcart = vues.map(ecart).filter((e): e is number => e != null)
     const hausses = avecEcart.filter((e) => e > 0.01)
     const baisses = avecEcart.filter((e) => e < -0.01)
     return {
+      compares,
       hausses: hausses.length,
       baisses: baisses.length,
       moyenne: avecEcart.length
@@ -255,6 +257,18 @@ export function HistoriquePrix() {
             </span>
           )}
         </div>
+
+        {/* Sur la base actuelle, les 119 achats portent sur 119 references
+            distinctes : aucune n'a encore ete rachetee, donc la colonne
+            Evolution est vide partout. Le dire vaut mieux que d'aligner cent
+            tirets, qu'on lit comme une panne. La colonne se remplira d'
+            elle-meme au deuxieme achat d'une meme reference. */}
+        {vues.length > 0 && resume.compares === 0 && (
+          <p className="mb-2 rounded-[var(--radius)] border border-bordure bg-attenue/40 px-2.5 py-1.5 text-[12px] text-attenue-texte">
+            Aucune comparaison possible : chacune de ces references n a ete achetee qu une seule
+            fois. La colonne « Evolution » se remplira au rachat de l une d elles.
+          </p>
+        )}
 
         <TableDroits
           module={MODULE}

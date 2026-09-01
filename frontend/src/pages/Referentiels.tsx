@@ -397,22 +397,34 @@ function ReferentielLecture({
   )
 }
 
-export function Referentiels() {
-  const [onglet, setOnglet] = useState(ONGLETS[0])
+/**
+ * @param cles  Sous-ensemble d'onglets a montrer, dans cet ordre.
+ *
+ * L'ecran est monte a deux endroits : en entier sur `/referentiels`, et reduit
+ * aux referentiels de mouvement dans la page de configuration. Le filtre est
+ * donc un PARAMETRE et non une coupe dans la liste : retirer un onglet de la
+ * liste elle-meme le rendrait introuvable partout, y compris les groupes
+ * d'equivalence, seul endroit ou l'on rattache une reference a ses alternatives.
+ */
+export function Referentiels({ cles }: { cles?: string[] } = {}) {
+  const visibles = cles
+    ? (cles.map((c) => ONGLETS.find((o) => o.cle === c)).filter(Boolean) as Onglet[])
+    : ONGLETS
+  const [onglet, setOnglet] = useState(visibles[0])
 
   // Deux groupes, parce que les deux derniers ne se modifient pas : les melanger
   // laisserait chercher un bouton de creation qui n'existe pas.
   const groupes: GroupeRail[] = [
     {
       titre: 'Modifiables',
-      entrees: ONGLETS.filter((o) => !o.lectureSeule).map((o) => ({
+      entrees: visibles.filter((o) => !o.lectureSeule).map((o) => ({
         cle: o.cle,
         libelle: o.libelle,
       })),
     },
     {
       titre: 'Structurels',
-      entrees: ONGLETS.filter((o) => o.lectureSeule).map((o) => ({
+      entrees: visibles.filter((o) => o.lectureSeule).map((o) => ({
         cle: o.cle,
         libelle: o.libelle,
         resume: 'lecture seule',
@@ -452,7 +464,7 @@ export function Referentiels() {
         <RailLateral
           groupes={groupes}
           actif={onglet.cle}
-          surChoix={(c) => setOnglet(ONGLETS.find((o) => o.cle === c) ?? ONGLETS[0])}
+          surChoix={(c) => setOnglet(visibles.find((o) => o.cle === c) ?? visibles[0])}
         />
       </div>
     </div>

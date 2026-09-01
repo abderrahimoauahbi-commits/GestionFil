@@ -940,6 +940,150 @@ pub async fn kpi_plan_achat(
     Ok(Json(sortie))
 }
 
+/// Les six zones du cockpit, en un seul appel.
+///
+/// UN APPEL ET NON SIX. Le poste de travail affiche tout d'un coup ; six
+/// requetes paralleles arriveraient dans le desordre et feraient sautiller la
+/// page pendant une seconde. Les agregats sont petits — quelques dizaines de
+/// lignes chacun — et le cout d'une jointure de plus est nul a cote.
+///
+/// Chaque bloc est une VUE : la regle de calcul se relit en SQL, pas dans du
+/// Rust qui l'aurait reecrite.
+pub async fn cockpit_analyse(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::COCKPIT, Action::Lire).await?;
+
+    async fn bloc(db: &crate::db::Db, sql: &str) -> AppResult<Value> {
+        let lignes = sqlx::query(sql).fetch_all(db).await?;
+        Ok(lignes_en_json(&lignes))
+    }
+
+    let mut sortie = serde_json::json!({
+        "couverture":   bloc(&state.db, "SELECT * FROM v_cockpit_couverture ORDER BY rang").await?,
+        "cout_mensuel": bloc(&state.db, "SELECT * FROM v_cockpit_cout_mensuel ORDER BY annee_mois").await?,
+        "economies":    bloc(&state.db,
+            "SELECT * FROM v_cockpit_economies ORDER BY economie_annuelle_mad DESC LIMIT 20").await?,
+        "devises":      bloc(&state.db, "SELECT * FROM v_cockpit_devise ORDER BY montant_mad DESC").await?,
+        "mono_source":  bloc(&state.db,
+            "SELECT * FROM v_cockpit_mono_source
+              WHERE statut <> 'OK'
+              ORDER BY budget_annuel_mad DESC LIMIT 20").await?,
+        // Le Pareto ne montre que le haut de la courbe : au-dela de trente
+        // references les barres deviennent illisibles et le cumul plat.
+        "pareto":       bloc(&state.db, "SELECT * FROM v_cockpit_pareto ORDER BY rang LIMIT 30").await?,
+        "fournisseurs": bloc(&state.db,
+            "SELECT f.nom AS fournisseur_nom,
+                    COUNT(*) AS nb_references,
+                    ROUND(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * 12
+                              * COALESCE(sp.cmup_mad, 0)), 2) AS budget_annuel_mad
+               FROM v_stock_projete sp
+               JOIN fournisseur f ON f.code_fournisseur = sp.code_fournisseur
+              GROUP BY f.nom
+              HAVING budget_annuel_mad > 0
+              ORDER BY budget_annuel_mad DESC
+              LIMIT 10").await?,
+        "abc_statut":   bloc(&state.db,
+            "SELECT r.classe_abc,
+                    SUM(CASE WHEN sp.statut IN ('RUPTURE','CRITIQUE') THEN 1 ELSE 0 END) AS en_alerte,
+                    SUM(CASE WHEN sp.statut = 'ATTENTION' THEN 1 ELSE 0 END)             AS attention,
+                    SUM(CASE WHEN sp.statut = 'OK' THEN 1 ELSE 0 END)                    AS ok
+               FROM reference r
+               JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
+              WHERE r.actif = 1 AND r.classe_abc IS NOT NULL
+              GROUP BY r.classe_abc
+              ORDER BY r.classe_abc").await?,
+    });
+
+    // Les indicateurs de tresorerie. DSO vient d'un parametre : sans module de
+    // vente, l'ERP ne peut pas le mesurer — il le declare, et l'ecran le dit.
+    let kpi: Option<(f64, f64, f64, f64, i64)> = sqlx::query_as(
+        "SELECT
+           ROUND(COALESCE(SUM(sp.valeur_totale_mad), 0), 2),
+           ROUND(COALESCE(SUM(sp.conso_mensuelle_kg * 12 * sp.cmup_mad), 0), 2),
+           ROUND(COALESCE(AVG(f.delai_paiement_jours), 0), 1),
+           (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_DSODefaut'),
+           COUNT(*)
+         FROM v_stock_projete sp
+         LEFT JOIN fournisseur f ON f.code_fournisseur = sp.code_fournisseur",
+    )
+    .fetch_optional(&state.db)
+    .await?;
+
+    if let Some((valeur_stock, cout_annuel, dpo, dso, _n)) = kpi {
+        // DIO : combien de jours de consommation le stock represente.
+        // Rotation : combien de fois il tourne dans l'annee.
+        // CCC = DIO + DSO - DPO. Negatif, le fournisseur finance le cycle.
+        let dio = if cout_annuel > 0.0 { valeur_stock / cout_annuel * 365.0 } else { 0.0 };
+        let rotation = if valeur_stock > 0.0 { cout_annuel / valeur_stock } else { 0.0 };
+        sortie["tresorerie"] = serde_json::json!({
+            "valeur_stock_mad":        valeur_stock,
+            "cout_matiere_annuel_mad": cout_annuel,
+            "dio_jours":               (dio * 10.0).round() / 10.0,
+            "dso_jours":               dso,
+            "dpo_jours":               dpo,
+            "ccc_jours":               ((dio + dso - dpo) * 10.0).round() / 10.0,
+            "rotation_annuelle":       (rotation * 100.0).round() / 100.0,
+            "dso_est_un_parametre":    true,
+        });
+    }
+
+    user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
+    Ok(Json(sortie))
+}
+
+/// Matrice des prix : une reference par ligne, un mois par colonne.
+///
+/// C'est la vue croisee de la feuille Matrice du classeur, et elle repond a une
+/// question que la liste chronologique ne sait pas poser : « depuis quand cette
+/// reference derive-t-elle ? ». En liste, il faut comparer deux lignes eloignees
+/// de vingt achats ; en matrice, la ligne se lit d'un trait.
+///
+/// LE PRIX D'UN MOIS EST PONDERE PAR LES QUANTITES, pas moyenne simplement.
+/// Deux achats le meme mois, l'un de 30 tonnes a 25 MAD et l'autre de 200 kg a
+/// 40 MAD, donnent 25,1 et non 32,5 : la moyenne simple laisserait un
+/// echantillon marginal peser autant qu'une commande de campagne. C'est la
+/// formule du classeur, conservee telle quelle.
+///
+/// Le serveur agrege ; l'ecran ne fait que disposer. Croiser 124 references par
+/// 36 mois cote navigateur demanderait de descendre toute la table a chaque
+/// ouverture.
+pub async fn matrice_prix(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(f): Query<Filtres>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::CATALOGUE, Action::Lire).await?;
+
+    let lignes = sqlx::query(
+        "SELECT hp.code_reference,
+                r.designation,
+                r.code_fournisseur,
+                fo.nom                                   AS fournisseur_nom,
+                substr(hp.date_achat, 1, 7)              AS annee_mois,
+                ROUND(SUM(hp.prix_kg_mad * hp.quantite_achetee_kg)
+                      / NULLIF(SUM(hp.quantite_achetee_kg), 0), 4) AS prix_moyen_mad,
+                ROUND(SUM(hp.quantite_achetee_kg), 4)    AS quantite_kg,
+                COUNT(*)                                 AS nb_achats
+           FROM historique_prix hp
+           JOIN reference r        ON r.code_reference   = hp.code_reference
+           LEFT JOIN fournisseur fo ON fo.code_fournisseur = hp.code_fournisseur
+          WHERE (?1 IS NULL OR hp.code_reference = ?1)
+          GROUP BY hp.code_reference, substr(hp.date_achat, 1, 7)
+          ORDER BY hp.code_reference, annee_mois
+          LIMIT ?2",
+    )
+    .bind(&f.code_reference)
+    .bind(f.limite() * 12)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut valeur = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::CATALOGUE, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
 /// Historique des prix d'achat : evolution par reference, et prix par bon.
 ///
 /// La table `historique_prix` est immuable et n'enregistre que des prix

@@ -430,3 +430,155 @@ export function ColonnesTemps({
     </Cadre>
   )
 }
+
+/* -------------------------------------------------------------------------- */
+/* Pareto : barres decroissantes et courbe de cumul                            */
+/* -------------------------------------------------------------------------- */
+
+export interface BarrePareto {
+  cle: string
+  libelle: string
+  valeur: number
+  /** Part cumulee, en pourcentage, deja calculee par le serveur. */
+  cumul: number
+  /** Classe ABC : colore la barre selon le rang, pas selon un seuil arbitraire. */
+  classe?: string | null
+}
+
+/**
+ * Le Pareto dit deux choses a la fois, et c'est tout son interet.
+ *
+ * Les BARRES donnent la valeur de chaque reference, decroissante. La COURBE
+ * donne la part cumulee : c'est elle qui montre ou passe la barre des 80 %,
+ * c'est-a-dire combien de references portent l'essentiel de la depense.
+ *
+ * Sans la courbe, on voit que la premiere reference est grosse ; avec elle, on
+ * voit que seize references font huit dixiemes du budget. C'est la seconde
+ * lecture qui commande une politique d'achat.
+ *
+ * La courbe est tracee en SVG sur la meme grille que les barres, pas dans un
+ * second cadre : superposees, les deux echelles se lisent ensemble ; cote a
+ * cote, il faudrait compter les colonnes pour les rapprocher.
+ */
+export function Pareto({
+  titre,
+  sousTitre,
+  unite,
+  donnees,
+  seuilA = 80,
+  maximum = 30,
+}: {
+  titre: string
+  sousTitre?: string
+  unite?: string
+  donnees: BarrePareto[]
+  /** Trait horizontal du seuil de classe A, lu du parametre. */
+  seuilA?: number
+  maximum?: number
+}) {
+  const [tableau, setTableau] = useState(false)
+  const visibles = donnees.slice(0, maximum)
+  const echelle = Math.max(...visibles.map((d) => d.valeur), 0) || 1
+  const H = 150
+  const L = 100
+
+  const points = visibles
+    .map((d, i) => {
+      const x = visibles.length > 1 ? (i / (visibles.length - 1)) * L : L / 2
+      return `${x.toFixed(2)},${(H - (Math.min(d.cumul, 100) / 100) * H).toFixed(2)}`
+    })
+    .join(' ')
+
+  const teinte = (c?: string | null) =>
+    c === 'A' ? 'var(--viz-critique)' : c === 'B' ? 'var(--viz-alerte)' : 'var(--viz-serie-1)'
+
+  return (
+    <Cadre
+      titre={titre}
+      sousTitre={sousTitre}
+      series={[
+        { cle: 'valeur', libelle: 'Valeur consommee' },
+        { cle: 'cumul', libelle: 'Part cumulee' },
+      ]}
+      vueTableau={tableau}
+      basculer={() => setTableau((v) => !v)}
+      tableau={
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-attenue-texte">
+              <th className="py-1 text-left font-medium">Reference</th>
+              <th className="py-1 text-right font-medium">Valeur</th>
+              <th className="py-1 text-right font-medium">Cumul</th>
+              <th className="py-1 text-right font-medium">Classe</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibles.map((d) => (
+              <tr key={d.cle} className="border-t border-bordure">
+                <td className="max-w-[220px] truncate py-1">{d.libelle}</td>
+                <td className="py-1 text-right tabular-nums">
+                  {d.valeur.toLocaleString('fr-FR', { maximumFractionDigits: 0 })}
+                </td>
+                <td className="py-1 text-right tabular-nums">{d.cumul.toFixed(1)} %</td>
+                <td className="py-1 text-right">{d.classe ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      }
+    >
+      <div className="relative" style={{ height: H }}>
+        {/* Barres */}
+        <div className="absolute inset-0 flex items-end gap-[2px]">
+          {visibles.map((d) => (
+            <div
+              key={d.cle}
+              className="min-w-0 flex-1 rounded-t-[2px]"
+              style={{
+                height: `${Math.max((d.valeur / echelle) * 100, 1)}%`,
+                background: teinte(d.classe),
+              }}
+              title={`${d.libelle} — ${d.valeur.toLocaleString('fr-FR', {
+                maximumFractionDigits: 0,
+              })} · cumul ${d.cumul.toFixed(1)} %`}
+            />
+          ))}
+        </div>
+
+        {/* Courbe de cumul, superposee. `preserveAspectRatio="none"` etire le
+            trace a la largeur reelle : les points restent au-dessus de leur
+            barre quelle que soit la taille du cadre. */}
+        <svg
+          className="pointer-events-none absolute inset-0 size-full"
+          viewBox={`0 0 ${L} ${H}`}
+          preserveAspectRatio="none"
+          aria-hidden
+        >
+          <line
+            x1="0"
+            x2={L}
+            y1={H - (seuilA / 100) * H}
+            y2={H - (seuilA / 100) * H}
+            stroke="var(--color-attenue-texte)"
+            strokeWidth="0.5"
+            strokeDasharray="2 2"
+            vectorEffect="non-scaling-stroke"
+          />
+          <polyline
+            points={points}
+            fill="none"
+            stroke="var(--viz-serie-2)"
+            strokeWidth="1.5"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+
+        <span className="absolute right-0 text-[9px] text-attenue-texte"
+              style={{ top: H - (seuilA / 100) * H - 12 }}>
+          {seuilA} % — limite classe A
+        </span>
+      </div>
+      {unite && <p className="text-right text-[10px] text-attenue-texte">{unite}</p>}
+    </Cadre>
+  )
+}

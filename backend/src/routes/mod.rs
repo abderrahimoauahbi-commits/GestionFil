@@ -168,6 +168,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))
         .route("/api/plan-achat/kpi", get(consultation::kpi_plan_achat))
         .route("/api/historique-prix", get(consultation::historique_prix))
+        .route("/api/matrice-prix", get(consultation::matrice_prix))
         .route("/api/plan-achat/propositions", get(consultation::propositions_achat))
         .route("/api/plan-achat/propositions/{id}", patch(consultation::modifier_proposition))
         .route("/api/plan-achat/propositions/{id}/ignorer",
@@ -179,6 +180,7 @@ pub fn router(state: AppState) -> Router {
         // --- Consultation -----------------------------------------------------
         .route("/api/cockpit", get(consultation::cockpit))
         .route("/api/cockpit/risques", get(consultation::risques_rupture))
+        .route("/api/cockpit/analyse", get(consultation::cockpit_analyse))
         .route("/api/stats/mouvements", get(consultation::stats_mouvements))
         .route("/api/stats/prix", get(consultation::stats_prix))
         .route("/api/stats/fournisseurs", get(consultation::stats_fournisseurs))

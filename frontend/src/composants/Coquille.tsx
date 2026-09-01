@@ -28,6 +28,7 @@ import {
   Factory,
   FileText,
   Gauge,
+  Grid3x3,
   LayoutGrid,
   LogOut,
   Menu as MenuIcone,
@@ -35,19 +36,17 @@ import {
   Moon,
   Package,
   PackageSearch,
-  Settings,
   ShieldAlert,
   ShoppingCart,
   Sun,
   Truck,
-  Users,
   Coins,
   FileSpreadsheet,
   Library,
   Receipt,
-  ScrollText,
   Ship,
   SlidersHorizontal,
+  Layers,
   Sparkles,
   TrendingUp,
   Undo2,
@@ -72,7 +71,7 @@ import {
 /**
  * Modules metier de l'ERP.
  *
- * Le rail de gauche porte ces sept entrees et rien d'autre : ce sont les
+ * Le rail de gauche porte ces six entrees et rien d'autre : ce sont les
  * grandes fonctions de l'entreprise, pas des vues d'outil. Le sous-menu du
  * module actif s'affiche dans le bandeau superieur.
  *
@@ -104,7 +103,6 @@ export type Section =
   | 'ACHATS'
   | 'STOCK'
   | 'FINANCE'
-  | 'ADMIN'
 
 export const MODULES: {
   id: Section
@@ -118,7 +116,6 @@ export const MODULES: {
   { id: 'ACHATS',     libelle: 'Achats',     resume: "Plan d'achat, commandes, receptions",       Icone: ShoppingCart },
   { id: 'STOCK',      libelle: 'Stock',      resume: 'Etat, mouvements, transferts, inventaires', Icone: Boxes },
   { id: 'FINANCE',    libelle: 'Finance',    resume: 'Valorisation, classification, rapports',    Icone: Coins },
-  { id: 'ADMIN',      libelle: 'Administration', resume: 'Parametres, droits, audit',             Icone: Settings },
 ]
 
 export interface EntreeNav {
@@ -169,16 +166,20 @@ export const NAVIGATION: EntreeNav[] = [
     section: 'GENERAL',
     roles: ['DIRECTION'],
   },
-  // Deux entrees, une seule page : le reglage des parametres est un ecran a
-  // sections, et chacune merite d'etre nommee dans le menu. Renvoyer les deux
-  // vers une page unique sans preciser la section obligeait a chercher.
-  { vers: '/configuration?section=entreprise', libelle: 'Entreprise', module: 'PARAMETRES', Icone: Library, section: 'GENERAL' },
-  { vers: '/configuration', libelle: 'Parametres generaux', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'GENERAL' },
+  // Une seule porte vers tous les reglages. L'ancienne section Administration
+  // n'existe plus : comptes, droits et journal d'audit sont des PARAMETRES, et
+  // les separer obligeait a se rappeler lequel des deux menus les portait.
+  { vers: '/configuration', libelle: 'Parametres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'GENERAL' },
 
   /* --- 2. Catalogue ------------------------------------------------------ */
   { vers: '/catalogue', libelle: 'References', module: 'CATALOGUE', Icone: Package, section: 'CATALOGUE', principale: true },
   { vers: '/equivalences', libelle: 'Equivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
   { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'CATALOGUE' },
+  // Categories et roles BOM decrivent le PRODUIT : ils quittent l'administration
+  // pour rejoindre ce qu'ils qualifient. Chacun ouvre l'ecran des referentiels
+  // reduit a son seul onglet — meme code, meme CRUD, pas de doublon.
+  { vers: '/categories', libelle: 'Categories matiere', module: 'CATALOGUE', Icone: Library, section: 'CATALOGUE' },
+  { vers: '/roles-bom', libelle: 'Roles BOM', module: 'CATALOGUE', Icone: Layers, section: 'CATALOGUE' },
 
   /* --- 3. Production & MRP ----------------------------------------------- */
   { vers: '/qualites', libelle: 'Qualites', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
@@ -195,6 +196,16 @@ export const NAVIGATION: EntreeNav[] = [
     libelle: 'Historique des prix',
     module: 'CATALOGUE',
     Icone: TrendingUp,
+    section: 'ACHATS',
+  },
+  // La matrice et l'historique montrent les MEMES achats : l'un en liste
+  // chronologique, l'autre croise par mois. Ce n'est pas un doublon — c'est la
+  // difference entre « quand a-t-on paye quoi » et « depuis quand ca monte ».
+  {
+    vers: '/matrice-prix',
+    libelle: 'Matrice des prix',
+    module: 'CATALOGUE',
+    Icone: Grid3x3,
     section: 'ACHATS',
   },
   {
@@ -242,11 +253,6 @@ export const NAVIGATION: EntreeNav[] = [
     aVenir: 'Export comptable et valorisation globale : format a arreter avec la DAF.',
   },
 
-  /* --- 7. Administration -------------------------------------------------- */
-  { vers: '/referentiels', libelle: 'Referentiels', module: 'CATALOGUE', Icone: Library, section: 'ADMIN' },
-  { vers: '/utilisateurs', libelle: 'Utilisateurs & droits', module: 'UTILISATEURS', Icone: Users, section: 'ADMIN' },
-  { vers: '/configuration?section=devises', libelle: 'Devises & taux', module: 'PARAMETRES', Icone: Coins, section: 'ADMIN' },
-  { vers: '/audit', libelle: "Journal d'audit", module: 'AUDIT', Icone: ScrollText, section: 'ADMIN' },
 ]
 
 /** Sections dans l'ordre du rail. */
@@ -291,6 +297,55 @@ export function Coquille() {
   const alertes = (qControles.data ?? []).filter((c) => c.anomalies > 0)
   const bloquantes = alertes.filter((c) => c.criticite === 'BLOQUANT')
 
+  /**
+   * Une entree de navigation, ouvrable ou non.
+   *
+   * POURQUOI CE COMPOSANT EXISTE. Les entrees marquees `aVenir` designent des
+   * ecrans declares mais pas construits ; leur `vers` ne correspond a aucune
+   * route. Rendues en lien ordinaire, elles tombaient sur la route attrape-tout
+   * et REDIRIGEAIENT VERS LE COCKPIT : les trois entrees Finance menaient donc
+   * a la meme page, sans que rien n'explique pourquoi.
+   *
+   * Le fil d'Ariane les desactivait deja ; les quatre autres endroits qui
+   * rendent la navigation l'avaient oublie, chacun a son tour. D'ou un seul
+   * composant, que ces cinq endroits partagent : la regle ne peut plus etre
+   * respectee a un endroit et pas a l'autre.
+   */
+  const LienNav = ({
+    e,
+    className,
+    end,
+    children,
+  }: {
+    e: EntreeNav
+    className?: string | ((p: { isActive: boolean }) => string)
+    end?: boolean
+    children: React.ReactNode
+  }) => {
+    if (e.aVenir) {
+      return (
+        <span
+          aria-disabled
+          title={e.aVenir}
+          className={cn(
+            typeof className === 'function' ? className({ isActive: false }) : className,
+            'cursor-not-allowed opacity-45',
+          )}
+        >
+          {children}
+          <Badge ton="contour" className="ml-auto shrink-0 text-[9px]">
+            a venir
+          </Badge>
+        </span>
+      )
+    }
+    return (
+      <NavLink to={e.vers} end={end} className={className}>
+        {children}
+      </NavLink>
+    )
+  }
+
   const lienNav = (actif: boolean) =>
     cn(
       'flex items-center gap-2 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-[13px]',
@@ -323,8 +378,8 @@ export function Coquille() {
         </MenuDeclencheur>
         <MenuContenu align="start" className="w-56">
           {entrees.map((e) => (
-            <MenuElement key={e.vers} asChild>
-              <NavLink to={e.vers} end={e.vers === '/'}>
+            <MenuElement key={e.vers} asChild disabled={Boolean(e.aVenir)}>
+              <LienNav e={e} end={e.vers === '/'}>
                 <e.Icone />
                 {e.libelle}
                 {e.vers === courante?.vers && (
@@ -332,7 +387,7 @@ export function Coquille() {
                     ici
                   </Badge>
                 )}
-              </NavLink>
+              </LienNav>
             </MenuElement>
           ))}
         </MenuContenu>
@@ -380,10 +435,10 @@ export function Coquille() {
           {accessibles
             .filter((e) => e.section === 'GENERAL' && e.vers !== '/')
             .map((e) => (
-              <NavLink key={e.vers} to={e.vers} className={({ isActive }) => lienNav(isActive)}>
+              <LienNav key={e.vers} e={e} className={({ isActive }) => lienNav(isActive)}>
                 <e.Icone className="size-3.5" />
                 {e.libelle}
-              </NavLink>
+              </LienNav>
             ))}
         </nav>
 
@@ -523,15 +578,15 @@ export function Coquille() {
                     </div>
                     <div className="space-y-0.5">
                       {entrees.map((e) => (
-                        <NavLink
+                        <LienNav
                           key={e.vers}
-                          to={e.vers}
+                          e={e}
                           end={e.vers === '/'}
                           className={({ isActive }) => lienNav(isActive)}
                         >
                           <e.Icone className="size-3.5" />
                           {e.libelle}
-                        </NavLink>
+                        </LienNav>
                       ))}
                     </div>
                   </div>

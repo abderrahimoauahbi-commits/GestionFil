@@ -11,6 +11,7 @@ import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
 import { Cockpit } from './pages/Cockpit'
 import { HistoriquePrix } from './pages/HistoriquePrix'
+import { MatricePrix } from './pages/MatricePrix'
 import { Statistiques } from './pages/Statistiques'
 import { Equivalences } from './pages/Equivalences'
 import { Configuration } from './pages/Configuration'
@@ -112,11 +113,19 @@ const ECRANS = (
       <Route path="transferts/:id/bon-reception" element={<ExigeModule module="MOUVEMENTS"><BonTransfert type="reception" /></ExigeModule>} />
       <Route path="configuration" element={<ExigeModule module="PARAMETRES"><Configuration /></ExigeModule>} />
       <Route path="equivalences" element={<ExigeModule module="CATALOGUE"><Equivalences /></ExigeModule>} />
+      <Route path="matrice-prix" element={<ExigeModule module="CATALOGUE"><MatricePrix /></ExigeModule>} />
       <Route path="historique-prix" element={<ExigeModule module="CATALOGUE"><HistoriquePrix /></ExigeModule>} />
       <Route path="statistiques" element={<ExigeModule module="MOUVEMENTS"><Statistiques /></ExigeModule>} />
       <Route path="receptions/nouvelle" element={<ExigeModule module="RECEPTIONS"><ReceptionNouvelle /></ExigeModule>} />
       <Route path="receptions/:id" element={<ExigeModule module="RECEPTIONS"><Reception /></ExigeModule>} />
       <Route path="fournisseurs" element={<ExigeModule module="FOURNISSEURS"><Fournisseurs /></ExigeModule>} />
+      {/* Trois portes sur le meme ecran, chacune reduite a son onglet.
+          Categories et roles BOM sont ranges au Catalogue : ils decrivent le
+          produit. `/referentiels` reste monte sans figurer au menu — c'est le
+          seul endroit ou l'on CREE un groupe d'equivalence, et le supprimer
+          rendrait les 93 groupes inadministrables. */}
+      <Route path="categories" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['categories']} /></ExigeModule>} />
+      <Route path="roles-bom" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['roles-bom']} /></ExigeModule>} />
       <Route path="referentiels" element={<ExigeModule module="CATALOGUE"><Referentiels /></ExigeModule>} />
       <Route path="qualites" element={<ExigeModule module="QUALITES"><Qualites /></ExigeModule>} />
       <Route path="recettes" element={<ExigeModule module="RECETTES"><Recettes /></ExigeModule>} />

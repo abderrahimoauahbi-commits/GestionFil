@@ -358,7 +358,7 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
 
   const destinations = useMemo<Entree[]>(
     () =>
-      NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role)).map((e) => ({
+      NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role) && !e.aVenir).map((e) => ({
         id: e.vers,
         libelle: e.libelle,
         detail: e.section,

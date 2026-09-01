@@ -30,7 +30,10 @@ import {
   PackageCheck,
   RotateCcw,
   Save,
+  ScrollText,
+  ShieldCheck,
   TrendingUp,
+  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useParamVue } from '../lib/navigation'
@@ -53,7 +56,9 @@ import {
 } from '../composants/ui/base'
 import { Infobulle } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { Audit } from './Audit'
 import { Referentiels } from './Referentiels'
+import { Utilisateurs } from './Utilisateurs'
 
 const MODULE = 'PARAMETRES'
 
@@ -92,9 +97,26 @@ type CleSection =
   | 'reception'
   | 'referentiels'
   | 'devises'
+  | 'utilisateurs'
+  | 'comptes'
+  | 'audit'
+
+/**
+ * Les quatre familles du rail, dans l'ordre ou on les parcourt en installant
+ * l'application : d'abord qui est l'entreprise, puis comment elle gere ses
+ * stocks, puis ce que la machine doit savoir, puis qui a le droit d'y toucher.
+ */
+const FAMILLES = [
+  'Entreprise',
+  'Parametres de gestion',
+  'Parametres systeme',
+  'Parametres utilisateurs',
+] as const
+type Famille = (typeof FAMILLES)[number]
 
 interface Section {
   cle: CleSection
+  famille: Famille
   libelle: string
   resume: string
   Icone: React.ComponentType<{ className?: string }>
@@ -112,6 +134,7 @@ interface Section {
 const SECTIONS: Section[] = [
   {
     cle: 'alertes',
+    famille: 'Parametres de gestion',
     libelle: 'Alertes et seuils',
     resume: 'Quand une reference passe en attention, en critique, en rupture',
     Icone: AlertTriangle,
@@ -134,6 +157,7 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'production',
+    famille: 'Parametres de gestion',
     libelle: 'Production',
     resume: 'Perte matiere, stocks de securite, tolerance des recettes',
     Icone: Factory,
@@ -163,6 +187,7 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'entreprise',
+    famille: 'Entreprise',
     libelle: 'Entreprise',
     resume: 'Identite, pays, devise de reporting',
     Icone: Building2,
@@ -185,6 +210,7 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'supply',
+    famille: 'Parametres de gestion',
     libelle: 'Chaine logistique',
     resume: 'Classement ABC/XYZ, tiering des commandes, notation fournisseurs',
     Icone: TrendingUp,
@@ -227,6 +253,7 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'reception',
+    famille: 'Parametres de gestion',
     libelle: 'Receptions et OTIF',
     resume: 'Tolerance de pesee, cible de performance fournisseur',
     Icone: PackageCheck,
@@ -249,15 +276,38 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'referentiels',
-    libelle: 'Referentiels',
-    resume: 'Categories, roles, magasins, mouvements, motifs, equivalences',
+    famille: 'Parametres systeme',
+    libelle: 'Mouvement stock',
+    resume: 'Magasins, types et motifs de mouvement, motifs de retour',
     Icone: Layers,
   },
   {
     cle: 'devises',
+    famille: 'Parametres systeme',
     libelle: 'Devises et taux',
     resume: 'Cours de change en vigueur et leur historique',
     Icone: Coins,
+  },
+  {
+    cle: 'comptes',
+    famille: 'Parametres utilisateurs',
+    libelle: 'Utilisateurs et droits',
+    resume: 'Comptes, roles, et la grille module x champ',
+    Icone: Users,
+  },
+  {
+    cle: 'utilisateurs',
+    famille: 'Parametres utilisateurs',
+    libelle: 'Roles et transitions',
+    resume: "Roles applicatifs et transitions d'etat autorisees",
+    Icone: ShieldCheck,
+  },
+  {
+    cle: 'audit',
+    famille: 'Parametres utilisateurs',
+    libelle: "Journal d'audit",
+    resume: 'Qui a fait quoi, quand, et depuis quelle adresse',
+    Icone: ScrollText,
   },
 ]
 
@@ -368,9 +418,9 @@ export function Configuration() {
         large
         rail={
           <RailLateral
-            groupes={[
-              {
-                entrees: SECTIONS.map((s) => ({
+            groupes={FAMILLES.map((famille) => ({
+              titre: famille,
+              entrees: SECTIONS.filter((s) => s.famille === famille).map((s) => ({
                   cle: s.cle,
                   libelle: s.libelle,
                   resume: s.resume,
@@ -382,9 +432,8 @@ export function Configuration() {
                       ? null
                       : s.blocs.reduce((n, b) => n + b.codes.length, 0) +
                         (orphelins[s.cle]?.length ?? 0),
-                })),
-              },
-            ]}
+              })),
+            }))}
             actif={recherche ? '' : section}
             surChoix={(c) => {
               setSection(c as CleSection)
@@ -428,7 +477,23 @@ export function Configuration() {
               </CarteCorps>
             </Carte>
           ) : section === 'referentiels' ? (
-            <Referentiels />
+            /* Categories matiere, roles BOM et groupes d'equivalence sont
+               retires d'ici : ce sont des referentiels de PRODUIT, pas de
+               mouvement. Ils restent entiers sur `/referentiels`, ou le
+               rattachement d'une reference a ses equivalents se fait. */
+            <Referentiels
+              cles={['magasins', 'types-mouvement', 'motifs-mouvement', 'motifs-ligne']}
+            />
+          ) : section === 'comptes' ? (
+            /* Les ecrans complets, montes tels quels. Ils gardent leur propre
+               entete : le rail de gauche dit ou l'on est, l'entete dit ce que
+               l'ecran fait. Les recopier en version reduite ici ferait deux
+               grilles de droits a maintenir pour une seule regle. */
+            <Utilisateurs />
+          ) : section === 'audit' ? (
+            <Audit />
+          ) : section === 'utilisateurs' ? (
+            <Referentiels cles={['roles-utilisateur', 'transitions']} />
           ) : section === 'devises' ? (
             <SectionDevises modifiable={droits.peutEcrire} />
           ) : (

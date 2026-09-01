@@ -46,6 +46,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
+import { CockpitAnalyse } from './CockpitAnalyse'
 import { EnTetePage } from '../composants/Coquille'
 import {
   Alerte,
@@ -455,6 +456,12 @@ export function Cockpit() {
           direct, les besoins datent de ce calcul.
         </p>
       ) : null}
+
+      {/* ---- Les six zones du classeur -------------------------------------
+          Dans l'ordre du cockpit Excel : les graphiques d'abord, parce qu'ils
+          donnent la forme du probleme, puis les tableaux qui la detaillent. */}
+      <TitreBande texte="Analyse" />
+      <CockpitAnalyse />
 
       {/* ---- Tableau de bord ----------------------------------------------- */}
       <TitreBande texte="Concentration et dependances" />

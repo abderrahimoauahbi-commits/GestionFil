@@ -13,6 +13,7 @@ interface Props<L> {
   chargement?: boolean
   cle: (ligne: L) => string
   surClic?: (ligne: L) => void
+  menuContextuel?: (ligne: L) => React.ReactNode
   texteVide?: string
   titreCarte?: (ligne: L) => React.ReactNode
 }

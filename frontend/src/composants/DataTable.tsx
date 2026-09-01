@@ -42,6 +42,11 @@ import { useDroits } from '../auth/AuthContext'
 import { cn } from '../lib/utils'
 import { Badge, Bouton, Champ, Chargement, EtatVide, Selecteur, Squelette } from './ui/base'
 import { Menu, MenuContenu, MenuDeclencheur, MenuElement, MenuTitre } from './ui/surcouches'
+import {
+  MenuContextuel,
+  MenuContextuelContenu,
+  MenuContextuelDeclencheur,
+} from './ui/surcouches'
 
 export interface ColonneDT<L> {
   /** Nom du champ, tel qu'il figure dans `champ_configurable`. */
@@ -93,6 +98,16 @@ interface Props<L> {
   surClic?: (ligne: L) => void
   /** Colonne d'actions, toujours rendue en fin de ligne. */
   actions?: (ligne: L) => React.ReactNode
+  /**
+   * Menu au clic droit sur la ligne.
+   *
+   * Rend des `MenuContextuelElement`. Il DOUBLE des chemins qui existent
+   * ailleurs, il n'en cree pas : un acheteur qui repere une rupture dans la
+   * liste veut commander sans repasser par le menu, mais l'ecran de commande
+   * reste atteignable normalement. Un menu contextuel est une raccourci, jamais
+   * le seul acces a une action — il ne s'ouvre ni au clavier ni au doigt.
+   */
+  menuContextuel?: (ligne: L) => React.ReactNode
   titreCarte?: (ligne: L) => React.ReactNode
   recherche?: boolean
   placeholderRecherche?: string
@@ -116,6 +131,7 @@ export function DataTable<L extends Record<string, unknown>>({
   cle,
   surClic,
   actions,
+  menuContextuel,
   titreCarte,
   recherche = true,
   placeholderRecherche = 'Filtrer...',
@@ -437,40 +453,62 @@ export function DataTable<L extends Record<string, unknown>>({
                 ))}
               </thead>
               <tbody>
-                {rangs.map((rang) => (
-                  <tr
-                    key={cle(rang.original)}
-                    onClick={surClic ? () => surClic(rang.original) : undefined}
-                    // Le quadrillage vient de la classe `grille` : filets
-                    // horizontaux ET verticaux, definis une seule fois dans la
-                    // feuille globale.
-                    className={cn(
-                      'transition-colors',
-                      surClic ? 'cursor-pointer hover:bg-primaire/5' : 'hover:bg-attenue/60',
-                    )}
-                  >
-                    {rang.getVisibleCells().map((cellule) => {
-                      const m = meta(cellule.column.id)
-                      return (
+                {rangs.map((rang) => {
+                  const ligne = (
+                    <tr
+                      onClick={surClic ? () => surClic(rang.original) : undefined}
+                      // Le quadrillage vient de la classe `grille` : filets
+                      // horizontaux ET verticaux, definis une seule fois dans la
+                      // feuille globale.
+                      className={cn(
+                        'transition-colors',
+                        surClic ? 'cursor-pointer hover:bg-primaire/5' : 'hover:bg-attenue/60',
+                        // Etat propre au menu contextuel : la ligne visee reste
+                        // designee tant que le menu est ouvert. Sans cela le
+                        // menu flotte au-dessus du tableau sans qu'on sache plus
+                        // sur quelle ligne il porte.
+                        menuContextuel && 'data-[state=open]:bg-primaire/8',
+                      )}
+                    >
+                      {rang.getVisibleCells().map((cellule) => {
+                        const m = meta(cellule.column.id)
+                        return (
+                          <td
+                            key={cellule.id}
+                            className={cn(
+                              'px-2.5 py-[5px] align-middle',
+                              m.numerique && 'text-right tabular-nums',
+                              m.secondaire && 'hidden xl:table-cell',
+                            )}
+                          >
+                            {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
+                          </td>
+                        )
+                      })}
+                      {actions && (
                         <td
-                          key={cellule.id}
-                          className={cn(
-                            'px-2.5 py-[5px] align-middle',
-                            m.numerique && 'text-right tabular-nums',
-                            m.secondaire && 'hidden xl:table-cell',
-                          )}
+                          className="px-2 py-[5px] text-right"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
+                          {actions(rang.original)}
                         </td>
-                      )
-                    })}
-                    {actions && (
-                      <td className="px-2 py-[5px] text-right" onClick={(e) => e.stopPropagation()}>
-                        {actions(rang.original)}
-                      </td>
-                    )}
-                  </tr>
-                ))}
+                      )}
+                    </tr>
+                  )
+
+                  if (!menuContextuel) return <React.Fragment key={cle(rang.original)}>{ligne}</React.Fragment>
+
+                  // `asChild` fait porter le clic droit par le <tr> lui-meme.
+                  // Sans lui, Radix inserait un <span> declencheur, que le
+                  // navigateur remonterait hors du <tbody> : la ligne se
+                  // detacherait du tableau.
+                  return (
+                    <MenuContextuel key={cle(rang.original)}>
+                      <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
+                      <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
+                    </MenuContextuel>
+                  )
+                })}
               </tbody>
             </table>
           </div>

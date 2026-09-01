@@ -13,6 +13,7 @@ import { MenuElement, useConfirmation } from '../composants/ui/surcouches'
 import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EcranReferentiel } from '../components/EcranReferentiel'
+import { useParamVue } from '../lib/navigation'
 import type { ChampDef } from '../components/Formulaire'
 import { PageAvecRail } from '../composants/RailLateral'
 import type { Colonne } from '../components/TableDroits'
@@ -44,6 +45,8 @@ export function Catalogue() {
   const [fournisseur, setFournisseur] = useState('')
   const [unite, setUnite] = useState('')
   const [actif, setActif] = useState('1')
+  // Arrivee ciblee : `/catalogue?reference=X` pose la recherche sur X.
+  const refDemandee = useParamVue('reference')
 
   // Le catalogue entier, uniquement pour COMPTER par categorie. La liste
   // affichee reste servie par EcranReferentiel, qui gere tri, pagination et
@@ -273,6 +276,7 @@ export function Catalogue() {
           champs={champs}
           filtres={filtres}
           libelleUnite="reference"
+          rechercheInitiale={refDemandee}
           titreCarte={(r) => r.code_reference}
         />
       </PageAvecRail>

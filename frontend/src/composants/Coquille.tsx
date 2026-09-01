@@ -49,6 +49,8 @@ import {
   Ship,
   SlidersHorizontal,
   Sparkles,
+  TrendingUp,
+  Undo2,
   Warehouse,
   type LucideIcon,
 } from 'lucide-react'
@@ -74,17 +76,33 @@ import {
  * grandes fonctions de l'entreprise, pas des vues d'outil. Le sous-menu du
  * module actif s'affiche dans le bandeau superieur.
  *
+ * DEUX CORRECTIONS PAR RAPPORT AU DECOUPAGE PRECEDENT, toutes deux venues de
+ * l'usage et non d'une preference de rangement.
+ *
+ * Le catalogue N'EST PAS UN SOUS-ENSEMBLE DES ACHATS. Il etait range sous
+ * Achats parce qu'on y achete des references — mais la production, le stock et
+ * la qualite le consultent tout autant, et l'acheteur n'en est pas
+ * proprietaire. Il devient une section a lui, avec ce qui le decrit :
+ * equivalences et fournisseurs.
+ *
+ * Le MRP N'EST PAS UN MODULE. C'est un calcul, celui qui relie la production
+ * aux achats. Lui donner une icone separee obligeait a choisir arbitrairement
+ * ou ranger « stock projete » (cote MRP) et « etat de stock » (cote Stock) —
+ * deux ecrans que les magasiniers cherchaient au meme endroit. Le calcul se
+ * range donc avec ce qui le nourrit, la production, et ses resultats avec ce
+ * qu'ils decrivent, le stock.
+ *
  * Une precision de vocabulaire qui compte ici : dans cette usine, « qualite »
  * designe une **qualite de tapis** (SH, LP, ...), pas le controle qualite. Les
  * qualites sont donc rangees en Production, et le controle qualite reste ou il
  * se pratique — dans la reception, au moment de la pesee.
  */
 export type Section =
-  | 'PILOTAGE'
-  | 'STOCK'
-  | 'MRP'
+  | 'GENERAL'
+  | 'CATALOGUE'
   | 'PRODUCTION'
   | 'ACHATS'
+  | 'STOCK'
   | 'FINANCE'
   | 'ADMIN'
 
@@ -94,13 +112,13 @@ export const MODULES: {
   resume: string
   Icone: LucideIcon
 }[] = [
-  { id: 'PILOTAGE', libelle: 'Pilotage', resume: 'Indicateurs et alertes', Icone: Gauge },
-  { id: 'STOCK', libelle: 'Stock', resume: 'Mouvements, inventaires, receptions', Icone: Boxes },
-  { id: 'MRP', libelle: 'MRP', resume: 'Plans, besoins, stock projete', Icone: Calculator },
-  { id: 'PRODUCTION', libelle: 'Production', resume: 'Qualites et compositions', Icone: Factory },
-  { id: 'ACHATS', libelle: 'Achats', resume: "Plan d'achat, commandes, fournisseurs", Icone: ShoppingCart },
-  { id: 'FINANCE', libelle: 'Finance', resume: 'Valorisation, classification, rapports', Icone: Calculator },
-  { id: 'ADMIN', libelle: 'Parametres', resume: 'Referentiels, droits, audit', Icone: Settings },
+  { id: 'GENERAL',    libelle: 'General',    resume: 'Tableau de bord, statistiques, entreprise', Icone: Gauge },
+  { id: 'CATALOGUE',  libelle: 'Catalogue',  resume: 'References, equivalences, fournisseurs',    Icone: Package },
+  { id: 'PRODUCTION', libelle: 'Production', resume: 'Qualites, recettes, plans, besoins',        Icone: Factory },
+  { id: 'ACHATS',     libelle: 'Achats',     resume: "Plan d'achat, commandes, receptions",       Icone: ShoppingCart },
+  { id: 'STOCK',      libelle: 'Stock',      resume: 'Etat, mouvements, transferts, inventaires', Icone: Boxes },
+  { id: 'FINANCE',    libelle: 'Finance',    resume: 'Valorisation, classification, rapports',    Icone: Coins },
+  { id: 'ADMIN',      libelle: 'Administration', resume: 'Parametres, droits, audit',             Icone: Settings },
 ]
 
 export interface EntreeNav {
@@ -140,56 +158,72 @@ export function estAccessible(
 }
 
 export const NAVIGATION: EntreeNav[] = [
-  /* --- 1. Pilotage ------------------------------------------------------- */
-  { vers: '/', libelle: 'Cockpit', module: 'COCKPIT', Icone: Gauge, section: 'PILOTAGE', principale: true },
-  { vers: '/stock', libelle: 'Stock projete', module: 'STOCK', Icone: PackageSearch, section: 'MRP' },
-  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'PILOTAGE' },
+  /* --- 1. General -------------------------------------------------------- */
+  { vers: '/', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', principale: true },
+  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'GENERAL' },
   {
     vers: '/assistant',
     libelle: 'Assistant',
     module: 'COCKPIT',
     Icone: Sparkles,
-    section: 'PILOTAGE',
+    section: 'GENERAL',
     roles: ['DIRECTION'],
   },
+  // Deux entrees, une seule page : le reglage des parametres est un ecran a
+  // sections, et chacune merite d'etre nommee dans le menu. Renvoyer les deux
+  // vers une page unique sans preciser la section obligeait a chercher.
+  { vers: '/configuration?section=entreprise', libelle: 'Entreprise', module: 'PARAMETRES', Icone: Library, section: 'GENERAL' },
+  { vers: '/configuration', libelle: 'Parametres generaux', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'GENERAL' },
 
-  /* --- 2. Stock ---------------------------------------------------------- */
-  { vers: '/etat-stock', libelle: 'Etat de stock', module: 'STOCK', Icone: Warehouse, section: 'STOCK', principale: true },
+  /* --- 2. Catalogue ------------------------------------------------------ */
+  { vers: '/catalogue', libelle: 'References', module: 'CATALOGUE', Icone: Package, section: 'CATALOGUE', principale: true },
+  { vers: '/equivalences', libelle: 'Equivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
+  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'CATALOGUE' },
+
+  /* --- 3. Production & MRP ----------------------------------------------- */
+  { vers: '/qualites', libelle: 'Qualites', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
+  { vers: '/recettes', libelle: 'Recettes (BOM)', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
+  { vers: '/plans', libelle: 'Plan de production', module: 'PLANS', Icone: LayoutGrid, section: 'PRODUCTION' },
+  { vers: '/besoins', libelle: 'Besoins (MRP)', module: 'MRP', Icone: Calculator, section: 'PRODUCTION', principale: true },
+  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'PRODUCTION' },
+
+  /* --- 4. Achats --------------------------------------------------------- */
+  { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
+  { vers: '/receptions', libelle: 'Receptions', module: 'RECEPTIONS', Icone: Package, section: 'ACHATS', principale: true },
+  {
+    vers: '/historique-prix',
+    libelle: 'Historique des prix',
+    module: 'CATALOGUE',
+    Icone: TrendingUp,
+    section: 'ACHATS',
+  },
+  {
+    vers: '/retours-fournisseur',
+    libelle: 'Retours fournisseur',
+    module: 'MOUVEMENTS',
+    Icone: Undo2,
+    section: 'ACHATS',
+    aVenir:
+      "Le type de mouvement existe et la sortie fonctionne ; il manque l'ecran qui rattache le retour a sa ligne de reception.",
+  },
+
+  /* --- 5. Stock & mouvements --------------------------------------------- */
+  { vers: '/etat-stock', libelle: 'Etat des stocks', module: 'STOCK', Icone: Warehouse, section: 'STOCK', principale: true },
+  { vers: '/stock', libelle: 'Stock projete & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
   { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: Boxes, section: 'STOCK', principale: true },
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
   { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardList, section: 'STOCK' },
-  { vers: '/receptions', libelle: 'Receptions', module: 'RECEPTIONS', Icone: Package, section: 'STOCK', principale: true },
 
-  /* --- 3. Production ----------------------------------------------------- */
-  { vers: '/qualites', libelle: 'Qualites', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
-  { vers: '/recettes', libelle: 'Compositions', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
-  { vers: '/plans', libelle: 'Plans', module: 'PLANS', Icone: LayoutGrid, section: 'MRP' },
-  { vers: '/besoins', libelle: 'Calcul des besoins', module: 'MRP', Icone: Calculator, section: 'MRP', principale: true },
-
-  /* --- 4. Achats --------------------------------------------------------- */
-  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'ACHATS' },
-  { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
-  { vers: '/catalogue', libelle: 'Catalogue', module: 'CATALOGUE', Icone: Package, section: 'ACHATS', principale: true },
-  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'ACHATS' },
-  { vers: '/equivalences', libelle: 'Equivalences', module: 'CATALOGUE', Icone: Link2, section: 'ACHATS' },
-
-  /* --- 5. Finance & valorisation ----------------------------------------- */
-  { vers: '/valorisation', libelle: 'Valorisation stock', module: 'VALORISATION', Icone: Coins, section: 'FINANCE' },
+  /* --- 6. Finance & valorisation ----------------------------------------- */
+  { vers: '/valorisation', libelle: 'Valorisation (CMUP)', module: 'VALORISATION', Icone: Coins, section: 'FINANCE' },
   {
     vers: '/classification',
     libelle: 'Analyse ABC / XYZ',
     module: 'STOCK',
     Icone: BarChart3,
     section: 'FINANCE',
-    aVenir: "Les colonnes existent, mais la classification n'a jamais ete calculee sur cette base.",
-  },
-  {
-    vers: '/rapports',
-    libelle: 'Rapports',
-    module: 'VALORISATION',
-    Icone: FileSpreadsheet,
-    section: 'FINANCE',
-    aVenir: "Export comptable et valorisation globale : format a arreter avec la DAF.",
+    aVenir:
+      "Les colonnes existent, mais la classification n'a jamais ete calculee : les 124 references ont classe_abc a NULL.",
   },
   {
     vers: '/landed-cost',
@@ -199,12 +233,19 @@ export const NAVIGATION: EntreeNav[] = [
     section: 'FINANCE',
     aVenir: "Necessite les frais de transport et de douane, qui vivent dans l'ERP transitaire.",
   },
+  {
+    vers: '/rapports',
+    libelle: 'Rapports financiers',
+    module: 'VALORISATION',
+    Icone: FileSpreadsheet,
+    section: 'FINANCE',
+    aVenir: 'Export comptable et valorisation globale : format a arreter avec la DAF.',
+  },
 
-  /* --- 6. Parametres & administration ------------------------------------ */
+  /* --- 7. Administration -------------------------------------------------- */
   { vers: '/referentiels', libelle: 'Referentiels', module: 'CATALOGUE', Icone: Library, section: 'ADMIN' },
   { vers: '/utilisateurs', libelle: 'Utilisateurs & droits', module: 'UTILISATEURS', Icone: Users, section: 'ADMIN' },
-  { vers: '/parametres', libelle: 'Parametres systeme', module: 'PARAMETRES', Icone: Settings, section: 'ADMIN' },
-  { vers: '/configuration', libelle: 'Champs & affichage', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'ADMIN' },
+  { vers: '/configuration?section=devises', libelle: 'Devises & taux', module: 'PARAMETRES', Icone: Coins, section: 'ADMIN' },
   { vers: '/audit', libelle: "Journal d'audit", module: 'AUDIT', Icone: ScrollText, section: 'ADMIN' },
 ]
 
@@ -333,11 +374,11 @@ export function Coquille() {
                 {e.libelle}
               </NavLink>
             ))}
-          {GROUPES.filter((g) => g !== 'PILOTAGE').map(groupeMenu)}
+          {GROUPES.filter((g) => g !== 'GENERAL').map(groupeMenu)}
           {/* Pilotage hors cockpit : rattache au premier groupe pour ne pas
               multiplier les menus a une seule entree. */}
           {accessibles
-            .filter((e) => e.section === 'PILOTAGE' && e.vers !== '/')
+            .filter((e) => e.section === 'GENERAL' && e.vers !== '/')
             .map((e) => (
               <NavLink key={e.vers} to={e.vers} className={({ isActive }) => lienNav(isActive)}>
                 <e.Icone className="size-3.5" />

@@ -11,6 +11,7 @@ import * as React from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'
 import * as DropdownPrimitive from '@radix-ui/react-dropdown-menu'
+import * as ContextPrimitive from '@radix-ui/react-context-menu'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import * as TabsPrimitive from '@radix-ui/react-tabs'
 import * as SwitchPrimitive from '@radix-ui/react-switch'
@@ -236,6 +237,72 @@ export function MenuSeparateur() {
 
 export function MenuTitre({ children }: { children: React.ReactNode }) {
   return <DropdownPrimitive.Label className="px-2 py-1.5 text-xs font-semibold text-attenue-texte">{children}</DropdownPrimitive.Label>
+}
+
+// ============================================================================
+// Menu contextuel (clic droit)
+// ============================================================================
+//
+// Famille distincte du menu deroulant, et non le meme composant declenche
+// autrement : Radix separe les deux parce qu'ils ne se positionnent pas pareil.
+// Un menu deroulant s'ancre sur son bouton ; un menu contextuel s'ouvre AU
+// POINTEUR. Detourner le premier oblige a lui fabriquer une ancre invisible a
+// la position du curseur — c'est ce que fait la barre d'onglets, faute de mieux
+// a l'epoque.
+//
+// L'apparence reste celle du menu deroulant, aux memes classes pres : deux
+// menus qui ne se ressemblent pas se lisent comme deux mecanismes differents.
+
+export const MenuContextuel = ContextPrimitive.Root
+export const MenuContextuelDeclencheur = ContextPrimitive.Trigger
+
+export function MenuContextuelContenu({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof ContextPrimitive.Content>) {
+  return (
+    <ContextPrimitive.Portal>
+      <ContextPrimitive.Content
+        className={cn(
+          'z-50 min-w-52 overflow-hidden rounded-[var(--radius)] border border-bordure',
+          'bg-surface p-1 shadow-lg apparition',
+          className,
+        )}
+        {...props}
+      />
+    </ContextPrimitive.Portal>
+  )
+}
+
+export function MenuContextuelElement({
+  className,
+  destructif,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof ContextPrimitive.Item> & { destructif?: boolean }) {
+  return (
+    <ContextPrimitive.Item
+      className={cn(
+        'flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none',
+        'focus:bg-attenue data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        '[&_svg]:size-4 [&_svg]:shrink-0',
+        destructif && 'text-danger focus:bg-danger/10',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+export function MenuContextuelSeparateur() {
+  return <ContextPrimitive.Separator className="my-1 h-px bg-bordure" />
+}
+
+export function MenuContextuelTitre({ children }: { children: React.ReactNode }) {
+  return (
+    <ContextPrimitive.Label className="truncate px-2 py-1.5 text-xs font-semibold text-attenue-texte">
+      {children}
+    </ContextPrimitive.Label>
+  )
 }
 
 // ============================================================================

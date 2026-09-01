@@ -18,7 +18,7 @@
  * « Autres reglages » de sa categorie. Le faire disparaitre serait reproduire,
  * a l'affichage, le defaut que la grille de droits nous a deja coute.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -33,6 +33,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useParamVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
@@ -278,7 +279,16 @@ export function Configuration() {
   const droits = useDroits(MODULE)
   const qc = useQueryClient()
 
-  const [section, setSection] = useState<CleSection>('alertes')
+  // `?section=` amorce le rail : le menu nomme « Entreprise » et « Devises »
+  // comme des entrees a part entiere, et cliquer dessus doit ouvrir LA section,
+  // pas la page a sa premiere rubrique a charge de la retrouver.
+  const demandee = useParamVue('section')
+  const [section, setSection] = useState<CleSection>(
+    SECTIONS.some((x) => x.cle === demandee) ? (demandee as CleSection) : 'alertes',
+  )
+  useEffect(() => {
+    if (SECTIONS.some((x) => x.cle === demandee)) setSection(demandee as CleSection)
+  }, [demandee])
   const [brouillon, setBrouillon] = useState<Record<string, string>>({})
   const [recherche, setRecherche] = useState('')
 

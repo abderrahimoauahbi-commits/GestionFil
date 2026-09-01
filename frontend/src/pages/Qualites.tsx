@@ -38,7 +38,6 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
-import { PageAvecRail } from '../composants/RailLateral'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { SelecteurReference } from '../composants/SelecteurReference'
@@ -1091,234 +1090,259 @@ export function Qualites() {
         </Alerte>
       )}
 
-      <div className="space-y-3">
-                {/* Entete et densites tiennent la barre laterale : ce sont les
-            parametres de la qualite, consultes puis laisses de cote. La
-            composition, elle, se travaille ligne a ligne et prend la place. */}
-        <PageAvecRail
-          large
-          rail={
-            <div className="flex flex-col gap-3">
-        <Carte repliable="qualites.1">
-          <CarteEntete>
-            <CarteTitre className="flex items-center gap-1.5">
-              <FileText className="size-3.5" />
-              Entete
-            </CarteTitre>
-            <div className="flex items-center gap-2 text-[11px] text-attenue-texte">
-              {!enCreation && courante && (
-                <>
-                  <span>Creee {fmt.dateHeure(courante.date_creation)}</span>
-                  <span className="text-bordure">|</span>
-                  <span>
-                    Modifiee{' '}
-                    {courante.date_modification
-                      ? `${fmt.dateHeure(courante.date_modification)}${courante.modifie_par ? ` (${courante.modifie_par})` : ''}`
-                      : 'jamais'}
-                  </span>
-                </>
-              )}
-              <Badge ton={TON_STATUT[entete.statut]}>{entete.statut}</Badge>
-            </div>
-          </CarteEntete>
+      <div className="@container space-y-3">
+        {/* Deux colonnes quand il y a la place : la composition a gauche, les
+            parametres a droite.
 
-          {/* Deux colonnes dans la carte : identite et description a gauche,
-              parametres de planification a droite. Ils ne se lisent pas dans le
-              meme mouvement — on nomme la qualite une fois, on ajuste ses
-              parametres separement — et les empiler allongeait la carte sans
-              raison. */}
-          <CarteCorps className="grid gap-x-4 gap-y-2.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,320px)]">
-            {/* --- Colonne gauche : identite et description ---------------- */}
-            <div className="grid content-start gap-2.5 sm:grid-cols-[140px_minmax(0,1fr)_130px]">
-              <div>
-                <Etiq obligatoire>
-                  Code qualite
-                  {!enCreation && (
-                    <Aide>
-                      Le code identifie la qualite dans les compositions et les plans : il ne se
-                      renomme pas.
-                    </Aide>
-                  )}
-                </Etiq>
-                <Champ
-                  value={entete.code_qualite}
-                  onChange={(e) =>
-                    setEntete((s) => ({ ...s, code_qualite: e.target.value.toUpperCase() }))
-                  }
-                  disabled={!enCreation || !droits.peutEcrire}
-                  placeholder="ex. SHAGGY-30"
-                  className="font-medium"
-                />
+            La composition est le plan de travail de cet ecran — on y ajoute et
+            retire des lignes, elle merite la largeur. L'entete et les densites
+            se consultent, s'ajustent, et se laissent : 430 px leur suffisent.
+
+            DEUX PIEGES, QUI SE PAYENT TOUS LES DEUX SUR PETIT ECRAN.
+
+            Le premier est l'ORDRE DU DOM. En une seule colonne, la grille suit
+            l'ordre d'ecriture : mettre la composition en premier renvoyait
+            l'entete SOUS le tableau, c'est-a-dire hors de l'ecran sur un
+            telephone. L'entete est donc ecrite en premier, et c'est le
+            placement explicite (`col-start`) qui la ramene a droite quand la
+            largeur revient. L'ordre de lecture etroit ne depend plus de la
+            mise en page large.
+
+            Le second est le CHOIX DE L'UNITE. `xl:` mesure la FENETRE, pas le
+            conteneur. Dans l'atelier, deux panneaux cote a cote sur un ecran de
+            1920 px font 950 px chacun : `xl:` se declencherait quand meme et
+            comprimerait la composition a 520 px. La requete porte donc sur le
+            conteneur (`@5xl`, 1024 px), qui est la seule largeur reellement
+            disponible. Le seuil laisse ~580 px a la composition : en dessous,
+            son tableau se mettrait a defiler horizontalement dans sa carte. */}
+        {/* Trois cadres, deux etages.
+
+            L'ENTETE EN HAUT, sur toute la largeur. C'est ce qu'on lit et ce
+            qu'on remplit en premier ; la reléguer dans une colonne de 430 px
+            comprimait quinze champs en accordeon, et sur telephone la renvoyait
+            SOUS le tableau de composition.
+
+            EN DESSOUS, les densites par role a gauche et la composition a
+            droite : le pourcentage d'une ligne se lit contre la densite de son
+            role, les avoir cote a cote evite l'aller-retour.
+
+            La bascule porte sur le CONTENEUR (`@5xl`), pas sur la fenetre :
+            dans l'atelier, deux panneaux cote a cote sur un ecran de 1920 px
+            font 950 px chacun, et un `xl:` se declencherait quand meme. */}
+          <Carte repliable="qualites.1">
+            <CarteEntete>
+              <CarteTitre className="flex items-center gap-1.5">
+                <FileText className="size-3.5" />
+                Entete
+              </CarteTitre>
+              <div className="flex items-center gap-2 text-[11px] text-attenue-texte">
+                {!enCreation && courante && (
+                  <>
+                    <span>Creee {fmt.dateHeure(courante.date_creation)}</span>
+                    <span className="text-bordure">|</span>
+                    <span>
+                      Modifiee{' '}
+                      {courante.date_modification
+                        ? `${fmt.dateHeure(courante.date_modification)}${courante.modifie_par ? ` (${courante.modifie_par})` : ''}`
+                        : 'jamais'}
+                    </span>
+                  </>
+                )}
+                <Badge ton={TON_STATUT[entete.statut]}>{entete.statut}</Badge>
               </div>
+            </CarteEntete>
 
-              <div>
-                <Etiq obligatoire>Nom</Etiq>
-                <Champ
-                  value={entete.nom}
-                  onChange={(e) => setEntete((s) => ({ ...s, nom: e.target.value }))}
-                  disabled={!champModifiable('nom')}
-                  placeholder="Designation commerciale"
-                />
-              </div>
+            {/* Deux colonnes dans la carte : identite et description a gauche,
+                parametres de planification a droite. Ils ne se lisent pas dans le
+                meme mouvement — on nomme la qualite une fois, on ajuste ses
+                parametres separement — et les empiler allongeait la carte sans
+                raison. */}
+            <CarteCorps className="@container grid gap-x-4 gap-y-2.5 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,320px)]">
+              {/* --- Colonne gauche : identite et description ---------------- */}
+              <div className="grid content-start gap-2.5 @lg:grid-cols-2 @3xl:grid-cols-[140px_minmax(0,1fr)_130px]">
+                <div>
+                  <Etiq obligatoire>
+                    Code qualite
+                    {!enCreation && (
+                      <Aide>
+                        Le code identifie la qualite dans les compositions et les plans : il ne se
+                        renomme pas.
+                      </Aide>
+                    )}
+                  </Etiq>
+                  <Champ
+                    value={entete.code_qualite}
+                    onChange={(e) =>
+                      setEntete((s) => ({ ...s, code_qualite: e.target.value.toUpperCase() }))
+                    }
+                    disabled={!enCreation || !droits.peutEcrire}
+                    placeholder="ex. SHAGGY-30"
+                    className="font-medium"
+                  />
+                </div>
 
-              <div>
-                <Etiq>Statut</Etiq>
-                <Selecteur
-                  value={entete.statut}
-                  onChange={(e) => setEntete((s) => ({ ...s, statut: e.target.value as Statut }))}
-                  disabled={!droits.peutEcrire}
-                >
-                  <option value="BROUILLON">Brouillon</option>
-                  <option value="ACTIF">Actif</option>
-                  <option value="CLOTURE">Cloture</option>
-                </Selecteur>
-              </div>
+                <div>
+                  <Etiq obligatoire>Nom</Etiq>
+                  <Champ
+                    value={entete.nom}
+                    onChange={(e) => setEntete((s) => ({ ...s, nom: e.target.value }))}
+                    disabled={!champModifiable('nom')}
+                    placeholder="Designation commerciale"
+                  />
+                </div>
 
-              <div className="sm:col-span-3">
-                <Etiq>Description</Etiq>
-                <Zone
-                  value={entete.description}
-                  onChange={(e) => setEntete((s) => ({ ...s, description: e.target.value }))}
-                  disabled={!champModifiable('description')}
-                  rows={3}
-                  className="min-h-20"
-                  placeholder="Usage, machine, particularites de fabrication..."
-                />
-              </div>
-            </div>
-
-            {/* --- Colonne droite : parametres de planification ------------
-                Embarques a la creation depuis les parametres globaux (B3),
-                ajustables ensuite qualite par qualite. */}
-            <div className="rounded-[var(--radius-sm)] border border-bordure bg-attenue p-2.5">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                  Parametres de planification
-                  <Aide>
-                    {enCreation
-                      ? "Recopies des parametres generaux a la creation. Ils n'en dependent plus ensuite : une qualite creee aujourd'hui reste calculable a l'identique si le parametre general change demain."
-                      : 'Figes a la creation de la qualite ; les modifier ici ne touche pas les parametres generaux.'}
-                  </Aide>
-                </p>
-                {enCreation && (
-                  <Bouton
-                    variante="discret"
-                    taille="icone-xs"
-                    onClick={() => setEntete((s) => ({ ...s, ...valeursGenerales() }))}
-                    aria-label="Reprendre les parametres generaux"
-                    title="Reprendre les parametres generaux"
+                <div>
+                  <Etiq>Statut</Etiq>
+                  <Selecteur
+                    value={entete.statut}
+                    onChange={(e) => setEntete((s) => ({ ...s, statut: e.target.value as Statut }))}
+                    disabled={!droits.peutEcrire}
                   >
-                    <RotateCcw />
+                    <option value="BROUILLON">Brouillon</option>
+                    <option value="ACTIF">Actif</option>
+                    <option value="CLOTURE">Cloture</option>
+                  </Selecteur>
+                </div>
+
+                <div className="sm:col-span-3">
+                  <Etiq>Description</Etiq>
+                  <Zone
+                    value={entete.description}
+                    onChange={(e) => setEntete((s) => ({ ...s, description: e.target.value }))}
+                    disabled={!champModifiable('description')}
+                    rows={3}
+                    className="min-h-20"
+                    placeholder="Usage, machine, particularites de fabrication..."
+                  />
+                </div>
+              </div>
+
+              {/* --- Colonne droite : parametres de planification ------------
+                  Embarques a la creation depuis les parametres globaux (B3),
+                  ajustables ensuite qualite par qualite. */}
+              <div className="rounded-[var(--radius-sm)] border border-bordure bg-attenue p-2.5">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
+                    Parametres de planification
+                    <Aide>
+                      {enCreation
+                        ? "Recopies des parametres generaux a la creation. Ils n'en dependent plus ensuite : une qualite creee aujourd'hui reste calculable a l'identique si le parametre general change demain."
+                        : 'Figes a la creation de la qualite ; les modifier ici ne touche pas les parametres generaux.'}
+                    </Aide>
+                  </p>
+                  {enCreation && (
+                    <Bouton
+                      variante="discret"
+                      taille="icone-xs"
+                      onClick={() => setEntete((s) => ({ ...s, ...valeursGenerales() }))}
+                      aria-label="Reprendre les parametres generaux"
+                      title="Reprendre les parametres generaux"
+                    >
+                      <RotateCcw />
+                    </Bouton>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {PARAMETRES_GENERAUX.map(({ champ, libelle, code }) => (
+                    <div key={champ}>
+                      <Etiq>
+                        {libelle}
+                        {enCreation && (
+                          <Aide>
+                            Parametre general {code} = {valeurGenerale(code) ?? '—'}
+                          </Aide>
+                        )}
+                      </Etiq>
+                      <Champ
+                        type="number"
+                        step="any"
+                        min={0}
+                        value={entete[champ]}
+                        onChange={(e) =>
+                          setEntete((s): Entete => ({ ...s, [champ]: e.target.value }))
+                        }
+                        disabled={!champModifiable(champ)}
+                        className="bg-surface text-right tabular-nums"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CarteCorps>
+
+          </Carte>
+
+        <div className="grid items-start gap-3 @5xl:grid-cols-[minmax(0,330px)_minmax(0,1fr)]">
+          <Carte repliable="qualites.2">
+            <CarteEntete>
+              <CarteTitre className="flex items-center gap-1.5">
+                <Layers className="size-3.5" />
+                Densite par role
+                <Aide>
+                  Les roles exprimes en <strong>ml/m²</strong> consomment de la matiere sans entrer
+                  dans le poids commercial du tapis : leur conversion en kg passe par la densite kg/ml
+                  de la reference. Le poids commercial affiche ici est la somme des seules lignes en
+                  kg/m² ; il est recalcule par le serveur a l'enregistrement.
+                </Aide>
+              </CarteTitre>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-attenue-texte">
+                  Poids commercial :{' '}
+                  <span className="font-semibold tabular-nums text-texte">
+                    {fmt.nombre(poidsCalcule, 4)} kg/m²
+                  </span>
+                </span>
+                {modifiable && (
+                  <Bouton variante="contour" taille="sm" onClick={ajouterLigne}>
+                    <Plus />
+                    Ajouter une ligne
                   </Bouton>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {PARAMETRES_GENERAUX.map(({ champ, libelle, code }) => (
-                  <div key={champ}>
-                    <Etiq>
-                      {libelle}
-                      {enCreation && (
-                        <Aide>
-                          Parametre general {code} = {valeurGenerale(code) ?? '—'}
-                        </Aide>
-                      )}
-                    </Etiq>
-                    <Champ
-                      type="number"
-                      step="any"
-                      min={0}
-                      value={entete[champ]}
-                      onChange={(e) =>
-                        setEntete((s): Entete => ({ ...s, [champ]: e.target.value }))
-                      }
-                      disabled={!champModifiable(champ)}
-                      className="bg-surface text-right tabular-nums"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CarteCorps>
-
-        </Carte>
-
-        {/* --- Lignes ------------------------------------------------------ */}
-        <Carte repliable="qualites.2">
-          <CarteEntete>
-            <CarteTitre className="flex items-center gap-1.5">
-              <Layers className="size-3.5" />
-              Densite par role
-              <Aide>
-                Les roles exprimes en <strong>ml/m²</strong> consomment de la matiere sans entrer
-                dans le poids commercial du tapis : leur conversion en kg passe par la densite kg/ml
-                de la reference. Le poids commercial affiche ici est la somme des seules lignes en
-                kg/m² ; il est recalcule par le serveur a l'enregistrement.
-              </Aide>
-            </CarteTitre>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-attenue-texte">
-                Poids commercial :{' '}
-                <span className="font-semibold tabular-nums text-texte">
-                  {fmt.nombre(poidsCalcule, 4)} kg/m²
-                </span>
-              </span>
-              {modifiable && (
-                <Bouton variante="contour" taille="sm" onClick={ajouterLigne}>
-                  <Plus />
-                  Ajouter une ligne
-                </Bouton>
+            </CarteEntete>
+            <CarteCorps>
+              {edition !== '' && qDensites.isLoading ? (
+                <Chargement texte="Chargement de la composition..." />
+              ) : (
+                <DataTable
+                  module={MODULE}
+                  colonnes={colonnesLignes}
+                  lignes={lignes}
+                  cle={(l) => l.cle}
+                  recherche={false}
+                  pagination={false}
+                  tailleParDefaut={500}
+                  titreCarte={(l) => libelleRole(l.code_role)}
+                  videTitre="Aucune ligne"
+                  videDescription="Une qualite sans ligne consomme zero matiere : le MRP ne generera aucun besoin."
+                  videAction={
+                    modifiable && (
+                      <Bouton variante="contour" onClick={ajouterLigne}>
+                        <Plus />
+                        Ajouter une ligne
+                      </Bouton>
+                    )
+                  }
+                  actions={
+                    modifiable
+                      ? (l) => (
+                          <Bouton
+                            variante="discret"
+                            taille="icone-xs"
+                            className="text-danger hover:bg-danger/10"
+                            onClick={() => setLignes((ls) => ls.filter((x) => x.cle !== l.cle))}
+                            aria-label="Retirer la ligne"
+                          >
+                            <Trash2 />
+                          </Bouton>
+                        )
+                      : undefined
+                  }
+                />
               )}
-            </div>
-          </CarteEntete>
-          <CarteCorps>
-            {edition !== '' && qDensites.isLoading ? (
-              <Chargement texte="Chargement de la composition..." />
-            ) : (
-              <DataTable
-                module={MODULE}
-                colonnes={colonnesLignes}
-                lignes={lignes}
-                cle={(l) => l.cle}
-                recherche={false}
-                pagination={false}
-                tailleParDefaut={500}
-                titreCarte={(l) => libelleRole(l.code_role)}
-                videTitre="Aucune ligne"
-                videDescription="Une qualite sans ligne consomme zero matiere : le MRP ne generera aucun besoin."
-                videAction={
-                  modifiable && (
-                    <Bouton variante="contour" onClick={ajouterLigne}>
-                      <Plus />
-                      Ajouter une ligne
-                    </Bouton>
-                  )
-                }
-                actions={
-                  modifiable
-                    ? (l) => (
-                        <Bouton
-                          variante="discret"
-                          taille="icone-xs"
-                          className="text-danger hover:bg-danger/10"
-                          onClick={() => setLignes((ls) => ls.filter((x) => x.cle !== l.cle))}
-                          aria-label="Retirer la ligne"
-                        >
-                          <Trash2 />
-                        </Bouton>
-                      )
-                    : undefined
-                }
-              />
-            )}
 
-          </CarteCorps>
-        </Carte>
-            </div>
-          }
-        >
-
-        {/* Colonne droite : la composition, qui est le vrai plan de travail de
-            cet ecran. */}
+            </CarteCorps>
+          </Carte>
         <Carte repliable="qualites.3">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
@@ -1405,7 +1429,8 @@ export function Qualites() {
 
           </CarteCorps>
         </Carte>
-        </PageAvecRail>
+
+        </div>
 
         {/* --- Pied : verifications et validation unique -------------------- */}
         {modifiable && (

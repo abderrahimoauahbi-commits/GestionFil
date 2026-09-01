@@ -10,13 +10,14 @@
  * ligne — serait un document fantome que personne ne saurait interpreter, et
  * qui fausserait la numerotation autant que les etats.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Save, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
+import { useParamVue } from '../lib/navigation'
 import { EnTetePage } from '../composants/Coquille'
 import {
   Alerte,
@@ -100,6 +101,24 @@ export function BonCommandeNouveau() {
   const [filtre, setFiltre] = useState('')
   const [erreur, setErreur] = useState<string | null>(null)
 
+  /* --- Arrivee ciblee : /bons-commande/nouveau?reference=X ----------------
+     Depuis le menu contextuel d'un ecran de stock, l'acheteur a deja designe
+     CE qu'il veut commander. L'ecran doit donc arriver sur le bon fournisseur,
+     la reference cochee, plutot que sur un formulaire vide ou il faudrait la
+     retrouver. Le fournisseur se lit sur la fiche : le deduire du nom affiche
+     ailleurs marcherait jusqu'au premier homonyme. */
+  const refDemandee = useParamVue('reference')
+  const dejaAmorce = useRef(false)
+
+  const qRefDemandee = useQuery({
+    queryKey: ['catalogue', refDemandee],
+    queryFn: () =>
+      api.get<{ code_reference: string; code_fournisseur: string | null }>(
+        `/api/catalogue/${encodeURIComponent(refDemandee)}`,
+      ),
+    enabled: !!refDemandee,
+  })
+
   const qFrs = useQuery({
     queryKey: ['fournisseurs-actifs'],
     queryFn: () => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500'),
@@ -117,6 +136,26 @@ export function BonCommandeNouveau() {
       ),
     enabled: !!entete.code_fournisseur,
   })
+
+  // Le fournisseur d'abord : c'est lui qui declenche le chargement des
+  // references commandables.
+  useEffect(() => {
+    const code = qRefDemandee.data?.code_fournisseur
+    if (code && !entete.code_fournisseur) {
+      setEntete((e) => ({ ...e, code_fournisseur: code }))
+      setFiltre(refDemandee)
+    }
+  }, [qRefDemandee.data, entete.code_fournisseur, refDemandee])
+
+  // La reference ensuite, une seule fois. Sans le garde, decocher la ligne la
+  // recocherait au rendu suivant : l'ecran refuserait la decision de l'acheteur.
+  useEffect(() => {
+    if (dejaAmorce.current || !refDemandee) return
+    const r = qRefs.data?.find((x) => x.code_reference === refDemandee)
+    if (!r) return
+    dejaAmorce.current = true
+    basculer(r)
+  }, [qRefs.data, refDemandee])
 
   const creer = useMutation({
     mutationFn: () =>

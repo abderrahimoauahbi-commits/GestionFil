@@ -18,12 +18,13 @@
  *   MEME FOURNISSEUR deux references du meme fournisseur tombent ensemble — ce
  *                    n'est pas une securite d'approvisionnement.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Link2, Plus, Search, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
+import { useParamVue } from '../lib/navigation'
 import { EnTetePage } from '../composants/Coquille'
 import {
   Alerte,
@@ -125,6 +126,25 @@ export function Equivalences() {
   const [filtre, setFiltre] = useState('')
   const [seulementAlternatifs, setSeulementAlternatifs] = useState(false)
   const [ajout, setAjout] = useState(false)
+
+  /* --- Arrivee ciblee : /equivalences?reference=X -------------------------
+     Depuis le menu contextuel du stock, la question n'est pas « montre-moi les
+     groupes » mais « par quoi puis-je remplacer X ». On pointe donc le groupe
+     de X. S'il n'en a pas, la reponse est « aucun » — et il faut la dire :
+     laisser l'ecran sur sa liste habituelle se lirait comme un lien casse. */
+  const refDemandee = useParamVue('reference')
+  const qGroupeDeRef = useQuery({
+    queryKey: ['reference-groupes', 'par-reference', refDemandee],
+    queryFn: () =>
+      api.get<Rattachement[]>(
+        `/api/reference-groupes?code_reference=${encodeURIComponent(refDemandee)}&limite=10`,
+      ),
+    enabled: !!refDemandee,
+  })
+  const groupeDeRef = qGroupeDeRef.data?.[0]?.code_groupe_equiv ?? null
+  useEffect(() => {
+    if (groupeDeRef) setPointe(groupeDeRef)
+  }, [groupeDeRef])
 
   const qGroupes = useQuery({
     queryKey: ['groupes-equivalence'],
@@ -259,6 +279,13 @@ export function Equivalences() {
         titre="Equivalences de references"
         description="Quelles references sont interchangeables, et dans quel ordre les preferer."
       />
+
+      {refDemandee && qGroupeDeRef.isSuccess && !groupeDeRef && (
+        <Alerte ton="alerte" className="mb-3">
+          {refDemandee} n appartient a aucun groupe d equivalence : rien ne peut la remplacer
+          aujourd hui. Rattachez-la a un groupe pour qu elle devienne substituable.
+        </Alerte>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         {/* ---- Groupes ---------------------------------------------------- */}

@@ -619,3 +619,15 @@ export function useOnglets() {
   if (!c) throw new Error('useOnglets doit etre utilise dans un FournisseurOnglets')
   return c
 }
+
+/**
+ * Meme contexte, mais sans exiger l'atelier.
+ *
+ * L'application tourne dans deux enveloppes : l'atelier a onglets sur le poste
+ * fixe, et la navigation simple ailleurs. Un ecran metier ne doit dependre ni
+ * de l'une ni de l'autre — il demande a ouvrir une vue, la coquille decide si
+ * cela cree un onglet ou remplace la page.
+ */
+export function useOngletsFacultatif() {
+  return useContext(OngletsContext)
+}

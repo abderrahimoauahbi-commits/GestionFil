@@ -413,6 +413,13 @@ SELECT
                      - COALESCE(b.besoin_12m_kg, 0)) / (cr.conso_mensuelle_kg / 30.0), 1)
     END                                     AS jours_couverture,
 
+    -- Les deux bornes de l'echelle logique, exposees telles quelles. L'ecran en
+    -- a besoin pour graduer la jauge de couverture. Sans elles il ecrirait 60 et
+    -- 90 en dur, et la jauge cesserait de suivre le parametre le jour ou la
+    -- direction le deplace : le chiffre changerait de statut, la barre non.
+    CAST(p_crit.v   AS REAL)                AS seuil_critique_jours,
+    CAST(p_alerte.v AS REAL)                AS seuil_alerte_jours,
+
     -- Le minimum recalcule (F3, MAX de quatre securites) : c'est LUI le seuil
     -- du veto physique, et non un plancher absolu en kilos. La difference n'est
     -- pas cosmetique — le minimum se parametre par reference, un plancher global

@@ -10,6 +10,7 @@ import { Alerte, Chargement } from './composants/ui/base'
 import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
 import { Cockpit } from './pages/Cockpit'
+import { HistoriquePrix } from './pages/HistoriquePrix'
 import { Statistiques } from './pages/Statistiques'
 import { Equivalences } from './pages/Equivalences'
 import { Configuration } from './pages/Configuration'
@@ -33,7 +34,6 @@ import { Receptions } from './pages/Receptions'
 import { Reception } from './pages/Reception'
 import { ReceptionNouvelle } from './pages/ReceptionNouvelle'
 import { PlanAchat } from './pages/PlanAchat'
-import { Parametres } from './pages/Parametres'
 import { Utilisateurs } from './pages/Utilisateurs'
 import { Droits } from './pages/Droits'
 import { Valorisation } from './pages/Valorisation'
@@ -112,6 +112,7 @@ const ECRANS = (
       <Route path="transferts/:id/bon-reception" element={<ExigeModule module="MOUVEMENTS"><BonTransfert type="reception" /></ExigeModule>} />
       <Route path="configuration" element={<ExigeModule module="PARAMETRES"><Configuration /></ExigeModule>} />
       <Route path="equivalences" element={<ExigeModule module="CATALOGUE"><Equivalences /></ExigeModule>} />
+      <Route path="historique-prix" element={<ExigeModule module="CATALOGUE"><HistoriquePrix /></ExigeModule>} />
       <Route path="statistiques" element={<ExigeModule module="MOUVEMENTS"><Statistiques /></ExigeModule>} />
       <Route path="receptions/nouvelle" element={<ExigeModule module="RECEPTIONS"><ReceptionNouvelle /></ExigeModule>} />
       <Route path="receptions/:id" element={<ExigeModule module="RECEPTIONS"><Reception /></ExigeModule>} />
@@ -129,7 +130,7 @@ const ECRANS = (
       <Route path="etat-stock" element={<ExigeModule module="STOCK"><EtatStock /></ExigeModule>} />
       <Route path="valorisation" element={<ExigeModule module="CATALOGUE"><Valorisation /></ExigeModule>} />
       <Route path="audit" element={<ExigeModule module="AUDIT"><Audit /></ExigeModule>} />
-      <Route path="parametres" element={<ExigeModule module="PARAMETRES"><Parametres /></ExigeModule>} />
+      <Route path="parametres" element={<Navigate to="/configuration" replace />} />
       <Route path="utilisateurs" element={<ExigeModule module="UTILISATEURS"><Utilisateurs /></ExigeModule>} />
       <Route path="utilisateurs/:id/droits" element={<ExigeModule module="UTILISATEURS"><Droits /></ExigeModule>} />
   </>

@@ -11,8 +11,20 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, Layers, PackageX, TrendingDown } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardList,
+  FileText,
+  History,
+  Layers,
+  PackageX,
+  Shuffle,
+  ShoppingCart,
+  TrendingDown,
+} from 'lucide-react'
 import { api } from '../api/client'
+import { cn } from '../lib/utils'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
@@ -22,6 +34,12 @@ import {
 } from '../composants/PanneauFiltres'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { Etiquette, fmt } from '../components/ui'
+import {
+  MenuContextuelElement,
+  MenuContextuelSeparateur,
+  MenuContextuelTitre,
+} from '../composants/ui/surcouches'
+import { useOuvrirVue } from '../lib/navigation'
 
 const MODULE = 'STOCK'
 
@@ -34,6 +52,9 @@ interface LigneProjete {
   besoin_12m_kg: number
   stock_projete_kg: number
   jours_couverture: number | null
+  /** Bornes de l'echelle logique, servies par la vue : la jauge s'y gradue. */
+  seuil_critique_jours: number | null
+  seuil_alerte_jours: number | null
   conso_mensuelle_kg: number | null
   source_conso: string | null
   statut: string
@@ -79,6 +100,77 @@ function motifAlerte(l: LigneProjete): string | null {
     return `${fmt.nombre(l.jours_couverture, 0)} jours de couverture`
   }
   return null
+}
+
+/**
+ * La couverture, en chiffre et en jauge.
+ *
+ * TROIS CHOIX QUI SE TIENNENT.
+ *
+ * La COULEUR vient du statut calcule, jamais d'un seuil ecrit ici. Peindre en
+ * rouge tout ce qui passe sous soixante jours contredirait le modele a double
+ * declencheur : une reference a 55 jours mais au-dessus de son minimum magasin
+ * n'est pas critique, et la ligne afficherait deux verdicts opposes — la
+ * couverture en rouge, la colonne Statut en vert, a deux cases d'ecart.
+ *
+ * La GRADUATION vient de la base, pas du code. Le plein de la jauge est le
+ * seuil d'alerte (P_SeuilAlerte), le repere le seuil critique
+ * (P_SeuilCritique) ; tous deux voyagent dans la vue. Ecrits en dur, ils
+ * cesseraient de suivre le parametre le jour ou la direction le deplace : le
+ * chiffre changerait de statut, la barre non.
+ *
+ * La LARGEUR est fixe. Une jauge qui s'etirerait avec la colonne ne serait
+ * comparable d'une ligne a l'autre que par accident — or c'est le seul usage
+ * d'une jauge dans une liste : voir d'un coup laquelle est la plus courte.
+ */
+function JaugeCouverture({ ligne: l }: { ligne: LigneProjete }) {
+  if (l.jours_couverture == null) return <span className="text-attenue-texte">—</span>
+
+  const plein = l.seuil_alerte_jours ?? 0
+  const critique = l.seuil_critique_jours ?? 0
+  const grave = l.statut === 'RUPTURE' || l.statut === 'CRITIQUE'
+  const alerte = l.statut === 'ATTENTION'
+
+  // Une couverture negative existe : la projection retranche les besoins de
+  // l'horizon et peut passer sous zero. La jauge se vide, elle ne s'inverse pas.
+  const part = plein > 0 ? Math.min(Math.max(l.jours_couverture / plein, 0), 1) : 0
+
+  return (
+    <span
+      className="relative inline-flex h-[18px] w-[86px] items-center justify-end overflow-hidden rounded-[3px] bg-attenue/40 px-1.5"
+      title={
+        plein > 0
+          ? `${fmt.nombre(l.jours_couverture, 0)} jours — critique en dessous de ${critique}, confortable a partir de ${plein}`
+          : `${fmt.nombre(l.jours_couverture, 0)} jours`
+      }
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'absolute inset-y-0 left-0 transition-[width] duration-150 ease-out',
+          grave ? 'bg-danger/25' : alerte ? 'bg-alerte/30' : 'bg-succes/25',
+        )}
+        style={{ width: `${part * 100}%` }}
+      />
+      {/* Repere du seuil critique : sans lui la jauge dit « peu », avec lui elle
+          dit « peu, et de quel cote de la limite ». */}
+      {plein > 0 && critique > 0 && critique < plein && (
+        <span
+          aria-hidden
+          className="absolute inset-y-0 w-px bg-texte/25"
+          style={{ left: `${(critique / plein) * 100}%` }}
+        />
+      )}
+      <span
+        className={cn(
+          'relative tabular-nums',
+          grave ? 'font-medium text-danger' : alerte ? 'text-alerte' : 'text-texte',
+        )}
+      >
+        {fmt.nombre(l.jours_couverture, 0)} j
+      </span>
+    </span>
+  )
 }
 
 const TON: Record<string, 'rouge' | 'ambre' | 'vert' | 'neutre'> = {
@@ -136,7 +228,76 @@ const CHAMPS_FILTRABLES: ChampFiltre<LigneProjete>[] = [
   { cle: 'reference', libelle: 'Reference', type: 'texte', valeur: (l) => l.code_reference },
 ]
 
+/**
+ * Le menu au clic droit sur une ligne de stock.
+ *
+ * IL NE CREE AUCUN CHEMIN. Chacune de ces quatre destinations reste atteignable
+ * par la navigation ordinaire ; le menu ne fait que les atteindre AVEC la
+ * reference deja portee. C'est la difference entre « ouvrir l'ecran des
+ * mouvements » et « voir l'historique de PES-20/2 » : le second evite a
+ * l'operateur de retaper un code qu'il a sous les yeux, et donc de le retaper
+ * faux. Un menu contextuel ne s'ouvre ni au clavier ni au doigt : y loger une
+ * action unique la rendrait inaccessible a une partie des postes.
+ *
+ * Les liens portent `?reference=`, et les trois ecrans vises le lisent. Un
+ * parametre qu'une page ignorerait serait pire que pas de lien du tout :
+ * l'entree promettrait un filtre et livrerait une liste entiere.
+ */
+function ActionsLigne({
+  ligne: l,
+  ouvrir,
+}: {
+  ligne: LigneProjete
+  ouvrir: (chemin: string) => void
+}) {
+  const ref = encodeURIComponent(l.code_reference)
+  const tendu = l.statut === 'RUPTURE' || l.statut === 'CRITIQUE'
+
+  return (
+    <>
+      <MenuContextuelTitre>{l.code_reference}</MenuContextuelTitre>
+      <MenuContextuelSeparateur />
+
+      {/* Commander en tete quand la ligne est en tension : c'est l'action que
+          l'acheteur cherche, et la remonter evite de la lire dans une liste. */}
+      {tendu && (
+        <MenuContextuelElement onSelect={() => ouvrir(`/bons-commande/nouveau?reference=${ref}`)}>
+          <ShoppingCart /> Commander cette reference
+        </MenuContextuelElement>
+      )}
+
+      <MenuContextuelElement onSelect={() => ouvrir(`/catalogue?reference=${ref}`)}>
+        <FileText /> Ouvrir la fiche
+      </MenuContextuelElement>
+
+      <MenuContextuelElement onSelect={() => ouvrir(`/mouvements?reference=${ref}`)}>
+        <History /> Voir l historique des mouvements
+      </MenuContextuelElement>
+
+      <MenuContextuelElement onSelect={() => ouvrir(`/equivalences?reference=${ref}`)}>
+        <Shuffle /> Chercher un equivalent
+      </MenuContextuelElement>
+
+      {!tendu && (
+        <MenuContextuelElement onSelect={() => ouvrir(`/bons-commande/nouveau?reference=${ref}`)}>
+          <ShoppingCart /> Commander cette reference
+        </MenuContextuelElement>
+      )}
+
+      <MenuContextuelSeparateur />
+
+      {/* L'inventaire ne porte pas la reference : il se lance par magasin, et
+          l'ecran demande lequel. Promettre un inventaire cible ici serait
+          promettre ce que le module ne fait pas. */}
+      <MenuContextuelElement onSelect={() => ouvrir('/inventaires')}>
+        <ClipboardList /> Lancer un inventaire
+      </MenuContextuelElement>
+    </>
+  )
+}
+
 export function Stock() {
+  const ouvrir = useOuvrirVue()
   const [filtre, setFiltre] = useState('')
   const [recherche, setRecherche] = useState('')
   const filtres = useFiltres(CHAMPS_FILTRABLES)
@@ -271,7 +432,12 @@ export function Stock() {
       champ: 'jours_couverture',
       entete: 'Couverture',
       numerique: true,
-      rendu: (l) => (l.jours_couverture == null ? '—' : `${fmt.nombre(l.jours_couverture, 0)} j`),
+      /* La couverture se colore selon le STATUT calcule, jamais selon un seuil
+         ecrit ici. Peindre en rouge tout ce qui passe sous soixante jours
+         contredirait le modele a double declencheur : une reference a 55 jours
+         mais au-dessus de son minimum magasin n'est pas critique, et l'ecran
+         afficherait alors deux verdicts opposes sur la meme ligne. */
+      rendu: (l) => <JaugeCouverture ligne={l} />,
     },
     {
       champ: 'date_derniere_entree',
@@ -327,6 +493,7 @@ export function Stock() {
         )}
         <TableDroits
           module={MODULE}
+          menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
           colonnes={colonnes}
           lignes={lignes}
           chargement={q.isLoading}

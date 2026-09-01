@@ -14,6 +14,7 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, useLocation, useNavigate } from 'react-router-dom'
+import { ContexteChemin } from '../../lib/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
@@ -58,7 +59,7 @@ const PREFS_DEFAUT: Preferences = {
   largeurLaterale: 240,
   hauteurBas: 200,
   basOuvert: false,
-  section: 'PILOTAGE',
+  section: 'GENERAL',
   ongletBas: 'controles',
   zoom: 1,
 }
@@ -819,7 +820,13 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
                             o.chemin === groupe.actif ? 'block' : 'hidden',
                           )}
                         >
-                          <Routes location={o.chemin}>{routes}</Routes>
+                          {/* Le chemin PROPRE a cet onglet. `useLocation()`
+                              rendrait celui du routeur, partage par tous les
+                              onglets montes : deux vues ouvertes sur deux
+                              references liraient la meme. */}
+                          <ContexteChemin.Provider value={o.chemin}>
+                            <Routes location={o.chemin}>{routes}</Routes>
+                          </ContexteChemin.Provider>
                         </div>
                       ))
                     )}

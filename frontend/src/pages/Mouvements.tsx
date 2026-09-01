@@ -21,6 +21,7 @@ import {
 import { Panneau } from '../components/Formulaire'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { Bouton, Etiquette, Message, fmt } from '../components/ui'
+import { useEtatDepuisParam } from '../lib/navigation'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -116,7 +117,10 @@ export function Mouvements() {
   const droits = useDroits(MODULE)
   const qc = useQueryClient()
   const [saisieOuverte, setSaisieOuverte] = useState(false)
-  const [filtreRef, setFiltreRef] = useState('')
+  // Amorce par `?reference=`, pose par le menu contextuel de l'ecran Stock :
+  // « voir l'historique » doit arriver sur le livre DEJA filtre, pas sur les
+  // trois cents derniers mouvements tous articles confondus.
+  const [filtreRef, setFiltreRef] = useEtatDepuisParam('reference')
   const [sens, setSens] = useState('')
   const filtres = useFiltres(CHAMPS_MVT)
 

@@ -6,7 +6,7 @@
  * permission d'ecriture, les colonnes suivent la grille de champs, et le
  * formulaire desactive ce que l'utilisateur ne peut pas modifier.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useDroits } from '../auth/AuthContext'
@@ -47,6 +47,15 @@ interface Props<L extends Record<string, unknown>> {
    * references, intenable sur 20 000.
    */
   serveur?: boolean
+  /**
+   * Valeur initiale de la recherche.
+   *
+   * Sert aux arrivees ciblees : « voir la fiche » depuis un autre ecran doit
+   * poser l'utilisateur sur SA reference, pas sur la premiere page du
+   * catalogue a lui de la retrouver. La valeur reste modifiable — c'est une
+   * amorce, pas un verrou.
+   */
+  rechercheInitiale?: string
 }
 
 export function EcranReferentiel<L extends Record<string, unknown>>({
@@ -62,6 +71,7 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
   titreCarte,
   actionsExtra,
   serveur = false,
+  rechercheInitiale = '',
 }: Props<L>) {
   const droits = useDroits(module)
   const [edition, setEdition] = useState<L | null>(null)
@@ -70,7 +80,10 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
 
   const [page, setPage] = useState(0)
   const [taille, setTaille] = useState(25)
-  const [recherche, setRecherche] = useState('')
+  const [recherche, setRecherche] = useState(rechercheInitiale)
+  // Resynchronise si l'amorce change sans que l'ecran soit remonte : hors
+  // atelier, aller de `?reference=A` a `?reference=B` ne remonte rien.
+  useEffect(() => setRecherche(rechercheInitiale), [rechercheInitiale])
   const [tri, setTri] = useState<{ champ: string | null; sens: 'asc' | 'desc' }>({
     champ: null,
     sens: 'asc',

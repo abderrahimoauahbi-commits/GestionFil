@@ -71,7 +71,7 @@ export function BarreActivites({
                   )}
                 />
                 <Icone className="size-6" strokeWidth={1.4} />
-                {id === 'PILOTAGE' && anomalies > 0 && (
+                {id === 'GENERAL' && anomalies > 0 && (
                   <span
                     className="absolute bottom-2 right-2 grid min-w-4 place-items-center rounded-full
                                bg-[hsl(var(--at-badge))] px-1 text-[9px] font-semibold leading-4

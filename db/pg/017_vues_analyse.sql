@@ -81,28 +81,9 @@ SELECT v.*,
 -- fausserait l'un ou l'autre : une matiere legere et chere porterait trop de
 -- fret, une lourde et bon marche trop de douane. Chaque frais porte donc sa
 -- propre cle.
-CREATE TABLE IF NOT EXISTS frais_approche (
-    id_frais            TEXT    NOT NULL PRIMARY KEY
-                                DEFAULT (lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-a'||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6)))),
-    id_reception        TEXT    NOT NULL REFERENCES reception(id_reception),
-    type_frais          TEXT    NOT NULL CHECK (type_frais IN
-                                    ('FRET', 'DOUANE', 'ASSURANCE', 'MANUTENTION', 'AUTRE')),
-    libelle             TEXT,
-    montant_devise      REAL    NOT NULL CHECK (montant_devise >= 0),
-    code_devise         TEXT    NOT NULL REFERENCES devise(code_devise),
-    taux_change         REAL    NOT NULL CHECK (taux_change > 0),
-    montant_mad         REAL    GENERATED ALWAYS AS (montant_devise * taux_change) VIRTUAL,
-    -- La cle de repartition, choisie par frais.
-    cle_repartition     TEXT    NOT NULL DEFAULT 'POIDS'
-                                CHECK (cle_repartition IN ('POIDS', 'VALEUR', 'LIGNES')),
-    reference_externe   TEXT,   -- numero de facture transitaire, DUM douaniere
-    date_frais          TEXT    NOT NULL DEFAULT (to_char(current_date, 'YYYY-MM-DD')),
-    id_utilisateur      TEXT    REFERENCES utilisateur(id_utilisateur),
-    date_creation       TEXT    NOT NULL DEFAULT (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
-    notes               TEXT
-) STRICT;
 
-CREATE INDEX IF NOT EXISTS ix_frais_reception ON frais_approche(id_reception);
+
+
 
 
 -- -----------------------------------------------------------------------------

@@ -1154,8 +1154,16 @@ SELECT
   FROM v_risque_mensuel rm
   JOIN reference ref      ON ref.code_reference = rm.code_reference
   LEFT JOIN fournisseur f ON f.code_fournisseur = ref.code_fournisseur
- GROUP BY rm.code_reference
-HAVING nb_mois_rupture > 0 OR nb_mois_tendu > 0;
+ -- Toutes ces colonnes dependent de `code_reference`, deja groupe : la
+ -- designation et la classe ABC viennent de la reference, le fournisseur et son
+ -- delai en decoulent. Les citer ne change aucune ligne.
+ GROUP BY rm.code_reference, rm.designation, rm.classe_abc,
+          ref.code_fournisseur, f.nom, f.delai_livraison_jours
+-- Les expressions sont repetees plutot que citees par leur alias :
+-- HAVING s'evalue AVANT la projection, donc avant que l'alias existe.
+-- SQLite l'admettait, la norme SQL non.
+HAVING SUM(CASE WHEN rm.statut = 'RUPTURE' THEN 1 ELSE 0 END) > 0
+    OR SUM(CASE WHEN rm.statut = 'TENDU'   THEN 1 ELSE 0 END) > 0;
 
 -- =============================================================================
 -- 8. STATISTIQUES

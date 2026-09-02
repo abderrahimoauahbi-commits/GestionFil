@@ -44,6 +44,12 @@ RACINE = Path(__file__).resolve().parent.parent
 SORTIE = Path(__file__).resolve().parent
 
 FICHIERS = [
+    ("seed/001_referentiels.sql", "seed_001_referentiels.sql"),
+    ("seed/002_securite.sql", "seed_002_securite.sql"),
+    ("seed/004_qualites.sql", "seed_004_qualites.sql"),
+    ("seed/003_roles_2026.sql", "seed_003_roles_2026.sql"),
+    ("seed/004_champs_matrice.sql", "seed_004_champs_matrice.sql"),
+    ("seed/005_champs_analyse.sql", "seed_005_champs_analyse.sql"),
     ("011_vues.sql", "011_vues.sql"),
     ("012_controles.sql", "012_controles.sql"),
     ("013_vues_cockpit.sql", "013_vues_cockpit.sql"),
@@ -58,6 +64,16 @@ BASE = "gestionfil"
 
 def convertir(sql):
     """Applique les cinq familles de conversion."""
+
+    # --- La DDL de 017 sort d'ici -------------------------------------------
+    # `frais_approche` vit au milieu d'un fichier de vues. Ce convertisseur
+    # traduit des REQUETES, pas de la DDL : la table est donc ecrite a la main
+    # dans `pg/017a_table_frais_approche.sql`, et retiree ici pour ne pas etre
+    # produite deux fois — la seconde version, non traduite, echouerait sur
+    # `STRICT` et sur `randomblob`.
+    sql = re.sub(r"CREATE TABLE IF NOT EXISTS frais_approche.*?STRICT;", "", sql,
+                 flags=re.S)
+    sql = re.sub(r"CREATE INDEX IF NOT EXISTS ix_frais_reception[^;]*;", "", sql)
 
     # --- 0. MAX / MIN a deux arguments --------------------------------------
     # EN PREMIER, ET C'EST NECESSAIRE : les conversions de dates introduisent
@@ -79,6 +95,24 @@ def convertir(sql):
                  "IS DISTINCT FROM ", sql, flags=re.I)
     sql = re.sub(r"\bIS\s+(?!NOT\b|NULL\b|TRUE\b|FALSE\b|DISTINCT\b)",
                  "IS NOT DISTINCT FROM ", sql, flags=re.I)
+
+    # --- 10. L'insertion idempotente -----------------------------------------
+    sql = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql, flags=re.I)
+    sql = _conflit_ignore(sql)
+
+    # --- 11. Les identifiants ------------------------------------------------
+    # L'expression SQLite complete, telle qu'elle apparait dans les seeds et les
+    # valeurs par defaut. On la reconnait a `randomblob` : aucune autre
+    # construction du schema ne l'emploie.
+    # Le motif part de `lower(` — SURTOUT PAS d'une parenthese ouvrante
+    # optionnelle, qui avalerait celle de la ligne de VALUES et produirait une
+    # ligne sans ouverture.
+    sql = re.sub(
+        r"lower\(hex\(randomblob\(4\)\)\).*?lower\(hex\(randomblob\(6\)\)\)",
+        "gen_random_uuid()::text", sql, flags=re.S)
+
+    # --- 12. Recherche dans une chaine ---------------------------------------
+    sql = re.sub(r"\binstr\(", "strpos(", sql, flags=re.I)
 
     # --- 5. Ce qui disparait -------------------------------------------------
     sql = re.sub(r"^\s*PRAGMA[^;]*;\s*$", "", sql, flags=re.M)
@@ -105,11 +139,22 @@ def convertir(sql):
     sql = _remplacer_appels_paires(sql, remplacer_diff)
 
     # --- 2. Le formatage de dates -------------------------------------------
-    sql = sql.replace("strftime('%Y-%m-%dT%H:%M:%fZ','now')",
-                      "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')")
-    sql = sql.replace("strftime('%Y-%m-%d','now')", "to_char(current_date, 'YYYY-MM-DD')")
-    sql = sql.replace("strftime('%Y-%m', 'now')", "to_char(current_date, 'YYYY-MM')")
-    sql = sql.replace("strftime('%Y-%m','now')", "to_char(current_date, 'YYYY-MM')")
+    # Les trois formes sur 'now', tolerantes aux espaces : les sources en
+    # ecrivent avec et sans.
+    # Le format PostgreSQL veut des guillemets doubles autour des litteraux
+    # `T` et `Z`. Ils passent par `re.escape` : dans un remplacement de
+    # `re.sub`, un antislash serait interprete comme une reference de groupe.
+    horodatage = (
+        "to_char(now() AT TIME ZONE 'UTC', "
+        + "'YYYY-MM-DD" + chr(34) + "T" + chr(34)
+        + "HH24:MI:SS.MS" + chr(34) + "Z" + chr(34) + "')"
+    )
+    sql = re.sub(r"strftime\(\s*'%Y-%m-%dT%H:%M:%fZ'\s*,\s*'now'\s*\)",
+                 lambda _: horodatage, sql)
+    sql = re.sub(r"strftime\(\s*'%Y-%m-%d'\s*,\s*'now'\s*\)",
+                 "to_char(current_date, 'YYYY-MM-DD')", sql)
+    sql = re.sub(r"strftime\(\s*'%Y-%m'\s*,\s*'now'\s*\)",
+                 "to_char(current_date, 'YYYY-MM')", sql)
     # `strftime('%Y-%m', X)` -> `substr(X, 1, 7)` : la donnee est du texte ISO.
     # L'expression X peut contenir des parentheses (COALESCE, CASE) : on la
     # capture de facon equilibree plutot qu'avec une expression reguliere, qui
@@ -245,6 +290,24 @@ def _decalage_de_date(sql):
         return "to_char(current_date %s (%s)::integer, 'YYYY-MM-DD')" % (signe, expr)
 
     return motif.sub(remplacer, sql)
+
+
+def _conflit_ignore(sql):
+    """Ajoute `ON CONFLICT DO NOTHING` aux INSERT issus d'un `OR IGNORE`.
+
+    Le marqueur a deja ete retire par la substitution precedente : on repere
+    donc les INSERT qui n'ont pas de clause `ON CONFLICT` et qui portent le
+    commentaire d'origine. Plutot que de deviner, on ne traite que les
+    instructions explicitement marquees — le seed en compte une seule.
+    """
+    resultat = []
+    for inst in sql.split(";"):
+        if ("INSERT INTO" in inst.upper()
+                and "ON CONFLICT" not in inst.upper()
+                and "-- idempotent" in inst.lower()):
+            inst = inst.rstrip() + "\nON CONFLICT DO NOTHING"
+        resultat.append(inst)
+    return ";".join(resultat)
 
 
 def _remplacer_strftime(sql):

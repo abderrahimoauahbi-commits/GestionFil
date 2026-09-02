@@ -23,6 +23,255 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION fn_trg_audit_immuable_r() RETURNS trigger AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM audit_log WHERE id_audit = NEW.id_audit) THEN
+        RAISE EXCEPTION 'R03 : remplacement interdit dans le journal d audit.';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_immuable_r
+BEFORE INSERT ON audit_log FOR EACH ROW
+EXECUTE FUNCTION fn_trg_audit_immuable_r();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_immuable_u() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'Le journal d''''audit est immuable.';
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_immuable_u
+BEFORE UPDATE ON audit_log FOR EACH ROW
+EXECUTE FUNCTION fn_trg_audit_immuable_u();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_immuable_d() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'Suppression interdite dans le journal d''''audit.';
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_immuable_d
+BEFORE DELETE ON audit_log FOR EACH ROW
+EXECUTE FUNCTION fn_trg_audit_immuable_d();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_parametre() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('parametre', 'UPDATE', NEW.code_parametre,
+                json_build_object('valeur_courante', OLD.valeur_courante),
+                json_build_object('valeur_courante', NEW.valeur_courante),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_parametre
+AFTER UPDATE ON parametre FOR EACH ROW
+WHEN (OLD.valeur_courante IS DISTINCT FROM NEW.valeur_courante)
+EXECUTE FUNCTION fn_trg_audit_parametre();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_reference() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('reference', 'UPDATE', NEW.code_reference,
+                json_build_object('prix_catalogue', OLD.prix_catalogue, 'code_fournisseur', OLD.code_fournisseur, 'actif', OLD.actif),
+                json_build_object('prix_catalogue', NEW.prix_catalogue, 'code_fournisseur', NEW.code_fournisseur, 'actif', NEW.actif),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_reference
+AFTER UPDATE ON reference FOR EACH ROW
+WHEN (OLD.prix_catalogue IS DISTINCT FROM NEW.prix_catalogue
+  OR OLD.code_fournisseur IS DISTINCT FROM NEW.code_fournisseur
+  OR OLD.actif IS DISTINCT FROM NEW.actif)
+EXECUTE FUNCTION fn_trg_audit_reference();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_bc_statut() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('bon_commande', 'UPDATE', NEW.id_bc,
+                json_build_object('statut', OLD.statut),
+                json_build_object('statut', NEW.statut, 'montant_total_mad', NEW.montant_total_mad,
+                            'id_utilisateur_validation', NEW.id_utilisateur_validation),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_bc_statut
+AFTER UPDATE OF statut ON bon_commande FOR EACH ROW
+WHEN (OLD.statut IS DISTINCT FROM NEW.statut)
+EXECUTE FUNCTION fn_trg_audit_bc_statut();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_reception_statut() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('reception', 'UPDATE', NEW.id_reception,
+                json_build_object('statut', OLD.statut),
+                json_build_object('statut', NEW.statut, 'id_utilisateur_controle', NEW.id_utilisateur_controle),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_reception_statut
+AFTER UPDATE OF statut ON reception FOR EACH ROW
+WHEN (OLD.statut IS DISTINCT FROM NEW.statut)
+EXECUTE FUNCTION fn_trg_audit_reception_statut();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_qualite_statut() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('qualite', 'UPDATE', NEW.code_qualite,
+                json_build_object('statut', OLD.statut),
+                json_build_object('statut', NEW.statut, 'nom', NEW.nom),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_qualite_statut
+AFTER UPDATE OF statut ON qualite FOR EACH ROW
+WHEN (OLD.statut IS DISTINCT FROM NEW.statut)
+EXECUTE FUNCTION fn_trg_audit_qualite_statut();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_plan_statut() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('plan_production', 'UPDATE', NEW.id_plan,
+                json_build_object('statut', OLD.statut),
+                json_build_object('statut', NEW.statut, 'annee', NEW.annee, 'numero_version', NEW.numero_version),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_plan_statut
+AFTER UPDATE OF statut ON plan_production FOR EACH ROW
+WHEN (OLD.statut IS DISTINCT FROM NEW.statut)
+EXECUTE FUNCTION fn_trg_audit_plan_statut();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_utilisateur() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('utilisateur', 'UPDATE', NEW.id_utilisateur,
+                json_build_object('code_role_user', OLD.code_role_user, 'actif', OLD.actif),
+                json_build_object('code_role_user', NEW.code_role_user, 'actif', NEW.actif),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_utilisateur
+AFTER UPDATE ON utilisateur FOR EACH ROW
+WHEN (OLD.code_role_user IS DISTINCT FROM NEW.code_role_user OR OLD.actif IS DISTINCT FROM NEW.actif)
+EXECUTE FUNCTION fn_trg_audit_utilisateur();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_droit_champ_i() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               nouvelles_valeurs, id_utilisateur, adresse_ip, session_id)
+        VALUES ('droit_champ', 'INSERT', NEW.id_utilisateur,
+                json_build_object('module', NEW.module, 'champ', NEW.champ, 'niveau', NEW.niveau),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_droit_champ_i
+AFTER INSERT ON droit_champ FOR EACH ROW
+EXECUTE FUNCTION fn_trg_audit_droit_champ_i();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_droit_champ_u() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, nouvelles_valeurs,
+                               id_utilisateur, adresse_ip, session_id)
+        VALUES ('droit_champ', 'UPDATE', NEW.id_utilisateur,
+                json_build_object('module', NEW.module, 'champ', NEW.champ, 'niveau', OLD.niveau),
+                json_build_object('module', NEW.module, 'champ', NEW.champ, 'niveau', NEW.niveau),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_droit_champ_u
+AFTER UPDATE OF niveau ON droit_champ FOR EACH ROW
+WHEN (OLD.niveau IS DISTINCT FROM NEW.niveau)
+EXECUTE FUNCTION fn_trg_audit_droit_champ_u();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_permission_i() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               nouvelles_valeurs, id_utilisateur, adresse_ip, session_id)
+        VALUES ('permission', 'INSERT', NEW.id_permission,
+                json_build_object('role', NEW.code_role_user, 'module', NEW.module, 'action', NEW.action),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_permission_i
+AFTER INSERT ON permission FOR EACH ROW
+EXECUTE FUNCTION fn_trg_audit_permission_i();
+
+CREATE OR REPLACE FUNCTION fn_trg_audit_permission_d() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                               anciennes_valeurs, id_utilisateur, adresse_ip, session_id)
+        VALUES ('permission', 'DELETE', OLD.id_permission,
+                json_build_object('role', OLD.code_role_user, 'module', OLD.module, 'action', OLD.action),
+                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
+                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
+                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_permission_d
+AFTER DELETE ON permission FOR EACH ROW
+EXECUTE FUNCTION fn_trg_audit_permission_d();
+
 CREATE OR REPLACE FUNCTION fn_trg_audit_mouvement() RETURNS trigger AS $$
 BEGIN
     INSERT INTO audit_log (table_concernee, operation, id_enregistrement,

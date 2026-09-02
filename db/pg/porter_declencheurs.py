@@ -210,6 +210,9 @@ $$ LANGUAGE plpgsql;
 # Chaque groupe donne un fichier de sortie : garder 014 separe permet de le
 # rejouer seul quand on ajoute un declencheur d'audit, sans retoucher aux 65
 # declencheurs metier de 010.
+# Le fichier ou vont tous les declencheurs d'audit, charge en dernier.
+AUDIT_CIBLE = "014_audit_operations.sql"
+
 GROUPES = [
     ("010_declencheurs.sql", ["010_triggers.sql", "006_schema_achats.sql"]),
     ("014_audit_operations.sql", ["014_audit_operations.sql"]),
@@ -218,6 +221,19 @@ GROUPES = [
 
 def main():
     total, restants = 0, []
+    # LES DECLENCHEURS D'AUDIT SE RECONNAISSENT A LEUR NOM, et se rangent tous
+    # dans le meme fichier, quelle que soit leur source.
+    #
+    # Ils sont mêles aux declencheurs metier dans 010_triggers.sql, ce qui est
+    # naturel : c'est la meme table qui porte la regle et sa trace. Mais au
+    # CHARGEMENT, les deux ne vont pas ensemble — les regles doivent exister
+    # avant les donnees, la trace doit exister apres. Poses avant, les
+    # declencheurs d'audit enregistrent l'installation : dix mille lignes
+    # disant que la grille de droits vient d'etre creee, qui noient les
+    # premieres vraies actions et qu'aucun DELETE ne pourra retirer, puisqu'un
+    # declencheur interdit la suppression dans ce journal.
+    audit_differe = []
+
     for cible, sources in GROUPES:
         sorties, notes = [], []
         for nom in sources:
@@ -227,9 +243,15 @@ def main():
             for bloc in decouper(src.read_text(encoding="utf-8")):
                 porte, note = porter(bloc)
                 if porte:
-                    sorties.append(porte)
+                    if cible != AUDIT_CIBLE and "trg_audit_" in porte:
+                        audit_differe.append(porte)
+                    else:
+                        sorties.append(porte)
                 if note:
                     notes.append(note)
+
+        if cible == AUDIT_CIBLE:
+            sorties = audit_differe + sorties
 
         (RACINE / "pg" / cible).write_text(
             ENTETE

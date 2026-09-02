@@ -46,6 +46,13 @@ RACINE = Path(__file__).resolve().parents[1]
 # pour qu'aucune echelle ne soit choisie en silence.
 ECHELLES = [
     # Monnaie : deux decimales, comme un dirham s'ecrit.
+    # LES PRIX UNITAIRES D'ABORD, et l'ordre est ce qui compte : sans cette
+    # ligne, la suivante les rangerait avec les montants, a deux decimales.
+    # Un prix unitaire multiplie une quantite — il lui faut l'echelle d'une
+    # quantite, pas celle d'un montant. Le controle de coherence de
+    # `historique_prix` le verifie : abs(prix_mad - prix_devise * taux) < 0,01.
+    (r"^prix_kg|^prix_unitaire|^prix_catalogue|^prix_entree|^prix_estime|^cmup",
+     "numeric(18,4)"),
     (r"_mad$|_mad_|montant|prix|valeur|cout|capital|plafond|_devise$", "numeric(18,2)"),
     # Quantites : quatre decimales, l'echelle retenue par R01 pour le kilo.
     (r"_kg$|_kg_|quantite|poids|densite|facteur|_m2$|m2_", "numeric(18,4)"),

@@ -83,10 +83,10 @@ CREATE TABLE reference (
                             END) STORED,
 
     -- Prix
-    prix_catalogue      numeric(18,2)    NOT NULL CHECK (prix_catalogue > 0),   -- par unite_catalogue
+    prix_catalogue      numeric(18,4)    NOT NULL CHECK (prix_catalogue > 0),   -- par unite_catalogue
     code_devise_catalogue text  NOT NULL REFERENCES devise(code_devise),
     date_prix_catalogue text,
-    prix_catalogue_kg   numeric(18,2)    GENERATED ALWAYS AS (
+    prix_catalogue_kg   numeric(18,4)    GENERATED ALWAYS AS (
                             prix_catalogue / CASE unite_catalogue
                                 WHEN 'kg'      THEN 1.0
                                 WHEN 'Bobine'  THEN poids_bobine_kg
@@ -107,7 +107,7 @@ CREATE TABLE reference (
     date_dernier_abc    text,
 
     -- Valorisation (RG-08 : NULL tant qu'aucune reception reelle)
-    cmup_mad            numeric(18,2)    CHECK (cmup_mad IS NULL OR cmup_mad >= 0),
+    cmup_mad            numeric(18,4)    CHECK (cmup_mad IS NULL OR cmup_mad >= 0),
     date_dernier_cmup   text,
 
     suivi_lot           smallint NOT NULL DEFAULT 0 CHECK (suivi_lot IN (0,1)),

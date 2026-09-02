@@ -44,11 +44,56 @@ FICHIERS = [
     "011_vues.sql",
     "012_controles.sql",
     "013_vues_cockpit.sql",
-    "014_audit_operations.sql",
     "015_vues_coherence.sql",
     "016_controles_classeur.sql",
+    "017a_table_frais_approche.sql",
     "017_vues_analyse.sql",
 ]
+
+# Les seeds sont SEPARES du schema, et l'ordre y est EXPLICITE.
+#
+# `004_qualites` depend de `002_securite` ; `003_roles_2026` reecrit la grille
+# de droits que `002_securite` vient de poser. Les decouvrir par tri
+# alphabetique inverserait ces dependances sans le dire — et une grille de
+# droits inversee ne se voit pas : elle donne simplement acces a ce qu'elle
+# devait masquer.
+SEEDS = [
+    # 1. Les referentiels : devises, magasins, types de mouvement, parametres.
+    "seed_001_referentiels.sql",
+    # 2. La securite : catalogue des champs, roles d'origine, permissions.
+    "seed_002_securite.sql",
+    # 3. Les qualites, qui referencent les roles BOM du point 1.
+    "seed_004_qualites.sql",
+    # 4. LES ROLES 2026 AVANT LES CHAMPS QUI LES CITENT. `003` cree DIRECTION,
+    #    ADMIN, ASSISTANTE et MAGASIN ; `004` et `005` declarent des champs et
+    #    derivent leurs droits POUR CES ROLES. Dans l'autre sens, la cle
+    #    etrangere refuse — et c'est heureux : une grille de droits derivee sur
+    #    des roles absents serait silencieusement vide.
+    "seed_003_roles_2026.sql",
+    # 5. Les champs declares apres coup, chacun derivant ses propres droits.
+    "seed_004_champs_matrice.sql",
+    "seed_005_champs_analyse.sql",
+]
+
+# Ce qui distingue une base de PRODUCTION d'une base de recette : le
+# referentiel reel de l'entreprise, et ses six comptes nominatifs a la place
+# des comptes de fonction. Charge par `--production`, jamais par defaut.
+PRODUCTION = [
+    "seed_100_referentiel_reel.sql",
+    "seed_110_comptes_production.sql",
+]
+
+# LES DECLENCHEURS D'AUDIT SE POSENT EN DERNIER, apres les donnees.
+#
+# Poses avant, ils enregistrent le chargement lui-meme : onze mille lignes
+# disant « admin a cree la reference PP-1500 » a la seconde ou le fichier est
+# joue. Ce n'est pas une trace d'exploitation, c'est le bruit de l'installation,
+# et il noierait les premieres vraies actions.
+#
+# On ne peut pas l'effacer apres coup : un declencheur interdit la suppression
+# dans le journal d'audit — et c'est bien ainsi. La seule facon propre de ne pas
+# auditer la reprise est de ne pas l'auditer.
+AUDIT = ["014_audit_operations.sql"]
 
 PSQL = os.environ.get("PSQL", r"C:\Program Files\PostgreSQL\18\bin\psql.exe")
 
@@ -181,6 +226,44 @@ def main():
                 if "ERREUR" in l or "ERROR" in l or "DETAIL" in l:
                     print("      %s" % l.strip())
         return 1
+
+    # --- Les seeds, EN ENTIER --------------------------------------------
+    # Un fichier, un processus psql, donc UNE session : c'est indispensable
+    # pour `seed_002_securite.sql`, qui derive la grille de permissions a
+    # travers une table TEMPORAIRE. Decoupee, elle mourrait avec la premiere
+    # instruction.
+    if "--seeds" in args or "--production" in args:
+        liste = SEEDS + (PRODUCTION if "--production" in args else [])
+        print("\n--- donnees de reference ---")
+        for nom in liste:
+            chemin = ICI / nom
+            if not chemin.exists():
+                print("  ! absent : %s" % nom)
+                continue
+            code, err = jouer(chemin.read_text(encoding="utf-8"),
+                              base, hote, utilisateur, motdepasse)
+            print("  %-30s %s" % (nom, "ok" if code == 0 else "ECHEC"))
+            if code != 0:
+                for l in err.split("\n"):
+                    if "ERREUR" in l or "ERROR" in l or "DETAIL" in l:
+                        print("      %s" % l.strip())
+                return 1
+
+    # --- Les declencheurs d'audit, en dernier ------------------------------
+    # Voir le commentaire de la liste AUDIT : poses avant les donnees, ils
+    # auditeraient l'installation.
+    print("\n--- declencheurs d'audit ---")
+    for nom in AUDIT:
+        chemin = ICI / nom
+        for inst in decouper(chemin.read_text(encoding="utf-8")):
+            code, err = jouer(inst, base, hote, utilisateur, motdepasse)
+            if code != 0:
+                print("  %-30s ECHEC" % nom)
+                for l in err.split("\n"):
+                    if "ERREUR" in l or "ERROR" in l:
+                        print("      %s" % l.strip())
+                return 1
+        print("  %-30s ok" % nom)
 
     print("\nTout est charge.")
     return 0

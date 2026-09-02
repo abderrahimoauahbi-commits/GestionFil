@@ -83,8 +83,8 @@ CREATE TABLE ligne_bc (
     quantite_restante_kg numeric(18,4)   GENERATED ALWAYS AS (quantite_commandee_kg - quantite_recue_kg) STORED,
 
     -- Prix : saisi par unite de commande, ramene au kg (unite canonique)
-    prix_unitaire_devise numeric(18,2)   NOT NULL CHECK (prix_unitaire_devise > 0),
-    prix_kg_devise      numeric(18,2)    GENERATED ALWAYS AS (prix_unitaire_devise / facteur_kg) STORED,
+    prix_unitaire_devise numeric(18,4)   NOT NULL CHECK (prix_unitaire_devise > 0),
+    prix_kg_devise      numeric(18,4)    GENERATED ALWAYS AS (prix_unitaire_devise / facteur_kg) STORED,
     code_devise         text    NOT NULL REFERENCES devise(code_devise),
     total_ligne_devise  numeric(18,2)    GENERATED ALWAYS AS (quantite_commandee_unite * prix_unitaire_devise) STORED,
 
@@ -145,7 +145,7 @@ CREATE TABLE plan_achat (
     quantite_suggeree_unite numeric(18,4),
 
     code_fournisseur    text    NOT NULL REFERENCES fournisseur(code_fournisseur),
-    prix_estime_mad     numeric(18,2)    NOT NULL CHECK (prix_estime_mad > 0),
+    prix_estime_mad     numeric(18,4)    NOT NULL CHECK (prix_estime_mad > 0),
     source_prix         text    NOT NULL CHECK (source_prix IN ('CMUP','CATALOGUE','NEGOCIE')),
     montant_total_mad   numeric(18,2)    GENERATED ALWAYS AS (quantite_suggeree_kg * prix_estime_mad) STORED,
 
@@ -225,10 +225,10 @@ CREATE TABLE historique_prix (
     -- fois comme devise etrangere (historique) -> CMUP faux d'un facteur ~9,5
     -- sur les achats USD. Les deux grandeurs sont ici distinctes et le lien
     -- entre elles est contraint.
-    prix_kg_devise      numeric(18,2)    NOT NULL CHECK (prix_kg_devise > 0),
+    prix_kg_devise      numeric(18,4)    NOT NULL CHECK (prix_kg_devise > 0),
     code_devise         text    NOT NULL REFERENCES devise(code_devise),
     taux_change         numeric(9,4)    NOT NULL CHECK (taux_change > 0),
-    prix_kg_mad         numeric(18,2)    NOT NULL CHECK (prix_kg_mad > 0),
+    prix_kg_mad         numeric(18,4)    NOT NULL CHECK (prix_kg_mad > 0),
 
     quantite_achetee_kg numeric(18,4)    NOT NULL CHECK (quantite_achetee_kg > 0),
     total_mad           numeric(18,2)    NOT NULL CHECK (total_mad > 0),

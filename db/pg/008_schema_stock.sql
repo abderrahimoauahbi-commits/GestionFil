@@ -63,7 +63,7 @@ CREATE TABLE ligne_mouvement (
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
 
     quantite_kg         numeric(18,4)    NOT NULL CHECK (quantite_kg > 0),
-    prix_kg_mad         numeric(18,2)    CHECK (prix_kg_mad IS NULL OR prix_kg_mad > 0),
+    prix_kg_mad         numeric(18,4)    CHECK (prix_kg_mad IS NULL OR prix_kg_mad > 0),
     total_mad           numeric(18,2)    GENERATED ALWAYS AS (quantite_kg * COALESCE(prix_kg_mad, 0)) STORED,
 
     -- Saisie d'origine conservee pour l'audit (R01 : le kg reste canonique)
@@ -99,7 +99,7 @@ CREATE TABLE stock_magasin (
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     code_magasin        text    NOT NULL REFERENCES magasin(code_magasin),
     quantite_kg         numeric(18,4)    NOT NULL DEFAULT 0 CHECK (quantite_kg >= 0),   -- R02
-    cmup_mad            numeric(18,2)    CHECK (cmup_mad IS NULL OR cmup_mad >= 0),      -- RG-08 : NULL si aucun achat
+    cmup_mad            numeric(18,4)    CHECK (cmup_mad IS NULL OR cmup_mad >= 0),      -- RG-08 : NULL si aucun achat
     valeur_mad          numeric(18,2)    GENERATED ALWAYS AS (quantite_kg * COALESCE(cmup_mad, 0)) STORED,
     date_derniere_entree text,
     date_derniere_sortie text,
@@ -122,7 +122,7 @@ CREATE TABLE stock_lot (
     code_magasin        text    NOT NULL REFERENCES magasin(code_magasin),
     lot_fournisseur     text    NOT NULL,
     quantite_kg         numeric(18,4)    NOT NULL DEFAULT 0 CHECK (quantite_kg >= 0),
-    prix_entree_mad     numeric(18,2)    CHECK (prix_entree_mad IS NULL OR prix_entree_mad >= 0),
+    prix_entree_mad     numeric(18,4)    CHECK (prix_entree_mad IS NULL OR prix_entree_mad >= 0),
     date_fabrication    text,
     date_peremption     text,
     date_premiere_entree text   NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
@@ -196,7 +196,7 @@ CREATE TABLE ligne_transfert (
     -- ferait entrer le lot a un prix qu'il n'a jamais eu, des qu'une reception
     -- fournisseur intervient pendant le trajet — et le CMUP du destinataire,
     -- qui est une moyenne ponderee, s'en trouverait fausse durablement.
-    prix_kg_mad         numeric(18,2)    CHECK (prix_kg_mad IS NULL OR prix_kg_mad > 0),
+    prix_kg_mad         numeric(18,4)    CHECK (prix_kg_mad IS NULL OR prix_kg_mad > 0),
 
     UNIQUE (id_transfert, ligne_numero)
 );
@@ -211,7 +211,7 @@ CREATE TABLE valorisation_stock (
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     code_magasin        text    NOT NULL REFERENCES magasin(code_magasin),
     quantite_kg         numeric(18,4)    NOT NULL,
-    cmup_mad            numeric(18,2)    NOT NULL,
+    cmup_mad            numeric(18,4)    NOT NULL,
     valeur_mad          numeric(18,2)    NOT NULL,
     methode             text    NOT NULL DEFAULT 'CMUP' CHECK (methode IN ('CMUP')),
     date_calcul         text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

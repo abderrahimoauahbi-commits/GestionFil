@@ -89,10 +89,10 @@ CREATE TABLE ligne_reception (
                             END) STORED,
 
     -- Prix : distinction stricte devise / MAD (correction BL-5)
-    prix_kg_devise      numeric(18,2)    NOT NULL CHECK (prix_kg_devise > 0),
+    prix_kg_devise      numeric(18,4)    NOT NULL CHECK (prix_kg_devise > 0),
     code_devise         text    NOT NULL REFERENCES devise(code_devise),
     taux_change         numeric(9,4)    NOT NULL CHECK (taux_change > 0),
-    prix_kg_mad         numeric(18,2)    NOT NULL CHECK (prix_kg_mad > 0),
+    prix_kg_mad         numeric(18,4)    NOT NULL CHECK (prix_kg_mad > 0),
     total_devise        numeric(18,2)    GENERATED ALWAYS AS (quantite_stock_kg * prix_kg_devise) STORED,
     total_mad           numeric(18,2)    GENERATED ALWAYS AS (quantite_stock_kg * prix_kg_mad) STORED,
 
@@ -168,10 +168,10 @@ CREATE TABLE archive_reception (
     quantite_pesee_unite numeric(18,4)   NOT NULL,
     unite_saisie        text    NOT NULL,
     quantite_stock_kg   numeric(18,4)    NOT NULL,
-    prix_kg_devise      numeric(18,2)    NOT NULL,
+    prix_kg_devise      numeric(18,4)    NOT NULL,
     code_devise         text    NOT NULL,
     taux_change         numeric(9,4)    NOT NULL,
-    prix_kg_mad         numeric(18,2)    NOT NULL,
+    prix_kg_mad         numeric(18,4)    NOT NULL,
     total_mad           numeric(18,2)    NOT NULL,
     code_magasin_dest   text    NOT NULL,
     statut_qualite      text    NOT NULL,

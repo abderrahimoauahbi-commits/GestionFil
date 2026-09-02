@@ -23,7 +23,7 @@ path = "src/bin/import.rs"
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 
 # sqlx en mode requetes dynamiques (pas de macros query!) : la couche SQL est
 # deja validee par db/tests/run-tests.ps1, et cela evite d'exiger une base

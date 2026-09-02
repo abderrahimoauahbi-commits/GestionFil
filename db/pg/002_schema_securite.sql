@@ -46,8 +46,6 @@ CREATE TABLE utilisateur (
     email               text,
     telephone           text,
     magasin_principal   text    REFERENCES magasin(code_magasin),
-    mfa_actif           smallint NOT NULL DEFAULT 0 CHECK (mfa_actif IN (0,1)),
-    mfa_secret          text,
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     derniere_connexion  text,
     actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))

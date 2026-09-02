@@ -101,8 +101,8 @@ export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: str
   {
     cle: 'glassier',
     nom: 'Verre liquide',
-    resume: 'Nappe de couleurs saturees, surfaces refractantes a bord lumineux. Les tableaux gardent un verre ferme pour que les chiffres restent nets.',
-    teintes: ['#A78BFA', '#22D3EE', '#7C3AED'],
+    resume: 'Maille de degrades floutee, comme un decor hors de mise au point. Toutes les surfaces sont en verre — tableaux compris — et la lentille deforme ce qui passe dessous.',
+    teintes: ['#DDE5EF', '#1A73E8', '#0D1219'],
   },
   {
     cle: 'claude',

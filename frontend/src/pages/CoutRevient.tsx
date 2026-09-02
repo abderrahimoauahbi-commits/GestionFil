@@ -202,10 +202,7 @@ export function CoutRevient() {
         sous_titre="Prix d achat plus fret, douane, assurance et manutention, repartis par reception"
         actions={
           droits.peutEcrire && (
-            <Bouton onClick={() => setSaisie(true)}>
-              <Plus />
-              Saisir un frais
-            </Bouton>
+            <Bouton taille="icone" title="Saisir un frais" aria-label="Saisir un frais" onClick={() => setSaisie(true)}>              <Plus />            </Bouton>
           )
         }
       />

@@ -250,10 +250,7 @@ export function BonsCommande() {
         description="Ouvrir un bon pour saisir ses lignes, negocier et suivre les livraisons."
         actions={
           droits.peutEcrire && (
-            <Bouton onClick={() => naviguer('/bons-commande/nouveau')}>
-              <Plus />
-              Nouveau bon
-            </Bouton>
+            <Bouton taille="icone" title="Nouveau bon" aria-label="Nouveau bon" onClick={() => naviguer('/bons-commande/nouveau')}>              <Plus />            </Bouton>
           )
         }
       />

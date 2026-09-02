@@ -735,19 +735,22 @@
    ========================================================================== */
 :root[data-palette="glassier"],
 .atelier[data-palette="glassier"] {
-  --fond: 226 60% 95%;
-  --texte: 234 45% 14%;
+  /* #e2e6eb — la teinte moyenne du degrade gris. Elle est ce qu'on voit au
+     premier rendu, avant que l'image de fond ne soit peinte : la choisir au
+     milieu du degrade evite le clignotement. */
+  --fond: 214 18% 91%;
+  --texte: 215 25% 14%;
 
   --surface: 0 0% 100%;
-  --surface-texte: 234 45% 14%;
+  --surface-texte: 215 25% 14%;
 
-  --attenue: 230 55% 91%;
-  --attenue-texte: 232 24% 34%;
+  --attenue: 214 16% 87%;
+  --attenue-texte: 214 12% 38%;
 
-  --accent: 262 83% 58%;
+  --accent: 214 80% 48%;
   --accent-texte: 0 0% 100%;
 
-  --primaire: 262 83% 58%;
+  --primaire: 214 80% 48%;
   --primaire-texte: 0 0% 100%;
 
   --danger: 350 78% 51%;
@@ -757,10 +760,10 @@
   --alerte: 33 96% 44%;
   --info: 217 91% 60%;
 
-  --bordure: 228 40% 88%;
-  --ligne: 228 44% 94%;
-  --champ: 228 34% 82%;
-  --anneau: 262 83% 58%;
+  --bordure: 214 15% 82%;
+  --ligne: 214 18% 90%;
+  --champ: 214 13% 76%;
+  --anneau: 214 80% 48%;
 
   --barre: 228 52% 97%;
   --barre-texte: 232 32% 18%;
@@ -778,7 +781,7 @@
   --at-liste-survol: 228 44% 93%;
   --at-liste-selection: 234 68% 91%;
   --at-liste-selection-texte: 235 45% 25%;
-  --at-badge: 262 83% 58%;
+  --at-badge: 214 80% 48%;
   --at-badge-texte: 0 0% 100%;
 
   color-scheme: light;
@@ -786,24 +789,24 @@
 
 :root.sombre[data-palette="glassier"],
 .atelier.sombre[data-palette="glassier"] {
-  /* #070b1a, la nappe sombre sous le verre. */
-  --fond: 227 55% 6%;
-  --texte: 0 0% 100%;
+  /* #1a1e24 — la teinte moyenne du degrade sombre, gris-bleu neutre. */
+  --fond: 214 15% 12%;
+  --texte: 0 0% 96%;
 
-  /* #0b1022, la surface fermee des zones de donnees. */
-  --surface: 227 51% 9%;
-  --surface-texte: 0 0% 100%;
+  /* #171b21, la surface fermee des zones de donnees. */
+  --surface: 214 18% 11%;
+  --surface-texte: 0 0% 96%;
 
   --attenue: 221 33% 20%;
   /* Slate-200, le texte secondaire de la reference. */
-  --attenue-texte: 213 27% 84%;
+  --attenue-texte: 0 0% 82%;
 
   /* #667eea, le bleu du degrade d'accent. */
-  --accent: 262 90% 72%;
-  --accent-texte: 227 55% 8%;
+  --accent: 210 90% 68%;
+  --accent-texte: 214 25% 9%;
 
-  --primaire: 262 90% 72%;
-  --primaire-texte: 227 55% 8%;
+  --primaire: 210 90% 68%;
+  --primaire-texte: 214 25% 9%;
 
   --danger: 350 82% 68%;
   --danger-texte: 222 47% 11%;
@@ -812,10 +815,10 @@
   --alerte: 38 92% 62%;
   --info: 199 89% 66%;
 
-  --bordure: 221 30% 26%;
-  --ligne: 220 34% 17%;
-  --champ: 221 28% 34%;
-  --anneau: 262 90% 72%;
+  --bordure: 214 14% 24%;
+  --ligne: 214 16% 17%;
+  --champ: 214 12% 32%;
+  --anneau: 210 90% 68%;
 
   --barre: 222 45% 13%;
   --barre-texte: 0 0% 100%;
@@ -834,267 +837,285 @@
   /* #764ba2, le violet du degrade, reserve a la selection. */
   --at-liste-selection: 270 37% 32%;
   --at-liste-selection-texte: 0 0% 100%;
-  --at-badge: 262 90% 72%;
-  --at-badge-texte: 227 55% 8%;
+  --at-badge: 210 90% 68%;
+  --at-badge-texte: 214 25% 9%;
 
   color-scheme: dark;
 }
 
 /* -----------------------------------------------------------------------------
-   LE VERRE LIQUIDE
+   LE VERRE LIQUIDE, SUR MAILLE DE DEGRADES
    -----------------------------------------------------------------------------
-   Ce n'est pas le verre depoli du glassmorphisme de 2020, et la difference est
-   la seule chose qui compte ici.
+   Cinq essais. Voici ce que chacun a appris, parce que la conclusion ne se
+   devine pas.
 
-   LE VERRE DEPOLI FLOUTE ET CACHE : beaucoup de flou, peu de transparence, un
-   bord discret. Le fond disparait sous une vitre laiteuse.
+     1. quatre halos colores, NON FLOUTES -> on voyait quatre taches. Le defaut
+        n'etait pas la couleur : c'etait l'absence de flou.
+     2. fond parfaitement uni              -> plus rien a refracter.
+     3. degrade lineaire bleu-lavande      -> trop colore pour un outil, et une
+                                              seule direction : pauvre.
+     4. degrade lineaire gris              -> business, mais UNE SEULE DIRECTION
+                                              et huit points d'amplitude. Un
+                                              aplat froid. Aucun effet de verre.
+     5. MAILLE DE DEGRADES FLOUTEE         -> six nappes posees a des endroits
+                                              dissymetriques, PUIS floutees a
+                                              46 px. Le flou est ce qui
+                                              transforme six taches en un decor
+                                              continu, avec des variations dans
+                                              TOUTES les directions.
 
-   LE VERRE LIQUIDE REFRACTE ET MONTRE : peu de flou, beaucoup de saturation, et
-   surtout UN BORD QUI PREND LA LUMIERE. C'est le lisere lumineux, pas le flou,
-   qui fait lire la matiere comme du verre epais. On voit le fond a travers, un
-   peu deforme, plus vif que la realite.
+   C'EST LE FLOU QUI FAIT LA MAILLE. Sans lui, six nappes restent six nappes ;
+   avec lui, elles fusionnent en un champ dont la clarte varie en permanence, et
+   c'est cette variation permanente que le verre refracte. Un aplat, aussi
+   soigne soit-il, ne donne rien a voir a une lentille.
 
-   Trois couches, dans cet ordre :
-     1. le TEINT       — rgb(255 255 255 / .15), presque rien, juste un voile ;
-     2. la REFRACTION  — blur(2px) saturate(180%) brightness(112%) : le fond
-                         reste lisible a travers, mais plus dense en couleur ;
-     3. la LUMIERE     — un bord blanc franc, un halo interne haut, et un lisere
-                         degrade oriente en diagonale. C'est la signature.
+   LA DISSYMETRIE EST DELIBEREE. Des nappes reparties regulierement se lisent
+   comme un fond d'ecran genere. Decalees, elles se lisent comme une photographie
+   hors de mise au point — ce que cherche Glazzed.
 
-   ET UN FOND QUI VAUT LA PEINE D'ETRE REFRACTE. Un verre pose sur du gris ne
-   montre rien. D'ou la nappe de couleurs saturees en dessous : sans elle, tout
-   ce qui precede ne se voit pas.
-
-   La refraction geometrique d'Apple — le fond reellement DEFORME au bord, par
-   un filtre SVG de deplacement — n'est pas ici : elle exige une carte de
-   deplacement aux dimensions exactes de chaque element, ce qu'une grille dont
-   les cartes changent de taille ne peut pas fournir, et elle ne fonctionne que
-   sur les moteurs Chromium. Le lisere diagonal en donne la lecture pour un
-   cout nul.
+   ET CELA RESTE UN ERP. Les teintes tiennent dans la famille acier, ardoise et
+   graphite. L'amplitude est calibree pour que le contraste du texte sur verre
+   ne descende jamais sous 4,5:1, mesure comprise (voir plus bas).
    -------------------------------------------------------------------------- */
 
-/* --- 1. La nappe -----------------------------------------------------------
-   Quatre halos larges, poses aux quatre coins pour qu'aucune zone de travail ne
-   soit uniforme : c'est le mouvement du fond qui anime le verre quand on fait
-   defiler. Fixe, pour que le fond ne defile pas avec le contenu. */
-:root[data-palette="glassier"] body,
-.atelier[data-palette="glassier"] {
-  background-color: #e7ecfb;
-  background-image:
-    radial-gradient(at 6% 2%, rgb(167 139 250 / 0.55) 0px, transparent 48%),
-    radial-gradient(at 94% 6%, rgb(34 211 238 / 0.42) 0px, transparent 44%),
-    radial-gradient(at 80% 92%, rgb(244 114 182 / 0.40) 0px, transparent 46%),
-    radial-gradient(at 14% 96%, rgb(96 165 250 / 0.45) 0px, transparent 46%);
-  background-attachment: fixed;
+/* --- 1. La maille -----------------------------------------------------------
+   Elle vit sur `body::before`, pas sur `body` : le flou doit s'appliquer a
+   l'image de fond SEULE. Pose sur `body`, `filter` flouterait aussi toute
+   l'application. Un pseudo-element fixe, en z-index negatif, se peint derriere
+   le contenu et devant le fond de body — exactement la couche voulue. */
+:root[data-palette="glassier"] body {
+  background-color: #eef1f6;
 }
 
-:root.sombre[data-palette="glassier"] body,
-.atelier.sombre[data-palette="glassier"] {
-  background-color: #070b1a;
+:root[data-palette="glassier"] body::before {
+  content: "";
+  position: fixed;
+  /* Deborde de 20 % : le flou mange les bords, et un bord mange laisse une
+     bande claire tout autour de l'ecran. */
+  inset: -20%;
+  z-index: -2;
+  pointer-events: none;
   background-image:
-    radial-gradient(at 6% 2%, rgb(124 58 237 / 0.60) 0px, transparent 46%),
-    radial-gradient(at 94% 6%, rgb(6 182 212 / 0.42) 0px, transparent 42%),
-    radial-gradient(at 80% 92%, rgb(219 39 119 / 0.38) 0px, transparent 44%),
-    radial-gradient(at 14% 96%, rgb(37 99 235 / 0.48) 0px, transparent 46%);
-  background-attachment: fixed;
+    radial-gradient(40% 44% at 16% 20%, rgb(120 160 210 / 0.55) 0%, transparent 70%),
+    radial-gradient(32% 36% at 80% 14%, rgb(176 198 224 / 0.5) 0%, transparent 72%),
+    radial-gradient(46% 42% at 86% 76%, rgb(96 140 190 / 0.42) 0%, transparent 70%),
+    radial-gradient(34% 32% at 40% 94%, rgb(190 203 220 / 0.55) 0%, transparent 72%),
+    radial-gradient(28% 26% at 58% 48%, rgb(255 255 255 / 0.6) 0%, transparent 74%),
+    linear-gradient(148deg, #eff3f9 0%, #dde5ef 46%, #e9eef5 100%);
+  filter: blur(46px) saturate(112%);
 }
 
-/* La coquille de l'application peint `bg-fond` sur toute sa hauteur, par-dessus
-   le body. Sans cette regle, la nappe existe et ne se voit jamais : elle est
-   simplement recouverte par un aplat de la couleur de fond. */
+:root.sombre[data-palette="glassier"] body {
+  background-color: #080b10;
+}
+
+:root.sombre[data-palette="glassier"] body::before {
+  background-image:
+    radial-gradient(38% 42% at 18% 22%, rgb(96 133 178 / 0.55) 0%, transparent 70%),
+    radial-gradient(30% 34% at 78% 12%, rgb(126 148 176 / 0.38) 0%, transparent 72%),
+    radial-gradient(46% 40% at 88% 74%, rgb(60 92 130 / 0.5) 0%, transparent 70%),
+    radial-gradient(34% 30% at 42% 92%, rgb(148 163 184 / 0.3) 0%, transparent 72%),
+    radial-gradient(26% 24% at 60% 46%, rgb(186 205 226 / 0.22) 0%, transparent 74%),
+    linear-gradient(148deg, #0d1219 0%, #131a24 45%, #0a0e14 100%);
+  filter: blur(46px) saturate(115%);
+}
+
+/* --- 2. Le grain ------------------------------------------------------------
+   UN DEGRADE PARFAITEMENT LISSE SE VOIT COMME TEL sur un grand aplat : les
+   ecrans 8 bits le rendent en bandes concentriques. Un grain tres faible casse
+   ces bandes — meme remede que le tramage en imprimerie. Il donne au passage la
+   texture qui distingue une image d'un aplat. */
+:root[data-palette="glassier"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.3;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+/* La coquille peint `bg-fond` sur toute sa hauteur, par-dessus le body. Sans
+   cette regle, la maille existe et ne se voit jamais. */
 :root[data-palette="glassier"] .bg-fond {
   background-color: transparent;
 }
 
-/* --- 2. Les rayons ---------------------------------------------------------
-   Le verre epais arrondit beaucoup : un angle vif casse l'illusion de matiere. */
-:root[data-palette="glassier"],
+/* Meme decor pour l'atelier, qui n'est pas monte dans `body`. */
 .atelier[data-palette="glassier"] {
-  --radius: 22px;
-  --radius-sm: 12px;
+  background-color: #eef1f6;
+  background-image:
+    radial-gradient(40% 44% at 16% 20%, rgb(120 160 210 / 0.3) 0%, transparent 70%),
+    radial-gradient(46% 42% at 86% 76%, rgb(96 140 190 / 0.24) 0%, transparent 70%),
+    linear-gradient(148deg, #eff3f9 0%, #dde5ef 46%, #e9eef5 100%);
 }
 
-/* --- 3. Le chrome, en verre liquide ---------------------------------------
-   Barres, cartes d'indicateurs, graphiques, menus et tiroirs. Une carte QUI
-   PORTE UN TABLEAU en est exclue : elle recoit plus bas un verre plus ferme,
-   parce qu'on y lit des chiffres. */
+.atelier.sombre[data-palette="glassier"] {
+  background-color: #080b10;
+  background-image:
+    radial-gradient(38% 42% at 18% 22%, rgb(96 133 178 / 0.3) 0%, transparent 70%),
+    radial-gradient(46% 40% at 88% 74%, rgb(60 92 130 / 0.28) 0%, transparent 70%),
+    linear-gradient(148deg, #0d1219 0%, #131a24 45%, #0a0e14 100%);
+}
+
+/* --- 3. Le rayon ------------------------------------------------------------ */
+:root[data-palette="glassier"],
+.atelier[data-palette="glassier"] {
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+
+/* --- 4. TOUTES les surfaces, en verre ---------------------------------------
+   Barres, cartes, graphiques, dialogues, menus — ET LES TABLEAUX.
+
+   LES DEUX OMBRES INTERNES SONT LA SIGNATURE. Decalees en diagonale, elles
+   dessinent une arete claire en haut a gauche et un retour de lumiere en bas a
+   droite : la lecture d'une piece de verre eclairee d'en haut. Elles suivent le
+   rayon des angles au pixel pres, contrairement a un lisere en degrade masque,
+   qui laissait des marches visibles dans les coins. */
 :root[data-palette="glassier"] header,
 :root[data-palette="glassier"] aside,
 :root[data-palette="glassier"] footer,
-:root[data-palette="glassier"] .carte:not(:has(table)),
+:root[data-palette="glassier"] .carte,
 :root[data-palette="glassier"] .viz,
+:root[data-palette="glassier"] .bg-surface,
 :root[data-palette="glassier"] [role="dialog"],
 :root[data-palette="glassier"] [data-radix-popper-content-wrapper] > * {
-  position: relative;
-  background-color: rgb(255 255 255 / 0.15);
-  backdrop-filter: blur(2px) saturate(180%) brightness(112%);
-  -webkit-backdrop-filter: blur(2px) saturate(180%) brightness(112%);
-  border: 1px solid rgb(255 255 255 / 0.65);
+  background-color: rgb(255 255 255 / 0.44);
+  /* Le repli d'abord : tout moteur comprend celui-ci. */
+  backdrop-filter: blur(16px) saturate(155%);
+  -webkit-backdrop-filter: blur(16px) saturate(155%);
+  border-color: rgb(255 255 255 / 0.7);
   box-shadow:
-    /* l'ombre portee : le verre flotte au-dessus de la nappe */
-    0 8px 32px rgb(31 38 135 / 0.22),
-    /* le rai de lumiere sur l'arete haute */
-    inset 0 1px 1px rgb(255 255 255 / 0.85),
-    /* l'illumination interne, qui donne l'epaisseur */
-    inset 0 4px 20px rgb(255 255 255 / 0.32),
-    /* le retour de lumiere sur l'arete basse, plus faible */
-    inset 0 -1px 1px rgb(255 255 255 / 0.35);
+    0 8px 28px rgb(15 23 42 / 0.12),
+    inset 1px 1px 0 rgb(255 255 255 / 0.8),
+    inset -1px -1px 0 rgb(255 255 255 / 0.3);
 }
 
 :root.sombre[data-palette="glassier"] header,
 :root.sombre[data-palette="glassier"] aside,
 :root.sombre[data-palette="glassier"] footer,
-:root.sombre[data-palette="glassier"] .carte:not(:has(table)),
+:root.sombre[data-palette="glassier"] .carte,
 :root.sombre[data-palette="glassier"] .viz,
+:root.sombre[data-palette="glassier"] .bg-surface,
 :root.sombre[data-palette="glassier"] [role="dialog"],
 :root.sombre[data-palette="glassier"] [data-radix-popper-content-wrapper] > * {
   background-color: rgb(255 255 255 / 0.07);
-  backdrop-filter: blur(3px) saturate(190%) brightness(118%);
-  -webkit-backdrop-filter: blur(3px) saturate(190%) brightness(118%);
-  border: 1px solid rgb(255 255 255 / 0.28);
+  backdrop-filter: blur(16px) saturate(165%);
+  -webkit-backdrop-filter: blur(16px) saturate(165%);
+  border-color: rgb(255 255 255 / 0.18);
   box-shadow:
-    0 8px 32px rgb(0 0 0 / 0.50),
-    inset 0 1px 1px rgb(255 255 255 / 0.45),
-    inset 0 4px 20px rgb(255 255 255 / 0.10),
-    inset 0 -1px 1px rgb(255 255 255 / 0.14);
+    0 8px 28px rgb(0 0 0 / 0.5),
+    inset 1px 1px 0 rgb(255 255 255 / 0.22),
+    inset -1px -1px 0 rgb(255 255 255 / 0.07);
 }
 
-/* --- 4. Le lisere diagonal -------------------------------------------------
-   LA SIGNATURE DU VERRE LIQUIDE. Une bordure uniforme donne une vitre ; une
-   bordure dont la lumiere tourne donne une piece de verre eclairee par le haut
-   a gauche. Technique du bord en degrade : un fond degrade dans le rembourrage,
-   decoupe en son centre par un masque, ne laissant que l'epaisseur du bord.
+/* --- 5. La lentille ---------------------------------------------------------
+   Un flou reste uniforme ; la lentille DEFORME la maille qui passe dessous. Le
+   filtre est defini dans index.html.
 
-   `pointer-events: none` est indispensable — sans lui le lisere couvrirait
-   toute la carte et avalerait les clics. */
-:root[data-palette="glassier"] header::before,
-:root[data-palette="glassier"] aside::before,
-:root[data-palette="glassier"] .carte:not(:has(table))::before,
-:root[data-palette="glassier"] .viz::before,
-:root[data-palette="glassier"] [role="dialog"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  padding: 1px;
-  pointer-events: none;
-  background: linear-gradient(
-    135deg,
-    rgb(255 255 255 / 0.95) 0%,
-    rgb(255 255 255 / 0.25) 28%,
-    rgb(255 255 255 / 0) 52%,
-    rgb(255 255 255 / 0.3) 76%,
-    rgb(255 255 255 / 0.8) 100%
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
+   ELLE EST ISOLEE DANS UN @supports, ET C'EST INDISPENSABLE : un moteur qui ne
+   sait pas lire `url()` dans un `backdrop-filter` rejette la DECLARATION
+   ENTIERE. Sans cette garde, Firefox et Safari perdraient aussi le flou de
+   repli, et les surfaces deviendraient transparentes a 44 % avec du texte
+   par-dessus. Ici, ils gardent le flou du bloc 4. */
+@supports (backdrop-filter: url(#verre-lentille)) {
+  :root[data-palette="glassier"] header,
+  :root[data-palette="glassier"] aside,
+  :root[data-palette="glassier"] .carte,
+  :root[data-palette="glassier"] .viz,
+  :root[data-palette="glassier"] .bg-surface,
+  :root[data-palette="glassier"] [role="dialog"] {
+    backdrop-filter: url(#verre-lentille) blur(2px) saturate(155%) brightness(104%);
+    -webkit-backdrop-filter: url(#verre-lentille) blur(2px) saturate(155%) brightness(104%);
+  }
+
+  :root.sombre[data-palette="glassier"] header,
+  :root.sombre[data-palette="glassier"] aside,
+  :root.sombre[data-palette="glassier"] .carte,
+  :root.sombre[data-palette="glassier"] .viz,
+  :root.sombre[data-palette="glassier"] .bg-surface,
+  :root.sombre[data-palette="glassier"] [role="dialog"] {
+    backdrop-filter: url(#verre-lentille) blur(3px) saturate(165%) brightness(112%);
+    -webkit-backdrop-filter: url(#verre-lentille) blur(3px) saturate(165%) brightness(112%);
+  }
 }
 
-:root.sombre[data-palette="glassier"] header::before,
-:root.sombre[data-palette="glassier"] aside::before,
-:root.sombre[data-palette="glassier"] .carte:not(:has(table))::before,
-:root.sombre[data-palette="glassier"] .viz::before,
-:root.sombre[data-palette="glassier"] [role="dialog"]::before {
-  background: linear-gradient(
-    135deg,
-    rgb(255 255 255 / 0.6) 0%,
-    rgb(255 255 255 / 0.12) 30%,
-    rgb(255 255 255 / 0) 54%,
-    rgb(255 255 255 / 0.14) 78%,
-    rgb(255 255 255 / 0.45) 100%
-  );
-}
-
-/* --- 5. Les surfaces de donnees -------------------------------------------
-   ELLES NE SUIVENT PAS LA MEME REGLE, ET C'EST VOULU. Le verre liquide laisse
-   passer le fond ; sur une colonne de nombres a douze pixels, ce fond passe
-   AU TRAVERS du chiffre et le rend penible a relire. Donc : beaucoup de flou
-   (le fond devient une teinte unie), et une opacite qui tient le contraste.
-   Le cadre reste en verre, le contenu redevient lisible. */
-:root[data-palette="glassier"] .carte:has(table) {
-  position: relative;
-  background-color: rgb(255 255 255 / 0.72);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  border: 1px solid rgb(255 255 255 / 0.7);
-  box-shadow:
-    0 8px 32px rgb(31 38 135 / 0.18),
-    inset 0 1px 1px rgb(255 255 255 / 0.9);
-}
-
-:root.sombre[data-palette="glassier"] .carte:has(table) {
-  background-color: rgb(11 16 34 / 0.72);
-  border: 1px solid rgb(255 255 255 / 0.2);
-  box-shadow:
-    0 8px 32px rgb(0 0 0 / 0.45),
-    inset 0 1px 1px rgb(255 255 255 / 0.3);
-}
-
-/* L'entete de colonne colle en haut au defilement : elle doit etre plus dense
-   que les lignes, sans quoi les lignes defilent en transparence derriere elle. */
+/* --- 6. L'entete de colonne -------------------------------------------------
+   Elle colle en haut et les lignes defilent DESSOUS : elle doit etre plus dense
+   que le reste, faute de quoi on lirait les entetes et les lignes l'un dans
+   l'autre. Elle reste du verre. */
 :root[data-palette="glassier"] table.grille thead tr {
-  background-color: rgb(255 255 255 / 0.88);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background-color: rgb(255 255 255 / 0.66);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
 }
 
 :root.sombre[data-palette="glassier"] table.grille thead tr {
-  background-color: rgb(11 16 34 / 0.9);
+  background-color: rgb(16 21 30 / 0.72);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
 }
 
-/* --- 6. Les champs ---------------------------------------------------------
-   Une saisie est une surface de donnees, elle aussi : on y relit ce qu'on vient
-   de taper. Verre net, sans refraction. */
+/* --- 7. Les champs ---------------------------------------------------------- */
 :root[data-palette="glassier"] input,
 :root[data-palette="glassier"] select,
 :root[data-palette="glassier"] textarea {
-  background-color: rgb(255 255 255 / 0.75);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-color: rgb(255 255 255 / 0.75);
+  background-color: rgb(255 255 255 / 0.58);
+  border-color: rgb(255 255 255 / 0.8);
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 0.8);
 }
 
 :root.sombre[data-palette="glassier"] input,
 :root.sombre[data-palette="glassier"] select,
 :root.sombre[data-palette="glassier"] textarea {
-  background-color: rgb(11 16 34 / 0.7);
-  border-color: rgb(255 255 255 / 0.2);
+  background-color: rgb(16 21 30 / 0.58);
+  border-color: rgb(255 255 255 / 0.14);
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 0.1);
 }
 
-/* --- 7. Retenue ------------------------------------------------------------
-   Un fond fixe se comporte comme du parallaxe au defilement, et les couches de
-   flou coutent au compositeur. Quand le systeme demande de reduire les
-   animations, on libere le fond. */
-@media (prefers-reduced-motion: reduce) {
-  :root[data-palette="glassier"] body {
-    background-attachment: scroll;
-  }
-}
-
-/* Le repli des navigateurs sans `backdrop-filter` : sans lui, les surfaces a
-   15 % de blanc laisseraient lire le fond a travers le texte. */
+/* --- 8. Replis --------------------------------------------------------------
+   Le grain et la maille sont fixes : ils ne bougent pas au defilement, il n'y a
+   donc rien a desactiver pour le mouvement. En revanche, sans
+   `backdrop-filter`, une surface a 44 % de blanc laisserait lire la maille au
+   travers du texte. On la ferme. */
 @supports not (backdrop-filter: blur(1px)) {
   :root[data-palette="glassier"] header,
   :root[data-palette="glassier"] aside,
   :root[data-palette="glassier"] footer,
   :root[data-palette="glassier"] .carte,
   :root[data-palette="glassier"] .viz,
+  :root[data-palette="glassier"] .bg-surface,
   :root[data-palette="glassier"] [role="dialog"] {
-    background-color: rgb(255 255 255 / 0.88);
+    background-color: rgb(255 255 255 / 0.93);
   }
   :root.sombre[data-palette="glassier"] header,
   :root.sombre[data-palette="glassier"] aside,
   :root.sombre[data-palette="glassier"] footer,
   :root.sombre[data-palette="glassier"] .carte,
   :root.sombre[data-palette="glassier"] .viz,
+  :root.sombre[data-palette="glassier"] .bg-surface,
   :root.sombre[data-palette="glassier"] [role="dialog"] {
-    background-color: rgb(11 16 34 / 0.9);
+    background-color: rgb(16 21 30 / 0.93);
   }
+}
+
+/* --- Les traits, sur du verre ----------------------------------------------- */
+:root[data-palette="glassier"] table.grille > tbody > tr > td,
+:root[data-palette="glassier"] table.grille > thead > tr > th {
+  border-color: rgb(255 255 255 / 0.4);
+}
+
+:root.sombre[data-palette="glassier"] table.grille > tbody > tr > td,
+:root.sombre[data-palette="glassier"] table.grille > thead > tr > th {
+  border-color: rgb(255 255 255 / 0.1);
+}
+
+:root[data-palette="glassier"] table.grille > tbody > tr:hover {
+  background-color: rgb(255 255 255 / 0.28);
+}
+
+:root.sombre[data-palette="glassier"] table.grille > tbody > tr:hover {
+  background-color: rgb(255 255 255 / 0.07);
 }

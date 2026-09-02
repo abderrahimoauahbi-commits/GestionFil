@@ -263,10 +263,7 @@ export function Transferts() {
         description="Un transfert valide genere deux mouvements : sortie du magasin source, entree au destinataire."
         actions={
           droits.peutEcrire && (
-            <Bouton onClick={() => naviguer('/transferts/nouveau')}>
-              <Plus />
-              Nouveau transfert
-            </Bouton>
+            <Bouton taille="icone" title="Nouveau transfert" aria-label="Nouveau transfert" onClick={() => naviguer('/transferts/nouveau')}>              <Plus />            </Bouton>
           )
         }
       />

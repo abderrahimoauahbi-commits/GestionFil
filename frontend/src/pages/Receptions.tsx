@@ -279,10 +279,7 @@ export function Receptions() {
         description="Ouvrir une reception pour peser, relever les lots et soumettre au controle qualite."
         actions={
           droits.peutEcrire && (
-            <Bouton onClick={() => naviguer('/receptions/nouvelle')}>
-              <Plus />
-              Nouvelle reception
-            </Bouton>
+            <Bouton taille="icone" title="Nouvelle reception" aria-label="Nouvelle reception" onClick={() => naviguer('/receptions/nouvelle')}>              <Plus />            </Bouton>
           )
         }
       />

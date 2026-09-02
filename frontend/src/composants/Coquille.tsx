@@ -386,20 +386,30 @@ export function Coquille() {
           estBureau() ? 'zone-glisser h-11' : 'h-12',
         )}
       >
-        {/* Marque */}
-        <Link to="/" className="flex shrink-0 items-center gap-2">
-          <div className="grid size-7 place-items-center rounded-[var(--radius-sm)] bg-primaire text-[11px] font-bold text-primaire-texte">
-            GF
-          </div>
-          <div className="hidden min-w-0 sm:block">
-            <div className="truncate text-[13px] font-semibold leading-tight">Gestion Fil</div>
-            <div className="truncate text-[10px] leading-tight text-attenue-texte">
-              Polyfashions Carpet
-            </div>
-          </div>
-        </Link>
+        {/* Marque — UNIQUEMENT quand rien d'autre ne la porte.
 
-        <div className="mx-1 hidden h-5 w-px shrink-0 bg-bordure xl:block" />
+            La barre laterale affiche deja le sigle et le nom en haut de sa
+            colonne. Les repeter ici mettait la marque deux fois sur le meme
+            ecran, a dix centimetres d'ecart, et volait a l'entete la largeur
+            du fil d'Ariane. En disposition « barre du haut », il n'y a pas de
+            barre laterale : la marque revient ici. */}
+        {reglages.disposition === 'entete' && (
+          <>
+            <Link to="/" className="flex shrink-0 items-center gap-2">
+              <div className="grid size-7 place-items-center rounded-[var(--radius-sm)] bg-primaire text-[11px] font-bold text-primaire-texte">
+                GF
+              </div>
+              <div className="hidden min-w-0 sm:block">
+                <div className="truncate text-[13px] font-semibold leading-tight">Gestion Fil</div>
+                <div className="truncate text-[10px] leading-tight text-attenue-texte">
+                  Polyfashions Carpet
+                </div>
+              </div>
+            </Link>
+
+            <div className="mx-1 hidden h-5 w-px shrink-0 bg-bordure xl:block" />
+          </>
+        )}
 
         {/* La navigation vit desormais dans la barre laterale. Il reste ici
             le fil d'Ariane de l'ecran courant, qui dit OU l'on est — la barre
@@ -591,7 +601,10 @@ export function Coquille() {
       {/* --- Contenu ------------------------------------------------------ */}
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div
-          className="mx-auto max-w-[1900px] p-3 lg:p-4"
+          // Pas de largeur maximale : une table de quinze colonnes se lit
+          // mieux etalee que centree entre deux marges vides. La densite
+          // reste reglable, la largeur suit la fenetre.
+          className="p-3 lg:p-4"
           style={{ paddingBottom: 'calc(4rem + var(--marge-sure-bas))' }}
         >
           <Outlet key={emplacement.pathname} />

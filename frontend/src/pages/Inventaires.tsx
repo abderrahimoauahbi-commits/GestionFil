@@ -362,10 +362,7 @@ export function Inventaires() {
         description="La cloture genere automatiquement les mouvements d'ajustement, dans une seule transaction."
         actions={
           droits.peutEcrire && (
-            <Bouton onClick={() => setCreation(true)}>
-              <Plus />
-              Nouvel inventaire
-            </Bouton>
+            <Bouton taille="icone" title="Nouvel inventaire" aria-label="Nouvel inventaire" onClick={() => setCreation(true)}>              <Plus />            </Bouton>
           )
         }
       />

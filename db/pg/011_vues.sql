@@ -1,3 +1,6 @@
+-- Porte automatiquement depuis db/011_vues.sql par pg/porter_vues.py.
+-- NE PAS MODIFIER ICI : corriger la source, puis rejouer le portage.
+
 -- =============================================================================
 -- VUES DE PILOTAGE
 -- =============================================================================
@@ -10,13 +13,11 @@
 --   * fan-out d'agregat dans le scorecard fournisseur
 --   * stock neuf classe dormant
 --
--- ATTENTION SQLite : max(a,b,c) scalaire renvoie NULL si un argument est NULL
+-- ATTENTION SQLite : GREATEST(a, b, c) scalaire renvoie NULL si un argument est NULL
 -- (contrairement a GREATEST de PostgreSQL qui ignore les NULL). Tous les termes
 -- sont donc explicitement COALESCE. C'est precisement le piege qui mettait la
 -- quantite a commander a 0 en silence dans la vue I2 du CDC.
 -- =============================================================================
-
-PRAGMA foreign_keys = ON;
 
 -- =============================================================================
 -- 1. RECETTES
@@ -33,8 +34,8 @@ PRAGMA foreign_keys = ON;
 -- besoin nul silencieux. Le trigger trg_qualite_activer_roles garantit qu'une
 -- qualite ACTIVE ne peut pas avoir de role sans densite.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_ligne_recette_calculee;
-DROP VIEW IF EXISTS v_recette_calculee;
+DROP VIEW IF EXISTS v_ligne_recette_calculee CASCADE;
+DROP VIEW IF EXISTS v_recette_calculee CASCADE;
 CREATE VIEW v_recette_calculee AS
 SELECT
     r.id_recette,
@@ -76,7 +77,7 @@ WHERE r.actif = 1;
 -- CDC ne respectait pas), avec application du taux de perte embarque sur le plan.
 -- Le lien plan -> composition passe par plan_qualite (correction BL-4).
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_besoin_mrp_calcule;
+DROP VIEW IF EXISTS v_besoin_mrp_calcule CASCADE;
 CREATE VIEW v_besoin_mrp_calcule AS
 SELECT
     pp.id_plan,
@@ -109,7 +110,7 @@ GROUP BY pp.id_plan, lpp.rang_mois, lpp.mois, lpp.annee_mois, rc.code_reference;
 -- mois, elle couvre l'horizon du plan en service, quel qu'il soit. Le renommer
 -- toucherait le service Rust et six ecrans ; la correction du calcul, elle, ne
 -- pouvait pas attendre.
-DROP VIEW IF EXISTS v_besoin_12m;
+DROP VIEW IF EXISTS v_besoin_12m CASCADE;
 CREATE VIEW v_besoin_12m AS
 WITH horizon AS (
     -- Nombre de mois REELLEMENT couverts par chaque plan. C'est le plan qui
@@ -145,7 +146,7 @@ FROM besoin_mrp bm
 JOIN plan_production pp ON pp.id_plan = bm.id_plan
 JOIN horizon h          ON h.id_plan  = bm.id_plan
 WHERE pp.statut = 'EN_COURS'
-  AND date('now') BETWEEN pp.date_debut AND pp.date_fin
+  AND to_char(current_date, 'YYYY-MM-DD') BETWEEN pp.date_debut AND pp.date_fin
 GROUP BY bm.code_reference;
 
 -- =============================================================================
@@ -160,7 +161,7 @@ GROUP BY bm.code_reference;
 -- la meme reference. Le flag magasin.inclure_mrp, prevu pour exclure la zone de
 -- quarantaine, n'etait par ailleurs utilise nulle part.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_disponible;
+DROP VIEW IF EXISTS v_stock_disponible CASCADE;
 CREATE VIEW v_stock_disponible AS
 SELECT
     r.code_reference,
@@ -183,7 +184,7 @@ GROUP BY r.code_reference;
 --     disponible = stock + en-cours - besoins
 -- Sans ce terme, le systeme recommande de recommander ce qui est deja commande.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_encours_bc;
+DROP VIEW IF EXISTS v_encours_bc CASCADE;
 CREATE VIEW v_encours_bc AS
 SELECT
     lb.code_reference,
@@ -204,14 +205,14 @@ GROUP BY lb.code_reference;
 -- La vue I1 du CDC utilisait SUM(besoin_mrp)/12, c'est-a-dire la consommation
 -- PREVISIONNELLE : la correction N4 n'avait pas ete reportee dans le SQL.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_conso_reelle;
+DROP VIEW IF EXISTS v_conso_reelle CASCADE;
 CREATE VIEW v_conso_reelle AS
 SELECT
     lm.code_reference,
     ROUND(SUM(lm.quantite_kg), 4) AS sorties_cumulees_kg,
-    max(1, CAST((julianday('now') - julianday(min(m.date_mouvement))) / 30.44 AS INTEGER)) AS nb_mois_ecoules,
+    GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS integer)) AS nb_mois_ecoules,
     ROUND(SUM(lm.quantite_kg)
-          / max(1, CAST((julianday('now') - julianday(min(m.date_mouvement))) / 30.44 AS INTEGER)), 4) AS conso_mensuelle_kg,
+          / GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS integer)), 4) AS conso_mensuelle_kg,
     min(m.date_mouvement) AS premiere_sortie,
     max(m.date_mouvement) AS derniere_sortie
 FROM ligne_mouvement lm
@@ -238,14 +239,13 @@ GROUP BY lm.code_reference;
 --
 -- Le maximum protege dans les deux sens : un demarrage sans historique prend le
 -- previsionnel, une consommation reelle superieure au plan prend le reel.
-DROP VIEW IF EXISTS v_conso_retenue;
+DROP VIEW IF EXISTS v_conso_retenue CASCADE;
 CREATE VIEW v_conso_retenue AS
 SELECT
     r.code_reference,
     -- max() scalaire de SQLite propage les NULL : chaque terme est COALESCE, et
     -- le zero final redevient NULL pour distinguer « aucune donnee » de « zero ».
-    NULLIF(max(COALESCE(cr.conso_mensuelle_kg, 0),
-               COALESCE(b.besoin_mensuel_moyen_kg, 0)), 0)   AS conso_mensuelle_kg,
+    NULLIF(GREATEST(COALESCE(cr.conso_mensuelle_kg, 0), COALESCE(b.besoin_mensuel_moyen_kg, 0)), 0)   AS conso_mensuelle_kg,
     ROUND(COALESCE(cr.conso_mensuelle_kg, 0), 4)             AS conso_reelle_kg,
     ROUND(COALESCE(b.besoin_mensuel_moyen_kg, 0), 4)         AS conso_previsionnelle_kg,
     CASE
@@ -267,7 +267,7 @@ WHERE r.actif = 1;
 -- le stock_min_kg saisi au catalogue.
 -- Rappel SQLite : max() scalaire propage les NULL -> chaque terme est COALESCE.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_min_dynamique;
+DROP VIEW IF EXISTS v_stock_min_dynamique CASCADE;
 CREATE VIEW v_stock_min_dynamique AS
 SELECT
     r.code_reference,
@@ -279,23 +279,18 @@ SELECT
     ROUND(COALESCE(cr.conso_mensuelle_kg, 0)
           * CASE r.classe_abc WHEN 'A' THEN p_seca.v WHEN 'B' THEN p_secb.v ELSE p_secc.v END
           / 30.0, 4)                                                         AS terme4_securite_abc_kg,
-    ROUND(max(
-        COALESCE(r.stock_min_kg, 0),
-        COALESCE(r.couverture_min_mois, p_couv.v) * COALESCE(cr.conso_mensuelle_kg, 0)
-            * (1 + COALESCE(r.marge_securite_pct, p_marge.v) / 100.0),
-        COALESCE(cr.conso_mensuelle_kg, 0) * COALESCE(f.delai_livraison_jours, p_delai.v) / 30.0,
-        COALESCE(cr.conso_mensuelle_kg, 0)
-            * CASE r.classe_abc WHEN 'A' THEN p_seca.v WHEN 'B' THEN p_secb.v ELSE p_secc.v END / 30.0
-    ), 4)                                                                    AS stock_min_kg
+    ROUND(GREATEST(COALESCE(r.stock_min_kg, 0), COALESCE(r.couverture_min_mois, p_couv.v) * COALESCE(cr.conso_mensuelle_kg, 0)
+            * (1 + COALESCE(r.marge_securite_pct, p_marge.v) / 100.0), COALESCE(cr.conso_mensuelle_kg, 0) * COALESCE(f.delai_livraison_jours, p_delai.v) / 30.0, COALESCE(cr.conso_mensuelle_kg, 0)
+            * CASE r.classe_abc WHEN 'A' THEN p_seca.v WHEN 'B' THEN p_secb.v ELSE p_secc.v END / 30.0), 4)                                                                    AS stock_min_kg
 FROM reference r
 LEFT JOIN fournisseur     f  ON f.code_fournisseur = r.code_fournisseur
 LEFT JOIN v_conso_retenue cr ON cr.code_reference  = r.code_reference
-CROSS JOIN (SELECT CAST(valeur_courante AS REAL) v FROM parametre WHERE code_parametre = 'P_CouvMinMois')  p_couv
-CROSS JOIN (SELECT CAST(valeur_courante AS REAL) v FROM parametre WHERE code_parametre = 'P_MargeSecurite') p_marge
-CROSS JOIN (SELECT CAST(valeur_courante AS REAL) v FROM parametre WHERE code_parametre = 'P_DelaiDefaut')   p_delai
-CROSS JOIN (SELECT CAST(valeur_courante AS REAL) v FROM parametre WHERE code_parametre = 'P_SecuriteA')     p_seca
-CROSS JOIN (SELECT CAST(valeur_courante AS REAL) v FROM parametre WHERE code_parametre = 'P_SecuriteB')     p_secb
-CROSS JOIN (SELECT CAST(valeur_courante AS REAL) v FROM parametre WHERE code_parametre = 'P_SecuriteC')     p_secc
+CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_CouvMinMois')  p_couv
+CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_MargeSecurite') p_marge
+CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_DelaiDefaut')   p_delai
+CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_SecuriteA')     p_seca
+CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_SecuriteB')     p_secb
+CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_SecuriteC')     p_secc
 WHERE r.actif = 1;
 
 -- -----------------------------------------------------------------------------
@@ -311,7 +306,7 @@ WHERE r.actif = 1;
 -- C'est le VETO qui s'imposera a la projection : l'alerte finale est le pire des
 -- deux, jamais la moyenne, jamais la plus optimiste.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_physique;
+DROP VIEW IF EXISTS v_stock_physique CASCADE;
 CREATE VIEW v_stock_physique AS
 SELECT
     r.code_reference,
@@ -351,25 +346,25 @@ GROUP BY r.code_reference;
 -- prevision, pas la prolonger. La quantite retardee reste comptee a part, pour
 -- que l'ecran dise POURQUOI la couverture a chute.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_encours_fiable;
+DROP VIEW IF EXISTS v_encours_fiable CASCADE;
 CREATE VIEW v_encours_fiable AS
 SELECT
     lb.code_reference,
-    ROUND(SUM(CASE WHEN date(lb.date_livraison_prevue) >= date('now', '-' || CAST(p_ret.v AS INTEGER) || ' days')
+    ROUND(SUM(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) >= to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
                      OR lb.date_livraison_prevue IS NULL
                    THEN lb.quantite_restante_kg ELSE 0 END), 4)       AS encours_fiable_kg,
-    ROUND(SUM(CASE WHEN date(lb.date_livraison_prevue) <  date('now', '-' || CAST(p_ret.v AS INTEGER) || ' days')
+    ROUND(SUM(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
                    THEN lb.quantite_restante_kg ELSE 0 END), 4)       AS encours_retarde_kg,
-    SUM(CASE WHEN date(lb.date_livraison_prevue) <  date('now', '-' || CAST(p_ret.v AS INTEGER) || ' days')
+    SUM(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
              THEN 1 ELSE 0 END)                                       AS nb_lignes_retardees,
-    MIN(CASE WHEN date(lb.date_livraison_prevue) <  date('now', '-' || CAST(p_ret.v AS INTEGER) || ' days')
+    MIN(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
              THEN lb.date_livraison_prevue END)                       AS plus_ancien_retard,
-    MAX(CASE WHEN date(lb.date_livraison_prevue) <  date('now', '-' || CAST(p_ret.v AS INTEGER) || ' days')
-             THEN CAST(julianday('now') - julianday(lb.date_livraison_prevue) AS INTEGER) END)
+    MAX(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
+             THEN CAST((current_date - (lb.date_livraison_prevue)::date) AS integer) END)
                                                                       AS retard_max_jours
 FROM ligne_bc lb
 JOIN bon_commande bc ON bc.id_bc = lb.id_bc
-CROSS JOIN (SELECT CAST(valeur_courante AS REAL) v FROM parametre WHERE code_parametre = 'P_RetardBCJours') p_ret
+CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_RetardBCJours') p_ret
 WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
   AND lb.statut NOT IN ('ANNULE','SOLDE')
   AND lb.quantite_restante_kg > 0
@@ -391,7 +386,7 @@ GROUP BY lb.code_reference;
 -- parce que l'autre moitie du calcul est optimiste est pire qu'une alerte
 -- absente, parce qu'elle se lit comme un feu vert.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_projete;
+DROP VIEW IF EXISTS v_stock_projete CASCADE;
 CREATE VIEW v_stock_projete AS
 SELECT
     r.code_reference,
@@ -399,7 +394,7 @@ SELECT
     r.code_fournisseur,
     f.nom                                   AS fournisseur_nom,
     f.pays                                  AS fournisseur_pays,
-    COALESCE(f.delai_livraison_jours, CAST(p_delai.v AS INTEGER)) AS delai_livraison_jours,
+    COALESCE(f.delai_livraison_jours, CAST(p_delai.v AS integer)) AS delai_livraison_jours,
     r.classe_abc,
     r.classe_xyz,
     r.unite_catalogue,
@@ -438,8 +433,8 @@ SELECT
     -- a besoin pour graduer la jauge de couverture. Sans elles il ecrirait 60 et
     -- 90 en dur, et la jauge cesserait de suivre le parametre le jour ou la
     -- direction le deplace : le chiffre changerait de statut, la barre non.
-    CAST(p_crit.v   AS REAL)                AS seuil_critique_jours,
-    CAST(p_alerte.v AS REAL)                AS seuil_alerte_jours,
+    CAST(p_crit.v   AS numeric)                AS seuil_critique_jours,
+    CAST(p_alerte.v AS numeric)                AS seuil_alerte_jours,
 
     -- Le minimum recalcule (F3, MAX de quatre securites) : c'est LUI le seuil
     -- du veto physique, et non un plancher absolu en kilos. La difference n'est
@@ -451,9 +446,8 @@ SELECT
     -- Le maximum : au-dela, le stock immobilise du capital sans servir la
     -- couverture. Plancher a une fois et demie le minimum, majore d'un mois de
     -- consommation supplementaire (P_MargeJours).
-    ROUND(max(sm.stock_min_kg * 1.5,
-              sm.stock_min_kg + COALESCE(cr.conso_mensuelle_kg, 0)
-                                * CAST(p_marge.v AS REAL) / 30.0), 4)   AS stock_max_kg,
+    ROUND(GREATEST(sm.stock_min_kg * 1.5, sm.stock_min_kg + COALESCE(cr.conso_mensuelle_kg, 0)
+                                * CAST(p_marge.v AS numeric) / 30.0), 4)   AS stock_max_kg,
 
     -- --- DECLENCHEUR A : la logique, en jours de couverture ----------------
     -- Echelle 60 / 90 jours. Elle ne juge PAS le stock d'aujourd'hui mais ce
@@ -472,10 +466,10 @@ SELECT
         WHEN COALESCE(cr.conso_mensuelle_kg, 0) = 0 THEN 'OK'
         WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
               - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_crit.v AS REAL)  THEN 'CRITIQUE'
+             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_crit.v AS numeric)  THEN 'CRITIQUE'
         WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
               - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_alerte.v AS REAL) THEN 'ATTENTION'
+             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_alerte.v AS numeric) THEN 'ATTENTION'
         ELSE 'OK'
     END                                     AS statut_logique,
 
@@ -513,10 +507,10 @@ SELECT
         WHEN COALESCE(cr.conso_mensuelle_kg, 0) = 0 THEN 'OK'
         WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
               - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_crit.v AS REAL)  THEN 'CRITIQUE'
+             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_crit.v AS numeric)  THEN 'CRITIQUE'
         WHEN (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
               - COALESCE(b.besoin_12m_kg, 0))
-             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_alerte.v AS REAL) THEN 'ATTENTION'
+             / (cr.conso_mensuelle_kg / 30.0) < CAST(p_alerte.v AS numeric) THEN 'ATTENTION'
         ELSE 'OK'
     END                                     AS statut,
 
@@ -528,9 +522,8 @@ SELECT
     CASE WHEN COALESCE(sm.stock_min_kg, 0) > 0
           AND (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
                - COALESCE(b.besoin_12m_kg, 0))
-              > max(sm.stock_min_kg * 1.5,
-                    sm.stock_min_kg + COALESCE(cr.conso_mensuelle_kg, 0)
-                                      * CAST(p_marge.v AS REAL) / 30.0)
+              > GREATEST(sm.stock_min_kg * 1.5, sm.stock_min_kg + COALESCE(cr.conso_mensuelle_kg, 0)
+                                      * CAST(p_marge.v AS numeric) / 30.0)
          THEN 1 ELSE 0 END                  AS sur_stock,
     -- --- DECLENCHEUR C : l'ecart majeur ------------------------------------
     -- Le filet de securite. La logique dit qu'on est confortable, le magasin dit
@@ -540,7 +533,7 @@ SELECT
     CASE WHEN COALESCE(cr.conso_mensuelle_kg, 0) > 0
           AND (ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg, 0)
                - COALESCE(b.besoin_12m_kg, 0)) / (cr.conso_mensuelle_kg / 30.0)
-              > CAST(p_ecart.v AS REAL)
+              > CAST(p_ecart.v AS numeric)
           AND ph.stock_physique_net_kg < COALESCE(r.stock_min_kg, 0)
          THEN 1 ELSE 0 END                  AS ecart_majeur,
 
@@ -580,7 +573,7 @@ WHERE r.actif = 1;
 --  * prix : repli CMUP -> catalogue converti en MAD, explicitement trace.
 --  * stock_min : formule dynamique F3 au lieu du seul stock_min catalogue.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_plan_achat;
+DROP VIEW IF EXISTS v_plan_achat CASCADE;
 CREATE VIEW v_plan_achat AS
 WITH base AS (
     SELECT
@@ -602,19 +595,19 @@ WITH base AS (
         COALESCE(r.cmup_mad, ROUND(r.prix_catalogue_kg * COALESCE(tc.taux, 1.0), 4)) AS prix_retenu_mad,
         CASE WHEN r.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END            AS source_prix,
         -- Besoin net avant MOQ / multiple
-        max(0.0, ROUND(smd.stock_min_kg - sp.stock_projete_kg, 4))                   AS besoin_net_kg
+        GREATEST(0.0, ROUND(smd.stock_min_kg - sp.stock_projete_kg, 4))                   AS besoin_net_kg
     FROM v_stock_projete       sp
     JOIN reference              r   ON r.code_reference = sp.code_reference
     JOIN v_stock_min_dynamique smd  ON smd.code_reference = sp.code_reference
     LEFT JOIN taux_change      tc   ON tc.code_devise = r.code_devise_catalogue
-                                   AND date('now') >= date(tc.date_debut)
-                                   AND (tc.date_fin IS NULL OR date('now') < date(tc.date_fin))
+                                   AND to_char(current_date, 'YYYY-MM-DD') >= substr(tc.date_debut, 1, 10)
+                                   AND (tc.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(tc.date_fin, 1, 10))
 ), calcul AS (
     SELECT
         base.*,
         -- MOQ applique seulement s'il y a quelque chose a commander
         CASE WHEN besoin_net_kg > 0
-             THEN max(besoin_net_kg, COALESCE(moq_kg, 0))
+             THEN GREATEST(besoin_net_kg, COALESCE(moq_kg, 0))
              ELSE 0.0 END AS qte_avec_moq_kg
     FROM base
 ), arrondi AS (
@@ -625,7 +618,7 @@ WITH base AS (
             WHEN multiple_achat_kg IS NULL OR multiple_achat_kg <= 0 THEN ROUND(qte_avec_moq_kg, 4)
             ELSE ROUND(CAST(
                      (qte_avec_moq_kg + multiple_achat_kg - 0.0001) / multiple_achat_kg
-                 AS INTEGER) * multiple_achat_kg, 4)
+                 AS integer) * multiple_achat_kg, 4)
         END AS qte_a_commander_kg
     FROM calcul
 )
@@ -658,9 +651,9 @@ SELECT
     CASE
         WHEN a.statut = 'RUPTURE' THEN 'TIER 1'
         WHEN a.classe_abc = 'A'
-         AND a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_SeuilTier1') THEN 'TIER 1'
-        WHEN a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_SeuilTier2') THEN 'TIER 2'
-        WHEN a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_SeuilTier3') THEN 'TIER 3'
+         AND a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_SeuilTier1') THEN 'TIER 1'
+        WHEN a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_SeuilTier2') THEN 'TIER 2'
+        WHEN a.qte_a_commander_kg * a.prix_retenu_mad >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_SeuilTier3') THEN 'TIER 3'
         ELSE 'TIER 4'
     END AS tier,
 
@@ -678,10 +671,10 @@ SELECT
         JOIN reference r2 ON r2.code_reference = rge2.code_reference AND r2.actif = 1
         JOIN reference r1 ON r1.code_reference = rge1.code_reference
         WHERE rge1.code_reference = a.code_reference AND rge1.actif = 1
-          AND r2.code_fournisseur IS NOT r1.code_fournisseur
+          AND r2.code_fournisseur IS DISTINCT FROM r1.code_fournisseur
     ) > 0 THEN 'MULTI-SOURCE' ELSE 'MONO-SOURCE' END AS risque_sourcing,
 
-    date('now', '+' || CAST(a.delai_livraison_jours AS TEXT) || ' days') AS date_besoin_prevue
+    to_char(current_date + (a.delai_livraison_jours)::integer, 'YYYY-MM-DD') AS date_besoin_prevue
 FROM arrondi a
 WHERE a.qte_a_commander_kg > 0
 ORDER BY
@@ -697,7 +690,7 @@ ORDER BY
 -- Un seul balayage par CTE, la ou la vue I3 du CDC rescannait v_stock_projete
 -- 4 fois et v_plan_achat 3 fois (chacune rescannant elle-meme v_stock_projete).
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_cockpit_stock;
+DROP VIEW IF EXISTS v_cockpit_stock CASCADE;
 CREATE VIEW v_cockpit_stock AS
 WITH s AS (SELECT statut, classe_abc FROM v_stock_projete),
      p AS (SELECT montant_estime_mad, classe_abc, tier FROM v_plan_achat)
@@ -745,7 +738,7 @@ SELECT
 -- -----------------------------------------------------------------------------
 -- v_substitution_dispo   (remplace I5)
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_substitution_dispo;
+DROP VIEW IF EXISTS v_substitution_dispo CASCADE;
 CREATE VIEW v_substitution_dispo AS
 SELECT
     r1.code_reference           AS ref_principale,
@@ -788,7 +781,7 @@ ORDER BY r1.code_reference, rge2.est_preferentielle DESC, rge2.priorite;
 -- L'OTIF (P_CibleOTIF), confie a l'acheteur en D1 mais calcule nulle part, est
 -- ajoute.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_fournisseur_scorecard;
+DROP VIEW IF EXISTS v_fournisseur_scorecard CASCADE;
 CREATE VIEW v_fournisseur_scorecard AS
 WITH bc_agg AS (
     SELECT code_fournisseur,
@@ -834,9 +827,9 @@ SELECT
     rc.retard_moyen_jours,
     f.note_globale,
     CASE
-        WHEN COALESCE(f.note_globale, 0) >= (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_ScoreStrategique') THEN 'STRATEGIQUE'
-        WHEN COALESCE(f.note_globale, 0) >= (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_ScoreStandard')    THEN 'STANDARD'
-        WHEN COALESCE(f.note_globale, 0) >= (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_ScoreSurveiller')  THEN 'A_SURVEILLER'
+        WHEN COALESCE(f.note_globale, 0) >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_ScoreStrategique') THEN 'STRATEGIQUE'
+        WHEN COALESCE(f.note_globale, 0) >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_ScoreStandard')    THEN 'STANDARD'
+        WHEN COALESCE(f.note_globale, 0) >= (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_ScoreSurveiller')  THEN 'A_SURVEILLER'
         ELSE 'CHALLENGER'
     END AS classement
 FROM fournisseur f
@@ -851,7 +844,7 @@ WHERE f.actif = 1;
 -- derniere sortie — y compris une reference RECUE LA VEILLE. Le repere est
 -- desormais la derniere sortie, a defaut la derniere entree.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_dormant;
+DROP VIEW IF EXISTS v_stock_dormant CASCADE;
 CREATE VIEW v_stock_dormant AS
 SELECT
     sm.code_reference,
@@ -864,15 +857,15 @@ SELECT
     sm.date_derniere_sortie,
     sm.date_derniere_entree,
     COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree) AS date_reference_dormance,
-    CAST(julianday('now') - julianday(COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree)) AS INTEGER) AS jours_sans_mouvement,
+    CAST((current_date - (COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree))::date) AS integer) AS jours_sans_mouvement,
     r.classe_abc
 FROM stock_magasin sm
 JOIN reference r  ON r.code_reference = sm.code_reference
 JOIN magasin  mg  ON mg.code_magasin  = sm.code_magasin
 WHERE sm.quantite_kg > 0
   AND COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree) IS NOT NULL
-  AND julianday('now') - julianday(COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree))
-      > (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_SeuilDormant')
+  AND (current_date - (COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree))::date)
+      > (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_SeuilDormant')
 ORDER BY jours_sans_mouvement DESC;
 
 -- -----------------------------------------------------------------------------
@@ -881,7 +874,7 @@ ORDER BY jours_sans_mouvement DESC;
 -- L'allocation elle-meme reste une decision metier assuree par le service Rust :
 -- ce n'est pas un invariant de base.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_lot_fefo;
+DROP VIEW IF EXISTS v_lot_fefo CASCADE;
 CREATE VIEW v_lot_fefo AS
 SELECT
     sl.code_reference,
@@ -894,7 +887,7 @@ SELECT
     sl.date_peremption,
     sl.date_premiere_entree,
     CASE WHEN sl.date_peremption IS NOT NULL
-         THEN CAST(julianday(sl.date_peremption) - julianday('now') AS INTEGER) END AS jours_avant_peremption,
+         THEN CAST(((sl.date_peremption)::date - current_date) AS integer) END AS jours_avant_peremption,
     ROW_NUMBER() OVER (
         PARTITION BY sl.code_reference, sl.code_magasin
         ORDER BY COALESCE(sl.date_peremption, '9999-12-31'), sl.date_premiere_entree
@@ -917,7 +910,7 @@ WHERE sl.quantite_kg > 0;
 -- une liste sur laquelle on peut agir. Un compteur qui ne mene nulle part n'a
 -- rien a faire sur un ecran d'accueil.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_cockpit_files;
+DROP VIEW IF EXISTS v_cockpit_files CASCADE;
 CREATE VIEW v_cockpit_files AS
 SELECT
     -- Achats
@@ -937,14 +930,14 @@ SELECT
     (SELECT COUNT(*) FROM bon_commande
       WHERE statut IN ('ENVOYE','LIVRE_PARTIEL')
         AND date_livraison_prevue IS NOT NULL
-        AND date(date_livraison_prevue) < date('now'))
+        AND substr(date_livraison_prevue, 1, 10) < to_char(current_date, 'YYYY-MM-DD'))
         AS nb_livraisons_en_retard,
-    (SELECT COALESCE(MAX(CAST(julianday('now') - julianday(date(date_livraison_prevue))
-                              AS INTEGER)), 0)
+    (SELECT COALESCE(MAX(CAST((current_date - (date_livraison_prevue)::date)
+                              AS integer)), 0)
        FROM bon_commande
       WHERE statut IN ('ENVOYE','LIVRE_PARTIEL')
         AND date_livraison_prevue IS NOT NULL
-        AND date(date_livraison_prevue) < date('now'))
+        AND substr(date_livraison_prevue, 1, 10) < to_char(current_date, 'YYYY-MM-DD'))
         AS retard_max_jours,
 
     -- Reception et qualite
@@ -1007,7 +1000,7 @@ SELECT
 --     mois de l'horizon plutot qu'oubliee. Elle est en retard, pas annulee — et
 --     le retard se lit ailleurs, sur le poste de travail.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_risque_mensuel;
+DROP VIEW IF EXISTS v_risque_mensuel CASCADE;
 CREATE VIEW v_risque_mensuel AS
 WITH horizon AS (
     -- Les besoins figes du plan EN SERVICE. Un plan cloture ne peuple pas le
@@ -1026,8 +1019,8 @@ WITH horizon AS (
       FROM besoin_mrp bm
       JOIN plan_production pp ON pp.id_plan = bm.id_plan
      WHERE pp.statut = 'EN_COURS'
-       AND date('now') BETWEEN pp.date_debut AND pp.date_fin
-       AND bm.annee_mois >= strftime('%Y-%m', 'now')
+       AND to_char(current_date, 'YYYY-MM-DD') BETWEEN pp.date_debut AND pp.date_fin
+       AND bm.annee_mois >= to_char(current_date, 'YYYY-MM')
      -- `annee_mois` est en correspondance 1:1 avec `rang_mois` dans un
      -- plan donne (verifie : aucun couple n'en porte deux).
      GROUP BY bm.code_reference, bm.rang_mois, bm.annee_mois
@@ -1038,7 +1031,7 @@ premier_mois AS (
 ),
 attendu_brut AS (
     SELECT lb.code_reference,
-           strftime('%Y-%m', COALESCE(lb.date_livraison_prevue, bc.date_livraison_prevue))
+           substr(COALESCE(lb.date_livraison_prevue, bc.date_livraison_prevue), 1, 7)
                AS annee_mois,
            lb.quantite_restante_kg AS entrees_kg
       FROM ligne_bc lb
@@ -1108,7 +1101,7 @@ SELECT p.code_reference,
 -- d'equivalence) : deux definitions du mono-source dans le meme produit se
 -- contrediraient un jour.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_risque_reference;
+DROP VIEW IF EXISTS v_risque_reference CASCADE;
 CREATE VIEW v_risque_reference AS
 SELECT
     rm.code_reference,
@@ -1117,7 +1110,7 @@ SELECT
     ref.code_fournisseur,
     f.nom AS fournisseur_nom,
     COALESCE(f.delai_livraison_jours,
-             (SELECT CAST(valeur_courante AS INTEGER) FROM parametre
+             (SELECT CAST(valeur_courante AS integer) FROM parametre
                WHERE code_parametre = 'P_DelaiDefaut')) AS delai_livraison_jours,
     -- Meme regle que v_plan_achat : un autre FOURNISSEUR, pas une autre
     -- reference. Le mur de risques trie sur ce champ ; le fausser reviendrait a
@@ -1131,7 +1124,7 @@ SELECT
         JOIN reference r2 ON r2.code_reference = rge2.code_reference AND r2.actif = 1
         JOIN reference r1 ON r1.code_reference = rge1.code_reference
         WHERE rge1.code_reference = rm.code_reference AND rge1.actif = 1
-          AND r2.code_fournisseur IS NOT r1.code_fournisseur
+          AND r2.code_fournisseur IS DISTINCT FROM r1.code_fournisseur
     ) > 0 THEN 'MULTI-SOURCE' ELSE 'MONO-SOURCE' END    AS risque_sourcing,
     MIN(rm.stock_min_kg)                                AS stock_min_kg,
     MIN(rm.stock_initial_kg)                            AS stock_initial_kg,
@@ -1143,11 +1136,10 @@ SELECT
     -- Jours restants avant le premier mois a risque, DELAI FOURNISSEUR DEDUIT.
     -- Negatif, il est deja trop tard pour commander a temps : c'est le seul
     -- chiffre qui dise s'il reste une decision a prendre ou un degat a limiter.
-    CAST(julianday(MIN(CASE WHEN rm.statut <> 'COUVERT' THEN rm.annee_mois END) || '-01')
-         - julianday('now')
+    CAST(((MIN(CASE WHEN rm.statut <> 'COUVERT' THEN rm.annee_mois END) || '-01')::date - current_date)
          - COALESCE(f.delai_livraison_jours,
-                    (SELECT CAST(valeur_courante AS INTEGER) FROM parametre
-                      WHERE code_parametre = 'P_DelaiDefaut')) AS INTEGER)
+                    (SELECT CAST(valeur_courante AS integer) FROM parametre
+                      WHERE code_parametre = 'P_DelaiDefaut')) AS integer)
                                                         AS marge_decision_jours,
     -- Un equivalent en stock change la NATURE du risque : ce n'est plus « il
     -- faut commander et attendre » mais « il faut decider ». Le dire evite de
@@ -1175,10 +1167,10 @@ HAVING nb_mois_rupture > 0 OR nb_mois_tendu > 0;
 -- SEPAREMENT, jamais nettes : un mois a 50 t entrees et 50 t sorties n'est pas
 -- un mois sans activite, et le solde seul le ferait croire.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stat_mouvement_mois;
+DROP VIEW IF EXISTS v_stat_mouvement_mois CASCADE;
 CREATE VIEW v_stat_mouvement_mois AS
 SELECT
-    strftime('%Y-%m', m.date_mouvement)          AS annee_mois,
+    substr(m.date_mouvement, 1, 7)          AS annee_mois,
     m.code_type_mvt,
     tm.libelle                                   AS type_libelle,
     tm.signe,
@@ -1205,7 +1197,7 @@ GROUP BY 1, 2, tm.libelle, tm.signe, tm.couleur;
 -- stock, on la calcule sur le stock ACTUEL : c'est une approximation, et elle
 -- est signalee comme telle plutot que presentee comme un ratio comptable.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stat_mouvement_reference;
+DROP VIEW IF EXISTS v_stat_mouvement_reference CASCADE;
 CREATE VIEW v_stat_mouvement_reference AS
 WITH flux AS (
     SELECT lm.code_reference,
@@ -1215,7 +1207,7 @@ WITH flux AS (
            COUNT(*)                                                    AS nb_lignes,
            MIN(m.date_mouvement)                                       AS premier_mouvement,
            MAX(m.date_mouvement)                                       AS dernier_mouvement,
-           COUNT(DISTINCT strftime('%Y-%m', m.date_mouvement))         AS nb_mois_actifs
+           COUNT(DISTINCT substr(m.date_mouvement, 1, 7))         AS nb_mois_actifs
       FROM ligne_mouvement lm
       JOIN mouvement      m  ON m.id_mouvement   = lm.id_mouvement
       JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
@@ -1237,7 +1229,7 @@ SELECT
     CASE WHEN COALESCE(sd.stock_total_kg, 0) > 0 AND COALESCE(fx.sorties_kg, 0) > 0
          THEN ROUND(fx.sorties_kg / sd.stock_total_kg, 2) END AS rotation,
     CASE WHEN fx.dernier_mouvement IS NULL THEN NULL
-         ELSE CAST(julianday('now') - julianday(date(fx.dernier_mouvement)) AS INTEGER)
+         ELSE CAST((current_date - (fx.dernier_mouvement)::date) AS integer)
     END                                                  AS jours_sans_mouvement
 FROM reference r
 LEFT JOIN flux fx               ON fx.code_reference = r.code_reference
@@ -1254,12 +1246,12 @@ WHERE r.actif = 1;
 -- Les deux devises sont conservees separement. C'est ce qui permet, en aval, de
 -- distinguer une hausse consentie au fournisseur d'une simple derive du change.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stat_prix_mois;
+DROP VIEW IF EXISTS v_stat_prix_mois CASCADE;
 CREATE VIEW v_stat_prix_mois AS
 SELECT
     hp.code_reference,
     r.designation,
-    strftime('%Y-%m', hp.date_achat)                     AS annee_mois,
+    substr(hp.date_achat, 1, 7)                     AS annee_mois,
     hp.code_devise,
     COUNT(*)                                             AS nb_achats,
     COUNT(DISTINCT hp.code_fournisseur)                  AS nb_fournisseurs,
@@ -1290,7 +1282,7 @@ GROUP BY hp.code_reference, r.designation, 3, hp.code_devise;
 -- Les confondre fait reprocher au fournisseur une variation du marche des
 -- devises. On les separe donc explicitement.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stat_prix_reference;
+DROP VIEW IF EXISTS v_stat_prix_reference CASCADE;
 CREATE VIEW v_stat_prix_reference AS
 WITH bornes AS (
     SELECT code_reference,
@@ -1374,12 +1366,12 @@ JOIN dernier  d  ON d.code_reference = c.code_reference;
 -- Un fournisseur a 92 % d'OTIF qui se degrade depuis trois mois n'appelle pas
 -- la meme decision qu'un fournisseur a 92 % qui remonte.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stat_fournisseur_mois;
+DROP VIEW IF EXISTS v_stat_fournisseur_mois CASCADE;
 CREATE VIEW v_stat_fournisseur_mois AS
 SELECT
     rc.code_fournisseur,
     f.nom                                        AS fournisseur_nom,
-    strftime('%Y-%m', rc.date_reception)         AS annee_mois,
+    substr(rc.date_reception, 1, 7)         AS annee_mois,
     COUNT(DISTINCT rc.id_reception)              AS nb_receptions,
     COUNT(lr.id_ligne_reception)                 AS nb_lignes,
     ROUND(SUM(lr.quantite_stock_kg), 3)          AS quantite_kg,
@@ -1389,12 +1381,11 @@ SELECT
     -- Ponctualite mesuree sur les receptions rattachables a une promesse ; les
     -- autres sont exclues du ratio plutot que comptees comme ponctuelles.
     SUM(CASE WHEN bc.date_livraison_prevue IS NOT NULL
-                  AND date(rc.date_reception) <= date(bc.date_livraison_prevue)
+                  AND substr(rc.date_reception, 1, 10) <= substr(bc.date_livraison_prevue, 1, 10)
              THEN 1 ELSE 0 END)                  AS nb_a_lheure,
     SUM(CASE WHEN bc.date_livraison_prevue IS NOT NULL THEN 1 ELSE 0 END) AS nb_mesurables,
     ROUND(AVG(CASE WHEN bc.date_livraison_prevue IS NOT NULL
-                   THEN julianday(date(rc.date_reception))
-                        - julianday(date(bc.date_livraison_prevue)) END), 1) AS retard_moyen_jours
+                   THEN ((rc.date_reception)::date - (bc.date_livraison_prevue)::date) END), 1) AS retard_moyen_jours
 FROM reception rc
 JOIN fournisseur f       ON f.code_fournisseur = rc.code_fournisseur
 JOIN ligne_reception lr  ON lr.id_reception    = rc.id_reception
@@ -1414,7 +1405,7 @@ GROUP BY rc.code_fournisseur, f.nom, 3;
 -- publie a cote du cout — un cout qui ignore en silence trois composants sur
 -- douze est plus dangereux qu'une absence de cout.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stat_qualite;
+DROP VIEW IF EXISTS v_stat_qualite CASCADE;
 CREATE VIEW v_stat_qualite AS
 WITH cout AS (
     SELECT rc.code_qualite,
@@ -1477,7 +1468,7 @@ LEFT JOIN production p ON p.code_qualite = q.code_qualite;
 -- C'est le niveau ou une decision se prend : on ne change pas « la recette »,
 -- on change le melange d'un role.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stat_qualite_role;
+DROP VIEW IF EXISTS v_stat_qualite_role CASCADE;
 CREATE VIEW v_stat_qualite_role AS
 SELECT
     rc.code_qualite,
@@ -1513,7 +1504,7 @@ GROUP BY rc.code_qualite, rc.code_role, rc.role_libelle;
 -- deux cotes portent leur stock et leur statut : c'est a l'ecran de decider ce
 -- qu'il met en avant.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_equivalence;
+DROP VIEW IF EXISTS v_equivalence CASCADE;
 CREATE VIEW v_equivalence AS
 SELECT
     rge1.code_groupe_equiv,
@@ -1536,7 +1527,7 @@ SELECT
     r2.code_fournisseur                 AS equivalent_fournisseur,
     f2.nom                              AS equivalent_fournisseur_nom,
     COALESCE(f2.delai_livraison_jours,
-             (SELECT CAST(valeur_courante AS INTEGER) FROM parametre
+             (SELECT CAST(valeur_courante AS integer) FROM parametre
                WHERE code_parametre = 'P_DelaiDefaut')) AS equivalent_delai_jours,
     rge2.priorite                       AS equivalent_priorite,
     rge2.est_preferentielle             AS equivalent_preferentielle,
@@ -1589,7 +1580,7 @@ WHERE rge1.actif = 1
 -- reference, des references heterogenes (substituer casserait le kg/m2), ou
 -- toutes chez le meme fournisseur (elles tombent ensemble).
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_groupe_equiv_detail;
+DROP VIEW IF EXISTS v_groupe_equiv_detail CASCADE;
 CREATE VIEW v_groupe_equiv_detail AS
 SELECT
     g.code_groupe_equiv,
@@ -1635,7 +1626,7 @@ GROUP BY g.code_groupe_equiv;
 -- magasin ni utilisable. L'y inclure ferait planifier une production sur ce qui
 -- est encore dans le camion.
 -- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_transit;
+DROP VIEW IF EXISTS v_stock_transit CASCADE;
 CREATE VIEW v_stock_transit AS
 SELECT
     t.id_transfert,
@@ -1655,7 +1646,7 @@ SELECT
     -- Depuis combien de jours la marchandise est-elle en route ? Au-dela de
     -- quelques jours pour un transfert interne, c'est qu'on a oublie de
     -- constater l'arrivee — ou que la marchandise s'est perdue.
-    CAST(julianday('now') - julianday(date(t.date_transfert)) AS INTEGER) AS jours_en_transit
+    CAST((current_date - (t.date_transfert)::date) AS integer) AS jours_en_transit
 FROM transfert t
 JOIN ligne_transfert lt ON lt.id_transfert = t.id_transfert
 JOIN reference r        ON r.code_reference = lt.code_reference

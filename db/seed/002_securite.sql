@@ -714,7 +714,6 @@ INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible,
  ('UTILISATEURS','email',              'Email',              'LECTURE', 0, 40),
  ('UTILISATEURS','telephone',          'Telephone',          'LECTURE', 0, 50),
  ('UTILISATEURS','magasin_principal',  'Magasin principal',  'LECTURE', 0, 60),
- ('UTILISATEURS','mfa_actif',          'Double facteur',     'LECTURE', 0, 70),
  ('UTILISATEURS','derniere_connexion', 'Derniere connexion', 'LECTURE', 0, 80),
  ('UTILISATEURS','actif',              'Actif',              'LECTURE', 0, 90);
 
@@ -851,13 +850,13 @@ UPDATE modele_droit_champ SET niveau = 'LECTURE'
 -- n'est possible avec. Definir les mots de passe reels via :
 --     cargo run --bin gestionfil-admin -- definir-mot-de-passe <login>
 -- =============================================================================
-INSERT INTO utilisateur (id_utilisateur, code_role_user, login, mot_de_passe_hash, nom, magasin_principal, mfa_actif) VALUES
-    ('00000000-0000-4000-a000-000000000010','DIRECTION','direction','!A_DEFINIR!','Direction Generale',         NULL,     1),
-    ('00000000-0000-4000-a000-000000000011','DAF',      'daf',      '!A_DEFINIR!','Direction Administrative',   NULL,     1),
-    ('00000000-0000-4000-a000-000000000012','ACHAT',    'achat',    '!A_DEFINIR!','Service Achats',             NULL,     1),
-    ('00000000-0000-4000-a000-000000000013','PLANIF',   'planif',   '!A_DEFINIR!','Planification',              NULL,     0),
-    ('00000000-0000-4000-a000-000000000014','QUALITE',  'qualite',  '!A_DEFINIR!','Controle Qualite',           'ZON-QUA',0),
-    ('00000000-0000-4000-a000-000000000015','MAGASIN',  'magasin',  '!A_DEFINIR!','Magasin Matieres Premieres', 'MP-01',  0);
+INSERT INTO utilisateur (id_utilisateur, code_role_user, login, mot_de_passe_hash, nom, magasin_principal) VALUES
+    ('00000000-0000-4000-a000-000000000010','DIRECTION','direction','!A_DEFINIR!','Direction Generale',         NULL),
+    ('00000000-0000-4000-a000-000000000011','DAF',      'daf',      '!A_DEFINIR!','Direction Administrative',   NULL),
+    ('00000000-0000-4000-a000-000000000012','ACHAT',    'achat',    '!A_DEFINIR!','Service Achats',             NULL),
+    ('00000000-0000-4000-a000-000000000013','PLANIF',   'planif',   '!A_DEFINIR!','Planification',              NULL),
+    ('00000000-0000-4000-a000-000000000014','QUALITE',  'qualite',  '!A_DEFINIR!','Controle Qualite',           'ZON-QUA'),
+    ('00000000-0000-4000-a000-000000000015','MAGASIN',  'magasin',  '!A_DEFINIR!','Magasin Matieres Premieres', 'MP-01');
 
 -- Initialisation des grilles individuelles depuis le modele de chaque role.
 -- A partir d'ici, la grille appartient a l'utilisateur : la modifier n'affecte

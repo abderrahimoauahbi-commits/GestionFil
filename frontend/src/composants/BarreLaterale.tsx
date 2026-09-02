@@ -119,14 +119,21 @@ export function BarreLaterale() {
       >
         {/* --- Marque et figeage ------------------------------------------ */}
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-bordure px-3">
-          <div className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] bg-primaire text-[12px] font-bold text-primaire-texte">
+          {/* La marque porte le retour a l'accueil : l'entete ne l'affiche plus
+              en disposition laterale, ce lien doit donc exister ici. */}
+          <NavLink
+            to="/"
+            end
+            title="Cockpit"
+            className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] bg-primaire text-[12px] font-bold text-primaire-texte"
+          >
             GF
-          </div>
+          </NavLink>
           {ouverte && (
             <>
-              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+              <NavLink to="/" end className="min-w-0 flex-1 truncate text-[13px] font-semibold">
                 Gestion Fil
-              </span>
+              </NavLink>
               <button
                 type="button"
                 onClick={() => definir({ menuFige: !menuFige })}

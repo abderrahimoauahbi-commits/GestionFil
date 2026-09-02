@@ -35,6 +35,52 @@
     </script>
   </head>
   <body>
+    <!--
+      LA LENTILLE DE LA FAMILLE « VERRE ».
+
+      Un `backdrop-filter` ne sait flouter que de facon uniforme ; il ne sait pas
+      DEFORMER. Or c'est la deformation du fond qui fait lire une surface comme
+      du verre epais plutot que comme un calque translucide. Ce filtre la fournit :
+      un bruit fractal de tres basse frequence deplace le fond de quelques pixels,
+      lentement, sans motif reconnaissable.
+
+      DE TRES BASSE FREQUENCE, ET C'EST LE POINT : sur un degrade lisse, un
+      deplacement lent produit une ondulation de verre. Une frequence plus haute
+      produirait du grain, et ce serait sale. Sur un ERP ou l'on regarde des
+      chiffres huit heures par jour, `scale` reste a 18 — assez pour voir la
+      matiere, trop peu pour distraire.
+
+      Il ne s'applique QU'AU FOND, jamais au contenu : le texte et les chiffres
+      poses sur la carte ne sont pas touches.
+
+      Chromium seul sait utiliser un filtre SVG comme `backdrop-filter` (donc
+      WebView2, donc l'application Tauri). Ailleurs, la feuille de style retombe
+      sur un flou simple — voir palettes.css.
+    -->
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      style="position: absolute; width: 0; height: 0; overflow: hidden"
+    >
+      <filter id="verre-lentille" color-interpolation-filters="sRGB">
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.004 0.007"
+          numOctaves="2"
+          seed="7"
+          result="ondulation"
+        />
+        <feGaussianBlur in="ondulation" stdDeviation="1.5" result="ondulation_douce" />
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="ondulation_douce"
+          scale="34"
+          xChannelSelector="R"
+          yChannelSelector="G"
+        />
+      </filter>
+    </svg>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

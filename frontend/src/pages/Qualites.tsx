@@ -729,10 +729,7 @@ export function Qualites() {
           description="Densite de matiere par role BOM, exprimee en kg/m² ou ml/m²."
           actions={
             droits.peutEcrire && (
-              <Bouton onClick={ouvrirCreation}>
-                <Plus />
-                Nouvelle qualite
-              </Bouton>
+              <Bouton taille="icone" title="Nouvelle qualite" aria-label="Nouvelle qualite" onClick={ouvrirCreation}>                <Plus />              </Bouton>
             )
           }
         />

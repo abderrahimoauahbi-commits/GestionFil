@@ -47,8 +47,6 @@ CREATE TABLE utilisateur (
     email               TEXT,
     telephone           TEXT,
     magasin_principal   TEXT    REFERENCES magasin(code_magasin),
-    mfa_actif           INTEGER NOT NULL DEFAULT 0 CHECK (mfa_actif IN (0,1)),
-    mfa_secret          TEXT,
     date_creation       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     derniere_connexion  TEXT,
     actif               INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0,1))

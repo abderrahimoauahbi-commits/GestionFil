@@ -20,6 +20,7 @@ use crate::state::AppState;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 pub fn router(state: AppState) -> Router {
@@ -44,7 +45,19 @@ pub fn router(state: AppState) -> Router {
             axum::http::header::CONTENT_TYPE,
         ]);
 
-    Router::new()
+    // L'interface, quand elle est deployee a cote du serveur.
+    //
+    // LE REPLI SUR index.html EST INDISPENSABLE, et c'est le piege classique :
+    // l'application tient sa navigation cote client. Un utilisateur qui recharge
+    // la page sur /plans/12 demande au serveur un fichier `plans/12` qui n'existe
+    // pas ; sans repli il obtient 404 au lieu de son ecran. `not_found_service`
+    // renvoie index.html, et le routeur du navigateur reprend la main.
+    //
+    // Il ne masque jamais l'API : ces routes sont enregistrees avant, et Axum
+    // sert la plus specifique.
+    let interface = state.config.frontend_dir.clone();
+
+    let routeur = Router::new()
         .route("/api/sante", get(consultation::sante))
         // --- Assistant de direction (lecture seule, role DIRECTION) -----------
         .route("/api/assistant", get(assistant::catalogue))
@@ -225,6 +238,21 @@ pub fn router(state: AppState) -> Router {
         .route("/api/{entite}/{id}",
                get(entites::lire).patch(entites::modifier).delete(entites::supprimer))
         .layer(TraceLayer::new_for_http())
-        .layer(cors)
-        .with_state(state)
+        .layer(cors);
+
+    match interface {
+        Some(rep) => {
+            let index = rep.join("index.html");
+            tracing::info!(repertoire = %rep.display(), "interface servie par le serveur");
+            routeur
+                .fallback_service(
+                    ServeDir::new(&rep).not_found_service(ServeFile::new(index)),
+                )
+                .with_state(state)
+        }
+        None => {
+            tracing::info!("aucune interface a servir : API seule");
+            routeur.with_state(state)
+        }
+    }
 }

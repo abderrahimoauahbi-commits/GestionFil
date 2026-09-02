@@ -17,7 +17,6 @@ interface Utilisateur {
   code_role_user: string
   role_libelle: string
   magasin_principal: string | null
-  mfa_actif: number
   derniere_connexion: string | null
   actif: number
   mot_de_passe_a_definir: number
@@ -108,7 +107,6 @@ export function Utilisateurs() {
                   {u.mot_de_passe_a_definir === 1 && (
                     <Etiquette ton="ambre">mot de passe a definir</Etiquette>
                   )}
-                  {u.mfa_actif === 1 && <Etiquette ton="vert">2FA</Etiquette>}
                   {u.id_utilisateur === moi?.id && <Etiquette>vous</Etiquette>}
                 </div>
                 <div className="mt-0.5 text-sm text-attenue-texte">
@@ -194,7 +192,6 @@ function FormulaireCreation({
     email: '',
     code_role_user: roles[0]?.code_role_user ?? 'MAGASIN',
     mot_de_passe: '',
-    mfa_actif: false,
   })
   const [erreur, setErreur] = useState<string | null>(null)
 
@@ -295,15 +292,6 @@ function FormulaireCreation({
               className={champ}
             />
           </div>
-
-          <label className="flex items-center gap-2 text-sm text-texte">
-            <input
-              type="checkbox"
-              checked={form.mfa_actif}
-              onChange={(e) => setForm({ ...form, mfa_actif: e.target.checked })}
-            />
-            Exiger la double authentification
-          </label>
 
           {erreur && <Message ton="erreur">{erreur}</Message>}
 

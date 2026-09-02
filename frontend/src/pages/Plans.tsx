@@ -623,10 +623,7 @@ export function Plans() {
           description="Periode glissante : base mensuelle par recette, saisonnalite par mois, croissance au prorata."
           actions={
             droits.peutEcrire && (
-              <Bouton onClick={ouvrirCreation}>
-                <Plus />
-                Nouveau plan
-              </Bouton>
+              <Bouton taille="icone" title="Nouveau plan" aria-label="Nouveau plan" onClick={ouvrirCreation}>                <Plus />              </Bouton>
             )
           }
         />

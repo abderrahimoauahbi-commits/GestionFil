@@ -7,6 +7,55 @@
  */
 
 const CLE_JETON = 'gestionfil.jeton'
+const CLE_SERVEUR = 'gestionfil.serveur'
+
+/**
+ * L'adresse du serveur.
+ *
+ * TROIS NIVEAUX, DU PLUS PRECIS AU PLUS GENERAL :
+ *
+ *   1. LE REGLAGE DU POSTE, en localStorage. C'est lui qui permet a UN SEUL
+ *      paquet installe de viser n'importe quel serveur : on ne recompile pas
+ *      l'application parce que l'adresse du serveur change.
+ *   2. L'ADRESSE COMPILEE, `VITE_API_URL`. Utile pour un paquet prepare a
+ *      l'avance pour un site donne, qui marche sans reglage.
+ *   3. LA MEME ORIGINE, chaine vide. C'est le cas du navigateur : la page vient
+ *      du serveur, l'API est au meme endroit. Ni CORS ni configuration.
+ *
+ * Le stockage est `localStorage` et non `sessionStorage`, contrairement au
+ * jeton : l'adresse du serveur doit survivre a la fermeture de l'application,
+ * le jeton non.
+ */
+export function serveur(): string {
+  try {
+    const choisi = localStorage.getItem(CLE_SERVEUR)
+    if (choisi) return choisi.replace(/\/+$/, '')
+  } catch {
+    /* navigation privee, stockage refuse : on continue sans */
+  }
+  const compile = import.meta.env.VITE_API_URL as string | undefined
+  if (compile) return compile.replace(/\/+$/, '')
+  return ''
+}
+
+export function definirServeur(url: string): void {
+  const propre = url.trim().replace(/\/+$/, '')
+  if (propre) localStorage.setItem(CLE_SERVEUR, propre)
+  else localStorage.removeItem(CLE_SERVEUR)
+}
+
+/**
+ * Faut-il demander l'adresse du serveur avant de pouvoir se connecter ?
+ *
+ * Vrai pour une application EMPAQUETEE (bureau ou mobile) non configuree : sa
+ * page ne vient pas d'un serveur, l'origine est `tauri://localhost` ou
+ * `file://`, et une requete relative n'aboutirait nulle part. Faux dans un
+ * navigateur, ou l'origine courante fait office de serveur.
+ */
+export function serveurRequis(): boolean {
+  if (serveur()) return false
+  return location.protocol !== 'http:' && location.protocol !== 'https:'
+}
 
 /** Erreur applicative renvoyee par l'API, avec son code metier. */
 export class ErreurApi extends Error {
@@ -46,7 +95,7 @@ async function requete<T>(
 
   let reponse: Response
   try {
-    reponse = await fetch(route, {
+    reponse = await fetch(serveur() + route, {
       method: methode,
       headers: entetes,
       body: corps === undefined ? undefined : JSON.stringify(corps),
@@ -58,7 +107,9 @@ async function requete<T>(
     throw new ErreurApi(
       0,
       'SERVEUR_INJOIGNABLE',
-      "Le serveur ne repond pas. Verifiez qu'il est demarre (cargo run dans backend/).",
+      serveur()
+        ? `Le serveur ${serveur()} ne repond pas. Verifiez l'adresse et que la machine est allumee.`
+        : "Le serveur ne repond pas. Verifiez qu'il est demarre.",
     )
   }
 
@@ -91,8 +142,11 @@ async function requete<T>(
     // connexion plutot que de laisser l'interface enchainer les 401.
     if (reponse.status === 401) {
       jeton.effacer()
-      if (!location.pathname.startsWith('/connexion')) {
-        location.replace('/connexion')
+      // `location.replace` sur un chemin absolu casse dans une application
+      // empaquetee, ou la page est servie depuis le disque : le hachage suffit
+      // et fonctionne dans les deux cas.
+      if (!location.pathname.endsWith('/connexion')) {
+        location.replace(import.meta.env.BASE_URL + 'connexion')
       }
     }
     throw new ErreurApi(reponse.status, code, message)

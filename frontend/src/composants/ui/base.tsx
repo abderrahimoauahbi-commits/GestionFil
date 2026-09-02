@@ -35,11 +35,16 @@ const varianteBouton = cva(
         danger: 'bg-danger text-danger-texte hover:bg-danger/90',
         lien: 'text-primaire underline-offset-4 hover:underline',
       },
+      // UN CRAN PLUS BAS QUE LA CONVENTION DU WEB, ET C'EST VOULU. Un bouton de
+      // 36 px convient a une page qu'on visite ; sur un ecran de saisie ou dix
+      // boutons cotoient une table de quarante lignes, chaque pixel de hauteur
+      // pris par la barre d'actions est une ligne de moins a lire. La cible
+      // reste au-dessus des 24 px en deca desquels le pointage devient penible.
       taille: {
         xs: 'h-6 px-2 text-[11px] [&_svg]:size-3',
-        sm: 'h-7 px-2.5 text-xs',
-        md: 'h-8 px-3',
-        lg: 'h-9 px-4 text-sm',
+        sm: 'h-6 px-2 text-[11.5px]',
+        md: 'h-7 px-2.5 text-[12px]',
+        lg: 'h-8 px-3',
         icone: 'h-7 w-7 p-0',
         'icone-xs': 'h-6 w-6 p-0 [&_svg]:size-3',
       },

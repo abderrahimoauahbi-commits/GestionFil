@@ -207,27 +207,43 @@ $$ LANGUAGE plpgsql;
 """
 
 
-def main():
-    sorties, notes = [], []
-    for src in (RACINE / "010_triggers.sql", RACINE / "006_schema_achats.sql"):
-        for bloc in decouper(src.read_text(encoding="utf-8")):
-            porte, note = porter(bloc)
-            if porte:
-                sorties.append(porte)
-            if note:
-                notes.append(note)
+# Chaque groupe donne un fichier de sortie : garder 014 separe permet de le
+# rejouer seul quand on ajoute un declencheur d'audit, sans retoucher aux 65
+# declencheurs metier de 010.
+GROUPES = [
+    ("010_declencheurs.sql", ["010_triggers.sql", "006_schema_achats.sql"]),
+    ("014_audit_operations.sql", ["014_audit_operations.sql"]),
+]
 
-    (RACINE / "pg" / "010_declencheurs.sql").write_text(
-        ENTETE
-        + "\n\n".join(sorties)
-        + "\n\n-- Portes a la main :\n"
-        + "\n".join(notes)
-        + "\n",
-        encoding="utf-8",
-    )
-    print("  declencheurs generes :", len(sorties))
-    print("  a porter a la main   :", len(notes))
-    for n in notes:
+
+def main():
+    total, restants = 0, []
+    for cible, sources in GROUPES:
+        sorties, notes = [], []
+        for nom in sources:
+            src = RACINE / nom
+            if not src.exists():
+                continue
+            for bloc in decouper(src.read_text(encoding="utf-8")):
+                porte, note = porter(bloc)
+                if porte:
+                    sorties.append(porte)
+                if note:
+                    notes.append(note)
+
+        (RACINE / "pg" / cible).write_text(
+            ENTETE
+            + "\n\n".join(sorties)
+            + ("\n\n-- Portes a la main :\n" + "\n".join(notes) if notes else "")
+            + "\n",
+            encoding="utf-8",
+        )
+        print("  %-28s %2d declencheurs, %d a la main" % (cible, len(sorties), len(notes)))
+        total += len(sorties)
+        restants += notes
+
+    print("  total : %d declencheurs portes" % total)
+    for n in restants:
         print("   ", n.replace("-- ", ""))
     return 0
 

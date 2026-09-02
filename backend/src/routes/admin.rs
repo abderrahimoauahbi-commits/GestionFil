@@ -25,7 +25,7 @@ pub async fn lister_utilisateurs(
     let rows = sqlx::query(
         "SELECT u.id_utilisateur, u.login, u.nom, u.email, u.telephone,
                 u.code_role_user, r.libelle AS role_libelle, u.magasin_principal,
-                u.mfa_actif, u.derniere_connexion, u.actif, u.date_creation,
+                u.derniere_connexion, u.actif, u.date_creation,
                 (u.mot_de_passe_hash = '!A_DEFINIR!') AS mot_de_passe_a_definir
            FROM utilisateur u
            JOIN role_utilisateur r ON r.code_role_user = u.code_role_user
@@ -64,8 +64,6 @@ pub struct NouvelUtilisateur {
     pub telephone: Option<String>,
     pub magasin_principal: Option<String>,
     pub mot_de_passe: String,
-    #[serde(default)]
-    pub mfa_actif: bool,
 }
 
 pub async fn creer_utilisateur(
@@ -93,8 +91,8 @@ pub async fn creer_utilisateur(
     sqlx::query(
         "INSERT INTO utilisateur
              (id_utilisateur, code_role_user, login, mot_de_passe_hash, nom,
-              email, telephone, magasin_principal, mfa_actif)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+              email, telephone, magasin_principal)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
     )
     .bind(&id)
     .bind(&nouveau.code_role_user)
@@ -104,7 +102,6 @@ pub async fn creer_utilisateur(
     .bind(&nouveau.email)
     .bind(&nouveau.telephone)
     .bind(&nouveau.magasin_principal)
-    .bind(i64::from(nouveau.mfa_actif))
     .execute(&mut *tx)
     .await?;
 
@@ -129,7 +126,6 @@ pub struct ModificationUtilisateur {
     pub telephone: Option<String>,
     pub code_role_user: Option<String>,
     pub magasin_principal: Option<String>,
-    pub mfa_actif: Option<bool>,
     pub actif: Option<bool>,
     pub mot_de_passe: Option<String>,
 }
@@ -167,8 +163,7 @@ pub async fn modifier_utilisateur(
             telephone         = COALESCE(?4, telephone),
             code_role_user    = COALESCE(?5, code_role_user),
             magasin_principal = COALESCE(?6, magasin_principal),
-            mfa_actif         = COALESCE(?7, mfa_actif),
-            actif             = COALESCE(?8, actif)
+            actif             = COALESCE(?7, actif)
           WHERE id_utilisateur = ?1",
     )
     .bind(&id)
@@ -177,7 +172,6 @@ pub async fn modifier_utilisateur(
     .bind(&m.telephone)
     .bind(&m.code_role_user)
     .bind(&m.magasin_principal)
-    .bind(m.mfa_actif.map(i64::from))
     .bind(m.actif.map(i64::from))
     .execute(&mut *tx)
     .await?;

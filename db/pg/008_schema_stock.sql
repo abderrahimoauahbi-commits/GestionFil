@@ -42,7 +42,7 @@ CREATE TABLE mouvement (
     numero_of           text,                       -- ordre de fabrication (C07)
     observations_globales text,
     id_utilisateur      text    NOT NULL REFERENCES utilisateur(id_utilisateur),  -- C09
-    est_initial         smallint NOT NULL DEFAULT 0 CHECK (est_initial IN (0,1)),
+    est_initial         bigint NOT NULL DEFAULT 0 CHECK (est_initial IN (0,1)),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 
@@ -59,7 +59,7 @@ CREATE TABLE ligne_mouvement (
     id_ligne_mouvement  text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     id_mouvement        text    NOT NULL REFERENCES mouvement(id_mouvement) ON DELETE CASCADE,
-    ligne_numero        integer NOT NULL CHECK (ligne_numero > 0),
+    ligne_numero        bigint NOT NULL CHECK (ligne_numero > 0),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
 
     quantite_kg         numeric(18,4)    NOT NULL CHECK (quantite_kg > 0),
@@ -173,7 +173,7 @@ CREATE TABLE ligne_transfert (
     id_ligne_transfert  text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     id_transfert        text    NOT NULL REFERENCES transfert(id_transfert) ON DELETE CASCADE,
-    ligne_numero        integer NOT NULL CHECK (ligne_numero > 0),
+    ligne_numero        bigint NOT NULL CHECK (ligne_numero > 0),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     quantite_kg         numeric(18,4)    NOT NULL CHECK (quantite_kg > 0),
     quantite_saisie     numeric(18,4),
@@ -187,8 +187,8 @@ CREATE TABLE ligne_transfert (
     -- palettes completes et quatre bobines isolees, et c'est ce decompte-la que
     -- le magasin destinataire verifiera au dechargement. Le deduire du poids
     -- donnerait un nombre juste en moyenne et faux sur chaque envoi.
-    nb_bobines          integer CHECK (nb_bobines IS NULL OR nb_bobines >= 0),
-    nb_palettes         integer CHECK (nb_palettes IS NULL OR nb_palettes >= 0),
+    nb_bobines          bigint CHECK (nb_bobines IS NULL OR nb_bobines >= 0),
+    nb_palettes         bigint CHECK (nb_palettes IS NULL OR nb_palettes >= 0),
 
     -- CMUP du magasin SOURCE, fige au moment de l'expedition.
     --

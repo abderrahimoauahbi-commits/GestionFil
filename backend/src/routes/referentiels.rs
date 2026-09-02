@@ -25,8 +25,8 @@ pub async fn devises(State(state): State<AppState>, user: Utilisateur) -> AppRes
         "SELECT d.*,
                 (SELECT t.taux FROM taux_change t
                   WHERE t.code_devise = d.code_devise
-                    AND date('now') >= date(t.date_debut)
-                    AND (t.date_fin IS NULL OR date('now') < date(t.date_fin))
+                    AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                    AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                   ORDER BY t.date_debut DESC LIMIT 1) AS taux_courant
            FROM devise d WHERE d.actif = 1
           ORDER BY d.est_pivot DESC, d.code_devise",
@@ -43,7 +43,7 @@ pub async fn taux_change(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PARAMETRES, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT * FROM taux_change WHERE code_devise = ?1 ORDER BY date_debut DESC",
+        "SELECT * FROM taux_change WHERE code_devise = $1 ORDER BY date_debut DESC",
     )
     .bind(&devise)
     .fetch_all(&state.db)
@@ -83,8 +83,8 @@ pub async fn creer_taux(
     user.poser_contexte(&mut tx).await?;
 
     sqlx::query(
-        "UPDATE taux_change SET date_fin = ?2
-          WHERE code_devise = ?1 AND date_fin IS NULL AND date_debut < ?2",
+        "UPDATE taux_change SET date_fin = $2
+          WHERE code_devise = $1 AND date_fin IS NULL AND date_debut < $2",
     )
     .bind(&devise)
     .bind(&debut)
@@ -93,7 +93,7 @@ pub async fn creer_taux(
 
     sqlx::query(
         "INSERT INTO taux_change (code_devise, taux, date_debut, source)
-         VALUES (?1, ?2, ?3, ?4)",
+         VALUES ($1, $2, $3, $4)",
     )
     .bind(&devise)
     .bind(t.taux)
@@ -196,7 +196,7 @@ pub async fn creer_transition(
     user.poser_contexte(&mut tx).await?;
 
     let connue: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM transition_statut WHERE entite = ?1")
+        sqlx::query_scalar("SELECT COUNT(*) FROM transition_statut WHERE entite = $1")
             .bind(&t.entite)
             .fetch_one(&mut *tx)
             .await?;
@@ -211,7 +211,7 @@ pub async fn creer_transition(
     sqlx::query(
         "INSERT INTO transition_statut
              (entite, statut_source, statut_cible, role_requis, description)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(&t.entite)
     .bind(&t.statut_source)
@@ -251,8 +251,8 @@ pub async fn modifier_transition(
 
     let r = sqlx::query(
         "UPDATE transition_statut
-            SET role_requis = ?4, description = ?5
-          WHERE entite = ?1 AND statut_source = ?2 AND statut_cible = ?3",
+            SET role_requis = $4, description = $5
+          WHERE entite = $1 AND statut_source = $2 AND statut_cible = $3",
     )
     .bind(&t.entite)
     .bind(&t.statut_source)
@@ -302,7 +302,7 @@ pub async fn supprimer_transition(
     user.poser_contexte(&mut tx).await?;
 
     let restantes: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM transition_statut WHERE entite = ?1 AND statut_source = ?2",
+        "SELECT COUNT(*) FROM transition_statut WHERE entite = $1 AND statut_source = $2",
     )
     .bind(&t.entite)
     .bind(&t.statut_source)
@@ -311,7 +311,7 @@ pub async fn supprimer_transition(
 
     let r = sqlx::query(
         "DELETE FROM transition_statut
-          WHERE entite = ?1 AND statut_source = ?2 AND statut_cible = ?3",
+          WHERE entite = $1 AND statut_source = $2 AND statut_cible = $3",
     )
     .bind(&t.entite)
     .bind(&t.statut_source)
@@ -368,8 +368,8 @@ pub async fn modifier_parametre(
     // historisent tout changement.
     let res = sqlx::query(
         "UPDATE parametre
-            SET valeur_courante = ?2, id_utilisateur_modif = ?3, motif_modif = ?4
-          WHERE code_parametre = ?1",
+            SET valeur_courante = $2, id_utilisateur_modif = $3, motif_modif = $4
+          WHERE code_parametre = $1",
     )
     .bind(&code)
     .bind(&m.valeur_courante)
@@ -396,7 +396,7 @@ pub async fn historique_parametre(
         "SELECT h.*, u.login AS auteur
            FROM parametre_historique h
            LEFT JOIN utilisateur u ON u.id_utilisateur = h.id_utilisateur
-          WHERE h.code_parametre = ?1
+          WHERE h.code_parametre = $1
           ORDER BY h.date_modification DESC",
     )
     .bind(&code)

@@ -163,7 +163,10 @@ def convertir(sql):
 
     # --- 3. Les conversions --------------------------------------------------
     sql = re.sub(r"\bAS\s+REAL\b", "AS numeric", sql, flags=re.I)
-    sql = re.sub(r"\bAS\s+INTEGER\b", "AS integer", sql, flags=re.I)
+    # `AS bigint` et non `AS integer` : les tables sont toutes en `bigint`
+    # (voir porter.py), et une vue qui rendrait un `integer` obligerait le
+    # service a connaitre la largeur de chaque colonne calculee.
+    sql = re.sub(r"\bAS\s+INTEGER\b", "AS bigint", sql, flags=re.I)
     sql = re.sub(r"\bAS\s+TEXT\b", "AS text", sql, flags=re.I)
 
     # --- 6. MAX / MIN a deux arguments --------------------------------------

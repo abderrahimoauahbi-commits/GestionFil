@@ -31,7 +31,7 @@ CREATE TABLE entreprise (
     logo_url            text,
     devise_base         text    NOT NULL DEFAULT 'MAD',
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------
@@ -41,8 +41,8 @@ CREATE TABLE devise (
     code_devise         text    NOT NULL PRIMARY KEY CHECK (length(code_devise) = 3),
     libelle             text    NOT NULL,
     symbole             text,
-    est_pivot           smallint NOT NULL DEFAULT 0 CHECK (est_pivot IN (0,1)),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    est_pivot           bigint NOT NULL DEFAULT 0 CHECK (est_pivot IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- Une seule devise pivot possible (MAD). Corrige l'ambiguite CDC E8 / A4.
@@ -87,8 +87,8 @@ CREATE TABLE categorie_matiere (
     -- C'est une AIDE A LA SAISIE, pas une contrainte : rien n'interdit d'employer
     -- une matiere hors de son role habituel, l'ecran offre de lever le filtre.
     code_role_defaut    text,
-    ordre_affichage     integer NOT NULL DEFAULT 0,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    ordre_affichage     bigint NOT NULL DEFAULT 0,
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------
@@ -98,8 +98,8 @@ CREATE TABLE role_bom (
     code_role           text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     description         text,
-    ordre_affichage     integer NOT NULL DEFAULT 0,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    ordre_affichage     bigint NOT NULL DEFAULT 0,
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------
@@ -113,9 +113,9 @@ CREATE TABLE magasin (
     type                text,
     adresse             text,
     responsable         text,
-    inclure_mrp         smallint NOT NULL DEFAULT 1 CHECK (inclure_mrp IN (0,1)),
-    est_quarantaine     smallint NOT NULL DEFAULT 0 CHECK (est_quarantaine IN (0,1)),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    inclure_mrp         bigint NOT NULL DEFAULT 1 CHECK (inclure_mrp IN (0,1)),
+    est_quarantaine     bigint NOT NULL DEFAULT 0 CHECK (est_quarantaine IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     CHECK (est_quarantaine = 0 OR inclure_mrp = 0)
 );
 
@@ -130,13 +130,13 @@ CREATE TABLE magasin (
 CREATE TABLE type_mouvement (
     code_type_mvt       text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
-    signe               integer NOT NULL CHECK (signe IN (-1, 1)),
-    exige_prix          smallint NOT NULL DEFAULT 0 CHECK (exige_prix IN (0,1)),
-    impacte_cmup        smallint NOT NULL DEFAULT 0 CHECK (impacte_cmup IN (0,1)),
-    exige_of            smallint NOT NULL DEFAULT 0 CHECK (exige_of IN (0,1)),
-    exige_motif_ligne   smallint NOT NULL DEFAULT 0 CHECK (exige_motif_ligne IN (0,1)),
+    signe               bigint NOT NULL CHECK (signe IN (-1, 1)),
+    exige_prix          bigint NOT NULL DEFAULT 0 CHECK (exige_prix IN (0,1)),
+    impacte_cmup        bigint NOT NULL DEFAULT 0 CHECK (impacte_cmup IN (0,1)),
+    exige_of            bigint NOT NULL DEFAULT 0 CHECK (exige_of IN (0,1)),
+    exige_motif_ligne   bigint NOT NULL DEFAULT 0 CHECK (exige_motif_ligne IN (0,1)),
     couleur             text,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     -- Un type ne peut impacter le CMUP que s'il est une entree valorisee (R04).
     CHECK (impacte_cmup = 0 OR (signe = 1 AND exige_prix = 1))
 );
@@ -148,8 +148,8 @@ CREATE TABLE motif_mouvement (
     code_motif          text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     categorie           text    NOT NULL,
-    signe_default       integer NOT NULL CHECK (signe_default IN (-1, 1)),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    signe_default       bigint NOT NULL CHECK (signe_default IN (-1, 1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------
@@ -159,7 +159,7 @@ CREATE TABLE motif_ligne (
     code_motif_ligne    text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     categorie           text,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------
@@ -178,11 +178,11 @@ CREATE TABLE parametre (
     description         text,
     categorie           text,
     modifiable_par      text,
-    verrouille          smallint NOT NULL DEFAULT 0 CHECK (verrouille IN (0,1)),
+    verrouille          bigint NOT NULL DEFAULT 0 CHECK (verrouille IN (0,1)),
     date_derniere_modif text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_utilisateur_modif text,
     motif_modif         text,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------

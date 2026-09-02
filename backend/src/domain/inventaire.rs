@@ -41,7 +41,7 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
     user.poser_contexte(&mut tx).await?;
 
     let (statut, magasin): (String, String) =
-        sqlx::query_as("SELECT statut, code_magasin FROM inventaire WHERE id_inventaire = ?1")
+        sqlx::query_as("SELECT statut, code_magasin FROM inventaire WHERE id_inventaire = $1")
             .bind(id_inventaire)
             .fetch_optional(&mut *tx)
             .await?
@@ -62,22 +62,22 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
     let res = sqlx::query(
         "INSERT INTO ligne_inventaire
              (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg)
-         SELECT ?1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg
+         SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg
            FROM stock_lot sl
            JOIN reference r ON r.code_reference = sl.code_reference AND r.suivi_lot = 1
-          WHERE sl.code_magasin = ?2 AND sl.quantite_kg > 0
+          WHERE sl.code_magasin = $2 AND sl.quantite_kg > 0
          UNION ALL
-         SELECT ?1, sm.code_reference, sm.code_magasin, NULL, sm.quantite_kg
+         SELECT $1, sm.code_reference, sm.code_magasin, NULL, sm.quantite_kg
            FROM stock_magasin sm
            JOIN reference r ON r.code_reference = sm.code_reference AND r.suivi_lot = 0
-          WHERE sm.code_magasin = ?2 AND sm.quantite_kg > 0",
+          WHERE sm.code_magasin = $2 AND sm.quantite_kg > 0",
     )
     .bind(id_inventaire)
     .bind(&magasin)
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("UPDATE inventaire SET statut = 'EN_COURS' WHERE id_inventaire = ?1")
+    sqlx::query("UPDATE inventaire SET statut = 'EN_COURS' WHERE id_inventaire = $1")
         .bind(id_inventaire)
         .execute(&mut *tx)
         .await?;
@@ -96,7 +96,7 @@ pub async fn cloturer(
     user.poser_contexte(&mut tx).await?;
 
     let (numero, statut, magasin): (String, String, String) = sqlx::query_as(
-        "SELECT numero_inventaire, statut, code_magasin FROM inventaire WHERE id_inventaire = ?1",
+        "SELECT numero_inventaire, statut, code_magasin FROM inventaire WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
     .fetch_optional(&mut *tx)
@@ -111,7 +111,7 @@ pub async fn cloturer(
 
     let non_comptees: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM ligne_inventaire
-          WHERE id_inventaire = ?1 AND statut_ligne = 'A_TRAITER'",
+          WHERE id_inventaire = $1 AND statut_ligne = 'A_TRAITER'",
     )
     .bind(id_inventaire)
     .fetch_one(&mut *tx)
@@ -126,7 +126,7 @@ pub async fn cloturer(
     // Un ecart hors tolerance doit etre justifie (CDC G6).
     let injustifiees: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM ligne_inventaire
-          WHERE id_inventaire = ?1
+          WHERE id_inventaire = $1
             AND ecart_pct IS NOT NULL
             AND abs(ecart_pct) > (SELECT CAST(valeur_courante AS REAL) FROM parametre
                                    WHERE code_parametre = 'P_TolerEcartPesee')
@@ -148,7 +148,7 @@ pub async fn cloturer(
            FROM ligne_inventaire li
            LEFT JOIN stock_magasin sm ON sm.code_reference = li.code_reference
                                      AND sm.code_magasin   = li.code_magasin
-          WHERE li.id_inventaire = ?1
+          WHERE li.id_inventaire = $1
             AND li.ecart_kg IS NOT NULL AND li.ecart_kg <> 0
           ORDER BY li.code_reference",
     )
@@ -187,7 +187,7 @@ pub async fn cloturer(
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, code_type_mvt,
                   code_magasin, code_motif, reference_document, id_utilisateur)
-             VALUES (?1, ?2, ?3, ?4, 'INVENTAIRE', ?5, ?6)",
+             VALUES ($1, $2, $3, $4, 'INVENTAIRE', $5, $6)",
         )
         .bind(&id_mouvement)
         .bind(&numero_mouvement)
@@ -207,7 +207,7 @@ pub async fn cloturer(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg,
                       lot_fournisseur, code_motif_ligne)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'R6')",
+                 VALUES ($1, $2, $3, $4, $5, 'R6')",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
@@ -227,8 +227,8 @@ pub async fn cloturer(
 
             sqlx::query(
                 "UPDATE ligne_inventaire
-                    SET statut_ligne = 'AJUSTE', ecart_mad = ?2
-                  WHERE id_ligne_inv = ?1",
+                    SET statut_ligne = 'AJUSTE', ecart_mad = $2
+                  WHERE id_ligne_inv = $1",
             )
             .bind(&l.id_ligne_inv)
             .bind(valeur)
@@ -240,7 +240,7 @@ pub async fn cloturer(
     }
 
     sqlx::query(
-        "UPDATE stock_magasin SET date_dernier_inventaire = ?2 WHERE code_magasin = ?1",
+        "UPDATE stock_magasin SET date_dernier_inventaire = $2 WHERE code_magasin = $1",
     )
     .bind(&magasin)
     .bind(&horodatage)
@@ -250,7 +250,7 @@ pub async fn cloturer(
     // date_cloture est renseignee explicitement : le CHECK de la table l'exige,
     // et le trigger AFTER du CDC ne pouvait pas le faire.
     sqlx::query(
-        "UPDATE inventaire SET statut = 'CLOTURE', date_cloture = ?2 WHERE id_inventaire = ?1",
+        "UPDATE inventaire SET statut = 'CLOTURE', date_cloture = $2 WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
     .bind(&horodatage)

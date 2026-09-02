@@ -15,7 +15,7 @@ Quatre choix de portage, tous reversibles, tous deliberes :
    cesse d'etre une discipline pour devenir une garantie. L'echelle se deduit du
    nom, qui est deja normalise dans ce schema.
 
-2. BOOLEENS -> `smallint` 0/1, PAS `boolean`. PostgreSQL a un vrai booleen, mais
+2. BOOLEENS -> `bigint` 0/1, PAS `boolean`. PostgreSQL a un vrai booleen, mais
    le service et les ecrans comparent partout `actif === 0` et `est_quarantaine
    === 1`. Basculer maintenant changerait le JSON en true/false et casserait ces
    comparaisons dans une centaine d'endroits, au milieu d'une migration deja
@@ -116,7 +116,17 @@ def porter(sql: str) -> str:
             booleen = re.search(
                 r"CHECK\s*\(\s*%s\s+IN\s*\(0\s*,\s*1\)\s*\)" % re.escape(nom), reste
             )
-            type_pg = "smallint" if booleen else "integer"
+            # TOUS LES ENTIERS EN `bigint`, booleens compris.
+            #
+            # SQLite n'a qu'un type entier, rendu en `i64` : les 42 requetes
+            # typees du service lisent donc tout en `i64`. sqlx exige une
+            # correspondance exacte — `i64` ne lit ni un INT2 ni un INT4. Les
+            # ranger tous en `bigint` garde le code inchange et la regle simple.
+            #
+            # Huit octets pour un drapeau 0/1 au lieu de deux : quelques
+            # dizaines de kilooctets sur une base de 16 Mo. L'invariant reste
+            # porte par le CHECK (0,1), pas par la largeur du type.
+            type_pg = "bigint"
         lignes.append("%s%s%s%s%s" % (indent, nom, espace, type_pg, reste))
     sql = "\n".join(lignes)
 

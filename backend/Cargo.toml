@@ -29,7 +29,15 @@ tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 # deja validee par db/tests/run-tests.ps1, et cela evite d'exiger une base
 # accessible a la compilation.
 sqlx = { version = "0.8", default-features = false, features = [
-    "runtime-tokio", "sqlite", "macros", "chrono", "json"
+    "runtime-tokio", "postgres", "macros", "chrono", "json",
+    # `numeric` du schema ne se decode pas en f64 : sqlx le refuse, et il a
+    # raison — la conversion perdrait la precision exacte que le type existe
+    # pour porter. `bigdecimal` fournit le type de decodage ; la conversion en
+    # nombre JSON se fait ensuite par la representation textuelle (routes/json.rs).
+    "bigdecimal",
+    # TLS : la base est sur la boucle locale aujourd'hui, mais un backend
+    # deporte se connecterait en clair sans cela.
+    "tls-rustls",
 ] }
 
 serde = { version = "1", features = ["derive"] }

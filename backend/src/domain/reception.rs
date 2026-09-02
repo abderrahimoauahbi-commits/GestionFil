@@ -90,7 +90,7 @@ pub async fn valider(
     let entete: EnteteReception = sqlx::query_as(
         "SELECT numero_reception, date_reception, statut, id_bc,
                 code_fournisseur, id_utilisateur_reception
-           FROM reception WHERE id_reception = ?1",
+           FROM reception WHERE id_reception = $1",
     )
     .bind(id_reception)
     .fetch_optional(&mut *tx)
@@ -122,11 +122,11 @@ pub async fn valider(
         "SELECT DISTINCT bc.id_bc, bc.numero_bc, bc.statut,
                 bc.date_livraison_prevue, bc.id_utilisateur_creation
            FROM bon_commande bc
-          WHERE bc.id_bc = ?2
+          WHERE bc.id_bc = $2
              OR bc.id_bc IN (SELECT lb.id_bc
                                FROM ligne_reception lr
                                JOIN ligne_bc lb ON lb.id_ligne_bc = lr.id_ligne_bc
-                              WHERE lr.id_reception = ?1)
+                              WHERE lr.id_reception = $1)
           ORDER BY bc.numero_bc",
     )
     .bind(id_reception)
@@ -169,7 +169,7 @@ pub async fn valider(
                 lot_fournisseur, date_fabrication, date_peremption,
                 statut_qualite, code_magasin_dest
            FROM ligne_reception
-          WHERE id_reception = ?1
+          WHERE id_reception = $1
           ORDER BY ligne_numero",
     )
     .bind(id_reception)
@@ -190,7 +190,7 @@ pub async fn valider(
            FROM ligne_reception lr
            JOIN ligne_bc lb     ON lb.id_ligne_bc = lr.id_ligne_bc
            JOIN bon_commande bc ON bc.id_bc = lb.id_bc
-          WHERE lr.id_reception = ?1",
+          WHERE lr.id_reception = $1",
     )
     .bind(id_reception)
     .fetch_all(&mut *tx)
@@ -239,7 +239,7 @@ pub async fn valider(
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt,
                   code_magasin, code_motif, reference_document, id_utilisateur)
-             VALUES (?1, ?2, ?3, 'ENTREE_REC', ?4, 'RECEPTION', ?5, ?6)",
+             VALUES ($1, $2, $3, 'ENTREE_REC', $4, 'RECEPTION', $5, $6)",
         )
         .bind(&id_mouvement)
         .bind(&numero_mouvement)
@@ -258,7 +258,7 @@ pub async fn valider(
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                       quantite_saisie, unite_saisie, facteur_conversion,
                       lot_fournisseur, date_fabrication, date_peremption, statut_qualite)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
@@ -275,7 +275,7 @@ pub async fn valider(
             .execute(&mut *tx)
             .await?;
 
-            sqlx::query("UPDATE ligne_reception SET id_mouvement_genere = ?1 WHERE id_ligne_reception = ?2")
+            sqlx::query("UPDATE ligne_reception SET id_mouvement_genere = $1 WHERE id_ligne_reception = $2")
                 .bind(&id_mouvement)
                 .bind(&l.id_ligne_reception)
                 .execute(&mut *tx)
@@ -307,7 +307,7 @@ pub async fn valider(
                   total_mad, code_magasin_dest, statut_qualite, ecart_pct,
                   conformite_specifications, conformite_quantite, conformite_delai,
                   jours_retard, date_archive, id_utilisateur_archive)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)",
         )
         .bind(&l.id_ligne_reception)
         .bind(&entete.numero_reception)
@@ -341,7 +341,7 @@ pub async fn valider(
                  (id_ligne_reception, code_reference, code_fournisseur, date_achat,
                   prix_kg_devise, code_devise, taux_change, prix_kg_mad,
                   quantite_achetee_kg, total_mad, date_enregistrement)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
         )
         .bind(&l.id_ligne_reception)
         .bind(&l.code_reference)
@@ -361,8 +361,8 @@ pub async fn valider(
         if let Some(id_ligne_bc) = &l.id_ligne_bc {
             sqlx::query(
                 "UPDATE ligne_bc
-                    SET quantite_recue_kg = ROUND(quantite_recue_kg + ?2, 4)
-                  WHERE id_ligne_bc = ?1",
+                    SET quantite_recue_kg = ROUND(quantite_recue_kg + $2, 4)
+                  WHERE id_ligne_bc = $1",
             )
             .bind(id_ligne_bc)
             .bind(arrondi_kg(l.quantite_stock_kg))
@@ -371,9 +371,9 @@ pub async fn valider(
 
             sqlx::query(
                 "UPDATE ligne_bc
-                    SET statut = CASE WHEN quantite_recue_kg >= quantite_commandee_kg - ?2
+                    SET statut = CASE WHEN quantite_recue_kg >= quantite_commandee_kg - $2
                                       THEN 'SOLDE' ELSE 'PARTIEL' END
-                  WHERE id_ligne_bc = ?1",
+                  WHERE id_ligne_bc = $1",
             )
             .bind(id_ligne_bc)
             .bind(EPSILON_KG)
@@ -399,7 +399,7 @@ pub async fn valider(
 
         let restantes: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM ligne_bc
-              WHERE id_bc = ?1 AND statut NOT IN ('SOLDE','ANNULE')",
+              WHERE id_bc = $1 AND statut NOT IN ('SOLDE','ANNULE')",
         )
         .bind(&b.id_bc)
         .fetch_one(&mut *tx)
@@ -407,7 +407,7 @@ pub async fn valider(
 
         let nouveau = if restantes == 0 { "CLOTURE" } else { "LIVRE_PARTIEL" };
         if nouveau != b.statut {
-            sqlx::query("UPDATE bon_commande SET statut = ?2 WHERE id_bc = ?1")
+            sqlx::query("UPDATE bon_commande SET statut = $2 WHERE id_bc = $1")
                 .bind(&b.id_bc)
                 .bind(nouveau)
                 .execute(&mut *tx)
@@ -438,10 +438,10 @@ pub async fn valider(
     sqlx::query(
         "UPDATE reception
             SET statut = 'VALIDE',
-                id_utilisateur_controle = ?2,
-                date_controle = ?3,
-                taux_change_reception = ?4
-          WHERE id_reception = ?1",
+                id_utilisateur_controle = $2,
+                date_controle = $3,
+                taux_change_reception = $4
+          WHERE id_reception = $1",
     )
     .bind(id_reception)
     .bind(&user.id)

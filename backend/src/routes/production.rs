@@ -39,12 +39,17 @@ pub async fn lister_qualites(
                   WHERE r.code_qualite = q.code_qualite AND r.actif = 1) AS nb_roles_composes,
                 -- Roles dont la somme des % s'ecarte de 100 : c'est ce qui
                 -- bloquera la mise en service (R07).
+                -- L'expression est repetee dans le HAVING plutot que citee par
+                -- son alias : HAVING s'evalue avant la projection. Et la
+                -- sous-requete recoit un alias, que PostgreSQL exige la ou
+                -- SQLite s'en passait.
                 (SELECT COUNT(*) FROM (
                      SELECT r.code_role, SUM(r.pourcentage_composition) AS somme
                        FROM recette r
                       WHERE r.code_qualite = q.code_qualite AND r.actif = 1
                       GROUP BY r.code_role
-                     HAVING ABS(somme - 100.0) > 0.5)) AS nb_roles_hors_100,
+                     HAVING ABS(SUM(r.pourcentage_composition) - 100.0) > 0.5
+                 ) AS hors_cent)                                             AS nb_roles_hors_100,
                 (SELECT COUNT(*) FROM ligne_plan_production l
                   WHERE l.code_qualite = q.code_qualite AND l.m2_prevus > 0)     AS nb_lignes_plan,
                 uc.login AS cree_par, um.login AS modifie_par
@@ -186,7 +191,7 @@ pub async fn enregistrer_qualite(
     user.poser_contexte(&mut tx).await?;
 
     let horodatage = maintenant();
-    let existe: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM qualite WHERE code_qualite = ?1")
+    let existe: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM qualite WHERE code_qualite = $1")
         .bind(code)
         .fetch_one(&mut *tx)
         .await?;
@@ -201,14 +206,14 @@ pub async fn enregistrer_qualite(
                   marge_securite_pct, couv_min_mois, taux_perte_pct,
                   seuil_alerte_jours, seuil_critique_jours, stock_securite_jours,
                   id_utilisateur_creation)
-             SELECT ?1, ?2, ?3, 'BROUILLON', 0,
-                    COALESCE(?4, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite')),
-                    COALESCE(?5, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois')),
-                    COALESCE(?6, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte')),
-                    COALESCE(?7, (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilAlerte')),
-                    COALESCE(?8, (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilCritique')),
-                    COALESCE(?9, (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SecuriteA')),
-                    ?10",
+             SELECT $1, $2, $3, 'BROUILLON', 0,
+                    COALESCE($4, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite')),
+                    COALESCE($5, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois')),
+                    COALESCE($6, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte')),
+                    COALESCE($7, (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte')),
+                    COALESCE($8, (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique')),
+                    COALESCE($9, (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SecuriteA')),
+                    $10",
         )
         .bind(code)
         .bind(d.nom.trim())
@@ -225,16 +230,16 @@ pub async fn enregistrer_qualite(
     } else {
         sqlx::query(
             "UPDATE qualite SET
-                 nom = ?2, description = ?3,
-                 marge_securite_pct   = COALESCE(?4, marge_securite_pct),
-                 couv_min_mois        = COALESCE(?5, couv_min_mois),
-                 taux_perte_pct       = COALESCE(?6, taux_perte_pct),
-                 seuil_alerte_jours   = COALESCE(?7, seuil_alerte_jours),
-                 seuil_critique_jours = COALESCE(?8, seuil_critique_jours),
-                 stock_securite_jours = COALESCE(?9, stock_securite_jours),
-                 date_modification = ?10,
-                 id_utilisateur_modification = ?11
-              WHERE code_qualite = ?1",
+                 nom = $2, description = $3,
+                 marge_securite_pct   = COALESCE($4, marge_securite_pct),
+                 couv_min_mois        = COALESCE($5, couv_min_mois),
+                 taux_perte_pct       = COALESCE($6, taux_perte_pct),
+                 seuil_alerte_jours   = COALESCE($7, seuil_alerte_jours),
+                 seuil_critique_jours = COALESCE($8, seuil_critique_jours),
+                 stock_securite_jours = COALESCE($9, stock_securite_jours),
+                 date_modification = $10,
+                 id_utilisateur_modification = $11
+              WHERE code_qualite = $1",
         )
         .bind(code)
         .bind(d.nom.trim())
@@ -255,7 +260,7 @@ pub async fn enregistrer_qualite(
     let roles_recus: Vec<&str> = d.lignes.iter().map(|l| l.code_role.as_str()).collect();
 
     let a_retirer: Vec<String> =
-        sqlx::query_scalar("SELECT code_role FROM ligne_qualite WHERE code_qualite = ?1")
+        sqlx::query_scalar("SELECT code_role FROM ligne_qualite WHERE code_qualite = $1")
             .bind(code)
             .fetch_all(&mut *tx)
             .await?
@@ -267,7 +272,7 @@ pub async fn enregistrer_qualite(
     // qui decide si un role est encore utilise.
     let roles_composition: std::collections::HashSet<String> = match &d.composition {
         Some(c) => c.iter().map(|l| l.code_role.clone()).collect(),
-        None => sqlx::query_scalar("SELECT DISTINCT code_role FROM recette WHERE code_qualite = ?1")
+        None => sqlx::query_scalar("SELECT DISTINCT code_role FROM recette WHERE code_qualite = $1")
             .bind(code)
             .fetch_all(&mut *tx)
             .await?
@@ -283,7 +288,7 @@ pub async fn enregistrer_qualite(
                 "Le role {role} porte des lignes de composition sur {code} : retirez-les d'abord."
             )));
         }
-        sqlx::query("DELETE FROM ligne_qualite WHERE code_qualite = ?1 AND code_role = ?2")
+        sqlx::query("DELETE FROM ligne_qualite WHERE code_qualite = $1 AND code_role = $2")
             .bind(code)
             .bind(role)
             .execute(&mut *tx)
@@ -295,7 +300,7 @@ pub async fn enregistrer_qualite(
             "INSERT INTO ligne_qualite
                  (code_qualite, code_role, densite, unite_densite,
                   entre_poids_commercial, ordre_affichage)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT (code_qualite, code_role) DO UPDATE SET
                  densite = excluded.densite,
                  unite_densite = excluded.unite_densite,
@@ -320,7 +325,7 @@ pub async fn enregistrer_qualite(
     // est produite par le plan en service.
     let mut nb_composition = 0usize;
     if let Some(comp) = &d.composition {
-        sqlx::query("DELETE FROM recette WHERE code_qualite = ?1")
+        sqlx::query("DELETE FROM recette WHERE code_qualite = $1")
             .bind(code)
             .execute(&mut *tx)
             .await?;
@@ -331,7 +336,7 @@ pub async fn enregistrer_qualite(
                      (code_qualite, ligne_numero, code_reference, code_role,
                       code_groupe_equiv, pourcentage_composition, couleur,
                       code_fournisseur_prefere)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             )
             .bind(code)
             .bind(i as i64 + 1)
@@ -353,8 +358,8 @@ pub async fn enregistrer_qualite(
         "UPDATE qualite
             SET poids_commercial_m2 = COALESCE((
                     SELECT ROUND(SUM(densite), 4) FROM ligne_qualite
-                     WHERE code_qualite = ?1 AND actif = 1 AND entre_poids_commercial = 1), 0)
-          WHERE code_qualite = ?1",
+                     WHERE code_qualite = $1 AND actif = 1 AND entre_poids_commercial = 1), 0)
+          WHERE code_qualite = $1",
     )
     .bind(code)
     .execute(&mut *tx)
@@ -364,7 +369,7 @@ pub async fn enregistrer_qualite(
     // Les controles d'activation (R07, densites, ml/m2) portent ainsi sur la
     // composition qui vient d'etre ecrite, jamais sur la precedente.
     let statut_actuel: String =
-        sqlx::query_scalar("SELECT statut FROM qualite WHERE code_qualite = ?1")
+        sqlx::query_scalar("SELECT statut FROM qualite WHERE code_qualite = $1")
             .bind(code)
             .fetch_one(&mut *tx)
             .await?;
@@ -372,12 +377,12 @@ pub async fn enregistrer_qualite(
     if statut_actuel != statut_cible {
         sqlx::query(
             "UPDATE qualite SET
-                 statut = ?2,
-                 date_cloture = CASE WHEN ?2 = 'CLOTURE' THEN COALESCE(date_cloture, ?3) END,
-                 id_utilisateur_cloture = CASE WHEN ?2 = 'CLOTURE'
-                                               THEN COALESCE(id_utilisateur_cloture, ?4) END,
-                 date_modification = ?3, id_utilisateur_modification = ?4
-              WHERE code_qualite = ?1",
+                 statut = $2,
+                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, $3) END,
+                 id_utilisateur_cloture = CASE WHEN $2 = 'CLOTURE'
+                                               THEN COALESCE(id_utilisateur_cloture, $4) END,
+                 date_modification = $3, id_utilisateur_modification = $4
+              WHERE code_qualite = $1",
         )
         .bind(code)
         .bind(&statut_cible)
@@ -388,7 +393,7 @@ pub async fn enregistrer_qualite(
     }
 
     let poids: f64 =
-        sqlx::query_scalar("SELECT poids_commercial_m2 FROM qualite WHERE code_qualite = ?1")
+        sqlx::query_scalar("SELECT poids_commercial_m2 FROM qualite WHERE code_qualite = $1")
             .bind(code)
             .fetch_one(&mut *tx)
             .await?;
@@ -431,12 +436,12 @@ pub async fn composition_qualite(
                         COALESCE(r.cmup_mad, ROUND(r.prix_catalogue_kg * COALESCE((
                             SELECT t.taux FROM taux_change t
                              WHERE t.code_devise = r.code_devise_catalogue
-                               AND date('now') >= t.date_debut
-                               AND (t.date_fin IS NULL OR date('now') <= t.date_fin)
+                               AND to_char(current_date, 'YYYY-MM-DD') >= t.date_debut
+                               AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') <= t.date_fin)
                              ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_kg_mad,
                         CASE WHEN r.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END AS source_prix
                    FROM reference r) px ON px.code_reference = rc.code_reference
-          WHERE rc.code_qualite = ?1
+          WHERE rc.code_qualite = $1
           ORDER BY rc.ligne_numero",
     )
     .bind(&code)
@@ -466,8 +471,8 @@ pub async fn supprimer_qualite(
     user.poser_contexte(&mut tx).await?;
 
     let plans: i64 = sqlx::query_scalar(
-        "SELECT (SELECT COUNT(*) FROM ligne_plan_production WHERE code_qualite = ?1)
-              + (SELECT COUNT(*) FROM plan_qualite          WHERE code_qualite = ?1)",
+        "SELECT (SELECT COUNT(*) FROM ligne_plan_production WHERE code_qualite = $1)
+              + (SELECT COUNT(*) FROM plan_qualite          WHERE code_qualite = $1)",
     )
     .bind(&code)
     .fetch_one(&mut *tx)
@@ -476,15 +481,15 @@ pub async fn supprimer_qualite(
     if plans == 0 {
         // ON DELETE CASCADE couvre ligne_qualite et recette ; le DELETE explicite
         // sur la saisonnalite reste necessaire, elle n'est rattachee qu'au plan.
-        sqlx::query("DELETE FROM ligne_qualite WHERE code_qualite = ?1")
+        sqlx::query("DELETE FROM ligne_qualite WHERE code_qualite = $1")
             .bind(&code)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM recette WHERE code_qualite = ?1")
+        sqlx::query("DELETE FROM recette WHERE code_qualite = $1")
             .bind(&code)
             .execute(&mut *tx)
             .await?;
-        let res = sqlx::query("DELETE FROM qualite WHERE code_qualite = ?1")
+        let res = sqlx::query("DELETE FROM qualite WHERE code_qualite = $1")
             .bind(&code)
             .execute(&mut *tx)
             .await?;
@@ -496,10 +501,10 @@ pub async fn supprimer_qualite(
     }
 
     let res = sqlx::query(
-        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = ?2,
-                            id_utilisateur_cloture = ?3, date_modification = ?2,
-                            id_utilisateur_modification = ?3
-          WHERE code_qualite = ?1 AND statut <> 'CLOTURE'",
+        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = $2,
+                            id_utilisateur_cloture = $3, date_modification = $2,
+                            id_utilisateur_modification = $3
+          WHERE code_qualite = $1 AND statut <> 'CLOTURE'",
     )
     .bind(&code)
     .bind(maintenant())
@@ -546,14 +551,14 @@ pub async fn creer_qualite(
               marge_securite_pct, couv_min_mois, taux_perte_pct,
               seuil_alerte_jours, seuil_critique_jours, stock_securite_jours,
               id_utilisateur_creation)
-         SELECT ?1, ?2, ?3,
+         SELECT $1, $2, $3,
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte'),
-                (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
-                (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilCritique'),
-                (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SecuriteA'),
-                ?4",
+                (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
+                (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
+                (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SecuriteA'),
+                $4",
     )
     .bind(q.code_qualite.trim())
     .bind(q.nom.trim())
@@ -601,7 +606,7 @@ pub async fn modifier_qualite(
     user.poser_contexte(&mut tx).await?;
 
     let sql = format!(
-        "UPDATE qualite SET {} WHERE code_qualite = ?1",
+        "UPDATE qualite SET {} WHERE code_qualite = $1",
         set.join(", ")
     );
     let mut q = sqlx::query(&sql).bind(&code);
@@ -631,7 +636,7 @@ pub async fn cloturer_qualite(
     let plans: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM ligne_plan_production lpp
            JOIN plan_production pp ON pp.id_plan = lpp.id_plan
-          WHERE lpp.code_qualite = ?1 AND pp.statut = 'VALIDE' AND lpp.m2_prevus > 0",
+          WHERE lpp.code_qualite = $1 AND pp.statut = 'VALIDE' AND lpp.m2_prevus > 0",
     )
     .bind(&code)
     .fetch_one(&mut *tx)
@@ -643,8 +648,8 @@ pub async fn cloturer_qualite(
     }
 
     let res = sqlx::query(
-        "UPDATE qualite SET actif = 0, date_cloture = ?2, id_utilisateur_cloture = ?3
-          WHERE code_qualite = ?1 AND actif = 1",
+        "UPDATE qualite SET actif = 0, date_cloture = $2, id_utilisateur_cloture = $3
+          WHERE code_qualite = $1 AND actif = 1",
     )
     .bind(&code)
     .bind(maintenant())
@@ -673,7 +678,7 @@ pub async fn lister_densites(
         "SELECT lq.*, rb.libelle AS role_libelle
            FROM ligne_qualite lq
            JOIN role_bom rb ON rb.code_role = lq.code_role
-          WHERE lq.code_qualite = ?1
+          WHERE lq.code_qualite = $1
           ORDER BY rb.ordre_affichage",
     )
     .bind(&code)
@@ -714,7 +719,7 @@ pub async fn definir_densite(
     sqlx::query(
         "INSERT INTO ligne_qualite
              (code_qualite, code_role, densite, unite_densite, entre_poids_commercial)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (code_qualite, code_role) DO UPDATE SET
              densite = excluded.densite,
              unite_densite = excluded.unite_densite,
@@ -749,7 +754,7 @@ pub async fn supprimer_densite(
     // incalculable sur cette qualite.
     let utilisee: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM recette r
-          WHERE r.code_qualite = ?1 AND r.code_role = ?2 AND r.actif = 1",
+          WHERE r.code_qualite = $1 AND r.code_role = $2 AND r.actif = 1",
     )
     .bind(&code)
     .bind(&role)
@@ -761,7 +766,7 @@ pub async fn supprimer_densite(
         )));
     }
 
-    let res = sqlx::query("DELETE FROM ligne_qualite WHERE code_qualite = ?1 AND code_role = ?2")
+    let res = sqlx::query("DELETE FROM ligne_qualite WHERE code_qualite = $1 AND code_role = $2")
         .bind(&code)
         .bind(&role)
         .execute(&mut *tx)
@@ -800,10 +805,10 @@ pub async fn lister_recettes(
            FROM v_recette_calculee rc
            JOIN reference    ref  ON ref.code_reference  = rc.code_reference
            JOIN fournisseur  four ON four.code_fournisseur = ref.code_fournisseur
-          WHERE (?1 IS NULL OR rc.code_qualite   = ?1)
-            AND (?2 IS NULL OR rc.code_reference = ?2)
-            AND (?3 IS NULL OR rc.code_role      = ?3)
-            AND (?4 IS NULL OR rc.statut_qualite = ?4)
+          WHERE ($1 IS NULL OR rc.code_qualite   = $1)
+            AND ($2 IS NULL OR rc.code_reference = $2)
+            AND ($3 IS NULL OR rc.code_role      = $3)
+            AND ($4 IS NULL OR rc.statut_qualite = $4)
           ORDER BY rc.code_qualite, rc.ligne_numero",
     )
     .bind(f.get("code_qualite"))
@@ -880,7 +885,7 @@ pub async fn creer_plan(
     user.poser_contexte(&mut tx).await?;
 
     let version: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(numero_version), 0) + 1 FROM plan_production WHERE annee = ?1",
+        "SELECT COALESCE(MAX(numero_version), 0) + 1 FROM plan_production WHERE annee = $1",
     )
     .bind(p.annee)
     .fetch_one(&mut *tx)
@@ -895,16 +900,16 @@ pub async fn creer_plan(
               seuil_alerte_jours, seuil_critique_jours,
               seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
               id_utilisateur_creation)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+         SELECT $1, $2, $3, $4, $5, $6, $7,
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte'),
-                (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
-                (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilCritique'),
+                (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
+                (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier1'),
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier2'),
                 (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier3'),
-                ?8",
+                $8",
     )
     .bind(&id)
     .bind(p.annee)
@@ -934,6 +939,8 @@ pub struct QualitePlan {
 #[derive(Debug, Deserialize)]
 pub struct CoefSaison {
     pub code_qualite: String,
+    /// Mois calendaire, 1 a 12. `u32` refuse un mois negatif des la
+    /// desserialisation, avant toute validation applicative.
     pub mois: u32,
     pub coefficient: f64,
 }
@@ -970,14 +977,14 @@ pub async fn qualites_disponibles(
                 pq.id_plan AS deja_dans_plan
            FROM qualite q
            LEFT JOIN plan_qualite pq ON pq.code_qualite = q.code_qualite
-                                    AND pq.id_plan = ?1
+                                    AND pq.id_plan = $1
           WHERE q.statut = 'ACTIF'
             AND NOT EXISTS (
                 SELECT 1 FROM plan_qualite px
                   JOIN plan_production pp ON pp.id_plan = px.id_plan
                  WHERE px.code_qualite = q.code_qualite
                    AND pp.statut <> 'CLOTURE'
-                   AND (?1 IS NULL OR px.id_plan <> ?1))
+                   AND ($1 IS NULL OR px.id_plan <> $1))
           ORDER BY q.code_qualite",
     )
     .bind(f.get("id_plan"))
@@ -1064,7 +1071,7 @@ pub async fn enregistrer_plan(
     // n'avancerait a rien.
     if let Some(id) = d.id_plan.as_deref().filter(|s| !s.is_empty()) {
         let statut: String =
-            sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = ?1")
+            sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
                 .bind(id)
                 .fetch_optional(&mut *tx)
                 .await?
@@ -1089,7 +1096,7 @@ pub async fn enregistrer_plan(
     let mut bases = Vec::with_capacity(d.qualites.len());
     for q in &d.qualites {
         let connue: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM qualite WHERE code_qualite = ?1")
+            sqlx::query_scalar("SELECT COUNT(*) FROM qualite WHERE code_qualite = $1")
                 .bind(&q.code_qualite)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -1129,11 +1136,11 @@ pub async fn enregistrer_plan(
         Some(id) => {
             sqlx::query(
                 "UPDATE plan_production SET
-                     libelle = ?2, scenario_nom = ?3, annee = ?4,
-                     date_debut = ?5, date_fin = ?6, mois_horizon = ?7,
-                     croissance_annuelle_pct = ?8,
-                     date_modification = ?9, id_utilisateur_modification = ?10
-                  WHERE id_plan = ?1",
+                     libelle = $2, scenario_nom = $3, annee = $4,
+                     date_debut = $5, date_fin = $6, mois_horizon = $7,
+                     croissance_annuelle_pct = $8,
+                     date_modification = $9, id_utilisateur_modification = $10
+                  WHERE id_plan = $1",
             )
             .bind(id)
             .bind(d.libelle.trim())
@@ -1151,7 +1158,7 @@ pub async fn enregistrer_plan(
         }
         None => {
             let version: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(MAX(numero_version), 0) + 1 FROM plan_production WHERE annee = ?1",
+                "SELECT COALESCE(MAX(numero_version), 0) + 1 FROM plan_production WHERE annee = $1",
             )
             .bind(annee)
             .fetch_one(&mut *tx)
@@ -1167,16 +1174,16 @@ pub async fn enregistrer_plan(
                       seuil_alerte_jours, seuil_critique_jours,
                       seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
                       id_utilisateur_creation)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
                         (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
                         (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
                         (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte'),
-                        (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
-                        (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilCritique'),
+                        (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
+                        (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
                         (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier1'),
                         (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier2'),
                         (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier3'),
-                        ?10",
+                        $10",
             )
             .bind(&id)
             .bind(annee)
@@ -1197,7 +1204,7 @@ pub async fn enregistrer_plan(
     // --- Recettes retenues ---------------------------------------------------
     // Table refaite a neuf : les triggers trg_plan_qualite_* arbitrent la
     // validite (qualite ACTIVE, pas d'autre plan actif).
-    sqlx::query("DELETE FROM plan_qualite WHERE id_plan = ?1")
+    sqlx::query("DELETE FROM plan_qualite WHERE id_plan = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -1205,7 +1212,7 @@ pub async fn enregistrer_plan(
     for b in &bases {
         sqlx::query(
             "INSERT INTO plan_qualite (id_plan, code_qualite, m2_base_mensuel, date_figee)
-             VALUES (?1, ?2, ?3, ?4)",
+             VALUES ($1, $2, $3, $4)",
         )
         .bind(&id)
         .bind(&b.code_qualite)
@@ -1216,7 +1223,7 @@ pub async fn enregistrer_plan(
     }
 
     // --- Saisonnalite --------------------------------------------------------
-    sqlx::query("DELETE FROM plan_saisonnalite WHERE id_plan = ?1")
+    sqlx::query("DELETE FROM plan_saisonnalite WHERE id_plan = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -1233,12 +1240,14 @@ pub async fn enregistrer_plan(
         }
         sqlx::query(
             "INSERT INTO plan_saisonnalite (id_plan, code_qualite, mois, coefficient)
-             VALUES (?1, ?2, ?3, ?4)
+             VALUES ($1, $2, $3, $4)
              ON CONFLICT (id_plan, code_qualite, mois) DO UPDATE SET coefficient = excluded.coefficient",
         )
         .bind(&id)
         .bind(&c.code_qualite)
-        .bind(c.mois)
+        // PostgreSQL n'a pas d'entier non signe : la conversion se fait
+        // ici, a la frontiere, et non dans le type metier.
+        .bind(c.mois as i32)
         .bind(c.coefficient)
         .execute(&mut *tx)
         .await?;
@@ -1250,7 +1259,7 @@ pub async fn enregistrer_plan(
         coefs.get(&(q.to_string(), mois)).copied()
     });
 
-    sqlx::query("DELETE FROM ligne_plan_production WHERE id_plan = ?1")
+    sqlx::query("DELETE FROM ligne_plan_production WHERE id_plan = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -1260,10 +1269,12 @@ pub async fn enregistrer_plan(
             "INSERT INTO ligne_plan_production
                  (id_plan, mois, rang_mois, annee_mois, code_qualite,
                   m2_prevus, m2_base_mensuel, saisonnalite, facteur_croissance)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(&id)
-        .bind(c.mois)
+        // PostgreSQL n'a pas d'entier non signe : la conversion se fait
+        // ici, a la frontiere, et non dans le type metier.
+        .bind(c.mois as i32)
         .bind(c.rang)
         .bind(&c.annee_mois)
         .bind(&c.code_qualite)
@@ -1276,7 +1287,7 @@ pub async fn enregistrer_plan(
     }
 
     let total: f64 = cases.iter().map(|c| c.m2_prevus).sum();
-    sqlx::query("UPDATE plan_production SET m2_total_annuel = ?2 WHERE id_plan = ?1")
+    sqlx::query("UPDATE plan_production SET m2_total_annuel = $2 WHERE id_plan = $1")
         .bind(&id)
         .bind(total)
         .execute(&mut *tx)
@@ -1318,7 +1329,7 @@ pub async fn recalculer_plan(
 
     let (statut, date_debut, horizon, croissance): (String, String, i64, f64) = sqlx::query_as(
         "SELECT statut, date_debut, mois_horizon, croissance_annuelle_pct
-           FROM plan_production WHERE id_plan = ?1",
+           FROM plan_production WHERE id_plan = $1",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -1336,7 +1347,7 @@ pub async fn recalculer_plan(
 
     let bases: Vec<BaseQualite> = sqlx::query_as::<_, (String, f64)>(
         "SELECT code_qualite, m2_base_mensuel FROM plan_qualite
-          WHERE id_plan = ?1 ORDER BY code_qualite",
+          WHERE id_plan = $1 ORDER BY code_qualite",
     )
     .bind(&id)
     .fetch_all(&mut *tx)
@@ -1353,7 +1364,7 @@ pub async fn recalculer_plan(
 
     let coefs: std::collections::HashMap<(String, u32), f64> =
         sqlx::query_as::<_, (String, i64, f64)>(
-            "SELECT code_qualite, mois, coefficient FROM plan_saisonnalite WHERE id_plan = ?1",
+            "SELECT code_qualite, mois, coefficient FROM plan_saisonnalite WHERE id_plan = $1",
         )
         .bind(&id)
         .fetch_all(&mut *tx)
@@ -1366,7 +1377,7 @@ pub async fn recalculer_plan(
         coefs.get(&(q.to_string(), mois)).copied()
     });
 
-    sqlx::query("DELETE FROM ligne_plan_production WHERE id_plan = ?1")
+    sqlx::query("DELETE FROM ligne_plan_production WHERE id_plan = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -1376,10 +1387,12 @@ pub async fn recalculer_plan(
             "INSERT INTO ligne_plan_production
                  (id_plan, mois, rang_mois, annee_mois, code_qualite,
                   m2_prevus, m2_base_mensuel, saisonnalite, facteur_croissance)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(&id)
-        .bind(c.mois)
+        // PostgreSQL n'a pas d'entier non signe : la conversion se fait
+        // ici, a la frontiere, et non dans le type metier.
+        .bind(c.mois as i32)
         .bind(c.rang)
         .bind(&c.annee_mois)
         .bind(&c.code_qualite)
@@ -1393,9 +1406,9 @@ pub async fn recalculer_plan(
 
     let total: f64 = cases.iter().map(|c| c.m2_prevus).sum();
     sqlx::query(
-        "UPDATE plan_production SET m2_total_annuel = ?2, date_modification = ?3,
-                                    id_utilisateur_modification = ?4
-          WHERE id_plan = ?1",
+        "UPDATE plan_production SET m2_total_annuel = $2, date_modification = $3,
+                                    id_utilisateur_modification = $4
+          WHERE id_plan = $1",
     )
     .bind(&id)
     .bind(total)
@@ -1425,7 +1438,7 @@ pub async fn cloturer_plan(
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = ?1")
+        sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1436,10 +1449,10 @@ pub async fn cloturer_plan(
 
     // Le trigger trg_transition_plan verifie que la transition est declaree.
     sqlx::query(
-        "UPDATE plan_production SET statut = 'CLOTURE', date_cloture = ?2,
-                                    id_utilisateur_cloture = ?3,
-                                    date_modification = ?2, id_utilisateur_modification = ?3
-          WHERE id_plan = ?1",
+        "UPDATE plan_production SET statut = 'CLOTURE', date_cloture = $2,
+                                    id_utilisateur_cloture = $3,
+                                    date_modification = $2, id_utilisateur_modification = $3
+          WHERE id_plan = $1",
     )
     .bind(&id)
     .bind(&maintenant())
@@ -1448,7 +1461,7 @@ pub async fn cloturer_plan(
     .await?;
 
     let liberees: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM plan_qualite WHERE id_plan = ?1",
+        "SELECT COUNT(*) FROM plan_qualite WHERE id_plan = $1",
     )
     .bind(&id)
     .fetch_one(&mut *tx)
@@ -1480,7 +1493,7 @@ pub async fn entete_plan(
                   WHERE r.code_qualite = pq.code_qualite AND r.actif = 1) AS nb_composition
            FROM plan_qualite pq
            JOIN qualite q ON q.code_qualite = pq.code_qualite
-          WHERE pq.id_plan = ?1
+          WHERE pq.id_plan = $1
           ORDER BY pq.code_qualite",
     )
     .bind(&id)
@@ -1489,7 +1502,7 @@ pub async fn entete_plan(
 
     let saisons = sqlx::query(
         "SELECT code_qualite, mois, coefficient FROM plan_saisonnalite
-          WHERE id_plan = ?1 ORDER BY code_qualite, mois",
+          WHERE id_plan = $1 ORDER BY code_qualite, mois",
     )
     .bind(&id)
     .fetch_all(&state.db)
@@ -1511,7 +1524,7 @@ pub async fn lignes_plan(
         "SELECT l.*, q.nom AS qualite_nom
            FROM ligne_plan_production l
            JOIN qualite q ON q.code_qualite = l.code_qualite
-          WHERE l.id_plan = ?1
+          WHERE l.id_plan = $1
           ORDER BY l.rang_mois, l.code_qualite",
     )
     .bind(&id)
@@ -1541,11 +1554,11 @@ pub async fn changer_statut_plan(
         // R08 : le trigger refuse la mise en service si une qualite planifiee n'a
         // pas sa recette figee. Le message renvoye guide vers /figer-recettes.
         sqlx::query(
-            "UPDATE plan_production SET statut = 'EN_COURS', date_validation = ?2,
-                                        id_utilisateur_validation = ?3,
-                                        date_modification = ?2,
-                                        id_utilisateur_modification = ?3
-              WHERE id_plan = ?1",
+            "UPDATE plan_production SET statut = 'EN_COURS', date_validation = $2,
+                                        id_utilisateur_validation = $3,
+                                        date_modification = $2,
+                                        id_utilisateur_modification = $3
+              WHERE id_plan = $1",
         )
         .bind(&id)
         .bind(maintenant())
@@ -1555,12 +1568,12 @@ pub async fn changer_statut_plan(
     } else {
         sqlx::query(
             "UPDATE plan_production SET
-                 statut = ?2,
-                 date_cloture = CASE WHEN ?2 = 'CLOTURE' THEN COALESCE(date_cloture, ?3) END,
-                 id_utilisateur_cloture = CASE WHEN ?2 = 'CLOTURE'
-                                               THEN COALESCE(id_utilisateur_cloture, ?4) END,
-                 date_modification = ?3, id_utilisateur_modification = ?4
-              WHERE id_plan = ?1",
+                 statut = $2,
+                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, $3) END,
+                 id_utilisateur_cloture = CASE WHEN $2 = 'CLOTURE'
+                                               THEN COALESCE(id_utilisateur_cloture, $4) END,
+                 date_modification = $3, id_utilisateur_modification = $4
+              WHERE id_plan = $1",
         )
         .bind(&id)
         .bind(&t.statut)
@@ -1584,7 +1597,7 @@ pub async fn supprimer_plan(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let statut: String = sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = ?1")
+    let statut: String = sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
         .bind(&id)
         .fetch_optional(&mut *tx)
         .await?
@@ -1598,7 +1611,7 @@ pub async fn supprimer_plan(
         )));
     }
 
-    sqlx::query("DELETE FROM plan_production WHERE id_plan = ?1")
+    sqlx::query("DELETE FROM plan_production WHERE id_plan = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;

@@ -97,7 +97,7 @@ pub async fn generer(
               unite_saisie, quantite_suggeree_unite, code_fournisseur,
               prix_estime_mad, source_prix, date_besoin_prevue, urgence,
               risque_identifie, action_recommandee, statut)
-         SELECT ?1, ?2, pa.code_reference, pa.qte_a_commander_kg,
+         SELECT $1, $2, pa.code_reference, pa.qte_a_commander_kg,
                 pa.unite_catalogue, pa.qte_a_commander_unite, pa.code_fournisseur,
                 pa.prix_estime_mad, pa.source_prix, pa.date_besoin_prevue, pa.tier,
                 pa.risque_sourcing,
@@ -256,13 +256,13 @@ pub async fn convertir(
         // Le prix de la proposition est en MAD ; le bon s'exprime dans la devise
         // du fournisseur, au taux engage sur ce bon.
         let taux: f64 =
-            sqlx::query_scalar("SELECT taux_change_engage FROM bon_commande WHERE id_bc = ?1")
+            sqlx::query_scalar("SELECT taux_change_engage FROM bon_commande WHERE id_bc = $1")
                 .bind(&id_bc)
                 .fetch_one(&mut *tx)
                 .await?;
 
         let numero: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_bc WHERE id_bc = ?1",
+            "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_bc WHERE id_bc = $1",
         )
         .bind(&id_bc)
         .fetch_one(&mut *tx)
@@ -276,16 +276,16 @@ pub async fn convertir(
                   facteur_kg, quantite_commandee_unite, quantite_commandee_kg,
                   prix_unitaire_devise, code_devise, date_livraison_prevue,
                   id_proposition, besoin_kg_origine)
-             SELECT ?1, ?2, pa.code_reference, r.designation, 'kg',
+             SELECT $1, $2, pa.code_reference, r.designation, 'kg',
                     1.0, pa.quantite_suggeree_kg, pa.quantite_suggeree_kg,
-                    ROUND(pa.prix_estime_mad / ?3, 6), bc.code_devise, pa.date_besoin_prevue,
+                    ROUND(pa.prix_estime_mad / $3, 6), bc.code_devise, pa.date_besoin_prevue,
                     pa.id_proposition,
                     COALESCE((SELECT b.besoin_12m_kg FROM v_besoin_12m b
                                WHERE b.code_reference = pa.code_reference), 0)
                FROM plan_achat pa
                JOIN reference r  ON r.code_reference = pa.code_reference
-               JOIN bon_commande bc ON bc.id_bc = ?1
-              WHERE pa.id_proposition = ?4",
+               JOIN bon_commande bc ON bc.id_bc = $1
+              WHERE pa.id_proposition = $4",
         )
         .bind(&id_bc)
         .bind(numero)
@@ -300,8 +300,8 @@ pub async fn convertir(
         // « protegee du recalcul » — un etat qui ne veut rien dire, et que les
         // ecrans compteraient parmi les arbitrages en cours.
         sqlx::query(
-            "UPDATE plan_achat SET statut = 'COMMANDE', id_bc_genere = ?2, figee = 0
-              WHERE id_proposition = ?1",
+            "UPDATE plan_achat SET statut = 'COMMANDE', id_bc_genere = $2, figee = 0
+              WHERE id_proposition = $1",
         )
         .bind(id_prop)
         .bind(&id_bc)
@@ -320,7 +320,7 @@ pub async fn convertir(
             "SELECT bc.numero_bc,
                     (SELECT COUNT(*) FROM ligne_bc l WHERE l.id_bc = bc.id_bc),
                     bc.montant_total_mad
-               FROM bon_commande bc WHERE bc.id_bc = ?1",
+               FROM bon_commande bc WHERE bc.id_bc = $1",
         )
         .bind(&id_bc)
         .fetch_one(&mut *tx)
@@ -340,7 +340,7 @@ pub async fn convertir(
 
 /// Ouvre un bon de commande en brouillon pour un fournisseur.
 async fn ouvrir_bon(
-    tx: &mut sqlx::SqliteConnection,
+    tx: &mut sqlx::PgConnection,
     user: &Utilisateur,
     fournisseur: &str,
     date_besoin: Option<&str>,
@@ -349,7 +349,7 @@ async fn ouvrir_bon(
 
     let (devise, conditions): (String, Option<String>) = sqlx::query_as(
         "SELECT COALESCE(code_devise, 'MAD'), conditions_paiement
-           FROM fournisseur WHERE code_fournisseur = ?1",
+           FROM fournisseur WHERE code_fournisseur = $1",
     )
     .bind(fournisseur)
     .fetch_optional(&mut *tx)
@@ -358,8 +358,8 @@ async fn ouvrir_bon(
 
     let taux: f64 = sqlx::query_scalar(
         "SELECT taux FROM taux_change
-          WHERE code_devise = ?1 AND date('now') >= date(date_debut)
-            AND (date_fin IS NULL OR date('now') < date(date_fin))
+          WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
+            AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
           ORDER BY date_debut DESC LIMIT 1",
     )
     .bind(&devise)
@@ -370,8 +370,8 @@ async fn ouvrir_bon(
     let annee = chrono::Utc::now().format("%Y").to_string();
     let prefixe = format!("BC-{annee}-");
     let suivant: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(CAST(substr(numero_bc, length(?1) + 1) AS INTEGER)), 0) + 1
-           FROM bon_commande WHERE numero_bc LIKE ?2",
+        "SELECT COALESCE(MAX(CAST(substr(numero_bc, length($1) + 1) AS bigint)), 0) + 1
+           FROM bon_commande WHERE numero_bc LIKE $2",
     )
     .bind(&prefixe)
     .bind(format!("{prefixe}%"))
@@ -386,7 +386,7 @@ async fn ouvrir_bon(
               date_taux_engage, date_livraison_prevue, conditions_paiement,
               motif_creation, montant_total_devise, montant_total_mad,
               id_utilisateur_creation)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'MRP',0,0,?9)",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'MRP',0,0,$9)",
     )
     .bind(&id)
     .bind(&numero)
@@ -404,15 +404,15 @@ async fn ouvrir_bon(
 }
 
 /// Totaux de l'entete a partir des lignes, au taux engage sur le bon.
-async fn recalculer_totaux(tx: &mut sqlx::SqliteConnection, id: &str) -> AppResult<()> {
+async fn recalculer_totaux(tx: &mut sqlx::PgConnection, id: &str) -> AppResult<()> {
     sqlx::query(
         "UPDATE bon_commande
             SET montant_total_devise = (SELECT COALESCE(SUM(total_ligne_devise), 0)
-                                          FROM ligne_bc WHERE id_bc = ?1),
+                                          FROM ligne_bc WHERE id_bc = $1),
                 montant_total_mad    = ROUND((SELECT COALESCE(SUM(total_ligne_devise), 0)
-                                                FROM ligne_bc WHERE id_bc = ?1)
+                                                FROM ligne_bc WHERE id_bc = $1)
                                              * taux_change_engage, 2)
-          WHERE id_bc = ?1",
+          WHERE id_bc = $1",
     )
     .bind(id)
     .execute(&mut *tx)

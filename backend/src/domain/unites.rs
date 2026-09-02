@@ -107,7 +107,7 @@ pub async fn charger(db: &Db, code_reference: &str) -> AppResult<FacteursReferen
     sqlx::query_as(
         "SELECT code_reference, unite_catalogue, poids_bobine_kg,
                 bobines_par_palette, densite_kg_ml
-           FROM reference WHERE code_reference = ?1",
+           FROM reference WHERE code_reference = $1",
     )
     .bind(code_reference)
     .fetch_optional(db)

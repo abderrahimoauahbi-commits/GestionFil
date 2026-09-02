@@ -27,8 +27,8 @@
 CREATE TABLE plan_production (
     id_plan             text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
-    annee               integer NOT NULL CHECK (annee BETWEEN 2000 AND 2200),
-    numero_version      integer NOT NULL DEFAULT 1 CHECK (numero_version > 0),
+    annee               bigint NOT NULL CHECK (annee BETWEEN 2000 AND 2200),
+    numero_version      bigint NOT NULL DEFAULT 1 CHECK (numero_version > 0),
     libelle             text    NOT NULL,
     scenario_nom        text,
     -- Periode GLISSANTE : `date_debut` est le premier jour du mois M0 choisi
@@ -40,7 +40,7 @@ CREATE TABLE plan_production (
     -- longue, rien d'autre. Ce qui distingue deux mois n'est pas leur mois
     -- calendaire mais leur RANG dans la periode — mai de l'an 1 et mai de l'an 2
     -- sont deux cases differentes.
-    mois_horizon        integer NOT NULL DEFAULT 12 CHECK (mois_horizon BETWEEN 1 AND 60),
+    mois_horizon        bigint NOT NULL DEFAULT 12 CHECK (mois_horizon BETWEEN 1 AND 60),
     -- Croissance ANNUELLE, composee : facteur = (1 + taux)^(mois ecoules / 12).
     -- Une croissance lineaire ferait un saut au 1er janvier et sous-estimerait
     -- les annees suivantes ; la composition suit le temps reellement ecoule.
@@ -50,15 +50,15 @@ CREATE TABLE plan_production (
 
     -- Un plan cloture ne nourrit plus aucun besoin : le drapeau derive du statut
     -- pour qu'ils ne puissent pas se contredire.
-    actif               integer GENERATED ALWAYS AS
+    actif               bigint GENERATED ALWAYS AS
                                 (CASE WHEN statut = 'CLOTURE' THEN 0 ELSE 1 END) STORED,
 
     -- Parametres LOCAUX embarques a la creation (B3 / R09)
     marge_securite_pct  numeric(9,4)    NOT NULL CHECK (marge_securite_pct >= 0),
     couv_min_mois       numeric(12,4)    NOT NULL CHECK (couv_min_mois >= 0),
     taux_perte_pct      numeric(9,4)    NOT NULL CHECK (taux_perte_pct >= 0),
-    seuil_alerte_jours  integer NOT NULL CHECK (seuil_alerte_jours > 0),
-    seuil_critique_jours integer NOT NULL CHECK (seuil_critique_jours > 0),
+    seuil_alerte_jours  bigint NOT NULL CHECK (seuil_alerte_jours > 0),
+    seuil_critique_jours bigint NOT NULL CHECK (seuil_critique_jours > 0),
     seuil_tier1_mad     numeric(18,2)    NOT NULL CHECK (seuil_tier1_mad > 0),
     seuil_tier2_mad     numeric(18,2)    NOT NULL CHECK (seuil_tier2_mad > 0),
     seuil_tier3_mad     numeric(18,2)    NOT NULL CHECK (seuil_tier3_mad > 0),
@@ -133,7 +133,7 @@ CREATE INDEX ix_plan_qualite_qualite ON plan_qualite(code_qualite);
 CREATE TABLE plan_saisonnalite (
     id_plan             text    NOT NULL REFERENCES plan_production(id_plan) ON DELETE CASCADE,
     code_qualite        text    NOT NULL REFERENCES qualite(code_qualite),
-    mois                integer NOT NULL CHECK (mois BETWEEN 1 AND 12),
+    mois                bigint NOT NULL CHECK (mois BETWEEN 1 AND 12),
     coefficient         numeric(9,4)    NOT NULL CHECK (coefficient >= 0),
     PRIMARY KEY (id_plan, code_qualite, mois)
 );
@@ -149,8 +149,8 @@ CREATE TABLE ligne_plan_production (
     -- saisonnalite. `rang_mois` est la position dans la periode, et c'est LUI
     -- qui identifie la case — sans quoi un plan de trois ans ecraserait mai de
     -- l'an 1 avec mai de l'an 2.
-    mois                integer NOT NULL CHECK (mois BETWEEN 1 AND 12),
-    rang_mois           integer NOT NULL CHECK (rang_mois >= 0),
+    mois                bigint NOT NULL CHECK (mois BETWEEN 1 AND 12),
+    rang_mois           bigint NOT NULL CHECK (rang_mois >= 0),
     annee_mois          text    NOT NULL,
     code_qualite        text    NOT NULL REFERENCES qualite(code_qualite),
     m2_prevus           numeric(18,4)    NOT NULL CHECK (m2_prevus >= 0),   -- valeur definitive, deja saisonnalisee
@@ -174,8 +174,8 @@ CREATE TABLE besoin_mrp (
     id_besoin           text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     id_plan             text    NOT NULL REFERENCES plan_production(id_plan) ON DELETE CASCADE,
-    mois                integer NOT NULL CHECK (mois BETWEEN 1 AND 12),
-    rang_mois           integer NOT NULL CHECK (rang_mois >= 0),
+    mois                bigint NOT NULL CHECK (mois BETWEEN 1 AND 12),
+    rang_mois           bigint NOT NULL CHECK (rang_mois >= 0),
     annee_mois          text    NOT NULL,
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     quantite_brute_kg   numeric(18,4)    NOT NULL CHECK (quantite_brute_kg >= 0),
@@ -200,8 +200,8 @@ CREATE TABLE snapshot_mrp (
     date_snapshot       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_plan             text    NOT NULL REFERENCES plan_production(id_plan),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
-    mois                integer NOT NULL CHECK (mois BETWEEN 1 AND 12),
-    rang_mois           integer NOT NULL DEFAULT 0 CHECK (rang_mois >= 0),
+    mois                bigint NOT NULL CHECK (mois BETWEEN 1 AND 12),
+    rang_mois           bigint NOT NULL DEFAULT 0 CHECK (rang_mois >= 0),
     annee_mois          text,
     quantite_besoin_kg  numeric(18,4)    NOT NULL,
     stock_projete_kg    numeric(18,4),

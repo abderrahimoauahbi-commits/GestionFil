@@ -36,7 +36,7 @@ pub async fn figer_recettes(db: &Db, user: &Utilisateur, id_plan: &str) -> AppRe
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let statut: String = sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = ?1")
+    let statut: String = sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
         .bind(id_plan)
         .fetch_optional(&mut *tx)
         .await?
@@ -52,9 +52,9 @@ pub async fn figer_recettes(db: &Db, user: &Utilisateur, id_plan: &str) -> AppRe
     let manquantes: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT lpp.code_qualite
            FROM ligne_plan_production lpp
-          WHERE lpp.id_plan = ?1 AND lpp.m2_prevus > 0
+          WHERE lpp.id_plan = $1 AND lpp.m2_prevus > 0
             AND NOT EXISTS (SELECT 1 FROM plan_qualite pq
-                             WHERE pq.id_plan = ?1 AND pq.code_qualite = lpp.code_qualite)",
+                             WHERE pq.id_plan = $1 AND pq.code_qualite = lpp.code_qualite)",
     )
     .bind(id_plan)
     .fetch_all(&mut *tx)
@@ -72,7 +72,7 @@ pub async fn figer_recettes(db: &Db, user: &Utilisateur, id_plan: &str) -> AppRe
         "SELECT pq.code_qualite || ' (' || q.statut || ')'
            FROM plan_qualite pq
            JOIN qualite q ON q.code_qualite = pq.code_qualite
-          WHERE pq.id_plan = ?1 AND q.statut <> 'ACTIF'",
+          WHERE pq.id_plan = $1 AND q.statut <> 'ACTIF'",
     )
     .bind(id_plan)
     .fetch_all(&mut *tx)
@@ -85,7 +85,7 @@ pub async fn figer_recettes(db: &Db, user: &Utilisateur, id_plan: &str) -> AppRe
         )));
     }
 
-    let res = sqlx::query("UPDATE plan_qualite SET date_figee = ?2 WHERE id_plan = ?1")
+    let res = sqlx::query("UPDATE plan_qualite SET date_figee = $2 WHERE id_plan = $1")
         .bind(id_plan)
         .bind(maintenant())
         .execute(&mut *tx)
@@ -101,7 +101,7 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
     user.poser_contexte(&mut tx).await?;
 
     let existe: Option<String> =
-        sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = ?1")
+        sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
             .bind(id_plan)
             .fetch_optional(&mut *tx)
             .await?;
@@ -119,9 +119,9 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
     let sans_recette: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT lpp.code_qualite
            FROM ligne_plan_production lpp
-          WHERE lpp.id_plan = ?1 AND lpp.m2_prevus > 0
+          WHERE lpp.id_plan = $1 AND lpp.m2_prevus > 0
             AND NOT EXISTS (SELECT 1 FROM plan_qualite pq
-                             WHERE pq.id_plan = ?1 AND pq.code_qualite = lpp.code_qualite)",
+                             WHERE pq.id_plan = $1 AND pq.code_qualite = lpp.code_qualite)",
     )
     .bind(id_plan)
     .fetch_all(&mut *tx)
@@ -136,7 +136,7 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
 
     let date_reference = aujourdhui();
 
-    sqlx::query("DELETE FROM besoin_mrp WHERE id_plan = ?1")
+    sqlx::query("DELETE FROM besoin_mrp WHERE id_plan = $1")
         .bind(id_plan)
         .execute(&mut *tx)
         .await?;
@@ -146,9 +146,9 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
              (id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
               taux_perte_applique, quantite_kg, date_calcul, date_reference)
          SELECT id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
-                taux_perte_pct, quantite_kg, ?2, ?3
+                taux_perte_pct, quantite_kg, $2, $3
            FROM v_besoin_mrp_calcule
-          WHERE id_plan = ?1",
+          WHERE id_plan = $1",
     )
     .bind(id_plan)
     .bind(maintenant())
@@ -158,7 +158,7 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
 
     let (refs, total): (i64, Option<f64>) = sqlx::query_as(
         "SELECT COUNT(DISTINCT code_reference), SUM(quantite_kg)
-           FROM besoin_mrp WHERE id_plan = ?1",
+           FROM besoin_mrp WHERE id_plan = $1",
     )
     .bind(id_plan)
     .fetch_one(&mut *tx)
@@ -185,11 +185,11 @@ pub async fn prendre_snapshot(db: &Db, user: &Utilisateur, id_plan: &str) -> App
         "INSERT INTO snapshot_mrp
              (date_snapshot, id_plan, code_reference, mois, rang_mois, annee_mois,
               quantite_besoin_kg, stock_projete_kg, statut_couleur)
-         SELECT ?2, bm.id_plan, bm.code_reference, bm.mois, bm.rang_mois, bm.annee_mois,
+         SELECT $2, bm.id_plan, bm.code_reference, bm.mois, bm.rang_mois, bm.annee_mois,
                 bm.quantite_kg, sp.stock_projete_kg, sp.statut
            FROM besoin_mrp bm
            LEFT JOIN v_stock_projete sp ON sp.code_reference = bm.code_reference
-          WHERE bm.id_plan = ?1",
+          WHERE bm.id_plan = $1",
     )
     .bind(id_plan)
     .bind(&horodatage)

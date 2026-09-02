@@ -34,7 +34,8 @@ impl Filtres {
 
 pub async fn sante(State(state): State<AppState>) -> AppResult<Json<Value>> {
     let tables: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        "SELECT COUNT(*) FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
     )
     .fetch_one(&state.db)
     .await?;
@@ -315,8 +316,8 @@ pub async fn equivalences(
 
     let rows = sqlx::query(
         "SELECT * FROM v_equivalence
-          WHERE (?1 IS NULL OR code_reference     = ?1)
-            AND (?2 IS NULL OR code_groupe_equiv  = ?2)
+          WHERE ($1 IS NULL OR code_reference     = $1)
+            AND ($2 IS NULL OR code_groupe_equiv  = $2)
           ORDER BY code_groupe_equiv, priorite, equivalent_priorite",
     )
     .bind(&reference)
@@ -379,7 +380,7 @@ pub async fn reordonner_groupe(
 
     let membres: Vec<String> = sqlx::query_scalar(
         "SELECT code_reference FROM reference_groupe_equiv
-          WHERE code_groupe_equiv = ?1 AND actif = 1",
+          WHERE code_groupe_equiv = $1 AND actif = 1",
     )
     .bind(&code_groupe)
     .fetch_all(&mut *tx)
@@ -399,7 +400,7 @@ pub async fn reordonner_groupe(
     // priorites finales, qui vont de 1 a n, ne peuvent en croiser aucune.
     let ecart: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(priorite), 0) FROM reference_groupe_equiv
-          WHERE code_groupe_equiv = ?1 AND actif = 1",
+          WHERE code_groupe_equiv = $1 AND actif = 1",
     )
     .bind(&code_groupe)
     .fetch_one(&mut *tx)
@@ -407,8 +408,8 @@ pub async fn reordonner_groupe(
 
     sqlx::query(
         "UPDATE reference_groupe_equiv
-            SET priorite = priorite + ?2, est_preferentielle = 0
-          WHERE code_groupe_equiv = ?1 AND actif = 1",
+            SET priorite = priorite + $2, est_preferentielle = 0
+          WHERE code_groupe_equiv = $1 AND actif = 1",
     )
     .bind(&code_groupe)
     .bind(ecart)
@@ -418,8 +419,8 @@ pub async fn reordonner_groupe(
     for (rang, code) in o.references.iter().enumerate() {
         sqlx::query(
             "UPDATE reference_groupe_equiv
-                SET priorite = ?3, est_preferentielle = ?4
-              WHERE code_groupe_equiv = ?1 AND code_reference = ?2 AND actif = 1",
+                SET priorite = $3, est_preferentielle = $4
+              WHERE code_groupe_equiv = $1 AND code_reference = $2 AND actif = 1",
         )
         .bind(&code_groupe)
         .bind(code)
@@ -463,7 +464,7 @@ pub async fn substituer_proposition(
     let (code_actuel, statut, quantite, origine): (String, String, f64, Option<String>) =
         sqlx::query_as(
             "SELECT code_reference, statut, quantite_suggeree_kg, code_reference_origine
-               FROM plan_achat WHERE id_proposition = ?1",
+               FROM plan_achat WHERE id_proposition = $1",
         )
         .bind(&id)
         .fetch_optional(&mut *tx)
@@ -487,7 +488,7 @@ pub async fn substituer_proposition(
     // quelqu'un les a mis dans le meme groupe par erreur.
     let compat: Option<i64> = sqlx::query_scalar(
         "SELECT interchangeable FROM v_equivalence
-          WHERE code_reference = ?1 AND equivalent_reference = ?2",
+          WHERE code_reference = $1 AND equivalent_reference = $2",
     )
     .bind(&code_actuel)
     .bind(&sub.code_reference_cible)
@@ -515,7 +516,7 @@ pub async fn substituer_proposition(
     // Le fournisseur suit la reference : une proposition porte le fournisseur de
     // ce qu'elle propose d'acheter, sinon elle irait grossir le bon du mauvais.
     let fournisseur_cible: Option<String> =
-        sqlx::query_scalar("SELECT code_fournisseur FROM reference WHERE code_reference = ?1")
+        sqlx::query_scalar("SELECT code_fournisseur FROM reference WHERE code_reference = $1")
             .bind(&sub.code_reference_cible)
             .fetch_optional(&mut *tx)
             .await?
@@ -533,7 +534,7 @@ pub async fn substituer_proposition(
     // FUSIONNE, et la proposition d'origine disparait en IGNORE.
     let existante: Option<(String, f64, i64)> = sqlx::query_as(
         "SELECT id_proposition, quantite_suggeree_kg, figee FROM plan_achat
-          WHERE code_reference = ?1 AND statut IN ('PROPOSE','EN_REVISION','VALIDE')",
+          WHERE code_reference = $1 AND statut IN ('PROPOSE','EN_REVISION','VALIDE')",
     )
     .bind(&sub.code_reference_cible)
     .fetch_optional(&mut *tx)
@@ -558,11 +559,11 @@ pub async fn substituer_proposition(
         let total = arrondi_kg(qte_cible + quantite);
         sqlx::query(
             "UPDATE plan_achat
-                SET quantite_suggeree_kg = ?2,
+                SET quantite_suggeree_kg = $2,
                     statut = 'EN_REVISION',
                     commentaires = TRIM(COALESCE(commentaires || ' | ', '') ||
-                                        'Fusion du besoin de ' || ?3)
-              WHERE id_proposition = ?1",
+                                        'Fusion du besoin de ' || $3)
+              WHERE id_proposition = $1",
         )
         .bind(&id_cible)
         .bind(total)
@@ -574,8 +575,8 @@ pub async fn substituer_proposition(
             "UPDATE plan_achat
                 SET statut = 'IGNORE', figee = 0,
                     commentaires = TRIM(COALESCE(commentaires || ' | ', '') ||
-                                        'Besoin reporte sur ' || ?2 || COALESCE(' : ' || ?3, ''))
-              WHERE id_proposition = ?1",
+                                        'Besoin reporte sur ' || $2 || COALESCE(' : ' || $3, ''))
+              WHERE id_proposition = $1",
         )
         .bind(&id)
         .bind(&sub.code_reference_cible)
@@ -594,12 +595,12 @@ pub async fn substituer_proposition(
     } else {
         sqlx::query(
             "UPDATE plan_achat
-                SET code_reference        = ?2,
-                    code_fournisseur      = ?3,
-                    code_reference_origine = COALESCE(?4, ?5),
-                    motif_substitution    = ?6,
+                SET code_reference        = $2,
+                    code_fournisseur      = $3,
+                    code_reference_origine = COALESCE($4, $5),
+                    motif_substitution    = $6,
                     statut                = 'EN_REVISION'
-              WHERE id_proposition = ?1",
+              WHERE id_proposition = $1",
         )
         .bind(&id)
         .bind(&sub.code_reference_cible)
@@ -648,7 +649,10 @@ pub async fn controle_detail(
 
     let vue = format!("v_ctl_{code}");
     let existe: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='view' AND name = ?1")
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.views
+              WHERE table_schema = 'public' AND table_name = $1",
+        )
             .bind(&vue)
             .fetch_one(&state.db)
             .await?;
@@ -686,9 +690,9 @@ pub async fn stock(
            FROM stock_magasin sm
            JOIN reference r ON r.code_reference = sm.code_reference
            JOIN magasin   m ON m.code_magasin   = sm.code_magasin
-          WHERE (?1 IS NULL OR sm.code_reference = ?1)
+          WHERE ($1 IS NULL OR sm.code_reference = $1)
           ORDER BY sm.code_reference, sm.code_magasin
-          LIMIT ?2",
+          LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
@@ -708,14 +712,14 @@ pub async fn stock_projete(
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let rows = sqlx::query(
         "SELECT * FROM v_stock_projete
-          WHERE (?1 IS NULL OR statut = ?1)
+          WHERE ($1 IS NULL OR statut = $1)
           ORDER BY CASE statut
                      WHEN 'RUPTURE'   THEN 1
                      WHEN 'CRITIQUE'  THEN 2
                      WHEN 'ATTENTION' THEN 3
                      ELSE 4 END,
                    jours_couverture
-          LIMIT ?2",
+          LIMIT $2",
     )
     .bind(&f.statut)
     .bind(f.limite())
@@ -742,9 +746,9 @@ pub async fn lots(
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let rows = sqlx::query(
         "SELECT * FROM v_lot_fefo
-          WHERE (?1 IS NULL OR code_reference = ?1)
+          WHERE ($1 IS NULL OR code_reference = $1)
           ORDER BY code_reference, rang_fefo
-          LIMIT ?2",
+          LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
@@ -999,9 +1003,9 @@ pub async fn frais_approche(
            FROM frais_approche fa
            JOIN reception rc ON rc.id_reception = fa.id_reception
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = rc.code_fournisseur
-          WHERE (?1 IS NULL OR fa.id_reception = ?1)
+          WHERE ($1 IS NULL OR fa.id_reception = $1)
           ORDER BY fa.date_frais DESC
-          LIMIT ?2",
+          LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
@@ -1098,7 +1102,12 @@ pub async fn cockpit_analyse(
                FROM v_stock_projete sp
                JOIN fournisseur f ON f.code_fournisseur = sp.code_fournisseur
               GROUP BY f.nom
-              HAVING budget_annuel_mad > 0
+              -- L'expression est repetee plutot que citee par son alias :
+              -- HAVING s'evalue AVANT la projection, donc avant que l'alias
+              -- existe. SQLite l'admettait, la norme SQL non. `ORDER BY`, lui,
+              -- s'evalue APRES : l'alias y est legitime.
+              HAVING SUM(COALESCE(sp.conso_mensuelle_kg, 0) * 12
+                         * COALESCE(sp.cmup_mad, 0)) > 0
               ORDER BY budget_annuel_mad DESC
               LIMIT 10").await?,
         "abc_statut":   bloc(&state.db,
@@ -1186,10 +1195,14 @@ pub async fn matrice_prix(
            FROM historique_prix hp
            JOIN reference r        ON r.code_reference   = hp.code_reference
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = hp.code_fournisseur
-          WHERE (?1 IS NULL OR hp.code_reference = ?1)
-          GROUP BY hp.code_reference, substr(hp.date_achat, 1, 7)
+          WHERE ($1 IS NULL OR hp.code_reference = $1)
+          -- `r.designation` depend de `code_reference`, deja groupe : la citer
+          -- ne change aucun resultat. SQLite la tolerait hors GROUP BY en
+          -- prenant une ligne au hasard ; PostgreSQL l'exige.
+          GROUP BY hp.code_reference, r.designation, r.code_fournisseur,
+                   fo.nom, substr(hp.date_achat, 1, 7)
           ORDER BY hp.code_reference, annee_mois
-          LIMIT ?2",
+          LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite() * 12)
@@ -1230,9 +1243,9 @@ pub async fn historique_prix(
            LEFT JOIN ligne_reception lr ON lr.id_ligne_reception = hp.id_ligne_reception
            LEFT JOIN reception rec ON rec.id_reception = lr.id_reception
            LEFT JOIN bon_commande bc ON bc.id_bc = rec.id_bc
-          WHERE (?1 IS NULL OR hp.code_reference = ?1)
+          WHERE ($1 IS NULL OR hp.code_reference = $1)
           ORDER BY hp.date_achat DESC, hp.code_reference
-          LIMIT ?2",
+          LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
@@ -1284,7 +1297,7 @@ pub async fn modifier_proposition(
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM plan_achat WHERE id_proposition = ?1")
+        sqlx::query_scalar("SELECT statut FROM plan_achat WHERE id_proposition = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1302,7 +1315,7 @@ pub async fn modifier_proposition(
     // exactement ce qui se passait avant. Le motif se deduit de ce qui a change ;
     // l'acheteur peut le corriger ensuite.
     let deja_figee: i64 =
-        sqlx::query_scalar("SELECT figee FROM plan_achat WHERE id_proposition = ?1")
+        sqlx::query_scalar("SELECT figee FROM plan_achat WHERE id_proposition = $1")
             .bind(&id)
             .fetch_one(&mut *tx)
             .await?;
@@ -1311,27 +1324,27 @@ pub async fn modifier_proposition(
 
     sqlx::query(
         "UPDATE plan_achat
-            SET quantite_suggeree_kg = COALESCE(?2, quantite_suggeree_kg),
+            SET quantite_suggeree_kg = COALESCE($2, quantite_suggeree_kg),
                 quantite_suggeree_unite = CASE
-                    WHEN ?2 IS NULL THEN quantite_suggeree_unite
+                    WHEN $2 IS NULL THEN quantite_suggeree_unite
                     -- La quantite en unite de conditionnement suit la quantite en
                     -- kg : les laisser diverger ferait commander deux nombres
                     -- differents selon la colonne lue.
-                    WHEN unite_saisie = 'kg' OR unite_saisie IS NULL THEN ?2
-                    ELSE ROUND(?2 * quantite_suggeree_unite / quantite_suggeree_kg, 4)
+                    WHEN unite_saisie = 'kg' OR unite_saisie IS NULL THEN $2
+                    ELSE ROUND($2 * quantite_suggeree_unite / quantite_suggeree_kg, 4)
                 END,
-                prix_estime_mad = COALESCE(?3, prix_estime_mad),
-                commentaires    = COALESCE(?4, commentaires),
+                prix_estime_mad = COALESCE($3, prix_estime_mad),
+                commentaires    = COALESCE($4, commentaires),
                 statut          = 'EN_REVISION',
                 -- Ce que le calcul proposait AVANT la retouche, garde une seule
                 -- fois : une seconde modification ne doit pas effacer le chiffre
                 -- d'origine, sinon l'ecart affiche ne se rapporte plus a rien.
                 quantite_mrp_kg = COALESCE(quantite_mrp_kg, quantite_suggeree_kg),
                 figee                   = 1,
-                id_utilisateur_figement = COALESCE(id_utilisateur_figement, ?5),
-                date_figement           = COALESCE(date_figement, ?6),
-                motif_figement          = COALESCE(motif_figement, ?7)
-          WHERE id_proposition = ?1",
+                id_utilisateur_figement = COALESCE(id_utilisateur_figement, $5),
+                date_figement           = COALESCE(date_figement, $6),
+                motif_figement          = COALESCE(motif_figement, $7)
+          WHERE id_proposition = $1",
     )
     .bind(&id)
     .bind(m.quantite_suggeree_kg)
@@ -1396,7 +1409,7 @@ pub async fn figer_proposition(
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM plan_achat WHERE id_proposition = ?1")
+        sqlx::query_scalar("SELECT statut FROM plan_achat WHERE id_proposition = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1410,12 +1423,12 @@ pub async fn figer_proposition(
     sqlx::query(
         "UPDATE plan_achat
             SET figee = 1,
-                id_utilisateur_figement = ?2,
-                date_figement           = ?3,
-                motif_figement          = ?4,
-                commentaires            = COALESCE(?5, commentaires),
+                id_utilisateur_figement = $2,
+                date_figement           = $3,
+                motif_figement          = $4,
+                commentaires            = COALESCE($5, commentaires),
                 quantite_mrp_kg         = COALESCE(quantite_mrp_kg, quantite_suggeree_kg)
-          WHERE id_proposition = ?1",
+          WHERE id_proposition = $1",
     )
     .bind(&id)
     .bind(&user.id)
@@ -1446,7 +1459,7 @@ pub async fn defiger_proposition(
     user.poser_contexte(&mut tx).await?;
 
     let ligne: Option<(i64, String)> = sqlx::query_as(
-        "SELECT figee, statut FROM plan_achat WHERE id_proposition = ?1",
+        "SELECT figee, statut FROM plan_achat WHERE id_proposition = $1",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -1466,7 +1479,7 @@ pub async fn defiger_proposition(
     // L'auteur et la date du figement RESTENT : savoir que cette ligne a ete
     // protegee puis rendue au calcul vaut mieux que de faire disparaitre le
     // passage. Seul le drapeau retombe.
-    sqlx::query("UPDATE plan_achat SET figee = 0 WHERE id_proposition = ?1")
+    sqlx::query("UPDATE plan_achat SET figee = 0 WHERE id_proposition = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -1486,7 +1499,7 @@ pub async fn ignorer_proposition(
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM plan_achat WHERE id_proposition = ?1")
+        sqlx::query_scalar("SELECT statut FROM plan_achat WHERE id_proposition = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1499,7 +1512,7 @@ pub async fn ignorer_proposition(
     }
 
     // Ecarter, c'est renoncer : la protection n'a plus d'objet et tombe avec.
-    sqlx::query("UPDATE plan_achat SET statut = 'IGNORE', figee = 0 WHERE id_proposition = ?1")
+    sqlx::query("UPDATE plan_achat SET statut = 'IGNORE', figee = 0 WHERE id_proposition = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -1520,7 +1533,7 @@ pub async fn besoins_mrp(
         "SELECT bm.*, r.designation, r.code_fournisseur
            FROM besoin_mrp bm
            JOIN reference r ON r.code_reference = bm.code_reference
-          WHERE bm.id_plan = ?1
+          WHERE bm.id_plan = $1
           ORDER BY bm.mois, bm.code_reference",
     )
     .bind(&id)
@@ -1552,7 +1565,7 @@ pub async fn production_besoins(
                 p.m2_total_annuel, p.date_validation, p.date_cloture,
                 (SELECT COUNT(*) FROM besoin_mrp b WHERE b.id_plan = p.id_plan) AS nb_besoins,
                 (SELECT MAX(date_calcul) FROM besoin_mrp b WHERE b.id_plan = p.id_plan) AS dernier_calcul
-           FROM plan_production p WHERE p.id_plan = ?1",
+           FROM plan_production p WHERE p.id_plan = $1",
     )
     .bind(&id)
     .fetch_optional(&state.db)
@@ -1563,7 +1576,7 @@ pub async fn production_besoins(
     // tableaux, et elle vient du plan, jamais d'un 1..12 suppose.
     let mois = sqlx::query(
         "SELECT DISTINCT rang_mois, mois, annee_mois FROM ligne_plan_production
-          WHERE id_plan = ?1 ORDER BY rang_mois",
+          WHERE id_plan = $1 ORDER BY rang_mois",
     )
     .bind(&id)
     .fetch_all(&state.db)
@@ -1575,7 +1588,7 @@ pub async fn production_besoins(
                 l.m2_base_mensuel, l.saisonnalite
            FROM ligne_plan_production l
            JOIN qualite q ON q.code_qualite = l.code_qualite
-          WHERE l.id_plan = ?1
+          WHERE l.id_plan = $1
           ORDER BY l.code_qualite, l.rang_mois",
     )
     .bind(&id)
@@ -1596,7 +1609,7 @@ pub async fn production_besoins(
            LEFT JOIN (SELECT DISTINCT id_plan, mois, rang_mois, annee_mois
                         FROM ligne_plan_production) lpm
                   ON lpm.id_plan = bm.id_plan AND lpm.mois = bm.mois
-          WHERE bm.id_plan = ?1
+          WHERE bm.id_plan = $1
           ORDER BY r.code_categorie, bm.code_reference, lpm.rang_mois",
     )
     .bind(&id)
@@ -1629,9 +1642,9 @@ pub async fn mouvements(
            JOIN mouvement      m  ON m.id_mouvement   = lm.id_mouvement
            JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
            JOIN utilisateur    u  ON u.id_utilisateur = m.id_utilisateur
-          WHERE (?1 IS NULL OR lm.code_reference = ?1)
+          WHERE ($1 IS NULL OR lm.code_reference = $1)
           ORDER BY m.date_mouvement DESC, lm.ligne_numero
-          LIMIT ?2",
+          LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
@@ -1655,7 +1668,7 @@ pub async fn audit(
            FROM audit_log a
            LEFT JOIN utilisateur u ON u.id_utilisateur = a.id_utilisateur
           ORDER BY a.date_operation DESC
-          LIMIT ?1",
+          LIMIT $1",
     )
     .bind(f.limite())
     .fetch_all(&state.db)
@@ -1683,17 +1696,17 @@ pub async fn usages_reference(
 
     let ligne = sqlx::query(
         "SELECT
-           (SELECT COUNT(*) FROM ligne_mouvement WHERE code_reference = ?1) AS mouvements,
-           (SELECT COUNT(*) FROM recette         WHERE code_reference = ?1) AS recettes,
-           (SELECT COUNT(*) FROM ligne_bc        WHERE code_reference = ?1) AS lignes_bc,
-           (SELECT COUNT(*) FROM ligne_reception WHERE code_reference = ?1) AS receptions,
-           (SELECT COUNT(*) FROM plan_achat      WHERE code_reference = ?1) AS propositions,
-           (SELECT COUNT(*) FROM historique_prix WHERE code_reference = ?1) AS prix,
-           (SELECT COUNT(*) FROM ligne_inventaire WHERE code_reference = ?1) AS inventaires,
-           (SELECT COUNT(*) FROM reference_groupe_equiv WHERE code_reference = ?1) AS equivalences,
+           (SELECT COUNT(*) FROM ligne_mouvement WHERE code_reference = $1) AS mouvements,
+           (SELECT COUNT(*) FROM recette         WHERE code_reference = $1) AS recettes,
+           (SELECT COUNT(*) FROM ligne_bc        WHERE code_reference = $1) AS lignes_bc,
+           (SELECT COUNT(*) FROM ligne_reception WHERE code_reference = $1) AS receptions,
+           (SELECT COUNT(*) FROM plan_achat      WHERE code_reference = $1) AS propositions,
+           (SELECT COUNT(*) FROM historique_prix WHERE code_reference = $1) AS prix,
+           (SELECT COUNT(*) FROM ligne_inventaire WHERE code_reference = $1) AS inventaires,
+           (SELECT COUNT(*) FROM reference_groupe_equiv WHERE code_reference = $1) AS equivalences,
            (SELECT COALESCE(SUM(quantite_kg), 0) FROM stock_magasin
-             WHERE code_reference = ?1) AS stock_kg,
-           (SELECT COUNT(*) FROM reference WHERE code_reference = ?1) AS existe",
+             WHERE code_reference = $1) AS stock_kg,
+           (SELECT COUNT(*) FROM reference WHERE code_reference = $1) AS existe",
     )
     .bind(&code)
     .fetch_one(&state.db)

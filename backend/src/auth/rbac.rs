@@ -71,7 +71,7 @@ impl Action {
 pub async fn a_permission(db: &Db, role: &str, module: &str, action: Action) -> AppResult<bool> {
     let n: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM permission
-          WHERE code_role_user = ?1 AND module = ?2 AND action = ?3 AND actif = 1",
+          WHERE code_role_user = $1 AND module = $2 AND action = $3 AND actif = 1",
     )
     .bind(role)
     .bind(module)
@@ -96,7 +96,7 @@ pub async fn exiger(db: &Db, role: &str, module: &str, action: Action) -> AppRes
 /// `None` = illimite (Direction).
 pub async fn plafond_validation_bc(db: &Db, role: &str) -> AppResult<Option<f64>> {
     Ok(sqlx::query_scalar(
-        "SELECT plafond_validation_bc_mad FROM role_utilisateur WHERE code_role_user = ?1",
+        "SELECT plafond_validation_bc_mad FROM role_utilisateur WHERE code_role_user = $1",
     )
     .bind(role)
     .fetch_optional(db)
@@ -141,8 +141,8 @@ pub async fn droits_champ(
            FROM champ_configurable cc
            LEFT JOIN droit_champ dc
                   ON dc.module = cc.module AND dc.champ = cc.champ
-                 AND dc.id_utilisateur = ?1
-          WHERE cc.module = ?2",
+                 AND dc.id_utilisateur = $1
+          WHERE cc.module = $2",
     )
     .bind(id_utilisateur)
     .bind(module)

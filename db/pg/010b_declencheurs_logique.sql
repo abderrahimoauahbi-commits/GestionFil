@@ -36,9 +36,9 @@ BEGIN
                                       id_utilisateur, motif, ip_adresse)
     VALUES (NEW.code_parametre, OLD.valeur_courante, NEW.valeur_courante,
             COALESCE(NEW.id_utilisateur_modif,
-                     (SELECT id_utilisateur FROM _contexte_session WHERE id = 1)),
+                     current_setting('gestionfil.id_utilisateur', true)),
             NEW.motif_modif,
-            (SELECT adresse_ip FROM _contexte_session WHERE id = 1));
+            current_setting('gestionfil.adresse_ip', true));
 
     -- Affectation directe plutot qu'un UPDATE : c'est ce qui rend la recursion
     -- structurellement impossible, au lieu de dependre d'un reglage.

@@ -294,7 +294,7 @@ async fn main() -> Result<()> {
     }
 
     let url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://../db/gestionfil.db".into());
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://gestionfil@127.0.0.1/gestionfil".into());
     let pool = db::connect(&url).await.context("connexion a la base")?;
 
     println!("Fichier : {chemin}");
@@ -372,7 +372,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
 
         let pays = f_four.txt(l, "Ville / Pays").unwrap_or_else(|| "Maroc".into());
         let devise = f_four.txt(l, "Devise").unwrap_or_else(|| "MAD".into());
-        let devise_ok: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM devise WHERE code_devise = ?1")
+        let devise_ok: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM devise WHERE code_devise = $1")
             .bind(&devise)
             .fetch_one(&mut *tx)
             .await?;
@@ -386,7 +386,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                  (code_fournisseur, nom, contact_principal, telephone, email, pays,
                   delai_livraison_jours, conditions_paiement, delai_paiement_jours,
                   code_devise, tolerance_pesee_pct)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,2.0)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,2.0)
              ON CONFLICT (code_fournisseur) DO UPDATE SET
                  nom = excluded.nom,
                  contact_principal = excluded.contact_principal,
@@ -480,7 +480,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                   couleur, titrage, unite_catalogue, poids_bobine_kg, bobines_par_palette,
                   densite_kg_ml, prix_catalogue, code_devise_catalogue, stock_min_kg,
                   couverture_min_mois, actif, suivi_lot, id_utilisateur_creation)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0,?17)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,0,$17)
              ON CONFLICT (code_reference) DO UPDATE SET
                  code_categorie = excluded.code_categorie,
                  code_fournisseur = excluded.code_fournisseur,
@@ -548,7 +548,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
 
         sqlx::query(
             "INSERT INTO groupe_equiv (code_groupe_equiv, libelle, description)
-             VALUES (?1, ?2, 'Importe de GESTION Fil.xlsx')
+             VALUES ($1, $2, 'Importe de GESTION Fil.xlsx')
              ON CONFLICT (code_groupe_equiv) DO NOTHING",
         )
         .bind(&code_grp)
@@ -561,7 +561,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         // en est la source. On vide d'abord : sans cela, des membres deja
         // presents (jeu de demonstration, import precedent partiel) entrent en
         // collision avec les priorites renumerotees ci-dessous.
-        sqlx::query("DELETE FROM reference_groupe_equiv WHERE code_groupe_equiv = ?1")
+        sqlx::query("DELETE FROM reference_groupe_equiv WHERE code_groupe_equiv = $1")
             .bind(&code_grp)
             .execute(&mut *tx)
             .await?;
@@ -570,7 +570,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
             sqlx::query(
                 "INSERT INTO reference_groupe_equiv
                      (code_reference, code_groupe_equiv, priorite, est_preferentielle)
-                 VALUES (?1, ?2, ?3, ?4)
+                 VALUES ($1, $2, $3, $4)
                  ON CONFLICT (code_reference, code_groupe_equiv) DO UPDATE SET
                      priorite = excluded.priorite,
                      est_preferentielle = excluded.est_preferentielle",
@@ -617,14 +617,14 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                   id_utilisateur_creation)
              -- BROUILLON : la mise en service intervient apres l'import de la
              -- composition, en passant par les controles R07 et densites.
-             SELECT ?1, ?2, ?3, 'BROUILLON',
+             SELECT $1, $2, $3, 'BROUILLON',
                     (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre='P_MargeSecurite'),
                     (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre='P_CouvMinMois'),
                     (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre='P_TauxPerte'),
-                    (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
-                    (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SeuilCritique'),
-                    (SELECT CAST(valeur_courante AS INTEGER) FROM parametre WHERE code_parametre='P_SecuriteA'),
-                    ?4
+                    (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
+                    (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
+                    (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SecuriteA'),
+                    $4
              ON CONFLICT (code_qualite) DO UPDATE SET
                  nom = excluded.nom,
                  poids_commercial_m2 = excluded.poids_commercial_m2",
@@ -650,7 +650,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                 "INSERT INTO ligne_qualite
                      (code_qualite, code_role, densite, unite_densite,
                       entre_poids_commercial, ordre_affichage)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 VALUES ($1, $2, $3, $4, $5, $6)
                  ON CONFLICT (code_qualite, code_role) DO UPDATE SET
                      densite = excluded.densite,
                      unite_densite = excluded.unite_densite",
@@ -685,7 +685,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
     let (mut n_rec, mut n_lig, mut ig_lig) = (0usize, 0usize, 0usize);
     for (code_qualite, lignes) in &par_qualite {
         let existe: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM qualite WHERE code_qualite = ?1")
+            sqlx::query_scalar("SELECT COUNT(*) FROM qualite WHERE code_qualite = $1")
                 .bind(code_qualite)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -698,7 +698,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         // trg_recette_verrou_plan_d refusera si la qualite est produite par le
         // plan en service — c'est voulu : on ne reecrit pas sous les pieds d'un
         // plan en cours.
-        sqlx::query("DELETE FROM recette WHERE code_qualite = ?1")
+        sqlx::query("DELETE FROM recette WHERE code_qualite = $1")
             .bind(code_qualite)
             .execute(&mut *tx)
             .await?;
@@ -745,7 +745,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                 "INSERT INTO recette
                      (code_qualite, ligne_numero, code_reference, code_role, code_groupe_equiv,
                       pourcentage_composition, type_composant, couleur)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
             )
             .bind(code_qualite)
             .bind(numero)
@@ -768,9 +768,9 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         // Mise en service : declenche les controles R07 (somme = 100 % par role),
         // roles avec densite, et densite_kg_ml presente pour les roles en ml/m2.
         let activation = sqlx::query(
-            "UPDATE qualite SET statut = 'ACTIF', date_modification = ?2,
-                                id_utilisateur_modification = ?3
-              WHERE code_qualite = ?1 AND statut <> 'ACTIF'",
+            "UPDATE qualite SET statut = 'ACTIF', date_modification = $2,
+                                id_utilisateur_modification = $3
+              WHERE code_qualite = $1 AND statut <> 'ACTIF'",
         )
         .bind(code_qualite)
         .bind(db::maintenant())
@@ -826,8 +826,8 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt,
                   code_magasin, code_motif, reference_document, id_utilisateur, est_initial)
-             VALUES (?1, 'MVT-INIT-XLSX-0001', ?2, 'STOCK_INIT', 'MP-01', 'INIT',
-                     'Reprise GESTION Fil.xlsx', ?3, 1)",
+             VALUES ($1, 'MVT-INIT-XLSX-0001', $2, 'STOCK_INIT', 'MP-01', 'INIT',
+                     'Reprise GESTION Fil.xlsx', $3, 1)",
         )
         .bind(&id_mvt)
         .bind(DATE_PHOTO_STOCK)
@@ -844,7 +844,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
                    FROM reference r
                    LEFT JOIN taux_change tc ON tc.code_devise = r.code_devise_catalogue
                                            AND tc.date_fin IS NULL
-                  WHERE r.code_reference = ?1",
+                  WHERE r.code_reference = $1",
             )
             .bind(code_ref)
             .fetch_optional(&mut *tx)
@@ -859,7 +859,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
             sqlx::query(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 VALUES ($1, $2, $3, $4, $5)",
             )
             .bind(&id_mvt)
             .bind((i + 1) as i64)

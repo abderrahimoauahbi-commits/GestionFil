@@ -45,9 +45,9 @@ SELECT q.code, q.nom, q.poids, 'BROUILLON',
        (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_MargeSecurite'),
        (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_CouvMinMois'),
        (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_TauxPerte'),
-       (SELECT CAST(valeur_courante AS integer) FROM parametre WHERE code_parametre = 'P_SeuilAlerte'),
-       (SELECT CAST(valeur_courante AS integer) FROM parametre WHERE code_parametre = 'P_SeuilCritique'),
-       (SELECT CAST(valeur_courante AS integer) FROM parametre WHERE code_parametre = 'P_SecuriteA')
+       (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre = 'P_SeuilAlerte'),
+       (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre = 'P_SeuilCritique'),
+       (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre = 'P_SecuriteA')
 FROM q;
 
 -- -----------------------------------------------------------------------------

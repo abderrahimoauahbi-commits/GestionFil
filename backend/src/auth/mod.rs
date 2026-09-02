@@ -41,7 +41,7 @@ impl FromRequestParts<AppState> for Utilisateur {
         // Un jeton reste valide jusqu'a son expiration : on revalide le compte a
         // chaque requete pour qu'une desactivation prenne effet immediatement.
         let actif: Option<i64> =
-            sqlx::query_scalar("SELECT actif FROM utilisateur WHERE id_utilisateur = ?1")
+            sqlx::query_scalar("SELECT actif FROM utilisateur WHERE id_utilisateur = $1")
                 .bind(&claims.sub)
                 .fetch_optional(&state.db)
                 .await?;
@@ -112,7 +112,7 @@ impl Utilisateur {
     }
 
     /// Pose l'identite de l'appelant pour les triggers d'audit.
-    pub async fn poser_contexte(&self, tx: &mut sqlx::SqliteConnection) -> AppResult<()> {
+    pub async fn poser_contexte(&self, tx: &mut sqlx::PgConnection) -> AppResult<()> {
         crate::db::poser_contexte(
             tx,
             &self.id,

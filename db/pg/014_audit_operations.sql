@@ -66,9 +66,9 @@ BEGIN
         VALUES ('parametre', 'UPDATE', NEW.code_parametre,
                 json_build_object('valeur_courante', OLD.valeur_courante),
                 json_build_object('valeur_courante', NEW.valeur_courante),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -86,9 +86,9 @@ BEGIN
         VALUES ('reference', 'UPDATE', NEW.code_reference,
                 json_build_object('prix_catalogue', OLD.prix_catalogue, 'code_fournisseur', OLD.code_fournisseur, 'actif', OLD.actif),
                 json_build_object('prix_catalogue', NEW.prix_catalogue, 'code_fournisseur', NEW.code_fournisseur, 'actif', NEW.actif),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -109,9 +109,9 @@ BEGIN
                 json_build_object('statut', OLD.statut),
                 json_build_object('statut', NEW.statut, 'montant_total_mad', NEW.montant_total_mad,
                             'id_utilisateur_validation', NEW.id_utilisateur_validation),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -129,9 +129,9 @@ BEGIN
         VALUES ('reception', 'UPDATE', NEW.id_reception,
                 json_build_object('statut', OLD.statut),
                 json_build_object('statut', NEW.statut, 'id_utilisateur_controle', NEW.id_utilisateur_controle),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -149,9 +149,9 @@ BEGIN
         VALUES ('qualite', 'UPDATE', NEW.code_qualite,
                 json_build_object('statut', OLD.statut),
                 json_build_object('statut', NEW.statut, 'nom', NEW.nom),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -169,9 +169,9 @@ BEGIN
         VALUES ('plan_production', 'UPDATE', NEW.id_plan,
                 json_build_object('statut', OLD.statut),
                 json_build_object('statut', NEW.statut, 'annee', NEW.annee, 'numero_version', NEW.numero_version),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -189,9 +189,9 @@ BEGIN
         VALUES ('utilisateur', 'UPDATE', NEW.id_utilisateur,
                 json_build_object('code_role_user', OLD.code_role_user, 'actif', OLD.actif),
                 json_build_object('code_role_user', NEW.code_role_user, 'actif', NEW.actif),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -207,9 +207,9 @@ BEGIN
                                nouvelles_valeurs, id_utilisateur, adresse_ip, session_id)
         VALUES ('droit_champ', 'INSERT', NEW.id_utilisateur,
                 json_build_object('module', NEW.module, 'champ', NEW.champ, 'niveau', NEW.niveau),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -226,9 +226,9 @@ BEGIN
         VALUES ('droit_champ', 'UPDATE', NEW.id_utilisateur,
                 json_build_object('module', NEW.module, 'champ', NEW.champ, 'niveau', OLD.niveau),
                 json_build_object('module', NEW.module, 'champ', NEW.champ, 'niveau', NEW.niveau),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -244,9 +244,9 @@ BEGIN
                                nouvelles_valeurs, id_utilisateur, adresse_ip, session_id)
         VALUES ('permission', 'INSERT', NEW.id_permission,
                 json_build_object('role', NEW.code_role_user, 'module', NEW.module, 'action', NEW.action),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -261,9 +261,9 @@ BEGIN
                                anciennes_valeurs, id_utilisateur, adresse_ip, session_id)
         VALUES ('permission', 'DELETE', OLD.id_permission,
                 json_build_object('role', OLD.code_role_user, 'module', OLD.module, 'action', OLD.action),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -284,9 +284,9 @@ BEGIN
                             'code_magasin',     NEW.code_magasin,
                             'date_mouvement',   NEW.date_mouvement,
                             'auteur_declare',   NEW.id_utilisateur),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -306,9 +306,9 @@ BEGIN
                             'code_magasin',      NEW.code_magasin,
                             'type_inventaire',   NEW.type_inventaire,
                             'statut',            NEW.statut),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -325,9 +325,9 @@ BEGIN
         VALUES ('inventaire', 'UPDATE', NEW.id_inventaire,
                 json_build_object('statut', OLD.statut),
                 json_build_object('statut', NEW.statut, 'numero_inventaire', NEW.numero_inventaire),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -348,9 +348,9 @@ BEGIN
                             'magasin_source',   NEW.code_magasin_source,
                             'magasin_dest',     NEW.code_magasin_destination,
                             'statut',           NEW.statut),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -367,9 +367,9 @@ BEGIN
         VALUES ('transfert', 'UPDATE', NEW.id_transfert,
                 json_build_object('statut', OLD.statut),
                 json_build_object('statut', NEW.statut, 'numero_transfert', NEW.numero_transfert),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -388,9 +388,9 @@ BEGIN
                 json_build_object('figee', OLD.figee, 'quantite_suggeree_kg', OLD.quantite_suggeree_kg),
                 json_build_object('figee', NEW.figee, 'quantite_suggeree_kg', NEW.quantite_suggeree_kg,
                             'code_reference', NEW.code_reference, 'motif', NEW.motif_figement),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -409,9 +409,9 @@ BEGIN
                 NULL,
                 json_build_object('code_qualite', NEW.code_qualite, 'code_reference', NEW.code_reference,
                             'code_role', NEW.code_role, 'pourcentage', NEW.pourcentage_composition),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -430,9 +430,9 @@ BEGIN
                             'pourcentage', OLD.pourcentage_composition),
                 json_build_object('code_qualite', NEW.code_qualite, 'code_reference', NEW.code_reference,
                             'pourcentage', NEW.pourcentage_composition),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -452,9 +452,9 @@ BEGIN
                 json_build_object('code_qualite', OLD.code_qualite, 'code_reference', OLD.code_reference,
                             'code_role', OLD.code_role, 'pourcentage', OLD.pourcentage_composition),
                 NULL,
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -471,9 +471,9 @@ BEGIN
         VALUES ('ligne_qualite', 'UPDATE', NEW.code_qualite || '/' || NEW.code_role,
                 json_build_object('densite', OLD.densite),
                 json_build_object('densite', NEW.densite, 'unite_densite', NEW.unite_densite),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -493,9 +493,9 @@ BEGIN
                             'code_devise', OLD.code_devise, 'actif', OLD.actif),
                 json_build_object('delai_livraison_jours', NEW.delai_livraison_jours,
                             'code_devise', NEW.code_devise, 'actif', NEW.actif),
-                (SELECT id_utilisateur FROM _contexte_session WHERE id = 1),
-                (SELECT adresse_ip    FROM _contexte_session WHERE id = 1),
-                (SELECT session_id    FROM _contexte_session WHERE id = 1));
+                current_setting('gestionfil.id_utilisateur', true),
+                current_setting('gestionfil.adresse_ip', true),
+                current_setting('gestionfil.session_id', true));
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

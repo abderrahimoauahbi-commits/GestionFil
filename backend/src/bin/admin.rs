@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         _ => {}
     }
 
-    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://../db/gestionfil.db".into());
+    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://gestionfil@127.0.0.1/gestionfil".into());
     let pool = db::connect(&url)
         .await
         .context("connexion a la base impossible")?;
@@ -107,7 +107,7 @@ fn init_config() -> Result<()> {
 
     let contenu = format!(
         "# Genere par `gestionfil-admin init-config`. Ne pas versionner.\n\
-         DATABASE_URL=sqlite://../db/gestionfil.db\n\
+         DATABASE_URL=postgres://gestionfil@127.0.0.1/gestionfil\n\
          BIND_ADDR=127.0.0.1:8080\n\
          JWT_SECRET={secret}\n\
          JWT_TTL_MINUTES=480\n\
@@ -125,7 +125,7 @@ fn init_config() -> Result<()> {
 
 async fn definir_mot_de_passe(pool: &db::Db, login: &str) -> Result<()> {
     let existe: Option<String> =
-        sqlx::query_scalar("SELECT nom FROM utilisateur WHERE login = ?1")
+        sqlx::query_scalar("SELECT nom FROM utilisateur WHERE login = $1")
             .bind(login)
             .fetch_optional(pool)
             .await?;
@@ -152,7 +152,7 @@ async fn definir_mot_de_passe(pool: &db::Db, login: &str) -> Result<()> {
     }
 
     let hash = password::hacher(&mdp)?;
-    sqlx::query("UPDATE utilisateur SET mot_de_passe_hash = ?2 WHERE login = ?1")
+    sqlx::query("UPDATE utilisateur SET mot_de_passe_hash = $2 WHERE login = $1")
         .bind(login)
         .bind(&hash)
         .execute(pool)
@@ -213,16 +213,21 @@ async fn verifier(pool: &db::Db) -> Result<()> {
 /* -------------------------------------------------------------------------- */
 
 fn url_base() -> String {
-    std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://../db/gestionfil.db".into())
+    std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://gestionfil@127.0.0.1/gestionfil".into())
 }
 
-fn chemin_base() -> String {
-    let u = url_base();
-    u.strip_prefix("sqlite://")
-        .unwrap_or(&u)
+/// Nom de la base dans l'URL de connexion.
+///
+/// Une base PostgreSQL n'a pas de chemin de fichier : ce qu'on manipule est un
+/// NOM, sur un serveur. `pg_restore` en a besoin pour savoir quoi recreer.
+fn nom_base() -> String {
+    url_base()
+        .rsplit('/')
+        .next()
+        .unwrap_or("gestionfil")
         .split('?')
         .next()
-        .unwrap_or_default()
+        .unwrap_or("gestionfil")
         .to_string()
 }
 
@@ -266,68 +271,113 @@ fn lister_sauvegardes() -> Result<()> {
 fn restaurer(fichier: &str) -> Result<()> {
     use std::path::{Path, PathBuf};
 
-    let base_txt = chemin_base();
-    let base = Path::new(&base_txt);
-    let dossier = base.parent().context("dossier de base introuvable")?;
-
+    let dossier = std::env::var("GESTIONFIL_SAUVEGARDES").unwrap_or_else(|_| "sauvegardes".into());
     let source: PathBuf =
         if Path::new(fichier).is_absolute() || fichier.contains('/') || fichier.contains('\\') {
             PathBuf::from(fichier)
         } else {
-            dossier.join("sauvegardes").join(fichier)
+            Path::new(&dossier).join(fichier)
         };
 
     if !source.exists() {
         bail!("sauvegarde introuvable : {}", source.display());
     }
 
-    // 1. Le serveur tourne-t-il ? Le journal WAL le trahit.
-    let wal = base.with_extension("db-wal");
-    if wal.exists() && std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0) > 0 {
+    let base = nom_base();
+    let url = url_base();
+
+    // 1. La sauvegarde est-elle lisible ? `pg_restore --list` lit l'index du
+    //    fichier sans rien ecrire : c'est la verification la moins chere, et
+    //    elle attrape le cas qui compte — un fichier tronque ou d'un autre
+    //    format.
+    println!("Verification de la sauvegarde...");
+    let liste = std::process::Command::new("pg_restore")
+        .arg("--list")
+        .arg(&source)
+        .output()
+        .context("pg_restore introuvable : installer postgresql-client")?;
+    if !liste.status.success() {
         bail!(
-            "un journal WAL non vide accompagne la base : le serveur est probablement en cours \
-             d'execution. Arretez-le, puis relancez cette commande."
+            "la sauvegarde n'est pas lisible : {}",
+            String::from_utf8_lossy(&liste.stderr).trim()
+        );
+    }
+    let objets = String::from_utf8_lossy(&liste.stdout)
+        .lines()
+        .filter(|l| !l.trim_start().starts_with(';'))
+        .count();
+    println!("  {objets} objets dans la sauvegarde");
+    if objets < 50 {
+        bail!("sauvegarde suspecte : {objets} objets seulement, attendu plus de 100");
+    }
+
+    // 2. LA BASE ACTUELLE EST MISE DE COTE, PAS DETRUITE.
+    //
+    //    `ALTER DATABASE ... RENAME` conserve tout : donnees, droits, taille.
+    //    Si la restauration decoit, la base precedente est encore la, sous un
+    //    nom qui dit ce qu'elle est. C'est la seule difference qui compte entre
+    //    une restauration et une perte de donnees.
+    //
+    //    Le renommage exige qu'aucune connexion ne soit ouverte : le serveur
+    //    doit etre arrete. PostgreSQL le dira lui-meme, avec un message clair.
+    let horodatage: String = maintenant().chars().filter(|c| c.is_ascii_digit()).take(14).collect();
+    let ecartee = format!("{base}_remplacee_{horodatage}");
+
+    println!("Mise de cote de la base actuelle sous `{ecartee}`...");
+    let sql = format!(
+        "ALTER DATABASE {base} RENAME TO {ecartee}; CREATE DATABASE {base};"
+    );
+    let r = std::process::Command::new("psql")
+        .arg("--set=ON_ERROR_STOP=1")
+        .arg("-c")
+        .arg(&sql)
+        .arg(url_maintenance(&url))
+        .output()
+        .context("psql introuvable : installer postgresql-client")?;
+    if !r.status.success() {
+        bail!(
+            "impossible de mettre la base de cote : {}\n\
+             Le serveur est-il arrete ? Une seule connexion ouverte suffit a bloquer le renommage.",
+            String::from_utf8_lossy(&r.stderr).trim()
         );
     }
 
-    // 2. La sauvegarde est-elle saine ?
-    println!("Verification de la sauvegarde...");
-    match std::process::Command::new("sqlite3")
+    // 3. La restauration proprement dite.
+    println!("Restauration...");
+    let r = std::process::Command::new("pg_restore")
+        .arg("--no-owner")
+        .arg("--no-privileges")
+        .arg("--exit-on-error")
+        .arg("--dbname")
+        .arg(&url)
         .arg(&source)
-        .arg("PRAGMA integrity_check;")
         .output()
-    {
-        Ok(o) if String::from_utf8_lossy(&o.stdout).trim() == "ok" => {
-            println!("  integrite : ok");
-        }
-        Ok(o) => bail!(
-            "la sauvegarde ne passe pas le controle d'integrite : {}",
-            String::from_utf8_lossy(&o.stdout).trim()
-        ),
-        Err(_) => {
-            println!("  sqlite3 absent du PATH : verification impossible.");
-            println!("  La restauration se poursuit, mais la sauvegarde n'a PAS ete verifiee.");
-        }
+        .context("pg_restore introuvable")?;
+    if !r.status.success() {
+        bail!(
+            "restauration echouee : {}\n\
+             La base precedente est intacte sous le nom `{ecartee}`.",
+            String::from_utf8_lossy(&r.stderr).trim()
+        );
     }
 
-    // 3. Mettre la base actuelle de cote, sous un nom qui dit ce que c'est.
-    if base.exists() {
-        let horodatage: String = maintenant()
-            .chars()
-            .filter(|c| c.is_ascii_digit())
-            .take(14)
-            .collect();
-        let ecartee = dossier.join(format!("gestionfil-remplacee-{horodatage}.db"));
-        std::fs::rename(base, &ecartee).context("impossible d'ecarter la base actuelle")?;
-        println!("Base actuelle mise de cote : {}", ecartee.display());
-    }
-
-    std::fs::copy(&source, base).context("copie de la sauvegarde impossible")?;
     println!("Base restauree depuis {}", source.display());
     println!();
     println!("Relancez le serveur. Si le resultat ne convient pas, la base precedente");
-    println!("est encore dans le dossier, sous le nom `gestionfil-remplacee-*.db`.");
+    println!("est encore la, sous le nom `{ecartee}`.");
+    println!("Quand tout est verifie : DROP DATABASE {ecartee};");
     Ok(())
+}
+
+/// L'URL de connexion, dirigee vers la base de maintenance `postgres`.
+///
+/// On ne peut ni renommer ni recreer une base a laquelle on est connecte : les
+/// commandes de restauration passent donc par `postgres`, qui existe toujours.
+fn url_maintenance(url: &str) -> String {
+    match url.rfind('/') {
+        Some(i) => format!("{}/postgres", &url[..i]),
+        None => "postgres://postgres@127.0.0.1/postgres".to_string(),
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -340,37 +390,52 @@ async fn diagnostic(pool: &Db) -> Result<()> {
     println!("=====================");
     println!();
 
-    let integrite: String = sqlx::query_scalar("PRAGMA integrity_check")
-        .fetch_one(pool)
-        .await?;
-    println!("Integrite physique      : {integrite}");
-
-    let cles: Vec<(String, i64, String, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
+    // PostgreSQL N'A PAS D'EQUIVALENT DE `PRAGMA integrity_check`, et c'est
+    // une bonne nouvelle : la verification de page se fait en continu par les
+    // sommes de controle, et les cles etrangeres sont verifiees a CHAQUE
+    // ecriture, pas a la demande. Ce qu'on peut encore verifier utilement,
+    // c'est qu'aucune contrainte n'a ete posee `NOT VALID` — c'est-a-dire
+    // acceptee sans controler l'existant.
+    let non_validees: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pg_constraint WHERE NOT convalidated",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
     println!(
-        "Cles etrangeres         : {}",
-        if cles.is_empty() {
-            "ok".to_string()
+        "Contraintes             : {}",
+        if non_validees == 0 {
+            "toutes validees".to_string()
         } else {
-            format!("{} violation(s)", cles.len())
+            format!("{non_validees} posee(s) sans controle de l'existant (NOT VALID)")
         }
     );
-    for (table, rowid, cible, _) in cles.iter().take(10) {
-        println!("   {table} ligne {rowid} vers {cible}");
-    }
 
-    let tables: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-        .fetch_one(pool)
-        .await?;
-    let vues: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='view'")
-        .fetch_one(pool)
-        .await?;
-    let declencheurs: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'")
-            .fetch_one(pool)
-            .await?;
+    let taille: String = sqlx::query_scalar(
+        "SELECT pg_size_pretty(pg_database_size(current_database()))",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|_| "inconnue".into());
+    println!("Taille                  : {taille}");
+
+    let tables: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.tables
+          WHERE table_schema='public' AND table_type='BASE TABLE'",
+    )
+    .fetch_one(pool)
+    .await?;
+    let vues: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.views WHERE table_schema='public'",
+    )
+    .fetch_one(pool)
+    .await?;
+    let declencheurs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT trigger_name) FROM information_schema.triggers
+          WHERE trigger_schema='public'",
+    )
+    .fetch_one(pool)
+    .await?;
     println!("Structure               : {tables} tables, {vues} vues, {declencheurs} declencheurs");
 
     println!();
@@ -404,20 +469,32 @@ async fn diagnostic(pool: &Db) -> Result<()> {
 /// se corrige dans l'application, par quelqu'un qui sait ce que la ligne devrait
 /// porter. Laisser croire le contraire ferait plus de degats que le probleme.
 async fn reparer(pool: &Db) -> Result<()> {
+    // `REINDEX` sans cible n'existe pas en PostgreSQL : il faut nommer ce
+    // qu'on reindexe. `DATABASE` couvre tout, y compris les index systeme.
     println!("Reindexation...");
-    sqlx::query("REINDEX").execute(pool).await?;
-
-    println!("Recalcul des statistiques...");
-    sqlx::query("ANALYZE").execute(pool).await?;
-
-    println!("Compactage...");
-    sqlx::query("VACUUM").execute(pool).await?;
-
-    let integrite: String = sqlx::query_scalar("PRAGMA integrity_check")
-        .fetch_one(pool)
+    let base = nom_base();
+    sqlx::query(&format!("REINDEX DATABASE {base}"))
+        .execute(pool)
         .await?;
+
+    // `VACUUM (ANALYZE)` fait les deux en un passage : il rend l'espace mort
+    // et recalcule les statistiques du planificateur. Separer les deux ferait
+    // parcourir les tables deux fois.
+    //
+    // PAS de `VACUUM FULL` : il reecrit chaque table et prend un verrou
+    // exclusif — la base est inutilisable pendant l'operation, et sur un ERP
+    // en service c'est une panne, pas une maintenance.
+    println!("Compactage et statistiques...");
+    sqlx::query("VACUUM (ANALYZE)").execute(pool).await?;
+
+    let mortes: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(n_dead_tup), 0) FROM pg_stat_user_tables",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
     println!();
-    println!("Integrite apres reparation : {integrite}");
+    println!("Lignes mortes restantes : {mortes}");
     println!();
     println!("Les index sont reconstruits et l'espace libre rendu au disque.");
     println!("Les anomalies METIER ne sont pas affectees : voir `diagnostic`.");

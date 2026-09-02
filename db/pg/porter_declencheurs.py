@@ -124,6 +124,14 @@ def assembler(nom, tete, corps_pg, moment, action, colonnes, table, condition, r
 
 def porter(bloc):
     bloc = traduire(bloc)
+    # LE CONTEXTE DE SESSION : d'une table globale a une variable de
+    # transaction. Seize connexions concurrentes qui se partagent une ligne
+    # unique attribuent les actions a la mauvaise personne — voir le
+    # commentaire de tete du module.
+    bloc = re.sub(
+        r"\(\s*SELECT\s+(\w+)\s+FROM\s+_contexte_session\s+WHERE\s+id\s*=\s*1\s*\)",
+        lambda m: "current_setting('gestionfil.%s', true)" % m.group(1),
+        bloc, flags=re.I)
     # `a IS NOT b` entre deux colonnes est l'inegalite null-safe de SQLite ;
     # PostgreSQL l'ecrit `IS DISTINCT FROM`. `IS NOT NULL` reste standard.
     bloc = re.sub(r"\bIS NOT (?!NULL\b)(\w)", r"IS DISTINCT FROM \1", bloc)

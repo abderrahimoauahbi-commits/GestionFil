@@ -92,7 +92,7 @@ pub async fn creer_utilisateur(
         "INSERT INTO utilisateur
              (id_utilisateur, code_role_user, login, mot_de_passe_hash, nom,
               email, telephone, magasin_principal)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
     )
     .bind(&id)
     .bind(&nouveau.code_role_user)
@@ -148,7 +148,7 @@ pub async fn modifier_utilisateur(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let existe: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilisateur WHERE id_utilisateur = ?1")
+    let existe: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilisateur WHERE id_utilisateur = $1")
         .bind(&id)
         .fetch_one(&mut *tx)
         .await?;
@@ -158,13 +158,13 @@ pub async fn modifier_utilisateur(
 
     sqlx::query(
         "UPDATE utilisateur SET
-            nom               = COALESCE(?2, nom),
-            email             = COALESCE(?3, email),
-            telephone         = COALESCE(?4, telephone),
-            code_role_user    = COALESCE(?5, code_role_user),
-            magasin_principal = COALESCE(?6, magasin_principal),
-            actif             = COALESCE(?7, actif)
-          WHERE id_utilisateur = ?1",
+            nom               = COALESCE($2, nom),
+            email             = COALESCE($3, email),
+            telephone         = COALESCE($4, telephone),
+            code_role_user    = COALESCE($5, code_role_user),
+            magasin_principal = COALESCE($6, magasin_principal),
+            actif             = COALESCE($7, actif)
+          WHERE id_utilisateur = $1",
     )
     .bind(&id)
     .bind(&m.nom)
@@ -183,7 +183,7 @@ pub async fn modifier_utilisateur(
             ));
         }
         let hash = password::hacher(mdp).map_err(AppError::Interne)?;
-        sqlx::query("UPDATE utilisateur SET mot_de_passe_hash = ?2 WHERE id_utilisateur = ?1")
+        sqlx::query("UPDATE utilisateur SET mot_de_passe_hash = $2 WHERE id_utilisateur = $1")
             .bind(&id)
             .bind(&hash)
             .execute(&mut *tx)
@@ -223,12 +223,12 @@ pub async fn lire_droits(
            FROM champ_configurable cc
            LEFT JOIN droit_champ dc
                   ON dc.module = cc.module AND dc.champ = cc.champ
-                 AND dc.id_utilisateur = ?1
-           LEFT JOIN utilisateur u ON u.id_utilisateur = ?1
+                 AND dc.id_utilisateur = $1
+           LEFT JOIN utilisateur u ON u.id_utilisateur = $1
            LEFT JOIN modele_droit_champ mdc
                   ON mdc.module = cc.module AND mdc.champ = cc.champ
                  AND mdc.code_role_user = u.code_role_user
-          WHERE (?2 IS NULL OR cc.module = ?2)
+          WHERE ($2 IS NULL OR cc.module = $2)
           ORDER BY cc.module, cc.ordre",
     )
     .bind(&id)
@@ -278,7 +278,7 @@ pub async fn enregistrer_droits(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let existe: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilisateur WHERE id_utilisateur = ?1")
+    let existe: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utilisateur WHERE id_utilisateur = $1")
         .bind(&id)
         .fetch_one(&mut *tx)
         .await?;
@@ -300,7 +300,7 @@ pub async fn enregistrer_droits(
         sqlx::query(
             "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
                                       date_modification, id_utilisateur_modif)
-             VALUES (?1,?2,?3,?4,?5,?6)
+             VALUES ($1,$2,$3,$4,$5,$6)
              ON CONFLICT (id_utilisateur, module, champ) DO UPDATE SET
                  niveau = excluded.niveau,
                  date_modification = excluded.date_modification,
@@ -346,7 +346,7 @@ pub async fn appliquer_modele_role(
 
     let role: String = match &d.code_role_user {
         Some(r) => r.clone(),
-        None => sqlx::query_scalar("SELECT code_role_user FROM utilisateur WHERE id_utilisateur = ?1")
+        None => sqlx::query_scalar("SELECT code_role_user FROM utilisateur WHERE id_utilisateur = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -354,13 +354,13 @@ pub async fn appliquer_modele_role(
     };
 
     if let Some(m) = &d.module {
-        sqlx::query("DELETE FROM droit_champ WHERE id_utilisateur = ?1 AND module = ?2")
+        sqlx::query("DELETE FROM droit_champ WHERE id_utilisateur = $1 AND module = $2")
             .bind(&id)
             .bind(m)
             .execute(&mut *tx)
             .await?;
     } else {
-        sqlx::query("DELETE FROM droit_champ WHERE id_utilisateur = ?1")
+        sqlx::query("DELETE FROM droit_champ WHERE id_utilisateur = $1")
             .bind(&id)
             .execute(&mut *tx)
             .await?;
@@ -369,10 +369,10 @@ pub async fn appliquer_modele_role(
     let n = sqlx::query(
         "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
                                   date_modification, id_utilisateur_modif)
-         SELECT ?1, m.module, m.champ, m.niveau, ?4, ?5
+         SELECT $1, m.module, m.champ, m.niveau, $4, $5
            FROM modele_droit_champ m
-          WHERE m.code_role_user = ?2
-            AND (?3 IS NULL OR m.module = ?3)",
+          WHERE m.code_role_user = $2
+            AND ($3 IS NULL OR m.module = $3)",
     )
     .bind(&id)
     .bind(&role)
@@ -394,7 +394,7 @@ pub async fn appliquer_modele_role(
 
 /// Applique le modele d'un role dans une transaction en cours (creation de compte).
 async fn appliquer_modele(
-    tx: &mut sqlx::SqliteConnection,
+    tx: &mut sqlx::PgConnection,
     id_utilisateur: &str,
     role: &str,
     par: &str,
@@ -402,8 +402,8 @@ async fn appliquer_modele(
     Ok(sqlx::query(
         "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
                                   date_modification, id_utilisateur_modif)
-         SELECT ?1, m.module, m.champ, m.niveau, ?3, ?4
-           FROM modele_droit_champ m WHERE m.code_role_user = ?2",
+         SELECT $1, m.module, m.champ, m.niveau, $3, $4
+           FROM modele_droit_champ m WHERE m.code_role_user = $2",
     )
     .bind(id_utilisateur)
     .bind(role)

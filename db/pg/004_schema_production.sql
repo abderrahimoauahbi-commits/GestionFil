@@ -35,16 +35,16 @@ CREATE TABLE qualite (
     -- par diverger, et les vues filtrent toutes sur `actif`.
     statut              text    NOT NULL DEFAULT 'BROUILLON'
                                 CHECK (statut IN ('BROUILLON','ACTIF','CLOTURE')),
-    actif               integer GENERATED ALWAYS AS
+    actif               bigint GENERATED ALWAYS AS
                                 (CASE WHEN statut = 'CLOTURE' THEN 0 ELSE 1 END) STORED,
 
     -- Snapshot des parametres globaux au moment de la creation
     marge_securite_pct  numeric(9,4)    NOT NULL CHECK (marge_securite_pct >= 0),
     couv_min_mois       numeric(12,4)    NOT NULL CHECK (couv_min_mois >= 0),
     taux_perte_pct      numeric(9,4)    NOT NULL CHECK (taux_perte_pct >= 0),
-    seuil_alerte_jours  integer NOT NULL CHECK (seuil_alerte_jours > 0),
-    seuil_critique_jours integer NOT NULL CHECK (seuil_critique_jours > 0),
-    stock_securite_jours integer NOT NULL CHECK (stock_securite_jours >= 0),
+    seuil_alerte_jours  bigint NOT NULL CHECK (seuil_alerte_jours > 0),
+    seuil_critique_jours bigint NOT NULL CHECK (seuil_critique_jours > 0),
+    stock_securite_jours bigint NOT NULL CHECK (stock_securite_jours >= 0),
 
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     date_modification   text,
@@ -70,10 +70,10 @@ CREATE TABLE ligne_qualite (
     densite             numeric(18,4)    NOT NULL CHECK (densite >= 0),
     unite_densite       text    NOT NULL DEFAULT 'kg_m2' CHECK (unite_densite IN ('kg_m2','ml_m2')),
     -- Un role en ml/m2 ne contribue pas au poids commercial du tapis
-    entre_poids_commercial smallint NOT NULL DEFAULT 1 CHECK (entre_poids_commercial IN (0,1)),
+    entre_poids_commercial bigint NOT NULL DEFAULT 1 CHECK (entre_poids_commercial IN (0,1)),
     observation         text,
-    ordre_affichage     integer NOT NULL DEFAULT 0,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    ordre_affichage     bigint NOT NULL DEFAULT 0,
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     UNIQUE (code_qualite, code_role),
     CHECK (unite_densite = 'kg_m2' OR entre_poids_commercial = 0)
 );
@@ -101,7 +101,7 @@ CREATE TABLE recette (
     id_recette          text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     code_qualite        text    NOT NULL REFERENCES qualite(code_qualite) ON DELETE CASCADE,
-    ligne_numero        integer NOT NULL CHECK (ligne_numero > 0),
+    ligne_numero        bigint NOT NULL CHECK (ligne_numero > 0),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     code_role           text    NOT NULL REFERENCES role_bom(code_role),
     code_groupe_equiv   text    REFERENCES groupe_equiv(code_groupe_equiv),
@@ -109,7 +109,7 @@ CREATE TABLE recette (
     type_composant      text,
     couleur             text,
     code_fournisseur_prefere text REFERENCES fournisseur(code_fournisseur),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     UNIQUE (code_qualite, ligne_numero),
     -- Une meme matiere ne figure qu'UNE FOIS dans une qualite, tous roles
     -- confondus. Deux lignes portant la meme reference additionneraient leurs

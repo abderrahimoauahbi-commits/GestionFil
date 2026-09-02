@@ -15,16 +15,16 @@ CREATE TABLE fournisseur (
     adresse             text,
     ville               text,
     pays                text    NOT NULL DEFAULT 'Maroc',
-    delai_livraison_jours integer CHECK (delai_livraison_jours IS NULL OR delai_livraison_jours > 0),
+    delai_livraison_jours bigint CHECK (delai_livraison_jours IS NULL OR delai_livraison_jours > 0),
     conditions_paiement text,
-    delai_paiement_jours integer,                  -- alimente le DPO du cockpit
+    delai_paiement_jours bigint,                  -- alimente le DPO du cockpit
     code_devise         text    REFERENCES devise(code_devise),
     incoterm            text,
     transporteur        text,
     note_globale        numeric(5,2)    CHECK (note_globale IS NULL OR note_globale BETWEEN 0 AND 100),
     delai_reel_moyen_jours numeric(12,4),
     tolerance_pesee_pct numeric(9,4)    CHECK (tolerance_pesee_pct IS NULL OR tolerance_pesee_pct >= 0),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 
@@ -39,8 +39,8 @@ CREATE TABLE contact_fournisseur (
     fonction            text,
     email               text,
     telephone           text,
-    est_principal       smallint NOT NULL DEFAULT 0 CHECK (est_principal IN (0,1)),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    est_principal       bigint NOT NULL DEFAULT 0 CHECK (est_principal IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 CREATE UNIQUE INDEX ux_contact_principal
@@ -72,7 +72,7 @@ CREATE TABLE reference (
     -- Unite de saisie et facteurs de conversion vers le kg
     unite_catalogue     text    NOT NULL CHECK (unite_catalogue IN ('kg','Palette','Bobine','ml')),
     poids_bobine_kg     numeric(18,4)    CHECK (poids_bobine_kg IS NULL OR poids_bobine_kg > 0),
-    bobines_par_palette integer CHECK (bobines_par_palette IS NULL OR bobines_par_palette > 0),
+    bobines_par_palette bigint CHECK (bobines_par_palette IS NULL OR bobines_par_palette > 0),
     densite_kg_ml       numeric(18,4)    CHECK (densite_kg_ml IS NULL OR densite_kg_ml > 0),
     facteur_kg          numeric(18,4)    GENERATED ALWAYS AS (
                             CASE unite_catalogue
@@ -110,8 +110,8 @@ CREATE TABLE reference (
     cmup_mad            numeric(18,4)    CHECK (cmup_mad IS NULL OR cmup_mad >= 0),
     date_dernier_cmup   text,
 
-    suivi_lot           smallint NOT NULL DEFAULT 0 CHECK (suivi_lot IN (0,1)),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    suivi_lot           bigint NOT NULL DEFAULT 0 CHECK (suivi_lot IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_utilisateur_creation text REFERENCES utilisateur(id_utilisateur),
 
@@ -134,7 +134,7 @@ CREATE TABLE groupe_equiv (
     code_groupe_equiv   text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     description         text,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------
@@ -145,11 +145,11 @@ CREATE TABLE reference_groupe_equiv (
                                 DEFAULT gen_random_uuid()::text,
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     code_groupe_equiv   text    NOT NULL REFERENCES groupe_equiv(code_groupe_equiv) ON DELETE CASCADE,
-    priorite            integer NOT NULL CHECK (priorite > 0),
-    est_preferentielle  smallint NOT NULL DEFAULT 0 CHECK (est_preferentielle IN (0,1)),
+    priorite            bigint NOT NULL CHECK (priorite > 0),
+    est_preferentielle  bigint NOT NULL DEFAULT 0 CHECK (est_preferentielle IN (0,1)),
     date_debut          text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     date_fin            text,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     UNIQUE (code_reference, code_groupe_equiv),
     CHECK (date_fin IS NULL OR date_fin > date_debut)
 );

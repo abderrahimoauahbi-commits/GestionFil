@@ -207,8 +207,8 @@ pub const ENTITES: &[Entite] = &[
                     COALESCE(c.cmup_mad, ROUND(c.prix_catalogue_kg * COALESCE((
                         SELECT t.taux FROM taux_change t
                          WHERE t.code_devise = c.code_devise_catalogue
-                           AND date('now') >= t.date_debut
-                           AND (t.date_fin IS NULL OR date('now') <= t.date_fin)
+                           AND to_char(current_date, 'YYYY-MM-DD') >= t.date_debut
+                           AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') <= t.date_fin)
                          ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_kg_mad,
                     CASE WHEN c.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END AS source_prix,
                     (SELECT COUNT(*) FROM reference_groupe_equiv g
@@ -258,9 +258,9 @@ fn jointures(table: &str) -> &'static str {
 
 /// Lie une valeur JSON, en respectant son type.
 pub fn lier<'q>(
-    q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    q: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
     v: &'q Value,
-) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
     match v {
         Value::Null => q.bind(None::<String>),
         Value::Bool(b) => q.bind(i64::from(*b)),
@@ -433,7 +433,7 @@ pub async fn lire(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResul
     user.exiger(db, e.module, Action::Lire).await?;
 
     let sql = format!(
-        "SELECT {} FROM {} c {} WHERE c.{} = ?1",
+        "SELECT {} FROM {} c {} WHERE c.{} = $1",
         e.selection,
         e.table,
         jointures(e.table),
@@ -523,7 +523,7 @@ pub async fn modifier(
         .map(|(i, (n, _))| format!("{n} = ?{}", i + 2))
         .collect();
     let sql = format!(
-        "UPDATE {} SET {} WHERE {} = ?1",
+        "UPDATE {} SET {} WHERE {} = $1",
         e.table,
         set.join(", "),
         e.cle
@@ -565,11 +565,11 @@ pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> App
         // commandes passes referencent ces lignes. Les effacer romprait
         // l'historique, que R03 declare immuable.
         Suppression::Logique(col) => (
-            format!("UPDATE {} SET {col} = 0 WHERE {} = ?1", e.table, e.cle),
+            format!("UPDATE {} SET {col} = 0 WHERE {} = $1", e.table, e.cle),
             true,
         ),
         Suppression::Physique => (
-            format!("DELETE FROM {} WHERE {} = ?1", e.table, e.cle),
+            format!("DELETE FROM {} WHERE {} = $1", e.table, e.cle),
             false,
         ),
     };

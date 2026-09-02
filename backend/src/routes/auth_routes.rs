@@ -28,7 +28,7 @@ pub async fn connexion(
 ) -> AppResult<Json<ReponseConnexion>> {
     let compte: Option<(String, String, String, String, i64)> = sqlx::query_as(
         "SELECT id_utilisateur, mot_de_passe_hash, nom, code_role_user, actif
-           FROM utilisateur WHERE login = ?1",
+           FROM utilisateur WHERE login = $1",
     )
     .bind(&demande.login)
     .fetch_optional(&state.db)
@@ -51,7 +51,7 @@ pub async fn connexion(
     )
     .map_err(AppError::Interne)?;
 
-    sqlx::query("UPDATE utilisateur SET derniere_connexion = ?2 WHERE id_utilisateur = ?1")
+    sqlx::query("UPDATE utilisateur SET derniere_connexion = $2 WHERE id_utilisateur = $1")
         .bind(&id)
         .bind(maintenant())
         .execute(&state.db)
@@ -77,7 +77,7 @@ pub async fn moi(
 ) -> AppResult<Json<serde_json::Value>> {
     let permissions: Vec<(String, String)> = sqlx::query_as(
         "SELECT module, action FROM permission
-          WHERE code_role_user = ?1 AND actif = 1
+          WHERE code_role_user = $1 AND actif = 1
           ORDER BY module, action",
     )
     .bind(&user.role)
@@ -93,7 +93,7 @@ pub async fn moi(
            FROM champ_configurable cc
            LEFT JOIN droit_champ dc
                   ON dc.module = cc.module AND dc.champ = cc.champ
-                 AND dc.id_utilisateur = ?1
+                 AND dc.id_utilisateur = $1
           ORDER BY cc.module, cc.ordre",
     )
     .bind(&user.id)

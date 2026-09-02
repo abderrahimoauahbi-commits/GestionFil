@@ -1,0 +1,85 @@
+# =============================================================================
+# Service systemd — ERP Gestion Fil
+# -----------------------------------------------------------------------------
+# Installation :
+#     sudo cp gestionfil.service /etc/systemd/system/
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now gestionfil
+#
+# Journal :
+#     journalctl -u gestionfil -f
+# =============================================================================
+
+[Unit]
+Description=ERP Gestion Fil — Polyfashions Carpet Morocco
+Documentation=file:/opt/gestionfil/README.md
+
+# `After` NE SUFFIT PAS. Il ordonne le demarrage mais n'attend pas que
+# PostgreSQL accepte les connexions : le service demarrerait, echouerait a se
+# connecter, et redemarrerait en boucle pendant quelques secondes au chaque
+# reboot. `Requires` lie les deux — si PostgreSQL s'arrete, le service s'arrete
+# aussi, au lieu de servir des erreurs 500.
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=gestionfil
+Group=gestionfil
+WorkingDirectory=/opt/gestionfil
+
+# La configuration vit dans un fichier separe, lisible par le seul compte du
+# service : il porte le mot de passe de la base et le secret des jetons.
+EnvironmentFile=/opt/gestionfil/.env
+
+ExecStart=/opt/gestionfil/gestionfil
+
+# --- Redemarrage -------------------------------------------------------------
+# `always` et non `on-failure` : un arret propre non demande — un OOM killer,
+# une exception non rattrapee dans un thread — doit aussi relancer le service.
+# Un ERP qui s'arrete a 14 h et attend le lendemain matin qu'on s'en apercoive
+# coute plus cher qu'un redemarrage de trop.
+Restart=always
+RestartSec=5
+
+# Sans limite, une boucle de redemarrage masque la panne au lieu de la
+# signaler : cinq tentatives en une minute, puis le service reste arrete et
+# `systemctl status` dit pourquoi.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# --- Cloisonnement -----------------------------------------------------------
+# Le service ne fait que trois choses : ecouter un port, parler a PostgreSQL sur
+# la boucle locale, et ecrire des sauvegardes. Tout le reste lui est interdit.
+#
+# Ce n'est pas de la precaution abstraite : une faille dans une dependance
+# donnerait sans cela un acces au systeme de fichiers entier, avec les
+# sauvegardes dedans — c'est-a-dire toute la base, prix et empreintes de mots de
+# passe compris.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+# Les deux seuls chemins ou le service peut ecrire.
+ReadWritePaths=/opt/gestionfil/sauvegardes /opt/gestionfil/journaux
+
+# Familles d'adresses : IPv4, IPv6, et le socket UNIX de PostgreSQL.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# --- Journal -----------------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gestionfil
+
+[Install]
+WantedBy=multi-user.target

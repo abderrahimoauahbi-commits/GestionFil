@@ -68,7 +68,7 @@ pub struct ResultatTransfert {
 
 /// Lit l'entete et les lignes, en verifiant le statut attendu.
 async fn dossier(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id_transfert: &str,
     statut_attendu: &str,
     action: &str,
@@ -76,7 +76,7 @@ async fn dossier(
     let entete: EnteteTransfert = sqlx::query_as(
         "SELECT numero_transfert, date_transfert, code_magasin_source,
                 code_magasin_dest, statut, id_utilisateur
-           FROM transfert WHERE id_transfert = ?1",
+           FROM transfert WHERE id_transfert = $1",
     )
     .bind(id_transfert)
     .fetch_optional(&mut **tx)
@@ -94,7 +94,7 @@ async fn dossier(
     let lignes: Vec<LigneTransfert> = sqlx::query_as(
         "SELECT ligne_numero, code_reference, quantite_kg, quantite_saisie,
                 unite_saisie, facteur_conversion, lot_fournisseur, prix_kg_mad
-           FROM ligne_transfert WHERE id_transfert = ?1 ORDER BY ligne_numero",
+           FROM ligne_transfert WHERE id_transfert = $1 ORDER BY ligne_numero",
     )
     .bind(id_transfert)
     .fetch_all(&mut **tx)
@@ -117,7 +117,7 @@ async fn dossier(
 /// quelques millisecondes. Le mouvement de reception etait rejete pour un ecart
 /// d'horloge invisible a l'oeil nu.
 async fn ouvrir_mouvement(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     numero: &str,
     date: Option<&str>,
     type_mvt: &str,
@@ -130,12 +130,12 @@ async fn ouvrir_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, code_type_mvt, code_magasin,
               code_motif, reference_document, id_utilisateur, date_mouvement)
-         VALUES (?1, ?2, ?3, ?4, 'TRANSFERT', ?5, ?6, ?7)"
+         VALUES ($1, $2, $3, $4, 'TRANSFERT', $5, $6, $7)"
     } else {
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, code_type_mvt, code_magasin,
               code_motif, reference_document, id_utilisateur)
-         VALUES (?1, ?2, ?3, ?4, 'TRANSFERT', ?5, ?6)"
+         VALUES ($1, $2, $3, $4, 'TRANSFERT', $5, $6)"
     };
     let mut q = sqlx::query(sql)
         .bind(&id)
@@ -185,7 +185,7 @@ pub async fn expedier(
         // la valeur que la marchandise emporte avec elle.
         let cmup: Option<f64> = sqlx::query_scalar(
             "SELECT cmup_mad FROM stock_magasin
-              WHERE code_reference = ?1 AND code_magasin = ?2",
+              WHERE code_reference = $1 AND code_magasin = $2",
         )
         .bind(&l.code_reference)
         .bind(&entete.code_magasin_source)
@@ -200,7 +200,7 @@ pub async fn expedier(
             ))
         })?;
 
-        sqlx::query("UPDATE ligne_transfert SET prix_kg_mad = ?2 WHERE id_transfert = ?1 AND ligne_numero = ?3")
+        sqlx::query("UPDATE ligne_transfert SET prix_kg_mad = $2 WHERE id_transfert = $1 AND ligne_numero = $3")
             .bind(id_transfert)
             .bind(prix)
             .bind(l.ligne_numero)
@@ -212,7 +212,7 @@ pub async fn expedier(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg,
                   quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(&id_sortie)
         .bind(l.ligne_numero)
@@ -235,8 +235,8 @@ pub async fn expedier(
     sqlx::query(
         "UPDATE transfert
             SET statut = 'VALIDE',
-                date_sortie = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-          WHERE id_transfert = ?1",
+                date_sortie = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+          WHERE id_transfert = $1",
     )
     .bind(id_transfert)
     .execute(&mut *tx)
@@ -299,7 +299,7 @@ pub async fn receptionner(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                   quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(&id_entree)
         .bind(l.ligne_numero)
@@ -320,9 +320,9 @@ pub async fn receptionner(
     sqlx::query(
         "UPDATE transfert
             SET statut = 'TERMINE',
-                id_utilisateur_reception = ?2,
-                date_reception_dest = ?3
-          WHERE id_transfert = ?1",
+                id_utilisateur_reception = $2,
+                date_reception_dest = $3
+          WHERE id_transfert = $1",
     )
     .bind(id_transfert)
     .bind(&user.id)

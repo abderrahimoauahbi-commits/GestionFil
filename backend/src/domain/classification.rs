@@ -76,7 +76,7 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
                              r.prix_catalogue_kg * COALESCE(
                                  (SELECT tc.taux FROM taux_change tc
                                    WHERE tc.code_devise = r.code_devise_catalogue
-                                     AND date('now') BETWEEN tc.date_debut
+                                     AND to_char(current_date, 'YYYY-MM-DD') BETWEEN tc.date_debut
                                                          AND COALESCE(tc.date_fin, '9999-12-31')
                                    LIMIT 1), 1.0),
                              0) AS valeur_mad
@@ -119,7 +119,7 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
         "SELECT code_reference, mois, MAX(quantite_kg) AS quantite_kg
            FROM (
              SELECT lm.code_reference,
-                    strftime('%Y-%m', m.date_mouvement) AS mois,
+                    substr(m.date_mouvement, 1, 7) AS mois,
                     SUM(lm.quantite_kg)                 AS quantite_kg
                FROM ligne_mouvement lm
                JOIN mouvement      m  ON m.id_mouvement   = lm.id_mouvement
@@ -193,8 +193,8 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
         }
         sqlx::query(
             "UPDATE reference
-                SET classe_abc = ?2, classe_xyz = ?3, date_dernier_abc = ?4
-              WHERE code_reference = ?1",
+                SET classe_abc = $2, classe_xyz = $3, date_dernier_abc = $4
+              WHERE code_reference = $1",
         )
         .bind(code)
         .bind(abc)
@@ -218,9 +218,9 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     })
 }
 
-async fn lire_param(tx: &mut sqlx::SqliteConnection, code: &str) -> AppResult<f64> {
+async fn lire_param(tx: &mut sqlx::PgConnection, code: &str) -> AppResult<f64> {
     let v: String =
-        sqlx::query_scalar("SELECT valeur_courante FROM parametre WHERE code_parametre = ?1")
+        sqlx::query_scalar("SELECT valeur_courante FROM parametre WHERE code_parametre = $1")
             .bind(code)
             .fetch_one(&mut *tx)
             .await?;

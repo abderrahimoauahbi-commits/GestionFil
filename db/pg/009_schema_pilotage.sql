@@ -80,7 +80,7 @@ CREATE INDEX ix_alerte_entite ON alerte(entite_concernee, id_entite);
 -- Equivalent SQLite de `SET LOCAL app.id_utilisateur` sous PostgreSQL.
 -- -----------------------------------------------------------------------------
 CREATE TABLE _contexte_session (
-    id                  integer NOT NULL PRIMARY KEY CHECK (id = 1),
+    id                  bigint NOT NULL PRIMARY KEY CHECK (id = 1),
     id_utilisateur      text,
     adresse_ip          text,
     session_id          text

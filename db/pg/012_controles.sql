@@ -35,7 +35,7 @@ HAVING abs(SUM(r.pourcentage_composition) - 100.0) > 0.5;
 DROP VIEW IF EXISTS v_ctl_c02 CASCADE;
 CREATE VIEW v_ctl_c02 AS
 SELECT bc.id_bc, bc.numero_bc, bc.code_fournisseur, bc.date_envoi, bc.statut,
-       CAST((current_date - (bc.date_envoi)::date) AS integer) AS jours_depuis_envoi
+       CAST((current_date - (bc.date_envoi)::date) AS bigint) AS jours_depuis_envoi
 FROM bon_commande bc
 WHERE bc.statut IN ('ENVOYE','LIVRE_PARTIEL')
   AND bc.date_envoi IS NOT NULL
@@ -281,7 +281,7 @@ DROP VIEW IF EXISTS v_ctl_c28 CASCADE;
 CREATE VIEW v_ctl_c28 AS
 SELECT lb.code_reference, r.designation, bc.numero_bc, bc.code_fournisseur,
        lb.date_livraison_prevue,
-       CAST((current_date - (lb.date_livraison_prevue)::date) AS integer) AS retard_jours,
+       CAST((current_date - (lb.date_livraison_prevue)::date) AS bigint) AS retard_jours,
        lb.quantite_restante_kg
 FROM ligne_bc lb
 JOIN bon_commande bc ON bc.id_bc = lb.id_bc

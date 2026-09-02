@@ -68,7 +68,7 @@ SELECT q.code_qualite,
        -- Les roles fautifs, nommes, avec leur somme. C'est ce que le classeur
        -- affiche entre parentheses : « Franges (0%) ».
        (SELECT string_agg(k.role_libelle || ' (' ||
-                            CAST(ROUND(k.somme_pct, 0) AS integer) || '%)', ', ')
+                            CAST(ROUND(k.somme_pct, 0) AS bigint) || '%)', ', ')
           FROM juge k
          WHERE k.code_qualite = q.code_qualite AND k.etat <> 'OK')  AS roles_fautifs,
        CASE

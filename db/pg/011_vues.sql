@@ -210,9 +210,9 @@ CREATE VIEW v_conso_reelle AS
 SELECT
     lm.code_reference,
     ROUND(SUM(lm.quantite_kg), 4) AS sorties_cumulees_kg,
-    GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS integer)) AS nb_mois_ecoules,
+    GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS bigint)) AS nb_mois_ecoules,
     ROUND(SUM(lm.quantite_kg)
-          / GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS integer)), 4) AS conso_mensuelle_kg,
+          / GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS bigint)), 4) AS conso_mensuelle_kg,
     min(m.date_mouvement) AS premiere_sortie,
     max(m.date_mouvement) AS derniere_sortie
 FROM ligne_mouvement lm
@@ -360,7 +360,7 @@ SELECT
     MIN(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
              THEN lb.date_livraison_prevue END)                       AS plus_ancien_retard,
     MAX(CASE WHEN substr(lb.date_livraison_prevue, 1, 10) <  to_char(current_date - (p_ret.v)::integer, 'YYYY-MM-DD')
-             THEN CAST((current_date - (lb.date_livraison_prevue)::date) AS integer) END)
+             THEN CAST((current_date - (lb.date_livraison_prevue)::date) AS bigint) END)
                                                                       AS retard_max_jours
 FROM ligne_bc lb
 JOIN bon_commande bc ON bc.id_bc = lb.id_bc
@@ -394,7 +394,7 @@ SELECT
     r.code_fournisseur,
     f.nom                                   AS fournisseur_nom,
     f.pays                                  AS fournisseur_pays,
-    COALESCE(f.delai_livraison_jours, CAST(p_delai.v AS integer)) AS delai_livraison_jours,
+    COALESCE(f.delai_livraison_jours, CAST(p_delai.v AS bigint)) AS delai_livraison_jours,
     r.classe_abc,
     r.classe_xyz,
     r.unite_catalogue,
@@ -618,7 +618,7 @@ WITH base AS (
             WHEN multiple_achat_kg IS NULL OR multiple_achat_kg <= 0 THEN ROUND(qte_avec_moq_kg, 4)
             ELSE ROUND(CAST(
                      (qte_avec_moq_kg + multiple_achat_kg - 0.0001) / multiple_achat_kg
-                 AS integer) * multiple_achat_kg, 4)
+                 AS bigint) * multiple_achat_kg, 4)
         END AS qte_a_commander_kg
     FROM calcul
 )
@@ -857,7 +857,7 @@ SELECT
     sm.date_derniere_sortie,
     sm.date_derniere_entree,
     COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree) AS date_reference_dormance,
-    CAST((current_date - (COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree))::date) AS integer) AS jours_sans_mouvement,
+    CAST((current_date - (COALESCE(sm.date_derniere_sortie, sm.date_derniere_entree))::date) AS bigint) AS jours_sans_mouvement,
     r.classe_abc
 FROM stock_magasin sm
 JOIN reference r  ON r.code_reference = sm.code_reference
@@ -887,7 +887,7 @@ SELECT
     sl.date_peremption,
     sl.date_premiere_entree,
     CASE WHEN sl.date_peremption IS NOT NULL
-         THEN CAST(((sl.date_peremption)::date - current_date) AS integer) END AS jours_avant_peremption,
+         THEN CAST(((sl.date_peremption)::date - current_date) AS bigint) END AS jours_avant_peremption,
     ROW_NUMBER() OVER (
         PARTITION BY sl.code_reference, sl.code_magasin
         ORDER BY COALESCE(sl.date_peremption, '9999-12-31'), sl.date_premiere_entree
@@ -933,7 +933,7 @@ SELECT
         AND substr(date_livraison_prevue, 1, 10) < to_char(current_date, 'YYYY-MM-DD'))
         AS nb_livraisons_en_retard,
     (SELECT COALESCE(MAX(CAST((current_date - (date_livraison_prevue)::date)
-                              AS integer)), 0)
+                              AS bigint)), 0)
        FROM bon_commande
       WHERE statut IN ('ENVOYE','LIVRE_PARTIEL')
         AND date_livraison_prevue IS NOT NULL
@@ -1110,7 +1110,7 @@ SELECT
     ref.code_fournisseur,
     f.nom AS fournisseur_nom,
     COALESCE(f.delai_livraison_jours,
-             (SELECT CAST(valeur_courante AS integer) FROM parametre
+             (SELECT CAST(valeur_courante AS bigint) FROM parametre
                WHERE code_parametre = 'P_DelaiDefaut')) AS delai_livraison_jours,
     -- Meme regle que v_plan_achat : un autre FOURNISSEUR, pas une autre
     -- reference. Le mur de risques trie sur ce champ ; le fausser reviendrait a
@@ -1138,8 +1138,8 @@ SELECT
     -- chiffre qui dise s'il reste une decision a prendre ou un degat a limiter.
     CAST(((MIN(CASE WHEN rm.statut <> 'COUVERT' THEN rm.annee_mois END) || '-01')::date - current_date)
          - COALESCE(f.delai_livraison_jours,
-                    (SELECT CAST(valeur_courante AS integer) FROM parametre
-                      WHERE code_parametre = 'P_DelaiDefaut')) AS integer)
+                    (SELECT CAST(valeur_courante AS bigint) FROM parametre
+                      WHERE code_parametre = 'P_DelaiDefaut')) AS bigint)
                                                         AS marge_decision_jours,
     -- Un equivalent en stock change la NATURE du risque : ce n'est plus « il
     -- faut commander et attendre » mais « il faut decider ». Le dire evite de
@@ -1237,7 +1237,7 @@ SELECT
     CASE WHEN COALESCE(sd.stock_total_kg, 0) > 0 AND COALESCE(fx.sorties_kg, 0) > 0
          THEN ROUND(fx.sorties_kg / sd.stock_total_kg, 2) END AS rotation,
     CASE WHEN fx.dernier_mouvement IS NULL THEN NULL
-         ELSE CAST((current_date - (fx.dernier_mouvement)::date) AS integer)
+         ELSE CAST((current_date - (fx.dernier_mouvement)::date) AS bigint)
     END                                                  AS jours_sans_mouvement
 FROM reference r
 LEFT JOIN flux fx               ON fx.code_reference = r.code_reference
@@ -1535,7 +1535,7 @@ SELECT
     r2.code_fournisseur                 AS equivalent_fournisseur,
     f2.nom                              AS equivalent_fournisseur_nom,
     COALESCE(f2.delai_livraison_jours,
-             (SELECT CAST(valeur_courante AS integer) FROM parametre
+             (SELECT CAST(valeur_courante AS bigint) FROM parametre
                WHERE code_parametre = 'P_DelaiDefaut')) AS equivalent_delai_jours,
     rge2.priorite                       AS equivalent_priorite,
     rge2.est_preferentielle             AS equivalent_preferentielle,
@@ -1654,7 +1654,7 @@ SELECT
     -- Depuis combien de jours la marchandise est-elle en route ? Au-dela de
     -- quelques jours pour un transfert interne, c'est qu'on a oublie de
     -- constater l'arrivee — ou que la marchandise s'est perdue.
-    CAST((current_date - (t.date_transfert)::date) AS integer) AS jours_en_transit
+    CAST((current_date - (t.date_transfert)::date) AS bigint) AS jours_en_transit
 FROM transfert t
 JOIN ligne_transfert lt ON lt.id_transfert = t.id_transfert
 JOIN reference r        ON r.code_reference = lt.code_reference

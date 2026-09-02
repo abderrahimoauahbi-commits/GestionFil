@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 /// Numerotation sequentielle par prefixe et par annee.
 async fn numeroter(
-    tx: &mut sqlx::SqliteConnection,
+    tx: &mut sqlx::PgConnection,
     table: &str,
     colonne: &str,
     prefixe: &str,
@@ -31,8 +31,8 @@ async fn numeroter(
     // chiffre. Sans le +1, "BC-2026-0001" donnait "-0001", converti en -1 : le
     // 2e document repartait a 0000 et le 3e retombait sur 0001, deja pris.
     let sql = format!(
-        "SELECT COALESCE(MAX(CAST(substr({colonne}, length(?1) + 1) AS INTEGER)), 0) + 1
-           FROM {table} WHERE {colonne} LIKE ?2"
+        "SELECT COALESCE(MAX(CAST(substr({colonne}, length($1) + 1) AS bigint)), 0) + 1
+           FROM {table} WHERE {colonne} LIKE $2"
     );
     let suivant: i64 = sqlx::query_scalar(&sql)
         .bind(format!("{prefixe}-{annee}-"))
@@ -113,7 +113,7 @@ pub async fn creer_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif,
               reference_document, numero_of, observations_globales, id_utilisateur)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
     )
     .bind(&id)
     .bind(&numero)
@@ -136,7 +136,7 @@ pub async fn creer_mouvement(
                   quantite_saisie, unite_saisie, facteur_conversion,
                   lot_fournisseur, date_fabrication, date_peremption,
                   code_motif_ligne, numero_of)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
         )
         .bind(&id)
         .bind((i + 1) as i64)
@@ -182,7 +182,7 @@ pub async fn lister_transferts(
                 -- de quelques jours sur un transfert interne, c'est qu'on a
                 -- oublie de constater l'arrivee.
                 CASE WHEN t.statut = 'VALIDE'
-                     THEN CAST(julianday('now') - julianday(date(t.date_transfert)) AS INTEGER)
+                     THEN CAST((current_date - (t.date_transfert)::date) AS bigint)
                 END AS jours_en_transit
            FROM transfert t
            LEFT JOIN utilisateur u  ON u.id_utilisateur = t.id_utilisateur
@@ -236,17 +236,17 @@ pub async fn dossier_transfert(
                                                                     AS valeur_totale_mad,
                 -- Duree reelle du trajet, une fois l'arrivee constatee.
                 CASE WHEN t.date_sortie IS NOT NULL AND t.date_reception_dest IS NOT NULL
-                     THEN CAST(julianday(t.date_reception_dest) - julianday(t.date_sortie)
-                               AS INTEGER)
+                     THEN CAST(((t.date_reception_dest)::date - (t.date_sortie)::date)
+                               AS bigint)
                      WHEN t.date_sortie IS NOT NULL
-                     THEN CAST(julianday('now') - julianday(t.date_sortie) AS INTEGER)
+                     THEN CAST((current_date - (t.date_sortie)::date) AS bigint)
                 END                                                 AS jours_en_transit
            FROM transfert t
            LEFT JOIN magasin ms     ON ms.code_magasin = t.code_magasin_source
            LEFT JOIN magasin md     ON md.code_magasin = t.code_magasin_dest
            LEFT JOIN utilisateur ue ON ue.id_utilisateur = t.id_utilisateur
            LEFT JOIN utilisateur ur ON ur.id_utilisateur = t.id_utilisateur_reception
-          WHERE t.id_transfert = ?1",
+          WHERE t.id_transfert = $1",
     )
     .bind(&id)
     .fetch_optional(&state.db)
@@ -258,7 +258,7 @@ pub async fn dossier_transfert(
                 ROUND(l.quantite_kg * COALESCE(l.prix_kg_mad, 0), 2) AS total_mad
            FROM ligne_transfert l
            JOIN reference r ON r.code_reference = l.code_reference
-          WHERE l.id_transfert = ?1 ORDER BY l.ligne_numero",
+          WHERE l.id_transfert = $1 ORDER BY l.ligne_numero",
     )
     .bind(&id)
     .fetch_all(&state.db)
@@ -290,8 +290,8 @@ pub async fn creer_transfert(
         "INSERT INTO transfert
              (id_transfert, numero_transfert, code_magasin_source, code_magasin_dest,
               id_utilisateur, responsable, transporteur, observations, date_transfert)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,
-                 COALESCE(?9, strftime('%Y-%m-%dT%H:%M:%fZ','now')))",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+                 COALESCE($9, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')))",
     )
     .bind(&id)
     .bind(&numero)
@@ -323,7 +323,7 @@ pub async fn creer_transfert(
                  (id_transfert, ligne_numero, code_reference, quantite_kg,
                   quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur,
                   nb_bobines, nb_palettes)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
         )
         .bind(&id)
         .bind((i + 1) as i64)
@@ -372,7 +372,7 @@ pub async fn ajouter_ligne_transfert(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = ?1")
+    let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = $1")
         .bind(&id)
         .fetch_optional(&mut *tx)
         .await?
@@ -384,7 +384,7 @@ pub async fn ajouter_ligne_transfert(
     }
 
     let numero: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_transfert WHERE id_transfert = ?1",
+        "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_transfert WHERE id_transfert = $1",
     )
     .bind(&id)
     .fetch_one(&mut *tx)
@@ -395,7 +395,7 @@ pub async fn ajouter_ligne_transfert(
              (id_transfert, ligne_numero, code_reference, quantite_kg,
               quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur,
               nb_bobines, nb_palettes)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(&id)
     .bind(numero)
@@ -457,7 +457,7 @@ pub async fn modifier_transfert(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = ?1")
+    let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = $1")
         .bind(&id)
         .fetch_optional(&mut *tx)
         .await?
@@ -473,10 +473,10 @@ pub async fn modifier_transfert(
 
     sqlx::query(
         "UPDATE transfert
-            SET code_magasin_source = ?2, code_magasin_dest = ?3,
-                responsable = ?4, transporteur = ?5, observations = ?6,
-                date_transfert = COALESCE(?7, date_transfert)
-          WHERE id_transfert = ?1",
+            SET code_magasin_source = $2, code_magasin_dest = $3,
+                responsable = $4, transporteur = $5, observations = $6,
+                date_transfert = COALESCE($7, date_transfert)
+          WHERE id_transfert = $1",
     )
     .bind(&id)
     .bind(&t.code_magasin_source)
@@ -488,7 +488,7 @@ pub async fn modifier_transfert(
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("DELETE FROM ligne_transfert WHERE id_transfert = ?1")
+    sqlx::query("DELETE FROM ligne_transfert WHERE id_transfert = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -500,7 +500,7 @@ pub async fn modifier_transfert(
                  (id_transfert, ligne_numero, code_reference, quantite_kg,
                   quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur,
                   nb_bobines, nb_palettes)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
         )
         .bind(&id)
         .bind((i + 1) as i64)
@@ -540,7 +540,7 @@ pub async fn annuler_transfert(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = ?1")
+    let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = $1")
         .bind(&id)
         .fetch_optional(&mut *tx)
         .await?
@@ -556,7 +556,7 @@ pub async fn annuler_transfert(
 
     // La transition BROUILLON -> ANNULE est declaree dans `transition_statut` :
     // c'est la base qui l'autorise, pas cette fonction.
-    sqlx::query("UPDATE transfert SET statut = 'ANNULE' WHERE id_transfert = ?1")
+    sqlx::query("UPDATE transfert SET statut = 'ANNULE' WHERE id_transfert = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
@@ -611,7 +611,7 @@ pub async fn creer_inventaire(
         "INSERT INTO inventaire
              (id_inventaire, numero_inventaire, type_inventaire, code_magasin,
               id_utilisateur_responsable)
-         VALUES (?1,?2,?3,?4,?5)",
+         VALUES ($1,$2,$3,$4,$5)",
     )
     .bind(&id)
     .bind(&numero)
@@ -635,7 +635,7 @@ pub async fn lignes_inventaire(
         "SELECT li.*, r.designation, r.unite_catalogue
            FROM ligne_inventaire li
            JOIN reference r ON r.code_reference = li.code_reference
-          WHERE li.id_inventaire = ?1
+          WHERE li.id_inventaire = $1
           ORDER BY li.code_reference",
     )
     .bind(&id)
@@ -677,7 +677,7 @@ pub async fn saisir_comptage(
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM inventaire WHERE id_inventaire = ?1")
+        sqlx::query_scalar("SELECT statut FROM inventaire WHERE id_inventaire = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -700,10 +700,10 @@ pub async fn saisir_comptage(
         // deux lignes de comptage distinctes.
         let res = sqlx::query(
             "UPDATE ligne_inventaire
-                SET quantite_comptee_kg = ?3, motif_ecart = ?4, statut_ligne = 'COMPTE',
-                    id_utilisateur_comptage = ?5, date_comptage = ?6
-              WHERE id_inventaire = ?1 AND code_reference = ?2 AND code_magasin = ?7
-                AND lot_fournisseur IS ?8",
+                SET quantite_comptee_kg = $3, motif_ecart = $4, statut_ligne = 'COMPTE',
+                    id_utilisateur_comptage = $5, date_comptage = $6
+              WHERE id_inventaire = $1 AND code_reference = $2 AND code_magasin = $7
+                AND lot_fournisseur IS $8",
         )
         .bind(&id)
         .bind(&c.code_reference)
@@ -773,17 +773,17 @@ pub async fn lister_bc(
                     WHEN (SELECT COALESCE(SUM(l.quantite_recue_kg), 0) FROM ligne_bc l
                            WHERE l.id_bc = bc.id_bc) > 0 THEN
                          CASE WHEN bc.date_livraison_prevue IS NOT NULL
-                                   AND date('now') > date(bc.date_livraison_prevue)
+                                   AND to_char(current_date, 'YYYY-MM-DD') > substr(bc.date_livraison_prevue, 1, 10)
                               THEN 'PARTIEL EN RETARD' ELSE 'PARTIEL' END
                     WHEN bc.date_livraison_prevue IS NOT NULL
-                         AND date('now') > date(bc.date_livraison_prevue) THEN 'EN RETARD'
+                         AND to_char(current_date, 'YYYY-MM-DD') > substr(bc.date_livraison_prevue, 1, 10) THEN 'EN RETARD'
                     ELSE 'ATTENDU'
                 END AS statut_livraison
            FROM bon_commande bc
            JOIN fournisseur f  ON f.code_fournisseur = bc.code_fournisseur
            LEFT JOIN utilisateur uc ON uc.id_utilisateur = bc.id_utilisateur_creation
            LEFT JOIN utilisateur uv ON uv.id_utilisateur = bc.id_utilisateur_validation
-          WHERE (?1 IS NULL OR bc.statut = ?1)
+          WHERE ($1 IS NULL OR bc.statut = $1)
           ORDER BY bc.date_bc DESC LIMIT 200",
     )
     .bind(f.get("statut"))
@@ -821,7 +821,7 @@ pub async fn creer_bc(
 
     let (devise, conditions): (String, Option<String>) = sqlx::query_as(
         "SELECT COALESCE(code_devise, 'MAD'), conditions_paiement
-           FROM fournisseur WHERE code_fournisseur = ?1",
+           FROM fournisseur WHERE code_fournisseur = $1",
     )
     .bind(&b.code_fournisseur)
     .fetch_optional(&mut *tx)
@@ -831,8 +831,8 @@ pub async fn creer_bc(
     // RG-09 : le taux est fige a la creation puis reevalue a la validation.
     let taux: f64 = sqlx::query_scalar(
         "SELECT taux FROM taux_change
-          WHERE code_devise = ?1 AND date('now') >= date(date_debut)
-            AND (date_fin IS NULL OR date('now') < date(date_fin))
+          WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
+            AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
           ORDER BY date_debut DESC LIMIT 1",
     )
     .bind(&devise)
@@ -851,8 +851,8 @@ pub async fn creer_bc(
               date_taux_engage, date_livraison_prevue, conditions_paiement,
               motif_creation, notes, montant_total_devise, montant_total_mad,
               id_utilisateur_creation, date_bc)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,0,?11,
-                 COALESCE(?12, strftime('%Y-%m-%dT%H:%M:%fZ','now')))",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,0,$11,
+                 COALESCE($12, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')))",
     )
     .bind(&id)
     .bind(&numero)
@@ -892,13 +892,13 @@ pub async fn creer_bc(
                   unite_commande, facteur_kg, quantite_commandee_unite,
                   quantite_commandee_kg, prix_unitaire_devise, code_devise,
                   date_livraison_prevue, id_proposition, besoin_kg_origine)
-             SELECT ?1, ?2, ?3, ?4, r.designation, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+             SELECT $1, $2, $3, $4, r.designation, $5, $6, $7, $8, $9, $10, $11,
                     (SELECT pa.id_proposition FROM plan_achat pa
-                      WHERE pa.code_reference = ?4
+                      WHERE pa.code_reference = $4
                         AND pa.statut IN ('PROPOSE','EN_REVISION','VALIDE') LIMIT 1),
                     COALESCE((SELECT bp.besoin_12m_kg FROM v_besoin_12m bp
-                               WHERE bp.code_reference = ?4), 0)
-               FROM reference r WHERE r.code_reference = ?4",
+                               WHERE bp.code_reference = $4), 0)
+               FROM reference r WHERE r.code_reference = $4",
         )
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(&id)
@@ -925,9 +925,9 @@ pub async fn creer_bc(
     // arbitrages ouverts alors qu'elle n'engage plus rien.
     if posees > 0 {
         sqlx::query(
-            "UPDATE plan_achat SET statut = 'COMMANDE', id_bc_genere = ?1, figee = 0
+            "UPDATE plan_achat SET statut = 'COMMANDE', id_bc_genere = $1, figee = 0
               WHERE id_proposition IN (SELECT id_proposition FROM ligne_bc
-                                        WHERE id_bc = ?1 AND id_proposition IS NOT NULL)",
+                                        WHERE id_bc = $1 AND id_proposition IS NOT NULL)",
         )
         .bind(&id)
         .execute(&mut *tx)
@@ -981,7 +981,7 @@ pub async fn lignes_bc(
            JOIN bon_commande bc  ON bc.id_bc = l.id_bc
            LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
            LEFT JOIN v_besoin_12m b ON b.code_reference = l.code_reference
-          WHERE l.id_bc = ?1 ORDER BY l.ligne_numero",
+          WHERE l.id_bc = $1 ORDER BY l.ligne_numero",
     )
     .bind(&id)
     .fetch_all(&state.db)
@@ -1010,15 +1010,15 @@ pub struct ModifLigneBc {
 }
 
 /// Recalcule les totaux de l'entete a partir des lignes.
-async fn recalculer_bc(tx: &mut sqlx::SqliteConnection, id: &str) -> AppResult<()> {
+async fn recalculer_bc(tx: &mut sqlx::PgConnection, id: &str) -> AppResult<()> {
     sqlx::query(
         "UPDATE bon_commande
             SET montant_total_devise = (SELECT COALESCE(SUM(total_ligne_devise), 0)
-                                          FROM ligne_bc WHERE id_bc = ?1),
+                                          FROM ligne_bc WHERE id_bc = $1),
                 montant_total_mad    = ROUND((SELECT COALESCE(SUM(total_ligne_devise), 0)
-                                                FROM ligne_bc WHERE id_bc = ?1)
+                                                FROM ligne_bc WHERE id_bc = $1)
                                              * taux_change_engage, 2)
-          WHERE id_bc = ?1",
+          WHERE id_bc = $1",
     )
     .bind(id)
     .execute(&mut *tx)
@@ -1053,7 +1053,7 @@ pub async fn ajouter_ligne_bc(
     user.poser_contexte(&mut tx).await?;
 
     let (statut, devise): (String, String) =
-        sqlx::query_as("SELECT statut, code_devise FROM bon_commande WHERE id_bc = ?1")
+        sqlx::query_as("SELECT statut, code_devise FROM bon_commande WHERE id_bc = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1065,7 +1065,7 @@ pub async fn ajouter_ligne_bc(
     }
 
     let numero: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_bc WHERE id_bc = ?1",
+        "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_bc WHERE id_bc = $1",
     )
     .bind(&id)
     .fetch_one(&mut *tx)
@@ -1077,8 +1077,8 @@ pub async fn ajouter_ligne_bc(
              (id_ligne_bc, id_bc, ligne_numero, code_reference, designation,
               unite_commande, facteur_kg, quantite_commandee_unite, quantite_commandee_kg,
               prix_unitaire_devise, code_devise, date_livraison_prevue)
-         SELECT ?1, ?2, ?3, ?4, r.designation, ?5, ?6, ?7, ?8, ?9, ?10, ?11
-           FROM reference r WHERE r.code_reference = ?4",
+         SELECT $1, $2, $3, $4, r.designation, $5, $6, $7, $8, $9, $10, $11
+           FROM reference r WHERE r.code_reference = $4",
     )
     .bind(&id_ligne)
     .bind(&id)
@@ -1114,7 +1114,7 @@ pub async fn supprimer_ligne_bc(
     user.poser_contexte(&mut tx).await?;
 
     let recue: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(quantite_recue_kg, 0) FROM ligne_bc WHERE id_ligne_bc = ?1",
+        "SELECT COALESCE(quantite_recue_kg, 0) FROM ligne_bc WHERE id_ligne_bc = $1",
     )
     .bind(&ligne)
     .fetch_optional(&mut *tx)
@@ -1134,14 +1134,14 @@ pub async fn supprimer_ligne_bc(
     let liberee: u64 = sqlx::query(
         "UPDATE plan_achat SET statut = 'PROPOSE', id_bc_genere = NULL
           WHERE statut = 'COMMANDE'
-            AND id_proposition = (SELECT id_proposition FROM ligne_bc WHERE id_ligne_bc = ?1)",
+            AND id_proposition = (SELECT id_proposition FROM ligne_bc WHERE id_ligne_bc = $1)",
     )
     .bind(&ligne)
     .execute(&mut *tx)
     .await?
     .rows_affected();
 
-    sqlx::query("DELETE FROM ligne_bc WHERE id_ligne_bc = ?1")
+    sqlx::query("DELETE FROM ligne_bc WHERE id_ligne_bc = $1")
         .bind(&ligne)
         .execute(&mut *tx)
         .await?;
@@ -1169,7 +1169,7 @@ pub async fn changer_statut_bc(
     user.poser_contexte(&mut tx).await?;
 
     let createur: String = sqlx::query_scalar(
-        "SELECT id_utilisateur_creation FROM bon_commande WHERE id_bc = ?1",
+        "SELECT id_utilisateur_creation FROM bon_commande WHERE id_bc = $1",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -1185,7 +1185,7 @@ pub async fn changer_statut_bc(
             ));
         }
 
-        let lignes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ligne_bc WHERE id_bc = ?1")
+        let lignes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ligne_bc WHERE id_bc = $1")
             .bind(&id)
             .fetch_one(&mut *tx)
             .await?;
@@ -1210,11 +1210,11 @@ pub async fn changer_statut_bc(
                 SET taux_change_engage = COALESCE((
                         SELECT t.taux FROM taux_change t
                          WHERE t.code_devise = bon_commande.code_devise
-                           AND date('now') >= date(t.date_debut)
-                           AND (t.date_fin IS NULL OR date('now') < date(t.date_fin))
+                           AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                           AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                          ORDER BY t.date_debut DESC LIMIT 1), taux_change_engage),
-                    date_taux_engage = ?2
-              WHERE id_bc = ?1",
+                    date_taux_engage = $2
+              WHERE id_bc = $1",
         )
         .bind(&id)
         .bind(maintenant())
@@ -1225,7 +1225,7 @@ pub async fn changer_statut_bc(
 
         // B4 regle 3 : validation par paliers de montant, sur le montant reengage.
         let montant: f64 =
-            sqlx::query_scalar("SELECT COALESCE(montant_total_mad, 0) FROM bon_commande WHERE id_bc = ?1")
+            sqlx::query_scalar("SELECT COALESCE(montant_total_mad, 0) FROM bon_commande WHERE id_bc = $1")
                 .bind(&id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -1242,8 +1242,8 @@ pub async fn changer_statut_bc(
 
         sqlx::query(
             "UPDATE bon_commande
-                SET statut = 'VALIDE', date_validation = ?2, id_utilisateur_validation = ?3
-              WHERE id_bc = ?1",
+                SET statut = 'VALIDE', date_validation = $2, id_utilisateur_validation = $3
+              WHERE id_bc = $1",
         )
         .bind(&id)
         .bind(maintenant())
@@ -1253,8 +1253,8 @@ pub async fn changer_statut_bc(
     } else {
         let date_envoi = if s.statut == "ENVOYE" { Some(maintenant()) } else { None };
         sqlx::query(
-            "UPDATE bon_commande SET statut = ?2, date_envoi = COALESCE(?3, date_envoi)
-              WHERE id_bc = ?1",
+            "UPDATE bon_commande SET statut = $2, date_envoi = COALESCE($3, date_envoi)
+              WHERE id_bc = $1",
         )
         .bind(&id)
         .bind(&s.statut)
@@ -1274,12 +1274,12 @@ pub async fn changer_statut_bc(
                 "UPDATE plan_achat SET statut = 'PROPOSE', id_bc_genere = NULL
                   WHERE statut = 'COMMANDE'
                     AND id_proposition IN (SELECT id_proposition FROM ligne_bc
-                                            WHERE id_bc = ?1 AND id_proposition IS NOT NULL)",
+                                            WHERE id_bc = $1 AND id_proposition IS NOT NULL)",
             )
             .bind(&id)
             .execute(&mut *tx)
             .await?;
-            sqlx::query("UPDATE ligne_bc SET statut = 'ANNULE' WHERE id_bc = ?1")
+            sqlx::query("UPDATE ligne_bc SET statut = 'ANNULE' WHERE id_bc = $1")
                 .bind(&id)
                 .execute(&mut *tx)
                 .await?;
@@ -1320,7 +1320,7 @@ pub async fn modifier_bc(
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = ?1")
+        sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1333,12 +1333,12 @@ pub async fn modifier_bc(
 
     sqlx::query(
         "UPDATE bon_commande
-            SET date_bc               = COALESCE(?2, date_bc),
-                date_livraison_prevue = COALESCE(?3, date_livraison_prevue),
-                conditions_paiement   = COALESCE(?4, conditions_paiement),
-                notes                 = COALESCE(?5, notes),
-                motif_creation        = COALESCE(?6, motif_creation)
-          WHERE id_bc = ?1",
+            SET date_bc               = COALESCE($2, date_bc),
+                date_livraison_prevue = COALESCE($3, date_livraison_prevue),
+                conditions_paiement   = COALESCE($4, conditions_paiement),
+                notes                 = COALESCE($5, notes),
+                motif_creation        = COALESCE($6, motif_creation)
+          WHERE id_bc = $1",
     )
     .bind(&id)
     .bind(&b.date_bc)
@@ -1377,7 +1377,7 @@ pub async fn references_commandables(
     let id = q.get("id_bc").cloned().unwrap_or_default();
     let fournisseur: String = match q.get("code_fournisseur") {
         Some(f) if !f.is_empty() => f.clone(),
-        _ => sqlx::query_scalar("SELECT code_fournisseur FROM bon_commande WHERE id_bc = ?1")
+        _ => sqlx::query_scalar("SELECT code_fournisseur FROM bon_commande WHERE id_bc = $1")
             .bind(&id)
             .fetch_optional(&state.db)
             .await?
@@ -1392,11 +1392,11 @@ pub async fn references_commandables(
     let taux: f64 = sqlx::query_scalar(
         "SELECT COALESCE((SELECT t.taux FROM taux_change t
                            JOIN fournisseur f ON f.code_devise = t.code_devise
-                          WHERE f.code_fournisseur = ?2
-                            AND date('now') >= date(t.date_debut)
-                            AND (t.date_fin IS NULL OR date('now') < date(t.date_fin))
+                          WHERE f.code_fournisseur = $2
+                            AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                            AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                           ORDER BY t.date_debut DESC LIMIT 1),
-                        (SELECT bc.taux_change_engage FROM bon_commande bc WHERE bc.id_bc = ?1),
+                        (SELECT bc.taux_change_engage FROM bon_commande bc WHERE bc.id_bc = $1),
                         1.0)",
     )
     .bind(&id)
@@ -1430,17 +1430,17 @@ pub async fn references_commandables(
                          ROUND(r.prix_catalogue_kg * COALESCE((
                              SELECT t.taux FROM taux_change t
                               WHERE t.code_devise = r.code_devise_catalogue
-                                AND date('now') >= date(t.date_debut)
-                                AND (t.date_fin IS NULL OR date('now') < date(t.date_fin))
+                                AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                                AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                               ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_mad_suggere,
                 ROUND(COALESCE(pa.prix_estime_mad, r.cmup_mad,
                          r.prix_catalogue_kg * COALESCE((
                              SELECT t.taux FROM taux_change t
                               WHERE t.code_devise = r.code_devise_catalogue
-                                AND date('now') >= date(t.date_debut)
-                                AND (t.date_fin IS NULL OR date('now') < date(t.date_fin))
+                                AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                                AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                               ORDER BY t.date_debut DESC LIMIT 1), 1.0))
-                      / ?3, 6) AS prix_suggere_devise,
+                      / $3, 6) AS prix_suggere_devise,
                 CASE WHEN pa.prix_estime_mad IS NOT NULL THEN pa.source_prix
                      WHEN r.cmup_mad IS NOT NULL THEN 'CMUP'
                      ELSE 'CATALOGUE' END AS source_prix,
@@ -1448,7 +1448,7 @@ pub async fn references_commandables(
                 -- masquer, sinon on la cherche sans comprendre pourquoi elle
                 -- manque.
                 (SELECT COUNT(*) FROM ligne_bc l
-                  WHERE l.id_bc = ?1 AND l.code_reference = r.code_reference) AS deja_sur_le_bon,
+                  WHERE l.id_bc = $1 AND l.code_reference = r.code_reference) AS deja_sur_le_bon,
 
                 -- EQUIVALENCE. Le filtre par fournisseur reste : un bon est
                 -- adresse a UN fournisseur, et proposer la reference d'un autre
@@ -1477,7 +1477,7 @@ pub async fn references_commandables(
            JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
            LEFT JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
            LEFT JOIN v_plan_achat    pa ON pa.code_reference = r.code_reference
-          WHERE r.actif = 1 AND r.code_fournisseur = ?2
+          WHERE r.actif = 1 AND r.code_fournisseur = $2
           ORDER BY CASE sp.statut WHEN 'RUPTURE' THEN 1 WHEN 'CRITIQUE' THEN 2
                                   WHEN 'ATTENTION' THEN 3 ELSE 4 END,
                    r.code_reference",
@@ -1514,7 +1514,7 @@ pub async fn modifier_ligne_bc(
             "SELECT bc.statut, lb.code_reference, lb.unite_commande,
                     COALESCE(lb.quantite_recue_kg, 0)
                FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
-              WHERE lb.id_ligne_bc = ?1 AND lb.id_bc = ?2",
+              WHERE lb.id_ligne_bc = $1 AND lb.id_bc = $2",
         )
         .bind(&ligne)
         .bind(&id)
@@ -1540,9 +1540,9 @@ pub async fn modifier_ligne_bc(
             )));
         }
         sqlx::query(
-            "UPDATE ligne_bc SET quantite_commandee_unite = ?2, quantite_commandee_kg = ?3,
-                                 facteur_kg = ?4
-              WHERE id_ligne_bc = ?1",
+            "UPDATE ligne_bc SET quantite_commandee_unite = $2, quantite_commandee_kg = $3,
+                                 facteur_kg = $4
+              WHERE id_ligne_bc = $1",
         )
         .bind(&ligne)
         .bind(q)
@@ -1556,7 +1556,7 @@ pub async fn modifier_ligne_bc(
         if p <= 0.0 {
             return Err(AppError::Invalide("le prix doit etre positif".into()));
         }
-        sqlx::query("UPDATE ligne_bc SET prix_unitaire_devise = ?2 WHERE id_ligne_bc = ?1")
+        sqlx::query("UPDATE ligne_bc SET prix_unitaire_devise = $2 WHERE id_ligne_bc = $1")
             .bind(&ligne)
             .bind(p)
             .execute(&mut *tx)
@@ -1564,14 +1564,14 @@ pub async fn modifier_ligne_bc(
     }
 
     if let Some(d) = &l.date_livraison_prevue {
-        sqlx::query("UPDATE ligne_bc SET date_livraison_prevue = ?2 WHERE id_ligne_bc = ?1")
+        sqlx::query("UPDATE ligne_bc SET date_livraison_prevue = $2 WHERE id_ligne_bc = $1")
             .bind(&ligne)
             .bind(d)
             .execute(&mut *tx)
             .await?;
     }
 
-    sqlx::query("UPDATE ligne_bc SET arbitree = 1 WHERE id_ligne_bc = ?1")
+    sqlx::query("UPDATE ligne_bc SET arbitree = 1 WHERE id_ligne_bc = $1")
         .bind(&ligne)
         .execute(&mut *tx)
         .await?;
@@ -1616,8 +1616,8 @@ pub async fn lister_receptions(
         // livraison a manque quelque chose, et l'affirmer serait faux.
         "WITH promesse AS (
              SELECT l.id_reception,
-                    MIN(date(bc.date_bc))               AS date_bc,
-                    MIN(date(bc.date_livraison_prevue)) AS date_livraison_prevue
+                    MIN(substr(bc.date_bc, 1, 10))               AS date_bc,
+                    MIN(substr(bc.date_livraison_prevue, 1, 10)) AS date_livraison_prevue
                FROM ligne_reception l
                JOIN ligne_bc lb    ON lb.id_ligne_bc = l.id_ligne_bc
                JOIN bon_commande bc ON bc.id_bc = lb.id_bc
@@ -1628,7 +1628,7 @@ pub async fn lister_receptions(
                 -- lignes couvrent : « hors commande » serait un mensonge pour un
                 -- camion qui porte deux bons.
                 COALESCE(bc.numero_bc,
-                         (SELECT GROUP_CONCAT(DISTINCT b2.numero_bc)
+                         (SELECT string_agg(DISTINCT b2.numero_bc, ', ')
                             FROM ligne_reception l2
                             JOIN ligne_bc lb2     ON lb2.id_ligne_bc = l2.id_ligne_bc
                             JOIN bon_commande b2  ON b2.id_bc = lb2.id_bc
@@ -1638,22 +1638,19 @@ pub async fn lister_receptions(
                 up.login AS receptionnaire, uc.login AS controleur,
                 (SELECT COUNT(*) FROM ligne_reception l WHERE l.id_reception = rc.id_reception) AS nb_lignes,
 
-                CAST(julianday(date(rc.date_reception))
-                     - julianday(COALESCE(date(bc.date_bc), p.date_bc)) AS INTEGER)
+                CAST(((rc.date_reception)::date - (COALESCE(substr(bc.date_bc, 1, 10), p.date_bc))::date) AS bigint)
                     AS delai_reel_jours,
-                CAST(julianday(COALESCE(date(bc.date_livraison_prevue), p.date_livraison_prevue))
-                     - julianday(COALESCE(date(bc.date_bc), p.date_bc)) AS INTEGER)
+                CAST(((COALESCE(substr(bc.date_livraison_prevue, 1, 10), p.date_livraison_prevue))::date - (COALESCE(substr(bc.date_bc, 1, 10), p.date_bc))::date) AS bigint)
                     AS delai_prevu_jours,
-                CAST(julianday(date(rc.date_reception))
-                     - julianday(COALESCE(date(bc.date_livraison_prevue), p.date_livraison_prevue))
-                     AS INTEGER)
+                CAST(((rc.date_reception)::date - (COALESCE(substr(bc.date_livraison_prevue, 1, 10), p.date_livraison_prevue))::date)
+                     AS bigint)
                     AS retard_jours,
 
                 CASE WHEN COALESCE(bc.date_bc, p.date_bc) IS NULL
                        OR COALESCE(bc.date_livraison_prevue, p.date_livraison_prevue) IS NULL
                      THEN NULL
-                     WHEN date(rc.date_reception)
-                          <= COALESCE(date(bc.date_livraison_prevue), p.date_livraison_prevue)
+                     WHEN substr(rc.date_reception, 1, 10)
+                          <= COALESCE(substr(bc.date_livraison_prevue, 1, 10), p.date_livraison_prevue)
                      THEN 1
                      ELSE 0 END AS on_time,
 
@@ -1680,7 +1677,7 @@ pub async fn lister_receptions(
            LEFT JOIN promesse p      ON p.id_reception = rc.id_reception
            LEFT JOIN utilisateur up  ON up.id_utilisateur = rc.id_utilisateur_reception
            LEFT JOIN utilisateur uc  ON uc.id_utilisateur = rc.id_utilisateur_controle
-          WHERE (?1 IS NULL OR rc.statut = ?1)
+          WHERE ($1 IS NULL OR rc.statut = $1)
           ORDER BY rc.date_reception DESC LIMIT 200",
     )
     .bind(f.get("statut"))
@@ -1733,7 +1730,7 @@ pub async fn modifier_reception(
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = ?1")
+        sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = $1")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1746,12 +1743,12 @@ pub async fn modifier_reception(
 
     sqlx::query(
         "UPDATE reception
-            SET num_bon_livraison   = COALESCE(?2, num_bon_livraison),
-                numero_facture      = COALESCE(?6, numero_facture),
-                transporteur        = COALESCE(?3, transporteur),
-                nombre_colis        = COALESCE(?4, nombre_colis),
-                poids_total_brut_kg = COALESCE(?5, poids_total_brut_kg)
-          WHERE id_reception = ?1",
+            SET num_bon_livraison   = COALESCE($2, num_bon_livraison),
+                numero_facture      = COALESCE($6, numero_facture),
+                transporteur        = COALESCE($3, transporteur),
+                nombre_colis        = COALESCE($4, nombre_colis),
+                poids_total_brut_kg = COALESCE($5, poids_total_brut_kg)
+          WHERE id_reception = $1",
     )
     .bind(&id)
     .bind(&m.num_bon_livraison)
@@ -1797,7 +1794,7 @@ pub async fn lignes_attendues(
     let id_bc = match (&id_bc, &fournisseur) {
         (Some(b), _) => Some(b.clone()),
         (None, Some(_)) => None,
-        (None, None) => sqlx::query_scalar("SELECT id_bc FROM reception WHERE id_reception = ?1")
+        (None, None) => sqlx::query_scalar("SELECT id_bc FROM reception WHERE id_reception = $1")
             .bind(&id_reception)
             .fetch_optional(&state.db)
             .await?
@@ -1821,23 +1818,23 @@ pub async fn lignes_attendues(
                 -- Deja saisie sur CETTE reception : montrer plutot que masquer,
                 -- sinon on la cherche sans comprendre pourquoi elle manque.
                 (SELECT COALESCE(SUM(lr.quantite_stock_kg), 0) FROM ligne_reception lr
-                  WHERE lr.id_reception = ?2 AND lr.id_ligne_bc = lb.id_ligne_bc)
+                  WHERE lr.id_reception = $2 AND lr.id_ligne_bc = lb.id_ligne_bc)
                     AS deja_pesee_kg,
                 -- Retard sur la date promise : c'est ce qui trie l'urgence au quai.
-                CAST(julianday('now') - julianday(date(bc.date_livraison_prevue)) AS INTEGER)
+                CAST((current_date - (bc.date_livraison_prevue)::date) AS bigint)
                     AS retard_jours,
                 -- Ce que le fournisseur peut legitimement livrer a la place.
                 -- Ramene ici plutot que par un appel separe : au quai on ouvre le
                 -- camion, on ne navigue pas dans un referentiel.
-                (SELECT GROUP_CONCAT(e.equivalent_reference) FROM v_equivalence e
+                (SELECT string_agg(e.equivalent_reference, ', ') FROM v_equivalence e
                   WHERE e.code_reference = lb.code_reference
                     AND e.interchangeable = 1)                 AS equivalents_recevables
            FROM ligne_bc lb
            JOIN bon_commande bc ON bc.id_bc = lb.id_bc
            JOIN reference r ON r.code_reference = lb.code_reference
           WHERE lb.statut <> 'ANNULE'
-            AND (?1 IS NULL OR lb.id_bc = ?1)
-            AND (?3 IS NULL OR (bc.code_fournisseur = ?3
+            AND ($1 IS NULL OR lb.id_bc = $1)
+            AND ($3 IS NULL OR (bc.code_fournisseur = $3
                                 AND bc.statut IN ('ENVOYE','LIVRE_PARTIEL')))
           ORDER BY bc.date_livraison_prevue, bc.numero_bc, lb.ligne_numero",
     )
@@ -1865,7 +1862,7 @@ pub async fn creer_reception(
     // Le fournisseur vient du BC quand il y en a un : le saisir deux fois,
     // c'est risquer qu'ils divergent.
     let fournisseur = match (&r.id_bc, &r.code_fournisseur) {
-        (Some(bc), _) => sqlx::query_scalar("SELECT code_fournisseur FROM bon_commande WHERE id_bc = ?1")
+        (Some(bc), _) => sqlx::query_scalar("SELECT code_fournisseur FROM bon_commande WHERE id_bc = $1")
             .bind(bc)
             .fetch_optional(&mut *tx)
             .await?
@@ -1886,7 +1883,7 @@ pub async fn creer_reception(
              (id_reception, numero_reception, id_bc, code_fournisseur,
               transporteur, num_bon_livraison, numero_facture, nombre_colis,
               poids_total_brut_kg, id_utilisateur_reception)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(&id)
     .bind(&numero)
@@ -1927,7 +1924,7 @@ pub async fn creer_reception(
     if !hors_commande.is_empty() {
         let (devise_frs, conditions): (String, Option<String>) = sqlx::query_as(
             "SELECT COALESCE(code_devise, 'MAD'), conditions_paiement
-               FROM fournisseur WHERE code_fournisseur = ?1",
+               FROM fournisseur WHERE code_fournisseur = $1",
         )
         .bind(&fournisseur)
         .fetch_optional(&mut *tx)
@@ -1936,8 +1933,8 @@ pub async fn creer_reception(
 
         let taux_frs: f64 = sqlx::query_scalar(
             "SELECT taux FROM taux_change
-              WHERE code_devise = ?1 AND date('now') >= date(date_debut)
-                AND (date_fin IS NULL OR date('now') < date(date_fin))
+              WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
+                AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
               ORDER BY date_debut DESC LIMIT 1",
         )
         .bind(&devise_frs)
@@ -1958,7 +1955,7 @@ pub async fn creer_reception(
                   date_taux_engage, date_livraison_prevue, conditions_paiement,
                   motif_creation, notes, montant_total_devise, montant_total_mad,
                   id_utilisateur_creation)
-             VALUES (?1,?2,?3,?4,?5,?6, date('now'), ?7, 'MANUEL', ?8, 0, 0, ?9)",
+             VALUES ($1,$2,$3,$4,$5,$6, to_char(current_date, 'YYYY-MM-DD'), $7, 'MANUEL', $8, 0, 0, $9)",
         )
         .bind(&id_bc_regul)
         .bind(&numero_bc)
@@ -1989,7 +1986,7 @@ pub async fn creer_reception(
             let prix_kg: f64 = match l.prix_kg_devise {
                 Some(p) if p > 0.0 => p,
                 _ => sqlx::query_scalar(
-                    "SELECT prix_catalogue_kg FROM reference WHERE code_reference = ?1",
+                    "SELECT prix_catalogue_kg FROM reference WHERE code_reference = $1",
                 )
                 .bind(&l.code_reference)
                 .fetch_optional(&mut *tx)
@@ -2011,9 +2008,9 @@ pub async fn creer_reception(
                       unite_commande, facteur_kg, quantite_commandee_unite,
                       quantite_commandee_kg, prix_unitaire_devise, code_devise,
                       date_livraison_prevue, notes)
-                 SELECT ?1, ?2, ?3, ?4, r.designation, ?5, ?6, ?7, ?8, ?9, ?10,
-                        date('now'), 'Cree par la reception ' || ?11
-                   FROM reference r WHERE r.code_reference = ?4",
+                 SELECT $1, $2, $3, $4, r.designation, $5, $6, $7, $8, $9, $10,
+                        to_char(current_date, 'YYYY-MM-DD'), 'Cree par la reception ' || $11
+                   FROM reference r WHERE r.code_reference = $4",
             )
             .bind(&id_ligne_bc)
             .bind(&id_bc_regul)
@@ -2065,10 +2062,10 @@ pub async fn creer_reception(
                 "SELECT lb.prix_kg_devise, lb.code_devise,
                         COALESCE((SELECT t.taux FROM taux_change t
                                    WHERE t.code_devise = lb.code_devise
-                                     AND date('now') >= date(t.date_debut)
-                                     AND (t.date_fin IS NULL OR date('now') < date(t.date_fin))
+                                     AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                                     AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                                    ORDER BY t.date_debut DESC LIMIT 1), 1.0)
-                   FROM ligne_bc lb WHERE lb.id_ligne_bc = ?1",
+                   FROM ligne_bc lb WHERE lb.id_ligne_bc = $1",
             )
             .bind(idl)
             .fetch_optional(&mut *tx)
@@ -2083,7 +2080,7 @@ pub async fn creer_reception(
 
         let qte_commandee: Option<f64> = match &id_ligne_bc {
             Some(idl) => sqlx::query_scalar(
-                "SELECT quantite_restante_kg FROM ligne_bc WHERE id_ligne_bc = ?1",
+                "SELECT quantite_restante_kg FROM ligne_bc WHERE id_ligne_bc = $1",
             )
             .bind(idl)
             .fetch_optional(&mut *tx)
@@ -2099,9 +2096,9 @@ pub async fn creer_reception(
                   code_devise, taux_change, prix_kg_mad, lot_fournisseur, date_fabrication,
                   date_peremption, statut_qualite, code_magasin_dest, notes,
                   substitution_acceptee, motif_substitution)
-             SELECT ?1, ?2, ?3, ?4, ?5, r.designation, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                    ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
-               FROM reference r WHERE r.code_reference = ?5",
+             SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13,
+                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+               FROM reference r WHERE r.code_reference = $5",
         )
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(&id)
@@ -2166,7 +2163,7 @@ pub async fn lignes_reception(
            FROM ligne_reception l
            JOIN reference r ON r.code_reference = l.code_reference
            LEFT JOIN ligne_bc lb ON lb.id_ligne_bc = l.id_ligne_bc
-          WHERE l.id_reception = ?1 ORDER BY l.ligne_numero",
+          WHERE l.id_reception = $1 ORDER BY l.ligne_numero",
     )
     .bind(&id)
     .fetch_all(&state.db)
@@ -2227,7 +2224,7 @@ pub async fn ajouter_ligne_reception(
         "SELECT rc.statut,
                 (SELECT bc.code_devise FROM bon_commande bc WHERE bc.id_bc = rc.id_bc),
                 rc.id_bc
-           FROM reception rc WHERE rc.id_reception = ?1",
+           FROM reception rc WHERE rc.id_reception = $1",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -2251,7 +2248,7 @@ pub async fn ajouter_ligne_reception(
                 // et l'OTIF de chacune tomberait a zero sans faute reelle.
                 let r: (f64, String, f64) = sqlx::query_as(
                     "SELECT prix_kg_devise, code_devise, quantite_restante_kg
-                       FROM ligne_bc WHERE id_ligne_bc = ?1",
+                       FROM ligne_bc WHERE id_ligne_bc = $1",
                 )
                 .bind(ligne_bc)
                 .fetch_optional(&mut *tx)
@@ -2267,7 +2264,7 @@ pub async fn ajouter_ligne_reception(
             (None, None) => {
                 let r: (f64, String) = sqlx::query_as(
                     "SELECT prix_catalogue_kg, code_devise_catalogue
-                       FROM reference WHERE code_reference = ?1",
+                       FROM reference WHERE code_reference = $1",
                 )
                 .bind(&l.code_reference)
                 .fetch_one(&mut *tx)
@@ -2279,8 +2276,8 @@ pub async fn ajouter_ligne_reception(
     // RG-09 : taux du jour de la reception, distinct du taux engage du BC.
     let taux: f64 = sqlx::query_scalar(
         "SELECT taux FROM taux_change
-          WHERE code_devise = ?1 AND date('now') >= date(date_debut)
-            AND (date_fin IS NULL OR date('now') < date(date_fin))
+          WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
+            AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
           ORDER BY date_debut DESC LIMIT 1",
     )
     .bind(&devise)
@@ -2289,7 +2286,7 @@ pub async fn ajouter_ligne_reception(
     .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux en vigueur pour {devise}.")))?;
 
     let numero: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_reception WHERE id_reception = ?1",
+        "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_reception WHERE id_reception = $1",
     )
     .bind(&id)
     .fetch_one(&mut *tx)
@@ -2307,9 +2304,9 @@ pub async fn ajouter_ligne_reception(
               code_magasin_dest, derogation_ecart, id_utilisateur_derogation, motif_derogation,
               quantite_bl_kg, nb_colis_ligne, notes,
               substitution_acceptee, motif_substitution)
-         SELECT ?1, ?2, ?3, ?4, ?5, r.designation, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
-           FROM reference r WHERE r.code_reference = ?5",
+         SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
+           FROM reference r WHERE r.code_reference = $5",
     )
     .bind(&id_ligne)
     .bind(&id)
@@ -2381,7 +2378,7 @@ pub async fn changer_statut_reception(
 
     if s.statut == "A_CONTROLER" {
         let lignes: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM ligne_reception WHERE id_reception = ?1")
+            sqlx::query_scalar("SELECT COUNT(*) FROM ligne_reception WHERE id_reception = $1")
                 .bind(&id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -2393,7 +2390,7 @@ pub async fn changer_statut_reception(
     }
 
     // Le trigger de transition refuse tout enchainement non prevu.
-    let res = sqlx::query("UPDATE reception SET statut = ?2 WHERE id_reception = ?1")
+    let res = sqlx::query("UPDATE reception SET statut = $2 WHERE id_reception = $1")
         .bind(&id)
         .bind(&s.statut)
         .execute(&mut *tx)
@@ -2416,7 +2413,7 @@ pub async fn supprimer_ligne_reception(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let statut: String = sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = ?1")
+    let statut: String = sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = $1")
         .bind(&id)
         .fetch_optional(&mut *tx)
         .await?
@@ -2427,7 +2424,7 @@ pub async fn supprimer_ligne_reception(
         ));
     }
 
-    let res = sqlx::query("DELETE FROM ligne_reception WHERE id_ligne_reception = ?1")
+    let res = sqlx::query("DELETE FROM ligne_reception WHERE id_ligne_reception = $1")
         .bind(&ligne)
         .execute(&mut *tx)
         .await?;

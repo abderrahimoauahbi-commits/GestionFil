@@ -1,41 +1,46 @@
-//! Pool de connexions SQLite et contexte de session.
+//! Pool de connexions PostgreSQL et contexte de session.
 //!
-//! Deux contraintes d'integration imposees par la couche SQL (db/README.md) :
+//! # Le contexte d'audit, et pourquoi il a change de forme
 //!
-//!   1. `PRAGMA foreign_keys = ON` sur CHAQUE connexion. SQLite le desactive par
-//!      defaut ; sans lui les controles C03/C04 ne protegent rien.
-//!   2. `recursive_triggers` doit rester desactive : l'historisation des
-//!      parametres s'appuie sur son etat par defaut.
+//! Les declencheurs d'audit doivent savoir QUI ecrit. Sous SQLite, l'identite
+//! etait posee dans `_contexte_session`, une table a une seule ligne :
+//! l'ecriture etant serialisee par le moteur, un seul redacteur pouvait s'y
+//! trouver a la fois.
+//!
+//! POSTGRESQL ECRIT EN CONCURRENCE, ET LE PROCEDE NE TIENT PLUS. Seize
+//! connexions du pool peuvent ecrire en meme temps : le magasinier pose son
+//! identite, l'assistante pose la sienne une milliseconde plus tard, et le
+//! declencheur du magasinier lit celle de l'assistante. Le journal attribuerait
+//! alors l'action a la mauvaise personne, sans panne et sans signal — le pire
+//! defaut possible pour une trace, puisqu'il ne se decouvre que le jour ou elle
+//! sert.
+//!
+//! L'identite voyage donc dans une VARIABLE DE TRANSACTION, posee par
+//! `set_config(..., true)` et lue par `current_setting(..., true)`. Elle est
+//! portee par la transaction, invisible aux autres sessions, et disparait au
+//! COMMIT. Les declencheurs ont ete portes en consequence (66 lectures).
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Executor, SqlitePool};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::PgPool;
 use std::str::FromStr;
 use std::time::Duration;
 
-pub type Db = SqlitePool;
+pub type Db = PgPool;
 
 pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
-    let options = SqliteConnectOptions::from_str(database_url)?
-        .foreign_keys(true)
-        .synchronous(SqliteSynchronous::Full)
-        .busy_timeout(Duration::from_secs(10))
-        // WAL : lectures concurrentes pendant une ecriture. Necessaire pour la
-        // cible "50 utilisateurs simultanes" du CDC L3.
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+    let options = PgConnectOptions::from_str(database_url)?
+        // Le fuseau de la SESSION, pas celui du serveur. Toutes les dates du
+        // schema sont du texte ISO-8601 en UTC (ADR-001 D-11) : un serveur
+        // regle sur Europe/Paris ferait rendre a `current_date` une date
+        // decalee d'un jour pendant deux heures chaque nuit.
+        .options([("timezone", "UTC")]);
 
-    let pool = SqlitePoolOptions::new()
+    let pool = PgPoolOptions::new()
+        // Seize connexions pour la cible « 50 utilisateurs simultanes » du
+        // CDC L3 : un ERP passe l'essentiel de son temps a lire, et les
+        // lectures sont courtes.
         .max_connections(16)
         .acquire_timeout(Duration::from_secs(10))
-        .after_connect(|conn, _meta| {
-            Box::pin(async move {
-                // Ceinture et bretelles : `foreign_keys(true)` ci-dessus le fait
-                // deja, mais une regression silencieuse ici corromprait
-                // l'integrite referentielle sans aucun signal.
-                conn.execute("PRAGMA foreign_keys = ON;").await?;
-                conn.execute("PRAGMA recursive_triggers = OFF;").await?;
-                Ok(())
-            })
-        })
         .connect_with(options)
         .await?;
 
@@ -44,51 +49,75 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
 }
 
 /// Verifie au demarrage que la base chargee est bien celle attendue.
+///
+/// Mieux vaut refuser de demarrer que servir des ecrans vides sur une base
+/// incomplete : l'erreur se lit alors dans le journal du service, pas dans le
+/// support utilisateur trois jours plus tard.
 async fn verifier_schema(pool: &Db) -> anyhow::Result<()> {
-    let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys;")
-        .fetch_one(pool)
-        .await?;
-    if fk != 1 {
-        anyhow::bail!("PRAGMA foreign_keys n'est pas actif sur la connexion");
-    }
-
     let tables: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        "SELECT COUNT(*) FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
     )
     .fetch_one(pool)
     .await?;
     if tables < 40 {
         anyhow::bail!(
-            "schema incomplet ({} tables) : executer db/build.ps1 avant de demarrer",
+            "schema incomplet ({} tables) : charger db/pg avec charger.py avant de demarrer",
             tables
         );
     }
 
-    let ctx: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _contexte_session WHERE id = 1")
-        .fetch_one(pool)
-        .await?;
-    if ctx != 1 {
-        anyhow::bail!("_contexte_session absente : le journal d'audit serait anonyme");
+    let vues: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.views WHERE table_schema = 'public'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if vues < 60 {
+        anyhow::bail!(
+            "vues manquantes ({} sur 73) : le pilotage serait muet sans erreur visible",
+            vues
+        );
+    }
+
+    // Les declencheurs d'audit portent la tracabilite : sans eux le service
+    // fonctionne parfaitement et n'enregistre rien. C'est exactement le genre
+    // d'absence qu'on ne remarque pas.
+    let declencheurs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT trigger_name) FROM information_schema.triggers
+          WHERE trigger_schema = 'public'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if declencheurs < 70 {
+        anyhow::bail!(
+            "declencheurs manquants ({} sur 76) : les regles metier ne seraient plus appliquees",
+            declencheurs
+        );
     }
 
     Ok(())
 }
 
-/// Renseigne l'identite de l'appelant pour les triggers d'audit.
+/// Renseigne l'identite de l'appelant pour les declencheurs d'audit.
 ///
-/// A appeler en TOUT DEBUT de transaction ecrivante, avant la premiere ecriture :
-/// les triggers d'audit lisent cette table au moment ou ils s'executent.
-/// Equivalent SQLite de `SET LOCAL app.id_utilisateur` sous PostgreSQL.
+/// A appeler en TOUT DEBUT de transaction ecrivante, avant la premiere
+/// ecriture : les declencheurs lisent ces variables au moment ou ils
+/// s'executent.
+///
+/// Le troisieme argument de `set_config` vaut `true` : la variable est LOCALE A
+/// LA TRANSACTION. Elle disparait au COMMIT et reste invisible aux autres
+/// connexions du pool — c'est ce qui empeche deux utilisateurs simultanes de se
+/// voler leur identite dans le journal.
 pub async fn poser_contexte(
-    tx: &mut sqlx::SqliteConnection,
+    tx: &mut sqlx::PgConnection,
     id_utilisateur: &str,
     adresse_ip: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE _contexte_session
-            SET id_utilisateur = ?1, adresse_ip = ?2, session_id = ?3
-          WHERE id = 1",
+        "SELECT set_config('gestionfil.id_utilisateur', $1, true),
+                set_config('gestionfil.adresse_ip',     COALESCE($2, ''), true),
+                set_config('gestionfil.session_id',     COALESCE($3, ''), true)",
     )
     .bind(id_utilisateur)
     .bind(adresse_ip)

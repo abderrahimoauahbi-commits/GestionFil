@@ -182,7 +182,7 @@ pub async fn supprimer_reference_definitivement(
     let mut motifs: Vec<String> = Vec::new();
     for (table, libelle) in retenants {
         let n: i64 = sqlx::query_scalar(&format!(
-            "SELECT COUNT(*) FROM {table} WHERE code_reference = ?1"
+            "SELECT COUNT(*) FROM {table} WHERE code_reference = $1"
         ))
         .bind(&code)
         .fetch_one(&mut *tx)
@@ -193,7 +193,7 @@ pub async fn supprimer_reference_definitivement(
     }
 
     let stock: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(quantite_kg), 0) FROM stock_magasin WHERE code_reference = ?1",
+        "SELECT COALESCE(SUM(quantite_kg), 0) FROM stock_magasin WHERE code_reference = $1",
     )
     .bind(&code)
     .fetch_one(&mut *tx)
@@ -213,16 +213,16 @@ pub async fn supprimer_reference_definitivement(
     /* Le rattachement a un groupe d'equivalence ne porte pas d'histoire : il se
        defait sans perte, et le laisser empecherait la suppression par cle
        etrangere. */
-    sqlx::query("DELETE FROM reference_groupe_equiv WHERE code_reference = ?1")
+    sqlx::query("DELETE FROM reference_groupe_equiv WHERE code_reference = $1")
         .bind(&code)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM stock_magasin WHERE code_reference = ?1 AND quantite_kg = 0")
+    sqlx::query("DELETE FROM stock_magasin WHERE code_reference = $1 AND quantite_kg = 0")
         .bind(&code)
         .execute(&mut *tx)
         .await?;
 
-    let res = sqlx::query("DELETE FROM reference WHERE code_reference = ?1")
+    let res = sqlx::query("DELETE FROM reference WHERE code_reference = $1")
         .bind(&code)
         .execute(&mut *tx)
         .await?;
@@ -277,7 +277,7 @@ pub async fn creer_frais_approche(
     }
 
     let statut: Option<String> =
-        sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = ?1")
+        sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = $1")
             .bind(&f.id_reception)
             .fetch_optional(&state.db)
             .await?;
@@ -298,7 +298,7 @@ pub async fn creer_frais_approche(
         "INSERT INTO frais_approche (id_reception, type_frais, libelle, montant_devise,
                                      code_devise, taux_change, cle_repartition,
                                      reference_externe, id_utilisateur, notes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 'POIDS'), ?8, ?9, ?10)",
+         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 'POIDS'), $8, $9, $10)",
     )
     .bind(&f.id_reception)
     .bind(&f.type_frais)

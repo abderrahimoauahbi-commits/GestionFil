@@ -70,7 +70,7 @@ CREATE TABLE ligne_bc (
     id_ligne_bc         text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     id_bc               text    NOT NULL REFERENCES bon_commande(id_bc) ON DELETE CASCADE,
-    ligne_numero        integer NOT NULL CHECK (ligne_numero > 0),
+    ligne_numero        bigint NOT NULL CHECK (ligne_numero > 0),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     designation         text,
 
@@ -113,7 +113,7 @@ CREATE TABLE ligne_bc (
     -- recalcul ne la realigne plus, il se contente d'alerter. Sans ce drapeau,
     -- soit on ecrase un prix negocie, soit on laisse vieillir en silence les
     -- lignes que personne n'a arbitrees.
-    arbitree            smallint NOT NULL DEFAULT 0 CHECK (arbitree IN (0,1)),
+    arbitree            bigint NOT NULL DEFAULT 0 CHECK (arbitree IN (0,1)),
 
     UNIQUE (id_bc, ligne_numero),
     -- Coherence de la conversion (tolerance d'arrondi au gramme)
@@ -181,7 +181,7 @@ CREATE TABLE plan_achat (
     -- Figer ne fige que la PROPOSITION, pas le besoin : le calcul continue de
     -- dire ce qu'il faudrait acheter, et l'ecart entre les deux se lit a tout
     -- moment. C'est ce qui distingue une ligne protegee d'une ligne aveugle.
-    figee               smallint NOT NULL DEFAULT 0 CHECK (figee IN (0,1)),
+    figee               bigint NOT NULL DEFAULT 0 CHECK (figee IN (0,1)),
     id_utilisateur_figement text REFERENCES utilisateur(id_utilisateur),
     date_figement       text,
     motif_figement      text    CHECK (motif_figement IS NULL OR motif_figement IN

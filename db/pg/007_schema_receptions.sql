@@ -39,7 +39,7 @@ CREATE TABLE reception (
     -- La facture arrive apres le camion : elle se saisit quand elle arrive, et
     -- c'est elle qui rapproche la reception du reglement.
     numero_facture      text,
-    nombre_colis        integer CHECK (nombre_colis IS NULL OR nombre_colis > 0),
+    nombre_colis        bigint CHECK (nombre_colis IS NULL OR nombre_colis > 0),
     poids_total_brut_kg numeric(18,4)    CHECK (poids_total_brut_kg IS NULL OR poids_total_brut_kg > 0),
 
     statut              text    NOT NULL DEFAULT 'BROUILLON'
@@ -73,7 +73,7 @@ CREATE TABLE ligne_reception (
                                 DEFAULT gen_random_uuid()::text,
     id_reception        text    NOT NULL REFERENCES reception(id_reception) ON DELETE CASCADE,
     id_ligne_bc         text    REFERENCES ligne_bc(id_ligne_bc),
-    ligne_numero        integer NOT NULL CHECK (ligne_numero > 0),
+    ligne_numero        bigint NOT NULL CHECK (ligne_numero > 0),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
     designation         text,
 
@@ -104,7 +104,7 @@ CREATE TABLE ligne_reception (
     quantite_bl_kg      numeric(18,4)    CHECK (quantite_bl_kg IS NULL OR quantite_bl_kg >= 0),
     -- Nombre de colis de CETTE ligne. Le poids moyen par colis qui s'en deduit
     -- detecte un conditionnement different de celui annonce au catalogue.
-    nb_colis_ligne      integer CHECK (nb_colis_ligne IS NULL OR nb_colis_ligne > 0),
+    nb_colis_ligne      bigint CHECK (nb_colis_ligne IS NULL OR nb_colis_ligne > 0),
     lot_fournisseur     text,
     date_fabrication    text,
     date_peremption     text,
@@ -121,7 +121,7 @@ CREATE TABLE ligne_reception (
     -- explicite, et le trigger refuse l'ecart sans lui. Sans cette porte, on
     -- pourrait solder une ligne de fil de chaine avec du jute et ne s'en
     -- apercevoir qu'a l'inventaire.
-    substitution_acceptee integer NOT NULL DEFAULT 0
+    substitution_acceptee bigint NOT NULL DEFAULT 0
                                 CHECK (substitution_acceptee IN (0,1)),
     motif_substitution  text,
 
@@ -133,7 +133,7 @@ CREATE TABLE ligne_reception (
     id_mouvement_genere text,
 
     -- Derogation sur ecart de pesee hors tolerance (E6)
-    derogation_ecart    smallint NOT NULL DEFAULT 0 CHECK (derogation_ecart IN (0,1)),
+    derogation_ecart    bigint NOT NULL DEFAULT 0 CHECK (derogation_ecart IN (0,1)),
     id_utilisateur_derogation text REFERENCES utilisateur(id_utilisateur),
     motif_derogation    text,
 
@@ -176,10 +176,10 @@ CREATE TABLE archive_reception (
     code_magasin_dest   text    NOT NULL,
     statut_qualite      text    NOT NULL,
     ecart_pct           numeric(9,4),
-    conformite_specifications integer CHECK (conformite_specifications IS NULL OR conformite_specifications IN (0,1)),
-    conformite_quantite integer CHECK (conformite_quantite IS NULL OR conformite_quantite IN (0,1)),
-    conformite_delai    integer CHECK (conformite_delai IS NULL OR conformite_delai IN (0,1)),
-    jours_retard        integer,
+    conformite_specifications bigint CHECK (conformite_specifications IS NULL OR conformite_specifications IN (0,1)),
+    conformite_quantite bigint CHECK (conformite_quantite IS NULL OR conformite_quantite IN (0,1)),
+    conformite_delai    bigint CHECK (conformite_delai IS NULL OR conformite_delai IN (0,1)),
+    jours_retard        bigint,
     documents_attaches  text    CHECK (documents_attaches IS NULL OR (documents_attaches)::jsonb IS NOT NULL),
     photos              text    CHECK (photos IS NULL OR (photos)::jsonb IS NOT NULL),
     date_archive        text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

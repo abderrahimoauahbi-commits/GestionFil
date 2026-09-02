@@ -27,10 +27,10 @@ CREATE TABLE role_utilisateur (
     code_role_user      text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     description         text,
-    niveau_hierarchique integer NOT NULL DEFAULT 0,
+    niveau_hierarchique bigint NOT NULL DEFAULT 0,
     -- Plafond de validation d'un BC en MAD (CDC B4 regle 3). NULL = illimite.
     plafond_validation_bc_mad numeric(18,2),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 -- -----------------------------------------------------------------------------
@@ -48,7 +48,7 @@ CREATE TABLE utilisateur (
     magasin_principal   text    REFERENCES magasin(code_magasin),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     derniere_connexion  text,
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
 );
 
 CREATE INDEX ix_utilisateur_role ON utilisateur(code_role_user);
@@ -65,7 +65,7 @@ CREATE TABLE permission (
     code_role_user      text    NOT NULL REFERENCES role_utilisateur(code_role_user) ON DELETE CASCADE,
     module              text    NOT NULL,
     action              text    NOT NULL CHECK (action IN ('LIRE','ECRIRE','VALIDER')),
-    actif               smallint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     UNIQUE (code_role_user, module, action)
 );
 
@@ -85,8 +85,8 @@ CREATE TABLE champ_configurable (
     libelle             text    NOT NULL,
     niveau_defaut       text    NOT NULL DEFAULT 'LECTURE'
                                 CHECK (niveau_defaut IN ('MASQUE','LECTURE','ECRITURE')),
-    sensible            smallint NOT NULL DEFAULT 0 CHECK (sensible IN (0,1)),
-    ordre               integer NOT NULL DEFAULT 0,
+    sensible            bigint NOT NULL DEFAULT 0 CHECK (sensible IN (0,1)),
+    ordre               bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (module, champ)
 );
 

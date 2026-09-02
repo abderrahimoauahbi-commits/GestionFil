@@ -35,7 +35,7 @@ impl Config {
 
         Ok(Self {
             database_url: std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite://../db/gestionfil.db".into()),
+                .unwrap_or_else(|_| "postgres://gestionfil@127.0.0.1/gestionfil".into()),
             bind_addr: std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into()),
             jwt_secret,
             jwt_ttl_minutes: std::env::var("JWT_TTL_MINUTES")

@@ -70,8 +70,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/telechargements/journal", get(telechargements::journal))
         .route("/api/telechargements/{fichier}", get(telechargements::telecharger))
         // --- Assistant de direction (lecture seule, role DIRECTION) -----------
+        // L'ANCIEN ASSISTANT RESTE, en second. C'est un catalogue ferme de
+        // questions : il repond sans modele de langage, donc il repond meme si
+        // le moteur est arrete ou injoignable. Le chatbot le remplace a
+        // l'usage, il ne le supprime pas.
         .route("/api/assistant", get(assistant::catalogue))
         .route("/api/assistant/{id}", get(assistant::repondre))
+        // --- Le chatbot --------------------------------------------------------
+        .route("/api/chat", post(crate::assistant::discuter))
+        .route("/api/chat/etat", get(crate::assistant::etat))
+        .route("/api/chat/competences", get(crate::assistant::liste_competences))
         // --- Authentification -------------------------------------------------
         .route("/api/auth/connexion", post(auth_routes::connexion))
         .route("/api/auth/moi", get(auth_routes::moi))

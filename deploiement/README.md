@@ -308,6 +308,60 @@ fonctionne parfaitement et n'applique plus aucune règle — stock négatif acce
 
 ---
 
+## L'assistant
+
+L'écran **Assistant** est un chatbot. On y pose sa question dans ses mots ; un
+modèle de langage choisit la **compétence** qui apporte le chiffre, et le serveur
+l'exécute. Treize compétences aujourd'hui : recherche de référence, état du
+stock, références en tension, équivalents, fournisseurs, commandes en cours,
+plan d'achat, mouvements, valeur du stock, contrôles, composition d'une qualité,
+et deux qui préparent un **brouillon** de mouvement ou de commande.
+
+**Le modèle n'écrit jamais de SQL et n'enregistre rien.** Il choisit une
+compétence et ses arguments ; la requête est écrite à l'avance, bornée, et son
+résultat masqué selon la grille de droits de celui qui pose la question. Une
+demande de saisie produit un brouillon que l'utilisateur relit et valide
+lui-même : sans cela, le journal d'audit dirait « Mohamed a validé » alors que
+personne n'a lu.
+
+### Deux moteurs, réglables dans `/opt/gestionfil/.env`
+
+```bash
+ASSISTANT_MOTEUR=ollama          # ou : claude
+ASSISTANT_MODELE=qwen2.5:3b-instruct
+OLLAMA_URL=http://127.0.0.1:11434
+# ANTHROPIC_API_KEY=sk-ant-...   # exigée par le moteur claude
+```
+
+| Moteur | Confidentialité | Vitesse mesurée sur ce serveur |
+|---|---|---|
+| `ollama` | Rien ne sort de la machine | 10 à 90 s par réponse |
+| `claude` | Question et chiffres partent chez Anthropic | 2 à 5 s |
+
+Sans `ANTHROPIC_API_KEY`, demander `claude` retombe sur `ollama` plutôt que
+d'échouer sur une erreur d'authentification illisible. Le changement de moteur
+ne demande **pas** de redémarrage du service : le réglage est relu à chaque
+question.
+
+Ollama tourne en service systemd, avec le modèle gardé en mémoire
+(`/etc/systemd/system/ollama.service.d/gestionfil.conf`). Le recharger coûtait
+plusieurs secondes à la première question de la journée.
+
+```bash
+ollama list                       # les modèles installés
+ollama pull qwen2.5:7b-instruct   # plus juste, environ trois fois plus lent
+systemctl status ollama
+```
+
+> **Ce que le moteur local vaut, dit franchement.** Sur quatre cœurs sans carte
+> graphique, le modèle 3B répond en 10 à 90 secondes et sa formulation est
+> parfois maladroite. Il choisit la bonne compétence et le chiffre qu'il donne
+> est exact — c'est le serveur qui le calcule — mais la phrase autour se lit
+> moins bien qu'avec Claude. Le modèle 7B écrit mieux et met trois fois plus de
+> temps.
+
+---
+
 ## Distribuer les clients
 
 Les installateurs vivent dans `/opt/gestionfil/telechargements`, servis par

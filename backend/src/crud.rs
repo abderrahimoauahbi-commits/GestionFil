@@ -343,7 +343,13 @@ pub async fn lister(
             return Err(AppError::Invalide(format!("filtre inconnu : {colonne}")));
         }
         valeurs.push(valeur.clone());
-        conditions.push(format!("c.{colonne} = ?{}", valeurs.len()));
+        // `$N` ET NON `?N`. Le portage vers PostgreSQL a converti le SQL ecrit
+        // en dur ; celui-ci est assemble a l'execution, il lui a echappe.
+        // Consequence : tout filtre d'egalite tombait en « erreur interne »,
+        // et l'ecran des equivalences n'affichait jamais les references d'un
+        // groupe. Vu en production, dans le journal : « l'operateur n'existe
+        // pas : ? integer ».
+        conditions.push(format!("c.{colonne} = ${}", valeurs.len()));
     }
     if let Some(motif) = &f.recherche {
         // Recherche sur la cle et les colonnes textuelles usuelles.
@@ -359,7 +365,7 @@ pub async fn lister(
             "({})",
             cibles
                 .iter()
-                .map(|c| format!("{c} LIKE ?{i}"))
+                .map(|c| format!("{c} LIKE ${i}"))
                 .collect::<Vec<_>>()
                 .join(" OR ")
         ));
@@ -517,10 +523,11 @@ pub async fn modifier(
     user.exiger(db, e.module, Action::Ecrire).await?;
     let champs = valider_charge(db, user, e.module, e.modification, charge).await?;
 
+    // `$1` porte l'identifiant, les champs commencent donc a `$2`.
     let set: Vec<String> = champs
         .iter()
         .enumerate()
-        .map(|(i, (n, _))| format!("{n} = ?{}", i + 2))
+        .map(|(i, (n, _))| format!("{n} = ${}", i + 2))
         .collect();
     let sql = format!(
         "UPDATE {} SET {} WHERE {} = $1",

@@ -56,7 +56,15 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
         // schema sont du texte ISO-8601 en UTC (ADR-001 D-11) : un serveur
         // regle sur Europe/Paris ferait rendre a `current_date` une date
         // decalee d'un jour pendant deux heures chaque nuit.
-        .options([("timezone", "UTC")]);
+        //
+        // L'ENCODAGE DU CLIENT EST FORCE EN UTF-8. Sans cela, libpq prend celui
+        // du systeme : sous Windows c'est WIN1252, et un tiret cadratin ou un
+        // accent parti d'un programme Rust — ou tout est UTF-8 par construction
+        // — revient de la base en « â€” ». Le serveur Linux n'avait pas le
+        // probleme, l'outil d'import lance depuis un poste de developpement si.
+        // Un encodage qui depend de la machine qui lance l'outil n'est pas un
+        // reglage, c'est un piege.
+        .options([("timezone", "UTC"), ("client_encoding", "UTF8")]);
 
     let pool = PgPoolOptions::new()
         // Seize connexions pour la cible « 50 utilisateurs simultanes » du

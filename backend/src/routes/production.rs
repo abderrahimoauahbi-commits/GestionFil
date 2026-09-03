@@ -598,10 +598,11 @@ pub async fn modifier_qualite(
         return Err(AppError::Invalide("aucun champ modifiable".into()));
     }
 
+    // Meme correction que dans `crud.rs` : `$1` porte le code de la qualite.
     let set: Vec<String> = champs
         .iter()
         .enumerate()
-        .map(|(i, (n, _))| format!("{n} = ?{}", i + 2))
+        .map(|(i, (n, _))| format!("{n} = ${}", i + 2))
         .collect();
 
     let mut tx = state.db.begin().await?;

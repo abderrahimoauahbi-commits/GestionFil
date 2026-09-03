@@ -3,6 +3,7 @@
 //! Polyfashions Carpet Morocco.
 //! Pilotage des achats, stocks et production de matieres premieres.
 
+mod assistant;
 mod auth;
 mod config;
 mod crud;

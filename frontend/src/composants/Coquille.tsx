@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
+  Bot,
   Download,
   Link2,
   BarChart3,
@@ -173,9 +174,15 @@ export const NAVIGATION: EntreeNav[] = [
   // La coherence est un ecran de pilotage, pas d'administration : c'est la
   // direction et l'assistante qui corrigent les anomalies, pas l'informaticien.
   { vers: '/controles', libelle: 'Controles de coherence', module: 'COCKPIT', Icone: ShieldCheck, section: 'GENERAL' },
+  /* LE CHATBOT EST OUVERT A TOUS, l'ancien assistant reste a la Direction.
+     Le premier n'expose que les competences que le role de l'appelant autorise
+     deja, chacune verifiee module par module ; le second lit des vues
+     consolidees sans ce filtre, d'ou sa restriction. */
+  { vers: '/chat', libelle: 'Assistant', module: 'COCKPIT', Icone: Bot, section: 'GENERAL',
+    principale: true },
   {
     vers: '/assistant',
-    libelle: 'Assistant',
+    libelle: 'Questions types',
     module: 'COCKPIT',
     Icone: Sparkles,
     section: 'GENERAL',

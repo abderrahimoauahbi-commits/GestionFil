@@ -70,6 +70,9 @@ interface Etat {
   modele: string
   local: boolean
   note: string
+  /** Le moteur demande, quand ce n'est pas celui qui repond. */
+  repli_depuis?: string | null
+  manque_cle?: boolean
 }
 
 interface CompetenceDecrite {
@@ -182,10 +185,21 @@ export function Chat() {
         }
       />
 
+      {/* LE REPLI EST DIT. Regler « claude » dans les parametres sans avoir
+          pose la cle d'API laisse le moteur local repondre : sans ce bandeau,
+          on cherche pendant une heure pourquoi c'est toujours aussi lent. */}
+      {etat?.manque_cle && (
+        <Alerte ton="alerte" className="mb-3" titre="Claude est demande mais la cle manque">
+          Le parametre demande Claude, mais aucune cle d API n est posee sur le serveur : c est
+          donc le modele local qui repond. Ajoutez <code>ANTHROPIC_API_KEY</code> dans
+          <code> /opt/gestionfil/.env</code>, puis redemarrez le service.
+        </Alerte>
+      )}
+
       {/* LA LENTEUR DU MOTEUR LOCAL EST ANNONCEE. Sans cet avertissement, une
           attente de quarante secondes passe pour une panne, et l'utilisateur
           recharge la page au moment ou la reponse allait arriver. */}
-      {local && fil.length === 0 && (
+      {local && !etat?.manque_cle && fil.length === 0 && (
         <Alerte ton="info" className="mb-3">
           Le modele tourne sur le serveur : aucune donnee ne sort de l entreprise. Sans carte
           graphique, comptez plusieurs dizaines de secondes par reponse.

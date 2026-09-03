@@ -48,9 +48,71 @@ pub struct Reglage {
     pub modele: String,
     pub url_ollama: String,
     pub cle_claude: Option<String>,
+    /// Ce qui a ete DEMANDE, quand ce n'est pas ce qui repond.
+    ///
+    /// Un parametre qui dit « claude » alors que le moteur local repond — faute
+    /// de cle d'API — est un piege : on cherche pendant une heure pourquoi les
+    /// reponses restent lentes. Le repli est donc SIGNALE, pas seulement
+    /// applique.
+    pub repli_depuis: Option<&'static str>,
 }
 
 impl Reglage {
+    /// Le reglage, LU EN BASE et complete par l'environnement.
+    ///
+    /// La base porte QUEL moteur repond — un parametre que la direction change
+    /// depuis l'ecran de configuration, sans session SSH. L'environnement porte
+    /// la CLE D'API, qui n'a rien a faire en base : une sauvegarde s'exporte,
+    /// se copie, se transporte, et un secret qui s'y trouve part avec elle.
+    ///
+    /// Une base injoignable ou un parametre absent ne bloquent pas : on retombe
+    /// sur l'environnement, puis sur le moteur local.
+    pub async fn depuis_base(db: &crate::db::Db) -> Self {
+        let lire = |code: &'static str| async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT valeur_courante FROM parametre
+                  WHERE code_parametre = $1 AND actif = 1",
+            )
+            .bind(code)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        };
+
+        let mut r = Self::depuis_env();
+        if let Some(m) = lire("P_AssistantMoteur").await {
+            let cle_presente = r.cle_claude.is_some();
+            let voulu = m.to_lowercase();
+            r.moteur = match voulu.as_str() {
+                "claude" | "anthropic" if cle_presente => Moteur::Claude,
+                _ => Moteur::Ollama,
+            };
+            r.repli_depuis = match voulu.as_str() {
+                "claude" | "anthropic" if !cle_presente => Some("claude"),
+                _ => None,
+            };
+            // Le modele par defaut suit le moteur : basculer sur Claude avec un
+            // nom de modele Ollama donnerait une erreur incomprehensible.
+            r.modele = match r.moteur {
+                Moteur::Claude => "claude-sonnet-4-5".into(),
+                Moteur::Ollama => "qwen2.5:3b-instruct".into(),
+            };
+        }
+        if let Some(m) = lire("P_AssistantModele").await {
+            // Un modele explicitement choisi prime, mais seulement s'il
+            // appartient au moteur retenu : « qwen2.5 » demande a Claude ne
+            // repondrait jamais.
+            let pour_claude = m.starts_with("claude");
+            if pour_claude == (r.moteur == Moteur::Claude) {
+                r.modele = m;
+            }
+        }
+        r
+    }
+
     pub fn depuis_env() -> Self {
         let demande = std::env::var("ASSISTANT_MOTEUR").unwrap_or_else(|_| "ollama".into());
         let cle = std::env::var("ANTHROPIC_API_KEY").ok().filter(|c| !c.trim().is_empty());
@@ -68,12 +130,18 @@ impl Reglage {
             Moteur::Claude => "claude-sonnet-4-5".into(),
         });
 
+        let repli_depuis = match demande.to_lowercase().as_str() {
+            "claude" | "anthropic" if moteur == Moteur::Ollama => Some("claude"),
+            _ => None,
+        };
+
         Self {
             moteur,
             modele,
             url_ollama: std::env::var("OLLAMA_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:11434".into()),
             cle_claude: cle,
+            repli_depuis,
         }
     }
 }

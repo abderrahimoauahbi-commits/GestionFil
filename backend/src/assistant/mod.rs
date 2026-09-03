@@ -82,8 +82,8 @@ pub struct Echange {
 ///
 /// L'ecran l'affiche pour que la lenteur du moteur local ne passe pas pour une
 /// panne, et que la bascule vers Claude soit un choix eclaire.
-pub async fn etat(State(_state): State<AppState>, _user: Utilisateur) -> AppResult<Json<Value>> {
-    let r = Reglage::depuis_env();
+pub async fn etat(State(state): State<AppState>, _user: Utilisateur) -> AppResult<Json<Value>> {
+    let r = Reglage::depuis_base(&state.db).await;
     let joignable = match r.moteur {
         moteur::Moteur::Ollama => reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(3))
@@ -98,6 +98,11 @@ pub async fn etat(State(_state): State<AppState>, _user: Utilisateur) -> AppResu
         "modele": r.modele,
         "local": r.moteur == moteur::Moteur::Ollama,
         "joignable": joignable,
+        // CE QUI A ETE DEMANDE, quand ce n'est pas ce qui repond. L'ecran le
+        // dit franchement : sinon on regle « claude » dans les parametres et
+        // l'on cherche pendant une heure pourquoi c'est toujours aussi lent.
+        "repli_depuis": r.repli_depuis,
+        "manque_cle": r.repli_depuis.is_some(),
         "note": match r.moteur {
             moteur::Moteur::Ollama =>
                 "Le modele tourne sur le serveur : aucune donnee ne sort de l'entreprise. \
@@ -123,7 +128,7 @@ pub async fn discuter(
         return Err(AppError::Invalide("aucune question".into()));
     }
 
-    let reglage = Reglage::depuis_env();
+    let reglage = Reglage::depuis_base(&state.db).await;
     let outils = competences::outils_autorises(&state, &user).await;
     let consigne = consigne(&user);
 

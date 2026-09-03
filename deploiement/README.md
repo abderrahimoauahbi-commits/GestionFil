@@ -324,14 +324,40 @@ demande de saisie produit un brouillon que l'utilisateur relit et valide
 lui-même : sans cela, le journal d'audit dirait « Mohamed a validé » alors que
 personne n'a lu.
 
-### Deux moteurs, réglables dans `/opt/gestionfil/.env`
+### Deux moteurs, réglables depuis l'application
+
+Le choix du moteur est un **paramètre**, dans Paramètres → catégorie SYSTÈME :
+
+| Paramètre | Valeurs |
+|---|---|
+| `P_AssistantMoteur` | `ollama` ou `claude` |
+| `P_AssistantModele` | `qwen2.5:3b-instruct`, `qwen2.5:7b-instruct`, `claude-sonnet-4-5` |
+
+Il est relu à chaque question : **aucun redémarrage du service**.
+
+**La clé d'API reste dans `/opt/gestionfil/.env`, et elle y restera.** Une
+sauvegarde de base s'exporte, se copie, se transporte ; un secret qui s'y trouve
+part avec elle. La base porte donc *quel* moteur répond, jamais de quoi
+s'authentifier auprès de lui.
 
 ```bash
-ASSISTANT_MOTEUR=ollama          # ou : claude
+sudo nano /opt/gestionfil/.env      # ANTHROPIC_API_KEY=sk-ant-...
+sudo systemctl restart gestionfil
+```
+
+Les variables d'environnement restent acceptées et servent de valeur par défaut
+quand le paramètre est absent :
+
+```bash
+ASSISTANT_MOTEUR=ollama
 ASSISTANT_MODELE=qwen2.5:3b-instruct
 OLLAMA_URL=http://127.0.0.1:11434
-# ANTHROPIC_API_KEY=sk-ant-...   # exigée par le moteur claude
 ```
+
+> **Le repli est signalé, pas subi.** Régler `claude` sans avoir posé la clé
+> laisse le modèle local répondre — et l'écran de l'assistant l'affiche en clair.
+> Sans ce signal, on cherche pendant une heure pourquoi les réponses restent
+> lentes alors que le paramètre dit « claude ».
 
 | Moteur | Confidentialité | Vitesse mesurée sur ce serveur |
 |---|---|---|

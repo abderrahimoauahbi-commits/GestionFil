@@ -727,7 +727,16 @@ export function EnTetePage({
             lignes de prose en tete d'ecran repoussent le contenu utile. */}
         {description && <Aide>{description}</Aide>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-1.5">{actions}</div>}
+      {/* LES ACTIONS PRENNENT LEUR PROPRE LIGNE SUR TELEPHONE.
+
+          `flex-wrap` ne suffisait pas : le titre porte `min-w-0`, donc le
+          navigateur le RETRECIT au lieu de passer les actions a la ligne — et
+          les boutons, eux, ne se retrecissent pas. Resultat, ils sortaient de
+          l'ecran. `w-full` en dessous de `sm` tranche : les actions descendent,
+          alignees a droite, et rien ne deborde. */}
+      {actions && (
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">{actions}</div>
+      )}
     </div>
   )
 }

@@ -152,8 +152,19 @@ export function PageAvecRail({
           : 'lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]',
       )}
     >
-      <div>{rail}</div>
-      <div className="min-w-0">{children}</div>
+      {/* LE CONTENU PASSE AVANT LE RAIL SUR TELEPHONE.
+
+          En une seule colonne, le rail se posait EN HAUT : « Tous les bons », le
+          classement par sens, par type, puis sept champs de filtre — un ecran
+          entier a faire defiler avant d'apercevoir la premiere ligne de donnees.
+          On ouvre un ecran pour voir ce qu'il contient, pas pour regler comment
+          on le regarde.
+
+          `order` inverse l'affichage sans toucher a l'ordre du DOM : le rail
+          reste lu en premier par un lecteur d'ecran et par le clavier, ou il a
+          sa place — c'est bien un filtre du tableau qui suit. */}
+      <div className="order-2 min-w-0 lg:order-1">{rail}</div>
+      <div className="order-1 min-w-0 lg:order-2">{children}</div>
     </div>
   )
 }

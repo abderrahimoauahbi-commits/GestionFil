@@ -11,7 +11,7 @@
  * apparaissent, et offrir les autres ne peut que vider le tableau.
  */
 import { useCallback, useMemo, useState } from 'react'
-import { Filter, FilterX } from 'lucide-react'
+import { ChevronDown, Filter, FilterX } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { dansPeriode, SelecteurPeriode, type Periode } from './SelecteurPeriode'
 
@@ -288,16 +288,46 @@ export function BarreFiltres<L>({
 }) {
   const options = optionsDesChamps(champs, lignes)
 
+  /* REPLIEE SUR TELEPHONE, DEPLIEE SUR ECRAN LARGE.
+
+     Sept champs en colonne, c'est un ecran entier a faire defiler avant
+     d'atteindre le tableau. Sur un large ecran ils tiennent sur une ligne et ne
+     coutent rien : les cacher la serait une gene inutile.
+
+     Le bouton porte le NOMBRE DE FILTRES ACTIFS. Replie sans ce compte, on ne
+     sait pas si le tableau montre tout ou une partie — et un tableau
+     silencieusement filtre est la pire des lectures. */
+  const [ouvert, setOuvert] = useState(false)
+
   return (
     <div
       className="sans-impression mb-3 flex flex-wrap items-end gap-2 rounded-[var(--radius)]
                  border border-bordure bg-surface px-2.5 py-2"
     >
-      <span className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase
-                       tracking-wide text-attenue-texte">
+      <button
+        type="button"
+        onClick={() => setOuvert((o) => !o)}
+        className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase
+                   tracking-wide text-attenue-texte lg:pointer-events-none"
+      >
         <Filter className="size-3" />
         Filtres
-      </span>
+        {actifs > 0 && (
+          <span className="rounded-full bg-primaire px-1.5 text-[10px] text-primaire-texte">
+            {actifs}
+          </span>
+        )}
+        <ChevronDown
+          className={cn('size-3 transition-transform lg:hidden', ouvert && 'rotate-180')}
+        />
+      </button>
+
+      <div
+        className={cn(
+          'w-full flex-wrap items-end gap-2 lg:flex lg:w-auto',
+          ouvert ? 'flex' : 'hidden',
+        )}
+      >
 
       {champs.map((c) => (
         <UnChamp
@@ -310,19 +340,20 @@ export function BarreFiltres<L>({
         />
       ))}
 
-      {enPied}
+        {enPied}
 
-      {actifs > 0 && (
-        <button
-          type="button"
-          onClick={reinitialiser}
-          className="mb-0.5 flex items-center gap-1 rounded-[3px] border border-bordure px-2
-                     py-1 text-[11px] text-primaire hover:bg-attenue"
-        >
-          <FilterX className="size-3" />
-          Effacer ({actifs})
-        </button>
-      )}
+        {actifs > 0 && (
+          <button
+            type="button"
+            onClick={reinitialiser}
+            className="mb-0.5 flex items-center gap-1 rounded-[3px] border border-bordure px-2
+                       py-1 text-[11px] text-primaire hover:bg-attenue"
+          >
+            <FilterX className="size-3" />
+            Effacer ({actifs})
+          </button>
+        )}
+      </div>
     </div>
   )
 }

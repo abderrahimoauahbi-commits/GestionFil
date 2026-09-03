@@ -494,7 +494,7 @@ export function Mouvements() {
         titre="Mouvements de stock"
         sous_titre="Registre immuable : une correction se fait par un mouvement inverse"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-lg border border-bordure p-0.5 text-[12px]">
               {[
                 { cle: '', libelle: 'Bons' },

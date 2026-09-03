@@ -56,10 +56,47 @@ fn libelle(plateforme: &str) -> &'static str {
     match plateforme {
         "windows" => "Windows",
         "macos" => "macOS",
-        "linux" => "Linux",
+        "linux" => "Linux (.deb)",
+        "linuxportable" => "Linux portable (AppImage)",
         "android" => "Android",
         "ios" => "iOS",
         _ => "Autre",
+    }
+}
+
+/// CE QUE LE PAQUET EXIGE DU POSTE, dit avant le telechargement.
+///
+/// POURQUOI CE N'EST PAS UN DETAIL. Un installateur qui refuse de demarrer sur
+/// un poste trop ancien ne dit jamais pourquoi : il affiche une erreur de
+/// bibliotheque manquante, ou ne fait rien du tout. L'utilisateur conclut que
+/// le fichier est casse et rappelle. Annoncer la version minimale coute une
+/// ligne et evite l'appel.
+///
+/// Les seuils viennent des dependances reelles de l'application, pas d'une
+/// prudence de principe : WebView2 est fourni d'origine a partir de Windows 10
+/// 1803 ; webkit2gtk 4.1 arrive avec Ubuntu 22.04 ; Tauri 2 pose macOS 10.15,
+/// Android 8 et iOS 13 comme planchers.
+fn compatibilite(plateforme: &str) -> &'static str {
+    match plateforme {
+        "windows" => "Windows 10 version 1803 ou plus recent, 64 bits. \
+                      WebView2 est fourni d'origine ; sur une machine plus \
+                      ancienne, l'installateur le telecharge.",
+        "linux" => "Paquet Debian, pour Ubuntu 22.04 / Debian 12 et plus recents, \
+                    64 bits. Demande webkit2gtk 4.1, present d'origine sur ces \
+                    versions. Installation : sudo apt install ./gestionfil-linux-*.deb",
+        // L'AppImage est une SECONDE FORME DU MEME CLIENT, pas une autre
+        // plateforme : un fichier unique, executable sans installation ni
+        // droits d'administrateur. Elle pese trente fois plus que le .deb
+        // parce qu'elle embarque ses bibliotheques au lieu de les emprunter
+        // au systeme — c'est exactement ce qui la rend portable.
+        "linuxportable" => "Fichier unique, sans installation ni droits \
+                            d'administrateur. Toute distribution 64 bits munie \
+                            de FUSE. Rendre executable (chmod +x), puis lancer.",
+        "macos" => "macOS 10.15 Catalina ou plus recent. Paquet universel \
+                    Intel et Apple Silicon.",
+        "android" => "Android 8.0 Oreo ou plus recent (API 26).",
+        "ios" => "iOS 13 ou plus recent.",
+        _ => "",
     }
 }
 
@@ -93,6 +130,7 @@ pub async fn lister(
                 "fichier": nom,
                 "plateforme": plateforme,
                 "plateforme_libelle": libelle(&plateforme),
+                "compatibilite": compatibilite(&plateforme),
                 "version": version,
                 "taille_octets": taille,
                 "nb_telechargements": pris,

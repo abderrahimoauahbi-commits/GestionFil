@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   Apple,
   Download,
+  Info,
   Laptop,
   Monitor,
   Smartphone,
@@ -46,6 +47,8 @@ interface Paquet {
   fichier: string
   plateforme: string
   plateforme_libelle: string
+  /** Version minimale du systeme, annoncee avant le telechargement. */
+  compatibilite: string
   version: string
   taille_octets: number
   nb_telechargements: number
@@ -72,37 +75,56 @@ const PLATEFORMES: {
   cle: string
   libelle: string
   Icone: typeof Monitor
+  /** Version minimale du systeme, meme quand aucun paquet n'est publie. */
+  compatibilite: string
   attente: string
 }[] = [
   {
     cle: 'windows',
     libelle: 'Windows',
     Icone: Monitor,
+    compatibilite: 'Windows 10 1803 ou plus recent, 64 bits',
     attente: "L'installateur se fabrique depuis le poste de developpement.",
-  },
-  {
-    cle: 'macos',
-    libelle: 'macOS',
-    Icone: Laptop,
-    attente: 'Un Mac est necessaire pour compiler et signer un paquet macOS.',
   },
   {
     cle: 'linux',
     libelle: 'Linux',
     Icone: Terminal,
+    compatibilite: 'Ubuntu 22.04 / Debian 12 ou plus recents, 64 bits',
     attente: 'A produire sur le serveur, qui porte deja la chaine de compilation.',
+  },
+  {
+    cle: 'linuxportable',
+    libelle: 'Linux portable',
+    Icone: Terminal,
+    compatibilite: 'Toute distribution 64 bits munie de FUSE',
+    attente: 'A produire sur le serveur, en meme temps que le paquet Debian.',
   },
   {
     cle: 'android',
     libelle: 'Android',
     Icone: Smartphone,
-    attente: 'Demande le SDK Android et une cle de signature.',
+    compatibilite: 'Android 8.0 ou plus recent',
+    attente:
+      'Demande le SDK Android, le NDK et une cle de signature. Ces outils ne sont pas encore \
+       installes sur le poste de developpement.',
+  },
+  {
+    cle: 'macos',
+    libelle: 'macOS',
+    Icone: Laptop,
+    compatibilite: 'macOS 10.15 Catalina ou plus recent',
+    attente:
+      'Un Mac est indispensable : la chaine d Apple ne tourne ni sous Windows ni sous Linux. \
+       C est une contrainte materielle, pas un choix.',
   },
   {
     cle: 'ios',
     libelle: 'iOS',
     Icone: Apple,
-    attente: 'Demande un Mac, Xcode et un compte developpeur Apple.',
+    compatibilite: 'iOS 13 ou plus recent',
+    attente:
+      'Un Mac, Xcode et un compte developpeur Apple payant. Meme contrainte materielle que macOS.',
   },
 ]
 
@@ -188,7 +210,7 @@ export function Telecharger() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {PLATEFORMES.map(({ cle, libelle, Icone, attente }) => {
+        {PLATEFORMES.map(({ cle, libelle, Icone, compatibilite, attente }) => {
           const dispo = parPlateforme(cle)
           const derniere = dispo[0]
           return (
@@ -201,6 +223,16 @@ export function Telecharger() {
                 </CarteTitre>
               </CarteEntete>
               <CarteCorps className="space-y-2">
+                {/* LA COMPATIBILITE EST DITE AVANT LE TELECHARGEMENT, qu'il y
+                    ait un paquet ou non. Un installateur qui refuse de demarrer
+                    sur un poste trop ancien n'explique jamais pourquoi : il
+                    affiche une bibliotheque manquante, ou ne fait rien. On
+                    conclut que le fichier est casse, et on rappelle. */}
+                <div className="flex items-start gap-1.5 text-[11px] leading-snug text-attenue-texte">
+                  <Info className="mt-0.5 size-3 shrink-0" />
+                  <span>{derniere?.compatibilite || compatibilite}</span>
+                </div>
+
                 {derniere ? (
                   <>
                     <div className="text-[12px] text-attenue-texte">

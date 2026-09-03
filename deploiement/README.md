@@ -169,6 +169,13 @@ cd /tmp && cat /home/sysadmin/gestionfil/db/migrations/2026-09-02_entreprise_ide
 > « Permission denied ». Le passage par l'entrée standard contourne cela sans
 > ouvrir le répertoire.
 
+> **Une migration qui CRÉE une table doit en donner la propriété au service.**
+> Elles se jouent en `postgres` — le seul compte qui puisse tout faire — alors
+> que le schéma a été chargé par le rôle `gestionfil`. Sans `ALTER TABLE …
+> OWNER TO gestionfil`, le service reçoit « droit refusé » à la première
+> écriture, et rien dans le message ne renvoie à la migration. Un `ALTER` de
+> colonne sur une table existante n'a pas ce problème.
+
 L'ordre est toujours : **sauvegarde** (`gestionfil-admin sauvegarder`), puis
 **migration**, puis **publication** du binaire qui attend le nouveau schéma. Un
 binaire publié avant sa migration démarre puis échoue à la première requête

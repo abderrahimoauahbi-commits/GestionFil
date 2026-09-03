@@ -40,6 +40,18 @@ CREATE INDEX IF NOT EXISTS ix_telechargement_date
 CREATE INDEX IF NOT EXISTS ix_telechargement_user
     ON telechargement(id_utilisateur, date_telechargement DESC);
 
+-- UNE TABLE CREEE PAR UNE MIGRATION APPARTIENT A CELUI QUI LA JOUE.
+--
+-- Ces migrations se lancent en `postgres` — le seul compte qui puisse tout
+-- faire — alors que le schema, lui, a ete charge par le role `gestionfil`. La
+-- table se retrouvait donc la propriete de `postgres`, et le service recevait
+-- « droit refuse pour la table telechargement » a la premiere ecriture. Vu en
+-- production, au premier telechargement.
+--
+-- A REPRODUIRE DANS TOUTE MIGRATION QUI CREE UNE TABLE. Un ALTER de colonne sur
+-- une table existante n'a pas ce probleme : il ne change pas le proprietaire.
+ALTER TABLE telechargement OWNER TO gestionfil;
+
 -- --- Les champs configurables ------------------------------------------------
 -- UN CHAMP NON DECLARE VAUT MASQUE, et sa colonne disparait de l'ecran sans un
 -- mot. Le journal vit dans le module PARAMETRES : il nomme des personnes, ce

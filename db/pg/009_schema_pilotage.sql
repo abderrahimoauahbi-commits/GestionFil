@@ -74,6 +74,33 @@ CREATE INDEX ix_alerte_statut ON alerte(statut, gravite, date_detection DESC);
 CREATE INDEX ix_alerte_entite ON alerte(entite_concernee, id_entite);
 
 -- -----------------------------------------------------------------------------
+-- telechargement
+-- -----------------------------------------------------------------------------
+-- QUI A PRIS QUELLE VERSION, ET QUAND.
+--
+-- Ce n'est pas de la statistique d'usage : c'est la reponse a la seule question
+-- qu'on se pose apres coup, « sur quelle version tourne ce poste ». Quand un
+-- utilisateur decrit un comportement que le code n'a plus, savoir qu'il a
+-- telecharge la 0.1.0 il y a trois mois clot le diagnostic en une seconde.
+--
+-- Le fichier lui-meme n'est pas en base. Un installateur pese des megaoctets,
+-- il vit sur le disque du serveur ; la base ne porte que la trace.
+CREATE TABLE telechargement (
+    id_telechargement   text    NOT NULL PRIMARY KEY
+                                DEFAULT gen_random_uuid()::text,
+    fichier             text    NOT NULL,
+    plateforme          text    NOT NULL,
+    version             text    NOT NULL,
+    taille_octets       bigint,
+    id_utilisateur      text    NOT NULL REFERENCES utilisateur(id_utilisateur),
+    adresse_ip          text,
+    date_telechargement text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+);
+
+CREATE INDEX ix_telechargement_date ON telechargement(date_telechargement DESC);
+CREATE INDEX ix_telechargement_user ON telechargement(id_utilisateur, date_telechargement DESC);
+
+-- -----------------------------------------------------------------------------
 -- _contexte_session
 -- Table technique mono-ligne : porte l'identite de l'appelant pour les triggers
 -- d'audit. Le service Rust l'ecrit en debut de transaction.

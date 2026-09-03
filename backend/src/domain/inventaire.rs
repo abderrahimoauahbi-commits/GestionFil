@@ -128,7 +128,7 @@ pub async fn cloturer(
         "SELECT COUNT(*) FROM ligne_inventaire
           WHERE id_inventaire = $1
             AND ecart_pct IS NOT NULL
-            AND abs(ecart_pct) > (SELECT CAST(valeur_courante AS REAL) FROM parametre
+            AND abs(ecart_pct) > (SELECT CAST(valeur_courante AS numeric) FROM parametre
                                    WHERE code_parametre = 'P_TolerEcartPesee')
             AND (motif_ecart IS NULL OR trim(motif_ecart) = '')",
     )

@@ -193,7 +193,8 @@ pub async fn supprimer_reference_definitivement(
     }
 
     let stock: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(quantite_kg), 0) FROM stock_magasin WHERE code_reference = $1",
+        "SELECT COALESCE(SUM(quantite_kg), 0)::float8 FROM stock_magasin
+           WHERE code_reference = $1",
     )
     .bind(&code)
     .fetch_one(&mut *tx)

@@ -71,6 +71,10 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 
 # Les deux seuls chemins ou le service peut ecrire.
+# Les paquets clients sont en LECTURE SEULE pour le service : il les sert, il
+# ne les fabrique pas. Un installateur se depose par SSH, jamais par l'API —
+# une application qui peut ecrire les binaires qu'elle distribue est une
+# application dont une faille suffit a contaminer tous les postes.
 ReadWritePaths=/opt/gestionfil/sauvegardes /opt/gestionfil/journaux
 
 # Familles d'adresses : IPv4, IPv6, et le socket UNIX de PostgreSQL.

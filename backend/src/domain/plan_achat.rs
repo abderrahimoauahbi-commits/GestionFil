@@ -140,7 +140,7 @@ pub async fn generer(
     .await?;
 
     let (budget, tier1): (Option<f64>, i64) = sqlx::query_as(
-        "SELECT SUM(montant_total_mad), SUM(CASE WHEN urgence = 'TIER 1' THEN 1 ELSE 0 END)
+        "SELECT SUM(montant_total_mad)::float8, SUM(CASE WHEN urgence = 'TIER 1' THEN 1 ELSE 0 END)
            FROM plan_achat WHERE statut = 'PROPOSE'",
     )
     .fetch_one(&mut *tx)
@@ -256,7 +256,9 @@ pub async fn convertir(
         // Le prix de la proposition est en MAD ; le bon s'exprime dans la devise
         // du fournisseur, au taux engage sur ce bon.
         let taux: f64 =
-            sqlx::query_scalar("SELECT taux_change_engage FROM bon_commande WHERE id_bc = $1")
+            sqlx::query_scalar(
+            "SELECT taux_change_engage::float8 FROM bon_commande WHERE id_bc = $1",
+        )
                 .bind(&id_bc)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -357,7 +359,7 @@ async fn ouvrir_bon(
     .ok_or_else(|| AppError::Introuvable(format!("fournisseur {fournisseur}")))?;
 
     let taux: f64 = sqlx::query_scalar(
-        "SELECT taux FROM taux_change
+        "SELECT taux::float8 FROM taux_change
           WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
             AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
           ORDER BY date_debut DESC LIMIT 1",

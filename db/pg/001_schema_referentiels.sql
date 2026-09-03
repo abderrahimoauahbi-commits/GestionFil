@@ -20,7 +20,19 @@ CREATE TABLE entreprise (
     id_entreprise       text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     nom                 text    NOT NULL,
+    -- Filiale de Mazari Group : l'affiliation figure sur les documents
+    -- commerciaux, et elle explique la coexistence de deux marques.
+    groupe              text,
     adresse             text,
+    -- Coordonnees de contact : elles figurent sur les etats imprimes, ou
+    -- l'emetteur doit etre joignable, et dans la barre de pied de
+    -- l'application, ou on les cherche sans jamais les trouver.
+    telephone           text,
+    fax                 text,
+    -- Les RIB, en texte libre : plusieurs banques, formats variables selon
+    -- l'etablissement. Les decouper en colonnes obligerait a en choisir un
+    -- nombre, et il en manquerait toujours un.
+    banques             text,
     ice                 text,
     rc                  text,
     identifiant_fiscal  text,

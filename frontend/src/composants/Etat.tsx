@@ -15,34 +15,16 @@
  */
 import { useEffect, useState } from 'react'
 import { Printer } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
-import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { mentionsLegales, useEntreprise } from '../lib/entreprise'
 import { Bouton } from './ui/base'
 
-interface Entreprise {
-  P_NomEntreprise?: string
-  P_Pays?: string
-  P_Secteur?: string
-}
-
-/** Les parametres d'identite, lus une fois et gardes en cache. */
-function useEntreprise(): Entreprise {
-  const q = useQuery({
-    queryKey: ['parametres', 'entreprise'],
-    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>(
-      '/api/parametres',
-    ),
-    staleTime: 30 * 60_000,
-  })
-  const par: Entreprise = {}
-  for (const p of q.data ?? []) {
-    if (p.code_parametre === 'P_NomEntreprise') par.P_NomEntreprise = p.valeur_courante
-    if (p.code_parametre === 'P_Pays') par.P_Pays = p.valeur_courante
-    if (p.code_parametre === 'P_Secteur') par.P_Secteur = p.valeur_courante
-  }
-  return par
-}
+/* L'IDENTITE VIENT DE LA TABLE `entreprise`, PAS DES PARAMETRES.
+   Cet ecran lisait `P_NomEntreprise` dans la table des parametres — un nom, et
+   rien d'autre. Un document commercial marocain sans registre du commerce ni
+   identifiant fiscal n'a pas de valeur : le fournisseur ne peut pas identifier
+   l'emetteur, et l'administration peut le rejeter. Ces mentions vivent dans
+   `entreprise`, avec l'adresse et les telephones ; on les lit donc la. */
 
 export function EtatImprimable({
   titre,
@@ -67,6 +49,7 @@ export function EtatImprimable({
 }) {
   const { moi } = useAuth()
   const entreprise = useEntreprise()
+  const legales = mentionsLegales(entreprise)
   const [edite] = useState(() => new Date())
 
   useEffect(() => {
@@ -105,12 +88,21 @@ export function EtatImprimable({
         <header className="mb-5 flex items-start justify-between gap-6 border-b-2 border-black pb-3">
           <div className="min-w-0">
             <div className="text-[15px] font-bold uppercase tracking-wide">
-              {entreprise.P_NomEntreprise ?? 'Polyfashions Carpet Morocco'}
+              {entreprise.nom ?? 'Polyfashions Carpet S.A.R.L.'}
             </div>
-            {entreprise.P_Secteur && (
+            {entreprise.groupe && (
+              <div className="text-[9px] uppercase tracking-wide text-neutral-600">
+                Groupe {entreprise.groupe}
+              </div>
+            )}
+            {entreprise.adresse && (
+              <div className="mt-0.5 text-[10px] text-neutral-700">{entreprise.adresse}</div>
+            )}
+            {(entreprise.telephone || entreprise.fax) && (
               <div className="text-[10px] text-neutral-600">
-                {entreprise.P_Secteur}
-                {entreprise.P_Pays && ` · ${entreprise.P_Pays}`}
+                {entreprise.telephone && <>Tel. {entreprise.telephone}</>}
+                {entreprise.telephone && entreprise.fax && ' · '}
+                {entreprise.fax && <>Fax {entreprise.fax}</>}
               </div>
             )}
           </div>
@@ -131,6 +123,12 @@ export function EtatImprimable({
             Il se repete sur chaque page grace a `position: fixed` sous
             `@media print` ; a l'ecran il reste en fin de document. */}
         <footer className="mt-6 border-t border-neutral-400 pt-2 text-[9px] text-neutral-600">
+          {/* LES MENTIONS LEGALES SONT SUR LE PAPIER, PAS DANS LE CODE.
+              Registre du commerce, identifiant fiscal, patente, CNSS : elles
+              rendent le document opposable. L'ICE peut manquer tant qu'il n'est
+              pas renseigne en base — mieux vaut une ligne incomplete qu'un
+              numero invente. */}
+          {legales && <div className="mb-1">{legales}</div>}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
               Edite le {horodatage}

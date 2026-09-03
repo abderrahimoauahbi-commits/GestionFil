@@ -8,8 +8,7 @@
  * qu'un ERP gagne a rendre net.
  *
  * IL EST SOMBRE DANS LES DEUX THEMES. Cet ecran s'affiche AVANT qu'on sache qui
- * se connecte, donc avant de connaitre ses preferences d'apparence. Le dessiner
- * deux fois pour cinq secondes de lecture n'en vaut pas le cout.
+ * se connecte, donc avant de connaitre ses preferences d'apparence.
  *
  * L'ADRESSE DU SERVEUR SE REGLE ICI, et nulle part ailleurs : c'est le seul
  * ecran qu'on atteigne sans serveur.
@@ -20,11 +19,11 @@
  */
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Eye, EyeOff, Loader2, LogIn, Server } from 'lucide-react'
+import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { ErreurApi, definirServeur, serveur, serveurRequis } from '../api/client'
 import { Chargement } from '../composants/ui/base'
-import { estBureau } from '../lib/utils'
+import { VERSION } from '../lib/version'
 import './connexion.css'
 
 export function Connexion() {
@@ -39,7 +38,7 @@ export function Connexion() {
   //
   // ELLE S'OUVRE D'ELLE-MEME QUAND ELLE EST INDISPENSABLE : une application
   // installee sur un poste ou un telephone ne sait pas ou joindre le serveur
-  // tant qu'on ne le lui a pas dit, et sans cet ecran elle repondrait
+  // tant qu'on ne le lui a pas dit, et sans ce reglage elle repondrait
   // « serveur injoignable » sans jamais offrir de le corriger. Dans un
   // navigateur, l'origine courante suffit : le reglage reste replie.
   const [adresse, setAdresse] = useState(serveur())
@@ -81,52 +80,37 @@ export function Connexion() {
       <div className="cnx__decor" aria-hidden />
       <div className="cnx__grain" aria-hidden />
 
+      {/* LA MARQUE, UNE SEULE FOIS, EN TETE DE PAGE.
+          Elle etait posee deux fois : dans le discours et dans la carte, la
+          seconde masquee sur grand ecran. Deux exemplaires du meme logo sur un
+          ecran qui n'en demande qu'un — et il suffisait d'une largeur
+          intermediaire pour voir les deux. Une seule marque, toujours visible,
+          au-dessus de tout le reste. */}
+      <header className="cnx__entete">
+        <img
+          src={`${import.meta.env.BASE_URL}logo-polyfashions-blanc.png`}
+          alt="Polyfashions Carpet"
+          className="cnx__logo"
+        />
+        <span className="cnx__appli">Gestion Fil</span>
+      </header>
+
       <div className="cnx__contenu">
         {/* --- Le discours : grand ecran seulement ------------------------- */}
         <section className="cnx__pitch">
-          <div className="cnx__marque">
-            <span className="cnx__sigle">GF</span>
-            <span>
-              <span className="cnx__nom">Gestion Fil</span>
-              <br />
-              <span className="cnx__societe">Polyfashions Carpet Morocco</span>
-            </span>
-          </div>
+          <hr className="cnx__filet" />
 
           <h2 className="cnx__titre">
             Achats, stocks et production de matieres premieres.
           </h2>
           <p className="cnx__texte">
-            Tout est tenu au kilogramme. Les palettes, bobines et metres lineaires ne sont que des
-            masques de saisie : la conversion est faite a l enregistrement, jamais devinee.
+            Tout est tenu au kilogramme. Les palettes, bobines et metres lineaires ne sont que
+            des masques de saisie : la conversion est faite a l enregistrement, jamais devinee.
           </p>
-
-          <dl className="cnx__chiffres">
-            {[
-              ['124', 'references'],
-              ['18', 'qualites'],
-              ['12', 'fournisseurs'],
-            ].map(([valeur, libelle]) => (
-              <div key={libelle}>
-                <dt>{valeur}</dt>
-                <dd>{libelle}</dd>
-              </div>
-            ))}
-          </dl>
         </section>
 
         {/* --- La carte de verre ------------------------------------------- */}
         <div className="cnx__carte">
-          {/* La marque revient dans la carte quand le discours est masque. */}
-          <div className="cnx__marque lg:hidden" style={{ marginBottom: '1.5rem' }}>
-            <span className="cnx__sigle">GF</span>
-            <span>
-              <span className="cnx__nom">Gestion Fil</span>
-              <br />
-              <span className="cnx__societe">Polyfashions Carpet Morocco</span>
-            </span>
-          </div>
-
           <h1>Connexion</h1>
           <p className="cnx__sous-titre">Identifiez-vous pour acceder a votre espace.</p>
 
@@ -197,16 +181,7 @@ export function Connexion() {
                   demandee.
                 </p>
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setReglageOuvert(true)}
-                className="cnx__discret"
-              >
-                <Server className="size-3" />
-                {serveur() || 'Serveur : cette machine'}
-              </button>
-            )}
+            ) : null}
 
             {erreur && <div className="cnx__erreur">{erreur}</div>}
 
@@ -217,8 +192,7 @@ export function Connexion() {
 
             {/* Effacer plutot que « annuler ». Il n'y a pas d'ecran precedent
                 ou revenir : la seule chose qu'on puisse annuler, c'est sa
-                saisie. Nommer le bouton par ce qu'il fait vaut mieux que par un
-                verbe generique qui promet un retour inexistant. */}
+                saisie. */}
             <button
               type="button"
               className="cnx__discret"
@@ -232,41 +206,30 @@ export function Connexion() {
               Effacer la saisie
             </button>
           </form>
-
-          {/* --- Mot de passe perdu -----------------------------------------
-              L'ERP n'envoie pas de courriel et n'a pas de question secrete : la
-              recuperation passe donc par une PERSONNE, pas par un lien. Le dire
-              ici evite de chercher un « mot de passe oublie ? » qui n'existera
-              jamais, et evite surtout de croire le compte perdu. */}
-          <details className="cnx__perdu">
-            <summary>Mot de passe perdu ?</summary>
-            <div className="mt-2 flex flex-col gap-2">
-              <p>
-                Demandez a l administrateur systeme de le redefinir depuis
-                <strong> Parametres → Utilisateurs et droits</strong>. Il prend effet
-                immediatement.
-              </p>
-              <p>
-                <strong>Si c est le compte administrateur lui-meme qui est perdu</strong> — le seul
-                cas ou personne ne peut plus rien redefinir — la reprise se fait sur la machine du
-                serveur, avec un acces au dossier de l application :
-              </p>
-              <pre>
-{`cd backend
-GESTIONFIL_MOT_DE_PASSE="au moins douze caracteres" \\
-  ./gestionfil-admin definir-mot-de-passe admin`}
-              </pre>
-              <p>
-                Cette commande ne s execute que sur le serveur, par quelqu un qui a deja acces aux
-                fichiers : c est ce qui la rend sure. Aucun lien de reinitialisation ne circule.
-              </p>
-            </div>
-          </details>
         </div>
       </div>
 
+      {/* LE PIED EST AUSSI LA PORTE DE SERVICE.
+          L'adresse du serveur ne concerne QUE celui qui installe : sur un
+          navigateur elle est inutile — la page vient deja du serveur — et
+          l'afficher a tout le monde ajoute une question a un ecran qui n'en
+          pose qu'une.
+
+          Elle apparait donc d'elle-meme dans deux cas seulement : application
+          empaquetee non configuree, ou serveur injoignable. Sinon, un clic sur
+          la version l'ouvre — un geste que celui qui installe trouve, et que
+          l'utilisateur ne fait jamais par hasard. */}
       <p className="cnx__pied">
-        {estBureau() ? 'Application de bureau' : 'Application web'} · version 0.1.0
+        <button
+          type="button"
+          onClick={() => setReglageOuvert(true)}
+          title={serveur() ? `Serveur : ${serveur()}` : 'Configurer l adresse du serveur'}
+          className="cursor-default border-0 bg-transparent p-0 font-[inherit]
+                     text-[inherit] text-inherit"
+        >
+          <strong>Gestion Fil</strong> version {VERSION} · © {new Date().getFullYear()}{' '}
+          Polyfashions Carpet
+        </button>
       </p>
     </div>
   )

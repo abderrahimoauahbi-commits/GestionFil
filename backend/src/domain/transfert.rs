@@ -184,7 +184,7 @@ pub async fn expedier(
         // Le CMUP du magasin source, LU MAINTENANT et fige sur la ligne : c'est
         // la valeur que la marchandise emporte avec elle.
         let cmup: Option<f64> = sqlx::query_scalar(
-            "SELECT cmup_mad FROM stock_magasin
+            "SELECT cmup_mad::float8 FROM stock_magasin
               WHERE code_reference = $1 AND code_magasin = $2",
         )
         .bind(&l.code_reference)

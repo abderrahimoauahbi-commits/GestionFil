@@ -123,3 +123,67 @@ pub async fn moi(
         "droits_champ": par_module,
     })))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct DemandeChangement {
+    pub ancien: String,
+    pub nouveau: String,
+}
+
+/// Change SON PROPRE mot de passe.
+///
+/// Voir le commentaire du module pour les trois gardes. Celle qui compte le
+/// plus est la premiere : l'ancien mot de passe est exige, meme si l'appelant
+/// est deja authentifie. Un jeton prouve qu'une session est ouverte, pas que
+/// la personne devant l'ecran est bien la bonne.
+pub async fn changer_mot_de_passe(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(d): Json<DemandeChangement>,
+) -> AppResult<Json<Value>> {
+    password::valider_longueur(&d.nouveau).map_err(AppError::Invalide)?;
+
+    if d.nouveau == d.ancien {
+        return Err(AppError::Invalide(
+            "le nouveau mot de passe doit differer de l'ancien".into(),
+        ));
+    }
+
+    let hash: String = sqlx::query_scalar(
+        "SELECT mot_de_passe_hash FROM utilisateur WHERE id_utilisateur = $1",
+    )
+    .bind(&user.id)
+    .fetch_one(&state.db)
+    .await?;
+
+    if !password::verifier(&d.ancien, &hash) {
+        // Le meme message que pour un compte inconnu a la connexion : ne rien
+        // apprendre a qui essaie.
+        return Err(AppError::IdentifiantsInvalides);
+    }
+
+    let nouveau_hash = password::hacher(&d.nouveau).map_err(AppError::Interne)?;
+
+    // L'ECRITURE PASSE PAR UNE TRANSACTION AVEC CONTEXTE, comme toute ecriture
+    // du service : sans `poser_contexte`, le declencheur d'audit enregistrerait
+    // un changement de mot de passe sans savoir qui l'a fait.
+    let mut tx = state.db.begin().await?;
+    crate::db::poser_contexte(&mut tx, &user.id, None, None).await?;
+    sqlx::query(
+        "UPDATE utilisateur SET mot_de_passe_hash = $2 WHERE id_utilisateur = $1",
+    )
+    .bind(&user.id)
+    .bind(&nouveau_hash)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    // LE JETON RESTE VALIDE. Le revoquer obligerait a se reconnecter
+    // immediatement apres avoir change son mot de passe, ce qui n'apporte rien
+    // ici : le jeton appartient deja a la bonne personne, qui vient de prouver
+    // qu'elle connait l'ancien mot de passe.
+    Ok(Json(json!({
+        "change": true,
+        "le": maintenant(),
+    })))
+}

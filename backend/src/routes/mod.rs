@@ -15,6 +15,7 @@ mod operations;
 mod production;
 mod referentiels;
 mod stock;
+mod telechargements;
 
 use crate::state::AppState;
 use axum::routing::{delete, get, patch, post, put};
@@ -59,12 +60,24 @@ pub fn router(state: AppState) -> Router {
 
     let routeur = Router::new()
         .route("/api/sante", get(consultation::sante))
+        // L'identite de l'entreprise : pied de page et etats imprimes.
+        .route("/api/entreprise", get(consultation::entreprise))
+        // --- Paquets clients ---------------------------------------------------
+        // La LISTE et le TELECHARGEMENT sont ouverts a tout compte connecte :
+        // refuser a un magasinier de reinstaller son poste ne protege rien. Le
+        // JOURNAL nomme des personnes, il reste dans PARAMETRES.
+        .route("/api/telechargements", get(telechargements::lister))
+        .route("/api/telechargements/journal", get(telechargements::journal))
+        .route("/api/telechargements/{fichier}", get(telechargements::telecharger))
         // --- Assistant de direction (lecture seule, role DIRECTION) -----------
         .route("/api/assistant", get(assistant::catalogue))
         .route("/api/assistant/{id}", get(assistant::repondre))
         // --- Authentification -------------------------------------------------
         .route("/api/auth/connexion", post(auth_routes::connexion))
         .route("/api/auth/moi", get(auth_routes::moi))
+        // Changer SON mot de passe : aucun droit particulier, mais
+        // l'ancien mot de passe est exige (voir auth_routes).
+        .route("/api/auth/mot-de-passe", post(auth_routes::changer_mot_de_passe))
         // --- Administration ---------------------------------------------------
         .route("/api/admin/utilisateurs",
                get(admin::lister_utilisateurs).post(admin::creer_utilisateur))
@@ -133,6 +146,12 @@ pub fn router(state: AppState) -> Router {
         // --- Stock et mouvements ----------------------------------------------
         .route("/api/mouvements",
                get(consultation::mouvements).post(stock::creer_mouvement))
+        // LE DOCUMENT A COTE DU GRAND LIVRE, pas a sa place. `/api/mouvements`
+        // rend une ligne par reference — la vue de l'auditeur ; `/documents`
+        // rend un bon par ligne, avec ses totaux — la vue du magasin. Le
+        // segment fixe passe avant `{id}` : axum donne priorite au statique.
+        .route("/api/mouvements/documents", get(stock::documents_mouvement))
+        .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
         .route("/api/transferts",
                get(stock::lister_transferts).post(stock::creer_transfert))
         .route("/api/transferts/{id}/lignes", post(stock::ajouter_ligne_transfert))

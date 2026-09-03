@@ -42,8 +42,20 @@ CREATE TABLE mouvement (
     reference_document  TEXT,                       -- n° BC / reception / transfert / inventaire
     numero_of           TEXT,                       -- ordre de fabrication (C07)
     observations_globales TEXT,
+    -- QUI A SAISI : le compte applicatif, garanti par le serveur.
     id_utilisateur      TEXT    NOT NULL REFERENCES utilisateur(id_utilisateur),  -- C09
+    -- QUI EST RESPONSABLE : la personne qui a physiquement remis ou recu la
+    -- marchandise. Ce n'est pas la meme chose et il ne faut pas les confondre :
+    -- le magasinier saisit souvent pour un chef d'equipe ou un chauffeur, et
+    -- c'est ce dernier qu'on cherche quand un ecart apparait trois jours plus
+    -- tard. Texte libre : ce peut etre un tiers qui n'a pas de compte.
+    responsable         TEXT,
     est_initial         INTEGER NOT NULL DEFAULT 0 CHECK (est_initial IN (0,1)),
+    -- DATE DE SAISIE, distincte de `date_mouvement`. Un mouvement du samedi
+    -- saisi le lundi porte deux dates differentes, et l'ecart entre les deux
+    -- est en soi une information : il dit si le magasin tient son journal a
+    -- jour. C06 interdit une date de mouvement dans le futur, jamais dans le
+    -- passe.
     date_creation       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 ) STRICT;
 
@@ -71,6 +83,19 @@ CREATE TABLE ligne_mouvement (
     quantite_saisie     REAL    CHECK (quantite_saisie IS NULL OR quantite_saisie > 0),
     unite_saisie        TEXT    CHECK (unite_saisie IS NULL OR unite_saisie IN ('kg','Palette','Bobine','ml')),
     facteur_conversion  REAL    CHECK (facteur_conversion IS NULL OR facteur_conversion > 0),
+
+    -- LES COLIS REELLEMENT COMPTES, et non deduits du poids.
+    --
+    -- `quantite_saisie` en palettes se CONVERTIT en kg par un facteur theorique
+    -- (poids d'une bobine x bobines par palette). Le nombre de palettes
+    -- physiquement chargees, lui, se COMPTE sur le quai — et les deux different
+    -- des qu'une palette est incomplete, ce qui est le cas ordinaire. Le bon
+    -- imprime porte le compte reel : c'est ce que le cariste verifie.
+    --
+    -- Meme raison que sur `ligne_transfert`, ou ces deux colonnes existent
+    -- depuis l'origine.
+    nb_bobines          INTEGER CHECK (nb_bobines  IS NULL OR nb_bobines  >= 0),
+    nb_palettes         INTEGER CHECK (nb_palettes IS NULL OR nb_palettes >= 0),
 
     lot_fournisseur     TEXT,
     date_fabrication    TEXT,

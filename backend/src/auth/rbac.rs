@@ -96,7 +96,8 @@ pub async fn exiger(db: &Db, role: &str, module: &str, action: Action) -> AppRes
 /// `None` = illimite (Direction).
 pub async fn plafond_validation_bc(db: &Db, role: &str) -> AppResult<Option<f64>> {
     Ok(sqlx::query_scalar(
-        "SELECT plafond_validation_bc_mad FROM role_utilisateur WHERE code_role_user = $1",
+        "SELECT plafond_validation_bc_mad::float8 FROM role_utilisateur
+           WHERE code_role_user = $1",
     )
     .bind(role)
     .fetch_optional(db)

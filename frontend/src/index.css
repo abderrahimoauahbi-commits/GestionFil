@@ -328,3 +328,13 @@ table.grille td {
   padding-top: var(--densite-y);
   padding-bottom: var(--densite-y);
 }
+
+
+/* --- La marque suit le theme ------------------------------------------------
+   Le logo existe en prune et en blanc. Prune sur une barre sombre serait
+   illisible, blanc sur une barre claire disparaitrait : on charge les deux et
+   on n'en montre qu'un. Basculer l'attribut `src` produirait un clignotement
+   au changement de theme, le temps que la seconde image se decode. */
+.marque-sombre { display: none; }
+.sombre .marque-claire { display: none; }
+.sombre .marque-sombre { display: block; }

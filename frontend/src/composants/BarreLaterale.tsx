@@ -24,6 +24,7 @@ import { ChevronRight, Pin, PinOff } from 'lucide-react'
 import { useApparence } from './Apparence'
 import { estAccessible, MODULES, NAVIGATION, type EntreeNav, type Section } from './Coquille'
 import { useAuth } from '../auth/AuthContext'
+import { MarqueCarree } from './Marque'
 import { cn } from '../lib/utils'
 
 export function BarreLaterale() {
@@ -121,13 +122,17 @@ export function BarreLaterale() {
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-bordure px-3">
           {/* La marque porte le retour a l'accueil : l'entete ne l'affiche plus
               en disposition laterale, ce lien doit donc exister ici. */}
+          {/* LA MARQUE DE L'ENTREPRISE, PAS DEUX LETTRES. Un carre « GF » ne
+              dit rien a personne : le bloc de la carte de visite se reconnait
+              a 28 px, parce que son texte est horizontal et gros. C'est la
+              seule version du logo qui tienne a cette taille. */}
           <NavLink
             to="/"
             end
             title="Cockpit"
-            className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] bg-primaire text-[12px] font-bold text-primaire-texte"
+            className="grid size-7 shrink-0 place-items-center overflow-hidden rounded-[var(--radius-sm)]"
           >
-            GF
+            <MarqueCarree className="size-7 object-contain" />
           </NavLink>
           {ouverte && (
             <>
@@ -200,26 +205,34 @@ export function BarreLaterale() {
 
         {/* --- Pied : reglages et identite --------------------------------- */}
         <div className="shrink-0 border-t border-bordure p-2">
+          {/* CHAQUE ECRAN PORTE SON PROPRE NOM ET SA PROPRE ICONE.
+              Ce pied affichait ceux du MODULE : deux ecrans de reglages s'y
+              montraient donc avec la meme icone et la meme infobulle,
+              impossibles a distinguer une fois la barre repliee. Et la
+              coloration suivait la SECTION, donc les deux s'allumaient
+              ensemble. Vu a la capture, le jour ou un second ecran est arrive. */}
           {reglages.map((m) => {
             const ecrans = accessibles.filter((e) => e.section === m.id)
-            const contientCourant = ecrans.some((e) => e.vers === courante?.vers)
-            return ecrans.map((e) => (
-              <NavLink
-                key={e.vers}
-                to={e.vers}
-                title={ouverte ? undefined : m.libelle}
-                className={cn(
-                  'flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-[12.5px]',
-                  'transition-colors',
-                  contientCourant
-                    ? 'bg-primaire/12 font-medium text-primaire'
-                    : 'text-attenue-texte hover:bg-attenue hover:text-texte',
-                )}
-              >
-                <m.Icone className="size-4 shrink-0" strokeWidth={contientCourant ? 2.2 : 1.7} />
-                {ouverte && <span className="min-w-0 flex-1 truncate">{e.libelle}</span>}
-              </NavLink>
-            ))
+            return ecrans.map((e) => {
+              const courant = e.vers === courante?.vers
+              return (
+                <NavLink
+                  key={e.vers}
+                  to={e.vers}
+                  title={ouverte ? undefined : e.libelle}
+                  className={cn(
+                    'flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-[12.5px]',
+                    'transition-colors',
+                    courant
+                      ? 'bg-primaire/12 font-medium text-primaire'
+                      : 'text-attenue-texte hover:bg-attenue hover:text-texte',
+                  )}
+                >
+                  <e.Icone className="size-4 shrink-0" strokeWidth={courant ? 2.2 : 1.7} />
+                  {ouverte && <span className="min-w-0 flex-1 truncate">{e.libelle}</span>}
+                </NavLink>
+              )
+            })
           })}
           {ouverte && (
             <div className="px-2 pt-2 text-[10px] text-attenue-texte">

@@ -29,11 +29,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env().context("configuration invalide")?;
-    tracing::info!(base = %config.database_url, "connexion a la base");
+    tracing::info!(base = %db::url_sans_mot_de_passe(&config.database_url), "connexion a la base");
 
     let pool = db::connect(&config.database_url)
         .await
-        .context("connexion a la base impossible â€” executer db/build.ps1 ?")?;
+        .context("connexion a la base impossible : verifier DATABASE_URL et que PostgreSQL ecoute")?;
 
     alerter_si_comptes_non_initialises(&pool).await?;
 

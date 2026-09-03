@@ -463,7 +463,7 @@ pub async fn substituer_proposition(
 
     let (code_actuel, statut, quantite, origine): (String, String, f64, Option<String>) =
         sqlx::query_as(
-            "SELECT code_reference, statut, quantite_suggeree_kg, code_reference_origine
+            "SELECT code_reference, statut, quantite_suggeree_kg::float8, code_reference_origine
                FROM plan_achat WHERE id_proposition = $1",
         )
         .bind(&id)
@@ -533,7 +533,7 @@ pub async fn substituer_proposition(
     // pour l'acheteur : les deux propositions visent le meme achat, on les
     // FUSIONNE, et la proposition d'origine disparait en IGNORE.
     let existante: Option<(String, f64, i64)> = sqlx::query_as(
-        "SELECT id_proposition, quantite_suggeree_kg, figee FROM plan_achat
+        "SELECT id_proposition, quantite_suggeree_kg::float8, figee FROM plan_achat
           WHERE code_reference = $1 AND statut IN ('PROPOSE','EN_REVISION','VALIDE')",
     )
     .bind(&sub.code_reference_cible)
@@ -1125,11 +1125,18 @@ pub async fn cockpit_analyse(
     // Les indicateurs de tresorerie. DSO vient d'un parametre : sans module de
     // vente, l'ERP ne peut pas le mesurer — il le declare, et l'ecran le dit.
     let kpi: Option<(f64, f64, f64, f64, i64)> = sqlx::query_as(
+        // Les quatre premieres colonnes quittent le domaine exact pour le
+        // calcul de DIO, DPO et du cycle de conversion — des ratios en jours,
+        // ou le flottant convient. `::float8` le dit explicitement.
+        // `AS numeric` de SQLite devient `numeric` puis `float8` : deux etapes,
+        // parce que le parametre est stocke en TEXTE et qu'un texte ne se
+        // convertit pas directement en flottant sans passer par le decimal.
         "SELECT
-           ROUND(COALESCE(SUM(sp.valeur_totale_mad), 0), 2),
-           ROUND(COALESCE(SUM(sp.conso_mensuelle_kg * 12 * sp.cmup_mad), 0), 2),
-           ROUND(COALESCE(AVG(f.delai_paiement_jours), 0), 1),
-           (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_DSODefaut'),
+           ROUND(COALESCE(SUM(sp.valeur_totale_mad), 0), 2)::float8,
+           ROUND(COALESCE(SUM(sp.conso_mensuelle_kg * 12 * sp.cmup_mad), 0), 2)::float8,
+           ROUND(COALESCE(AVG(f.delai_paiement_jours), 0), 1)::float8,
+           (SELECT CAST(valeur_courante AS numeric)::float8 FROM parametre
+             WHERE code_parametre = 'P_DSODefaut'),
            COUNT(*)
          FROM v_stock_projete sp
          LEFT JOIN fournisseur f ON f.code_fournisseur = sp.code_fournisseur",
@@ -1750,4 +1757,43 @@ pub async fn usages_reference(
     obj.insert("supprimable".into(), json!(motifs.is_empty()));
     obj.insert("motifs".into(), json!(motifs));
     Ok(Json(Value::Object(obj)))
+}
+
+/// L'identite de l'entreprise : raison sociale, adresse, mentions legales.
+///
+/// EN LECTURE POUR TOUT LE MONDE, sans exiger de droit particulier. Ces
+/// informations figurent deja sur chaque document qui sort de l'entreprise :
+/// les masquer a l'interieur n'aurait aucun sens, et le pied de page en a
+/// besoin pour tous les roles.
+///
+/// Les coordonnees bancaires font exception et sont retirees pour qui n'a pas
+/// acces au module ACHAT : elles n'apparaissent que sur les documents
+/// commerciaux, et un changement de RIB frauduleux est une fraude classique.
+pub async fn entreprise(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    let lignes = sqlx::query("SELECT * FROM entreprise WHERE actif = 1 LIMIT 1")
+        .fetch_all(&state.db)
+        .await?;
+
+    let mut valeur = lignes_en_json(&lignes);
+    let Some(premiere) = valeur.as_array_mut().and_then(|a| a.first_mut()) else {
+        return Ok(Json(json!({})));
+    };
+
+    // LES COORDONNEES BANCAIRES NE SORTENT QUE POUR QUI TRAITE LES ACHATS.
+    // Elles figurent sur les documents commerciaux, donc elles n'ont rien de
+    // secret — mais un changement de RIB frauduleux sur des bons de commande
+    // est une escroquerie classique, et la premiere etape en est la lecture.
+    if user
+        .exiger(&state.db, module::BONS_COMMANDE, Action::Lire)
+        .await
+        .is_err()
+    {
+        if let Some(o) = premiere.as_object_mut() {
+            o.remove("banques");
+        }
+    }
+    Ok(Json(premiere.clone()))
 }

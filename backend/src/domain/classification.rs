@@ -220,7 +220,9 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
 
 async fn lire_param(tx: &mut sqlx::PgConnection, code: &str) -> AppResult<f64> {
     let v: String =
-        sqlx::query_scalar("SELECT valeur_courante FROM parametre WHERE code_parametre = $1")
+        sqlx::query_scalar(
+        "SELECT valeur_courante::float8 FROM parametre WHERE code_parametre = $1",
+    )
             .bind(code)
             .fetch_one(&mut *tx)
             .await?;

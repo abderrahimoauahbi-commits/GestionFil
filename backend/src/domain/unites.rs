@@ -105,8 +105,16 @@ impl FacteursReference {
 
 pub async fn charger(db: &Db, code_reference: &str) -> AppResult<FacteursReference> {
     sqlx::query_as(
-        "SELECT code_reference, unite_catalogue, poids_bobine_kg,
-                bobines_par_palette, densite_kg_ml
+        // LES CASTS `::float8` NE SONT PAS COSMETIQUES. Les colonnes sont
+        // `numeric` en PostgreSQL — le type juste pour un poids, qui ne doit
+        // pas deriver a l'arrondi binaire. sqlx refuse de les decoder vers
+        // `f64` sans conversion explicite, et l'echec ne se voit qu'a
+        // l'execution : la saisie en palettes tombait en « erreur interne »,
+        // sans un mot sur la cause.
+        "SELECT code_reference, unite_catalogue,
+                poids_bobine_kg::float8    AS poids_bobine_kg,
+                bobines_par_palette,
+                densite_kg_ml::float8      AS densite_kg_ml
            FROM reference WHERE code_reference = $1",
     )
     .bind(code_reference)

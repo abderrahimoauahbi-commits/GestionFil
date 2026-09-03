@@ -41,7 +41,7 @@ INSERT INTO utilisateur
     (id_utilisateur, code_role_user, login, mot_de_passe_hash, nom, magasin_principal, actif)
 VALUES
     ('fb4103c0-c16e-4214-a90b-451f7cd64211', 'ADMIN',      'admin',     '!A_DEFINIR!', 'Superviseur systeme',   NULL,    1),
-    ('119a2b25-7dde-4132-a626-ad141264801d', 'DIRECTION',  'Medmazari', '!A_DEFINIR!', 'Mohamed Mazari',        NULL,    1),
+    ('119a2b25-7dde-4132-a626-ad141264801d', 'DIRECTION',  'Mohamed',   '!A_DEFINIR!', 'Mohamed Mazari',        NULL,    1),
     ('98c682da-54db-4818-ad5a-4d4d826ae45a', 'DIRECTION',  'Choukri',   '!A_DEFINIR!', 'Chokri Mazari',         NULL,    1),
     ('86a20519-69c4-45aa-aa41-aff9fa88d628', 'DIRECTION',  'Tarik',     '!A_DEFINIR!', 'Tarik Mazari',          NULL,    1),
     ('d5160331-fa19-4141-a47e-9b040a0746fa', 'ASSISTANTE', 'Assistante','!A_DEFINIR!', 'Assistante de gestion', NULL,    1),

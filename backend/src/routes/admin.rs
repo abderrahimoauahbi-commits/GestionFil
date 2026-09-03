@@ -73,11 +73,7 @@ pub async fn creer_utilisateur(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::UTILISATEURS, Action::Ecrire).await?;
 
-    if nouveau.mot_de_passe.chars().count() < 12 {
-        return Err(AppError::Invalide(
-            "mot de passe trop court : 12 caracteres minimum".into(),
-        ));
-    }
+    password::valider_longueur(&nouveau.mot_de_passe).map_err(AppError::Invalide)?;
     if nouveau.login.trim().is_empty() || nouveau.nom.trim().is_empty() {
         return Err(AppError::Invalide("login et nom sont obligatoires".into()));
     }
@@ -177,11 +173,7 @@ pub async fn modifier_utilisateur(
     .await?;
 
     if let Some(mdp) = &m.mot_de_passe {
-        if mdp.chars().count() < 12 {
-            return Err(AppError::Invalide(
-                "mot de passe trop court : 12 caracteres minimum".into(),
-            ));
-        }
+        password::valider_longueur(mdp).map_err(AppError::Invalide)?;
         let hash = password::hacher(mdp).map_err(AppError::Interne)?;
         sqlx::query("UPDATE utilisateur SET mot_de_passe_hash = $2 WHERE id_utilisateur = $1")
             .bind(&id)

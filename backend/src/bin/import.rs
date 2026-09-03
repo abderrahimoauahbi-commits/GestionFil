@@ -25,7 +25,24 @@ use anyhow::{bail, Context, Result};
 use calamine::{open_workbook_auto, Data, Range, Reader};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const UTILISATEUR_IMPORT: &str = "00000000-0000-4000-a000-000000000010"; // direction
+/// Le compte auquel la reprise est attribuee, RESOLU AU DEMARRAGE.
+///
+/// C'etait une constante — l'identifiant d'un compte de developpement que le
+/// seed de production supprime. L'import posait donc un contexte d'audit
+/// pointant sur personne, et `reference.id_utilisateur_creation` etant une cle
+/// etrangere, la premiere reference inseree faisait echouer toute la reprise.
+///
+/// On le cherche desormais par LOGIN : `admin` existe dans toutes les bases,
+/// c'est le compte auquel le seed de production reassigne deja les traces.
+async fn utilisateur_import(pool: &db::Db) -> Result<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT id_utilisateur FROM utilisateur
+          WHERE login = 'admin' AND actif = 1 LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?
+    .context("compte 'admin' introuvable : charger les seeds avant l'import")
+}
 const DATE_PHOTO_STOCK: &str = "2026-04-27T08:00:00.000Z";
 
 // ============================================================================
@@ -298,7 +315,7 @@ async fn main() -> Result<()> {
     let pool = db::connect(&url).await.context("connexion a la base")?;
 
     println!("Fichier : {chemin}");
-    println!("Base    : {url}");
+    println!("Base    : {}", db::url_sans_mot_de_passe(&url));
     if simuler {
         println!("Mode    : SIMULATION (aucune ecriture ne sera conservee)");
     }
@@ -314,9 +331,10 @@ async fn main() -> Result<()> {
 
 async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport> {
     let mut r = Rapport::default();
+    let utilisateur_import = utilisateur_import(pool).await?;
     let mut tx = pool.begin().await?;
 
-    db::poser_contexte(&mut tx, UTILISATEUR_IMPORT, None, Some("import-xlsx")).await?;
+    db::poser_contexte(&mut tx, &utilisateur_import, None, Some("import-xlsx")).await?;
 
     // ---- Catalogue lu d'abord : il determine les fournisseurs reellement utilises
     let f_cat = charger_feuille(chemin, "Catalogue")?;
@@ -512,7 +530,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         .bind(f_cat.nombre(l, "Stock Min").filter(|v| *v > 0.0))
         .bind(f_cat.nombre(l, "Couv Min (mois)"))
         .bind(i64::from(f_cat.booleen(l, "Actif")))
-        .bind(UTILISATEUR_IMPORT)
+        .bind(&utilisateur_import)
         .execute(&mut *tx)
         .await?;
 
@@ -618,9 +636,9 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
              -- BROUILLON : la mise en service intervient apres l'import de la
              -- composition, en passant par les controles R07 et densites.
              SELECT $1, $2, $3, 'BROUILLON',
-                    (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre='P_MargeSecurite'),
-                    (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre='P_CouvMinMois'),
-                    (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre='P_TauxPerte'),
+                    (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre='P_MargeSecurite'),
+                    (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre='P_CouvMinMois'),
+                    (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre='P_TauxPerte'),
                     (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
                     (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
                     (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SecuriteA'),
@@ -632,7 +650,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         .bind(&code)
         .bind(&nom)
         .bind(f_qual.nombre(l, "Poids commercial/m² (info)").unwrap_or(0.0))
-        .bind(UTILISATEUR_IMPORT)
+        .bind(&utilisateur_import)
         .execute(&mut *tx)
         .await?;
         n_qual += 1;
@@ -774,7 +792,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         )
         .bind(code_qualite)
         .bind(db::maintenant())
-        .bind(UTILISATEUR_IMPORT)
+        .bind(&utilisateur_import)
         .execute(&mut *tx)
         .await;
 
@@ -831,7 +849,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         )
         .bind(&id_mvt)
         .bind(DATE_PHOTO_STOCK)
-        .bind(UTILISATEUR_IMPORT)
+        .bind(&utilisateur_import)
         .execute(&mut *tx)
         .await?;
 

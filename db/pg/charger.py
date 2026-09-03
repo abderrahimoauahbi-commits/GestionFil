@@ -18,6 +18,12 @@ Usage :
     python charger.py                       # base locale
     python charger.py --base autre_base
     python charger.py --hote 192.168.1.140 --utilisateur gestionfil
+
+    python charger.py --production            # comptes reels, referentiel a importer
+    python charger.py --production --referentiel-fige   # + la photo du 2026-09-02
+
+Apres `--production`, le referentiel s'importe depuis le classeur :
+    gestionfil-import --simuler      puis      gestionfil-import
 """
 import os
 import re
@@ -75,13 +81,26 @@ SEEDS = [
     "seed_005_champs_analyse.sql",
 ]
 
-# Ce qui distingue une base de PRODUCTION d'une base de recette : le
-# referentiel reel de l'entreprise, et ses six comptes nominatifs a la place
-# des comptes de fonction. Charge par `--production`, jamais par defaut.
+# Ce qui distingue une base de PRODUCTION d'une base de recette : les six
+# comptes nominatifs de l'entreprise a la place des comptes de fonction, et son
+# identite legale. Charge par `--production`, jamais par defaut.
 PRODUCTION = [
-    "seed_100_referentiel_reel.sql",
     "seed_110_comptes_production.sql",
+    "seed_120_entreprise.sql",
 ]
+
+# LE REFERENTIEL NE VIENT PLUS D'ICI.
+#
+# `seed_100_referentiel_reel.sql` est une PHOTOGRAPHIE, extraite un jour donne
+# de la base de recette. Le classeur « GESTION FIL.xlsx » est la source vivante :
+# c'est lui que l'entreprise tient a jour, et `gestionfil-import` sait le lire —
+# catalogue, fournisseurs, qualites, recettes et photo de stock, sans
+# l'historique ni les plans.
+#
+# Charger les deux ferait entrer en concurrence deux verites sur les memes
+# references. Le fichier fige reste disponible derriere son propre drapeau, pour
+# reproduire a l'identique l'etat d'un jour precis.
+REFERENTIEL_FIGE = ["seed_100_referentiel_reel.sql"]
 
 # LES DECLENCHEURS D'AUDIT SE POSENT EN DERNIER, apres les donnees.
 #
@@ -234,6 +253,8 @@ def main():
     # instruction.
     if "--seeds" in args or "--production" in args:
         liste = SEEDS + (PRODUCTION if "--production" in args else [])
+        if "--referentiel-fige" in args:
+            liste = liste + REFERENTIEL_FIGE
         print("\n--- donnees de reference ---")
         for nom in liste:
             chemin = ICI / nom

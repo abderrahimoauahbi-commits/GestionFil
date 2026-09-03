@@ -21,7 +21,19 @@ CREATE TABLE entreprise (
     id_entreprise       TEXT    NOT NULL PRIMARY KEY
                                 DEFAULT (lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-a'||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6)))),
     nom                 TEXT    NOT NULL,
+    -- Filiale de Mazari Group : l'affiliation figure sur les documents
+    -- commerciaux, et elle explique la coexistence de deux marques.
+    groupe              TEXT,
     adresse             TEXT,
+    -- Coordonnees de contact : elles figurent sur les etats imprimes, ou
+    -- l'emetteur doit etre joignable, et dans la barre de pied de
+    -- l'application, ou on les cherche sans jamais les trouver.
+    telephone           TEXT,
+    fax                 TEXT,
+    -- Les RIB, en texte libre : plusieurs banques, formats variables selon
+    -- l'etablissement. Les decouper en colonnes obligerait a en choisir un
+    -- nombre, et il en manquerait toujours un.
+    banques             TEXT,
     ice                 TEXT,
     rc                  TEXT,
     identifiant_fiscal  TEXT,

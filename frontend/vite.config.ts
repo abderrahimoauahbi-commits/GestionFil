@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -5,7 +6,16 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 const hoteTauri = !!process.env.TAURI_ENV_PLATFORM
 
+// La version vient de `package.json` : un seul endroit ou elle est
+// declaree, et c'est celui que la publication verifie.
+const paquet = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+) as { version: string }
+
 export default defineConfig({
+  define: {
+    __VERSION__: JSON.stringify(paquet.version),
+  },
   plugins: [
     react(),
     tailwindcss(),

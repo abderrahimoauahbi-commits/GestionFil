@@ -82,6 +82,10 @@ Charge le schéma (53 tables, 73 vues, 76 déclencheurs), le référentiel réel
 (124 références, 12 fournisseurs, 18 qualités, 301 lignes de recette) et les six
 comptes nominatifs.
 
+> **Une seule fois.** Ce script **supprime et recrée** la base. Il n'a de sens
+> qu'avant le premier mot de passe posé et la première écriture. Ensuite, toute
+> évolution du schéma passe par une migration (voir « Faire évoluer la base »).
+
 ### 4. Les mots de passe
 
 Les six comptes portent `!A_DEFINIR!`, qui n'est pas une empreinte Argon2
@@ -133,6 +137,80 @@ sudo bash 04-revenir.sh
 > schéma, revenir au binaire précédent ne suffit pas — il faut aussi restaurer la
 > base, ce qui perd les écritures faites depuis. Le script le rappelle à chaque
 > exécution.
+
+---
+
+## Faire évoluer la base
+
+Depuis le 2 septembre 2026, la base de production **ne se recrée plus** : elle
+porte un mot de passe administrateur et, bientôt, des écritures. Chaque
+changement de schéma est un fichier daté dans `db/pg/migrations/`, écrit pour
+être **rejouable sans effet** s'il a déjà été appliqué (`ADD COLUMN IF NOT
+EXISTS`, `CREATE OR REPLACE VIEW`, upsert pour les données).
+
+Sur le serveur, après avoir déposé le fichier dans
+`/home/sysadmin/gestionfil/db/migrations/` :
+
+```bash
+cd /tmp && cat /home/sysadmin/gestionfil/db/migrations/2026-09-02_entreprise_identite.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1
+```
+
+> **Pourquoi `cat … |` et non `psql -f`.** Le compte `postgres` ne lit pas le
+> répertoire personnel de `sysadmin` (`drwxr-x---`) ; `-f` échoue en
+> « Permission denied ». Le passage par l'entrée standard contourne cela sans
+> ouvrir le répertoire.
+
+L'ordre est toujours : **sauvegarde** (`gestionfil-admin sauvegarder`), puis
+**migration**, puis **publication** du binaire qui attend le nouveau schéma. Un
+binaire publié avant sa migration démarre puis échoue à la première requête
+touchant la colonne absente.
+
+Migrations appliquées :
+
+| Date | Fichier | Objet |
+|---|---|---|
+| 2026-09-02 | `2026-09-02_entreprise_identite.sql` | `entreprise` : groupe, téléphone, fax, banques (puis `seed_120_entreprise.sql` rejoué) |
+| 2026-09-02 | `2026-09-02_mouvement_document.sql` | `mouvement.responsable`, `ligne_mouvement.nb_bobines` / `nb_palettes`, et les 13 champs configurables du bon de mouvement |
+| 2026-09-03 | `2026-09-03_telechargements.sql` | table `telechargement` (journal des paquets clients) et ses 9 champs configurables |
+
+> **Le 3 septembre 2026, la base a été reconstruite depuis zéro** et le
+> référentiel réimporté du classeur (voir « Reprise depuis le classeur »). Les
+> deux migrations du 2 septembre sont donc déjà comprises dans le schéma ; elles
+> restent listées parce qu'une base plus ancienne peut encore en avoir besoin.
+
+---
+
+## Reprise depuis le classeur
+
+Le référentiel ne vient plus d'un fichier SQL figé mais de **`GESTION FIL.xlsx`**,
+que l'entreprise tient à jour. `gestionfil-import` en lit cinq feuilles —
+Catalogue, Fournisseurs, Qualités, Recettes, Stock — et **rien d'autre** : ni
+mouvements, ni réceptions, ni commandes, ni plans. Une reprise d'historique
+ferait entrer dans l'ERP les incohérences accumulées dans le tableur.
+
+```bash
+# 1. Base neuve : schéma, sécurité, comptes nominatifs, identité de l'entreprise
+cd /home/sysadmin/gestionfil/db
+PSQL=psql python3 charger.py --production --base gestionfil --hote 127.0.0.1     --utilisateur gestionfil --motdepasse '<mot de passe du rôle>'
+
+# 2. Le référentiel, depuis le classeur — TOUJOURS en simulation d'abord
+cd /opt/gestionfil && set -a && . ./.env && set +a
+./gestionfil-import --simuler --fichier '/home/sysadmin/GESTION FIL.xlsx'
+./gestionfil-import          --fichier '/home/sysadmin/GESTION FIL.xlsx'
+
+# 3. Les mots de passe, qu'une base neuve remet à « à définir »
+GESTIONFIL_MOT_DE_PASSE='...' ./gestionfil-admin definir-mot-de-passe admin
+```
+
+`--simuler` joue tout l'import puis annule la transaction : le rapport est
+identique, la base intacte. Le rapport nomme chaque ligne rejetée.
+
+> **Le classeur ne porte aucun stock.** Au 3 septembre 2026, ses 124 références
+> ont toutes un stock initial à zéro, et ses feuilles Mouvements, Réceptions et
+> Historique sont vides. L'import le signale au lieu de créer une photo de stock
+> vide : les quantités réelles se saisiront dans l'application.
+
+---
 
 ---
 
@@ -218,6 +296,32 @@ Le service démarre en vérifiant la base et **s'arrête si elle ne convient pas
 La troisième est la plus importante : sans les déclencheurs, le service
 fonctionne parfaitement et n'applique plus aucune règle — stock négatif accepté,
 écritures dans le grand livre, journal d'audit silencieux.
+
+---
+
+## Distribuer les clients
+
+Les installateurs vivent dans `/opt/gestionfil/telechargements`, servis par
+l'écran « Télécharger l'application ». Le **nom du fichier est le catalogue** :
+
+```
+gestionfil-<plateforme>-<version>.<extension>
+gestionfil-windows-0.1.0.exe
+```
+
+Déposer le fichier suffit à le publier ; rien n'est à déclarer en base. Le
+service ne peut pas écrire dans ce dossier, et c'est délibéré : une application
+qui peut réécrire les binaires qu'elle distribue est une application dont une
+faille suffit à contaminer tous les postes. Un paquet se dépose donc par SSH.
+
+Chaque téléchargement est inscrit dans la table `telechargement` — qui, quelle
+version, quand. C'est la réponse à la seule question qu'on se pose après coup :
+« sur quelle version tourne ce poste ».
+
+```bash
+scp gestionfil-windows-0.2.0.exe sysadmin@192.168.1.140:/home/sysadmin/paquets/
+ssh sysadmin@192.168.1.140   'sudo install -o gestionfil -g gestionfil -m 0644      /home/sysadmin/paquets/gestionfil-windows-0.2.0.exe /opt/gestionfil/telechargements/'
+```
 
 ---
 

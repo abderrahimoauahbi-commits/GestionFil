@@ -66,6 +66,14 @@ pub struct LigneMouvement {
     pub quantite_saisie: f64,
     pub unite_saisie: String,
     pub prix_kg_mad: Option<f64>,
+    /// Les colis REELLEMENT COMPTES sur le quai.
+    ///
+    /// Ils ne se deduisent pas du poids : `quantite_saisie` en palettes se
+    /// convertit en kg par un facteur theorique, alors qu'une palette
+    /// incomplete reste une palette a manutentionner. Le bon imprime porte ce
+    /// compte, parce que c'est lui que le cariste verifie.
+    pub nb_bobines: Option<i64>,
+    pub nb_palettes: Option<i64>,
     pub lot_fournisseur: Option<String>,
     pub date_fabrication: Option<String>,
     pub date_peremption: Option<String>,
@@ -78,10 +86,46 @@ pub struct NouveauMouvement {
     pub code_type_mvt: String,
     pub code_magasin: String,
     pub code_motif: String,
+    /// LA DATE DU FAIT, distincte de la date de saisie.
+    ///
+    /// Elle etait imposee par la base a l'instant de l'enregistrement, ce qui
+    /// obligeait a tout saisir le jour meme sous peine de fausser le journal.
+    /// Un mouvement du samedi saisi le lundi porte desormais ses deux dates ;
+    /// le declencheur C06 refuse toujours une date future.
+    ///
+    /// Absente, la base pose l'instant courant, comme avant.
+    pub date_mouvement: Option<String>,
+    /// La personne qui a physiquement remis ou recu la marchandise.
+    ///
+    /// Ce n'est pas le compte qui saisit : le magasinier tape souvent pour un
+    /// chef d'equipe ou un chauffeur, et c'est ce dernier qu'on cherche quand
+    /// un ecart apparait trois jours plus tard.
+    pub responsable: Option<String>,
     pub numero_of: Option<String>,
     pub reference_document: Option<String>,
     pub observations_globales: Option<String>,
     pub lignes: Vec<LigneMouvement>,
+}
+
+/// Normalise une date de mouvement vers l'horodatage ISO-8601 du schema.
+///
+/// Un ecran envoie `2026-09-01` — c'est ce que produit un `<input type="date">`.
+/// Le schema stocke `2026-09-01T00:00:00.000Z`, et les vues comparent ces
+/// chaines lexicalement : melanger les deux formes ferait passer un mouvement
+/// avant ou apres tous les autres du meme jour, selon le sens du tri.
+///
+/// MINUIT ET NON MIDI : le declencheur C06 refuse une date dans le futur en
+/// comparant a l'instant courant. Midi rendrait impossible la saisie du jour
+/// meme avant midi — un refus incomprehensible pour celui qui le subit.
+fn normaliser_date_mouvement(v: &Option<String>) -> Option<String> {
+    v.as_ref().map(|d| {
+        let d = d.trim();
+        if d.len() == 10 {
+            format!("{d}T00:00:00.000Z")
+        } else {
+            d.to_string()
+        }
+    })
 }
 
 pub async fn creer_mouvement(
@@ -109,20 +153,28 @@ pub async fn creer_mouvement(
     let numero = numeroter(&mut tx, "mouvement", "numero_mouvement", "MVT").await?;
     let id = uuid::Uuid::new_v4().to_string();
 
+    // `COALESCE` plutot qu'une requete conditionnelle : la valeur par defaut du
+    // schema est l'instant courant, et la reproduire ici la ferait diverger le
+    // jour ou elle changera.
     sqlx::query(
         "INSERT INTO mouvement
-             (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif,
-              reference_document, numero_of, observations_globales, id_utilisateur)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+             (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
+              code_motif, reference_document, numero_of, observations_globales,
+              responsable, id_utilisateur)
+         VALUES ($1,$2,
+                 COALESCE($3, to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')),
+                 $4,$5,$6,$7,$8,$9,$10,$11)",
     )
     .bind(&id)
     .bind(&numero)
+    .bind(normaliser_date_mouvement(&m.date_mouvement))
     .bind(&m.code_type_mvt)
     .bind(&m.code_magasin)
     .bind(&m.code_motif)
     .bind(&m.reference_document)
     .bind(&m.numero_of)
     .bind(&m.observations_globales)
+    .bind(m.responsable.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(&user.id)
     .execute(&mut *tx)
     .await?;
@@ -134,9 +186,10 @@ pub async fn creer_mouvement(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                   quantite_saisie, unite_saisie, facteur_conversion,
+                  nb_bobines, nb_palettes,
                   lot_fournisseur, date_fabrication, date_peremption,
                   code_motif_ligne, numero_of)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
         )
         .bind(&id)
         .bind((i + 1) as i64)
@@ -146,6 +199,8 @@ pub async fn creer_mouvement(
         .bind(l.quantite_saisie)
         .bind(&l.unite_saisie)
         .bind(facteur)
+        .bind(l.nb_bobines)
+        .bind(l.nb_palettes)
         .bind(&l.lot_fournisseur)
         .bind(&l.date_fabrication)
         .bind(&l.date_peremption)
@@ -162,6 +217,168 @@ pub async fn creer_mouvement(
         "lignes": converties.len(),
         "quantite_totale_kg": arrondi_kg(converties.iter().map(|(_, kg, _)| kg).sum()),
     })))
+}
+
+// ----------------------------------------------------------------------------
+// Le mouvement comme DOCUMENT
+// ----------------------------------------------------------------------------
+// Le grand livre — une ligne par reference — reste servi par
+// `consultation::mouvements` : c'est la vue de l'auditeur, qui cherche ce
+// qu'est devenue une reference. Ce n'est pas celle du magasin, qui manipule des
+// camions et des equipes. Les deux endpoints coexistent parce que les deux
+// lectures sont legitimes ; les confondre obligeait a additionner de tete les
+// lignes d'un meme bon pour savoir combien de kilos etaient sortis.
+// ----------------------------------------------------------------------------
+
+/// Les totaux d'un document, calcules en SQL et non a l'ecran.
+///
+/// Le meme fragment sert la liste et le dossier : deux calculs paralleles
+/// finissent toujours par diverger d'un arrondi, et c'est le genre d'ecart
+/// qu'on ne remarque qu'au moment ou quelqu'un compare deux impressions.
+const TOTAUX_MOUVEMENT: &str = "
+    LEFT JOIN (
+        SELECT l.id_mouvement,
+               CAST(COUNT(*) AS bigint)                          AS nb_lignes,
+               CAST(COUNT(DISTINCT l.code_reference) AS bigint)  AS nb_references,
+               ROUND(SUM(l.quantite_kg), 3)                      AS quantite_totale_kg,
+               CAST(SUM(COALESCE(l.nb_bobines, 0))  AS bigint)   AS bobines_totales,
+               CAST(SUM(COALESCE(l.nb_palettes, 0)) AS bigint)   AS palettes_totales,
+               ROUND(SUM(COALESCE(l.total_mad, 0)), 2)           AS valeur_totale_mad,
+               -- LE REBUT, ISOLE DU RESTE. Un retour d'atelier melange de
+               -- l'excedent reutilisable (R3) et de la chute perdue (R4) : les
+               -- additionner ferait croire que tout revient en stock utile.
+               ROUND(SUM(CASE WHEN l.code_motif_ligne = 'R4'
+                              THEN l.quantite_kg ELSE 0 END), 3) AS rebut_kg
+          FROM ligne_mouvement l
+         GROUP BY l.id_mouvement
+    ) tot ON tot.id_mouvement = m.id_mouvement";
+
+/// Les colonnes d'entete, communes a la liste et au dossier.
+const ENTETE_MOUVEMENT: &str = "
+    m.id_mouvement, m.numero_mouvement, m.date_mouvement, m.date_creation,
+    m.code_type_mvt, tm.libelle AS type_libelle, tm.signe, tm.couleur,
+    m.code_magasin, mg.nom AS magasin_nom,
+    m.code_motif, mo.libelle AS motif_libelle,
+    m.reference_document, m.numero_of, m.observations_globales,
+    m.responsable, m.est_initial, u.login AS saisi_par,
+    CAST((substr(m.date_creation, 1, 10))::date
+       - (substr(m.date_mouvement, 1, 10))::date AS bigint) AS jours_de_retard_saisie,
+    COALESCE(tot.nb_lignes, 0)          AS nb_lignes,
+    COALESCE(tot.nb_references, 0)      AS nb_references,
+    COALESCE(tot.quantite_totale_kg, 0) AS quantite_totale_kg,
+    COALESCE(tot.bobines_totales, 0)    AS bobines_totales,
+    COALESCE(tot.palettes_totales, 0)   AS palettes_totales,
+    COALESCE(tot.valeur_totale_mad, 0)  AS valeur_totale_mad,
+    COALESCE(tot.rebut_kg, 0)           AS rebut_kg";
+
+const JOINTURES_MOUVEMENT: &str = "
+    FROM mouvement m
+    JOIN type_mouvement  tm ON tm.code_type_mvt = m.code_type_mvt
+    JOIN magasin         mg ON mg.code_magasin  = m.code_magasin
+    JOIN motif_mouvement mo ON mo.code_motif    = m.code_motif
+    JOIN utilisateur     u  ON u.id_utilisateur = m.id_utilisateur";
+
+#[derive(Debug, Deserialize)]
+pub struct FiltresDocuments {
+    pub limite: Option<i64>,
+    pub code_magasin: Option<String>,
+    pub code_type_mvt: Option<String>,
+    /// Ne garde que les documents portant cette reference sur l'une de leurs
+    /// lignes. C'est ce que demande « voir les bons ou cette matiere apparait ».
+    pub code_reference: Option<String>,
+    /// Bornes sur la date DU FAIT, pas sur celle de la saisie.
+    pub depuis: Option<String>,
+    pub jusqu_a: Option<String>,
+}
+
+/// La liste des mouvements, un document par ligne.
+///
+/// L'ECART ENTRE LE FAIT ET SA SAISIE est calcule ici et non a l'ecran. Il ne
+/// juge personne : il dit si le journal est tenu au jour le jour, ce qui
+/// conditionne la fiabilite du stock projete. Zero est le cas normal.
+pub async fn documents_mouvement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(f): Query<FiltresDocuments>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+
+    let sql = format!(
+        "SELECT {ENTETE_MOUVEMENT} {JOINTURES_MOUVEMENT} {TOTAUX_MOUVEMENT}
+          WHERE ($1::text IS NULL OR m.code_magasin  = $1)
+            AND ($2::text IS NULL OR m.code_type_mvt = $2)
+            AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM ligne_mouvement l
+                                              WHERE l.id_mouvement   = m.id_mouvement
+                                                AND l.code_reference = $3))
+            AND ($4::text IS NULL OR m.date_mouvement >= $4)
+            AND ($5::text IS NULL OR m.date_mouvement <= $5)
+          ORDER BY m.date_mouvement DESC, m.numero_mouvement DESC
+          LIMIT $6"
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(&f.code_magasin)
+        .bind(&f.code_type_mvt)
+        .bind(&f.code_reference)
+        .bind(&f.depuis)
+        // Une borne haute sur une date nue exclurait la journee entiere :
+        // '2026-09-02' est plus petit que '2026-09-02T08:00:00.000Z'. On la
+        // repousse donc a la fin du jour demande.
+        .bind(f.jusqu_a.as_ref().map(|d| {
+            let d = d.trim();
+            if d.len() == 10 { format!("{d}T23:59:59.999Z") } else { d.to_string() }
+        }))
+        .bind(f.limite.unwrap_or(300).clamp(1, 2000))
+        .fetch_all(&state.db)
+        .await?;
+
+    let mut valeur = lignes_en_json(&rows);
+    user.masquer(&state.db, module::MOUVEMENTS, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
+/// Le dossier complet d'un mouvement : entete, lignes, totaux.
+///
+/// Un seul appel, parce que c'est ce qu'imprime un bon d'entree ou de sortie.
+/// Assembler le document depuis trois requetes exposerait a l'imprimer a
+/// moitie servi — meme raison que pour le dossier de transfert.
+pub async fn dossier_mouvement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+
+    let sql = format!(
+        "SELECT {ENTETE_MOUVEMENT} {JOINTURES_MOUVEMENT} {TOTAUX_MOUVEMENT}
+          WHERE m.id_mouvement = $1"
+    );
+    let entete = sqlx::query(&sql)
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("mouvement {id}")))?;
+
+    let lignes = sqlx::query(
+        "SELECT l.*, r.designation, r.couleur, r.unite_catalogue,
+                ml.libelle AS motif_ligne_libelle
+           FROM ligne_mouvement l
+           JOIN reference r ON r.code_reference = l.code_reference
+           LEFT JOIN motif_ligne ml ON ml.code_motif_ligne = l.code_motif_ligne
+          WHERE l.id_mouvement = $1
+          ORDER BY l.ligne_numero",
+    )
+    .bind(&id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut sortie = json!({
+        "entete": lignes_en_json(std::slice::from_ref(&entete))
+            .as_array().and_then(|a| a.first().cloned()).unwrap_or(Value::Null),
+        "lignes": lignes_en_json(&lignes),
+    });
+    user.masquer(&state.db, module::MOUVEMENTS, &mut sortie).await?;
+    Ok(Json(sortie))
 }
 
 // ============================================================================
@@ -830,7 +1047,7 @@ pub async fn creer_bc(
 
     // RG-09 : le taux est fige a la creation puis reevalue a la validation.
     let taux: f64 = sqlx::query_scalar(
-        "SELECT taux FROM taux_change
+        "SELECT taux::float8 FROM taux_change
           WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
             AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
           ORDER BY date_debut DESC LIMIT 1",
@@ -1225,7 +1442,9 @@ pub async fn changer_statut_bc(
 
         // B4 regle 3 : validation par paliers de montant, sur le montant reengage.
         let montant: f64 =
-            sqlx::query_scalar("SELECT COALESCE(montant_total_mad, 0) FROM bon_commande WHERE id_bc = $1")
+            sqlx::query_scalar(
+        "SELECT COALESCE(montant_total_mad, 0)::float8 FROM bon_commande WHERE id_bc = $1",
+    )
                 .bind(&id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -1660,7 +1879,7 @@ pub async fn lister_receptions(
                             WHERE l.id_reception = rc.id_reception)
                           >= (SELECT SUM(l.quantite_commandee_kg) FROM ligne_reception l
                                WHERE l.id_reception = rc.id_reception)
-                             * (1 - COALESCE((SELECT CAST(valeur_courante AS REAL) / 100.0
+                             * (1 - COALESCE((SELECT CAST(valeur_courante AS numeric) / 100.0
                                                 FROM parametre
                                                WHERE code_parametre = 'P_TolerInFull'), 0.02))
                      THEN 1 ELSE 0 END AS in_full,
@@ -1932,7 +2151,7 @@ pub async fn creer_reception(
         .ok_or_else(|| AppError::Introuvable(format!("fournisseur {fournisseur}")))?;
 
         let taux_frs: f64 = sqlx::query_scalar(
-            "SELECT taux FROM taux_change
+            "SELECT taux::float8 FROM taux_change
               WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
                 AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
               ORDER BY date_debut DESC LIMIT 1",
@@ -1986,7 +2205,7 @@ pub async fn creer_reception(
             let prix_kg: f64 = match l.prix_kg_devise {
                 Some(p) if p > 0.0 => p,
                 _ => sqlx::query_scalar(
-                    "SELECT prix_catalogue_kg FROM reference WHERE code_reference = $1",
+                    "SELECT prix_catalogue_kg::float8 FROM reference WHERE code_reference = $1",
                 )
                 .bind(&l.code_reference)
                 .fetch_optional(&mut *tx)
@@ -2059,7 +2278,7 @@ pub async fn creer_reception(
         // entre ce qu'on a commande et ce qu'on valorise.
         let engage: Option<(f64, String, f64)> = match &id_ligne_bc {
             Some(idl) => sqlx::query_as(
-                "SELECT lb.prix_kg_devise, lb.code_devise,
+                "SELECT lb.prix_kg_devise::float8, lb.code_devise,
                         COALESCE((SELECT t.taux FROM taux_change t
                                    WHERE t.code_devise = lb.code_devise
                                      AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
@@ -2080,7 +2299,7 @@ pub async fn creer_reception(
 
         let qte_commandee: Option<f64> = match &id_ligne_bc {
             Some(idl) => sqlx::query_scalar(
-                "SELECT quantite_restante_kg FROM ligne_bc WHERE id_ligne_bc = $1",
+                "SELECT quantite_restante_kg::float8 FROM ligne_bc WHERE id_ligne_bc = $1",
             )
             .bind(idl)
             .fetch_optional(&mut *tx)
@@ -2247,7 +2466,7 @@ pub async fn ajouter_ligne_reception(
                 // deux camions verrait sinon chaque reception jugee incomplete,
                 // et l'OTIF de chacune tomberait a zero sans faute reelle.
                 let r: (f64, String, f64) = sqlx::query_as(
-                    "SELECT prix_kg_devise, code_devise, quantite_restante_kg
+                    "SELECT prix_kg_devise::float8, code_devise, quantite_restante_kg::float8
                        FROM ligne_bc WHERE id_ligne_bc = $1",
                 )
                 .bind(ligne_bc)
@@ -2263,7 +2482,7 @@ pub async fn ajouter_ligne_reception(
             ),
             (None, None) => {
                 let r: (f64, String) = sqlx::query_as(
-                    "SELECT prix_catalogue_kg, code_devise_catalogue
+                    "SELECT prix_catalogue_kg::float8, code_devise_catalogue
                        FROM reference WHERE code_reference = $1",
                 )
                 .bind(&l.code_reference)
@@ -2275,7 +2494,7 @@ pub async fn ajouter_ligne_reception(
 
     // RG-09 : taux du jour de la reception, distinct du taux engage du BC.
     let taux: f64 = sqlx::query_scalar(
-        "SELECT taux FROM taux_change
+        "SELECT taux::float8 FROM taux_change
           WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
             AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
           ORDER BY date_debut DESC LIMIT 1",

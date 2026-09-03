@@ -681,6 +681,33 @@ INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible,
  -- qualite comme tout ce qui porte un prix (B4 regle 1). Les deux bons
  -- imprimables ne l'affichent pas ; ils n'en ont pas besoin.
  ('MOUVEMENTS','valeur_totale_mad',      'Valeur transportee (MAD)', 'LECTURE', 1, 1540),
+-- ---- MOUVEMENTS : LE BON DE MOUVEMENT -------------------------------------
+-- Le mouvement etait lu ligne a ligne, comme un grand livre comptable. C'est
+-- juste pour l'audit et faux pour le magasin : ce qui entre ou sort, c'est un
+-- CAMION, une palette, une equipe — un document avec un entete et des lignes,
+-- exactement comme un bon de commande. Ces champs sont ceux de cet entete.
+--
+-- Un champ non declare ici vaut MASQUE et sa colonne disparait de l'ecran sans
+-- un mot : c'est la raison d'etre de ce pave.
+ ('MOUVEMENTS','magasin_nom',           'Nom du magasin',           'LECTURE', 0, 1600),
+ ('MOUVEMENTS','motif_libelle',         'Motif',                    'LECTURE', 0, 1610),
+ ('MOUVEMENTS','reference_document',    'Document de reference',    'LECTURE', 0, 1620),
+ ('MOUVEMENTS','observations_globales', 'Observations',             'LECTURE', 0, 1630),
+ -- Les deux dates, et leur ecart. Un mouvement du samedi saisi le lundi porte
+ -- deux dates : celle du fait et celle de son enregistrement. L'ecart dit si le
+ -- magasin tient son journal a jour — c'est une information, pas un defaut.
+ ('MOUVEMENTS','date_creation',         'Date de saisie',           'LECTURE', 0, 1640),
+ ('MOUVEMENTS','jours_de_retard_saisie','Jours entre fait et saisie','LECTURE',0, 1650),
+ ('MOUVEMENTS','saisi_par',             'Saisi par',                'LECTURE', 0, 1660),
+ -- Le rebut, isole du reste. Un retour d'atelier melange de l'excedent
+ -- reutilisable (R3) et de la chute perdue (R4) : les additionner ferait croire
+ -- que tout revient en stock utile.
+ ('MOUVEMENTS','rebut_kg',              'Dont rebut / perte (kg)',  'LECTURE', 0, 1670),
+ ('MOUVEMENTS','motif_ligne_libelle',   'Motif de la ligne',        'LECTURE', 0, 1680),
+ ('MOUVEMENTS','est_initial',           'Reprise de stock initial', 'LECTURE', 0, 1690),
+ ('MOUVEMENTS','date_fabrication',      'Date de fabrication',      'LECTURE', 0, 1700),
+ ('MOUVEMENTS','statut_qualite',        'Statut qualite',           'LECTURE', 0, 1710),
+ ('MOUVEMENTS','facteur_conversion',    'Facteur de conversion',    'LECTURE', 0, 1720),
 -- ---- PLAN D'ACHAT : FIGEMENT DES PROPOSITIONS -----------------------------
 -- Une ligne retouchee par l'acheteur est protegee du recalcul. L'ecart entre ce
 -- qu'elle porte et ce que le calcul dit aujourd'hui se lit sur la ligne : une
@@ -693,6 +720,18 @@ INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible,
  ('PLAN_ACHAT','quantite_calculee_kg', 'Quantite calculee aujourdhui (kg)','LECTURE', 0, 1350),
  ('PLAN_ACHAT','ecart_calcul_kg',      'Ecart avec le calcul (kg)', 'LECTURE', 0, 1360),
  ('PLAN_ACHAT','etat_figement',        'Coherence de la protection','LECTURE', 0, 1370),
+-- ---- TELECHARGEMENTS -------------------------------------------------------
+-- Le journal des versions distribuees. Il vit dans le module PARAMETRES : c'est
+-- une information d'exploitation, pas de gestion.
+ ('PARAMETRES','fichier',             'Fichier',             'LECTURE', 0, 200),
+ ('PARAMETRES','plateforme',          'Plateforme',          'LECTURE', 0, 210),
+ ('PARAMETRES','version',             'Version',             'LECTURE', 0, 220),
+ ('PARAMETRES','taille_octets',       'Taille',              'LECTURE', 0, 230),
+ ('PARAMETRES','date_telechargement', 'Telecharge le',       'LECTURE', 0, 240),
+ ('PARAMETRES','utilisateur',         'Par',                 'LECTURE', 0, 250),
+ ('PARAMETRES','adresse_ip',          'Adresse IP',          'LECTURE', 0, 260),
+ ('PARAMETRES','disponible',          'Disponible',          'LECTURE', 0, 270),
+ ('PARAMETRES','nb_telechargements',  'Telechargements',     'LECTURE', 0, 280),
 -- ---- PARAMETRES ------------------------------------------------------------
  ('PARAMETRES','code_parametre',  'Code',            'LECTURE', 0, 10),
  ('PARAMETRES','libelle',         'Libelle',         'LECTURE', 0, 20),
@@ -753,7 +792,10 @@ UPDATE modele_droit_champ SET niveau = 'LECTURE'
                  'total_devise','total_ligne_devise','ecart_pct','ecart_kg','ecart_mad',
                  'kg_m2','quantite_recue_kg','quantite_stock_kg','montant_estime_mad',
                  'stock_projete_kg','jours_couverture','derniere_connexion',
-                 'quantite_theorique_kg','nb_references','taux_change');
+                 'quantite_theorique_kg','nb_references','taux_change',
+                 'rebut_kg','jours_de_retard_saisie','facteur_conversion',
+                 'quantite_totale_kg','bobines_totales','palettes_totales',
+                 'valeur_totale_mad');
 
 -- 3b. IDENTIFIANTS : non modifiables APRES creation, dans le module dont ils
 -- sont la cle. Un code de reference est cite par les mouvements, les recettes

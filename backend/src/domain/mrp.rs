@@ -157,7 +157,7 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
     .await?;
 
     let (refs, total): (i64, Option<f64>) = sqlx::query_as(
-        "SELECT COUNT(DISTINCT code_reference), SUM(quantite_kg)
+        "SELECT COUNT(DISTINCT code_reference), SUM(quantite_kg)::float8
            FROM besoin_mrp WHERE id_plan = $1",
     )
     .bind(id_plan)

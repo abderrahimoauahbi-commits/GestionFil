@@ -207,9 +207,9 @@ pub async fn enregistrer_qualite(
                   seuil_alerte_jours, seuil_critique_jours, stock_securite_jours,
                   id_utilisateur_creation)
              SELECT $1, $2, $3, 'BROUILLON', 0,
-                    COALESCE($4, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite')),
-                    COALESCE($5, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois')),
-                    COALESCE($6, (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte')),
+                    COALESCE($4, (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite')),
+                    COALESCE($5, (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois')),
+                    COALESCE($6, (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte')),
                     COALESCE($7, (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte')),
                     COALESCE($8, (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique')),
                     COALESCE($9, (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SecuriteA')),
@@ -393,7 +393,9 @@ pub async fn enregistrer_qualite(
     }
 
     let poids: f64 =
-        sqlx::query_scalar("SELECT poids_commercial_m2 FROM qualite WHERE code_qualite = $1")
+        sqlx::query_scalar(
+        "SELECT poids_commercial_m2::float8 FROM qualite WHERE code_qualite = $1",
+    )
             .bind(code)
             .fetch_one(&mut *tx)
             .await?;
@@ -552,9 +554,9 @@ pub async fn creer_qualite(
               seuil_alerte_jours, seuil_critique_jours, stock_securite_jours,
               id_utilisateur_creation)
          SELECT $1, $2, $3,
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte'),
                 (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
                 (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
                 (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SecuriteA'),
@@ -901,14 +903,14 @@ pub async fn creer_plan(
               seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
               id_utilisateur_creation)
          SELECT $1, $2, $3, $4, $5, $6, $7,
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte'),
                 (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
                 (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier1'),
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier2'),
-                (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier3'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_SeuilTier1'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_SeuilTier2'),
+                (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_SeuilTier3'),
                 $8",
     )
     .bind(&id)
@@ -1175,14 +1177,14 @@ pub async fn enregistrer_plan(
                       seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
                       id_utilisateur_creation)
                  SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                        (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
-                        (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
-                        (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_TauxPerte'),
+                        (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
+                        (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
+                        (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte'),
                         (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilAlerte'),
                         (SELECT CAST(valeur_courante AS bigint) FROM parametre WHERE code_parametre='P_SeuilCritique'),
-                        (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier1'),
-                        (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier2'),
-                        (SELECT CAST(valeur_courante AS REAL)    FROM parametre WHERE code_parametre='P_SeuilTier3'),
+                        (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_SeuilTier1'),
+                        (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_SeuilTier2'),
+                        (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_SeuilTier3'),
                         $10",
             )
             .bind(&id)
@@ -1328,7 +1330,7 @@ pub async fn recalculer_plan(
     user.poser_contexte(&mut tx).await?;
 
     let (statut, date_debut, horizon, croissance): (String, String, i64, f64) = sqlx::query_as(
-        "SELECT statut, date_debut, mois_horizon, croissance_annuelle_pct
+        "SELECT statut, date_debut, mois_horizon, croissance_annuelle_pct::float8
            FROM plan_production WHERE id_plan = $1",
     )
     .bind(&id)

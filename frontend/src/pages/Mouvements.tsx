@@ -7,6 +7,7 @@
  * entrer en stock.
  */
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -81,6 +82,9 @@ interface Saisie {
   quantite_saisie: string
   unite_saisie: string
   prix_kg_mad: string
+  /** Les colis REELLEMENT COMPTES, qui ne se deduisent pas du poids. */
+  nb_palettes: string
+  nb_bobines: string
   lot_fournisseur: string
   code_motif_ligne: string
 }
@@ -90,8 +94,16 @@ const LIGNE_VIDE: Saisie = {
   quantite_saisie: '',
   unite_saisie: 'kg',
   prix_kg_mad: '',
+  nb_palettes: '',
+  nb_bobines: '',
   lot_fournisseur: '',
   code_motif_ligne: '',
+}
+
+/** La date du jour, au format d'un `<input type="date">` et en heure locale. */
+function aujourdhui(): string {
+  const d = new Date()
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
 }
 
 /** Facteur de conversion vers le kg, ou null si la reference ne le permet pas. */
@@ -113,6 +125,236 @@ function facteur(r: RefCatalogue | undefined, unite: string): number | null {
   }
 }
 
+/**
+ * La liste des mouvements, UN DOCUMENT PAR LIGNE.
+ *
+ * POURQUOI ELLE EXISTE A COTE DU GRAND LIVRE. Le livre montre une ligne par
+ * reference : c'est la vue de l'auditeur, qui cherche ce qu'est devenue une
+ * matiere. Ce n'est pas celle du magasin, qui manipule des camions et des
+ * equipes. Devant le livre seul, il fallait additionner de tete les lignes d'un
+ * meme bon pour savoir combien de kilos etaient sortis — et personne ne le
+ * faisait.
+ *
+ * Les deux vues restent, parce que les deux lectures sont legitimes.
+ */
+interface DocMouvement extends Record<string, unknown> {
+  id_mouvement: string
+  numero_mouvement: string
+  date_mouvement: string
+  date_creation?: string
+  jours_de_retard_saisie?: number
+  code_type_mvt: string
+  type_libelle?: string
+  signe: number
+  code_magasin: string
+  magasin_nom?: string
+  motif_libelle?: string
+  reference_document?: string | null
+  numero_of?: string | null
+  responsable?: string | null
+  saisi_par?: string
+  nb_lignes: number
+  nb_references: number
+  quantite_totale_kg: number
+  bobines_totales?: number
+  palettes_totales?: number
+  valeur_totale_mad?: number
+  rebut_kg?: number
+}
+
+const CHAMPS_DOC: ChampFiltre<DocMouvement>[] = [
+  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (d) => d.date_mouvement },
+  { cle: 'type', libelle: 'Type', type: 'liste', valeur: (d) => d.code_type_mvt },
+  { cle: 'magasin', libelle: 'Magasin', type: 'liste', valeur: (d) => d.code_magasin },
+  { cle: 'responsable', libelle: 'Responsable', type: 'liste', valeur: (d) => d.responsable },
+  { cle: 'saisi_par', libelle: 'Saisi par', type: 'liste', valeur: (d) => d.saisi_par },
+  { cle: 'document', libelle: 'Document', type: 'texte', valeur: (d) => d.reference_document },
+]
+
+function ListeDocuments({ filtreRef }: { filtreRef: string }) {
+  const navigate = useNavigate()
+  const filtres = useFiltres(CHAMPS_DOC)
+  const [sens, setSens] = useState('')
+
+  const params = new URLSearchParams({ limite: '300' })
+  if (filtreRef) params.set('code_reference', filtreRef)
+
+  const q = useQuery({
+    queryKey: ['mouvements-documents', filtreRef],
+    queryFn: () => api.get<DocMouvement[]>(`/api/mouvements/documents?${params}`),
+  })
+
+  const colonnes: Colonne<DocMouvement>[] = [
+    { champ: 'date_mouvement', entete: 'Date', rendu: (d) => fmt.date(d.date_mouvement) },
+    {
+      champ: 'numero_mouvement',
+      entete: 'Numero',
+      rendu: (d) => <span className="font-mono text-xs">{d.numero_mouvement}</span>,
+    },
+    {
+      champ: 'code_type_mvt',
+      entete: 'Type',
+      rendu: (d) => (
+        <Etiquette ton={d.signe > 0 ? 'vert' : 'ambre'}>
+          {d.signe > 0 ? '+' : '−'} {d.type_libelle ?? d.code_type_mvt}
+        </Etiquette>
+      ),
+    },
+    { champ: 'magasin_nom', entete: 'Magasin', rendu: (d) => d.magasin_nom ?? d.code_magasin },
+    {
+      champ: 'nb_lignes',
+      entete: 'Lignes',
+      numerique: true,
+      rendu: (d) => (
+        <span title={`${d.nb_references} reference(s)`}>{d.nb_lignes}</span>
+      ),
+    },
+    {
+      champ: 'quantite_totale_kg',
+      entete: 'Total (kg)',
+      numerique: true,
+      rendu: (d) => (
+        <span className={d.signe > 0 ? 'text-emerald-700' : 'text-alerte'}>
+          {d.signe > 0 ? '+' : '−'}
+          {fmt.nombre(d.quantite_totale_kg, 2)}
+        </span>
+      ),
+    },
+    {
+      champ: 'palettes_totales',
+      entete: 'Palettes',
+      numerique: true,
+      secondaire: true,
+      rendu: (d) => (d.palettes_totales ? fmt.entier(d.palettes_totales) : '—'),
+    },
+    {
+      champ: 'rebut_kg',
+      entete: 'Rebut (kg)',
+      numerique: true,
+      secondaire: true,
+      rendu: (d) =>
+        d.rebut_kg ? <span className="text-alerte">{fmt.nombre(d.rebut_kg, 2)}</span> : '—',
+    },
+    {
+      champ: 'valeur_totale_mad',
+      entete: 'Valeur',
+      numerique: true,
+      secondaire: true,
+      rendu: (d) => (d.valeur_totale_mad ? fmt.mad(d.valeur_totale_mad) : '—'),
+    },
+    {
+      champ: 'responsable',
+      entete: 'Responsable',
+      rendu: (d) => fmt.texte(d.responsable),
+    },
+    {
+      champ: 'saisi_par',
+      entete: 'Saisi par',
+      secondaire: true,
+      // L'ECART ENTRE LE FAIT ET SA SAISIE se lit ici, pas dans une colonne a
+      // part : il n'interesse que lorsqu'il n'est pas nul.
+      rendu: (d) => (
+        <>
+          {d.saisi_par ?? '—'}
+          {(d.jours_de_retard_saisie ?? 0) > 0 && (
+            <span className="ml-1 text-[11px] text-alerte">+{d.jours_de_retard_saisie} j</span>
+          )}
+        </>
+      ),
+    },
+    { champ: 'reference_document', entete: 'Document', secondaire: true,
+      rendu: (d) => fmt.texte(d.reference_document) },
+  ]
+
+  const tous = q.data ?? []
+  const comptes = tous.reduce<Record<string, number>>((m, d) => {
+    const c = d.signe > 0 ? 'ENTREE' : 'SORTIE'
+    m[c] = (m[c] ?? 0) + 1
+    m[`T:${d.code_type_mvt}`] = (m[`T:${d.code_type_mvt}`] ?? 0) + 1
+    return m
+  }, {})
+  const typesPresents = [...new Set(tous.map((d) => d.code_type_mvt))].sort()
+
+  const groupes: GroupeRail[] = [
+    { entrees: [{ cle: '', libelle: 'Tous les bons', compte: tous.length }] },
+    {
+      titre: 'Par sens',
+      entrees: [
+        { cle: 'ENTREE', libelle: 'Entrees', resume: 'Le stock monte',
+          compte: comptes.ENTREE ?? 0, ton: 'succes' as const },
+        { cle: 'SORTIE', libelle: 'Sorties', resume: 'Le stock descend',
+          compte: comptes.SORTIE ?? 0, ton: 'alerte' as const },
+      ],
+    },
+    {
+      titre: 'Par type',
+      entrees: typesPresents.map((t) => ({
+        cle: `T:${t}`,
+        libelle: tous.find((d) => d.code_type_mvt === t)?.type_libelle ?? t,
+        compte: comptes[`T:${t}`] ?? 0,
+      })),
+    },
+  ]
+
+  const parSens = tous.filter((d) => {
+    if (!sens) return true
+    if (sens.startsWith('T:')) return d.code_type_mvt === sens.slice(2)
+    return sens === 'ENTREE' ? d.signe > 0 : d.signe < 0
+  })
+  const vues = parSens.filter(filtres.retenir)
+
+  // Les totaux de ce qui est A L'ECRAN, pas de ce que la base contient : c'est
+  // la question qu'on se pose apres avoir filtre.
+  const totalKg = vues.reduce((s, d) => s + d.signe * (d.quantite_totale_kg ?? 0), 0)
+  const totalPalettes = vues.reduce((s, d) => s + (d.palettes_totales ?? 0), 0)
+
+  return (
+    <PageAvecRail
+      large
+      rail={
+        <div className="space-y-3">
+          <RailLateral groupes={groupes} actif={sens} surChoix={setSens} />
+          <PanneauFiltres
+            champs={CHAMPS_DOC}
+            lignes={parSens}
+            valeurs={filtres.valeurs}
+            definir={filtres.definir}
+            reinitialiser={filtres.reinitialiser}
+            actifs={filtres.actifs}
+          />
+        </div>
+      }
+    >
+      {vues.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-x-4 text-[12px] text-attenue-texte">
+          <span>
+            {vues.length} bon(s) sur {tous.length}
+          </span>
+          <span>
+            Solde affiche{' '}
+            <strong className={totalKg >= 0 ? 'text-emerald-700' : 'text-alerte'}>
+              {fmt.nombre(totalKg, 2)} kg
+            </strong>
+          </span>
+          {totalPalettes > 0 && <span>{fmt.entier(totalPalettes)} palette(s)</span>}
+        </div>
+      )}
+      <TableDroits
+        exportable="bons-de-mouvement"
+        imprimable="Bons de mouvement"
+        module={MODULE}
+        colonnes={colonnes}
+        lignes={vues}
+        chargement={q.isLoading}
+        cle={(d) => d.id_mouvement}
+        surClic={(d) => navigate(`/mouvements/${d.id_mouvement}`)}
+        titreCarte={(d) => `${d.numero_mouvement} · ${d.type_libelle ?? d.code_type_mvt}`}
+        texteVide="Aucun mouvement."
+      />
+    </PageAvecRail>
+  )
+}
+
 export function Mouvements() {
   const droits = useDroits(MODULE)
   const qc = useQueryClient()
@@ -123,6 +365,13 @@ export function Mouvements() {
   const [filtreRef, setFiltreRef] = useEtatDepuisParam('reference')
   const [sens, setSens] = useState('')
   const filtres = useFiltres(CHAMPS_MVT)
+
+  // DEUX LECTURES DU MEME JOURNAL. « Bons » montre un document par ligne, avec
+  // ses totaux : c'est la vue du magasin. « Grand livre » montre une ligne par
+  // reference : c'est celle de l'auditeur. Le choix vit dans l'URL, pour qu'un
+  // lien partage ouvre la bonne.
+  const [vue, setVue] = useEtatDepuisParam('vue')
+  const livre = vue === 'livre'
 
   const params = new URLSearchParams({ limite: '300' })
   if (filtreRef) params.set('code_reference', filtreRef)
@@ -243,14 +492,39 @@ export function Mouvements() {
     <div>
       <EnTetePage
         titre="Mouvements de stock"
-        sous_titre="Grand livre immuable : une correction se fait par un mouvement inverse"
+        sous_titre="Registre immuable : une correction se fait par un mouvement inverse"
         actions={
-          droits.peutEcrire && (
-            <Bouton onClick={() => setSaisieOuverte(true)}>Saisir un mouvement</Bouton>
-          )
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-bordure p-0.5 text-[12px]">
+              {[
+                { cle: '', libelle: 'Bons' },
+                { cle: 'livre', libelle: 'Grand livre' },
+              ].map((o) => (
+                <button
+                  key={o.cle}
+                  type="button"
+                  onClick={() => setVue(o.cle)}
+                  className={
+                    'rounded px-2.5 py-1 transition-colors ' +
+                    ((o.cle === 'livre') === livre
+                      ? 'bg-accent font-medium text-texte'
+                      : 'text-attenue-texte hover:text-texte')
+                  }
+                >
+                  {o.libelle}
+                </button>
+              ))}
+            </div>
+            {droits.peutEcrire && (
+              <Bouton onClick={() => setSaisieOuverte(true)}>Saisir un mouvement</Bouton>
+            )}
+          </div>
         }
       />
 
+      {!livre && <ListeDocuments filtreRef={filtreRef} />}
+
+      {livre && (
       <PageAvecRail
         large
         rail={
@@ -293,6 +567,7 @@ export function Mouvements() {
           texteVide="Aucun mouvement."
         />
       </PageAvecRail>
+      )}
 
       {saisieOuverte && (
         <SaisieMouvement
@@ -300,6 +575,7 @@ export function Mouvements() {
           surSucces={() => {
             setSaisieOuverte(false)
             void qc.invalidateQueries({ queryKey: ['mouvements'] })
+            void qc.invalidateQueries({ queryKey: ['mouvements-documents'] })
             void qc.invalidateQueries({ queryKey: ['stock-projete'] })
             void qc.invalidateQueries({ queryKey: ['cockpit'] })
           }}
@@ -320,6 +596,12 @@ function SaisieMouvement({
     code_type_mvt: '',
     code_magasin: '',
     code_motif: '',
+    // LA DATE DU FAIT, pre-remplie a aujourd'hui. Elle etait imposee par la
+    // base a l'instant de l'enregistrement, ce qui obligeait a tout saisir le
+    // jour meme sous peine de fausser le journal.
+    date_mouvement: aujourdhui(),
+    responsable: '',
+    reference_document: '',
     numero_of: '',
     observations_globales: '',
   })
@@ -378,8 +660,10 @@ function SaisieMouvement({
     mutationFn: () =>
       api.post('/api/mouvements', {
         ...entete,
+        responsable: entete.responsable.trim() || null,
+        reference_document: entete.reference_document.trim() || null,
         numero_of: entete.numero_of || null,
-        observations_globales: entete.observations_globales || null,
+        observations_globales: entete.observations_globales.trim() || null,
         lignes: lignes
           .filter((l) => l.code_reference && l.quantite_saisie)
           .map((l) => ({
@@ -387,6 +671,8 @@ function SaisieMouvement({
             quantite_saisie: Number(l.quantite_saisie),
             unite_saisie: l.unite_saisie,
             prix_kg_mad: l.prix_kg_mad ? Number(l.prix_kg_mad) : null,
+            nb_palettes: l.nb_palettes ? Number(l.nb_palettes) : null,
+            nb_bobines: l.nb_bobines ? Number(l.nb_bobines) : null,
             lot_fournisseur: l.lot_fournisseur || null,
             code_motif_ligne: l.code_motif_ligne || null,
           })),
@@ -494,6 +780,61 @@ function SaisieMouvement({
               />
             </div>
           )}
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-texte">
+              Date du mouvement <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              required
+              max={aujourdhui()}
+              value={entete.date_mouvement}
+              onChange={(e) => setEntete({ ...entete, date_mouvement: e.target.value })}
+              className={champ}
+            />
+            <p className="mt-0.5 text-[11px] text-attenue-texte">
+              La date du fait, qui peut differer du jour de saisie. Jamais dans le futur.
+            </p>
+          </div>
+
+          {/* DEUX RESPONSABLES, ET C'EST VOULU. Le compte connecte dit qui a
+              TAPE ; ce champ dit qui a REMIS ou RECU. Le magasinier saisit
+              souvent pour un chef d'equipe ou un chauffeur, et c'est ce dernier
+              qu'on cherche quand un ecart apparait trois jours plus tard. */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-texte">
+              Responsable de la marchandise
+            </label>
+            <input
+              value={entete.responsable}
+              onChange={(e) => setEntete({ ...entete, responsable: e.target.value })}
+              placeholder="Qui remet ou recoit"
+              className={champ}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-texte">
+              Document de reference
+            </label>
+            <input
+              value={entete.reference_document}
+              onChange={(e) => setEntete({ ...entete, reference_document: e.target.value })}
+              placeholder="N BL, bon de commande, OF..."
+              className={champ}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-texte">Observations</label>
+          <textarea
+            rows={2}
+            value={entete.observations_globales}
+            onChange={(e) => setEntete({ ...entete, observations_globales: e.target.value })}
+            className={champ}
+          />
         </div>
 
         {/* --- Lignes ------------------------------------------------------ */}
@@ -588,6 +929,32 @@ function SaisieMouvement({
                       />
                     </div>
                   )}
+                  {/* LES COLIS COMPTES. Une palette incomplete reste une
+                      palette a manutentionner : le compte reel ne se deduit pas
+                      du poids, il se compte sur le quai. */}
+                  <div className="sm:col-span-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="Palettes"
+                      value={l.nb_palettes}
+                      onChange={(e) => majLigne(i, 'nb_palettes', e.target.value)}
+                      className={champ}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="Bobines"
+                      value={l.nb_bobines}
+                      onChange={(e) => majLigne(i, 'nb_bobines', e.target.value)}
+                      className={champ}
+                    />
+                  </div>
+
                   {r?.suivi_lot === 1 && (
                     <div className="sm:col-span-4">
                       <input

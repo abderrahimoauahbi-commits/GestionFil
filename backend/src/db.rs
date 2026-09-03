@@ -25,6 +25,29 @@ use sqlx::PgPool;
 use std::str::FromStr;
 use std::time::Duration;
 
+/// L'URL de connexion, sans son mot de passe.
+///
+/// A ECRIRE DANS TOUT JOURNAL A LA PLACE DE L'URL BRUTE. Le journal systemd est
+/// lisible par tout administrateur de la machine et conserve des mois : une URL
+/// tracee au demarrage y depose le mot de passe de la base en clair, autant de
+/// fois que le service redemarre. Vu dans `journalctl` apres la premiere
+/// publication — corrige ici, pas dans chaque appelant.
+pub fn url_sans_mot_de_passe(url: &str) -> String {
+    let Some(debut) = url.find("://") else { return url.to_string() };
+    let apres = debut + 3;
+    let Some(arobase) = url[apres..].find('@') else { return url.to_string() };
+    let identite = &url[apres..apres + arobase];
+    match identite.find(':') {
+        Some(deux_points) => format!(
+            "{}{}:***{}",
+            &url[..apres],
+            &identite[..deux_points],
+            &url[apres + arobase..]
+        ),
+        None => url.to_string(),
+    }
+}
+
 pub type Db = PgPool;
 
 pub async fn connect(database_url: &str) -> anyhow::Result<Db> {

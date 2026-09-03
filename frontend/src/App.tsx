@@ -13,6 +13,8 @@ import { Connexion } from './pages/Connexion'
 import { Cockpit } from './pages/Cockpit'
 import { HistoriquePrix } from './pages/HistoriquePrix'
 import { BonCommandeEtat } from './pages/BonCommandeEtat'
+import { BonMouvement } from './pages/BonMouvement'
+import { Telecharger } from './pages/Telecharger'
 import { Controles } from './pages/Controles'
 import { Etats } from './pages/Etats'
 import {
@@ -125,7 +127,9 @@ const ECRANS = (
       <Route index element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
+      <Route path="telecharger" element={<ExigeModule module="COCKPIT"><Telecharger /></ExigeModule>} />
       <Route path="mouvements" element={<ExigeModule module="MOUVEMENTS"><Mouvements /></ExigeModule>} />
+      <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />
       <Route path="receptions" element={<ExigeModule module="RECEPTIONS"><Receptions /></ExigeModule>} />

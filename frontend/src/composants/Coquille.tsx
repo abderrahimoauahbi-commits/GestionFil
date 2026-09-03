@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
+  Download,
   Link2,
   BarChart3,
   Bell,
@@ -30,6 +31,7 @@ import {
   Gauge,
   Grid3x3,
   LayoutGrid,
+  KeyRound,
   LogOut,
   Menu as MenuIcone,
   Monitor,
@@ -57,11 +59,13 @@ import {
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { useEntreprise } from '../lib/entreprise'
 import { cn, estBureau } from '../lib/utils'
 import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
+import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
 import {
@@ -265,6 +269,12 @@ export const NAVIGATION: EntreeNav[] = [
      au meme rang que le plan d'achat, ce qu'ils ne sont pas. La barre les
      place donc en pied, separes du reste par un filet. */
   { vers: '/configuration', libelle: 'Parametres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'PARAMETRES' },
+  /* L'ecran de telechargement est ouvert a TOUS les comptes, pas au seul
+     administrateur : celui qui doit reinstaller son poste est celui qui s'en
+     sert dessus. Il est rattache au module COCKPIT, que tout le monde lit,
+     precisement pour cela. Le JOURNAL qu'il affiche, lui, reste reserve a
+     PARAMETRES — c'est l'ecran qui le masque, et le serveur qui le refuse. */
+  { vers: '/telecharger', libelle: 'Telecharger l application', module: 'COCKPIT', Icone: Download, section: 'PARAMETRES' },
 ]
 
 /** Sections dans l'ordre du rail. */
@@ -283,7 +293,9 @@ export function Coquille() {
   const emplacement = useLocation()
   const [tiroir, setTiroir] = useState(false)
   const [apparence, setApparence] = useState(false)
+  const [motDePasse, setMotDePasse] = useState(false)
   const reglages = useApparence()
+  const entreprise = useEntreprise()
 
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
   const principales = accessibles.filter((e) => e.principale).slice(0, 4)
@@ -549,6 +561,11 @@ export function Coquille() {
               </MenuElement>
             ))}
             <MenuSeparateur />
+            <MenuElement onSelect={() => setMotDePasse(true)}>
+              <KeyRound />
+              Changer mon mot de passe
+            </MenuElement>
+            <MenuSeparateur />
             <MenuElement destructif onSelect={deconnecter}>
               <LogOut />
               Se deconnecter
@@ -611,9 +628,20 @@ export function Coquille() {
         </div>
       </main>
 
+      {/* LA BARRE DE PIED PORTE LES COORDONNEES DE L'ENTREPRISE.
+          Elle ne portait que l'etat des controles et le nom du compte — deux
+          choses qu'on lit deja ailleurs. Le telephone et l'adresse du siege,
+          eux, se cherchent : ils sont sur les documents papier, jamais a
+          l'ecran, et on finit par les demander a quelqu'un. Ils viennent de la
+          base (`/api/entreprise`), donc un changement d'adresse se voit
+          partout sans recompiler.
+
+          L'ORDRE SUIT L'IMPORTANCE : l'etat des donnees a gauche, l'identite au
+          centre, le compte a droite. Sous 1024 px l'identite disparait — sur un
+          telephone, la place manque et l'etat prime. */}
       {reglages.piedVisible && (
         <footer className="sans-impression flex h-7 shrink-0 items-center gap-4 border-t border-bordure bg-barre px-3 text-[11px] text-attenue-texte">
-          <span className="flex items-center gap-1.5">
+          <span className="flex shrink-0 items-center gap-1.5">
             <span
               className={cn(
                 'size-1.5 rounded-full',
@@ -624,7 +652,19 @@ export function Coquille() {
               ? `${alertes.length} controle(s) en anomalie`
               : `${qControles.data?.length ?? 0} controles au vert`}
           </span>
-          <span className="ml-auto">{moi?.login} · {moi?.role}</span>
+
+          {entreprise.nom && (
+            <span className="hidden min-w-0 flex-1 items-center justify-center gap-2 truncate lg:flex">
+              <span className="font-medium text-texte">{entreprise.nom}</span>
+              {entreprise.groupe && <span>· {entreprise.groupe}</span>}
+              {entreprise.adresse && <span className="truncate">· {entreprise.adresse}</span>}
+              {entreprise.telephone && (
+                <span className="shrink-0">· Tel. {entreprise.telephone}</span>
+              )}
+            </span>
+          )}
+
+          <span className="ml-auto shrink-0">{moi?.login} · {moi?.role}</span>
         </footer>
       )}
       </div>
@@ -632,6 +672,7 @@ export function Coquille() {
       {/* Le tiroir d'apparence : hors de la colonne de contenu, il se pose
           par-dessus tout et n'entre dans aucun flux. */}
       <PanneauApparence ouvert={apparence} surFermeture={() => setApparence(false)} />
+      <ChangerMotDePasse ouvert={motDePasse} surFermeture={() => setMotDePasse(false)} />
 
       {/* --- Barre du bas : mobile ---------------------------------------- */}
       {principales.length > 1 && (

@@ -45,3 +45,25 @@ mod tests {
         assert!(!verifier("peu importe", ""));
     }
 }
+
+/// Longueur minimale d'un mot de passe.
+///
+/// DOUZE, ET NON HUIT. Un mot de passe de huit caracteres se casse aujourd'hui
+/// en quelques heures sur une carte graphique grand public, meme hache en
+/// Argon2 : la longueur est le seul facteur qui rende l'attaque hors de portee,
+/// bien avant la complexite. Exiger une majuscule et un chiffre pousse surtout
+/// a choisir `Password1!`, que les dictionnaires connaissent.
+pub const LONGUEUR_MINIMALE: usize = 12;
+
+/// Verifie la longueur, en CARACTERES et non en octets.
+///
+/// `len()` compterait les octets : « été2026motdepasse » ferait 20 octets pour
+/// 17 caracteres, et un mot de passe court en caracteres accentues passerait.
+pub fn valider_longueur(mot_de_passe: &str) -> Result<(), String> {
+    if mot_de_passe.chars().count() < LONGUEUR_MINIMALE {
+        return Err(format!(
+            "mot de passe trop court : {LONGUEUR_MINIMALE} caracteres minimum"
+        ));
+    }
+    Ok(())
+}

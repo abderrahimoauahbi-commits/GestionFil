@@ -91,14 +91,21 @@ export function Atelier({ routes }: { routes: React.ReactNode }) {
     return () => document.documentElement.classList.remove('atelier')
   }, [])
 
-  /* Sombre par defaut sur le poste de bureau — mais seulement tant qu'aucun
-     choix n'a ete fait : un reglage explicite de l'utilisateur, meme clair,
-     doit survivre au redemarrage. */
-  const { definir: definirTheme } = useTheme()
-  useEffect(() => {
-    if (!localStorage.getItem('gestionfil.theme')) definirTheme('sombre')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  /* LE BUREAU SUIT LE MEME THEME QUE LE NAVIGATEUR.
+  
+     Il forcait le sombre au premier lancement, par mimetisme avec les editeurs
+     de code. Mais ce n'est pas un editeur de code : c'est le meme ERP, ouvert
+     autrement. Deux apparences pour les memes ecrans obligeaient a se
+     reorienter en passant de l'un a l'autre, et le sombre rendait les tableaux
+     — l'essentiel de cet outil — plus durs a parcourir en plein jour dans un
+     atelier.
+  
+     Le theme reste choisi par l'utilisateur, et le sombre est a un clic dans la
+     palette de commandes ou le menu Affichage. Ce qui change, c'est qu'on ne le
+     lui impose plus.
+  
+     LE MULTIFENETRAGE, LUI, RESTE : les onglets, la barre de titre et le rail
+     sont ce que le bureau apporte de plus que le navigateur. */
 
   const allerA = useCallback((chemin: string) => naviguer(chemin), [naviguer])
 

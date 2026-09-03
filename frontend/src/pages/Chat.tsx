@@ -27,6 +27,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Bot,
+  Check,
+  ChevronDown,
   CircleAlert,
   Cpu,
   Cloud,
@@ -39,7 +41,7 @@ import {
 import { api, ErreurApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
-import { Alerte, Badge, Bouton, Carte, CarteCorps, Champ } from '../composants/ui/base'
+import { Alerte, Bouton, Carte, CarteCorps, Champ } from '../composants/ui/base'
 import { cn } from '../lib/utils'
 
 interface Echange {
@@ -75,6 +77,21 @@ interface Etat {
   manque_cle?: boolean
 }
 
+interface ModeleDispo {
+  nom: string
+  moteur: string
+  taille_go?: number
+  note: string
+}
+
+interface Modeles {
+  moteur_actuel: string
+  modele_actuel: string
+  cle_claude_presente: boolean
+  locaux: ModeleDispo[]
+  distants: ModeleDispo[]
+}
+
 interface CompetenceDecrite {
   nom: string
   description: string
@@ -92,12 +109,51 @@ const AMORCES = [
   'Qu est-ce qu on doit commander cette semaine ?',
 ]
 
+/** Une ligne du selecteur : le nom, ce qu'il coute, et son etat. */
+function LigneModele({
+  m,
+  actif,
+  surChoix,
+  enCours,
+}: {
+  m: ModeleDispo
+  actif: boolean
+  surChoix: () => void
+  enCours: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={surChoix}
+      disabled={enCours || actif}
+      className={cn(
+        'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
+        actif ? 'bg-primaire/12' : 'hover:bg-attenue',
+      )}
+    >
+      <span className="mt-0.5 w-4 shrink-0">
+        {actif ? <Check className="size-3.5 text-primaire" /> : null}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-baseline gap-1.5">
+          <span className="font-mono text-[12px] font-medium text-texte">{m.nom}</span>
+          {m.taille_go ? (
+            <span className="text-[11px] text-attenue-texte">{m.taille_go} Go</span>
+          ) : null}
+        </span>
+        <span className="block text-[11px] leading-snug text-attenue-texte">{m.note}</span>
+      </span>
+    </button>
+  )
+}
+
 export function Chat() {
   const { moi } = useAuth()
   const naviguer = useNavigate()
   const [saisie, setSaisie] = useState('')
   const [fil, setFil] = useState<Echange[]>([])
   const [aide, setAide] = useState(false)
+  const [choixOuvert, setChoixOuvert] = useState(false)
   const basDuFil = useRef<HTMLDivElement>(null)
 
   const qEtat = useQuery({
@@ -105,6 +161,25 @@ export function Chat() {
     queryFn: () => api.get<Etat>('/api/chat/etat'),
     retry: false,
   })
+  const qModeles = useQuery({
+    queryKey: ['chat-modeles'],
+    queryFn: () => api.get<Modeles>('/api/chat/modeles'),
+    retry: false,
+  })
+
+  /* LA BASCULE PREND EFFET A LA QUESTION SUIVANTE, sans redemarrage : le
+     serveur relit le reglage a chaque appel. On rafraichit donc l'etat plutot
+     que de demander a l'utilisateur de recharger la page. */
+  const basculer = useMutation({
+    mutationFn: (m: ModeleDispo) =>
+      api.post('/api/chat/modeles', { moteur: m.moteur, modele: m.nom }),
+    onSuccess: () => {
+      void qEtat.refetch()
+      void qModeles.refetch()
+      setChoixOuvert(false)
+    },
+  })
+
   const qCompetences = useQuery({
     queryKey: ['chat-competences'],
     queryFn: () => api.get<{ competences: CompetenceDecrite[] }>('/api/chat/competences'),
@@ -172,10 +247,16 @@ export function Chat() {
         actions={
           <div className="flex items-center gap-2">
             {etat && (
-              <Badge ton={local ? 'succes' : 'info'} title={etat.note}>
-                {local ? <Cpu className="size-3" /> : <Cloud className="size-3" />}
-                {local ? 'Modele local' : 'Claude'} · {etat.modele}
-              </Badge>
+              <Bouton
+                variante="contour"
+                taille="sm"
+                onClick={() => setChoixOuvert((o) => !o)}
+                title={etat.note}
+              >
+                {local ? <Cpu /> : <Cloud />}
+                {local ? 'Local' : 'Claude'} · {etat.modele}
+                <ChevronDown />
+              </Bouton>
             )}
             <Bouton variante="contour" taille="sm" onClick={() => setAide((a) => !a)}>
               <Wrench />
@@ -184,6 +265,61 @@ export function Chat() {
           </div>
         }
       />
+
+      {/* LE CHOIX DU MODELE EST DANS L'ECRAN, pas dans un fichier du serveur.
+          Chaque ligne porte ce qu'elle coute : sur un processeur sans carte
+          graphique la vitesse tombe a peu pres comme le nombre de parametres,
+          et un modele plus gros ne sera jamais plus rapide. Le dire evite d'en
+          essayer trois pour le decouvrir. */}
+      {choixOuvert && qModeles.data && (
+        <Carte className="mb-3">
+          <CarteCorps className="space-y-2">
+            <div>
+              <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-texte">
+                <Cpu className="size-3.5" />
+                Sur le serveur — aucune donnee ne sort
+              </div>
+              {qModeles.data.locaux.length === 0 && (
+                <p className="text-[12px] text-attenue-texte">
+                  Aucun modele installe, ou le service ollama est arrete.
+                </p>
+              )}
+              {qModeles.data.locaux.map((m) => (
+                <LigneModele
+                  key={m.nom}
+                  m={m}
+                  actif={m.nom === etat?.modele && local}
+                  surChoix={() => basculer.mutate(m)}
+                  enCours={basculer.isPending}
+                />
+              ))}
+            </div>
+
+            <div className="border-t border-bordure pt-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-texte">
+                <Cloud className="size-3.5" />
+                Par l API — la question et les chiffres partent chez Anthropic
+              </div>
+              {!qModeles.data.cle_claude_presente && (
+                <p className="mb-1 text-[12px] text-alerte">
+                  Aucune cle d API sur le serveur : ces modeles se choisissent, mais c est le
+                  modele local qui repondra tant que <code>ANTHROPIC_API_KEY</code> n est pas
+                  posee dans <code>/opt/gestionfil/.env</code>.
+                </p>
+              )}
+              {qModeles.data.distants.map((m) => (
+                <LigneModele
+                  key={m.nom}
+                  m={m}
+                  actif={m.nom === etat?.modele && !local}
+                  surChoix={() => basculer.mutate(m)}
+                  enCours={basculer.isPending}
+                />
+              ))}
+            </div>
+          </CarteCorps>
+        </Carte>
+      )}
 
       {/* LE REPLI EST DIT. Regler « claude » dans les parametres sans avoir
           pose la cle d'API laisse le moteur local repondre : sans ce bandeau,

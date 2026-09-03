@@ -80,6 +80,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/chat", post(crate::assistant::discuter))
         .route("/api/chat/etat", get(crate::assistant::etat))
         .route("/api/chat/competences", get(crate::assistant::liste_competences))
+        .route("/api/chat/modeles",
+               get(crate::assistant::modeles).post(crate::assistant::choisir_modele))
         // --- Authentification -------------------------------------------------
         .route("/api/auth/connexion", post(auth_routes::connexion))
         .route("/api/auth/moi", get(auth_routes::moi))

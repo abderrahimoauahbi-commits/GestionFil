@@ -203,6 +203,153 @@ pub async fn discuter(
     })))
 }
 
+/// Les modeles disponibles, et celui qui repond.
+///
+/// POURQUOI DEMANDER LA LISTE A OLLAMA plutot que de l'ecrire ici. Les modeles
+/// s'installent et se retirent par `ollama pull` / `ollama rm` sur le serveur ;
+/// une liste ecrite dans le code serait fausse le lendemain, et proposer un
+/// modele absent donne une erreur que rien n'explique.
+///
+/// Les modeles de Claude, eux, ne s'installent pas : ils sont connus, et leur
+/// disponibilite ne depend que de la cle d'API.
+pub async fn modeles(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::COCKPIT, Action::Lire).await?;
+
+    let r = Reglage::depuis_base(&state.db).await;
+    let mut locaux: Vec<Value> = Vec::new();
+
+    // Un serveur Ollama arrete n'est pas une erreur : la liste est simplement
+    // vide, et l'ecran le dit. Trois secondes d'attente au plus — cette route
+    // est appelee a l'ouverture de l'ecran.
+    if let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        let url = format!("{}/api/tags", r.url_ollama.trim_end_matches('/'));
+        if let Ok(rep) = client.get(&url).send().await {
+            if let Ok(corps) = rep.json::<Value>().await {
+                if let Some(liste) = corps.get("models").and_then(Value::as_array) {
+                    for m in liste {
+                        let nom = m.get("model").and_then(Value::as_str).unwrap_or("");
+                        if nom.is_empty() {
+                            continue;
+                        }
+                        let octets = m.get("size").and_then(Value::as_u64).unwrap_or(0);
+                        locaux.push(json!({
+                            "nom": nom,
+                            "moteur": "ollama",
+                            "taille_go": (octets as f64 / 1e9 * 10.0).round() / 10.0,
+                            "note": note_modele(nom),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    locaux.sort_by_key(|m| m["nom"].as_str().unwrap_or("").to_string());
+
+    Ok(Json(json!({
+        "moteur_actuel": r.moteur.nom(),
+        "modele_actuel": r.modele,
+        "cle_claude_presente": r.cle_claude.is_some(),
+        "locaux": locaux,
+        "distants": [
+            { "nom": "claude-sonnet-4-5", "moteur": "claude",
+              "note": "Le plus juste et le plus rapide. Deux a cinq secondes." },
+            { "nom": "claude-haiku-4-5", "moteur": "claude",
+              "note": "Plus economique, un peu moins fin sur les questions tournees." },
+        ],
+    })))
+}
+
+/// Ce qu'on sait d'un modele, pour que le choix ne soit pas a l'aveugle.
+///
+/// LA TAILLE EST LE FACTEUR DOMINANT sur un processeur sans carte graphique :
+/// la vitesse est bornee par la bande passante memoire, donc elle tombe a peu
+/// pres comme le nombre de parametres. Mesure sur ce serveur : 4,6 jetons par
+/// seconde a sept milliards. Un modele plus gros ne sera pas plus rapide.
+fn note_modele(nom: &str) -> &'static str {
+    let n = nom.to_lowercase();
+    if n.starts_with("qwen2.5:3b") {
+        "Le plus rapide. Choisit bien la competence, formulation parfois maladroite."
+    } else if n.starts_with("qwen3:4b") {
+        "Generation plus recente que qwen2.5 : mieux ecrit pour un quart de temps de plus."
+    } else if n.starts_with("mistral-nemo") {
+        "Le meilleur francais des modeles locaux — maison francaise. Environ trois fois          plus lent que le 3b."
+    } else if n.starts_with("mistral") {
+        "Bon francais, appels d'outils fiables. Deux fois plus lent que le 3b."
+    } else if n.starts_with("granite") {
+        "Concu pour les appels d'outils. Francais correct sans plus."
+    } else if n.contains(":7b") || n.contains(":8b") {
+        "Mieux ecrit, environ trois fois plus lent que le 3b."
+    } else if n.contains(":12b") || n.contains(":13b") || n.contains(":14b") {
+        "Nettement mieux ecrit, mais cinq a six fois plus lent que le 3b."
+    } else {
+        "Modele installe sur le serveur."
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChoixModele {
+    pub moteur: String,
+    pub modele: String,
+}
+
+/// Bascule de moteur ou de modele.
+///
+/// ECRIRE DANS `parametre` PLUTOT QUE DANS `.env` : le reglage est relu a chaque
+/// question, donc la bascule prend effet immediatement, sans redemarrer le
+/// service. Reservee a qui peut ecrire les parametres — c'est un reglage de
+/// direction, pas une preference d'ecran.
+pub async fn choisir_modele(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(c): Json<ChoixModele>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PARAMETRES, Action::Ecrire).await?;
+
+    let moteur = match c.moteur.to_lowercase().as_str() {
+        "claude" | "anthropic" => "claude",
+        "ollama" => "ollama",
+        autre => return Err(AppError::Invalide(format!("moteur inconnu : {autre}"))),
+    };
+    // Un nom de modele qui n'appartient pas au moteur choisi ne repondrait
+    // jamais : on refuse tout de suite plutot que de laisser l'assistant
+    // echouer a la premiere question.
+    let pour_claude = c.modele.starts_with("claude");
+    if pour_claude != (moteur == "claude") {
+        return Err(AppError::Invalide(format!(
+            "le modele « {} » n'appartient pas au moteur « {moteur} »",
+            c.modele
+        )));
+    }
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    for (code, valeur) in [("P_AssistantMoteur", moteur), ("P_AssistantModele", &c.modele)] {
+        sqlx::query(
+            "UPDATE parametre SET valeur_courante = $2,
+                    date_derniere_modif = to_char(now() AT TIME ZONE 'UTC',
+                                                  'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),
+                    id_utilisateur_modif = $3
+              WHERE code_parametre = $1",
+        )
+        .bind(code)
+        .bind(valeur)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    let r = Reglage::depuis_base(&state.db).await;
+    Ok(Json(json!({
+        "moteur": r.moteur.nom(),
+        "modele": r.modele,
+        "manque_cle": r.repli_depuis.is_some(),
+    })))
+}
+
 /// La liste des competences, pour l'ecran d'aide.
 pub async fn liste_competences(
     State(state): State<AppState>,

@@ -354,6 +354,30 @@ ASSISTANT_MODELE=qwen2.5:3b-instruct
 OLLAMA_URL=http://127.0.0.1:11434
 ```
 
+### Changer de modèle depuis l'écran
+
+L'écran Assistant porte un bouton qui liste **les modèles réellement installés
+sur le serveur** — interrogés à `ollama`, pas écrits dans le code : un modèle
+s'installe et se retire par `ollama pull` / `ollama rm`, et une liste figée
+serait fausse le lendemain. Chaque ligne dit ce que le modèle coûte, pour éviter
+d'en essayer trois pour le découvrir.
+
+**Sur un processeur sans carte graphique, plus gros veut dire strictement plus
+lent.** La vitesse est bornée par la bande passante mémoire, donc elle tombe à
+peu près comme le nombre de paramètres. Mesuré sur ce serveur : 4,6 jetons par
+seconde à sept milliards de paramètres. Le levier utile n'est donc pas la
+taille, c'est la **famille** : à nombre de paramètres égal, une génération plus
+récente ou un modèle entraîné sur du français écrit nettement mieux.
+
+```bash
+ollama pull mistral-nemo:12b   # le meilleur français des modèles locaux
+ollama rm   qwen2.5:7b-instruct
+```
+
+Le choix de modèle est refusé s'il n'appartient pas au moteur retenu :
+`claude-sonnet-4-5` sur le moteur `ollama` ne répondrait jamais, autant le dire
+au moment du clic.
+
 > **Le repli est signalé, pas subi.** Régler `claude` sans avoir posé la clé
 > laisse le modèle local répondre — et l'écran de l'assistant l'affiche en clair.
 > Sans ce signal, on cherche pendant une heure pourquoi les réponses restent

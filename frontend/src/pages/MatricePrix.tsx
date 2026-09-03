@@ -20,8 +20,7 @@ import { Minus, TrendingDown, TrendingUp } from 'lucide-react'
 import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
-import { PageAvecRail } from '../composants/RailLateral'
-import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
+import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { Alerte, Carte, CarteCorps, Chargement, EtatVide, Selecteur } from '../composants/ui/base'
 import { fmt } from '../components/ui'
 import { cn } from '../lib/utils'
@@ -138,19 +137,15 @@ export function MatricePrix() {
         }
       />
 
-      <PageAvecRail
-        large
-        rail={
-          <PanneauFiltres
-            champs={CHAMPS}
-            lignes={lignes}
-            valeurs={filtres.valeurs}
-            definir={filtres.definir}
-            reinitialiser={filtres.reinitialiser}
-            actifs={filtres.actifs}
-          />
-        }
-      >
+      <BarreFiltres
+        champs={CHAMPS}
+        lignes={lignes}
+        valeurs={filtres.valeurs}
+        definir={filtres.definir}
+        reinitialiser={filtres.reinitialiser}
+        actifs={filtres.actifs}
+      />
+
         {q.isLoading ? (
           <Chargement texte="Agregation des achats par mois…" />
         ) : !prixVisible ? (
@@ -297,7 +292,6 @@ export function MatricePrix() {
             </p>
           </>
         )}
-      </PageAvecRail>
     </div>
   )
 }

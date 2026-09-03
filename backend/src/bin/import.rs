@@ -890,7 +890,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
             // STOCK_INIT exige un prix : on prend le prix catalogue converti en
             // MAD, en le tracant comme valeur d'ouverture.
             let prix_mad: Option<f64> = sqlx::query_scalar(
-                "SELECT ROUND(r.prix_catalogue_kg * COALESCE(tc.taux, 1.0), 4)
+                "SELECT ROUND(r.prix_catalogue_kg * COALESCE(tc.taux, 1.0), 4)::float8
                    FROM reference r
                    LEFT JOIN taux_change tc ON tc.code_devise = r.code_devise_catalogue
                                            AND tc.date_fin IS NULL

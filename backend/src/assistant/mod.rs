@@ -272,8 +272,8 @@ fn note_modele(nom: &str) -> &'static str {
     let n = nom.to_lowercase();
     if n.starts_with("qwen2.5:3b") {
         "Le plus rapide. Choisit bien la competence, formulation parfois maladroite."
-    } else if n.starts_with("qwen3:4b") {
-        "Generation plus recente que qwen2.5 : mieux ecrit pour un quart de temps de plus."
+    } else if n.starts_with("qwen3") {
+        "Modele a raisonnement. Son monologue interieur est desactive, sans quoi il          depasse le delai d'attente sur ce processeur."
     } else if n.starts_with("mistral-nemo") {
         "Le meilleur francais des modeles locaux — maison francaise. Environ trois fois          plus lent que le 3b."
     } else if n.starts_with("mistral") {

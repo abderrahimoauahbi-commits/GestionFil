@@ -1331,7 +1331,8 @@ pub async fn supprimer_ligne_bc(
     user.poser_contexte(&mut tx).await?;
 
     let recue: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(quantite_recue_kg, 0) FROM ligne_bc WHERE id_ligne_bc = $1",
+        "SELECT COALESCE(quantite_recue_kg, 0)::float8 FROM ligne_bc
+          WHERE id_ligne_bc = $1",
     )
     .bind(&ligne)
     .fetch_optional(&mut *tx)
@@ -1616,7 +1617,7 @@ pub async fn references_commandables(
                             AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                           ORDER BY t.date_debut DESC LIMIT 1),
                         (SELECT bc.taux_change_engage FROM bon_commande bc WHERE bc.id_bc = $1),
-                        1.0)",
+                        1.0)::float8",
     )
     .bind(&id)
     .bind(&fournisseur)
@@ -1731,7 +1732,7 @@ pub async fn modifier_ligne_bc(
     let (statut_bc, code_reference, unite, recue): (String, String, String, f64) =
         sqlx::query_as(
             "SELECT bc.statut, lb.code_reference, lb.unite_commande,
-                    COALESCE(lb.quantite_recue_kg, 0)
+                    COALESCE(lb.quantite_recue_kg, 0)::float8
                FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
               WHERE lb.id_ligne_bc = $1 AND lb.id_bc = $2",
         )

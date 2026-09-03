@@ -20,7 +20,8 @@
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Calculator, Download, Factory, Package } from 'lucide-react'
+import { AlertTriangle, Calculator, Download, Factory, Package, Printer } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -369,6 +370,18 @@ export function Besoins() {
               <Download />
               Exporter
             </Bouton>
+            {/* L'ETAT IMPRIMABLE EXISTAIT DEJA, sans porte pour y entrer : on
+                l'atteignait par l'ecran des etats, deux clics plus loin, en
+                sachant qu'il existe. Le besoin matiere se porte a l'atelier et
+                au magasin sur papier — c'est le premier usage de cet ecran. */}
+            {plan && (
+              <Bouton variante="contour" asChild>
+                <Link to={`/etats/besoins/${plan.id_plan}`}>
+                  <Printer />
+                  Imprimer les besoins
+                </Link>
+              </Bouton>
+            )}
           </>
         }
       />
@@ -529,17 +542,23 @@ export function Besoins() {
                   canonique : la conversion vers l'unite d'achat se fait au bon de commande.
                 </Aide>
               </CarteTitre>
-              <div className="flex items-center gap-2">
+              {/* LES CHAMPS S'ALIGNENT SUR UNE MEME HAUTEUR ET UNE MEME BASE.
+                  Ils etaient de trois hauteurs differentes — un champ de saisie,
+                  deux listes et un selecteur de periode — poses cote a cote sans
+                  largeur commune : la barre montait et descendait, et le compte
+                  de references se retrouvait a mi-hauteur. `items-end` et une
+                  largeur minimale commune suffisent. */}
+              <div className="sans-impression flex flex-wrap items-end gap-2">
                 <Champ
                   value={filtre}
                   onChange={(e) => setFiltre(e.target.value)}
                   placeholder="Reference, designation, fournisseur..."
-                  className="w-56"
+                  className="h-7 w-56 text-[12px]"
                 />
                 <select
                   value={categorie}
                   onChange={(e) => setCategorie(e.target.value)}
-                  className={CLASSE_FILTRE}
+                  className={CLASSE_FILTRE + ' min-w-[10rem]'}
                   aria-label="Categorie"
                 >
                   <option value="">Toutes categories</option>
@@ -552,7 +571,7 @@ export function Besoins() {
                 <select
                   value={fournisseur}
                   onChange={(e) => setFournisseur(e.target.value)}
-                  className={CLASSE_FILTRE}
+                  className={CLASSE_FILTRE + ' min-w-[10rem]'}
                   aria-label="Fournisseur"
                 >
                   <option value="">Tous fournisseurs</option>
@@ -567,7 +586,7 @@ export function Besoins() {
                   valeur={periode}
                   surChangement={setPeriode}
                 />
-                <span className="text-[11px] text-attenue-texte">
+                <span className="mb-1 text-[11px] text-attenue-texte">
                   {besoinsFiltres.length} ref. ·{' '}
                   <span className="font-semibold tabular-nums text-texte">
                     {fmt.nombre(totalKg, 2)} kg

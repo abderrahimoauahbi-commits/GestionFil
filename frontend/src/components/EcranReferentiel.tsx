@@ -39,6 +39,8 @@ interface Props<L extends Record<string, unknown>> {
    * communes. Rendues seulement si l'utilisateur peut ecrire.
    */
   actionsExtra?: (ligne: L) => React.ReactNode
+  /** Barre de filtres propre a l'ecran, rendue sous le titre. */
+  filtresEnTete?: React.ReactNode
   /**
    * Delegue recherche, tri et pagination au serveur.
    *
@@ -74,6 +76,7 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
   libelleUnite = 'enregistrement',
   titreCarte,
   actionsExtra,
+  filtresEnTete,
   serveur = false,
   rechercheInitiale = '',
   exportable,
@@ -238,6 +241,12 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
           )
         }
       />
+
+      {/* Les filtres de l'ecran, POSES SOUS SON TITRE. Places par l'appelant
+          au-dessus du composant, ils se retrouvaient au-dessus du titre lui-
+          meme, ce qui se lit comme une barre d'application et non comme un
+          reglage de cette liste. */}
+      {filtresEnTete}
 
       <DataTable<L>
         exportable={exportable}

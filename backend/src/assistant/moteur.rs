@@ -289,6 +289,15 @@ async fn ollama(
             "messages": suite,
             "tools": outils_ollama,
             "stream": false,
+            // PAS DE MONOLOGUE INTERIEUR. Les modeles « a raisonnement » —
+            // qwen3 et sa famille — ecrivent des centaines de jetons de
+            // reflexion avant de repondre. Sur une carte graphique c'est
+            // quelques secondes ; sur quatre coeurs a cinq jetons par seconde,
+            // c'est plusieurs minutes, et le delai d'attente tombe avant la
+            // reponse. Mesure : qwen3:4b passait de 210 secondes de moyenne et
+            // zero competence employee, a l'inverse exact du but recherche.
+            // Le drapeau est ignore par les modeles qui n'y repondent pas.
+            "think": false,
             // Temperature basse : on veut un choix de competence fiable, pas de
             // l'invention. Un assistant de gestion qui varie ses reponses a la
             // meme question perd la confiance qu'il met des mois a gagner.

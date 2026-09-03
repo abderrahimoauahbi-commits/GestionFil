@@ -262,7 +262,18 @@ export function DataTable<L extends Record<string, unknown>>({
     [lignes, visibles],
   )
 
-  const colonnesFiltrables = visibles.filter((c) => c.filtre)
+  /* LE FILTRE PAR COLONNE NE PEUT PAS MARCHER EN MODE SERVEUR, donc on ne le
+     propose pas.
+     
+     `manualFiltering: true` dit a la table de ne PAS filtrer localement — c'est
+     juste, elle n'a qu'une page sous la main — et rien ne transmet ces filtres
+     au serveur. Le bouton s'allumait donc, affichait « 1 », et le tableau ne
+     bougeait pas. Un controle qui ment est pire qu'un controle absent : on
+     conclut que le filtre ne trouve rien, alors qu'il n'a jamais ete applique.
+     
+     Les ecrans en mode serveur portent leur propre barre de filtres, qui elle
+     interroge le serveur. */
+  const colonnesFiltrables = serveur ? [] : visibles.filter((c) => c.filtre)
   const nbFiltresActifs = filtresColonne.length
 
   if (chargement) {

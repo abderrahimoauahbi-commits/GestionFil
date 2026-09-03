@@ -23,8 +23,8 @@ import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { Alerte, Badge, Squelette } from '../composants/ui/base'
 import { BarresRangees } from '../composants/graphiques/Graphiques'
-import { PageAvecRail } from '../composants/RailLateral'
-import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
+import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
+import { TableDroits, type Colonne } from '../components/TableDroits'
 import { cn, fmt } from '../lib/utils'
 
 interface LigneStock {
@@ -40,6 +40,12 @@ interface LigneStock {
   date_derniere_entree: string | null
   date_derniere_sortie: string | null
   date_dernier_inventaire: string | null
+  /* Nombre de magasins portant du stock pour cette reference. Pose par la
+     consolidation ; toujours 1 quand on regarde un magasin precis. */
+  nb_magasins: number
+  /* `TableDroits` filtre ses colonnes par la grille de droits, ce qui suppose
+     une ligne indexable par nom de champ. */
+  [k: string]: unknown
 }
 
 interface Magasin {
@@ -128,7 +134,7 @@ export function EtatStock() {
         .sort((a, b) => (b.valeur_mad ?? 0) - (a.valeur_mad ?? 0))
     }
 
-    const parRef = new Map<string, LigneStock & { nb_magasins: number }>()
+    const parRef = new Map<string, LigneStock>()
     for (const l of retenues) {
       const e = parRef.get(l.code_reference)
       if (!e) {
@@ -148,42 +154,115 @@ export function EtatStock() {
       .sort((a, b) => (b.valeur_mad ?? 0) - (a.valeur_mad ?? 0))
   }, [lignes, magasin, filtres, avecStock])
 
+  /* Les colonnes du detail. Declarees ici plutot qu'en constante : deux
+     d'entre elles changent de libelle selon qu'on regarde un magasin ou la
+     consolidation, et le champ `magasin` porte la mention « n magasins » qui
+     n'a de sens que consolidee. */
+  const colonnes: Colonne<LigneStock>[] = [
+    {
+      champ: 'code_reference',
+      entete: 'Reference',
+      rendu: (l) => <span className="font-mono">{l.code_reference}</span>,
+    },
+    {
+      champ: 'designation',
+      entete: 'Designation',
+      rendu: (l) => <span className="text-attenue-texte">{l.designation ?? '—'}</span>,
+    },
+    {
+      champ: 'code_magasin',
+      entete: magasin ? 'Magasin' : 'Magasins',
+      rendu: (l) =>
+        !magasin && l.nb_magasins > 1 ? (
+          // Une reference eclatee sur plusieurs magasins merite d'etre
+          // signalee : c'est la que naissent les erreurs de picking.
+          <Badge ton="info">{l.nb_magasins} magasins</Badge>
+        ) : (
+          <span className="font-mono">{l.code_magasin}</span>
+        ),
+    },
+    {
+      champ: 'quantite_kg',
+      entete: 'Quantite (kg)',
+      numerique: true,
+      rendu: (l) => fmt.nombre(l.quantite_kg ?? 0),
+    },
+    {
+      champ: 'cmup_mad',
+      entete: 'CMUP',
+      numerique: true,
+      rendu: (l) =>
+        l.cmup_mad != null ? (
+          fmt.nombre(l.cmup_mad)
+        ) : (
+          <span className="inline-flex items-center gap-1 text-alerte">
+            <AlertTriangle className="size-3" />—
+          </span>
+        ),
+    },
+    {
+      champ: 'valeur_mad',
+      entete: 'Valeur (MAD)',
+      numerique: true,
+      rendu: (l) => (l.valeur_mad != null ? fmt.nombre(Math.round(l.valeur_mad)) : '—'),
+    },
+    {
+      champ: 'date_derniere_entree',
+      entete: 'Derniere entree',
+      secondaire: true,
+      rendu: (l) => l.date_derniere_entree?.slice(0, 10) ?? '—',
+    },
+    {
+      champ: 'date_derniere_sortie',
+      entete: 'Derniere sortie',
+      secondaire: true,
+      rendu: (l) => l.date_derniere_sortie?.slice(0, 10) ?? '—',
+    },
+    {
+      champ: 'date_dernier_inventaire',
+      entete: 'Dernier inventaire',
+      secondaire: true,
+      rendu: (l) =>
+        l.date_dernier_inventaire?.slice(0, 10) ?? <span className="text-alerte">jamais</span>,
+    },
+  ]
+
   if (qStock.isLoading) return <Squelette className="h-96 w-full" />
 
   return (
-    <PageAvecRail
-      rail={
-        <PanneauFiltres
-          champs={CHAMPS_STOCK}
-          lignes={lignes}
-          valeurs={filtres.valeurs}
-          definir={filtres.definir}
-          reinitialiser={filtres.reinitialiser}
-          actifs={filtres.actifs}
-          enPied={
-            <button
-              type="button"
-              onClick={() => setAvecStock((v) => !v)}
-              aria-pressed={avecStock}
-              className={cn(
-                'mt-1 rounded-[3px] border px-2 py-1 text-[11px] transition-colors',
-                avecStock
-                  ? 'border-primaire bg-primaire text-primaire-texte'
-                  : 'border-bordure text-attenue-texte hover:bg-attenue',
-              )}
-            >
-              Avec stock seulement
-            </button>
-          }
-        />
-      }
-    >
+    <>
       <EnTetePage
         titre="Etat de stock"
         description={
           magasin
             ? `Detail du magasin ${magasin} — la projection MRP est sur l'ecran Stock projete`
             : "Position consolidee tous magasins — cliquer un magasin pour son detail"
+        }
+      />
+
+      {/* LES FILTRES SONT AU-DESSUS DU TABLEAU, plus a sa gauche : le rail
+          prenait un quart de la largeur, et partait a l'impression. */}
+      <BarreFiltres
+        champs={CHAMPS_STOCK}
+        lignes={lignes}
+        valeurs={filtres.valeurs}
+        definir={filtres.definir}
+        reinitialiser={filtres.reinitialiser}
+        actifs={filtres.actifs}
+        enPied={
+          <button
+            type="button"
+            onClick={() => setAvecStock((v) => !v)}
+            aria-pressed={avecStock}
+            className={cn(
+              'mb-0.5 rounded-[3px] border px-2 py-1 text-[11px] transition-colors',
+              avecStock
+                ? 'border-primaire bg-primaire text-primaire-texte'
+                : 'border-bordure text-attenue-texte hover:bg-attenue',
+            )}
+          >
+            Avec stock seulement
+          </button>
         }
       />
 
@@ -276,84 +355,25 @@ export function EtatStock() {
         />
       )}
 
-      {/* --- Detail ------------------------------------------------------- */}
-      <div className="defilement-x rounded-[var(--radius)] border border-bordure bg-surface">
-        <table className="grille w-full text-[12px]">
-          <thead className="bg-attenue">
-            <tr>
-              <th className="px-2 py-1.5 text-left font-medium">Reference</th>
-              <th className="px-2 py-1.5 text-left font-medium">Designation</th>
-              <th className="px-2 py-1.5 text-left font-medium">
-                {magasin ? 'Magasin' : 'Magasins'}
-              </th>
-              <th className="px-2 py-1.5 text-right font-medium">Quantite (kg)</th>
-              {droits.visible('cmup_mad') && (
-                <th className="px-2 py-1.5 text-right font-medium">CMUP</th>
-              )}
-              {droits.visible('valeur_mad') && (
-                <th className="px-2 py-1.5 text-right font-medium">Valeur (MAD)</th>
-              )}
-              <th className="px-2 py-1.5 text-left font-medium">Derniere entree</th>
-              <th className="px-2 py-1.5 text-left font-medium">Derniere sortie</th>
-              <th className="px-2 py-1.5 text-left font-medium">Dernier inventaire</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibles.map((l) => (
-              <tr key={l.id_stock} className="hover:bg-attenue/60">
-                <td className="whitespace-nowrap px-2 py-1 font-mono">{l.code_reference}</td>
-                <td className="max-w-[16rem] truncate px-2 py-1 text-attenue-texte">
-                  {l.designation ?? '—'}
-                </td>
-                <td className="whitespace-nowrap px-2 py-1 text-attenue-texte">
-                  {magasin ? (
-                    <span className="font-mono">{l.code_magasin}</span>
-                  ) : l.nb_magasins > 1 ? (
-                    // Une reference eclatee sur plusieurs magasins merite d'etre
-                    // signalee : c'est la que naissent les erreurs de picking.
-                    <Badge ton="info">{l.nb_magasins} magasins</Badge>
-                  ) : (
-                    <span className="font-mono">{l.code_magasin}</span>
-                  )}
-                </td>
-                <td className="px-2 py-1 text-right font-medium tabular-nums">
-                  {fmt.nombre(l.quantite_kg ?? 0)}
-                </td>
-                {droits.visible('cmup_mad') && (
-                  <td className="px-2 py-1 text-right tabular-nums">
-                    {l.cmup_mad != null ? (
-                      fmt.nombre(l.cmup_mad)
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-alerte">
-                        <AlertTriangle className="size-3" />
-                        —
-                      </span>
-                    )}
-                  </td>
-                )}
-                {droits.visible('valeur_mad') && (
-                  <td className="px-2 py-1 text-right tabular-nums">
-                    {l.valeur_mad != null ? fmt.nombre(Math.round(l.valeur_mad)) : '—'}
-                  </td>
-                )}
-                <td className="whitespace-nowrap px-2 py-1 text-attenue-texte">
-                  {l.date_derniere_entree?.slice(0, 10) ?? '—'}
-                </td>
-                <td className="whitespace-nowrap px-2 py-1 text-attenue-texte">
-                  {l.date_derniere_sortie?.slice(0, 10) ?? '—'}
-                </td>
-                <td className="whitespace-nowrap px-2 py-1 text-attenue-texte">
-                  {l.date_dernier_inventaire?.slice(0, 10) ?? (
-                    <span className="text-alerte">jamais</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* --- Detail -------------------------------------------------------
+          UN TABLEAU A LA MAIN NE SAIT NI PAGINER, NI EXPORTER, NI S'IMPRIMER.
+          Celui-ci alignait toutes les lignes d'un coup : sur trois cents
+          references c'est deja long, et il n'y avait aucun moyen d'en sortir un
+          etat. `TableDroits` apporte les trois, et applique en plus la grille
+          de droits par colonne — le magasinier ne voit ni CMUP ni valeur, sans
+          qu'on ait a le redire ici. */}
+      <TableDroits
+        exportable="etat-de-stock"
+        imprimable={magasin ? `Etat de stock — ${magasin}` : 'Etat de stock consolide'}
+        module="STOCK"
+        colonnes={colonnes}
+        lignes={visibles}
+        cle={(l) => l.id_stock}
+        titreCarte={(l) => l.code_reference}
+        texteVide="Aucune ligne de stock."
+      />
 
-    </PageAvecRail>
+    </>
   )
 }
 

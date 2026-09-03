@@ -17,8 +17,7 @@ import { TrendingDown, TrendingUp } from 'lucide-react'
 import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
-import { PageAvecRail } from '../composants/RailLateral'
-import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
+import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { fmt } from '../components/ui'
 import { cn } from '../lib/utils'
@@ -214,31 +213,31 @@ export function HistoriquePrix() {
         sous_titre="Prix reellement payes, enregistres a la reception — pas les tarifs annonces"
       />
 
-      <PageAvecRail
-        large
-        rail={
-          <PanneauFiltres
-            champs={CHAMPS}
-            lignes={toutes}
-            valeurs={filtres.valeurs}
-            definir={filtres.definir}
-            reinitialiser={filtres.reinitialiser}
-            actifs={filtres.actifs}
-            enTete={
-              ref ? (
-                <button
-                  onClick={() => setRef('')}
-                  className="w-full rounded-[var(--radius)] border border-bordure px-2 py-1.5 text-left text-[12px] hover:bg-attenue"
-                >
-                  <span className="text-attenue-texte">Reference : </span>
-                  <span className="font-mono">{ref}</span>
-                  <span className="text-attenue-texte"> — tout voir</span>
-                </button>
-              ) : undefined
-            }
-          />
+      {/* LES FILTRES SONT AU-DESSUS DU TABLEAU, plus a sa gauche. Le rail
+          prenait un quart de la largeur sur un portable, et c'est le tableau
+          qui le payait. Il partait aussi a l'impression, en travers de la
+          page : la barre porte `sans-impression`. */}
+      <BarreFiltres
+        champs={CHAMPS}
+        lignes={toutes}
+        valeurs={filtres.valeurs}
+        definir={filtres.definir}
+        reinitialiser={filtres.reinitialiser}
+        actifs={filtres.actifs}
+        enPied={
+          ref ? (
+            <button
+              onClick={() => setRef('')}
+              className="mb-0.5 rounded-[3px] border border-bordure px-2 py-1 text-[11px] hover:bg-attenue"
+            >
+              <span className="text-attenue-texte">Reference : </span>
+              <span className="font-mono">{ref}</span>
+              <span className="text-attenue-texte"> — tout voir</span>
+            </button>
+          ) : undefined
         }
-      >
+      />
+
         <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-attenue-texte">
           <span>
             {vues.length} achat(s)
@@ -285,7 +284,6 @@ export function HistoriquePrix() {
               : 'Module non accessible.'
           }
         />
-      </PageAvecRail>
     </div>
   )
 }

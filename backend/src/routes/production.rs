@@ -1349,7 +1349,7 @@ pub async fn recalculer_plan(
         .map_err(|_| AppError::Invalide(format!("date de debut illisible : {date_debut}")))?;
 
     let bases: Vec<BaseQualite> = sqlx::query_as::<_, (String, f64)>(
-        "SELECT code_qualite, m2_base_mensuel FROM plan_qualite
+        "SELECT code_qualite, m2_base_mensuel::float8 FROM plan_qualite
           WHERE id_plan = $1 ORDER BY code_qualite",
     )
     .bind(&id)
@@ -1367,7 +1367,8 @@ pub async fn recalculer_plan(
 
     let coefs: std::collections::HashMap<(String, u32), f64> =
         sqlx::query_as::<_, (String, i64, f64)>(
-            "SELECT code_qualite, mois, coefficient FROM plan_saisonnalite WHERE id_plan = $1",
+            "SELECT code_qualite, mois, coefficient::float8 FROM plan_saisonnalite
+              WHERE id_plan = $1",
         )
         .bind(&id)
         .fetch_all(&mut *tx)

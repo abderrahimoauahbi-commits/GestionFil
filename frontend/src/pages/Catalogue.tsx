@@ -8,14 +8,13 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Trash2 } from 'lucide-react'
+import { Filter, FilterX, Trash2 } from 'lucide-react'
 import { MenuElement, useConfirmation } from '../composants/ui/surcouches'
 import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EcranReferentiel } from '../components/EcranReferentiel'
 import { useParamVue } from '../lib/navigation'
 import type { ChampDef } from '../components/Formulaire'
-import { PageAvecRail } from '../composants/RailLateral'
 import type { Colonne } from '../components/TableDroits'
 import { Etiquette, Message, fmt } from '../components/ui'
 
@@ -252,17 +251,19 @@ export function Catalogue() {
         </div>
       )}
 
-      <PageAvecRail
-        rail={
-          <PanneauFiltres
-            valeurs={{ categorie, fournisseur, unite, actif }}
-            definir={{ categorie: setCategorie, fournisseur: setFournisseur, unite: setUnite, actif: setActif }}
-            categories={qCat.data ?? []}
-            fournisseurs={qFour.data ?? []}
-          />
-        }
-      >
+      {/* LES FILTRES SONT AU-DESSUS DU TABLEAU, plus a sa gauche. Le rail
+          prenait un quart de la largeur sur un portable, et c'est le catalogue
+          qui le payait : dix-sept colonnes serrees dans les trois quarts
+          restants. Il partait aussi a l'impression. */}
         <EcranReferentiel<Reference>
+          filtresEnTete={
+            <BarreFiltres
+              valeurs={{ categorie, fournisseur, unite, actif }}
+              definir={{ categorie: setCategorie, fournisseur: setFournisseur, unite: setUnite, actif: setActif }}
+              categories={qCat.data ?? []}
+              fournisseurs={qFour.data ?? []}
+            />
+          }
           exportable="catalogue-references"
           imprimable="Catalogue references"
           // Remonter la categorie dans la cle force le rechargement : sans cela,
@@ -281,7 +282,6 @@ export function Catalogue() {
           rechercheInitiale={refDemandee}
           titreCarte={(r) => r.code_reference}
         />
-      </PageAvecRail>
     </>
   )
 }
@@ -375,7 +375,7 @@ function SupprimerDefinitivement({ reference }: { reference: string }) {
  * Chaque champ vaut une egalite envoyee au serveur : c'est lui qui filtre et
  * qui compte, la table n'affiche qu'une page.
  */
-function PanneauFiltres({
+function BarreFiltres({
   valeurs,
   definir,
   categories,
@@ -403,21 +403,15 @@ function PanneauFiltres({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-attenue-texte">
-          Filtres
-        </span>
-        {actifs > 0 && (
-          <button
-            type="button"
-            onClick={reinitialiser}
-            className="rounded-[3px] px-1.5 py-0.5 text-[11px] text-primaire hover:bg-attenue"
-          >
-            Effacer ({actifs})
-          </button>
-        )}
-      </div>
+    <div
+      className="sans-impression mb-3 flex flex-wrap items-end gap-2 rounded-[var(--radius)]
+                 border border-bordure bg-surface px-2.5 py-2"
+    >
+      <span className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase
+                       tracking-wide text-attenue-texte">
+        <Filter className="size-3" />
+        Filtres
+      </span>
 
       <Champ libelle="Categorie">
         <select
@@ -479,6 +473,18 @@ function PanneauFiltres({
           <option value="">Toutes</option>
         </select>
       </Champ>
+
+      {actifs > 0 && (
+        <button
+          type="button"
+          onClick={reinitialiser}
+          className="mb-0.5 flex items-center gap-1 rounded-[3px] border border-bordure px-2
+                     py-1 text-[11px] text-primaire hover:bg-attenue"
+        >
+          <FilterX className="size-3" />
+          Effacer ({actifs})
+        </button>
+      )}
     </div>
   )
 }
@@ -490,7 +496,9 @@ const CLASSE_CHAMP =
 /** Libelle serre au-dessus de son champ : deux lignes, pas de colonne perdue. */
 function Champ({ libelle, children }: { libelle: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-0.5">
+    // `min-w` : sans elle chaque champ prend la largeur de son contenu et la
+    // barre devient un escalier.
+    <label className="flex min-w-[10rem] flex-col gap-0.5">
       <span className="text-[10.5px] text-attenue-texte">{libelle}</span>
       {children}
     </label>

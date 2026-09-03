@@ -466,6 +466,56 @@
   border: 1px solid rgb(255 255 255 / 0.08);
 }
 
+/* --- Quitter ----------------------------------------------------------------
+   L'application installee n'a pas de barre de titre : sans cette croix, l'ecran
+   de connexion est une impasse dont on ne sort qu'au gestionnaire des taches.
+   Elle est discrete parce qu'on ne vient pas ici pour partir. */
+.cnx__quitter {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(226 232 240 / 0.55);
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.cnx__quitter:hover {
+  color: #f8fafc;
+  background: rgb(220 38 38 / 0.55);
+  border-color: rgb(248 113 113 / 0.55);
+}
+
+/* --- Le lien de reglage du serveur ------------------------------------------
+   Il ne pose pas de question a qui n'en a pas, et il repond a qui la cherche. */
+.cnx__reglage {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 0.64rem;
+  color: rgb(226 232 240 / 0.42);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.cnx__reglage:hover {
+  color: rgb(196 161 90 / 0.95);
+  border-color: rgb(196 161 90 / 0.4);
+}
+
 /* --- Le pied --------------------------------------------------------------- */
 .cnx__pied {
   position: absolute;

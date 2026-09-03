@@ -19,11 +19,12 @@
  */
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react'
+import { Eye, EyeOff, Loader2, LogIn, Server, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { ErreurApi, definirServeur, serveur, serveurRequis } from '../api/client'
 import { Chargement } from '../composants/ui/base'
 import { VERSION } from '../lib/version'
+import { estBureau } from '../lib/utils'
 import './connexion.css'
 
 export function Connexion() {
@@ -86,6 +87,28 @@ export function Connexion() {
           ecran qui n'en demande qu'un — et il suffisait d'une largeur
           intermediaire pour voir les deux. Une seule marque, toujours visible,
           au-dessus de tout le reste. */}
+      {/* QUITTER. L'application installee n'a PAS de barre de titre : la fenetre
+          est sans decoration, et sa croix vit dans l'entete de l'application —
+          qui n'existe pas encore tant qu'on n'est pas connecte. Sans ce bouton,
+          l'ecran de connexion est une impasse : il faut le gestionnaire des
+          taches pour en sortir. Il ne parait que dans l'application installee ;
+          dans un navigateur, l'onglet se ferme tout seul. */}
+      {estBureau() && (
+        <button
+          type="button"
+          onClick={() => {
+            void import('@tauri-apps/api/window').then((m) =>
+              m.getCurrentWindow().close(),
+            )
+          }}
+          className="cnx__quitter"
+          title="Quitter Gestion Fil"
+          aria-label="Quitter"
+        >
+          <X className="size-4" />
+        </button>
+      )}
+
       <header className="cnx__entete">
         <img
           src={`${import.meta.env.BASE_URL}logo-polyfashions-blanc.png`}
@@ -220,16 +243,27 @@ export function Connexion() {
           la version l'ouvre — un geste que celui qui installe trouve, et que
           l'utilisateur ne fait jamais par hasard. */}
       <p className="cnx__pied">
-        <button
-          type="button"
-          onClick={() => setReglageOuvert(true)}
-          title={serveur() ? `Serveur : ${serveur()}` : 'Configurer l adresse du serveur'}
-          className="cursor-default border-0 bg-transparent p-0 font-[inherit]
-                     text-[inherit] text-inherit"
-        >
+        <span>
           <strong>Gestion Fil</strong> version {VERSION} · © {new Date().getFullYear()}{' '}
           Polyfashions Carpet
-        </button>
+        </span>
+
+        {/* LE REGLAGE DU SERVEUR SE VOIT, DESORMAIS.
+            Il s'ouvrait par un clic sur la ligne de version — un geste que celui
+            qui installe finit par trouver, mais que personne ne devine le jour ou
+            le serveur change d'adresse. Le lien reste discret : il ne pose pas de
+            question a qui n'en a pas, et il repond a qui la cherche.
+
+            LA BASE DE DONNEES, ELLE, NE SE REGLE PAS ICI ni nulle part dans
+            l'application. Seul le serveur lui parle, par son fichier .env ; un
+            poste de magasin n'a aucun acces direct a PostgreSQL, et c'est ce qui
+            fait que la grille de droits protege quelque chose. */}
+        {!reglageOuvert && (
+          <button type="button" onClick={() => setReglageOuvert(true)} className="cnx__reglage">
+            <Server className="size-3" />
+            {serveur() ? `Serveur : ${serveur()}` : 'Configurer le serveur'}
+          </button>
+        )}
       </p>
     </div>
   )

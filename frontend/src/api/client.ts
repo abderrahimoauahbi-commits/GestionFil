@@ -47,13 +47,23 @@ export function definirServeur(url: string): void {
 /**
  * Faut-il demander l'adresse du serveur avant de pouvoir se connecter ?
  *
- * Vrai pour une application EMPAQUETEE (bureau ou mobile) non configuree : sa
- * page ne vient pas d'un serveur, l'origine est `tauri://localhost` ou
- * `file://`, et une requete relative n'aboutirait nulle part. Faux dans un
- * navigateur, ou l'origine courante fait office de serveur.
+ * Vrai pour une application EMPAQUETEE non configuree : sa page ne vient pas
+ * d'un serveur, et une requete relative n'aboutirait nulle part.
+ *
+ * LE PROTOCOLE NE SUFFIT PAS A LA RECONNAITRE. Cette fonction testait
+ * `location.protocol !== 'http:'`, en supposant que l'enveloppe servait la page
+ * en `tauri://`. Sous Windows, Tauri 2 sert en `http://tauri.localhost` : le
+ * test rendait donc FAUX, le champ d'adresse restait cache, et l'application
+ * installee interrogeait sa propre enveloppe. Elle recevait sa page d'accueil
+ * en guise de reponse d'API — « Reponse inattendue du serveur (HTTP 200) » —
+ * sans aucun moyen de corriger l'adresse. Vu apres installation reelle sur un
+ * poste.
+ *
+ * On demande donc a l'enveloppe elle-meme, qui ne ment pas.
  */
 export function serveurRequis(): boolean {
   if (serveur()) return false
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) return true
   return location.protocol !== 'http:' && location.protocol !== 'https:'
 }
 

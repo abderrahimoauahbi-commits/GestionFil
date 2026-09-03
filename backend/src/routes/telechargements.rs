@@ -22,10 +22,7 @@ use crate::auth::Utilisateur;
 use crate::error::{AppError, AppResult};
 use crate::routes::json::lignes_en_json;
 use crate::AppState;
-use axum::body::Body;
-use axum::extract::{Path, State};
-use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::extract::State;
 use axum::Json;
 use serde_json::{json, Value};
 
@@ -154,34 +151,33 @@ pub async fn lister(
     Ok(Json(Value::Array(paquets)))
 }
 
-/// Sert un paquet et inscrit qui l'a pris.
+/// Inscrit un telechargement au journal.
 ///
-/// LA TRACE EST ECRITE AVANT L'ENVOI. Un telechargement interrompu laisse
-/// quand meme sa ligne : on cherche a savoir QUI A VOULU quelle version, pas a
-/// compter des octets. L'inverse — inscrire apres coup — perdrait justement les
-/// cas interessants, ceux qui echouent.
-pub async fn telecharger(
+/// LE FICHIER NE PASSE PLUS PAR ICI. Il est servi en statique sous
+/// `/telechargements/`, pour que le bouton de l'ecran soit un VRAI LIEN — qui
+/// s'ouvre dans un onglet, se copie, se colle dans un courriel. Cette route ne
+/// porte plus que la trace, ecrite par l'ecran au moment du clic.
+///
+/// ON INSCRIT L'INTENTION, PAS L'OCTET. Un telechargement interrompu laisse sa
+/// ligne : la question a laquelle ce journal repond est « qui a voulu quelle
+/// version », pas « combien d'octets sont passes ».
+pub async fn inscrire(
     State(state): State<AppState>,
     user: Utilisateur,
-    Path(fichier): Path<String>,
-) -> AppResult<Response> {
-    // AUCUN CHEMIN, JAMAIS. Un nom de fichier qui contient un separateur ou
-    // « .. » n'est pas un paquet mal nomme : c'est une tentative de lire
-    // ailleurs sur le disque. On refuse sans chercher a nettoyer — nettoyer un
-    // chemin hostile est un exercice qu'on perd toujours.
-    if fichier.contains('/') || fichier.contains('\\') || fichier.contains("..") {
-        return Err(AppError::Invalide("nom de fichier invalide".into()));
-    }
-    let Some((plateforme, version)) = decrire(&fichier) else {
-        return Err(AppError::Invalide(
-            "nom de paquet non conforme : gestionfil-<plateforme>-<version>.<ext>".into(),
-        ));
+    Json(d): Json<InscriptionTelechargement>,
+) -> AppResult<Json<Value>> {
+    let Some((plateforme, version)) = decrire(&d.fichier) else {
+        return Err(AppError::Invalide(format!(
+            "nom de paquet non conforme : {}",
+            d.fichier
+        )));
     };
-
-    let chemin = dossier().join(&fichier);
-    let octets = tokio::fs::read(&chemin)
-        .await
-        .map_err(|_| AppError::Introuvable(format!("paquet {fichier}")))?;
+    // Le fichier doit exister : inscrire un nom invente remplirait le journal
+    // de lignes qui ne correspondent a rien.
+    let chemin = dossier().join(&d.fichier);
+    let taille = std::fs::metadata(&chemin)
+        .map(|m| m.len() as i64)
+        .map_err(|_| AppError::Introuvable(format!("paquet {}", d.fichier)))?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -190,27 +186,21 @@ pub async fn telecharger(
              (fichier, plateforme, version, taille_octets, id_utilisateur)
          VALUES ($1,$2,$3,$4,$5)",
     )
-    .bind(&fichier)
+    .bind(&d.fichier)
     .bind(&plateforme)
     .bind(&version)
-    .bind(octets.len() as i64)
+    .bind(taille)
     .bind(&user.id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
 
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
-            (
-                header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{fichier}\""),
-            ),
-        ],
-        Body::from(octets),
-    )
-        .into_response())
+    Ok(Json(json!({ "inscrit": true })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct InscriptionTelechargement {
+    pub fichier: String,
 }
 
 /// Le journal : qui a pris quoi, et quand.

@@ -67,8 +67,8 @@ pub fn router(state: AppState) -> Router {
         // refuser a un magasinier de reinstaller son poste ne protege rien. Le
         // JOURNAL nomme des personnes, il reste dans PARAMETRES.
         .route("/api/telechargements", get(telechargements::lister))
-        .route("/api/telechargements/journal", get(telechargements::journal))
-        .route("/api/telechargements/{fichier}", get(telechargements::telecharger))
+        .route("/api/telechargements/journal",
+               get(telechargements::journal).post(telechargements::inscrire))
         // --- Assistant de direction (lecture seule, role DIRECTION) -----------
         // L'ANCIEN ASSISTANT RESTE, en second. C'est un catalogue ferme de
         // questions : il repond sans modele de langage, donc il repond meme si
@@ -273,6 +273,27 @@ pub fn router(state: AppState) -> Router {
         Some(rep) => {
             let index = rep.join("index.html");
             tracing::info!(repertoire = %rep.display(), "interface servie par le serveur");
+
+            // LES PAQUETS SONT DES FICHIERS, SERVIS COMME TELS.
+            //
+            // Ils passaient par une route d'API qui exigeait un jeton dans un
+            // en-tete : le bouton ne pouvait donc pas etre un lien, il fallait
+            // telecharger en memoire puis rendre le contenu au navigateur par un
+            // lien temporaire. Un detour invisible, mais un detour — et un
+            // bouton qui n'est pas un lien ne s'ouvre pas dans un nouvel onglet,
+            // ne se copie pas, ne se colle pas dans un courriel.
+            //
+            // UN INSTALLATEUR N'EST PAS UN SECRET : c'est ce que tout editeur
+            // met derriere une adresse publique. Ce qui est protege, ce sont les
+            // donnees de l'entreprise, pas le programme qui les affiche.
+            let routeur = routeur.nest_service(
+                "/telechargements",
+                ServeDir::new(
+                    std::env::var("GESTIONFIL_PAQUETS")
+                        .unwrap_or_else(|_| "./telechargements".into()),
+                ),
+            );
+
             routeur
                 .fallback_service(
                     ServeDir::new(&rep).not_found_service(ServeFile::new(index)),

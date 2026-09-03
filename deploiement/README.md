@@ -92,6 +92,15 @@ Les six comptes portent `!A_DEFINIR!`, qui n'est pas une empreinte Argon2
 valide : **aucune connexion n'est possible** tant qu'un mot de passe réel n'a pas
 été posé. Le serveur le signale au démarrage.
 
+> **Le minimum est de 8 caractères**, abaissé depuis 12 le 3 septembre 2026 à la
+> demande de la direction. Ce que cela coûte, dit franchement : une empreinte
+> volée se casse en quelques heures à 8 caractères, contre des années à 12. Ce
+> qui rend le compromis tenable ici : la base n'est joignable que depuis le
+> réseau local, PostgreSQL n'écoute que sur la boucle locale, et Argon2id rend
+> une attaque par le formulaire de connexion trop lente pour aboutir. Pour les
+> comptes de direction, qui voient les prix et valident les engagements, une
+> phrase longue reste vivement conseillée.
+
 ```bash
 cd /opt/gestionfil
 GESTIONFIL_MOT_DE_PASSE="au moins douze caracteres" \

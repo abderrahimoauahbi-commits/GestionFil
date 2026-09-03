@@ -11,6 +11,7 @@
  * pour qu'ils soient verifiables, pas pour qu'ils soient redessines.
  */
 import { useMemo, useState } from 'react'
+import { useEtatDepuisParam } from '../lib/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -410,7 +411,13 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
   const visibles = cles
     ? (cles.map((c) => ONGLETS.find((o) => o.cle === c)).filter(Boolean) as Onglet[])
     : ONGLETS
-  const [onglet, setOnglet] = useState(visibles[0])
+  // L'ONGLET VIT DANS L'URL. Il etait un simple `useState` : on ne pouvait donc
+  // pas envoyer un lien vers les groupes d'equivalence, et un rechargement
+  // ramenait sur le premier onglet. Le referentiel qu'on regarde fait partie de
+  // l'adresse, comme partout ailleurs dans l'application.
+  const [cleOnglet, setCleOnglet] = useEtatDepuisParam('ref')
+  const onglet = visibles.find((o) => o.cle === cleOnglet) ?? visibles[0]
+  const setOnglet = (o: Onglet) => setCleOnglet(o.cle)
 
   // Deux groupes, parce que les deux derniers ne se modifient pas : les melanger
   // laisserait chercher un bouton de creation qui n'existe pas.

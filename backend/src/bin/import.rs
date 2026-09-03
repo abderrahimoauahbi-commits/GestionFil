@@ -564,13 +564,45 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
     for (code_grp, mut membres) in groupes {
         membres.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
+        // LE LIBELLE DIT CE QUE LE GROUPE CONTIENT, pas son numero.
+        //
+        // Il valait « Groupe GRP-001 », ce qui repete le code affiche a cote et
+        // n'apprend rien : devant quatre-vingt-treize lignes toutes pareilles,
+        // il fallait ouvrir chaque groupe pour savoir lequel on cherchait. On
+        // le nomme donc d'apres sa reference preferentielle — la premiere par
+        // priorite, celle qu'on achete en temps normal.
+        //
+        // ON N'ECRASE PAS UN LIBELLE EXISTANT : `DO UPDATE ... WHERE` ne
+        // reecrit que les libelles encore automatiques. Un groupe renomme a la
+        // main dans l'application garde son nom au prochain import, sans quoi
+        // le classeur effacerait le travail de l'ecran a chaque reprise.
+        let prefere = membres.first().map(|(_, r)| r.as_str()).unwrap_or("");
+        let designation: Option<String> = sqlx::query_scalar(
+            "SELECT designation FROM reference WHERE code_reference = $1",
+        )
+        .bind(prefere)
+        .fetch_optional(&mut *tx)
+        .await?
+        .flatten();
+
+        let libelle = match designation.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            Some(d) if membres.len() > 1 => {
+                format!("{d} — {} sources", membres.len())
+            }
+            Some(d) => d.to_string(),
+            None => format!("Groupe {code_grp}"),
+        };
+
         sqlx::query(
             "INSERT INTO groupe_equiv (code_groupe_equiv, libelle, description)
              VALUES ($1, $2, 'Importe de GESTION Fil.xlsx')
-             ON CONFLICT (code_groupe_equiv) DO NOTHING",
+             ON CONFLICT (code_groupe_equiv) DO UPDATE SET libelle = excluded.libelle
+                 WHERE groupe_equiv.libelle IS NULL
+                    OR groupe_equiv.libelle = ''
+                    OR groupe_equiv.libelle LIKE 'Groupe GRP-%'",
         )
         .bind(&code_grp)
-        .bind(format!("Groupe {code_grp}"))
+        .bind(&libelle)
         .execute(&mut *tx)
         .await?;
         n_grp += 1;

@@ -48,12 +48,29 @@ mod tests {
 
 /// Longueur minimale d'un mot de passe.
 ///
-/// DOUZE, ET NON HUIT. Un mot de passe de huit caracteres se casse aujourd'hui
-/// en quelques heures sur une carte graphique grand public, meme hache en
-/// Argon2 : la longueur est le seul facteur qui rende l'attaque hors de portee,
-/// bien avant la complexite. Exiger une majuscule et un chiffre pousse surtout
-/// a choisir `Password1!`, que les dictionnaires connaissent.
-pub const LONGUEUR_MINIMALE: usize = 12;
+/// HUIT, SUR DECISION DE LA DIRECTION, ET C'EST UN COMPROMIS ASSUME.
+///
+/// La valeur etait douze. Ce que coute ce passage a huit, dit franchement : un
+/// mot de passe de huit caracteres tombe en quelques heures sur une carte
+/// graphique grand public si l'empreinte est volee, la ou douze tient des
+/// annees. La longueur est le seul facteur qui compte vraiment — bien avant les
+/// majuscules et les chiffres, qui poussent surtout a choisir `Password1!`.
+///
+/// CE QUI REND LE COMPROMIS TENABLE ICI, et seulement ici : la base n'est
+/// joignable que depuis le reseau local de l'usine, PostgreSQL n'ecoute que sur
+/// la boucle locale, et Argon2id rend chaque essai en ligne assez lent pour
+/// qu'une attaque par le formulaire de connexion n'aboutisse pas. Le risque
+/// reel est donc celui d'une empreinte exfiltree — c'est-a-dire d'un serveur
+/// deja compromis.
+///
+/// EN DESSOUS DE HUIT, ON NE DESCEND PAS. C'est le plancher de toutes les
+/// recommandations publiques, et le franchir ferait basculer l'attaque en ligne
+/// dans le domaine du faisable.
+///
+/// Pour les comptes de direction, qui voient les prix et valident les engagements,
+/// une phrase longue reste vivement conseillee : la regle autorise huit
+/// caracteres, elle n'oblige personne a s'y tenir.
+pub const LONGUEUR_MINIMALE: usize = 8;
 
 /// Verifie la longueur, en CARACTERES et non en octets.
 ///

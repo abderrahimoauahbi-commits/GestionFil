@@ -19,7 +19,7 @@ import { Alerte, Bouton, Champ, Etiq } from './ui/base'
 import { Dialogue, DialogueContenu } from './ui/surcouches'
 
 /** Longueur minimale, la meme que celle appliquee par le serveur. */
-const LONGUEUR_MINIMALE = 12
+const LONGUEUR_MINIMALE = 8
 
 export function ChangerMotDePasse({
   ouvert,
@@ -120,11 +120,12 @@ export function ChangerMotDePasse({
                 required
               />
               <p className="mt-1 text-[11px] leading-relaxed text-attenue-texte">
-                {LONGUEUR_MINIMALE} caracteres minimum.{' '}
+                {LONGUEUR_MINIMALE} caracteres minimum, mais{' '}
                 <span className="text-texte">
-                  Une phrase est plus sure et plus facile a retenir qu un mot complique
+                  une phrase longue est bien plus sure et plus facile a retenir
                 </span>{' '}
-                — la longueur compte bien plus que les majuscules et les chiffres.
+                qu un mot court et complique : la longueur compte davantage que les majuscules
+                et les chiffres.
               </p>
             </div>
 

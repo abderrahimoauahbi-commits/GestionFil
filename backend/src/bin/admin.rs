@@ -147,9 +147,11 @@ async fn definir_mot_de_passe(pool: &db::Db, login: &str) -> Result<()> {
             saisie
         }
     };
-    if mdp.chars().count() < 12 {
-        bail!("mot de passe trop court : 12 caracteres minimum");
-    }
+    // LA REGLE VIT A UN SEUL ENDROIT. Cet outil portait sa propre condition en
+    // dur : abaisser le minimum cote serveur laissait donc l'outil refuser ce
+    // que l'API acceptait, ce qui est le genre d'incoherence qu'on met une
+    // heure a comprendre.
+    password::valider_longueur(&mdp).map_err(|e| anyhow::anyhow!(e))?;
 
     let hash = password::hacher(&mdp)?;
     sqlx::query("UPDATE utilisateur SET mot_de_passe_hash = $2 WHERE login = $1")

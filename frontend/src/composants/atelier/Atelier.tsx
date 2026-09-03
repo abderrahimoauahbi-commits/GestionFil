@@ -23,7 +23,8 @@ import { estAccessible, MODULES, NAVIGATION, type Section } from '../Coquille'
 import { Infobulle } from '../ui/surcouches'
 import { cn } from '../../lib/utils'
 import { BarreTitre, type MenuBarre } from './BarreTitre'
-import { BarreActivites, type Controle } from './Lateral'
+import { type Controle } from './Lateral'
+import { BarreLaterale } from '../BarreLaterale'
 import { FilAriane } from './FilAriane'
 import { BarreEtat } from './BarreEtat'
 import { Onglets } from './Onglets'
@@ -617,14 +618,11 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
           })),
         ],
       },
-      {
-        libelle: 'Aller',
-        commandes: destinations.map((d) => ({
-          id: `menu-aller:${d.id}`,
-          libelle: d.libelle,
-          executer: d.executer,
-        })),
-      },
+      // LE MENU « ALLER » A DISPARU. Il repetait, en liste plate de trente
+      // entrees, ce que la barre laterale montre deja classe par module. Deux
+      // chemins vers la meme chose, dont l'un plus long : celui-la part.
+      // « Aller a un ecran » reste dans Affichage, parce qu'il ouvre la palette
+      // de recherche — ce n'est pas la meme chose qu'une liste.
     ]
   }, [
     peut,
@@ -732,12 +730,28 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
       <BarreTitre menus={menus} titre={titreFenetre} />
 
       <div className="flex min-h-0 flex-1">
-        <BarreActivites
-          section={prefs.section}
-          definirSection={definirSection}
-          anomalies={anomalies}
-          bas={<EtatServeur />}
-        />
+        {/* LA MEME BARRE LATERALE QUE LE WEB.
+        
+            Le bureau avait la sienne : un rail de dix icones qui ne faisait que
+            CHANGER DE SECTION. Le clic ne menait nulle part — il fallait
+            ensuite descendre dans le fil d'Ariane pour trouver l'ecran, ce qui
+            se lisait comme une barre qui ne fonctionne pas.
+        
+            Celle du web liste les ecrans, replies sous leur module, et s'ouvre
+            au survol. Ses liens savent ou ils vivent : ici ils ouvrent un
+            onglet, dans un navigateur ils remplacent la page. Une entree
+            ajoutee a la navigation parait donc des deux cotes sans qu'on y
+            pense. */}
+        <BarreLaterale />
+
+        {/* L'ETAT DU SERVEUR reste visible : il vivait au pied du rail, qui
+            n'existe plus. Ancre en bas a gauche, il ne prend la place de rien
+            et se voit d'un coup d'oeil — c'est tout ce qu'on lui demande. */}
+        <div className="pointer-events-none fixed bottom-8 left-2 z-30">
+          <span className="pointer-events-auto">
+            <EtatServeur />
+          </span>
+        </div>
 
         {/* --- Zone de travail --------------------------------------------- */}
         <div className="flex min-w-0 flex-1 flex-col">

@@ -20,12 +20,62 @@
  */
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { useOuvrirVue } from '../lib/navigation'
 import { ChevronRight, Pin, PinOff } from 'lucide-react'
 import { useApparence } from './Apparence'
 import { estAccessible, MODULES, NAVIGATION, type EntreeNav, type Section } from './Coquille'
 import { useAuth } from '../auth/AuthContext'
+import { useOngletsFacultatif } from './atelier/etat'
 import { MarqueCarree } from './Marque'
 import { cn } from '../lib/utils'
+
+/**
+ * Un lien de navigation qui sait ou il vit.
+ *
+ * DANS LE NAVIGATEUR il remplace la page ; DANS L'APPLICATION DE BUREAU il
+ * ouvre un onglet. C'etait la raison pour laquelle le bureau avait sa propre
+ * barre laterale : un `NavLink` y aurait remplace l'onglet courant au lieu d'en
+ * ouvrir un, ce qui aurait supprime le multifenetrage a chaque clic.
+ *
+ * `useOuvrirVue` connait la difference. Le meme composant sert donc les deux
+ * coquilles, et une entree ajoutee a la navigation apparait des deux cotes sans
+ * qu'on y pense.
+ */
+function LienVue({
+  vers,
+  className,
+  title,
+  children,
+}: {
+  vers: string
+  className: string | ((e: { isActive: boolean }) => string)
+  title?: string
+  children: React.ReactNode
+}) {
+  const ouvrir = useOuvrirVue()
+  const emplacement = useLocation()
+  const onglets = useOngletsFacultatif()
+
+  if (!onglets) {
+    return (
+      <NavLink to={vers} end={vers === '/'} title={title} className={className}>
+        {children}
+      </NavLink>
+    )
+  }
+
+  const actif = vers === '/' ? onglets.actif === '/' : (onglets.actif ?? emplacement.pathname).startsWith(vers)
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={() => ouvrir(vers)}
+      className={typeof className === 'function' ? className({ isActive: actif }) : className}
+    >
+      {children}
+    </button>
+  )
+}
 
 export function BarreLaterale() {
   const { moi, peut } = useAuth()
@@ -36,6 +86,11 @@ export function BarreLaterale() {
   const [ouvert, setOuvert] = useState<Section | null>(null)
 
   const ouverte = menuFige || survol
+  /* La coquille de bureau change deux choses : la barre y est dans le flux, et
+     ses liens ouvrent des onglets. Elle se reconnait a la presence du contexte
+     d'onglets. */
+  const dansAtelier = !!useOngletsFacultatif()
+
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
 
   const courante = accessibles.find(
@@ -88,9 +143,9 @@ export function BarreLaterale() {
       )
     }
     return (
-      <NavLink key={e.vers} to={e.vers} end={e.vers === '/'} className={classe}>
+      <LienVue key={e.vers} vers={e.vers} className={classe}>
         {contenu}
-      </NavLink>
+      </LienVue>
     )
   }
 
@@ -103,6 +158,9 @@ export function BarreLaterale() {
         className={cn(
           'sans-impression hidden shrink-0 transition-[width] duration-150 ease-out md:block',
           menuFige ? 'w-[248px]' : 'w-[56px]',
+          // Dans l'atelier la barre est dans le flux : elle occupe deja sa
+          // place, une gouttiere de plus la doublerait.
+          dansAtelier && 'hidden',
         )}
       />
 
@@ -113,9 +171,24 @@ export function BarreLaterale() {
           setOuvert(null)
         }}
         className={cn(
-          'sans-impression fixed bottom-0 left-0 top-0 z-40 hidden flex-col border-r border-bordure',
+          'sans-impression hidden flex-col border-r border-bordure',
           'bg-surface transition-[width] duration-150 ease-out md:flex',
+          // POSEE DANS LE FLUX SUR LE BUREAU, EN SURIMPRESSION SUR LE WEB.
+          //
+          // `fixed` la colle aux quatre bords de la fenetre. Dans un
+          // navigateur c'est ce qu'on veut : elle passe par-dessus le contenu
+          // quand elle s'ouvre au survol, sans le decaler. Dans l'application
+          // de bureau, la fenetre porte AUSSI une barre de titre en haut et une
+          // barre d'etat en bas : la barre laterale les recouvrait, mangeant le
+          // menu Fichier et le nom du compte. Vu a la capture.
+          //
+          // Le bureau la met donc dans le flux — sa zone de travail est deja
+          // une rangee flex, la barre y prend simplement sa colonne.
+          dansAtelier
+            ? 'relative shrink-0'
+            : 'fixed bottom-0 left-0 top-0 z-40',
           ouverte ? 'w-[248px] shadow-xl' : 'w-[56px]',
+          ouverte && dansAtelier && 'absolute bottom-0 left-0 top-0 z-40',
         )}
       >
         {/* --- Marque et figeage ------------------------------------------ */}
@@ -216,9 +289,9 @@ export function BarreLaterale() {
             return ecrans.map((e) => {
               const courant = e.vers === courante?.vers
               return (
-                <NavLink
+                <LienVue
                   key={e.vers}
-                  to={e.vers}
+                  vers={e.vers}
                   title={ouverte ? undefined : e.libelle}
                   className={cn(
                     'flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-[12.5px]',
@@ -230,7 +303,7 @@ export function BarreLaterale() {
                 >
                   <e.Icone className="size-4 shrink-0" strokeWidth={courant ? 2.2 : 1.7} />
                   {ouverte && <span className="min-w-0 flex-1 truncate">{e.libelle}</span>}
-                </NavLink>
+                </LienVue>
               )
             })
           })}

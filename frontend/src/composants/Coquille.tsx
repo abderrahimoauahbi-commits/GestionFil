@@ -43,6 +43,7 @@ import {
   ShieldAlert,
   ShoppingCart,
   Sun,
+  Cog,
   Truck,
   Coins,
   FileSpreadsheet,
@@ -242,6 +243,9 @@ export const NAVIGATION: EntreeNav[] = [
   { vers: '/stock', libelle: 'Stock projete & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
   { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: Boxes, section: 'STOCK', principale: true },
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
+  // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :
+  // chaque etage est un magasin, et rien ici n'est un registre a part.
+  { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'STOCK', principale: true },
   { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardList, section: 'STOCK' },
 
   /* --- 6. Finance & valorisation ----------------------------------------- */

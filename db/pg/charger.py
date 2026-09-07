@@ -44,6 +44,7 @@ FICHIERS = [
     "007_schema_receptions.sql",
     "008_schema_stock.sql",
     "009_schema_pilotage.sql",
+    "009b_schema_machines.sql",
     "099_cles_differees.sql",
     "010_declencheurs.sql",
     "010b_declencheurs_logique.sql",

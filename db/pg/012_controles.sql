@@ -378,6 +378,104 @@ SELECT code_groupe_equiv, libelle, nb_references, nb_fournisseurs
 FROM v_groupe_equiv_detail
 WHERE qualification = 'MEME FOURNISSEUR';
 
+-- =============================================================================
+-- MACHINES — C33 a C37
+-- -----------------------------------------------------------------------------
+-- Les deux premiers ne devraient JAMAIS rien remonter : le declencheur
+-- trg_lmvt_capacite interdit le depassement a l'ecriture. S'ils sortent, ce
+-- n'est pas la capacite qui a ete violee, c'est le CACHE de bobines qui a
+-- derive — meme logique que C11 et C15 pour les kilos.
+-- =============================================================================
+
+DROP VIEW IF EXISTS v_ctl_c33 CASCADE;
+CREATE VIEW v_ctl_c33 AS
+SELECT e.code_machine, e.code_emplacement, e.libelle, e.capacite_bobines,
+       COALESCE(SUM(sl.nb_bobines), 0) AS bobines_presentes
+FROM machine_emplacement e
+LEFT JOIN stock_lot sl ON sl.code_magasin = e.code_magasin
+GROUP BY e.code_machine, e.code_emplacement, e.libelle, e.capacite_bobines
+HAVING COALESCE(SUM(sl.nb_bobines), 0) > e.capacite_bobines;
+
+DROP VIEW IF EXISTS v_ctl_c34 CASCADE;
+CREATE VIEW v_ctl_c34 AS
+SELECT m.code_machine, m.nom, m.capacite_bobines,
+       COALESCE(SUM(sl.nb_bobines), 0) AS bobines_presentes
+FROM machine m
+LEFT JOIN machine_emplacement e ON e.code_machine = m.code_machine
+LEFT JOIN stock_lot sl ON sl.code_magasin = e.code_magasin
+GROUP BY m.code_machine, m.nom, m.capacite_bobines
+HAVING COALESCE(SUM(sl.nb_bobines), 0) > m.capacite_bobines;
+
+-- C35 : L'AUDIT DU MODE ESTIMATION.
+--
+-- C'est le controle qui donne son sens a la colonne `mode_pesee`. L'estimation
+-- est legitime — un operateur qui depose des bobines a moitie vides a raison de
+-- saisir 50 %, et le bloquer l'empecherait de travailler. Mais une estimation
+-- tres eloignee du catalogue est soit une bobine reellement inhabituelle, soit
+-- une saisie faite pour aller vite. Les deux meritent d'etre regardees a froid,
+-- et celui qui a saisi est nomme.
+DROP VIEW IF EXISTS v_ctl_c35 CASCADE;
+CREATE VIEW v_ctl_c35 AS
+SELECT lm.id_ligne_mouvement, mv.numero_mouvement, mv.date_mouvement,
+       e.code_machine, e.libelle,
+       lm.code_reference, lm.lot_fournisseur, lm.nb_bobines,
+       lm.quantite_kg, lm.pourcentage_restant,
+       lm.poids_unitaire_theorique_kg, lm.poids_reel_moyen_bobine_kg,
+       ROUND(lm.ecart_theorique_pct, 2) AS ecart_theorique_pct,
+       mv.responsable, mv.id_utilisateur
+FROM ligne_mouvement lm
+JOIN mouvement mv ON mv.id_mouvement = lm.id_mouvement
+JOIN machine_emplacement e ON e.code_magasin = mv.code_magasin
+WHERE lm.mode_pesee = 'ESTIMATION'
+  AND lm.ecart_theorique_pct IS NOT NULL
+  AND abs(lm.ecart_theorique_pct) >
+      (SELECT CAST(valeur_courante AS numeric) FROM parametre
+        WHERE code_parametre = 'P_TolerEstimMachine');
+
+-- C36 : EMPLACEMENT NON INVENTORIE DEPUIS TROP LONGTEMPS.
+--
+-- Le stock d'une machine repose sur une hypothese : retirer N bobines retire
+-- N fois le poids moyen de l'emplacement, faute de suivre les bobines une par
+-- une. La correction d'inventaire absorbe l'ecart de cette hypothese. Espacee,
+-- elle ne l'absorbe plus, et l'ecart s'installe sans que personne le voie.
+--
+-- Comparaison de textes ISO-8601 : elle est exacte par construction, les dates
+-- s'y ordonnant comme des chaines. Un emplacement vide n'est pas signale — il
+-- n'y a rien a compter dessus.
+DROP VIEW IF EXISTS v_ctl_c36 CASCADE;
+CREATE VIEW v_ctl_c36 AS
+SELECT e.code_machine, e.code_emplacement, e.libelle,
+       MAX(sm.date_dernier_inventaire) AS dernier_inventaire,
+       ROUND(SUM(sm.quantite_kg), 3) AS quantite_kg
+FROM machine_emplacement e
+JOIN stock_magasin sm ON sm.code_magasin = e.code_magasin
+WHERE e.actif = 1
+GROUP BY e.code_machine, e.code_emplacement, e.libelle
+HAVING SUM(sm.quantite_kg) > 0
+   AND (MAX(sm.date_dernier_inventaire) IS NULL
+     OR MAX(sm.date_dernier_inventaire) <
+        to_char((now() AT TIME ZONE 'UTC')
+                - make_interval(days => (SELECT CAST(valeur_courante AS integer)
+                                           FROM parametre
+                                          WHERE code_parametre = 'P_JoursInventMachine')),
+                'YYYY-MM-DD'));
+
+-- C37 : LES DEUX COMPTEURS ONT DIVERGE.
+--
+-- Des bobines sans kilos, ou des kilos sans bobines : dans les deux cas le
+-- poids moyen par bobine devient absurde, et c'est lui qui sert a calculer ce
+-- qui quitte l'emplacement lors d'une depose. L'anomalie est donc CRITIQUE :
+-- elle fausse silencieusement tous les retraits suivants.
+DROP VIEW IF EXISTS v_ctl_c37 CASCADE;
+CREATE VIEW v_ctl_c37 AS
+SELECT e.code_machine, e.libelle, sl.code_reference, sl.lot_fournisseur,
+       sl.quantite_kg, sl.nb_bobines
+FROM stock_lot sl
+JOIN machine_emplacement e ON e.code_magasin = sl.code_magasin
+WHERE (sl.quantite_kg > 0 AND sl.nb_bobines = 0)
+   OR (sl.quantite_kg = 0 AND sl.nb_bobines > 0);
+
+
 DROP VIEW IF EXISTS v_controles CASCADE;
 CREATE VIEW v_controles AS
 SELECT 'C01' AS code, 'Somme des % <> 100 par role BOM'                AS controle, 'BLOQUANT'  AS criticite, (SELECT COUNT(*) FROM v_ctl_c01) AS anomalies UNION ALL
@@ -414,4 +512,11 @@ SELECT 'C29', 'Besoins plus anciens que le plan : projection perimee',    'CRITI
 -- juste avant celui-ci lors de la construction.
 SELECT 'C30', 'Delai fournisseur absent, nul ou negatif',                'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c30) UNION ALL
 SELECT 'C31', 'Reception validee non repercutee au stock',               'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c31) UNION ALL
-SELECT 'C32', 'Reception valorisee absente de l''historique des prix',   'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c32);
+SELECT 'C32', 'Reception valorisee absente de l''historique des prix',   'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c32) UNION ALL
+-- MACHINES. C33 et C34 traquent une derive du cache de bobines, pas un
+-- depassement : le declencheur rend celui-ci impossible a l''ecriture.
+SELECT 'C33', 'Emplacement de machine au-dela de sa capacite',          'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c33) UNION ALL
+SELECT 'C34', 'Machine au-dela de sa capacite totale',                  'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c34) UNION ALL
+SELECT 'C35', 'Estimation de poids hors tolerance en machine',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c35) UNION ALL
+SELECT 'C36', 'Emplacement de machine sans inventaire recent',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c36) UNION ALL
+SELECT 'C37', 'Bobines sans kilos, ou kilos sans bobines, en machine',  'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c37);

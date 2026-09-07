@@ -115,6 +115,16 @@ BEGIN
                ELSE cmup_mad
            END,
            quantite_kg = round(quantite_kg + v_signe * NEW.quantite_kg, 4),
+           -- LE COMPTE DE BOBINES SUIT LES KILOS, avec le meme signe.
+           --
+           -- GREATEST borne a zero, et ce n'est pas une precaution de confort :
+           -- les mouvements anterieurs a ce module ne portent aucun nombre de
+           -- bobines, donc un magasin peut contenir 400 kg pour un compte de 0.
+           -- Sans la borne, la premiere sortie chiffree violerait le CHECK et
+           -- bloquerait un mouvement de kilos parfaitement legitime. Le compte
+           -- est un compteur SECONDAIRE ; c'est le controle C30 qui signale les
+           -- incoherences, pas une erreur au visage du magasinier.
+           nb_bobines = GREATEST(0, nb_bobines + v_signe * COALESCE(NEW.nb_bobines, 0)),
            date_derniere_entree = CASE WHEN v_signe =  1 THEN v_date
                                        ELSE date_derniere_entree END,
            date_derniere_sortie = CASE WHEN v_signe = -1 THEN v_date
@@ -133,6 +143,11 @@ BEGIN
 
         UPDATE stock_lot
            SET quantite_kg      = round(quantite_kg + v_signe * NEW.quantite_kg, 4),
+               -- Meme borne, meme raison qu'au solde par magasin ci-dessus.
+               -- C'est CE compte-ci que lit le declencheur de capacite : sur un
+               -- emplacement de machine, ou la saisie impose toujours le nombre
+               -- de bobines, il est exact des la premiere ecriture.
+               nb_bobines       = GREATEST(0, nb_bobines + v_signe * COALESCE(NEW.nb_bobines, 0)),
                prix_entree_mad  = COALESCE(prix_entree_mad, NEW.prix_kg_mad),
                date_fabrication = COALESCE(date_fabrication, NEW.date_fabrication),
                date_peremption  = COALESCE(date_peremption, NEW.date_peremption),
@@ -162,3 +177,145 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_lmvt_appliquer
 AFTER INSERT ON ligne_mouvement FOR EACH ROW
 EXECUTE FUNCTION fn_trg_lmvt_appliquer();
+
+
+-- =============================================================================
+-- 3. CAPACITE D'UN EMPLACEMENT DE MACHINE
+-- -----------------------------------------------------------------------------
+-- POURQUOI CE DECLENCHEUR EXISTE ALORS QUE LE SERVEUR VERIFIE DEJA.
+--
+-- Le backend calcule la place restante avant d'ouvrir la transaction, pour
+-- pouvoir refuser avec une phrase que le magasinier comprend : « Etage 2 plein,
+-- 200 places, 40 libres, vous en chargez 60 ». C'est le bon message, mais ce
+-- n'est pas une garantie : il ne vaut que pour l'appelant qui prend la peine de
+-- le demander. Ici la regle tient quel que soit l'appelant, y compris un
+-- import, une reprise de donnees ou un psql ouvert un dimanche.
+--
+-- BEFORE INSERT, donc avant fn_trg_lmvt_appliquer qui est AFTER : la place est
+-- lue sur l'etat courant du cache, et les lignes d'un meme document s'empilent
+-- correctement puisque chaque ligne voit l'effet de la precedente.
+--
+-- Les trois roles — etage, chaine, trame — passent par le meme chemin. Le role
+-- ne sert qu'au plan ; ici il ne sert a rien, et c'est voulu.
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION fn_trg_lmvt_capacite() RETURNS trigger AS $$
+DECLARE
+    v_empl  machine_emplacement%ROWTYPE;
+    v_signe integer;
+    v_apres bigint;
+    v_max   bigint;
+BEGIN
+    IF COALESCE(NEW.nb_bobines, 0) = 0 THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT e.* INTO v_empl
+      FROM machine_emplacement e
+      JOIN mouvement m ON m.code_magasin = e.code_magasin
+     WHERE m.id_mouvement = NEW.id_mouvement;
+
+    -- Magasin ordinaire : aucun plafond a faire respecter.
+    IF NOT FOUND THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT tm.signe INTO v_signe
+      FROM mouvement m
+      JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
+     WHERE m.id_mouvement = NEW.id_mouvement;
+
+    -- On ne deborde pas en retirant.
+    IF v_signe < 0 THEN
+        RETURN NEW;
+    END IF;
+
+    -- Plafond de l'emplacement. Le libelle genere donne un message que
+    -- l'operateur reconnait : il lit « Chaine pleine », pas « MC1-CH plein ».
+    SELECT COALESCE(SUM(nb_bobines), 0) INTO v_apres
+      FROM stock_lot WHERE code_magasin = v_empl.code_magasin;
+
+    IF v_apres + NEW.nb_bobines > v_empl.capacite_bobines THEN
+        RAISE EXCEPTION 'C33 : % plein. Capacite % bobines, il y en aurait %.',
+            v_empl.libelle, v_empl.capacite_bobines, v_apres + NEW.nb_bobines;
+    END IF;
+
+    -- Plafond de la machine, tous emplacements confondus.
+    SELECT COALESCE(SUM(sl.nb_bobines), 0) INTO v_apres
+      FROM stock_lot sl
+      JOIN machine_emplacement e ON e.code_magasin = sl.code_magasin
+     WHERE e.code_machine = v_empl.code_machine;
+
+    SELECT capacite_bobines INTO v_max
+      FROM machine WHERE code_machine = v_empl.code_machine;
+
+    IF v_apres + NEW.nb_bobines > v_max THEN
+        RAISE EXCEPTION 'C34 : machine % pleine. Capacite % bobines, il y en aurait %.',
+            v_empl.code_machine, v_max, v_apres + NEW.nb_bobines;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_lmvt_capacite
+BEFORE INSERT ON ligne_mouvement FOR EACH ROW
+EXECUTE FUNCTION fn_trg_lmvt_capacite();
+
+
+-- =============================================================================
+-- 4. COHERENCE ENTRE UN ETAGE ET LE NOMBRE D'ETAGES DE SA MACHINE
+-- -----------------------------------------------------------------------------
+-- `numero_etage <= machine.nb_etages` porte sur deux tables : un CHECK ne sait
+-- pas l'exprimer. Le declencheur garde les deux sens — on ne cree pas un etage
+-- au-dela du compte declare, et on ne reduit pas le compte sous un etage qui
+-- existe deja, ce qui rendrait la machine incoherente en silence.
+--
+-- La chaine et la trame portent le numero 0 et ne sont pas concernees : elles
+-- ne sont pas des etages.
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION fn_trg_empl_numero() RETURNS trigger AS $$
+DECLARE
+    v_nb bigint;
+BEGIN
+    IF NEW.role <> 'ETAGE' THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT nb_etages INTO v_nb FROM machine WHERE code_machine = NEW.code_machine;
+
+    IF NEW.numero_etage > v_nb THEN
+        RAISE EXCEPTION 'La machine % declare % etages : l''etage % ne peut pas exister.',
+            NEW.code_machine, v_nb, NEW.numero_etage;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_empl_numero
+BEFORE INSERT OR UPDATE ON machine_emplacement FOR EACH ROW
+EXECUTE FUNCTION fn_trg_empl_numero();
+
+
+CREATE OR REPLACE FUNCTION fn_trg_machine_nb_etages() RETURNS trigger AS $$
+DECLARE
+    v_haut bigint;
+BEGIN
+    SELECT COALESCE(MAX(numero_etage), 0) INTO v_haut
+      FROM machine_emplacement
+     WHERE code_machine = NEW.code_machine AND role = 'ETAGE';
+
+    IF NEW.nb_etages < v_haut THEN
+        RAISE EXCEPTION 'La machine % porte deja un etage % : son nombre d''etages ne peut pas descendre a %.',
+            NEW.code_machine, v_haut, NEW.nb_etages;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_machine_nb_etages
+BEFORE UPDATE OF nb_etages ON machine FOR EACH ROW
+EXECUTE FUNCTION fn_trg_machine_nb_etages();

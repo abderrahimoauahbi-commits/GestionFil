@@ -166,6 +166,11 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
     ('P_ScoreStandard',    'Score fournisseur STANDARD',                '65',    'DECIMAL', '/100',  'ACHAT',   'DIRECTION', 0),
     ('P_ScoreSurveiller',  'Score fournisseur A SURVEILLER',            '45',    'DECIMAL', '/100',  'ACHAT',   'DIRECTION', 0),
     ('P_TolerEcartPesee',  'Tolerance ecart de pesee en reception',     '2',     'DECIMAL', '%',     'RECEPT',  'DIRECTION', 0),
+    -- MACHINES. Le premier regle l'avertissement visuel du mode Estimation et le
+    -- controle C35 ; le second, l'anciennete d'inventaire que C36 signale. Tous
+    -- deux se reglent sans redeploiement, comme la tolerance de pesee au-dessus.
+    ('P_TolerEstimMachine', 'Tolerance ecart estimation en machine',    '10',    'DECIMAL', '%',     'MACHINE', 'DIRECTION', 0),
+    ('P_JoursInventMachine','Anciennete max d''inventaire d''un emplacement','30','ENTIER', 'jours', 'MACHINE', 'DIRECTION', 0),
     ('P_SeuilDormant',     'Seuil de stock dormant',                    '180',   'ENTIER',  'jours', 'STOCK',   'DIRECTION', 0),
     ('P_SeuilValidationBC','Montant BC exigeant validation Direction',  '300000','DECIMAL', 'MAD',   'ACHAT',   'DIRECTION', 0);
 

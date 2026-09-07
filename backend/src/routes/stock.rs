@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 /// Numerotation sequentielle par prefixe et par annee.
-async fn numeroter(
+pub(super) async fn numeroter(
     tx: &mut sqlx::PgConnection,
     table: &str,
     colonne: &str,

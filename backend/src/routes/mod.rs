@@ -10,6 +10,7 @@ mod assistant;
 mod auth_routes;
 mod consultation;
 mod entites;
+mod machines;
 pub(crate) mod json;
 mod operations;
 mod production;
@@ -160,6 +161,13 @@ pub fn router(state: AppState) -> Router {
         // rend une ligne par reference — la vue de l'auditeur ; `/documents`
         // rend un bon par ligne, avec ses totaux — la vue du magasin. Le
         // segment fixe passe avant `{id}` : axum donne priorite au statique.
+        // MACHINES. Le stock pose sur les metiers, tenu au poids reel.
+        .route("/api/machines", get(machines::lister).post(machines::creer_machine))
+        .route("/api/machines/inventaire", post(machines::inventaire))
+        .route("/api/machines/{code}", get(machines::plan))
+        .route("/api/machines/{code}/emplacements/{empl}", get(machines::contenu))
+        .route("/api/machines/geste", post(machines::geste))
+        .route("/api/machines/geste/{marque}/annuler", post(machines::annuler_geste))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
         .route("/api/transferts",

@@ -96,6 +96,43 @@ CREATE TABLE ligne_mouvement (
     nb_bobines          bigint CHECK (nb_bobines  IS NULL OR nb_bobines  >= 0),
     nb_palettes         bigint CHECK (nb_palettes IS NULL OR nb_palettes >= 0),
 
+    -- -------------------------------------------------------------------
+    -- LE POIDS REEL (catch weight)
+    -- -------------------------------------------------------------------
+    -- REGLE D'OR : le poids catalogue ne sert qu'a proposer et a afficher ;
+    -- le stock n'enregistre que ce qui a ete constate. `quantite_kg` porte
+    -- donc TOUJOURS le poids reel, et ces colonnes disent COMMENT il a ete
+    -- obtenu.
+    --
+    -- Sans `mode_pesee`, rien ne distinguerait six mois plus tard un poids
+    -- sorti de la bascule d'un poids juge a l'oeil — et c'est exactement la
+    -- question que pose un ecart d'inventaire.
+    mode_pesee          text    CHECK (mode_pesee IS NULL
+                                    OR mode_pesee IN ('PESEE','ESTIMATION','THEORIQUE')),
+
+    -- Le poids catalogue FIGE au moment du geste. Le catalogue evoluera ;
+    -- l'ecart constate ce jour-la doit rester lisible dans dix ans.
+    poids_unitaire_theorique_kg numeric(18,4)
+                                CHECK (poids_unitaire_theorique_kg IS NULL
+                                    OR poids_unitaire_theorique_kg > 0),
+
+    -- MODE A : ce que la bascule a affiche. MODE B : le pourcentage estime.
+    -- Exclusifs l'un de l'autre — la contrainte du bas l'impose.
+    poids_total_pese_kg numeric(18,4) CHECK (poids_total_pese_kg IS NULL
+                                          OR poids_total_pese_kg >= 0),
+    pourcentage_restant numeric(6,2)  CHECK (pourcentage_restant IS NULL
+                                          OR pourcentage_restant BETWEEN 0 AND 100),
+
+    -- TRACABILITE. C'est ce chiffre qui permettra de dire, dans six mois, si le
+    -- fil du fournisseur A tient vraiment les 2,70 kg qu'il annonce.
+    poids_reel_moyen_bobine_kg numeric(18,4) GENERATED ALWAYS AS (
+        CASE WHEN nb_bobines > 0 THEN quantite_kg / nb_bobines END) STORED,
+
+    ecart_theorique_pct numeric(9,4) GENERATED ALWAYS AS (
+        CASE WHEN nb_bobines > 0 AND poids_unitaire_theorique_kg > 0
+             THEN (quantite_kg - nb_bobines * poids_unitaire_theorique_kg)
+                  / (nb_bobines * poids_unitaire_theorique_kg) * 100.0 END) STORED,
+
     lot_fournisseur     text,
     date_fabrication    text,
     date_peremption     text,
@@ -104,9 +141,43 @@ CREATE TABLE ligne_mouvement (
     statut_qualite      text    CHECK (statut_qualite IS NULL OR statut_qualite IN ('CONFORME','NON_CONFORME','QUARANTAINE')),
 
     UNIQUE (id_mouvement, ligne_numero),
-    -- Si l'unite de saisie est renseignee, la conversion doit etre coherente
-    CHECK (quantite_saisie IS NULL OR facteur_conversion IS NULL
-           OR abs(quantite_kg - quantite_saisie * facteur_conversion) < 0.001)
+
+    -- LA CONVERSION THEORIQUE NE S'APPLIQUE PLUS QUAND UN POIDS A ETE CONSTATE.
+    --
+    -- Elle continue de proteger les mouvements ordinaires, ou une saisie en
+    -- palettes se convertit par un facteur. Elle se retire des qu'une pesee ou
+    -- une estimation a eu lieu : c'est le sens meme de la regle d'or, et c'est
+    -- cette contrainte qui interdisait jusqu'ici d'enregistrer « 200 bobines
+    -- qui pesent 528 kg » quand le catalogue en annonce 540.
+    --
+    -- COALESCE et non `mode_pesee IN (...)` : avec un mode nul, `IN` vaut NULL,
+    -- un CHECK ne refuse que ce qui est FAUX, et la verification cesserait
+    -- silencieusement de s'appliquer a tous les mouvements ordinaires.
+    CONSTRAINT ck_lmvt_conversion CHECK (
+           COALESCE(mode_pesee,'') IN ('PESEE','ESTIMATION')
+           OR quantite_saisie IS NULL OR facteur_conversion IS NULL
+           OR abs(quantite_kg - quantite_saisie * facteur_conversion) < 0.001),
+
+    -- LA BASE REFAIT LE CALCUL DE L'OPERATEUR.
+    --
+    -- Sans elle, un client mal ecrit — ou une application mobile pressee —
+    -- pourrait annoncer 'PESEE' et enregistrer le poids theorique. La regle
+    -- d'or ne serait qu'une intention dans du code ; ici elle tient quel que
+    -- soit l'appelant.
+    CONSTRAINT ck_lmvt_mode_pesee CHECK (
+        mode_pesee IS NULL
+        OR mode_pesee = 'THEORIQUE'
+        OR (mode_pesee = 'PESEE'
+            AND poids_total_pese_kg IS NOT NULL
+            AND pourcentage_restant IS NULL
+            AND abs(quantite_kg - poids_total_pese_kg) < 0.001)
+        OR (mode_pesee = 'ESTIMATION'
+            AND pourcentage_restant IS NOT NULL
+            AND poids_total_pese_kg IS NULL
+            AND nb_bobines IS NOT NULL AND nb_bobines > 0
+            AND poids_unitaire_theorique_kg IS NOT NULL
+            AND abs(quantite_kg - nb_bobines * poids_unitaire_theorique_kg
+                                  * pourcentage_restant / 100.0) < 0.01))
 );
 
 CREATE INDEX ix_lmvt_ref ON ligne_mouvement(code_reference);
@@ -126,6 +197,18 @@ CREATE TABLE stock_magasin (
     quantite_kg         numeric(18,4)    NOT NULL DEFAULT 0 CHECK (quantite_kg >= 0),   -- R02
     cmup_mad            numeric(18,4)    CHECK (cmup_mad IS NULL OR cmup_mad >= 0),      -- RG-08 : NULL si aucun achat
     valeur_mad          numeric(18,2)    GENERATED ALWAYS AS (quantite_kg * COALESCE(cmup_mad, 0)) STORED,
+
+    -- LE COMPTE DE BOBINES, entretenu par le meme declencheur que les kilos.
+    -- Sans lui, verifier la capacite d'un emplacement de machine imposerait de
+    -- relire tout l'historique des mouvements a chaque saisie.
+    --
+    -- COMPTEUR SECONDAIRE : il ne doit JAMAIS empecher un mouvement de kilos
+    -- legitime. Les mouvements anterieurs a ce module ne portent pas de nombre
+    -- de bobines, donc le compte peut etre en retard sur la realite dans les
+    -- magasins ordinaires ; le declencheur le borne a zero et le controle C30
+    -- signale les incoherences. Sur un emplacement de machine, ou la saisie
+    -- impose toujours le nombre, il est exact.
+    nb_bobines          bigint  NOT NULL DEFAULT 0 CHECK (nb_bobines >= 0),
     date_derniere_entree text,
     date_derniere_sortie text,
     date_dernier_inventaire text,
@@ -148,6 +231,17 @@ CREATE TABLE stock_lot (
     lot_fournisseur     text    NOT NULL,
     quantite_kg         numeric(18,4)    NOT NULL DEFAULT 0 CHECK (quantite_kg >= 0),
     prix_entree_mad     numeric(18,4)    CHECK (prix_entree_mad IS NULL OR prix_entree_mad >= 0),
+    -- LE COMPTE DE BOBINES, entretenu par le meme declencheur que les kilos.
+    -- Sans lui, verifier la capacite d'un emplacement de machine imposerait de
+    -- relire tout l'historique des mouvements a chaque saisie.
+    --
+    -- COMPTEUR SECONDAIRE : il ne doit JAMAIS empecher un mouvement de kilos
+    -- legitime. Les mouvements anterieurs a ce module ne portent pas de nombre
+    -- de bobines, donc le compte peut etre en retard sur la realite dans les
+    -- magasins ordinaires ; le declencheur le borne a zero et le controle C30
+    -- signale les incoherences. Sur un emplacement de machine, ou la saisie
+    -- impose toujours le nombre, il est exact.
+    nb_bobines          bigint  NOT NULL DEFAULT 0 CHECK (nb_bobines >= 0),
     date_fabrication    text,
     date_peremption     text,
     date_premiere_entree text   NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

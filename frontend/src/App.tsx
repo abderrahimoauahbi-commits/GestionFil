@@ -46,6 +46,7 @@ import { Catalogue } from './pages/Catalogue'
 import { Fournisseurs } from './pages/Fournisseurs'
 import { Referentiels } from './pages/Referentiels'
 import { Stock } from './pages/Stock'
+import { Machines } from './pages/Machines'
 import { Mouvements } from './pages/Mouvements'
 import { Transferts } from './pages/Transferts'
 import { Inventaires } from './pages/Inventaires'
@@ -130,6 +131,7 @@ const ECRANS = (
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
       <Route path="chat" element={<ExigeModule module="COCKPIT"><Chat /></ExigeModule>} />
       <Route path="telecharger" element={<ExigeModule module="COCKPIT"><Telecharger /></ExigeModule>} />
+      <Route path="machines" element={<ExigeModule module="STOCK"><Machines /></ExigeModule>} />
       <Route path="mouvements" element={<ExigeModule module="MOUVEMENTS"><Mouvements /></ExigeModule>} />
       <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />

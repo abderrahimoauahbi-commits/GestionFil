@@ -8,6 +8,8 @@ pub struct Config {
     pub bind_addr: String,
     pub jwt_secret: String,
     pub jwt_ttl_minutes: i64,
+    /// Secondes d'inactivite avant que l'ecran ne se verrouille.
+    pub verrou_inactivite_secondes: i64,
     pub cors_origins: Vec<String>,
     /// Repertoire de l'interface compilee, servie par le meme processus.
     ///
@@ -42,6 +44,18 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(480),
+            // LE VERROU D'INACTIVITE, en secondes.
+            //
+            // Reglable sans recompiler, et c'est voulu : la bonne valeur ne se
+            // decide pas au bureau. Deux minutes protegent bien un poste de
+            // bureau ; au quai, un magasinier qui va peser une palette revient
+            // au bout de trois et retrouve un ecran verrouille. Si le verrou
+            // gene, on l'allonge — un verrou contourne ne protege plus rien.
+            verrou_inactivite_secondes: std::env::var("VERROU_INACTIVITE_SECONDES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|v: &i64| *v > 0)
+                .unwrap_or(120),
             cors_origins: std::env::var("CORS_ORIGINS")
                 .unwrap_or_else(|_| "http://localhost:5173".into())
                 .split(',')

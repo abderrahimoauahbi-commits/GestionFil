@@ -547,7 +547,7 @@ export function Plans() {
       },
       {
         champ: 'date_debut',
-        entete: 'Periode',
+        entete: 'Période',
         largeur: '180px',
         rendu: (p) => (
           <span className="tabular-nums">
@@ -576,7 +576,7 @@ export function Plans() {
       },
       {
         champ: 'nb_qualites',
-        entete: 'Qualites',
+        entete: 'Qualités',
         numerique: true,
         largeur: '110px',
         rendu: (p) =>
@@ -609,7 +609,7 @@ export function Plans() {
       },
       {
         champ: 'date_cloture',
-        entete: 'Cloture le',
+        entete: 'Clôture le',
         largeur: '140px',
         secondaire: true,
         rendu: (p) => fmt.dateHeure(p.date_cloture),
@@ -620,7 +620,7 @@ export function Plans() {
       <div>
         <EnTetePage
           titre="Plans de production"
-          description="Periode glissante : base mensuelle par recette, saisonnalite par mois, croissance au prorata."
+          description="Période glissante : base mensuelle par recette, saisonnalite par mois, croissance au prorata."
           actions={
             droits.peutEcrire && (
               <Bouton taille="icone" title="Nouveau plan" aria-label="Nouveau plan" onClick={ouvrirCreation}>                <Plus />              </Bouton>
@@ -728,7 +728,7 @@ export function Plans() {
   const colonnesEntete: ColonneDT<LigneEntete>[] = [
     {
       champ: 'code_qualite',
-      entete: 'Qualite',
+      entete: 'Qualité',
       largeur: '200px',
       rendu: (l) => (
         <div className="min-w-0">
@@ -845,7 +845,7 @@ export function Plans() {
       />
 
       {erreur && (
-        <Alerte ton="danger" titre="Enregistrement refuse" className="mb-3">
+        <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">
           {erreur}
         </Alerte>
       )}
@@ -859,7 +859,7 @@ export function Plans() {
       )}
 
       {perimees.length > 0 && (
-        <Alerte ton="danger" titre="Qualites plus actives" className="mb-3">
+        <Alerte ton="danger" titre="Qualités plus actives" className="mb-3">
           {perimees.map((l) => `${l.code_qualite} (${l.qualite_statut})`).join(', ')}. Remplacez-les
           avant de figer : un plan ne peut entrer en service que sur des qualites actives.
         </Alerte>
@@ -959,7 +959,7 @@ export function Plans() {
               />
             </div>
             <div className="sm:col-span-2 lg:col-span-4">
-              <Etiq>Periode couverte</Etiq>
+              <Etiq>Période couverte</Etiq>
               <div className="flex h-8 items-center gap-2 rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[12px]">
                 {periode.length > 0 ? (
                   <>
@@ -1312,8 +1312,8 @@ export function Plans() {
       <Dialogue open={panneauOuvert} onOpenChange={setPanneauOuvert}>
         <DialogueContenu
           cote="droite"
-          titre="Qualites a planifier"
-          description="Cochez les qualites a produire, puis ajoutez le lot d'un coup."
+          titre="Qualités a planifier"
+          description="Cochez les qualités a produire, puis ajoutez le lot d'un coup."
         >
           <div className="space-y-1.5">
             {qualitesDisponibles.map((q) => {

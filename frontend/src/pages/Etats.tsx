@@ -59,7 +59,7 @@ const ETATS: EtatDisponible[] = [
   /* --- Situations de stock ---------------------------------------------- */
   {
     cle: 'stock',
-    titre: 'Etat des stocks',
+    titre: 'État des stocks',
     description:
       'Quantites par magasin, stock projete, couverture et statut. La photo du jour, celle qu on affiche au mur du magasin.',
     chemin: '/etats/stock',
@@ -104,7 +104,7 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'receptions',
-    titre: 'Journal des receptions',
+    titre: 'Journal des réceptions',
     description:
       'Receptions de la periode, avec bon de commande, fournisseur, ecarts de pesee et statut qualite.',
     chemin: '/etats/receptions',
@@ -151,7 +151,7 @@ const ETATS: EtatDisponible[] = [
   /* --- Referentiels ------------------------------------------------------ */
   {
     cle: 'catalogue',
-    titre: 'Catalogue des references',
+    titre: 'Catalogue des références',
     description:
       'La liste complete, avec categorie, unite, fournisseur et politique de reapprovisionnement.',
     chemin: '/etats/catalogue',
@@ -162,7 +162,7 @@ const ETATS: EtatDisponible[] = [
   {
     cle: 'fournisseurs',
     titre: 'Repertoire fournisseurs',
-    description: 'Coordonnees, devise, delai et conditions de paiement.',
+    description: 'Coordonnees, devise, délai et conditions de paiement.',
     chemin: '/etats/fournisseurs',
     module: 'FOURNISSEURS',
     Icone: Library,
@@ -194,7 +194,7 @@ export function Etats() {
   return (
     <div>
       <EnTetePage
-        titre="Etats imprimables"
+        titre="États imprimables"
         sous_titre="Les documents qui portent sur une situation. Ceux qui suivent un objet s impriment depuis sa fiche."
       />
 
@@ -252,7 +252,7 @@ export function Etats() {
           <p>
             Le <span className="text-texte">bon de commande</span>, le{' '}
             <span className="text-texte">bon de sortie</span> et le{' '}
-            <span className="text-texte">bon de reception</span> d un transfert s impriment depuis
+            <span className="text-texte">bon de réception</span> d un transfert s impriment depuis
             leur propre fiche, avec le bouton <span className="text-texte">Imprimer</span>. Ils
             portent un numero et engagent l entreprise : les editer depuis une liste ferait perdre
             le lien avec le document dont ils sont la copie.

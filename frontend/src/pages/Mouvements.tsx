@@ -48,10 +48,10 @@ interface LigneLivre extends Record<string, unknown> {
  * mouvement ne figure pas au filtre, puisque le choisir ne montrerait rien.
  */
 const CHAMPS_MVT: ChampFiltre<LigneLivre>[] = [
-  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (l) => l.date_mouvement },
+  { cle: 'periode', libelle: 'Période', type: 'periode', valeur: (l) => l.date_mouvement },
   { cle: 'type', libelle: 'Type', type: 'liste', valeur: (l) => l.code_type_mvt },
   { cle: 'magasin', libelle: 'Magasin', type: 'liste', valeur: (l) => l.code_magasin },
-  { cle: 'reference', libelle: 'Reference', type: 'liste', valeur: (l) => l.code_reference },
+  { cle: 'reference', libelle: 'Référence', type: 'liste', valeur: (l) => l.code_reference },
   { cle: 'lot', libelle: 'Lot', type: 'texte', valeur: (l) => l.lot_fournisseur },
   { cle: 'of', libelle: "N° d'OF", type: 'texte', valeur: (l) => l.numero_of },
   { cle: 'utilisateur', libelle: 'Saisi par', type: 'liste', valeur: (l) => l.utilisateur },
@@ -163,7 +163,7 @@ interface DocMouvement extends Record<string, unknown> {
 }
 
 const CHAMPS_DOC: ChampFiltre<DocMouvement>[] = [
-  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (d) => d.date_mouvement },
+  { cle: 'periode', libelle: 'Période', type: 'periode', valeur: (d) => d.date_mouvement },
   { cle: 'type', libelle: 'Type', type: 'liste', valeur: (d) => d.code_type_mvt },
   { cle: 'magasin', libelle: 'Magasin', type: 'liste', valeur: (d) => d.code_magasin },
   { cle: 'responsable', libelle: 'Responsable', type: 'liste', valeur: (d) => d.responsable },
@@ -188,7 +188,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
     { champ: 'date_mouvement', entete: 'Date', rendu: (d) => fmt.date(d.date_mouvement) },
     {
       champ: 'numero_mouvement',
-      entete: 'Numero',
+      entete: 'Numéro',
       rendu: (d) => <span className="font-mono text-xs">{d.numero_mouvement}</span>,
     },
     {
@@ -389,7 +389,7 @@ export function Mouvements() {
     },
     {
       champ: 'numero_mouvement',
-      entete: 'Numero',
+      entete: 'Numéro',
       rendu: (l) => <span className="font-mono text-xs">{l.numero_mouvement}</span>,
       secondaire: true,
     },
@@ -402,11 +402,11 @@ export function Mouvements() {
         </Etiquette>
       ),
     },
-    { champ: 'code_reference', entete: 'Reference' },
+    { champ: 'code_reference', entete: 'Référence' },
     { champ: 'code_magasin', entete: 'Magasin' },
     {
       champ: 'quantite_kg',
-      entete: 'Quantite (kg)',
+      entete: 'Quantité (kg)',
       numerique: true,
       rendu: (l) => (
         <span className={l.signe > 0 ? 'text-emerald-700' : 'text-alerte'}>
@@ -536,7 +536,7 @@ export function Mouvements() {
               recherche={{
                 valeur: filtreRef,
                 surChangement: setFiltreRef,
-                placeholder: 'Reference exacte…',
+                placeholder: 'Référence exacte…',
               }}
             />
             <PanneauFiltres
@@ -697,7 +697,7 @@ function SaisieMouvement({
   return (
     <Panneau
       titre="Saisir un mouvement"
-      sous_titre="La quantite est convertie en kilogrammes avant enregistrement"
+      sous_titre="La quantité est convertie en kilogrammes avant enregistrement"
       surFermeture={surFermeture}
     >
       <form
@@ -868,7 +868,7 @@ function SaisieMouvement({
                   <div className="sm:col-span-5">
                     <input
                       list="refs"
-                      placeholder="Reference"
+                      placeholder="Référence"
                       value={l.code_reference}
                       onChange={(e) => majLigne(i, 'code_reference', e.target.value)}
                       className={champ}
@@ -885,7 +885,7 @@ function SaisieMouvement({
                       type="number"
                       step="any"
                       min="0"
-                      placeholder="Quantite"
+                      placeholder="Quantité"
                       value={l.quantite_saisie}
                       onChange={(e) => majLigne(i, 'quantite_saisie', e.target.value)}
                       className={champ}

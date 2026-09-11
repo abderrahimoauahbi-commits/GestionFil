@@ -21,19 +21,32 @@ import { cn } from '../../lib/utils'
 // une ligne de moins a l'ecran.
 const varianteBouton = cva(
   'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius)] ' +
-    'text-[13px] font-medium transition-colors outline-none ' +
+    'text-[13px] font-medium outline-none select-none ' +
+    // LA TRANSITION PORTE AUSSI SUR L'OMBRE ET LA POSITION : sans elles,
+    // l'enfoncement est un saut, pas un geste.
+    'transition-[background-color,border-color,color,box-shadow,transform] duration-100 ' +
     'focus-visible:ring-2 focus-visible:ring-anneau focus-visible:ring-offset-1 focus-visible:ring-offset-fond ' +
-    'disabled:pointer-events-none disabled:opacity-50 ' +
+    // UN BOUTON DOIT REPONDRE AU DOIGT. Sans etat enfonce, rien ne distingue
+    // un appui pris d'un appui perdu — et sur un ecran tactile, ou il n'y a
+    // pas de survol, c'est le SEUL retour que recoit l'operateur.
+    'active:translate-y-px active:shadow-none ' +
+    'disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none ' +
     '[&_svg]:size-3.5 [&_svg]:shrink-0',
   {
     variants: {
       variante: {
-        principal: 'bg-accent text-accent-texte hover:bg-accent/90',
-        primaire: 'bg-primaire text-primaire-texte hover:bg-primaire/90',
-        contour: 'border border-bordure bg-surface hover:bg-attenue',
+        // L'OMBRE EST UNE MINCE ARETE, PAS UN NUAGE. Elle detache le bouton de
+        // son fond sans donner l'air d'une maquette : un liachage de 1 px sous
+        // la surface suffit a le faire lire comme un objet qu'on presse.
+        principal:
+          'bg-accent text-accent-texte shadow-sm hover:bg-accent/90 hover:shadow',
+        primaire:
+          'bg-primaire text-primaire-texte shadow-sm hover:bg-primaire/90 hover:shadow',
+        contour:
+          'border border-bordure bg-surface shadow-sm hover:border-primaire/40 hover:bg-attenue',
         discret: 'hover:bg-attenue hover:text-texte',
-        danger: 'bg-danger text-danger-texte hover:bg-danger/90',
-        lien: 'text-primaire underline-offset-4 hover:underline',
+        danger: 'bg-danger text-danger-texte shadow-sm hover:bg-danger/90 hover:shadow',
+        lien: 'text-primaire underline-offset-4 hover:underline active:translate-y-0',
       },
       // UN CRAN PLUS BAS QUE LA CONVENTION DU WEB, ET C'EST VOULU. Un bouton de
       // 36 px convient a une page qu'on visite ; sur un ecran de saisie ou dix

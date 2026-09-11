@@ -71,7 +71,7 @@ export function Recettes() {
   const colonnes: ColonneDT<Ligne>[] = [
     {
       champ: 'code_qualite',
-      entete: 'Qualite',
+      entete: 'Qualité',
       largeur: '190px',
       filtre: 'liste',
       rendu: (l) => (
@@ -79,7 +79,7 @@ export function Recettes() {
           <Link
             to="/qualites"
             className="font-medium hover:underline"
-            title="Ouvrir les qualites"
+            title="Ouvrir les qualités"
           >
             {l.code_qualite}
           </Link>
@@ -106,7 +106,7 @@ export function Recettes() {
     },
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       filtre: 'texte',
       rendu: (l) => (
         <div className="min-w-0">
@@ -131,7 +131,7 @@ export function Recettes() {
     },
     {
       champ: 'densite_role',
-      entete: 'Densite',
+      entete: 'Densité',
       numerique: true,
       largeur: '120px',
       secondaire: true,
@@ -205,7 +205,7 @@ export function Recettes() {
         lignes={lignes}
         chargement={q.isLoading}
         cle={(l) => `${l.code_qualite}|${l.ligne_numero}`}
-        placeholderRecherche="Qualite, reference, designation, role..."
+        placeholderRecherche="Qualité, référence, designation, role..."
         titreCarte={(l) => `${l.code_qualite} · ${l.code_reference}`}
         tailleParDefaut={50}
         hauteurMax="65vh"

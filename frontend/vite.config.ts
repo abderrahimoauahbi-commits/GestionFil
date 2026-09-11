@@ -62,6 +62,10 @@ export default defineConfig({
   ],
 
   server: {
+    // `true` = 0.0.0.0. Sans cela Vite n'ecoute que la boucle locale, et l'ecran
+    // reste invisible depuis un telephone ou une tablette du site — ce qui rend
+    // impossible l'essai de la saisie mobile la ou elle sera utilisee.
+    host: true,
     port: 5173,
     strictPort: true,
     // Le front appelle /api sans connaitre l'hote du backend : la meme

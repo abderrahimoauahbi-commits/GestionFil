@@ -141,12 +141,33 @@ export function PanneauFiltres<L>({
 }) {
   const options = optionsDesChamps(champs, lignes)
 
+  /* REPLIE SUR TELEPHONE, COMME LA BARRE. Quatre listes deroulantes en colonne,
+     c'etaient quatre cent soixante-dix pixels avant la premiere donnee : on
+     ouvre un ecran pour voir ce qu'il contient, pas pour regler comment on le
+     regarde. Le titre porte le NOMBRE DE FILTRES ACTIFS, sans quoi un tableau
+     filtre en silence passerait pour un tableau complet. */
+  const [ouvert, setOuvert] = useState(false)
+
   return (
     <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-attenue-texte">
+        <button
+          type="button"
+          onClick={() => setOuvert((o) => !o)}
+          aria-expanded={ouvert}
+          className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide
+                     text-attenue-texte lg:pointer-events-none"
+        >
+          <Filter className="size-3" />
           Filtres
-        </span>
+          {actifs > 0 && (
+            <span className="rounded-full bg-primaire px-1.5 text-[10px] text-primaire-texte">
+              {actifs}
+            </span>
+          )}
+          <ChevronDown className={cn('size-3.5 transition-transform lg:hidden',
+                                     ouvert && 'rotate-180')} />
+        </button>
         {actifs > 0 && (
           <button
             type="button"
@@ -160,19 +181,21 @@ export function PanneauFiltres<L>({
         )}
       </div>
 
-      {enTete}
+      <div className={cn('flex flex-col gap-2', !ouvert && 'hidden lg:flex')}>
+        {enTete}
 
-      {champs.map((c) => (
-        <UnChamp
-          key={c.cle}
-          champ={c}
-          options={options.get(c.cle) ?? []}
-          valeurs={valeurs}
-          definir={definir}
-        />
-      ))}
+        {champs.map((c) => (
+          <UnChamp
+            key={c.cle}
+            champ={c}
+            options={options.get(c.cle) ?? []}
+            valeurs={valeurs}
+            definir={definir}
+          />
+        ))}
 
-      {enPied}
+        {enPied}
+      </div>
     </div>
   )
 }
@@ -198,7 +221,14 @@ function UnChamp<L>({
   /** Largeur minimale, pour que les champs s'alignent en barre. */
   largeur?: string
 }) {
-  const enveloppe = cn('flex flex-col gap-0.5', largeur)
+  // UNE PERIODE PORTE DEUX DATES : sur une demi-largeur de telephone, elles
+  // deviennent illisibles. Elle prend donc la ligne entiere, la grille s'en
+  // accommode sans que le reste bouge.
+  const enveloppe = cn(
+    'flex flex-col gap-0.5',
+    c.type === 'periode' && 'col-span-2 lg:col-span-1',
+    largeur,
+  )
 
   if (c.type === 'periode') {
     return (
@@ -322,10 +352,16 @@ export function BarreFiltres<L>({
         />
       </button>
 
+      {/* SUR TELEPHONE, UNE GRILLE ; AU-DELA, UNE BARRE.
+          En `flex-wrap`, chaque champ prend la largeur qu'il veut : les colonnes
+          ne s'alignent pas d'une ligne a l'autre, et le dernier champ reste seul
+          sur la sienne, etire. En grille, ils tombent deux par deux avec le meme
+          bord gauche et le meme bord droit — ce qui est la seule facon de lire
+          vite une barre de filtres au doigt. */}
       <div
         className={cn(
-          'w-full flex-wrap items-end gap-2 lg:flex lg:w-auto',
-          ouvert ? 'flex' : 'hidden',
+          'w-full grid-cols-2 items-end gap-2 lg:flex lg:w-auto lg:flex-wrap',
+          ouvert ? 'grid' : 'hidden lg:flex',
         )}
       >
 
@@ -336,7 +372,11 @@ export function BarreFiltres<L>({
           options={options.get(c.cle) ?? []}
           valeurs={valeurs}
           definir={definir}
-          largeur={c.type === 'periode' ? 'min-w-[13rem]' : 'min-w-[9.5rem]'}
+          /* LA LARGEUR MINIMALE NE VAUT QU'EN BARRE. En grille, `min-w-[9.5rem]`
+             sur une colonne de 175 px passe encore, mais `min-w-[13rem]` d'une
+             periode la fait deborder : le champ sort de l'ecran. Prefixees en
+             `lg:`, ces largeurs ne s'appliquent plus que la ou elles servent. */
+          largeur={c.type === 'periode' ? 'lg:min-w-[13rem]' : 'lg:min-w-[9.5rem]'}
         />
       ))}
 

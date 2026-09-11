@@ -23,7 +23,7 @@ export const FAMILLES: { id: Famille; libelle: string; description: string }[] =
   {
     id: 'ardoise',
     libelle: 'Ardoise',
-    description: 'Gris-bleu doux, accent bleu. Recommandee pour une journee entiere.',
+    description: 'Gris-bleu doux, accent bleu. Recommandee pour une journée entiere.',
   },
   {
     id: 'slate',
@@ -43,7 +43,7 @@ export const FAMILLES: { id: Famille; libelle: string; description: string }[] =
   {
     id: 'chaud',
     libelle: 'Atelier',
-    description: 'Neutres chauds, accent vert. Reposante en fin de journee.',
+    description: 'Neutres chauds, accent vert. Reposante en fin de journée.',
   },
   {
     id: 'contraste',

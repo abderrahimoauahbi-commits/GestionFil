@@ -15,8 +15,8 @@
  * filtrage (Stock, Catalogue) : dans les deux cas, on choisit un sous-ensemble
  * de ce que la page sait montrer.
  */
-import type { ReactNode } from 'react'
-import { Search } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { ChevronDown, Search } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 export interface EntreeRail {
@@ -60,8 +60,27 @@ export function RailLateral({
     placeholder?: string
   }
 }) {
+  /**
+   * AU TELEPHONE, LE RAIL SE REPLIE — il ne s'exile pas.
+   *
+   * Deplie, ses dix entrees avec leurs resumes occupaient l'ecran entier avant
+   * la premiere ligne de donnees ; on l'avait donc renvoye SOUS le tableau. Le
+   * remede etait pire : dans les statistiques, changer de famille demandait de
+   * traverser quatre mille pixels de chiffres pour trouver le choix, et de
+   * remonter ensuite. Un reglage qu'on ne trouve pas n'existe pas.
+   *
+   * Replie, il tient sur une ligne : il dit ce qui est affiche, et il s'ouvre
+   * d'une touche. Les donnees restent visibles, le choix reste a portee.
+   *
+   * A partir de `lg` rien ne change : la colonne est la, tout est deplie.
+   */
+  const [ouvert, setOuvert] = useState(false)
+  const toutes = groupes.flatMap((g) => g.entrees)
+  const courante = toutes.find((e) => e.cle === actif)
+  const IconeCourante = courante?.Icone
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-2 lg:space-y-3">
       {recherche && (
         <div className="flex items-center gap-2 rounded-[var(--radius)] border border-bordure bg-surface px-2">
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
@@ -74,6 +93,34 @@ export function RailLateral({
         </div>
       )}
 
+      {/* Le bandeau de choix : telephone et tablette seulement. */}
+      <button
+        type="button"
+        onClick={() => setOuvert((o) => !o)}
+        aria-expanded={ouvert}
+        className="flex w-full items-center justify-between gap-2 rounded-[var(--radius)]
+                   border border-bordure bg-surface px-3 py-2 text-left lg:hidden"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {IconeCourante && <IconeCourante className="size-4 shrink-0 text-primaire" />}
+          <span className="min-w-0">
+            <span className="block truncate text-[13px] font-medium text-texte">
+              {courante?.libelle ?? 'Choisir un affichage'}
+            </span>
+            {courante?.resume && (
+              <span className="block truncate text-[11px] leading-tight text-attenue-texte">
+                {courante.resume}
+              </span>
+            )}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-attenue-texte">
+          {toutes.length > 1 && <span className="tabular-nums">{toutes.length} choix</span>}
+          <ChevronDown className={cn('size-4 transition-transform', ouvert && 'rotate-180')} />
+        </span>
+      </button>
+
+      <div className={cn('space-y-3', !ouvert && 'hidden lg:block')}>
       {groupes.map((g, i) => (
         <div key={g.titre ?? i}>
           {g.titre && (
@@ -88,7 +135,10 @@ export function RailLateral({
                 <button
                   key={e.cle}
                   type="button"
-                  onClick={() => surChoix(e.cle)}
+                  onClick={() => {
+                    surChoix(e.cle)
+                    setOuvert(false) // choisi, donc referme : on veut voir le resultat
+                  }}
                   aria-current={choisi ? 'true' : undefined}
                   className={cn(
                     'flex w-full items-start gap-2 rounded-[var(--radius)] px-2.5 py-2 text-left transition-colors',
@@ -122,6 +172,7 @@ export function RailLateral({
           </nav>
         </div>
       ))}
+      </div>
     </div>
   )
 }
@@ -129,9 +180,12 @@ export function RailLateral({
 /**
  * Disposition a deux colonnes : le rail, puis le contenu.
  *
- * Sur petit ecran le rail passe au-dessus plutot que de se replier : un filtre
- * qu'on ne voit pas est un filtre qu'on oublie avoir mis, et l'on cherche
- * ensuite pourquoi la liste est vide.
+ * Sur petit ecran, le rail repasse AU-DESSUS du contenu. Il avait ete renvoye
+ * dessous parce qu'il mangeait l'ecran ; maintenant qu'il se replie sur une
+ * ligne (voir RailLateral), le motif a disparu — et le placer dessous coutait
+ * bien plus cher qu'il ne rapportait : un filtre qu'on ne voit pas est un
+ * filtre qu'on oublie avoir mis, et l'on cherche ensuite pourquoi la liste est
+ * vide.
  */
 export function PageAvecRail({
   rail,
@@ -152,19 +206,8 @@ export function PageAvecRail({
           : 'lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]',
       )}
     >
-      {/* LE CONTENU PASSE AVANT LE RAIL SUR TELEPHONE.
-
-          En une seule colonne, le rail se posait EN HAUT : « Tous les bons », le
-          classement par sens, par type, puis sept champs de filtre — un ecran
-          entier a faire defiler avant d'apercevoir la premiere ligne de donnees.
-          On ouvre un ecran pour voir ce qu'il contient, pas pour regler comment
-          on le regarde.
-
-          `order` inverse l'affichage sans toucher a l'ordre du DOM : le rail
-          reste lu en premier par un lecteur d'ecran et par le clavier, ou il a
-          sa place — c'est bien un filtre du tableau qui suit. */}
-      <div className="order-2 min-w-0 lg:order-1">{rail}</div>
-      <div className="order-1 min-w-0 lg:order-2">{children}</div>
+      <div className="min-w-0">{rail}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }

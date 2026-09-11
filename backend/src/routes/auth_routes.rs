@@ -117,6 +117,7 @@ pub async fn moi(
         "login": user.login,
         "role": user.role,
         "plafond_validation_bc_mad": plafond,
+        "verrou_inactivite_secondes": state.config.verrou_inactivite_secondes,
         "permissions": permissions.iter()
             .map(|(m, a)| json!({ "module": m, "action": a }))
             .collect::<Vec<_>>(),
@@ -186,4 +187,46 @@ pub async fn changer_mot_de_passe(
         "change": true,
         "le": maintenant(),
     })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DemandeDeverrouillage {
+    pub mot_de_passe: String,
+}
+
+/// `POST /api/auth/deverrouiller`
+///
+/// VERIFIE LE MOT DE PASSE SANS EMETTRE DE JETON, et c'est tout le point.
+///
+/// L'ecran se verrouille apres quelques minutes d'inactivite parce qu'un poste
+/// abandonne, session ouverte, donne a n'importe qui le stock, les prix et le
+/// droit d'ecrire. Le verrou n'est pas une deconnexion : la saisie en cours est
+/// conservee, sinon l'operateur perdrait sa fiche et finirait par contourner le
+/// verrou plutot que de le subir.
+///
+/// Deverrouiller NE PROLONGE DONC PAS la session. Le jeton garde son echeance
+/// d'origine : au bout des quatre heures, il expire quoi qu'il arrive et il
+/// faut se reconnecter pour de bon. Emettre un jeton neuf ici rendrait la
+/// session eternelle — il suffirait de bouger la souris une fois par heure.
+///
+/// Le compte est relu en base : un compte desactive pendant la session ne se
+/// deverrouille plus.
+pub async fn deverrouiller(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(demande): Json<DemandeDeverrouillage>,
+) -> AppResult<Json<Value>> {
+    let compte: Option<(String, i64)> = sqlx::query_as(
+        "SELECT mot_de_passe_hash, actif FROM utilisateur WHERE id_utilisateur = $1",
+    )
+    .bind(&user.id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let (hash, actif) = compte.ok_or(AppError::IdentifiantsInvalides)?;
+    if actif != 1 || !password::verifier(&demande.mot_de_passe, &hash) {
+        return Err(AppError::IdentifiantsInvalides);
+    }
+
+    Ok(Json(json!({ "ok": true })))
 }

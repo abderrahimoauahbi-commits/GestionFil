@@ -211,7 +211,7 @@ export function SelecteurReference({
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium">{r.code_reference}</span>
                       {choisie && <Check className="size-3.5 text-primaire" />}
-                      {prise && <Badge ton="contour">deja employee</Badge>}
+                      {prise && <Badge ton="contour">déjà employee</Badge>}
                       {horsRole && <Badge ton="alerte">hors role</Badge>}
                     </div>
                     <div className="truncate text-[11px] text-attenue-texte">{r.designation}</div>

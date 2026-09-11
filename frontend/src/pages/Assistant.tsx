@@ -71,7 +71,7 @@ export function Assistant() {
   if (qCatalogue.isError) {
     const e = qCatalogue.error as ErreurApi
     return (
-      <Alerte ton="danger" titre="Assistant reserve a la Direction">
+      <Alerte ton="danger" titre="Assistant réserve a la Direction">
         {e?.estNonAutorise
           ? `Votre role (${moi?.role ?? '—'}) n'a pas acces a l'assistant. Il lit des donnees
              consolidees — valorisation, marges fournisseurs, journal — que la grille de droits

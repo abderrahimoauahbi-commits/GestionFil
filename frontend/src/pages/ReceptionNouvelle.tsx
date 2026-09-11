@@ -345,7 +345,7 @@ export function ReceptionNouvelle() {
   return (
     <div>
       <EnTetePage
-        titre="Nouvelle reception"
+        titre="Nouvelle réception"
         description="Reprenez un ou plusieurs bons du fournisseur, corrigez les pesees, enregistrez l'ensemble en une fois."
         actions={
           <Bouton variante="contour" onClick={() => naviguer('/receptions')}>
@@ -356,7 +356,7 @@ export function ReceptionNouvelle() {
       />
 
       {erreur && (
-        <Alerte ton="danger" titre="Enregistrement refuse" className="mb-3">
+        <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">
           {erreur}
         </Alerte>
       )}
@@ -461,8 +461,8 @@ export function ReceptionNouvelle() {
                 {qAtt.isLoading && <Chargement texte="Lecture des bons de commande…" />}
 
                 {!qAtt.isLoading && (
-                  <div className="flex flex-wrap items-end gap-2">
-                    <div className="min-w-56 flex-1">
+                  <div className="grid grid-cols-2 items-end gap-2 lg:flex lg:flex-wrap">
+                    <div className="col-span-2 lg:col-span-1 lg:min-w-56 lg:flex-1">
                       <Etiq htmlFor="bon">Bon de commande</Etiq>
                       <Selecteur
                         id="bon"
@@ -571,13 +571,13 @@ export function ReceptionNouvelle() {
                             OK
                           </th>
                           <th className="w-10 px-1 py-2 text-right">#</th>
-                          <th className="px-2 py-2 text-left">Reference</th>
+                          <th className="px-2 py-2 text-left">Référence</th>
                           <th className="w-32 px-2 py-2 text-left">Bon</th>
                           <th className="w-24 px-2 py-2 text-right">Reste</th>
                           <th className="w-28 px-2 py-2 text-right">Qte BL</th>
                           <th className="w-32 px-2 py-2 text-right">Qte pesee</th>
-                          <th className="w-24 px-2 py-2 text-left">Unite</th>
-                          <th className="w-24 px-2 py-2 text-right">Ecart</th>
+                          <th className="w-24 px-2 py-2 text-left">Unité</th>
+                          <th className="w-24 px-2 py-2 text-right">Écart</th>
                           <th className="w-32 px-2 py-2 text-left">Lot</th>
                           <th className="w-28 px-2 py-2 text-left">Magasin</th>
                           <th className="w-10 px-1 py-2"></th>
@@ -622,7 +622,7 @@ export function ReceptionNouvelle() {
                                       'h-7',
                                       l.code_recu !== l.code_reference && 'border-alerte',
                                     )}
-                                    aria-label="Reference reellement recue"
+                                    aria-label="Référence reellement recue"
                                   >
                                     <option value={l.code_reference}>{l.code_reference}</option>
                                     {l.equivalents.map((e) => (
@@ -670,7 +670,7 @@ export function ReceptionNouvelle() {
                                   onChange={(e) => maj(l.cle, 'qteBl', e.target.value)}
                                   onClick={(e) => e.stopPropagation()}
                                   className="h-7 text-right tabular-nums"
-                                  aria-label="Quantite du bon de livraison"
+                                  aria-label="Quantité du bon de livraison"
                                 />
                               </td>
                               <td className="px-2 py-1">
@@ -685,7 +685,7 @@ export function ReceptionNouvelle() {
                                     'h-7 text-right font-medium tabular-nums',
                                     (hors || manqueQte) && 'border-danger',
                                   )}
-                                  aria-label="Quantite pesee"
+                                  aria-label="Quantité pesee"
                                 />
                               </td>
                               <td className="px-2 py-1">
@@ -694,7 +694,7 @@ export function ReceptionNouvelle() {
                                   onChange={(e) => maj(l.cle, 'unite', e.target.value)}
                                   onClick={(e) => e.stopPropagation()}
                                   className="h-7"
-                                  aria-label="Unite de saisie"
+                                  aria-label="Unité de saisie"
                                 >
                                   <option value="kg">kg</option>
                                   {l.unite_catalogue !== 'kg' && (
@@ -872,10 +872,10 @@ function PanneauDetail({
   const ecartBl = ligne.qteBl !== '' ? Number(ligne.qte) - Number(ligne.qteBl) : null
 
   const onglets = [
-    { cle: 'quantite' as const, nom: 'Quantite' },
+    { cle: 'quantite' as const, nom: 'Quantité' },
     { cle: 'stockage' as const, nom: 'Stockage et lot' },
     { cle: 'commande' as const, nom: 'Commande' },
-    { cle: 'qualite' as const, nom: 'Qualite' },
+    { cle: 'qualite' as const, nom: 'Qualité' },
   ]
 
   return (
@@ -906,7 +906,7 @@ function PanneauDetail({
         {onglet === 'quantite' && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq>Quantite annoncee au BL</Etiq>
+              <Etiq>Quantité annoncee au BL</Etiq>
               <Champ
                 type="number"
                 step="any"
@@ -923,7 +923,7 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq obligatoire>Quantite pesee</Etiq>
+              <Etiq obligatoire>Quantité pesee</Etiq>
               <Champ
                 type="number"
                 step="any"
@@ -949,7 +949,7 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq>Unite de saisie</Etiq>
+              <Etiq>Unité de saisie</Etiq>
               <Selecteur
                 value={ligne.unite}
                 onChange={(e) => maj(ligne.cle, 'unite', e.target.value)}
@@ -1071,7 +1071,7 @@ function PanneauDetail({
         {onglet === 'qualite' && (
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Etiq>Statut qualite</Etiq>
+              <Etiq>Statut qualité</Etiq>
               <Selecteur
                 value={ligne.qualite}
                 onChange={(e) => maj(ligne.cle, 'qualite', e.target.value)}
@@ -1190,7 +1190,7 @@ function PanneauHorsCommande({
         <div className="mb-2 flex items-center gap-2">
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
           <Champ
-            placeholder="Reference ou designation…"
+            placeholder="Référence ou designation…"
             value={filtre}
             onChange={(e) => setFiltre(e.target.value)}
             className="h-8"
@@ -1201,7 +1201,7 @@ function PanneauHorsCommande({
         {q.isLoading && <Chargement texte="Lecture du catalogue…" />}
 
         {!q.isLoading && refs.length === 0 && (
-          <Alerte ton="info">Aucune reference ne correspond.</Alerte>
+          <Alerte ton="info">Aucune référence ne correspond.</Alerte>
         )}
 
         <div className="space-y-1">

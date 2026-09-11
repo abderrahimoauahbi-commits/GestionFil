@@ -215,6 +215,40 @@ body {
   [role="option"] {
     min-height: 44px;
   }
+
+  /* LA REGLE CI-DESSUS ABIME LES CASES A COCHER, ET IL FAUT LE CORRIGER ICI.
+     `input` les inclut : une case garde sa largeur native de 12 px et prend
+     44 px de haut. On obtient une lamelle verticale — une cible PIRE qu'avant,
+     puisqu'elle est plus difficile a viser qu'un carre de 12 px et qu'elle
+     ment sur sa zone sensible.
+
+     Une case cochee se vise par son cote, pas par sa hauteur : on lui rend
+     donc un carre franc de 22 px. La cible de 44 px reste atteinte par le
+     LABEL qui l'entoure, cliquable lui aussi — c'est ainsi qu'on gagne de la
+     surface sans deformer la case. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 22px;
+    height: 22px;
+    min-height: 22px;
+    flex: none;
+  }
+
+  /* Le label d'une case porte la cible : c'est lui qu'on touche. */
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* UN SELECTEUR DOIT MONTRER SON CONTENU. A 87 px, « Toutes les categories »
+     se reduit a « Toutes… » : on ne sait plus sur quoi on filtre. La moitie
+     d'un telephone est le minimum lisible. */
+  select {
+    min-width: 8rem;
+  }
 }
 
 /* Barre de titre Tauri : la fenetre est sans decoration native, on rend cette

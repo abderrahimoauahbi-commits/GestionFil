@@ -63,7 +63,7 @@ export function CoherenceRecettes() {
           <table className="grille w-full text-[12px]">
             <thead>
               <tr className="bg-attenue">
-                <th className="px-2.5 py-1.5 text-left font-semibold">Qualite</th>
+                <th className="px-2.5 py-1.5 text-left font-semibold">Qualité</th>
                 <th className="px-2.5 py-1.5 text-right font-semibold">Roles a 100 %</th>
                 <th className="px-2.5 py-1.5 text-left font-semibold">Roles a corriger</th>
                 <th className="px-2.5 py-1.5 text-left font-semibold">Nature</th>

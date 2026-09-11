@@ -113,9 +113,9 @@ type CleSection =
  */
 const FAMILLES = [
   'Entreprise',
-  'Parametres de gestion',
-  'Parametres systeme',
-  'Parametres utilisateurs',
+  'Paramètres de gestion',
+  'Paramètres système',
+  'Paramètres utilisateurs',
 ] as const
 type Famille = (typeof FAMILLES)[number]
 
@@ -139,9 +139,9 @@ interface Section {
 const SECTIONS: Section[] = [
   {
     cle: 'alertes',
-    famille: 'Parametres de gestion',
+    famille: 'Paramètres de gestion',
     libelle: 'Alertes et seuils',
-    resume: 'Quand une reference passe en attention, en critique, en rupture',
+    resume: 'Quand une référence passe en attention, en critique, en rupture',
     Icone: AlertTriangle,
     blocs: [
       {
@@ -152,7 +152,7 @@ const SECTIONS: Section[] = [
         codes: ['P_SeuilAlerte', 'P_SeuilCritique', 'P_CouvMinMois', 'P_MargeSecurite'],
       },
       {
-        titre: 'Reapprovisionnement',
+        titre: 'Réapprovisionnement',
         intention:
           "Ce que le plan d'achat suppose quand le fournisseur ne dit rien, et la marge " +
           'gardee avant la date de besoin.',
@@ -162,9 +162,9 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'production',
-    famille: 'Parametres de gestion',
+    famille: 'Paramètres de gestion',
     libelle: 'Production',
-    resume: 'Perte matiere, stocks de securite, tolerance des recettes',
+    resume: 'Perte matiere, stocks de sécurité, tolerance des recettes',
     Icone: Factory,
     blocs: [
       {
@@ -175,7 +175,7 @@ const SECTIONS: Section[] = [
         codes: ['P_TauxPerte', 'P_ToleranceRecette'],
       },
       {
-        titre: 'Stock de securite par classe',
+        titre: 'Stock de sécurité par classe',
         intention:
           'Le matelas garde en plus du besoin calcule, exprime en jours de consommation. ' +
           'Une classe A merite en general davantage de couverture qu une classe C.',
@@ -205,7 +205,7 @@ const SECTIONS: Section[] = [
         codes: ['P_NomEntreprise', 'P_Secteur', 'P_Pays', 'P_DateCreationERP'],
       },
       {
-        titre: 'Monnaie de reference',
+        titre: 'Monnaie de référence',
         intention:
           'Toute valorisation est ramenee a cette devise. Elle est verrouillee : la changer ' +
           'apres coup rendrait faux tout le stock deja valorise.',
@@ -215,13 +215,13 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'supply',
-    famille: 'Parametres de gestion',
-    libelle: 'Chaine logistique',
+    famille: 'Paramètres de gestion',
+    libelle: 'Chaîne logistique',
     resume: 'Classement ABC/XYZ, tiering des commandes, notation fournisseurs',
     Icone: TrendingUp,
     blocs: [
       {
-        titre: 'Classement des references',
+        titre: 'Classement des références',
         intention:
           'ABC repartit les references par poids financier, XYZ par regularite de consommation. ' +
           'Les deux servent a doser le stock de securite et la vigilance.',
@@ -258,8 +258,8 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'reception',
-    famille: 'Parametres de gestion',
-    libelle: 'Receptions et OTIF',
+    famille: 'Paramètres de gestion',
+    libelle: 'Réceptions et OTIF',
     resume: 'Tolerance de pesee, cible de performance fournisseur',
     Icone: PackageCheck,
     blocs: [
@@ -281,14 +281,14 @@ const SECTIONS: Section[] = [
   },
   {
     cle: 'referentiels',
-    famille: 'Parametres systeme',
+    famille: 'Paramètres système',
     libelle: 'Mouvement stock',
     resume: 'Magasins, types et motifs de mouvement, motifs de retour',
     Icone: Layers,
   },
   {
     cle: 'devises',
-    famille: 'Parametres systeme',
+    famille: 'Paramètres système',
     libelle: 'Devises et taux',
     resume: 'Cours de change en vigueur et leur historique',
     Icone: Coins,
@@ -297,33 +297,33 @@ const SECTIONS: Section[] = [
     cle: 'apparence',
     famille: 'Entreprise',
     libelle: 'Apparence',
-    resume: 'Couleurs, densite des tableaux, barre de navigation',
+    resume: 'Couleurs, densité des tableaux, barre de navigation',
     Icone: Palette,
   },
   {
     cle: 'sauvegardes',
-    famille: 'Parametres systeme',
+    famille: 'Paramètres système',
     libelle: 'Sauvegardes',
     resume: 'Copies de la base, manuelles et automatiques',
     Icone: DatabaseBackup,
   },
   {
     cle: 'comptes',
-    famille: 'Parametres utilisateurs',
+    famille: 'Paramètres utilisateurs',
     libelle: 'Utilisateurs et droits',
     resume: 'Comptes, roles, et la grille module x champ',
     Icone: Users,
   },
   {
     cle: 'utilisateurs',
-    famille: 'Parametres utilisateurs',
+    famille: 'Paramètres utilisateurs',
     libelle: 'Roles et transitions',
     resume: "Roles applicatifs et transitions d'etat autorisees",
     Icone: ShieldCheck,
   },
   {
     cle: 'audit',
-    famille: 'Parametres utilisateurs',
+    famille: 'Paramètres utilisateurs',
     libelle: "Journal d'audit",
     resume: 'Qui a fait quoi, quand, et depuis quelle adresse',
     Icone: ScrollText,
@@ -430,7 +430,7 @@ export function Configuration() {
     <div>
       <EnTetePage
         titre="Configuration"
-        description="Les reglages qui gouvernent les calculs, et les referentiels sur lesquels ils s appuient."
+        description="Les réglages qui gouvernent les calculs, et les referentiels sur lesquels ils s appuient."
       />
 
       <PageAvecRail
@@ -461,13 +461,13 @@ export function Configuration() {
             recherche={{
               valeur: recherche,
               surChangement: setRecherche,
-              placeholder: 'Chercher un reglage…',
+              placeholder: 'Chercher un réglage…',
             }}
           />
         }
       >
         <div className="space-y-3">
-          {q.isLoading && <Chargement texte="Lecture des parametres…" />}
+          {q.isLoading && <Chargement texte="Lecture des paramètres…" />}
 
           {recherche ? (
             <Carte repliable="configuration.1">
@@ -552,7 +552,7 @@ export function Configuration() {
               {(orphelins[section] ?? []).length > 0 && (
                 <Carte repliable="configuration.2">
                   <CarteEntete className="flex-col items-start gap-1">
-                    <CarteTitre>Autres reglages</CarteTitre>
+                    <CarteTitre>Autres réglages</CarteTitre>
                     <p className="text-[11px] text-attenue-texte">
                       Parametres de cette categorie qu aucun bloc ne nomme explicitement. Ils
                       apparaissent ici pour ne jamais disparaitre en silence.
@@ -583,7 +583,7 @@ export function Configuration() {
         <div className="sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-primaire bg-surface px-3 py-2 shadow-sm">
           <span className="text-[13px]">
             <span className="font-medium">{modifies.length} modification(s)</span>
-            <span className="text-alerte"> — rien n est encore enregistre.</span>
+            <span className="text-alerte"> — rien n est encore enregistré.</span>
           </span>
           <div className="flex items-center gap-2">
             <Bouton variante="contour" onClick={() => setBrouillon({})}>
@@ -701,13 +701,13 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
       }),
     onSuccess: () => {
       toast.success('Nouveau taux enregistre', {
-        description: 'Le taux precedent est ferme a cette date. Les achats deja valorises ne bougent pas.',
+        description: 'Le taux précédent est ferme a cette date. Les achats déjà valorises ne bougent pas.',
       })
       setNouveau({ taux: '', date_debut: '' })
       void qc.invalidateQueries({ queryKey: ['taux'] })
       void qc.invalidateQueries({ queryKey: ['devises'] })
     },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Taux refuse.'),
+    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Taux refusé.'),
   })
 
   const devises = qDev.data ?? []
@@ -1054,7 +1054,7 @@ cargo run --bin gestionfil-admin -- restaurer gestionfil-AAAAMMJJhhmmss.db`}
           <p>
             <span className="font-mono text-texte">reparer</span> reindexe, recalcule les
             statistiques et compacte le fichier. Il ne corrige{' '}
-            <span className="text-texte">aucune donnee metier</span> : une anomalie de coherence se
+            <span className="text-texte">aucune donnée métier</span> : une anomalie de coherence se
             corrige dans l application, par quelqu un qui sait ce que la ligne devrait porter.
           </p>
           <pre className="overflow-x-auto rounded-[3px] bg-attenue p-2 font-mono text-[11px] text-texte">
@@ -1063,7 +1063,7 @@ cargo run --bin gestionfil-admin -- reparer`}
           </pre>
           <p>
             Les anomalies de coherence se lisent aussi a l ecran, dans{' '}
-            <span className="text-texte">General - Controles de coherence</span>, avec le detail
+            <span className="text-texte">Général - Contrôles de cohérence</span>, avec le detail
             des lignes concernees.
           </p>
         </CarteCorps>

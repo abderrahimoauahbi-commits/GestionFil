@@ -18,14 +18,13 @@
  * Sur telephone, une carte par reference qui se deplie : la meme information,
  * mais lue une reference a la fois.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  ChevronDown, Cog, Download, Printer, Search, Warehouse, X,
-} from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { Alerte, Chargement } from '../composants/ui/base'
 import { cn } from '../lib/utils'
 
@@ -89,6 +88,12 @@ export function EtatStock() {
   const [recherche, setRecherche] = useState('')
   const [statut, setStatut] = useState('')
   const [ouverte, setOuverte] = useState<string | null>(null)
+  /* OU LE STOCK SE TROUVE : le seul critere que la barre generique ne sait pas
+     poser, parce qu'une reference est presente dans PLUSIEURS magasins a la
+     fois et qu'un filtre par egalite ne connait qu'une valeur. */
+  const [magasin, setMagasin] = useState('')
+  const [page, setPage] = useState(0)
+  const [taille, setTaille] = useState(50)
 
   const q = useQuery({
     queryKey: ['etat-stock'],
@@ -113,17 +118,51 @@ export function EtatStock() {
     return [...vus].sort().map((code) => ({ code, nom: noms.get(code) ?? code }))
   }, [lignes, qMag.data])
 
+  /* LES CRITERES SONT CEUX DU CLASSEUR : de qui ca vient, de quelle famille,
+     et ce que l'analyse en dit. Les valeurs proposees sortent des lignes
+     recues — offrir une categorie que personne ne porte ne peut que vider le
+     tableau. */
+  const champs = useMemo<ChampFiltre<LigneStock>[]>(
+    () => [
+      { cle: 'categorie', libelle: 'Catégorie', type: 'liste', valeur: (l) => l.categorie },
+      { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', valeur: (l) => l.fournisseur_nom },
+      { cle: 'abc', libelle: 'Classe ABC', type: 'liste', valeur: (l) => l.classe_abc },
+      { cle: 'unite', libelle: 'Unité', type: 'liste', valeur: (l) => l.unite },
+    ],
+    [],
+  )
+  const filtres = useFiltres<LigneStock>(champs)
+  const { retenir } = filtres
+
+  /* Les magasins DECLARES, pour le filtre. Les colonnes, elles, restent
+     deduites du stock reel : c'est une lecture, pas un reglage. */
+  const declares = qMag.data ?? []
+
   const filtrees = useMemo(() => {
     const r = recherche.trim().toLowerCase()
     return lignes.filter(
       (l) =>
         (!statut || l.statut === statut) &&
+        (!magasin || (l.par_magasin?.[magasin] ?? 0) > 0) &&
+        retenir(l) &&
         (!r ||
           l.designation?.toLowerCase().includes(r) ||
           l.code_reference?.toLowerCase().includes(r) ||
           l.fournisseur_nom?.toLowerCase().includes(r)),
     )
-  }, [lignes, recherche, statut])
+  }, [lignes, recherche, statut, magasin, retenir])
+
+  /* ON REVIENT EN PREMIERE PAGE DES QUE LE FILTRE CHANGE. Rester en page 3
+     d'un resultat qui n'en a plus qu'une affiche un tableau vide et donne a
+     croire que le critere ne trouve rien. */
+  useEffect(() => setPage(0), [recherche, statut, magasin, filtres.valeurs])
+
+  const pages = Math.max(1, Math.ceil(filtrees.length / taille))
+  const pageSure = Math.min(page, pages - 1)
+  const visibles = useMemo(
+    () => filtrees.slice(pageSure * taille, pageSure * taille + taille),
+    [filtrees, pageSure, taille],
+  )
 
   const totaux = useMemo(() => {
     const s = (f: (l: LigneStock) => number | null | undefined) =>
@@ -139,12 +178,81 @@ export function EtatStock() {
     }
   }, [filtrees])
 
+
+  /**
+   * LA BARRE DE PAGES, POSEE EN HAUT ET EN BAS.
+   *
+   * Elle existe parce que 124 references font sept metres de page sur un
+   * telephone. En bas seulement, il fallait traverser les cinquante fiches pour
+   * atteindre « page suivante » — exactement le defilement qu'on voulait
+   * supprimer. Elle s'affiche meme quand tout tient sur une page : sans elle,
+   * rien ne dit si l'ecran montre tout ou une tranche.
+   *
+   * C'est un ELEMENT et non un composant : declarer un composant dans le corps
+   * du rendu en fabrique un type neuf a chaque passage, React demonte alors la
+   * barre et la liste deroulante se referme sous le doigt a l'instant meme ou
+   * l'on change le nombre de lignes par page.
+   */
+  const barrePages = (
+    <div className="sans-impression flex flex-wrap items-center justify-between gap-2
+                    rounded-[var(--radius)] border border-bordure bg-surface px-2.5 py-2">
+      <span className="text-[12px] tabular-nums text-attenue-texte">
+        {pageSure * taille + 1}–{Math.min(filtrees.length, (pageSure + 1) * taille)} sur{' '}
+        {filtrees.length}
+      </span>
+      <div className="flex items-center gap-2">
+        <select
+          value={taille}
+          onChange={(e) => {
+            setTaille(Number(e.target.value))
+            setPage(0)
+          }}
+          className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure
+                     bg-fond px-2 text-[12.5px]"
+          aria-label="References par page"
+        >
+          {[25, 50, 100, 250].map((n) => (
+            <option key={n} value={n}>
+              {n} par page
+            </option>
+          ))}
+          <option value={100000}>Tout afficher</option>
+        </select>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setPage(pageSure - 1)}
+            disabled={pageSure === 0}
+            className="inline-flex min-h-[34px] min-w-[34px] items-center justify-center
+                       rounded-[var(--radius-sm)] border border-bordure disabled:opacity-40"
+            aria-label="Page precedente"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <span className="min-w-[4.5rem] text-center text-[12px] tabular-nums">
+            {pageSure + 1} / {pages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage(pageSure + 1)}
+            disabled={pageSure >= pages - 1}
+            className="inline-flex min-h-[34px] min-w-[34px] items-center justify-center
+                       rounded-[var(--radius-sm)] border border-bordure disabled:opacity-40"
+            aria-label="Page suivante"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   if (q.isLoading) return <Chargement texte="Lecture de l etat des stocks…" />
 
   return (
     <div className="flex flex-col gap-3">
       <EnTetePage
-        titre="Etat des stocks"
+        titre="État des stocks"
         actions={
           <>
             <button
@@ -193,14 +301,47 @@ export function EtatStock() {
         />
       </div>
 
-      {/* --- Les filtres, en ligne au-dessus du tableau --------------------- */}
+      {/* --- Les criteres, la meme barre que sur les autres ecrans ---------- */}
+      <BarreFiltres
+        champs={champs}
+        lignes={lignes}
+        valeurs={filtres.valeurs}
+        definir={filtres.definir}
+        reinitialiser={() => {
+          filtres.reinitialiser()
+          setMagasin('')
+        }}
+        actifs={filtres.actifs + (magasin ? 1 : 0)}
+        enPied={
+          declares.length > 1 && (
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[11px] text-attenue-texte">Magasin</span>
+              <select
+                value={magasin}
+                onChange={(e) => setMagasin(e.target.value)}
+                className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure
+                           bg-fond px-2 text-[12.5px]"
+              >
+                <option value="">Tous les magasins</option>
+                {declares.map((m) => (
+                  <option key={m.code_magasin} value={m.code_magasin}>
+                    {m.nom}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )
+        }
+      />
+
+      {/* --- La recherche et les statuts ------------------------------------ */}
       <div className="sans-impression flex flex-wrap items-center gap-2">
         <div className="relative min-w-[14rem] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-attenue-texte" />
           <input
             value={recherche}
             onChange={(e) => setRecherche(e.target.value)}
-            placeholder="Reference, designation, fournisseur…"
+            placeholder="Référence, designation, fournisseur…"
             className="min-h-[38px] w-full rounded-[var(--radius-sm)] border border-bordure
                        bg-fond pl-8 pr-8 text-[13px]"
           />
@@ -215,7 +356,7 @@ export function EtatStock() {
             </button>
           )}
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
           {['', 'RUPTURE', 'CRITIQUE', 'ATTENTION', 'OK'].map((s) => (
             <button
               key={s || 'tous'}
@@ -238,18 +379,25 @@ export function EtatStock() {
       </div>
 
       {filtrees.length === 0 ? (
-        <Alerte ton="info" titre="Aucune reference">
+        <Alerte ton="info" titre="Aucune référence">
           Aucune reference ne correspond a ces criteres.
         </Alerte>
       ) : (
         <>
-          <TableauLarge lignes={filtrees} magasins={magasins} totaux={totaux} />
+          {barrePages}
+          <TableauLarge
+            lignes={visibles}
+            toutes={filtrees}
+            magasins={magasins}
+            totaux={totaux}
+          />
           <ListeTelephone
-            lignes={filtrees}
+            lignes={visibles}
             magasins={magasins}
             ouverte={ouverte}
             setOuverte={setOuverte}
           />
+          {barrePages}
         </>
       )}
     </div>
@@ -297,9 +445,14 @@ function Tuile({
  * Le defilement lateral appartient au tableau, jamais a la page.
  */
 function TableauLarge({
-  lignes, magasins, totaux,
+  lignes, toutes, magasins, totaux,
 }: {
+  /** Les lignes de la PAGE affichee. */
   lignes: LigneStock[]
+  /** Toutes les lignes retenues par les filtres : ce sont elles qu'on totalise.
+      Totaliser la page donnerait un total qui change quand on tourne la page —
+      un chiffre qu'on ne peut ni recopier ni verifier. */
+  toutes: LigneStock[]
   magasins: { code: string; nom: string }[]
   totaux: { global: number; magasins: number; machines: number; valeur: number }
 }) {
@@ -308,7 +461,7 @@ function TableauLarge({
       <table className="w-full text-[12px]">
         <thead className="sticky top-0 z-10">
           <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
-            <th className="px-2 py-1 text-left" rowSpan={2}>Reference</th>
+            <th className="px-2 py-1 text-left" rowSpan={2}>Référence</th>
             <th className="border-l border-bordure px-2 py-1 text-center" colSpan={2 + magasins.length}>
               Ou est le stock (kg)
             </th>
@@ -403,13 +556,13 @@ function TableauLarge({
             chercher en faisant defiler trois cents lignes. */}
         <tfoot className="sticky bottom-0">
           <tr className="border-t-2 border-ink/20 bg-attenue font-semibold text-texte">
-            <td className="px-2 py-1.5">Total ({lignes.length})</td>
+            <td className="px-2 py-1.5">Total ({toutes.length})</td>
             <td className="border-l border-bordure px-2 py-1.5 text-right tabular-nums">
               {nb(totaux.global)}
             </td>
             {magasins.map((m) => (
               <td key={m.code} className="px-2 py-1.5 text-right tabular-nums">
-                {nb(lignes.reduce((a, l) => a + (l.par_magasin?.[m.code] ?? 0), 0))}
+                {nb(toutes.reduce((a, l) => a + (l.par_magasin?.[m.code] ?? 0), 0))}
               </td>
             ))}
             <td className="px-2 py-1.5 text-right tabular-nums">{nb(totaux.machines)}</td>

@@ -43,7 +43,7 @@ import { cn } from '../lib/utils'
 const MODES: { cle: Theme; nom: string }[] = [
   { cle: 'clair', nom: 'Clair' },
   { cle: 'sombre', nom: 'Sombre' },
-  { cle: 'systeme', nom: 'Suivre le systeme' },
+  { cle: 'systeme', nom: 'Suivre le système' },
 ]
 
 /** Les trois familles ajoutees pour l'aspect, separees des six familles de
@@ -209,7 +209,7 @@ export function ControlesApparence() {
       {/* --- Tableaux ------------------------------------------------------ */}
       <Titre>Tableaux</Titre>
 
-      <Ligne pour="ap-densite" nom="Densite">
+      <Ligne pour="ap-densite" nom="Densité">
         <Selecteur
           id="ap-densite"
           value={densite}

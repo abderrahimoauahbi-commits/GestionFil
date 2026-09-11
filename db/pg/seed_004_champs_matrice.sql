@@ -36,7 +36,7 @@ ON CONFLICT (module, champ) DO UPDATE SET
 INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
 SELECT r.code_role_user, c.module, c.champ,
        CASE
-         WHEN r.code_role_user = 'DIRECTION' THEN 'ECRITURE'
+         WHEN r.code_role_user IN ('DIRECTION', 'ADMIN') THEN 'ECRITURE'
          WHEN c.sensible = 1 THEN 'MASQUE'
          ELSE 'ECRITURE'
        END

@@ -1,0 +1,251 @@
+/**
+ * L'accueil — la page que TOUT LE MONDE peut ouvrir.
+ *
+ * POURQUOI ELLE EXISTE. L'accueil etait le tableau de bord, protege par le
+ * module COCKPIT. Le jour ou l'assistante a perdu ce module, sa page d'accueil
+ * est devenue « Acces refuse » : elle se connectait pour lire un message
+ * d'erreur. Un ERP ne peut pas ouvrir sur un refus.
+ *
+ * CETTE PAGE N'A DONC AUCUNE GARDE, et elle n'en a pas besoin : elle ne montre
+ * rien d'autre que les ecrans auxquels celui qui regarde a deja droit. Elle les
+ * lit dans la meme table de navigation que le menu — une seule liste, donc pas
+ * de raccourci qui survivrait a la disparition d'un ecran.
+ *
+ * ELLE REPREND L'IDENTITE DE L'ECRAN DE CONNEXION, et c'est voulu. La premiere
+ * version alignait des rectangles gris : elle ne ressemblait a rien, et surtout
+ * pas au reste de l'outil. L'ecran de connexion, lui, a un monde — le fond de
+ * fils graphite, le filet d'or, le logo blanc. On entre dans l'application par
+ * cette porte-la ; la page qui suit doit en garder la trace, sinon l'atelier a
+ * l'impression d'avoir change de logiciel entre la connexion et le travail.
+ *
+ * L'OR NE SERT QU'ICI. Il marque la banniere et rien d'autre : le bleu de
+ * l'application reste la couleur de ce qui se clique. Une seule audace, tenue
+ * a un seul endroit.
+ */
+import { Link } from 'react-router-dom'
+import { ArrowRight } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
+import { estAccessible, MODULES, NAVIGATION } from '../composants/Coquille'
+import { cn } from '../lib/utils'
+
+/** Ce que le rôle veut dire, en une phrase que son titulaire reconnaît. */
+const METIER: Record<string, string> = {
+  ADMIN: 'Vous administrez l’outil et vous voyez tout.',
+  DIRECTION: 'Vous suivez l’activité, les achats et la valeur du stock.',
+  ASSISTANTE: 'Vous tenez le catalogue, les commandes et les réceptions.',
+  MAGASIN: 'Vous chargez, déchargez, transférez et comptez.',
+}
+
+/**
+ * UNE TEINTE PAR RUBRIQUE, PAS UNE PAR BOUTON.
+ *
+ * Colorer chaque icone separement ferait un sapin de Noel ou plus rien ne se
+ * distingue. La couleur sert ici a une seule chose : dire d'un coup d'oeil de
+ * quel monde releve l'ecran — le catalogue, la production, les achats, le
+ * stock. Deux boutons de la meme teinte parlent du meme sujet.
+ *
+ * Les valeurs sont donnees en clair et non en jetons de theme : ce sont des
+ * couleurs de reperage, pas des couleurs d'etat, et elles doivent rester les
+ * memes en clair comme en sombre pour que le repere tienne.
+ */
+const TEINTE: Record<string, { fond: string; trait: string }> = {
+  GENERAL:    { fond: 'rgb(37 99 235 / .12)',  trait: 'rgb(37 99 235)' },   // bleu
+  CATALOGUE:  { fond: 'rgb(124 58 237 / .12)', trait: 'rgb(124 58 237)' },  // violet
+  PRODUCTION: { fond: 'rgb(196 161 90 / .18)', trait: 'rgb(163 128 58)' },  // l'or de la marque
+  ACHATS:     { fond: 'rgb(5 150 105 / .12)',  trait: 'rgb(5 150 105)' },   // vert
+  STOCK:      { fond: 'rgb(13 148 136 / .12)', trait: 'rgb(13 148 136)' },  // sarcelle
+  FINANCE:    { fond: 'rgb(225 29 72 / .10)',  trait: 'rgb(190 24 62)' },   // grenat
+  PARAMETRES: { fond: 'rgb(100 116 139 / .14)', trait: 'rgb(71 85 105)' },  // ardoise
+}
+
+const teinte = (section: string) => TEINTE[section] ?? TEINTE.GENERAL
+
+function salutation(): string {
+  const h = new Date().getHours()
+  if (h < 12) return 'Bonjour'
+  if (h < 18) return 'Bon après-midi'
+  return 'Bonsoir'
+}
+
+/** « mercredi 9 septembre 2026 » — la date que porte une fiche de production. */
+function dateDuJour(): string {
+  return new Date().toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+export function Accueil() {
+  const { moi, peut } = useAuth()
+
+  /* L'ACCUEIL NE SE LISTE PAS LUI-MEME. Il figure dans la navigation — sans
+     quoi personne ne savait comment y revenir — mais un raccourci vers la page
+     qu'on regarde deja n'apprend rien a personne. */
+  const accessibles = NAVIGATION.filter(
+    (e) => e.vers !== '/' && !e.aVenir && estAccessible(e, peut, moi?.role),
+  )
+  const quotidiens = accessibles.filter((e) => e.principale)
+
+  /* Les rubriques dans l'ordre de MODULES, vides ecartees : une rubrique sans
+     aucun ecran ouvert n'a rien a faire sur l'accueil de quelqu'un. Les ecrans
+     du quotidien n'y reviennent pas — ils sont deja en haut. */
+  const rubriques = MODULES.map((m) => ({
+    ...m,
+    entrees: accessibles.filter((e) => e.section === m.id && !e.principale),
+  })).filter((r) => r.entrees.length > 0)
+
+  return (
+    <div className="flex flex-col gap-7 pb-4">
+      {/* ================= LA BANNIERE =================================
+          Pleine largeur : les marges negatives annulent le rembourrage de la
+          coquille, sinon la bande flotterait dans une gouttiere et perdrait
+          tout son effet. Le fond est le meme fichier que l'ecran de connexion.
+          ================================================================= */}
+      <header
+        className="relative -mx-3 overflow-hidden px-6 py-9 sm:-mx-4 sm:rounded-[var(--radius-lg)]
+                   sm:px-9 sm:py-11"
+        style={{
+          backgroundColor: '#0F141A',
+          backgroundImage: `linear-gradient(100deg, rgba(15,20,26,.94) 0%, rgba(15,20,26,.72) 48%, rgba(15,20,26,.42) 100%), url(${import.meta.env.BASE_URL}fond-fils-graphite.jpg)`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center right',
+        }}
+      >
+        {/* LE LOGO SE POSAIT SUR LA PARTIE CLAIRE DU FOND et disparaissait : a
+            70 % d'opacite sur des fils blancs, il ne restait qu'un contour. On
+            le remonte a pleine opacite et on lui glisse un halo sombre pour
+            qu'il se detache de ce qui passe derriere lui. */}
+        <img
+          src={`${import.meta.env.BASE_URL}logo-polyfashions-blanc.png`}
+          alt="Polyfashions Carpet"
+          className="pointer-events-none absolute right-6 top-6 hidden h-9 sm:block"
+          style={{ filter: 'drop-shadow(0 1px 6px rgba(15,20,26,.85))' }}
+        />
+
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">
+          {dateDuJour()}
+        </p>
+
+        <h1
+          className="mt-2 max-w-[22ch] text-[clamp(1.7rem,1.1rem+2.4vw,2.6rem)] font-semibold
+                     leading-[1.1] tracking-[-0.02em] text-white"
+          style={{ textWrap: 'balance' } as React.CSSProperties}
+        >
+          {salutation()}
+          {moi?.login ? `, ${moi.login}` : ''}
+        </h1>
+
+        {/* Le filet d'or de l'ecran de connexion, repris a l'identique. */}
+        <hr
+          className="my-4 h-px w-40 border-0"
+          style={{
+            background:
+              'linear-gradient(90deg, rgb(196 161 90 / .75) 0%, rgb(196 161 90 / .35) 60%, transparent 100%)',
+          }}
+        />
+
+        <p className="max-w-[54ch] text-[14.5px] leading-relaxed text-white/70">
+          {METIER[moi?.role ?? ''] ?? 'Voici les écrans auxquels vous avez accès.'}
+        </p>
+      </header>
+
+      {/* ================= CE QU'ON OUVRE TOUS LES JOURS ================ */}
+      {quotidiens.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-attenue-texte">
+            Pour commencer
+          </h2>
+          {/* DEUX PAR LIGNE DES LE TELEPHONE. Pleine largeur, chaque bouton
+              faisait un pave de 390 px pour trois mots : sept ecrans de haut
+              rien que pour les raccourcis, et il fallait defiler pour voir le
+              reste. A deux colonnes, tout tient dans un ecran. */}
+          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-4">
+            {quotidiens.map((e) => {
+              const c = teinte(e.section)
+              return (
+                <Link
+                  key={e.vers}
+                  to={e.vers}
+                  className={cn(
+                    'group flex flex-col gap-2 rounded-[var(--radius)] border border-bordure',
+                    'bg-surface p-3 shadow-sm',
+                    'transition-[box-shadow,border-color,transform] duration-150',
+                    'hover:-translate-y-px hover:border-primaire/45 hover:shadow-md',
+                  )}
+                >
+                  <span
+                    className="flex size-9 items-center justify-center rounded-[var(--radius-sm)]"
+                    style={{ backgroundColor: c.fond, color: c.trait }}
+                  >
+                    <e.Icone className="size-[19px]" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1">
+                      <span className="truncate text-[13.5px] font-semibold leading-tight text-texte">
+                        {e.libelle}
+                      </span>
+                      <ArrowRight
+                        className="size-3 shrink-0 text-attenue-texte opacity-0 transition-all
+                                   group-hover:translate-x-0.5 group-hover:text-primaire
+                                   group-hover:opacity-100"
+                      />
+                    </span>
+                    {/* LE RESUME PORTE LE SENS. « Mouvements » n'apprend rien a
+                        qui decouvre l'outil ; « entrees, sorties, transferts »
+                        dit ce qu'on vient y faire. */}
+                    {e.resume && (
+                      <span className="mt-1 block text-[11.5px] leading-snug text-attenue-texte">
+                        {e.resume}
+                      </span>
+                    )}
+                  </span>
+                </Link>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ================= LE RESTE, PAR RUBRIQUE ======================= */}
+      {rubriques.map((r) => (
+        <section key={r.id} className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+            <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold
+                           uppercase tracking-[0.14em] text-attenue-texte">
+              <r.Icone className="size-3.5" style={{ color: teinte(r.id).trait }} />
+              {r.libelle}
+            </h2>
+            <span className="text-[11.5px] text-attenue-texte/65">{r.resume}</span>
+          </div>
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
+            {r.entrees.map((e) => (
+              <Link
+                key={e.vers}
+                to={e.vers}
+                className={cn(
+                  'group flex items-center gap-2.5 rounded-[var(--radius-sm)] border border-bordure',
+                  'bg-surface px-3 py-2.5 text-[13.5px] text-texte transition-colors',
+                  'hover:border-primaire/40 hover:bg-primaire/[0.04]',
+                )}
+              >
+                <e.Icone
+                  className="size-4 shrink-0 transition-colors"
+                  style={{ color: teinte(e.section).trait }}
+                />
+                <span className="min-w-0 flex-1 truncate">{e.libelle}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      {accessibles.length === 0 && (
+        <p className="text-[14px] text-attenue-texte">
+          Aucun écran ne vous est ouvert. Demandez vos droits à la direction.
+        </p>
+      )}
+    </div>
+  )
+}

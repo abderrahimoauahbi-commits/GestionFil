@@ -49,7 +49,7 @@ ON CONFLICT (module, champ) DO UPDATE SET
 INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
 SELECT r.code_role_user, c.module, c.champ,
        CASE
-         WHEN r.code_role_user = 'DIRECTION' THEN 'ECRITURE'
+         WHEN r.code_role_user IN ('DIRECTION', 'ADMIN') THEN 'ECRITURE'
          WHEN NOT EXISTS (SELECT 1 FROM permission p
                            WHERE p.code_role_user = r.code_role_user
                              AND p.module = c.module

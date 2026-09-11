@@ -179,7 +179,7 @@ export function BonMouvement() {
           colonnes={[
             { entete: 'N°', valeur: (l) => l.ligne_numero, numerique: true },
             {
-              entete: 'Reference',
+              entete: 'Référence',
               valeur: (l) => (
                 <>
                   <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
@@ -193,7 +193,7 @@ export function BonMouvement() {
               ),
             },
             {
-              entete: 'Quantite',
+              entete: 'Quantité',
               numerique: true,
               valeur: (l) => (
                 <>

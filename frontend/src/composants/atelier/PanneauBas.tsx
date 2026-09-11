@@ -45,7 +45,7 @@ export function PanneauBas({
   const anomalies = controles.filter((c) => c.anomalies > 0).length
 
   const onglets: { id: OngletBas; libelle: string; compte?: number }[] = [
-    { id: 'controles', libelle: 'Controles', compte: anomalies },
+    { id: 'controles', libelle: 'Contrôles', compte: anomalies },
     ...(peutAudit ? [{ id: 'journal' as const, libelle: 'Journal' }] : []),
   ]
 

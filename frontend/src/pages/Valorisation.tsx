@@ -97,7 +97,7 @@ export function Valorisation() {
     <div className="flex flex-col gap-3">
       <EnTetePage
         titre="Valorisation du stock"
-        description="CMUP par reference, et ecart au prix catalogue converti"
+        description="CMUP par référence, et ecart au prix catalogue converti"
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -106,12 +106,12 @@ export function Valorisation() {
           libelle="Valeur totale"
           valeur={`${fmt.nombre(Math.round(total.valeur))} MAD`}
         />
-        <Chiffre libelle="Quantite" valeur={`${fmt.nombre(Math.round(total.kg))} kg`} />
+        <Chiffre libelle="Quantité" valeur={`${fmt.nombre(Math.round(total.kg))} kg`} />
         <Chiffre
           libelle="Sans CMUP"
           valeur={String(total.sansCmup)}
           ton={total.sansCmup > 0 ? 'alerte' : undefined}
-          aide="Aucune reception valorisee : ces references ne comptent pas dans le total."
+          aide="Aucune reception valorisee : ces références ne comptent pas dans le total."
         />
         <Chiffre
           libelle={`Ecart superieur a ${ECART_NOTABLE} %`}
@@ -144,7 +144,7 @@ export function Valorisation() {
         <CarteCorps className="grid gap-x-8 gap-y-2 text-[12px] md:grid-cols-2">
           <div>
             <div className="text-[11px] text-attenue-texte">Methode</div>
-            <div className="font-medium">CMUP — cout moyen unitaire pondere</div>
+            <div className="font-medium">CMUP — coût moyen unitaire pondere</div>
           </div>
           <div>
             <div className="text-[11px] text-attenue-texte">Formule</div>
@@ -167,7 +167,7 @@ export function Valorisation() {
             </div>
           </div>
           <div>
-            <div className="text-[11px] text-attenue-texte">Unite</div>
+            <div className="text-[11px] text-attenue-texte">Unité</div>
             <div>
               <span className="font-medium">Kilogramme</span> — toute quantite y est ramenee a la
               saisie (regle R01)
@@ -182,7 +182,7 @@ export function Valorisation() {
 
       <BarresRangees
         titre="Ou dort la valeur"
-        sousTitre="Les references qui pesent le plus dans le stock"
+        sousTitre="Les références qui pesent le plus dans le stock"
         unite="MAD"
         donnees={visibles
           .filter((r) => (r.valeur ?? 0) > 0)
@@ -221,13 +221,13 @@ export function Valorisation() {
         <table className="grille w-full text-[12px]">
           <thead className="bg-attenue">
             <tr>
-              <th className="px-2 py-1.5 text-left font-medium">Reference</th>
+              <th className="px-2 py-1.5 text-left font-medium">Référence</th>
               <th className="px-2 py-1.5 text-left font-medium">Designation</th>
               <th className="px-2 py-1.5 text-center font-medium">ABC</th>
               <th className="px-2 py-1.5 text-right font-medium">Stock (kg)</th>
               <th className="px-2 py-1.5 text-right font-medium">CMUP (MAD)</th>
               <th className="px-2 py-1.5 text-right font-medium">Catalogue (MAD)</th>
-              <th className="px-2 py-1.5 text-right font-medium">Ecart</th>
+              <th className="px-2 py-1.5 text-right font-medium">Écart</th>
               <th className="px-2 py-1.5 text-right font-medium">Valeur (MAD)</th>
             </tr>
           </thead>

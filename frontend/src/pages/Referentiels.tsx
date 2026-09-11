@@ -83,7 +83,7 @@ const colonneCode = (champ: string, entete: string): Colonne<Ligne> => ({
 const ROLES_BOM = [
   { valeur: 'POIL', libelle: 'Poil' },
   { valeur: 'TRAME', libelle: 'Trame' },
-  { valeur: 'CHAINE', libelle: 'Chaine' },
+  { valeur: 'CHAINE', libelle: 'Chaîne' },
   { valeur: 'COLLE', libelle: 'Colle' },
   { valeur: 'CUIR', libelle: 'Cuir' },
   { valeur: 'FRANGE', libelle: 'Franges' },
@@ -94,11 +94,11 @@ const ROLES_BOM = [
 const ONGLETS: Onglet[] = [
   {
     cle: 'categories',
-    libelle: 'Categories matiere',
+    libelle: 'Catégories matiere',
     module: 'CATALOGUE',
     chemin: 'categories',
     identifiant: 'code_categorie',
-    unite: 'categorie',
+    unite: 'catégorie',
     colonnes: [
       colonneCode('code_categorie', 'Code'),
       { champ: 'libelle', entete: 'Libelle' },
@@ -203,7 +203,7 @@ const ONGLETS: Onglet[] = [
   },
   {
     cle: 'groupes-equiv',
-    libelle: 'Groupes d equivalence',
+    libelle: 'Groupes d équivalence',
     module: 'CATALOGUE',
     chemin: 'groupes-equiv',
     identifiant: 'code_groupe_equiv',
@@ -225,7 +225,7 @@ const ONGLETS: Onglet[] = [
         champ: 'description',
         libelle: 'Description',
         type: 'zone',
-        aide: 'Les references d un meme groupe sont substituables en cas de rupture.',
+        aide: 'Les références d un meme groupe sont substituables en cas de rupture.',
       },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
@@ -273,7 +273,7 @@ const ONGLETS: Onglet[] = [
       },
       { champ: 'exige_prix', libelle: 'Exige un prix', type: 'booleen' },
       { champ: 'impacte_cmup', libelle: 'Impacte le CMUP', type: 'booleen', cleCreation: true },
-      { champ: 'exige_of', libelle: 'Exige un numero d OF', type: 'booleen' },
+      { champ: 'exige_of', libelle: 'Exige un numéro d OF', type: 'booleen' },
       { champ: 'exige_motif_ligne', libelle: 'Exige un motif de ligne', type: 'booleen' },
       { champ: 'couleur', libelle: 'Couleur', aide: 'Code hexadecimal, ex. #10b981.' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
@@ -289,12 +289,12 @@ const ONGLETS: Onglet[] = [
     colonnes: [
       colonneCode('code_motif', 'Code'),
       { champ: 'libelle', entete: 'Libelle' },
-      { champ: 'categorie', entete: 'Categorie' },
+      { champ: 'categorie', entete: 'Catégorie' },
     ],
     champs: [
       { champ: 'code_motif', libelle: 'Code', obligatoire: true, cleCreation: true },
       { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
-      { champ: 'categorie', libelle: 'Categorie', obligatoire: true },
+      { champ: 'categorie', libelle: 'Catégorie', obligatoire: true },
       {
         champ: 'signe_default',
         libelle: 'Sens habituel',
@@ -320,12 +320,12 @@ const ONGLETS: Onglet[] = [
     colonnes: [
       colonneCode('code_motif_ligne', 'Code'),
       { champ: 'libelle', entete: 'Libelle' },
-      { champ: 'categorie', entete: 'Categorie' },
+      { champ: 'categorie', entete: 'Catégorie' },
     ],
     champs: [
       { champ: 'code_motif_ligne', libelle: 'Code', obligatoire: true, cleCreation: true },
       { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
-      { champ: 'categorie', libelle: 'Categorie' },
+      { champ: 'categorie', libelle: 'Catégorie' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },
@@ -549,8 +549,8 @@ function MachineEtats() {
         refusera au moment du changement.
       </Alerte>
 
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div className="min-w-52">
+      <div className="grid grid-cols-2 items-end gap-2 lg:flex lg:flex-wrap lg:justify-between">
+        <div className="col-span-2 lg:col-span-1 lg:min-w-52">
           <Etiq htmlFor="ent">Entite</Etiq>
           <Selecteur id="ent" value={entite} onChange={(e) => setEntite(e.target.value)}>
             <option value="">Toutes ({q.data?.length ?? 0} transitions)</option>
@@ -676,7 +676,7 @@ function AjoutTransition({
       toast.success('Transition ouverte')
       surSucces()
     },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Creation impossible.'),
+    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Création impossible.'),
   })
 
   const pret = f.entite && f.statut_source.trim() && f.statut_cible.trim()
@@ -733,7 +733,7 @@ function AjoutTransition({
               id="r"
               value={f.role_requis}
               onChange={(e) => setF({ ...f, role_requis: e.target.value })}
-              placeholder="Vide : tout role autorise"
+              placeholder="Vide : tout role autorisé"
             />
           </div>
           <div>

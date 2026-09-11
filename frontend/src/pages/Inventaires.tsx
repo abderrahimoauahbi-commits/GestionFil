@@ -56,12 +56,12 @@ interface Inventaire extends Record<string, unknown> {
 /* Des axes que l'on choisit, pas de comparateur a saisir : les valeurs
    des listes sortent des lignes affichees. */
 const CHAMPS_INVENTAIRE: ChampFiltre<Inventaire>[] = [
-  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (l) => l.date_inventaire },
+  { cle: 'periode', libelle: 'Période', type: 'periode', valeur: (l) => l.date_inventaire },
   { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
   { cle: 'magasin', libelle: 'Magasin', type: 'liste', valeur: (l) => l.code_magasin },
   { cle: 'type', libelle: "Type d'inventaire", type: 'liste', valeur: (l) => l.type_inventaire },
   { cle: 'responsable', libelle: 'Responsable', type: 'liste', valeur: (l) => l.responsable },
-  { cle: 'numero', libelle: 'Numero', type: 'texte', valeur: (l) => l.numero_inventaire },
+  { cle: 'numero', libelle: 'Numéro', type: 'texte', valeur: (l) => l.numero_inventaire },
 ]
 
 interface LigneInv extends Record<string, unknown> {
@@ -115,7 +115,7 @@ export function Inventaires() {
     void qc.invalidateQueries({ queryKey: ['lignes-inventaire'] })
   }
   const echec = (e: unknown) =>
-    toast.error(e instanceof ErreurApi ? e.message : 'Operation impossible.')
+    toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
   const ouvrir = useMutation({
     mutationFn: (id: string) =>
@@ -177,7 +177,7 @@ export function Inventaires() {
   const colonnesInv: ColonneDT<Inventaire>[] = [
     {
       champ: 'numero_inventaire',
-      entete: 'Numero',
+      entete: 'Numéro',
       rendu: (i) => <span className="font-mono text-xs">{i.numero_inventaire}</span>,
     },
     { champ: 'date_inventaire', entete: 'Date', rendu: (i) => fmt.date(i.date_inventaire) },
@@ -200,7 +200,7 @@ export function Inventaires() {
   const colonnesLignes: ColonneDT<LigneInv>[] = [
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-medium">{l.code_reference}</div>
@@ -248,7 +248,7 @@ export function Inventaires() {
     },
     {
       champ: 'ecart_kg',
-      entete: 'Ecart (kg)',
+      entete: 'Écart (kg)',
       numerique: true,
       rendu: (l) =>
         l.ecart_kg == null ? (
@@ -267,7 +267,7 @@ export function Inventaires() {
     },
     {
       champ: 'ecart_pct',
-      entete: 'Ecart (%)',
+      entete: 'Écart (%)',
       numerique: true,
       rendu: (l) =>
         l.ecart_pct == null ? (
@@ -340,7 +340,7 @@ export function Inventaires() {
         },
         {
           cle: 'CLOTURE',
-          libelle: 'Cloture',
+          libelle: 'Clôture',
           resume: 'Ajustements generes',
           compte: comptes.CLOTURE ?? 0,
           ton: 'succes' as const,
@@ -359,7 +359,7 @@ export function Inventaires() {
     <div>
       <EnTetePage
         titre="Inventaires"
-        description="La cloture genere automatiquement les mouvements d'ajustement, dans une seule transaction."
+        description="La clôture genere automatiquement les mouvements d'ajustement, dans une seule transaction."
         actions={
           droits.peutEcrire && (
             <Bouton taille="icone" title="Nouvel inventaire" aria-label="Nouvel inventaire" onClick={() => setCreation(true)}>              <Plus />            </Bouton>
@@ -487,7 +487,7 @@ export function Inventaires() {
               chargement={qLignes.isLoading}
               cle={(l) => l.id_ligne_inv}
               titreCarte={(l) => l.code_reference}
-              placeholderRecherche="Chercher une reference..."
+              placeholderRecherche="Chercher une référence..."
               tailleParDefaut={50}
               videTitre="Aucune ligne"
               videDescription="Ouvrez l'inventaire pour figer le stock theorique."
@@ -541,7 +541,7 @@ function FormulaireInventaire({
       toast.success(`Inventaire ${r.numero_inventaire} cree.`)
       surSucces(r.id_inventaire)
     },
-    onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Creation impossible.'),
+    onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Création impossible.'),
   })
 
   return (
@@ -584,7 +584,7 @@ function FormulaireInventaire({
             >
               <option value="GLOBAL">Global — tout le magasin</option>
               <option value="TOURNANT">Tournant — par rotation</option>
-              <option value="CIBLE">Cible — references choisies</option>
+              <option value="CIBLE">Cible — références choisies</option>
             </Selecteur>
           </div>
           {erreur && <Alerte ton="danger">{erreur}</Alerte>}

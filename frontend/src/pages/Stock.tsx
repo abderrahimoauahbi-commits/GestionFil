@@ -191,7 +191,7 @@ const STATUTS = [
   {
     cle: 'RUPTURE',
     libelle: 'Rupture',
-    resume: 'Projete a zero ou negatif',
+    resume: 'Projeté a zero ou negatif',
     Icone: PackageX,
     ton: 'danger' as const,
   },
@@ -231,7 +231,7 @@ const CHAMPS_FILTRABLES: ChampFiltre<LigneProjete>[] = [
   { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
   { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', valeur: (l) => l.fournisseur_nom },
   { cle: 'classe', libelle: 'Classe ABC', type: 'liste', valeur: (l) => l.classe_abc },
-  { cle: 'reference', libelle: 'Reference', type: 'texte', valeur: (l) => l.code_reference },
+  { cle: 'reference', libelle: 'Référence', type: 'texte', valeur: (l) => l.code_reference },
 ]
 
 /**
@@ -354,7 +354,7 @@ export function Stock() {
       entrees: [
         {
           cle: '',
-          libelle: 'Toutes les references',
+          libelle: 'Toutes les références',
           resume: 'Sans filtre',
           Icone: Layers,
           compte: toutes.length,
@@ -395,7 +395,7 @@ export function Stock() {
   const colonnes: Colonne<LigneProjete>[] = [
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       rendu: (l) => <span className="font-medium text-texte">{l.code_reference}</span>,
     },
     {
@@ -411,7 +411,7 @@ export function Stock() {
             <div className="flex flex-wrap items-center gap-1">
               <Etiquette ton={TON[l.statut] ?? 'neutre'}>{l.statut}</Etiquette>
               {l.sur_stock === 1 && <Etiquette ton="neutre">sur-stock</Etiquette>}
-              {l.ecart_majeur === 1 && <Etiquette ton="ambre">ecart a verifier</Etiquette>}
+              {l.ecart_majeur === 1 && <Etiquette ton="ambre">ecart a vérifier</Etiquette>}
             </div>
             {motif && <div className="text-[11px] text-attenue-texte">{motif}</div>}
           </div>
@@ -426,7 +426,7 @@ export function Stock() {
     },
     {
       champ: 'stock_projete_kg',
-      entete: 'Projete (kg)',
+      entete: 'Projeté (kg)',
       numerique: true,
       rendu: (l) => (
         <span className={l.stock_projete_kg < 0 ? 'font-medium text-red-600' : ''}>
@@ -519,14 +519,14 @@ export function Stock() {
     },
     {
       champ: 'delai_livraison_jours',
-      entete: 'Delai (j)',
+      entete: 'Délai (j)',
       numerique: true,
       secondaire: true,
       rendu: (l) => l.delai_livraison_jours ?? '—',
     },
     {
       champ: 'unite_catalogue',
-      entete: 'Unite',
+      entete: 'Unité',
       secondaire: true,
       rendu: (l) => fmt.texte(l.unite_catalogue),
     },
@@ -563,7 +563,7 @@ export function Stock() {
     },
     {
       champ: 'date_derniere_sortie',
-      entete: 'Derniere sortie',
+      entete: 'Dernière sortie',
       secondaire: true,
       rendu: (l) => fmt.date(l.date_derniere_sortie),
     },
@@ -572,7 +572,7 @@ export function Stock() {
   return (
     <div>
       <EnTetePage
-        titre="Stock projete"
+        titre="Stock projeté"
         sous_titre="Stock disponible + en-cours fournisseur − besoins sur 12 mois"
       />
 
@@ -587,7 +587,7 @@ export function Stock() {
               recherche={{
                 valeur: recherche,
                 surChangement: setRecherche,
-                placeholder: 'Reference, fournisseur…',
+                placeholder: 'Référence, fournisseur…',
               }}
             />
             <PanneauFiltres
@@ -608,7 +608,7 @@ export function Stock() {
         )}
         <TableDroits
           exportable="etat-des-stocks"
-          imprimable="Etat des stocks"
+          imprimable="État des stocks"
           module={MODULE}
           menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
           colonnes={colonnes}

@@ -53,7 +53,7 @@ export function Fournisseurs() {
     { champ: 'email', entete: 'Email', rendu: (f) => fmt.texte(f.email), secondaire: true },
     {
       champ: 'delai_livraison_jours',
-      entete: 'Delai',
+      entete: 'Délai',
       numerique: true,
       rendu: (f) => (f.delai_livraison_jours == null ? '—' : `${f.delai_livraison_jours} j`),
     },
@@ -65,7 +65,7 @@ export function Fournisseurs() {
     { champ: 'code_devise', entete: 'Devise', rendu: (f) => fmt.texte(f.code_devise) },
     {
       champ: 'nb_references',
-      entete: 'References',
+      entete: 'Références',
       numerique: true,
       rendu: (f) => <Etiquette>{f.nb_references}</Etiquette>,
     },
@@ -88,7 +88,7 @@ export function Fournisseurs() {
     { champ: 'adresse', libelle: 'Adresse', type: 'zone', pleineLargeur: true },
     {
       champ: 'delai_livraison_jours',
-      libelle: 'Delai de livraison (jours)',
+      libelle: 'Délai de livraison (jours)',
       type: 'entier',
       min: 1,
       aide: 'Entre dans le calcul du stock minimum dynamique (formule F3).',
@@ -96,7 +96,7 @@ export function Fournisseurs() {
     { champ: 'conditions_paiement', libelle: 'Conditions de paiement' },
     {
       champ: 'delai_paiement_jours',
-      libelle: 'Delai de paiement (jours)',
+      libelle: 'Délai de paiement (jours)',
       type: 'entier',
       aide: 'Alimente le DPO du cockpit.',
     },

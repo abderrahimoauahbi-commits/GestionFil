@@ -59,10 +59,10 @@ interface LigneAbc {
 type Rapport = 'synthese' | 'abc' | 'fournisseurs' | 'mensuel'
 
 const RAPPORTS: { cle: Rapport; libelle: string; resume: string }[] = [
-  { cle: 'synthese', libelle: 'Synthese patrimoniale', resume: 'Valeur du stock, cout matiere, cycle de tresorerie' },
-  { cle: 'abc', libelle: 'Concentration de la valeur', resume: 'Repartition par classe ABC et poids des references' },
+  { cle: 'synthese', libelle: 'Synthese patrimoniale', resume: 'Valeur du stock, coût matiere, cycle de tresorerie' },
+  { cle: 'abc', libelle: 'Concentration de la valeur', resume: 'Répartition par classe ABC et poids des références' },
   { cle: 'fournisseurs', libelle: 'Engagement par fournisseur', resume: 'Budget annuel et dependance' },
-  { cle: 'mensuel', libelle: 'Cout matiere mensuel', resume: 'Ce que le plan engage, mois par mois' },
+  { cle: 'mensuel', libelle: 'Coût matiere mensuel', resume: 'Ce que le plan engage, mois par mois' },
 ]
 
 function Chiffre({
@@ -153,7 +153,7 @@ export function RapportsFinanciers() {
     <div>
       <EnTetePage
         titre="Rapports financiers"
-        sous_titre="Les chiffres matiere de l ERP — ni balance, ni compte de resultat"
+        sous_titre="Les chiffres matiere de l ERP — ni balance, ni compte de résultat"
         actions={
           <>
             <Selecteur
@@ -182,12 +182,12 @@ export function RapportsFinanciers() {
           <>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Chiffre
-                libelle="Stock immobilise"
+                libelle="Stock immobilisé"
                 valeur={fmt.nombre(t.valeur_stock_mad / 1e6, 2)}
                 unite="M MAD"
               />
               <Chiffre
-                libelle="Cout matiere annuel"
+                libelle="Coût matiere annuel"
                 valeur={fmt.nombre(t.cout_matiere_annuel_mad / 1e6, 2)}
                 unite="M MAD"
                 aide="Besoin du plan en service, valorise au CMUP."
@@ -229,10 +229,10 @@ export function RapportsFinanciers() {
                 <thead>
                   <tr className="bg-attenue">
                     <th className="px-2.5 py-1.5 text-left font-semibold">Classe</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">References</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Références</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Consommation annuelle</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Part conso</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Stock immobilise</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Stock immobilisé</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Part stock</th>
                   </tr>
                 </thead>
@@ -279,7 +279,7 @@ export function RapportsFinanciers() {
                 <thead>
                   <tr className="bg-attenue">
                     <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">References</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Références</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Budget annuel</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Part</th>
                   </tr>
@@ -335,8 +335,8 @@ export function RapportsFinanciers() {
                 <thead>
                   <tr className="bg-attenue">
                     <th className="px-2.5 py-1.5 text-left font-semibold">Mois</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Quantite (kg)</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Cout (MAD)</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Quantité (kg)</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Coût (MAD)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -375,30 +375,30 @@ export function RapportsFinanciers() {
               if (rapport === 'abc') {
                 exporterCsv('rapport-classes', [
                   { champ: 'classe', entete: 'Classe' },
-                  { champ: 'n', entete: 'References', numerique: true },
+                  { champ: 'n', entete: 'Références', numerique: true },
                   { champ: 'conso', entete: 'Consommation annuelle MAD', numerique: true },
                   { champ: 'stock', entete: 'Stock immobilise MAD', numerique: true },
                 ], parClasse.map(([k, c]) => ({ classe: k, ...c })))
               } else if (rapport === 'fournisseurs' && d) {
                 exporterCsv('rapport-fournisseurs', [
                   { champ: 'fournisseur_nom', entete: 'Fournisseur' },
-                  { champ: 'nb_references', entete: 'References', numerique: true },
+                  { champ: 'nb_references', entete: 'Références', numerique: true },
                   { champ: 'budget_annuel_mad', entete: 'Budget annuel MAD', numerique: true },
                 ], d.fournisseurs)
               } else if (rapport === 'mensuel' && d) {
                 exporterCsv('rapport-cout-mensuel', [
                   { champ: 'annee_mois', entete: 'Mois' },
-                  { champ: 'quantite_kg', entete: 'Quantite kg', numerique: true },
-                  { champ: 'cout_mad', entete: 'Cout MAD', numerique: true },
+                  { champ: 'quantite_kg', entete: 'Quantité kg', numerique: true },
+                  { champ: 'cout_mad', entete: 'Coût MAD', numerique: true },
                 ], d.cout_mensuel)
               } else if (t) {
                 exporterCsv('rapport-synthese', [
                   { champ: 'indicateur', entete: 'Indicateur' },
                   { champ: 'valeur', entete: 'Valeur', numerique: true },
-                  { champ: 'unite', entete: 'Unite' },
+                  { champ: 'unite', entete: 'Unité' },
                 ], [
                   { indicateur: 'Stock immobilise', valeur: t.valeur_stock_mad, unite: 'MAD' },
-                  { indicateur: 'Cout matiere annuel', valeur: t.cout_matiere_annuel_mad, unite: 'MAD' },
+                  { indicateur: 'Coût matière annuel', valeur: t.cout_matiere_annuel_mad, unite: 'MAD' },
                   { indicateur: 'Rotation du stock', valeur: t.rotation_annuelle, unite: 'fois/an' },
                   { indicateur: 'DIO', valeur: t.dio_jours, unite: 'jours' },
                   { indicateur: 'DSO (parametre)', valeur: t.dso_jours, unite: 'jours' },
@@ -449,7 +449,7 @@ export function RapportsFinanciers() {
           <TableEtat<[string, { n: number; conso: number; stock: number }]>
             colonnes={[
               { entete: 'Classe', valeur: ([k]) => (k === '?' ? 'Non classees' : k) },
-              { entete: 'References', numerique: true, valeur: ([, c]) => c.n },
+              { entete: 'Références', numerique: true, valeur: ([, c]) => c.n },
               { entete: 'Conso annuelle', numerique: true, valeur: ([, c]) => fmt.nombre(c.conso, 0) },
               { entete: 'Stock', numerique: true, valeur: ([, c]) => fmt.nombre(c.stock, 0) },
             ]}
@@ -464,7 +464,7 @@ export function RapportsFinanciers() {
               <TableEtat<(typeof d.fournisseurs)[number]>
                 colonnes={[
                   { entete: 'Fournisseur', valeur: (f) => f.fournisseur_nom },
-                  { entete: 'References', numerique: true, valeur: (f) => f.nb_references },
+                  { entete: 'Références', numerique: true, valeur: (f) => f.nb_references },
                   {
                     entete: 'Budget annuel MAD',
                     numerique: true,
@@ -480,8 +480,8 @@ export function RapportsFinanciers() {
               <TableEtat<(typeof d.cout_mensuel)[number]>
                 colonnes={[
                   { entete: 'Mois', valeur: (m) => m.annee_mois },
-                  { entete: 'Quantite kg', numerique: true, valeur: (m) => fmt.nombre(m.quantite_kg, 0) },
-                  { entete: 'Cout MAD', numerique: true, valeur: (m) => fmt.nombre(m.cout_mad, 0) },
+                  { entete: 'Quantité kg', numerique: true, valeur: (m) => fmt.nombre(m.quantite_kg, 0) },
+                  { entete: 'Coût MAD', numerique: true, valeur: (m) => fmt.nombre(m.cout_mad, 0) },
                 ]}
                 lignes={d.cout_mensuel}
               />

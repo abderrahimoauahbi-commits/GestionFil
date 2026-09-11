@@ -72,7 +72,7 @@ export function SelecteurPeriode({
           onChange={(e) => surChangement({ ...valeur, debut: e.target.value || null })}
           className={CLASSE}
         >
-          <option value="">Debut du plan</option>
+          <option value="">Début du plan</option>
           {mois.map((m) => (
             <option key={m} value={m}>
               {libelleMois(m)}

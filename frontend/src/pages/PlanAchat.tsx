@@ -314,7 +314,7 @@ export function PlanAchat() {
       })
       await rafraichir()
     },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Operation impossible.'),
+    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.'),
   })
 
   const ignorer = useMutation({
@@ -453,7 +453,7 @@ export function PlanAchat() {
     },
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       filtre: 'texte',
       rendu: (p) => (
         <div className="min-w-0">
@@ -564,7 +564,7 @@ export function PlanAchat() {
                 le calcul ne demande plus rien sur cette reference
               </div>
             ) : p.etat_figement === 'REFERENCE_INACTIVE' ? (
-              <div className="text-[11px] text-danger">reference desactivee au catalogue</div>
+              <div className="text-[11px] text-danger">référence desactivee au catalogue</div>
             ) : (
               p.ecart_calcul_kg != null &&
               Math.abs(p.ecart_calcul_kg) > 0.001 && (
@@ -645,7 +645,7 @@ export function PlanAchat() {
               Situation du stock
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
-              <span className="text-attenue-texte">References en alerte</span>
+              <span className="text-attenue-texte">Références en alerte</span>
               <span className="text-right font-semibold tabular-nums">{kpi.refs_en_alerte}</span>
               <span className="text-danger">Ruptures</span>
               <span className="text-right font-semibold tabular-nums text-danger">{kpi.ruptures}</span>
@@ -667,9 +667,9 @@ export function PlanAchat() {
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
               <span className="text-attenue-texte">Budget total</span>
               <span className="text-right font-semibold tabular-nums">{fmt.mad(kpi.budget_mad)}</span>
-              <span className="text-attenue-texte">Quantite totale</span>
+              <span className="text-attenue-texte">Quantité totale</span>
               <span className="text-right tabular-nums">{fmt.nombre(kpi.quantite_kg, 0)} kg</span>
-              <span className="text-attenue-texte">References</span>
+              <span className="text-attenue-texte">Références</span>
               <span className="text-right tabular-nums">{kpi.refs_a_commander}</span>
             </div>
             <div className="mt-2 border-t border-bordure pt-2">
@@ -684,7 +684,7 @@ export function PlanAchat() {
                   </Fragment>
                 ))}
                 {(qKpi.data?.tiering ?? []).length === 0 && (
-                  <span className="col-span-2 text-attenue-texte">Aucune reference a commander.</span>
+                  <span className="col-span-2 text-attenue-texte">Aucune référence a commander.</span>
                 )}
               </div>
             </div>
@@ -715,7 +715,7 @@ export function PlanAchat() {
       {(qKpi.data?.fournisseurs ?? []).length > 0 && (
         <Carte className="mb-4">
           <CarteEntete>
-            <CarteTitre>Repartition par fournisseur</CarteTitre>
+            <CarteTitre>Répartition par fournisseur</CarteTitre>
             <span className="text-[11px] text-attenue-texte">
               classee par budget · un bon de commande sera cree par fournisseur
             </span>
@@ -842,7 +842,7 @@ export function PlanAchat() {
         chargement={q.isLoading}
         cle={(p) => p.id_proposition}
         titreCarte={(p) => p.code_reference}
-        placeholderRecherche="Reference, fournisseur, urgence..."
+        placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
         videTitre="Aucune proposition"
         videDescription="Le stock projete couvre les besoins, ou le MRP n'a pas encore ete calcule."
@@ -992,7 +992,7 @@ function PanneauEquivalent({
         titre={`Equivalents de ${proposition.code_reference}`}
         description={`Besoin a couvrir : ${fmt.nombre(proposition.quantite_suggeree_kg, 0)} kg`}
       >
-        {q.isLoading && <Chargement texte="Lecture du groupe d equivalence…" />}
+        {q.isLoading && <Chargement texte="Lecture du groupe d équivalence…" />}
 
         {!q.isLoading && equivalents.length === 0 && (
           <Alerte ton="info">
@@ -1085,7 +1085,7 @@ function PanneauEquivalent({
               id="motif"
               value={motif}
               onChange={(ev) => setMotif(ev.target.value)}
-              placeholder="Stock dormant, delai plus court, rupture chez le fournisseur…"
+              placeholder="Stock dormant, délai plus court, rupture chez le fournisseur…"
             />
             <p className="mt-1 text-[11px] text-attenue-texte">
               Le besoin sera reporte sur {retenu.equivalent_reference}, et{' '}

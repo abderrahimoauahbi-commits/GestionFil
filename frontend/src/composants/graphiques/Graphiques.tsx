@@ -498,7 +498,7 @@ export function Pareto({
       sousTitre={sousTitre}
       series={[
         { cle: 'valeur', libelle: 'Valeur consommee' },
-        { cle: 'cumul', libelle: 'Part cumulee' },
+        { cle: 'cumul', libelle: 'Part cumulée' },
       ]}
       vueTableau={tableau}
       basculer={() => setTableau((v) => !v)}
@@ -506,7 +506,7 @@ export function Pareto({
         <table className="w-full text-[11px]">
           <thead>
             <tr className="text-attenue-texte">
-              <th className="py-1 text-left font-medium">Reference</th>
+              <th className="py-1 text-left font-medium">Référence</th>
               <th className="py-1 text-right font-medium">Valeur</th>
               <th className="py-1 text-right font-medium">Cumul</th>
               <th className="py-1 text-right font-medium">Classe</th>

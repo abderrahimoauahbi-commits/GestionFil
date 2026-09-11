@@ -18,46 +18,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Bot,
-  Download,
-  Link2,
-  BarChart3,
-  Bell,
-  Boxes,
-  Calculator,
-  ChevronDown,
-  ClipboardList,
-  Factory,
-  FileText,
-  Gauge,
-  Grid3x3,
-  LayoutGrid,
-  KeyRound,
-  LogOut,
-  Menu as MenuIcone,
-  Monitor,
-  Moon,
-  Package,
-  Palette,
-  PackageSearch,
-  ShieldAlert,
-  ShoppingCart,
-  Sun,
-  Cog,
-  Truck,
-  Coins,
-  FileSpreadsheet,
-  Library,
-  Receipt,
-  Ship,
-  SlidersHorizontal,
-  Layers,
-  ShieldCheck,
-  Sparkles,
-  TrendingUp,
-  Undo2,
-  Warehouse,
-  type LucideIcon,
+  ArrowLeftRight, BarChart3, Bell, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -123,13 +84,13 @@ export const MODULES: {
   resume: string
   Icone: LucideIcon
 }[] = [
-  { id: 'GENERAL',    libelle: 'General',    resume: 'Tableau de bord, statistiques, entreprise', Icone: Gauge },
-  { id: 'CATALOGUE',  libelle: 'Catalogue',  resume: 'References, equivalences, fournisseurs',    Icone: Package },
-  { id: 'PRODUCTION', libelle: 'Production', resume: 'Qualites, recettes, plans, besoins',        Icone: Factory },
-  { id: 'ACHATS',     libelle: 'Achats',     resume: "Plan d'achat, commandes, receptions",       Icone: ShoppingCart },
-  { id: 'STOCK',      libelle: 'Stock',      resume: 'Etat, mouvements, transferts, inventaires', Icone: Boxes },
+  { id: 'GENERAL',    libelle: 'Général',    resume: 'Tableau de bord, statistiques, entreprise', Icone: Gauge },
+  { id: 'CATALOGUE',  libelle: 'Catalogue',  resume: 'Références, équivalences, fournisseurs',    Icone: Package },
+  { id: 'PRODUCTION', libelle: 'Production', resume: 'Qualités, recettes, plans, besoins',        Icone: Factory },
+  { id: 'ACHATS',     libelle: 'Achats',     resume: "Plan d'achat, commandes, réceptions",       Icone: ShoppingCart },
+  { id: 'STOCK',      libelle: 'Stock',      resume: 'État, mouvements, transferts, inventaires', Icone: Boxes },
   { id: 'FINANCE',    libelle: 'Finance',    resume: 'Valorisation, classification, rapports',    Icone: Coins },
-  { id: 'PARAMETRES', libelle: 'Parametres', resume: 'Apparence, entreprise, droits, sauvegardes', Icone: SlidersHorizontal },
+  { id: 'PARAMETRES', libelle: 'Paramètres', resume: 'Apparence, entreprise, droits, sauvegardes', Icone: SlidersHorizontal },
 ]
 
 export interface EntreeNav {
@@ -142,6 +103,9 @@ export interface EntreeNav {
   section: Section
   /** Presente dans la barre du bas sur mobile. */
   principale?: boolean
+  /** Une ligne disant CE QU'ON Y FAIT. Affichee sur l'accueil, sous le nom :
+      « Mouvements » n'apprend rien a qui ne connait pas encore l'outil. */
+  resume?: string
   /** Ecran declare mais pas encore construit : affiche grise, non ouvrable. */
   aVenir?: string
   /**
@@ -163,6 +127,10 @@ export function estAccessible(
   peut: (module: string, action: 'LIRE') => boolean,
   role: string | undefined,
 ): boolean {
+  /* UN MODULE VIDE VEUT DIRE « OUVERT A TOUS ». L'accueil n'appartient a aucun
+     module : il ne montre que les ecrans auxquels celui qui regarde a deja
+     droit, et le lui fermer reviendrait a le laisser sans porte de sortie. */
+  if (entree.module === '') return true
   if (!peut(entree.module, 'LIRE')) return false
   if (entree.roles && !entree.roles.includes(role ?? '')) return false
   return true
@@ -170,16 +138,18 @@ export function estAccessible(
 
 export const NAVIGATION: EntreeNav[] = [
   /* --- 1. General -------------------------------------------------------- */
-  { vers: '/', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', principale: true },
+  { vers: '/', libelle: 'Accueil', module: '', Icone: Home, section: 'GENERAL', principale: true },
+  { vers: '/tableau-de-bord', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', resume: 'Indicateurs, alertes et mur de risques', principale: true },
   { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'GENERAL' },
   // La coherence est un ecran de pilotage, pas d'administration : c'est la
   // direction et l'assistante qui corrigent les anomalies, pas l'informaticien.
-  { vers: '/controles', libelle: 'Controles de coherence', module: 'COCKPIT', Icone: ShieldCheck, section: 'GENERAL' },
+  { vers: '/controles', libelle: 'Contrôles de cohérence', module: 'COCKPIT', Icone: ShieldCheck, section: 'GENERAL' },
   /* LE CHATBOT EST OUVERT A TOUS, l'ancien assistant reste a la Direction.
      Le premier n'expose que les competences que le role de l'appelant autorise
      deja, chacune verifiee module par module ; le second lit des vues
      consolidees sans ce filtre, d'ou sa restriction. */
   { vers: '/chat', libelle: 'Assistant', module: 'COCKPIT', Icone: Bot, section: 'GENERAL',
+    resume: 'Poser une question sur le stock et les achats',
     principale: true },
   {
     vers: '/assistant',
@@ -192,25 +162,25 @@ export const NAVIGATION: EntreeNav[] = [
 
 
   /* --- 2. Catalogue ------------------------------------------------------ */
-  { vers: '/catalogue', libelle: 'References', module: 'CATALOGUE', Icone: Package, section: 'CATALOGUE', principale: true },
-  { vers: '/equivalences', libelle: 'Equivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
+  { vers: '/catalogue', libelle: 'Références', module: 'CATALOGUE', Icone: Boxes, section: 'CATALOGUE', resume: 'Les références, leurs prix et leur stock', principale: true },
+  { vers: '/equivalences', libelle: 'Équivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
   { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'CATALOGUE' },
   // Categories et roles BOM decrivent le PRODUIT : ils quittent l'administration
   // pour rejoindre ce qu'ils qualifient. Chacun ouvre l'ecran des referentiels
   // reduit a son seul onglet — meme code, meme CRUD, pas de doublon.
-  { vers: '/categories', libelle: 'Categories matiere', module: 'CATALOGUE', Icone: Library, section: 'CATALOGUE' },
-  { vers: '/roles-bom', libelle: 'Roles BOM', module: 'CATALOGUE', Icone: Layers, section: 'CATALOGUE' },
+  { vers: '/categories', libelle: 'Catégories matière', module: 'CATALOGUE', Icone: Shapes, section: 'CATALOGUE' },
+  { vers: '/roles-bom', libelle: 'Rôles BOM', module: 'CATALOGUE', Icone: Layers, section: 'CATALOGUE' },
 
   /* --- 3. Production & MRP ----------------------------------------------- */
-  { vers: '/qualites', libelle: 'Qualites', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
+  { vers: '/qualites', libelle: 'Qualités', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
   { vers: '/recettes', libelle: 'Recettes (BOM)', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
   { vers: '/plans', libelle: 'Plan de production', module: 'PLANS', Icone: LayoutGrid, section: 'PRODUCTION' },
-  { vers: '/besoins', libelle: 'Besoins (MRP)', module: 'MRP', Icone: Calculator, section: 'PRODUCTION', principale: true },
+  { vers: '/besoins', libelle: 'Besoins (MRP)', module: 'MRP', Icone: Calculator, section: 'PRODUCTION', resume: 'Ce qu’il faut acheter, et quand', principale: true },
   { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'PRODUCTION' },
 
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
-  { vers: '/receptions', libelle: 'Receptions', module: 'RECEPTIONS', Icone: Package, section: 'ACHATS', principale: true },
+  { vers: '/receptions', libelle: 'Réceptions', module: 'RECEPTIONS', Icone: PackageCheck, section: 'ACHATS', resume: 'Peser et enregistrer ce qui arrive', principale: true },
   {
     vers: '/historique-prix',
     libelle: 'Historique des prix',
@@ -239,14 +209,14 @@ export const NAVIGATION: EntreeNav[] = [
   },
 
   /* --- 5. Stock & mouvements --------------------------------------------- */
-  { vers: '/etat-stock', libelle: 'Etat des stocks', module: 'STOCK', Icone: Warehouse, section: 'STOCK', principale: true },
-  { vers: '/stock', libelle: 'Stock projete & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
-  { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: Boxes, section: 'STOCK', principale: true },
+  { vers: '/etat-stock', libelle: 'État des stocks', module: 'STOCK', Icone: Warehouse, section: 'STOCK', resume: 'Ce que chaque magasin porte, en kilos', principale: true },
+  { vers: '/stock', libelle: 'Stock projeté & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
+  { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: ArrowLeftRight, section: 'STOCK', resume: 'Entrées, sorties, transferts', principale: true },
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
   // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :
   // chaque etage est un magasin, et rien ici n'est un registre a part.
-  { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'STOCK', principale: true },
-  { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardList, section: 'STOCK' },
+  { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'STOCK', resume: 'Charger, décharger, constater les métiers', principale: true },
+  { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardCheck, section: 'STOCK' },
 
   /* --- 6. Finance & valorisation ----------------------------------------- */
   { vers: '/valorisation', libelle: 'Valorisation (CMUP)', module: 'VALORISATION', Icone: Coins, section: 'FINANCE' },
@@ -259,7 +229,7 @@ export const NAVIGATION: EntreeNav[] = [
   },
   {
     vers: '/landed-cost',
-    libelle: 'Cout de revient complet',
+    libelle: 'Coût de revient complet',
     module: 'VALORISATION',
     Icone: Ship,
     section: 'FINANCE',
@@ -279,13 +249,14 @@ export const NAVIGATION: EntreeNav[] = [
      quand quelque chose doit changer. Les ranger avec le pilotage les mettait
      au meme rang que le plan d'achat, ce qu'ils ne sont pas. La barre les
      place donc en pied, separes du reste par un filet. */
-  { vers: '/configuration', libelle: 'Parametres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'PARAMETRES' },
+  { vers: '/parc-machines', libelle: 'Parc machines', module: 'PARAMETRES', Icone: Cog, section: 'PARAMETRES' },
+  { vers: '/configuration', libelle: 'Paramètres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'PARAMETRES' },
   /* L'ecran de telechargement est ouvert a TOUS les comptes, pas au seul
      administrateur : celui qui doit reinstaller son poste est celui qui s'en
      sert dessus. Il est rattache au module COCKPIT, que tout le monde lit,
      precisement pour cela. Le JOURNAL qu'il affiche, lui, reste reserve a
      PARAMETRES — c'est l'ecran qui le masque, et le serveur qui le refuse. */
-  { vers: '/telecharger', libelle: 'Telecharger l application', module: 'COCKPIT', Icone: Download, section: 'PARAMETRES' },
+  { vers: '/telecharger', libelle: 'Télécharger l application', module: 'COCKPIT', Icone: Download, section: 'PARAMETRES' },
 ]
 
 /** Sections dans l'ordre du rail. */
@@ -394,7 +365,23 @@ export function Coquille() {
 
 
   return (
-    <div className="flex h-full bg-fond">
+    <div
+      className="flex h-full bg-fond"
+      /* LA HAUTEUR DE LA BARRE DU BAS, PUBLIEE POUR LES AUTRES.
+         Une barre d'action figee en bas d'un tableau se collerait sinon au bord
+         de l'ecran — c'est-a-dire DERRIERE la navigation du telephone, ou elle
+         est parfaitement invisible. On donne donc la mesure une fois, ici, la
+         ou l'on sait si la barre existe, plutot que de recopier « 4rem » dans
+         chaque ecran en esperant que personne ne la deplace. */
+      style={
+        {
+          '--barre-basse':
+            principales.length > 1
+              ? 'calc(4rem + var(--marge-sure-bas))'
+              : 'var(--marge-sure-bas)',
+        } as React.CSSProperties
+      }
+    >
       {/* La navigation passe en COLONNE. Sept modules et vingt-neuf ecrans ne
           tiennent pas sur une ligne : la barre du haut les repliait en menus
           deroulants, et il fallait deux clics et une memoire du rangement pour
@@ -502,7 +489,7 @@ export function Coquille() {
             </button>
           </MenuDeclencheur>
           <MenuContenu className="w-80">
-            <MenuTitre>Controles de coherence</MenuTitre>
+            <MenuTitre>Contrôles de cohérence</MenuTitre>
             {alertes.length === 0 ? (
               <div className="px-2 py-3 text-center text-[12px] text-attenue-texte">
                 {qControles.isLoading ? 'Verification...' : 'Aucune anomalie detectee.'}
@@ -511,7 +498,11 @@ export function Coquille() {
               <div className="max-h-80 overflow-y-auto">
                 {alertes.map((c) => (
                   <MenuElement key={c.code} asChild>
-                    <Link to="/">
+                    {/* VERS LES CONTROLES, PAS VERS L'ACCUEIL. Ce lien visait
+                        « / » du temps ou le tableau de bord y logeait ; depuis
+                        que l'accueil a pris cette adresse, cliquer une alerte
+                        menait a une page qui ne parle pas d'elle. */}
+                    <Link to="/controles">
                       <ShieldAlert
                         className={c.criticite === 'BLOQUANT' ? 'text-danger' : 'text-alerte'}
                       />
@@ -724,7 +715,26 @@ export function EnTetePage({
   actions?: React.ReactNode
 }) {
   return (
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-bordure pb-2">
+    /* L'EN-TETE SUIT LE DEFILEMENT, PARCE QUE C'EST LUI QUI PORTE « VALIDER »
+       ET « RETOUR ». Sur une table de plusieurs centaines de lignes, ces deux
+       boutons disparaissaient des qu'on descendait : il fallait remonter tout
+       en haut pour valider, puis redescendre pour verifier. Un ecran de saisie
+       ou l'action s'eloigne de la saisie est un ecran qu'on abandonne.
+
+       Le fond est OPAQUE et la marge negative compense le rembourrage du
+       conteneur : sans elle, les lignes du tableau defileraient visiblement
+       dans la gouttiere, de part et d'autre de l'en-tete.
+
+       LES DECALAGES SONT EN CSS PUR, PAS MESURES EN JAVASCRIPT. J'avais d'abord
+       publie la hauteur reelle depuis un `useEffect` : ajouter des crochets a ce
+       composant a fait planter toute l'application — React refuse qu'un
+       composant change son nombre de crochets d'un rendu a l'autre. Deux
+       regimes de hauteur suffisent : compact des `sm`, plus haut en dessous ou
+       les actions passent a la ligne. */
+    <div
+      className="sticky top-0 z-30 mb-3 -mx-3 flex flex-wrap items-center justify-between gap-3
+                 border-b border-bordure bg-fond px-3 pb-2 pt-1 sm:-mx-4 sm:px-4"
+    >
       <div className="flex min-w-0 items-center gap-1.5">
         <h1 className="text-[15px] font-semibold leading-tight tracking-tight">{titre}</h1>
         {/* La description tient dans une aide plutot que sous le titre : trois

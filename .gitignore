@@ -23,6 +23,12 @@
 *.sqlite
 *.sqlite3
 
+# Depuis PostgreSQL (04/09/2026), les memes donnees voyagent en SAUVEGARDE :
+# un pg_dump porte tout ce que portait gestionfil.db. Le serveur en range dans
+# backend/sauvegardes/.
+*.dump
+backend/sauvegardes/
+
 # --- Classeurs sources ------------------------------------------------------
 # Le classeur de reprise porte les memes donnees que la base.
 *.xlsx

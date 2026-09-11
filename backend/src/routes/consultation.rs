@@ -704,6 +704,43 @@ pub async fn stock(
     Ok(Json(valeur))
 }
 
+/// `GET /api/etat-stock` — UNE LIGNE PAR REFERENCE, ventilee par magasin.
+///
+/// L'ancien `/api/stock` rendait une ligne par couple (reference, magasin) et
+/// laissait l'ecran recomposer le tableau : on ne voyait jamais une reference
+/// d'un coup d'oeil, et le total ne s'affichait nulle part. C'est la feuille
+/// « Stock » du classeur qui a la bonne forme, et c'est celle-ci.
+///
+/// LES MACHINES TIENNENT EN UNE COLONNE. Chaque etage est un magasin — juste
+/// pour la comptabilite, illisible dans un etat, ou une machine a six zones
+/// ferait six colonnes. Le detail reste sur l'ecran des machines.
+pub async fn etat_stock(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(f): Query<Filtres>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let rows = sqlx::query(
+        "SELECT * FROM v_etat_stock
+          WHERE ($1 IS NULL OR code_reference = $1)
+          ORDER BY CASE statut
+                     WHEN 'RUPTURE'   THEN 1
+                     WHEN 'CRITIQUE'  THEN 2
+                     WHEN 'ATTENTION' THEN 3
+                     ELSE 4 END,
+                   designation
+          LIMIT $2",
+    )
+    .bind(&f.code_reference)
+    .bind(f.limite())
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut valeur = lignes_en_json(&rows);
+    user.masquer(&state.db, module::STOCK, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
 pub async fn stock_projete(
     State(state): State<AppState>,
     user: Utilisateur,

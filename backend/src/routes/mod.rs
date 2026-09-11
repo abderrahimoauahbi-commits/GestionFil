@@ -247,6 +247,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/controles/{code}", get(consultation::controle_detail))
         .route("/api/fournisseurs/scorecard", get(consultation::scorecard))
         .route("/api/stock", get(consultation::stock))
+        .route("/api/etat-stock", get(consultation::etat_stock))
         .route("/api/stock/projete", get(consultation::stock_projete))
         .route("/api/stock/dormant", get(consultation::stock_dormant))
         .route("/api/stock/lots", get(consultation::lots))

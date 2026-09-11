@@ -53,6 +53,15 @@ pub fn ligne_en_json(row: &PgRow) -> Value {
                     .map(|v| Value::from(i64::from(v)))
                     .unwrap_or(Value::Null),
 
+                // LE JSON RENDU PAR UNE VUE. `v_etat_stock` ventile le stock
+                // par magasin dans un objet jsonb, plutot qu'en inventant une
+                // colonne par magasin — la liste des magasins change, la vue
+                // non. Sans ce cas, la ventilation ressortirait a `null` sans
+                // le moindre message.
+                "JSONB" | "JSON" => row
+                    .try_get::<Value, _>(i)
+                    .unwrap_or(Value::Null),
+
                 // Le decimal exact. Voir le commentaire de tete.
                 "NUMERIC" => row
                     .try_get::<sqlx::types::BigDecimal, _>(i)

@@ -192,9 +192,9 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_a_controler',
-      libelle: 'Receptions a controler',
+      libelle: 'Réceptions a controler',
       valeur: n('nb_receptions_a_controler'),
-      detail: 'en attente du controle qualite',
+      detail: 'en attente du controle qualité',
       ton: 'alerte',
       Icone: ClipboardCheck,
       vers: '/receptions',
@@ -202,7 +202,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_en_saisie',
-      libelle: 'Receptions en saisie',
+      libelle: 'Réceptions en saisie',
       valeur: n('nb_receptions_en_saisie'),
       detail: 'pesees non soumises',
       ton: 'neutre',
@@ -252,7 +252,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_refs_dormantes',
-      libelle: 'References dormantes',
+      libelle: 'Références dormantes',
       valeur: n('nb_refs_dormantes'),
       detail: droits.visible('valeur_dormante_mad')
         ? `${fmt.compact(n('valeur_dormante_mad'))} MAD immobilises`
@@ -264,7 +264,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_controles_bloquants',
-      libelle: 'Controles bloquants',
+      libelle: 'Contrôles bloquants',
       valeur: n('nb_controles_bloquants'),
       detail: 'coherence du referentiel',
       ton: 'danger',
@@ -326,7 +326,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_ecart_majeur',
-      libelle: 'Ecarts a verifier',
+      libelle: 'Écarts a vérifier',
       valeur: n('nb_ecart_majeur'),
       detail: 'couverture confortable, magasin bas',
       ton: n('nb_ecart_majeur') > 0 ? 'alerte' : 'neutre',
@@ -382,7 +382,7 @@ export function Cockpit() {
       <ChiffresCles />
 
       {qKpi.isLoading ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
             <Squelette key={i} className="h-24" />
           ))}
@@ -392,7 +392,7 @@ export function Cockpit() {
           {mesFiles.length > 0 && (
             <>
               <TitreBande texte="A traiter" />
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-6">
+              <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
                 {mesFiles.map((t) => (
                   <TuileCompteur key={t.champ} tuile={t} />
                 ))}
@@ -410,7 +410,7 @@ export function Cockpit() {
           {mesEtats.length > 0 && (
             <>
               <TitreBande texte="Situation" />
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4">
                 {mesEtats.map((t) => (
                   <TuileCompteur key={t.champ} tuile={t} />
                 ))}
@@ -485,7 +485,7 @@ export function Cockpit() {
           <CarteTitre>Tenue du plan de production</CarteTitre>
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-attenue-texte">
             <Legende ton="bg-succes/70" texte="couvert" />
-            <Legende ton="bg-alerte" texte="tendu : sous le stock de securite" />
+            <Legende ton="bg-alerte" texte="tendu : sous le stock de sécurité" />
             <Legende ton="bg-danger" texte="rupture" />
           </div>
         </CarteEntete>
@@ -507,9 +507,9 @@ export function Cockpit() {
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                    <th className="px-3 py-2 text-left">Reference</th>
+                    <th className="px-3 py-2 text-left">Référence</th>
                     <th className="w-28 px-2 py-2 text-left">Sourcing</th>
-                    <th className="w-20 px-2 py-2 text-right">Delai</th>
+                    <th className="w-20 px-2 py-2 text-right">Délai</th>
                     {colonnes.map((m) => (
                       <th key={m} className="w-9 px-0.5 py-2 text-center font-normal">
                         {m.slice(5)}
@@ -585,7 +585,7 @@ export function Cockpit() {
               </table>
               <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
                 La marge est le nombre de jours restants avant le premier mois tendu,{' '}
-                <strong>delai fournisseur deduit</strong>. Negative, il est deja trop tard pour
+                <strong>délai fournisseur deduit</strong>. Negative, il est deja trop tard pour
                 commander a temps : il reste a arbitrer, substituer ou decaler la production.{' '}
                 Une ligne avec un <strong>equivalent en stock</strong> se resout par un arbitrage
                 depuis le plan d'achat, sans attendre de livraison.
@@ -599,7 +599,7 @@ export function Cockpit() {
       <TitreBande texte="Sante du referentiel" />
       <Carte repliable="cockpit.2">
         <CarteEntete>
-          <CarteTitre>Controles metier</CarteTitre>
+          <CarteTitre>Contrôles métier</CarteTitre>
           <Badge ton={autres.length ? 'alerte' : 'succes'}>
             {autres.length ? `${autres.length} a traiter` : 'tout est vert'}
           </Badge>
@@ -674,8 +674,14 @@ function TuileCompteur({ tuile: t }: { tuile: Tuile }) {
         <div className={cn('mt-1.5 text-2xl font-semibold tabular-nums', TEINTE[t.ton])}>
           {t.affichage ?? t.valeur}
         </div>
+        {/* LE DETAIL PASSE A LA LIGNE, IL NE SE COUPE PLUS. `truncate` rendait
+            « Stock magasin sous le minimum » en « Stock magasin sous l… » sur un
+            telephone : une tuile qui ne dit pas ce qu'elle compte ne sert a rien.
+            Deux lignes suffisent, la troisieme est coupee proprement. */}
         {t.detail && (
-          <div className="mt-0.5 truncate text-[11px] text-attenue-texte">{t.detail}</div>
+          <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-attenue-texte">
+            {t.detail}
+          </div>
         )}
         {t.vers && (
           <div className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-primaire">
@@ -818,7 +824,7 @@ function TableauDeBord() {
   if (q.isLoading) return <Squelette className="h-56 w-full" />
   if (!couts.length) {
     return (
-      <Alerte ton="info" titre="Pas encore de cout matiere">
+      <Alerte ton="info" titre="Pas encore de coût matiere">
         Le cout par metre carre se calcule a partir du CMUP des composants. Il apparaitra des la
         premiere reception valorisee sur chaque reference de recette.
       </Alerte>
@@ -828,14 +834,14 @@ function TableauDeBord() {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <BarresRangees
-        titre="Cout matiere par qualite"
+        titre="Coût matiere par qualité"
         sousTitre="CMUP des composants, rapporte au metre carre"
         unite="MAD/m2"
         donnees={couts}
       />
       {composition.donnees.length > 0 && (
         <BarresEmpilees
-          titre="Ou passe le cout"
+          titre="Ou passe le coût"
           sousTitre="Les trois roles les plus lourds de la gamme"
           unite="MAD/m2"
           series={composition.series}
@@ -905,7 +911,7 @@ function Concentration() {
     <div className="grid gap-3 lg:grid-cols-2">
       <Pareto
         titre="Concentration de la valeur"
-        sousTitre="Part cumulee du stock valorise, references triees par valeur"
+        sousTitre="Part cumulée du stock valorise, références triees par valeur"
         unite="MAD"
         donnees={lignes.map((l) => ({
           cle: l.code_reference,
@@ -962,7 +968,7 @@ function ChiffresCles() {
   const k = q.data
   if (q.isLoading) {
     return (
-      <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="mb-3 grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
           <Squelette key={i} className="h-[68px]" />
         ))}
@@ -979,10 +985,10 @@ function ChiffresCles() {
 
   return (
     <div className="mb-3 flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-5">
         <CarteStat
           Icone={Package}
-          libelle="References suivies"
+          libelle="Références suivies"
           valeur={fmt.nombre(n('nb_references'), 0)}
           precision={`${ok} au vert · ${attention} en attention`}
           ton="primaire"
@@ -1017,7 +1023,7 @@ function ChiffresCles() {
         />
         <CarteStat
           Icone={AlertTriangle}
-          libelle="Controles en anomalie"
+          libelle="Contrôles en anomalie"
           valeur={fmt.nombre(n('nb_alertes_ouvertes'), 0)}
           precision={bloquants > 0 ? `${bloquants} bloquant(s) ou critique(s)` : 'Aucun bloquant'}
           ton={bloquants > 0 ? 'danger' : n('nb_alertes_ouvertes') > 0 ? 'alerte' : 'succes'}

@@ -20,7 +20,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Link2, Plus, Search, Star, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Link2, Plus, Search, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -220,14 +220,14 @@ export function Equivalences() {
     void qc.invalidateQueries({ queryKey: ['equivalences'] })
   }
   const echec = (e: unknown) =>
-    toast.error(e instanceof ErreurApi ? e.message : 'Operation impossible.')
+    toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
   const reordonner = useMutation({
     mutationFn: (references: string[]) =>
       api.put(`/api/groupes-equivalence/${encodeURIComponent(pointe!)}/ordre`, { references }),
     onSuccess: () => {
       toast.success('Ordre mis a jour', {
-        description: 'La premiere reference du groupe devient la preferentielle.',
+        description: 'La premiere référence du groupe devient la préférentielle.',
       })
       rafraichir()
     },
@@ -276,8 +276,8 @@ export function Equivalences() {
   return (
     <div>
       <EnTetePage
-        titre="Equivalences de references"
-        description="Quelles references sont interchangeables, et dans quel ordre les preferer."
+        titre="Équivalences de références"
+        description="Quelles références sont interchangeables, et dans quel ordre les preferer."
       />
 
       {refDemandee && qGroupeDeRef.isSuccess && !groupeDeRef && (
@@ -287,9 +287,16 @@ export function Equivalences() {
         </Alerte>
       )}
 
+      {/* AU TELEPHONE, UN SEUL NIVEAU A LA FOIS.
+          Cote a cote, la liste et le detail deviennent, sur un ecran etroit,
+          l'un SOUS l'autre : il fallait franchir 93 groupes pour lire les
+          references du groupe qu'on venait de toucher — 5300 px de defilement.
+          On montre donc la liste, puis le detail a sa place, avec un retour.
+          A partir de `lg` la place existe : les deux colonnes reviennent, et
+          les classes ci-dessous ne s'appliquent plus. */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         {/* ---- Groupes ---------------------------------------------------- */}
-        <Carte className="h-fit">
+        <Carte className={cn('h-fit min-w-0', pointe && 'hidden lg:block')}>
           <CarteEntete>
             <CarteTitre>Groupes</CarteTitre>
             <span className="text-[11px] text-attenue-texte">
@@ -354,7 +361,7 @@ export function Equivalences() {
         </Carte>
 
         {/* ---- Membres du groupe pointe ------------------------------------ */}
-        <div className="space-y-3">
+        <div className={cn('min-w-0 space-y-3', !pointe && 'hidden lg:block')}>
           {!groupe ? (
             <Alerte ton="info">
               Choisissez un groupe pour voir ses references, changer leur ordre de preference, en
@@ -362,6 +369,18 @@ export function Equivalences() {
             </Alerte>
           ) : (
             <>
+              {/* LE RETOUR N'EXISTE QUE LA OU IL SERT. Au bureau les deux
+                  colonnes sont visibles ensemble : rien a quitter. */}
+              <Bouton
+                variante="discret"
+                taille="sm"
+                className="-ml-2 lg:hidden"
+                onClick={() => setPointe(null)}
+              >
+                <ArrowLeft />
+                Tous les groupes
+              </Bouton>
+
               <Alerte ton={TON_ALERTE[groupe.qualification]}>
                 <strong>{groupe.qualification}</strong> — {EXPLICATION[groupe.qualification]}
               </Alerte>
@@ -388,11 +407,12 @@ export function Equivalences() {
                       Aucune reference rattachee a ce groupe.
                     </p>
                   ) : (
-                    <table className="w-full text-[13px]">
+                    <div className="defilement-x">
+                    <table className="w-full min-w-[46rem] text-[13px] lg:min-w-0">
                       <thead>
                         <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                           <th className="w-16 px-2 py-2 text-right">Ordre</th>
-                          <th className="px-3 py-2 text-left">Reference</th>
+                          <th className="px-3 py-2 text-left">Référence</th>
                           <th className="w-40 px-2 py-2 text-left">Fournisseur</th>
                           <th className="w-28 px-2 py-2 text-right">Stock</th>
                           <th className="w-28 px-2 py-2 text-right">Besoin 12 m</th>
@@ -446,7 +466,7 @@ export function Equivalences() {
                               </td>
                               <td className="px-2 py-1.5 text-center">
                                 {m.est_preferentielle === 1 ? (
-                                  <Badge ton="succes">preferentielle</Badge>
+                                  <Badge ton="succes">préférentielle</Badge>
                                 ) : (
                                   <span className="text-[11px] text-attenue-texte">
                                     alternative
@@ -481,7 +501,7 @@ export function Equivalences() {
                                       taille="icone-xs"
                                       onClick={() => promouvoir(m.code_reference)}
                                       disabled={m.est_preferentielle === 1 || reordonner.isPending}
-                                      aria-label="Rendre preferentielle"
+                                      aria-label="Rendre préférentielle"
                                       title="Rendre preferentielle"
                                     >
                                       <Star />
@@ -512,10 +532,11 @@ export function Equivalences() {
                         })}
                       </tbody>
                     </table>
+                    </div>
                   )}
                   {membres.length > 1 && (
                     <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
-                      La reference de rang 1 est la <strong>preferentielle</strong> : celle que le
+                      La reference de rang 1 est la <strong>préférentielle</strong> : celle que le
                       plan d'achat propose par defaut. Les suivantes sont les substituts, dans
                       l'ordre.
                     </p>
@@ -594,7 +615,7 @@ function PanneauRattachement({
         <div className="mb-2 flex items-center gap-2">
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
           <Champ
-            placeholder="Reference ou designation…"
+            placeholder="Référence ou designation…"
             value={filtre}
             onChange={(e) => setFiltre(e.target.value)}
             className="h-8"
@@ -632,7 +653,7 @@ function PanneauRattachement({
             </label>
           ))}
           {!q.isLoading && refs.length === 0 && (
-            <Alerte ton="info">Aucune reference disponible pour ce filtre.</Alerte>
+            <Alerte ton="info">Aucune référence disponible pour ce filtre.</Alerte>
           )}
         </div>
 

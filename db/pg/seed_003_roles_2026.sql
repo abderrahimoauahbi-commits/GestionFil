@@ -9,9 +9,10 @@
 --
 --   DIRECTION   le metier et le financier. Voit tout, ecrit partout sauf sur les
 --               comptes et le journal.
---   ADMIN       l'administrateur systeme. Comptes, droits, parametres, audit,
---               referentiels — mais AUCUN montant. Il fait tourner l'outil, il
---               ne lit pas les prix d'achat.
+--   ADMIN       le super-utilisateur. Tous les modules, toutes les actions,
+--               montants compris. Voir la section 3 bis : ce role a d'abord ete
+--               un administrateur technique sans acces aux montants, et cela a
+--               change le 08/09/2026.
 --   ASSISTANTE  toute la gestion courante : catalogue, qualites, recettes,
 --               plans, besoins, plan d'achat, commandes, receptions, stock.
 --               Sans les montants, sans les parametres systeme, sans les
@@ -19,12 +20,16 @@
 --   MAGASIN     le quai et les magasins : mouvements, inventaires, receptions.
 --               Quantites uniquement.
 --
--- POURQUOI PERSONNE N'A TOUT. DIRECTION lit les montants mais ne peut pas
+-- CETTE SEPARATION N'EXISTE PLUS POUR ADMIN, et il faut savoir ce qu'elle
+-- protegeait. Elle disait : DIRECTION lit les montants mais ne peut pas
 -- s'attribuer de droits ; ADMIN attribue les droits mais ne lit pas les
--- montants. Un seul compte cumulant les deux pourrait se donner acces a la
+-- montants. Un seul compte cumulant les deux peut se donner acces a la
 -- valorisation puis effacer la trace — l'audit etant justement ce qu'il
--- administre. La separation coute une connexion de plus le jour d'une reprise ;
--- elle evite qu'un compte compromis puisse a la fois lire et couvrir.
+-- administre. Le 08/09/2026, le proprietaire de l'outil a tranche pour la
+-- commodite : ADMIN aura tout. Le compte `admin` se protege donc desormais
+-- comme un compte de direction, pas comme un compte technique.
+--
+-- DIRECTION, ASSISTANTE et MAGASIN, eux, restent separes comme decrit ci-dessus.
 --
 -- CE QUE CE FICHIER NE TOUCHE PAS : les mots de passe.
 --
@@ -45,7 +50,8 @@ INSERT INTO role_utilisateur (code_role_user, libelle, description, niveau_hiera
                               plafond_validation_bc_mad, actif)
 VALUES
   ('ADMIN', 'Administrateur systeme',
-   'Comptes, droits, parametres, audit et referentiels. Aucun acces aux montants.',
+   'Super-utilisateur : tous les modules, toutes les actions, montants compris. '
+   'Aucune separation avec la direction.',
    90, NULL, 1),
   ('ASSISTANTE', 'Assistante de gestion',
    'Gestion courante hors montants : catalogue, production, planification, achats, stock.',
@@ -201,6 +207,25 @@ VALUES
 
 
 -- -----------------------------------------------------------------------------
+-- 3 bis. ADMIN : tout le reste — 08/09/2026
+-- -----------------------------------------------------------------------------
+-- Les lignes ADMIN ci-dessus datent du modele d'origine, ou ce role n'ecrivait
+-- que sur les referentiels, les comptes et l'audit. Il lui manquait notamment
+-- MOUVEMENTS/ECRIRE, ce qui l'empechait d'annuler une fiche machine erronee.
+--
+-- On COMPLETE plutot qu'on ne reecrit : les lignes d'origine restent lisibles,
+-- et l'on voit d'un coup d'oeil ce qui a ete ajoute et quand.
+--
+-- La liste des modules se lit dans `champ_configurable` — `seed_002` l'a remplie
+-- avant nous. Une liste recopiee ici divergerait au premier module ajoute.
+INSERT INTO permission (id_permission, code_role_user, module, action, actif)
+SELECT gen_random_uuid()::text, 'ADMIN', m.module, a.action, 1
+  FROM (SELECT DISTINCT module FROM champ_configurable) m
+ CROSS JOIN (VALUES ('LIRE'), ('ECRIRE'), ('VALIDER')) AS a(action)
+    ON CONFLICT (code_role_user, module, action) DO NOTHING;
+
+
+-- -----------------------------------------------------------------------------
 -- 4. Droits par champ
 -- -----------------------------------------------------------------------------
 -- La permission de module ouvre l'ecran ; le droit par champ decide de chaque
@@ -229,17 +254,11 @@ DELETE FROM modele_droit_champ
 INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
 SELECT 'DIRECTION', module, champ, 'ECRITURE' FROM champ_configurable;
 
--- ADMIN : tout sauf les montants. Il administre l'outil, pas les achats.
+-- ADMIN : tout, en ecriture, montants compris — comme DIRECTION depuis le
+-- 08/09/2026. La condition « sensible = 1 -> MASQUE » qui s'appliquait ici a ete
+-- retiree ; c'est elle qui masquait 97 colonnes de montants a ce role.
 INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
-SELECT 'ADMIN', c.module, c.champ,
-       CASE
-         WHEN NOT EXISTS (SELECT 1 FROM permission p
-                           WHERE p.code_role_user = 'ADMIN' AND p.module = c.module
-                             AND p.action = 'LIRE' AND p.actif = 1) THEN 'MASQUE'
-         WHEN c.sensible = 1 THEN 'MASQUE'
-         ELSE 'ECRITURE'
-       END
-  FROM champ_configurable c;
+SELECT 'ADMIN', module, champ, 'ECRITURE' FROM champ_configurable;
 
 -- ASSISTANTE : la gestion sans les montants.
 --

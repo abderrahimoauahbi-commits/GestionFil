@@ -212,7 +212,7 @@ export function Controles() {
   const parNiveau = (n: string) => tous.filter((c) => c.criticite === n)
   const groupes: GroupeRail[] = [
     {
-      titre: 'Etat',
+      titre: 'État',
       entrees: [
         {
           cle: 'ANOMALIE',
@@ -237,7 +237,7 @@ export function Controles() {
   return (
     <div>
       <EnTetePage
-        titre="Controles de coherence"
+        titre="Contrôles de cohérence"
         sous_titre="Ce que la base verifie sur elle-meme, et ce qu elle trouve"
         actions={
           <>
@@ -247,7 +247,7 @@ export function Controles() {
                 exporterCsv('controles-coherence', [
                   { champ: 'code', entete: 'Code' },
                   { champ: 'criticite', entete: 'Criticite' },
-                  { champ: 'controle', entete: 'Controle' },
+                  { champ: 'controle', entete: 'Contrôle' },
                   { champ: 'anomalies', entete: 'Anomalies', numerique: true },
                 ], tous)
               }
@@ -274,7 +274,7 @@ export function Controles() {
         }
       >
         {q.isLoading ? (
-          <Chargement texte="Execution des controles…" />
+          <Chargement texte="Execution des contrôles…" />
         ) : !droits.peutLire ? (
           <Alerte ton="info">Module non accessible.</Alerte>
         ) : (
@@ -302,7 +302,7 @@ export function Controles() {
             )}
 
             {!tries.length ? (
-              <EtatVide icone={CheckCircle2} titre="Aucun controle dans cette selection" />
+              <EtatVide icone={CheckCircle2} titre="Aucun contrôle dans cette sélection" />
             ) : (
               <div className="flex flex-col gap-1.5">
                 {tries.map((c) => {

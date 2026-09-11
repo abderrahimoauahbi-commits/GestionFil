@@ -52,7 +52,7 @@ interface Ligne {
 
 const CHAMPS: ChampFiltre<Ligne>[] = [
   { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', valeur: (l) => l.fournisseur_nom },
-  { cle: 'reference', libelle: 'Reference', type: 'texte', valeur: (l) => l.code_reference },
+  { cle: 'reference', libelle: 'Référence', type: 'texte', valeur: (l) => l.code_reference },
 ]
 
 /** Libelle court d'un mois : « août 26 ». */
@@ -157,8 +157,8 @@ export function MatricePrix() {
         ) : !vues.length ? (
           <EtatVide
             icone={Minus}
-            titre="Aucun achat sur la periode"
-            description="La matrice se remplit a la validation des receptions."
+            titre="Aucun achat sur la période"
+            description="La matrice se remplit a la validation des réceptions."
           />
         ) : (
           <>
@@ -169,7 +169,7 @@ export function MatricePrix() {
               {derive > 0 ? (
                 <span className="text-danger">{derive} en hausse sur la periode</span>
               ) : (
-                <span>aucune hausse superieure a 1 % sur la periode</span>
+                <span>aucune hausse superieure a 1 % sur la période</span>
               )}
               {mois.length === 1 && (
                 <span>

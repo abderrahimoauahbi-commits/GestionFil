@@ -89,6 +89,9 @@ pub fn router(state: AppState) -> Router {
         // Changer SON mot de passe : aucun droit particulier, mais
         // l'ancien mot de passe est exige (voir auth_routes).
         .route("/api/auth/mot-de-passe", post(auth_routes::changer_mot_de_passe))
+        // Le verrou d'inactivite : verifie le mot de passe sans prolonger la
+        // session. Voir auth_routes::deverrouiller.
+        .route("/api/auth/deverrouiller", post(auth_routes::deverrouiller))
         // --- Administration ---------------------------------------------------
         .route("/api/admin/utilisateurs",
                get(admin::lister_utilisateurs).post(admin::creer_utilisateur))
@@ -161,13 +164,30 @@ pub fn router(state: AppState) -> Router {
         // rend une ligne par reference — la vue de l'auditeur ; `/documents`
         // rend un bon par ligne, avec ses totaux — la vue du magasin. Le
         // segment fixe passe avant `{id}` : axum donne priorite au statique.
-        // MACHINES. Le stock pose sur les metiers, tenu au poids reel.
+        // MACHINES. Le stock s'y compte, la consommation s'y journalise —
+        // et jamais dans le journal des mouvements.
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
-        .route("/api/machines/inventaire", post(machines::inventaire))
-        .route("/api/machines/{code}", get(machines::plan))
-        .route("/api/machines/{code}/emplacements/{empl}", get(machines::contenu))
-        .route("/api/machines/geste", post(machines::geste))
-        .route("/api/machines/geste/{marque}/annuler", post(machines::annuler_geste))
+        .route("/api/machines/consommation", get(machines::journal_consommation))
+        .route("/api/machines/fiches",
+               get(machines::lister_fiches).post(machines::creer_fiche))
+        .route("/api/machines/fiches/{id}",
+               get(machines::lire_fiche)
+                   .put(machines::remplacer_fiche)
+                   .delete(machines::supprimer_fiche))
+        .route("/api/machines/fiches/{id}/valider", post(machines::valider_fiche))
+        .route("/api/machines/fiches/{id}/annuler", post(machines::annuler_fiche))
+        // Lire le plan d une machine, ou le corriger. La correction exige
+        // PARAMETRES/ECRIRE — la direction et les super-utilisateurs — parce
+        // qu une capacite fausse fausse toute la consommation qui en decoule.
+        .route("/api/machines/{code}",
+               get(machines::plan)
+                   .put(machines::modifier_machine)
+                   // Supprimer n'est possible que sur une machine jamais
+                   // utilisee : une machine qui a travaille se RETIRE.
+                   .delete(machines::supprimer_machine))
+        // En panne, en sommeil, remise en production, retiree du parc.
+        .route("/api/machines/{code}/etat", patch(machines::changer_etat))
+        .route("/api/machines/{code}/zones/{zone}", get(machines::etat_zone))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
         .route("/api/transferts",

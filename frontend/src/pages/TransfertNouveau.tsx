@@ -402,7 +402,7 @@ export function TransfertNouveau() {
       )}
 
       {erreur && (
-        <Alerte ton="danger" titre="Enregistrement refuse" className="mb-3">
+        <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">
           {erreur}
         </Alerte>
       )}
@@ -535,10 +535,10 @@ export function TransfertNouveau() {
                       <thead>
                         <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                           <th className="w-10 px-1 py-2 text-right">#</th>
-                          <th className="px-2 py-2 text-left">Reference</th>
+                          <th className="px-2 py-2 text-left">Référence</th>
                           <th className="w-28 px-2 py-2 text-right">Dispo</th>
-                          <th className="w-28 px-2 py-2 text-right">Quantite</th>
-                          <th className="w-24 px-2 py-2 text-left">Unite</th>
+                          <th className="w-28 px-2 py-2 text-right">Quantité</th>
+                          <th className="w-24 px-2 py-2 text-left">Unité</th>
                           <th className="w-24 px-2 py-2 text-right">En kg</th>
                           <th className="w-24 px-2 py-2 text-right">Bobines</th>
                           <th className="w-24 px-2 py-2 text-right">Palettes</th>
@@ -779,13 +779,13 @@ function PanneauChargement({
     <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
       <DialogueContenu
         cote="droite"
-        titre="Charger des references"
+        titre="Charger des références"
         description="Seul ce que le magasin source a en stock peut partir."
       >
         <div className="mb-2 flex items-center gap-2">
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
           <Champ
-            placeholder="Reference ou designation…"
+            placeholder="Référence ou designation…"
             value={filtre}
             onChange={(e) => setFiltre(e.target.value)}
             className="h-8"

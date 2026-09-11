@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from './auth/AuthContext'
+import { Verrou } from './auth/Verrou'
 import { FournisseurTheme, useTheme } from './composants/Theme'
 import { FournisseurApparence } from './composants/Apparence'
 import { Coquille } from './composants/Coquille'
@@ -47,6 +48,8 @@ import { Fournisseurs } from './pages/Fournisseurs'
 import { Referentiels } from './pages/Referentiels'
 import { Stock } from './pages/Stock'
 import { Machines } from './pages/Machines'
+import { ParcMachines } from './pages/ParcMachines'
+import { Accueil } from './pages/Accueil'
 import { Mouvements } from './pages/Mouvements'
 import { Transferts } from './pages/Transferts'
 import { Inventaires } from './pages/Inventaires'
@@ -96,7 +99,7 @@ function ExigeModule({ module, children }: { module: string; children: React.Rea
   const { peut } = useAuth()
   if (!peut(module, 'LIRE')) {
     return (
-      <Alerte ton="danger" titre="Acces refuse">
+      <Alerte ton="danger" titre="Accès refusé">
         Vous n'avez pas les droits de lecture sur le module {module}.
       </Alerte>
     )
@@ -126,12 +129,21 @@ function Notifications() {
  */
 const ECRANS = (
   <>
-      <Route index element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+      {/* L ACCUEIL N A PAS DE GARDE, et c est necessaire : protege par COCKPIT,
+          il renvoyait « Acces refuse » a l assistante des qu on lui a retire le
+          tableau de bord. Un ERP ne peut pas ouvrir sur un refus. La page ne
+          montre de toute facon que les ecrans deja ouverts a celui qui regarde. */}
+      <Route index element={<Accueil />} />
+      <Route path="tableau-de-bord"
+             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
       <Route path="chat" element={<ExigeModule module="COCKPIT"><Chat /></ExigeModule>} />
       <Route path="telecharger" element={<ExigeModule module="COCKPIT"><Telecharger /></ExigeModule>} />
       <Route path="machines" element={<ExigeModule module="STOCK"><Machines /></ExigeModule>} />
+      {/* LE PARC EST DU PARAMETRAGE, pas de l exploitation : module PARAMETRES,
+          donc la direction et les super-utilisateurs. */}
+      <Route path="parc-machines" element={<ExigeModule module="PARAMETRES"><ParcMachines /></ExigeModule>} />
       <Route path="mouvements" element={<ExigeModule module="MOUVEMENTS"><Mouvements /></ExigeModule>} />
       <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
@@ -203,7 +215,7 @@ const ECRANS = (
     masque, cela deplacerait la navigation de l’onglet actif. */
 function OngletInconnu() {
   return (
-    <Alerte ton="alerte" titre="Ecran introuvable">
+    <Alerte ton="alerte" titre="Écran introuvable">
       Cet onglet pointe vers un ecran qui n’existe plus. Fermez-le (Ctrl+W).
     </Alerte>
   )
@@ -285,6 +297,9 @@ export function App() {
           <BrowserRouter>
             <AuthProvider>
               <Aiguillage />
+              {/* AU-DESSUS DE TOUT, ecrans compris : un poste laisse sans
+                  surveillance se couvre, quelle que soit la page ouverte. */}
+              <Verrou />
               <Notifications />
             </AuthProvider>
           </BrowserRouter>

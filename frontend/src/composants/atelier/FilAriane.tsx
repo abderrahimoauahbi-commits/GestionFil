@@ -112,7 +112,7 @@ export function FilAriane({
                      transition-colors hover:border-champ hover:text-texte"
         >
           <Search className="size-3.5 shrink-0" />
-          <span className="flex-1 text-left">Rechercher une reference, un bon, un fournisseur</span>
+          <span className="flex-1 text-left">Rechercher une référence, un bon, un fournisseur</span>
           <kbd className="shrink-0 rounded-[3px] border border-bordure px-1 font-mono text-[10px]">
             Ctrl+P
           </kbd>
@@ -132,7 +132,7 @@ export function FilAriane({
         >
           <button
             type="button"
-            aria-label="Controles de coherence"
+            aria-label="Contrôles de cohérence"
             onClick={ouvrirControles}
             className="relative grid size-8 place-items-center rounded-[3px] text-attenue-texte
                        hover:bg-[hsl(var(--at-liste-survol))] hover:text-texte"

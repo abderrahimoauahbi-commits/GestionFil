@@ -11,7 +11,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { api, jeton } from '../api/client'
+import { api, echeance, jeton } from '../api/client'
 
 export type Niveau = 'MASQUE' | 'LECTURE' | 'ECRITURE'
 export type ActionModule = 'LIRE' | 'ECRIRE' | 'VALIDER'
@@ -21,6 +21,8 @@ export interface Moi {
   login: string
   role: string
   plafond_validation_bc_mad: number | null
+  /** Secondes d'inactivite avant verrouillage. Regle sur le serveur. */
+  verrou_inactivite_secondes: number
   permissions: { module: string; action: ActionModule }[]
   droits_champ: Record<string, Record<string, Niveau>>
 }
@@ -68,11 +70,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const connecter = useCallback(
     async (login: string, motDePasse: string) => {
-      const r = await api.post<{ jeton: string }>('/api/auth/connexion', {
-        login,
-        mot_de_passe: motDePasse,
-      })
+      const r = await api.post<{ jeton: string; expire_le: number }>(
+        '/api/auth/connexion',
+        { login, mot_de_passe: motDePasse },
+      )
       jeton.ecrire(r.jeton)
+      /* L'ECHEANCE ABSOLUE DE LA SESSION, gardee a cote du jeton.
+         Le verrou d'inactivite se deverrouille sans prolonger la session : il
+         faut donc savoir quand celle-ci s'arrete, quoi qu'il arrive. Le serveur
+         le sait aussi — le jeton porte la meme date et il la fait respecter —
+         mais l'interface s'en sert pour fermer proprement plutot que d'attendre
+         un 401 au milieu d'une saisie. */
+      echeance.ecrire(r.expire_le)
       setChargement(true)
       await charger()
     },
@@ -81,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const deconnecter = useCallback(() => {
     jeton.effacer()
+    echeance.effacer()
     setMoi(null)
   }, [])
 

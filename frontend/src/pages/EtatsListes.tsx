@@ -62,7 +62,7 @@ export function EtatStockImprime() {
       <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
         <span className="text-[12px] text-attenue-texte">Restreindre a un statut :</span>
         <Selecteur value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
-          <option value="">Toutes les references</option>
+          <option value="">Toutes les références</option>
           <option value="RUPTURE">Ruptures</option>
           <option value="CRITIQUE">Critiques</option>
           <option value="ATTENTION">Attention</option>
@@ -71,12 +71,12 @@ export function EtatStockImprime() {
       </div>
 
       <EtatImprimable
-        titre="Etat des stocks"
+        titre="État des stocks"
         sousTitre={filtre ? `Restreint aux references en statut ${filtre}` : undefined}
         enTete={
           <div className="flex flex-wrap gap-x-8 gap-y-1">
             <span>
-              <span className="text-neutral-600">References : </span>
+              <span className="text-neutral-600">Références : </span>
               <span className="font-semibold">{lignes.length}</span>
             </span>
             {valeurVisible && (
@@ -91,7 +91,7 @@ export function EtatStockImprime() {
         <TableEtat<LigneStock>
           colonnes={[
             {
-              entete: 'Reference',
+              entete: 'Référence',
               valeur: (l) => (
                 <>
                   <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
@@ -108,7 +108,7 @@ export function EtatStockImprime() {
               valeur: (l) => fmt.nombre(l.stock_physique_net_kg ?? 0, 1),
             },
             {
-              entete: 'Projete kg',
+              entete: 'Projeté kg',
               numerique: true,
               valeur: (l) => fmt.nombre(l.stock_projete_kg ?? 0, 1),
             },
@@ -212,7 +212,7 @@ export function EtatComptage() {
         <TableEtat<LigneStock>
           colonnes={[
             {
-              entete: 'Reference',
+              entete: 'Référence',
               valeur: (l) => <span className="font-mono text-[10px]">{l.code_reference}</span>,
             },
             { entete: 'Designation', valeur: (l) => l.designation ?? '—' },
@@ -221,7 +221,7 @@ export function EtatComptage() {
               valeur: () => <span className="inline-block h-3 w-full" />,
             },
             {
-              entete: 'Quantite comptee',
+              entete: 'Quantité comptee',
               numerique: true,
               // La cellule est vide et large : c'est la ou l'on ecrit.
               valeur: () => <span className="inline-block h-4 w-24 border-b border-neutral-400" />,
@@ -327,7 +327,7 @@ export function EtatPlanAchat() {
           <TableEtat<Proposition>
             colonnes={[
               {
-                entete: 'Reference',
+                entete: 'Référence',
                 valeur: (p) => (
                   <>
                     <div className="font-mono text-[10px] font-medium">{p.code_reference}</div>
@@ -338,7 +338,7 @@ export function EtatPlanAchat() {
                 ),
               },
               {
-                entete: 'Quantite',
+                entete: 'Quantité',
                 numerique: true,
                 valeur: (p) =>
                   p.quantite_suggeree_unite != null && p.unite_saisie
@@ -433,11 +433,11 @@ export function EtatMouvements() {
           },
           { entete: 'Type', valeur: (l) => l.code_type_mvt },
           {
-            entete: 'Reference',
+            entete: 'Référence',
             valeur: (l) => <span className="font-mono text-[10px]">{l.code_reference}</span>,
           },
           {
-            entete: 'Quantite kg',
+            entete: 'Quantité kg',
             numerique: true,
             valeur: (l) => fmt.nombre(l.quantite_kg ?? 0, 3),
           },
@@ -484,11 +484,11 @@ export function EtatCatalogue() {
 
   return (
     <EtatImprimable
-      titre="Catalogue des references"
-      sousTitre="References actives"
+      titre="Catalogue des références"
+      sousTitre="Références actives"
       enTete={
         <span>
-          <span className="text-neutral-600">References : </span>
+          <span className="text-neutral-600">Références : </span>
           <span className="font-semibold">{lignes.length}</span>
         </span>
       }
@@ -496,12 +496,12 @@ export function EtatCatalogue() {
       <TableEtat<Ref>
         colonnes={[
           {
-            entete: 'Reference',
+            entete: 'Référence',
             valeur: (r) => <span className="font-mono text-[10px]">{r.code_reference}</span>,
           },
           { entete: 'Designation', valeur: (r) => r.designation ?? '—' },
-          { entete: 'Categorie', valeur: (r) => r.code_categorie ?? '—' },
-          { entete: 'Unite', valeur: (r) => r.unite_catalogue ?? '—' },
+          { entete: 'Catégorie', valeur: (r) => r.code_categorie ?? '—' },
+          { entete: 'Unité', valeur: (r) => r.unite_catalogue ?? '—' },
           { entete: 'Fournisseur', valeur: (r) => r.code_fournisseur ?? '—' },
           ...(prixVisible
             ? [
@@ -577,7 +577,7 @@ export function EtatFournisseurs() {
           { entete: 'Pays', valeur: (f) => f.pays ?? '—' },
           { entete: 'Devise', valeur: (f) => f.code_devise ?? '—' },
           {
-            entete: 'Delai j',
+            entete: 'Délai j',
             numerique: true,
             valeur: (f) => (f.delai_livraison_jours == null ? '—' : f.delai_livraison_jours),
           },

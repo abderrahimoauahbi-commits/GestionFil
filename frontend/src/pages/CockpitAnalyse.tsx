@@ -179,7 +179,7 @@ export function CockpitAnalyse() {
 
         <BarresRangees
           titre="Distribution des couvertures"
-          sousTitre="Combien de references dans chaque tranche de jours"
+          sousTitre="Combien de références dans chaque tranche de jours"
           unite="references"
           maximum={6}
           donnees={d.couverture.map((c) => ({
@@ -195,7 +195,7 @@ export function CockpitAnalyse() {
         />
 
         <ColonnesTemps
-          titre="Cout matiere par mois"
+          titre="Coût matiere par mois"
           sousTitre="Besoin du plan valorise — quand la tresorerie sera sollicitee"
           unite="MAD"
           donnees={d.cout_mensuel.map((m) => ({
@@ -207,7 +207,7 @@ export function CockpitAnalyse() {
 
         <BarresEmpilees
           titre="Classe ABC croisee au statut"
-          sousTitre="Une reference de classe A en alerte ne se traite pas comme une classe C"
+          sousTitre="Une référence de classe A en alerte ne se traite pas comme une classe C"
           unite="references"
           series={[
             { cle: 'en_alerte', libelle: 'Rupture ou critique' },
@@ -225,12 +225,12 @@ export function CockpitAnalyse() {
         {t && droits.visible('valeur_stock_mad') && (
           <BlocKpi titre="Cycle de tresorerie" Icone={Landmark}>
             <Kpi
-              libelle="Stock immobilise"
+              libelle="Stock immobilisé"
               valeur={fmt.nombre(t.valeur_stock_mad / 1e6, 2)}
               unite="M MAD"
             />
             <Kpi
-              libelle="Cout matiere annuel"
+              libelle="Coût matiere annuel"
               valeur={fmt.nombre(t.cout_matiere_annuel_mad / 1e6, 2)}
               unite="M MAD"
             />
@@ -239,7 +239,7 @@ export function CockpitAnalyse() {
               valeur={fmt.nombre(t.rotation_annuelle, 2)}
               unite="fois / an"
               ton={t.rotation_annuelle < 1 ? 'alerte' : undefined}
-              aide="Cout matiere annuel divise par la valeur du stock. Sous 1, le stock represente plus d une annee de consommation."
+              aide="Coût matière annuel divise par la valeur du stock. Sous 1, le stock represente plus d une annee de consommation."
             />
             <Kpi
               libelle="Stock en jours (DIO)"
@@ -248,7 +248,7 @@ export function CockpitAnalyse() {
               ton={t.dio_jours > 180 ? 'alerte' : undefined}
             />
             <Kpi
-              libelle="Delai fournisseur (DPO)"
+              libelle="Délai fournisseur (DPO)"
               valeur={fmt.nombre(t.dpo_jours, 0)}
               unite="j"
               aide="Moyenne des delais de paiement accordes par les fournisseurs."
@@ -286,7 +286,7 @@ export function CockpitAnalyse() {
               <table className="grille w-full text-[12px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Reference</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
                     <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur actuel</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Prix actuel</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Prix mini du groupe</th>
@@ -343,9 +343,9 @@ export function CockpitAnalyse() {
                 <table className="grille w-full text-[12px]">
                   <thead>
                     <tr className="bg-attenue">
-                      <th className="px-2.5 py-1.5 text-left font-semibold">Reference</th>
+                      <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
                       <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur unique</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">Delai</th>
+                      <th className="px-2.5 py-1.5 text-right font-semibold">Délai</th>
                       <th className="px-2.5 py-1.5 text-right font-semibold">Couverture</th>
                     </tr>
                   </thead>
@@ -388,7 +388,7 @@ export function CockpitAnalyse() {
                 <thead>
                   <tr className="bg-attenue">
                     <th className="px-2.5 py-1.5 text-left font-semibold">Devise</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">References</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Références</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Budget annuel</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Part</th>
                   </tr>

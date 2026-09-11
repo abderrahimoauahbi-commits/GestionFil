@@ -109,19 +109,19 @@ const DYNAMIQUES: {
   },
   {
     motif: /^\/utilisateurs$/,
-    decrire: () => ({ titre: 'Utilisateurs et droits', detail: 'Parametres', Icone: ShieldCheck }),
+    decrire: () => ({ titre: 'Utilisateurs et droits', detail: 'Paramètres', Icone: ShieldCheck }),
   },
   {
     motif: /^\/audit$/,
-    decrire: () => ({ titre: "Journal d'audit", detail: 'Parametres', Icone: ScrollText }),
+    decrire: () => ({ titre: "Journal d'audit", detail: 'Paramètres', Icone: ScrollText }),
   },
   {
     motif: /^\/referentiels$/,
-    decrire: () => ({ titre: 'Referentiels', detail: 'Parametres', Icone: Library }),
+    decrire: () => ({ titre: 'Referentiels', detail: 'Paramètres', Icone: Library }),
   },
   {
     motif: /^\/receptions\/nouvelle$/,
-    decrire: () => ({ titre: 'Nouvelle reception', Icone: Package }),
+    decrire: () => ({ titre: 'Nouvelle réception', Icone: Package }),
   },
   {
     motif: /^\/receptions\/([^/]+)$/,

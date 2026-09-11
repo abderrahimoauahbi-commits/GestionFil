@@ -79,7 +79,7 @@ export function QualiteEtat() {
   const brut = qQualite.data
   const liste = Array.isArray(brut) ? brut : ((brut as unknown as { lignes?: Qualite[] })?.lignes ?? [])
   const q = liste.find((x) => x.code_qualite === code)
-  if (!q) return <Alerte ton="danger">Qualite introuvable.</Alerte>
+  if (!q) return <Alerte ton="danger">Qualité introuvable.</Alerte>
 
   const roles = qLignes.data ?? []
   const compo = [...(qCompo.data ?? [])].sort(
@@ -107,7 +107,7 @@ export function QualiteEtat() {
 
   return (
     <EtatImprimable
-      titre="Fiche qualite"
+      titre="Fiche qualité"
       reference={q.code_qualite}
       sousTitre={q.statut !== 'ACTIF' ? `Statut : ${q.statut}` : undefined}
       enTete={
@@ -159,8 +159,8 @@ export function QualiteEtat() {
       <TableEtat<LigneRole>
         colonnes={[
           { entete: 'Role', valeur: (r) => r.role_libelle ?? r.code_role },
-          { entete: 'Densite', numerique: true, valeur: (r) => fmt.nombre(r.densite, 4) },
-          { entete: 'Unite', valeur: (r) => (r.unite_densite === 'kg_m2' ? 'kg/m²' : 'ml/m²') },
+          { entete: 'Densité', numerique: true, valeur: (r) => fmt.nombre(r.densite, 4) },
+          { entete: 'Unité', valeur: (r) => (r.unite_densite === 'kg_m2' ? 'kg/m²' : 'ml/m²') },
           {
             entete: 'Somme composition',
             numerique: true,
@@ -183,7 +183,7 @@ export function QualiteEtat() {
         colonnes={[
           { entete: 'Role', valeur: (l) => l.role_libelle ?? l.code_role },
           {
-            entete: 'Reference',
+            entete: 'Référence',
             valeur: (l) => (
               <>
                 <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>

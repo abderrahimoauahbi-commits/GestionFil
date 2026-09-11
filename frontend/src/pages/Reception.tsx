@@ -180,7 +180,7 @@ export function Reception() {
     void qc.invalidateQueries({ queryKey: ['bons-commande'] })
   }
   const echec = (e: unknown) =>
-    toast.error(e instanceof ErreurApi ? e.message : 'Operation impossible.')
+    toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
   useEffect(() => {
     if (!rec) return
@@ -318,7 +318,7 @@ export function Reception() {
   const colonnes: ColonneDT<LigneRec>[] = [
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-medium">{l.code_reference}</div>
@@ -381,7 +381,7 @@ export function Reception() {
     },
     {
       champ: 'ecart_pct',
-      entete: 'Ecart',
+      entete: 'Écart',
       numerique: true,
       largeur: '110px',
       rendu: (l) => {
@@ -397,7 +397,7 @@ export function Reception() {
     },
     {
       champ: 'ecart_cmd_kg',
-      entete: 'Ecart commande',
+      entete: 'Écart commande',
       numerique: true,
       largeur: '130px',
       secondaire: true,
@@ -447,7 +447,7 @@ export function Reception() {
     },
     {
       champ: 'statut_qualite',
-      entete: 'Qualite',
+      entete: 'Qualité',
       largeur: '140px',
       rendu: (l) => (
         <Badge ton={TON_QUALITE[l.statut_qualite] ?? 'neutre'}>{l.statut_qualite}</Badge>
@@ -467,7 +467,7 @@ export function Reception() {
     },
     {
       champ: 'ligne_numero',
-      entete: 'Etat',
+      entete: 'État',
       largeur: '150px',
       rendu: (l) =>
         estNouvelle(l) ? (
@@ -502,7 +502,7 @@ export function Reception() {
   if (!rec) {
     return (
       <div>
-        <EnTetePage titre="Reception" description="Introuvable." />
+        <EnTetePage titre="Réception" description="Introuvable." />
         <Alerte ton="alerte">
           Cette reception n'existe pas, ou vous n'y avez pas acces.{' '}
           <button className="underline" onClick={() => naviguer('/receptions')}>
@@ -576,7 +576,7 @@ export function Reception() {
       )}
 
       {horsTolerance > 0 && (
-        <Alerte ton="alerte" titre="Ecart de pesee" className="mb-3">
+        <Alerte ton="alerte" titre="Écart de pesee" className="mb-3">
           {horsTolerance} ligne(s) s'ecartent de plus de {TOLERANCE_PCT} % de la quantite
           commandee. Au-dela, le controle qualite exigera une derogation motivee.
         </Alerte>
@@ -597,8 +597,8 @@ export function Reception() {
             </Badge>
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <Indicateur libelle="Delai reel" valeur={rec.delai_reel_jours} suffixe=" j" />
-            <Indicateur libelle="Delai promis" valeur={rec.delai_prevu_jours} suffixe=" j" />
+            <Indicateur libelle="Délai reel" valeur={rec.delai_reel_jours} suffixe=" j" />
+            <Indicateur libelle="Délai promis" valeur={rec.delai_prevu_jours} suffixe=" j" />
             <Indicateur
               libelle="Retard"
               valeur={rec.retard_jours}
@@ -755,7 +755,7 @@ export function Reception() {
                     .filter(Boolean)
                     .join(' · ')}
                 </span>
-                <span className="text-alerte"> — rien n'est encore enregistre.</span>
+                <span className="text-alerte"> — rien n'est encore enregistré.</span>
               </>
             ) : (
               <span className="text-attenue-texte">
@@ -975,7 +975,7 @@ function PanneauPesee({
                       )}
                       {l.suivi_lot === 1 && <Badge ton="info">lot obligatoire</Badge>}
                       {deja && (
-                        <span className="text-[11px] text-attenue-texte">deja pesee ici</span>
+                        <span className="text-[11px] text-attenue-texte">déjà pesee ici</span>
                       )}
                     </span>
                     <span className="mt-0.5 block truncate text-[12px] text-attenue-texte">
@@ -1047,7 +1047,7 @@ function PanneauPesee({
                       />
                     </div>
                     <div>
-                      <Etiq>Unite</Etiq>
+                      <Etiq>Unité</Etiq>
                       <Selecteur
                         value={choix[l.id_ligne_bc].unite}
                         onChange={(e) =>

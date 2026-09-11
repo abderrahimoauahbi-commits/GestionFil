@@ -47,8 +47,8 @@ interface LignePrix {
 const CHAMPS: ChampFiltre<LignePrix>[] = [
   { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', valeur: (l) => l.fournisseur_nom },
   { cle: 'devise', libelle: 'Devise', type: 'liste', valeur: (l) => l.code_devise },
-  { cle: 'reference', libelle: 'Reference', type: 'texte', valeur: (l) => l.code_reference },
-  { cle: 'periode', libelle: "Periode d'achat", type: 'periode', valeur: (l) => l.date_achat },
+  { cle: 'reference', libelle: 'Référence', type: 'texte', valeur: (l) => l.code_reference },
+  { cle: 'periode', libelle: "Période d'achat", type: 'periode', valeur: (l) => l.date_achat },
 ]
 
 /** Ecart avec l'achat precedent de la MEME reference, en pourcentage. */
@@ -102,7 +102,7 @@ export function HistoriquePrix() {
     },
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-mono text-[11px]">{l.code_reference}</div>
@@ -182,7 +182,7 @@ export function HistoriquePrix() {
     },
     {
       champ: 'quantite_achetee_kg',
-      entete: 'Quantite',
+      entete: 'Quantité',
       numerique: true,
       secondaire: true,
       rendu: (l) =>
@@ -210,7 +210,7 @@ export function HistoriquePrix() {
     <div>
       <EnTetePage
         titre="Historique des prix"
-        sous_titre="Prix reellement payes, enregistres a la reception — pas les tarifs annonces"
+        sous_titre="Prix reellement payes, enregistres a la réception — pas les tarifs annonces"
       />
 
       {/* LES FILTRES SONT AU-DESSUS DU TABLEAU, plus a sa gauche. Le rail
@@ -230,7 +230,7 @@ export function HistoriquePrix() {
               onClick={() => setRef('')}
               className="mb-0.5 rounded-[3px] border border-bordure px-2 py-1 text-[11px] hover:bg-attenue"
             >
-              <span className="text-attenue-texte">Reference : </span>
+              <span className="text-attenue-texte">Référence : </span>
               <span className="font-mono">{ref}</span>
               <span className="text-attenue-texte"> — tout voir</span>
             </button>

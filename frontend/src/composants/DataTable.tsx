@@ -124,6 +124,7 @@ interface Props<L> {
   /** Boutons additionnels, inseres dans la barre d'outils. */
   barreOutils?: React.ReactNode
   /** Hauteur maximale du corps ; l'en-tete reste fixe au defilement. */
+  /** Hauteur du cadre de defilement du tableau. Voir le defaut plus bas. */
   hauteurMax?: string
   /**
    * Sujet du fichier exporte. Sa PRESENCE affiche le bouton d'export.
@@ -163,7 +164,19 @@ export function DataTable<L extends Record<string, unknown>>({
   videDescription,
   videAction,
   barreOutils,
-  hauteurMax,
+  /* SANS HAUTEUR, L'EN-TETE DE COLONNES NE COLLE PAS — et c'etait le cas
+     partout sauf sur les recettes, seul ecran a renseigner cette propriete.
+     `position: sticky` se cale sur le premier ancetre qui defile ; le cadre
+     porte `overflow-x: auto`, donc c'est LUI le referentiel, et tant qu'il n'a
+     pas de hauteur il ne defile jamais verticalement : l'en-tete part avec la
+     page. Mesure : sur un ecran de 500 px, il descendait a -434 px.
+
+     On lui donne donc une hauteur par defaut. `dvh` et non `vh` : sur un
+     telephone, `vh` ignore la barre d'adresse qui se replie, et le bas du
+     tableau se retrouve sous le pouce. La reserve de 18 rem couvre l'en-tete de
+     page fige, la barre d'outils, la pagination et la barre de navigation
+     basse. */
+  hauteurMax = 'calc(100dvh - 18rem)',
   exportable,
   imprimable,
   serveur,
@@ -310,9 +323,28 @@ export function DataTable<L extends Record<string, unknown>>({
 
   return (
     <div className="space-y-2">
-      {/* --- Barre d'outils --------------------------------------------- */}
+      {/* --- Barre d'outils ----------------------------------------------
+          ELLE RESTE EN HAUT, ET C'EST INDISPENSABLE SUR UNE GRANDE TABLE.
+          Sur quatre cents references, l'utilisateur qui veut changer de filtre
+          apres avoir descendu la liste devait remonter jusqu'en haut, filtrer,
+          puis redescendre. La barre suit donc le defilement.
+
+          `top-0` colle a l'en-tete de table, qui est deja `sticky top-0` : les
+          deux se superposeraient. On la place donc AU-DESSUS en pile (`z-20`
+          contre `z-10`) et on lui donne un fond opaque — sans quoi les lignes
+          defileraient visiblement derriere elle.
+
+          `sans-impression` : une barre d'outils n'a rien a faire sur un papier. */}
       {(recherche || colonnesFiltrables.length > 0 || visibles.length > 4 || barreOutils) && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div
+          /* COLLEE SOUS L EN-TETE DE PAGE. Deux regimes, mesures a l ecran :
+             l en-tete fait 36 px des `sm`, et 65 px en dessous ou ses actions
+             passent a la ligne. Les decalages suivent, en CSS pur — une version
+             precedente les mesurait en JavaScript, et les crochets ajoutes a
+             `EnTetePage` faisaient planter toute l application. */
+          className="sans-impression sticky top-[4.6rem] z-20 -mx-1 flex flex-wrap items-center
+                     gap-1.5 border-b border-bordure bg-fond px-1 py-2 sm:top-[2.5rem]"
+        >
           {recherche && (
             <div className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-attenue-texte" />
@@ -439,7 +471,7 @@ export function DataTable<L extends Record<string, unknown>>({
                       rangs.map((r) => r.original),
                     )
                   }
-                  title="Telecharger la liste au format CSV, lisible par Excel"
+                  title="Télécharger la liste au format CSV, lisible par Excel"
                   aria-label="Exporter la liste"
                   className="grid size-7 place-items-center border-l border-bordure
                              text-attenue-texte transition-colors hover:bg-attenue
@@ -507,6 +539,22 @@ export function DataTable<L extends Record<string, unknown>>({
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}
           >
             <table className="grille w-full text-[12px]">
+              {/* L'en-tete se colle SOUS la barre d'outils : `top-12` la laisse
+                  passer, sinon les deux se recouvrent au defilement. */}
+              {/* CET EN-TETE NE COLLE PAS, ET CE N'EST PAS FAUTE DE `sticky`.
+                  Le tableau vit dans un conteneur `overflow-x-auto` : des qu'un
+                  ancetre porte un debordement, il devient le referentiel du
+                  collage, et `sticky` ne voit plus le defilement de la page.
+                  Mesure a l'appui — sur un ecran de 500 px ou la table defile
+                  de 903 px, l'en-tete part a -434 px.
+
+                  C'etait deja le cas AVANT que je touche a quoi que ce soit :
+                  le `sticky top-0` d'origine ne servait a rien non plus. Le
+                  reparer demande de donner au conteneur sa propre hauteur et
+                  son propre defilement vertical — un changement de modele de
+                  defilement qui merite d'etre decide, pas glisse ici.
+
+                  On laisse donc `top-0` : inerte, mais honnete. */}
               <thead className="sticky top-0 z-10">
                 {table.getHeaderGroups().map((groupe) => (
                   <tr key={groupe.id} className="bg-attenue">
@@ -664,7 +712,13 @@ export function DataTable<L extends Record<string, unknown>>({
                       <dt className="text-xs text-attenue-texte">
                         {visibles.find((v) => v.champ === cellule.column.id)?.entete}
                       </dt>
-                      <dd className="truncate">
+                      {/* UNE CARTE A LA PLACE DE PASSER A LA LIGNE, une table
+                          non. `truncate` coupait « SOFIA TEXTILE » ou une
+                          designation longue au milieu d'un mot, sans que rien
+                          ne le signale — 44 px de valeur perdus sur l'ecran
+                          Stock. Ici la hauteur est libre : on laisse le texte
+                          revenir a la ligne. */}
+                      <dd className="break-words">
                         {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
                       </dd>
                     </div>
@@ -677,12 +731,22 @@ export function DataTable<L extends Record<string, unknown>>({
           {/* --- Pagination ----------------------------------------------
               Toujours affichee des qu'il y a des lignes : le compte total et
               le choix de la taille de page sont des reperes utiles meme sur
-              une seule page. */}
+              une seule page.
+
+              FIGEE EN BAS SUR TELEPHONE. Vingt-cinq cartes font sept mille
+              pixels : la barre de pages se trouvait sous la derniere, et il
+              fallait traverser toute la liste pour changer de page — puis
+              remonter pour la lire. Au bureau elle reste au fil du texte : le
+              corps du tableau a deja sa propre hauteur bornee, la barre est
+              donc visible sans rien figer. */}
           <div
             className={cn(
-              'flex flex-wrap items-center justify-between gap-3 text-[12px]',
+              'sticky z-20 -mx-3 flex flex-wrap items-center justify-between gap-3',
+              'border-t border-bordure bg-fond px-3 py-2 text-[12px]',
+              'md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0',
               !avecPagination && 'hidden',
             )}
+            style={{ bottom: 'var(--barre-basse, 0px)' }}
           >
             <div className="flex items-center gap-2">
               <span className="text-attenue-texte">
@@ -731,7 +795,7 @@ export function DataTable<L extends Record<string, unknown>>({
                     serveur ? serveur.surPage(serveur.page - 1) : table.previousPage()
                   }
                   disabled={!table.getCanPreviousPage()}
-                  aria-label="Page precedente"
+                  aria-label="Page précédente"
                 >
                   <ChevronLeft />
                 </Bouton>
@@ -754,7 +818,7 @@ export function DataTable<L extends Record<string, unknown>>({
                   taille="icone"
                   onClick={() => table.lastPage()}
                   disabled={pagination.pageIndex + 1 >= Math.max(1, Math.ceil(total / pagination.pageSize))}
-                  aria-label="Derniere page"
+                  aria-label="Dernière page"
                 >
                   <ChevronsRight />
                 </Bouton>

@@ -104,8 +104,8 @@ export function EtatReception() {
     enabled: !!choisi,
   })
 
-  if (qListe.isLoading) return <Chargement texte="Chargement des receptions…" />
-  if (!liste.length) return <Alerte ton="info">Aucune reception enregistree.</Alerte>
+  if (qListe.isLoading) return <Chargement texte="Chargement des réceptions…" />
+  if (!liste.length) return <Alerte ton="info">Aucune réception enregistree.</Alerte>
 
   const lignes = qLignes.data ?? []
   const totalBl = lignes.reduce((s, l) => s + (l.quantite_bl_kg ?? 0), 0)
@@ -115,7 +115,7 @@ export function EtatReception() {
     <div>
       {!idUrl && (
       <Choix
-        libelle="Reception a imprimer :"
+        libelle="Réception a imprimer :"
         valeur={choisi}
         surChangement={setId}
         options={liste.map((x) => ({
@@ -127,7 +127,7 @@ export function EtatReception() {
 
       {!r ? null : (
         <EtatImprimable
-          titre="Bon de reception"
+          titre="Bon de réception"
           reference={r.numero_reception}
           sousTitre={r.statut !== 'VALIDEE' ? `Statut : ${r.statut}` : undefined}
           enTete={
@@ -163,7 +163,7 @@ export function EtatReception() {
                   {r.receptionnaire ?? '—'}
                 </div>
                 <div className="text-[10px]">
-                  <span className="text-neutral-600">Controleur qualite : </span>
+                  <span className="text-neutral-600">Controleur qualité : </span>
                   {r.controleur ?? '—'}
                 </div>
               </div>
@@ -173,7 +173,7 @@ export function EtatReception() {
           <TableEtat<LigneRecept>
             colonnes={[
               {
-                entete: 'Reference',
+                entete: 'Référence',
                 valeur: (l) => (
                   <>
                     <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
@@ -196,14 +196,14 @@ export function EtatReception() {
                   l.quantite_pesee_kg == null ? '—' : fmt.nombre(l.quantite_pesee_kg, 2),
               },
               {
-                entete: 'Ecart',
+                entete: 'Écart',
                 numerique: true,
                 valeur: (l) =>
                   l.ecart_pct == null
                     ? '—'
                     : `${l.ecart_pct > 0 ? '+' : ''}${fmt.nombre(l.ecart_pct, 2)} %`,
               },
-              { entete: 'Qualite', valeur: (l) => l.statut_qualite ?? '—' },
+              { entete: 'Qualité', valeur: (l) => l.statut_qualite ?? '—' },
               { entete: 'Magasin', valeur: (l) => l.code_magasin_dest ?? '—' },
             ]}
             lignes={lignes}
@@ -291,7 +291,7 @@ export function EtatInventaire() {
   })
 
   if (qListe.isLoading) return <Chargement texte="Chargement des inventaires…" />
-  if (!liste.length) return <Alerte ton="info">Aucun inventaire enregistre.</Alerte>
+  if (!liste.length) return <Alerte ton="info">Aucun inventaire enregistré.</Alerte>
 
   const toutes = qLignes.data ?? []
   /* Le proces-verbal se lit sur les ECARTS : les lignes conformes sont
@@ -365,7 +365,7 @@ export function EtatInventaire() {
           <TableEtat<LigneInv>
             colonnes={[
               {
-                entete: 'Reference',
+                entete: 'Référence',
                 valeur: (l) => (
                   <>
                     <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
@@ -389,7 +389,7 @@ export function EtatInventaire() {
                   l.quantite_comptee_kg == null ? '—' : fmt.nombre(l.quantite_comptee_kg, 3),
               },
               {
-                entete: 'Ecart kg',
+                entete: 'Écart kg',
                 numerique: true,
                 valeur: (l) =>
                   l.ecart_kg == null
@@ -397,7 +397,7 @@ export function EtatInventaire() {
                     : `${l.ecart_kg > 0 ? '+' : ''}${fmt.nombre(l.ecart_kg, 3)}`,
               },
               {
-                entete: 'Ecart %',
+                entete: 'Écart %',
                 numerique: true,
                 valeur: (l) => (l.ecart_pct == null ? '—' : `${fmt.nombre(l.ecart_pct, 2)} %`),
               },
@@ -544,7 +544,7 @@ export function EtatPlanProduction() {
         <div className="defilement-x">
           <TableEtat<(typeof qualites)[number]>
             colonnes={[
-              { entete: 'Qualite', valeur: (p) => p.nom },
+              { entete: 'Qualité', valeur: (p) => p.nom },
               ...mois.map((m) => ({
                 entete: m.slice(2),
                 numerique: true,
@@ -662,7 +662,7 @@ export function EtatBesoins() {
         enTete={
           <div className="flex flex-wrap gap-x-8 gap-y-1">
             <span>
-              <span className="text-neutral-600">References : </span>
+              <span className="text-neutral-600">Références : </span>
               <span className="font-semibold">{refs.length}</span>
             </span>
             <span>
@@ -682,7 +682,7 @@ export function EtatBesoins() {
           <TableEtat<(typeof refs)[number]>
             colonnes={[
               {
-                entete: 'Reference',
+                entete: 'Référence',
                 valeur: (r) => (
                   <>
                     <div className="font-mono text-[10px] font-medium">{r.code}</div>

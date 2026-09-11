@@ -207,7 +207,7 @@ function FormulaireCreation({
           `a ajuster champ par champ si besoin.`,
       ),
     onError: (e) =>
-      setErreur(e instanceof ErreurApi ? e.message : 'Creation impossible.'),
+      setErreur(e instanceof ErreurApi ? e.message : 'Création impossible.'),
   })
 
   const champ =

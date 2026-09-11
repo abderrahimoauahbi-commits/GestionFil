@@ -159,12 +159,12 @@ interface Parametre {
  * l'identique si la marge generale change en juin (B3).
  */
 const PARAMETRES_GENERAUX = [
-  { champ: 'marge_securite_pct', libelle: 'Marge securite %', code: 'P_MargeSecurite' },
+  { champ: 'marge_securite_pct', libelle: 'Marge sécurité %', code: 'P_MargeSecurite' },
   { champ: 'taux_perte_pct', libelle: 'Taux de perte %', code: 'P_TauxPerte' },
   { champ: 'couv_min_mois', libelle: 'Couverture min. (mois)', code: 'P_CouvMinMois' },
   { champ: 'seuil_alerte_jours', libelle: 'Seuil alerte (j)', code: 'P_SeuilAlerte' },
   { champ: 'seuil_critique_jours', libelle: 'Seuil critique (j)', code: 'P_SeuilCritique' },
-  { champ: 'stock_securite_jours', libelle: 'Securite (j)', code: 'P_SecuriteA' },
+  { champ: 'stock_securite_jours', libelle: 'Sécurité (j)', code: 'P_SecuriteA' },
 ] as const satisfies readonly { champ: keyof Entete; libelle: string; code: string }[]
 
 /** Ligne en cours de saisie. `cle` est locale : elle survit au changement de role. */
@@ -725,11 +725,11 @@ export function Qualites() {
     return (
       <div>
         <EnTetePage
-          titre="Qualites"
-          description="Densite de matiere par role BOM, exprimee en kg/m² ou ml/m²."
+          titre="Qualités"
+          description="Densité de matiere par role BOM, exprimee en kg/m² ou ml/m²."
           actions={
             droits.peutEcrire && (
-              <Bouton taille="icone" title="Nouvelle qualite" aria-label="Nouvelle qualite" onClick={ouvrirCreation}>                <Plus />              </Bouton>
+              <Bouton taille="icone" title="Nouvelle qualité" aria-label="Nouvelle qualité" onClick={ouvrirCreation}>                <Plus />              </Bouton>
             )
           }
         />
@@ -742,7 +742,7 @@ export function Qualites() {
 
         <DataTable
           exportable="composition-qualite"
-          imprimable="Composition qualite"
+          imprimable="Composition qualité"
           module={MODULE}
           colonnes={colonnes}
           lignes={qQualites.data}
@@ -768,7 +768,7 @@ export function Qualites() {
               taille="icone-xs"
               onClick={() => ouvrirEtat(`/etats/qualite/${q.code_qualite}`)}
               aria-label="Imprimer"
-              title="Imprimer la fiche qualite"
+              title="Imprimer la fiche qualité"
             >
               <Printer />
             </Bouton>
@@ -849,7 +849,7 @@ export function Qualites() {
     },
     {
       champ: 'densite',
-      entete: 'Densite',
+      entete: 'Densité',
       numerique: true,
       largeur: '160px',
       rendu: (l) => (
@@ -866,7 +866,7 @@ export function Qualites() {
     },
     {
       champ: 'unite_densite',
-      entete: 'Unite',
+      entete: 'Unité',
       largeur: '150px',
       rendu: (l) => (
         <CelluleEditable
@@ -929,7 +929,7 @@ export function Qualites() {
     },
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       largeur: '230px',
       rendu: (c) => (
         // Pas de menu deroulant : le catalogue se compte en centaines de
@@ -1036,7 +1036,7 @@ export function Qualites() {
     },
     {
       champ: 'cout_m2_mad',
-      entete: 'Cout MAD/m²',
+      entete: 'Coût MAD/m²',
       numerique: true,
       largeur: '120px',
       valeurTri: (c) => coutM2(c),
@@ -1096,7 +1096,7 @@ export function Qualites() {
       />
 
       {erreur && (
-        <Alerte ton="danger" titre="Enregistrement refuse" className="mb-3">
+        <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">
           {erreur}
         </Alerte>
       )}
@@ -1218,7 +1218,7 @@ export function Qualites() {
                   >
                     <option value="BROUILLON">Brouillon</option>
                     <option value="ACTIF">Actif</option>
-                    <option value="CLOTURE">Cloture</option>
+                    <option value="CLOTURE">Clôture</option>
                   </Selecteur>
                 </div>
 
@@ -1253,7 +1253,7 @@ export function Qualites() {
                       variante="discret"
                       taille="icone-xs"
                       onClick={() => setEntete((s) => ({ ...s, ...valeursGenerales() }))}
-                      aria-label="Reprendre les parametres generaux"
+                      aria-label="Reprendre les paramètres generaux"
                       title="Reprendre les parametres generaux"
                     >
                       <RotateCcw />
@@ -1367,7 +1367,7 @@ export function Qualites() {
               <Boxes className="size-3.5" />
               Composition
               <Aide>
-                <strong>Une qualite = une composition.</strong> Pas de versionnement : si la
+                <strong>Une qualité = une composition.</strong> Pas de versionnement : si la
                 composition doit changer, dupliquez la qualite sous un nouveau code (SH1, SH2...)
                 plutot que de modifier celle-ci. Une matiere ne figure qu'une seule fois, tous roles
                 confondus. Le selecteur ne propose que les matieres dont la categorie est destinee

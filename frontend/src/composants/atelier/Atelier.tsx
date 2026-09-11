@@ -394,13 +394,13 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
       },
       {
         id: 'vue:controles',
-        libelle: 'Affichage : controles de coherence',
+        libelle: 'Affichage : contrôles de cohérence',
         raccourci: 'Ctrl+Maj+M',
         executer: montrerControles,
       },
       {
         id: 'donnees:rafraichir',
-        libelle: 'Donnees : tout rafraichir',
+        libelle: 'Données : tout rafraichir',
         raccourci: 'Ctrl+R',
         executer: rafraichir,
       },
@@ -458,7 +458,7 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
       })),
       { id: 'theme:clair', libelle: 'Theme : clair', executer: () => definir('clair') },
       { id: 'theme:sombre', libelle: 'Theme : sombre', executer: () => definir('sombre') },
-      { id: 'theme:systeme', libelle: 'Theme : systeme', executer: () => definir('systeme') },
+      { id: 'theme:systeme', libelle: 'Theme : système', executer: () => definir('systeme') },
       {
         id: 'zoom:plus',
         libelle: 'Zoom : agrandir',
@@ -500,7 +500,7 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
   const menus = useMemo<MenuBarre[]>(() => {
     const nouveaux = [
       { chemin: '/mouvements', libelle: 'Mouvement de stock', module: 'MOUVEMENTS' },
-      { chemin: '/receptions/nouvelle', libelle: 'Reception', module: 'RECEPTIONS' },
+      { chemin: '/receptions/nouvelle', libelle: 'Réception', module: 'RECEPTIONS' },
       { chemin: '/transferts/nouveau', libelle: 'Transfert', module: 'MOUVEMENTS' },
       { chemin: '/bons-commande/nouveau', libelle: 'Bon de commande', module: 'BONS_COMMANDE' },
     ].filter((n) => peut(n.module, 'ECRIRE'))
@@ -564,7 +564,7 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
           },
           {
             id: 'aff:controles',
-            libelle: 'Controles de coherence',
+            libelle: 'Contrôles de cohérence',
             raccourci: 'Ctrl+Maj+M',
             separateurAvant: true,
             executer: montrerControles,

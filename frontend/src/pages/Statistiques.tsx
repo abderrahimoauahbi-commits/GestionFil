@@ -74,7 +74,7 @@ const ONGLETS: {
   },
   {
     cle: 'qualites',
-    nom: 'Qualites',
+    nom: 'Qualités',
     resume: 'Ce que coute le metre carre',
     module: 'QUALITES',
     Icone: Factory,
@@ -107,7 +107,7 @@ export function Statistiques() {
     <div>
       <EnTetePage
         titre="Statistiques"
-        description="Calculees a la lecture, sur les donnees du jour. Aucun chiffre n'est fige ni recopie."
+        description="Calculees a la lecture, sur les données du jour. Aucun chiffre n'est fige ni recopie."
       />
 
       <PageAvecRail
@@ -167,10 +167,10 @@ function Chiffre({
     danger: 'text-danger',
   }[ton]
   return (
-    <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-      <div className="text-[11px] text-attenue-texte">{libelle}</div>
-      <div className={cn('text-lg font-semibold tabular-nums', teinte)}>{valeur}</div>
-      {detail && <div className="text-[11px] text-attenue-texte">{detail}</div>}
+    <div className="rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2.5 sm:px-4">
+      <div className="text-[11px] leading-tight text-attenue-texte">{libelle}</div>
+      <div className={cn('text-base font-semibold tabular-nums sm:text-lg', teinte)}>{valeur}</div>
+      {detail && <div className="text-[11px] leading-tight text-attenue-texte">{detail}</div>}
     </div>
   )
 }
@@ -249,19 +249,19 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <Chiffre libelle="Entrees cumulees" valeur={`${fmt.compact(totaux.e)} kg`} ton="succes" />
         <Chiffre libelle="Sorties cumulees" valeur={`${fmt.compact(totaux.so)} kg`} ton="alerte" />
         <Chiffre
           libelle="Sans mouvement depuis 6 mois"
           valeur={String(totaux.dormantes)}
-          detail="references"
+          detail="références"
           ton={totaux.dormantes > 0 ? 'alerte' : 'succes'}
         />
         <Chiffre
           libelle="Jamais mouvementees"
           valeur={String(totaux.jamais)}
-          detail="references du catalogue"
+          detail="références du catalogue"
           ton={totaux.jamais > 0 ? 'alerte' : 'succes'}
         />
       </div>
@@ -272,17 +272,17 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         </CarteEntete>
         <CarteCorps className="p-0">
           {mois.length === 0 ? (
-            <p className="p-4 text-[13px] text-attenue-texte">Aucun mouvement enregistre.</p>
+            <p className="p-4 text-[13px] text-attenue-texte">Aucun mouvement enregistré.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
+              <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
                 <thead>
                   <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                     <th className="px-3 py-2 text-left">Mois</th>
                     <th className="px-3 py-2 text-left">Type</th>
                     <th className="w-20 px-2 py-2 text-right">Sens</th>
                     <th className="w-24 px-2 py-2 text-right">Mvts</th>
-                    <th className="w-28 px-2 py-2 text-right">Quantite</th>
+                    <th className="w-28 px-2 py-2 text-right">Quantité</th>
                     <th className="w-40 px-3 py-2 text-left">Part</th>
                     {voitValeur && <th className="w-32 px-3 py-2 text-right">Valeur</th>}
                   </tr>
@@ -327,7 +327,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
 
       <Carte repliable="statistiques.2">
         <CarteEntete>
-          <CarteTitre>Par reference</CarteTitre>
+          <CarteTitre>Par référence</CarteTitre>
           <span className="text-[11px] text-attenue-texte">
             la rotation rapporte les sorties au stock actuel — une approximation, faute
             d'historique de stock
@@ -335,10 +335,10 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         </CarteEntete>
         <CarteCorps className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
               <thead>
                 <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                  <th className="px-3 py-2 text-left">Reference</th>
+                  <th className="px-3 py-2 text-left">Référence</th>
                   <th className="w-16 px-2 py-2 text-center">ABC</th>
                   <th className="w-28 px-2 py-2 text-right">Entrees</th>
                   <th className="w-28 px-2 py-2 text-right">Sorties</th>
@@ -434,12 +434,12 @@ function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Chiffre libelle="References suivies" valeur={String(refs.length)} />
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+        <Chiffre libelle="Références suivies" valeur={String(refs.length)} />
         <Chiffre
           libelle="En hausse fournisseur"
           valeur={String(enHausse)}
-          detail="hors effet de change"
+          detail="hors effet de changé"
           ton={enHausse > 0 ? 'alerte' : 'succes'}
         />
         <Chiffre
@@ -470,10 +470,10 @@ function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
         </CarteEntete>
         <CarteCorps className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
               <thead>
                 <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                  <th className="px-3 py-2 text-left">Reference</th>
+                  <th className="px-3 py-2 text-left">Référence</th>
                   <th className="w-16 px-2 py-2 text-center">Dev.</th>
                   <th className="w-16 px-2 py-2 text-right">Achats</th>
                   <th className="w-28 px-2 py-2 text-right">Prix moyen</th>
@@ -548,49 +548,51 @@ function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
           </CarteEntete>
           <CarteCorps className="p-0">
             {serie.length === 0 ? (
-              <p className="p-4 text-[13px] text-attenue-texte">Aucun achat enregistre.</p>
+              <p className="p-4 text-[13px] text-attenue-texte">Aucun achat enregistré.</p>
             ) : (
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                    <th className="px-3 py-2 text-left">Mois</th>
-                    <th className="w-20 px-2 py-2 text-right">Achats</th>
-                    <th className="w-28 px-2 py-2 text-right">Quantite</th>
-                    <th className="w-28 px-2 py-2 text-right">Prix devise</th>
-                    <th className="w-24 px-2 py-2 text-right">Taux</th>
-                    <th className="w-28 px-2 py-2 text-right">Prix MAD</th>
-                    <th className="w-32 px-2 py-2 text-right">Montant</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {serie.map((m, i) => (
-                    <tr key={i} className="border-b border-bordure/60">
-                      <td className="px-3 py-1.5 tabular-nums">{txt(m, 'annee_mois')}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.entier(nb(m, 'nb_achats') ?? 0)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.nombre(nb(m, 'quantite_kg') ?? 0, 0)} kg
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.nombre(nb(m, 'prix_moyen_devise') ?? 0, 4)} {txt(m, 'code_devise')}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.nombre(nb(m, 'taux_moyen') ?? 0, 3)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right font-medium tabular-nums">
-                        {fmt.nombre(nb(m, 'prix_moyen_mad') ?? 0, 4)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.compact(nb(m, 'montant_mad'))}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
+                  <thead>
+                    <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                      <th className="px-3 py-2 text-left">Mois</th>
+                      <th className="w-20 px-2 py-2 text-right">Achats</th>
+                      <th className="w-28 px-2 py-2 text-right">Quantité</th>
+                      <th className="w-28 px-2 py-2 text-right">Prix devise</th>
+                      <th className="w-24 px-2 py-2 text-right">Taux</th>
+                      <th className="w-28 px-2 py-2 text-right">Prix MAD</th>
+                      <th className="w-32 px-2 py-2 text-right">Montant</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {serie.map((m, i) => (
+                      <tr key={i} className="border-b border-bordure/60">
+                        <td className="px-3 py-1.5 tabular-nums">{txt(m, 'annee_mois')}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.entier(nb(m, 'nb_achats') ?? 0)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(nb(m, 'quantite_kg') ?? 0, 0)} kg
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(nb(m, 'prix_moyen_devise') ?? 0, 4)} {txt(m, 'code_devise')}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(nb(m, 'taux_moyen') ?? 0, 3)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-medium tabular-nums">
+                          {fmt.nombre(nb(m, 'prix_moyen_mad') ?? 0, 4)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.compact(nb(m, 'montant_mad'))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
-              Moyennes <strong>ponderees par les quantites</strong> : une palette d'essai ne pese
+              Moyennes <strong>ponderees par les quantités</strong> : une palette d'essai ne pese
               pas autant qu'un conteneur dans le prix affiche.
             </p>
           </CarteCorps>
@@ -626,7 +628,7 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <Chiffre libelle="Fournisseurs" valeur={String(score.length)} />
         <Chiffre
           libelle="OTIF moyen"
@@ -651,14 +653,14 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
         </CarteEntete>
         <CarteCorps className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
               <thead>
                 <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                   <th className="px-3 py-2 text-left">Fournisseur</th>
                   <th className="w-20 px-2 py-2 text-center">Pays</th>
                   <th className="w-20 px-2 py-2 text-right">Refs</th>
                   {voitMontant && <th className="w-40 px-3 py-2 text-left">Volume d'achat</th>}
-                  <th className="w-24 px-2 py-2 text-right">Delai</th>
+                  <th className="w-24 px-2 py-2 text-right">Délai</th>
                   <th className="w-24 px-2 py-2 text-right">Ponctuel</th>
                   <th className="w-24 px-2 py-2 text-right">Conforme</th>
                   <th className="w-24 px-2 py-2 text-right">OTIF</th>
@@ -765,54 +767,56 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
                 Aucune reception validee pour ce fournisseur.
               </p>
             ) : (
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                    <th className="px-3 py-2 text-left">Mois</th>
-                    <th className="w-24 px-2 py-2 text-right">Receptions</th>
-                    <th className="w-28 px-2 py-2 text-right">Quantite</th>
-                    {a(serie, 'montant_mad') && (
-                      <th className="w-32 px-2 py-2 text-right">Montant</th>
-                    )}
-                    <th className="w-28 px-2 py-2 text-right">Conforme</th>
-                    <th className="w-32 px-2 py-2 text-right">A l'heure</th>
-                    <th className="w-28 px-2 py-2 text-right">Retard moyen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {serie.map((m, i) => (
-                    <tr key={i} className="border-b border-bordure/60">
-                      <td className="px-3 py-1.5 tabular-nums">{txt(m, 'annee_mois')}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.entier(nb(m, 'nb_receptions') ?? 0)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.nombre(nb(m, 'quantite_kg') ?? 0, 0)} kg
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
+                  <thead>
+                    <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                      <th className="px-3 py-2 text-left">Mois</th>
+                      <th className="w-24 px-2 py-2 text-right">Réceptions</th>
+                      <th className="w-28 px-2 py-2 text-right">Quantité</th>
                       {a(serie, 'montant_mad') && (
-                        <td className="px-2 py-1.5 text-right tabular-nums">
-                          {fmt.compact(nb(m, 'montant_mad'))}
-                        </td>
+                        <th className="w-32 px-2 py-2 text-right">Montant</th>
                       )}
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.nombre(nb(m, 'taux_conformite_pct') ?? 0, 0)} %
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {nb(m, 'nb_mesurables') === 0 ? (
-                          <span className="text-attenue-texte">non mesurable</span>
-                        ) : (
-                          `${nb(m, 'nb_a_lheure')} / ${nb(m, 'nb_mesurables')}`
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {nb(m, 'retard_moyen_jours') == null
-                          ? '—'
-                          : `${fmt.nombre(nb(m, 'retard_moyen_jours')!, 1)} j`}
-                      </td>
+                      <th className="w-28 px-2 py-2 text-right">Conforme</th>
+                      <th className="w-32 px-2 py-2 text-right">A l'heure</th>
+                      <th className="w-28 px-2 py-2 text-right">Retard moyen</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {serie.map((m, i) => (
+                      <tr key={i} className="border-b border-bordure/60">
+                        <td className="px-3 py-1.5 tabular-nums">{txt(m, 'annee_mois')}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.entier(nb(m, 'nb_receptions') ?? 0)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(nb(m, 'quantite_kg') ?? 0, 0)} kg
+                        </td>
+                        {a(serie, 'montant_mad') && (
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {fmt.compact(nb(m, 'montant_mad'))}
+                          </td>
+                        )}
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(nb(m, 'taux_conformite_pct') ?? 0, 0)} %
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {nb(m, 'nb_mesurables') === 0 ? (
+                            <span className="text-attenue-texte">non mesurable</span>
+                          ) : (
+                            `${nb(m, 'nb_a_lheure')} / ${nb(m, 'nb_mesurables')}`
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {nb(m, 'retard_moyen_jours') == null
+                            ? '—'
+                            : `${fmt.nombre(nb(m, 'retard_moyen_jours')!, 1)} j`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </CarteCorps>
         </Carte>
@@ -844,10 +848,10 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Chiffre libelle="Qualites" valeur={String(qualites.length)} detail={`${actives.length} actives`} />
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+        <Chiffre libelle="Qualités" valeur={String(qualites.length)} detail={`${actives.length} actives`} />
         <Chiffre
-          libelle="Cout matiere moyen"
+          libelle="Coût matiere moyen"
           valeur={
             voitCout && actives.length
               ? `${fmt.nombre(
@@ -859,7 +863,7 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
           }
         />
         <Chiffre
-          libelle="Cout incomplet"
+          libelle="Coût incomplet"
           valeur={String(sansCmup.length)}
           detail="composants sans CMUP"
           ton={sansCmup.length > 0 ? 'alerte' : 'succes'}
@@ -873,7 +877,7 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
       </div>
 
       {sansCmup.length > 0 && (
-        <Alerte ton="alerte" titre="Cout matiere incomplet">
+        <Alerte ton="alerte" titre="Coût matiere incomplet">
           {sansCmup.length} qualite(s) contiennent des composants sans CMUP — une matiere jamais
           entree en stock n'a pas de prix moyen. Leur part manque au cout affiche, qui est donc
           <strong> sous-estime</strong>. Le nombre de composants concernes est indique par ligne.
@@ -882,22 +886,22 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
 
       <Carte repliable="statistiques.7">
         <CarteEntete>
-          <CarteTitre>Cout et production par qualite</CarteTitre>
+          <CarteTitre>Coût et production par qualité</CarteTitre>
         </CarteEntete>
         <CarteCorps className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
               <thead>
                 <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                  <th className="px-3 py-2 text-left">Qualite</th>
+                  <th className="px-3 py-2 text-left">Qualité</th>
                   <th className="w-24 px-2 py-2 text-left">Statut</th>
                   <th className="w-20 px-2 py-2 text-right">Roles</th>
                   <th className="w-24 px-2 py-2 text-right">Matieres</th>
                   <th className="w-28 px-2 py-2 text-right">kg/m2</th>
-                  <th className="w-24 px-2 py-2 text-right">Ecart fiche</th>
-                  {voitCout && <th className="w-28 px-2 py-2 text-right">Cout/m2</th>}
+                  <th className="w-24 px-2 py-2 text-right">Écart fiche</th>
+                  {voitCout && <th className="w-28 px-2 py-2 text-right">Coût/m2</th>}
                   {voitCout && <th className="w-36 px-3 py-2 text-left">Poids relatif</th>}
-                  <th className="w-28 px-2 py-2 text-right">m2 prevus</th>
+                  <th className="w-28 px-2 py-2 text-right">m2 prévus</th>
                   <th className="w-24 px-2 py-2 text-right">Realise</th>
                 </tr>
               </thead>
@@ -994,54 +998,56 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
             </span>
           </CarteEntete>
           <CarteCorps className="p-0">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                  <th className="px-3 py-2 text-left">Role</th>
-                  <th className="w-24 px-2 py-2 text-right">Matieres</th>
-                  <th className="w-24 px-2 py-2 text-right">Somme %</th>
-                  <th className="w-28 px-2 py-2 text-right">kg/m2</th>
-                  {voitCout && <th className="w-28 px-2 py-2 text-right">Cout/m2</th>}
-                  {voitCout && <th className="w-40 px-3 py-2 text-left">Part du cout</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {ventilation.map((r, i) => {
-                  const somme = nb(r, 'somme_pct') ?? 0
-                  return (
-                    <tr key={i} className="border-b border-bordure/60">
-                      <td className="px-3 py-1.5">{txt(r, 'role_libelle')}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.entier(nb(r, 'nb_composants') ?? 0)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right">
-                        <span
-                          className={cn(
-                            'tabular-nums',
-                            Math.abs(somme - 100) > 0.01 && 'font-medium text-danger',
-                          )}
-                        >
-                          {fmt.nombre(somme, 1)} %
-                        </span>
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.nombre(nb(r, 'kg_m2') ?? 0, 4)}
-                      </td>
-                      {voitCout && (
-                        <td className="px-2 py-1.5 text-right font-medium tabular-nums">
-                          {fmt.nombre(nb(r, 'cout_m2_mad') ?? 0, 2)}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
+                <thead>
+                  <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                    <th className="px-3 py-2 text-left">Role</th>
+                    <th className="w-24 px-2 py-2 text-right">Matieres</th>
+                    <th className="w-24 px-2 py-2 text-right">Somme %</th>
+                    <th className="w-28 px-2 py-2 text-right">kg/m2</th>
+                    {voitCout && <th className="w-28 px-2 py-2 text-right">Coût/m2</th>}
+                    {voitCout && <th className="w-40 px-3 py-2 text-left">Part du coût</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ventilation.map((r, i) => {
+                    const somme = nb(r, 'somme_pct') ?? 0
+                    return (
+                      <tr key={i} className="border-b border-bordure/60">
+                        <td className="px-3 py-1.5">{txt(r, 'role_libelle')}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.entier(nb(r, 'nb_composants') ?? 0)}
                         </td>
-                      )}
-                      {voitCout && (
-                        <td className="px-3 py-1.5">
-                          <Barre part={(nb(r, 'cout_m2_mad') ?? 0) / maxRole} />
+                        <td className="px-2 py-1.5 text-right">
+                          <span
+                            className={cn(
+                              'tabular-nums',
+                              Math.abs(somme - 100) > 0.01 && 'font-medium text-danger',
+                            )}
+                          >
+                            {fmt.nombre(somme, 1)} %
+                          </span>
                         </td>
-                      )}
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(nb(r, 'kg_m2') ?? 0, 4)}
+                        </td>
+                        {voitCout && (
+                          <td className="px-2 py-1.5 text-right font-medium tabular-nums">
+                            {fmt.nombre(nb(r, 'cout_m2_mad') ?? 0, 2)}
+                          </td>
+                        )}
+                        {voitCout && (
+                          <td className="px-3 py-1.5">
+                            <Barre part={(nb(r, 'cout_m2_mad') ?? 0) / maxRole} />
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
             <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
               La somme des pourcentages d'un role doit valoir 100 % (regle R07). Toute autre valeur
               signale une composition incomplete.

@@ -211,7 +211,7 @@ export function Receptions() {
     },
     {
       champ: 'retard_jours',
-      entete: 'Delai',
+      entete: 'Délai',
       numerique: true,
       largeur: '130px',
       rendu: (r) => {
@@ -258,7 +258,7 @@ export function Receptions() {
     },
     {
       champ: 'date_controle',
-      entete: 'Controle',
+      entete: 'Contrôle',
       largeur: '150px',
       rendu: (r) =>
         r.date_controle ? (
@@ -275,11 +275,11 @@ export function Receptions() {
   return (
     <div>
       <EnTetePage
-        titre="Receptions"
-        description="Ouvrir une reception pour peser, relever les lots et soumettre au controle qualite."
+        titre="Réceptions"
+        description="Ouvrir une réception pour peser, relever les lots et soumettre au contrôle qualité."
         actions={
           droits.peutEcrire && (
-            <Bouton taille="icone" title="Nouvelle reception" aria-label="Nouvelle reception" onClick={() => naviguer('/receptions/nouvelle')}>              <Plus />            </Bouton>
+            <Bouton taille="icone" title="Nouvelle reception" aria-label="Nouvelle réception" onClick={() => naviguer('/receptions/nouvelle')}>              <Plus />            </Bouton>
           )
         }
       />
@@ -294,7 +294,7 @@ export function Receptions() {
           )}
           {totaux.aControler > 0 && (
             <div className="rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En attente de controle</div>
+              <div className="text-[11px] text-attenue-texte">En attente de contrôle</div>
               <div className="text-lg font-semibold tabular-nums text-alerte">
                 {totaux.aControler}
               </div>
@@ -336,7 +336,7 @@ export function Receptions() {
 
       <DataTable<Reception>
           exportable="receptions"
-          imprimable="Receptions"
+          imprimable="Réceptions"
         module={MODULE}
         colonnes={colonnes}
         lignes={lignes}

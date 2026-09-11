@@ -65,7 +65,7 @@ export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: str
   {
     cle: 'ardoise',
     nom: 'Ardoise',
-    resume: 'Gris-bleu froid, accent bleu calme. Douce pour une journee entiere.',
+    resume: 'Gris-bleu froid, accent bleu calme. Douce pour une journée entiere.',
     teintes: ['#F5F7FA', '#1F6FEB', '#2E3A4A'],
   },
   {
@@ -89,7 +89,7 @@ export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: str
   {
     cle: 'chaud',
     nom: 'Chaud',
-    resume: 'Gris tirant sur le sable, accent ambre. Moins froid en fin de journee.',
+    resume: 'Gris tirant sur le sable, accent ambre. Moins froid en fin de journée.',
     teintes: ['#FAF7F2', '#B45309', '#3B342C'],
   },
   {
@@ -113,7 +113,7 @@ export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: str
   {
     cle: 'azur',
     nom: 'Azur',
-    resume: 'Bleu franc sur gris neutres. La grammaire visuelle que tout le monde a deja pratiquee.',
+    resume: 'Bleu franc sur gris neutres. La grammaire visuelle que tout le monde a déjà pratiquee.',
     teintes: ['#F8F9FA', '#1A73E8', '#202124'],
   },
 ]
@@ -132,14 +132,14 @@ export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: str
 export const POLICES: { cle: Police; nom: string; resume: string; pile: string }[] = [
   {
     cle: 'systeme',
-    nom: 'Systeme',
+    nom: 'Système',
     resume: 'Celle de Windows. Nette a toute taille, aucune attente au chargement.',
     pile: '"Segoe UI", system-ui, -apple-system, sans-serif',
   },
   {
     cle: 'inter',
     nom: 'Inter',
-    resume: 'Dessinee pour les interfaces denses. Le defaut precedent.',
+    resume: 'Dessinee pour les interfaces denses. Le defaut précédent.',
     pile: '"Inter", "Segoe UI", system-ui, sans-serif',
   },
   {

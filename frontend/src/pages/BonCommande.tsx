@@ -177,7 +177,7 @@ export function BonCommande() {
     void qc.invalidateQueries({ queryKey: ['refs-commandables'] })
   }
   const echec = (e: unknown) =>
-    toast.error(e instanceof ErreurApi ? e.message : 'Operation impossible.')
+    toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
   // Le formulaire se recharge quand le bon arrive ou change de version : sans
   // cela, ouvrir un bon afficherait les valeurs du precedent.
@@ -350,7 +350,7 @@ export function BonCommande() {
   const colonnes: ColonneDT<LigneBc>[] = [
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-medium">{l.code_reference}</div>
@@ -706,7 +706,7 @@ export function BonCommande() {
               />
             </div>
             <div>
-              <Etiq htmlFor="livr">Livraison prevue</Etiq>
+              <Etiq htmlFor="livr">Livraison prévue</Etiq>
               <Champ
                 id="livr"
                 type="date"
@@ -842,7 +842,7 @@ export function BonCommande() {
                     .filter(Boolean)
                     .join(' · ')}
                 </span>
-                <span className="text-alerte"> — rien n'est encore enregistre.</span>
+                <span className="text-alerte"> — rien n'est encore enregistré.</span>
               </>
             ) : (
               <span className="text-attenue-texte">
@@ -994,13 +994,13 @@ function PanneauSaisie({
         description={`References de ce fournisseur, classees par urgence. Prix en ${devise} par kg.`}
       >
         <Champ
-          placeholder="Filtrer par reference ou designation…"
+          placeholder="Filtrer par référence ou designation…"
           value={filtre}
           onChange={(e) => setFiltre(e.target.value)}
           className="mb-3"
         />
 
-        {q.isLoading && <Chargement texte="Chargement des references…" />}
+        {q.isLoading && <Chargement texte="Chargement des références…" />}
 
         <div className="space-y-1.5">
           {refs.map((r) => {
@@ -1031,7 +1031,7 @@ function PanneauSaisie({
                       )}
                       {r.tier && <Badge ton="contour">{r.tier}</Badge>}
                       {r.classe_abc && <Badge ton="neutre">ABC {r.classe_abc}</Badge>}
-                      {deja && <span className="text-[11px] text-attenue-texte">deja sur ce bon</span>}
+                      {deja && <span className="text-[11px] text-attenue-texte">déjà sur ce bon</span>}
                     </span>
                     <span className="mt-0.5 block truncate text-[12px] text-attenue-texte">
                       {r.designation}
@@ -1074,7 +1074,7 @@ function PanneauSaisie({
                       {r.source_prix === 'CATALOGUE' && (
                         <span className="text-alerte">prix catalogue, jamais paye</span>
                       )}
-                      {r.source_prix === 'CMUP' && <span>cout moyen constate</span>}
+                      {r.source_prix === 'CMUP' && <span>coût moyen constate</span>}
                     </span>
                   </span>
                 </label>
@@ -1082,7 +1082,7 @@ function PanneauSaisie({
                 {coche && (
                   <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-2">
                     <div>
-                      <Etiq>Quantite (kg)</Etiq>
+                      <Etiq>Quantité (kg)</Etiq>
                       <Champ
                         type="number"
                         step="any"

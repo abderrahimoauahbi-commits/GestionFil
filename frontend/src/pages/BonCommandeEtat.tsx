@@ -136,7 +136,7 @@ export function BonCommandeEtat() {
               </div>
               <Champ libelle="Date" valeur={fmt.date(bc.date_bc)} />
               <Champ
-                libelle="Livraison prevue"
+                libelle="Livraison prévue"
                 valeur={bc.date_livraison_prevue ? fmt.date(bc.date_livraison_prevue) : '—'}
               />
               <Champ libelle="Devise" valeur={bc.code_devise} />
@@ -154,7 +154,7 @@ export function BonCommandeEtat() {
           colonnes={[
             { entete: 'N°', valeur: (l) => l.ligne_numero, numerique: true },
             {
-              entete: 'Reference',
+              entete: 'Référence',
               valeur: (l) => (
                 <>
                   <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
@@ -165,7 +165,7 @@ export function BonCommandeEtat() {
               ),
             },
             {
-              entete: 'Quantite',
+              entete: 'Quantité',
               numerique: true,
               valeur: (l) => (
                 <>

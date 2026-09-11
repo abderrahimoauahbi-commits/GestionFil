@@ -128,7 +128,7 @@ export function AnalyseAbcXyz() {
     },
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-mono text-[11px]">{l.code_reference}</div>

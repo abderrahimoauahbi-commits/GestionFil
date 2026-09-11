@@ -61,12 +61,12 @@ const LIBELLE: Record<string, string> = {
 /* Des axes que l'on choisit, pas de comparateur a saisir : les valeurs
    des listes sortent des lignes affichees. */
 const CHAMPS_TRANSFERT: ChampFiltre<Transfert>[] = [
-  { cle: 'periode', libelle: 'Periode', type: 'periode', valeur: (l) => l.date_transfert },
+  { cle: 'periode', libelle: 'Période', type: 'periode', valeur: (l) => l.date_transfert },
   { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
   { cle: 'source', libelle: 'Magasin source', type: 'liste', valeur: (l) => l.code_magasin_source },
   { cle: 'dest', libelle: 'Magasin destinataire', type: 'liste', valeur: (l) => l.code_magasin_dest },
   { cle: 'auteur', libelle: 'Auteur', type: 'liste', valeur: (l) => l.auteur },
-  { cle: 'numero', libelle: 'Numero', type: 'texte', valeur: (l) => l.numero_transfert },
+  { cle: 'numero', libelle: 'Numéro', type: 'texte', valeur: (l) => l.numero_transfert },
 ]
 
 const TON: Record<string, 'neutre' | 'info' | 'succes' | 'danger' | 'alerte'> = {
@@ -98,7 +98,7 @@ export function Transferts() {
   }
 
   const echec = (e: unknown) =>
-    toast.error(e instanceof ErreurApi ? e.message : 'Operation impossible.')
+    toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
   /** Etape 1, au magasin SOURCE : la marchandise part. */
   const expedier = useMutation({
@@ -143,7 +143,7 @@ export function Transferts() {
   const colonnes: ColonneDT<Transfert>[] = [
     {
       champ: 'numero_mouvement',
-      entete: 'Numero',
+      entete: 'Numéro',
       rendu: (t) => <span className="font-mono text-xs">{t.numero_transfert}</span>,
     },
     { champ: 'date_mouvement', entete: 'Date', rendu: (t) => fmt.date(t.date_transfert) },
@@ -190,7 +190,7 @@ export function Transferts() {
     },
     {
       champ: 'utilisateur',
-      entete: 'Expedie / recu par',
+      entete: 'Expedie / reçu par',
       secondaire: true,
       rendu: (t) => (
         <div className="text-[12px]">

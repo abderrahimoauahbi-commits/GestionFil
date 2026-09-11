@@ -74,8 +74,8 @@ export function Parametres() {
   return (
     <div>
       <EnTetePage
-        titre="Parametres"
-        sous_titre="Valeurs par defaut a la creation — les enregistrements existants ne sont pas affectes"
+        titre="Paramètres"
+        sous_titre="Valeurs par defaut a la création — les enregistrements existants ne sont pas affectes"
       />
 
       {retour && (

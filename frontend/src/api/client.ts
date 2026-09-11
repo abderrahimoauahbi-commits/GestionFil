@@ -7,6 +7,7 @@
  */
 
 const CLE_JETON = 'gestionfil.jeton'
+const CLE_ECHEANCE = 'gestionfil.echeance'
 const CLE_SERVEUR = 'gestionfil.serveur'
 
 /**
@@ -87,6 +88,23 @@ export class ErreurApi extends Error {
   }
 }
 
+/**
+ * L'echeance absolue de la session, en secondes Unix.
+ *
+ * Rangee comme le jeton, en `sessionStorage` : elle disparait avec l'onglet.
+ * Elle ne PROTEGE rien — le serveur refuse un jeton expire de toute facon —
+ * elle permet seulement de fermer la session au bon moment plutot que de
+ * laisser l'utilisateur decouvrir l'expiration par une erreur.
+ */
+export const echeance = {
+  lire: () => {
+    const v = sessionStorage.getItem(CLE_ECHEANCE)
+    return v ? Number(v) : null
+  },
+  ecrire: (v: number) => sessionStorage.setItem(CLE_ECHEANCE, String(v)),
+  effacer: () => sessionStorage.removeItem(CLE_ECHEANCE),
+}
+
 export const jeton = {
   lire: () => sessionStorage.getItem(CLE_JETON),
   ecrire: (v: string) => sessionStorage.setItem(CLE_JETON, v),
@@ -150,7 +168,20 @@ async function requete<T>(
 
     // Jeton expire ou compte desactive : on nettoie et on renvoie a la
     // connexion plutot que de laisser l'interface enchainer les 401.
-    if (reponse.status === 401) {
+    //
+    // DEUX 401 QUI NE VEULENT PAS DIRE LA MEME CHOSE. Sur toutes les routes,
+    // un 401 signifie « votre session est finie » et le retour a l'ecran de
+    // connexion est la bonne reponse. Sur le deverrouillage du verrou
+    // d'inactivite, il signifie « ce n'est pas le bon mot de passe » : renvoyer
+    // l'utilisateur a la connexion lui ferait perdre la saisie que le verrou
+    // existe justement pour proteger. On laisse alors l'appelant decider.
+    //
+    // Vu a l'essai : une faute de frappe sur l'ecran verrouille deconnectait,
+    // et la fiche en cours partait avec.
+    const motDePasseRefuse =
+      route.startsWith('/api/auth/deverrouiller') && code === 'IDENTIFIANTS_INVALIDES'
+
+    if (reponse.status === 401 && !motDePasseRefuse) {
       jeton.effacer()
       // `location.replace` sur un chemin absolu casse dans une application
       // empaquetee, ou la page est servie depuis le disque : le hachage suffit

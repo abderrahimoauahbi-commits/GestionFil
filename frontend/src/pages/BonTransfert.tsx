@@ -165,7 +165,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
           <thead>
             <tr className="border-y border-black">
               <th className="w-8 py-1.5 text-right">#</th>
-              <th className="py-1.5 text-left">Reference / designation</th>
+              <th className="py-1.5 text-left">Référence / designation</th>
               <th className="w-28 py-1.5 text-left">Lot</th>
               <th className="w-16 py-1.5 text-right">Bob.</th>
               <th className="w-16 py-1.5 text-right">Pal.</th>

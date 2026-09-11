@@ -66,7 +66,7 @@ export function Catalogue() {
   const colonnes: Colonne<Reference>[] = [
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       filtre: 'texte',
       rendu: (r) => (
         <div>
@@ -75,12 +75,12 @@ export function Catalogue() {
         </div>
       ),
     },
-    { champ: 'code_categorie', entete: 'Categorie', filtre: 'liste', rendu: (r) => r.categorie_libelle },
+    { champ: 'code_categorie', entete: 'Catégorie', filtre: 'liste', rendu: (r) => r.categorie_libelle },
     { champ: 'fournisseur_nom', entete: 'Fournisseur', filtre: 'liste', rendu: (r) => r.fournisseur_nom },
     { champ: 'couleur', entete: 'Couleur', filtre: 'liste', rendu: (r) => fmt.texte(r.couleur), secondaire: true },
     {
       champ: 'unite_catalogue',
-      entete: 'Unite',
+      entete: 'Unité',
       filtre: 'liste',
       rendu: (r) => (
         <span title={r.facteur_kg ? `1 ${r.unite_catalogue} = ${r.facteur_kg} kg` : undefined}>
@@ -142,16 +142,16 @@ export function Catalogue() {
   const champs: ChampDef[] = [
     {
       champ: 'code_reference',
-      libelle: 'Reference',
+      libelle: 'Référence',
       obligatoire: true,
       cleCreation: true,
       pleineLargeur: true,
-      aide: 'Identifiant cite par les recettes et les mouvements : il ne pourra plus etre change.',
+      aide: 'Identifiant cité par les recettes et les mouvements : il ne pourra plus être changé.',
     },
     { champ: 'designation', libelle: 'Designation', obligatoire: true, pleineLargeur: true },
     {
       champ: 'code_categorie',
-      libelle: 'Categorie matiere',
+      libelle: 'Catégorie matiere',
       type: 'liste',
       obligatoire: true,
       options: qCat.data?.map((c) => ({ valeur: c.code_categorie, libelle: c.libelle })),
@@ -168,7 +168,7 @@ export function Catalogue() {
     { champ: 'titrage', libelle: 'Titrage' },
     {
       champ: 'unite_catalogue',
-      libelle: 'Unite de stock',
+      libelle: 'Unité de stock',
       type: 'liste',
       obligatoire: true,
       options: [
@@ -177,22 +177,22 @@ export function Catalogue() {
         { valeur: 'Palette', libelle: 'Palette' },
         { valeur: 'ml', libelle: 'Metre lineaire' },
       ],
-      aide: 'Le stock reste tenu en kg ; les autres unites sont des masques de saisie.',
+      aide: 'Le stock reste tenu en kg ; les autres unités sont des masques de saisie.',
     },
     {
       champ: 'poids_bobine_kg',
       libelle: 'Poids par bobine (kg)',
       type: 'nombre',
-      aide: 'Obligatoire pour une unite Bobine ou Palette.',
+      aide: 'Obligatoire pour une unité Bobine ou Palette.',
     },
     { champ: 'bobines_par_palette', libelle: 'Bobines par palette', type: 'entier' },
     {
       champ: 'densite_kg_ml',
-      libelle: 'Densite (kg/ml)',
+      libelle: 'Densité (kg/ml)',
       type: 'nombre',
-      aide: 'Obligatoire pour une unite ml : sans elle, la conversion est refusee.',
+      aide: 'Obligatoire pour une unité ml : sans elle, la conversion est refusee.',
     },
-    { champ: 'prix_catalogue', libelle: 'Prix par unite', type: 'nombre', obligatoire: true },
+    { champ: 'prix_catalogue', libelle: 'Prix par unité', type: 'nombre', obligatoire: true },
     {
       champ: 'code_devise_catalogue',
       libelle: 'Devise',
@@ -209,7 +209,7 @@ export function Catalogue() {
     { champ: 'couverture_min_mois', libelle: 'Couverture minimale (mois)', type: 'nombre' },
     {
       champ: 'marge_securite_pct',
-      libelle: 'Marge de securite (%)',
+      libelle: 'Marge de sécurité (%)',
       type: 'nombre',
       aide:
         'Majore le stock minimum de cette reference. Vide : la valeur generale des parametres ' +
@@ -223,7 +223,7 @@ export function Catalogue() {
         'Depuis quand ce tarif est annonce. Un prix sans date ne dit pas s il date du mois ' +
         'dernier ou de trois ans.',
     },
-    { champ: 'moq_kg', libelle: 'Quantite minimale de commande (kg)', type: 'nombre' },
+    { champ: 'moq_kg', libelle: 'Quantité minimale de commande (kg)', type: 'nombre' },
     { champ: 'multiple_achat_kg', libelle: 'Multiple d achat (kg)', type: 'nombre' },
     {
       champ: 'suivi_lot',
@@ -265,7 +265,7 @@ export function Catalogue() {
             />
           }
           exportable="catalogue-references"
-          imprimable="Catalogue references"
+          imprimable="Catalogue références"
           // Remonter la categorie dans la cle force le rechargement : sans cela,
           // l'ecran garderait la liste precedente en changeant de filtre.
           key={categorie}
@@ -278,7 +278,7 @@ export function Catalogue() {
           colonnes={colonnes}
           champs={champs}
           filtres={filtres}
-          libelleUnite="reference"
+          libelleUnite="référence"
           rechercheInitiale={refDemandee}
           titreCarte={(r) => r.code_reference}
         />
@@ -404,16 +404,23 @@ function BarreFiltres({
 
   return (
     <div
-      className="sans-impression mb-3 flex flex-wrap items-end gap-2 rounded-[var(--radius)]
-                 border border-bordure bg-surface px-2.5 py-2"
+      /* SUR TELEPHONE, UNE GRILLE ; AU-DELA, UNE BARRE.
+         En `flex-wrap`, le mot « Filtres » comptait comme un champ : il prenait
+         la premiere place, poussait « Categorie » et « Fournisseur » a la ligne,
+         et le second sortait de l'ecran. Les quatre selecteurs se retrouvaient
+         sur trois lignes sans bord commun. En grille, ils s'alignent deux par
+         deux et le titre occupe sa propre ligne, ou il ne gene personne. */
+      className="sans-impression mb-3 grid grid-cols-2 items-end gap-2 rounded-[var(--radius)]
+                 border border-bordure bg-surface px-2.5 py-2
+                 sm:flex sm:flex-wrap"
     >
-      <span className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase
-                       tracking-wide text-attenue-texte">
+      <span className="col-span-2 flex items-center gap-1 text-[11px] font-semibold uppercase
+                       tracking-wide text-attenue-texte sm:mb-1">
         <Filter className="size-3" />
         Filtres
       </span>
 
-      <Champ libelle="Categorie">
+      <Champ libelle="Catégorie">
         <select
           value={valeurs.categorie}
           onChange={(e) => definir.categorie(e.target.value)}
@@ -443,7 +450,7 @@ function BarreFiltres({
         </select>
       </Champ>
 
-      <Champ libelle="Unite">
+      <Champ libelle="Unité">
         <select
           value={valeurs.unite}
           onChange={(e) => definir.unite(e.target.value)}
@@ -462,7 +469,7 @@ function BarreFiltres({
         </select>
       </Champ>
 
-      <Champ libelle="Etat">
+      <Champ libelle="État">
         <select
           value={valeurs.actif}
           onChange={(e) => definir.actif(e.target.value)}
@@ -498,7 +505,10 @@ function Champ({ libelle, children }: { libelle: string; children: React.ReactNo
   return (
     // `min-w` : sans elle chaque champ prend la largeur de son contenu et la
     // barre devient un escalier.
-    <label className="flex min-w-[10rem] flex-col gap-0.5">
+    // `min-w` ne vaut qu'a partir de la barre horizontale : en grille, elle
+    // forcerait une colonne plus large que la moitie d'un telephone, et la
+    // seconde sortirait de l'ecran — c'est ce qui coupait « Fournisseur ».
+    <label className="flex w-full flex-col gap-0.5 sm:w-auto sm:min-w-[10rem]">
       <span className="text-[10.5px] text-attenue-texte">{libelle}</span>
       {children}
     </label>

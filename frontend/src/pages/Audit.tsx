@@ -67,7 +67,7 @@ export function Audit() {
 
   if (!peut('AUDIT', 'LIRE')) {
     return (
-      <Alerte ton="danger" titre="Acces refuse">
+      <Alerte ton="danger" titre="Accès refusé">
         Le journal d'audit est reserve a la Direction et a la DAF.
       </Alerte>
     )
@@ -83,7 +83,7 @@ export function Audit() {
 
       <Alerte ton="alerte" titre="Ce journal ne trace pas les valeurs">
         Il enregistre les changements de statut et de referentiel, avec leur auteur et leur date.
-        Il ne contient <strong>ni quantite, ni prix, ni mouvement de stock</strong> : ce n'est pas
+        Il ne contient <strong>ni quantité, ni prix, ni mouvement de stock</strong> : ce n'est pas
         une piste d'audit complete au sens comptable. L'etendre aux valeurs est un prealable a
         tout audit externe.
       </Alerte>
@@ -134,7 +134,7 @@ export function Audit() {
             <tr>
               <th className="px-2 py-1.5 text-left font-medium">Date</th>
               <th className="px-2 py-1.5 text-left font-medium">Auteur</th>
-              <th className="px-2 py-1.5 text-left font-medium">Operation</th>
+              <th className="px-2 py-1.5 text-left font-medium">Opération</th>
               <th className="px-2 py-1.5 text-left font-medium">Table</th>
               <th className="px-2 py-1.5 text-left font-medium">Enregistrement</th>
             </tr>

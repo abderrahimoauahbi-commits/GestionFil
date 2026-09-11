@@ -176,7 +176,7 @@ export function BonCommandeNouveau() {
       void qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
       naviguer(`/bons-commande/${r.id_bc}`)
     },
-    onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Creation impossible.'),
+    onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Création impossible.'),
   })
 
   const refs = useMemo(() => {
@@ -314,7 +314,7 @@ export function BonCommandeNouveau() {
                 <span className="text-alerte">prix catalogue, jamais paye</span>
               )}
               {r.moq_kg != null && <span>MOQ {fmt.nombre(r.moq_kg, 0)} kg</span>}
-              {deja && <span>deja sur un bon</span>}
+              {deja && <span>déjà sur un bon</span>}
             </span>
           </span>
         </label>
@@ -322,7 +322,7 @@ export function BonCommandeNouveau() {
         {coche && (
           <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-3">
             <div>
-              <Etiq>Quantite (kg)</Etiq>
+              <Etiq>Quantité (kg)</Etiq>
               <Champ
                 type="number"
                 step="any"
@@ -383,7 +383,7 @@ export function BonCommandeNouveau() {
       />
 
       {erreur && (
-        <Alerte ton="danger" titre="Creation refusee" className="mb-3">
+        <Alerte ton="danger" titre="Création refusee" className="mb-3">
           {erreur}
         </Alerte>
       )}
@@ -438,7 +438,7 @@ export function BonCommandeNouveau() {
               />
             </div>
             <div>
-              <Etiq htmlFor="livr">Livraison prevue</Etiq>
+              <Etiq htmlFor="livr">Livraison prévue</Etiq>
               <Champ
                 id="livr"
                 type="date"
@@ -554,7 +554,7 @@ export function BonCommandeNouveau() {
         <div className="sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2 shadow-sm">
           <span className="text-[13px]">
             {nb === 0 ? (
-              <span className="text-attenue-texte">Aucune reference selectionnee.</span>
+              <span className="text-attenue-texte">Aucune référence selectionnee.</span>
             ) : (
               <>
                 <span className="font-medium">{nb} ligne(s)</span>
@@ -563,7 +563,7 @@ export function BonCommandeNouveau() {
                   {fmt.nombre(total, 2)} {devise}
                 </span>
                 {!complet && (
-                  <span className="text-danger"> — quantite ou prix manquant sur une ligne</span>
+                  <span className="text-danger"> — quantité ou prix manquant sur une ligne</span>
                 )}
               </>
             )}

@@ -299,9 +299,9 @@ export function Besoins() {
       [
         { champ: 'code_reference', entete: 'Code Ref' },
         { champ: 'designation', entete: 'Designation' },
-        { champ: 'categorie', entete: 'Categorie' },
+        { champ: 'categorie', entete: 'Catégorie' },
         { champ: 'fournisseur', entete: 'Fournisseur' },
-        { champ: 'unite', entete: 'Unite' },
+        { champ: 'unite', entete: 'Unité' },
         ...mois.map((m) => ({
           champ: `m${m.rang_mois}`,
           entete: libelleMois(m.annee_mois),
@@ -336,7 +336,7 @@ export function Besoins() {
     <div>
       <EnTetePage
         titre="Production & Besoins"
-        description="m² planifies par qualite, et matiere necessaire par reference, sur les mois de la periode."
+        description="m² planifies par qualité, et matiere necessaire par référence, sur les mois de la période."
         actions={
           <>
             {/* Le choix du plan remonte ici : c'est le contexte de TOUT l'ecran,
@@ -535,7 +535,7 @@ export function Besoins() {
                 <Package className="size-3.5" />
                 Besoins matiere — kg par reference
                 <Aide>
-                  besoin(reference, mois) = (1 + taux de perte) × Σ<sub>qualites</sub> (kg/m² de la
+                  besoin(reference, mois) = (1 + taux de perte) × Σ<sub>qualités</sub> (kg/m² de la
                   composition × m² prevus) — la formule de la feuille Production_Besoins. Le taux de
                   perte applique est celui fige sur le plan ({fmt.nombre(plan.taux_perte_pct, 2)} %),
                   pas le parametre general du jour. Les quantites sont en <strong>kg</strong>, unite
@@ -548,20 +548,20 @@ export function Besoins() {
                   largeur commune : la barre montait et descendait, et le compte
                   de references se retrouvait a mi-hauteur. `items-end` et une
                   largeur minimale commune suffisent. */}
-              <div className="sans-impression flex flex-wrap items-end gap-2">
+              <div className="sans-impression grid grid-cols-2 items-end gap-2 lg:flex lg:flex-wrap">
                 <Champ
                   value={filtre}
                   onChange={(e) => setFiltre(e.target.value)}
-                  placeholder="Reference, designation, fournisseur..."
+                  placeholder="Référence, designation, fournisseur..."
                   className="h-7 w-56 text-[12px]"
                 />
                 <select
                   value={categorie}
                   onChange={(e) => setCategorie(e.target.value)}
                   className={CLASSE_FILTRE + ' min-w-[10rem]'}
-                  aria-label="Categorie"
+                  aria-label="Catégorie"
                 >
-                  <option value="">Toutes categories</option>
+                  <option value="">Toutes catégories</option>
                   {axes.categories.map((c) => (
                     <option key={c} value={c}>
                       {c}

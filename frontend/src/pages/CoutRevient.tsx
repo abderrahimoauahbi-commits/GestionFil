@@ -114,7 +114,7 @@ export function CoutRevient() {
   const colonnes: Colonne<LigneCout>[] = [
     {
       champ: 'numero_reception',
-      entete: 'Reception',
+      entete: 'Réception',
       rendu: (l) => (
         <div className="min-w-0">
           <div className="font-mono text-[11px]">{l.numero_reception}</div>
@@ -126,7 +126,7 @@ export function CoutRevient() {
     },
     {
       champ: 'code_reference',
-      entete: 'Reference',
+      entete: 'Référence',
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-mono text-[11px]">{l.code_reference}</div>
@@ -139,7 +139,7 @@ export function CoutRevient() {
     { champ: 'fournisseur_nom', entete: 'Fournisseur', secondaire: true },
     {
       champ: 'quantite_stock_kg',
-      entete: 'Quantite',
+      entete: 'Quantité',
       numerique: true,
       rendu: (l) => `${fmt.nombre(l.quantite_stock_kg, 1)} kg`,
     },
@@ -193,13 +193,13 @@ export function CoutRevient() {
     },
   ]
 
-  if (q.isLoading) return <Chargement texte="Calcul du cout de revient…" />
+  if (q.isLoading) return <Chargement texte="Calcul du coût de revient…" />
 
   return (
     <div>
       <EnTetePage
-        titre="Cout de revient complet"
-        sous_titre="Prix d achat plus fret, douane, assurance et manutention, repartis par reception"
+        titre="Coût de revient complet"
+        sous_titre="Prix d achat plus fret, douane, assurance et manutention, repartis par réception"
         actions={
           droits.peutEcrire && (
             <Bouton taille="icone" title="Saisir un frais" aria-label="Saisir un frais" onClick={() => setSaisie(true)}>              <Plus />            </Bouton>
@@ -269,12 +269,12 @@ export function CoutRevient() {
               <table className="grille w-full text-[12px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Reception</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Réception</th>
                     <th className="px-2.5 py-1.5 text-left font-semibold">Nature</th>
                     <th className="px-2.5 py-1.5 text-left font-semibold">Libelle</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Montant</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Repartition</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Reference</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Répartition</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -309,7 +309,7 @@ export function CoutRevient() {
         cle={(l) => l.id_ligne_reception}
         titreCarte={(l) => `${l.numero_reception} · ${l.code_reference}`}
         exportable="cout-de-revient"
-        imprimable="Cout de revient"
+        imprimable="Coût de revient"
         texteVide="Aucune reception validee."
       />
 
@@ -375,7 +375,7 @@ function FormulaireFrais({
         taux_change: Number(form.taux_change),
       }),
     onSuccess: () => {
-      toast.success('Frais enregistre', { description: 'Le cout de revient est recalcule.' })
+      toast.success('Frais enregistre', { description: 'Le coût de revient est recalcule.' })
       surSucces()
     },
     onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.'),
@@ -387,7 +387,7 @@ function FormulaireFrais({
     <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
       <DialogueContenu
         titre="Saisir un frais d approche"
-        description="Il sera reparti sur les lignes de la reception selon la cle choisie."
+        description="Il sera reparti sur les lignes de la réception selon la cle choisie."
       >
         <form
           className="flex flex-col gap-3"
@@ -400,7 +400,7 @@ function FormulaireFrais({
           {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 
           <div>
-            <Etiq obligatoire>Reception</Etiq>
+            <Etiq obligatoire>Réception</Etiq>
             <Selecteur
               value={form.id_reception}
               onChange={(e) => setForm({ ...form, id_reception: e.target.value })}
@@ -441,7 +441,7 @@ function FormulaireFrais({
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire>Repartition</Etiq>
+              <Etiq obligatoire>Répartition</Etiq>
               <Selecteur
                 value={form.cle_repartition}
                 onChange={(e) => setForm({ ...form, cle_repartition: e.target.value })}
@@ -504,7 +504,7 @@ function FormulaireFrais({
               />
             </div>
             <div>
-              <Etiq>Reference externe</Etiq>
+              <Etiq>Référence externe</Etiq>
               <Champ
                 value={form.reference_externe}
                 onChange={(e) => setForm({ ...form, reference_externe: e.target.value })}

@@ -27,7 +27,7 @@ import { estAccessible, MODULES, NAVIGATION, type EntreeNav, type Section } from
 import { useAuth } from '../auth/AuthContext'
 import { useOngletsFacultatif } from './atelier/etat'
 import { MarqueCarree } from './Marque'
-import { cn } from '../lib/utils'
+import { cn, sousChemin } from '../lib/utils'
 
 /**
  * Un lien de navigation qui sait ou il vit.
@@ -64,7 +64,7 @@ function LienVue({
     )
   }
 
-  const actif = vers === '/' ? onglets.actif === '/' : (onglets.actif ?? emplacement.pathname).startsWith(vers)
+  const actif = vers === '/' ? onglets.actif === '/' : sousChemin(onglets.actif ?? emplacement.pathname, vers)
   return (
     <button
       type="button"
@@ -96,7 +96,7 @@ export function BarreLaterale() {
   const courante = accessibles.find(
     (e) =>
       e.vers === emplacement.pathname ||
-      (e.vers !== '/' && emplacement.pathname.startsWith(e.vers.split('?')[0])),
+      (e.vers !== '/' && sousChemin(emplacement.pathname, e.vers.split('?')[0])),
   )
 
   const tous = MODULES.filter((m) => accessibles.some((e) => e.section === m.id))

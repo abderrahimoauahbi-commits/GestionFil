@@ -18,12 +18,12 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ArrowLeftRight, BarChart3, Bell, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
+  ArrowLeftRight, BarChart3, Bell, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Container, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useEntreprise } from '../lib/entreprise'
-import { cn, estBureau } from '../lib/utils'
+import { cn, estBureau, sousChemin } from '../lib/utils'
 import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
 import { NavigationEntete } from './NavigationEntete'
@@ -181,6 +181,8 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
   { vers: '/receptions', libelle: 'Réceptions', module: 'RECEPTIONS', Icone: PackageCheck, section: 'ACHATS', resume: 'Peser et enregistrer ce qui arrive', principale: true },
+  { vers: '/import', libelle: "Dossiers d'import", module: 'IMPORT', Icone: Ship, section: 'ACHATS', resume: 'Factures, frais et coût de revient des importations' },
+  { vers: '/receptions-import', libelle: 'Réceptions import', module: 'RECEPTIONS', Icone: Container, section: 'ACHATS', resume: 'Faire entrer en stock la marchandise importée' },
   {
     vers: '/historique-prix',
     libelle: 'Historique des prix',
@@ -284,7 +286,7 @@ export function Coquille() {
   const courante = accessibles.find(
     (e) =>
       e.vers === emplacement.pathname ||
-      (e.vers !== '/' && emplacement.pathname.startsWith(e.vers)),
+      (e.vers !== '/' && sousChemin(emplacement.pathname, e.vers)),
   )
 
   useEffect(() => setTiroir(false), [emplacement.pathname])

@@ -136,9 +136,9 @@ BEGIN
     -- (b) solde par lot, seulement si la ligne porte un lot
     IF NEW.lot_fournisseur IS NOT NULL THEN
         INSERT INTO stock_lot (code_reference, code_magasin, lot_fournisseur, quantite_kg,
-                               prix_entree_mad, date_fabrication, date_peremption)
+                               prix_entree_mad, date_fabrication, date_peremption, code_couleur)
         VALUES (NEW.code_reference, v_magasin, NEW.lot_fournisseur, 0,
-                NEW.prix_kg_mad, NEW.date_fabrication, NEW.date_peremption)
+                NEW.prix_kg_mad, NEW.date_fabrication, NEW.date_peremption, NEW.code_couleur)
         ON CONFLICT (code_reference, code_magasin, lot_fournisseur) DO NOTHING;
 
         UPDATE stock_lot
@@ -151,6 +151,7 @@ BEGIN
                prix_entree_mad  = COALESCE(prix_entree_mad, NEW.prix_kg_mad),
                date_fabrication = COALESCE(date_fabrication, NEW.date_fabrication),
                date_peremption  = COALESCE(date_peremption, NEW.date_peremption),
+               code_couleur     = COALESCE(code_couleur, NEW.code_couleur),
                date_maj         = v_maintenant
          WHERE code_reference  = NEW.code_reference
            AND lot_fournisseur = NEW.lot_fournisseur

@@ -134,6 +134,8 @@ CREATE TABLE ligne_mouvement (
                   / (nb_bobines * poids_unitaire_theorique_kg) * 100.0 END) STORED,
 
     lot_fournisseur     text,
+    -- Transmis par la reception importee : la production suit la nuance au lot.
+    code_couleur        text,
     date_fabrication    text,
     date_peremption     text,
     code_motif_ligne    text    REFERENCES motif_ligne(code_motif_ligne),
@@ -231,6 +233,7 @@ CREATE TABLE stock_lot (
     lot_fournisseur     text    NOT NULL,
     quantite_kg         numeric(18,4)    NOT NULL DEFAULT 0 CHECK (quantite_kg >= 0),
     prix_entree_mad     numeric(18,4)    CHECK (prix_entree_mad IS NULL OR prix_entree_mad >= 0),
+    code_couleur        text,
     -- LE COMPTE DE BOBINES, entretenu par le meme declencheur que les kilos.
     -- Sans lui, verifier la capacite d'un emplacement de machine imposerait de
     -- relire tout l'historique des mouvements a chaque saisie.

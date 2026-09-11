@@ -36,6 +36,7 @@ pub mod module {
     pub const PLAN_ACHAT: &str = "PLAN_ACHAT";
     pub const BONS_COMMANDE: &str = "BONS_COMMANDE";
     pub const RECEPTIONS: &str = "RECEPTIONS";
+    pub const IMPORT: &str = "IMPORT";
     pub const MOUVEMENTS: &str = "MOUVEMENTS";
     pub const STOCK: &str = "STOCK";
     pub const INVENTAIRE: &str = "INVENTAIRE";

@@ -59,6 +59,11 @@ import { Plans } from './pages/Plans'
 import { Besoins } from './pages/Besoins'
 import { BonsCommande } from './pages/BonsCommande'
 import { BonCommande } from './pages/BonCommande'
+import { DossiersImport } from './pages/import/DossiersImport'
+import { DossierImport } from './pages/import/DossierImport'
+import { FactureImport } from './pages/import/FactureImport'
+import { ReceptionImport } from './pages/import/ReceptionImport'
+import { ReceptionsImport } from './pages/import/ReceptionsImport'
 import { BonCommandeNouveau } from './pages/BonCommandeNouveau'
 import { Receptions } from './pages/Receptions'
 import { Reception } from './pages/Reception'
@@ -149,6 +154,13 @@ const ECRANS = (
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />
       <Route path="receptions" element={<ExigeModule module="RECEPTIONS"><Receptions /></ExigeModule>} />
+      <Route path="import" element={<ExigeModule module="IMPORT"><DossiersImport /></ExigeModule>} />
+      <Route path="import/:id" element={<ExigeModule module="IMPORT"><DossierImport /></ExigeModule>} />
+      <Route path="import/:id/factures/:idFacture" element={<ExigeModule module="IMPORT"><FactureImport /></ExigeModule>} />
+      {/* La reception d'import est A PART du dossier : sa liste, son ecran, et
+          le module RECEPTIONS — le magasinier y a ses droits, sans voir les prix. */}
+      <Route path="receptions-import" element={<ExigeModule module="RECEPTIONS"><ReceptionsImport /></ExigeModule>} />
+      <Route path="receptions-import/:idReception" element={<ExigeModule module="RECEPTIONS"><ReceptionImport /></ExigeModule>} />
       <Route path="transferts/nouveau" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/modifier" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/bon-sortie" element={<ExigeModule module="MOUVEMENTS"><BonTransfert type="sortie" /></ExigeModule>} />

@@ -10,6 +10,7 @@ mod assistant;
 mod auth_routes;
 mod consultation;
 mod entites;
+mod importation;
 mod machines;
 pub(crate) mod json;
 mod operations;
@@ -166,6 +167,38 @@ pub fn router(state: AppState) -> Router {
         // segment fixe passe avant `{id}` : axum donne priorite au statique.
         // MACHINES. Le stock s'y compte, la consommation s'y journalise —
         // et jamais dans le journal des mouvements.
+        // --- Dossiers d'importation : MRP, stock, CUMP -------------------------
+        .route("/api/parametres-frais",
+               get(importation::lister_parametres_frais).post(importation::creer_parametre_frais))
+        .route("/api/parametres-frais/{id}", patch(importation::modifier_parametre_frais))
+        .route("/api/import/dossiers",
+               get(importation::lister_dossiers).post(importation::creer_dossier))
+        .route("/api/import/dossiers/{id}",
+               get(importation::lire_dossier)
+                   .patch(importation::modifier_dossier)
+                   .delete(importation::supprimer_dossier))
+        .route("/api/import/dossiers/{id}/factures", post(importation::creer_facture))
+        .route("/api/import/dossiers/{id}/frais", post(importation::ajouter_frais))
+        .route("/api/import/dossiers/{id}/cloturer", post(importation::cloturer))
+        .route("/api/import/factures/{id}",
+               patch(importation::modifier_facture).delete(importation::supprimer_facture))
+        .route("/api/import/factures/{id}/lignes", post(importation::ajouter_ligne))
+        .route("/api/import/lignes/{id}",
+               patch(importation::modifier_ligne).delete(importation::supprimer_ligne))
+        .route("/api/import/lignes/{id}/solder", post(importation::solder_ligne))
+        .route("/api/import/lignes-bc", get(importation::lignes_bc_ouvertes))
+        .route("/api/import/frais/{id}",
+               patch(importation::modifier_frais).delete(importation::supprimer_frais))
+        // La reception est un document A PART : elle ne passe pas par un
+        // dossier, et ses lignes peuvent venir de plusieurs.
+        .route("/api/import/a-recevoir", get(importation::a_recevoir))
+        .route("/api/import/receptions",
+               get(importation::lister_receptions).post(importation::creer_reception))
+        .route("/api/import/receptions/{id}",
+               get(importation::lire_reception)
+                   .put(importation::modifier_reception)
+                   .delete(importation::supprimer_reception))
+        .route("/api/import/receptions/{id}/valider", post(importation::valider_reception))
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
         .route("/api/machines/consommation", get(machines::journal_consommation))
         .route("/api/machines/fiches",

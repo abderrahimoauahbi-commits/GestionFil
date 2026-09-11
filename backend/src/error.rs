@@ -61,8 +61,17 @@ impl From<sqlx::Error> for AppError {
             sqlx::Error::RowNotFound => AppError::Introuvable("enregistrement".into()),
             sqlx::Error::Database(db) => {
                 let msg = db.message().to_string();
+                // UN RAISE EXCEPTION DE DECLENCHEUR EST UN MESSAGE METIER, ecrit
+                // pour l'utilisateur. On le reconnait a sa routine d'origine
+                // plutot qu'a sa premiere lettre : « La ligne du bon ... porte
+                // la reference ... » tombait sinon en « erreur interne ».
+                let leve_par_declencheur = db
+                    .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                    .and_then(|pg| pg.routine())
+                    .is_some_and(|r| r == "exec_stmt_raise");
                 // Message metier explicite leve par un trigger.
-                if msg.starts_with('R')
+                if leve_par_declencheur
+                    || msg.starts_with('R')
                     || msg.starts_with('C')
                     || msg.starts_with('B')
                     || msg.contains("Transition")

@@ -67,6 +67,9 @@ CREATE TABLE reference (
     designation         text    NOT NULL,
     type_fil            text,
     couleur             text,
+    -- La nuance du fournisseur (« 7612 » sur la facture Hasirci), distincte
+    -- du nom de la couleur : c'est elle que la production suit au lot.
+    code_couleur        text,
     titrage             text,
 
     -- Unite de saisie et facteurs de conversion vers le kg

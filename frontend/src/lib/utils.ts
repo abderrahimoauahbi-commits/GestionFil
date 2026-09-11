@@ -58,5 +58,12 @@ export const fmt = {
 }
 
 /** Detecte l'execution dans l'enveloppe Tauri (application de bureau). */
+/**
+ * `chemin` est-il l'ecran `vers` ou l'un de ses sous-ecrans ? Par SEGMENT, pas
+ * par caractere : « /receptions » ne couvre pas « /receptions-import ».
+ */
+export const sousChemin = (chemin: string, vers: string) =>
+  chemin === vers || chemin.startsWith(vers.endsWith('/') ? vers : `${vers}/`)
+
 export const estBureau = () =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window

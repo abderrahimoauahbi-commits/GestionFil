@@ -190,6 +190,20 @@ export const NATURE_PIECE: Record<Piece['nature'], string> = {
   AUTRE: 'Autre document',
 }
 
+/**
+ * Un document que le dossier devrait porter, et ce qu'il en manque. Calculé par
+ * le serveur : l'assistant répond aux mêmes questions que cet écran, et la
+ * règle ne peut pas vivre en deux endroits.
+ */
+export interface PieceAttendue {
+  nature: Piece['nature']
+  libelle: string
+  /** Combien il en faut — un dossier à trois factures en attend trois. */
+  combien: number
+  deposees: number
+  manque: number
+}
+
 export interface DossierComplet {
   dossier: Dossier
   factures: Facture[]
@@ -197,6 +211,7 @@ export interface DossierComplet {
   frais: Frais[]
   repartition: Allocation[]
   pieces: Piece[]
+  attendues: PieceAttendue[]
   ajustements: Ajustement[]
 }
 

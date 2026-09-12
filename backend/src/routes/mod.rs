@@ -15,7 +15,7 @@ mod importation;
 mod machines;
 pub(crate) mod json;
 mod operations;
-mod pieces;
+pub mod pieces;
 mod production;
 mod referentiels;
 mod stock;

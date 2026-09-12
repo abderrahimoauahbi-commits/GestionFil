@@ -38,38 +38,12 @@ const poids = (octets: number) =>
     ? `${fmt.nombre(octets / (1024 * 1024), 1)} Mo`
     : `${Math.round(octets / 1024)} ko`
 
-/**
- * Ce que le dossier devrait contenir, deduit de ce qu'il porte deja.
- *
- * On ne reclame que ce qui a une raison d'exister : pas de quittance tant
- * qu'aucun frais de douane n'est saisi, pas de facture fournisseur tant
- * qu'aucune facture ne l'est.
+/*
+ * CE QUE LE DOSSIER DEVRAIT CONTENIR est calcule par le serveur et arrive dans
+ * `d.attendues`. La regle n'est pas ici : l'assistant repond a « qu'est-ce qui
+ * manque au dossier 55/26 », et deux copies d'une meme regle divergent le jour
+ * ou l'une est corrigee seule.
  */
-function attendues(d: DossierComplet): { nature: Piece['nature']; libelle: string; combien: number }[] {
-  const liste: { nature: Piece['nature']; libelle: string; combien: number }[] = []
-  if (d.factures.length > 0) {
-    liste.push({
-      nature: 'FACTURE_FOURNISSEUR',
-      libelle: 'Facture fournisseur',
-      combien: d.factures.length,
-    })
-  }
-  const douane = d.frais.some((f) => f.categorie === 'DOUANE' || f.categorie === 'TAXE')
-  if (douane) {
-    liste.push({ nature: 'QUITTANCE_DOUANE', libelle: 'Quittance de la douane', combien: 1 })
-    liste.push({ nature: 'LIQUIDATION', libelle: 'Fiche de liquidation', combien: 1 })
-    liste.push({ nature: 'DUM', libelle: 'DUM (déclaration)', combien: 1 })
-  }
-  if (d.frais.some((f) => f.categorie !== 'DOUANE' && f.categorie !== 'TAXE')) {
-    liste.push({
-      nature: 'FACTURE_FRAIS',
-      libelle: 'Facture de frais (transitaire, fret, port)',
-      combien: 1,
-    })
-  }
-  if (d.dossier.numero_bl) liste.push({ nature: 'BL', libelle: 'Connaissement (BL)', combien: 1 })
-  return liste
-}
 
 export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
   const idDossier = d.dossier.id_dossier
@@ -130,9 +104,7 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
     if (fichiers.length) deposer.mutate(fichiers)
   }
 
-  const manquantes = attendues(d).filter(
-    (a) => d.pieces.filter((p) => p.nature === a.nature).length < a.combien,
-  )
+  const manquantes = (d.attendues ?? []).filter((a) => a.manque > 0)
 
   return (
     <Carte>

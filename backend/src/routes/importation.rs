@@ -256,10 +256,12 @@ pub async fn lire_dossier(
     .await?;
 
     let pieces = super::pieces::lister_du_dossier(db, &id).await?;
+    let attendues = super::pieces::attendues(db, &id).await?;
 
     let mut v = json!({
         "dossier": lignes_en_json(&entete).get(0).cloned().unwrap_or(Value::Null),
         "pieces": pieces,
+        "attendues": attendues,
         "factures": lignes_en_json(&factures),
         "lignes": lignes_en_json(&lignes),
         "frais": lignes_en_json(&frais),

@@ -28,6 +28,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use sqlx::Row;
 use tokio::io::AsyncWriteExt;
 
 const IMPORT: &str = "IMPORT";
@@ -283,6 +284,83 @@ pub async fn supprimer(
     // piece introuvable.
     let _ = tokio::fs::remove_file(&chemin).await;
     Ok(Json(json!({ "supprime": id })))
+}
+
+/// CE QUE LE DOSSIER DEVRAIT CONTENIR, deduit de ce qu'il porte deja.
+///
+/// La regle vit ICI, et non dans l'ecran, parce qu'elle a deux lecteurs :
+/// l'ecran des pieces, qui affiche les manques en tete, et l'assistant, a qui
+/// l'on demande « qu'est-ce qui manque au dossier 55/26 ». Deux copies d'une
+/// meme regle divergent le jour ou l'une est corrigee seule.
+///
+/// ON NE RECLAME QUE CE QUI A UNE RAISON D'EXISTER : pas de quittance tant
+/// qu'aucun frais de douane n'est saisi, pas de facture fournisseur tant
+/// qu'aucune facture ne l'est. Un dossier vide ne doit rien reclamer, sans quoi
+/// l'ecran ouvre sur une liste de reproches.
+pub async fn attendues(db: &crate::db::Db, id_dossier: &str) -> AppResult<Value> {
+    let ligne = sqlx::query(
+        "SELECT (SELECT count(*) FROM import_factures f WHERE f.id_dossier = d.id_dossier)
+                  AS nb_factures,
+                EXISTS (SELECT 1 FROM dossier_lignes_frais x
+                          JOIN parametres_frais p ON p.id_frais = x.id_frais
+                         WHERE x.id_dossier = d.id_dossier
+                           AND p.categorie IN ('DOUANE','TAXE'))            AS douane,
+                EXISTS (SELECT 1 FROM dossier_lignes_frais x
+                          JOIN parametres_frais p ON p.id_frais = x.id_frais
+                         WHERE x.id_dossier = d.id_dossier
+                           AND p.categorie NOT IN ('DOUANE','TAXE'))        AS autres_frais,
+                COALESCE(d.numero_bl, '') <> ''                             AS a_un_bl
+           FROM import_dossiers d WHERE d.id_dossier = $1",
+    )
+    .bind(id_dossier)
+    .fetch_optional(db)
+    .await?;
+    let Some(l) = ligne else { return Ok(json!([])) };
+
+    let nb_factures: i64 = l.try_get("nb_factures").unwrap_or(0);
+    let douane: bool = l.try_get("douane").unwrap_or(false);
+    let autres_frais: bool = l.try_get("autres_frais").unwrap_or(false);
+    let a_un_bl: bool = l.try_get("a_un_bl").unwrap_or(false);
+
+    let mut liste: Vec<(&str, &str, i64)> = Vec::new();
+    if nb_factures > 0 {
+        liste.push(("FACTURE_FOURNISSEUR", "Facture fournisseur", nb_factures));
+    }
+    if douane {
+        liste.push(("QUITTANCE_DOUANE", "Quittance de la douane", 1));
+        liste.push(("LIQUIDATION", "Fiche de liquidation", 1));
+        liste.push(("DUM", "DUM (déclaration)", 1));
+    }
+    if autres_frais {
+        liste.push(("FACTURE_FRAIS", "Facture de frais (transitaire, fret, port)", 1));
+    }
+    if a_un_bl {
+        liste.push(("BL", "Connaissement (BL)", 1));
+    }
+
+    // Ce qui est deja depose, par nature : le manque est une soustraction, pas
+    // une presence/absence — un dossier a trois factures en veut trois.
+    let deposees: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT nature, count(*) FROM piece_jointe WHERE id_dossier = $1 GROUP BY nature",
+    )
+    .bind(id_dossier)
+    .fetch_all(db)
+    .await?;
+
+    Ok(Value::Array(
+        liste
+            .into_iter()
+            .map(|(nature, libelle, combien)| {
+                let n = deposees
+                    .iter()
+                    .find(|(d, _)| d == nature)
+                    .map(|(_, n)| *n)
+                    .unwrap_or(0);
+                json!({ "nature": nature, "libelle": libelle, "combien": combien,
+                        "deposees": n, "manque": (combien - n).max(0) })
+            })
+            .collect(),
+    ))
 }
 
 /// Les pieces d'un dossier, pour l'ecran.

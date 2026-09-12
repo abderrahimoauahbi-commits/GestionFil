@@ -28,6 +28,7 @@ import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
+import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
@@ -675,6 +676,9 @@ export function Coquille() {
 
       {/* Le tiroir d'apparence : hors de la colonne de contenu, il se pose
           par-dessus tout et n'entre dans aucun flux. */}
+      {/* Le robot de connexion : il s'ouvre seul a la premiere page de la
+          session, et se rappelle par son bouton. */}
+      <RobotConnexion />
       <PanneauApparence ouvert={apparence} surFermeture={() => setApparence(false)} />
       <ChangerMotDePasse ouvert={motDePasse} surFermeture={() => setMotDePasse(false)} />
 

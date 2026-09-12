@@ -21,6 +21,7 @@ import { Equivalences } from './Equivalences'
 import { EcranReferentiel } from '../components/EcranReferentiel'
 import type { ChampDef } from '../components/Formulaire'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
+import { MaitreDetail } from '../composants/MaitreDetail'
 import { RailLateral, type GroupeRail } from '../composants/RailLateral'
 import type { Colonne } from '../components/TableDroits'
 import {
@@ -67,6 +68,21 @@ const compte = (champ: string, entete: string): Colonne<Ligne> => ({
   rendu: (l) => <Etiquette>{String(l[champ] ?? 0)}</Etiquette>,
 })
 
+/** Un 0/1 de la base, lu comme une reponse : oui, ou rien. */
+const ouiNon = (champ: string, entete: string): Colonne<Ligne> => ({
+  champ,
+  entete,
+  rendu: (l) =>
+    Number(l[champ]) === 1 ? <Etiquette>oui</Etiquette> : <span className="text-attenue-texte">non</span>,
+})
+
+const METHODES_FRAIS = [
+  { valeur: 'VALEUR', libelle: 'A la valeur' },
+  { valeur: 'POIDS', libelle: 'Au poids' },
+  { valeur: 'QUANTITE', libelle: 'A la quantite' },
+  { valeur: 'PARTS_EGALES', libelle: 'A parts egales' },
+]
+
 const colonneCode = (champ: string, entete: string): Colonne<Ligne> => ({
   champ,
   entete,
@@ -93,44 +109,113 @@ const ROLES_BOM = [
 
 const ONGLETS: Onglet[] = [
   {
+    /**
+     * LA CATEGORIE ET SES FAMILLES, dans un seul ecran. Une famille n'a pas de
+     * sens hors de sa categorie — « FIL 2650 dtex FZ » est du polypropylene —
+     * et une categorie sans famille ne peut rien classer : celles qui n'en
+     * avaient pas ont recu la leur, a leur nom.
+     */
     cle: 'categories',
-    libelle: 'Catégories matiere',
+    libelle: 'Catégories et familles',
     module: 'CATALOGUE',
     chemin: 'categories',
     identifiant: 'code_categorie',
     unite: 'catégorie',
-    colonnes: [
-      colonneCode('code_categorie', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
-      {
-        champ: 'code_role_defaut',
-        entete: 'Role BOM habituel',
-        rendu: (l) =>
-          l.code_role_defaut ? (
-            String(l.code_role_defaut)
-          ) : (
-            <span className="text-attenue-texte">—</span>
-          ),
-      },
-      { champ: 'description', entete: 'Description', secondaire: true },
-      compte('nb_references', 'References'),
-    ],
-    champs: [
-      { champ: 'code_categorie', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
-      {
-        champ: 'code_role_defaut',
-        libelle: 'Role BOM habituel',
-        type: 'liste',
-        options: ROLES_BOM,
-        aide:
-          "Aide a la saisie : la composition d'une qualite proposera d'abord les matieres " +
-          'de cette categorie pour ce role. Rien n\'interdit de la faire servir ailleurs.',
-      },
-      { champ: 'description', libelle: 'Description', type: 'zone' },
-      { champ: 'ordre_affichage', libelle: 'Ordre d affichage', type: 'entier' },
-      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
-    ],
+    colonnes: [],
+    champs: [],
+    ecranDedie: () => (
+      <MaitreDetail
+        titre="Catégories matière"
+        module="CATALOGUE"
+        aide="Choisissez une catégorie pour voir et compléter ses familles."
+        maitre={{
+          route: 'categories',
+          cle: 'code_categorie',
+          unite: 'Catégorie',
+          libelle: (l) => String(l.libelle ?? l.code_categorie),
+          detail: (l) => `${l.code_categorie} · ${l.nb_references ?? 0} référence(s)`,
+          champs: [
+            { champ: 'code_categorie', entete: 'Code', cleCreation: true, obligatoire: true },
+            { champ: 'libelle', entete: 'Libellé', obligatoire: true },
+            {
+              champ: 'code_role_defaut',
+              entete: 'Rôle BOM habituel',
+              options: ROLES_BOM.map((r) => ({ valeur: r.valeur, libelle: r.libelle })),
+            },
+          ],
+        }}
+        detail={{
+          route: 'familles',
+          cle: 'code_famille',
+          cleEtrangere: 'code_categorie',
+          unite: 'Famille',
+          colonnes: [
+            { champ: 'code_famille', entete: 'Code', obligatoire: true, cleCreation: true,
+              placeholder: 'FIL-2650-FZ', largeur: 'w-56' },
+            { champ: 'libelle', entete: 'Libellé', obligatoire: true, placeholder: 'FIL 2650 dtex FZ' },
+            { champ: 'titrage', entete: 'Titrage', placeholder: '2650 dtex', largeur: 'w-40' },
+            { champ: 'type_fil', entete: 'Type de fil', placeholder: 'PP frisé', largeur: 'w-40' },
+          ],
+        }}
+      />
+    ),
+  },
+  {
+    /**
+     * LA COULEUR INTERNE ET SES CODES FOURNISSEUR. Le rouge de la maison est
+     * C3 ; chez Hasirci il s'ecrit « RED 7612 », chez Ozkaralar « OZ 5109 ».
+     * Cette liste est ce qui permet de reconnaitre une couleur sur une facture
+     * et de rapprocher deux fournisseurs du meme fil.
+     */
+    cle: 'couleurs',
+    libelle: 'Couleurs',
+    module: 'CATALOGUE',
+    chemin: 'couleurs',
+    identifiant: 'code_couleur_interne',
+    unite: 'couleur',
+    colonnes: [],
+    champs: [],
+    ecranDedie: () => (
+      <MaitreDetail
+        titre="Couleurs"
+        module="CATALOGUE"
+        aide="Choisissez une couleur pour voir son code chez chaque fournisseur."
+        maitre={{
+          route: 'couleurs',
+          cle: 'code_couleur_interne',
+          unite: 'Couleur',
+          libelle: (l) => `${l.code_couleur_interne} — ${l.libelle}`,
+          detail: (l) => `${l.nb_references ?? 0} référence(s)`,
+          champs: [
+            { champ: 'code_couleur_interne', entete: 'Code', cleCreation: true, obligatoire: true },
+            { champ: 'libelle', entete: 'Libellé', obligatoire: true },
+            {
+              champ: 'classe_teinture',
+              entete: 'Classe de teinture',
+              options: [
+                { valeur: 'LIGHT', libelle: 'Claire' },
+                { valeur: 'MEDIUM', libelle: 'Moyenne' },
+                { valeur: 'DARK', libelle: 'Sombre' },
+                { valeur: 'RED', libelle: 'Rouge' },
+              ],
+            },
+          ],
+        }}
+        detail={{
+          route: 'couleurs-fournisseur',
+          cle: 'id_couleur_fournisseur',
+          cleEtrangere: 'code_couleur_interne',
+          unite: 'Code fournisseur',
+          colonnes: [
+            { champ: 'code_fournisseur', entete: 'Fournisseur', obligatoire: true, largeur: 'w-40' },
+            { champ: 'code_couleur', entete: 'Code chez lui', obligatoire: true,
+              placeholder: 'RED 7612', largeur: 'w-52' },
+            { champ: 'libelle', entete: 'Son libellé', placeholder: 'ROUGE' },
+            { champ: 'supplement_teinture', entete: 'Supplément ($/t)', largeur: 'w-36' },
+          ],
+        }}
+      />
+    ),
   },
   {
     cle: 'roles-bom',
@@ -326,6 +411,102 @@ const ONGLETS: Onglet[] = [
       { champ: 'code_motif_ligne', libelle: 'Code', obligatoire: true, cleCreation: true },
       { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
       { champ: 'categorie', libelle: 'Catégorie' },
+      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
+    ],
+  },
+  {
+    /**
+     * Le catalogue des frais d'importation. Chaque type porte la PIECE qui le
+     * justifie — ce que l'assistante cherche dans le dossier —, sa
+     * recuperabilite, sa portee et sa methode de repartition.
+     *
+     * On le desactive plutot que de le supprimer : un dossier deja clos cite
+     * son type de frais, et sa repartition doit rester lisible.
+     */
+    cle: 'types-frais',
+    libelle: 'Types de frais',
+    module: 'PARAMETRES',
+    chemin: 'types-frais',
+    identifiant: 'id_frais',
+    unite: 'type de frais',
+    colonnes: [
+      colonneCode('id_frais', 'Code'),
+      { champ: 'libelle', entete: 'Libelle' },
+      {
+        champ: 'piece_justificative',
+        entete: 'Piece justificative',
+        rendu: (l) =>
+          l.piece_justificative ? (
+            String(l.piece_justificative)
+          ) : (
+            <span className="text-attenue-texte">—</span>
+          ),
+      },
+      ouiNon('recuperable', 'Recuperable'),
+      ouiNon('inclus_dans_cout', 'Dans le cout'),
+      ouiNon('commun', 'Commun'),
+      {
+        champ: 'methode_repartition',
+        entete: 'Repartition',
+        rendu: (l) => METHODES_FRAIS.find((m) => m.valeur === l.methode_repartition)?.libelle ?? '—',
+      },
+      compte('nb_utilisations', 'Employe'),
+    ],
+    champs: [
+      { champ: 'id_frais', libelle: 'Code', obligatoire: true, cleCreation: true },
+      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      {
+        champ: 'categorie',
+        libelle: 'Categorie',
+        type: 'liste',
+        obligatoire: true,
+        options: [
+          { valeur: 'DOUANE', libelle: 'Douane' },
+          { valeur: 'TAXE', libelle: 'Taxe' },
+          { valeur: 'TRANSPORT', libelle: 'Transport' },
+          { valeur: 'PORT', libelle: 'Port' },
+          { valeur: 'TRANSIT', libelle: 'Transit' },
+          { valeur: 'AUTRE', libelle: 'Autre' },
+        ],
+      },
+      {
+        champ: 'piece_justificative',
+        libelle: 'Piece justificative',
+        aide: "Le document qui porte ce frais : quittance de la douane, facture du transitaire… "
+          + "C'est ce qu'on cherche dans le dossier, et ce que la saisie assistee reconnaitra.",
+      },
+      {
+        champ: 'recuperable',
+        libelle: 'Recuperable',
+        type: 'booleen',
+        aide: "La TVA a l'importation se recupere : elle se saisit pour que le dossier balance, "
+          + "mais elle n'entre jamais dans le cout de revient.",
+      },
+      {
+        champ: 'inclus_dans_cout',
+        libelle: 'Entre dans le cout de revient',
+        type: 'booleen',
+        defaut: true,
+        aide: 'Un frais recuperable ne peut pas y entrer : la marchandise le paierait deux fois.',
+      },
+      {
+        champ: 'commun',
+        libelle: 'Commun au dossier',
+        type: 'booleen',
+        defaut: true,
+        aide: "Commun : reparti sur toutes les lignes. Sinon, la saisie demande sur quelles "
+          + 'lignes il porte — une analyse, une redevance sur une seule marchandise.',
+      },
+      {
+        champ: 'methode_repartition',
+        libelle: 'Methode de repartition',
+        type: 'liste',
+        options: METHODES_FRAIS,
+        defaut: 'VALEUR',
+        aide: 'Le classeur repartit tout a la valeur. Le poids sert pour un fret facture au kilo, '
+          + 'les parts egales pour une formalite qui ne depend ni du prix ni du poids.',
+      },
+      { champ: 'ordre', libelle: 'Ordre d affichage', type: 'entier' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },

@@ -969,7 +969,13 @@ pub async fn kpi_plan_achat(
                 SUM(CASE WHEN pa.statut = 'RUPTURE' THEN 1 ELSE 0 END) AS nb_ruptures
            FROM v_plan_achat pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
-          GROUP BY pa.code_fournisseur
+          -- REGROUPER SUR LA CLE DU FOURNISSEUR, pas seulement sur le code
+          -- porte par le plan : PostgreSQL n'accepte une colonne hors agregat
+          -- que si elle depend fonctionnellement du groupe, et c'est la cle
+          -- primaire de `fournisseur` qui le garantit pour `f.nom`, `f.pays`,
+          -- `f.code_devise`... SQLite laissait passer ; ici l'ecran du plan
+          -- d'achat tombait en « erreur interne ».
+          GROUP BY f.code_fournisseur, pa.code_fournisseur
           ORDER BY montant_mad DESC",
     )
     .fetch_all(&state.db)

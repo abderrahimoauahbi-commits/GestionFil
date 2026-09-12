@@ -39,8 +39,10 @@ import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { Avancement, PastilleStatut } from './DossiersImport'
 import { CiblesDialogue, ClotureDialogue, echec, nombre, Tuile, useRafraichir } from './dialogues'
+import { PiecesDossier } from './PiecesDossier'
 import {
   LIBELLE_RECEPTION,
+  METHODE_REPARTITION,
   TON_RECEPTION,
   type DossierComplet,
   type Frais,
@@ -109,6 +111,7 @@ export function DossierImport() {
       <Informations d={d} ecrire={ecrire} />
       <FraisDossier d={d} ecrire={ecrire} />
       <FacturesDossier d={d} ecrire={ecrire} />
+      <PiecesDossier d={d} ecrire={ecrire} />
       {d.ajustements.length > 0 && <JournalCloture d={d} />}
 
       <ClotureDialogue idDossier={id} ouvert={cloture} surFermer={() => setCloture(false)} />
@@ -273,7 +276,13 @@ function FraisDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
         cours_change: n.code_devise === 'MAD' ? 1 : nombre(n.cours_change),
       }),
     onSuccess: () => {
-      toast.success(typeChoisi?.inclus_dans_cout ? 'Frais ajouté — réparti à la valeur' : 'Frais ajouté — hors coût de revient')
+      toast.success(
+        !typeChoisi?.inclus_dans_cout
+          ? 'Frais ajouté — hors coût de revient'
+          : typeChoisi.commun
+            ? `Frais ajouté — réparti ${METHODE_REPARTITION[typeChoisi.methode_repartition].toLowerCase()}`
+            : 'Frais ajouté — désignez les lignes qu’il concerne (icône cible)',
+      )
       setN(vide)
       rafraichir()
     },
@@ -299,7 +308,7 @@ function FraisDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
       <CarteEntete>
         <CarteTitre>Frais du dossier</CarteTitre>
         <span className="text-[11.5px] text-attenue-texte">
-          Hors taxes. Répartis sur les lignes au prorata de leur valeur.
+          Chaque type de frais dit sa pièce justificative et sa méthode de répartition.
         </span>
       </CarteEntete>
       <CarteCorps className="p-0">
@@ -383,6 +392,10 @@ function FraisDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
                         </optgroup>
                       ))}
                     </Selecteur>
+                    {/* La piece a avoir en main pour ce frais. */}
+                    {typeChoisi?.piece_justificative && (
+                      <div className="mt-0.5 text-[11px] text-attenue-texte">{typeChoisi.piece_justificative}</div>
+                    )}
                   </td>
                   <td className={td}><Champ className="h-7" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
                   <td className={td}><Champ className="h-7" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
@@ -406,7 +419,17 @@ function FraisDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
                     {montantDh > 0 ? fmt.nombre(montantDh, 2) : '—'}
                   </td>
                   <td className={cn(td, 'text-[11.5px]')}>
-                    {typeChoisi && (typeChoisi.inclus_dans_cout ? 'inclus · tout le dossier' : <span className="text-alerte">hors coût</span>)}
+                    {typeChoisi &&
+                      (typeChoisi.inclus_dans_cout ? (
+                        <>
+                          {METHODE_REPARTITION[typeChoisi.methode_repartition].toLowerCase()} ·{' '}
+                          {typeChoisi.commun ? 'tout le dossier' : 'lignes à désigner'}
+                        </>
+                      ) : (
+                        <span className="text-alerte">
+                          hors coût{typeChoisi.recuperable ? ' — récupérable' : ''}
+                        </span>
+                      ))}
                   </td>
                   <td className={td}>
                     <Bouton taille="sm" disabled={!complet} chargement={ajouter.isPending} onClick={() => ajouter.mutate()}>

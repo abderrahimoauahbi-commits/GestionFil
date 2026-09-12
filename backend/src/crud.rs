@@ -64,7 +64,9 @@ pub const ENTITES: &[Entite] = &[
         modification: &["libelle", "description", "code_role_defaut", "ordre_affichage", "actif"],
         suppression: Suppression::Logique("actif"),
         selection: "c.*, (SELECT COUNT(*) FROM reference r
-                           WHERE r.code_categorie = c.code_categorie AND r.actif = 1) AS nb_references",
+                           WHERE r.code_categorie = c.code_categorie AND r.actif = 1) AS nb_references,
+                    (SELECT COUNT(*) FROM famille f
+                      WHERE f.code_categorie = c.code_categorie AND f.actif = 1) AS nb_familles",
         tri: "c.ordre_affichage, c.libelle",
     },
     Entite {
@@ -155,6 +157,27 @@ pub const ENTITES: &[Entite] = &[
                            WHERE g.code_groupe_equiv = c.code_groupe_equiv AND g.actif = 1) AS nb_references",
         tri: "c.code_groupe_equiv",
     },
+    // Le catalogue des frais d'importation. Il s'administre comme un
+    // referentiel : chaque type dit sa piece justificative, s'il est
+    // recuperable, s'il est commun au dossier, et comment il se repartit.
+    // Desactive plutot que supprime : un dossier deja clos cite son type.
+    Entite {
+        chemin: "types-frais",
+        table: "parametres_frais",
+        module: "PARAMETRES",
+        cle: "id_frais",
+        cle_generee: false,
+        creation: &[
+            "id_frais", "libelle", "categorie", "piece_justificative", "recuperable",
+            "commun", "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+        modification: &[
+            "libelle", "categorie", "piece_justificative", "recuperable", "commun",
+            "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*, (SELECT COUNT(*) FROM dossier_lignes_frais d
+                           WHERE d.id_frais = c.id_frais) AS nb_utilisations",
+        tri: "c.ordre",
+    },
     Entite {
         chemin: "fournisseurs",
         table: "fournisseur",
@@ -177,6 +200,73 @@ pub const ENTITES: &[Entite] = &[
                            WHERE r.code_fournisseur = c.code_fournisseur AND r.actif = 1) AS nb_references",
         tri: "c.nom",
     },
+    // NOTRE liste de couleurs (C1 = Or, C3 = Rouge…), commune a tous les
+    // fournisseurs : c'est elle qui rapproche « RED 7612 » de « OZ 5109 ».
+    Entite {
+        chemin: "couleurs",
+        table: "couleur",
+        module: "CATALOGUE",
+        cle: "code_couleur_interne",
+        cle_generee: false,
+        creation: &[
+            "code_couleur_interne", "libelle", "classe_teinture", "description",
+            "ordre_affichage", "actif"],
+        modification: &["libelle", "classe_teinture", "description", "ordre_affichage", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*, (SELECT COUNT(*) FROM reference r
+                           WHERE r.code_couleur_interne = c.code_couleur_interne AND r.actif = 1)
+                          AS nb_references,
+                    (SELECT COUNT(*) FROM couleur_fournisseur cf
+                      WHERE cf.code_couleur_interne = c.code_couleur_interne AND cf.actif = 1)
+                          AS nb_fournisseurs",
+        tri: "c.ordre_affichage",
+    },
+    // Le meme rouge, chez chacun : « RED 7612 » chez Hasirci, « OZ 5109 » chez
+    // Ozkaralar. C'est ce qui permet a la saisie assistee de reconnaitre une
+    // couleur sur une facture, et a l'acheteur de savoir qui sait la fournir.
+    Entite {
+        chemin: "couleurs-fournisseur",
+        table: "couleur_fournisseur",
+        module: "CATALOGUE",
+        cle: "id_couleur_fournisseur",
+        cle_generee: true,
+        creation: &[
+            "code_couleur_interne", "code_fournisseur", "code_couleur", "libelle",
+            "supplement_teinture", "actif"],
+        modification: &[
+            "code_couleur_interne", "code_fournisseur", "code_couleur", "libelle",
+            "supplement_teinture", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*,
+                    (SELECT x.nom FROM fournisseur x WHERE x.code_fournisseur = c.code_fournisseur)
+                        AS fournisseur_nom,
+                    (SELECT x.libelle FROM couleur x
+                      WHERE x.code_couleur_interne = c.code_couleur_interne) AS couleur_libelle",
+        tri: "c.code_couleur_interne, c.code_fournisseur",
+    },
+    // La famille : le produit independamment du vendeur.
+    Entite {
+        chemin: "familles",
+        table: "famille",
+        module: "CATALOGUE",
+        cle: "code_famille",
+        cle_generee: false,
+        creation: &[
+            "code_famille", "libelle", "code_categorie", "type_fil", "titrage",
+            "description", "ordre_affichage", "actif"],
+        modification: &[
+            "libelle", "code_categorie", "type_fil", "titrage", "description",
+            "ordre_affichage", "actif"],
+        suppression: Suppression::Logique("actif"),
+        // En sous-requete : `jointures()` ne declare d'alias que pour la
+        // reference et les groupes d'equivalence.
+        selection: "c.*,
+                    (SELECT x.libelle FROM categorie_matiere x
+                      WHERE x.code_categorie = c.code_categorie) AS categorie_libelle,
+                    (SELECT COUNT(*) FROM reference r
+                      WHERE r.code_famille = c.code_famille AND r.actif = 1) AS nb_references",
+        tri: "c.ordre_affichage",
+    },
     Entite {
         chemin: "catalogue",
         table: "reference",
@@ -185,14 +275,18 @@ pub const ENTITES: &[Entite] = &[
         cle_generee: false,
         creation: &[
             "code_reference", "code_categorie", "code_fournisseur", "designation",
-            "type_fil", "couleur", "titrage", "unite_catalogue", "poids_bobine_kg",
+            "type_fil", "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
+            "reference_fournisseur", "supplement_teinture",
+            "unite_catalogue", "poids_bobine_kg",
             "bobines_par_palette", "densite_kg_ml", "prix_catalogue",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
             "couverture_min_mois", "marge_securite_pct", "moq_kg",
             "multiple_achat_kg", "suivi_lot", "actif"],
         modification: &[
             "code_categorie", "code_fournisseur", "designation", "type_fil",
-            "couleur", "titrage", "unite_catalogue", "poids_bobine_kg",
+            "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
+            "reference_fournisseur", "supplement_teinture",
+            "unite_catalogue", "poids_bobine_kg",
             "bobines_par_palette", "densite_kg_ml", "prix_catalogue",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
             "couverture_min_mois", "marge_securite_pct", "moq_kg",
@@ -204,6 +298,11 @@ pub const ENTITES: &[Entite] = &[
         // regles de prix dans l'application finiraient par donner deux chiffres.
         selection: "c.*, cat.libelle AS categorie_libelle, cat.code_role_defaut,
                     f.nom AS fournisseur_nom,
+                    (SELECT x.libelle FROM famille x WHERE x.code_famille = c.code_famille)
+                        AS famille_libelle,
+                    (SELECT x.libelle FROM couleur x
+                      WHERE x.code_couleur_interne = c.code_couleur_interne)
+                        AS couleur_interne_libelle,
                     COALESCE(c.cmup_mad, ROUND(c.prix_catalogue_kg * COALESCE((
                         SELECT t.taux FROM taux_change t
                          WHERE t.code_devise = c.code_devise_catalogue
@@ -491,7 +590,10 @@ pub async fn creer(
 
     let mut colonnes = vec![e.cle.to_string()];
     colonnes.extend(champs.iter().map(|(n, _)| n.clone()));
-    let marques: Vec<String> = (1..=colonnes.len()).map(|i| format!("?{i}")).collect();
+    // `$1`, PAS `?1` : le point d'interrogation etait le marqueur de SQLite.
+    // Depuis PostgreSQL, toute creation partait en erreur de syntaxe — donc en
+    // « erreur interne » a l'ecran, sans rien creer.
+    let marques: Vec<String> = (1..=colonnes.len()).map(|i| format!("${i}")).collect();
 
     let sql = format!(
         "INSERT INTO {} ({}) VALUES ({})",

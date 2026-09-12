@@ -258,7 +258,10 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
         cle={(l) => String(l[cle])}
         actions={actions}
         titreCarte={titreCarte}
-        placeholderRecherche={`Filtrer les ${libelleUnite}s...`}
+        placeholderRecherche={
+          // « type de frais » est deja au pluriel : pas de « fraiss ».
+          `Filtrer les ${libelleUnite}${libelleUnite.endsWith('s') ? '' : 's'}...`
+        }
         serveur={
           serveur
             ? {

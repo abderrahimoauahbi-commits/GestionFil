@@ -5,18 +5,25 @@
 -- Les colonnes de frais du classeur IMPORTATION 2026, une par une. La TVA est
 -- saisie comme les autres (le dossier doit balancer avec les pieces) mais elle
 -- est recuperable : elle n'entre jamais dans le cout de revient.
-INSERT INTO parametres_frais (id_frais, libelle, categorie, inclus_dans_cout, ordre) VALUES
-    ('DOUANE',    'Droits de douane (D.D.)',              'DOUANE',    1, 10),
-    ('TVA',       'TVA a l''importation',                 'TAXE',      0, 20),
-    ('PORT_MED',  'Port Tanger Med',                      'PORT',      1, 30),
-    ('FRET',      'Fret',                                 'TRANSPORT', 1, 40),
-    ('TREMSA',    'Transitaire (TREMSA / WIDEM)',         'TRANSIT',   1, 50),
-    ('TIMBRE',    'Timbre',                               'TAXE',      1, 60),
-    ('INT_OC',    'INT/OC',                               'TRANSIT',   1, 70),
-    ('TMSA',      'TMSA',                                 'PORT',      1, 80),
-    ('TRANSPORT', 'Transport local',                      'TRANSPORT', 1, 90),
-    ('AUTRE',     'Autre frais',                          'AUTRE',     1, 99)
-ON CONFLICT (id_frais) DO NOTHING;
+-- La PIECE JUSTIFICATIVE de chaque type : c'est elle que l'assistante cherche
+-- dans le dossier, et c'est par elle que la saisie assistee reconnaitra un
+-- document depose. « Recuperable » ne concerne aujourd'hui que la TVA.
+INSERT INTO parametres_frais (id_frais, libelle, categorie, piece_justificative,
+                              recuperable, commun, methode_repartition, inclus_dans_cout, ordre) VALUES
+    ('DOUANE',    'Droits de douane (D.D.)',      'DOUANE',    'Quittance de la douane',            0, 1, 'VALEUR', 1, 10),
+    ('TVA',       'TVA a l''importation',         'TAXE',      'Quittance de la douane',            1, 1, 'VALEUR', 0, 20),
+    ('PORT_MED',  'Port Tanger Med',              'PORT',      'Facture du port',                   0, 1, 'VALEUR', 1, 30),
+    ('FRET',      'Fret',                         'TRANSPORT', 'Facture du transporteur maritime',  0, 1, 'VALEUR', 1, 40),
+    ('TREMSA',    'Transitaire (TREMSA / WIDEM)', 'TRANSIT',   'Facture du transitaire',            0, 1, 'VALEUR', 1, 50),
+    ('TIMBRE',    'Timbre',                       'TAXE',      'Timbre fiscal',                     0, 1, 'VALEUR', 1, 60),
+    ('INT_OC',    'INT/OC',                       'TRANSIT',   'Facture du transitaire',            0, 1, 'VALEUR', 1, 70),
+    ('TMSA',      'TMSA',                         'PORT',      'Facture TMSA',                      0, 1, 'VALEUR', 1, 80),
+    ('TRANSPORT', 'Transport local',              'TRANSPORT', 'Facture du transporteur routier',   0, 1, 'VALEUR', 1, 90),
+    ('AUTRE',     'Autre frais',                  'AUTRE',     NULL,                                0, 0, 'VALEUR', 1, 99)
+ON CONFLICT (id_frais) DO UPDATE SET
+    piece_justificative = excluded.piece_justificative,
+    recuperable = excluded.recuperable, commun = excluded.commun,
+    methode_repartition = excluded.methode_repartition;
 
 -- Le module IMPORT. Saisir un dossier : direction, administration, assistante.
 -- CLOTURER — donc changer le CUMP — : direction et administration seulement.
@@ -82,6 +89,43 @@ SELECT u.id_utilisateur, m.module, m.champ, m.niveau
   FROM utilisateur u
   JOIN modele_droit_champ m ON m.code_role_user = u.code_role_user
  WHERE m.module = 'IMPORT'
+ON CONFLICT (id_utilisateur, module, champ) DO NOTHING;
+
+-- L'ECRAN « TYPES DE FRAIS » (Referentiels) se lit et se modifie avec le module
+-- PARAMETRES. Ses colonnes doivent y etre declarees, sinon elles disparaissent.
+-- `libelle` et `categorie` y sont deja.
+INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible, ordre) VALUES
+ ('PARAMETRES', 'id_frais',            'Code du frais',         'ECRITURE', 0, 900),
+ ('PARAMETRES', 'piece_justificative', 'Piece justificative',   'ECRITURE', 0, 905),
+ ('PARAMETRES', 'recuperable',         'Recuperable',           'ECRITURE', 0, 910),
+ ('PARAMETRES', 'commun',              'Commun au dossier',     'ECRITURE', 0, 915),
+ ('PARAMETRES', 'inclus_dans_cout',    'Entre dans le cout',    'ECRITURE', 0, 920),
+ ('PARAMETRES', 'methode_repartition', 'Methode de repartition','ECRITURE', 0, 925),
+ ('PARAMETRES', 'ordre',               'Ordre d''affichage',    'ECRITURE', 0, 930),
+ ('PARAMETRES', 'actif',               'Actif',                 'ECRITURE', 0, 935),
+ ('PARAMETRES', 'nb_utilisations',     'Dossiers concernes',    'LECTURE',  0, 940)
+ON CONFLICT (module, champ) DO UPDATE SET
+    libelle = excluded.libelle, sensible = excluded.sensible, ordre = excluded.ordre;
+
+INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
+SELECT r.code_role_user, c.module, c.champ,
+       CASE WHEN c.niveau_defaut = 'ECRITURE' AND EXISTS (
+                 SELECT 1 FROM permission p WHERE p.code_role_user = r.code_role_user
+                  AND p.module = 'PARAMETRES' AND p.action = 'ECRIRE') THEN 'ECRITURE'
+            WHEN EXISTS (SELECT 1 FROM permission p WHERE p.code_role_user = r.code_role_user
+                          AND p.module = 'PARAMETRES' AND p.action = 'LIRE') THEN 'LECTURE'
+            ELSE 'MASQUE' END
+  FROM role_utilisateur r
+  CROSS JOIN champ_configurable c
+ WHERE c.module = 'PARAMETRES' AND c.ordre BETWEEN 900 AND 940 AND r.actif = 1
+ON CONFLICT (code_role_user, module, champ) DO NOTHING;
+
+INSERT INTO droit_champ (id_utilisateur, module, champ, niveau)
+SELECT u.id_utilisateur, m.module, m.champ, m.niveau
+  FROM utilisateur u
+  JOIN modele_droit_champ m ON m.code_role_user = u.code_role_user
+  JOIN champ_configurable c ON c.module = m.module AND c.champ = m.champ
+ WHERE m.module = 'PARAMETRES' AND c.ordre BETWEEN 900 AND 940
 ON CONFLICT (id_utilisateur, module, champ) DO NOTHING;
 
 -- LA LISTE DES RECEPTIONS D'IMPORT se lit avec le module RECEPTIONS. Elle

@@ -1662,3 +1662,38 @@ LEFT JOIN magasin ms    ON ms.code_magasin = t.code_magasin_source
 LEFT JOIN magasin md    ON md.code_magasin = t.code_magasin_dest
 LEFT JOIN utilisateur u ON u.id_utilisateur = t.id_utilisateur
 WHERE t.statut = 'VALIDE';
+
+
+-- -----------------------------------------------------------------------------
+-- v_equivalence_auto — l'equivalence qui se DEDUIT
+-- -----------------------------------------------------------------------------
+-- Deux references de meme famille et de meme couleur interne, chez deux
+-- fournisseurs differents, sont le meme fil. Cette vue les rapproche sans
+-- qu'on ait rien a declarer, et dit si un groupe d'equivalence les couvre deja.
+-- Elle ne remplace pas les groupes : elle montre ce que la donnee dit.
+-- -----------------------------------------------------------------------------
+CREATE VIEW v_equivalence_auto AS
+SELECT a.code_reference                AS code_reference,
+       b.code_reference                AS code_equivalent,
+       a.code_famille,
+       f.libelle                       AS famille_libelle,
+       a.code_couleur_interne,
+       c.libelle                       AS couleur_libelle,
+       a.code_fournisseur              AS fournisseur,
+       b.code_fournisseur              AS fournisseur_equivalent,
+       a.reference_fournisseur         AS reference_chez_fournisseur,
+       b.reference_fournisseur         AS reference_chez_equivalent,
+       (SELECT count(*) FROM reference_groupe_equiv g1
+          JOIN reference_groupe_equiv g2 ON g2.code_groupe_equiv = g1.code_groupe_equiv
+         WHERE g1.code_reference = a.code_reference
+           AND g2.code_reference = b.code_reference
+           AND g1.actif = 1 AND g2.actif = 1) AS deja_groupees
+  FROM reference a
+  JOIN reference b ON b.code_famille = a.code_famille
+                  AND b.code_couleur_interne = a.code_couleur_interne
+                  AND b.code_reference <> a.code_reference
+  LEFT JOIN famille f ON f.code_famille = a.code_famille
+  LEFT JOIN couleur c ON c.code_couleur_interne = a.code_couleur_interne
+ WHERE a.actif = 1 AND b.actif = 1
+   AND a.code_famille IS NOT NULL AND a.code_couleur_interne IS NOT NULL
+   AND a.code_fournisseur <> b.code_fournisseur;

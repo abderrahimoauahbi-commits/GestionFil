@@ -7,6 +7,7 @@
 
 mod admin;
 mod assistant;
+mod briefing;
 mod auth_routes;
 mod consultation;
 mod entites;
@@ -14,6 +15,7 @@ mod importation;
 mod machines;
 pub(crate) mod json;
 mod operations;
+mod pieces;
 mod production;
 mod referentiels;
 mod stock;
@@ -21,10 +23,45 @@ mod telechargements;
 
 use crate::state::AppState;
 use axum::routing::{delete, get, patch, post, put};
-use axum::Router;
+use axum::{Json, Router};
+use serde_json::json;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
+
+/// UNE ADRESSE D'API SANS ROUTE DOIT LE DIRE.
+///
+/// Sans ce filet, un appel vers une route disparue ne rencontre aucune route et
+/// tombe sur le service de fichiers, qui repond 405 a tout ce qui n'est pas un
+/// GET. C'est le cas le plus courant apres une mise a jour : l'ecran garde en
+/// cache par le navigateur appelle l'adresse d'hier, et l'utilisateur lit
+/// « erreur 405 » sans rien pour la comprendre.
+///
+/// Le filtre ne touche QUE `/api/...` : le reste appartient a l'interface.
+async fn nommer_route_inconnue(
+    requete: axum::extract::Request,
+    suite: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let chemin = requete.uri().path().to_string();
+    let est_api = chemin.starts_with("/api/");
+    let reponse = suite.run(requete).await;
+    if est_api && reponse.status() == axum::http::StatusCode::METHOD_NOT_ALLOWED {
+        return (
+            axum::http::StatusCode::METHOD_NOT_ALLOWED,
+            Json(json!({
+                "code": "ROUTE_INCONNUE",
+                "message": format!(
+                    "L'adresse {chemin} n'existe pas, ou pas pour cette action. \
+                     Rechargez la page avec Ctrl+F5 : l'écran affiché est probablement \
+                     une ancienne version gardée en cache."
+                ),
+            })),
+        )
+            .into_response();
+    }
+    reponse
+}
 
 pub fn router(state: AppState) -> Router {
     let origines: Vec<_> = state
@@ -79,6 +116,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/assistant", get(assistant::catalogue))
         .route("/api/assistant/{id}", get(assistant::repondre))
         // --- Le chatbot --------------------------------------------------------
+        // Le robot de connexion : ce qui attend l'utilisateur, filtre par ses
+        // droits. Des comptes, pas une conversation — il doit s'afficher
+        // meme si le moteur de langage est arrete.
+        .route("/api/briefing", get(briefing::briefing))
         .route("/api/chat", post(crate::assistant::discuter))
         .route("/api/chat/etat", get(crate::assistant::etat))
         .route("/api/chat/competences", get(crate::assistant::liste_competences))
@@ -168,9 +209,9 @@ pub fn router(state: AppState) -> Router {
         // MACHINES. Le stock s'y compte, la consommation s'y journalise —
         // et jamais dans le journal des mouvements.
         // --- Dossiers d'importation : MRP, stock, CUMP -------------------------
-        .route("/api/parametres-frais",
-               get(importation::lister_parametres_frais).post(importation::creer_parametre_frais))
-        .route("/api/parametres-frais/{id}", patch(importation::modifier_parametre_frais))
+        // Lecture pour la saisie d'un dossier ; l'administration du catalogue
+        // passe par le referentiel generique /api/types-frais (PARAMETRES).
+        .route("/api/parametres-frais", get(importation::lister_parametres_frais))
         .route("/api/import/dossiers",
                get(importation::lister_dossiers).post(importation::creer_dossier))
         .route("/api/import/dossiers/{id}",
@@ -191,6 +232,13 @@ pub fn router(state: AppState) -> Router {
                patch(importation::modifier_frais).delete(importation::supprimer_frais))
         // La reception est un document A PART : elle ne passe pas par un
         // dossier, et ses lignes peuvent venir de plusieurs.
+        // Les pieces du dossier : scans, PDF, photos. La limite de corps est
+        // posee sur la seule route qui recoit un fichier — ailleurs, un envoi
+        // volumineux n'a aucune raison d'etre accepte.
+        .route("/api/import/dossiers/{id}/pieces", post(pieces::deposer)
+               .layer(axum::extract::DefaultBodyLimit::max(pieces::TAILLE_MAX + 1024 * 1024)))
+        .route("/api/import/pieces/{id}",
+               get(pieces::telecharger).delete(pieces::supprimer))
         .route("/api/import/a-recevoir", get(importation::a_recevoir))
         .route("/api/import/receptions",
                get(importation::lister_receptions).post(importation::creer_reception))
@@ -357,14 +405,25 @@ pub fn router(state: AppState) -> Router {
             );
 
             routeur
-                .fallback_service(
-                    ServeDir::new(&rep).not_found_service(ServeFile::new(index)),
-                )
+                // LES RESSOURCES CONSTRUITES SE SERVENT A PART, sans repli : un
+                // fichier absent doit repondre 404. Avec le repli general, un
+                // `.js` manquant renverrait la page HTML avec un code 200, et le
+                // navigateur echouerait sur « Unexpected token < » — une panne
+                // illisible pour une simple ressource oubliee.
+                .nest_service("/assets", ServeDir::new(rep.join("assets")))
+                // `fallback` et NON `not_found_service` : le second impose un
+                // code 404 a la reponse de repli. L'ecran s'affichait donc, mais
+                // chaque adresse de l'application repondait « 404 » — de quoi
+                // tromper un cache, une sonde ou un service worker.
+                .fallback_service(ServeDir::new(&rep).fallback(ServeFile::new(index)))
+                .layer(axum::middleware::from_fn(nommer_route_inconnue))
                 .with_state(state)
         }
         None => {
             tracing::info!("aucune interface a servir : API seule");
-            routeur.with_state(state)
+            routeur
+                .layer(axum::middleware::from_fn(nommer_route_inconnue))
+                .with_state(state)
         }
     }
 }

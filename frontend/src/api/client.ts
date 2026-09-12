@@ -195,7 +195,61 @@ async function requete<T>(
   return donnees as T
 }
 
+/**
+ * Envoie un FICHIER — un scan, un PDF — en multipart.
+ *
+ * `requete` ne sait poser que du JSON : ici le corps est un `FormData`, et le
+ * navigateur doit choisir lui-meme l'en-tete `Content-Type` (il y glisse la
+ * frontiere du multipart). Le fixer a la main casse l'envoi.
+ */
+async function envoyerFichier<T>(route: string, donnees: FormData): Promise<T> {
+  const entetes: Record<string, string> = {}
+  const t = jeton.lire()
+  if (t) entetes['Authorization'] = `Bearer ${t}`
+
+  let reponse: Response
+  try {
+    reponse = await fetch(serveur() + route, { method: 'POST', headers: entetes, body: donnees })
+  } catch {
+    throw new ErreurApi(0, 'SERVEUR_INJOIGNABLE', "Le serveur ne repond pas pendant l'envoi.")
+  }
+  const texte = await reponse.text()
+  let corps: { code?: string; message?: string } | null = null
+  try {
+    corps = texte ? JSON.parse(texte) : null
+  } catch {
+    throw new ErreurApi(reponse.status, 'REPONSE_INVALIDE', `Reponse inattendue (HTTP ${reponse.status}).`)
+  }
+  if (!reponse.ok) {
+    throw new ErreurApi(reponse.status, corps?.code ?? 'ERREUR', corps?.message ?? `Erreur ${reponse.status}`)
+  }
+  return corps as T
+}
+
+/**
+ * Recupere un document protege et le rend affichable.
+ *
+ * Une piece ne peut pas s'ouvrir par un simple lien : la route exige le jeton
+ * dans un en-tete, et un `<a href>` n'en pose aucun. On telecharge donc les
+ * octets, et on rend une adresse locale (`blob:`) que l'ecran peut afficher ou
+ * ouvrir dans un onglet. A REVOQUER apres usage : sans cela, chaque ouverture
+ * garde le document en memoire jusqu'au rechargement de la page.
+ */
+async function fichier(route: string): Promise<{ url: string; type: string }> {
+  const entetes: Record<string, string> = {}
+  const t = jeton.lire()
+  if (t) entetes['Authorization'] = `Bearer ${t}`
+  const reponse = await fetch(serveur() + route, { headers: entetes })
+  if (!reponse.ok) {
+    throw new ErreurApi(reponse.status, 'ERREUR', `Le document n'a pas pu etre lu (HTTP ${reponse.status}).`)
+  }
+  const blob = await reponse.blob()
+  return { url: URL.createObjectURL(blob), type: blob.type }
+}
+
 export const api = {
+  envoyerFichier,
+  fichier,
   get: <T>(route: string) => requete<T>('GET', route),
   post: <T>(route: string, corps?: unknown) => requete<T>('POST', route, corps ?? {}),
   put: <T>(route: string, corps: unknown) => requete<T>('PUT', route, corps),

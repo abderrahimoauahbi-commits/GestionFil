@@ -48,81 +48,19 @@ async fn dossier_de_ligne(tx: &mut sqlx::PgConnection, id_ligne: &str) -> AppRes
 // Catalogue des frais
 // ============================================================================
 
-/// `GET /api/parametres-frais`
+/// `GET /api/parametres-frais` — le catalogue tel que l'ecran de saisie en a
+/// besoin. Son administration passe par le referentiel `/api/types-frais`
+/// (module PARAMETRES) : ici, on lit, avec le module IMPORT.
 pub async fn lister_parametres_frais(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Lire).await?;
     let lignes = sqlx::query(
-        "SELECT id_frais, libelle, categorie, inclus_dans_cout, ordre, actif
-           FROM parametres_frais ORDER BY ordre, libelle",
+        "SELECT id_frais, libelle, categorie, piece_justificative, recuperable, commun,
+                methode_repartition, inclus_dans_cout, ordre, actif
+           FROM parametres_frais WHERE actif = 1 ORDER BY ordre, libelle",
     )
     .fetch_all(&state.db)
     .await?;
     Ok(Json(lignes_en_json(&lignes)))
-}
-
-#[derive(Deserialize)]
-pub struct ParametreFrais {
-    id_frais: Option<String>,
-    libelle: Option<String>,
-    categorie: Option<String>,
-    inclus_dans_cout: Option<i64>,
-    ordre: Option<i64>,
-    actif: Option<i64>,
-}
-
-/// `POST /api/parametres-frais`
-pub async fn creer_parametre_frais(
-    State(state): State<AppState>,
-    user: Utilisateur,
-    Json(p): Json<ParametreFrais>,
-) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::PARAMETRES, Action::Ecrire).await?;
-    let id = p.id_frais.filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| AppError::Invalide("Code du frais obligatoire.".into()))?
-        .trim().to_uppercase();
-    let libelle = p.libelle.ok_or_else(|| AppError::Invalide("Libellé obligatoire.".into()))?;
-    sqlx::query(
-        "INSERT INTO parametres_frais (id_frais, libelle, categorie, inclus_dans_cout, ordre)
-         VALUES ($1, $2, COALESCE($3, 'AUTRE'), COALESCE($4, 1), COALESCE($5, 0))",
-    )
-    .bind(&id)
-    .bind(&libelle)
-    .bind(&p.categorie)
-    .bind(p.inclus_dans_cout)
-    .bind(p.ordre)
-    .execute(&state.db)
-    .await?;
-    Ok(Json(json!({ "id_frais": id })))
-}
-
-/// `PATCH /api/parametres-frais/{id}`
-pub async fn modifier_parametre_frais(
-    State(state): State<AppState>,
-    user: Utilisateur,
-    Path(id): Path<String>,
-    Json(p): Json<ParametreFrais>,
-) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::PARAMETRES, Action::Ecrire).await?;
-    let n = sqlx::query(
-        "UPDATE parametres_frais
-            SET libelle = COALESCE($2, libelle), categorie = COALESCE($3, categorie),
-                inclus_dans_cout = COALESCE($4, inclus_dans_cout),
-                ordre = COALESCE($5, ordre), actif = COALESCE($6, actif)
-          WHERE id_frais = $1",
-    )
-    .bind(&id)
-    .bind(&p.libelle)
-    .bind(&p.categorie)
-    .bind(p.inclus_dans_cout)
-    .bind(p.ordre)
-    .bind(p.actif)
-    .execute(&state.db)
-    .await?
-    .rows_affected();
-    if n == 0 {
-        return Err(AppError::Introuvable(format!("frais {id}")));
-    }
-    Ok(Json(json!({ "id_frais": id })))
 }
 
 // ============================================================================
@@ -317,8 +255,11 @@ pub async fn lire_dossier(
     .fetch_all(db)
     .await?;
 
+    let pieces = super::pieces::lister_du_dossier(db, &id).await?;
+
     let mut v = json!({
         "dossier": lignes_en_json(&entete).get(0).cloned().unwrap_or(Value::Null),
+        "pieces": pieces,
         "factures": lignes_en_json(&factures),
         "lignes": lignes_en_json(&lignes),
         "frais": lignes_en_json(&frais),

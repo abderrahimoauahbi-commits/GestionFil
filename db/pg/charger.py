@@ -90,6 +90,7 @@ PRODUCTION = [
     "seed_110_comptes_production.sql",
     "seed_120_entreprise.sql",
     "seed_130_import.sql",
+    "seed_140_couleur_famille.sql",
 ]
 
 # LE REFERENTIEL NE VIENT PLUS D'ICI.

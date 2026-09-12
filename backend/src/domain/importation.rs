@@ -82,8 +82,16 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
     }
 
     // Toutes les lignes, ERP comme hors ERP : chacune porte sa part de frais.
-    let lignes: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT l.id_ligne, (round(l.montant_devise * f.taux_change, 2) * 100)::bigint
+    //
+    // Trois bases sont lues d'un coup — la valeur en centimes, le poids et la
+    // quantite au millieme — parce que le type de frais choisit LAQUELLE le
+    // repartit. En entiers : la repartition au centime ne supporte pas le
+    // flottant.
+    let lignes: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT l.id_ligne,
+                (round(l.montant_devise * f.taux_change, 2) * 100)::bigint,
+                (round(COALESCE(l.poids_net_kg, 0), 3) * 1000)::bigint,
+                (round(COALESCE(l.quantite, 0), 3) * 1000)::bigint
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
           WHERE f.id_dossier = $1
@@ -92,6 +100,19 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
     .bind(id_dossier)
     .fetch_all(&mut *tx)
     .await?;
+
+    /// La base d'une ligne pour une methode donnee.
+    ///
+    /// PARTS_EGALES vaut 1 par ligne : chaque ligne pese autant, et les restes
+    /// tombent alors dans l'ordre des lignes, sans hasard.
+    fn base(l: &(String, i64, i64, i64), methode: &str) -> i64 {
+        match methode {
+            "POIDS" => l.2,
+            "QUANTITE" => l.3,
+            "PARTS_EGALES" => 1,
+            _ => l.1,
+        }
+    }
 
     sqlx::query(
         "DELETE FROM lignes_frais_repartition
@@ -104,8 +125,8 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
 
     // Seuls les frais INCLUS dans le cout : la TVA a l'importation n'est
     // jamais repartie, c'est le catalogue qui le dit.
-    let frais: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT d.id_ligne_frais, (d.montant_dhs * 100)::bigint
+    let frais: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT d.id_ligne_frais, (d.montant_dhs * 100)::bigint, p.methode_repartition
            FROM dossier_lignes_frais d
            JOIN parametres_frais p ON p.id_frais = d.id_frais
           WHERE d.id_dossier = $1 AND p.inclus_dans_cout = 1
@@ -115,7 +136,7 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
     .fetch_all(&mut *tx)
     .await?;
 
-    for (id_frais, montant) in &frais {
+    for (id_frais, montant, methode) in &frais {
         let cibles: Vec<String> = sqlx::query_scalar(
             "SELECT id_ligne FROM dossier_lignes_frais_cibles WHERE id_ligne_frais = $1",
         )
@@ -124,11 +145,11 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
         .await?;
 
         // Pas de cible : tout le dossier. Des cibles : elles seules.
-        let perimetre: Vec<&(String, i64)> = lignes
+        let perimetre: Vec<&(String, i64, i64, i64)> = lignes
             .iter()
-            .filter(|(id, _)| cibles.is_empty() || cibles.contains(id))
+            .filter(|(id, ..)| cibles.is_empty() || cibles.contains(id))
             .collect();
-        let bases: Vec<i64> = perimetre.iter().map(|(_, b)| *b).collect();
+        let bases: Vec<i64> = perimetre.iter().map(|l| base(l, methode)).collect();
         let total: i64 = bases.iter().sum();
         if total <= 0 {
             // Rien pour le porter encore (aucune ligne saisie) : la cloture le
@@ -137,7 +158,7 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
         }
 
         let parts = repartir_centimes(*montant, &bases);
-        let ids: Vec<String> = perimetre.iter().map(|(id, _)| id.clone()).collect();
+        let ids: Vec<String> = perimetre.iter().map(|(id, ..)| id.clone()).collect();
         let pcts: Vec<f64> = bases.iter().map(|&b| b as f64 * 100.0 / total as f64).collect();
 
         sqlx::query(
@@ -156,10 +177,13 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
 
     // La part de chaque ligne dans la valeur du dossier — la colonne « % » du
     // classeur.
-    let total: i64 = lignes.iter().map(|(_, b)| b).sum();
+    let total: i64 = lignes.iter().map(|(_, valeur, _, _)| valeur).sum();
     if total > 0 {
-        let ids: Vec<String> = lignes.iter().map(|(id, _)| id.clone()).collect();
-        let pcts: Vec<f64> = lignes.iter().map(|(_, b)| *b as f64 * 100.0 / total as f64).collect();
+        let ids: Vec<String> = lignes.iter().map(|(id, ..)| id.clone()).collect();
+        let pcts: Vec<f64> = lignes
+            .iter()
+            .map(|(_, valeur, _, _)| *valeur as f64 * 100.0 / total as f64)
+            .collect();
         sqlx::query(
             "UPDATE import_facture_lignes l
                 SET pct_dossier = round(v.pct::numeric, 10)

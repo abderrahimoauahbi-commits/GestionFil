@@ -30,14 +30,31 @@
 -- -----------------------------------------------------------------------------
 -- parametres_frais — le catalogue des frais, colonnes du classeur IMPORTATION
 -- -----------------------------------------------------------------------------
+-- Chaque type de frais dit QUATRE choses, et l'ecran de saisie s'y conforme :
+--   * quelle PIECE le justifie — ce que l'assistante doit avoir en main ;
+--   * s'il est RECUPERABLE (la TVA a l'importation) : alors il ne rejoint
+--     jamais le cout de revient, quelle que soit la saisie ;
+--   * s'il est COMMUN au dossier, ou s'il vise des lignes designees (une
+--     analyse, une redevance sur une seule marchandise) ;
+--   * COMMENT il se repartit. Le classeur repartit tout a la valeur ; les
+--     autres methodes existent parce qu'un fret se repartit parfois au poids,
+--     et qu'une formalite se partage a parts egales.
 CREATE TABLE parametres_frais (
     id_frais            text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     categorie           text    NOT NULL
                                 CHECK (categorie IN ('DOUANE','TAXE','TRANSPORT','PORT','TRANSIT','AUTRE')),
+    piece_justificative text,
+    recuperable         bigint  NOT NULL DEFAULT 0 CHECK (recuperable IN (0,1)),
+    commun              bigint  NOT NULL DEFAULT 1 CHECK (commun IN (0,1)),
+    methode_repartition text    NOT NULL DEFAULT 'VALEUR'
+                                CHECK (methode_repartition IN ('VALEUR','POIDS','QUANTITE','PARTS_EGALES')),
     inclus_dans_cout    bigint  NOT NULL CHECK (inclus_dans_cout IN (0,1)),
     ordre               bigint  NOT NULL DEFAULT 0,
-    actif               bigint  NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+    actif               bigint  NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
+    -- Un frais recuperable se recupere : le porter au cout de revient le
+    -- ferait payer deux fois par la marchandise.
+    CHECK (recuperable = 0 OR inclus_dans_cout = 0)
 );
 
 
@@ -378,6 +395,23 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_import_dossier_garde
 BEFORE UPDATE OR DELETE ON import_dossiers
 FOR EACH ROW EXECUTE FUNCTION fn_trg_import_dossier_garde();
+
+
+-- Le CHECK ci-dessus protege la donnee ; ce declencheur protege l'utilisateur :
+-- il dit POURQUOI, en francais, au lieu de laisser remonter une contrainte.
+CREATE OR REPLACE FUNCTION fn_trg_pf_coherence() RETURNS trigger AS $$
+BEGIN
+    IF NEW.recuperable = 1 AND NEW.inclus_dans_cout = 1 THEN
+        RAISE EXCEPTION 'Un frais recuperable n''entre pas dans le cout de revient : la marchandise le paierait deux fois.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_pf_coherence
+BEFORE INSERT OR UPDATE OF recuperable, inclus_dans_cout ON parametres_frais
+FOR EACH ROW EXECUTE FUNCTION fn_trg_pf_coherence();
 
 
 -- Une ligne recue est une ligne ERP, d'un dossier qui n'est pas clos : la

@@ -501,7 +501,7 @@ export function Configuration() {
                mouvement. Ils restent entiers sur `/referentiels`, ou le
                rattachement d'une reference a ses equivalents se fait. */
             <Referentiels
-              cles={['magasins', 'types-mouvement', 'motifs-mouvement', 'motifs-ligne']}
+              cles={['magasins', 'types-mouvement', 'motifs-mouvement', 'motifs-ligne', 'types-frais']}
             />
           ) : section === 'comptes' ? (
             /* Les ecrans complets, montes tels quels. Ils gardent leur propre

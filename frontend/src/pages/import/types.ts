@@ -159,21 +159,69 @@ export interface Ajustement {
   montant_dhs: number
 }
 
+/** Une piece deposee dans le dossier : scan, PDF, photo. */
+export interface Piece {
+  id_piece: string
+  id_facture: string | null
+  id_reception: string | null
+  nature: 'FACTURE_FOURNISSEUR' | 'DUM' | 'QUITTANCE_DOUANE' | 'LIQUIDATION' | 'FACTURE_FRAIS'
+    | 'BL' | 'PACKING' | 'ENGAGEMENT' | 'AUTRE'
+  id_frais: string | null
+  frais_libelle: string | null
+  libelle: string | null
+  nom_fichier: string
+  type_mime: string
+  taille_octets: number
+  nb_pages: number | null
+  date_depot: string
+  depose_par: string | null
+  numero_facture: string | null
+}
+
+export const NATURE_PIECE: Record<Piece['nature'], string> = {
+  FACTURE_FOURNISSEUR: 'Facture fournisseur',
+  DUM: 'DUM (declaration)',
+  QUITTANCE_DOUANE: 'Quittance de la douane',
+  LIQUIDATION: 'Fiche de liquidation',
+  FACTURE_FRAIS: 'Facture de frais',
+  BL: 'Connaissement / BL',
+  PACKING: 'Liste de colisage',
+  ENGAGEMENT: "Engagement d'importation",
+  AUTRE: 'Autre document',
+}
+
 export interface DossierComplet {
   dossier: Dossier
   factures: Facture[]
   lignes: Ligne[]
   frais: Frais[]
   repartition: Allocation[]
+  pieces: Piece[]
   ajustements: Ajustement[]
 }
 
+/**
+ * Un type de frais du catalogue. Il dit la pièce qui le justifie, s'il est
+ * récupérable (la TVA), s'il est commun au dossier ou affecté à des lignes, et
+ * comment il se répartit. Il s'administre dans Référentiels → Types de frais.
+ */
 export interface ParametreFrais {
   id_frais: string
   libelle: string
   categorie: string
+  piece_justificative: string | null
+  recuperable: number
+  commun: number
+  methode_repartition: 'VALEUR' | 'POIDS' | 'QUANTITE' | 'PARTS_EGALES'
   inclus_dans_cout: number
   actif: number
+}
+
+export const METHODE_REPARTITION: Record<ParametreFrais['methode_repartition'], string> = {
+  VALEUR: 'À la valeur',
+  POIDS: 'Au poids',
+  QUANTITE: 'À la quantité',
+  PARTS_EGALES: 'À parts égales',
 }
 
 export const LIBELLE_STATUT: Record<StatutDossier, string> = {

@@ -62,6 +62,17 @@ export function Catalogue() {
     queryKey: ['devises'],
     queryFn: () => api.get<{ code_devise: string; libelle: string }[]>('/api/devises'),
   })
+  // La famille et la couleur interne : deux references qui les partagent sont
+  // le meme fil chez deux fournisseurs.
+  const qFam = useQuery({
+    queryKey: ['familles', ''],
+    queryFn: () => api.get<{ code_famille: string; libelle: string }[]>('/api/familles?actif=1'),
+  })
+  const qCoul = useQuery({
+    queryKey: ['couleurs', ''],
+    queryFn: () =>
+      api.get<{ code_couleur_interne: string; libelle: string }[]>('/api/couleurs?actif=1'),
+  })
 
   const colonnes: Colonne<Reference>[] = [
     {
@@ -78,6 +89,26 @@ export function Catalogue() {
     { champ: 'code_categorie', entete: 'Catégorie', filtre: 'liste', rendu: (r) => r.categorie_libelle },
     { champ: 'fournisseur_nom', entete: 'Fournisseur', filtre: 'liste', rendu: (r) => r.fournisseur_nom },
     { champ: 'couleur', entete: 'Couleur', filtre: 'liste', rendu: (r) => fmt.texte(r.couleur), secondaire: true },
+    {
+      champ: 'code_couleur_interne',
+      entete: 'Couleur interne',
+      filtre: 'liste',
+      rendu: (r) => fmt.texte(r.code_couleur_interne),
+      secondaire: true,
+    },
+    {
+      champ: 'code_famille',
+      entete: 'Famille',
+      filtre: 'liste',
+      rendu: (r) => fmt.texte(r.famille_libelle ?? r.code_famille),
+      secondaire: true,
+    },
+    {
+      champ: 'reference_fournisseur',
+      entete: 'Ref. fournisseur',
+      rendu: (r) => fmt.texte(r.reference_fournisseur),
+      secondaire: true,
+    },
     {
       champ: 'unite_catalogue',
       entete: 'Unité',
@@ -165,7 +196,44 @@ export function Catalogue() {
     },
     { champ: 'type_fil', libelle: 'Nature' },
     { champ: 'couleur', libelle: 'Couleur' },
+    {
+      champ: 'origine',
+      libelle: 'Origine',
+      aide: "Quand la matiere n'a pas de couleur — jute, colle, plastique, cuir — c'est la "
+        + "provenance qui prend sa place dans le nom de la reference.",
+    },
     { champ: 'titrage', libelle: 'Titrage' },
+    {
+      champ: 'code_famille',
+      libelle: 'Famille',
+      type: 'liste',
+      options: qFam.data?.map((f) => ({ valeur: f.code_famille, libelle: f.libelle })),
+      aide: 'Le produit independamment du vendeur. Deux references de meme famille et de meme '
+        + 'couleur interne sont le meme fil, chez deux fournisseurs differents.',
+    },
+    {
+      champ: 'code_couleur_interne',
+      libelle: 'Couleur interne',
+      type: 'liste',
+      options: qCoul.data?.map((c) => ({
+        valeur: c.code_couleur_interne,
+        libelle: `${c.code_couleur_interne} — ${c.libelle}`,
+      })),
+      aide: 'Votre code couleur, commun a tous les fournisseurs (C1, C3, CG…).',
+    },
+    {
+      champ: 'reference_fournisseur',
+      libelle: 'Reference fournisseur',
+      aide: "La reference telle que le fournisseur l'ecrit sur sa facture : « GOLD 2117 », "
+        + "« OZ 3034 », « SSL2081 ». C'est elle que la saisie assistée lit.",
+    },
+    {
+      champ: 'supplement_teinture',
+      libelle: 'Supplement de teinture',
+      type: 'nombre',
+      aide: 'En devise par tonne (100, 150, 530…). Le prix de la couleur est le prix de base de '
+        + 'la famille plus ce supplement ramene au kilo.',
+    },
     {
       champ: 'unite_catalogue',
       libelle: 'Unité de stock',

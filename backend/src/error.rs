@@ -80,16 +80,35 @@ impl From<sqlx::Error> for AppError {
                     || msg.contains("quarantaine")
                     || msg.contains("Tracabilite")
                 {
-                    AppError::RegleMetier(msg)
-                } else if msg.contains("UNIQUE constraint failed") {
-                    AppError::Conflit(msg)
-                } else if msg.contains("CHECK constraint failed")
-                    || msg.contains("FOREIGN KEY constraint failed")
-                    || msg.contains("NOT NULL constraint failed")
-                {
-                    AppError::Invalide(msg)
-                } else {
-                    AppError::Sqlx(e)
+                    return AppError::RegleMetier(msg);
+                }
+
+                // LES CONTRAINTES SE LISENT PAR LEUR CODE SQLSTATE, pas par leur
+                // message : PostgreSQL parle la langue du serveur, et « UNIQUE
+                // constraint failed » etait la formule de SQLite. Un numero de
+                // facture deja pris tombait ainsi en « erreur interne », sans un
+                // mot pour celui qui saisit.
+                let detail = db
+                    .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                    .and_then(|pg| pg.detail())
+                    .map(|d| format!(" {d}"))
+                    .unwrap_or_default();
+                match db.code().as_deref() {
+                    Some("23505") => AppError::Conflit(format!("Cet enregistrement existe déjà.{detail}")),
+                    Some("23503") => AppError::Invalide(format!(
+                        "Référence liée absente, ou encore utilisée ailleurs.{detail}"
+                    )),
+                    Some("23514") => AppError::Invalide(format!("Valeur refusée par une règle de la base : {msg}")),
+                    Some("23502") => AppError::Invalide(format!("Un champ obligatoire manque : {msg}")),
+                    // Formules de SQLite, gardees le temps que rien n'en depende.
+                    _ if msg.contains("UNIQUE constraint failed") => AppError::Conflit(msg),
+                    _ if msg.contains("CHECK constraint failed")
+                        || msg.contains("FOREIGN KEY constraint failed")
+                        || msg.contains("NOT NULL constraint failed") =>
+                    {
+                        AppError::Invalide(msg)
+                    }
+                    _ => AppError::Sqlx(e),
                 }
             }
             _ => AppError::Sqlx(e),

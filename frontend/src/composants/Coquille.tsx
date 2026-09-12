@@ -164,6 +164,10 @@ export const NAVIGATION: EntreeNav[] = [
 
   /* --- 2. Catalogue ------------------------------------------------------ */
   { vers: '/catalogue', libelle: 'Références', module: 'CATALOGUE', Icone: Boxes, section: 'CATALOGUE', resume: 'Les références, leurs prix et leur stock', principale: true },
+  // L'assistant de completion : il lit le code de chaque reference et
+  // propose famille, couleur et reference fournisseur. Sa place est ici,
+  // sous les references qu'il complete.
+  { vers: '/catalogue/completer', libelle: 'Compléter les références', module: 'CATALOGUE', Icone: Sparkles, section: 'CATALOGUE', resume: 'L’assistant déduit famille, couleur et réf. fournisseur' },
   { vers: '/equivalences', libelle: 'Équivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
   { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'CATALOGUE' },
   // Categories et roles BOM decrivent le PRODUIT : ils quittent l'administration

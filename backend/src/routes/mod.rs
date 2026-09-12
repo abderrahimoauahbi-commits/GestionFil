@@ -8,6 +8,7 @@
 mod admin;
 mod assistant;
 mod briefing;
+mod completion;
 mod auth_routes;
 mod consultation;
 mod entites;
@@ -120,6 +121,7 @@ pub fn router(state: AppState) -> Router {
         // droits. Des comptes, pas une conversation — il doit s'afficher
         // meme si le moteur de langage est arrete.
         .route("/api/briefing", get(briefing::briefing))
+        .route("/api/catalogue/completion", get(completion::completion))
         .route("/api/chat", post(crate::assistant::discuter))
         .route("/api/chat/etat", get(crate::assistant::etat))
         .route("/api/chat/competences", get(crate::assistant::liste_competences))

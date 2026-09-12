@@ -154,7 +154,6 @@ const ONGLETS: Onglet[] = [
               placeholder: 'FIL-2650-FZ', largeur: 'w-56' },
             { champ: 'libelle', entete: 'Libellé', obligatoire: true, placeholder: 'FIL 2650 dtex FZ' },
             { champ: 'titrage', entete: 'Titrage', placeholder: '2650 dtex', largeur: 'w-40' },
-            { champ: 'type_fil', entete: 'Type de fil', placeholder: 'PP frisé', largeur: 'w-40' },
           ],
         }}
       />

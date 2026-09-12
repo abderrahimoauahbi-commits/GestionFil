@@ -11,7 +11,7 @@
  * on tape dans la grille, on ajoute par la derniere ligne, et rien n'ouvre de
  * fenetre. C'est la forme que l'usage a retenue ici.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -92,6 +92,18 @@ export function MaitreDetail({ titre, module, maitre, detail, aide }: Props) {
     queryKey: [detail.route],
     queryFn: () => api.get<Ligne[]>(`/api/${detail.route}?limite=1000`),
   })
+
+  /*
+   * LE PREMIER EST POINTE D'OFFICE. Sans cela l'ecran s'ouvre sur un grand
+   * vide au milieu, et l'on croit qu'il n'existe pas : la liste de gauche
+   * ressemble alors a tout l'ecran. Montrer d'emblee un cas reel dit ce que
+   * l'ecran fait, et ce qu'on peut y saisir.
+   */
+  useEffect(() => {
+    if (pointe !== null) return
+    const premier = qMaitre.data?.[0]
+    if (premier) setPointe(String(premier[maitre.cle] ?? ''))
+  }, [qMaitre.data, pointe, maitre.cle])
 
   const lignes = useMemo(() => {
     const tout = qDetail.data ?? []

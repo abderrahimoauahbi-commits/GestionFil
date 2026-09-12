@@ -44,6 +44,7 @@ import { Configuration } from './pages/Configuration'
 import { TransfertNouveau } from './pages/TransfertNouveau'
 import { BonTransfert } from './pages/BonTransfert'
 import { Catalogue } from './pages/Catalogue'
+import { CompleterCatalogue } from './pages/CompleterCatalogue'
 import { Fournisseurs } from './pages/Fournisseurs'
 import { Referentiels } from './pages/Referentiels'
 import { Stock } from './pages/Stock'
@@ -142,6 +143,7 @@ const ECRANS = (
       <Route path="tableau-de-bord"
              element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
+      <Route path="catalogue/completer" element={<ExigeModule module="CATALOGUE"><CompleterCatalogue /></ExigeModule>} />
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
       <Route path="chat" element={<ExigeModule module="COCKPIT"><Chat /></ExigeModule>} />
       <Route path="telecharger" element={<ExigeModule module="COCKPIT"><Telecharger /></ExigeModule>} />

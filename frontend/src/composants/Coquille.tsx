@@ -186,6 +186,9 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
   { vers: '/receptions', libelle: 'Réceptions', module: 'RECEPTIONS', Icone: PackageCheck, section: 'ACHATS', resume: 'Peser et enregistrer ce qui arrive', principale: true },
+  // L'assistant part du scan et non du formulaire vide : c'est l'ordre du
+  // geste reel, la liasse arrive avant le dossier.
+  { vers: '/import/assistant', libelle: "Assistant d'import", module: 'IMPORT', Icone: Sparkles, section: 'ACHATS', resume: 'Chargez la liasse scannée, le dossier se crée autour' },
   { vers: '/import', libelle: "Dossiers d'import", module: 'IMPORT', Icone: Ship, section: 'ACHATS', resume: 'Factures, frais et coût de revient des importations' },
   { vers: '/receptions-import', libelle: 'Réceptions import', module: 'RECEPTIONS', Icone: Container, section: 'ACHATS', resume: 'Faire entrer en stock la marchandise importée' },
   {

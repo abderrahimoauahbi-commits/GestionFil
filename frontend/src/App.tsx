@@ -60,6 +60,7 @@ import { Plans } from './pages/Plans'
 import { Besoins } from './pages/Besoins'
 import { BonsCommande } from './pages/BonsCommande'
 import { BonCommande } from './pages/BonCommande'
+import { AssistantImport } from './pages/import/AssistantImport'
 import { DossiersImport } from './pages/import/DossiersImport'
 import { DossierImport } from './pages/import/DossierImport'
 import { FactureImport } from './pages/import/FactureImport'
@@ -157,6 +158,7 @@ const ECRANS = (
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />
       <Route path="receptions" element={<ExigeModule module="RECEPTIONS"><Receptions /></ExigeModule>} />
       <Route path="import" element={<ExigeModule module="IMPORT"><DossiersImport /></ExigeModule>} />
+      <Route path="import/assistant" element={<ExigeModule module="IMPORT"><AssistantImport /></ExigeModule>} />
       <Route path="import/:id" element={<ExigeModule module="IMPORT"><DossierImport /></ExigeModule>} />
       <Route path="import/:id/factures/:idFacture" element={<ExigeModule module="IMPORT"><FactureImport /></ExigeModule>} />
       {/* La reception d'import est A PART du dossier : sa liste, son ecran, et

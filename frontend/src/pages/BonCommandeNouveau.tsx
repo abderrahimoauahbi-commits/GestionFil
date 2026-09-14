@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Search } from 'lucide-react'
+import { ArrowLeft, Link2, Save, Search, Unlink2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -33,8 +33,39 @@ import {
   Selecteur,
 } from '../composants/ui/base'
 import { cn, fmt } from '../lib/utils'
+import {
+  type Conditionnement,
+  depuisBobines,
+  depuisKg,
+  depuisPalettes,
+  depuisUnite,
+  facteurVersKg,
+  pourChamp,
+} from '../lib/conditionnement'
 
 const MODULE = 'BONS_COMMANDE'
+
+/** Conditionnement neutre : aucune conversion n'est possible, et on le dit. */
+const SANS_CONDITIONNEMENT: Conditionnement = {}
+
+/**
+ * CE QU'ON COMMANDE, dans l'unite ou on le commande.
+ *
+ * Le fournisseur facture au kilo, mais on negocie en palettes : « deux palettes
+ * de l'ivoire ». Le bon doit pouvoir dire les deux — la quantite dans l'unite
+ * choisie, le prix toujours ramene au kilo, parce que c'est ainsi que se
+ * comparent les offres et que se calcule le cout de revient.
+ */
+interface Choix {
+  qte: string
+  unite: string
+  palettes: string
+  bobines: string
+  /** Lie, les trois se repondent ; detache, chacun se saisit seul. */
+  lie: boolean
+  /** Toujours par KILO, quelle que soit l'unite de commande. */
+  prix: string
+}
 
 interface RefCommandable extends Record<string, unknown> {
   code_reference: string
@@ -97,7 +128,7 @@ export function BonCommandeNouveau() {
     motif_creation: 'MRP',
     notes: '',
   })
-  const [choix, setChoix] = useState<Record<string, { qte: string; prix: string }>>({})
+  const [choix, setChoix] = useState<Record<string, Choix>>({})
   const [filtre, setFiltre] = useState('')
   const [erreur, setErreur] = useState<string | null>(null)
 
@@ -137,6 +168,97 @@ export function BonCommandeNouveau() {
     enabled: !!entete.code_fournisseur,
   })
 
+  // LE CONDITIONNEMENT vient du catalogue, pas de l'ecran : c'est lui qui dit
+  // combien pese une bobine et combien une palette en porte. Sans lui, commander
+  // « deux palettes » ne voudrait rien dire.
+  const qCat = useQuery({
+    queryKey: ['catalogue-saisie'],
+    queryFn: () =>
+      api.get<(Conditionnement & { code_reference: string })[]>(
+        '/api/catalogue?actif=1&limite=2000',
+      ),
+  })
+  const parReference = useMemo(
+    () => new Map((qCat.data ?? []).map((r) => [r.code_reference, r as Conditionnement])),
+    [qCat.data],
+  )
+  const condDe = (code: string): Conditionnement =>
+    parReference.get(code) ?? SANS_CONDITIONNEMENT
+
+  /** Les unites de commande que la reference autorise, en plus du kilo. */
+  const unitesDe = (code: string): string[] => {
+    const c = condDe(code)
+    const u: string[] = []
+    if (facteurVersKg('Bobine', c)) u.push('Bobine')
+    if (facteurVersKg('Palette', c)) u.push('Palette')
+    if (facteurVersKg('ml', c)) u.push('ml')
+    return u
+  }
+
+  /** Le poids commande, quelle que soit l'unite saisie. */
+  const kgDe = (code: string, v: Choix) => depuisUnite(v.qte, v.unite, condDe(code)).kg
+
+  /**
+   * LES TROIS EXPRESSIONS SE REPONDENT — palettes, bobines, quantite.
+   *
+   * On saisit celle qu'on a en tete au moment de negocier, les deux autres
+   * suivent les parametres de la reference. Detache, chacune se saisit seule :
+   * un fournisseur livre parfois une palette entamee, et la formule ne le sait
+   * pas.
+   */
+  const majColis = (code: string, source: 'quantite' | 'palettes' | 'bobines', valeur: string) =>
+    setChoix((c) => {
+      const v = c[code]
+      if (!v) return c
+      const cond = condDe(code)
+      if (!v.lie) {
+        const champ =
+          source === 'quantite' ? 'qte' : source === 'palettes' ? 'palettes' : 'bobines'
+        return { ...c, [code]: { ...v, [champ]: valeur } }
+      }
+      const r =
+        source === 'palettes'
+          ? depuisPalettes(valeur, cond)
+          : source === 'bobines'
+            ? depuisBobines(valeur, cond)
+            : depuisUnite(valeur, v.unite, cond)
+      const quantite =
+        source === 'quantite'
+          ? valeur
+          : v.unite === 'Palette'
+            ? pourChamp(r.palettes)
+            : v.unite === 'Bobine'
+              ? pourChamp(r.bobines)
+              : (() => {
+                  const f = facteurVersKg(v.unite, cond)
+                  return r.kg !== null && f ? pourChamp(r.kg / f, 3) : v.qte
+                })()
+      return {
+        ...c,
+        [code]: {
+          ...v,
+          qte: quantite,
+          palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
+          bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
+        },
+      }
+    })
+
+  /** Changer d'unite ne change pas la marchandise : seule son expression change. */
+  const majUnite = (code: string, unite: string) =>
+    setChoix((c) => {
+      const v = c[code]
+      if (!v) return c
+      const cond = condDe(code)
+      const kg = depuisUnite(v.qte, v.unite, cond).kg
+      const f = facteurVersKg(unite, cond)
+      if (!v.lie || kg === null || !f) return { ...c, [code]: { ...v, unite } }
+      return {
+        ...c,
+        [code]: { ...v, unite, qte: pourChamp(kg / f, unite === 'kg' ? 3 : 0) },
+      }
+    })
+
   // Le fournisseur d'abord : c'est lui qui declenche le chargement des
   // references commandables.
   useEffect(() => {
@@ -163,9 +285,14 @@ export function BonCommandeNouveau() {
         ...entete,
         lignes: Object.entries(choix).map(([code, v]) => ({
           code_reference: code,
-          unite_commande: 'kg',
+          unite_commande: v.unite,
           quantite_commandee_unite: Number(v.qte),
-          prix_unitaire_devise: Number(v.prix),
+          // LE PRIX SE SAISIT AU KILO, le bon l'enregistre par unite commandee.
+          // C'est au kilo que les offres se comparent et que le cout de revient
+          // se calcule ; c'est par palette que le fournisseur facture. La
+          // conversion se fait ici, une fois, plutot que de tete a chaque ligne.
+          prix_unitaire_devise:
+            Number(v.prix) * (facteurVersKg(v.unite, condDe(code)) ?? 1),
         })),
       }),
     onSuccess: (r) => {
@@ -210,18 +337,36 @@ export function BonCommandeNouveau() {
         const { [r.code_reference]: _, ...reste } = c
         return reste
       }
+      const kg = r.qte_a_commander_kg ?? 0
+      const colis = depuisKg(kg, condDe(r.code_reference))
       return {
         ...c,
         [r.code_reference]: {
           qte: String(r.qte_a_commander_kg ?? ''),
+          unite: 'kg',
+          // Ce que la quantite proposee represente au quai : l'acheteur voit
+          // tout de suite s'il commande un camion complet ou une palette seule.
+          palettes: pourChamp(colis.palettes),
+          bobines: pourChamp(colis.bobines),
+          lie: true,
           prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
         },
       }
     })
 
   const nb = Object.keys(choix).length
-  const complet = Object.values(choix).every((v) => Number(v.qte) > 0 && Number(v.prix) > 0)
-  const total = Object.values(choix).reduce((s, v) => s + Number(v.qte) * Number(v.prix), 0)
+  const complet = Object.entries(choix).every(
+    ([code, v]) => Number(v.qte) > 0 && Number(v.prix) > 0 && kgDe(code, v) !== null,
+  )
+  const total = Object.entries(choix).reduce(
+    (s, [code, v]) => s + (kgDe(code, v) ?? 0) * Number(v.prix),
+    0,
+  )
+  // Une unite que la reference ne sait pas convertir sera REFUSEE par le serveur
+  // (R01, jamais de repli sur un facteur de 1). Autant le dire tout de suite.
+  const sansFacteur = Object.entries(choix).filter(
+    ([code, v]) => Number(v.qte) > 0 && kgDe(code, v) === null,
+  )
   const pret = !!entete.code_fournisseur && !!entete.date_bc && nb > 0 && complet
 
   const Ligne = ({ r }: { r: RefCommandable }) => {
@@ -320,22 +465,94 @@ export function BonCommandeNouveau() {
         </label>
 
         {coche && (
-          <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-3">
+          <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-3 lg:grid-cols-6">
             <div>
-              <Etiq>Quantité (kg)</Etiq>
+              <Etiq>Quantité</Etiq>
               <Champ
                 type="number"
                 step="any"
                 min="0.0001"
                 value={choix[r.code_reference].qte}
-                onChange={(e) =>
-                  setChoix((c) => ({
-                    ...c,
-                    [r.code_reference]: { ...c[r.code_reference], qte: e.target.value },
-                  }))
-                }
+                onChange={(e) => majColis(r.code_reference, 'quantite', e.target.value)}
                 className="text-right tabular-nums"
               />
+              {choix[r.code_reference].unite !== 'kg' && (
+                <p className="mt-1 text-[11px] tabular-nums text-attenue-texte">
+                  {kgDe(r.code_reference, choix[r.code_reference]) === null ? (
+                    <span className="text-danger">conversion impossible</span>
+                  ) : (
+                    <>= {fmt.nombre(kgDe(r.code_reference, choix[r.code_reference]), 0)} kg</>
+                  )}
+                </p>
+              )}
+            </div>
+            <div>
+              <Etiq>Unité</Etiq>
+              <Selecteur
+                value={choix[r.code_reference].unite}
+                onChange={(e) => majUnite(r.code_reference, e.target.value)}
+              >
+                <option value="kg">kg</option>
+                {unitesDe(r.code_reference).map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </Selecteur>
+            </div>
+            <div>
+              <Etiq>Palettes</Etiq>
+              <Champ
+                type="number"
+                min="0"
+                value={choix[r.code_reference].palettes}
+                onChange={(e) => majColis(r.code_reference, 'palettes', e.target.value)}
+                className="text-right tabular-nums"
+              />
+            </div>
+            <div>
+              <Etiq>Bobines</Etiq>
+              <div className="flex items-center gap-1">
+                <Champ
+                  type="number"
+                  min="0"
+                  value={choix[r.code_reference].bobines}
+                  onChange={(e) => majColis(r.code_reference, 'bobines', e.target.value)}
+                  className="text-right tabular-nums"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setChoix((c) => ({
+                      ...c,
+                      [r.code_reference]: {
+                        ...c[r.code_reference],
+                        lie: !c[r.code_reference].lie,
+                      },
+                    }))
+                  }
+                  title={
+                    choix[r.code_reference].lie
+                      ? 'Les trois se repondent — cliquez pour saisir chacun separement'
+                      : 'Calcul detache — cliquez pour relier les trois'
+                  }
+                  aria-label={
+                    choix[r.code_reference].lie ? 'Détacher le calcul' : 'Relier le calcul'
+                  }
+                  className={cn(
+                    'shrink-0 rounded-[var(--radius)] p-1.5',
+                    choix[r.code_reference].lie
+                      ? 'text-primaire hover:bg-primaire/10'
+                      : 'text-alerte hover:bg-alerte/10',
+                  )}
+                >
+                  {choix[r.code_reference].lie ? (
+                    <Link2 className="size-4" />
+                  ) : (
+                    <Unlink2 className="size-4" />
+                  )}
+                </button>
+              </div>
             </div>
             <div>
               <Etiq>Prix {devise}/kg</Etiq>
@@ -357,7 +574,8 @@ export function BonCommandeNouveau() {
               <Etiq>Total ligne</Etiq>
               <div className="flex h-8 items-center justify-end rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[13px] tabular-nums">
                 {fmt.nombre(
-                  Number(choix[r.code_reference].qte) * Number(choix[r.code_reference].prix),
+                  (kgDe(r.code_reference, choix[r.code_reference]) ?? 0) *
+                    Number(choix[r.code_reference].prix),
                   2,
                 )}{' '}
                 {devise}
@@ -562,8 +780,16 @@ export function BonCommandeNouveau() {
                 <span className="font-semibold tabular-nums">
                   {fmt.nombre(total, 2)} {devise}
                 </span>
-                {!complet && (
-                  <span className="text-danger"> — quantité ou prix manquant sur une ligne</span>
+                {sansFacteur.length > 0 ? (
+                  <span className="text-danger">
+                    {' '}
+                    — conversion impossible sur {sansFacteur.map(([code]) => code).join(', ')} :
+                    renseignez le conditionnement sur la référence, ou commandez en kg
+                  </span>
+                ) : (
+                  !complet && (
+                    <span className="text-danger"> — quantité ou prix manquant sur une ligne</span>
+                  )
                 )}
               </>
             )}

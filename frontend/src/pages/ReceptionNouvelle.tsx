@@ -24,7 +24,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCheck, Plus, Save, Search, Trash2, X } from 'lucide-react'
+import { ArrowLeft, CheckCheck, Link2, Plus, Save, Search, Trash2, Unlink2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -44,6 +44,15 @@ import {
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import {
+  type Conditionnement,
+  depuisBobines,
+  depuisKg,
+  depuisPalettes,
+  depuisUnite,
+  facteurVersKg,
+  pourChamp,
+} from '../lib/conditionnement'
 
 const MODULE = 'RECEPTIONS'
 /** Au-dela, le controle qualite exigera une derogation motivee (controle C10). */
@@ -75,7 +84,14 @@ interface RefCatalogue extends Record<string, unknown> {
   suivi_lot: number
   prix_catalogue_kg?: number
   code_devise_catalogue?: string
+  /** Le conditionnement : ce qui permet de peser en palettes ou en bobines. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  densite_kg_ml?: number | null
 }
+
+/** Conditionnement neutre : aucune conversion n'est possible, et on le dit. */
+const SANS_CONDITIONNEMENT: Conditionnement = {}
 
 /** Une ligne de la grille. `retenue` est le drapeau « OK » de MIGO. */
 interface Ligne {
@@ -100,6 +116,23 @@ interface Ligne {
   qteBl: string
   unite: string
   colis: string
+  /**
+   * CE QU'ON A COMPTE AU QUAI, a cote de ce qu'on a pese.
+   *
+   * Au camion on compte des palettes, sur la machine des bobines, a la bascule
+   * des kilos : trois facons de dire la meme quantite. Les trois se repondent
+   * par les parametres de la reference — on saisit celui qu'on a sous les yeux.
+   */
+  palettes: string
+  bobines: string
+  /**
+   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
+   *
+   * Detache, chaque champ se saisit seul : une palette entamee reste une
+   * palette a manutentionner, et un poids pese ne se deduit pas d'un compte.
+   * C'est l'operateur qui le sait, pas la formule.
+   */
+  lie: boolean
   lot: string
   fabrication: string
   peremption: string
@@ -143,6 +176,41 @@ export function ReceptionNouvelle() {
   })
   const magasinDefaut = qMag.data?.[0]?.code_magasin ?? 'MP-01'
 
+  // LE CATALOGUE EST CHARGE ICI, pas seulement dans la fenetre d'ajout : c'est
+  // lui qui porte le poids de bobine et les bobines par palette, sans quoi la
+  // grille ne saurait pas convertir ce qu'on compte au quai.
+  const qCat = useQuery({
+    queryKey: ['catalogue-saisie'],
+    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
+  })
+  const parReference = useMemo(
+    () => new Map((qCat.data ?? []).map((r) => [r.code_reference, r])),
+    [qCat.data],
+  )
+  /** Le conditionnement de la reference REELLEMENT recue — pas de celle commandee. */
+  const condDe = (l: Ligne): Conditionnement =>
+    parReference.get(l.code_recu) ?? parReference.get(l.code_reference) ?? SANS_CONDITIONNEMENT
+
+  /**
+   * Les unites de pesee que la REFERENCE autorise, en plus du kilo.
+   *
+   * Proposer « Palette » a une reference qui ne dit pas combien de bobines elle
+   * porte, c'est promettre une conversion que le serveur refusera (R01) — apres
+   * que tout ait ete saisi. La liste ne montre que ce qui passera.
+   */
+  const uniteesDe = (l: Ligne): string[] => {
+    const c = condDe(l)
+    const u: string[] = []
+    if (facteurVersKg('Bobine', c)) u.push('Bobine')
+    if (facteurVersKg('Palette', c)) u.push('Palette')
+    if (facteurVersKg('ml', c)) u.push('ml')
+    // L'unite du catalogue et celle deja choisie restent offertes, sans quoi le
+    // selecteur afficherait une case vide devant une saisie bien reelle.
+    for (const autre of [l.unite_catalogue, l.unite])
+      if (autre && autre !== 'kg' && !u.includes(autre)) u.push(autre)
+    return u
+  }
+
   const qAtt = useQuery({
     queryKey: ['lignes-attendues-frs', entete.code_fournisseur],
     queryFn: () =>
@@ -175,6 +243,10 @@ export function ReceptionNouvelle() {
     [lignes],
   )
 
+  /** Les colis que representerait un poids donne, pour pre-remplir une ligne. */
+  const colisAttendus = (code: string, kg: number) =>
+    depuisKg(kg, parReference.get(code) ?? SANS_CONDITIONNEMENT)
+
   const reprendre = (numeroBc: string) => {
     const prises = new Set(lignes.map((l) => l.id_ligne_bc).filter(Boolean))
     const nouvelles = attendues
@@ -202,6 +274,11 @@ export function ReceptionNouvelle() {
         qteBl: String(Math.round(a.quantite_restante_kg * 1000) / 1000),
         unite: 'kg',
         colis: '',
+        // Les colis attendus pour ce reste : le cariste sait tout de suite
+        // combien de places il doit trouver dans l'allee.
+        palettes: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).palettes),
+        bobines: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).bobines),
+        lie: true,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -246,6 +323,9 @@ export function ReceptionNouvelle() {
         qteBl: String(qte),
         unite: 'kg',
         colis: '',
+        palettes: pourChamp(depuisKg(qte, ref).palettes),
+        bobines: pourChamp(depuisKg(qte, ref).bobines),
+        lie: true,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -259,10 +339,85 @@ export function ReceptionNouvelle() {
   const maj = (cle: string, champ: keyof Ligne, v: string | boolean) =>
     setLignes((l) => l.map((x) => (x.cle === cle ? { ...x, [champ]: v } : x)))
 
+  /**
+   * LES TROIS COLIS SE REPONDENT : palettes, bobines, quantite pesee.
+   *
+   * On saisit celui qu'on a sous les yeux — au camion des palettes, a la
+   * bascule des kilos — et les deux autres se calculent par les PARAMETRES DE
+   * LA REFERENCE, jamais par un facteur invente ici. Obliger le receptionnaire
+   * a convertir de tete, c'est garantir l'erreur au moment ou elle coute le
+   * plus cher : la valeur du stock entre par cette porte.
+   *
+   * Les champs calcules restent MODIFIABLES, et l'interrupteur de la ligne
+   * detache le calcul quand le camion ne suit pas la theorie.
+   */
+  const majColis = (cle: string, source: 'quantite' | 'palettes' | 'bobines', valeur: string) =>
+    setLignes((ls) =>
+      ls.map((l) => {
+        if (l.cle !== cle) return l
+        const c0 = condDe(l)
+        if (!l.lie) {
+          const champ =
+            source === 'quantite' ? 'qte' : source === 'palettes' ? 'palettes' : 'bobines'
+          return { ...l, [champ]: valeur }
+        }
+        const c =
+          source === 'palettes'
+            ? depuisPalettes(valeur, c0)
+            : source === 'bobines'
+              ? depuisBobines(valeur, c0)
+              : depuisUnite(valeur, l.unite, c0)
+
+        // La quantite se reexprime dans l'unite choisie pour la ligne.
+        const quantite =
+          source === 'quantite'
+            ? valeur
+            : l.unite === 'Palette'
+              ? pourChamp(c.palettes)
+              : l.unite === 'Bobine'
+                ? pourChamp(c.bobines)
+                : (() => {
+                    const f = facteurVersKg(l.unite, c0)
+                    return c.kg !== null && f ? pourChamp(c.kg / f, 3) : l.qte
+                  })()
+
+        return {
+          ...l,
+          qte: quantite,
+          palettes: source === 'palettes' ? valeur : pourChamp(c.palettes),
+          bobines: source === 'bobines' ? valeur : pourChamp(c.bobines),
+        }
+      }),
+    )
+
+  /**
+   * Changer d'unite ne change PAS la marchandise : le poids reste, son
+   * expression change. Reporter tel quel un nombre de kilos dans une case
+   * « palettes » multiplierait la reception par mille.
+   */
+  const majUnite = (cle: string, unite: string) =>
+    setLignes((ls) =>
+      ls.map((l) => {
+        if (l.cle !== cle) return l
+        const c0 = condDe(l)
+        const kg = depuisUnite(l.qte, l.unite, c0).kg
+        const f = facteurVersKg(unite, c0)
+        if (!l.lie || kg === null || !f) return { ...l, unite }
+        return { ...l, unite, qte: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
+      }),
+    )
+
+  /** Ce que la ligne pese REELLEMENT, quelle que soit l'unite saisie. */
+  const kgDe = (l: Ligne) => depuisUnite(l.qte, l.unite, condDe(l)).kg
+
   const retenues = lignes.filter((l) => l.retenue)
   const nbHorsCommande = retenues.filter((l) => !l.id_ligne_bc).length
-  const totalKg = retenues.reduce((s, l) => s + (Number(l.qte) || 0), 0)
+  const totalKg = retenues.reduce((s, l) => s + (kgDe(l) ?? 0), 0)
   const sansQte = retenues.filter((l) => !(Number(l.qte) > 0))
+  // Une ligne saisie dans une unite que la reference ne sait pas convertir sera
+  // REFUSEE par le serveur (R01, aucun repli sur un facteur de 1). Autant le
+  // dire au quai plutot qu'apres avoir tout saisi.
+  const sansFacteur = retenues.filter((l) => Number(l.qte) > 0 && kgDe(l) === null)
   const sansLot = retenues.filter((l) => l.suivi_lot === 1 && !l.lot.trim())
   // Une substitution sans motif serait acceptee par la base mais illisible dans
   // six mois : c'est l'ecran qui exige l'explication, au moment ou on l'a.
@@ -274,10 +429,15 @@ export function ReceptionNouvelle() {
     retenues.length > 0 &&
     !sansQte.length &&
     !sansLot.length &&
-    !sansMotif.length
+    !sansMotif.length &&
+    !sansFacteur.length
 
-  const ecartDe = (l: Ligne) =>
-    l.reste_kg && l.reste_kg > 0 ? ((Number(l.qte) - l.reste_kg) / l.reste_kg) * 100 : null
+  const ecartDe = (l: Ligne) => {
+    const kg = kgDe(l)
+    return l.reste_kg && l.reste_kg > 0 && kg !== null
+      ? ((kg - l.reste_kg) / l.reste_kg) * 100
+      : null
+  }
 
   const creer = useMutation({
     mutationFn: () =>
@@ -564,7 +724,10 @@ export function ReceptionNouvelle() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
+                    {/* La grille a une largeur PLANCHER : comprimee, le selecteur
+                        d'unite rognait « kg » en « kc ». Sous cette largeur, le
+                        conteneur defile plutot que d'ecraser les colonnes. */}
+                    <table className="w-full min-w-[1180px] text-[13px]">
                       <thead>
                         <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                           <th className="w-10 px-2 py-2" title="Ligne retenue pour cette reception">
@@ -577,6 +740,12 @@ export function ReceptionNouvelle() {
                           <th className="w-28 px-2 py-2 text-right">Qte BL</th>
                           <th className="w-32 px-2 py-2 text-right">Qte pesee</th>
                           <th className="w-24 px-2 py-2 text-left">Unité</th>
+                          <th
+                            className="w-40 px-2 py-2 text-center"
+                            title="Palettes et bobines comptees : les trois se repondent"
+                          >
+                            Pal. / Bob.
+                          </th>
                           <th className="w-24 px-2 py-2 text-right">Écart</th>
                           <th className="w-32 px-2 py-2 text-left">Lot</th>
                           <th className="w-28 px-2 py-2 text-left">Magasin</th>
@@ -679,7 +848,7 @@ export function ReceptionNouvelle() {
                                   step="any"
                                   min="0.0001"
                                   value={l.qte}
-                                  onChange={(e) => maj(l.cle, 'qte', e.target.value)}
+                                  onChange={(e) => majColis(l.cle, 'quantite', e.target.value)}
                                   onClick={(e) => e.stopPropagation()}
                                   className={cn(
                                     'h-7 text-right font-medium tabular-nums',
@@ -687,20 +856,80 @@ export function ReceptionNouvelle() {
                                   )}
                                   aria-label="Quantité pesee"
                                 />
+                                {l.unite !== 'kg' && (
+                                  <div className="mt-0.5 text-right text-[11px] tabular-nums text-attenue-texte">
+                                    {kgDe(l) === null ? (
+                                      <span className="text-danger">non convertible</span>
+                                    ) : (
+                                      <>= {fmt.nombre(kgDe(l), 1)} kg</>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-2 py-1">
                                 <Selecteur
                                   value={l.unite}
-                                  onChange={(e) => maj(l.cle, 'unite', e.target.value)}
+                                  onChange={(e) => majUnite(l.cle, e.target.value)}
                                   onClick={(e) => e.stopPropagation()}
                                   className="h-7"
                                   aria-label="Unité de saisie"
                                 >
                                   <option value="kg">kg</option>
-                                  {l.unite_catalogue !== 'kg' && (
-                                    <option value={l.unite_catalogue}>{l.unite_catalogue}</option>
-                                  )}
+                                  {uniteesDe(l).map((u) => (
+                                    <option key={u} value={u}>
+                                      {u}
+                                    </option>
+                                  ))}
                                 </Selecteur>
+                              </td>
+                              <td className="px-2 py-1">
+                                <div className="flex items-center gap-1">
+                                  <Champ
+                                    type="number"
+                                    min="0"
+                                    value={l.palettes}
+                                    onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="h-7 w-14 text-right tabular-nums"
+                                    placeholder="pal."
+                                    aria-label="Nombre de palettes"
+                                  />
+                                  <Champ
+                                    type="number"
+                                    min="0"
+                                    value={l.bobines}
+                                    onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="h-7 w-16 text-right tabular-nums"
+                                    placeholder="bob."
+                                    aria-label="Nombre de bobines"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      maj(l.cle, 'lie', !l.lie)
+                                    }}
+                                    title={
+                                      l.lie
+                                        ? 'Les trois se repondent — cliquez pour saisir chacun separement'
+                                        : 'Calcul detache — cliquez pour relier les trois'
+                                    }
+                                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                                    className={cn(
+                                      'rounded-[var(--radius)] p-1',
+                                      l.lie
+                                        ? 'text-primaire hover:bg-primaire/10'
+                                        : 'text-alerte hover:bg-alerte/10',
+                                    )}
+                                  >
+                                    {l.lie ? (
+                                      <Link2 className="size-3.5" />
+                                    ) : (
+                                      <Unlink2 className="size-3.5" />
+                                    )}
+                                  </button>
+                                </div>
                               </td>
                               <td
                                 className={cn(
@@ -773,6 +1002,10 @@ export function ReceptionNouvelle() {
               <PanneauDetail
                 ligne={ligneP}
                 maj={maj}
+                majColis={majColis}
+                majUnite={majUnite}
+                unites={uniteesDe(ligneP)}
+                kg={kgDe(ligneP)}
                 voitPrix={voitPrix}
                 magasins={qMag.data ?? []}
                 rang={lignes.findIndex((l) => l.cle === ligneP.cle) + 1}
@@ -809,6 +1042,14 @@ export function ReceptionNouvelle() {
                     {' '}
                     — motif de substitution manquant sur{' '}
                     {sansMotif.map((l) => l.code_recu).join(', ')}
+                  </span>
+                )}
+                {sansFacteur.length > 0 && (
+                  <span className="text-danger">
+                    {' '}
+                    — conversion impossible en {sansFacteur[0].unite} :{' '}
+                    {sansFacteur.map((l) => l.code_recu).join(', ')} (renseignez le poids de bobine
+                    sur la référence, ou pesez en kg)
                   </span>
                 )}
               </>
@@ -857,19 +1098,30 @@ export function ReceptionNouvelle() {
 function PanneauDetail({
   ligne,
   maj,
+  majColis,
+  majUnite,
+  unites,
+  kg,
   voitPrix,
   magasins,
   rang,
 }: {
   ligne: Ligne
   maj: (cle: string, champ: keyof Ligne, v: string | boolean) => void
+  majColis: (cle: string, source: 'quantite' | 'palettes' | 'bobines', v: string) => void
+  majUnite: (cle: string, unite: string) => void
+  unites: string[]
+  /** Le poids reel de la ligne, converti — null si la reference ne le permet pas. */
+  kg: number | null
   voitPrix: boolean
   magasins: { code_magasin: string; nom: string }[]
   rang: number
 }) {
   const [onglet, setOnglet] = useState<'quantite' | 'stockage' | 'commande' | 'qualite'>('quantite')
-  const poidsColis = Number(ligne.colis) > 0 ? Number(ligne.qte) / Number(ligne.colis) : null
-  const ecartBl = ligne.qteBl !== '' ? Number(ligne.qte) - Number(ligne.qteBl) : null
+  // Les comparaisons se font EN KILOS : le bon de livraison en annonce, la
+  // bascule en pese. Comparer un nombre de palettes a un poids n'a aucun sens.
+  const poidsColis = Number(ligne.colis) > 0 && kg !== null ? kg / Number(ligne.colis) : null
+  const ecartBl = ligne.qteBl !== '' && kg !== null ? kg - Number(ligne.qteBl) : null
 
   const onglets = [
     { cle: 'quantite' as const, nom: 'Quantité' },
@@ -929,9 +1181,34 @@ function PanneauDetail({
                 step="any"
                 min="0.0001"
                 value={ligne.qte}
-                onChange={(e) => maj(ligne.cle, 'qte', e.target.value)}
+                onChange={(e) => majColis(ligne.cle, 'quantite', e.target.value)}
                 className="text-right tabular-nums"
               />
+              {ligne.unite !== 'kg' && (
+                <p className="mt-1 text-[11px] tabular-nums text-attenue-texte">
+                  {kg === null ? (
+                    <span className="text-danger">
+                      conversion impossible : la référence ne porte pas ce paramètre
+                    </span>
+                  ) : (
+                    <>soit {fmt.nombre(kg, 2)} kg en stock</>
+                  )}
+                </p>
+              )}
+            </div>
+            <div>
+              <Etiq>Unité de saisie</Etiq>
+              <Selecteur value={ligne.unite} onChange={(e) => majUnite(ligne.cle, e.target.value)}>
+                <option value="kg">kg</option>
+                {unites.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </Selecteur>
+              <p className="mt-1 text-[11px] text-attenue-texte">
+                Le poids ne change pas : seule son expression change.
+              </p>
             </div>
             <div>
               <Etiq>Nombre de colis</Etiq>
@@ -948,20 +1225,50 @@ function PanneauDetail({
                 </p>
               )}
             </div>
-            <div>
-              <Etiq>Unité de saisie</Etiq>
-              <Selecteur
-                value={ligne.unite}
-                onChange={(e) => maj(ligne.cle, 'unite', e.target.value)}
-              >
-                <option value="kg">kg</option>
-                {ligne.unite_catalogue !== 'kg' && (
-                  <option value={ligne.unite_catalogue}>{ligne.unite_catalogue}</option>
-                )}
-              </Selecteur>
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Converti en kg a l'enregistrement.
-              </p>
+
+            {/* ---- Les colis comptes, qui se repondent avec la pesee -------- */}
+            <div className="sm:col-span-2 lg:col-span-4">
+              <div className="flex flex-wrap items-end gap-3 rounded-[var(--radius)] border border-bordure bg-fond/40 p-3">
+                <div className="w-28">
+                  <Etiq>Palettes</Etiq>
+                  <Champ
+                    type="number"
+                    min="0"
+                    value={ligne.palettes}
+                    onChange={(e) => majColis(ligne.cle, 'palettes', e.target.value)}
+                    className="text-right tabular-nums"
+                  />
+                </div>
+                <div className="w-28">
+                  <Etiq>Bobines</Etiq>
+                  <Champ
+                    type="number"
+                    min="0"
+                    value={ligne.bobines}
+                    onChange={(e) => majColis(ligne.cle, 'bobines', e.target.value)}
+                    className="text-right tabular-nums"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => maj(ligne.cle, 'lie', !ligne.lie)}
+                  aria-label={ligne.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                  className={cn(
+                    'mb-1 flex items-center gap-1.5 rounded-[var(--radius)] border px-2.5 py-1.5 text-[12px]',
+                    ligne.lie
+                      ? 'border-primaire/40 text-primaire hover:bg-primaire/10'
+                      : 'border-alerte/50 text-alerte hover:bg-alerte/10',
+                  )}
+                >
+                  {ligne.lie ? <Link2 className="size-4" /> : <Unlink2 className="size-4" />}
+                  {ligne.lie ? 'Calcul lié' : 'Calcul détaché'}
+                </button>
+                <p className="mb-1.5 flex-1 text-[11px] leading-snug text-attenue-texte">
+                  Palettes, bobines et pesée disent la même quantité : saisissez celle que vous avez
+                  sous les yeux, les deux autres suivent les paramètres de la référence. Détachez le
+                  calcul pour une palette entamée ou un comptage qui ne suit pas la théorie.
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -1161,7 +1468,7 @@ function PanneauHorsCommande({
   const [choix, setChoix] = useState<Record<string, string>>({})
 
   const q = useQuery({
-    queryKey: ['catalogue-reception'],
+    queryKey: ['catalogue-saisie'],
     queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
   })
 

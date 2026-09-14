@@ -16,7 +16,17 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ChevronDown, ChevronRight, Lock, Plus, Save, Trash2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  Link2,
+  Lock,
+  Plus,
+  Save,
+  Trash2,
+  Unlink2,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
@@ -37,6 +47,13 @@ import {
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
+import {
+  type Conditionnement,
+  depuisBobines,
+  depuisKg,
+  depuisPalettes,
+  pourChamp,
+} from '../../lib/conditionnement'
 import { echec, nombre, useRafraichir } from './dialogues'
 import { UNITE, type DossierComplet, type Ligne } from './types'
 
@@ -51,6 +68,10 @@ interface RefCatalogue {
   code_fournisseur: string
   code_couleur?: string | null
   couleur?: string | null
+  /** Le conditionnement : ce qui relie le poids net aux bobines et palettes. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  densite_kg_ml?: number | null
 }
 
 interface LigneBcOuverte {
@@ -79,6 +100,15 @@ interface LigneEdit {
   quantite: string
   nb_bobines: string
   nb_palettes: string
+  /**
+   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
+   *
+   * Lie, poids net, bobines et palettes se repondent par les parametres de la
+   * reference. Detache, chacun se saisit seul — parce que c'est la FACTURE du
+   * fournisseur qu'on recopie : si elle annonce 3 palettes pour un poids qui
+   * n'en fait que 2,7, c'est elle qui fait foi, et l'ecart se discute.
+   */
+  lie: boolean
   prix_unitaire_devise: string
   supprimee: boolean
   recue: boolean
@@ -103,6 +133,9 @@ function versEdition(l: Ligne): LigneEdit {
     quantite: texte(l.quantite),
     nb_bobines: texte(l.nb_bobines),
     nb_palettes: texte(l.nb_palettes),
+    // Une ligne deja enregistree garde ses comptes tels quels : les relier les
+    // recalculerait en silence, alors qu'ils viennent de la facture.
+    lie: l.nb_bobines == null && l.nb_palettes == null,
     prix_unitaire_devise: texte(l.prix_unitaire_devise),
     supprimee: false,
     recue: l.quantite_recue_kg > 0,
@@ -115,7 +148,7 @@ function ligneVide(type: 'ERP' | 'HORS_ERP' = 'ERP'): LigneEdit {
   return {
     cle: `n-${compteur}`, type_ligne: type, code_reference: '', libelle: '', id_ligne_bc: '', numero_bc: '',
     lot_fournisseur: '', code_couleur: '', libelle_couleur: '', unite: type === 'ERP' ? 'kg' : 'piece', poids_net_kg: '', quantite: '',
-    nb_bobines: '', nb_palettes: '', prix_unitaire_devise: '', supprimee: false, recue: false,
+    nb_bobines: '', nb_palettes: '', lie: true, prix_unitaire_devise: '', supprimee: false, recue: false,
   }
 }
 
@@ -221,6 +254,37 @@ export function FactureImport() {
   // ---- Modifications -------------------------------------------------------
   const majLigne = (cle: string, patch: Partial<LigneEdit>) =>
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
+
+  /** Le conditionnement de la reference d'une ligne — vide si elle n'en porte pas. */
+  const condDe = (code: string): Conditionnement =>
+    qCatalogue.data?.find((x) => x.code_reference === code) ?? {}
+
+  /**
+   * POIDS NET, BOBINES ET PALETTES SE REPONDENT.
+   *
+   * Une facture d'import annonce souvent les trois, et ils doivent concorder :
+   * c'est sur ce poids que se repartissent les frais d'approche, donc le cout
+   * de revient. Saisir celui qu'on lit sur le document, voir les deux autres se
+   * poser, et comparer avec ce que le document annonce — c'est la que se
+   * reperent les erreurs de recopie.
+   */
+  const majColis = (l: LigneEdit, source: 'poids' | 'palettes' | 'bobines', valeur: string) => {
+    const champ =
+      source === 'poids' ? 'poids_net_kg' : source === 'palettes' ? 'nb_palettes' : 'nb_bobines'
+    if (!l.lie) return majLigne(l.cle, { [champ]: valeur })
+    const c = condDe(l.code_reference)
+    const r =
+      source === 'palettes'
+        ? depuisPalettes(valeur, c)
+        : source === 'bobines'
+          ? depuisBobines(valeur, c)
+          : depuisKg(valeur, c)
+    majLigne(l.cle, {
+      poids_net_kg: source === 'poids' ? valeur : r.kg !== null ? pourChamp(r.kg, 3) : l.poids_net_kg,
+      nb_palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
+      nb_bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
+    })
+  }
   const choisirReference = (l: LigneEdit, code: string) => {
     const r = qCatalogue.data?.find((x) => x.code_reference === code)
     majLigne(l.cle, {
@@ -529,7 +593,7 @@ export function FactureImport() {
                         <td className={td}>
                           {erp ? (
                             <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.poids_net_kg} disabled={fige}
-                              onChange={(e) => majLigne(l.cle, { poids_net_kg: e.target.value })} />
+                              onChange={(e) => majColis(l, 'poids', e.target.value)} />
                           ) : <span className="block text-right text-attenue-texte">—</span>}
                         </td>
                         <td className={td}>
@@ -540,8 +604,23 @@ export function FactureImport() {
                               onChange={(e) => majLigne(l.cle, { quantite: e.target.value })} />
                           )}
                         </td>
-                        <td className={td}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.nb_bobines} disabled={!ecrire} onChange={(e) => majLigne(l.cle, { nb_bobines: e.target.value })} /></td>
-                        <td className={td}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.nb_palettes} disabled={!ecrire} onChange={(e) => majLigne(l.cle, { nb_palettes: e.target.value })} /></td>
+                        <td className={td}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.nb_bobines} disabled={!ecrire} onChange={(e) => majColis(l, 'bobines', e.target.value)} /></td>
+                        <td className={td}>
+                          <div className="flex items-center gap-1">
+                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.nb_palettes} disabled={!ecrire} onChange={(e) => majColis(l, 'palettes', e.target.value)} />
+                            {ecrire && (
+                              <button type="button" onClick={() => majLigne(l.cle, { lie: !l.lie })}
+                                title={l.lie
+                                  ? 'Poids, bobines et palettes se repondent — cliquez pour saisir chacun separement'
+                                  : 'Calcul detache — cliquez pour relier les trois'}
+                                aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                                className={cn('shrink-0 rounded-[var(--radius)] p-1',
+                                  l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
+                                {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
+                              </button>
+                            )}
+                          </div>
+                        </td>
                         <td className={td}>
                           <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.prix_unitaire_devise} disabled={fige}
                             onChange={(e) => majLigne(l.cle, { prix_unitaire_devise: e.target.value })} />

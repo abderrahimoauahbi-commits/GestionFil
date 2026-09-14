@@ -22,7 +22,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Plus, Save, Search, Trash2, XCircle } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Link2,
+  Plus,
+  Save,
+  Search,
+  Trash2,
+  Unlink2,
+  XCircle,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -42,6 +52,15 @@ import {
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import {
+  type Conditionnement,
+  depuisBobines,
+  depuisKg,
+  depuisPalettes,
+  depuisUnite,
+  facteurVersKg,
+  pourChamp,
+} from '../lib/conditionnement'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -78,6 +97,15 @@ interface Ligne {
   unite: string
   bobines: string
   palettes: string
+  /**
+   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
+   *
+   * Lie, saisir un des trois — quantite, bobines, palettes — remplit les deux
+   * autres par les parametres de la reference. Detache, chacun se saisit seul :
+   * deux palettes completes et quatre bobines isolees ne forment pas une
+   * fraction de palette, et c'est le cariste qui le sait.
+   */
+  lie: boolean
   lot: string
 }
 
@@ -166,6 +194,9 @@ export function TransfertNouveau() {
         unite: l.unite_saisie ?? 'kg',
         bobines: l.nb_bobines != null ? String(l.nb_bobines) : '',
         palettes: l.nb_palettes != null ? String(l.nb_palettes) : '',
+        // Un brouillon repris garde le calcul DETACHE : ses comptes ont ete
+        // poses par quelqu'un, et les relier les recalculerait en silence.
+        lie: l.nb_bobines == null && l.nb_palettes == null,
         lot: l.lot_fournisseur ?? '',
       })),
     )
@@ -201,6 +232,9 @@ export function TransfertNouveau() {
     return m
   }, [qCat.data])
 
+  /** Le conditionnement d'une reference — vide si elle n'en porte pas. */
+  const condDe = (code: string): Conditionnement => catalogue.get(code) ?? {}
+
   const disponibles = useMemo(
     () => (qStock.data ?? []).filter((s) => s.quantite_kg > 0.001),
     [qStock.data],
@@ -224,26 +258,87 @@ export function TransfertNouveau() {
         designation: ref.designation ?? catalogue.get(ref.code_reference)?.designation ?? '',
         quantite: String(qte),
         unite: 'kg',
-        bobines: '',
-        palettes: '',
+        // Ce que la quantite represente au quai, tout de suite : le cariste sait
+        // combien de places il doit trouver dans le camion.
+        bobines: pourChamp(depuisKg(qte, condDe(ref.code_reference)).bobines),
+        palettes: pourChamp(depuisKg(qte, condDe(ref.code_reference)).palettes),
+        lie: true,
         lot: ref.lot_fournisseur ?? '',
       })),
     ])
 
-  const maj = (cle: string, champ: keyof Ligne, v: string) =>
+  const maj = (cle: string, champ: keyof Ligne, v: string | boolean) =>
     setLignes((l) => l.map((x) => (x.cle === cle ? { ...x, [champ]: v } : x)))
 
-  /** Conversion en kg, pour totaliser et alerter avant l'envoi. */
-  const enKg = (l: Ligne) => {
-    const q = Number(l.quantite) || 0
-    const c = catalogue.get(l.code_reference)
-    if (l.unite === 'Bobine') return q * (c?.poids_bobine_kg ?? 0)
-    if (l.unite === 'Palette')
-      return q * (c?.poids_bobine_kg ?? 0) * (c?.bobines_par_palette ?? 0)
-    return q
-  }
+  /**
+   * LES TROIS EXPRESSIONS SE REPONDENT — quantite, bobines, palettes.
+   *
+   * On saisit celle qu'on a sous les yeux, les deux autres se calculent par les
+   * PARAMETRES DE LA REFERENCE. Detache, chacune se saisit seule : deux palettes
+   * completes et quatre bobines isolees ne forment pas 2,03 palette.
+   */
+  const majColis = (cle: string, source: 'quantite' | 'palettes' | 'bobines', valeur: string) =>
+    setLignes((ls) =>
+      ls.map((l) => {
+        if (l.cle !== cle) return l
+        const c = condDe(l.code_reference)
+        if (!l.lie) {
+          const champ =
+            source === 'quantite' ? 'quantite' : source === 'palettes' ? 'palettes' : 'bobines'
+          return { ...l, [champ]: valeur }
+        }
+        const r =
+          source === 'palettes'
+            ? depuisPalettes(valeur, c)
+            : source === 'bobines'
+              ? depuisBobines(valeur, c)
+              : depuisUnite(valeur, l.unite, c)
+        const quantite =
+          source === 'quantite'
+            ? valeur
+            : l.unite === 'Palette'
+              ? pourChamp(r.palettes)
+              : l.unite === 'Bobine'
+                ? pourChamp(r.bobines)
+                : (() => {
+                    const f = facteurVersKg(l.unite, c)
+                    return r.kg !== null && f ? pourChamp(r.kg / f, 3) : l.quantite
+                  })()
+        return {
+          ...l,
+          quantite,
+          palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
+          bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
+        }
+      }),
+    )
 
-  const totalKg = lignes.reduce((s, l) => s + enKg(l), 0)
+  /** Changer d'unite ne change pas la marchandise : seule son expression change. */
+  const majUnite = (cle: string, unite: string) =>
+    setLignes((ls) =>
+      ls.map((l) => {
+        if (l.cle !== cle) return l
+        const c = condDe(l.code_reference)
+        const kg = depuisUnite(l.quantite, l.unite, c).kg
+        const f = facteurVersKg(unite, c)
+        if (!l.lie || kg === null || !f) return { ...l, unite }
+        return { ...l, unite, quantite: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
+      }),
+    )
+
+  /**
+   * Conversion en kg, pour totaliser et alerter avant l'envoi.
+   *
+   * ELLE PEUT ECHOUER, et le dire. L'ancienne version repliait sur un facteur
+   * nul quand la reference ne portait pas son poids de bobine : dix bobines
+   * pesaient alors zero kilo, le total etait faux et rien ne le signalait.
+   */
+  const enKg = (l: Ligne) => depuisUnite(l.quantite, l.unite, condDe(l.code_reference)).kg
+
+  const totalKg = lignes.reduce((s, l) => s + (enKg(l) ?? 0), 0)
+  // Une unite que la reference ne sait pas convertir sera refusee par le serveur
+  // (R01). Autant le dire pendant la saisie.
+  const sansFacteur = lignes.filter((l) => Number(l.quantite) > 0 && enKg(l) === null)
   const totalBobines = lignes.reduce((s, l) => s + (Number(l.bobines) || 0), 0)
   const totalPalettes = lignes.reduce((s, l) => s + (Number(l.palettes) || 0), 0)
 
@@ -251,7 +346,7 @@ export function TransfertNouveau() {
   const sansLot = lignes.filter(
     (l) => catalogue.get(l.code_reference)?.suivi_lot === 1 && !l.lot.trim(),
   )
-  const auDela = lignes.filter((l) => enKg(l) > dispoDe(l.code_reference) + 0.001)
+  const auDela = lignes.filter((l) => (enKg(l) ?? 0) > dispoDe(l.code_reference) + 0.001)
   const memeMagasin =
     !!entete.code_magasin_source && entete.code_magasin_source === entete.code_magasin_dest
 
@@ -263,7 +358,8 @@ export function TransfertNouveau() {
     lignes.length > 0 &&
     !sansQte.length &&
     !sansLot.length &&
-    !auDela.length
+    !auDela.length &&
+    !sansFacteur.length
 
   const charge = () => ({
     code_magasin_source: entete.code_magasin_source,
@@ -551,7 +647,7 @@ export function TransfertNouveau() {
                           const c = catalogue.get(l.code_reference)
                           const dispo = dispoDe(l.code_reference)
                           const kg = enKg(l)
-                          const trop = kg > dispo + 0.001
+                          const trop = (kg ?? 0) > dispo + 0.001
                           const manqueLot = c?.suivi_lot === 1 && !l.lot.trim()
                           return (
                             <tr key={l.cle} className="border-b border-bordure/60">
@@ -573,7 +669,7 @@ export function TransfertNouveau() {
                                   step="any"
                                   min="0.0001"
                                   value={l.quantite}
-                                  onChange={(e) => maj(l.cle, 'quantite', e.target.value)}
+                                  onChange={(e) => majColis(l.cle, 'quantite', e.target.value)}
                                   className={cn(
                                     'h-7 text-right tabular-nums',
                                     (trop || !(Number(l.quantite) > 0)) && 'border-danger',
@@ -583,7 +679,7 @@ export function TransfertNouveau() {
                               <td className="px-2 py-1">
                                 <Selecteur
                                   value={l.unite}
-                                  onChange={(e) => maj(l.cle, 'unite', e.target.value)}
+                                  onChange={(e) => majUnite(l.cle, e.target.value)}
                                   className="h-7"
                                 >
                                   <option value="kg">kg</option>
@@ -601,25 +697,55 @@ export function TransfertNouveau() {
                                   trop && 'font-medium text-danger',
                                 )}
                               >
-                                {fmt.nombre(kg, 1)}
+                                {kg === null ? (
+                                  <span className="text-[11px] text-danger">non convertible</span>
+                                ) : (
+                                  fmt.nombre(kg, 1)
+                                )}
                               </td>
                               <td className="px-2 py-1">
                                 <Champ
                                   type="number"
                                   min="0"
                                   value={l.bobines}
-                                  onChange={(e) => maj(l.cle, 'bobines', e.target.value)}
+                                  onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
                                   className="h-7 text-right tabular-nums"
                                 />
                               </td>
                               <td className="px-2 py-1">
-                                <Champ
-                                  type="number"
-                                  min="0"
-                                  value={l.palettes}
-                                  onChange={(e) => maj(l.cle, 'palettes', e.target.value)}
-                                  className="h-7 text-right tabular-nums"
-                                />
+                                <div className="flex items-center gap-1">
+                                  <Champ
+                                    type="number"
+                                    min="0"
+                                    value={l.palettes}
+                                    onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
+                                    className="h-7 text-right tabular-nums"
+                                  />
+                                  {!parti && (
+                                    <button
+                                      type="button"
+                                      onClick={() => maj(l.cle, 'lie', !l.lie)}
+                                      title={
+                                        l.lie
+                                          ? 'Les trois se repondent — cliquez pour saisir chacun separement'
+                                          : 'Calcul detache — cliquez pour relier les trois'
+                                      }
+                                      aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                                      className={cn(
+                                        'shrink-0 rounded-[var(--radius)] p-1',
+                                        l.lie
+                                          ? 'text-primaire hover:bg-primaire/10'
+                                          : 'text-alerte hover:bg-alerte/10',
+                                      )}
+                                    >
+                                      {l.lie ? (
+                                        <Link2 className="size-3.5" />
+                                      ) : (
+                                        <Unlink2 className="size-3.5" />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-2 py-1">
                                 <Champ
@@ -700,6 +826,13 @@ export function TransfertNouveau() {
                   <span className="text-danger">
                     {' '}
                     — lot obligatoire : {sansLot.map((l) => l.code_reference).join(', ')}
+                  </span>
+                )}
+                {sansFacteur.length > 0 && (
+                  <span className="text-danger">
+                    {' '}
+                    — conversion impossible : {sansFacteur.map((l) => l.code_reference).join(', ')}{' '}
+                    (renseignez le conditionnement sur la référence, ou saisissez en kg)
                   </span>
                 )}
               </>

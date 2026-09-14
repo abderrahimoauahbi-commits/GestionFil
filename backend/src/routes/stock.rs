@@ -1660,7 +1660,13 @@ pub async fn references_commandables(
                                 AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
                                 AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                               ORDER BY t.date_debut DESC LIMIT 1), 1.0))
-                      / $3, 6) AS prix_suggere_devise,
+                      -- LE TAUX ARRIVE EN `float8` (il est lie depuis un `f64`).
+                      -- Sans ce cast, la division rend un `double precision`,
+                      -- et PostgreSQL n'a pas de `round(double precision, int)` :
+                      -- la requete entiere echouait en 500, donc l'ecran de
+                      -- creation d'un bon n'affichait AUCUNE reference — sans
+                      -- un mot expliquant pourquoi.
+                      / $3::numeric, 6) AS prix_suggere_devise,
                 CASE WHEN pa.prix_estime_mad IS NOT NULL THEN pa.source_prix
                      WHEN r.cmup_mad IS NOT NULL THEN 'CMUP'
                      ELSE 'CATALOGUE' END AS source_prix,

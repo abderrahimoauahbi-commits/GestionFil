@@ -21,7 +21,10 @@ import { Controles } from './pages/Controles'
 import { Etats } from './pages/Etats'
 import {
   EtatCatalogue,
+  EtatCategories,
   EtatComptage,
+  EtatCouleur,
+  EtatCouleurs,
   EtatFournisseurs,
   EtatMouvements,
   EtatPlanAchat,
@@ -192,6 +195,13 @@ const ECRANS = (
       <Route path="etats/mouvements" element={<ExigeModule module="MOUVEMENTS"><EtatMouvements /></ExigeModule>} />
       <Route path="etats/catalogue" element={<ExigeModule module="CATALOGUE"><EtatCatalogue /></ExigeModule>} />
       <Route path="etats/fournisseurs" element={<ExigeModule module="FOURNISSEURS"><EtatFournisseurs /></ExigeModule>} />
+      <Route path="etats/categories" element={<ExigeModule module="CATALOGUE"><EtatCategories /></ExigeModule>} />
+      <Route path="etats/couleurs" element={<ExigeModule module="CATALOGUE"><EtatCouleurs /></ExigeModule>} />
+      {/* La fiche d'UNE couleur porte son code dans l'adresse : on peut y
+          revenir, l'envoyer, la mettre en favori. L'adresse nue propose
+          encore le choix, comme les autres etats de document. */}
+      <Route path="etats/couleur/:code" element={<ExigeModule module="CATALOGUE"><EtatCouleur /></ExigeModule>} />
+      <Route path="etats/couleur" element={<ExigeModule module="CATALOGUE"><EtatCouleur /></ExigeModule>} />
       <Route path="controles" element={<ExigeModule module="COCKPIT"><Controles /></ExigeModule>} />
       <Route path="matrice-prix" element={<ExigeModule module="CATALOGUE"><MatricePrix /></ExigeModule>} />
       <Route path="historique-prix" element={<ExigeModule module="CATALOGUE"><HistoriquePrix /></ExigeModule>} />

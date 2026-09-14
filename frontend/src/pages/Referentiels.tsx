@@ -13,7 +13,8 @@
 import { useMemo, useState } from 'react'
 import { useEtatDepuisParam } from '../lib/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Printer, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -37,6 +38,27 @@ import { Etiquette } from '../components/ui'
 
 interface Ligne extends Record<string, unknown> {
   actif: number
+}
+
+/**
+ * LE CHEMIN VERS LE PAPIER, depuis l'ecran qui montre la liste.
+ *
+ * Un referentiel se consulte a l'ecran mais se DIFFUSE sur papier : le nuancier
+ * va au quai, la nomenclature va sur le bureau de qui classe une matiere. Sans
+ * ce lien, il faudrait quitter l'ecran, ouvrir le sommaire des etats et y
+ * retrouver la meme liste sous un autre nom — ce que personne ne fait.
+ */
+function LienEtat({ vers, titre }: { vers: string; titre: string }) {
+  return (
+    <Link
+      to={vers}
+      title={titre}
+      aria-label={titre}
+      className="rounded-[var(--radius)] p-1 text-attenue-texte hover:bg-attenue/60 hover:text-texte"
+    >
+      <Printer className="size-4" />
+    </Link>
+  )
 }
 
 interface Onglet {
@@ -128,6 +150,7 @@ const ONGLETS: Onglet[] = [
         titre="Catégories matière"
         module="CATALOGUE"
         aide="Choisissez une catégorie pour voir et compléter ses familles."
+        actions={<LienEtat vers="/etats/categories" titre="Imprimer catégories et familles" />}
         maitre={{
           route: 'categories',
           cle: 'code_categorie',
@@ -179,6 +202,13 @@ const ONGLETS: Onglet[] = [
         titre="Couleurs"
         module="CATALOGUE"
         aide="Choisissez une couleur pour voir son code chez chaque fournisseur."
+        actions={<LienEtat vers="/etats/couleurs" titre="Imprimer le nuancier" />}
+        actionsLigne={(l) => (
+          <LienEtat
+            vers={`/etats/couleur/${encodeURIComponent(String(l.code_couleur_interne ?? ''))}`}
+            titre="Imprimer la fiche de cette couleur"
+          />
+        )}
         maitre={{
           route: 'couleurs',
           cle: 'code_couleur_interne',

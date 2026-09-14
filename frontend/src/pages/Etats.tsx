@@ -24,6 +24,7 @@ import {
   Gauge,
   Library,
   Package,
+  Palette,
   Printer,
   ShoppingCart,
   Truck,
@@ -166,6 +167,36 @@ const ETATS: EtatDisponible[] = [
     chemin: '/etats/fournisseurs',
     module: 'FOURNISSEURS',
     Icone: Library,
+    famille: 'Referentiels',
+  },
+  {
+    cle: 'categories',
+    titre: 'Catégories et familles',
+    description:
+      'La nomenclature matiere en arbre : chaque categorie, puis ses familles avec leur titrage. Le document qu on pose devant quelqu un qui doit classer une matiere nouvelle.',
+    chemin: '/etats/categories',
+    module: 'CATALOGUE',
+    Icone: Library,
+    famille: 'Referentiels',
+  },
+  {
+    cle: 'couleurs',
+    titre: 'Couleurs',
+    description:
+      'Le nuancier interne et, en face de chaque couleur, son code chez chaque fournisseur. C est lui qui permet de reconnaitre une couleur sur une facture turque.',
+    chemin: '/etats/couleurs',
+    module: 'CATALOGUE',
+    Icone: Palette,
+    famille: 'Referentiels',
+  },
+  {
+    cle: 'couleur',
+    titre: 'Fiche d une couleur',
+    description:
+      'Une couleur, ses codes fournisseur et toutes les references qui la portent, avec leur stock. La page qu on emporte chez le teinturier.',
+    chemin: '/etats/couleur',
+    module: 'CATALOGUE',
+    Icone: Palette,
     famille: 'Referentiels',
   },
 ]

@@ -74,9 +74,28 @@ interface Props {
     defauts?: Record<string, unknown>
   }
   aide?: string
+  /**
+   * Ce qu'on peut faire de la LISTE ENTIERE — l'imprimer, le plus souvent.
+   *
+   * L'action se pose dans l'en-tete du niveau du haut, a cote du compte : c'est
+   * la que porte le regard quand on cherche quoi faire de ce qu'on voit. La
+   * ranger dans le menu general obligerait a quitter l'ecran pour retrouver la
+   * meme liste sous un autre nom.
+   */
+  actions?: React.ReactNode
+  /** Ce qu'on peut faire de LA LIGNE POINTEE : sa fiche imprimee, surtout. */
+  actionsLigne?: (l: Ligne) => React.ReactNode
 }
 
-export function MaitreDetail({ titre, module, maitre, detail, aide }: Props) {
+export function MaitreDetail({
+  titre,
+  module,
+  maitre,
+  detail,
+  aide,
+  actions,
+  actionsLigne,
+}: Props) {
   const droits = useDroits(module)
   const qc = useQueryClient()
   const confirmation = useConfirmation()
@@ -183,7 +202,10 @@ export function MaitreDetail({ titre, module, maitre, detail, aide }: Props) {
       <Carte className={cn('h-fit', pointe && 'hidden lg:block')}>
         <CarteEntete>
           <CarteTitre>{titre}</CarteTitre>
-          <span className="text-[11.5px] text-attenue-texte">{tous.length}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11.5px] text-attenue-texte">{tous.length}</span>
+            {actions}
+          </div>
         </CarteEntete>
         <CarteCorps className="p-0">
           <ul className="divide-y divide-bordure/60">
@@ -261,9 +283,12 @@ export function MaitreDetail({ titre, module, maitre, detail, aide }: Props) {
           <Carte>
             <CarteEntete>
               <CarteTitre>{maitre.libelle(courant)}</CarteTitre>
-              <Bouton taille="sm" variante="contour" className="lg:hidden" onClick={() => setPointe(null)}>
-                Retour
-              </Bouton>
+              <div className="flex items-center gap-2">
+                {actionsLigne?.(courant)}
+                <Bouton taille="sm" variante="contour" className="lg:hidden" onClick={() => setPointe(null)}>
+                  Retour
+                </Bouton>
+              </div>
             </CarteEntete>
             {maitre.champs && (
               <CarteCorps className="flex flex-wrap gap-2 border-b border-bordure">

@@ -33,6 +33,11 @@ export function Connexion() {
   const [motDePasse, setMotDePasse] = useState('')
   const [visible, setVisible] = useState(false)
   const [erreur, setErreur] = useState<string | null>(null)
+  /* LE CODE N'APPARAIT QU'UNE FOIS LE MOT DE PASSE ACCEPTE. Le demander
+     d'emblee apprendrait a un inconnu quels comptes en portent un — et
+     encombrerait l'ecran de tous les autres. */
+  const [exigeCode, setExigeCode] = useState(false)
+  const [code, setCode] = useState('')
   const [envoi, setEnvoi] = useState(false)
 
   // L'adresse du serveur.
@@ -54,7 +59,11 @@ export function Connexion() {
     setEnvoi(true)
     try {
       definirServeur(adresse)
-      await connecter(login.trim(), motDePasse)
+      const suite = await connecter(login.trim(), motDePasse, exigeCode ? code : undefined)
+      if (suite === 'code') {
+        setExigeCode(true)
+        setCode('')
+      }
     } catch (ex) {
       setErreur(
         ex instanceof ErreurApi
@@ -181,6 +190,33 @@ export function Connexion() {
                 </button>
               </div>
             </div>
+
+            {/* --- Le code du second facteur ---------------------------------
+                Il prend la main des qu'il apparait : on vient de taper son mot
+                de passe, la seule chose qui reste a faire est ce code. */}
+            {exigeCode && (
+              <div className="space-y-1">
+                <label htmlFor="code" className="block text-[12px]">
+                  Code de votre application
+                </label>
+                <input
+                  id="code"
+                  className="w-full px-3 text-center text-[19px] tracking-[0.45em]"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  maxLength={6}
+                  autoFocus
+                  required
+                />
+                <p className="text-[11.5px] text-slate-300/70">
+                  Les six chiffres affichés par votre application. Ils changent
+                  toutes les trente secondes.
+                </p>
+              </div>
+            )}
 
             {/* --- Adresse du serveur ---------------------------------------- */}
             {reglageOuvert ? (

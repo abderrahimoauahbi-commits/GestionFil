@@ -31,6 +31,7 @@ import { PanneauApparence } from './PanneauApparence'
 import { AideEcran } from './AideEcran'
 import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
+import { DoubleAuthentification } from './DoubleAuthentification'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
 import {
@@ -286,6 +287,7 @@ export function Coquille() {
   const [tiroir, setTiroir] = useState(false)
   const [apparence, setApparence] = useState(false)
   const [motDePasse, setMotDePasse] = useState(false)
+  const [doubleAuth, setDoubleAuth] = useState(false)
   const reglages = useApparence()
   const entreprise = useEntreprise()
 
@@ -573,6 +575,10 @@ export function Coquille() {
               </MenuElement>
             ))}
             <MenuSeparateur />
+            <MenuElement onSelect={() => setDoubleAuth(true)}>
+              <ShieldCheck />
+              Double authentification
+            </MenuElement>
             <MenuElement onSelect={() => setMotDePasse(true)}>
               <KeyRound />
               Changer mon mot de passe
@@ -688,6 +694,7 @@ export function Coquille() {
       <RobotConnexion />
       <PanneauApparence ouvert={apparence} surFermeture={() => setApparence(false)} />
       <ChangerMotDePasse ouvert={motDePasse} surFermeture={() => setMotDePasse(false)} />
+      <DoubleAuthentification ouvert={doubleAuth} surFermeture={() => setDoubleAuth(false)} />
 
       {/* --- Barre du bas : mobile ---------------------------------------- */}
       {principales.length > 1 && (

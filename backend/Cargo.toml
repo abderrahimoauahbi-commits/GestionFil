@@ -49,6 +49,9 @@ argon2 = "0.5"
 # Empreinte des pieces deposees : reconnaitre un scan deja recu, et prouver
 # qu'il n'a pas bouge depuis.
 sha2 = "0.10"
+# Le second facteur : HMAC-SHA1, fige par la RFC 6238.
+hmac = "0.12"
+sha1 = "0.10"
 hex = "0.4"
 password-hash = { version = "0.5", features = ["rand_core"] }
 rand = "0.8"

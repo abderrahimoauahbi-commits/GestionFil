@@ -29,6 +29,13 @@ pub enum AppError {
     #[error("Identifiants invalides")]
     IdentifiantsInvalides,
 
+    /// TROP DE TENTATIVES. Distincte d'identifiants invalides, et c'est
+    /// volontaire : celui qui s'est trompe trois fois de suite doit savoir que
+    /// le compte attend, sinon il continue a taper et allonge l'attente sans
+    /// comprendre. Le message porte le delai restant.
+    #[error("{0}")]
+    TropDeTentatives(String),
+
     #[error("Acces refuse : permission {action} manquante sur le module {module}")]
     NonAutorise { module: String, action: String },
 
@@ -124,6 +131,12 @@ impl IntoResponse for AppError {
             AppError::Invalide(_) => (StatusCode::BAD_REQUEST, "INVALIDE"),
             AppError::NonAuthentifie => (StatusCode::UNAUTHORIZED, "NON_AUTHENTIFIE"),
             AppError::IdentifiantsInvalides => (StatusCode::UNAUTHORIZED, "IDENTIFIANTS_INVALIDES"),
+            // 429 et non 401 : ce n'est pas le mot de passe qui est refuse,
+            // c'est la cadence. Un client qui reessaie en boucle doit pouvoir
+            // faire la difference.
+            AppError::TropDeTentatives(_) => {
+                (StatusCode::TOO_MANY_REQUESTS, "TROP_DE_TENTATIVES")
+            }
             AppError::NonAutorise { .. } => (StatusCode::FORBIDDEN, "NON_AUTORISE"),
             AppError::ChampNonModifiable { .. } => (StatusCode::FORBIDDEN, "CHAMP_NON_MODIFIABLE"),
             AppError::Conflit(_) => (StatusCode::CONFLICT, "CONFLIT"),

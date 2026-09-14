@@ -163,6 +163,16 @@ pub fn maintenant() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
+/// Un instant a venir, au meme format que `maintenant()`.
+///
+/// Les dates sont stockees en texte ISO : deux instants se comparent donc
+/// directement, sans conversion, y compris en SQL.
+pub fn dans_secondes(secondes: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::seconds(secondes))
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
+}
+
 /// Date calendaire du jour, format base.
 pub fn aujourdhui() -> String {
     chrono::Utc::now().format("%Y-%m-%d").to_string()

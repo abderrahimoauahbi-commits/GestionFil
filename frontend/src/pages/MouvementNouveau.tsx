@@ -20,9 +20,17 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { Link2, Unlink2 } from 'lucide-react'
 import { api, ErreurApi } from '../api/client'
 import { EnTetePage } from '../components/Layout'
 import { Bouton, Message, fmt } from '../components/ui'
+import {
+  depuisBobines,
+  depuisPalettes,
+  depuisUnite,
+  facteurVersKg,
+  pourChamp,
+} from '../lib/conditionnement'
 
 interface TypeMvt {
   code_type_mvt: string
@@ -54,6 +62,15 @@ interface Saisie {
   nb_bobines: string
   lot_fournisseur: string
   code_motif_ligne: string
+  /**
+   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
+   *
+   * Lie, saisir un des trois colis remplit les deux autres. Detache, chacun se
+   * saisit seul — c'est le cas d'une palette incomplete, d'un reliquat, d'un
+   * comptage qui ne suit pas la theorie. La formule ne sait pas cela ;
+   * l'operateur, si.
+   */
+  lie: boolean
 }
 
 const LIGNE_VIDE: Saisie = {
@@ -65,6 +82,7 @@ const LIGNE_VIDE: Saisie = {
   nb_bobines: '',
   lot_fournisseur: '',
   code_motif_ligne: '',
+  lie: true,
 }
 
 /** La date du jour, au format d'un `<input type="date">` et en heure locale. */
@@ -202,6 +220,55 @@ export function MouvementNouveau() {
 
   const majLigne = (i: number, champ: keyof Saisie, valeur: string) =>
     setLignes((ls) => ls.map((l, k) => (k === i ? { ...l, [champ]: valeur } : l)))
+
+  /**
+   * LES TROIS COLIS SE REPONDENT : palettes, bobines, quantite.
+   *
+   * On saisit celui qu'on a sous les yeux — au quai des palettes, sur la
+   * machine des bobines, a la bascule des kilos — et les deux autres se
+   * calculent par les PARAMETRES DE LA REFERENCE. Obliger l'operateur a
+   * convertir de tete, c'est garantir l'erreur ; lui faire saisir les trois
+   * separement, c'est garantir qu'elles se contrediront.
+   *
+   * Les champs calcules restent MODIFIABLES : une palette incomplete reste une
+   * palette a manutentionner, et c'est l'operateur qui le sait. Le dernier
+   * champ touche commande, les deux autres suivent.
+   */
+  const majColis = (i: number, source: 'quantite' | 'palettes' | 'bobines', valeur: string) =>
+    setLignes((ls) =>
+      ls.map((l, k) => {
+        if (k !== i) return l
+        const r = parReference.get(l.code_reference)
+        // Lien detache : chaque champ se saisit seul, rien ne se recalcule.
+        if (!r || !l.lie) {
+          const champ = source === 'quantite' ? 'quantite_saisie'
+            : source === 'palettes' ? 'nb_palettes' : 'nb_bobines'
+          return { ...l, [champ]: valeur }
+        }
+        const c =
+          source === 'palettes' ? depuisPalettes(valeur, r)
+          : source === 'bobines' ? depuisBobines(valeur, r)
+          : depuisUnite(valeur, l.unite_saisie, r)
+
+        // La quantite se reexprime dans l'unite choisie pour la ligne.
+        const quantite =
+          source === 'quantite'
+            ? valeur
+            : l.unite_saisie === 'Palette' ? pourChamp(c.palettes)
+            : l.unite_saisie === 'Bobine' ? pourChamp(c.bobines)
+            : (() => {
+                const f = facteurVersKg(l.unite_saisie, r)
+                return c.kg !== null && f ? pourChamp(c.kg / f, 3) : ''
+              })()
+
+        return {
+          ...l,
+          quantite_saisie: quantite,
+          nb_palettes: source === 'palettes' ? valeur : pourChamp(c.palettes),
+          nb_bobines: source === 'bobines' ? valeur : pourChamp(c.bobines),
+        }
+      }),
+    )
 
   const champ =
     'w-full rounded-lg border border-champ px-3 py-2 text-sm outline-none focus:border-anneau'
@@ -405,7 +472,7 @@ export function MouvementNouveau() {
                       min="0"
                       placeholder="Quantité"
                       value={l.quantite_saisie}
-                      onChange={(e) => majLigne(i, 'quantite_saisie', e.target.value)}
+                      onChange={(e) => majColis(i, 'quantite', e.target.value)}
                       className={champ}
                     />
                   </div>
@@ -450,6 +517,30 @@ export function MouvementNouveau() {
                   {/* LES COLIS COMPTES. Une palette incomplete reste une
                       palette a manutentionner : le compte reel ne se deduit pas
                       du poids, il se compte sur le quai. */}
+                  {/* L'INTERRUPTEUR DU CALCUL, au plus pres des colis qu'il
+                      relie. Lie, les trois se repondent ; detache, chacun se
+                      saisit seul — une palette incomplete, un reliquat. */}
+                  <div className="flex items-center justify-center sm:col-span-1">
+                    <button
+                      type="button"
+                      onClick={() => majLigne(i, 'lie', !l.lie as unknown as string)}
+                      title={
+                        l.lie
+                          ? 'Calcul lié : saisir un colis remplit les autres. Cliquez pour détacher.'
+                          : 'Calcul détaché : chaque colis se saisit seul. Cliquez pour relier.'
+                      }
+                      aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                      className={
+                        'grid size-8 place-items-center rounded-lg border ' +
+                        (l.lie
+                          ? 'border-anneau text-anneau'
+                          : 'border-bordure text-attenue-texte')
+                      }
+                    >
+                      {l.lie ? <Link2 className="size-4" /> : <Unlink2 className="size-4" />}
+                    </button>
+                  </div>
+
                   <div className="sm:col-span-2">
                     <input
                       type="number"
@@ -457,7 +548,7 @@ export function MouvementNouveau() {
                       step="1"
                       placeholder="Palettes"
                       value={l.nb_palettes}
-                      onChange={(e) => majLigne(i, 'nb_palettes', e.target.value)}
+                      onChange={(e) => majColis(i, 'palettes', e.target.value)}
                       className={champ}
                     />
                   </div>
@@ -468,7 +559,7 @@ export function MouvementNouveau() {
                       step="1"
                       placeholder="Bobines"
                       value={l.nb_bobines}
-                      onChange={(e) => majLigne(i, 'nb_bobines', e.target.value)}
+                      onChange={(e) => majColis(i, 'bobines', e.target.value)}
                       className={champ}
                     />
                   </div>

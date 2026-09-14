@@ -71,6 +71,9 @@ interface RefCommandable extends Record<string, unknown> {
   code_reference: string
   designation: string
   unite_catalogue: string
+  /** Le fournisseur HABITUEL de cette reference — pas une exclusivite. */
+  code_fournisseur?: string | null
+  fournisseur_nom?: string | null
   classe_abc: string | null
   moq_kg: number | null
   multiple_achat_kg: number | null
@@ -130,6 +133,18 @@ export function BonCommandeNouveau() {
   })
   const [choix, setChoix] = useState<Record<string, Choix>>({})
   const [filtre, setFiltre] = useState('')
+  /**
+   * OUVRIR LE BON AU RESTE DU CATALOGUE.
+   *
+   * Par defaut l'ecran montre les references rattachees a ce fournisseur : neuf
+   * commandes sur dix ne sortent pas de la. Mais le rattachement du catalogue
+   * est une HABITUDE D'ACHAT, pas une exclusivite — un fournisseur qui propose
+   * un meilleur prix ou un delai plus court sur un fil qu'on achete ailleurs
+   * doit pouvoir etre commande. Sans cette porte, il fallait modifier la fiche
+   * de la reference pour passer une commande : on maquillait le referentiel
+   * pour contourner l'ecran.
+   */
+  const [toutCatalogue, setToutCatalogue] = useState(false)
   const [erreur, setErreur] = useState<string | null>(null)
 
   /* --- Arrivee ciblee : /bons-commande/nouveau?reference=X ----------------
@@ -160,10 +175,11 @@ export function BonCommandeNouveau() {
   // Des le fournisseur choisi : ce qu'il faut lui commander. Pas d'etape
   // intermediaire, pas de document vide a ouvrir d'abord.
   const qRefs = useQuery({
-    queryKey: ['refs-commandables', entete.code_fournisseur],
+    queryKey: ['refs-commandables', entete.code_fournisseur, toutCatalogue],
     queryFn: () =>
       api.get<RefCommandable[]>(
-        `/api/references-commandables?code_fournisseur=${encodeURIComponent(entete.code_fournisseur)}`,
+        `/api/references-commandables?code_fournisseur=${encodeURIComponent(entete.code_fournisseur)}` +
+          (toutCatalogue ? '&toutes=1' : ''),
       ),
     enabled: !!entete.code_fournisseur,
   })
@@ -323,11 +339,21 @@ export function BonCommandeNouveau() {
   // besoin propre, mais equivalente a une reference en tension achetee ailleurs.
   // Elle tombait auparavant dans « les autres references », ou personne ne
   // faisait le rapprochement — c'est-a-dire au moment precis ou il aurait servi.
-  const aCommander = refs.filter((r) => (r.qte_a_commander_kg ?? 0) > 0)
-  const equivalentes = refs.filter(
+  //
+  // La quatrieme n'apparait que si l'on a ouvert le catalogue entier : les
+  // references d'un AUTRE fournisseur, qu'on peut commander a celui-ci en le
+  // sachant. Elle reste a part, et jamais melangee aux siennes.
+  const duFournisseur = refs.filter(
+    (r) => !r.code_fournisseur || r.code_fournisseur === entete.code_fournisseur,
+  )
+  const dAilleurs = refs.filter(
+    (r) => !!r.code_fournisseur && r.code_fournisseur !== entete.code_fournisseur,
+  )
+  const aCommander = duFournisseur.filter((r) => (r.qte_a_commander_kg ?? 0) > 0)
+  const equivalentes = duFournisseur.filter(
     (r) => !((r.qte_a_commander_kg ?? 0) > 0) && !!r.equivalent_de,
   )
-  const autres = refs.filter(
+  const autres = duFournisseur.filter(
     (r) => !((r.qte_a_commander_kg ?? 0) > 0) && !r.equivalent_de,
   )
 
@@ -397,6 +423,11 @@ export function BonCommandeNouveau() {
               {r.classe_abc && <Badge ton="contour">ABC {r.classe_abc}</Badge>}
               {r.risque_sourcing === 'MONO-SOURCE' && <Badge ton="alerte">mono-source</Badge>}
               {r.equivalent_de && <Badge ton="info">equivalent</Badge>}
+              {/* LE CHOIX DOIT ETRE DELIBERE : on ne glisse pas la reference
+                  d'un autre fournisseur sur un bon sans que ce soit visible. */}
+              {!!r.code_fournisseur && r.code_fournisseur !== entete.code_fournisseur && (
+                <Badge ton="alerte">habituellement chez {r.fournisseur_nom ?? r.code_fournisseur}</Badge>
+              )}
             </span>
             <span className="mt-0.5 block truncate text-[12px] text-attenue-texte">
               {r.designation}
@@ -699,14 +730,28 @@ export function BonCommandeNouveau() {
           <Carte repliable="boncommandenouveau.2">
             <CarteEntete>
               <CarteTitre>A commander chez {fournisseur?.nom}</CarteTitre>
-              <div className="flex items-center gap-2">
-                <Search className="size-3.5 text-attenue-texte" />
-                <Champ
-                  placeholder="Filtrer…"
-                  value={filtre}
-                  onChange={(e) => setFiltre(e.target.value)}
-                  className="h-7 w-48"
-                />
+              <div className="flex items-center gap-3">
+                <label
+                  className="flex cursor-pointer items-center gap-1.5 text-[12px] text-attenue-texte"
+                  title="Le catalogue dit chez qui on achète d'habitude, pas chez qui on a le droit d'acheter."
+                >
+                  <input
+                    type="checkbox"
+                    checked={toutCatalogue}
+                    onChange={(e) => setToutCatalogue(e.target.checked)}
+                    className="size-3.5"
+                  />
+                  Tout le catalogue
+                </label>
+                <div className="flex items-center gap-2">
+                  <Search className="size-3.5 text-attenue-texte" />
+                  <Champ
+                    placeholder="Filtrer…"
+                    value={filtre}
+                    onChange={(e) => setFiltre(e.target.value)}
+                    className="h-7 w-48"
+                  />
+                </div>
               </div>
             </CarteEntete>
             <CarteCorps>
@@ -762,6 +807,34 @@ export function BonCommandeNouveau() {
                     ))}
                   </div>
                 </>
+              )}
+
+              {/* ---- Le reste du catalogue, sur demande --------------------- */}
+              {!toutCatalogue ? (
+                <p className="mt-4 text-[11px] text-attenue-texte">
+                  Une référence que ce fournisseur peut livrer mais qu'on achète d'habitude
+                  ailleurs ? Cochez <span className="font-medium">Tout le catalogue</span> en haut
+                  de cette carte.
+                </p>
+              ) : (
+                dAilleurs.length > 0 && (
+                  <>
+                    <div className="mb-1 mt-4 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
+                      Achetées d'habitude ailleurs ({dAilleurs.length})
+                    </div>
+                    <p className="mb-2 text-[11px] text-attenue-texte">
+                      Le catalogue dit chez qui on achète d'ordinaire ; il n'interdit pas d'acheter
+                      ailleurs. Ces références partiront sur ce bon, au nom de{' '}
+                      {fournisseur?.nom} — leur fournisseur habituel reste affiché pour que le choix
+                      soit délibéré.
+                    </p>
+                    <div className="space-y-1.5">
+                      {dAilleurs.map((r) => (
+                        <Ligne key={r.code_reference} r={r} />
+                      ))}
+                    </div>
+                  </>
+                )
               )}
             </CarteCorps>
           </Carte>

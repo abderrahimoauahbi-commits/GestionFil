@@ -1595,6 +1595,15 @@ pub async fn references_commandables(
     // fournisseur. Le second cas est celui qui compte : c'est la que l'acheteur
     // decide quoi commander, pas apres avoir ouvert un document vide.
     let id = q.get("id_bc").cloned().unwrap_or_default();
+
+    // `toutes=1` : TOUT LE CATALOGUE, pas seulement les references rattachees a
+    // ce fournisseur. Le rattachement du catalogue est une habitude d'achat, pas
+    // une exclusivite : un fournisseur qui propose un meilleur prix sur un fil
+    // qu'on achete ailleurs doit pouvoir etre commande. L'ecran reste par defaut
+    // sur les siennes — c'est ce qu'on commande neuf fois sur dix — et ouvre le
+    // catalogue entier sur demande.
+    let toutes: i64 = if q.get("toutes").map(String::as_str) == Some("1") { 1 } else { 0 };
+
     let fournisseur: String = match q.get("code_fournisseur") {
         Some(f) if !f.is_empty() => f.clone(),
         _ => sqlx::query_scalar("SELECT code_fournisseur FROM bon_commande WHERE id_bc = $1")
@@ -1627,6 +1636,12 @@ pub async fn references_commandables(
     let rows = sqlx::query(
         "SELECT r.code_reference, r.designation, r.unite_catalogue, r.prix_catalogue,
                 r.code_devise_catalogue, r.classe_abc, r.moq_kg, r.multiple_achat_kg,
+                -- LE FOURNISSEUR HABITUEL, pas une exclusivite. Le catalogue dit
+                -- chez qui on achete d'ordinaire ; rien n'empeche de commander
+                -- le meme fil ailleurs quand le prix ou le delai l'exigent. Le
+                -- bon doit donc pouvoir porter une reference d'un autre, en le
+                -- DISANT — d'ou cette colonne, que l'ecran affiche en clair.
+                r.code_fournisseur,
                 sp.stock_mrp_kg, sp.stock_projete_kg, sp.encours_kg, sp.besoin_12m_kg,
                 sp.jours_couverture, sp.statut AS statut_stock,
                 sp.besoin_12m_kg, sp.encours_kg AS deja_commande_kg,
@@ -1703,7 +1718,7 @@ pub async fn references_commandables(
            JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
            LEFT JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
            LEFT JOIN v_plan_achat    pa ON pa.code_reference = r.code_reference
-          WHERE r.actif = 1 AND r.code_fournisseur = $2
+          WHERE r.actif = 1 AND ($4 = 1 OR r.code_fournisseur = $2)
           ORDER BY CASE sp.statut WHEN 'RUPTURE' THEN 1 WHEN 'CRITIQUE' THEN 2
                                   WHEN 'ATTENTION' THEN 3 ELSE 4 END,
                    r.code_reference",
@@ -1711,6 +1726,7 @@ pub async fn references_commandables(
     .bind(&id)
     .bind(&fournisseur)
     .bind(taux)
+    .bind(toutes)
     .fetch_all(&state.db)
     .await?;
 

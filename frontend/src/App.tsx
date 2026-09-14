@@ -44,6 +44,7 @@ import { Configuration } from './pages/Configuration'
 import { TransfertNouveau } from './pages/TransfertNouveau'
 import { BonTransfert } from './pages/BonTransfert'
 import { Catalogue } from './pages/Catalogue'
+import { MouvementNouveau } from './pages/MouvementNouveau'
 import { CompleterCatalogue } from './pages/CompleterCatalogue'
 import { Fournisseurs } from './pages/Fournisseurs'
 import { Referentiels } from './pages/Referentiels'
@@ -153,6 +154,7 @@ const ECRANS = (
           donc la direction et les super-utilisateurs. */}
       <Route path="parc-machines" element={<ExigeModule module="PARAMETRES"><ParcMachines /></ExigeModule>} />
       <Route path="mouvements" element={<ExigeModule module="MOUVEMENTS"><Mouvements /></ExigeModule>} />
+      <Route path="mouvements/nouveau" element={<ExigeModule module="MOUVEMENTS"><MouvementNouveau /></ExigeModule>} />
       <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />

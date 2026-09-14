@@ -682,7 +682,12 @@ pub async fn lignes_bc_ouvertes(
            FROM ligne_bc lb
            JOIN bon_commande b ON b.id_bc = lb.id_bc
            JOIN reference r ON r.code_reference = lb.code_reference
-          WHERE b.code_fournisseur = $1
+          -- Une ligne de facture se rattache a de la MARCHANDISE commandee. Le
+          -- transport et les commissions se saisissent en frais d'approche du
+          -- dossier, ou ils se repartissent sur les poids ; rattaches a une
+          -- ligne de bon, ils ne pourraient se repartir sur rien.
+          WHERE lb.type_ligne = 'MARCHANDISE'
+            AND b.code_fournisseur = $1
             AND b.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
             AND lb.statut NOT IN ('SOLDE','ANNULE')
           ORDER BY b.date_bc DESC, lb.ligne_numero",

@@ -231,6 +231,8 @@ INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible,
  ('BONS_COMMANDE','taux_change_engage',      'Taux engage',        'LECTURE', 1, 60),
  ('BONS_COMMANDE','montant_total_devise',    'Montant (devise)',   'LECTURE', 1, 70),
  ('BONS_COMMANDE','montant_total_mad',       'Montant (MAD)',      'LECTURE', 1, 80),
+ ('BONS_COMMANDE','type_ligne',              'Type de ligne',      'LECTURE', 0,  85),
+ ('BONS_COMMANDE','libelle',                 'Libelle de prestation','LECTURE', 0,  88),
  ('BONS_COMMANDE','code_reference',          'Reference',          'LECTURE', 0, 90),
  ('BONS_COMMANDE','unite_commande',          'Unite de commande',  'LECTURE', 0,100),
  ('BONS_COMMANDE','quantite_commandee_unite','Quantite commandee', 'LECTURE', 0,110),
@@ -794,6 +796,10 @@ UPDATE modele_droit_champ SET niveau = 'LECTURE'
                  'quantite_theorique_kg','nb_references','taux_change',
                  'rebut_kg','jours_de_retard_saisie','facteur_conversion',
                  'quantite_totale_kg','bobines_totales','palettes_totales',
+                 -- Le type d'une ligne de bon se choisit a la creation, jamais
+                 -- apres : retyper une prestation en marchandise la ferait
+                 -- attendre au quai.
+                 'type_ligne',
                  'valeur_totale_mad');
 
 -- 3b. IDENTIFIANTS : non modifiables APRES creation, dans le module dont ils

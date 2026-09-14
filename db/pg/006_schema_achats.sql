@@ -71,14 +71,34 @@ CREATE TABLE ligne_bc (
                                 DEFAULT gen_random_uuid()::text,
     id_bc               text    NOT NULL REFERENCES bon_commande(id_bc) ON DELETE CASCADE,
     ligne_numero        bigint NOT NULL CHECK (ligne_numero > 0),
-    code_reference      text    NOT NULL REFERENCES reference(code_reference),
+
+    -- MARCHANDISE ou SERVICE.
+    --
+    -- Un bon ne porte pas que du fil : le transport, la commission d'un agent,
+    -- une piece detachee se commandent, se facturent, et doivent figurer sur le
+    -- bon envoye au fournisseur comme au montant engage. Faute de pouvoir les
+    -- porter, il fallait inventer une fausse reference au catalogue — qui
+    -- entrait ensuite en stock.
+    --
+    -- Une ligne de SERVICE ne se receptionne jamais : il n'y a rien a peser au
+    -- quai. Elle pese ZERO kilo, ce qui la fait sortir d'elle-meme de toutes les
+    -- vues d'en-cours, qui filtrent `quantite_restante_kg > 0`.
+    --
+    -- Le modele vient de la facture d'import (018_schema_import.sql), qui resout
+    -- deja le meme probleme : meme vocabulaire, meme CHECK d'exclusion mutuelle.
+    type_ligne          text    NOT NULL DEFAULT 'MARCHANDISE'
+                                CHECK (type_ligne IN ('MARCHANDISE','SERVICE')),
+    code_reference      text    REFERENCES reference(code_reference),
+    -- Ce que la ligne designe quand aucune reference ne la nomme.
+    libelle             text,
     designation         text,
 
     -- Unite de commande + facteur FIGE (jamais relu du catalogue)
-    unite_commande      text    NOT NULL CHECK (unite_commande IN ('kg','Palette','Bobine','ml')),
+    unite_commande      text    NOT NULL CHECK (unite_commande IN ('kg','Palette','Bobine','ml',
+                                                                   'Forfait','Unite','Heure')),
     facteur_kg          numeric(18,4)    NOT NULL CHECK (facteur_kg > 0),
     quantite_commandee_unite numeric(18,4) NOT NULL CHECK (quantite_commandee_unite > 0),
-    quantite_commandee_kg    numeric(18,4) NOT NULL CHECK (quantite_commandee_kg > 0),
+    quantite_commandee_kg    numeric(18,4) NOT NULL CHECK (quantite_commandee_kg >= 0),
     quantite_recue_kg   numeric(18,4)    NOT NULL DEFAULT 0 CHECK (quantite_recue_kg >= 0),
     quantite_restante_kg numeric(18,4)   GENERATED ALWAYS AS (quantite_commandee_kg - quantite_recue_kg) STORED,
 
@@ -116,13 +136,37 @@ CREATE TABLE ligne_bc (
     arbitree            bigint NOT NULL DEFAULT 0 CHECK (arbitree IN (0,1)),
 
     UNIQUE (id_bc, ligne_numero),
-    -- Coherence de la conversion (tolerance d'arrondi au gramme)
-    CHECK (abs(quantite_commandee_kg - quantite_commandee_unite * facteur_kg) < 0.001),
+
+    -- L'EXCLUSION MUTUELLE. Une ligne de marchandise porte une reference et un
+    -- poids ; une ligne de service porte un libelle et rien d'autre. Sans ce
+    -- CHECK, une ligne de service pourrait naitre avec une reference et des
+    -- kilos, et redeviendrait de la marchandise fantome que le quai attendrait
+    -- en vain. `facteur_kg = 1` par convention, pour que la colonne generee
+    -- `prix_kg_devise` reste calculable sans division par zero.
+    CONSTRAINT ligne_bc_type_coherent CHECK (
+        (type_ligne = 'MARCHANDISE'
+             AND code_reference IS NOT NULL
+             AND quantite_commandee_kg > 0)
+     OR (type_ligne = 'SERVICE'
+             AND code_reference IS NULL
+             AND libelle IS NOT NULL AND btrim(libelle) <> ''
+             AND quantite_commandee_kg = 0
+             AND facteur_kg = 1
+             AND id_proposition IS NULL
+             AND besoin_kg_origine IS NULL)
+    ),
+    -- Coherence de la conversion (tolerance d'arrondi au gramme). Elle ne vaut
+    -- que pour la marchandise : un forfait de transport n'a pas de facteur au
+    -- kilo.
+    CONSTRAINT ligne_bc_conversion_coherente
+        CHECK (type_ligne <> 'MARCHANDISE'
+            OR abs(quantite_commandee_kg - quantite_commandee_unite * facteur_kg) < 0.001),
     -- On ne peut pas recevoir plus que commande sans avenant
     CHECK (quantite_recue_kg <= quantite_commandee_kg + 0.001)
 );
 
-CREATE INDEX ix_ligne_bc_ref ON ligne_bc(code_reference);
+-- Partiel : les lignes de service n'ont pas de reference a indexer.
+CREATE INDEX ix_ligne_bc_ref ON ligne_bc(code_reference) WHERE code_reference IS NOT NULL;
 CREATE INDEX ix_ligne_bc_bc  ON ligne_bc(id_bc);
 
 -- -----------------------------------------------------------------------------

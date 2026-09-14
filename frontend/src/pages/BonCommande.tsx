@@ -62,7 +62,10 @@ interface Bc extends Record<string, unknown> {
 interface LigneBc extends Record<string, unknown> {
   id_ligne_bc: string
   ligne_numero: number
-  code_reference: string
+  /** `MARCHANDISE` ou `SERVICE` — une prestation n'a pas de reference. */
+  type_ligne?: string
+  code_reference: string | null
+  libelle?: string | null
   reference_designation: string
   unite_commande: string
   quantite_commandee_unite: number
@@ -351,10 +354,16 @@ export function BonCommande() {
     {
       champ: 'code_reference',
       entete: 'Référence',
+      // UNE PRESTATION N'A PAS DE REFERENCE : c'est son libelle qui la nomme.
+      // Sans ce repli, la ligne de transport s'affichait vide.
       rendu: (l) => (
         <div className="min-w-0">
-          <div className="truncate font-medium">{l.code_reference}</div>
-          <div className="truncate text-[11px] text-attenue-texte">{l.reference_designation}</div>
+          <div className="truncate font-medium">
+            {l.code_reference ?? l.libelle ?? '—'}
+          </div>
+          <div className="truncate text-[11px] text-attenue-texte">
+            {l.code_reference ? l.reference_designation : 'prestation — n’entre pas en stock'}
+          </div>
         </div>
       ),
     },
@@ -428,7 +437,11 @@ export function BonCommande() {
       largeur: '120px',
       rendu: (l) => (
         <div className="min-w-0">
-          <div className="truncate">{l.categorie_libelle ?? l.code_categorie ?? '—'}</div>
+          <div className="truncate">
+            {l.type_ligne === 'SERVICE'
+              ? 'Prestation'
+              : (l.categorie_libelle ?? l.code_categorie ?? '—')}
+          </div>
           {l.couleur && (
             <div className="truncate text-[11px] text-attenue-texte">{l.couleur}</div>
           )}
@@ -887,7 +900,12 @@ export function BonCommande() {
         <PanneauSaisie
           idBc={id}
           devise={bc.code_devise}
-          dejaChoisies={[...lignes.map((l) => l.code_reference), ...nouvelles.map((n) => n.code_reference)]}
+          // Les prestations n'ont pas de reference : elles ne peuvent pas etre
+          // « deja choisies », et n'ont rien a retirer de la liste du catalogue.
+          dejaChoisies={[
+            ...lignes.map((l) => l.code_reference).filter((c): c is string => !!c),
+            ...nouvelles.map((n) => n.code_reference),
+          ]}
           surFermeture={() => setSaisie(false)}
           surAjout={(ajouts) =>
             setNouvelles((n) => [

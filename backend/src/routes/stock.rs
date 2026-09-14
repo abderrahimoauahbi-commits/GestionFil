@@ -1089,46 +1089,19 @@ pub async fn creer_bc(
     // --- Lignes saisies avec l'entete ---------------------------------------
     let mut posees = 0i64;
     for (i, l) in b.lignes.iter().flatten().enumerate() {
-        if l.quantite_commandee_unite <= 0.0 || l.prix_unitaire_devise <= 0.0 {
-            return Err(AppError::Invalide(format!(
-                "{} : quantite et prix doivent etre strictement positifs",
-                l.code_reference
-            )));
-        }
-        let (kg, facteur) = vers_kg(
-            &state.db,
-            &l.code_reference,
-            l.quantite_commandee_unite,
-            &l.unite_commande,
+        valider_ligne_bc(l)?;
+        let (kg, facteur) = poids_ligne_bc(&state.db, l).await?;
+        inserer_ligne_bc(
+            &mut tx,
+            &uuid::Uuid::new_v4().to_string(),
+            &id,
+            (i + 1) as i64,
+            l,
+            kg,
+            facteur,
+            &devise,
+            true,
         )
-        .await?;
-
-        sqlx::query(
-            "INSERT INTO ligne_bc
-                 (id_ligne_bc, id_bc, ligne_numero, code_reference, designation,
-                  unite_commande, facteur_kg, quantite_commandee_unite,
-                  quantite_commandee_kg, prix_unitaire_devise, code_devise,
-                  date_livraison_prevue, id_proposition, besoin_kg_origine)
-             SELECT $1, $2, $3, $4, r.designation, $5, $6, $7, $8, $9, $10, $11,
-                    (SELECT pa.id_proposition FROM plan_achat pa
-                      WHERE pa.code_reference = $4
-                        AND pa.statut IN ('PROPOSE','EN_REVISION','VALIDE') LIMIT 1),
-                    COALESCE((SELECT bp.besoin_12m_kg FROM v_besoin_12m bp
-                               WHERE bp.code_reference = $4), 0)
-               FROM reference r WHERE r.code_reference = $4",
-        )
-        .bind(uuid::Uuid::new_v4().to_string())
-        .bind(&id)
-        .bind((i + 1) as i64)
-        .bind(&l.code_reference)
-        .bind(&l.unite_commande)
-        .bind(facteur)
-        .bind(l.quantite_commandee_unite)
-        .bind(kg)
-        .bind(l.prix_unitaire_devise)
-        .bind(&devise)
-        .bind(&l.date_livraison_prevue)
-        .execute(&mut *tx)
         .await?;
         posees += 1;
     }
@@ -1169,7 +1142,11 @@ pub async fn lignes_bc(
     // jusqu'au prochain recalcul du MRP, puis mentirait sans le signaler.
     // L'ecart n'existe donc que le temps de l'affichage, et il est toujours vrai.
     let rows = sqlx::query(
-        "SELECT l.*, r.designation AS reference_designation, r.unite_catalogue,
+        // LE NOM DE LA LIGNE VIENT DE LA REFERENCE, OU DE LA LIGNE ELLE-MEME.
+        // Une ligne de service n'a pas de reference : c'est son libelle qui la
+        // nomme. Sans ce COALESCE, le transport s'afficherait sans intitule.
+        "SELECT l.*, COALESCE(r.designation, l.libelle) AS reference_designation,
+                r.unite_catalogue,
                 r.couleur, r.code_categorie, cat.libelle AS categorie_libelle,
                 r.poids_bobine_kg, r.bobines_par_palette,
 
@@ -1194,7 +1171,11 @@ pub async fn lignes_bc(
                      ELSE ROUND(COALESCE(b.besoin_12m_kg, 0) - l.besoin_kg_origine, 4)
                 END AS ecart_besoin_kg
            FROM ligne_bc l
-           JOIN reference r      ON r.code_reference = l.code_reference
+           -- JOINTURE EXTERNE, et non interne : une ligne de service n'a pas de
+           -- reference au catalogue. En interne, elle disparaissait purement et
+           -- simplement de la fiche du bon ET du bon imprime — c'est-a-dire du
+           -- document qu'on envoie au fournisseur et qu'il facture.
+           LEFT JOIN reference r  ON r.code_reference = l.code_reference
            JOIN bon_commande bc  ON bc.id_bc = l.id_bc
            LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
            LEFT JOIN v_besoin_12m b ON b.code_reference = l.code_reference
@@ -1211,11 +1192,151 @@ pub async fn lignes_bc(
 
 #[derive(Debug, Deserialize)]
 pub struct LigneBc {
-    pub code_reference: String,
+    /// `MARCHANDISE` (defaut) ou `SERVICE`. Absent : de la marchandise.
+    #[serde(default)]
+    pub type_ligne: Option<String>,
+    /// Nulle sur une ligne de service : il n'y a pas de reference a commander.
+    pub code_reference: Option<String>,
+    /// Ce que la ligne designe quand aucune reference ne la nomme.
+    pub libelle: Option<String>,
     pub unite_commande: String,
     pub quantite_commandee_unite: f64,
     pub prix_unitaire_devise: f64,
     pub date_livraison_prevue: Option<String>,
+}
+
+impl LigneBc {
+    fn est_service(&self) -> bool {
+        self.type_ligne.as_deref() == Some("SERVICE")
+    }
+
+    /// Ce qui nomme la ligne dans un message d'erreur.
+    fn nom(&self) -> String {
+        self.code_reference
+            .clone()
+            .or_else(|| self.libelle.clone())
+            .unwrap_or_else(|| "ligne sans intitule".into())
+    }
+}
+
+/// Ce qu'une ligne doit porter selon son type, dit AVANT d'ecrire.
+///
+/// La base le verifie aussi — le CHECK `ligne_bc_type_coherent` est la vraie
+/// garantie. Mais une violation de contrainte remonte un message de PostgreSQL
+/// que personne ne peut interpreter ; ici on nomme ce qui manque.
+fn valider_ligne_bc(l: &LigneBc) -> AppResult<()> {
+    if l.quantite_commandee_unite <= 0.0 || l.prix_unitaire_devise <= 0.0 {
+        return Err(AppError::Invalide(format!(
+            "{} : quantite et prix doivent etre strictement positifs",
+            l.nom()
+        )));
+    }
+    if l.est_service() {
+        if l.libelle.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            return Err(AppError::Invalide(
+                "Une prestation doit porter un intitule : c'est lui qui la nomme \
+                 sur le bon envoye au fournisseur."
+                    .into(),
+            ));
+        }
+        if l.code_reference.is_some() {
+            return Err(AppError::Invalide(
+                "Une prestation ne se rattache a aucune reference du catalogue : \
+                 elle n'entre jamais en stock."
+                    .into(),
+            ));
+        }
+    } else if l.code_reference.is_none() {
+        return Err(AppError::Invalide(
+            "Une ligne de marchandise exige une reference du catalogue.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Le poids et le facteur d'une ligne — ou la convention des prestations.
+///
+/// UNE PRESTATION N'A PAS DE POIDS. Zero kilo la fait sortir d'elle-meme de
+/// toutes les vues d'en-cours, qui filtrent `quantite_restante_kg > 0` : il n'y
+/// a pas un filtre a ajouter dans chacune. Le facteur vaut 1 pour que la colonne
+/// generee `prix_kg_devise` reste calculable sans division par zero.
+async fn poids_ligne_bc(db: &Db, l: &LigneBc) -> AppResult<(f64, f64)> {
+    if l.est_service() {
+        return Ok((0.0, 1.0));
+    }
+    let code = l
+        .code_reference
+        .as_deref()
+        .ok_or_else(|| AppError::Invalide("une ligne de marchandise exige une reference".into()))?;
+    vers_kg(db, code, l.quantite_commandee_unite, &l.unite_commande).await
+}
+
+/// L'INSERT d'une ligne de bon, marchandise ou prestation.
+///
+/// `INSERT … VALUES` ET NON `INSERT … SELECT … FROM reference`. L'ancienne forme
+/// n'inserait RIEN quand la reference n'existait pas — sans erreur, sans
+/// message : le bon sortait avec zero ligne alors que l'utilisateur croyait
+/// avoir saisi. Une prestation, qui n'a par definition aucune reference,
+/// tombait exactement dans ce piege.
+///
+/// `rattacher_au_plan` : a la creation, une ligne de marchandise reprend la
+/// proposition d'achat qui la justifie et le besoin du moment. Une ligne
+/// ajoutee apres coup ne le fait pas — la proposition ne serait alors marquee
+/// COMMANDE nulle part, et resterait comptee parmi les arbitrages ouverts.
+#[allow(clippy::too_many_arguments)]
+async fn inserer_ligne_bc(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id_ligne: &str,
+    id_bc: &str,
+    numero: i64,
+    l: &LigneBc,
+    kg: f64,
+    facteur: f64,
+    devise: &str,
+    rattacher_au_plan: bool,
+) -> AppResult<()> {
+    let (proposition, besoin) = if rattacher_au_plan {
+        (
+            "(SELECT pa.id_proposition FROM plan_achat pa
+                WHERE pa.code_reference = $5
+                  AND pa.statut IN ('PROPOSE','EN_REVISION','VALIDE') LIMIT 1)",
+            // NULL et non zero sur une prestation : le CHECK de la table exige
+            // qu'elle ne porte aucun besoin, et un zero serait un besoin.
+            "CASE WHEN $5 IS NULL THEN NULL
+                  ELSE COALESCE((SELECT bp.besoin_12m_kg FROM v_besoin_12m bp
+                                  WHERE bp.code_reference = $5), 0) END",
+        )
+    } else {
+        ("NULL", "NULL")
+    };
+
+    sqlx::query(&format!(
+        "INSERT INTO ligne_bc
+             (id_ligne_bc, id_bc, ligne_numero, type_ligne, code_reference, libelle,
+              designation, unite_commande, facteur_kg, quantite_commandee_unite,
+              quantite_commandee_kg, prix_unitaire_devise, code_devise,
+              date_livraison_prevue, id_proposition, besoin_kg_origine)
+         VALUES ($1, $2, $3, $4, $5, $6,
+                 COALESCE((SELECT r.designation FROM reference r
+                            WHERE r.code_reference = $5), $6),
+                 $7, $8, $9, $10, $11, $12, $13, {proposition}, {besoin})"
+    ))
+    .bind(id_ligne)
+    .bind(id_bc)
+    .bind(numero)
+    .bind(if l.est_service() { "SERVICE" } else { "MARCHANDISE" })
+    .bind(&l.code_reference)
+    .bind(l.libelle.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(&l.unite_commande)
+    .bind(facteur)
+    .bind(l.quantite_commandee_unite)
+    .bind(kg)
+    .bind(l.prix_unitaire_devise)
+    .bind(devise)
+    .bind(&l.date_livraison_prevue)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// Modification partielle d'une ligne : seuls les champs fournis changent.
@@ -1250,21 +1371,11 @@ pub async fn ajouter_ligne_bc(
     Json(l): Json<LigneBc>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
-    if l.quantite_commandee_unite <= 0.0 || l.prix_unitaire_devise <= 0.0 {
-        return Err(AppError::Invalide(
-            "quantite et prix doivent etre strictement positifs".into(),
-        ));
-    }
+    valider_ligne_bc(&l)?;
 
     // Le facteur est fige sur la ligne : si le conditionnement du fournisseur
     // change, les commandes passees restent reconstituables.
-    let (kg, facteur) = vers_kg(
-        &state.db,
-        &l.code_reference,
-        l.quantite_commandee_unite,
-        &l.unite_commande,
-    )
-    .await?;
+    let (kg, facteur) = poids_ligne_bc(&state.db, &l).await?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -1289,27 +1400,7 @@ pub async fn ajouter_ligne_bc(
     .await?;
 
     let id_ligne = uuid::Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO ligne_bc
-             (id_ligne_bc, id_bc, ligne_numero, code_reference, designation,
-              unite_commande, facteur_kg, quantite_commandee_unite, quantite_commandee_kg,
-              prix_unitaire_devise, code_devise, date_livraison_prevue)
-         SELECT $1, $2, $3, $4, r.designation, $5, $6, $7, $8, $9, $10, $11
-           FROM reference r WHERE r.code_reference = $4",
-    )
-    .bind(&id_ligne)
-    .bind(&id)
-    .bind(numero)
-    .bind(&l.code_reference)
-    .bind(&l.unite_commande)
-    .bind(facteur)
-    .bind(l.quantite_commandee_unite)
-    .bind(kg)
-    .bind(l.prix_unitaire_devise)
-    .bind(&devise)
-    .bind(&l.date_livraison_prevue)
-    .execute(&mut *tx)
-    .await?;
+    inserer_ligne_bc(&mut tx, &id_ligne, &id, numero, &l, kg, facteur, &devise, false).await?;
 
     recalculer_bc(&mut tx, &id).await?;
     tx.commit().await?;
@@ -1751,9 +1842,17 @@ pub async fn modifier_ligne_bc(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let (statut_bc, code_reference, unite, recue): (String, String, String, f64) =
-        sqlx::query_as(
-            "SELECT bc.statut, lb.code_reference, lb.unite_commande,
+    // `Option<String>` POUR LA REFERENCE : une ligne de prestation n'en porte
+    // pas. Decodee en `String`, sqlx echouait en erreur interne des qu'on
+    // touchait au prix d'un transport.
+    let (statut_bc, type_ligne, code_reference, unite, recue): (
+        String,
+        String,
+        Option<String>,
+        String,
+        f64,
+    ) = sqlx::query_as(
+            "SELECT bc.statut, lb.type_ligne, lb.code_reference, lb.unite_commande,
                     COALESCE(lb.quantite_recue_kg, 0)::float8
                FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
               WHERE lb.id_ligne_bc = $1 AND lb.id_bc = $2",
@@ -1774,7 +1873,16 @@ pub async fn modifier_ligne_bc(
         if q <= 0.0 {
             return Err(AppError::Invalide("la quantite doit etre positive".into()));
         }
-        let (kg, facteur) = vers_kg(&state.db, &code_reference, q, &unite).await?;
+        // Une prestation garde son poids nul et son facteur de 1 : c'est ce que
+        // le CHECK de la table exige, et il n'y a rien a convertir.
+        let (kg, facteur) = if type_ligne == "SERVICE" {
+            (0.0, 1.0)
+        } else {
+            let code = code_reference.as_deref().ok_or_else(|| {
+                AppError::Invalide("ligne de marchandise sans reference".into())
+            })?;
+            vers_kg(&state.db, code, q, &unite).await?
+        };
         if kg < recue {
             return Err(AppError::RegleMetier(format!(
                 "Deja {recue:.2} kg receptionnes sur cette ligne : la quantite ne peut pas \
@@ -2074,7 +2182,13 @@ pub async fn lignes_attendues(
            FROM ligne_bc lb
            JOIN bon_commande bc ON bc.id_bc = lb.id_bc
            JOIN reference r ON r.code_reference = lb.code_reference
-          WHERE lb.statut <> 'ANNULE'
+          -- LE QUAI N'ATTEND QUE DE LA MARCHANDISE. La jointure interne ci-dessus
+          -- suffirait aujourd'hui, mais c'est une protection accidentelle : le
+          -- jour ou elle passera en jointure externe — comme celle de la fiche du
+          -- bon vient de le faire — « FRET MARITIME » apparaitrait dans l'ecran
+          -- de pesee, avec un prix au kilo absurde.
+          WHERE lb.type_ligne = 'MARCHANDISE'
+            AND lb.statut <> 'ANNULE'
             AND ($1 IS NULL OR lb.id_bc = $1)
             AND ($3 IS NULL OR (bc.code_fournisseur = $3
                                 AND bc.statut IN ('ENVOYE','LIVRE_PARTIEL')))

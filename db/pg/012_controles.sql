@@ -289,6 +289,7 @@ JOIN reference r     ON r.code_reference = lb.code_reference
 CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_RetardBCJours') p
 WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
   AND lb.statut NOT IN ('ANNULE','SOLDE')
+  AND lb.type_ligne = 'MARCHANDISE'
   AND lb.quantite_restante_kg > 0
   AND substr(lb.date_livraison_prevue, 1, 10) < to_char(current_date - (p.v)::integer, 'YYYY-MM-DD');
 

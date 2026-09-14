@@ -397,9 +397,15 @@ pub async fn valider(
             continue;
         }
 
+        // SEULE LA MARCHANDISE DECIDE DE LA CLOTURE. Une ligne de service —
+        // transport, commission — ne se receptionne jamais : rien ne viendra
+        // jamais la solder. Sans ce filtre, un bon portant du fret resterait
+        // LIVRE_PARTIEL a vie, ressortirait en en-cours d'approvisionnement et
+        // partirait en anomalie au controle C02.
         let restantes: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM ligne_bc
-              WHERE id_bc = $1 AND statut NOT IN ('SOLDE','ANNULE')",
+              WHERE id_bc = $1 AND statut NOT IN ('SOLDE','ANNULE')
+                AND type_ligne = 'MARCHANDISE'",
         )
         .bind(&b.id_bc)
         .fetch_one(&mut *tx)

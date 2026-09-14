@@ -49,7 +49,10 @@ interface Bc {
 interface LigneBc {
   id_ligne_bc: string
   ligne_numero: number
-  code_reference: string
+  /** `MARCHANDISE` ou `SERVICE` — une prestation n'a pas de reference. */
+  type_ligne?: string
+  code_reference: string | null
+  libelle?: string | null
   reference_designation: string
   unite_commande: string
   quantite_commandee_unite: number
@@ -155,14 +158,24 @@ export function BonCommandeEtat() {
             { entete: 'N°', valeur: (l) => l.ligne_numero, numerique: true },
             {
               entete: 'Référence',
-              valeur: (l) => (
-                <>
-                  <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
-                  {l.reference_designation && (
-                    <div className="text-[9px] text-neutral-600">{l.reference_designation}</div>
-                  )}
-                </>
-              ),
+              // UNE PRESTATION N'A PAS DE REFERENCE. Son libelle la nomme —
+              // en romain, pas en chasse fixe : ce n'est pas un code.
+              valeur: (l) =>
+                l.code_reference ? (
+                  <>
+                    <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
+                    {l.reference_designation && (
+                      <div className="text-[9px] text-neutral-600">{l.reference_designation}</div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="text-[10px] font-medium">
+                      {l.libelle ?? l.reference_designation}
+                    </div>
+                    <div className="text-[9px] text-neutral-600">Prestation</div>
+                  </>
+                ),
             },
             {
               entete: 'Quantité',
@@ -173,7 +186,7 @@ export function BonCommandeEtat() {
                   {/* Le kilo est l'unite canonique de l'ERP ; le fournisseur
                       livre dans la sienne. Porter les deux evite la conversion
                       de tete au quai, qui est la source d'erreur classique. */}
-                  {l.unite_commande !== 'kg' && (
+                  {l.unite_commande !== 'kg' && l.type_ligne !== 'SERVICE' && (
                     <div className="text-[9px] text-neutral-600">
                       {fmt.nombre(l.quantite_commandee_kg, 2)} kg
                     </div>

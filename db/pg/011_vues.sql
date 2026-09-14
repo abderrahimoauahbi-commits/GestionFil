@@ -195,6 +195,7 @@ FROM ligne_bc lb
 JOIN bon_commande bc ON bc.id_bc = lb.id_bc
 WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
   AND lb.statut NOT IN ('ANNULE','SOLDE')
+  AND lb.type_ligne = 'MARCHANDISE'
   AND lb.quantite_restante_kg > 0
 GROUP BY lb.code_reference;
 
@@ -367,6 +368,7 @@ JOIN bon_commande bc ON bc.id_bc = lb.id_bc
 CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_RetardBCJours') p_ret
 WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
   AND lb.statut NOT IN ('ANNULE','SOLDE')
+  AND lb.type_ligne = 'MARCHANDISE'
   AND lb.quantite_restante_kg > 0
 GROUP BY lb.code_reference;
 

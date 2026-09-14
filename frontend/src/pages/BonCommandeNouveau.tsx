@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Link2, Save, Search, Unlink2 } from 'lucide-react'
+import { ArrowLeft, Link2, Plus, Save, Search, Trash2, Unlink2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -65,6 +65,49 @@ interface Choix {
   lie: boolean
   /** Toujours par KILO, quelle que soit l'unite de commande. */
   prix: string
+}
+
+/**
+ * UNE PRESTATION : ce qui se commande sans entrer en stock.
+ *
+ * Transport, commission d'agent, piece detachee, montage. Cela se commande, se
+ * facture, et doit figurer sur le bon envoye au fournisseur comme au montant
+ * engage — mais rien n'en sera pese au quai. Faute de pouvoir le porter, il
+ * fallait inventer une fausse reference au catalogue, qui entrait ensuite en
+ * stock et faussait le cout de revient de la matiere.
+ *
+ * Elle n'a ni reference, ni poids, ni conversion : un intitule, une quantite
+ * dans son unite a elle, un prix unitaire.
+ */
+interface Prestation {
+  cle: string
+  libelle: string
+  unite: string
+  quantite: string
+  prix: string
+}
+
+/** Les unites d'une prestation : rien ne s'y pese. */
+const UNITES_PRESTATION = ['Forfait', 'Unite', 'Heure'] as const
+
+/** Une prestation part au serveur quand elle porte un intitule, un compte et un prix. */
+const estPrete = (p: Prestation) =>
+  !!p.libelle.trim() && Number(p.quantite) > 0 && Number(p.prix) > 0
+
+/** Une prestation commencee mais incomplete : elle bloque l'enregistrement. */
+const estEbauche = (p: Prestation) =>
+  !estPrete(p) && (!!p.libelle.trim() || Number(p.prix) > 0)
+
+let compteurPrestation = 0
+function prestationVide(): Prestation {
+  compteurPrestation += 1
+  return {
+    cle: `p-${compteurPrestation}`,
+    libelle: '',
+    unite: 'Forfait',
+    quantite: '1',
+    prix: '',
+  }
 }
 
 interface RefCommandable extends Record<string, unknown> {
@@ -145,6 +188,7 @@ export function BonCommandeNouveau() {
    * pour contourner l'ecran.
    */
   const [toutCatalogue, setToutCatalogue] = useState(false)
+  const [prestations, setPrestations] = useState<Prestation[]>([])
   const [erreur, setErreur] = useState<string | null>(null)
 
   /* --- Arrivee ciblee : /bons-commande/nouveau?reference=X ----------------
@@ -299,7 +343,16 @@ export function BonCommandeNouveau() {
     mutationFn: () =>
       api.post<{ id_bc: string; numero_bc: string; lignes: number }>('/api/bons-commande', {
         ...entete,
-        lignes: Object.entries(choix).map(([code, v]) => ({
+        lignes: [
+          ...prestations.filter(estPrete).map((p) => ({
+            type_ligne: 'SERVICE',
+            libelle: p.libelle.trim(),
+            unite_commande: p.unite,
+            quantite_commandee_unite: Number(p.quantite),
+            prix_unitaire_devise: Number(p.prix),
+          })),
+          ...Object.entries(choix).map(([code, v]) => ({
+          type_ligne: 'MARCHANDISE',
           code_reference: code,
           unite_commande: v.unite,
           quantite_commandee_unite: Number(v.qte),
@@ -309,7 +362,8 @@ export function BonCommandeNouveau() {
           // conversion se fait ici, une fois, plutot que de tete a chaque ligne.
           prix_unitaire_devise:
             Number(v.prix) * (facteurVersKg(v.unite, condDe(code)) ?? 1),
-        })),
+          })),
+        ],
       }),
     onSuccess: (r) => {
       toast.success(`${r.numero_bc} cree`, {
@@ -380,14 +434,18 @@ export function BonCommandeNouveau() {
       }
     })
 
-  const nb = Object.keys(choix).length
-  const complet = Object.entries(choix).every(
-    ([code, v]) => Number(v.qte) > 0 && Number(v.prix) > 0 && kgDe(code, v) !== null,
-  )
-  const total = Object.entries(choix).reduce(
-    (s, [code, v]) => s + (kgDe(code, v) ?? 0) * Number(v.prix),
-    0,
-  )
+  const pretes = prestations.filter(estPrete)
+  const ebauches = prestations.filter(estEbauche)
+  const nb = Object.keys(choix).length + pretes.length
+  const complet =
+    Object.entries(choix).every(
+      ([code, v]) => Number(v.qte) > 0 && Number(v.prix) > 0 && kgDe(code, v) !== null,
+    ) && ebauches.length === 0
+  const total =
+    Object.entries(choix).reduce(
+      (s, [code, v]) => s + (kgDe(code, v) ?? 0) * Number(v.prix),
+      0,
+    ) + pretes.reduce((s, p) => s + Number(p.quantite) * Number(p.prix), 0)
   // Une unite que la reference ne sait pas convertir sera REFUSEE par le serveur
   // (R01, jamais de repli sur un facteur de 1). Autant le dire tout de suite.
   const sansFacteur = Object.entries(choix).filter(
@@ -835,6 +893,134 @@ export function BonCommandeNouveau() {
                     </div>
                   </>
                 )
+              )}
+            </CarteCorps>
+          </Carte>
+        )}
+
+        {/* ---- Ce qui se commande sans entrer en stock ------------------- */}
+        {entete.code_fournisseur && (
+          <Carte className="mt-3">
+            <CarteEntete>
+              <CarteTitre>Prestations et frais</CarteTitre>
+              <Bouton
+                variante="contour"
+                taille="sm"
+                onClick={() => setPrestations((p) => [...p, prestationVide()])}
+              >
+                <Plus />
+                Ajouter une prestation
+              </Bouton>
+            </CarteEntete>
+            <CarteCorps>
+              {prestations.length === 0 ? (
+                <p className="text-[11px] text-attenue-texte">
+                  Transport, commission d'agent, pièce détachée, montage : ce qui se commande et se
+                  facture sans jamais entrer en stock. Ces lignes figurent sur le bon envoyé au
+                  fournisseur et dans le montant engagé, mais rien n'en sera pesé au quai.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {prestations.map((p, i) => (
+                    <div
+                      key={p.cle}
+                      className="grid items-end gap-2 sm:grid-cols-[1fr_8rem_6rem_8rem_8rem_2rem]"
+                    >
+                      <div>
+                        {i === 0 && <Etiq obligatoire>Intitulé</Etiq>}
+                        <Champ
+                          value={p.libelle}
+                          placeholder="Fret maritime Izmir — Tanger"
+                          onChange={(e) =>
+                            setPrestations((ps) =>
+                              ps.map((x) =>
+                                x.cle === p.cle ? { ...x, libelle: e.target.value } : x,
+                              ),
+                            )
+                          }
+                          className={cn(
+                            !p.libelle.trim() && Number(p.prix) > 0 && 'border-danger',
+                          )}
+                        />
+                      </div>
+                      <div>
+                        {i === 0 && <Etiq>Unité</Etiq>}
+                        <Selecteur
+                          value={p.unite}
+                          onChange={(e) =>
+                            setPrestations((ps) =>
+                              ps.map((x) => (x.cle === p.cle ? { ...x, unite: e.target.value } : x)),
+                            )
+                          }
+                        >
+                          {UNITES_PRESTATION.map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
+                        </Selecteur>
+                      </div>
+                      <div>
+                        {i === 0 && <Etiq>Nombre</Etiq>}
+                        <Champ
+                          type="number"
+                          step="any"
+                          min="0.0001"
+                          value={p.quantite}
+                          onChange={(e) =>
+                            setPrestations((ps) =>
+                              ps.map((x) =>
+                                x.cle === p.cle ? { ...x, quantite: e.target.value } : x,
+                              ),
+                            )
+                          }
+                          className="text-right tabular-nums"
+                        />
+                      </div>
+                      <div>
+                        {i === 0 && <Etiq obligatoire>Prix {devise}</Etiq>}
+                        <Champ
+                          type="number"
+                          step="any"
+                          min="0.0001"
+                          value={p.prix}
+                          onChange={(e) =>
+                            setPrestations((ps) =>
+                              ps.map((x) => (x.cle === p.cle ? { ...x, prix: e.target.value } : x)),
+                            )
+                          }
+                          className={cn(
+                            'text-right tabular-nums',
+                            !(Number(p.prix) > 0) && !!p.libelle.trim() && 'border-danger',
+                          )}
+                        />
+                      </div>
+                      <div>
+                        {i === 0 && <Etiq>Total</Etiq>}
+                        <div className="flex h-8 items-center justify-end rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[13px] tabular-nums">
+                          {fmt.nombre(Number(p.quantite) * Number(p.prix), 2)}
+                        </div>
+                      </div>
+                      <Bouton
+                        variante="discret"
+                        taille="icone-xs"
+                        className="mb-1 text-danger hover:bg-danger/10"
+                        aria-label="Retirer la prestation"
+                        onClick={() =>
+                          setPrestations((ps) => ps.filter((x) => x.cle !== p.cle))
+                        }
+                      >
+                        <Trash2 />
+                      </Bouton>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-attenue-texte">
+                    Ces lignes n'entrent pas en stock et ne se réceptionnent pas : elles n'ont ni
+                    référence, ni poids. Pour un transport dont le coût doit peser sur le prix de
+                    revient de la matière, passez plutôt par les frais d'approche du dossier
+                    d'import — ils s'y répartissent au poids.
+                  </p>
+                </div>
               )}
             </CarteCorps>
           </Carte>

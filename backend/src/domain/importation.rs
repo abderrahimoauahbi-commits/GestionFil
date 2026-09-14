@@ -459,9 +459,12 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
         sqlx::query(
             "UPDATE bon_commande b
                 SET statut = n.nouveau
+               -- Seule la MARCHANDISE decide de la cloture : une ligne de
+               -- service ne se receptionne jamais, donc rien ne la soldera.
                FROM (SELECT CASE WHEN EXISTS (SELECT 1 FROM ligne_bc l
                                                WHERE l.id_bc = $1
-                                                 AND l.statut NOT IN ('SOLDE','ANNULE'))
+                                                 AND l.statut NOT IN ('SOLDE','ANNULE')
+                                                 AND l.type_ligne = 'MARCHANDISE')
                                  THEN 'LIVRE_PARTIEL' ELSE 'CLOTURE' END AS nouveau) n
               WHERE b.id_bc = $1 AND b.statut IN ('ENVOYE','LIVRE_PARTIEL')
                 AND b.statut <> n.nouveau",

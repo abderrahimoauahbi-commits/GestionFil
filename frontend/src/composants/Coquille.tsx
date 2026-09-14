@@ -28,12 +28,12 @@ import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
+import { AideEcran } from './AideEcran'
 import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
 import {
-  Aide,
   Menu,
   MenuContenu,
   MenuDeclencheur,
@@ -750,9 +750,10 @@ export function EnTetePage({
     >
       <div className="flex min-w-0 items-center gap-1.5">
         <h1 className="text-[15px] font-semibold leading-tight tracking-tight">{titre}</h1>
-        {/* La description tient dans une aide plutot que sous le titre : trois
-            lignes de prose en tete d'ecran repoussent le contenu utile. */}
-        {description && <Aide>{description}</Aide>}
+        {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
+            par la route courante : aucun ecran n'a a la declarer, donc aucun ne
+            peut l'oublier. */}
+        <AideEcran description={description} />
       </div>
       {/* LES ACTIONS PRENNENT LEUR PROPRE LIGNE SUR TELEPHONE.
 

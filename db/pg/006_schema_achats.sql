@@ -87,7 +87,7 @@ CREATE TABLE ligne_bc (
     -- Le modele vient de la facture d'import (018_schema_import.sql), qui resout
     -- deja le meme probleme : meme vocabulaire, meme CHECK d'exclusion mutuelle.
     type_ligne          text    NOT NULL DEFAULT 'MARCHANDISE'
-                                CHECK (type_ligne IN ('MARCHANDISE','SERVICE')),
+                                CHECK (type_ligne IN ('MARCHANDISE','LIBRE','SERVICE')),
     code_reference      text    REFERENCES reference(code_reference),
     -- Ce que la ligne designe quand aucune reference ne la nomme.
     libelle             text,
@@ -147,7 +147,7 @@ CREATE TABLE ligne_bc (
         (type_ligne = 'MARCHANDISE'
              AND code_reference IS NOT NULL
              AND quantite_commandee_kg > 0)
-     OR (type_ligne = 'SERVICE'
+     OR (type_ligne IN ('LIBRE','SERVICE')
              AND code_reference IS NULL
              AND libelle IS NOT NULL AND btrim(libelle) <> ''
              AND quantite_commandee_kg = 0

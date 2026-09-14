@@ -1206,8 +1206,13 @@ pub struct LigneBc {
 }
 
 impl LigneBc {
-    fn est_service(&self) -> bool {
-        self.type_ligne.as_deref() == Some("SERVICE")
+    /// Une ligne SANS reference au catalogue : prestation ou ligne libre.
+    ///
+    /// Les deux se comportent pareil ici — ni poids, ni conversion, ni entree
+    /// en stock. Ce qui les separe se joue au quai : un echantillon arrive,
+    /// un fret non.
+    fn sans_reference(&self) -> bool {
+        matches!(self.type_ligne.as_deref(), Some("SERVICE") | Some("LIBRE"))
     }
 
     /// Ce qui nomme la ligne dans un message d'erreur.
@@ -1231,18 +1236,18 @@ fn valider_ligne_bc(l: &LigneBc) -> AppResult<()> {
             l.nom()
         )));
     }
-    if l.est_service() {
+    if l.sans_reference() {
         if l.libelle.as_deref().map(str::trim).unwrap_or("").is_empty() {
             return Err(AppError::Invalide(
-                "Une prestation doit porter un intitule : c'est lui qui la nomme \
-                 sur le bon envoye au fournisseur."
+                "Une ligne sans reference doit porter un intitule : c'est lui qui la \
+                 nomme sur le bon envoye au fournisseur."
                     .into(),
             ));
         }
         if l.code_reference.is_some() {
             return Err(AppError::Invalide(
-                "Une prestation ne se rattache a aucune reference du catalogue : \
-                 elle n'entre jamais en stock."
+                "Une prestation ou une ligne libre ne se rattache a aucune reference \
+                 du catalogue : elle n'entre jamais en stock."
                     .into(),
             ));
         }
@@ -1261,7 +1266,7 @@ fn valider_ligne_bc(l: &LigneBc) -> AppResult<()> {
 /// a pas un filtre a ajouter dans chacune. Le facteur vaut 1 pour que la colonne
 /// generee `prix_kg_devise` reste calculable sans division par zero.
 async fn poids_ligne_bc(db: &Db, l: &LigneBc) -> AppResult<(f64, f64)> {
-    if l.est_service() {
+    if l.sans_reference() {
         return Ok((0.0, 1.0));
     }
     let code = l
@@ -1324,7 +1329,12 @@ async fn inserer_ligne_bc(
     .bind(id_ligne)
     .bind(id_bc)
     .bind(numero)
-    .bind(if l.est_service() { "SERVICE" } else { "MARCHANDISE" })
+    .bind(
+        l.type_ligne
+            .as_deref()
+            .filter(|t| *t == "SERVICE" || *t == "LIBRE")
+            .unwrap_or("MARCHANDISE"),
+    )
     .bind(&l.code_reference)
     .bind(l.libelle.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(&l.unite_commande)
@@ -1695,6 +1705,45 @@ pub async fn references_commandables(
     // catalogue entier sur demande.
     let toutes: i64 = if q.get("toutes").map(String::as_str) == Some("1") { 1 } else { 0 };
 
+    // LA RECHERCHE SE FAIT ICI, PAS DANS LE NAVIGATEUR.
+    //
+    // Sur 124 references, charger tout le catalogue et filtrer a l'ecran
+    // passait. Sur 1000 — et ce catalogue y va — c'est une seconde d'attente a
+    // chaque ouverture d'ecran, et une liste que personne ne peut parcourir.
+    // L'acheteur tape « bleu 1500 » : le serveur rend les quelques lignes qui
+    // correspondent, avec leur prix et ce que le plan en dit.
+    //
+    // Chaque mot doit etre trouve, dans n'importe quelle colonne : la reference,
+    // la designation, la couleur, le type de fil, ou le nom du fournisseur —
+    // ce dernier compte quand on ouvre le catalogue entier.
+    let recherche = q.get("recherche").map(|s| s.trim()).filter(|s| !s.is_empty());
+    let mots: Vec<String> = recherche
+        .map(|r| r.split_whitespace().map(|m| format!("%{m}%")).collect())
+        .unwrap_or_default();
+    let filtre_recherche = if mots.is_empty() {
+        String::new()
+    } else {
+        // $5 et au-dela : les quatre premiers parametres sont deja pris.
+        (0..mots.len())
+            .map(|i| {
+                let n = i + 5;
+                format!(
+                    " AND (r.code_reference ILIKE ${n} OR r.designation ILIKE ${n}
+                           OR COALESCE(r.couleur, '') ILIKE ${n}
+                           OR COALESCE(r.type_fil, '') ILIKE ${n}
+                           OR f.nom ILIKE ${n})"
+                )
+            })
+            .collect()
+    };
+    // Une recherche rend peu de lignes ; sans recherche on garde le plafond
+    // d'origine, puisque l'ecran groupe encore par section.
+    let plafond: i64 = q
+        .get("limite")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(if recherche.is_some() { 25 } else { 2000 })
+        .clamp(1, 2000);
+
     let fournisseur: String = match q.get("code_fournisseur") {
         Some(f) if !f.is_empty() => f.clone(),
         _ => sqlx::query_scalar("SELECT code_fournisseur FROM bon_commande WHERE id_bc = $1")
@@ -1724,9 +1773,17 @@ pub async fn references_commandables(
     .fetch_one(&state.db)
     .await?;
 
-    let rows = sqlx::query(
+    let sql_commandables = format!(
         "SELECT r.code_reference, r.designation, r.unite_catalogue, r.prix_catalogue,
                 r.code_devise_catalogue, r.classe_abc, r.moq_kg, r.multiple_achat_kg,
+                -- LE CONDITIONNEMENT VOYAGE AVEC LA SUGGESTION.
+                --
+                -- L'ecran convertissait palettes et bobines en kilos grace au
+                -- catalogue entier, charge a chaque ouverture. A mille
+                -- references ce n'est plus tenable : les parametres partent
+                -- desormais avec chaque ligne trouvee, et le catalogue n'est
+                -- plus charge du tout.
+                r.poids_bobine_kg, r.bobines_par_palette, r.densite_kg_ml,
                 -- LE FOURNISSEUR HABITUEL, pas une exclusivite. Le catalogue dit
                 -- chez qui on achete d'ordinaire ; rien n'empeche de commander
                 -- le meme fil ailleurs quand le prix ou le delai l'exigent. Le
@@ -1809,17 +1866,25 @@ pub async fn references_commandables(
            JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
            LEFT JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
            LEFT JOIN v_plan_achat    pa ON pa.code_reference = r.code_reference
-          WHERE r.actif = 1 AND ($4 = 1 OR r.code_fournisseur = $2)
-          ORDER BY CASE sp.statut WHEN 'RUPTURE' THEN 1 WHEN 'CRITIQUE' THEN 2
+          WHERE r.actif = 1 AND ($4 = 1 OR r.code_fournisseur = $2){filtre_recherche}
+          -- CE QUE LE PLAN RECLAME D'ABORD, puis ce qui est en tension. Quand on
+          -- cherche a la frappe, les premieres lignes doivent etre celles qu'on
+          -- avait des raisons de commander.
+          ORDER BY CASE WHEN COALESCE(pa.qte_a_commander_kg, 0) > 0 THEN 0 ELSE 1 END,
+                   CASE sp.statut WHEN 'RUPTURE' THEN 1 WHEN 'CRITIQUE' THEN 2
                                   WHEN 'ATTENTION' THEN 3 ELSE 4 END,
-                   r.code_reference",
-    )
+                   r.code_reference
+          LIMIT {plafond}"
+    );
+    let mut requete = sqlx::query(&sql_commandables)
     .bind(&id)
     .bind(&fournisseur)
     .bind(taux)
-    .bind(toutes)
-    .fetch_all(&state.db)
-    .await?;
+    .bind(toutes);
+    for mot in &mots {
+        requete = requete.bind(mot);
+    }
+    let rows = requete.fetch_all(&state.db).await?;
 
     let mut valeur = lignes_en_json(&rows);
     user.masquer(&state.db, module::BONS_COMMANDE, &mut valeur).await?;
@@ -1875,7 +1940,7 @@ pub async fn modifier_ligne_bc(
         }
         // Une prestation garde son poids nul et son facteur de 1 : c'est ce que
         // le CHECK de la table exige, et il n'y a rien a convertir.
-        let (kg, facteur) = if type_ligne == "SERVICE" {
+        let (kg, facteur) = if type_ligne != "MARCHANDISE" {
             (0.0, 1.0)
         } else {
             let code = code_reference.as_deref().ok_or_else(|| {

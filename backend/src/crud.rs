@@ -452,22 +452,36 @@ pub async fn lister(
     }
     if let Some(motif) = &f.recherche {
         // Recherche sur la cle et les colonnes textuelles usuelles.
-        let cibles: Vec<String> = ["libelle", "nom", "designation", "couleur"]
+        //
+        // CHAQUE MOT DOIT ETRE TROUVE, pas la chaine entiere. On tape « bleu
+        // 1500 » en pensant a la matiere, pas a l'ordre des mots de sa
+        // designation ; chercher « bleu 1500 » d'un bloc ne rend rien des que la
+        // reference s'appelle « PP-1500 Dtex-Bleu 6666 ». Les mots se cumulent
+        // en ET, chacun pouvant tomber dans n'importe quelle colonne : la
+        // recherche se resserre a mesure qu'on tape, ce qui est exactement ce
+        // qu'on attend d'une saisie a la frappe.
+        //
+        // `ILIKE` ET NON `LIKE` : PostgreSQL distingue la casse. En `LIKE`,
+        // taper « pes » ne trouvait jamais « PES-3000 Deniers » — le champ de
+        // recherche paraissait casse alors qu'il obeissait a la lettre.
+        let cibles: Vec<String> = ["libelle", "nom", "designation", "couleur", "type_fil"]
             .iter()
             .filter(|c| e.creation.contains(*c))
             .map(|c| format!("c.{c}"))
             .chain(std::iter::once(format!("c.{}", e.cle)))
             .collect();
-        valeurs.push(format!("%{motif}%"));
-        let i = valeurs.len();
-        conditions.push(format!(
-            "({})",
-            cibles
-                .iter()
-                .map(|c| format!("{c} LIKE ${i}"))
-                .collect::<Vec<_>>()
-                .join(" OR ")
-        ));
+        for mot in motif.split_whitespace() {
+            valeurs.push(format!("%{mot}%"));
+            let i = valeurs.len();
+            conditions.push(format!(
+                "({})",
+                cibles
+                    .iter()
+                    .map(|c| format!("COALESCE({c}, '') ILIKE ${i}"))
+                    .collect::<Vec<_>>()
+                    .join(" OR ")
+            ));
+        }
     }
 
     let ou = if conditions.is_empty() {

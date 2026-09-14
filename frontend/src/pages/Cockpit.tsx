@@ -595,6 +595,14 @@ export function Cockpit() {
         </CarteCorps>
       </Carte>
 
+      {/* ---- Par famille ----------------------------------------------------
+           L'atelier compte par famille, comme les classeurs : une feuille par
+           famille, les couleurs en colonnes. Le tableau de bord en donne la
+           tete — les cinq plus lourdes — et renvoie a la statistique complete.
+           Le detail n'a pas sa place ici : on vient au cockpit pour decider,
+           pas pour depouiller.                                                */}
+      {peut('MOUVEMENTS', 'LIRE') && <BlocFamilles />}
+
       {/* ---- Controles de coherence ---------------------------------------- */}
       <TitreBande texte="Sante du referentiel" />
       <Carte repliable="cockpit.2">
@@ -1046,5 +1054,129 @@ function ChiffresCles() {
         </div>
       )}
     </div>
+  )
+}
+
+
+/**
+ * Les familles qui portent le plus de stock, et ce qui est entre cette annee.
+ *
+ * POURQUOI LA FAMILLE ET NON LA REFERENCE. Une liste de references ne se lit
+ * pas d'un coup d'oeil ; l'atelier raisonne par famille — « combien de 1500
+ * dtex » — et c'est la forme des classeurs depuis toujours.
+ *
+ * CE QUI N'EST PAS CLASSE APPARAIT AUSSI, sous « Sans famille » : l'ecarter
+ * donnerait un total faux et ferait croire le catalogue plus propre qu'il
+ * n'est. Cette ligne-la est une invitation a completer le catalogue.
+ */
+function BlocFamilles() {
+  const naviguer = useNavigate()
+  const droits = useDroits('MOUVEMENTS')
+  const q = useQuery({
+    queryKey: ['stats', 'familles'],
+    queryFn: () => api.get<Record<string, Record<string, unknown>[]>>('/api/stats/familles'),
+    staleTime: 5 * 60_000,
+  })
+
+  const familles = q.data?.familles ?? []
+  // Une ligne par (famille, annee) : on garde la plus recente de chaque famille.
+  const tete = useMemo(() => {
+    const par = new Map<string, Record<string, unknown>>()
+    for (const f of familles) {
+      const cle = String(f.code_famille ?? '')
+      const vue = par.get(cle)
+      if (!vue || String(f.annee ?? '') > String(vue.annee ?? '')) par.set(cle, f)
+    }
+    return [...par.values()]
+      .sort((x, y) => Number(y.stock_kg ?? 0) - Number(x.stock_kg ?? 0))
+      .slice(0, 6)
+  }, [familles])
+
+  const total = tete.reduce((s, f) => s + Number(f.stock_kg ?? 0), 0)
+  const voitValeur = droits.visible('valeur_dhs')
+
+  if (q.isLoading) {
+    return (
+      <>
+        <TitreBande texte="Par famille" />
+        <Carte>
+          <CarteCorps className="space-y-2 p-4">
+            <Squelette className="h-6" />
+            <Squelette className="h-6" />
+          </CarteCorps>
+        </Carte>
+      </>
+    )
+  }
+  if (tete.length === 0) return null
+
+  return (
+    <>
+      <TitreBande texte="Par famille" />
+      <Carte repliable="cockpit.familles">
+        <CarteEntete>
+          <CarteTitre>Ce que chaque famille porte</CarteTitre>
+          <button
+            type="button"
+            onClick={() => naviguer('/statistiques')}
+            className="text-[11.5px] font-medium text-primaire hover:underline"
+          >
+            Toutes les familles et leurs couleurs
+          </button>
+        </CarteEntete>
+        <CarteCorps className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[30rem] text-[13px] lg:min-w-0">
+              <thead>
+                <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                  <th className="px-3 py-2 text-left">Famille</th>
+                  <th className="w-28 px-2 py-2 text-right">Stock</th>
+                  <th className="w-32 px-3 py-2 text-left">Part</th>
+                  <th className="w-28 px-2 py-2 text-right">Entrees</th>
+                  {voitValeur && <th className="w-32 px-2 py-2 text-right">Valeur</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {tete.map((f, i) => {
+                  const stock = Number(f.stock_kg ?? 0)
+                  const sansFamille = String(f.code_famille ?? '') === '(sans famille)'
+                  return (
+                    <tr key={i} className="border-b border-bordure/60">
+                      <td className="max-w-56 px-3 py-1.5">
+                        <div className="truncate font-medium">{String(f.famille_libelle ?? '')}</div>
+                        <div className="truncate text-[11px] text-attenue-texte">
+                          {sansFamille
+                            ? 'a classer dans le catalogue'
+                            : String(f.categorie_libelle ?? '')}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {stock > 0 ? `${fmt.nombre(stock, 0)} kg` : '—'}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-bordure/60">
+                          <div
+                            className={cn('h-full rounded-full', sansFamille ? 'bg-alerte' : 'bg-primaire')}
+                            style={{ width: `${Math.max(1, total > 0 ? (stock / total) * 100 : 0)}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-succes">
+                        {Number(f.entrees_kg ?? 0) > 0 ? fmt.nombre(Number(f.entrees_kg), 0) : '—'}
+                      </td>
+                      {voitValeur && (
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(Number(f.valeur_dhs ?? 0), 0)}
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CarteCorps>
+      </Carte>
+    </>
   )
 }

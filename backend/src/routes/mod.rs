@@ -343,6 +343,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/frais-approche",
              get(consultation::frais_approche).post(operations::creer_frais_approche))
         .route("/api/stats/mouvements", get(consultation::stats_mouvements))
+        .route("/api/stats/familles", get(consultation::stats_familles))
         .route("/api/stats/prix", get(consultation::stats_prix))
         .route("/api/stats/fournisseurs", get(consultation::stats_fournisseurs))
         .route("/api/stats/qualites", get(consultation::stats_qualites))

@@ -225,6 +225,46 @@ pub async fn stats_mouvements(
     .await
 }
 
+/// Statistiques par FAMILLE : la forme que les classeurs tiennent depuis
+/// toujours — une feuille par famille, les couleurs en colonnes.
+///
+/// L'atelier ne raisonne pas par reference mais par famille : on ne demande pas
+/// « combien de PP-1500 Dtex-Bleu 6666-Hs », on demande « combien de 1500 dtex,
+/// et de quelle couleur ».
+///
+/// TROIS JEUX, TROIS LECTURES. Les familles pour le poids de chacune ; le
+/// croisement famille x couleur, qui est la feuille du classeur ; les
+/// categories, pour la lecture de direction.
+pub async fn stats_familles(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    dossier(
+        &state,
+        &user,
+        module::MOUVEMENTS,
+        &[
+            // Les familles sans mouvement remontent aussi : une famille qui
+            // dort est precisement ce qu'on cherche a reperer.
+            (
+                "familles",
+                "SELECT * FROM v_stat_famille
+                  ORDER BY COALESCE(entrees_kg, 0) DESC, stock_kg DESC, famille_libelle",
+            ),
+            (
+                "croisement",
+                "SELECT * FROM v_stat_famille_couleur
+                  ORDER BY annee DESC, entrees_kg DESC",
+            ),
+            (
+                "categories",
+                "SELECT * FROM v_stat_categorie ORDER BY stock_kg DESC, categorie_libelle",
+            ),
+        ],
+    )
+    .await
+}
+
 /// Statistiques de PRIX d'achat : serie mensuelle et derive decomposee.
 pub async fn stats_prix(
     State(state): State<AppState>,

@@ -1,30 +1,36 @@
 /**
  * Nouveau bon de commande — en-tete ET lignes saisis ensemble.
  *
- * ON TAPE, ON NE CHOISIT PAS DANS UNE LISTE. L'ecran proposait auparavant
- * toutes les references du fournisseur en cases a cocher. Sur 124 references
- * cela passait ; sur mille c'est illisible, et charger le catalogue entier a
- * chaque ouverture coute une seconde d'attente. La saisie se fait desormais
- * dans un champ ou l'on FRAPPE : le serveur cherche, et rend les quelques
- * lignes qui correspondent avec leur prix et ce que le plan en dit.
+ * UNE GRILLE, ET DANS CHAQUE LIGNE UNE LISTE DEROULANTE AVEC RECHERCHE.
  *
- * TROIS FACONS D'AJOUTER UNE LIGNE, parce qu'il y a trois situations reelles :
+ * L'ecran proposait auparavant toutes les references du fournisseur en cases a
+ * cocher, et chargeait le catalogue entier pour cela. Sur 124 references cela
+ * passait ; sur mille c'est illisible, et le chargement coute une seconde a
+ * chaque ouverture. On designe desormais ce qu'on commande LA OU ON LE
+ * COMMANDE : dans la cellule « reference » de la ligne. On y clique, la liste
+ * s'ouvre ; on tape, elle se resserre. Le serveur cherche, jamais le navigateur.
  *
- *   1. LE PLAN D'ACHAT propose. C'est le cas courant : le MRP a calcule ce qui
- *      manque chez ce fournisseur, la grille s'ouvre deja remplie, et la frappe
- *      ne cherche que dans ces references-la.
- *   2. HORS PLAN. On achete ce que le plan ne reclame pas : une opportunite de
- *      prix, une anticipation, un fil qu'on achete d'habitude ailleurs. La
- *      frappe cherche dans TOUT le catalogue.
- *   3. LA REFERENCE N'EXISTE PAS. Un echantillon, un type nouveau, un article
- *      que le fournisseur n'a pas encore. On la cree au catalogue si elle a
- *      vocation a revenir, ou l'on pose une LIGNE LIBRE si elle n'en a pas.
+ * CE QUE LA LISTE PROPOSE — un interrupteur, deux positions :
  *
- * CE QU'EST UNE LIGNE LIBRE. Elle porte un intitule, une quantite, un prix, et
- * rien d'autre : ni conversion au kilo, ni entree en stock, ni statistique. Le
- * quai peut constater qu'elle est arrivee — c'est ce que font les ERP du marche
- * pour un poste sans article — mais rien n'entre au magasin, parce qu'il n'y a
- * aucune reference sous laquelle le ranger.
+ *   « Du plan d'achat » : ce que le MRP reclame chez ce fournisseur, et rien
+ *   d'autre. C'est le cas courant, et s'y tenir evite de commander par megarde
+ *   une reference dont on a deja trois mois de stock.
+ *
+ *   « Tout le catalogue » : quand on achete pour une autre raison — un prix,
+ *   un delai, une anticipation, un fil qu'on prend d'habitude ailleurs.
+ *
+ * LA GRILLE S'OUVRE VIDE. Le plan PROPOSE, il ne decide pas : verser ses
+ * propositions dans le bon des l'arrivee obligerait a retirer une a une celles
+ * qu'on ne veut pas, alors que le travail reel consiste a ajouter ce qu'on
+ * commande.
+ *
+ * ET SI LA REFERENCE N'EXISTE PAS ? La liste ne dit pas seulement non : elle
+ * propose de l'ajouter au catalogue, ou de garder la ligne telle quelle. Une
+ * ligne sans reference n'est pas une ligne d'un type particulier — c'est
+ * simplement une ligne dont ce qu'on commande n'est pas au catalogue :
+ * echantillon, type nouveau, transport. Elle ne se convertit pas en kilos,
+ * n'entre pas en stock et ne compte dans aucune statistique de matiere, faute
+ * de reference sous laquelle la ranger.
  *
  * Tout part en UNE transaction. Un bon a moitie cree — numero attribue, aucune
  * ligne — serait un document fantome que personne ne saurait interpreter, et
@@ -123,19 +129,6 @@ interface Fournisseur {
  */
 type Nature = 'MARCHANDISE' | 'LIBRE' | 'SERVICE'
 
-const NATURES: { valeur: Nature; libelle: string; aide: string }[] = [
-  {
-    valeur: 'LIBRE',
-    libelle: 'Ligne libre',
-    aide: 'Echantillon, type nouveau, article hors catalogue. Se commande et se constate a l arrivee, mais n entre jamais en stock.',
-  },
-  {
-    valeur: 'SERVICE',
-    libelle: 'Prestation',
-    aide: 'Transport, commission, montage. Rien n arrive au quai.',
-  },
-]
-
 /** Les unites d'une ligne sans reference : rien ne s'y pese. */
 const UNITES_LIBRES = ['Forfait', 'Unite', 'Heure'] as const
 
@@ -163,19 +156,28 @@ interface LigneSaisie {
 }
 
 let compteur = 0
-function ligneVide(nature: Nature): LigneSaisie {
+
+/**
+ * UNE LIGNE NEUVE, en attente de ce qu'on va taper dedans.
+ *
+ * Elle naît en MARCHANDISE : c'est ce qu'on commande neuf fois sur dix. Elle ne
+ * bascule en ligne libre que si l'on retient un intitule qui ne correspond a
+ * aucune reference — ce n'est donc pas un type qu'on choisit d'avance, mais le
+ * constat que ce qu'on commande n'est pas au catalogue.
+ */
+function ligneVide(): LigneSaisie {
   compteur += 1
   return {
     cle: `l-${compteur}`,
-    nature,
+    nature: 'MARCHANDISE',
     code_reference: '',
     intitule: '',
     cond: {},
     unite_catalogue: 'kg',
     fournisseur_habituel: null,
     suggere_kg: null,
-    qte: nature === 'MARCHANDISE' ? '' : '1',
-    unite: nature === 'MARCHANDISE' ? 'kg' : 'Forfait',
+    qte: '',
+    unite: 'kg',
     palettes: '',
     bobines: '',
     lie: true,
@@ -263,14 +265,17 @@ export function BonCommandeNouveau() {
     densite_kg_ml: r.densite_kg_ml,
   })
 
-  /** Une reference trouvee devient une ligne prete a chiffrer. */
-  const depuisReference = (r: RefCommandable): LigneSaisie => {
+  /**
+   * Une reference retenue remplit la ligne : sa designation, son
+   * conditionnement, ce que le plan reclame et le prix qu'il propose.
+   */
+  const depuisReference = (r: RefCommandable, cle?: string): LigneSaisie => {
     const c = condDe(r)
     const kg = r.qte_a_commander_kg ?? 0
     const colis = depuisKg(kg, c)
     compteur += 1
     return {
-      cle: `l-${compteur}`,
+      cle: cle ?? `l-${compteur}`,
       nature: 'MARCHANDISE',
       code_reference: r.code_reference,
       intitule: r.designation ?? r.code_reference,
@@ -302,21 +307,20 @@ export function BonCommandeNouveau() {
   }, [qPlan.data, refDemandee])
 
   /**
-   * LE PLAN REMPLIT LA GRILLE, une fois, a l'arrivee du fournisseur.
+   * LA GRILLE S'OUVRE SUR UNE LIGNE VIDE, jamais remplie d'office.
    *
-   * Une fois seulement : re-remplir apres coup effacerait les lignes retirees a
-   * la main, et l'ecran refuserait la decision de l'acheteur.
+   * Le plan PROPOSE ; il ne decide pas a la place de l'acheteur. Verser ses
+   * vingt-deux propositions dans le bon des l'arrivee obligeait a retirer une a
+   * une celles qu'on ne voulait pas — c'est l'inverse du travail reel, ou l'on
+   * ajoute ce qu'on commande. Les propositions s'affichent dans la liste
+   * deroulante, des qu'on entre dans le champ.
    */
-  const rempli = useRef('')
   useEffect(() => {
-    if (!entete.code_fournisseur || mode !== 'PLAN') return
-    if (rempli.current === entete.code_fournisseur) return
-    if (!qPlan.data) return
-    rempli.current = entete.code_fournisseur
-    if (proposees.length > 0) setLignes(proposees.map(depuisReference))
-  }, [entete.code_fournisseur, qPlan.data, proposees, mode])
+    if (!entete.code_fournisseur) return
+    setLignes((ls) => (ls.length > 0 ? ls : [ligneVide()]))
+  }, [entete.code_fournisseur])
 
-  /* --- La frappe --------------------------------------------------------- */
+  /* --- La liste deroulante ------------------------------------------------ */
 
   const dejaPrises = useMemo(
     () => new Set(lignes.map((l) => l.code_reference).filter(Boolean)),
@@ -554,7 +558,6 @@ export function BonCommandeNouveau() {
                 onChange={(e) => {
                   setEntete({ ...entete, code_fournisseur: e.target.value })
                   setLignes([])
-                  rempli.current = ''
                 }}
               >
                 <option value="">Choisir…</option>
@@ -623,11 +626,36 @@ export function BonCommandeNouveau() {
           <Carte repliable="boncommandenouveau.2">
             <CarteEntete>
               <CarteTitre>Lignes du bon</CarteTitre>
-              <span className="text-[11px] text-attenue-texte">
-                {qPlan.isLoading
-                  ? 'lecture du plan…'
-                  : `${proposees.length} proposition(s) du plan chez ${fournisseur?.nom}`}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-attenue-texte">
+                  {qPlan.isLoading
+                    ? 'lecture du plan…'
+                    : `${proposees.length} proposition(s) du plan`}
+                </span>
+                {/* L'INTERRUPTEUR : ce que la liste deroulante propose. */}
+                <div className="flex overflow-hidden rounded-[var(--radius)] border border-bordure">
+                  {(
+                    [
+                      ['PLAN', 'Du plan d’achat'],
+                      ['CATALOGUE', 'Tout le catalogue'],
+                    ] as const
+                  ).map(([m, libelle]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMode(m)}
+                      className={cn(
+                        'px-2.5 py-1 text-[12px]',
+                        mode === m
+                          ? 'bg-primaire/10 font-medium text-primaire'
+                          : 'text-attenue-texte hover:bg-attenue/50',
+                      )}
+                    >
+                      {libelle}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </CarteEntete>
             <CarteCorps className="space-y-3">
               {qPlan.isLoading && <Chargement texte="Lecture du plan d'achat…" />}
@@ -659,19 +687,52 @@ export function BonCommandeNouveau() {
                             <td className="px-1 py-1 text-right tabular-nums text-attenue-texte">
                               {i + 1}
                             </td>
+                            {/* LA LISTE DEROULANTE EST DANS LA LIGNE, a la place
+                                meme de la reference. C'est la qu'on la cherche :
+                                un champ d'ajout pose ailleurs oblige a faire un
+                                aller-retour pour chaque article. */}
                             <td className={cn(cellule, 'min-w-0')}>
-                              {marchandise ? (
+                              {l.code_reference || (l.nature !== 'MARCHANDISE' && l.intitule) ? (
                                 <>
-                                  <div className="truncate font-medium">{l.code_reference}</div>
-                                  <div className="truncate text-[11px] text-attenue-texte">
-                                    {l.intitule}
-                                    {l.fournisseur_habituel &&
-                                      l.fournisseur_habituel !== entete.code_fournisseur && (
-                                        <span className="text-alerte">
-                                          {' '}
-                                          · habituellement chez {l.fournisseur_habituel}
-                                        </span>
-                                      )}
+                                  <div className="flex items-start gap-1.5">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate font-medium">
+                                        {l.code_reference || l.intitule}
+                                      </div>
+                                      <div className="truncate text-[11px] text-attenue-texte">
+                                        {marchandise ? (
+                                          <>
+                                            {l.intitule}
+                                            {l.fournisseur_habituel &&
+                                              l.fournisseur_habituel !==
+                                                entete.code_fournisseur && (
+                                                <span className="text-alerte">
+                                                  {' '}
+                                                  · habituellement chez {l.fournisseur_habituel}
+                                                </span>
+                                              )}
+                                          </>
+                                        ) : (
+                                          <Badge ton="alerte">hors catalogue</Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        maj(l.cle, {
+                                          nature: 'MARCHANDISE',
+                                          code_reference: '',
+                                          intitule: '',
+                                          cond: {},
+                                          suggere_kg: null,
+                                        })
+                                      }
+                                      className="shrink-0 pt-0.5 text-[11px] text-attenue-texte underline hover:text-texte"
+                                      aria-label="Changer la référence"
+                                    >
+                                      changer
+                                    </button>
                                   </div>
                                   {ecart != null && Math.abs(ecart) > 0.5 && (
                                     <div className="text-[11px] text-alerte">
@@ -681,32 +742,57 @@ export function BonCommandeNouveau() {
                                   )}
                                 </>
                               ) : (
-                                <>
-                                  <Champ
-                                    value={l.intitule}
-                                    placeholder={
-                                      l.nature === 'SERVICE'
-                                        ? 'Fret maritime Izmir — Tanger'
-                                        : 'Echantillon PES 1500 dtex bleu'
-                                    }
-                                    onChange={(e) => maj(l.cle, { intitule: e.target.value })}
-                                    className={cn(
-                                      'h-8',
-                                      !l.intitule.trim() && Number(l.prix) > 0 && 'border-danger',
-                                    )}
-                                    aria-label="Intitulé de la ligne"
-                                  />
-                                  <div className="mt-0.5">
-                                    <Badge ton={l.nature === 'SERVICE' ? 'neutre' : 'alerte'}>
-                                      {l.nature === 'SERVICE' ? 'prestation' : 'ligne libre'}
-                                    </Badge>
-                                    <span className="ml-1.5 text-[11px] text-attenue-texte">
-                                      {l.nature === 'SERVICE'
-                                        ? 'rien au quai'
-                                        : 'constatable à l’arrivée, jamais en stock'}
-                                    </span>
-                                  </div>
-                                </>
+                                <ChampRecherche
+                                  valeur=""
+                                  chercher={chercher}
+                                  cleCache={[mode, entete.code_fournisseur, dejaPrises.size]}
+                                  chercherAVide
+                                  surChoix={(s) =>
+                                    maj(l.cle, depuisReference(s.charge as RefCommandable, l.cle))
+                                  }
+                                  placeholder={
+                                    mode === 'PLAN'
+                                      ? 'Référence — le plan propose…'
+                                      : 'Référence — tout le catalogue…'
+                                  }
+                                  aide="Flèches pour parcourir, Entrée pour retenir."
+                                  ariaLabel="Référence de la ligne"
+                                  surAucun={(motif) => (
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                      {mode === 'PLAN' && (
+                                        <Bouton
+                                          variante="contour"
+                                          taille="sm"
+                                          onClick={() => setMode('CATALOGUE')}
+                                        >
+                                          Chercher dans tout le catalogue
+                                        </Bouton>
+                                      )}
+                                      <Bouton
+                                        variante="contour"
+                                        taille="sm"
+                                        onClick={() => setACreer(motif)}
+                                      >
+                                        <Plus />
+                                        Ajouter au catalogue
+                                      </Bouton>
+                                      <Bouton
+                                        variante="contour"
+                                        taille="sm"
+                                        onClick={() =>
+                                          maj(l.cle, {
+                                            nature: 'LIBRE',
+                                            intitule: motif,
+                                            unite: 'Forfait',
+                                            qte: '1',
+                                          })
+                                        }
+                                      >
+                                        Garder « {motif} » sans référence
+                                      </Bouton>
+                                    </div>
+                                  )}
+                                />
                               )}
                             </td>
                             <td className={cellule}>
@@ -847,102 +933,22 @@ export function BonCommandeNouveau() {
                 </div>
               )}
 
-              {/* ---- La frappe ------------------------------------------- */}
-              <div className="rounded-[var(--radius)] border border-bordure bg-fond/40 p-3">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] uppercase tracking-wider text-attenue-texte">
-                    Ajouter une ligne
-                  </span>
-                  <div className="flex overflow-hidden rounded-[var(--radius)] border border-bordure">
-                    {(
-                      [
-                        ['PLAN', 'Du plan d’achat'],
-                        ['CATALOGUE', 'Hors plan'],
-                      ] as const
-                    ).map(([m, libelle]) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setMode(m)}
-                        className={cn(
-                          'px-2.5 py-1 text-[12px]',
-                          mode === m
-                            ? 'bg-primaire/10 font-medium text-primaire'
-                            : 'text-attenue-texte hover:bg-attenue/50',
-                        )}
-                      >
-                        {libelle}
-                      </button>
-                    ))}
-                  </div>
-                  {NATURES.map((n) => (
-                    <Bouton
-                      key={n.valeur}
-                      variante="contour"
-                      taille="sm"
-                      title={n.aide}
-                      onClick={() => setLignes((ls) => [...ls, ligneVide(n.valeur)])}
-                    >
-                      <Plus />
-                      {n.libelle}
-                    </Bouton>
-                  ))}
-                </div>
-
-                <ChampRecherche
-                  valeur=""
-                  chercher={chercher}
-                  cleCache={[mode, entete.code_fournisseur, dejaPrises.size]}
-                  surChoix={(s) =>
-                    setLignes((ls) => [...ls, depuisReference(s.charge as RefCommandable)])
-                  }
-                  placeholder={
-                    mode === 'PLAN'
-                      ? 'Tapez une référence proposée par le plan…'
-                      : 'Tapez une référence du catalogue…'
-                  }
-                  aide="Flèches pour parcourir, Entrée pour retenir."
-                  ariaLabel="Ajouter une référence"
-                  surAucun={(motif) => (
-                    <div className="mt-1.5 space-y-1.5">
-                      <p className="text-[11px] text-attenue-texte">
-                        {mode === 'PLAN'
-                          ? 'Le plan ne la réclame pas. Cherchez dans tout le catalogue, ou posez-la sans référence.'
-                          : 'Elle n’est pas au catalogue. Créez-la si elle a vocation à revenir, ou posez une ligne libre.'}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {mode === 'PLAN' && (
-                          <Bouton variante="contour" taille="sm" onClick={() => setMode('CATALOGUE')}>
-                            Chercher dans tout le catalogue
-                          </Bouton>
-                        )}
-                        <Bouton variante="contour" taille="sm" onClick={() => setACreer(motif)}>
-                          <Plus />
-                          Créer « {motif} » au catalogue
-                        </Bouton>
-                        <Bouton
-                          variante="contour"
-                          taille="sm"
-                          onClick={() =>
-                            setLignes((ls) => [
-                              ...ls,
-                              { ...ligneVide('LIBRE'), intitule: motif },
-                            ])
-                          }
-                        >
-                          <Plus />
-                          Ligne libre
-                        </Bouton>
-                      </div>
-                    </div>
-                  )}
-                />
-
-                <p className="mt-2 text-[11px] text-attenue-texte">
+              {/* UNE LIGNE DE PLUS, et rien d'autre. Ce qu'on commande se
+                  designe DANS la ligne, pas dans un champ pose a cote. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Bouton
+                  variante="contour"
+                  taille="sm"
+                  onClick={() => setLignes((ls) => [...ls, ligneVide()])}
+                >
+                  <Plus />
+                  Ajouter une ligne
+                </Bouton>
+                <span className="text-[11px] text-attenue-texte">
                   {mode === 'PLAN'
-                    ? 'La frappe ne cherche que parmi les références que le plan d’achat réclame chez ce fournisseur.'
-                    : 'La frappe cherche dans tout le catalogue — le rattachement à un fournisseur est une habitude d’achat, pas une exclusivité.'}
-                </p>
+                    ? 'La liste propose ce que le plan d’achat réclame chez ce fournisseur.'
+                    : 'La liste propose tout le catalogue — le rattachement à un fournisseur est une habitude d’achat, pas une exclusivité.'}
+                </span>
               </div>
 
               {aCreer && (

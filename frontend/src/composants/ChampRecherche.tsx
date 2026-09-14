@@ -22,7 +22,8 @@
  * ferme. Une saisie de bon de commande se fait a deux mains sur le clavier,
  * avec le telephone coince sur l'epaule.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Search } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -55,6 +56,7 @@ export function ChampRecherche({
   surChoix,
   chercher,
   cleCache,
+  chercherAVide,
   placeholder,
   aide,
   surAucun,
@@ -79,6 +81,16 @@ export function ChampRecherche({
    * ignorer le changement de mode.
    */
   cleCache?: unknown[]
+  /**
+   * OUVRIR SUR UNE PROPOSITION, champ encore vide.
+   *
+   * Exiger deux caracteres avant de montrer quoi que ce soit oblige a savoir ce
+   * qu'on cherche avant de chercher. Quand l'ecran a quelque chose a proposer
+   * d'emblee — ce que le plan d'achat reclame, ce qui est en stock dans ce
+   * magasin — le simple fait d'entrer dans le champ doit le faire apparaitre.
+   * `chercher('')` rend alors cette liste-la.
+   */
+  chercherAVide?: boolean
   placeholder?: string
   /** Ligne d'aide sous la liste, quand elle est ouverte. */
   aide?: string
@@ -100,6 +112,7 @@ export function ChampRecherche({
   const [pointe, setPointe] = useState(0)
   const boite = useRef<HTMLDivElement>(null)
 
+
   /**
    * LA FRAPPE EST RETENUE AVANT D'ETRE ENVOYEE.
    *
@@ -117,13 +130,44 @@ export function ChampRecherche({
   const q = useQuery({
     queryKey: ['champ-recherche', motif, ...(cleCache ?? [])],
     queryFn: () => chercher(motif),
-    // DEUX CARACTERES AU MOINS. Une seule lettre rendrait la moitie du
+    // DEUX CARACTERES AU MOINS — sauf quand l'ecran a une proposition a
+    // faire des l'ouverture. Une seule lettre rendrait la moitie du
     // catalogue : ni utile a lire, ni honnete a demander au serveur.
-    enabled: ouvert && motif.length >= 2,
+    enabled: ouvert && (motif.length >= 2 || (!!chercherAVide && motif === '')),
     staleTime: 30_000,
   })
 
   const suggestions = useMemo(() => q.data ?? [], [q.data])
+  // La hauteur de la liste change avec le nombre de suggestions : on la
+  // replace a chaque fois, sinon elle chevauche la ligne suivante.
+  const suggestionsLongueur = suggestions.length
+
+  /**
+   * LA LISTE SORT DU TABLEAU, par un portail vers le corps du document.
+   *
+   * Posee dans la cellule, elle etait ROGNEE : la grille defile
+   * horizontalement (`overflow-x`), et tout ce qui depasse d'un conteneur
+   * defilant est coupe. On ne voyait que la premiere suggestion, tranchee au
+   * ras. Le portail l'affranchit du conteneur ; en echange il faut la placer
+   * soi-meme, d'apres la position reelle du champ.
+   */
+  const [cadre, setCadre] = useState<{ x: number; y: number; l: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!ouvert) return setCadre(null)
+    const placer = () => {
+      const r = boite.current?.getBoundingClientRect()
+      if (r) setCadre({ x: r.left, y: r.bottom + 2, l: Math.max(r.width, 320) })
+    }
+    placer()
+    // La page peut defiler ou changer de largeur pendant que la liste est
+    // ouverte : sans cela elle resterait accrochee a l'ancienne position.
+    window.addEventListener('scroll', placer, true)
+    window.addEventListener('resize', placer)
+    return () => {
+      window.removeEventListener('scroll', placer, true)
+      window.removeEventListener('resize', placer)
+    }
+  }, [ouvert, motif, suggestionsLongueur])
   const choisissables = useMemo(() => suggestions.filter((s) => !s.desactivee), [suggestions])
 
   // Le pointeur revient en tete a chaque nouvelle liste : sans cela il reste
@@ -172,6 +216,7 @@ export function ChampRecherche({
     }
   }
 
+  const assezTape = motif.length >= 2 || (!!chercherAVide && motif === '')
   const rien = ouvert && motif.length >= 2 && !q.isFetching && suggestions.length === 0
 
   return (
@@ -204,12 +249,16 @@ export function ChampRecherche({
         )}
       </div>
 
-      {ouvert && (motif.length >= 2 || frappe.length > 0) && (
+      {ouvert &&
+        (assezTape || frappe.length > 0) &&
+        cadre &&
+        createPortal(
         <div
           role="listbox"
-          className="absolute z-50 mt-1 max-h-72 w-full min-w-80 overflow-y-auto rounded-[var(--radius)] border border-bordure bg-surface shadow-lg"
+          style={{ position: 'fixed', left: cadre.x, top: cadre.y, width: cadre.l }}
+          className="z-[60] max-h-72 overflow-y-auto rounded-[var(--radius)] border border-bordure bg-surface shadow-lg"
         >
-          {motif.length < 2 && (
+          {!assezTape && (
             <p className="px-3 py-2 text-[11px] text-attenue-texte">
               Tapez au moins deux caractères — le code, un morceau de la désignation, ou la
               couleur.
@@ -220,7 +269,7 @@ export function ChampRecherche({
               ligne, le panneau s'ouvrait VIDE le temps que le serveur reponde —
               une boite blanche de zero hauteur, invisible : on croyait que la
               frappe n'avait rien declenche, et l'on retapait. */}
-          {motif.length >= 2 && q.isFetching && suggestions.length === 0 && (
+          {assezTape && q.isFetching && suggestions.length === 0 && (
             <p className="px-3 py-2 text-[11px] text-attenue-texte">Recherche…</p>
           )}
 
@@ -285,8 +334,9 @@ export function ChampRecherche({
               {aide}
             </p>
           )}
-        </div>
-      )}
+        </div>,
+          document.body,
+        )}
     </div>
   )
 }

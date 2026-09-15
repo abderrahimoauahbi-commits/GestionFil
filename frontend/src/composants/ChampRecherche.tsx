@@ -269,7 +269,19 @@ export function ChampRecherche({
         <div
           ref={panneau}
           role="listbox"
-          style={{ position: 'fixed', left: cadre.x, top: cadre.y, width: cadre.l }}
+          /* `pointerEvents` N'EST PAS DECORATIF ICI.
+             Une fenetre modale Radix pose `pointer-events: none` sur le corps
+             du document et ne le rend qu'a son propre contenu. Notre liste vit
+             dans un portail, DEHORS : elle s'affichait normalement mais ne
+             recevait aucun clic — au quai, l'article hors commande etait
+             impossible a choisir a la souris. On lui rend ses evenements. */
+          style={{
+            position: 'fixed',
+            left: cadre.x,
+            top: cadre.y,
+            width: cadre.l,
+            pointerEvents: 'auto',
+          }}
           className="z-[60] max-h-72 overflow-y-auto rounded-[var(--radius)] border border-bordure bg-surface shadow-lg"
         >
           {!assezTape && (

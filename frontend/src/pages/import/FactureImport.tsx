@@ -46,6 +46,7 @@ import {
 } from '../../composants/ui/base'
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
+import { ChampReference } from '../../composants/ChampReference'
 import { cn, fmt } from '../../lib/utils'
 import {
   type Conditionnement,
@@ -234,30 +235,28 @@ export function FactureImport() {
     queryFn: () => api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1&limite=500'),
   })
   const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
-  const qCatalogue = useQuery({
-    queryKey: ['catalogue-actif'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
-  })
   const qBc = useQuery({
     queryKey: ['import-lignes-bc', entete.code_fournisseur],
     queryFn: () => api.get<LigneBcOuverte[]>(`/api/import/lignes-bc?fournisseur=${encodeURIComponent(entete.code_fournisseur)}`),
     enabled: !!entete.code_fournisseur,
   })
 
-  /* LES REFERENCES DU FOURNISSEUR D'ABORD : proposer les 124 du catalogue pour
-     une facture Hasirci, c'est inviter a choisir le Red d'Ozkaralar. */
-  const references = useMemo(
-    () => (qCatalogue.data ?? []).filter((r) => toutes || r.code_fournisseur === entete.code_fournisseur),
-    [qCatalogue.data, toutes, entete.code_fournisseur],
-  )
+  /**
+   * LES REFERENCES RETENUES SUR CETTE FACTURE, et elles seules.
+   *
+   * L'ecran chargeait le catalogue entier pour peupler un menu deroulant par
+   * ligne — tenable a 124 references, intenable a mille. On tape desormais, le
+   * serveur cherche, et l'on garde ce qu'on retient : c'est tout ce dont la
+   * ligne a besoin pour connaitre sa couleur et son conditionnement.
+   */
+  const [refsRetenues, setRefsRetenues] = useState<Map<string, RefCatalogue>>(new Map())
 
   // ---- Modifications -------------------------------------------------------
   const majLigne = (cle: string, patch: Partial<LigneEdit>) =>
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
 
   /** Le conditionnement de la reference d'une ligne — vide si elle n'en porte pas. */
-  const condDe = (code: string): Conditionnement =>
-    qCatalogue.data?.find((x) => x.code_reference === code) ?? {}
+  const condDe = (code: string): Conditionnement => refsRetenues.get(code) ?? {}
 
   /**
    * POIDS NET, BOBINES ET PALETTES SE REPONDENT.
@@ -285,12 +284,12 @@ export function FactureImport() {
       nb_bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
     })
   }
-  const choisirReference = (l: LigneEdit, code: string) => {
-    const r = qCatalogue.data?.find((x) => x.code_reference === code)
+  const choisirReference = (l: LigneEdit, r: RefCatalogue) => {
+    setRefsRetenues((m) => new Map(m).set(r.code_reference, r))
     majLigne(l.cle, {
-      code_reference: code, id_ligne_bc: '', numero_bc: '',
-      code_couleur: r?.code_couleur ?? l.code_couleur,
-      libelle_couleur: r?.couleur ?? l.libelle_couleur,
+      code_reference: r.code_reference, id_ligne_bc: '', numero_bc: '',
+      code_couleur: r.code_couleur ?? l.code_couleur,
+      libelle_couleur: r.couleur ?? l.libelle_couleur,
     })
   }
   // Choisir la ligne de BC reprend sa reference et son prix : c'est ce qui a
@@ -544,16 +543,18 @@ export function FactureImport() {
                         </td>
                         <td className={td}>
                           {erp ? (
-                            <Selecteur className={champ} value={l.code_reference} disabled={fige}
-                              onChange={(e) => choisirReference(l, e.target.value)}>
-                              <option value="">Choisir la référence…</option>
-                              {l.code_reference && !references.some((r) => r.code_reference === l.code_reference) && (
-                                <option value={l.code_reference}>{l.code_reference}</option>
-                              )}
-                              {references.map((r) => (
-                                <option key={r.code_reference} value={r.code_reference}>{r.code_reference}</option>
-                              ))}
-                            </Selecteur>
+                            /* LES REFERENCES DU FOURNISSEUR D'ABORD : proposer
+                               tout le catalogue pour une facture Hasirci, c'est
+                               inviter a choisir le Red d'Ozkaralar. La case
+                               « toutes » ouvre le reste quand il le faut. */
+                            <ChampReference
+                              valeur={l.code_reference}
+                              fournisseur={toutes ? undefined : entete.code_fournisseur}
+                              surChoix={(r) => choisirReference(l, r as RefCatalogue)}
+                              desactive={fige}
+                              placeholder="Référence — tapez…"
+                              ariaLabel="Référence de la ligne"
+                            />
                           ) : (
                             <Champ className={champ} value={l.libelle} disabled={fige} placeholder="Hors ERP — pièce, autre…"
                               onChange={(e) => majLigne(l.cle, { libelle: e.target.value })} />

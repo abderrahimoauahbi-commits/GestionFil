@@ -24,6 +24,15 @@ pub struct Filtres {
     pub limite: Option<i64>,
     pub statut: Option<String>,
     pub code_reference: Option<String>,
+    /// LE MAGASIN, qui etait recu et IGNORE.
+    ///
+    /// L'ecran de transfert demandait le stock d'un magasin precis ; la requete
+    /// ne filtrait que sur la reference. Il recevait donc le stock de TOUS les
+    /// magasins et l'additionnait : « disponible » annoncait un total que le
+    /// magasin source ne detenait pas. On pouvait preparer un transfert de cinq
+    /// tonnes depuis un magasin qui en tenait une, et seule la regle R02 le
+    /// refusait — a l'expedition, une fois tout saisi.
+    pub code_magasin: Option<String>,
 }
 
 impl Filtres {
@@ -726,16 +735,24 @@ pub async fn stock(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT sm.*, r.designation, m.nom AS magasin_nom, m.inclure_mrp
+        // LE CONDITIONNEMENT VOYAGE AVEC LE STOCK. Transferer se compte en
+        // palettes et en bobines autant qu'en kilos ; sans ces parametres,
+        // l'ecran de transfert devait charger le catalogue entier pour
+        // convertir trois lignes.
+        "SELECT sm.*, r.designation, r.unite_catalogue, r.suivi_lot,
+                r.poids_bobine_kg, r.bobines_par_palette, r.densite_kg_ml,
+                m.nom AS magasin_nom, m.inclure_mrp
            FROM stock_magasin sm
            JOIN reference r ON r.code_reference = sm.code_reference
            JOIN magasin   m ON m.code_magasin   = sm.code_magasin
           WHERE ($1 IS NULL OR sm.code_reference = $1)
+            AND ($3 IS NULL OR sm.code_magasin = $3)
           ORDER BY sm.code_reference, sm.code_magasin
           LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
+    .bind(&f.code_magasin)
     .fetch_all(&state.db)
     .await?;
 

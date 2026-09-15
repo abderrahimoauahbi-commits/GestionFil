@@ -21,10 +21,10 @@
  * Rien ne part au serveur avant le clic final : en-tete, lignes et bon de
  * regularisation partent dans une seule transaction.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCheck, Link2, Plus, Save, Search, Trash2, Unlink2, X } from 'lucide-react'
+import { ArrowLeft, CheckCheck, Link2, Plus, Save, Trash2, Unlink2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -43,6 +43,7 @@ import {
   Selecteur,
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { ChampReference, chercherCatalogue } from '../composants/ChampReference'
 import { cn, fmt } from '../lib/utils'
 import {
   type Conditionnement,
@@ -176,17 +177,23 @@ export function ReceptionNouvelle() {
   })
   const magasinDefaut = qMag.data?.[0]?.code_magasin ?? 'MP-01'
 
-  // LE CATALOGUE EST CHARGE ICI, pas seulement dans la fenetre d'ajout : c'est
-  // lui qui porte le poids de bobine et les bobines par palette, sans quoi la
-  // grille ne saurait pas convertir ce qu'on compte au quai.
-  const qCat = useQuery({
-    queryKey: ['catalogue-saisie'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
-  })
-  const parReference = useMemo(
-    () => new Map((qCat.data ?? []).map((r) => [r.code_reference, r])),
-    [qCat.data],
-  )
+  /**
+   * LE CONDITIONNEMENT DES REFERENCES EN JEU, et d'elles seules.
+   *
+   * L'ecran chargeait le CATALOGUE ENTIER pour connaitre le poids d'une bobine :
+   * deux mille lignes en memoire pour convertir la dizaine de references d'un
+   * camion. Les lignes reprises d'un bon apportent desormais leur
+   * conditionnement avec elles, et celles ajoutees hors commande le portent
+   * depuis la liste deroulante qui les a proposees.
+   */
+  const [refsRetenues, setRefsRetenues] = useState<Map<string, RefCatalogue>>(new Map())
+  const parReference = refsRetenues
+  const retenir = (refs: RefCatalogue[]) =>
+    setRefsRetenues((m) => {
+      const n = new Map(m)
+      refs.forEach((r) => n.set(r.code_reference, r))
+      return n
+    })
   /** Le conditionnement de la reference REELLEMENT recue — pas de celle commandee. */
   const condDe = (l: Ligne): Conditionnement =>
     parReference.get(l.code_recu) ?? parReference.get(l.code_reference) ?? SANS_CONDITIONNEMENT
@@ -247,6 +254,23 @@ export function ReceptionNouvelle() {
   const colisAttendus = (code: string, kg: number) =>
     depuisKg(kg, parReference.get(code) ?? SANS_CONDITIONNEMENT)
 
+  /**
+   * LE CONDITIONNEMENT DES LIGNES REPRISES D'UN BON.
+   *
+   * Elles ne passent pas par la liste deroulante : elles viennent du bon de
+   * commande. On demande donc au serveur les seules references concernees —
+   * une dizaine, jamais le catalogue.
+   */
+  const qCondBon = useQuery({
+    queryKey: ['cond-bon', entete.code_fournisseur],
+    queryFn: () =>
+      chercherCatalogue('', { fournisseur: entete.code_fournisseur, limite: 500 }),
+    enabled: !!entete.code_fournisseur,
+  })
+  useEffect(() => {
+    if (qCondBon.data?.length) retenir(qCondBon.data as unknown as RefCatalogue[])
+  }, [qCondBon.data])
+
   const reprendre = (numeroBc: string) => {
     const prises = new Set(lignes.map((l) => l.id_ligne_bc).filter(Boolean))
     const nouvelles = attendues
@@ -299,7 +323,10 @@ export function ReceptionNouvelle() {
   const retirerBon = (numeroBc: string) =>
     setLignes((l) => l.filter((x) => x.numero_bc !== numeroBc))
 
-  const ajouterHorsCommande = (refs: { ref: RefCatalogue; qte: number }[]) =>
+  const ajouterHorsCommande = (refs: { ref: RefCatalogue; qte: number }[]) => {
+    // La reference apporte son conditionnement : c'est lui qui permettra de
+    // convertir palettes et bobines sur la ligne qu'on vient d'ajouter.
+    retenir(refs.map((r) => r.ref))
     setLignes((l) => [
       ...l,
       ...refs.map<Ligne>(({ ref, qte }, i) => ({
@@ -335,6 +362,7 @@ export function ReceptionNouvelle() {
         notes: '',
       })),
     ])
+  }
 
   const maj = (cle: string, champ: keyof Ligne, v: string | boolean) =>
     setLignes((l) => l.map((x) => (x.cle === cle ? { ...x, [champ]: v } : x)))
@@ -1464,28 +1492,17 @@ function PanneauHorsCommande({
   surFermeture: () => void
   surAjout: (refs: { ref: RefCatalogue; qte: number }[]) => void
 }) {
-  const [filtre, setFiltre] = useState('')
-  const [choix, setChoix] = useState<Record<string, string>>({})
+  /**
+   * ON TAPE, LE SERVEUR CHERCHE.
+   *
+   * Ce panneau chargeait le catalogue entier pour en montrer quarante lignes,
+   * filtrees dans le navigateur. A mille references, c'est une seconde
+   * d'attente pour ajouter UN article au quai — le moment ou l'on a le moins
+   * de temps.
+   */
+  const [choisies, setChoisies] = useState<{ ref: RefCatalogue; qte: string }[]>([])
 
-  const q = useQuery({
-    queryKey: ['catalogue-saisie'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
-  })
-
-  const refs = useMemo(() => {
-    const f = filtre.trim().toLowerCase()
-    const l = q.data ?? []
-    if (!f) return l.slice(0, 40)
-    return l
-      .filter(
-        (r) =>
-          r.code_reference.toLowerCase().includes(f) ||
-          (r.designation ?? '').toLowerCase().includes(f),
-      )
-      .slice(0, 40)
-  }, [q.data, filtre])
-
-  const retenues = Object.entries(choix).filter(([, v]) => Number(v) > 0)
+  const retenues = choisies.filter((c) => Number(c.qte) > 0)
 
   return (
     <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
@@ -1494,63 +1511,77 @@ function PanneauHorsCommande({
         titre="Article hors commande"
         description="La marchandise est au quai sans bon derriere elle. Saisissez-la : le bon manquant sera cree."
       >
-        <div className="mb-2 flex items-center gap-2">
-          <Search className="size-3.5 shrink-0 text-attenue-texte" />
-          <Champ
-            placeholder="Référence ou designation…"
-            value={filtre}
-            onChange={(e) => setFiltre(e.target.value)}
-            className="h-8"
-            autoFocus
-          />
-        </div>
+        <ChampReference
+          valeur=""
+          surChoix={(r) =>
+            setChoisies((c) =>
+              c.some((x) => x.ref.code_reference === r.code_reference)
+                ? c
+                : [...c, { ref: r as unknown as RefCatalogue, qte: '' }],
+            )
+          }
+          dejaPrises={new Set(choisies.map((c) => c.ref.code_reference))}
+          placeholder="Référence — tapez pour chercher…"
+          ariaLabel="Référence hors commande"
+          autoFocus
+        />
 
-        {q.isLoading && <Chargement texte="Lecture du catalogue…" />}
-
-        {!q.isLoading && refs.length === 0 && (
-          <Alerte ton="info">Aucune référence ne correspond.</Alerte>
+        {choisies.length === 0 && (
+          <Alerte ton="info" className="mt-3">
+            Tapez le début d’un code, d’une désignation ou d’une couleur. Les références retenues
+            s’ajoutent ci-dessous, avec leur poids.
+          </Alerte>
         )}
 
-        <div className="space-y-1">
-          {refs.map((r) => (
+        <div className="mt-3 space-y-1">
+          {choisies.map((c, i) => (
             <div
-              key={r.code_reference}
-              className={cn(
-                'flex items-center gap-2 rounded-[var(--radius)] border p-2',
-                Number(choix[r.code_reference]) > 0
-                  ? 'border-primaire bg-primaire/5'
-                  : 'border-bordure',
-              )}
+              key={c.ref.code_reference}
+              className="flex items-center gap-2 rounded-[var(--radius)] border border-bordure p-2"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-medium">{r.code_reference}</span>
-                  {r.suivi_lot === 1 && <Badge ton="info">lot obligatoire</Badge>}
+                  <span className="font-medium">{c.ref.code_reference}</span>
+                  {c.ref.suivi_lot === 1 && <Badge ton="info">lot obligatoire</Badge>}
                 </div>
-                <div className="truncate text-[11px] text-attenue-texte">{r.designation}</div>
-                {voitPrix && r.prix_catalogue_kg != null && (
-                  <div className="text-[11px] tabular-nums text-attenue-texte">
-                    catalogue {fmt.nombre(r.prix_catalogue_kg, 4)} {r.code_devise_catalogue}/kg
-                  </div>
-                )}
+                <div className="truncate text-[11px] text-attenue-texte">
+                  {c.ref.designation}
+                  {voitPrix && c.ref.prix_catalogue_kg != null && (
+                    <> · catalogue {fmt.nombre(c.ref.prix_catalogue_kg, 4)}{' '}
+                      {c.ref.code_devise_catalogue}/kg</>
+                  )}
+                </div>
               </div>
               <Champ
                 type="number"
                 step="any"
                 min="0"
+                value={c.qte}
+                onChange={(e) =>
+                  setChoisies((ls) =>
+                    ls.map((x, k) => (k === i ? { ...x, qte: e.target.value } : x)),
+                  )
+                }
                 placeholder="kg"
-                value={choix[r.code_reference] ?? ''}
-                onChange={(e) => setChoix((c) => ({ ...c, [r.code_reference]: e.target.value }))}
                 className="h-8 w-28 text-right tabular-nums"
-                aria-label={`Quantite pour ${r.code_reference}`}
+                aria-label={`Quantite pour ${c.ref.code_reference}`}
               />
+              <Bouton
+                variante="discret"
+                taille="icone-xs"
+                className="text-danger hover:bg-danger/10"
+                aria-label="Retirer"
+                onClick={() => setChoisies((ls) => ls.filter((_, k) => k !== i))}
+              >
+                <X />
+              </Bouton>
             </div>
           ))}
         </div>
 
         <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
           <span className="text-[11px] text-attenue-texte">
-            {retenues.length} article(s) — ajoutes a la grille, rien n'est encore enregistre
+            {retenues.length} référence(s) — ajoutées au document, rien n’est enregistré
           </span>
           <div className="flex items-center gap-2">
             <Bouton variante="contour" onClick={surFermeture}>
@@ -1559,12 +1590,7 @@ function PanneauHorsCommande({
             <Bouton
               disabled={!retenues.length}
               onClick={() =>
-                surAjout(
-                  retenues.map(([code, v]) => ({
-                    ref: (q.data ?? []).find((r) => r.code_reference === code)!,
-                    qte: Number(v),
-                  })),
-                )
+                surAjout(retenues.map((c) => ({ ref: c.ref, qte: Number(c.qte) })))
               }
             >
               <Plus />

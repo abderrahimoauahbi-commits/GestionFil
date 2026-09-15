@@ -221,16 +221,20 @@ export function TransfertNouveau() {
     enabled: !!entete.code_magasin_source,
   })
 
-  const qCat = useQuery({
-    queryKey: ['catalogue-transfert'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
-  })
 
+  /**
+   * LE CONDITIONNEMENT VIENT DU STOCK, PAS DU CATALOGUE.
+   *
+   * L'ecran chargeait les deux mille references actives pour connaitre le poids
+   * d'une bobine. Or on ne transfere QUE ce qui est en stock dans le magasin
+   * source — une liste bien plus courte, deja chargee, et qui porte desormais
+   * le conditionnement de chaque reference.
+   */
   const catalogue = useMemo(() => {
     const m = new Map<string, RefCatalogue>()
-    for (const r of qCat.data ?? []) m.set(r.code_reference, r)
+    for (const r of qStock.data ?? []) m.set(r.code_reference, r as unknown as RefCatalogue)
     return m
-  }, [qCat.data])
+  }, [qStock.data])
 
   /** Le conditionnement d'une reference — vide si elle n'en porte pas. */
   const condDe = (code: string): Conditionnement => catalogue.get(code) ?? {}

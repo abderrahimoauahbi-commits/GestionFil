@@ -101,9 +101,18 @@ Bouton.displayName = 'Bouton'
 // Champs de saisie
 // ============================================================================
 
+/*
+ * UN CHAMP VIDE NE DOIT PAS RESSEMBLER A UN CHAMP REMPLI.
+ *
+ * L'indication d'aide — le « placeholder » — s'affichait dans la meme graisse
+ * et presque la meme teinte que la valeur saisie. Devant un formulaire, on ne
+ * distinguait plus ce qui etait renseigne de ce qui ne l'etait pas : on croyait
+ * avoir saisi, et l'enregistrement refusait. Elle est desormais en ITALIQUE et
+ * franchement plus claire : la difference se voit d'un coup d'oeil, sans lire.
+ */
 const classeChamp =
   'flex h-8 w-full rounded-[var(--radius)] border border-champ bg-surface px-2.5 py-1 text-[13px] ' +
-  'transition-colors placeholder:text-attenue-texte ' +
+  'transition-colors placeholder:italic placeholder:text-attenue-texte/55 ' +
   'focus-visible:border-anneau focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau/20 ' +
   'disabled:cursor-not-allowed disabled:bg-attenue disabled:text-attenue-texte ' +
   'aria-[invalid=true]:border-danger aria-[invalid=true]:ring-danger/25'

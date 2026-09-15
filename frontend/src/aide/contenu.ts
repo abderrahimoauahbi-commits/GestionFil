@@ -91,7 +91,8 @@ export const SUJETS: Sujet[] = [
     ],
     regles: [
       'Les colonnes de prix n’existent pas pour un rôle qui n’a pas le droit de les voir : ni en-tête, ni cellule, ni donnée envoyée.',
-      'Une référence ne se supprime pas, elle se désactive : l’historique doit rester lisible.',
+      'Une donnée de base que rien n’utilise se supprime pour de bon. Dès qu’un mouvement, une recette ou une commande la cite, la suppression est refusée et le message nomme ce qui la retient : détachez-le d’abord, ou mettez la ligne à l’état inactif.',
+      'Décocher « Actif » ne supprime rien : la référence sort des listes de saisie mais reste lisible dans l’historique. C’est le geste à faire pour une matière qu’on n’achète plus mais qu’on a déjà consommée.',
     ],
     liens: [
       { route: '/catalogue/completer', libelle: 'Compléter les références' },

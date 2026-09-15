@@ -355,7 +355,40 @@ fn jointures(table: &str) -> &'static str {
     }
 }
 
+/// La charge utile, prete a etre coulee dans les types de la table.
+///
+/// LE PROBLEME QUE CECI RESOUT. Un champ de formulaire rend TOUJOURS du texte :
+/// une quantite saisie « 500 » arrive comme la chaine "500", jamais comme le
+/// nombre 500. Liee telle quelle, PostgreSQL recevait un parametre `text` pour
+/// une colonne `numeric` et refusait — chaque enregistrement portant un prix, un
+/// poids ou un seuil tombait en « erreur interne ». Les champs textuels
+/// passaient, les champs chiffres non : l'ecran paraissait capricieux.
+///
+/// LA SOLUTION N'EST PAS DE DEVINER LE TYPE ICI. Convertir « ce qui ressemble a
+/// un nombre » casserait l'inverse : un titrage « 1500 » ou un code « 1234 »
+/// deviendrait un entier, refuse par une colonne texte. Seule la BASE connait le
+/// type de chaque colonne.
+///
+/// `jsonb_populate_record(NULL::table, $1)` le lui demande : PostgreSQL coule
+/// chaque champ du JSON dans le type reel de la colonne du meme nom, avec la
+/// fonction d'entree de ce type. Une seule valeur liee, aucune table de types a
+/// tenir a jour, et la conversion est celle de la base — pas la notre.
+fn charge_jsonb(champs: &[(String, Value)]) -> String {
+    let mut m = Map::new();
+    for (nom, v) in champs {
+        // UN CHAMP VIDE EST UN CHAMP NON RENSEIGNE, pas la chaine vide. Sans
+        // cela, « » atteindrait la fonction d'entree de `numeric`, qui refuse.
+        let valeur = match v {
+            Value::String(s) if s.trim().is_empty() => Value::Null,
+            autre => autre.clone(),
+        };
+        m.insert(nom.clone(), valeur);
+    }
+    Value::Object(m).to_string()
+}
+
 /// Lie une valeur JSON, en respectant son type.
+#[allow(dead_code)]
 pub fn lier<'q>(
     q: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
     v: &'q Value,
@@ -602,28 +635,39 @@ pub async fn creer(
 
     let champs = valider_charge(db, user, e.module, e.creation, &reste).await?;
 
-    let mut colonnes = vec![e.cle.to_string()];
-    colonnes.extend(champs.iter().map(|(n, _)| n.clone()));
-    // `$1`, PAS `?1` : le point d'interrogation etait le marqueur de SQLite.
-    // Depuis PostgreSQL, toute creation partait en erreur de syntaxe — donc en
-    // « erreur interne » a l'ecran, sans rien creer.
-    let marques: Vec<String> = (1..=colonnes.len()).map(|i| format!("${i}")).collect();
-
-    let sql = format!(
-        "INSERT INTO {} ({}) VALUES ({})",
-        e.table,
-        colonnes.join(", "),
-        marques.join(", ")
-    );
+    // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES.
+    //
+    // `jsonb_populate_record(NULL::table, $1)` rend une ligne de la table dont
+    // chaque colonne porte la valeur du champ JSON de meme nom, convertie par la
+    // fonction d'entree de SON type. Le « 500 » d'un formulaire devient un
+    // `numeric`, le « 1500 » d'un titrage reste du texte : c'est la colonne qui
+    // decide, pas nous.
+    let colonnes: Vec<String> = champs.iter().map(|(n, _)| n.clone()).collect();
+    let sql = if colonnes.is_empty() {
+        format!("INSERT INTO {} ({}) VALUES ($2)", e.table, e.cle)
+    } else {
+        format!(
+            "INSERT INTO {} ({}, {}) SELECT $2, {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) p",
+            e.table,
+            e.cle,
+            colonnes.join(", "),
+            colonnes
+                .iter()
+                .map(|c| format!("p.{c}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            e.table,
+        )
+    };
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let mut q = sqlx::query(&sql).bind(&cle_valeur);
-    for (_, v) in &champs {
-        q = lier(q, v);
-    }
-    q.execute(&mut *tx).await?;
+    sqlx::query(&sql)
+        .bind(charge_jsonb(&champs))
+        .bind(&cle_valeur)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     Ok(json!({ e.cle: cle_valeur, "cree": true }))
@@ -639,27 +683,28 @@ pub async fn modifier(
     user.exiger(db, e.module, Action::Ecrire).await?;
     let champs = valider_charge(db, user, e.module, e.modification, charge).await?;
 
-    // `$1` porte l'identifiant, les champs commencent donc a `$2`.
-    let set: Vec<String> = champs
-        .iter()
-        .enumerate()
-        .map(|(i, (n, _))| format!("{n} = ${}", i + 2))
-        .collect();
+    // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES — voir `charge_jsonb`.
+    // Un « 500 » saisi au clavier est du TEXTE ; lie tel quel a une colonne
+    // `numeric`, il faisait echouer l'enregistrement de toute reference portant
+    // un prix, un poids ou un seuil.
+    let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
     let sql = format!(
-        "UPDATE {} SET {} WHERE {} = $1",
+        "UPDATE {} AS c SET {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) AS p
+          WHERE c.{} = $2",
         e.table,
         set.join(", "),
+        e.table,
         e.cle
     );
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let mut q = sqlx::query(&sql).bind(id);
-    for (_, v) in &champs {
-        q = lier(q, v);
-    }
-    let res = q.execute(&mut *tx).await?;
+    let res = sqlx::query(&sql)
+        .bind(charge_jsonb(&champs))
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     if res.rows_affected() == 0 {
         return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
     }
@@ -671,33 +716,84 @@ pub async fn modifier(
     }))
 }
 
+/// La table qui retient une ligne, d'apres la contrainte qui a cede.
+///
+/// ON INTERROGE LE CATALOGUE, PAS LE MESSAGE D'ERREUR. Le detail rendu par
+/// PostgreSQL nomme bien la table — « is still referenced from table "x" » —
+/// mais il est TRADUIT selon la langue du serveur, et le serveur d'ici parle
+/// francais. Lire `pg_constraint` donne la meme reponse dans toutes les langues :
+/// pour une cle etrangere, `conrelid` designe la table qui REFERENCE.
+///
+/// La transaction est morte quand on arrive ici : on interroge donc la base
+/// directement, pas la transaction avortee.
+async fn retenue_par(db: &Db, contrainte: Option<&str>) -> Option<String> {
+    let nom = contrainte?;
+    sqlx::query_scalar::<_, String>(
+        "SELECT conrelid::regclass::text FROM pg_constraint
+          WHERE conname = $1 AND contype = 'f' LIMIT 1",
+    )
+    .bind(nom)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+}
+
 pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let (sql, logique) = match e.suppression {
+    let sql = match e.suppression {
         Suppression::Interdite => {
             return Err(AppError::RegleMetier(format!(
                 "La suppression n'est pas autorisee sur {}.",
                 e.chemin
             )))
         }
-        // Desactivation plutot que suppression : les mouvements, recettes et
-        // commandes passes referencent ces lignes. Les effacer romprait
-        // l'historique, que R03 declare immuable.
-        Suppression::Logique(col) => (
-            format!("UPDATE {} SET {col} = 0 WHERE {} = $1", e.table, e.cle),
-            true,
-        ),
-        Suppression::Physique => (
-            format!("DELETE FROM {} WHERE {} = $1", e.table, e.cle),
-            false,
-        ),
+        // UNE DONNEE DE BASE QUE PERSONNE N'UTILISE SE SUPPRIME VRAIMENT.
+        //
+        // Elle etait DESACTIVEE : la ligne restait en base, et les ecrans qui ne
+        // filtrent pas les inactives continuaient de l'afficher — le bouton
+        // « Retirer » paraissait alors sans le moindre effet, ce qui est pire
+        // qu'un refus.
+        //
+        // C'est la BASE qui decide : une famille qu'aucune reference ne cite
+        // s'efface ; une famille citee est retenue par sa cle etrangere, et l'on
+        // rapporte alors CE QUI la retient plutot qu'un refus muet. L'historique
+        // reste protege sans qu'on ait a le deviner ici — R03 tient par les
+        // contraintes, pas par une convention d'ecran.
+        //
+        // La desactivation reste possible, mais comme un acte a part : on met
+        // `actif` a zero. Retirer et desactiver ne sont pas la meme decision.
+        Suppression::Logique(_) | Suppression::Physique => {
+            format!("DELETE FROM {} WHERE {} = $1", e.table, e.cle)
+        }
     };
 
-    let res = sqlx::query(&sql).bind(id).execute(&mut *tx).await?;
+    let res = match sqlx::query(&sql).bind(id).execute(&mut *tx).await {
+        Ok(r) => r,
+        // 23503 : violation de cle etrangere. Quelque chose s'appuie sur cette
+        // ligne. Le message brut de PostgreSQL ne veut rien dire pour qui
+        // administre un referentiel : on nomme la table qui retient.
+        Err(sqlx::Error::Database(err)) if err.code().as_deref() == Some("23503") => {
+            let qui = retenue_par(db, err.constraint()).await;
+            return Err(AppError::RegleMetier(match qui {
+                Some(table) => format!(
+                    "« {id} » est encore utilise par des lignes de « {table} » : \
+                     il ne peut pas etre supprime. Detachez-les d'abord, ou \
+                     mettez cette ligne a l'etat inactif."
+                ),
+                None => format!(
+                    "« {id} » est encore utilise ailleurs : il ne peut pas etre \
+                     supprime. Detachez d'abord ce qui s'y rattache, ou mettez \
+                     cette ligne a l'etat inactif."
+                ),
+            }));
+        }
+        Err(autre) => return Err(autre.into()),
+    };
     if res.rows_affected() == 0 {
         return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
     }
@@ -706,7 +802,7 @@ pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> App
     Ok(json!({
         e.cle: id,
         "supprime": true,
-        "mode": if logique { "desactivation" } else { "suppression" },
+        "mode": "suppression",
     }))
 }
 

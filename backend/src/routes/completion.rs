@@ -160,6 +160,15 @@ pub async fn completion(
                 r.code_famille, r.code_couleur_interne,
                 COALESCE(r.reference_fournisseur, '') AS reference_fournisseur,
                 COALESCE(r.origine, '')  AS origine,
+                -- LES INFORMATIONS CRITIQUES. Sans elles une reference existe
+                -- mais ne sert a rien : on ne peut ni la commander (prix), ni
+                -- la peser en bobines (conditionnement), ni la reconnaitre sur
+                -- une facture (code couleur du fournisseur).
+                COALESCE(r.code_couleur, '') AS code_couleur,
+                r.prix_catalogue::float8     AS prix_catalogue,
+                r.poids_bobine_kg::float8    AS poids_bobine_kg,
+                r.bobines_par_palette,
+                COALESCE(r.unite_catalogue, 'kg') AS unite_catalogue,
                 cat.libelle AS categorie_libelle
            FROM reference r
            LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
@@ -200,6 +209,43 @@ pub async fn completion(
         })
         .collect();
 
+    // LE CONDITIONNEMENT SE DEDUIT DES REFERENCES SOEURS.
+    //
+    // Le poids d'une bobine et le nombre de bobines par palette sont une
+    // propriete du couple (famille, fournisseur) : le meme fil, chez le meme
+    // vendeur, arrive dans le meme emballage. Quand toutes les references deja
+    // renseignees d'un couple s'accordent sur une valeur, on la propose ; des
+    // qu'elles divergent, on ne propose rien — deux emballages coexistent, et
+    // c'est a l'humain de dire lequel.
+    //
+    // `COUNT(DISTINCT)` ignore les NULL : un groupe ou une seule reference porte
+    // la valeur compte donc UN, ce qui est exactement le cas a propager.
+    let colis = sqlx::query(
+        "SELECT code_famille, code_fournisseur,
+                COUNT(DISTINCT poids_bobine_kg)     AS n_poids,
+                MIN(poids_bobine_kg)::float8        AS poids,
+                COUNT(DISTINCT bobines_par_palette) AS n_bobines,
+                MIN(bobines_par_palette)            AS bobines
+           FROM reference
+          WHERE actif = 1 AND code_famille IS NOT NULL AND code_fournisseur IS NOT NULL
+          GROUP BY code_famille, code_fournisseur",
+    )
+    .fetch_all(db)
+    .await?;
+    let colis: Vec<(String, String, i64, Option<f64>, i64, Option<i64>)> = colis
+        .iter()
+        .map(|c| {
+            (
+                c.get::<String, _>("code_famille"),
+                c.get::<String, _>("code_fournisseur"),
+                c.get::<i64, _>("n_poids"),
+                c.get::<Option<f64>, _>("poids"),
+                c.get::<i64, _>("n_bobines"),
+                c.get::<Option<i64>, _>("bobines"),
+            )
+        })
+        .collect();
+
     // Les codes couleur de chaque fournisseur : « RED 7612 » chez Hasirci, c'est
     // le C3 de la maison.
     let cf = sqlx::query(
@@ -212,6 +258,8 @@ pub async fn completion(
 
     let mut lignes: Vec<Value> = Vec::new();
     let (mut sur_famille, mut sur_couleur, mut sur_ref) = (0, 0, 0);
+    // Ce qui manque encore APRES deduction : c'est le vrai reste a faire.
+    let (mut sans_prix, mut sans_colis, mut sans_code_couleur) = (0, 0, 0);
 
     for r in &refs {
         let code: String = r.get("code_reference");
@@ -272,10 +320,106 @@ pub async fn completion(
         let actuel_ref: String = r.get("reference_fournisseur");
         let actuel_origine: String = r.get("origine");
 
-        // Rien a faire sur cette reference : elle est deja complete.
+        // --- LES INFORMATIONS CRITIQUES ---------------------------------
+        //
+        // Ce qui manque ici ne se voit pas a l'ecran du catalogue : une
+        // reference sans prix ne peut pas etre commandee, une reference sans
+        // poids de bobine ne peut pas etre pesee au quai, une reference sans
+        // code couleur fournisseur ne peut pas etre reconnue sur une facture.
+        // L'assistant propose ce qui se DEDUIT et nomme ce qui ne se deduit pas.
+        let actuel_code_couleur: String = r.get("code_couleur");
+        let actuel_prix: Option<f64> = r.get("prix_catalogue");
+        let actuel_poids: Option<f64> = r.get("poids_bobine_kg");
+        let actuel_bobines: Option<i64> = r.get("bobines_par_palette");
+        let unite: String = r.get("unite_catalogue");
+
+        // La famille retenue — deja posee, ou proposee a l'instant — sert de
+        // socle aux deductions qui suivent.
+        let famille_retenue = actuel_famille.clone().or_else(|| famille_proposee.clone());
+
+        // LE TITRAGE VIENT DE LA FAMILLE. C'est elle qui le porte : « 1500 dtex »
+        // n'est pas une propriete du fournisseur, c'est la finesse du fil.
+        let titrage_propose = if titrage.is_empty() {
+            famille_retenue
+                .as_ref()
+                .and_then(|f| familles.iter().find(|(c, _, _, _)| c == f))
+                .map(|(_, _, tit, _)| tit.clone())
+                .filter(|t| !t.is_empty())
+        } else {
+            None
+        };
+
+        // LE CODE COULEUR DU FOURNISSEUR se lit dans la table des
+        // correspondances : la couleur interne, chez CE vendeur.
+        let couleur_retenue = actuel_couleur.clone().or_else(|| couleur_proposee.clone());
+        let code_couleur_propose = if actuel_code_couleur.is_empty() {
+            couleur_retenue.as_ref().and_then(|ci| {
+                cf.iter()
+                    .find(|x| {
+                        x.get::<String, _>("code_fournisseur") == fournisseur
+                            && x.get::<String, _>("code_couleur_interne") == *ci
+                    })
+                    .map(|x| x.get::<String, _>("code_couleur"))
+            })
+        } else {
+            None
+        };
+
+        // LE CONDITIONNEMENT vient des references soeurs — meme famille, meme
+        // fournisseur — quand elles s'accordent toutes sur une valeur.
+        let groupe = famille_retenue.as_ref().and_then(|f| {
+            colis
+                .iter()
+                .find(|(fam, frs, _, _, _, _)| fam == f && *frs == fournisseur)
+        });
+        let poids_propose = if actuel_poids.is_none() {
+            groupe.filter(|(_, _, n, _, _, _)| *n == 1).and_then(|(_, _, _, p, _, _)| *p)
+        } else {
+            None
+        };
+        let bobines_proposees = if actuel_bobines.is_none() {
+            groupe.filter(|(_, _, _, _, n, _)| *n == 1).and_then(|(_, _, _, _, _, b)| *b)
+        } else {
+            None
+        };
+
+        // CE QUI NE SE DEDUIT PAS, et qu'il faut donc aller chercher. Un prix ne
+        // s'invente pas : le proposer d'apres une reference voisine donnerait un
+        // cout de revient faux, et RG-08 interdit ce repli silencieux.
+        let mut manque: Vec<&str> = Vec::new();
+        if actuel_prix.unwrap_or(0.0) <= 0.0 {
+            manque.push("prix_catalogue");
+        }
+        if actuel_poids.is_none() && poids_propose.is_none() && unite != "ml" {
+            manque.push("poids_bobine_kg");
+        }
+        if actuel_bobines.is_none() && bobines_proposees.is_none() && unite != "ml" {
+            manque.push("bobines_par_palette");
+        }
+        if actuel_code_couleur.is_empty() && code_couleur_propose.is_none() && couleur_retenue.is_some() {
+            manque.push("code_couleur");
+        }
+        if titrage.is_empty() && titrage_propose.is_none() {
+            manque.push("titrage");
+        }
+
+        // COMPLETE NE VEUT DIRE QUE « IDENTIFIEE ». Une reference peut etre
+        // parfaitement classee et rester incommandable faute de prix : ce
+        // second manque se lit dans `manque`, pas ici, sinon l'ecran melerait
+        // deux questions — qui est cette matiere, et que sait-on d'elle.
         let complete = actuel_famille.is_some()
             && (actuel_couleur.is_some() || !actuel_origine.is_empty())
             && !actuel_ref.is_empty();
+
+        if manque.contains(&"prix_catalogue") {
+            sans_prix += 1;
+        }
+        if manque.contains(&"poids_bobine_kg") || manque.contains(&"bobines_par_palette") {
+            sans_colis += 1;
+        }
+        if manque.contains(&"code_couleur") {
+            sans_code_couleur += 1;
+        }
 
         lignes.push(json!({
             "code_reference": code,
@@ -291,12 +435,25 @@ pub async fn completion(
                 "code_couleur_interne": actuel_couleur,
                 "reference_fournisseur": actuel_ref,
                 "origine": actuel_origine,
+                "titrage": titrage,
+                "code_couleur": actuel_code_couleur,
+                "prix_catalogue": actuel_prix,
+                "poids_bobine_kg": actuel_poids,
+                "bobines_par_palette": actuel_bobines,
+                "unite_catalogue": unite,
             },
             "propose": {
                 "code_famille": famille_proposee,
                 "code_couleur_interne": couleur_proposee,
                 "reference_fournisseur": ref_four,
+                "titrage": titrage_propose,
+                "code_couleur": code_couleur_propose,
+                "poids_bobine_kg": poids_propose,
+                "bobines_par_palette": bobines_proposees,
             },
+            // Ce qu'aucune deduction ne peut fournir : il faut aller le chercher
+            // chez le fournisseur ou sur une facture.
+            "manque": manque,
             // Les candidats a proposer quand l'assistant ne tranche pas : c'est
             // la forme que prend « je demande ».
             "familles_possibles": candidates_famille.iter()
@@ -314,6 +471,9 @@ pub async fn completion(
             "famille_sure": sur_famille,
             "couleur_sure": sur_couleur,
             "reference_fournisseur_lue": sur_ref,
+            "sans_prix": sans_prix,
+            "sans_conditionnement": sans_colis,
+            "sans_code_couleur": sans_code_couleur,
         },
     })))
 }

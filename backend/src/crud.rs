@@ -276,6 +276,11 @@ pub const ENTITES: &[Entite] = &[
         creation: &[
             "code_reference", "code_categorie", "code_fournisseur", "designation",
             "type_fil", "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
+            "code_couleur",
+            // Le code que le FOURNISSEUR donne a cette couleur. Il existait en
+            // base sans etre modifiable par aucune route : l'assistant de
+            // completion ne pouvait donc pas le renseigner.
+            "code_couleur",
             "reference_fournisseur", "supplement_teinture",
             "unite_catalogue", "poids_bobine_kg",
             "bobines_par_palette", "densite_kg_ml", "prix_catalogue",
@@ -285,6 +290,7 @@ pub const ENTITES: &[Entite] = &[
         modification: &[
             "code_categorie", "code_fournisseur", "designation", "type_fil",
             "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
+            "code_couleur",
             "reference_fournisseur", "supplement_teinture",
             "unite_catalogue", "poids_bobine_kg",
             "bobines_par_palette", "densite_kg_ml", "prix_catalogue",

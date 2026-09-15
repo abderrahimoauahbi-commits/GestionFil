@@ -56,12 +56,24 @@ interface LigneCompletion {
     code_couleur_interne: string | null
     reference_fournisseur: string
     origine: string
+    titrage: string
+    code_couleur: string
+    prix_catalogue: number | null
+    poids_bobine_kg: number | null
+    bobines_par_palette: number | null
+    unite_catalogue: string
   }
   propose: {
     code_famille: string | null
     code_couleur_interne: string | null
     reference_fournisseur: string | null
+    titrage: string | null
+    code_couleur: string | null
+    poids_bobine_kg: number | null
+    bobines_par_palette: number | null
   }
+  /** Ce qu'aucune deduction ne fournit : il faut aller le chercher. */
+  manque: string[]
   familles_possibles: FamillePossible[]
 }
 
@@ -73,6 +85,9 @@ interface Completion {
     famille_sure: number
     couleur_sure: number
     reference_fournisseur_lue: number
+    sans_prix: number
+    sans_conditionnement: number
+    sans_code_couleur: number
   }
 }
 
@@ -82,7 +97,27 @@ interface Saisie {
   code_couleur_interne: string
   reference_fournisseur: string
   origine: string
+  /* LES INFORMATIONS CRITIQUES. Sans elles la référence existe mais ne sert à
+     rien : on ne peut ni la commander (prix), ni la peser en bobines
+     (conditionnement), ni la reconnaître sur une facture (code fournisseur). */
+  titrage: string
+  code_couleur: string
+  prix_catalogue: string
+  poids_bobine_kg: string
+  bobines_par_palette: string
 }
+
+/** Le nom lisible d'un champ manquant, pour le dire à l'écran. */
+const NOM_CHAMP: Record<string, string> = {
+  prix_catalogue: 'prix',
+  poids_bobine_kg: 'poids de bobine',
+  bobines_par_palette: 'bobines par palette',
+  code_couleur: 'code couleur du fournisseur',
+  titrage: 'titrage',
+}
+
+/** Un nombre venu du serveur, tel qu'on le pose dans un champ de saisie. */
+const texte = (n: number | null | undefined) => (n == null ? '' : String(n))
 
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
 const td = 'px-2 py-1 align-top'
@@ -94,6 +129,11 @@ function valeurDepart(l: LigneCompletion): Saisie {
     code_couleur_interne: l.actuel.code_couleur_interne ?? l.propose.code_couleur_interne ?? '',
     reference_fournisseur: l.actuel.reference_fournisseur || l.propose.reference_fournisseur || '',
     origine: l.actuel.origine ?? '',
+    titrage: l.actuel.titrage || l.propose.titrage || '',
+    code_couleur: l.actuel.code_couleur || l.propose.code_couleur || '',
+    prix_catalogue: texte(l.actuel.prix_catalogue),
+    poids_bobine_kg: texte(l.actuel.poids_bobine_kg ?? l.propose.poids_bobine_kg),
+    bobines_par_palette: texte(l.actuel.bobines_par_palette ?? l.propose.bobines_par_palette),
   }
 }
 
@@ -130,6 +170,13 @@ export function CompleterCatalogue() {
         if (v.code_couleur_interne) charge.code_couleur_interne = v.code_couleur_interne
         if (v.reference_fournisseur) charge.reference_fournisseur = v.reference_fournisseur
         if (v.origine) charge.origine = v.origine
+        /* UN CHAMP VIDE N'EFFACE JAMAIS : on n'envoie que ce qui est renseigné.
+           Accepter un lot ne peut donc pas vider ce qu'une autre main a saisi. */
+        if (v.titrage) charge.titrage = v.titrage
+        if (v.code_couleur) charge.code_couleur = v.code_couleur
+        if (v.prix_catalogue) charge.prix_catalogue = v.prix_catalogue
+        if (v.poids_bobine_kg) charge.poids_bobine_kg = v.poids_bobine_kg
+        if (v.bobines_par_palette) charge.bobines_par_palette = v.bobines_par_palette
         if (Object.keys(charge).length === 0) continue
         await api.patch(`/api/catalogue/${encodeURIComponent(l.code_reference)}`, charge)
         faites += 1
@@ -161,7 +208,11 @@ export function CompleterCatalogue() {
     return (
       (v.code_famille && !l.actuel.code_famille) ||
       (v.code_couleur_interne && !l.actuel.code_couleur_interne) ||
-      (v.reference_fournisseur && !l.actuel.reference_fournisseur)
+      (v.reference_fournisseur && !l.actuel.reference_fournisseur) ||
+      (v.titrage && !l.actuel.titrage) ||
+      (v.code_couleur && !l.actuel.code_couleur) ||
+      (v.poids_bobine_kg && l.actuel.poids_bobine_kg == null) ||
+      (v.bobines_par_palette && l.actuel.bobines_par_palette == null)
     )
   })
   const aDemander = lignes.filter((l) => !valeur(l).code_couleur_interne && l.couleur)
@@ -207,6 +258,23 @@ export function CompleterCatalogue() {
               <Badge ton="succes">{bilan.famille_sure} famille(s) déduite(s)</Badge>
               <Badge ton="succes">{bilan.couleur_sure} couleur(s) reconnue(s)</Badge>
               <Badge ton="succes">{bilan.reference_fournisseur_lue} réf. fournisseur lue(s)</Badge>
+              {/* CE QUI RESTE A ALLER CHERCHER. Un prix ne se déduit pas d'une
+                  référence voisine : le proposer donnerait un coût de revient
+                  faux, et c'est exactement le repli silencieux que RG-08
+                  interdit. On le compte, on ne l'invente pas. */}
+              {bilan.sans_prix > 0 && (
+                <Badge ton="alerte">{bilan.sans_prix} sans prix</Badge>
+              )}
+              {bilan.sans_conditionnement > 0 && (
+                <Badge ton="alerte">
+                  {bilan.sans_conditionnement} sans conditionnement
+                </Badge>
+              )}
+              {bilan.sans_code_couleur > 0 && (
+                <Badge ton="alerte">
+                  {bilan.sans_code_couleur} sans code couleur fournisseur
+                </Badge>
+              )}
             </div>
           )}
 
@@ -234,16 +302,28 @@ export function CompleterCatalogue() {
                   <th className={cn(th, 'text-left')}>Couleur interne</th>
                   <th className={cn(th, 'text-left')}>Réf. fournisseur</th>
                   <th className={cn(th, 'text-left')}>Origine</th>
+                  <th className={cn(th, 'text-left')}>Titrage</th>
+                  <th className={cn(th, 'text-left')}>Code couleur frs</th>
+                  <th className={cn(th, 'text-right')}>Prix</th>
+                  <th className={cn(th, 'text-right')}>Poids bob.</th>
+                  <th className={cn(th, 'text-right')}>Bob./pal.</th>
                   <th className={th} />
                 </tr>
               </thead>
               <tbody>
                 {lignes.map((l) => {
                   const v = valeur(l)
-                  const propose = (c: keyof Saisie) =>
-                    !l.actuel[c as keyof typeof l.actuel] &&
-                    Boolean((l.propose as Record<string, unknown>)[c]) &&
-                    v[c] === ((l.propose as Record<string, string | null>)[c] ?? '')
+                  /* UNE VALEUR EST « PROPOSEE » quand la référence ne la
+                     portait pas, que l'assistant en a trouvé une, et qu'on ne
+                     l'a pas encore corrigée à la main. Le cadre bleu ne dit pas
+                     « juste » : il dit « déduit, à vérifier ». */
+                  const propose = (c: keyof Saisie) => {
+                    const actuel = (l.actuel as Record<string, unknown>)[c]
+                    const suggere = (l.propose as Record<string, unknown>)[c]
+                    if (actuel != null && actuel !== '') return false
+                    if (suggere == null || suggere === '') return false
+                    return v[c] === String(suggere)
+                  }
                   return (
                     <tr key={l.code_reference} className="border-b border-bordure/60">
                       <td className={cn(td, 'max-w-[22rem]')}>
@@ -252,6 +332,14 @@ export function CompleterCatalogue() {
                           {l.categorie_libelle} · {l.couleur || 'sans couleur'}
                           {l.titrage && ` · ${l.titrage}`}
                         </div>
+                        {/* CE QUI MANQUE, DIT EN TOUTES LETTRES. Un cadre rouge
+                            signale la case ; il ne dit pas de quoi il s'agit
+                            quand la colonne est hors de l'écran. */}
+                        {l.manque.length > 0 && (
+                          <div className="text-[11px] text-danger">
+                            manque : {l.manque.map((m) => NOM_CHAMP[m] ?? m).join(', ')}
+                          </div>
+                        )}
                       </td>
                       <td className={td}>
                         <Selecteur
@@ -296,6 +384,70 @@ export function CompleterCatalogue() {
                           onChange={(e) => poser(l.code_reference, 'origine', e.target.value)}
                           placeholder={l.couleur ? '' : 'à la place de la couleur'}
                           className={cn(champ, 'w-32')}
+                        />
+                      </td>
+                      <td className={td}>
+                        <Champ
+                          value={v.titrage}
+                          onChange={(e) => poser(l.code_reference, 'titrage', e.target.value)}
+                          placeholder="1500 dtex"
+                          className={cn(champ, 'w-28', propose('titrage') && 'border-primaire')}
+                        />
+                      </td>
+                      <td className={td}>
+                        <Champ
+                          value={v.code_couleur}
+                          onChange={(e) => poser(l.code_reference, 'code_couleur', e.target.value)}
+                          placeholder="RED 7612"
+                          className={cn(champ, 'w-28', propose('code_couleur') && 'border-primaire')}
+                        />
+                      </td>
+                      {/* LE PRIX NE SE DEDUIT PAS : il se lit sur une offre ou
+                          une facture. Le champ reste vide et se signale en
+                          rouge, plutot que de porter une valeur inventee. */}
+                      <td className={td}>
+                        <Champ
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={v.prix_catalogue}
+                          onChange={(e) => poser(l.code_reference, 'prix_catalogue', e.target.value)}
+                          className={cn(
+                            champ,
+                            'w-24 text-right tabular-nums',
+                            l.manque.includes('prix_catalogue') && 'border-danger',
+                          )}
+                        />
+                      </td>
+                      <td className={td}>
+                        <Champ
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={v.poids_bobine_kg}
+                          onChange={(e) => poser(l.code_reference, 'poids_bobine_kg', e.target.value)}
+                          className={cn(
+                            champ,
+                            'w-20 text-right tabular-nums',
+                            propose('poids_bobine_kg') && 'border-primaire',
+                            l.manque.includes('poids_bobine_kg') && 'border-danger',
+                          )}
+                        />
+                      </td>
+                      <td className={td}>
+                        <Champ
+                          type="number"
+                          min="0"
+                          value={v.bobines_par_palette}
+                          onChange={(e) =>
+                            poser(l.code_reference, 'bobines_par_palette', e.target.value)
+                          }
+                          className={cn(
+                            champ,
+                            'w-20 text-right tabular-nums',
+                            propose('bobines_par_palette') && 'border-primaire',
+                            l.manque.includes('bobines_par_palette') && 'border-danger',
+                          )}
                         />
                       </td>
                       <td className={cn(td, 'text-right')}>

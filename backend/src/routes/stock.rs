@@ -1784,6 +1784,9 @@ pub async fn references_commandables(
                 -- desormais avec chaque ligne trouvee, et le catalogue n'est
                 -- plus charge du tout.
                 r.poids_bobine_kg, r.bobines_par_palette, r.densite_kg_ml,
+                -- CE QUE LE FOURNISSEUR RECONNAIT. Le bon part chez lui : il y
+                -- lit SON code article et SON code couleur, pas les notres.
+                r.reference_fournisseur, r.couleur, r.code_couleur,
                 -- LE FOURNISSEUR HABITUEL, pas une exclusivite. Le catalogue dit
                 -- chez qui on achete d'ordinaire ; rien n'empeche de commander
                 -- le meme fil ailleurs quand le prix ou le delai l'exigent. Le

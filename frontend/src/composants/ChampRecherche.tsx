@@ -111,6 +111,16 @@ export function ChampRecherche({
   const [ouvert, setOuvert] = useState(false)
   const [pointe, setPointe] = useState(0)
   const boite = useRef<HTMLDivElement>(null)
+  /**
+   * LA LISTE N'EST PLUS DANS LA BOITE : elle vit dans un portail, au corps
+   * du document. Il faut donc la designer a part pour savoir si un clic est
+   * « dedans » — sans ce second reperage, cliquer sur une suggestion comptait
+   * comme un clic DEHORS : la liste se fermait au `mousedown`, et le `click`
+   * n'atteignait jamais la ligne. Rien ne se selectionnait a la souris ;
+   * seul le clavier fonctionnait, ce qui rendait le defaut invisible a un
+   * essai automatise.
+   */
+  const panneau = useRef<HTMLDivElement>(null)
 
 
   /**
@@ -179,7 +189,10 @@ export function ChampRecherche({
   useEffect(() => {
     if (!ouvert) return
     const dehors = (e: MouseEvent) => {
-      if (boite.current && !boite.current.contains(e.target as Node)) setOuvert(false)
+      const cible = e.target as Node
+      if (boite.current?.contains(cible)) return
+      if (panneau.current?.contains(cible)) return
+      setOuvert(false)
     }
     document.addEventListener('mousedown', dehors)
     return () => document.removeEventListener('mousedown', dehors)
@@ -254,6 +267,7 @@ export function ChampRecherche({
         cadre &&
         createPortal(
         <div
+          ref={panneau}
           role="listbox"
           style={{ position: 'fixed', left: cadre.x, top: cadre.y, width: cadre.l }}
           className="z-[60] max-h-72 overflow-y-auto rounded-[var(--radius)] border border-bordure bg-surface shadow-lg"

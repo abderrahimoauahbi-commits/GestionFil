@@ -215,6 +215,10 @@ const ECRANS = (
           seul endroit ou l'on CREE un groupe d'equivalence, et le supprimer
           rendrait les 93 groupes inadministrables. */}
       <Route path="categories" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['categories']} /></ExigeModule>} />
+      {/* LES COULEURS AVAIENT LEUR ECRAN SANS AVOIR DE PORTE. Le CRUD existait
+          dans l'ecran des referentiels, mais aucun menu n'y menait : de
+          l'exterieur, il n'existait pas. Meme code, meme CRUD, une adresse. */}
+      <Route path="couleurs" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['couleurs']} /></ExigeModule>} />
       <Route path="roles-bom" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['roles-bom']} /></ExigeModule>} />
       <Route path="referentiels" element={<ExigeModule module="CATALOGUE"><Referentiels /></ExigeModule>} />
       <Route path="qualites" element={<ExigeModule module="QUALITES"><Qualites /></ExigeModule>} />

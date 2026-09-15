@@ -449,8 +449,17 @@ export function MouvementNouveau() {
 
             return (
               <div key={i} className="rounded-lg border border-bordure bg-attenue p-3">
-                <div className="grid gap-2 sm:grid-cols-12">
-                  <div className="sm:col-span-5">
+                {/* UNE SEULE RANGEE SUR GRAND ECRAN.
+                    En grille de douze colonnes, prix, quantite, unite et
+                    colis retombaient sur deux ou trois rangees : les champs
+                    d'une meme ligne de mouvement se lisaient alors comme
+                    plusieurs lignes, et l'oeil perdait a quelle reference ils
+                    se rapportaient. Chacun prend desormais la largeur qu'il
+                    lui faut — un nombre de bobines n'a pas besoin d'autant de
+                    place qu'une reference — et la rangee ne se replie qu'en
+                    dessous du bureau. */}
+                <div className="flex flex-wrap items-start gap-2 lg:flex-nowrap">
+                  <div className="min-w-48 flex-1">
                     <input
                       list="refs"
                       placeholder="Référence"
@@ -465,7 +474,7 @@ export function MouvementNouveau() {
                       </div>
                     )}
                   </div>
-                  <div className="sm:col-span-3">
+                  <div className="w-28 shrink-0">
                     <input
                       type="number"
                       step="any"
@@ -476,7 +485,7 @@ export function MouvementNouveau() {
                       className={champ}
                     />
                   </div>
-                  <div className="sm:col-span-3">
+                  <div className="w-24 shrink-0">
                     <select
                       value={l.unite_saisie}
                       onChange={(e) => majLigne(i, 'unite_saisie', e.target.value)}
@@ -488,7 +497,7 @@ export function MouvementNouveau() {
                       <option value="ml">ml</option>
                     </select>
                   </div>
-                  <div className="flex items-center justify-end sm:col-span-1">
+                  <div className="order-last flex shrink-0 items-center">
                     {lignes.length > 1 && (
                       <button
                         type="button"
@@ -502,7 +511,7 @@ export function MouvementNouveau() {
                   </div>
 
                   {typeActif?.exige_prix === 1 && (
-                    <div className="sm:col-span-4">
+                    <div className="w-32 shrink-0">
                       <input
                         type="number"
                         step="any"
@@ -520,7 +529,7 @@ export function MouvementNouveau() {
                   {/* L'INTERRUPTEUR DU CALCUL, au plus pres des colis qu'il
                       relie. Lie, les trois se repondent ; detache, chacun se
                       saisit seul — une palette incomplete, un reliquat. */}
-                  <div className="flex items-center justify-center sm:col-span-1">
+                  <div className="flex shrink-0 items-center">
                     <button
                       type="button"
                       onClick={() => majLigne(i, 'lie', !l.lie as unknown as string)}
@@ -541,7 +550,7 @@ export function MouvementNouveau() {
                     </button>
                   </div>
 
-                  <div className="sm:col-span-2">
+                  <div className="w-20 shrink-0">
                     <input
                       type="number"
                       min="0"
@@ -552,7 +561,7 @@ export function MouvementNouveau() {
                       className={champ}
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="w-20 shrink-0">
                     <input
                       type="number"
                       min="0"
@@ -565,7 +574,7 @@ export function MouvementNouveau() {
                   </div>
 
                   {r?.suivi_lot === 1 && (
-                    <div className="sm:col-span-4">
+                    <div className="w-full lg:w-52">
                       <input
                         placeholder="Lot fournisseur (obligatoire)"
                         value={l.lot_fournisseur}
@@ -575,7 +584,7 @@ export function MouvementNouveau() {
                     </div>
                   )}
                   {typeActif?.exige_motif_ligne === 1 && (
-                    <div className="sm:col-span-4">
+                    <div className="w-full lg:w-40">
                       <input
                         placeholder="Motif (R1 a R6)"
                         value={l.code_motif_ligne}

@@ -82,6 +82,9 @@ interface RefCommandable extends Record<string, unknown> {
   poids_bobine_kg?: number | null
   bobines_par_palette?: number | null
   densite_kg_ml?: number | null
+  reference_fournisseur?: string | null
+  couleur?: string | null
+  code_couleur?: string | null
   classe_abc: string | null
   moq_kg: number | null
   multiple_achat_kg: number | null
@@ -153,6 +156,18 @@ interface LigneSaisie {
   lie: boolean
   /** Au KILO pour une marchandise, a l'unite saisie sinon. */
   prix: string
+  /**
+   * CE QUE LE FOURNISSEUR RECONNAIT.
+   *
+   * Le bon part chez lui : il y lit SON code article et SON code couleur, pas
+   * les notres. Ces trois-la appartiennent a la REFERENCE — ce ne sont pas des
+   * proprietes de la commande — mais c'est en preparant la commande qu'on
+   * s'apercoit qu'ils manquent. On les corrige donc ici, et la correction
+   * remonte a la fiche de la reference, la ou l'information a sa place.
+   */
+  reference_fournisseur: string
+  couleur: string
+  code_couleur: string
 }
 
 let compteur = 0
@@ -182,6 +197,9 @@ function ligneVide(): LigneSaisie {
     bobines: '',
     lie: true,
     prix: '',
+    reference_fournisseur: '',
+    couleur: '',
+    code_couleur: '',
   }
 }
 
@@ -258,6 +276,12 @@ export function BonCommandeNouveau() {
     () => (qPlan.data ?? []).filter((r) => (r.qte_a_commander_kg ?? 0) > 0),
     [qPlan.data],
   )
+  // La fiche telle que le serveur l'a rendue : elle sert de point de
+  // comparaison pour ne remonter au catalogue QUE ce qui a change.
+  const parPlan = useMemo(
+    () => new Map((qPlan.data ?? []).map((r) => [r.code_reference, r])),
+    [qPlan.data],
+  )
 
   const condDe = (r: RefCommandable): Conditionnement => ({
     poids_bobine_kg: r.poids_bobine_kg,
@@ -289,6 +313,9 @@ export function BonCommandeNouveau() {
       bobines: pourChamp(colis.bobines),
       lie: true,
       prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
+      reference_fournisseur: r.reference_fournisseur ?? '',
+      couleur: r.couleur ?? '',
+      code_couleur: r.code_couleur ?? '',
     }
   }
 
@@ -384,6 +411,30 @@ export function BonCommandeNouveau() {
 
   const maj = (cle: string, patch: Partial<LigneSaisie>) =>
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
+
+  /**
+   * CORRIGER LA FICHE DE LA REFERENCE DEPUIS LA COMMANDE.
+   *
+   * La reference du fournisseur, sa couleur et son code couleur appartiennent
+   * a la REFERENCE, pas a la ligne de commande. Mais c'est en preparant la
+   * commande qu'on s'apercoit qu'ils manquent — 23 references du catalogue
+   * n'ont aucun code couleur fournisseur. Les corriger ici les ecrit la ou
+   * elles ont leur place, une fois pour toutes : la commande suivante les
+   * trouvera deja renseignes.
+   *
+   * L'ecriture part a la SORTIE du champ, pas a chaque frappe : sinon chaque
+   * lettre deviendrait un enregistrement.
+   */
+  const corrigerReference = useMutation({
+    mutationFn: ({ code, champ, valeur }: { code: string; champ: string; valeur: string }) =>
+      api.patch(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur }),
+    onSuccess: () => {
+      toast.success('Fiche de la référence corrigée')
+      void qc.invalidateQueries({ queryKey: ['refs-plan'] })
+    },
+    onError: (e) =>
+      toast.error(e instanceof ErreurApi ? e.message : 'Correction impossible.'),
+  })
 
   /** Le poids d'une ligne de marchandise, quelle que soit l'unite saisie. */
   const kgDe = (l: LigneSaisie) =>
@@ -669,6 +720,13 @@ export function BonCommandeNouveau() {
                         <th className="w-8 px-1 py-2 text-right">#</th>
                         <th className="px-1.5 py-2 text-left">Référence ou intitulé</th>
                         <th className="w-28 px-1.5 py-2 text-right">Quantité</th>
+                        <th className="w-32 px-1.5 py-2 text-left" title="Le code que le fournisseur emploie, tel qu'il figure sur sa facture">
+                          Réf. frs
+                        </th>
+                        <th className="w-28 px-1.5 py-2 text-left">Couleur</th>
+                        <th className="w-28 px-1.5 py-2 text-left" title="Le code que CE fournisseur donne a cette couleur">
+                          Code coul. frs
+                        </th>
                         <th className="w-24 px-1.5 py-2 text-left">Unité</th>
                         <th className="w-36 px-1.5 py-2 text-center">Pal. / Bob.</th>
                         <th className="w-28 px-1.5 py-2 text-right">Prix {devise}</th>
@@ -815,6 +873,52 @@ export function BonCommandeNouveau() {
                                 </div>
                               )}
                             </td>
+                            {/* CE QUE LE FOURNISSEUR RECONNAIT. Modifiable :
+                                la correction remonte a la fiche de la
+                                reference, la ou l'information a sa place. */}
+                            {(['reference_fournisseur', 'couleur', 'code_couleur'] as const).map(
+                              (champ) => (
+                                <td className={cellule} key={champ}>
+                                  {marchandise ? (
+                                    <Champ
+                                      value={l[champ]}
+                                      onChange={(e) => maj(l.cle, { [champ]: e.target.value })}
+                                      onBlur={(e) => {
+                                        const v = e.target.value.trim()
+                                        const initial =
+                                          (parPlan.get(l.code_reference)?.[champ] as string) ?? ''
+                                        if (v !== initial && l.code_reference) {
+                                          corrigerReference.mutate({
+                                            code: l.code_reference,
+                                            champ,
+                                            valeur: v,
+                                          })
+                                        }
+                                      }}
+                                      className="h-8"
+                                      placeholder={
+                                        champ === 'reference_fournisseur'
+                                          ? 'Ssl2279'
+                                          : champ === 'couleur'
+                                            ? 'Cream'
+                                            : 'RED 7612'
+                                      }
+                                      aria-label={
+                                        champ === 'reference_fournisseur'
+                                          ? 'Référence chez le fournisseur'
+                                          : champ === 'couleur'
+                                            ? 'Couleur'
+                                            : 'Code couleur du fournisseur'
+                                      }
+                                    />
+                                  ) : (
+                                    <span className="block text-center text-[11px] text-attenue-texte">
+                                      —
+                                    </span>
+                                  )}
+                                </td>
+                              ),
+                            )}
                             <td className={cellule}>
                               <Selecteur
                                 value={l.unite}

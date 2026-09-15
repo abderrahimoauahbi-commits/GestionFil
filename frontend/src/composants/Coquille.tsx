@@ -175,6 +175,7 @@ export const NAVIGATION: EntreeNav[] = [
   // pour rejoindre ce qu'ils qualifient. Chacun ouvre l'ecran des referentiels
   // reduit a son seul onglet — meme code, meme CRUD, pas de doublon.
   { vers: '/categories', libelle: 'Catégories matière', module: 'CATALOGUE', Icone: Shapes, section: 'CATALOGUE' },
+  { vers: '/couleurs', libelle: 'Couleurs', module: 'CATALOGUE', Icone: Palette, section: 'CATALOGUE', resume: 'Le nuancier maison et son code chez chaque fournisseur' },
   { vers: '/roles-bom', libelle: 'Rôles BOM', module: 'CATALOGUE', Icone: Layers, section: 'CATALOGUE' },
 
   /* --- 3. Production & MRP ----------------------------------------------- */

@@ -718,7 +718,9 @@ export function BonCommandeNouveau() {
                     <thead>
                       <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                         <th className="w-8 px-1 py-2 text-right">#</th>
-                        <th className="px-1.5 py-2 text-left">Référence ou intitulé</th>
+                        <th className="px-1.5 py-2 text-left" title="Le code interne de la maison">
+                          Notre référence
+                        </th>
                         <th className="w-28 px-1.5 py-2 text-right">Quantité</th>
                         <th className="w-32 px-1.5 py-2 text-left" title="Le code que le fournisseur emploie, tel qu'il figure sur sa facture">
                           Réf. frs
@@ -760,7 +762,17 @@ export function BonCommandeNouveau() {
                                       <div className="truncate text-[11px] text-attenue-texte">
                                         {marchandise ? (
                                           <>
-                                            {l.intitule}
+                                            {/* LA DESIGNATION NE SE REPETE PAS.
+                                                Dans ce catalogue elle est le
+                                                plus souvent IDENTIQUE au code :
+                                                l'afficher dessous montrait deux
+                                                fois la meme chaine, juste a cote
+                                                des codes du fournisseur — on ne
+                                                savait plus lequel etait lequel. */}
+                                            {l.intitule !== l.code_reference && (
+                                              <span>{l.intitule} · </span>
+                                            )}
+                                            <span>notre code</span>
                                             {l.fournisseur_habituel &&
                                               l.fournisseur_habituel !==
                                                 entete.code_fournisseur && (

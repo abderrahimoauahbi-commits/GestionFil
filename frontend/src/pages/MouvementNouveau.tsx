@@ -23,6 +23,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link2, Unlink2 } from 'lucide-react'
 import { api, ErreurApi } from '../api/client'
 import { EnTetePage } from '../components/Layout'
+import { ChampReference, type RefTrouvee } from '../composants/ChampReference'
 import { Bouton, Message, fmt } from '../components/ui'
 import {
   depuisBobines,
@@ -176,21 +177,25 @@ export function MouvementNouveau() {
     queryFn: () => api.get<{ code_motif: string; libelle: string }[]>('/api/motifs-mouvement'),
     retry: false,
   })
-  const qRefs = useQuery({
-    queryKey: ['catalogue-saisie'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
-  })
 
   const typeActif = useMemo(
     () => qTypes.data?.find((t) => t.code_type_mvt === entete.code_type_mvt),
     [qTypes.data, entete.code_type_mvt],
   )
 
-  const parReference = useMemo(() => {
-    const m = new Map<string, RefCatalogue>()
-    qRefs.data?.forEach((r) => m.set(r.code_reference, r))
-    return m
-  }, [qRefs.data])
+  /**
+   * LES REFERENCES RETENUES, et elles seules.
+   *
+   * L'ecran chargeait le CATALOGUE ENTIER pour connaitre le poids d'une bobine
+   * et le suivi de lot : deux mille lignes en memoire pour en utiliser trois.
+   * Chaque suggestion de la liste deroulante porte deja ces parametres ; on les
+   * garde au moment ou l'on retient la reference, et le catalogue n'est plus
+   * jamais charge.
+   */
+  const [refsRetenues, setRefsRetenues] = useState<Map<string, RefCatalogue>>(new Map())
+  const parReference = refsRetenues
+  const retenir = (r: RefTrouvee) =>
+    setRefsRetenues((m) => new Map(m).set(r.code_reference, r as unknown as RefCatalogue))
 
   const enregistrer = useMutation({
     mutationFn: () =>
@@ -460,12 +465,29 @@ export function MouvementNouveau() {
                     dessous du bureau. */}
                 <div className="flex flex-wrap items-start gap-2 lg:flex-nowrap">
                   <div className="min-w-48 flex-1">
-                    <input
-                      list="refs"
-                      placeholder="Référence"
-                      value={l.code_reference}
-                      onChange={(e) => majLigne(i, 'code_reference', e.target.value)}
-                      className={champ}
+                    {/* ON TAPE, LE SERVEUR CHERCHE. Le `<datalist>` recevait le
+                        catalogue entier — deux mille `<option>` dans le
+                        document, et une seconde de chargement a chaque
+                        ouverture d'ecran. Sur une sortie, la liste s'ouvre
+                        d'emblee sur CE QUI EST EN STOCK : c'est ce qu'on peut
+                        sortir, et rien d'autre n'a de sens ici. */}
+                    <ChampReference
+                      valeur={l.code_reference}
+                      fournisseur={undefined}
+                      surChoix={(r) => {
+                        retenir(r)
+                        majLigne(i, 'code_reference', r.code_reference)
+                      }}
+                      mention={(r) => {
+                        const q = stockPar.get(r.code_reference)
+                        if (q == null) return null
+                        return {
+                          texte: `${fmt.nombre(q, 0)} kg en stock`,
+                          ton: q > 0 ? 'neutre' : 'alerte',
+                        }
+                      }}
+                      placeholder="Référence — tapez pour chercher…"
+                      ariaLabel="Référence de la ligne"
                     />
                     {sortie && dispo != null && (
                       <div className="mt-0.5 text-[11px] text-attenue-texte">
@@ -628,13 +650,6 @@ export function MouvementNouveau() {
             )
           })}
 
-          <datalist id="refs">
-            {qRefs.data?.map((r) => (
-              <option key={r.code_reference} value={r.code_reference}>
-                {r.designation}
-              </option>
-            ))}
-          </datalist>
         </div>
 
         {pretes.length > 0 && (

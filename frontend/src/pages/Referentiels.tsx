@@ -48,6 +48,89 @@ interface Ligne extends Record<string, unknown> {
  * ce lien, il faudrait quitter l'ecran, ouvrir le sommaire des etats et y
  * retrouver la meme liste sous un autre nom — ce que personne ne fait.
  */
+/**
+ * L'ECRAN DES COULEURS — le nuancier maison, et son code chez chaque vendeur.
+ *
+ * IL EST UN COMPOSANT A PART, et pas une simple fonction dans la table des
+ * onglets, parce qu'il doit INTERROGER la liste des fournisseurs : le code du
+ * vendeur se saisissait a la main, il fallait le connaitre par coeur et une
+ * faute de frappe creait un rattachement muet vers un fournisseur inexistant.
+ * On le choisit desormais.
+ */
+function EcranCouleurs() {
+  const qFrs = useQuery({
+    queryKey: ['fournisseurs-actifs'],
+    queryFn: () =>
+      api.get<{ code_fournisseur: string; nom: string }[]>(
+        '/api/fournisseurs?actif=1&limite=500',
+      ),
+  })
+  const fournisseurs = (qFrs.data ?? []).map((f) => ({
+    valeur: f.code_fournisseur,
+    libelle: `${f.nom} (${f.code_fournisseur})`,
+  }))
+
+  return (
+    <MaitreDetail
+      titre="Couleurs"
+      module="CATALOGUE"
+      aide="Choisissez une couleur pour voir son code chez chaque fournisseur."
+      actions={<LienEtat vers="/etats/couleurs" titre="Imprimer le nuancier" />}
+      actionsLigne={(l) => (
+        <LienEtat
+          vers={`/etats/couleur/${encodeURIComponent(String(l.code_couleur_interne ?? ''))}`}
+          titre="Imprimer la fiche de cette couleur"
+        />
+      )}
+      maitre={{
+        route: 'couleurs',
+        cle: 'code_couleur_interne',
+        unite: 'Couleur',
+        libelle: (l) => `${l.code_couleur_interne} — ${l.libelle}`,
+        detail: (l) => `${l.nb_references ?? 0} référence(s)`,
+        champs: [
+          { champ: 'code_couleur_interne', entete: 'Code', cleCreation: true, obligatoire: true },
+          { champ: 'libelle', entete: 'Libellé', obligatoire: true },
+          {
+            champ: 'classe_teinture',
+            entete: 'Classe de teinture',
+            options: [
+              { valeur: 'LIGHT', libelle: 'Claire' },
+              { valeur: 'MEDIUM', libelle: 'Moyenne' },
+              { valeur: 'DARK', libelle: 'Sombre' },
+              { valeur: 'RED', libelle: 'Rouge' },
+            ],
+          },
+        ],
+      }}
+      detail={{
+        route: 'couleurs-fournisseur',
+        cle: 'id_couleur_fournisseur',
+        cleEtrangere: 'code_couleur_interne',
+        unite: 'Code fournisseur',
+        colonnes: [
+          {
+            champ: 'code_fournisseur',
+            entete: 'Fournisseur',
+            obligatoire: true,
+            largeur: 'w-52',
+            options: fournisseurs,
+          },
+          {
+            champ: 'code_couleur',
+            entete: 'Code chez lui',
+            obligatoire: true,
+            placeholder: 'RED 7612',
+            largeur: 'w-52',
+          },
+          { champ: 'libelle', entete: 'Son libellé', placeholder: 'ROUGE' },
+          { champ: 'supplement_teinture', entete: 'Supplément ($/t)', largeur: 'w-36' },
+        ],
+      }}
+    />
+  )
+}
+
 function LienEtat({ vers, titre }: { vers: string; titre: string }) {
   return (
     <Link
@@ -197,54 +280,7 @@ const ONGLETS: Onglet[] = [
     unite: 'couleur',
     colonnes: [],
     champs: [],
-    ecranDedie: () => (
-      <MaitreDetail
-        titre="Couleurs"
-        module="CATALOGUE"
-        aide="Choisissez une couleur pour voir son code chez chaque fournisseur."
-        actions={<LienEtat vers="/etats/couleurs" titre="Imprimer le nuancier" />}
-        actionsLigne={(l) => (
-          <LienEtat
-            vers={`/etats/couleur/${encodeURIComponent(String(l.code_couleur_interne ?? ''))}`}
-            titre="Imprimer la fiche de cette couleur"
-          />
-        )}
-        maitre={{
-          route: 'couleurs',
-          cle: 'code_couleur_interne',
-          unite: 'Couleur',
-          libelle: (l) => `${l.code_couleur_interne} — ${l.libelle}`,
-          detail: (l) => `${l.nb_references ?? 0} référence(s)`,
-          champs: [
-            { champ: 'code_couleur_interne', entete: 'Code', cleCreation: true, obligatoire: true },
-            { champ: 'libelle', entete: 'Libellé', obligatoire: true },
-            {
-              champ: 'classe_teinture',
-              entete: 'Classe de teinture',
-              options: [
-                { valeur: 'LIGHT', libelle: 'Claire' },
-                { valeur: 'MEDIUM', libelle: 'Moyenne' },
-                { valeur: 'DARK', libelle: 'Sombre' },
-                { valeur: 'RED', libelle: 'Rouge' },
-              ],
-            },
-          ],
-        }}
-        detail={{
-          route: 'couleurs-fournisseur',
-          cle: 'id_couleur_fournisseur',
-          cleEtrangere: 'code_couleur_interne',
-          unite: 'Code fournisseur',
-          colonnes: [
-            { champ: 'code_fournisseur', entete: 'Fournisseur', obligatoire: true, largeur: 'w-40' },
-            { champ: 'code_couleur', entete: 'Code chez lui', obligatoire: true,
-              placeholder: 'RED 7612', largeur: 'w-52' },
-            { champ: 'libelle', entete: 'Son libellé', placeholder: 'ROUGE' },
-            { champ: 'supplement_teinture', entete: 'Supplément ($/t)', largeur: 'w-36' },
-          ],
-        }}
-      />
-    ),
+    ecranDedie: () => <EcranCouleurs />,
   },
   {
     cle: 'roles-bom',

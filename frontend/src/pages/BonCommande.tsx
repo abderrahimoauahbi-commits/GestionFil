@@ -34,7 +34,7 @@ import {
   Chargement,
   Etiq,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
+import { Aide, Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'BONS_COMMANDE'
@@ -700,13 +700,13 @@ export function BonCommande() {
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq>Fournisseur</Etiq>
+              <Etiq>
+                Fournisseur
+                <Aide>Non modifiable : la devise, le taux et les prix du bon en decoulent.</Aide>
+              </Etiq>
               <div className="flex h-8 items-center rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[13px]">
                 {bc.fournisseur_nom}
               </div>
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Non modifiable : devise, taux et prix en decoulent.
-              </p>
             </div>
             <div>
               <Etiq htmlFor="datebc">Date du bon</Etiq>

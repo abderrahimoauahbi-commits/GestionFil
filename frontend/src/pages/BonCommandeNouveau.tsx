@@ -58,6 +58,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
+import { Aide } from '../composants/ui/surcouches'
 import { ChampRecherche, type Suggestion } from '../composants/ChampRecherche'
 import { cn, fmt } from '../lib/utils'
 import {
@@ -602,6 +603,10 @@ export function BonCommandeNouveau() {
             <div className="lg:col-span-2">
               <Etiq htmlFor="frs" obligatoire>
                 Fournisseur
+                <Aide>
+                  Changer de fournisseur remet la saisie a zero : la devise, les prix et les
+                  propositions du plan en dependent tous.
+                </Aide>
               </Etiq>
               <Selecteur
                 id="frs"
@@ -618,9 +623,6 @@ export function BonCommandeNouveau() {
                   </option>
                 ))}
               </Selecteur>
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Changer de fournisseur remet la saisie a zero : la devise et les prix en dependent.
-              </p>
             </div>
             <div>
               <Etiq htmlFor="datebc" obligatoire>

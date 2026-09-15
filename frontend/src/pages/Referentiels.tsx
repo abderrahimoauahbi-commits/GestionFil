@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { Equivalences } from './Equivalences'
+import { EnTetePage } from '../composants/Coquille'
 import { EcranReferentiel } from '../components/EcranReferentiel'
 import type { ChampDef } from '../components/Formulaire'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
@@ -686,7 +687,14 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
   ]
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,13rem)]">
+    <>
+      {/* L'EN-TETE MANQUAIT, ET AVEC LUI LE « ? » DE L'ECRAN. Les fiches d'aide
+          des referentiels existaient, mais rien ne menait a elles : le panneau
+          se trouve par la route, et la route ne portait aucun bouton. Le titre
+          suit l'onglet, pour que « /couleurs » s'annonce « Couleurs » et tombe
+          sur SA fiche, pas sur celle des referentiels en general. */}
+      <EnTetePage titre={onglet.libelle} />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,13rem)]">
       {/* Le contenu vient EN PREMIER dans le flux : sur petit ecran, la liste
           des referentiels passe alors sous le tableau plutot que de le repousser
           hors de l'ecran a chaque ouverture. */}
@@ -720,7 +728,8 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
           surChoix={(c) => setOnglet(visibles.find((o) => o.cle === c) ?? visibles[0])}
         />
       </div>
-    </div>
+      </div>
+    </>
   )
 }
 

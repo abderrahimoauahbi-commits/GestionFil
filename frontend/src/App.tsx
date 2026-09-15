@@ -19,6 +19,7 @@ import { Telecharger } from './pages/Telecharger'
 import { Chat } from './pages/Chat'
 import { Controles } from './pages/Controles'
 import { Etats } from './pages/Etats'
+import { EtatManuel } from './pages/EtatManuel'
 import {
   EtatCatalogue,
   EtatCategories,
@@ -195,6 +196,11 @@ const ECRANS = (
       <Route path="etats/mouvements" element={<ExigeModule module="MOUVEMENTS"><EtatMouvements /></ExigeModule>} />
       <Route path="etats/catalogue" element={<ExigeModule module="CATALOGUE"><EtatCatalogue /></ExigeModule>} />
       <Route path="etats/fournisseurs" element={<ExigeModule module="FOURNISSEURS"><EtatFournisseurs /></ExigeModule>} />
+      {/* LE MANUEL EST SOUS COCKPIT, et non sous un module metier : tout le
+          monde a le droit de lire le mode d'emploi de l'outil qu'il emploie.
+          Chaque fiche, elle, ne decrit que des ecrans que le lecteur peut
+          ouvrir — les droits par champ font le reste. */}
+      <Route path="etats/manuel" element={<ExigeModule module="COCKPIT"><EtatManuel /></ExigeModule>} />
       <Route path="etats/categories" element={<ExigeModule module="CATALOGUE"><EtatCategories /></ExigeModule>} />
       <Route path="etats/couleurs" element={<ExigeModule module="CATALOGUE"><EtatCouleurs /></ExigeModule>} />
       {/* La fiche d'UNE couleur porte son code dans l'adresse : on peut y

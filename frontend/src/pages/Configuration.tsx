@@ -56,7 +56,7 @@ import {
   Chargement,
   Etiq,
 } from '../composants/ui/base'
-import { Infobulle } from '../composants/ui/surcouches'
+import { Aide, Infobulle } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { Audit } from './Audit'
 import { ReglageApparence } from '../composants/ReglageApparence'
@@ -832,16 +832,16 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
                   />
                 </div>
                 <div>
-                  <Etiq htmlFor="d">En vigueur a partir du</Etiq>
+                  <Etiq htmlFor="d">
+                    En vigueur a partir du
+                    <Aide>Laisse vide, le taux s'applique immediatement.</Aide>
+                  </Etiq>
                   <Champ
                     id="d"
                     type="date"
                     value={nouveau.date_debut}
                     onChange={(e) => setNouveau({ ...nouveau, date_debut: e.target.value })}
                   />
-                  <p className="mt-1 text-[11px] text-attenue-texte">
-                    Vide : applicable immediatement.
-                  </p>
                 </div>
                 <Bouton
                   disabled={!(Number(nouveau.taux) > 0)}

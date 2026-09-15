@@ -248,6 +248,201 @@ export const SUJETS: Sujet[] = [
     ],
   },
 
+  {
+    route: '/couleurs',
+    titre: 'Couleurs',
+    chemin: 'Catalogue → Couleurs',
+    objectif:
+      'Tenir le nuancier de la maison, et rattacher à chaque couleur le code que CHAQUE fournisseur lui donne.',
+    droits: 'Lecture du module Catalogue pour consulter ; écriture pour créer ou corriger.',
+    procedures: [
+      {
+        titre: 'Déclarer une couleur et ses codes fournisseur',
+        etapes: [
+          'À gauche, créez la couleur : un code interne court et un libellé — par exemple « C5 — Beige ».',
+          'Choisissez sa classe de teinture : elle sert au calcul du supplément et au regroupement des bains.',
+          'Sélectionnez la couleur : le volet de droite montre ce que chaque fournisseur appelle cette couleur.',
+          'Ajoutez une ligne par fournisseur : choisissez-le dans la liste, puis saisissez SON code et SON libellé.',
+        ],
+        resultat:
+          'Le code fournisseur s’affiche tout seul sur le bon de commande, et la fiche couleur s’imprime avec tous ses équivalents.',
+      },
+    ],
+    champs: [
+      {
+        nom: 'Code',
+        description:
+          'L’identifiant interne de la couleur, court et stable — « C5 », « N1 ». Il apparaît dans le code de chaque référence teinte.',
+        obligatoire: true,
+        valeurs: 'Ne se modifie plus après création : les références le citent.',
+      },
+      {
+        nom: 'Libellé',
+        description: 'Le nom lisible — « Beige », « Rouge brique ». C’est lui qui s’imprime sur les documents.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Classe de teinture',
+        description:
+          'Le poids de la teinture sur le coût et sur la conduite du bain. Une couleur sombre ou rouge coûte plus cher à teindre qu’une claire.',
+        valeurs: 'Claire · Moyenne · Sombre · Rouge',
+      },
+      {
+        nom: 'Fournisseur',
+        description:
+          'À qui appartient le code saisi sur cette ligne. Il se CHOISIT dans la liste des fournisseurs actifs — un nom tapé à la main ne se raccrocherait à rien.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Code chez lui',
+        description:
+          'Le code que CE fournisseur emploie pour cette couleur, tel qu’il figure sur sa facture — « RED 7612 ». C’est ce code qui part sur le bon de commande.',
+        obligatoire: true,
+      },
+      { nom: 'Son libellé', description: 'Le nom que le fournisseur donne à la couleur, quand il diffère du nôtre.' },
+      {
+        nom: 'Supplément ($/t)',
+        description:
+          'Le surcoût de teinture appliqué par ce fournisseur, par tonne. Il entre dans la valorisation de la référence.',
+        valeurs: 'Devise du fournisseur, par tonne',
+      },
+    ],
+    regles: [
+      'Une couleur que rien n’utilise se supprime pour de bon. Dès qu’une référence la cite, la suppression est refusée et le message nomme ce qui la retient.',
+      'Un même fournisseur peut porter plusieurs codes pour une couleur — deux gammes, deux usines. Ils sont tous conservés.',
+      'Le code fournisseur saisi ici est celui que le bon de commande affiche et que la réception reconnaît : c’est le seul point où il se corrige une fois pour toutes.',
+    ],
+    liens: [
+      { route: '/etats/couleurs', libelle: 'Imprimer le nuancier' },
+      { route: '/catalogue', libelle: 'Références' },
+    ],
+  },
+
+  {
+    route: '/fournisseurs',
+    titre: 'Fournisseurs',
+    chemin: 'Catalogue → Fournisseurs',
+    objectif:
+      'Tenir la fiche de chaque fournisseur : sa devise, ses délais, ses conditions, et la tolérance qu’on lui accorde à la pesée.',
+    droits: 'Lecture du module Catalogue pour consulter ; écriture pour créer ou corriger.',
+    champs: [
+      {
+        nom: 'Code',
+        description: 'L’identifiant court du fournisseur. Il entre dans le code de chaque référence qu’on lui achète.',
+        obligatoire: true,
+        valeurs: 'Ne se modifie plus après création.',
+      },
+      { nom: 'Raison sociale', description: 'Le nom légal, repris sur les bons de commande et les documents d’import.', obligatoire: true },
+      {
+        nom: 'Devise de facturation',
+        description:
+          'La devise dans laquelle il facture. Elle commande l’affichage des prix sur le bon de commande et la conversion au débarquement.',
+        obligatoire: true,
+        defaut: 'USD',
+      },
+      {
+        nom: 'Délai de livraison (jours)',
+        description:
+          'Le nombre de jours entre la commande et l’arrivée. C’EST LUI QUI TRANSFORME UNE ÉCHÉANCE EN URGENCE dans le plan d’achat : un délai faux déplace toutes les dates de commande.',
+        valeurs: 'jours calendaires',
+      },
+      { nom: 'Délai de paiement (jours)', description: 'Le nombre de jours accordés pour régler la facture.' },
+      { nom: 'Conditions de paiement', description: 'La formule convenue — acompte, lettre de crédit, paiement à vue.' },
+      {
+        nom: 'Incoterm',
+        description:
+          'Le partage des frais et du risque jusqu’à la livraison — FOB, CIF, EXW. Il commande ce qui entre dans le coût au débarquement.',
+      },
+      {
+        nom: 'Tolérance de pesée (%)',
+        description:
+          'L’écart admis entre le poids commandé et le poids pesé à la réception. Au-delà, la réception signale l’écart au lieu de le laisser passer.',
+        valeurs: 'pourcentage',
+      },
+      {
+        nom: 'Note globale (/100)',
+        description: 'L’appréciation de la tenue du fournisseur : délais, conformité, réactivité. Elle sert à l’arbitrage, pas au calcul.',
+      },
+      {
+        nom: 'Actif',
+        description:
+          'Décocher retire le fournisseur des listes de saisie sans rien effacer : son historique et ses références restent lisibles.',
+        defaut: 'coché',
+      },
+    ],
+    regles: [
+      'Un fournisseur que rien n’utilise se supprime pour de bon. Dès qu’une référence, un bon ou un dossier d’import le cite, la suppression est refusée et le message nomme ce qui le retient : décochez « Actif » à la place.',
+      'Le rattachement d’une référence à un fournisseur est une HABITUDE D’ACHAT, pas une exclusivité : le bon de commande permet de commander chez un autre.',
+    ],
+    liens: [
+      { route: '/catalogue', libelle: 'Références' },
+      { route: '/etats/fournisseurs', libelle: 'Imprimer la liste' },
+    ],
+  },
+
+  {
+    route: '/qualites',
+    titre: 'Qualités et compositions',
+    chemin: 'Production → Qualités',
+    objectif:
+      'Décrire de quoi chaque qualité de tapis est faite : quelles références, dans quel rôle, à quelle quantité par mètre carré.',
+    prerequis: [
+      'Les références employées doivent exister au catalogue.',
+      'Une référence comptée en mètres linéaires doit porter sa densité (kg/ml), sinon le kg/m² ne se calcule pas.',
+    ],
+    droits: 'Lecture du module Production pour consulter ; écriture pour modifier une composition.',
+    procedures: [
+      {
+        titre: 'Composer une qualité',
+        etapes: [
+          'Créez la qualité : son code, son nom, son poids commercial et sa densité.',
+          'Ajoutez une ligne par composant : choisissez la référence dans la liste déroulante, puis son rôle BOM.',
+          'Saisissez la quantité par mètre carré et le pourcentage de perte.',
+          'Vérifiez le coût MAD/m² affiché : c’est la composition qui le produit.',
+        ],
+        resultat: 'Le plan de production sait traduire des mètres carrés en kilos de matière, référence par référence.',
+      },
+    ],
+    champs: [
+      { nom: 'Code', description: 'L’identifiant de la qualité, cité par les plans de production.', obligatoire: true },
+      { nom: 'Nom', description: 'Le libellé commercial de la qualité.', obligatoire: true },
+      { nom: 'Poids commercial', description: 'Le poids annoncé au client, par mètre carré. Il sert de repère, pas de calcul.', valeurs: 'g/m²' },
+      { nom: 'Densité', description: 'La densité de tuftage — nœuds ou points par unité de surface.' },
+      {
+        nom: 'Référence',
+        description: 'Le composant. Il se cherche à la frappe dans la liste déroulante : le catalogue dépasse le millier de lignes.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Rôle BOM',
+        description:
+          'La place du composant dans le tapis — velours, trame, chaîne, latex, envers. C’est lui qui distingue deux lignes portant la même matière.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Perte %',
+        description:
+          'La part de matière perdue à la fabrication. Elle S’AJOUTE à la quantité théorique : 5 % de perte, c’est 5 % de matière à acheter en plus.',
+        valeurs: 'pourcentage',
+        defaut: '0',
+      },
+      { nom: 'Coût MAD/m²', description: 'Le coût matière du mètre carré, calculé depuis la composition et les prix. Il ne se saisit pas.' },
+      {
+        nom: 'Couverture min. (mois)',
+        description: 'Le nombre de mois de consommation qu’on veut garder en stock pour cette qualité. Le plan d’achat s’en sert.',
+      },
+      { nom: 'Marge sécurité %', description: 'Le coussin ajouté au besoin calculé, pour absorber l’aléa de consommation.' },
+    ],
+    regles: [
+      'Une quantité par m² se saisit dans l’unité du composant ; la conversion en kilos passe par la densité de la référence.',
+      'Une composition sans ligne ne produit aucun besoin : le plan de production restera muet sur cette qualité.',
+    ],
+    liens: [
+      { route: '/besoins', libelle: 'Besoins (MRP)' },
+      { route: '/plans', libelle: 'Plans de production' },
+    ],
+  },
+
   /* ====================================================== IMPORTATION ===== */
   {
     route: '/import/assistant',
@@ -404,6 +599,206 @@ export const SUJETS: Sujet[] = [
   },
 
   {
+    route: '/besoins',
+    titre: 'Besoins (MRP)',
+    chemin: 'Production → Besoins',
+    objectif:
+      'Voir ce que les plans de production réclament en matière, référence par référence, avant tout arbitrage d’achat.',
+    prerequis: [
+      'Un plan de production en service.',
+      'Des qualités dont la composition est renseignée : une qualité sans composition ne produit aucun besoin.',
+    ],
+    droits: 'Lecture du module Production.',
+    champs: [
+      { nom: 'Code Ref', description: 'La référence réclamée par les compositions.' },
+      { nom: 'Designation', description: 'Son libellé, repris du catalogue.' },
+      { nom: 'Catégorie', description: 'Le filtre par matière : polypropylène, polyester, jute…' },
+      {
+        nom: 'Fournisseur',
+        description:
+          'Le fournisseur habituel de la référence. Le filtre sert à préparer une commande, pas à interdire d’acheter ailleurs.',
+      },
+      {
+        nom: 'Total kg',
+        description:
+          'Le besoin brut de la période : la somme des mètres carrés planifiés, traduite en kilos par la composition, perte comprise.',
+        valeurs: 'kg',
+      },
+      { nom: 'Unité', description: 'L’unité du catalogue pour cette référence. Le besoin reste exprimé en kilos.' },
+    ],
+    regles: [
+      'CE N’EST PAS UNE PROPOSITION D’ACHAT : le besoin brut ne retire ni le stock, ni ce qui est déjà commandé. C’est le plan d’achat qui fait cette soustraction.',
+      'Un besoin nul sur une référence attendue signale presque toujours une composition incomplète, pas une absence de besoin.',
+    ],
+    liens: [
+      { route: '/plan-achat', libelle: 'Plan d’achat' },
+      { route: '/qualites', libelle: 'Qualités et compositions' },
+      { route: '/plans', libelle: 'Plans de production' },
+    ],
+  },
+
+  {
+    route: '/bons-commande',
+    titre: 'Bons de commande',
+    chemin: 'Achats → Bons de commande',
+    objectif: 'Suivre la vie de chaque commande, de sa création jusqu’à son solde par les réceptions.',
+    droits: 'Lecture du module Achats ; écriture pour créer ou corriger ; validation pour envoyer.',
+    procedures: [
+      {
+        titre: 'Suivre une commande',
+        etapes: [
+          'Ouvrez le bon pour voir ses lignes et ce qu’il reste à recevoir sur chacune.',
+          'Corrigez tant qu’il est en brouillon ; une fois envoyé, il engage.',
+          'Imprimez-le pour l’adresser au fournisseur.',
+          'Les réceptions le soldent ligne par ligne : le reste à recevoir descend à mesure.',
+        ],
+      },
+    ],
+    regles: [
+      'Un bon se solde quand TOUTES ses lignes de marchandise sont servies. Les lignes de service et les lignes sans référence n’entrent pas dans ce décompte : elles ne se réceptionnent pas.',
+      'Un bon cité par une réception ne se supprime pas : la suppression est refusée et le message nomme ce qui le retient.',
+    ],
+    liens: [
+      { route: '/bons-commande/nouveau', libelle: 'Nouveau bon de commande' },
+      { route: '/receptions', libelle: 'Réceptions' },
+      { route: '/plan-achat', libelle: 'Plan d’achat' },
+    ],
+  },
+
+  {
+    route: '/bons-commande/nouveau',
+    titre: 'Nouveau bon de commande',
+    chemin: 'Achats → Bons de commande → Nouveau',
+    objectif:
+      'Composer une commande chez un fournisseur : ce que le plan d’achat réclame, ce qu’on y ajoute du catalogue, et ce qui n’a pas encore de référence.',
+    prerequis: ['Le fournisseur doit être déclaré et actif.'],
+    droits: 'Écriture du module Achats.',
+    procedures: [
+      {
+        titre: 'Saisir une commande',
+        etapes: [
+          'Choisissez le fournisseur : la devise et les prix en dépendent.',
+          'Posez la date du bon et, si elle est connue, la livraison prévue.',
+          'La grille s’ouvre VIDE, sur une seule ligne : rien n’est pré-rempli à votre place.',
+          'Dans la cellule « Notre référence », tapez : la liste déroulante filtre à la frappe.',
+          'L’interrupteur en haut de la carte décide de ce qu’elle propose — « Du plan d’achat » ou « Tout le catalogue ».',
+          'Saisissez la quantité, puis au choix les palettes et les bobines : les trois se répondent.',
+          'Corrigez au besoin la référence fournisseur, la couleur ou le code couleur : la correction remonte dans le catalogue.',
+          '« Ajouter une ligne » pour l’article suivant. Enregistrez quand le bon est complet.',
+        ],
+        resultat: 'Le bon est créé en brouillon, ses lignes de marchandise attendues par les réceptions.',
+      },
+      {
+        titre: 'Commander ce qui n’a pas de référence',
+        etapes: [
+          'Tapez ce que vous cherchez dans la cellule « Notre référence ».',
+          'Si rien ne correspond, la liste propose trois issues.',
+          '« Chercher dans tout le catalogue » : la référence existe peut-être hors du plan de ce fournisseur.',
+          '« Ajouter au catalogue » : pour un article qu’on rachètera — la fiche complète se saisit à l’écran Catalogue, puis la référence est trouvée à la frappe.',
+          '« Garder « … » sans référence » : pour un échantillon, un type nouveau, du transport. La ligne porte alors un libellé libre et un montant.',
+        ],
+        resultat:
+          'La commande accepte tout ce qui s’achète, sans forcer à créer une référence pour un échantillon qu’on ne rachètera pas.',
+      },
+    ],
+    champs: [
+      {
+        nom: 'Fournisseur',
+        description:
+          'Chez qui l’on commande. LE CHANGER REMET LA SAISIE À ZÉRO : la devise, les prix et les propositions du plan en dépendent tous.',
+        obligatoire: true,
+      },
+      { nom: 'Date du bon', description: 'La date d’émission de la commande.', obligatoire: true, defaut: 'aujourd’hui' },
+      {
+        nom: 'Livraison prévue',
+        description:
+          'La date d’arrivée attendue. Elle sert au suivi de l’en-cours : une ligne en retard se voit à cette date, pas à celle du bon.',
+      },
+      { nom: 'Observations', description: 'Une note libre, reprise sur le bon imprimé adressé au fournisseur.' },
+      {
+        nom: 'Motif',
+        description: 'Pourquoi cette commande existe. Il sert à l’analyse des achats, jamais au calcul.',
+        valeurs:
+          'Issu du MRP — le plan la réclamait · Manuel — décidée hors plan · Opportunité de prix — un tarif à saisir · Anticipation de risque — une rupture qu’on devance',
+        defaut: 'Issu du MRP',
+      },
+      {
+        nom: 'Du plan d’achat / Tout le catalogue',
+        description:
+          'L’interrupteur qui décide de ce que la liste déroulante propose. « Du plan d’achat » ne montre que ce que le calcul réclame chez CE fournisseur ; « Tout le catalogue » ouvre à tout, parce que le rattachement d’une référence à un fournisseur est une habitude d’achat, pas une exclusivité.',
+        defaut: 'Du plan d’achat',
+      },
+      {
+        nom: 'Notre référence',
+        description:
+          'Le code interne de l’article. IL SE CHERCHE À LA FRAPPE, dans la cellule même : le catalogue dépasse le millier de lignes, une liste à dérouler ne s’y lit plus. Deux caractères suffisent à filtrer.',
+        obligatoire: true,
+        valeurs: 'Ou bien un libellé libre, pour une ligne qui ne porte aucune référence.',
+      },
+      {
+        nom: 'Quantité',
+        description:
+          'Ce qu’on commande, dans l’unité de la ligne. Sur une référence issue du plan, l’écart avec la quantité proposée est signalé — sans être interdit.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Réf. frs',
+        description:
+          'Le code que le fournisseur emploie, tel qu’il figure sur sa facture. Modifiable ici : la correction REMONTE DANS LE CATALOGUE, pour ne pas avoir à la refaire au bon suivant.',
+      },
+      { nom: 'Couleur', description: 'La couleur de la maison. Se corrige ici et remonte au catalogue, comme la réf. fournisseur.' },
+      {
+        nom: 'Code coul. frs',
+        description:
+          'Le code que CE fournisseur donne à cette couleur. C’est lui qui part sur le bon imprimé — c’est le code que le fournisseur reconnaît.',
+      },
+      {
+        nom: 'Unité',
+        description:
+          'L’unité dans laquelle la ligne est commandée : kg, bobine, palette, ml. Le stock reste tenu en kilos ; la conversion se fait ici.',
+        defaut: 'l’unité du catalogue de la référence',
+      },
+      {
+        nom: 'Pal. / Bob.',
+        description:
+          'Le nombre de palettes et de bobines. LES TROIS CHAMPS SE RÉPONDENT : saisir des palettes remplit les bobines et les kilos, saisir des kilos remplit les deux autres. On saisit dans l’unité où l’on compte, sans calculer de tête.',
+        valeurs: 'Il faut pour cela que la référence porte son poids de bobine et ses bobines par palette.',
+      },
+      {
+        nom: 'Prix',
+        description:
+          'Le prix unitaire, DANS LA DEVISE DU FOURNISSEUR — l’en-tête de la colonne la rappelle. Il est proposé depuis le catalogue et reste corrigible : c’est le prix négocié qui fait foi.',
+      },
+      { nom: 'Total', description: 'Quantité multipliée par le prix. Il ne se saisit pas.' },
+    ],
+    regles: [
+      'LA GRILLE S’OUVRE VIDE. Pré-remplir vingt lignes obligerait à en effacer dix-huit ; c’est la liste déroulante qui apporte ce dont on a besoin.',
+      'Une ligne SANS RÉFÉRENCE n’est pas d’une nature spéciale : c’est une ligne qui ne porte pas de référence existante. Elle porte un libellé et un montant.',
+      'Une ligne sans référence NE SE RÉCEPTIONNE PAS et n’entre jamais en stock : un échantillon ou du transport n’a pas de poids à peser. Elle ne compte pas non plus dans le solde du bon.',
+      'Une ligne sans référence n’entre ni dans le calcul des besoins, ni dans les statistiques d’achat par référence : elle n’a rien à quoi se rattacher.',
+      'La conversion palettes / bobines / kilos exige que la référence porte son conditionnement. Sans lui, l’enregistrement est refusé et le message nomme les références à compléter.',
+      'Le prix n’est JAMAIS déduit ni deviné : une valeur inventée fausserait le coût de revient sans laisser de trace.',
+    ],
+    messages: [
+      {
+        message: 'Conversion impossible sur … : renseignez le conditionnement',
+        cause:
+          'La ligne est saisie en palettes ou en bobines, mais la référence ne porte pas son poids de bobine ou ses bobines par palette. Complétez-la au catalogue, ou saisissez la ligne en kilos.',
+      },
+      {
+        message: 'Choisissez un fournisseur',
+        cause: 'Tant qu’il n’est pas choisi, ni la devise ni les propositions du plan ne sont connues : la grille reste fermée.',
+      },
+    ],
+    liens: [
+      { route: '/plan-achat', libelle: 'Plan d’achat' },
+      { route: '/catalogue', libelle: 'Références' },
+      { route: '/catalogue/completer', libelle: 'Compléter les références' },
+      { route: '/receptions', libelle: 'Réceptions' },
+    ],
+  },
+
+  {
     route: '/receptions',
     titre: 'Réceptions',
     chemin: 'Achats → Réceptions',
@@ -514,6 +909,147 @@ export const SUJETS: Sujet[] = [
     regles: ['Les références sous suivi de lot se comptent AU LOT, pas en total abstrait.'],
   },
 
+  {
+    route: '/transferts',
+    titre: 'Transferts entre magasins',
+    chemin: 'Stock → Transferts',
+    objectif:
+      'Déplacer de la matière d’un magasin à un autre, et imprimer le bon de sortie et le bon de réception qui accompagnent le camion.',
+    droits: 'Écriture du module Stock ; validation pour confirmer l’arrivée.',
+    regles: [
+      'Un transfert ne crée ni ne détruit de matière : il sort d’un magasin exactement ce qu’il entre dans l’autre.',
+      'Le bon de sortie part avec le camion, le bon de réception revient signé : ce sont les deux moitiés d’un même mouvement.',
+    ],
+    liens: [
+      { route: '/transferts/nouveau', libelle: 'Nouveau transfert' },
+      { route: '/stock', libelle: 'Stock par magasin' },
+    ],
+  },
+
+  {
+    route: '/transferts/nouveau',
+    titre: 'Nouveau transfert',
+    chemin: 'Stock → Transferts → Nouveau',
+    objectif: 'Préparer le départ d’une matière d’un magasin vers un autre, en palettes, en bobines ou en kilos.',
+    prerequis: ['Les deux magasins doivent exister.', 'La matière doit être présente dans le magasin source.'],
+    droits: 'Écriture du module Stock.',
+    procedures: [
+      {
+        titre: 'Préparer un transfert',
+        etapes: [
+          'Choisissez le magasin source : c’est son stock qui alimente la liste des références.',
+          'Choisissez le magasin destinataire — il doit être différent du premier.',
+          'Ajoutez une ligne et cherchez la référence à la frappe dans la liste déroulante.',
+          'Saisissez la quantité en palettes, en bobines ou en kilos : les trois se répondent.',
+          'Vérifiez le disponible affiché en regard : il vient du magasin source, pas du stock global.',
+          'Enregistrez, puis imprimez le bon de sortie.',
+        ],
+        resultat: 'Le transfert est enregistré, et ses deux bons sont imprimables.',
+      },
+    ],
+    champs: [
+      {
+        nom: 'Magasin source',
+        description:
+          'D’où la matière part. LE CHANGER RECHARGE LA LISTE DES RÉFÉRENCES : on ne transfère que ce qui est réellement là.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Magasin destinataire',
+        description: 'Où elle va. Il doit différer du magasin source.',
+        obligatoire: true,
+      },
+      { nom: 'Date du document', description: 'La date du départ.', obligatoire: true, defaut: 'aujourd’hui' },
+      { nom: 'Responsable', description: 'Qui répond du transfert. Le nom s’imprime sur les deux bons.' },
+      { nom: 'Transporteur', description: 'Qui emporte la marchandise, quand ce n’est pas un véhicule de la maison.' },
+      { nom: 'Observations', description: 'Une note libre, reprise sur les bons imprimés.' },
+      {
+        nom: 'Référence',
+        description: 'Ce qu’on déplace. La liste ne propose QUE ce que le magasin source détient, cherché à la frappe.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Dispo',
+        description:
+          'Ce que le magasin SOURCE détient de cette référence, au moment de la saisie. Ce n’est pas le stock de la maison : transférer plus que ce chiffre mettrait le magasin source en négatif.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Palettes / Bobines / En kg',
+        description:
+          'La quantité, saisie dans l’unité où l’on compte. LES TROIS SE RÉPONDENT : remplir l’une remplit les deux autres. Le stock reste tenu en kilos — c’est la conversion qui s’adapte, pas le magasinier.',
+        obligatoire: true,
+        valeurs: 'Il faut pour cela que la référence porte son poids de bobine et ses bobines par palette.',
+      },
+      {
+        nom: 'Lot fournisseur',
+        description: 'Le numéro de bain. Obligatoire pour une référence suivie au lot : le lot voyage avec la matière.',
+      },
+    ],
+    regles: [
+      'La conversion ne DEVINE JAMAIS un facteur manquant. Si la référence ne porte pas son conditionnement, la ligne refuse la saisie en palettes ou en bobines au lieu de convertir avec un facteur nul — ce qui produirait un transfert de zéro kilo sans le dire.',
+      'Le disponible affiché est celui du MAGASIN SOURCE seul. Sommer les magasins ferait croire à une matière présente ailleurs.',
+      'Une référence suivie au lot se transfère lot par lot : c’est la traçabilité du bain qui l’exige.',
+    ],
+    liens: [
+      { route: '/stock', libelle: 'Stock par magasin' },
+      { route: '/mouvements', libelle: 'Mouvements' },
+    ],
+  },
+
+  {
+    route: '/stock',
+    titre: 'Stock et couverture',
+    chemin: 'Stock → Situation',
+    objectif:
+      'Voir, référence par référence, ce qu’on détient, ce qui est en route, ce qui reste à consommer, et depuis quand.',
+    droits: 'Lecture du module Stock. Les colonnes de coût n’apparaissent pas pour un rôle qui n’a pas le droit de les voir.',
+    champs: [
+      { nom: 'Physique (kg)', description: 'Ce qui est réellement dans les magasins, toutes entrées validées.', valeurs: 'kg' },
+      {
+        nom: 'En-cours (kg)',
+        description: 'Ce qui est commandé et pas encore reçu : le reste à livrer des bons de commande envoyés.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Projeté (kg)',
+        description:
+          'Le physique plus l’en-cours, moins ce que les plans réclament sur l’horizon. C’EST CE CHIFFRE QUI DIT S’IL FAUT COMMANDER, pas le physique.',
+        valeurs: 'kg',
+      },
+      { nom: 'Minimum (kg)', description: 'Le plancher fixé sur la fiche référence. Le plan d’achat déclenche en dessous.' },
+      { nom: 'Besoin horizon', description: 'Ce que les plans de production réclament sur la période regardée.' },
+      { nom: 'Conso / mois', description: 'La consommation moyenne constatée, qui sert à calculer la couverture.' },
+      {
+        nom: 'Couverture',
+        description:
+          'Combien de mois le stock tient au rythme actuel. Une couverture courte sur un délai long est le vrai signal d’alerte — pas le stock en kilos.',
+        valeurs: 'mois',
+      },
+      { nom: 'Délai (j)', description: 'Le délai du fournisseur. À lire avec la couverture : c’est leur écart qui fait l’urgence.' },
+      { nom: 'CMUP', description: 'Le coût moyen unitaire pondéré, recalculé à chaque entrée validée. Ce n’est pas le prix catalogue.' },
+      {
+        nom: 'Classe ABC',
+        description: 'Le poids de la référence dans la valeur consommée : A pèse lourd, C est marginal. Elle oriente l’effort de suivi.',
+      },
+      {
+        nom: 'Statut',
+        description: 'La lecture rapide de la situation.',
+        valeurs: 'Rupture · Critique · Attention · Situation normale · Sur-stock',
+      },
+      { nom: 'Dernière sortie', description: 'Quand la référence a bougé pour la dernière fois. Une date ancienne signale un dormant.' },
+    ],
+    regles: [
+      'Le filtre par magasin porte sur le STOCK DE CE MAGASIN. Sans lui, les magasins sont sommés — utile pour la maison, trompeur pour un transfert.',
+      'Un rôle sans droit sur le coût ne voit ni la colonne CMUP ni sa donnée : elle n’est pas grisée, elle n’est pas envoyée.',
+    ],
+    liens: [
+      { route: '/etat-stock', libelle: 'État du stock imprimable' },
+      { route: '/mouvements', libelle: 'Mouvements' },
+      { route: '/valorisation', libelle: 'Valorisation' },
+    ],
+  },
+
   /* ========================================================== ANALYSE ===== */
   {
     route: '/statistiques',
@@ -553,6 +1089,74 @@ export const SUJETS: Sujet[] = [
       'Une tuile n’apparaît que si vous pouvez VOIR le champ ET AGIR dessus : afficher « 3 bons à valider » à qui ne peut pas valider n’est pas une information.',
       'Une file vide disparaît : un écran couvert de zéros apprend à ne plus être lu.',
       'Le mur de risques trie par le temps qui reste RÉELLEMENT — échéance moins délai fournisseur.',
+    ],
+  },
+
+  {
+    route: '/valorisation',
+    titre: 'Valorisation du stock',
+    chemin: 'Analyse → Valorisation',
+    objectif: 'Chiffrer ce que vaut le stock à une date, dans une devise unique et selon une méthode explicite.',
+    prerequis: ['Des mouvements validés : c’est eux qui portent les coûts.', 'Un taux de change à la date demandée.'],
+    droits: 'Lecture du module Analyse ET droit de voir les coûts : sans lui, l’écran n’a rien à montrer.',
+    champs: [
+      {
+        nom: 'Date de valorisation',
+        description:
+          'La date à laquelle on se place. Le stock et les coûts sont reconstitués À CETTE DATE, pas à aujourd’hui : c’est ce qui permet de justifier un arrêté passé.',
+        obligatoire: true,
+      },
+      {
+        nom: 'Méthode',
+        description:
+          'La convention de coût retenue. Elle change le chiffre, pas la quantité — deux méthodes sur le même stock donnent deux valeurs justes.',
+      },
+      {
+        nom: 'Devise pivot',
+        description:
+          'La devise dans laquelle tout est ramené. Les achats se font en plusieurs devises ; additionner sans pivot ne veut rien dire.',
+        obligatoire: true,
+      },
+      { nom: 'Assiette', description: 'Ce qui entre dans le calcul : quels magasins, quelles catégories.' },
+      { nom: 'Stock (kg)', description: 'La quantité retenue à la date, référence par référence.' },
+      { nom: 'Formule', description: 'Le détail du calcul appliqué à la ligne. Il est affiché pour que le chiffre soit vérifiable.' },
+    ],
+    regles: [
+      'La valorisation ne modifie rien : c’est une lecture, jamais une écriture. On peut la rejouer autant de fois qu’on veut.',
+      'Un taux de change manquant à la date demandée arrête le calcul au lieu de prendre le dernier connu : une valeur fausse est pire qu’une valeur absente.',
+    ],
+    liens: [
+      { route: '/stock', libelle: 'Stock et couverture' },
+      { route: '/landed-cost', libelle: 'Coût au débarquement' },
+    ],
+  },
+
+  {
+    route: '/etats',
+    titre: 'États imprimables',
+    chemin: 'Analyse → États',
+    objectif:
+      'Sortir sur papier ce qui doit circuler hors de l’écran : listes de référence, bons, comptages, nuanciers.',
+    droits: 'Lecture du module dont l’état relève. Un état n’imprime jamais un champ que le rôle n’a pas le droit de voir.',
+    procedures: [
+      {
+        titre: 'Imprimer un état',
+        etapes: [
+          'Choisissez l’état dans la liste, ou cliquez l’icône d’imprimante depuis l’écran concerné.',
+          'Réglez les filtres : ils décident de ce qui figure sur la feuille.',
+          'Imprimez, ou enregistrez en PDF depuis la boîte d’impression du navigateur.',
+        ],
+      },
+    ],
+    regles: [
+      'Un état est une PHOTO : il porte sa date et ses filtres en en-tête, pour qu’on sache plus tard ce qu’on regarde.',
+      'Les colonnes de prix disparaissent de l’état pour un rôle qui n’a pas le droit de les voir — imprimer contourne les droits, sinon.',
+    ],
+    liens: [
+      { route: '/etats/categories', libelle: 'Catégories et familles' },
+      { route: '/etats/couleurs', libelle: 'Nuancier' },
+      { route: '/etats/catalogue', libelle: 'Catalogue' },
+      { route: '/etats/stock', libelle: 'État du stock' },
     ],
   },
 

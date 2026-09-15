@@ -18,6 +18,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import {
+  BookOpen,
   Boxes,
   ClipboardList,
   FileSpreadsheet,
@@ -198,6 +199,16 @@ const ETATS: EtatDisponible[] = [
     module: 'CATALOGUE',
     Icone: Palette,
     famille: 'Referentiels',
+  },
+  {
+    cle: 'manuel',
+    titre: 'Manuel d utilisation',
+    description:
+      'Toute la documentation de l outil sur papier : chaque ecran, sa procedure, le role de chacun de ses champs et les regles qu il applique. On peut n imprimer qu un chapitre — le stock pour le magasin, les achats pour le bureau.',
+    chemin: '/etats/manuel',
+    module: 'COCKPIT',
+    Icone: BookOpen,
+    famille: 'Documentation',
   },
 ]
 

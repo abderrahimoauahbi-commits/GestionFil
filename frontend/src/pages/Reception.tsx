@@ -36,7 +36,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { Aide, Dialogue, DialogueContenu } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'RECEPTIONS'
@@ -635,16 +635,16 @@ export function Reception() {
               />
             </div>
             <div>
-              <Etiq htmlFor="fact">N° de facture</Etiq>
+              <Etiq htmlFor="fact">
+                N° de facture
+                <Aide>Souvent absente a la livraison : elle se saisit plus tard.</Aide>
+              </Etiq>
               <Champ
                 id="fact"
                 value={entete.numero_facture}
                 disabled={!modifiable}
                 onChange={(e) => setEntete({ ...entete, numero_facture: e.target.value })}
               />
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Souvent absente a la livraison : elle se saisit plus tard.
-              </p>
             </div>
             <div>
               <Etiq htmlFor="tr">Transporteur</Etiq>
@@ -668,7 +668,10 @@ export function Reception() {
               />
             </div>
             <div>
-              <Etiq htmlFor="brut">Poids brut (kg)</Etiq>
+              <Etiq htmlFor="brut">
+                Poids brut (kg)
+                <Aide>Releve au pont-bascule, emballage compris.</Aide>
+              </Etiq>
               <Champ
                 id="brut"
                 type="number"
@@ -679,9 +682,6 @@ export function Reception() {
                 onChange={(e) => setEntete({ ...entete, poids_total_brut_kg: e.target.value })}
                 className="text-right tabular-nums"
               />
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Releve au pont-bascule, emballage compris.
-              </p>
             </div>
           </CarteCorps>
         </Carte>

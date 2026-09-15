@@ -78,7 +78,15 @@ ALTER TABLE ligne_bc
 -- marchandise. Un forfait de transport n'a pas de facteur au kilo ; son
 -- `facteur_kg` vaut 1 par convention, pour que `prix_kg_devise` reste calculable
 -- sans division par zero.
+-- DEUX NOMS A RETIRER, ET C'EST VOULU. `ligne_bc_check` est le nom anonyme que
+-- PostgreSQL avait donne a la contrainte d'origine ; `ligne_bc_conversion_coherente`
+-- est celui qu'on lui donne ici. Sans le second DROP, rejouer cette migration
+-- echoue sur « la contrainte existe deja » — ce qui s'est produit en publication,
+-- a mi-chemin, sur une base a demi migree. Une migration qu'on ne peut pas
+-- rejouer est un piege : elle n'est utilisable qu'une fois, et on ne sait jamais
+-- si cette fois-la a eu lieu.
 ALTER TABLE ligne_bc DROP CONSTRAINT IF EXISTS ligne_bc_check;
+ALTER TABLE ligne_bc DROP CONSTRAINT IF EXISTS ligne_bc_conversion_coherente;
 ALTER TABLE ligne_bc
     ADD CONSTRAINT ligne_bc_conversion_coherente
     CHECK (type_ligne <> 'MARCHANDISE'

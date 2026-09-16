@@ -1,33 +1,43 @@
 /**
- * Le bon de commande sur papier — le document qui part chez le fournisseur.
+ * LE BON DE COMMANDE SUR PAPIER — celui qui part chez le fournisseur.
  *
- * POURQUOI IL MANQUAIT ET POURQUOI IL COMPTE. L'ERP savait creer, valider et
- * suivre un bon ; il ne savait pas en sortir un document. C'etait le seul
- * manque qui obligeait a rouvrir le classeur Excel tous les jours, pour la
- * seule chose qui quitte l'entreprise.
+ * IL N'Y EN A QU'UN, ET C'EST UNE CORRECTION. J'avais d'abord ecrit DEUX
+ * documents : un interne avec nos codes et nos prix, un second en anglais pour
+ * le fournisseur. L'utilisateur a appuye sur « Imprimer » et a recu le premier —
+ * « 2,00 Lot / 8 601,60 kg », prix 4,10, total 8,20 — c'est-a-dire exactement
+ * ce qu'il ne voulait pas. Un document correct derriere un bouton qu'on ne
+ * trouve pas ne vaut pas mieux qu'un document absent.
  *
- * DEUX REGLES DE FOND.
+ * LE BON DE COMMANDE EST UN DOCUMENT DE QUANTITES. Les 109 bons Excel tenus de
+ * decembre 2020 a septembre 2026 le disent sans ambiguite : un mot de prix
+ * apparait sur cinq d'entre eux, et deux fois c'est « OLD PRICE ». Le prix se
+ * negocie ailleurs ; il n'a pas a voyager jusqu'en Turquie sur un papier que
+ * l'on faxe.
  *
- * Un bon NON VALIDE s'imprime, mais porte la mention. On imprime pour relire
- * avant d'engager, pas seulement pour envoyer : masquer le bouton tant que le
- * bon n'est pas valide priverait du seul moment ou une erreur se voit encore.
- * La mention evite qu'un brouillon parte par megarde.
+ * CE QU'IL REPREND DE CES BONS, parce que c'est ce que le fournisseur attend :
  *
- * Les MONTANTS suivent les droits. Si le role ne recoit pas les prix, le
- * document sort en quantites seules et le dit. Un bon sans prix n'est pas un
- * bon de commande : le magasinier ne doit pas croire qu'il tient un document
- * envoyable.
+ *   - la langue est l'ANGLAIS, de bout en bout ;
+ *   - les colonnes sont DESCRIPTION OF GOODS / COLOR / COLOR CODE / DTEX /
+ *     QUANTITY / TOTAL PLTS, dans cet ordre — celui de leurs feuilles ;
+ *   - LA DESCRIPTION EST COMMERCIALE : « 100% POLYPROPYLENE YARN 2900 DTEX »,
+ *     et non `PP FRZ-2900 Dtex-Gold 3423-Hs` qui ne leur dit rien ;
+ *   - LE CODE COULEUR EST LE LEUR — 7612, 3423, CB-1426 ;
+ *   - la quantite s'exprime en LOTS, PALETTES ou BOBINES. JAMAIS EN KILOS :
+ *     sur 109 bons, huit seulement portaient un poids, et le kilo est notre
+ *     unite de stock, pas la leur ;
+ *   - le pied de page porte INCOTERMS, TOLERENCE, SHIPMENT DATE, NBR OF
+ *     CONTAINERS et TOTAL PALLETS — les cinq mentions que lit le transitaire.
+ *
+ * ET LE MONTANT ENGAGE ? Il est a l'ecran du bon, ou il sert : a la saisie, a
+ * l'arbitrage, a la validation. Il n'est pas sur le papier qu'on envoie.
  */
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { useDroits } from '../auth/AuthContext'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement } from '../composants/ui/base'
 import { fmt } from '../components/ui'
 import { useParamVue } from '../lib/navigation'
-
-const MODULE = 'BONS_COMMANDE'
 
 interface Bc {
   id_bc: string
@@ -36,33 +46,42 @@ interface Bc {
   fournisseur_nom: string
   code_fournisseur: string
   date_livraison_prevue: string | null
-  conditions_paiement: string | null
-  notes: string | null
   statut: string
-  code_devise: string
-  taux_change_engage: number
-  montant_total_devise?: number
-  montant_total_mad?: number
+  /** Lus depuis la fiche du fournisseur, pas recopies sur le bon. */
+  incoterm?: string | null
+  tolerance_pesee_pct?: number | null
+  palettes_par_conteneur?: number | null
+  /** Force le calcul quand le transitaire en decide autrement. */
+  nombre_conteneurs?: number | null
+  /** « As soon as possible » — une phrase la ou l'ERP attend une date. */
+  mention_expedition?: string | null
   [k: string]: unknown
 }
 
 interface LigneBc {
   id_ligne_bc: string
   ligne_numero: number
-  /** `MARCHANDISE` ou `SERVICE` — une prestation n'a pas de reference. */
   type_ligne?: string
   code_reference: string | null
   libelle?: string | null
   reference_designation: string
+  description_commerciale?: string | null
+  couleur?: string | null
+  code_couleur?: string | null
+  /** Le titrage : chez nous c'est la famille — « 2900-DTEX ». */
+  code_famille?: string | null
+  categorie_libelle?: string | null
   unite_commande: string
   quantite_commandee_unite: number
   quantite_commandee_kg: number
-  prix_unitaire_devise?: number
-  total_ligne_devise?: number
+  nb_palettes?: number | null
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  bobines_par_lot?: number | null
   [k: string]: unknown
 }
 
-/** Un couple libelle / valeur de l'entete, aligne pour le papier. */
+/** Un couple libelle / valeur, aligne pour le papier. */
 function Champ({ libelle, valeur }: { libelle: string; valeur: React.ReactNode }) {
   return (
     <div className="flex gap-1.5">
@@ -72,15 +91,17 @@ function Champ({ libelle, valeur }: { libelle: string; valeur: React.ReactNode }
   )
 }
 
+/** Les bobines d'une ligne, quand la reference porte de quoi les compter. */
+function bobinesDe(l: LigneBc): number | null {
+  const p = l.poids_bobine_kg ?? 0
+  if (!(p > 0)) return null
+  return Math.round(l.quantite_commandee_kg / p)
+}
+
 export function BonCommandeEtat() {
   const { id } = useParams<{ id: string }>()
-  const droits = useDroits(MODULE)
   const auto = useParamVue('imprimer') === '1'
 
-  /* L'entete se prend dans la LISTE et non par un appel unitaire : il n'existe
-     pas de route `GET /api/bons-commande/{id}` — seul PATCH est monte sur ce
-     chemin. C'est ce que fait deja la fiche du bon, et partager la meme cle de
-     cache evite un second aller-retour quand on vient de la fiche. */
   const qBc = useQuery({
     queryKey: ['bons-commande'],
     queryFn: () => api.get<Bc[]>('/api/bons-commande'),
@@ -91,164 +112,188 @@ export function BonCommandeEtat() {
     enabled: !!id,
   })
 
-  if (qBc.isLoading || qLignes.isLoading) return <Chargement texte="Preparation du document…" />
+  if (qBc.isLoading || qLignes.isLoading) return <Chargement texte="Preparing the document…" />
   const bc = qBc.data?.find((b) => b.id_bc === id) ?? null
   if (!bc) return <Alerte ton="danger">Bon de commande introuvable.</Alerte>
 
-  const lignes = [...(qLignes.data ?? [])].sort((a, b) => a.ligne_numero - b.ligne_numero)
-  const prixVisibles = droits.visible('prix_unitaire_devise')
+  // LES PRESTATIONS NE PARTENT PAS. Un forfait de transport ou une commission
+  // regarde notre comptabilite, pas l'atelier qui doit filer la marchandise.
+  const lignes = [...(qLignes.data ?? [])]
+    .filter((l) => l.type_ligne !== 'SERVICE')
+    .sort((a, b) => a.ligne_numero - b.ligne_numero)
+
   const valide = bc.statut !== 'BROUILLON'
 
-  const total = lignes.reduce((s, l) => s + (l.total_ligne_devise ?? 0), 0)
+  // Le total des palettes : c'est le chiffre du transitaire, et celui que
+  // portaient tous les bons d'archive en bas de page.
+  const palettes = lignes.reduce((s, l) => s + (l.nb_palettes ?? 0), 0)
+  const totalPalettes = palettes > 0 ? Math.ceil(palettes) : null
+
+  // LE NOMBRE DE CONTENEURS SE DEDUIT, ET SE FORCE. Sans `palettes_par_conteneur`
+  // sur la fiche du fournisseur, on n'affiche rien plutot qu'un zero : mieux
+  // vaut une mention absente qu'un chiffre faux sur un document d'expedition.
+  const parConteneur = bc.palettes_par_conteneur ?? null
+  const conteneursCalcules =
+    totalPalettes !== null && parConteneur ? Math.ceil(totalPalettes / parConteneur) : null
+  const conteneurs = bc.nombre_conteneurs ?? conteneursCalcules
 
   return (
     <div>
       {!valide && (
         <Alerte ton="alerte" className="sans-impression mb-3">
-          Ce bon est encore en brouillon. Le document portera la mention « brouillon » : il se
-          relit, il ne s envoie pas.
+          Ce bon est encore en brouillon. Le document portera la mention « DRAFT » : il se relit,
+          il ne s envoie pas.
         </Alerte>
       )}
-      {!prixVisibles && (
+      {lignes.some((l) => !l.description_commerciale) && (
         <Alerte ton="info" className="sans-impression mb-3">
-          Votre role ne recoit pas les prix : le document sortira en quantites seules. Ce n est
-          pas un bon envoyable a un fournisseur.
+          Certaines lignes n ont pas de description commerciale : leur designation interne partira
+          a sa place. Renseignez-la au catalogue pour que le fournisseur reconnaisse l article.
         </Alerte>
       )}
 
       <EtatImprimable
-        titre="Bon de commande"
+        titre="PURCHASE ORDER"
         reference={bc.numero_bc}
-        sousTitre={valide ? undefined : 'BROUILLON — ne pas envoyer'}
+        sousTitre={valide ? undefined : 'DRAFT — do not send'}
         auto={auto}
         enTete={
           <div className="grid grid-cols-2 gap-x-8 gap-y-1">
             <div className="space-y-1">
               <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-                Fournisseur
+                Supplier
               </div>
               <div className="text-[13px] font-semibold">{bc.fournisseur_nom}</div>
-              <div className="font-mono text-[10px] text-neutral-600">{bc.code_fournisseur}</div>
-              {bc.conditions_paiement && (
-                <Champ libelle="Conditions" valeur={bc.conditions_paiement} />
-              )}
             </div>
             <div className="space-y-1">
               <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-                Commande
+                Order
               </div>
               <Champ libelle="Date" valeur={fmt.date(bc.date_bc)} />
-              <Champ
-                libelle="Livraison prévue"
-                valeur={bc.date_livraison_prevue ? fmt.date(bc.date_livraison_prevue) : '—'}
-              />
-              <Champ libelle="Devise" valeur={bc.code_devise} />
-              {prixVisibles && bc.code_devise !== 'MAD' && (
-                <Champ
-                  libelle="Taux engage"
-                  valeur={`${fmt.nombre(bc.taux_change_engage, 4)} MAD`}
-                />
-              )}
+              <Champ libelle="Order N°" valeur={bc.numero_bc} />
             </div>
           </div>
         }
       >
+        {/* « New order » ouvrait chacun des 109 bons d'archive. C'est la phrase
+            que le correspondant cherche en haut du message. */}
+        <div className="mb-2 text-[11px] font-semibold">New order</div>
+
         <TableEtat<LigneBc>
           colonnes={[
-            { entete: 'N°', valeur: (l) => l.ligne_numero, numerique: true },
             {
-              entete: 'Référence',
-              // UNE PRESTATION N'A PAS DE REFERENCE. Son libelle la nomme —
-              // en romain, pas en chasse fixe : ce n'est pas un code.
-              valeur: (l) =>
-                l.code_reference ? (
-                  <>
-                    <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
-                    {l.reference_designation && (
-                      <div className="text-[9px] text-neutral-600">{l.reference_designation}</div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="text-[10px] font-medium">
-                      {l.libelle ?? l.reference_designation}
-                    </div>
-                    <div className="text-[9px] text-neutral-600">Prestation</div>
-                  </>
-                ),
-            },
-            {
-              entete: 'Quantité',
-              numerique: true,
+              entete: 'DESCRIPTION OF GOODS',
+              // La description COMMERCIALE d'abord. A defaut, la designation
+              // interne — imparfaite, mais preferable a une case vide.
               valeur: (l) => (
-                <>
-                  {fmt.nombre(l.quantite_commandee_unite, 2)} {l.unite_commande}
-                  {/* Le kilo est l'unite canonique de l'ERP ; le fournisseur
-                      livre dans la sienne. Porter les deux evite la conversion
-                      de tete au quai, qui est la source d'erreur classique. */}
-                  {l.unite_commande !== 'kg' && l.type_ligne !== 'SERVICE' && (
-                    <div className="text-[9px] text-neutral-600">
-                      {fmt.nombre(l.quantite_commandee_kg, 2)} kg
-                    </div>
-                  )}
-                </>
+                <span className="text-[10px] font-medium uppercase">
+                  {l.description_commerciale || l.reference_designation || l.libelle}
+                </span>
               ),
             },
-            ...(prixVisibles
-              ? [
-                  {
-                    entete: `Prix ${bc.code_devise}`,
-                    numerique: true,
-                    valeur: (l: LigneBc) =>
-                      l.prix_unitaire_devise == null
-                        ? '—'
-                        : fmt.nombre(l.prix_unitaire_devise, 2),
-                  },
-                  {
-                    entete: `Total ${bc.code_devise}`,
-                    numerique: true,
-                    valeur: (l: LigneBc) =>
-                      l.total_ligne_devise == null ? '—' : fmt.nombre(l.total_ligne_devise, 2),
-                  },
-                ]
-              : []),
+            {
+              entete: 'COLOR',
+              valeur: (l) => <span className="text-[10px] uppercase">{l.couleur || '—'}</span>,
+            },
+            {
+              entete: 'COLOR CODE',
+              // LE CODE DU FOURNISSEUR, pas le notre. C'est par lui qu'il
+              // retrouve la teinte dans son propre systeme.
+              valeur: (l) => (
+                <span className="font-mono text-[10px]">{l.code_couleur || '—'}</span>
+              ),
+            },
+            {
+              entete: 'DTEX / DEN',
+              // LE TITRAGE EST LA FAMILLE. « 2900-DTEX », « 1200-DENIERS-SHRINK » :
+              // c'est le classement interne, et c'est aussi ce que le fournisseur
+              // met en face du fil qu'il doit filer.
+              valeur: (l) => <span className="text-[10px]">{l.code_famille || '—'}</span>,
+            },
+            {
+              entete: 'QUANTITY',
+              numerique: true,
+              // LA QUANTITE DANS L'UNITE COMMANDEE, et le detail en dessous.
+              // Un lot ne dit rien sans son nombre de bobines : c'est ce que
+              // l'atelier doit mettre en production.
+              valeur: (l) => {
+                const bob = bobinesDe(l)
+                return (
+                  <>
+                    <div className="font-medium">
+                      {fmt.nombre(l.quantite_commandee_unite, 2)}{' '}
+                      {l.unite_commande === 'Lot'
+                        ? 'LOT'
+                        : l.unite_commande === 'Palette'
+                          ? 'PLTS'
+                          : l.unite_commande === 'Bobine'
+                            ? 'BOBINS'
+                            : l.unite_commande}
+                    </div>
+                    {bob !== null && l.unite_commande !== 'Bobine' && (
+                      <div className="text-[9px] text-neutral-600">
+                        {fmt.nombre(bob, 0)} bobins
+                      </div>
+                    )}
+                  </>
+                )
+              },
+            },
+            {
+              entete: 'TOTAL PLTS',
+              numerique: true,
+              valeur: (l) =>
+                l.nb_palettes == null ? '—' : fmt.nombre(Math.ceil(l.nb_palettes), 0),
+            },
           ]}
           lignes={lignes}
+          // La ligne de total ne porte QUE les palettes. Additionner des lots
+          // et des palettes n'aurait aucun sens, et un total en kilos ne dirait
+          // rien a qui charge un camion.
           total={
-            prixVisibles
-              ? ['', `${lignes.length} ligne(s)`, '', 'Total', fmt.nombre(total, 2)]
-              : ['', `${lignes.length} ligne(s)`, '']
+            totalPalettes === null
+              ? undefined
+              : ['TOTAL', '', '', '', '', fmt.nombre(totalPalettes, 0)]
           }
         />
 
-        {prixVisibles && bc.code_devise !== 'MAD' && bc.montant_total_mad != null && (
-          <p className="mt-2 text-right text-[10px] text-neutral-600">
-            Contre-valeur au taux engage : {fmt.nombre(bc.montant_total_mad, 2)} MAD
-          </p>
-        )}
-
-        {bc.notes && (
-          <div className="mt-4 border-t border-neutral-300 pt-2">
-            <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-              Observations
-            </div>
-            <p className="whitespace-pre-wrap text-[10px]">{bc.notes}</p>
+        {/* LE PIED DE PAGE EST LE DOCUMENT D'EXPEDITION. Ces cinq mentions
+            figuraient sur la quasi-totalite des bons d'archive, et ce sont
+            elles que lisent le transitaire et la douane. */}
+        <div className="mt-4 space-y-0.5 text-[10px]">
+          <div>
+            <span className="font-semibold">INCOTERMS : </span>
+            {bc.incoterm || 'CFR TANGIER'}
           </div>
-        )}
-
-        {/* Les deux cadres de signature. Un bon qui part sans place pour un
-            visa revient signe en travers, ou pas signe du tout. */}
-        <div className="mt-8 grid grid-cols-2 gap-8">
-          {['Pour Polyfashions', 'Pour le fournisseur'].map((r) => (
-            <div key={r}>
-              <div className="mb-10 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-                {r}
-              </div>
-              <div className="border-t border-neutral-500 pt-1 text-[9px] text-neutral-600">
-                Nom, date et signature
-              </div>
+          <div>
+            <span className="font-semibold">TOLERENCE QUANTITY : </span>
+            {bc.tolerance_pesee_pct != null
+              ? `+/- ${fmt.nombre(bc.tolerance_pesee_pct, 0)} %`
+              : '—'}
+          </div>
+          <div>
+            <span className="font-semibold">SHIPMENT DATE : </span>
+            {bc.mention_expedition ||
+              (bc.date_livraison_prevue ? fmt.date(bc.date_livraison_prevue) : 'As soon as possible')}
+          </div>
+          {conteneurs !== null && (
+            <div>
+              <span className="font-semibold">NBR OF CONTAINERS : </span>
+              {fmt.nombre(conteneurs, 0)}
+              {bc.nombre_conteneurs == null && parConteneur && (
+                <span className="text-neutral-600">
+                  {' '}
+                  ({fmt.nombre(parConteneur, 0)} pallets per container)
+                </span>
+              )}
             </div>
-          ))}
+          )}
+          {totalPalettes !== null && (
+            <div>
+              <span className="font-semibold">TOTAL PALLETS : </span>
+              {fmt.nombre(totalPalettes, 0)}
+            </div>
+          )}
         </div>
       </EtatImprimable>
     </div>

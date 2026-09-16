@@ -20,7 +20,6 @@ import { Chat } from './pages/Chat'
 import { Controles } from './pages/Controles'
 import { Etats } from './pages/Etats'
 import { EtatManuel } from './pages/EtatManuel'
-import { BonCommandeFournisseur } from './pages/BonCommandeFournisseur'
 import {
   EtatCatalogue,
   EtatCategories,
@@ -235,12 +234,6 @@ const ECRANS = (
       <Route path="plan-achat" element={<ExigeModule module="PLAN_ACHAT"><PlanAchat /></ExigeModule>} />
       <Route path="bons-commande" element={<ExigeModule module="BONS_COMMANDE"><BonsCommande /></ExigeModule>} />
       <Route path="bons-commande/nouveau" element={<ExigeModule module="BONS_COMMANDE"><BonCommandeNouveau /></ExigeModule>} />
-      {/* DEUX DOCUMENTS, PAS DEUX MISES EN PAGE. « /etat » dit ce que la
-          maison achete — nos codes, nos prix. « /fournisseur » dit ce que
-          le fournisseur doit produire : anglais, ses codes couleur, aucun
-          prix. Les confondre reviendrait a envoyer nos prix d'achat a
-          l'etranger, ou a lui adresser des codes qu'il ne connait pas. */}
-      <Route path="bons-commande/:id/fournisseur" element={<ExigeModule module="BONS_COMMANDE"><BonCommandeFournisseur /></ExigeModule>} />
       <Route path="bons-commande/:id/etat" element={<ExigeModule module="BONS_COMMANDE"><BonCommandeEtat /></ExigeModule>} />
       <Route path="bons-commande/:id" element={<ExigeModule module="BONS_COMMANDE"><BonCommande /></ExigeModule>} />
       <Route path="assistant" element={<ExigeModule module="COCKPIT"><Assistant /></ExigeModule>} />

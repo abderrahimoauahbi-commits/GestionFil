@@ -294,6 +294,26 @@ export function BonCommandeNouveau() {
   })
 
   /**
+   * L'UNITE DANS LAQUELLE ON COMMANDE, et non celle dans laquelle on stocke.
+   *
+   * La ligne naissait en KILOS, et le bon imprime sortait donc en kilos — alors
+   * que les 109 bons d'archive sont en lots et en palettes, sans une seule
+   * mention de poids. Le fournisseur turc ne produit pas 8 601,6 kg : il
+   * produit deux bains de 1344 bobines. Le kilo est notre unite de stock ; ce
+   * n'est pas la sienne, et ce n'est pas celle du document.
+   *
+   * On prend donc la PLUS GROSSE unite que la reference sait exprimer : le lot
+   * s'il porte son bain, sinon la palette, sinon la bobine, et le kilo en
+   * dernier recours. L'acheteur reste libre d'en changer d'un clic.
+   */
+  const uniteDeCommande = (c: Conditionnement): string => {
+    if (facteurVersKg('Lot', c)) return 'Lot'
+    if (facteurVersKg('Palette', c)) return 'Palette'
+    if (facteurVersKg('Bobine', c)) return 'Bobine'
+    return 'kg'
+  }
+
+  /**
    * Une reference retenue remplit la ligne : sa designation, son
    * conditionnement, ce que le plan reclame et le prix qu'il propose.
    */
@@ -301,6 +321,13 @@ export function BonCommandeNouveau() {
     const c = condDe(r)
     const kg = r.qte_a_commander_kg ?? 0
     const colis = depuisKg(kg, c)
+    const unite = uniteDeCommande(c)
+    // Le plan reclame des KILOS ; on les traduit dans l'unite de commande.
+    // Un facteur absent ne peut pas arriver ici — `uniteDeCommande` ne rend
+    // que des unites dont le facteur existe — mais on se garde quand meme :
+    // une division par null produirait une quantite silencieusement fausse.
+    const f = facteurVersKg(unite, c)
+    const qte = kg > 0 && f ? kg / f : kg
     compteur += 1
     return {
       cle: cle ?? `l-${compteur}`,
@@ -311,8 +338,8 @@ export function BonCommandeNouveau() {
       unite_catalogue: r.unite_catalogue ?? 'kg',
       fournisseur_habituel: r.code_fournisseur ?? null,
       suggere_kg: kg > 0 ? kg : null,
-      qte: kg > 0 ? String(kg) : '',
-      unite: 'kg',
+      qte: qte > 0 ? String(Number(qte.toFixed(unite === 'kg' ? 2 : 3))) : '',
+      unite,
       palettes: pourChamp(colis.palettes),
       bobines: pourChamp(colis.bobines),
       lie: true,

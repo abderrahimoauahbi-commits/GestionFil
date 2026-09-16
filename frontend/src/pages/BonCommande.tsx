@@ -644,17 +644,6 @@ export function BonCommande() {
               <Printer />
               Imprimer
             </Bouton>
-            {/* LE DOCUMENT QUI PART CHEZ LE FOURNISSEUR est un autre papier :
-                anglais, ses codes couleur, ses unites, et AUCUN prix. Le bouton
-                est distinct pour qu'on ne se trompe pas de document — envoyer
-                nos prix d'achat en Turquie se fait en un clic de trop. */}
-            <Bouton
-              variante="contour"
-              onClick={() => ouvrir(`/bons-commande/${id}/fournisseur`)}
-            >
-              <Send />
-              Document fournisseur
-            </Bouton>
             {modifiable && (
               <Bouton variante="contour" onClick={() => setSaisie(true)}>
                 <Plus />

@@ -966,6 +966,11 @@ pub async fn lister_bc(
         // lignes, comme les colonnes I et K de la feuille Commandes. Les stocker
         // les ferait diverger des receptions a la premiere pesee.
         "SELECT bc.*, f.nom AS fournisseur_nom, f.code_devise AS devise_fournisseur,
+                -- CE QUE LE DOCUMENT FOURNISSEUR IMPRIME. Ces trois-la vivent sur la
+                -- fiche du fournisseur, et 98 bons sur 109 des archives Excel les
+                -- portaient en pied de page. Les recopier sur le bon les figerait ;
+                -- on les lit, on ne les stocke pas.
+                f.incoterm, f.tolerance_pesee_pct, f.palettes_par_conteneur,
                 uc.login AS createur, uv.login AS valideur,
                 (SELECT COUNT(*) FROM ligne_bc l WHERE l.id_bc = bc.id_bc) AS nb_lignes,
                 (SELECT COALESCE(SUM(l.quantite_restante_kg), 0) FROM ligne_bc l
@@ -1148,7 +1153,14 @@ pub async fn lignes_bc(
         "SELECT l.*, COALESCE(r.designation, l.libelle) AS reference_designation,
                 r.unite_catalogue,
                 r.couleur, r.code_categorie, cat.libelle AS categorie_libelle,
-                r.poids_bobine_kg, r.bobines_par_palette,
+                -- LES DEUX COLONNES QUE LE FOURNISSEUR LIT EN PREMIER : son code
+                -- couleur — « 7612 », « CB-1426 » — et le titrage, qui est chez
+                -- nous la FAMILLE : « 2900-DTEX », « 1200-DENIERS-SHRINK ».
+                r.code_couleur, r.code_famille,
+                r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot,
+                -- Ce que le FOURNISSEUR lit sur le document : sa description
+                -- commerciale en anglais, pas notre code interne.
+                r.description_commerciale,
 
                 -- Montant de la ligne en DIRHAMS. Il n'est pas stocke, et c'est
                 -- volontaire : seul le taux ENGAGE du bon fait foi (RG-09), et le
@@ -1618,6 +1630,12 @@ pub struct ModifBc {
     pub conditions_paiement: Option<String>,
     pub notes: Option<String>,
     pub motif_creation: Option<String>,
+    /// Ce que le document fournisseur imprime en face de « SHIPMENT DATE ».
+    pub mention_expedition: Option<String>,
+    /// Force le nombre de conteneurs annonce, au lieu de le laisser calculer.
+    /// Une chaine vide vaut « reprends le calcul » — d'ou `Option<String>` :
+    /// un `Option<i64>` ne saurait pas distinguer « efface » de « ne touche pas ».
+    pub nombre_conteneurs: Option<String>,
 }
 
 /// Modifie l'entete d'un bon de commande tant qu'il n'est pas engage.
@@ -1658,7 +1676,15 @@ pub async fn modifier_bc(
                 date_livraison_prevue = COALESCE($3, date_livraison_prevue),
                 conditions_paiement   = COALESCE($4, conditions_paiement),
                 notes                 = COALESCE($5, notes),
-                motif_creation        = COALESCE($6, motif_creation)
+                motif_creation        = COALESCE($6, motif_creation),
+                mention_expedition    = COALESCE($7, mention_expedition),
+                -- UNE CHAINE VIDE EFFACE, et c'est la difference qui compte :
+                -- vider le champ doit rendre la main au calcul, pas conserver
+                -- le dernier chiffre force. `NULLIF` en fait un NULL ; le
+                -- `CASE` distingue « champ absent de la requete » — on ne
+                -- touche a rien — de « champ present mais vide » — on efface.
+                nombre_conteneurs     = CASE WHEN $8::text IS NULL THEN nombre_conteneurs
+                                             ELSE NULLIF($8, '')::bigint END
           WHERE id_bc = $1",
     )
     .bind(&id)
@@ -1667,6 +1693,8 @@ pub async fn modifier_bc(
     .bind(&b.conditions_paiement)
     .bind(&b.notes)
     .bind(&b.motif_creation)
+    .bind(&b.mention_expedition)
+    .bind(&b.nombre_conteneurs)
     .execute(&mut *tx)
     .await?;
 
@@ -1783,7 +1811,8 @@ pub async fn references_commandables(
                 -- references ce n'est plus tenable : les parametres partent
                 -- desormais avec chaque ligne trouvee, et le catalogue n'est
                 -- plus charge du tout.
-                r.poids_bobine_kg, r.bobines_par_palette, r.densite_kg_ml,
+                r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot,
+                r.densite_kg_ml, r.description_commerciale,
                 -- CE QUE LE FOURNISSEUR RECONNAIT. Le bon part chez lui : il y
                 -- lit SON code article et SON code couleur, pas les notres.
                 r.reference_fournisseur, r.couleur, r.code_couleur,
@@ -2232,7 +2261,7 @@ pub async fn lignes_attendues(
                 lb.prix_unitaire_devise, lb.prix_kg_devise, lb.code_devise,
                 bc.id_bc, bc.numero_bc, bc.date_bc, bc.date_livraison_prevue, bc.statut AS statut_bc,
                 r.unite_catalogue, r.suivi_lot, r.densite_kg_ml, r.poids_bobine_kg,
-                r.bobines_par_palette,
+                r.bobines_par_palette, r.bobines_par_lot,
                 -- Deja saisie sur CETTE reception : montrer plutot que masquer,
                 -- sinon on la cherche sans comprendre pourquoi elle manque.
                 (SELECT COALESCE(SUM(lr.quantite_stock_kg), 0) FROM ligne_reception lr

@@ -47,6 +47,8 @@ interface Bc extends Record<string, unknown> {
   fournisseur_nom: string
   date_livraison_prevue: string | null
   conditions_paiement: string | null
+  mention_expedition?: string | null
+  nombre_conteneurs?: number | null
   notes: string | null
   statut: string
   code_devise: string
@@ -141,6 +143,8 @@ export function BonCommande() {
     date_bc: '',
     date_livraison_prevue: '',
     conditions_paiement: '',
+    mention_expedition: '',
+    nombre_conteneurs: '',
     notes: '',
   })
   /** Lignes retouchees mais pas encore enregistrees, par identifiant. */
@@ -190,6 +194,8 @@ export function BonCommande() {
       date_bc: bc.date_bc?.slice(0, 10) ?? '',
       date_livraison_prevue: bc.date_livraison_prevue?.slice(0, 10) ?? '',
       conditions_paiement: bc.conditions_paiement ?? '',
+      mention_expedition: bc.mention_expedition ?? '',
+      nombre_conteneurs: bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '',
       notes: bc.notes ?? '',
     })
   }, [bc?.id_bc, bc?.date_bc, bc?.date_livraison_prevue, bc?.conditions_paiement, bc?.notes])
@@ -199,6 +205,9 @@ export function BonCommande() {
     (entete.date_bc !== (bc.date_bc?.slice(0, 10) ?? '') ||
       entete.date_livraison_prevue !== (bc.date_livraison_prevue?.slice(0, 10) ?? '') ||
       entete.conditions_paiement !== (bc.conditions_paiement ?? '') ||
+      entete.mention_expedition !== (bc.mention_expedition ?? '') ||
+      entete.nombre_conteneurs !==
+        (bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '') ||
       entete.notes !== (bc.notes ?? ''))
 
   const changerStatut = useMutation({
@@ -635,6 +644,17 @@ export function BonCommande() {
               <Printer />
               Imprimer
             </Bouton>
+            {/* LE DOCUMENT QUI PART CHEZ LE FOURNISSEUR est un autre papier :
+                anglais, ses codes couleur, ses unites, et AUCUN prix. Le bouton
+                est distinct pour qu'on ne se trompe pas de document — envoyer
+                nos prix d'achat en Turquie se fait en un clic de trop. */}
+            <Bouton
+              variante="contour"
+              onClick={() => ouvrir(`/bons-commande/${id}/fournisseur`)}
+            >
+              <Send />
+              Document fournisseur
+            </Bouton>
             {modifiable && (
               <Bouton variante="contour" onClick={() => setSaisie(true)}>
                 <Plus />
@@ -744,6 +764,46 @@ export function BonCommande() {
                 value={entete.notes}
                 disabled={!modifiable}
                 onChange={(e) => setEntete({ ...entete, notes: e.target.value })}
+              />
+            </div>
+            {/* CE QUI PART SUR LE DOCUMENT FOURNISSEUR, et nulle part ailleurs.
+                La date de livraison prevue pilote le suivi de l'en-cours ; le
+                fournisseur, lui, lit souvent une phrase — « As soon as
+                possible » figurait sur dix-neuf des bons d'archive. */}
+            <div>
+              <Etiq htmlFor="expe">
+                Mention d’expédition
+                <Aide>
+                  Ce que le document fournisseur imprime en face de « SHIPMENT DATE ». Laissée
+                  vide, c’est la livraison prévue qui part. Elle ne remplace pas cette date :
+                  le suivi de l’en-cours continue de s’appuyer dessus.
+                </Aide>
+              </Etiq>
+              <Champ
+                id="expe"
+                placeholder="As soon as possible"
+                value={entete.mention_expedition}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, mention_expedition: e.target.value })}
+              />
+            </div>
+            <div>
+              <Etiq htmlFor="cont">
+                Nombre de conteneurs
+                <Aide>
+                  Laissé vide, il se calcule : total des palettes divisé par les palettes par
+                  conteneur du fournisseur. On ne le saisit que lorsque le transitaire en
+                  décide autrement — une expédition partagée, un conteneur de plus.
+                </Aide>
+              </Etiq>
+              <Champ
+                id="cont"
+                type="number"
+                min="1"
+                className="text-right tabular-nums"
+                value={entete.nombre_conteneurs}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, nombre_conteneurs: e.target.value })}
               />
             </div>
           </CarteCorps>
@@ -876,6 +936,8 @@ export function BonCommande() {
                     date_bc: bc.date_bc?.slice(0, 10) ?? '',
                     date_livraison_prevue: bc.date_livraison_prevue?.slice(0, 10) ?? '',
                     conditions_paiement: bc.conditions_paiement ?? '',
+                    mention_expedition: bc.mention_expedition ?? '',
+                    nombre_conteneurs: bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '',
                     notes: bc.notes ?? '',
                   })
                 }

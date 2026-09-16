@@ -16,6 +16,13 @@
  *
  *     kg      = bobines × poids_bobine_kg
  *     bobines = palettes × bobines_par_palette
+ *     bobines = lots     × bobines_par_lot
+ *
+ * LE LOT EST UNE UNITÉ D'ACHAT, pas une unité de manutention. Le fournisseur
+ * turc produit par bains — 1344 bobines le plus souvent, parfois 1400, 1688 ou
+ * 1720 selon l'article. On commande au lot ; on réceptionne et on range en
+ * palettes. C'est pourquoi il entre dans `facteurVersKg` et pas dans le
+ * triplet palettes/bobines/kilos, qui décrit ce qu'on manutentionne.
  *
  * Une référence qui ne porte pas ces paramètres ne se convertit pas — et il
  * faut le dire, pas inventer un facteur. Un kilo faux se propage en coût de
@@ -28,6 +35,8 @@ export interface Conditionnement {
   bobines_par_palette?: number | null
   /** Pour les matières comptées au mètre linéaire — bande, plastique. */
   densite_kg_ml?: number | null
+  /** Le bain de production du fournisseur, en bobines. Unité d'achat. */
+  bobines_par_lot?: number | null
 }
 
 /** Les trois expressions d'une même quantité. Nul = non calculable. */
@@ -135,6 +144,11 @@ export function facteurVersKg(unite: string, c: Conditionnement): number | null 
       const p = poids(c)
       const pp = parPalette(c)
       return p !== null && pp !== null ? p * pp : null
+    }
+    case 'Lot': {
+      const p = poids(c)
+      const pl = nombre(c.bobines_par_lot)
+      return p !== null && pl !== null && pl > 0 ? p * pl : null
     }
     case 'ml': {
       const d = nombre(c.densite_kg_ml)

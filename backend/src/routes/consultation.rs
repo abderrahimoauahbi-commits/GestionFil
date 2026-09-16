@@ -740,7 +740,8 @@ pub async fn stock(
         // l'ecran de transfert devait charger le catalogue entier pour
         // convertir trois lignes.
         "SELECT sm.*, r.designation, r.unite_catalogue, r.suivi_lot,
-                r.poids_bobine_kg, r.bobines_par_palette, r.densite_kg_ml,
+                r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot,
+                r.densite_kg_ml,
                 m.nom AS magasin_nom, m.inclure_mrp
            FROM stock_magasin sm
            JOIN reference r ON r.code_reference = sm.code_reference

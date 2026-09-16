@@ -82,6 +82,8 @@ interface RefCommandable extends Record<string, unknown> {
   fournisseur_nom?: string | null
   poids_bobine_kg?: number | null
   bobines_par_palette?: number | null
+  /** Le bain de production du fournisseur, en bobines. */
+  bobines_par_lot?: number | null
   densite_kg_ml?: number | null
   reference_fournisseur?: string | null
   couleur?: string | null
@@ -287,6 +289,7 @@ export function BonCommandeNouveau() {
   const condDe = (r: RefCommandable): Conditionnement => ({
     poids_bobine_kg: r.poids_bobine_kg,
     bobines_par_palette: r.bobines_par_palette,
+    bobines_par_lot: r.bobines_par_lot,
     densite_kg_ml: r.densite_kg_ml,
   })
 
@@ -452,6 +455,10 @@ export function BonCommandeNouveau() {
     const u: string[] = []
     if (facteurVersKg('Bobine', l.cond)) u.push('Bobine')
     if (facteurVersKg('Palette', l.cond)) u.push('Palette')
+    // LE LOT NE S'OFFRE QUE SI LA REFERENCE LE PORTE. C'est l'unite dans
+    // laquelle le fournisseur turc produit ; elle n'a de sens que pour les
+    // articles dont on connait le bain.
+    if (facteurVersKg('Lot', l.cond)) u.push('Lot')
     if (facteurVersKg('ml', l.cond)) u.push('ml')
     return u
   }

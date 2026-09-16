@@ -181,6 +181,15 @@ export function Catalogue() {
     },
     { champ: 'designation', libelle: 'Designation', obligatoire: true, pleineLargeur: true },
     {
+      champ: 'description_commerciale',
+      libelle: 'Description commerciale (anglais)',
+      pleineLargeur: true,
+      aide:
+        'Ce que le fournisseur lit sur le bon de commande : « 100% POLYPROPYLENE YARN 2900 ' +
+        'DTEX ». Notre code interne ne lui dit rien. Laissée vide, la désignation part à sa ' +
+        'place — au risque qu’il ne la reconnaisse pas.',
+    },
+    {
       champ: 'code_categorie',
       libelle: 'Catégorie matiere',
       type: 'liste',
@@ -243,9 +252,12 @@ export function Catalogue() {
         { valeur: 'kg', libelle: 'Kilogramme' },
         { valeur: 'Bobine', libelle: 'Bobine' },
         { valeur: 'Palette', libelle: 'Palette' },
+        { valeur: 'Lot', libelle: 'Lot (bain de production)' },
         { valeur: 'ml', libelle: 'Metre lineaire' },
       ],
-      aide: 'Le stock reste tenu en kg ; les autres unités sont des masques de saisie.',
+      aide:
+        'Le stock reste tenu en kg ; les autres unités sont des masques de saisie. ' +
+        'Le lot est le bain que le fournisseur produit — une unité d’achat, pas de manutention.',
     },
     {
       champ: 'poids_bobine_kg',
@@ -254,6 +266,15 @@ export function Catalogue() {
       aide: 'Obligatoire pour une unité Bobine ou Palette.',
     },
     { champ: 'bobines_par_palette', libelle: 'Bobines par palette', type: 'entier' },
+    {
+      champ: 'bobines_par_lot',
+      libelle: 'Bobines par lot',
+      type: 'entier',
+      aide:
+        'Le bain de production du fournisseur. Il varie d’un article à l’autre, même chez ' +
+        'le même fournisseur : 1344 bobines le plus souvent, parfois 1400, 1688 ou 1720. ' +
+        'Sans lui, la commande au lot est refusée plutôt que convertie au jugé.',
+    },
     {
       champ: 'densite_kg_ml',
       libelle: 'Densité (kg/ml)',

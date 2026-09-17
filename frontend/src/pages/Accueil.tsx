@@ -23,10 +23,12 @@
  * a un seul endroit.
  */
 import { Link } from 'react-router-dom'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
+import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { estAccessible, MODULES, NAVIGATION } from '../composants/Coquille'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 
 /** Ce que le rôle veut dire, en une phrase que son titulaire reconnaît. */
 const METIER: Record<string, string> = {
@@ -59,6 +61,99 @@ const TEINTE: Record<string, { fond: string; trait: string }> = {
 }
 
 const teinte = (section: string) => TEINTE[section] ?? TEINTE.GENERAL
+
+/**
+ * LES TAUX DE CHANGE EN VIGUEUR, des l'ouverture — pour la direction et
+ * l'administrateur (demande du 17/09/2026).
+ *
+ * Tout le fil s'achete en dollars : le taux fait le prix de revient, le plan
+ * d'achat et la valeur de chaque reception. Il doit se lire sans aller le
+ * chercher dans la configuration, et un taux qui n'a pas bouge depuis longtemps
+ * doit se voir.
+ */
+const ROLES_TAUX = ['DIRECTION', 'ADMIN']
+
+interface TauxDate {
+  taux: number
+  date_debut: string
+  date_fin: string | null
+}
+
+function TauxDeChange() {
+  const qDev = useQuery({
+    queryKey: ['devises'],
+    queryFn: () => api.get<{ code_devise: string; est_pivot: number }[]>('/api/devises'),
+  })
+  const devises = (qDev.data ?? []).filter((d) => d.est_pivot === 0)
+  const historiques = useQueries({
+    queries: devises.map((d) => ({
+      queryKey: ['taux', d.code_devise],
+      queryFn: () =>
+        api.get<TauxDate[]>(`/api/devises/${encodeURIComponent(d.code_devise)}/taux`),
+    })),
+  })
+  if (devises.length === 0) return null
+
+  return (
+    <section className="flex flex-col gap-3" aria-label="Taux de change en vigueur">
+      <div className="flex flex-wrap items-baseline gap-x-2.5">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-attenue-texte">
+          Taux de change en vigueur
+        </h2>
+        <Link to="/configuration" className="text-[11.5px] text-primaire hover:underline">
+          historique
+        </Link>
+      </div>
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-4">
+        {devises.map((d, i) => {
+          const lignes = historiques[i]?.data ?? []
+          // En vigueur : la periode ouverte. La precedente est le dernier taux
+          // DIFFERENT — un meme taux ressaisi ne dit rien du mouvement.
+          const courant = lignes.find((l) => !l.date_fin) ?? lignes[0]
+          const precedent = courant && lignes.find((l) => l.date_debut < courant.date_debut && l.taux !== courant.taux)
+          const ecart = courant && precedent ? ((courant.taux - precedent.taux) / precedent.taux) * 100 : null
+          const jours = courant
+            ? Math.floor((Date.now() - new Date(courant.date_debut).getTime()) / 86_400_000)
+            : null
+          return (
+            <div
+              key={d.code_devise}
+              className="flex flex-col gap-1 rounded-[var(--radius)] border border-bordure bg-surface p-3 shadow-sm"
+            >
+              <span className="text-[11.5px] font-medium text-attenue-texte">
+                1 {d.code_devise} en MAD
+              </span>
+              <span className="text-[22px] font-semibold leading-tight tabular-nums text-texte">
+                {courant ? fmt.nombre(courant.taux, 4) : '—'}
+              </span>
+              {courant && (
+                <span className="text-[11.5px] leading-snug text-attenue-texte">
+                  depuis le {fmt.date(courant.date_debut)}
+                  {jours !== null && jours > 7 && (
+                    <span className="text-alerte"> · {jours} jours sans mise à jour</span>
+                  )}
+                </span>
+              )}
+              {ecart !== null && precedent && (
+                // Pour un acheteur en devise, un taux qui MONTE renchérit
+                // chaque achat : la hausse se lit en rouge, la baisse en vert.
+                <span
+                  className={cn(
+                    'text-[11.5px] tabular-nums',
+                    ecart > 0 ? 'text-danger' : ecart < 0 ? 'text-succes' : 'text-attenue-texte',
+                  )}
+                >
+                  {ecart > 0 ? '▲' : ecart < 0 ? '▼' : '='}{' '}
+                  {fmt.nombre(Math.abs(ecart), 2)} % sur {fmt.nombre(precedent.taux, 4)}
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
 
 function salutation(): string {
   const h = new Date().getHours()
@@ -150,6 +245,8 @@ export function Accueil() {
           {METIER[moi?.role ?? ''] ?? 'Voici les écrans auxquels vous avez accès.'}
         </p>
       </header>
+
+      {ROLES_TAUX.includes(moi?.role ?? '') && <TauxDeChange />}
 
       {/* ================= CE QU'ON OUVRE TOUS LES JOURS ================ */}
       {quotidiens.length > 0 && (

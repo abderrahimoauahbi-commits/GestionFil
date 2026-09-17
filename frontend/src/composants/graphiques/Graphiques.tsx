@@ -159,6 +159,7 @@ export function BarresRangees({
   unite,
   donnees,
   maximum = 12,
+  trier = true,
 }: {
   titre: string
   sousTitre?: string
@@ -166,12 +167,14 @@ export function BarresRangees({
   donnees: Barre[]
   /** Nombre de barres affichees. Le reste est annonce, jamais tronque en silence. */
   maximum?: number
+  /** Faux quand l'ordre des donnees porte le sens (tranches de couverture). */
+  trier?: boolean
 }) {
   const [tableau, setTableau] = useState(false)
 
   const triees = useMemo(
-    () => [...donnees].sort((a, b) => b.valeur - a.valeur),
-    [donnees],
+    () => (trier ? [...donnees].sort((a, b) => b.valeur - a.valeur) : donnees),
+    [donnees, trier],
   )
   const visibles = triees.slice(0, maximum)
   const restantes = triees.length - visibles.length

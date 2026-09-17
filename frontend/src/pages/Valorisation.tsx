@@ -6,10 +6,15 @@
  *
  * Le piege que cet ecran doit desamorcer : `cmup_mad` et `prix_catalogue_kg` ne
  * sont PAS comparables tels quels — le premier est en dirhams, le second dans
- * la devise du fournisseur. La colonne servie `prix_kg_mad` est le prix
- * catalogue **deja converti** ; c'est elle, et elle seule, qui se compare au
- * CMUP. Les mettre cote a cote sans conversion afficherait un ecart de 9,5 sur
- * les references en dollars, qui n'est que le taux de change.
+ * la devise du fournisseur. La colonne servie `prix_catalogue_mad` est le prix
+ * catalogue **converti au taux en vigueur** ; c'est elle qui se compare au CMUP.
+ *
+ * L'ANCIEN PIEGE (corrige le 17/09/2026) : l'ecart se calculait contre
+ * `prix_kg_mad`, qui rend le CMUP des qu'il existe. Le CMUP etait compare a
+ * lui-meme et l'ecart valait toujours zero.
+ *
+ * LA VALEUR est `valeur_stock_mad` : chaque magasin a son CMUP, exactement
+ * comme la tuile « Valeur du stock » du tableau de bord.
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -36,8 +41,10 @@ interface LigneCatalogue {
   code_devise_catalogue: string | null
   stock_total_kg: number | null
   cmup_mad: number | null
-  /** Prix catalogue converti en dirhams : la seule base comparable au CMUP. */
-  prix_kg_mad: number | null
+  /** Prix catalogue converti au taux en vigueur : la seule base comparable au CMUP. */
+  prix_catalogue_mad: number | null
+  /** Somme des magasins, chacun a son CMUP. */
+  valeur_stock_mad: number | null
   source_prix: string | null
   classe_abc: string | null
 }
@@ -60,8 +67,8 @@ export function Valorisation() {
       .map((r) => {
         const kg = r.stock_total_kg ?? 0
         const cmup = r.cmup_mad ?? null
-        const catalogue = r.prix_kg_mad ?? null
-        const valeur = cmup !== null ? kg * cmup : null
+        const catalogue = r.prix_catalogue_mad ?? null
+        const valeur = r.valeur_stock_mad ?? (cmup !== null ? kg * cmup : null)
         const ecart =
           cmup !== null && catalogue !== null && catalogue > 0
             ? ((cmup - catalogue) / catalogue) * 100
@@ -111,21 +118,21 @@ export function Valorisation() {
           libelle="Sans CMUP"
           valeur={String(total.sansCmup)}
           ton={total.sansCmup > 0 ? 'alerte' : undefined}
-          aide="Aucune reception valorisee : ces références ne comptent pas dans le total."
+          aide="Ni achat, ni prix catalogue convertible (taux absent) : ces références comptent pour zéro."
         />
         <Chiffre
           libelle={`Ecart superieur a ${ECART_NOTABLE} %`}
           valeur={String(total.ecarts)}
           ton={total.ecarts > 0 ? 'alerte' : undefined}
-          aide="Le cout reel s'ecarte nettement du prix catalogue."
+          aide="Le CMUP s'écarte nettement du prix catalogue converti au taux du jour."
         />
       </div>
 
       {total.sansCmup > 0 && (
         <Alerte ton="alerte" titre="Une partie du stock n'est pas valorisee">
           {total.sansCmup} reference{total.sansCmup > 1 ? 's portent' : ' porte'} du stock sans
-          CMUP : aucune reception valorisee n'a encore ete saisie dessus. Leur valeur est comptee
-          pour zero dans le total ci-dessus, qui est donc un plancher, pas une estimation.
+          CMUP : ni achat, ni prix catalogue convertible — sa devise n'a pas de taux en vigueur.
+          Leur valeur est comptee pour zero dans le total ci-dessus, qui est donc un plancher.
         </Alerte>
       )}
 
@@ -155,8 +162,9 @@ export function Valorisation() {
           <div>
             <div className="text-[11px] text-attenue-texte">Assiette</div>
             <div>
-              Entrees <span className="font-medium">valorisees</span> seulement — une sortie ne
-              modifie jamais le CMUP (regle R04)
+              Entrees <span className="font-medium">valorisees</span> ; sans achat, le CMUP est le
+              prix catalogue au taux en vigueur, et la premiere reception moyenne avec lui. Une
+              sortie ne modifie jamais le CMUP d'un magasin (regle R04)
             </div>
           </div>
           <div>

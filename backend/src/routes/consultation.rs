@@ -149,18 +149,18 @@ pub async fn risques_rupture(
         .unwrap_or_default();
 
     if !codes.is_empty() {
-        let trous = std::iter::repeat("?").take(codes.len()).collect::<Vec<_>>().join(",");
-        let sql = format!(
+        // `= ANY($1)` et un tableau lie : la version precedente fabriquait des
+        // `?` a la maniere de SQLite, que PostgreSQL refuse. L'ecran recevait une
+        // erreur 500 et affichait « aucune reference ne descend sous son stock de
+        // securite » — en vert, au-dessus de 73 ruptures.
+        let q = sqlx::query(
             "SELECT code_reference, annee_mois, rang_mois, besoin_kg, entrees_kg,
                     stock_fin_kg, stock_min_kg, statut
                FROM v_risque_mensuel
-              WHERE code_reference IN ({trous})
-              ORDER BY code_reference, rang_mois"
-        );
-        let mut q = sqlx::query(&sql);
-        for c in &codes {
-            q = q.bind(c);
-        }
+              WHERE code_reference = ANY($1)
+              ORDER BY code_reference, rang_mois",
+        )
+        .bind(&codes);
         let mois = lignes_en_json(&q.fetch_all(&state.db).await?);
 
         if let (Some(tableau), Some(mois)) = (liste.as_array_mut(), mois.as_array()) {
@@ -1221,7 +1221,57 @@ pub async fn cockpit_analyse(
               WHERE r.actif = 1 AND r.classe_abc IS NOT NULL
               GROUP BY r.classe_abc
               ORDER BY r.classe_abc").await?,
+        // ZONE 2 DU COCKPIT DU CLASSEUR : les references en alerte, les plus
+        // urgentes d'abord (couverture croissante), avec ce qu'il faut commander.
+        "alertes":      bloc(&state.db,
+            "SELECT sp.code_reference, sp.designation, cat.libelle AS categorie_libelle,
+                    r.couleur, sp.fournisseur_nom, sp.unite_catalogue,
+                    sp.stock_physique_net_kg, sp.conso_mensuelle_kg, sp.jours_couverture,
+                    sp.delai_livraison_jours, pa.qte_a_commander_kg, sp.statut
+               FROM v_stock_projete sp
+               JOIN reference r ON r.code_reference = sp.code_reference
+               LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
+               LEFT JOIN v_plan_achat pa ON pa.code_reference = sp.code_reference
+              WHERE sp.statut <> 'OK'
+              ORDER BY sp.jours_couverture ASC NULLS LAST, sp.code_reference
+              LIMIT 24").await?,
     });
+
+    // LES INDICATEURS DE LA ZONE 5 DU CLASSEUR qui manquaient. Une seule ligne.
+    //
+    // La couverture ponderee valeur se lit sur le stock PHYSIQUE : le projete de
+    // l'ERP retranche douze mois de besoins et serait negatif presque partout.
+    // Les economies sont sommees sur TOUTES les opportunites — l'ecran n'en
+    // montre que cinq, et en additionnait vingt — une reference presente dans
+    // deux groupes d'equivalence ne compte qu'une fois, a sa meilleure economie.
+    let ind = sqlx::query(
+        "SELECT
+           (SELECT COUNT(*) FROM v_stock_projete WHERE statut <> 'OK')                AS nb_refs_en_alerte,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'A')      AS nb_classe_a,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'B')      AS nb_classe_b,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'C')      AS nb_classe_c,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc IS NULL)    AS nb_non_classees,
+           (SELECT ROUND(SUM(GREATEST(sp.stock_physique_net_kg, 0) * sp.cmup_mad)
+                         / NULLIF(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * sp.cmup_mad) / 30.0, 0), 1)
+              FROM v_stock_projete sp)                                                AS couverture_ponderee_jours,
+           (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM archive_reception
+             WHERE ecart_pct IS NOT NULL)                                             AS ecart_pesee_moyen_pct,
+           (SELECT ROUND(COALESCE(SUM(e), 0), 2) FROM (
+                SELECT MAX(economie_annuelle_mad) AS e FROM v_cockpit_economies
+                 GROUP BY code_reference) x)                                          AS economies_total_mad,
+           (SELECT COUNT(DISTINCT code_reference) FROM v_cockpit_economies)          AS nb_opportunites,
+           (SELECT ROUND(COALESCE(SUM(montant_estime_mad), 0), 2) FROM v_plan_achat
+             WHERE statut = 'RUPTURE')                                                AS budget_ruptures_mad,
+           (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM v_stock_dormant)      AS valeur_dormante_mad,
+           (SELECT ROUND(100.0 * COALESCE((SELECT SUM(valeur_mad) FROM v_stock_dormant), 0)
+                         / NULLIF(SUM(valeur_mad), 0), 1)
+              FROM stock_magasin)                                                     AS pct_valeur_dormante",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    if let Some(ligne) = lignes_en_json(&ind).as_array().and_then(|a| a.first()).cloned() {
+        sortie["indicateurs"] = ligne;
+    }
 
     // Les indicateurs de tresorerie. DSO vient d'un parametre : sans module de
     // vente, l'ERP ne peut pas le mesurer — il le declare, et l'ecran le dit.
@@ -1232,10 +1282,20 @@ pub async fn cockpit_analyse(
         // `AS numeric` de SQLite devient `numeric` puis `float8` : deux etapes,
         // parce que le parametre est stocke en TEXTE et qu'un texte ne se
         // convertit pas directement en flottant sans passer par le decimal.
+        //
+        // LA VALEUR DU STOCK est celle de la tuile « Valeur du stock » et de la
+        // Valorisation : tous les magasins, chacun a son CMUP. Trois ecrans
+        // donnaient trois chiffres.
+        // LE DPO est pondere par le budget annuel : un fournisseur a 180 jours
+        // qui porte 40 % des achats pese plus qu'un fournisseur de plastique.
         "SELECT
-           ROUND(COALESCE(SUM(sp.valeur_totale_mad), 0), 2)::float8,
+           (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM stock_magasin)::float8,
            ROUND(COALESCE(SUM(sp.conso_mensuelle_kg * 12 * sp.cmup_mad), 0), 2)::float8,
-           ROUND(COALESCE(AVG(f.delai_paiement_jours), 0), 1)::float8,
+           ROUND(COALESCE(
+               SUM(f.delai_paiement_jours * COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0))
+               / NULLIF(SUM(CASE WHEN f.delai_paiement_jours IS NOT NULL
+                                 THEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0) END), 0),
+               AVG(f.delai_paiement_jours), 0), 1)::float8,
            (SELECT CAST(valeur_courante AS numeric)::float8 FROM parametre
              WHERE code_parametre = 'P_DSODefaut'),
            COUNT(*)

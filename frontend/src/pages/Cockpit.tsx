@@ -989,6 +989,7 @@ function ChiffresCles() {
   const ok = n('nb_ok')
   const attention = n('nb_attention')
   const critiques = n('nb_critiques')
+  const ruptures = n('nb_ruptures')
   const bloquants = n('nb_controles_bloquants') + n('nb_controles_critiques')
 
   return (
@@ -1002,14 +1003,18 @@ function ChiffresCles() {
           ton="primaire"
           surClic={() => naviguer('/stock')}
         />
+        {/* LE LIBELLE DIT CE QUE LE CHIFFRE COMPTE : les references dont le stock
+            PROJETE sur douze mois passe sous le minimum — donc a commander. Il
+            annoncait « stock magasin sous le seuil », un veto physique qu'il ne
+            mesure pas. */}
         <CarteStat
           Icone={TrendingDown}
-          libelle="Sous le minimum"
+          libelle="A commander"
           valeur={fmt.nombre(n('nb_refs_sous_minimum'), 0)}
-          precision="Stock magasin sous le seuil calcule"
+          precision="Projete sous le minimum sur 12 mois"
           ton={n('nb_refs_sous_minimum') > 0 ? 'danger' : 'succes'}
-          surClic={() => naviguer('/stock')}
-          aide="Veto physique : le magasin est court, quelle que soit la couverture."
+          surClic={() => naviguer('/plan-achat')}
+          aide="Stock + commandes fiables - besoins du plan sur 12 mois, compare au stock minimum."
         />
         <CarteStat
           Icone={Layers}
@@ -1029,17 +1034,20 @@ function ChiffresCles() {
           ton="primaire"
           surClic={() => naviguer('/plan-achat')}
         />
+        {/* Le chiffre compte les CONTROLES en anomalie ; il comptait les alertes
+            ouvertes, une autre table, sous le titre « Controles ». */}
         <CarteStat
           Icone={AlertTriangle}
           libelle="Contrôles en anomalie"
-          valeur={fmt.nombre(n('nb_alertes_ouvertes'), 0)}
-          precision={bloquants > 0 ? `${bloquants} bloquant(s) ou critique(s)` : 'Aucun bloquant'}
-          ton={bloquants > 0 ? 'danger' : n('nb_alertes_ouvertes') > 0 ? 'alerte' : 'succes'}
+          valeur={fmt.nombre(bloquants, 0)}
+          precision={`${n('nb_controles_bloquants')} bloquant(s) · ${n('nb_controles_critiques')} critique(s)`}
+          ton={n('nb_controles_bloquants') > 0 ? 'danger' : bloquants > 0 ? 'alerte' : 'succes'}
+          surClic={() => naviguer('/controles')}
           aide="Coherence des donnees, verifiee en permanence."
         />
       </div>
 
-      {ok + attention + critiques > 0 && (
+      {ok + attention + critiques + ruptures > 0 && (
         <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
           <p className="mb-2 text-[11px] uppercase tracking-wide text-attenue-texte">
             Etat du catalogue suivi
@@ -1048,7 +1056,10 @@ function ChiffresCles() {
             parts={[
               { libelle: 'Au vert', valeur: ok, ton: 'succes' },
               { libelle: 'En attention', valeur: attention, ton: 'alerte' },
-              { libelle: 'Critique ou rupture', valeur: critiques, ton: 'danger' },
+              { libelle: 'Critique', valeur: critiques, ton: 'danger' },
+              // Les ruptures manquaient : les trois segments ne faisaient pas le
+              // total des references suivies.
+              { libelle: 'Rupture', valeur: ruptures, ton: 'danger' },
             ]}
           />
         </div>

@@ -46,14 +46,16 @@ FROM tranches t;
 -- tresorerie sera sollicitee : un plan saisonnier fait des pics, et les voir
 -- douze mois a l'avance est tout l'interet du MRP.
 DROP VIEW IF EXISTS v_cockpit_cout_mensuel CASCADE;
+-- Le mois courant et les suivants seulement (2026-09-17i).
 CREATE VIEW v_cockpit_cout_mensuel AS
 SELECT bm.annee_mois,
        ROUND(SUM(bm.quantite_kg), 4)                            AS quantite_kg,
-       ROUND(SUM(bm.quantite_kg * COALESCE(sp.cmup_mad, 0)), 2) AS cout_mad,
+       ROUND(SUM(bm.quantite_kg * COALESCE(r.cmup_mad, 0)), 2)  AS cout_mad,
        COUNT(DISTINCT bm.code_reference)                        AS nb_references
   FROM besoin_mrp bm
   JOIN plan_production pp ON pp.id_plan = bm.id_plan AND pp.statut = 'EN_COURS'
-  LEFT JOIN v_stock_projete sp ON sp.code_reference = bm.code_reference
+  JOIN reference r        ON r.code_reference = bm.code_reference
+ WHERE bm.annee_mois >= to_char(current_date, 'YYYY-MM')
  GROUP BY bm.annee_mois;
 
 
@@ -139,6 +141,7 @@ SELECT b.code_devise,
 -- qu'une reference dont trois maisons detiennent l'equivalent. C'est le premier
 -- tri d'un plan de securisation.
 DROP VIEW IF EXISTS v_cockpit_mono_source CASCADE;
+-- L'alternative doit venir d'un AUTRE fournisseur (2026-09-17i).
 CREATE VIEW v_cockpit_mono_source AS
 SELECT sp.code_reference,
        sp.designation,
@@ -156,8 +159,10 @@ SELECT sp.code_reference,
              ON b.code_groupe_equiv = a.code_groupe_equiv
             AND b.code_reference   <> a.code_reference
             AND b.actif = 1
+           JOIN reference rb ON rb.code_reference = b.code_reference AND rb.actif = 1
           WHERE a.code_reference = sp.code_reference
-            AND a.actif = 1);
+            AND a.actif = 1
+            AND rb.code_fournisseur IS DISTINCT FROM sp.code_fournisseur);
 
 
 -- -----------------------------------------------------------------------------

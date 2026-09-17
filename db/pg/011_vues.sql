@@ -1445,20 +1445,20 @@ GROUP BY rc.code_fournisseur, f.nom, 3;
 -- douze est plus dangereux qu'une absence de cout.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_stat_qualite CASCADE;
+-- CORRIGE LE 17/09/2026 (2026-09-17i) : chaque composant au CMUP de la fiche.
+-- La valeur du stock en magasin rendait gratuit tout composant sans stock :
+-- Shehrazade a 10,24 MAD/m2 pour 83,62 reels.
 CREATE VIEW v_stat_qualite AS
 WITH cout AS (
     SELECT rc.code_qualite,
            COUNT(*)                                         AS nb_composants,
            COUNT(DISTINCT rc.code_role)                     AS nb_roles,
-           SUM(CASE WHEN COALESCE(sd.valeur_totale_mad, 0) > 0
-                     AND COALESCE(sd.stock_total_kg, 0) > 0 THEN 0 ELSE 1 END)
+           SUM(CASE WHEN r.cmup_mad IS NULL THEN 1 ELSE 0 END)
                                                             AS nb_sans_cmup,
            ROUND(SUM(rc.kg_m2), 6)                          AS kg_m2_total,
-           ROUND(SUM(rc.kg_m2 * CASE WHEN COALESCE(sd.stock_total_kg, 0) > 0
-                                     THEN sd.valeur_totale_mad / sd.stock_total_kg
-                                     ELSE 0 END), 4)        AS cout_matiere_m2_mad
+           ROUND(SUM(rc.kg_m2 * COALESCE(r.cmup_mad, 0)), 4) AS cout_matiere_m2_mad
       FROM v_recette_calculee rc
-      LEFT JOIN v_stock_disponible sd ON sd.code_reference = rc.code_reference
+      JOIN reference r ON r.code_reference = rc.code_reference
      GROUP BY rc.code_qualite
 ),
 production AS (
@@ -1482,9 +1482,6 @@ SELECT
     COALESCE(c.nb_sans_cmup, 0)                  AS nb_sans_cmup,
     c.kg_m2_total,
     c.cout_matiere_m2_mad,
-    -- Ecart entre le poids commercial declare et la somme des kg/m2 de la
-    -- recette : au-dela du bruit d'arrondi, la recette et la fiche produit ne
-    -- decrivent plus le meme tapis.
     CASE WHEN q.poids_commercial_m2 > 0 AND c.kg_m2_total IS NOT NULL
          THEN ROUND((c.kg_m2_total - q.poids_commercial_m2) / q.poids_commercial_m2 * 100.0, 2)
     END                                          AS ecart_poids_pct,
@@ -1508,6 +1505,7 @@ LEFT JOIN production p ON p.code_qualite = q.code_qualite;
 -- on change le melange d'un role.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_stat_qualite_role CASCADE;
+-- Meme correction (2026-09-17i).
 CREATE VIEW v_stat_qualite_role AS
 SELECT
     rc.code_qualite,
@@ -1516,12 +1514,9 @@ SELECT
     COUNT(*)                                     AS nb_composants,
     ROUND(SUM(rc.pourcentage_composition), 2)    AS somme_pct,
     ROUND(SUM(rc.kg_m2), 6)                      AS kg_m2,
-    ROUND(SUM(rc.kg_m2 * CASE WHEN COALESCE(sd.stock_total_kg, 0) > 0
-                              THEN sd.valeur_totale_mad / sd.stock_total_kg
-                              ELSE 0 END), 4)    AS cout_m2_mad
+    ROUND(SUM(rc.kg_m2 * COALESCE(r.cmup_mad, 0)), 4) AS cout_m2_mad
 FROM v_recette_calculee rc
-LEFT JOIN v_stock_disponible sd ON sd.code_reference = rc.code_reference
--- `rc.role_libelle` depend de `code_role`, deja groupe.
+JOIN reference r ON r.code_reference = rc.code_reference
 GROUP BY rc.code_qualite, rc.code_role, rc.role_libelle;
 
 -- =============================================================================

@@ -69,17 +69,15 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     // la monnaie : pour 107 references sur 119 il porte des dollars. Le
     // multiplier par une quantite donnait une « valeur MAD » neuf fois trop
     // basse, et faussait le rang de toute reference sans CMUP.
+    //
+    // LE PRIX : le CMUP de la fiche, qui vaut le prix catalogue au taux en
+    // vigueur tant qu'aucun achat ne l'a fixe (2026-09-17h). Plus de repli sur un
+    // taux de 1, qui classait un fil en dollars comme s'il etait en dirhams.
     let mut consos: Vec<ConsoAnnuelle> = sqlx::query_as(
         "SELECT sp.code_reference,
-                sp.conso_mensuelle_kg * 12
-                  * COALESCE(r.cmup_mad,
-                             r.prix_catalogue_kg * COALESCE(
-                                 (SELECT tc.taux FROM taux_change tc
-                                   WHERE tc.code_devise = r.code_devise_catalogue
-                                     AND to_char(current_date, 'YYYY-MM-DD') BETWEEN tc.date_debut
-                                                         AND COALESCE(tc.date_fin, '9999-12-31')
-                                   LIMIT 1), 1.0),
-                             0) AS valeur_mad
+                (sp.conso_mensuelle_kg * 12
+                  * COALESCE(r.cmup_mad, fn_prix_catalogue_mad(r.code_reference), 0))::float8
+                  AS valeur_mad
            FROM v_stock_projete sp
            JOIN reference r ON r.code_reference = sp.code_reference
           WHERE sp.conso_mensuelle_kg IS NOT NULL
@@ -116,7 +114,9 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     // besoin planifie sinon. UNION ALL puis MAX par mois — une reference qui a
     // les deux garde la plus forte des deux valeurs, comme pour la moyenne.
     let mensuelles: Vec<ConsoMensuelle> = sqlx::query_as(
-        "SELECT code_reference, mois, MAX(quantite_kg) AS quantite_kg
+        // `datetime('now','-12 months')` etait du SQLite : PostgreSQL le refusait
+        // et le bouton « Calculer la classification » repondait par une erreur.
+        "SELECT code_reference, mois, MAX(quantite_kg)::float8 AS quantite_kg
            FROM (
              SELECT lm.code_reference,
                     substr(m.date_mouvement, 1, 7) AS mois,
@@ -126,7 +126,8 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
                JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
               WHERE tm.signe = -1
                 AND m.code_type_mvt = 'SORTIE_PROD'
-                AND m.date_mouvement >= datetime('now','-12 months')
+                AND m.date_mouvement >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
+                                                'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
               GROUP BY lm.code_reference, mois
              UNION ALL
              SELECT bm.code_reference, bm.annee_mois, SUM(bm.quantite_kg)
@@ -219,14 +220,15 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
 }
 
 async fn lire_param(tx: &mut sqlx::PgConnection, code: &str) -> AppResult<f64> {
-    let v: String =
-        sqlx::query_scalar(
+    // La base convertit deja en float8 : le lire comme texte faisait echouer le
+    // decodage, et avec lui toute la classification.
+    let v: f64 = sqlx::query_scalar(
         "SELECT valeur_courante::float8 FROM parametre WHERE code_parametre = $1",
     )
-            .bind(code)
-            .fetch_one(&mut *tx)
-            .await?;
-    Ok(v.parse().unwrap_or(0.0))
+    .bind(code)
+    .fetch_one(&mut *tx)
+    .await?;
+    Ok(v)
 }
 
 /// Ecart-type / moyenne. `None` si la moyenne est nulle (aucune consommation).

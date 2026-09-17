@@ -313,13 +313,17 @@ pub const ENTITES: &[Entite] = &[
                     (SELECT x.libelle FROM couleur x
                       WHERE x.code_couleur_interne = c.code_couleur_interne)
                         AS couleur_interne_libelle,
-                    COALESCE(c.cmup_mad, ROUND(c.prix_catalogue_kg * COALESCE((
-                        SELECT t.taux FROM taux_change t
-                         WHERE t.code_devise = c.code_devise_catalogue
-                           AND to_char(current_date, 'YYYY-MM-DD') >= t.date_debut
-                           AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') <= t.date_fin)
-                         ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_kg_mad,
+                    COALESCE(c.cmup_mad, fn_prix_catalogue_mad(c.code_reference)) AS prix_kg_mad,
                     CASE WHEN c.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END AS source_prix,
+                    -- LE PRIX CATALOGUE SEUL, converti au taux en vigueur (sans repli
+                    -- sur un taux de 1). `prix_kg_mad` rend le CMUP des qu'il existe :
+                    -- la Valorisation comparait donc le CMUP a lui-meme, et l'ecart
+                    -- valait toujours zero.
+                    fn_prix_catalogue_mad(c.code_reference) AS prix_catalogue_mad,
+                    -- La valeur du stock comme la calcule le cockpit : chaque magasin
+                    -- a son CMUP. Un seul chiffre pour les trois ecrans.
+                    (SELECT COALESCE(SUM(s.valeur_mad), 0) FROM stock_magasin s
+                      WHERE s.code_reference = c.code_reference) AS valeur_stock_mad,
                     (SELECT COUNT(*) FROM reference_groupe_equiv g
                       WHERE g.code_reference = c.code_reference AND g.actif = 1) AS nb_groupes,
                     (SELECT COUNT(*) FROM recette lr

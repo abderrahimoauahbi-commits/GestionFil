@@ -521,6 +521,14 @@ export function PlanAchat() {
         ) : (
           <div>
             <div className="tabular-nums">{fmt.nombre(p.prix_estime_mad, 3)}</div>
+            {/* Le meme prix dans l'unite d'achat : au metre, un prix au kg ne
+                se reconnait pas sur la facture. */}
+            {p.unite_catalogue !== 'kg' && p.quantite_suggeree_unite ? (
+              <div className="text-[11px] text-attenue-texte tabular-nums">
+                {fmt.nombre((p.prix_estime_mad * p.quantite_suggeree_kg) / p.quantite_suggeree_unite, 4)} MAD/
+                {p.unite_catalogue}
+              </div>
+            ) : null}
             {p.source_prix === 'CATALOGUE' && (
               <div className="text-[11px] text-alerte">catalogue</div>
             )}

@@ -132,16 +132,31 @@ export function Catalogue() {
       champ: 'prix_catalogue',
       entete: 'Prix',
       numerique: true,
+      // L'UNITE EST ECRITE. « 2,500 USD » a cote d'un CMUP au kg laissait croire
+      // a une erreur de calcul sur les references vendues au metre.
       rendu: (r) =>
         r.prix_catalogue === undefined
           ? '—'
-          : `${fmt.nombre(r.prix_catalogue, 3)} ${r.code_devise_catalogue ?? ''}`,
+          : `${fmt.nombre(r.prix_catalogue, 3)} ${r.code_devise_catalogue ?? ''}/${r.unite_catalogue}`,
     },
     {
       champ: 'cmup_mad',
       entete: 'CMUP',
       numerique: true,
-      rendu: (r) => (r.cmup_mad == null ? '—' : fmt.mad(r.cmup_mad)),
+      // LE CMUP DANS L'UNITE D'ACHAT. La base le tient au kg — le stock se
+      // compte en kg —, mais la Bande s'achete au metre : 4 635,20 MAD/kg ne se
+      // compare a rien, 23,18 MAD/ml se compare au prix. Le kg reste en infobulle.
+      rendu: (r) => {
+        if (r.cmup_mad == null) return '—'
+        if (r.unite_catalogue !== 'kg' && r.facteur_kg) {
+          return (
+            <span title={`soit ${fmt.nombre(r.cmup_mad, 2)} MAD/kg (1 ${r.unite_catalogue} = ${r.facteur_kg} kg)`}>
+              {fmt.nombre(r.cmup_mad * r.facteur_kg, 4)} MAD/{r.unite_catalogue}
+            </span>
+          )
+        }
+        return `${fmt.nombre(r.cmup_mad, 2)} MAD/kg`
+      },
     },
     {
       champ: 'quantite_kg',

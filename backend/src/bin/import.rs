@@ -887,10 +887,9 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
 
         let mut n_stock = 0usize;
         for (i, (code_ref, qte)) in a_stocker.iter().enumerate() {
-            // LE STOCK DE DEPART ENTRE SANS VALEUR (2026-09-17b). Il n'a connu
-            // aucun achat dans l'ERP : le prix catalogue n'est pas un cout, et le
-            // moyenner avec les vrais achats fausserait le CMUP. Le premier achat
-            // valorise le stock present.
+            // LE STOCK DE DEPART ENTRE SANS PRIX (2026-09-17b). Il n'a connu
+            // aucun achat dans l'ERP : c'est la base qui lui donne le prix
+            // catalogue au taux en vigueur (2026-09-17h), et jamais un taux de 1.
             sqlx::query(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg)

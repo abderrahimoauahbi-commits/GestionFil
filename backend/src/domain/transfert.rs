@@ -292,7 +292,7 @@ pub async fn receptionner(
     let mut valeur = 0.0_f64;
     for l in &lignes {
         // Sans valeur figee au depart, la ligne entre sans prix : le magasin
-        // destinataire garde son CMUP, ou prendra celui du premier achat.
+        // destinataire garde son CMUP, ou prend le prix catalogue (2026-09-17h).
         let prix = l.prix_kg_mad;
 
         sqlx::query(

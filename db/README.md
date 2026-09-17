@@ -65,7 +65,7 @@ Ce que la base refuse, quel que soit le chemin d'appel — y compris une correct
 | R01 · unité canonique kg | `reference.facteur_kg` colonne générée + 3 `CHECK` conditionnels |
 | R02 · stock jamais négatif | garde avant écriture, par magasin **et** par lot |
 | R03 · historique immuable | refus d'`UPDATE`/`DELETE` sur mouvements, archives, historique prix, audit |
-| R04 · CMUP aux entrées seules | `type_mouvement.impacte_cmup`, contraint à `signe = +1` ; une entrée sans prix ne touche pas au CMUP, un CMUP vide prend le prix de la première entrée valorisée |
+| R04 · CMUP aux entrées seules | `type_mouvement.impacte_cmup`, contraint à `signe = +1`. Sans achat, le CMUP est le prix catalogue × taux en vigueur (`fn_prix_catalogue_mad`, vide sans taux) ; la première réception moyenne avec lui |
 | R07 · Σ % = 100 par rôle | contrôlé au passage à `VALIDE` |
 | R08 · seuls les plans VALIDE alimentent le MRP | index unique partiel sur `(annee) WHERE statut='VALIDE'` |
 | RG-04 · recette validée immuable | verrou sur `ligne_recette` |

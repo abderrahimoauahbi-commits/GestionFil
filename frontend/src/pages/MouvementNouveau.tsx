@@ -535,7 +535,7 @@ export function MouvementNouveau() {
 
                   {/* LE PRIX S'OFFRE DES QU'IL PEUT VALORISER. Obligatoire sur une
                       reception ; facultatif sur un stock initial, qui peut
-                      entrer sans valeur — le premier achat fixera alors le CMUP. */}
+                      entrer sans prix — il prend alors le prix catalogue. */}
                   {(typeActif?.exige_prix === 1 || typeActif?.impacte_cmup === 1) && (
                     <div className="w-32 shrink-0">
                       <input
@@ -546,7 +546,7 @@ export function MouvementNouveau() {
                         title={
                           typeActif.exige_prix === 1
                             ? 'Prix MAD/kg, obligatoire'
-                            : 'Facultatif. Vide : les kilos entrent sans valeur, et le premier achat fixe le CMUP.'
+                            : 'Facultatif. Vide : les kilos entrent au prix catalogue, converti au taux en vigueur.'
                         }
                         value={l.prix_kg_mad}
                         onChange={(e) => majLigne(i, 'prix_kg_mad', e.target.value)}

@@ -536,7 +536,7 @@ pub async fn substituer_proposition(
     // pourrait reporter un besoin de latex sur du fil de jute au motif que
     // quelqu'un les a mis dans le meme groupe par erreur.
     let compat: Option<i64> = sqlx::query_scalar(
-        "SELECT interchangeable FROM v_equivalence
+        "SELECT interchangeable::bigint FROM v_equivalence
           WHERE code_reference = $1 AND equivalent_reference = $2",
     )
     .bind(&code_actuel)
@@ -1499,7 +1499,9 @@ pub async fn modifier_proposition(
                     -- kg : les laisser diverger ferait commander deux nombres
                     -- differents selon la colonne lue.
                     WHEN unite_saisie = 'kg' OR unite_saisie IS NULL THEN $2
-                    ELSE ROUND($2 * quantite_suggeree_unite / quantite_suggeree_kg, 4)
+                    -- `round(double precision, integer)` n'existe pas : le `::numeric`
+                    -- manquait, et CHAQUE modification de proposition echouait.
+                    ELSE ROUND($2::numeric * quantite_suggeree_unite / quantite_suggeree_kg, 4)
                 END,
                 prix_estime_mad = COALESCE($3, prix_estime_mad),
                 commentaires    = COALESCE($4, commentaires),

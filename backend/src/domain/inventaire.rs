@@ -169,7 +169,7 @@ pub async fn cloturer(
 
     let ecarts: Vec<LigneEcart> = sqlx::query_as(
         "SELECT li.id_ligne_inv, li.code_reference, li.lot_fournisseur,
-                li.ecart_kg, sm.cmup_mad
+                li.ecart_kg::float8 AS ecart_kg, sm.cmup_mad::float8 AS cmup_mad
            FROM ligne_inventaire li
            LEFT JOIN stock_magasin sm ON sm.code_reference = li.code_reference
                                      AND sm.code_magasin   = li.code_magasin

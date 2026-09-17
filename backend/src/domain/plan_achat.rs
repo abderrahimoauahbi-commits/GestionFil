@@ -200,27 +200,26 @@ pub async fn convertir(
 
     // Les propositions retenues : celles demandees, ou toutes celles ouvertes.
     // COMMANDE et IGNORE sont exclues — l'une engage deja, l'autre a ete ecartee.
+    // `= ANY($1)` et non des `?` a la SQLite ; quantites et prix en `::float8`,
+    // sans quoi le decodage des NUMERIC echouait. « Commander » ne marchait pas.
     let ouvertes: Vec<(String, String, f64, f64, Option<String>)> = match propositions {
         Some(ids) if !ids.is_empty() => {
-            let trous = vec!["?"; ids.len()].join(",");
-            let sql = format!(
-                "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg,
-                        prix_estime_mad, date_besoin_prevue
+            sqlx::query_as(
+                "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
+                        prix_estime_mad::float8, date_besoin_prevue
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
-                    AND id_proposition IN ({trous})
-                  ORDER BY code_fournisseur, code_reference"
-            );
-            let mut q = sqlx::query_as(&sql);
-            for i in ids {
-                q = q.bind(i);
-            }
-            q.fetch_all(&mut *tx).await?
+                    AND id_proposition = ANY($1)
+                  ORDER BY code_fournisseur, code_reference",
+            )
+            .bind(ids)
+            .fetch_all(&mut *tx)
+            .await?
         }
         _ => {
             sqlx::query_as(
-                "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg,
-                        prix_estime_mad, date_besoin_prevue
+                "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
+                        prix_estime_mad::float8, date_besoin_prevue
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
                   ORDER BY code_fournisseur, code_reference",
@@ -280,7 +279,7 @@ pub async fn convertir(
                   id_proposition, besoin_kg_origine)
              SELECT $1, $2, pa.code_reference, r.designation, 'kg',
                     1.0, pa.quantite_suggeree_kg, pa.quantite_suggeree_kg,
-                    ROUND(pa.prix_estime_mad / $3, 6), bc.code_devise, pa.date_besoin_prevue,
+                    ROUND(pa.prix_estime_mad / $3::numeric, 6), bc.code_devise, pa.date_besoin_prevue,
                     pa.id_proposition,
                     COALESCE((SELECT b.besoin_12m_kg FROM v_besoin_12m b
                                WHERE b.code_reference = pa.code_reference), 0)
@@ -321,7 +320,7 @@ pub async fn convertir(
         let (numero_bc, lignes, montant): (String, i64, Option<f64>) = sqlx::query_as(
             "SELECT bc.numero_bc,
                     (SELECT COUNT(*) FROM ligne_bc l WHERE l.id_bc = bc.id_bc),
-                    bc.montant_total_mad
+                    bc.montant_total_mad::float8
                FROM bon_commande bc WHERE bc.id_bc = $1",
         )
         .bind(&id_bc)

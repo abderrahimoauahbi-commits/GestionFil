@@ -932,7 +932,9 @@ pub async fn saisir_comptage(
                 SET quantite_comptee_kg = $3, motif_ecart = $4, statut_ligne = 'COMPTE',
                     id_utilisateur_comptage = $5, date_comptage = $6
               WHERE id_inventaire = $1 AND code_reference = $2 AND code_magasin = $7
-                AND lot_fournisseur IS $8",
+                -- `IS $8` etait du SQLite : PostgreSQL le refuse, et chaque saisie
+                -- de comptage tombait en erreur interne.
+                AND lot_fournisseur IS NOT DISTINCT FROM $8",
         )
         .bind(&id)
         .bind(&c.code_reference)
@@ -2522,14 +2524,17 @@ pub async fn creer_reception(
         // Prix et taux viennent de la ligne du bon, jamais du catalogue : c'est
         // le prix ENGAGE qui sera paye, et le relire ailleurs ouvrirait un ecart
         // entre ce qu'on a commande et ce qu'on valorise.
-        let engage: Option<(f64, String, f64)> = match &id_ligne_bc {
+        // Le taux est NUMERIC en base : sans `::float8`, le decodage echouait et
+        // toute reception rattachee a un bon tombait en erreur. Le prix engage
+        // est une colonne calculee qui peut etre nulle : `Option`.
+        let engage: Option<(Option<f64>, String, f64)> = match &id_ligne_bc {
             Some(idl) => sqlx::query_as(
                 "SELECT lb.prix_kg_devise::float8, lb.code_devise,
                         COALESCE((SELECT t.taux FROM taux_change t
                                    WHERE t.code_devise = lb.code_devise
                                      AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
                                      AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
-                                   ORDER BY t.date_debut DESC LIMIT 1), 1.0)
+                                   ORDER BY t.date_debut DESC LIMIT 1), 1.0)::float8
                    FROM ligne_bc lb WHERE lb.id_ligne_bc = $1",
             )
             .bind(idl)
@@ -2538,7 +2543,7 @@ pub async fn creer_reception(
             None => None,
         };
         let (prix_devise, devise_ligne, taux) = match engage {
-            Some((p, d, t)) => (Some(p), d, t),
+            Some((p, d, t)) => (p, d, t),
             None => (l.prix_kg_devise, "MAD".to_string(), 1.0),
         };
         let prix_mad = prix_devise.map(|p| arrondi_mad(p * taux));

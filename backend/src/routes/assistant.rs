@@ -57,8 +57,8 @@ const CATALOGUE: &[Question] = &[
         theme: "Stock",
         mots: "tension rupture critique alerte manque risque penurie",
         resume: "SELECT
-                   SUM(statut IN ('RUPTURE','CRITIQUE')) AS graves,
-                   SUM(statut = 'ATTENTION')             AS attention,
+                   COUNT(*) FILTER (WHERE statut IN ('RUPTURE','CRITIQUE')) AS graves,
+                   COUNT(*) FILTER (WHERE statut = 'ATTENTION')             AS attention,
                    COUNT(*)                              AS total
                  FROM v_stock_projete",
         detail: Some(
@@ -109,8 +109,8 @@ const CATALOGUE: &[Question] = &[
         theme: "Controle",
         mots: "anomalie controle coherence incoherence probleme verification",
         resume: "SELECT
-                   SUM(anomalies > 0) AS en_anomalie,
-                   SUM(anomalies > 0 AND criticite IN ('BLOQUANT','CRITIQUE')) AS graves,
+                   COUNT(*) FILTER (WHERE anomalies > 0) AS en_anomalie,
+                   COUNT(*) FILTER (WHERE anomalies > 0 AND criticite IN ('BLOQUANT','CRITIQUE')) AS graves,
                    COUNT(*) AS total
                  FROM v_controles",
         detail: Some(
@@ -186,7 +186,7 @@ const CATALOGUE: &[Question] = &[
         libelle: "Ou dort-on sur trop de stock ?",
         theme: "Stock",
         mots: "sur-stock surstock trop excedent dort dormant immobilise inutile",
-        resume: "SELECT SUM(sur_stock = 1) AS sur_stock,
+        resume: "SELECT COUNT(*) FILTER (WHERE sur_stock = 1) AS sur_stock,
                         (SELECT COUNT(*) FROM v_stock_dormant) AS dormantes,
                         COUNT(*) AS total
                  FROM v_stock_projete",
@@ -227,7 +227,7 @@ const CATALOGUE: &[Question] = &[
         // Un gabarit fonde sur le classement annoncerait « 0 strategiques », ce qui
         // se lit comme un constat alors que c'est une absence de donnee.
         resume: "SELECT COUNT(*) AS total,
-                        COALESCE(SUM(note_globale IS NOT NULL), 0) AS notes,
+                        COUNT(note_globale) AS notes,
                         ROUND(AVG(otif_pct)) AS otif_moyen,
                         ROUND(100.0 * MAX(montant_total_mad)
                               / NULLIF(SUM(montant_total_mad), 0)) AS part_premier
@@ -254,7 +254,7 @@ const CATALOGUE: &[Question] = &[
         resume: "SELECT COUNT(*) AS propositions,
                         COALESCE(ROUND(SUM(quantite_suggeree_kg * COALESCE(prix_estime_mad, 0))), 0)
                           AS montant,
-                        COALESCE(SUM(figee = 1), 0) AS figees
+                        COUNT(*) FILTER (WHERE figee = 1) AS figees
                  FROM plan_achat
                  WHERE statut NOT IN ('COMMANDE','IGNOREE')",
         detail: Some(
@@ -305,9 +305,9 @@ const CATALOGUE: &[Question] = &[
         theme: "Inventaire",
         mots: "inventaire comptage ecart compte magasin gel",
         resume: "SELECT COUNT(*) AS total,
-                        SUM(statut = 'EN_COURS') AS en_cours,
-                        SUM(statut = 'CLOTURE')  AS clotures,
-                        SUM(statut = 'BROUILLON') AS brouillons
+                        COUNT(*) FILTER (WHERE statut = 'EN_COURS')  AS en_cours,
+                        COUNT(*) FILTER (WHERE statut = 'CLOTURE')   AS clotures,
+                        COUNT(*) FILTER (WHERE statut = 'BROUILLON') AS brouillons
                  FROM inventaire",
         detail: Some(
             "SELECT numero_inventaire, code_magasin, type_inventaire, statut,

@@ -495,7 +495,15 @@ pub async fn lister(
         // et l'ecran des equivalences n'affichait jamais les references d'un
         // groupe. Vu en production, dans le journal : « l'operateur n'existe
         // pas : ? integer ».
-        conditions.push(format!("c.{colonne} = ${}", valeurs.len()));
+        // LA BASE CONVERTIT LA VALEUR DANS LE TYPE DE LA COLONNE : elle arrive en
+        // texte, et `bigint = text` n'existe pas en PostgreSQL — filtrer sur
+        // `suivi_lot` ou `priorite` tombait en erreur. Comparer en `::text`
+        // aurait rate « 2.5 » contre « 2.5000 ».
+        conditions.push(format!(
+            "c.{colonne} IS NOT DISTINCT FROM (jsonb_populate_record(NULL::{table},              jsonb_build_object('{colonne}', ${n}::text))).{colonne}",
+            table = e.table,
+            n = valeurs.len()
+        ));
     }
     if let Some(motif) = &f.recherche {
         // Recherche sur la cle et les colonnes textuelles usuelles.

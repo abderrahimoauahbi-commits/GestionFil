@@ -209,7 +209,13 @@ function TauxDeChange() {
                   </>
                 ) : (
                   <span className="text-[11.5px] text-attenue-texte">
-                    {qBam.isLoading ? 'lecture du cours…' : 'aucun cours lu pour cette devise'}
+                    {qBam.isLoading
+                      ? 'lecture du cours…'
+                      : qBam.isError
+                        ? // Un serveur qui n'a pas encore la route : le dire, plutot
+                          // que de laisser croire que la banque ne cote pas.
+                          'cours indisponible : le serveur doit être mis à jour et redémarré'
+                        : 'aucun cours lu pour cette devise'}
                   </span>
                 )}
                 {ecartBam !== null && (

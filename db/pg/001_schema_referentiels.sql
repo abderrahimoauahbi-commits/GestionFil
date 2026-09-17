@@ -137,7 +137,10 @@ CREATE TABLE magasin (
 -- (E7) etait instockable ; il est scinde en AJUST_INV_POS / AJUST_INV_NEG.
 -- Cf. ADR-001 D-05.
 --   exige_prix   : le prix_kg_mad de la ligne est obligatoire.
---   impacte_cmup : ce type recalcule le CMUP (uniquement les entrees, R04).
+--   impacte_cmup : ce type recalcule le CMUP (uniquement les entrees, R04) —
+--                  QUAND la ligne porte un prix. Une entree sans prix ajoute
+--                  les kilos et laisse le CMUP tel quel ; un stock sans CMUP
+--                  prend le prix de la premiere entree valorisee.
 -- -----------------------------------------------------------------------------
 CREATE TABLE type_mouvement (
     code_type_mvt       text    NOT NULL PRIMARY KEY,
@@ -149,8 +152,9 @@ CREATE TABLE type_mouvement (
     exige_motif_ligne   bigint NOT NULL DEFAULT 0 CHECK (exige_motif_ligne IN (0,1)),
     couleur             text,
     actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
-    -- Un type ne peut impacter le CMUP que s'il est une entree valorisee (R04).
-    CHECK (impacte_cmup = 0 OR (signe = 1 AND exige_prix = 1))
+    -- Seule une entree peut impacter le CMUP (R04). Le prix, lui, peut etre
+    -- facultatif : un stock de depart dont on ignore le cout entre sans valeur.
+    CONSTRAINT type_mouvement_cmup_entree CHECK (impacte_cmup = 0 OR signe = 1)
 );
 
 -- -----------------------------------------------------------------------------

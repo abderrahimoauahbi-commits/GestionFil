@@ -597,7 +597,7 @@ function FormulaireInventaire({
                 où la base ne connaît pas de stock. C’est le seul qui découvre une marchandise
                 ignorée. Attention : ce qu’il trouve entre en quantité SANS valeur — l’ajustement
                 d’inventaire ne porte pas de prix. Un stock de départ se charge par
-                l’initialisation de stock, qui exige un prix. Tournant et ciblé : seulement les
+                l’initialisation de stock, avec ou sans prix. Tournant et ciblé : seulement les
                 références déjà en stock dans ce magasin. Le ciblé ne permet pas encore de choisir
                 ses références.
               </Aide>

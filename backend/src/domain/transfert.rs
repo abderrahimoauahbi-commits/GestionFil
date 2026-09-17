@@ -91,9 +91,14 @@ async fn dossier(
         )));
     }
 
+    // LES NUMERIC SE CONVERTISSENT EN float8 ICI : sqlx refuse de decoder un
+    // NUMERIC en f64, et l'expedition tombait en « erreur interne » des la
+    // lecture du dossier — aucun transfert n'avait jamais pu partir.
     let lignes: Vec<LigneTransfert> = sqlx::query_as(
-        "SELECT ligne_numero, code_reference, quantite_kg, quantite_saisie,
-                unite_saisie, facteur_conversion, lot_fournisseur, prix_kg_mad
+        "SELECT ligne_numero, code_reference, quantite_kg::float8 AS quantite_kg,
+                quantite_saisie::float8 AS quantite_saisie, unite_saisie,
+                facteur_conversion::float8 AS facteur_conversion, lot_fournisseur,
+                prix_kg_mad::float8 AS prix_kg_mad
            FROM ligne_transfert WHERE id_transfert = $1 ORDER BY ligne_numero",
     )
     .bind(id_transfert)
@@ -183,7 +188,12 @@ pub async fn expedier(
     for l in &lignes {
         // Le CMUP du magasin source, LU MAINTENANT et fige sur la ligne : c'est
         // la valeur que la marchandise emporte avec elle.
-        let cmup: Option<f64> = sqlx::query_scalar(
+        //
+        // UN STOCK SANS CMUP VOYAGE SANS VALEUR (2026-09-17b). Le stock de depart
+        // entre sans cout connu ; le refuser ici bloquerait les 131 t de Morocco
+        // jusqu'a un achat qui n'y arrivera peut-etre jamais. L'entree sans prix
+        // ne touche pas au CMUP du magasin destinataire.
+        let prix: Option<f64> = sqlx::query_scalar(
             "SELECT cmup_mad::float8 FROM stock_magasin
               WHERE code_reference = $1 AND code_magasin = $2",
         )
@@ -192,13 +202,6 @@ pub async fn expedier(
         .fetch_optional(&mut *tx)
         .await?
         .flatten();
-
-        let prix = cmup.ok_or_else(|| {
-            AppError::RegleMetier(format!(
-                "Reference {} non valorisee au magasin {} : transfert impossible sans CMUP.",
-                l.code_reference, entete.code_magasin_source
-            ))
-        })?;
 
         sqlx::query("UPDATE ligne_transfert SET prix_kg_mad = $2 WHERE id_transfert = $1 AND ligne_numero = $3")
             .bind(id_transfert)
@@ -226,7 +229,7 @@ pub async fn expedier(
         .await?;
 
         total += l.quantite_kg;
-        valeur += l.quantite_kg * prix;
+        valeur += l.quantite_kg * prix.unwrap_or(0.0);
     }
 
     // La date de SORTIE est celle du depart reel, distincte de la date du
@@ -288,12 +291,9 @@ pub async fn receptionner(
     let mut total = 0.0_f64;
     let mut valeur = 0.0_f64;
     for l in &lignes {
-        let prix = l.prix_kg_mad.ok_or_else(|| {
-            AppError::RegleMetier(format!(
-                "Ligne {} sans valeur figee au depart : la reception ne peut pas la valoriser.",
-                l.ligne_numero
-            ))
-        })?;
+        // Sans valeur figee au depart, la ligne entre sans prix : le magasin
+        // destinataire garde son CMUP, ou prendra celui du premier achat.
+        let prix = l.prix_kg_mad;
 
         sqlx::query(
             "INSERT INTO ligne_mouvement
@@ -314,7 +314,7 @@ pub async fn receptionner(
         .await?;
 
         total += l.quantite_kg;
-        valeur += l.quantite_kg * prix;
+        valeur += l.quantite_kg * prix.unwrap_or(0.0);
     }
 
     sqlx::query(

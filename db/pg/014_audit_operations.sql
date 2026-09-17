@@ -346,7 +346,7 @@ BEGIN
                 NULL,
                 json_build_object('numero_transfert', NEW.numero_transfert,
                             'magasin_source',   NEW.code_magasin_source,
-                            'magasin_dest',     NEW.code_magasin_destination,
+                            'magasin_dest',     NEW.code_magasin_dest,
                             'statut',           NEW.statut),
                 current_setting('gestionfil.id_utilisateur', true),
                 current_setting('gestionfil.adresse_ip', true),

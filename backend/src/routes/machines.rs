@@ -1188,8 +1188,9 @@ async fn ecrire_mouvement(
     .await?;
 
     for (i, l) in lignes.iter().enumerate() {
-        // Un retour rentre au magasin : il doit porter un prix, sans quoi le fil
-        // reviendrait valorise a zero et ferait fondre le CMUP.
+        // Un retour rentre au magasin au CMUP connu. Sans CMUP nulle part — un
+        // stock de depart jamais achete —, il rentre sans prix : les kilos
+        // reviennent et le CMUP reste vide, il ne fond pas (2026-09-17b).
         let prix = if type_mvt == "RETOUR_MACHINE" {
             cmup(&mut *tx, magasin, &l.reference).await?
         } else {

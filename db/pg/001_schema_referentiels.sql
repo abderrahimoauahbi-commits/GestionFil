@@ -83,6 +83,20 @@ CREATE INDEX ix_taux_devise_date ON taux_change(code_devise, date_debut DESC);
 CREATE UNIQUE INDEX ux_taux_devise_debut ON taux_change(code_devise, date_debut);
 
 -- -----------------------------------------------------------------------------
+-- cours_bam — le cours de reference MOYEN de Bank Al-Maghrib, POUR INFORMATION.
+-- Il ne valorise rien : c'est `taux_change` qui le fait. Il se lit a cote, pour
+-- voir si le taux de l'ERP s'est eloigne du marche. Une ligne par devise et par
+-- jour de cotation, gardee : l'ecran s'affiche meme sans Internet.
+-- -----------------------------------------------------------------------------
+CREATE TABLE cours_bam (
+    code_devise         text    NOT NULL REFERENCES devise(code_devise),
+    date_cours          text    NOT NULL CHECK (date_cours ~ '^\d{4}-\d{2}-\d{2}$'),
+    cours_mad           numeric(12,4)   NOT NULL CHECK (cours_mad > 0),
+    date_lecture        text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    PRIMARY KEY (code_devise, date_cours)
+);
+
+-- -----------------------------------------------------------------------------
 -- categorie_matiere
 -- -----------------------------------------------------------------------------
 CREATE TABLE categorie_matiere (

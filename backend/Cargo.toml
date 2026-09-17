@@ -62,8 +62,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Lecture du classeur GESTION Fil.xlsx (import de reprise)
 calamine = "0.26"
 
-# LE PREMIER CLIENT HTTP SORTANT DU SERVEUR, et il n'y en aura qu'un usage :
-# joindre le moteur de langage de l'assistant. `rustls` plutot qu'OpenSSL pour
+# LE CLIENT HTTP SORTANT DU SERVEUR, pour deux usages : joindre le moteur de
+# langage de l'assistant, et lire le cours de reference de Bank Al-Maghrib. `rustls` plutot qu'OpenSSL pour
 # ne pas dependre d'une bibliotheque systeme sur la machine cible ; pas de
 # compression ni de cookies, dont un appel d'API n'a que faire.
 reqwest = { version = "0.12", default-features = false, features = [

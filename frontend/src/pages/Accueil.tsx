@@ -79,10 +79,45 @@ interface TauxDate {
   date_fin: string | null
 }
 
+/** Le cours de reference de Bank Al-Maghrib, lu par le serveur — pour information. */
+interface CoursBam {
+  code_devise: string
+  date_cours: string | null
+  cours_mad: number | null
+  date_precedente: string | null
+  cours_precedent_mad: number | null
+}
+
+/** Hausse en rouge, baisse en vert : un taux qui monte renchérit chaque achat. */
+function Variation({ ecart, base, suffixe }: { ecart: number; base: number; suffixe?: string }) {
+  return (
+    <span
+      className={cn(
+        'tabular-nums',
+        ecart > 0 ? 'text-danger' : ecart < 0 ? 'text-succes' : 'text-attenue-texte',
+      )}
+    >
+      {ecart > 0 ? '▲' : ecart < 0 ? '▼' : '='} {fmt.nombre(Math.abs(ecart), 2)} % sur{' '}
+      {fmt.nombre(base, 4)}
+      {suffixe}
+    </span>
+  )
+}
+
 function TauxDeChange() {
   const qDev = useQuery({
     queryKey: ['devises'],
     queryFn: () => api.get<{ code_devise: string; est_pivot: number }[]>('/api/devises'),
+  })
+  // Le serveur ne relit la banque qu'au plus une fois par demi-heure : un
+  // rafraichissement de l'ecran plus frequent ne lui apprendrait rien.
+  const qBam = useQuery({
+    queryKey: ['cours-bam'],
+    queryFn: () =>
+      api.get<{ source: string; url: string; erreur: string | null; cours: CoursBam[] }>(
+        '/api/devises/cours-bam',
+      ),
+    staleTime: 10 * 60_000,
   })
   const devises = (qDev.data ?? []).filter((d) => d.est_pivot === 0)
   const historiques = useQueries({
@@ -104,53 +139,105 @@ function TauxDeChange() {
           historique
         </Link>
       </div>
-      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
         {devises.map((d, i) => {
           const lignes = historiques[i]?.data ?? []
           // En vigueur : la periode ouverte. La precedente est le dernier taux
           // DIFFERENT — un meme taux ressaisi ne dit rien du mouvement.
           const courant = lignes.find((l) => !l.date_fin) ?? lignes[0]
           const precedent = courant && lignes.find((l) => l.date_debut < courant.date_debut && l.taux !== courant.taux)
-          const ecart = courant && precedent ? ((courant.taux - precedent.taux) / precedent.taux) * 100 : null
           const jours = courant
             ? Math.floor((Date.now() - new Date(courant.date_debut).getTime()) / 86_400_000)
             : null
+          const bam = qBam.data?.cours.find((c) => c.code_devise === d.code_devise)
+          // L'ECART QUI COMPTE : le taux de l'ERP rapporte au cours de la banque.
+          // Un taux ERP sous le marche sous-estime le cout de chaque achat.
+          const ecartBam =
+            courant && bam?.cours_mad ? ((courant.taux - bam.cours_mad) / bam.cours_mad) * 100 : null
           return (
             <div
               key={d.code_devise}
-              className="flex flex-col gap-1 rounded-[var(--radius)] border border-bordure bg-surface p-3 shadow-sm"
+              className="flex flex-col gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3 shadow-sm"
             >
               <span className="text-[11.5px] font-medium text-attenue-texte">
                 1 {d.code_devise} en MAD
               </span>
-              <span className="text-[22px] font-semibold leading-tight tabular-nums text-texte">
-                {courant ? fmt.nombre(courant.taux, 4) : '—'}
-              </span>
-              {courant && (
-                <span className="text-[11.5px] leading-snug text-attenue-texte">
-                  depuis le {fmt.date(courant.date_debut)}
-                  {jours !== null && jours > 7 && (
-                    <span className="text-alerte"> · {jours} jours sans mise à jour</span>
-                  )}
+
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-attenue-texte">
+                  Taux utilisé par l’ERP
                 </span>
-              )}
-              {ecart !== null && precedent && (
-                // Pour un acheteur en devise, un taux qui MONTE renchérit
-                // chaque achat : la hausse se lit en rouge, la baisse en vert.
-                <span
-                  className={cn(
-                    'text-[11.5px] tabular-nums',
-                    ecart > 0 ? 'text-danger' : ecart < 0 ? 'text-succes' : 'text-attenue-texte',
-                  )}
-                >
-                  {ecart > 0 ? '▲' : ecart < 0 ? '▼' : '='}{' '}
-                  {fmt.nombre(Math.abs(ecart), 2)} % sur {fmt.nombre(precedent.taux, 4)}
+                <span className="text-[22px] font-semibold leading-tight tabular-nums text-texte">
+                  {courant ? fmt.nombre(courant.taux, 4) : '—'}
                 </span>
-              )}
+                {courant && (
+                  <span className="text-[11.5px] leading-snug text-attenue-texte">
+                    depuis le {fmt.date(courant.date_debut)}
+                    {jours !== null && jours > 7 && (
+                      <span className="text-alerte"> · {jours} jours sans mise à jour</span>
+                    )}
+                  </span>
+                )}
+                {courant && precedent && (
+                  <span className="text-[11.5px]">
+                    <Variation ecart={((courant.taux - precedent.taux) / precedent.taux) * 100} base={precedent.taux} />
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-0.5 border-t border-bordure pt-2">
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-attenue-texte">
+                  Bank Al-Maghrib · cours de référence
+                </span>
+                {bam?.cours_mad ? (
+                  <>
+                    <span className="text-[17px] font-semibold leading-tight tabular-nums text-texte">
+                      {fmt.nombre(bam.cours_mad, 4)}
+                      <span className="ml-1.5 text-[11.5px] font-normal text-attenue-texte">
+                        au {fmt.date(bam.date_cours)}
+                      </span>
+                    </span>
+                    {bam.cours_precedent_mad && (
+                      <span className="text-[11.5px]">
+                        <Variation
+                          ecart={((bam.cours_mad - bam.cours_precedent_mad) / bam.cours_precedent_mad) * 100}
+                          base={bam.cours_precedent_mad}
+                          suffixe={` au ${fmt.date(bam.date_precedente)}`}
+                        />
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[11.5px] text-attenue-texte">
+                    {qBam.isLoading ? 'lecture du cours…' : 'aucun cours lu pour cette devise'}
+                  </span>
+                )}
+                {ecartBam !== null && (
+                  // Signale au-dela de 1 % : le prix de revient calcule s'ecarte
+                  // alors sensiblement de ce que la banque facturera.
+                  <span
+                    className={cn(
+                      'mt-0.5 text-[11.5px] tabular-nums',
+                      Math.abs(ecartBam) >= 1 ? 'font-medium text-alerte' : 'text-attenue-texte',
+                    )}
+                  >
+                    {Math.abs(ecartBam) < 0.005
+                      ? 'Taux ERP aligné sur Bank Al-Maghrib'
+                      : `Taux ERP ${fmt.nombre(Math.abs(ecartBam), 2)} % ${ecartBam < 0 ? 'sous le' : 'au-dessus du'} cours BAM`}
+                  </span>
+                )}
+              </div>
             </div>
           )
         })}
       </div>
+      <p className="text-[11px] text-attenue-texte">
+        Pour information : le cours de Bank Al-Maghrib ne modifie jamais le taux de l’ERP.{' '}
+        <a href={qBam.data?.url} target="_blank" rel="noreferrer" className="text-primaire hover:underline">
+          Source : Bank Al-Maghrib
+        </a>
+        {qBam.data?.erreur && <span className="text-alerte"> · {qBam.data.erreur} — dernier cours connu affiché</span>}
+      </p>
     </section>
   )
 }

@@ -157,6 +157,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/registre", get(entites::registre))
         // --- Referentiels a traitement particulier ----------------------------
         .route("/api/devises", get(referentiels::devises))
+        .route("/api/devises/cours-bam", get(referentiels::cours_bam))
         .route("/api/devises/{code}/taux",
                get(referentiels::taux_change).post(referentiels::creer_taux))
         .route("/api/parametres", get(referentiels::parametres))

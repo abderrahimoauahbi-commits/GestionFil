@@ -87,6 +87,15 @@ export function Catalogue() {
       ),
     },
     { champ: 'code_categorie', entete: 'Catégorie', filtre: 'liste', rendu: (r) => r.categorie_libelle },
+    {
+      // LE ROLE VIENT DE LA CATEGORIE — Poil, Trame, Chaîne, Colle… : c'est la
+      // place normale de la matiere dans la composition. Le serveur ne trie que
+      // sur les colonnes de la fiche, d'ou l'absence de tri.
+      champ: 'code_role_defaut',
+      entete: 'Rôle',
+      triable: false,
+      rendu: (r) => fmt.texte(r.role_libelle ?? r.code_role_defaut),
+    },
     { champ: 'fournisseur_nom', entete: 'Fournisseur', filtre: 'liste', rendu: (r) => r.fournisseur_nom },
     { champ: 'couleur', entete: 'Couleur', filtre: 'liste', rendu: (r) => fmt.texte(r.couleur), secondaire: true },
     {

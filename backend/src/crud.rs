@@ -305,6 +305,8 @@ pub const ENTITES: &[Entite] = &[
         // s'il existe, sinon le prix catalogue converti au taux en vigueur. Deux
         // regles de prix dans l'application finiraient par donner deux chiffres.
         selection: "c.*, cat.libelle AS categorie_libelle, cat.code_role_defaut,
+                    (SELECT x.libelle FROM role_bom x WHERE x.code_role = cat.code_role_defaut)
+                        AS role_libelle,
                     f.nom AS fournisseur_nom,
                     (SELECT x.libelle FROM famille x WHERE x.code_famille = c.code_famille)
                         AS famille_libelle,

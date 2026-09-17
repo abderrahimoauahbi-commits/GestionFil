@@ -40,12 +40,13 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let (statut, magasin): (String, String) =
-        sqlx::query_as("SELECT statut, code_magasin FROM inventaire WHERE id_inventaire = $1")
-            .bind(id_inventaire)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| AppError::Introuvable(format!("inventaire {id_inventaire}")))?;
+    let (statut, magasin, type_inventaire): (String, String, String) = sqlx::query_as(
+        "SELECT statut, code_magasin, type_inventaire FROM inventaire WHERE id_inventaire = $1",
+    )
+    .bind(id_inventaire)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("inventaire {id_inventaire}")))?;
 
     if statut != "BROUILLON" {
         return Err(AppError::RegleMetier(format!(
@@ -59,6 +60,27 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
     // compte des bobines portant un numero de bain de teinture, pas un total
     // abstrait. Sans cette distinction, l'ajustement genere ensuite serait un
     // mouvement sans lot, que le suivi de lot refuse.
+    //
+    // LE TYPE D'INVENTAIRE ETAIT IGNORE, et un inventaire GLOBAL ne comptait que
+    // ce qui etait deja en stock — exactement comme un TOURNANT. Deux
+    // consequences, l'une et l'autre graves :
+    //
+    //   * UN INVENTAIRE NE POUVAIT RIEN DECOUVRIR. 500 kg poses au fond d'une
+    //     allee et ignores de la base ne figuraient sur aucune ligne : on ne
+    //     compte que ce qu'on vous demande de compter.
+    //   * LE PREMIER INVENTAIRE ETAIT VIDE. Le referentiel a ete charge sans
+    //     aucun stock ; l'inventaire initial est precisement ce qui doit le
+    //     constituer, et il ouvrait zero ligne.
+    //
+    // Un inventaire GLOBAL couvre donc TOUT le catalogue actif, avec un theorique
+    // a zero la ou la base ne connait rien. TOURNANT et CIBLE gardent le perimetre
+    // du stock existant : ce sont des controles, pas des recensements.
+    //
+    // CE QUI RESTE HORS CHAMP : une reference SUIVIE AU LOT et sans aucun lot en
+    // stock. Lui ouvrir une ligne sans lot creerait un ajustement que le suivi de
+    // lot refuserait a la cloture. Aucune reference n'est suivie au lot
+    // aujourd'hui ; le jour ou il y en aura, il faudra saisir le lot trouve.
+    let global = type_inventaire == "GLOBAL";
     let res = sqlx::query(
         "INSERT INTO ligne_inventaire
              (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg)
@@ -67,13 +89,16 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
            JOIN reference r ON r.code_reference = sl.code_reference AND r.suivi_lot = 1
           WHERE sl.code_magasin = $2 AND sl.quantite_kg > 0
          UNION ALL
-         SELECT $1, sm.code_reference, sm.code_magasin, NULL, sm.quantite_kg
-           FROM stock_magasin sm
-           JOIN reference r ON r.code_reference = sm.code_reference AND r.suivi_lot = 0
-          WHERE sm.code_magasin = $2 AND sm.quantite_kg > 0",
+         SELECT $1, r.code_reference, $2, NULL, COALESCE(sm.quantite_kg, 0)
+           FROM reference r
+           LEFT JOIN stock_magasin sm ON sm.code_reference = r.code_reference
+                                     AND sm.code_magasin   = $2
+          WHERE r.suivi_lot = 0
+            AND ( ($3 AND r.actif = 1) OR sm.quantite_kg > 0 )",
     )
     .bind(id_inventaire)
     .bind(&magasin)
+    .bind(global)
     .execute(&mut *tx)
     .await?;
 

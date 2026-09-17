@@ -112,14 +112,37 @@ GROUP BY pp.id_plan, lpp.rang_mois, lpp.mois, lpp.annee_mois, rc.code_reference;
 -- pouvait pas attendre.
 DROP VIEW IF EXISTS v_besoin_12m CASCADE;
 CREATE VIEW v_besoin_12m AS
+-- -----------------------------------------------------------------------------
+-- CE QUI RESTE A CONSOMMER, PAS CE QUE LE PLAN PREVOYAIT EN TOUT.
+--
+-- La vue sommait TOUS les mois du plan, passes compris. Or le stock projete
+-- s'ecrit « physique + en-cours - besoin » : le physique a DEJA perdu ce que
+-- les mois passes ont consomme. Ces mois etaient donc retires deux fois — une
+-- fois du stock par les sorties reelles, une seconde fois par le plan.
+--
+-- Mesure sur la base de verification (17/09/2026) : plan d'avril 2026 a mars
+-- 2027, 1 000 kg par mois, 3 000 kg en stock. Le plan d'achat proposait
+-- 11 600 kg ; le besoin reel en appelait 6 600. SURCOMMANDE : 5 000 kg, soit
+-- exactement les cinq mois deja ecoules — et l'ecart grossit d'un mois de
+-- consommation a chaque mois qui passe, jusqu'a la fin du plan.
+--
+-- On ne retient donc que le MOIS COURANT ET LES SUIVANTS. Le mois courant
+-- reste compte en entier : il n'est pas encore consomme, et le retirer serait
+-- l'erreur inverse — une rupture en fin de mois.
+-- -----------------------------------------------------------------------------
 WITH horizon AS (
     -- Nombre de mois REELLEMENT couverts par chaque plan. C'est le plan qui
     -- donne le denominateur, jamais une constante : un plan de six mois divise
     -- par six. Diviser par douze halvait la consommation mensuelle, doublait la
     -- couverture affichee, et retardait d'autant le declenchement des alertes
     -- — verifie : facteur exactement 2,0 sur un plan de six mois.
+    --
+    -- Le denominateur suit le meme horizon que le numerateur : les mois RESTANTS.
+    -- Diviser le reste du plan par ses douze mois d'origine ferait fondre la
+    -- consommation mensuelle au fil de l'annee.
     SELECT id_plan, COUNT(DISTINCT annee_mois) AS mois
       FROM besoin_mrp
+     WHERE annee_mois >= to_char(current_date, 'YYYY-MM')
      GROUP BY id_plan
 )
 SELECT
@@ -147,6 +170,7 @@ JOIN plan_production pp ON pp.id_plan = bm.id_plan
 JOIN horizon h          ON h.id_plan  = bm.id_plan
 WHERE pp.statut = 'EN_COURS'
   AND to_char(current_date, 'YYYY-MM-DD') BETWEEN pp.date_debut AND pp.date_fin
+  AND bm.annee_mois >= to_char(current_date, 'YYYY-MM')
 GROUP BY bm.code_reference;
 
 -- =============================================================================
@@ -618,9 +642,14 @@ WITH base AS (
         CASE
             WHEN qte_avec_moq_kg <= 0 THEN 0.0
             WHEN multiple_achat_kg IS NULL OR multiple_achat_kg <= 0 THEN ROUND(qte_avec_moq_kg, 4)
-            ELSE ROUND(CAST(
-                     (qte_avec_moq_kg + multiple_achat_kg - 0.0001) / multiple_achat_kg
-                 AS bigint) * multiple_achat_kg, 4)
+            -- L'ARRONDI AU MULTIPLE SUPERIEUR, VRAIMENT. La formule precedente
+            -- — `CAST((q + m - 0,0001) / m AS bigint)` — supposait qu'une
+            -- conversion en entier TRONQUE. PostgreSQL ARRONDIT. Le resultat
+            -- commandait un multiple de trop dans pres d'un cas sur deux :
+            -- 1 600 kg au multiple de 1 000 donnaient 3 000 kg au lieu de 2 000,
+            -- et un besoin tombant pile sur un multiple en ajoutait un entier.
+            -- Mesure le 17/09/2026. `CEIL` dit exactement ce qu'on veut dire.
+            ELSE ROUND(CEIL(qte_avec_moq_kg / multiple_achat_kg) * multiple_achat_kg, 4)
         END AS qte_a_commander_kg
     FROM calcul
 )

@@ -849,11 +849,23 @@ pub async fn lignes_inventaire(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::INVENTAIRE, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT li.*, r.designation, r.unite_catalogue
+        // CE QU'IL FAUT POUR COMPTER, pas seulement pour saisir. Au magasin on
+        // compte des palettes et des bobines, jamais des kilos : la feuille de
+        // comptage doit porter le conditionnement pour que le bureau convertisse
+        // sans rappeler l'allee. Et elle suit l'ORDRE DU MAGASIN — la matiere,
+        // puis la famille — parce qu'on parcourt une allee de polypropylene, pas
+        // une liste alphabetique de codes.
+        "SELECT li.*, r.designation, r.unite_catalogue,
+                r.poids_bobine_kg, r.bobines_par_palette,
+                r.code_categorie, cat.libelle AS categorie_libelle,
+                r.code_famille, r.reference_fournisseur,
+                f.nom AS fournisseur_nom
            FROM ligne_inventaire li
            JOIN reference r ON r.code_reference = li.code_reference
+           LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
+           LEFT JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
           WHERE li.id_inventaire = $1
-          ORDER BY li.code_reference",
+          ORDER BY cat.libelle NULLS LAST, r.code_famille NULLS LAST, li.code_reference",
     )
     .bind(&id)
     .fetch_all(&state.db)

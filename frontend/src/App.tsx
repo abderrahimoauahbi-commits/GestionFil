@@ -20,6 +20,7 @@ import { Chat } from './pages/Chat'
 import { Controles } from './pages/Controles'
 import { Etats } from './pages/Etats'
 import { EtatManuel } from './pages/EtatManuel'
+import { FeuilleComptage } from './pages/FeuilleComptage'
 import {
   EtatCatalogue,
   EtatCategories,
@@ -185,6 +186,9 @@ const ECRANS = (
           s'ouvrent depuis la ligne, pas depuis un selecteur. Le segment reste
           optionnel pour que l'adresse nue propose encore le choix. */}
       <Route path="etats/receptions/:id" element={<ExigeModule module="RECEPTIONS"><EtatReception /></ExigeModule>} />
+      {/* La feuille qu'on emporte POUR compter, distincte du proces-verbal qui
+          confronte APRES coup le compte au theorique. */}
+      <Route path="etats/inventaire/:id/comptage" element={<ExigeModule module="INVENTAIRE"><FeuilleComptage /></ExigeModule>} />
       <Route path="etats/inventaire/:id" element={<ExigeModule module="INVENTAIRE"><EtatInventaire /></ExigeModule>} />
       <Route path="etats/plan-production/:id" element={<ExigeModule module="PLANS"><EtatPlanProduction /></ExigeModule>} />
       <Route path="etats/besoins/:id" element={<ExigeModule module="MRP"><EtatBesoins /></ExigeModule>} />

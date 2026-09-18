@@ -26,6 +26,7 @@ import { useEntreprise } from '../lib/entreprise'
 import { cn, estBureau, sousChemin } from '../lib/utils'
 import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
+import { BoutonRafraichir, useEcranCalcule } from './BoutonRafraichir'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
 import { AideEcran } from './AideEcran'
@@ -735,6 +736,7 @@ export function EnTetePage({
   description?: React.ReactNode
   actions?: React.ReactNode
 }) {
+  const calculable = useEcranCalcule()
   return (
     /* L'EN-TETE SUIT LE DEFILEMENT, PARCE QUE C'EST LUI QUI PORTE « VALIDER »
        ET « RETOUR ». Sur une table de plusieurs centaines de lignes, ces deux
@@ -770,8 +772,16 @@ export function EnTetePage({
           les boutons, eux, ne se retrecissent pas. Resultat, ils sortaient de
           l'ecran. `w-full` en dessous de `sm` tranche : les actions descendent,
           alignees a droite, et rien ne deborde. */}
-      {actions && (
-        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">{actions}</div>
+      {/* LE RAFRAICHISSEMENT SE PLACE SEUL, COMME L'AIDE D'ECRAN. Il connait la
+          liste des ecrans calcules et ne s'affiche que la : aucun ecran n'a a
+          le declarer, donc aucun ne peut l'oublier. Il vient EN DERNIER, apres
+          les actions propres a la page — « Valider » et « Enregistrer »
+          gardent la place de droite, qui est celle qu'on cherche. */}
+      {(actions || calculable) && (
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+          {actions}
+          <BoutonRafraichir />
+        </div>
       )}
     </div>
   )

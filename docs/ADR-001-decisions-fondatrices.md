@@ -139,6 +139,10 @@ Le stockage en UTC explicite résout le problème et se migre directement vers `
 
 ## D-12 — Tables `STRICT` et clés étrangères actives
 
+> **Caduque depuis le 4 septembre 2026.** La base est PostgreSQL 18 : le typage est strict par
+> nature et les clés étrangères sont toujours vérifiées. Ce qui suit décrit l'état SQLite, conservé
+> parce qu'une décision se lit avec son époque.
+
 **Décision** — Toutes les tables sont déclarées `STRICT`. `PRAGMA foreign_keys = ON` est requis sur chaque connexion.
 
 **Pourquoi** — Sans `STRICT`, SQLite accepte `'abc'` dans une colonne numérique. Sans le PRAGMA, les clés étrangères ne sont pas vérifiées — ce qui aurait rendu vains les contrôles C03 et C04.

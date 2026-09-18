@@ -7,7 +7,7 @@ Rust + Axum + sqlx. Consomme la base construite par [`db/`](../db/README.md).
 ## Démarrage
 
 ```powershell
-cd db;      .\build.ps1                # construire la base (schéma + référentiels)
+cd db\pg;   python charger.py          # construire la base (schéma + référentiels)
 cd ..\backend
 cargo run --bin gestionfil-admin -- init-config   # crée .env avec un secret aléatoire
 cargo run --bin gestionfil-import                 # charge GESTION Fil.xlsx
@@ -19,13 +19,12 @@ Le paquet expose trois binaires ; `default-run` fait pointer `cargo run` sur le 
 
 ```powershell
 cargo test                                        # tests unitaires
-.\tests\e2e.ps1                                   # 40 tests de bout en bout
 cargo run --bin gestionfil-admin -- verifier      # contrôles métier C01–C21
 cargo run --bin gestionfil-admin -- lister-comptes
 cargo run --bin gestionfil-import -- --simuler    # import à blanc, rapport identique
 ```
 
-`build.ps1 -Demo` ajoute un jeu de démonstration (fournisseurs fictifs, qualité SH, réception en attente). **À ne pas combiner avec l'import** : les deux créeraient les mêmes fournisseurs sous des codes différents.
+`charger.py --production` charge les comptes réels sans référentiel : il s'importe ensuite depuis le classeur. **À ne pas combiner avec un jeu de démonstration** : les deux créeraient les mêmes fournisseurs sous des codes différents.
 
 ---
 
@@ -156,7 +155,7 @@ La cascade crée **un mouvement par magasin destinataire**, une archive figée e
 
 ## Notes d'implémentation
 
-**sqlx en requêtes dynamiques**, pas les macros `query!`. La couche SQL est déjà validée par `db/tests/run-tests.ps1` (38 tests), et cela évite d'exiger une base accessible à la compilation — donc en CI et sur un poste neuf.
+**sqlx en requêtes dynamiques**, pas les macros `query!` : cela évite d'exiger une base accessible à la compilation — donc en CI et sur un poste neuf. En contrepartie, une erreur de SQL ou de type ne se voit qu'à l'exécution : toute requête nouvelle se vérifie par un `PREPARE` sur une copie de la base, résultat comparé aux types Rust (audit du 17/09/2026, seize requêtes en panne).
 
 **Contexte de session.** Chaque transaction écrivante appelle `user.poser_contexte(&mut tx)` en premier : les triggers d'audit lisent `_contexte_session` au moment où ils s'exécutent. Sans cet appel, le journal enregistre des actions anonymes.
 

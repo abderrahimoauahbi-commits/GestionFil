@@ -62,6 +62,14 @@ interface Proposition extends Record<string, unknown> {
   prix_estime_mad?: number
   source_prix?: string
   montant_total_mad?: number
+  /* CE QU'ON IRA NEGOCIER, dans la devise du fournisseur. Le montant en
+     dirhams ne sert qu'au budget : le bon de commande, lui, se libelle en
+     dollars ou en euros, et c'est ce chiffre-la que le fournisseur lira. */
+  code_devise?: string | null
+  prix_devise?: number | null
+  montant_devise?: number | null
+  taux_devise?: number | null
+  palettes_a_commander?: number | null
   date_besoin_prevue: string
   urgence: string
   risque_identifie: string | null
@@ -515,10 +523,26 @@ export function PlanAchat() {
       entete: 'Prix MAD/kg',
       numerique: true,
       largeur: '120px',
+      // LE PRIX SE NEGOCIE, DONC IL SE SAISIT. Il etait seul en lecture au
+      // milieu de colonnes modifiables : l'acheteur qui obtenait un rabais
+      // devait commander au tarif, puis corriger le bon apres coup. Le prix en
+      // devise et le montant suivent, cote serveur.
       rendu: (p) =>
         p.prix_estime_mad == null ? (
           '—'
         ) : (
+          <CelluleEditable
+            valeur={p.prix_estime_mad}
+            type="nombre"
+            min={0}
+            aligneDroite
+            modifiable={droits.peutEcrire && convertible(p)}
+            surValider={(v) =>
+              v != null &&
+              Number(v) !== p.prix_estime_mad &&
+              ajuster.mutate({ id: p.id_proposition, corps: { prix_estime_mad: Number(v) } })
+            }
+            affichage={
           <div>
             <div className="tabular-nums">{fmt.nombre(p.prix_estime_mad, 3)}</div>
             {/* Le meme prix dans l'unite d'achat : au metre, un prix au kg ne
@@ -533,14 +557,61 @@ export function PlanAchat() {
               <div className="text-[11px] text-alerte">catalogue</div>
             )}
           </div>
+            }
+          />
+        ),
+    },
+    // LES TROIS COLONNES DU CLASSEUR. Le fournisseur est turc ou indien : le
+    // bon se libelle dans SA devise, et le dirham ne sert qu'au budget. Les
+    // afficher cote a cote evite la conversion de tete au moment de negocier.
+    {
+      champ: 'prix_devise',
+      entete: 'Prix devise',
+      numerique: true,
+      largeur: '110px',
+      rendu: (p) =>
+        p.prix_devise == null ? (
+          '—'
+        ) : (
+          <span className="tabular-nums">
+            {fmt.nombre(p.prix_devise, 3)}
+            <span className="ml-1 text-[11px] text-attenue-texte">{p.code_devise}</span>
+          </span>
+        ),
+    },
+    {
+      champ: 'montant_devise',
+      entete: 'Montant devise',
+      numerique: true,
+      largeur: '140px',
+      rendu: (p) =>
+        p.montant_devise == null ? (
+          '—'
+        ) : (
+          <span className="font-medium tabular-nums">
+            {fmt.nombre(p.montant_devise, 2)}
+            <span className="ml-1 text-[11px] text-attenue-texte">{p.code_devise}</span>
+          </span>
         ),
     },
     {
       champ: 'montant_total_mad',
-      entete: 'Montant',
+      entete: 'Montant MAD',
       numerique: true,
       largeur: '130px',
       rendu: (p) => (p.montant_total_mad == null ? '—' : fmt.mad(p.montant_total_mad)),
+    },
+    {
+      champ: 'palettes_a_commander',
+      entete: 'Palettes',
+      numerique: true,
+      largeur: '90px',
+      rendu: (p) =>
+        p.palettes_a_commander == null ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
+        ),
     },
     {
       champ: 'date_besoin_prevue',

@@ -96,7 +96,14 @@ pub async fn generer(
              (date_generation, id_plan, code_reference, quantite_suggeree_kg,
               unite_saisie, quantite_suggeree_unite, code_fournisseur,
               prix_estime_mad, source_prix, date_besoin_prevue, urgence,
-              risque_identifie, action_recommandee, statut)
+              risque_identifie, action_recommandee, statut,
+              -- CE QU'ON IRA NEGOCIER. On ne discute pas en dirhams avec un
+              -- fournisseur turc : le bon de commande se libelle dans SA
+              -- devise. La proposition porte donc les deux, et le taux du jour
+              -- avec elles — sans quoi le montant en MAD deviendrait
+              -- irreproductible des que le taux bouge.
+              code_devise, prix_devise, montant_devise, taux_devise,
+              palettes_a_commander)
          SELECT $1, $2, pa.code_reference, pa.qte_a_commander_kg,
                 pa.unite_catalogue, pa.qte_a_commander_unite, pa.code_fournisseur,
                 pa.prix_estime_mad, pa.source_prix, pa.date_besoin_prevue, pa.tier,
@@ -107,7 +114,9 @@ pub async fn generer(
                     WHEN 'ATTENTION' THEN 'Planifier la commande'
                     ELSE 'Reapprovisionnement normal'
                 END,
-                'PROPOSE'
+                'PROPOSE',
+                pa.devise, pa.prix_devise, pa.montant_devise, pa.taux_devise,
+                pa.palettes_a_commander
            FROM v_plan_achat pa
           WHERE NOT EXISTS (
                 SELECT 1 FROM plan_achat pa2

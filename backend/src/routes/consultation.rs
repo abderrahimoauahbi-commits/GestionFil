@@ -1504,6 +1504,26 @@ pub async fn modifier_proposition(
                     ELSE ROUND($2::numeric * quantite_suggeree_unite / quantite_suggeree_kg, 4)
                 END,
                 prix_estime_mad = COALESCE($3, prix_estime_mad),
+                -- LE PRIX EN DEVISE SUIT LE PRIX NEGOCIE. L'acheteur discute
+                -- en dollars ou en euros ; c'est le montant en dirhams qui en
+                -- decoule, jamais l'inverse. Sans cette ligne, negocier un
+                -- rabais laissait la colonne « Montant devise » afficher
+                -- l'ancien chiffre — celui-la meme qu'on met sur le bon.
+                prix_devise = CASE
+                    WHEN $3 IS NULL OR COALESCE(taux_devise, 0) <= 0 THEN prix_devise
+                    ELSE ROUND($3::numeric / taux_devise, 4)
+                END,
+                montant_devise = CASE
+                    WHEN prix_devise IS NULL THEN montant_devise
+                    ELSE ROUND(COALESCE($2::numeric, quantite_suggeree_kg)
+                               * CASE WHEN $3 IS NULL OR COALESCE(taux_devise, 0) <= 0
+                                      THEN prix_devise ELSE $3::numeric / taux_devise END, 2)
+                END,
+                palettes_a_commander = CASE
+                    WHEN $2 IS NULL OR palettes_a_commander IS NULL
+                         OR quantite_suggeree_kg <= 0 THEN palettes_a_commander
+                    ELSE CEIL(palettes_a_commander * $2::numeric / quantite_suggeree_kg)::bigint
+                END,
                 commentaires    = COALESCE($4, commentaires),
                 statut          = 'EN_REVISION',
                 -- Ce que le calcul proposait AVANT la retouche, garde une seule

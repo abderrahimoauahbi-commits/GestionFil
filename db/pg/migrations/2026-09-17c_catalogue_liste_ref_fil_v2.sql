@@ -172,13 +172,20 @@ BEGIN
     END IF;
 END $$;
 
+-- REJOUABLE APRES 2026-09-17f, qui retire du nuancier les codes que le fichier
+-- n'emploie pas (C5S, CMS...). Une couleur disparue n'est pas reposee : la
+-- reference garde celle qu'elle porte, et 17f la remettra a sa valeur exacte.
 UPDATE reference r SET
     code_categorie        = m.cat,
     code_fournisseur      = m.frs,
     code_famille          = m.fam,
     reference_fournisseur = m.reffrs,
     unite_catalogue       = m.unite,
-    code_couleur_interne  = m.couleur,
+    code_couleur_interne  = CASE
+        WHEN m.couleur IS NULL THEN NULL
+        WHEN EXISTS (SELECT 1 FROM couleur c WHERE c.code_couleur_interne = m.couleur)
+             THEN m.couleur
+        ELSE r.code_couleur_interne END,
     stock_min_kg          = COALESCE(m.smin, r.stock_min_kg)
   FROM maj m WHERE r.code_reference = m.code;
 
@@ -186,8 +193,12 @@ UPDATE reference r SET
 -- LE CLASSEUR FAIT FOI : une correspondance existante qui pointe vers une autre
 -- couleur de la maison est CORRIGEE. Chez HASIRCI et OZKARALAR, « Marron (CMS) »
 -- est desormais saisi C6.
+-- Meme garde : une correspondance vers une couleur retiree du nuancier ne se
+-- repose pas (la cle etrangere la refuserait au second passage).
 INSERT INTO couleur_fournisseur (id_couleur_fournisseur, code_couleur_interne,
-                                 code_fournisseur, code_couleur, libelle, actif) VALUES
+                                 code_fournisseur, code_couleur, libelle, actif)
+SELECT v.id, v.interne, v.frs, v.code, v.libelle, 1
+  FROM (VALUES
   ('CF-C5-FRS-001-BEIGE', 'C5', 'FRS-001', 'BEIGE', 'Beige', 1),
   ('CF-C5S-FRS-001-BEIGEC5S', 'C5S', 'FRS-001', 'BEIGE (C5S)', 'Beige (C5S)', 1),
   ('CF-C4-FRS-001-BLEU', 'C4', 'FRS-001', 'BLEU', 'Bleu', 1),
@@ -243,6 +254,8 @@ INSERT INTO couleur_fournisseur (id_couleur_fournisseur, code_couleur_interne,
   ('CF-C5-FRS-010-BEIGE', 'C5', 'FRS-010', 'BEIGE', 'Beige', 1),
   ('CF-C00-FRS-011-BLANC', 'C00', 'FRS-011', 'BLANC', 'Blanc', 1),
   ('CF-C00-FRS-012-BLANC', 'C00', 'FRS-012', 'BLANC', 'Blanc', 1)
+       ) AS v(id, interne, frs, code, libelle, actif)
+ WHERE EXISTS (SELECT 1 FROM couleur c WHERE c.code_couleur_interne = v.interne)
 ON CONFLICT (code_fournisseur, code_couleur) DO UPDATE
    SET code_couleur_interne = excluded.code_couleur_interne,
        libelle              = excluded.libelle,

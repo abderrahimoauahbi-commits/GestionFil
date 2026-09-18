@@ -443,12 +443,13 @@ export function Cockpit() {
           les besoins bas, donc la projection haute, donc l'alerte verte. */}
       {n('besoins_perimes') > 0 ? (
         <Alerte ton="danger" titre="Les alertes reposent sur des besoins perimes">
-          Le plan de production a ete modifie apres le dernier calcul MRP
+          Le plan, une recette ou une densité a changé depuis le dernier calcul MRP
           {k.besoins_calcules_le
             ? ` du ${fmt.dateHeure(k.besoins_calcules_le as string)}`
             : ''}
-          . Les couvertures affichees ci-dessous raisonnent sur un plan qui
-          n existe plus. Relancez le calcul avant de decider quoi que ce soit.
+          . Les couvertures affichées ci-dessous raisonnent sur des besoins qui ne
+          correspondent plus aux recettes d’aujourd’hui. Relancez le calcul avant de
+          décider quoi que ce soit.
         </Alerte>
       ) : k.besoins_calcules_le ? (
         <p className="text-[11px] text-attenue-texte">

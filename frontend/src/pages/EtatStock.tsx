@@ -20,7 +20,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
@@ -42,6 +42,14 @@ interface LigneStock extends Record<string, unknown> {
   machines_bobines: number | null
   nb_machines: number | null
   par_magasin: Record<string, number> | null
+  /* LE COMPTAGE TEL QU'ON LE FAIT AU MAGASIN. Le stock ENTRE en palettes ; le
+     rendre en kilos seulement obligeait le magasinier a diviser de tete pour
+     retrouver ce qu'il a devant les yeux. `null` quand le catalogue ignore le
+     poids d'une bobine ou leur nombre par palette : on ne sait pas, on ne dit
+     rien — un zero se lirait « il n'y en a pas ». */
+  kg_par_palette: number | null
+  palettes: number | null
+  bobines: number | null
   quarantaine_kg: number | null
   disponible_kg: number | null
   encours_kg: number | null
@@ -465,6 +473,11 @@ function TableauLarge({
             <th className="border-l border-bordure px-2 py-1 text-center" colSpan={2 + magasins.length}>
               Ou est le stock (kg)
             </th>
+            {/* LE COMPTAGE A SA PROPRE COLONNE, pas une infobulle : c'est le
+                chiffre qu'on verifie en marchant dans l'allee. */}
+            <th className="border-l border-bordure px-2 py-1 text-center" colSpan={2}>
+              Comptage
+            </th>
             <th className="border-l border-bordure px-2 py-1 text-center" colSpan={3}>
               Ce qu il annonce
             </th>
@@ -480,6 +493,8 @@ function TableauLarge({
               </th>
             ))}
             <th className="px-2 py-1 text-right">Machines</th>
+            <th className="border-l border-bordure px-2 py-1 text-right">Palettes</th>
+            <th className="px-2 py-1 text-right">Bobines</th>
             <th className="border-l border-bordure px-2 py-1 text-right">Min</th>
             <th className="px-2 py-1 text-right">Couv. j</th>
             <th className="px-2 py-1 text-center">Statut</th>
@@ -516,6 +531,24 @@ function TableauLarge({
                 ) : (
                   ''
                 )}
+              </td>
+
+              {/* LE TIRET DIT « ON NE SAIT PAS », et il se distingue du vide
+                  qui dit « rien ici » : une reference sans poids de bobine au
+                  catalogue ne se compte pas en palettes, et cela doit se voir
+                  plutot que passer pour un zero. */}
+              <td
+                className="border-l border-bordure px-2 py-1.5 text-right text-texte"
+                title={l.kg_par_palette ? `${nb(l.kg_par_palette)} kg la palette` : undefined}
+              >
+                {l.palettes == null ? (
+                  <span className="text-attenue-texte">—</span>
+                ) : (
+                  nb(l.palettes, 2)
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-right text-attenue-texte">
+                {l.bobines == null ? '—' : nb(l.bobines, 0)}
               </td>
 
               <td className="border-l border-bordure px-2 py-1.5 text-right text-attenue-texte">
@@ -665,6 +698,13 @@ function ListeTelephone({
                     Icone={Cog}
                   />
                 )}
+                {l.palettes != null && (
+                  <D
+                    t="Comptage"
+                    v={`${nb(l.palettes, 2)} palette(s) · ${nb(l.bobines, 0)} bobine(s)`}
+                    Icone={Boxes}
+                  />
+                )}
                 <D t="Disponible" v={`${nb(l.disponible_kg)} kg`} />
                 <D t="Stock minimum" v={`${nb(l.stock_min_kg)} kg`} />
                 <D t="Couverture" v={`${nb(l.jours_couverture, 0)} j`} />
@@ -720,6 +760,7 @@ function exporter(lignes: LigneStock[], magasins: { code: string; nom: string }[
   const entetes = [
     'Code', 'Designation', 'Categorie', 'Fournisseur', 'Unite',
     'Stock global kg', ...magasins.map((m) => `${m.nom} kg`), 'Machines kg', 'Machines bobines',
+    'Palettes', 'Bobines', 'Kg par palette',
     'Disponible kg', 'Quarantaine kg', 'En commande kg', 'Besoin 12m kg', 'Stock projete kg',
     'Stock min kg', 'Conso mens. kg', 'Couverture j', 'Delai j', 'Statut', 'Sous minimum', 'ABC', 'XYZ',
     'CMUP MAD', 'Prix catalogue', 'Devise', 'Valeur MAD', 'A commander kg',
@@ -733,6 +774,7 @@ function exporter(lignes: LigneStock[], magasins: { code: string; nom: string }[
       l.code_reference, l.designation, l.categorie, l.fournisseur_nom, l.unite,
       l.stock_global_kg, ...magasins.map((m) => l.par_magasin?.[m.code] ?? 0),
       l.machines_kg, l.machines_bobines,
+      l.palettes, l.bobines, l.kg_par_palette,
       l.disponible_kg, l.quarantaine_kg, l.encours_kg, l.besoin_12m_kg, l.stock_projete_kg,
       l.stock_min_kg, l.conso_mensuelle_kg, l.jours_couverture, l.delai_livraison_jours,
       l.statut, l.sous_minimum ? 'OUI' : 'NON', l.classe_abc, l.classe_xyz,

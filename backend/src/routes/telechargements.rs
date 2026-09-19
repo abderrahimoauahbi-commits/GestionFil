@@ -39,10 +39,35 @@ fn dossier() -> std::path::PathBuf {
 /// qui ne la suit pas est ignore plutot que devine — un paquet mal etiquete
 /// installe sur un poste est pire qu'un paquet absent.
 fn decrire(nom: &str) -> Option<(String, String)> {
-    let tronc = nom.rsplit_once('.').map(|(t, _)| t).unwrap_or(nom);
+    // SEULES LES EXTENSIONS D'INSTALLATEUR SONT DES PAQUETS.
+    //
+    // La regle etait « on enleve ce qui suit le dernier point ». Elle a tenu
+    // tant que le dossier ne contenait que des installateurs. Depuis que les
+    // paquets sont signes, il porte aussi des `.sig` : le fichier de signature
+    // `gestionfil-windows-0.4.0.exe.sig` perdait son `.sig`, devenait
+    // `gestionfil-windows-0.4.0.exe`, et s'annoncait a l'ecran comme un
+    // telechargement de « version 0.4.0.exe » pesant 424 octets. Un utilisateur
+    // qui le prenait reparait avec un fichier inutilisable.
+    //
+    // On liste donc ce qu'on accepte, au lieu de retirer ce qu'on reconnait :
+    // tout ce qui n'est pas un installateur connu — signature, somme de
+    // controle, note de version, fichier temporaire — est ignore.
+    const EXTENSIONS: &[&str] = &[
+        "exe", "msi", "deb", "rpm", "dmg", "appimage", "apk", "zip", "tar.gz",
+    ];
+    let (tronc, extension) = nom.rsplit_once('.')?;
+    if !EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()) {
+        return None;
+    }
     let reste = tronc.strip_prefix("gestionfil-")?;
     let (plateforme, version) = reste.split_once('-')?;
     if plateforme.is_empty() || version.is_empty() {
+        return None;
+    }
+    // UNE VERSION EST FAITE DE CHIFFRES ET DE POINTS. « 0.4.0.exe » n'en est
+    // pas une, et le refuser ici ferme la porte a tous les noms douteux plutot
+    // qu'au seul cas qu'on vient de rencontrer.
+    if !version.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
         return None;
     }
     Some((plateforme.to_string(), version.to_string()))

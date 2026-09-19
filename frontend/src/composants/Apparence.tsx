@@ -53,7 +53,11 @@ export interface Apparence {
 const DEFAUT: Apparence = {
   palette: 'ardoise',
   densite: 'normale',
-  police: 'systeme',
+  // INTER PAR DEFAUT, maintenant qu'elle est reellement livree. Elle est
+  // dessinee pour les ecrans denses — chiffres a chasse fixe, lettres qui ne
+  // se confondent pas a 11 px — et ne coute plus aucune attente puisqu'elle
+  // part avec l'application. Les quatre autres restent a un clic.
+  police: 'inter',
   taille: 14,
   disposition: 'laterale',
   piedVisible: false,
@@ -121,9 +125,15 @@ export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: str
 /**
  * Les familles de caracteres proposees.
  *
- * AUCUNE N'EST TELECHARGEE. Toutes reposent sur ce que la machine possede
- * deja : une police distante ajoute une attente au premier affichage, et
- * l'ERP tourne sur un reseau d'usine ou elle n'arriverait pas toujours.
+ * AUCUNE N'EST TELECHARGEE A L'USAGE. Quatre reposent sur ce que la machine
+ * possede deja ; Inter, elle, est EMBARQUEE dans l'application — livree avec
+ * elle, pas demandee a un serveur distant. La nuance compte : l'ERP tourne sur
+ * un reseau d'usine sans acces internet garanti, et une police appelee dehors
+ * n'arriverait pas toujours.
+ *
+ * ELLE ETAIT PROPOSEE SANS ETRE FOURNIE. Choisir « Inter » nommait une police
+ * qu'aucun poste n'a installee : le navigateur retombait sans rien dire sur
+ * Segoe UI. Le reglage existait, le dessin n'arrivait jamais.
  *
  * Le CHIFFRE compte plus que la lettre dans cet outil. Les cinq choix gardent
  * donc tous des chiffres a chasse fixe pour que les colonnes s'alignent — ce
@@ -139,8 +149,8 @@ export const POLICES: { cle: Police; nom: string; resume: string; pile: string }
   {
     cle: 'inter',
     nom: 'Inter',
-    resume: 'Dessinee pour les interfaces denses. Le defaut précédent.',
-    pile: '"Inter", "Segoe UI", system-ui, sans-serif',
+    resume: 'Dessinee pour les interfaces denses. Livree avec l application.',
+    pile: '"Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif',
   },
   {
     cle: 'geometrique',

@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* INTER EST EMBARQUEE, PAS APPELEE DEHORS.
+   La police etait NOMMEE dans `--font-sans` mais jamais fournie : sur un poste
+   de l'usine qui ne l'a pas installee — c'est-a-dire tous — l'ERP retombait sur
+   Segoe UI. Le dessin qu'on avait choisi n'etait donc visible nulle part.
+   Un appel a Google Fonts ne reglerait rien : le reseau de Tanger n'a pas
+   d'acces internet garanti, et une police qui n'arrive pas fait sauter la mise
+   en page a l'ouverture. Elle est donc servie avec l'application. */
+@import "@fontsource-variable/inter";
+
 /* =============================================================================
    Jetons de design
    -----------------------------------------------------------------------------
@@ -9,48 +18,86 @@
    ========================================================================== */
 
 @theme {
-  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter Variable", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, monospace;
 
   /* Rayon court : un tableau de bord d'administration se lit mieux avec des
      angles nets qu'avec des cartes arrondies facon site vitrine. */
-  --radius: 0.375rem;
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-lg: calc(var(--radius) + 2px);
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-lg: calc(var(--radius) + 4px);
+
+  /* ---------------------------------------------------------------------
+     ELEVATION
+     ---------------------------------------------------------------------
+     Il n'y en avait aucune : tout etait plat, separe par des traits. Sur un
+     ecran dense, le trait ne suffit pas a dire ce qui est POSE SUR quoi — une
+     carte, un menu deroulant et une boite de dialogue se ressemblaient.
+
+     Quatre niveaux, pas davantage, et tous tres doux : deux ombres
+     superposees, l'une courte et franche pour le contact, l'autre longue et
+     diffuse pour la distance. Une seule ombre large donne le halo gris
+     caracteristique des interfaces bricolees. */
+  --ombre-pose: 0 1px 2px -1px hsl(215 30% 20% / 0.08), 0 1px 3px hsl(215 30% 20% / 0.05);
+  --ombre-levee: 0 2px 4px -2px hsl(215 30% 20% / 0.10), 0 4px 12px -2px hsl(215 30% 20% / 0.08);
+  --ombre-flottante: 0 4px 8px -4px hsl(215 30% 20% / 0.12), 0 12px 28px -6px hsl(215 30% 20% / 0.14);
+  --ombre-modale: 0 8px 16px -8px hsl(215 30% 20% / 0.16), 0 24px 56px -12px hsl(215 30% 20% / 0.22);
+
+  /* Une transition unique pour tout ce qui reagit au survol : des durees
+     differentes d'un composant a l'autre donnent une interface qui « flotte »
+     sans qu'on sache pourquoi. */
+  --transition-douce: 140ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 :root {
   /* Le fond de page est legerement gris : les cartes blanches s'en detachent
      sans avoir besoin d'ombre, et la page cesse d'etre un aplat uniforme. */
-  --fond: 210 20% 97%;
-  --texte: 215 28% 17%;
+  /* LE GRIS N'EST PAS NEUTRE, IL PENCHE.
+     Un gris pur (0% de saturation) sous un accent bleu donne cette grisaille
+     d'imprimante qu'on reconnait a dix metres. Tous les neutres portent ici
+     une trace du bleu de l'accent : le fond, les traits et le texte attenue
+     appartiennent alors a la meme famille que le reste, et l'ecran se tient. */
+  --fond: 215 30% 97.5%;
+  --texte: 217 33% 15%;
 
   --surface: 0 0% 100%;
-  --surface-texte: 215 28% 17%;
+  --surface-texte: 217 33% 15%;
 
-  --attenue: 210 20% 97%;
-  --attenue-texte: 215 14% 45%;
+  --attenue: 215 28% 96.5%;
+  --attenue-texte: 215 16% 47%;
 
-  --accent: 215 28% 17%;
+  --accent: 217 33% 15%;
   --accent-texte: 0 0% 100%;
 
-  --primaire: 217 80% 45%;
+  /* BLEU NUIT PLUTOT QUE BLEU VIF. Le bleu precedent (80% de saturation)
+     tirait vers le lien hypertexte des annees 2000 ; celui-ci est plus
+     profond, plus calme, et supporte d'etre pose en aplat sur un bouton sans
+     crier. Il reste assez fonce pour passer le contraste AA sur blanc. */
+  --primaire: 221 62% 33%;
   --primaire-texte: 0 0% 100%;
 
-  --danger: 0 70% 45%;
+  /* L'OR ANCIEN, signature de la maison (#C4A15A). Il ne sert jamais d'accent
+     principal — il souligne : un filet, un chiffre qui compte, une bordure de
+     carte mise en avant. Employe en aplat, il vire au jaune moutarde. */
+  --or: 41 46% 56%;
+
+  --danger: 358 64% 46%;
   --danger-texte: 0 0% 100%;
 
-  --succes: 152 60% 35%;
-  --alerte: 32 90% 45%;
-  --info: 205 80% 42%;
+  --succes: 154 58% 32%;
+  --alerte: 30 85% 44%;
+  --info: 210 72% 40%;
 
   /* Deux niveaux de trait : `bordure` cerne les blocs, `ligne` separe les
      lignes d'un tableau. Un seul niveau donne soit des tableaux zebres de
      traits noirs, soit des cartes sans contour. */
-  --bordure: 215 20% 88%;
-  --ligne: 215 20% 93%;
-  --champ: 215 18% 84%;
-  --anneau: 217 80% 45%;
+  /* DES FILETS PLUS FINS QU'AVANT. A 88% de luminosite, le trait se lisait
+     comme un cadre ; a 91%, il separe sans enfermer — c'est ce que font les
+     interfaces qu'on trouve elegantes, et cela ne coute que trois points. */
+  --bordure: 215 22% 91%;
+  --ligne: 215 24% 94.5%;
+  --champ: 215 20% 86%;
+  --anneau: 221 62% 33%;
 
   --barre: 215 30% 15%;
   --barre-texte: 210 20% 94%;
@@ -76,6 +123,10 @@
   --primaire: 214 90% 62%;
   --primaire-texte: 222 40% 10%;
 
+  /* L'or tient sur fond graphite sans etre retouche : c'est ce qui en fait
+     une signature utilisable dans les deux themes. */
+  --or: 41 52% 62%;
+
   --danger: 0 65% 55%;
   --danger-texte: 0 0% 100%;
 
@@ -93,6 +144,11 @@
   --barre-attenue: 215 14% 55%;
   --barre-actif: 218 24% 18%;
 
+  --ombre-pose: 0 1px 2px -1px hsl(0 0% 0% / 0.30), 0 1px 3px hsl(0 0% 0% / 0.24);
+  --ombre-levee: 0 2px 4px -2px hsl(0 0% 0% / 0.36), 0 4px 12px -2px hsl(0 0% 0% / 0.30);
+  --ombre-flottante: 0 4px 8px -4px hsl(0 0% 0% / 0.44), 0 12px 28px -6px hsl(0 0% 0% / 0.40);
+  --ombre-modale: 0 8px 16px -8px hsl(0 0% 0% / 0.50), 0 24px 56px -12px hsl(0 0% 0% / 0.55);
+
   color-scheme: dark;
 }
 
@@ -107,6 +163,7 @@
   --color-accent-texte: hsl(var(--accent-texte));
   --color-primaire: hsl(var(--primaire));
   --color-primaire-texte: hsl(var(--primaire-texte));
+  --color-or: hsl(var(--or));
   --color-danger: hsl(var(--danger));
   --color-danger-texte: hsl(var(--danger-texte));
   --color-succes: hsl(var(--succes));
@@ -372,3 +429,99 @@ table.grille td {
 .marque-sombre { display: none; }
 .sombre .marque-claire { display: none; }
 .sombre .marque-sombre { display: block; }
+
+/* =============================================================================
+   ATTENTE, RELIEF, MICRO-GESTES
+   -----------------------------------------------------------------------------
+   Trois effets seulement, et les trois disent quelque chose de vrai : « ca
+   charge », « ceci est pose sur cela », « votre geste a ete pris ». Tout le
+   reste serait de la decoration, et la decoration vieillit mal.
+   ========================================================================== */
+
+/* LA LUEUR QUI TRAVERSE, plutot que le clignotement.
+   `animate-pulse` fait battre un bloc gris : on regarde du vide qui bat. Une
+   lueur qui balaie le bloc va dans le sens de la lecture et suggere un travail
+   en cours. Meme duree d'attente, impression de rapidite differente. */
+.squelette {
+  position: relative;
+  overflow: hidden;
+}
+.squelette::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(var(--surface) / 0.75) 45%,
+    hsl(var(--surface) / 0.75) 55%,
+    transparent 100%
+  );
+  animation: lueur-attente 1.4s ease-in-out infinite;
+}
+@keyframes lueur-attente {
+  100% { transform: translateX(100%); }
+}
+
+/* LA CARTE QUI MENE QUELQUE PART SE SOULEVE AU SURVOL.
+   Une carte cliquable et une carte informative se ressemblaient trait pour
+   trait. Un demi-pixel d'elevation et une bordure qui prend la teinte de
+   l'accent suffisent a dire « celle-ci s'ouvre » — sans ajouter ni fleche ni
+   texte « cliquez ici ». */
+.carte-active {
+  transition:
+    transform var(--transition-douce),
+    box-shadow var(--transition-douce),
+    border-color var(--transition-douce);
+}
+.carte-active:hover {
+  transform: translateY(-1px);
+  border-color: hsl(var(--primaire) / 0.35);
+  box-shadow: var(--ombre-levee);
+}
+
+/* LE FILET D'OR, signature de la maison.
+   Pose en haut d'une carte que l'on veut distinguer : il marque sans colorer
+   le bloc entier, ce qui serait lourd sur un ecran deja dense. */
+.filet-or {
+  position: relative;
+}
+.filet-or::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background-image: linear-gradient(
+    90deg,
+    hsl(var(--or) / 0.15),
+    hsl(var(--or) / 0.85) 35%,
+    hsl(var(--or) / 0.85) 65%,
+    hsl(var(--or) / 0.15)
+  );
+}
+
+/* LE CHIFFRE QUI COMPTE S'INSTALLE, il n'apparait pas.
+   Cent quatre-vingts millisecondes de montee : on percoit que la valeur vient
+   d'arriver, ce qui evite de croire qu'elle etait deja la et qu'on l'avait mal
+   lue. Au-dela, l'attente devient perceptible ; en deca, l'effet est perdu. */
+@keyframes valeur-arrive {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+.valeur-arrive {
+  animation: valeur-arrive 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* RIEN DE TOUT CELA POUR QUI A DEMANDE LE CALME.
+   Un systeme regle sur « animations reduites » le demande pour une raison —
+   vertiges, migraines, fatigue visuelle. On respecte, sans rien perdre du
+   contenu. */
+@media (prefers-reduced-motion: reduce) {
+  .squelette::after { animation: none; }
+  .carte-active:hover { transform: none; }
+  .valeur-arrive { animation: none; }
+}

@@ -23,7 +23,7 @@ import { Download } from 'lucide-react'
 import { api, serveur } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
-import { Alerte, Chargement } from '../composants/ui/base'
+import { Alerte, Badge, Chargement } from '../composants/ui/base'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { fmt } from '../lib/utils'
 
@@ -85,6 +85,29 @@ export function Telecharger() {
   if (qPaquets.isLoading) return <Chargement texte="Lecture des paquets…" />
   const paquets = qPaquets.data ?? []
 
+  /* LA DERNIERE VERSION D'ABORD, LE RESTE EN DESSOUS.
+     L'ecran empilait toutes les versions jamais publiees — Windows 0.1.0,
+     0.3.0, 0.4.0, Linux 0.1.0, 0.3.0 — au meme rang et dans l'ordre du
+     systeme de fichiers. Celui qui vient installer l'ERP ne sait pas laquelle
+     prendre, et rien ne le lui dit. Or dans quatre-vingt-dix-neuf cas sur
+     cent, la reponse est « la plus recente pour ma machine ».
+     Les anciennes ne disparaissent pas : elles descendent. On en a besoin le
+     jour ou une version neuve pose un probleme et qu'il faut revenir. */
+  const rang = (v: string) =>
+    v.split(/[.\-+]/).reduce((a, x) => a * 1000 + (parseInt(x, 10) || 0), 0)
+
+  const derniers = new Map<string, Paquet>()
+  for (const p of paquets) {
+    const tenant = derniers.get(p.plateforme)
+    if (!tenant || rang(p.version) > rang(tenant.version)) derniers.set(p.plateforme, p)
+  }
+  const courants = [...derniers.values()].sort((a, b) =>
+    a.plateforme_libelle.localeCompare(b.plateforme_libelle),
+  )
+  const anciens = paquets
+    .filter((p) => derniers.get(p.plateforme)?.fichier !== p.fichier)
+    .sort((a, b) => rang(b.version) - rang(a.version))
+
   return (
     <div>
       <EnTetePage titre="Télécharger l application" />
@@ -95,13 +118,18 @@ export function Telecharger() {
           plateforme et la version : <code>gestionfil-windows-0.1.0.exe</code>.
         </Alerte>
       ) : (
-        <div className="max-w-2xl divide-y divide-bordure rounded-[var(--radius)] border border-bordure bg-surface">
-          {paquets.map((p) => (
+        <div className="max-w-2xl divide-y divide-bordure rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-pose)]">
+          {courants.map((p) => (
             <div key={p.fichier} className="flex items-center gap-4 px-4 py-3">
               <div className="min-w-0 flex-1">
-                <div className="text-[14px] font-medium text-texte">{p.plateforme_libelle}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-medium text-texte">
+                    {p.plateforme_libelle}
+                  </span>
+                  <Badge ton="succes">derniere version</Badge>
+                </div>
                 <div className="text-[12px] tabular-nums text-attenue-texte">
-                  Version {p.version}
+                  Version {p.version} · {(p.taille_octets / 1e6).toFixed(1)} Mo
                 </div>
               </div>
 
@@ -129,6 +157,40 @@ export function Telecharger() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* LES VERSIONS PRECEDENTES, REPLIEES.
+          Elles servent le jour ou une version neuve pose un probleme et qu'il
+          faut revenir en arriere — cas rare, mais sans issue quand le fichier
+          a disparu. Repliees, elles ne brouillent plus le choix courant. */}
+      {anciens.length > 0 && (
+        <details className="mt-3 max-w-2xl">
+          <summary
+            className="cursor-pointer select-none text-[12px] text-attenue-texte
+                       transition-colors hover:text-texte"
+          >
+            Versions precedentes ({anciens.length})
+          </summary>
+          <ul className="mt-2 divide-y divide-bordure/60 rounded-[var(--radius)] border border-bordure">
+            {anciens.map((p) => (
+              <li
+                key={p.fichier}
+                className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]"
+              >
+                <span className="text-attenue-texte">
+                  {p.plateforme_libelle} · version {p.version}
+                </span>
+                <a
+                  href={`${serveur()}/telechargements/${encodeURIComponent(p.fichier)}`}
+                  download={p.fichier}
+                  className="text-primaire underline-offset-2 hover:underline"
+                >
+                  Telecharger
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {droits.peutLire && (

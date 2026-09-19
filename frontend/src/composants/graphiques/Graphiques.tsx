@@ -52,12 +52,23 @@ function Cadre({
   tableau: React.ReactNode
 }) {
   return (
-    <figure className="viz m-0 flex flex-col gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3">
+    /* LE CADRE DU GRAPHIQUE EST UNE CARTE, avec les memes marges et la meme
+       elevation que les autres. Il en differait de quelques pixels, ce qui
+       suffisait a faire « sonner faux » une rangee melant cartes et
+       graphiques : l'oeil ne sait pas nommer l'ecart, il le voit. */
+    <figure
+      className="viz m-0 flex flex-col gap-3 rounded-[var(--radius-lg)] border border-bordure
+                 bg-surface p-4 shadow-[var(--ombre-pose)]"
+    >
       <figcaption className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-[13px] font-semibold text-texte">{titre}</h3>
+          <h3 className="truncate text-[13px] font-semibold tracking-[-0.01em] text-texte">
+            {titre}
+          </h3>
           {sousTitre && (
-            <p className="truncate text-[11px] text-attenue-texte">{sousTitre}</p>
+            <p className="mt-0.5 truncate text-[11.5px] leading-snug text-attenue-texte">
+              {sousTitre}
+            </p>
           )}
         </div>
         <button
@@ -65,7 +76,8 @@ function Cadre({
           onClick={basculer}
           aria-pressed={vueTableau}
           title={vueTableau ? 'Voir le graphique' : 'Voir les valeurs'}
-          className="grid size-6 shrink-0 place-items-center rounded-[3px] text-attenue-texte
+          className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)]
+                     text-attenue-texte transition-colors duration-[140ms]
                      hover:bg-attenue hover:text-texte"
         >
           {vueTableau ? <BarChart3 className="size-4" /> : <Table2 className="size-4" />}
@@ -75,12 +87,17 @@ function Cadre({
       {/* Legende : presente des deux series, absente pour une seule — le titre
           nomme deja la grandeur unique. */}
       {series && series.length >= 2 && !vueTableau && (
-        <ul className="flex flex-wrap gap-x-4 gap-y-1">
+        <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
           {series.map((s, i) => (
-            <li key={s.cle} className="flex items-center gap-1.5 text-[11px] text-attenue-texte">
+            <li
+              key={s.cle}
+              className="flex items-center gap-1.5 text-[11.5px] text-attenue-texte"
+            >
+              {/* PASTILLE RONDE plutot que carree : le carre se confond avec
+                  une case a cocher, surtout a deux pixels et demi. */}
               <span
                 aria-hidden
-                className="size-2.5 shrink-0 rounded-[2px]"
+                className="size-2.5 shrink-0 rounded-full"
                 style={{ background: `var(--viz-serie-${i + 1})` }}
               />
               {s.libelle}
@@ -206,18 +223,32 @@ export function BarresRangees({
         />
       }
     >
-      <div className="flex flex-col gap-[3px]">
+      <div className="flex flex-col gap-[5px]">
         {visibles.map((d) => (
-          <div key={d.cle} className="rangee grid grid-cols-[minmax(0,10rem)_1fr] items-center gap-2">
-            <span className="truncate text-[11px] text-attenue-texte" title={d.libelle}>
+          <div
+            key={d.cle}
+            className="rangee group grid grid-cols-[minmax(0,10rem)_1fr] items-center gap-2.5
+                       rounded-[var(--radius-sm)] px-1 py-[3px] transition-colors duration-[140ms]
+                       hover:bg-attenue/50"
+          >
+            <span
+              className="truncate text-[11.5px] text-attenue-texte transition-colors
+                         duration-[140ms] group-hover:text-texte"
+              title={d.libelle}
+            >
               {d.libelle}
             </span>
-            <div className="flex items-center gap-2">
-              <div className="h-4 min-w-0 flex-1">
+            <div className="flex items-center gap-2.5">
+              {/* LE RAIL DE FOND DIT LE MAXIMUM. Sans lui, une barre courte
+                  flotte dans le vide et l'on ne voit pas par rapport a quoi
+                  elle est courte — c'est la difference entre « peu » et
+                  « peu comparé à quoi ». */}
+              <div className="h-[18px] min-w-0 flex-1 rounded-full bg-attenue/70">
                 <div
-                  className="marque h-full rounded-r-[4px]"
+                  className="marque h-full rounded-full transition-[filter] duration-[140ms]
+                             group-hover:brightness-110"
                   style={{
-                    width: `${Math.max((d.valeur / echelle) * 100, 0.8)}%`,
+                    width: `${Math.max((d.valeur / echelle) * 100, 1.2)}%`,
                     background: teinte(d),
                   }}
                   role="img"
@@ -226,7 +257,7 @@ export function BarresRangees({
               </div>
               {/* Etiquette directe : elle porte la valeur, ce qui rend le
                   graphique lisible sans dependre de la seule couleur. */}
-              <span className="w-16 shrink-0 text-right text-[11px] text-texte">
+              <span className="w-16 shrink-0 text-right text-[11.5px] font-medium text-texte">
                 {fmtNombre(d.valeur)}
               </span>
             </div>

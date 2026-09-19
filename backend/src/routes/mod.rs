@@ -116,6 +116,11 @@ pub fn router(state: AppState) -> Router {
         // interface et se fige au jour de son installation ; sans cette route,
         // un poste installe en septembre ne saurait jamais qu'il a vieilli.
         .route("/api/mise-a-jour", get(telechargements::mise_a_jour))
+        // LE POSTE INTERROGE LUI-MEME, SANS JETON : le greffon de mise a jour
+        // s'execute avant toute connexion, et un manifeste qui ne dit que
+        // « telle version existe » n'apprend rien a qui l'intercepte. Ce qui
+        // protege, c'est la signature du paquet, pas le secret du manifeste.
+        .route("/api/maj/{cible}/{arch}/{version}", get(telechargements::manifeste_maj))
         // --- Assistant de direction (lecture seule, role DIRECTION) -----------
         // L'ANCIEN ASSISTANT RESTE, en second. C'est un catalogue ferme de
         // questions : il repond sans modele de langage, donc il repond meme si

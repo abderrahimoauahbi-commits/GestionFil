@@ -23,13 +23,15 @@ import {
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useEntreprise } from '../lib/entreprise'
-import { cn, estBureau, sousChemin } from '../lib/utils'
+import { cn, sousChemin } from '../lib/utils'
 import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
 import { BoutonRafraichir, useEcranCalcule } from './BoutonRafraichir'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
 import { AideEcran } from './AideEcran'
+import { BandeauMiseAJour } from './BandeauMiseAJour'
+import { MiseAJourAuto } from './MiseAJourAuto'
 import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { DoubleAuthentification } from './DoubleAuthentification'
@@ -421,7 +423,10 @@ export function Coquille() {
       <header
         className={cn(
           'sans-impression z-30 flex shrink-0 items-center gap-2 border-b border-bordure bg-surface px-3',
-          estBureau() ? 'zone-glisser h-11' : 'h-12',
+          // LA FENETRE A RETROUVE SA BORDURE : l'entete n'a plus a servir de
+          // poignee de deplacement, et rien ne justifie qu'elle soit plus
+          // basse au bureau qu'au navigateur.
+          'h-12',
         )}
       >
         {/* Marque — UNIQUEMENT quand rien d'autre ne la porte.
@@ -658,6 +663,18 @@ export function Coquille() {
           className="p-3 lg:p-4"
           style={{ paddingBottom: 'calc(4rem + var(--marge-sure-bas))' }}
         >
+          {/* L'AVIS DE MISE A JOUR VIT ICI, et non plus dans l'atelier.
+              Il etait monte dans l'enveloppe de bureau seule ; celle-ci ayant
+              disparu, l'avis ne paraissait plus nulle part — ce qui explique
+              qu'aucune mise a jour n'ait jamais ete proposee. Il se tait de
+              lui-meme hors de l'application installee, ou la question ne se
+              pose pas : le navigateur sert toujours la version du serveur. */}
+          {/* D'ABORD CELLE QUI SE FAIT TOUTE SEULE. Le bandeau de rappel ne
+              parait qu'en second, pour les postes dont la version installee
+              est trop ancienne pour porter le greffon de mise a jour — ceux-la
+              doivent encore passer par l'installateur, une derniere fois. */}
+          <MiseAJourAuto />
+          <BandeauMiseAJour />
           <Outlet key={emplacement.pathname} />
         </div>
       </main>

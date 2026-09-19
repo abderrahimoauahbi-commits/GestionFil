@@ -6,8 +6,6 @@ import { Verrou } from './auth/Verrou'
 import { FournisseurTheme, useTheme } from './composants/Theme'
 import { FournisseurApparence } from './composants/Apparence'
 import { Coquille } from './composants/Coquille'
-import { Atelier } from './composants/atelier/Atelier'
-import { estBureau } from './lib/utils'
 import { Alerte, Chargement } from './composants/ui/base'
 import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
@@ -260,66 +258,25 @@ const ECRANS = (
   </>
 )
 
-/** Onglet dont le chemin n’existe plus : ne jamais rediriger depuis un onglet
-    masque, cela deplacerait la navigation de l’onglet actif. */
-function OngletInconnu() {
-  return (
-    <Alerte ton="alerte" titre="Écran introuvable">
-      Cet onglet pointe vers un ecran qui n’existe plus. Fermez-le (Ctrl+W).
-    </Alerte>
-  )
-}
 
 /**
- * Aiguillage de coquille. Le bureau recoit l’atelier complet (onglets, panneau
- * lateral, barre d’etat) ; le web et la PWA gardent la coquille tactile, mieux
- * adaptee a un ecran de telephone.
- */
-/**
- * Apercu de l'atelier hors Tauri.
+ * UNE SEULE COQUILLE, POUR LE BUREAU COMME POUR LE NAVIGATEUR.
  *
- * Compiler l'enveloppe de bureau prend plusieurs minutes ; `?atelier=1` permet
- * de voir la coquille d'atelier dans un navigateur, et `?atelier=0` de revenir
- * a la coquille tactile. Le choix est retenu, sinon la premiere navigation
- * effacerait le parametre et ferait basculer la coquille en pleine session.
+ * L'APPLICATION INSTALLEE PORTAIT UN « ATELIER » calque sur un editeur de
+ * code : barre de titre dessinee a la main, onglets, groupes fractionnables,
+ * panneau bas, barre d'etat. C'etait une enveloppe de developpeur posee sur un
+ * ERP, et cela se voyait — la fenetre ne se comportait plus comme les autres
+ * fenetres du poste, et la barre laterale vivait sa propre vie.
  *
- * Ce n'est qu'un confort de developpement : aucune donnee ni aucun droit ne
- * depend de la coquille, les deux appellent les memes routes et le serveur
- * applique les memes controles.
+ * CE N'EST PAS CE QU'ON ATTEND D'UN ERP. Un magasinier, une assistante, un
+ * directeur veulent une fenetre ordinaire, un menu a gauche, un ecran a la
+ * fois. C'est ce que fait la coquille — la meme qu'au navigateur, avec les
+ * memes rubriques, les memes sous-menus et les memes habitudes.
+ *
+ * L'ATELIER N'EST PLUS MONTE. Son code reste au depot le temps qu'on soit sur
+ * que rien n'en manque, mais plus aucune adresse n'y mene.
  */
-const CLE_APERCU = 'gestionfil.atelier.apercu'
-
-function apercuAtelier(): boolean {
-  const demande = new URLSearchParams(window.location.search).get('atelier')
-  if (demande === '1') localStorage.setItem(CLE_APERCU, '1')
-  else if (demande === '0') localStorage.removeItem(CLE_APERCU)
-  return localStorage.getItem(CLE_APERCU) === '1'
-}
-
 function Aiguillage() {
-  if (estBureau() || apercuAtelier()) {
-    return (
-      <Routes>
-        <Route path="/connexion" element={<Connexion />} />
-        <Route
-          path="*"
-          element={
-            <Protege>
-              <Atelier
-                routes={
-                  <>
-                    {ECRANS}
-                    <Route path="*" element={<OngletInconnu />} />
-                  </>
-                }
-              />
-            </Protege>
-          }
-        />
-      </Routes>
-    )
-  }
-
   return (
     <Routes>
       <Route path="/connexion" element={<Connexion />} />

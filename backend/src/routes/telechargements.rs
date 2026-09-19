@@ -343,3 +343,94 @@ mod tests {
         assert_eq!(decrire("gestionfil-windows.exe"), None);
     }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Mise a jour automatique des postes                                          */
+/* -------------------------------------------------------------------------- */
+
+/// `GET /api/maj/{cible}/{arch}/{version}` — le manifeste attendu par le poste.
+///
+/// POURQUOI UNE ROUTE DE PLUS, ALORS QUE `/api/mise-a-jour` EXISTE DEJA.
+/// La premiere s'adresse a un ECRAN : elle dit « une version plus recente
+/// existe », et compte sur quelqu'un pour cliquer, telecharger, fermer
+/// l'application et relancer un installateur. Autant dire que cela n'arrive
+/// pas. Celle-ci s'adresse au POSTE : l'application interroge, verifie la
+/// signature, installe et redemarre — sans que personne ait rien a faire.
+///
+/// LE FORMAT N'EST PAS DE NOTRE CHOIX : c'est celui qu'attend le greffon de
+/// mise a jour. `version`, `pub_date`, puis par cible une `url` et une
+/// `signature`. La signature est celle produite a la construction du paquet,
+/// deposee a cote de lui en `.sig` ; elle est verifiee sur le poste contre la
+/// cle publique compilee dans l'application. C'est ce qui rend l'operation
+/// acceptable : meme avec le serveur, on ne peut pas pousser n'importe quoi.
+///
+/// 204 QUAND IL N'Y A RIEN DE NEUF. Le greffon le comprend comme « tu es a
+/// jour » ; une reponse vide en 200 le ferait echouer.
+pub async fn manifeste_maj(
+    State(_state): State<AppState>,
+    axum::extract::Path((cible, _arch, version)): axum::extract::Path<(String, String, String)>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    // LE GREFFON PARLE EN CIBLES, LE DOSSIER EN PLATEFORMES. « darwin » est
+    // notre « macos » ; le reste se recouvre.
+    let plateforme = match cible.as_str() {
+        "darwin" => "macos",
+        autre => autre,
+    };
+
+    let dossier = dossier();
+    let mut meilleur: Option<(Vec<u64>, String, String, String)> = None; // ordre, version, fichier, sig
+
+    if let Ok(entrees) = std::fs::read_dir(&dossier) {
+        for e in entrees.flatten() {
+            let nom = e.file_name().to_string_lossy().to_string();
+            // Les `.sig` accompagnent les paquets ; ils ne sont pas des paquets.
+            if nom.ends_with(".sig") {
+                continue;
+            }
+            let Some((p, v)) = decrire(&nom) else { continue };
+            if p != plateforme {
+                continue;
+            }
+            // SANS SIGNATURE, PAS DE MISE A JOUR AUTOMATIQUE. Un paquet non
+            // signe reste telechargeable a la main depuis l'ecran des
+            // telechargements ; il ne s'installera simplement pas tout seul.
+            let Ok(signature) = std::fs::read_to_string(dossier.join(format!("{nom}.sig"))) else {
+                continue;
+            };
+            let ordre = ordre_version(&v);
+            if meilleur.as_ref().map(|(o, ..)| &ordre > o).unwrap_or(true) {
+                meilleur = Some((ordre, v, nom, signature.trim().to_string()));
+            }
+        }
+    }
+
+    let Some((ordre, v, fichier, signature)) = meilleur else {
+        return axum::http::StatusCode::NO_CONTENT.into_response();
+    };
+    if ordre <= ordre_version(&version) {
+        return axum::http::StatusCode::NO_CONTENT.into_response();
+    }
+
+    let publie_le = std::fs::metadata(dossier.join(&fichier))
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
+        .map(|x| x.to_rfc3339())
+        .unwrap_or_default();
+
+    Json(json!({
+        "version": v,
+        "pub_date": publie_le,
+        "notes": format!("Mise a jour {v} de Gestion Fil."),
+        "platforms": {
+            format!("{cible}-{}", _arch): {
+                "signature": signature,
+                "url": format!("https://192.168.1.140/telechargements/{fichier}"),
+            }
+        },
+    }))
+    .into_response()
+}

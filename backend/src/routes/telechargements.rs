@@ -97,6 +97,88 @@ fn compatibilite(plateforme: &str) -> &'static str {
     }
 }
 
+/// Une version « 1.2.3 » rendue comparable, champ par champ.
+///
+/// Les segments non numeriques (« 1.2.0-rc1 ») valent zero plutot que de faire
+/// echouer la lecture : mieux vaut classer approximativement une pre-version
+/// que refuser de voir le paquet.
+fn ordre_version(v: &str) -> Vec<u64> {
+    v.split(['.', '-', '+'])
+        .map(|s| s.parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+/// CE QUI EXISTE DE PLUS RECENT, PAR PLATEFORME.
+///
+/// POURQUOI CETTE ROUTE EXISTE. L'application de bureau EMBARQUE son interface :
+/// une fois installee, elle est figee au jour de sa construction. Le serveur,
+/// lui, avance. Un poste installe en septembre peut donc afficher pendant des
+/// mois des ecrans qui ne connaissent plus les colonnes que l'API renvoie — et
+/// personne ne le sait, parce que rien ne le dit. Le navigateur n'a pas ce
+/// probleme : il recoit l'interface du serveur a chaque visite.
+///
+/// ON NE MET RIEN A JOUR TOUT SEUL. Installer un logiciel sur le poste de
+/// quelqu'un sans le lui demander, sur un reseau d'usine, c'est prendre le
+/// risque d'interrompre une saisie en cours. On ANNONCE, on donne le lien, et
+/// la personne choisit son moment.
+///
+/// LISIBLE PAR TOUT COMPTE CONNECTE, comme la liste des paquets : savoir qu'une
+/// version plus recente existe n'est un secret pour personne.
+pub async fn mise_a_jour(
+    State(_state): State<AppState>,
+    _user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    let dossier = dossier();
+    let mut dernieres: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+
+    if let Ok(entrees) = std::fs::read_dir(&dossier) {
+        for e in entrees.flatten() {
+            let nom = e.file_name().to_string_lossy().to_string();
+            let Some((plateforme, version)) = decrire(&nom) else { continue };
+            let meta = e.metadata().ok();
+            let taille = meta.as_ref().map(|m| m.len() as i64).unwrap_or(0);
+            // La date de publication est celle du fichier : c'est elle qui
+            // repond a « depuis quand cette version attend-elle ? ».
+            let publie_le = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| {
+                    chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
+                        .map(|x| x.format("%Y-%m-%d").to_string())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+
+            let candidat = json!({
+                "plateforme": plateforme,
+                "plateforme_libelle": libelle(&plateforme),
+                "compatibilite": compatibilite(&plateforme),
+                "version": version,
+                "fichier": nom,
+                "url": format!("/telechargements/{nom}"),
+                "taille_octets": taille,
+                "publie_le": publie_le,
+            });
+            let garder = match dernieres.get(&plateforme) {
+                None => true,
+                Some(v) => ordre_version(&version) > ordre_version(v["version"].as_str().unwrap_or("")),
+            };
+            if garder {
+                dernieres.insert(plateforme, candidat);
+            }
+        }
+    }
+
+    // La version du serveur, pour l'ecran qui veut la montrer a cote de celle
+    // du poste : deux chiffres cote a cote valent mieux qu'un discours.
+    Ok(Json(json!({
+        "serveur": env!("CARGO_PKG_VERSION"),
+        "nb_plateformes": dernieres.len(),
+        "plateformes": dernieres,
+    })))
+}
+
 /// Les paquets disponibles, avec le nombre de fois qu'ils ont ete pris.
 ///
 /// LISIBLE PAR TOUT COMPTE CONNECTE, et c'est deliberé : refuser a un
@@ -138,11 +220,17 @@ pub async fn lister(
 
     // Par plateforme puis version decroissante : la derniere en tete, qui est
     // celle qu'on veut dans quatre-vingt-dix-neuf cas sur cent.
+    //
+    // LE TRI EST NUMERIQUE, PAS ALPHABETIQUE. Compare comme du texte, « 0.9.0 »
+    // passe apres « 0.10.0 » — et l'ecran proposerait de « mettre a jour » vers
+    // une version plus ancienne. Le jour ou le numero mineur depasse neuf, le
+    // defaut serait silencieux et l'erreur, irrattrapable : on aurait installe
+    // l'ancien paquet en croyant faire le contraire.
     paquets.sort_by(|a, b| {
         let cle = |v: &Value| {
             (
                 v["plateforme"].as_str().unwrap_or("").to_string(),
-                std::cmp::Reverse(v["version"].as_str().unwrap_or("").to_string()),
+                std::cmp::Reverse(ordre_version(v["version"].as_str().unwrap_or(""))),
             )
         };
         cle(a).cmp(&cle(b))

@@ -109,6 +109,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/telechargements", get(telechargements::lister))
         .route("/api/telechargements/journal",
                get(telechargements::journal).post(telechargements::inscrire))
+        // CE QUI EXISTE DE PLUS RECENT. L'application de bureau embarque son
+        // interface et se fige au jour de son installation ; sans cette route,
+        // un poste installe en septembre ne saurait jamais qu'il a vieilli.
+        .route("/api/mise-a-jour", get(telechargements::mise_a_jour))
         // --- Assistant de direction (lecture seule, role DIRECTION) -----------
         // L'ANCIEN ASSISTANT RESTE, en second. C'est un catalogue ferme de
         // questions : il repond sans modele de langage, donc il repond meme si

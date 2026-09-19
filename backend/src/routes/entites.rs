@@ -105,6 +105,42 @@ pub async fn supprimer(
     Ok(Json(crud::supprimer(&state.db, &user, e, &id).await?))
 }
 
+/// `GET /api/{entite}/{id}/retenants` — CE QUI EMPECHE D'EFFACER, AVANT D'ESSAYER.
+///
+/// L'ecran demandait la suppression, la base refusait, et l'on decouvrait la
+/// premiere table qui retenait. On la detachait, on relancait, une deuxieme
+/// apparaissait. Autant d'allers-retours que de dependances — et aucune facon
+/// de savoir, avant de commencer, si l'affaire prendrait deux minutes ou deux
+/// heures.
+///
+/// Cette route repond a la question posee AVANT le clic : qui s'en sert, et
+/// combien de fois. L'ecran peut alors annoncer ce qui sera detruit, ou
+/// expliquer pourquoi il ne le sera pas.
+pub async fn retenants(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path((chemin, id)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let e = crud::entite(&chemin)?;
+    // LIRE SUFFIT POUR SAVOIR. Refuser cette reponse a qui peut deja lire la
+    // ligne ne protegerait rien : il verrait les memes liens en ouvrant les
+    // ecrans concernes, simplement plus lentement.
+    user.exiger(&state.db, e.module, crate::auth::rbac::Action::Lire).await?;
+
+    let liste = crud::retenants(&state.db, e.table, &id).await;
+    let total: i64 = liste.iter().map(|(_, n)| n).sum();
+    Ok(Json(serde_json::json!({
+        "entite": e.chemin,
+        "cle": id,
+        "supprimable": liste.is_empty(),
+        "total": total,
+        "retenants": liste
+            .iter()
+            .map(|(table, n)| serde_json::json!({ "table": table, "nb": n }))
+            .collect::<Vec<_>>(),
+    })))
+}
+
 /// Metadonnees du registre : le frontend s'en sert pour construire ses
 /// formulaires sans coder en dur la liste des champs.
 pub async fn registre(

@@ -392,6 +392,10 @@ pub fn router(state: AppState) -> Router {
                get(entites::lister).post(entites::creer))
         .route("/api/{entite}/{id}",
                get(entites::lire).patch(entites::modifier).delete(entites::supprimer))
+        // CE QUI RETIENT CETTE LIGNE, demande AVANT d'essayer de l'effacer.
+        // Enregistree apres le motif a deux segments : un chemin plus precis
+        // doit etre declare apres celui qu'il precise, sinon il ne sert jamais.
+        .route("/api/{entite}/{id}/retenants", get(entites::retenants))
         .layer(TraceLayer::new_for_http())
         .layer(cors);
 

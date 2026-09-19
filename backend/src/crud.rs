@@ -800,19 +800,34 @@ pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> App
         // ligne. Le message brut de PostgreSQL ne veut rien dire pour qui
         // administre un referentiel : on nomme la table qui retient.
         Err(sqlx::Error::Database(err)) if err.code().as_deref() == Some("23503") => {
-            let qui = retenue_par(db, err.constraint()).await;
-            return Err(AppError::RegleMetier(match qui {
-                Some(table) => format!(
-                    "« {id} » est encore utilise par des lignes de « {table} » : \
-                     il ne peut pas etre supprime. Detachez-les d'abord, ou \
-                     mettez cette ligne a l'etat inactif."
-                ),
-                None => format!(
-                    "« {id} » est encore utilise ailleurs : il ne peut pas etre \
-                     supprime. Detachez d'abord ce qui s'y rattache, ou mettez \
-                     cette ligne a l'etat inactif."
-                ),
-            }));
+            // TOUT CE QUI RETIENT, ET PAS SEULEMENT LA PREMIERE CONTRAINTE
+            // RENCONTREE. PostgreSQL s'arrete a la premiere cle etrangere
+            // violee : on detachait la table nommee, on relancait, et une
+            // deuxieme apparaissait — puis une troisieme. Autant de refus que
+            // de tables, decouvertes une par une. `fn_retenants` lit le
+            // catalogue et les rend toutes d'un coup, avec leur nombre de
+            // lignes : on sait alors ce qu'il y a a faire avant de commencer.
+            let liste = retenants(db, e.table, id).await;
+            let detail = if liste.is_empty() {
+                // Le catalogue ne voit rien alors que la base a refuse : cle
+                // composite, ou contrainte differee. On le dit plutot que de
+                // pretendre savoir.
+                retenue_par(db, err.constraint())
+                    .await
+                    .map(|t| format!("des lignes de « {t} »"))
+                    .unwrap_or_else(|| "quelque chose ailleurs".into())
+            } else {
+                liste
+                    .iter()
+                    .map(|(table, n)| format!("{n} dans « {table} »"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            return Err(AppError::RegleMetier(format!(
+                "« {id} » est retenu par {detail}. Detachez-les d'abord, ou \
+                 mettez cette ligne a l'etat inactif — son passage doit rester \
+                 lisible."
+            )));
         }
         Err(autre) => return Err(autre.into()),
     };
@@ -826,6 +841,28 @@ pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> App
         "supprime": true,
         "mode": "suppression",
     }))
+}
+
+/// CE QUI RETIENT UNE LIGNE : tables liees et nombre de lignes.
+///
+/// LE CATALOGUE REPOND, PAS UNE LISTE ECRITE A LA MAIN. Une liste de tables
+/// codee dans le programme vieillit a chaque migration, et le jour ou elle a
+/// vieilli, elle ne se trompe pas bruyamment : elle laisse passer, puis la base
+/// refuse avec un message que personne ne comprend. `fn_retenants` lit
+/// `pg_constraint`, qui EST la verite.
+///
+/// UN ECHEC NE FAIT PAS ECHOUER L'APPELANT : cette fonction sert a EXPLIQUER un
+/// refus. Si elle ne peut pas repondre, le refus reste — on perd l'explication,
+/// pas la protection.
+pub async fn retenants(db: &Db, table: &str, valeur: &str) -> Vec<(String, i64)> {
+    sqlx::query_as::<_, (String, i64)>(
+        "SELECT table_liee, nb FROM fn_retenants($1, $2) ORDER BY nb DESC, table_liee",
+    )
+    .bind(table)
+    .bind(valeur)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default()
 }
 
 /// Horodatage de derniere modification, pour les entites qui le portent.

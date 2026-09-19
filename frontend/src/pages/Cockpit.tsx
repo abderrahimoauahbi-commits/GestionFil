@@ -27,7 +27,7 @@ import { useMemo } from 'react'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowRight,
@@ -278,26 +278,24 @@ export function Cockpit() {
   const bloquants = (qCtl.data ?? []).filter((c) => c.criticite === 'BLOQUANT' && c.anomalies > 0)
   const autres = (qCtl.data ?? []).filter((c) => c.criticite !== 'BLOQUANT' && c.anomalies > 0)
 
-  // LA VUE COURANTE, gardee pour la session : revenir au poste de travail apres
-  // avoir ouvert une reference doit ramener la ou l'on etait. `sessionStorage`
-  // et non `localStorage` : une preference d'ecran n'a pas a survivre des
-  // semaines a celui qui l'a prise une fois.
-  const [vue, setVueBrute] = useState<VueCockpit>(() => {
-    try {
-      const v = sessionStorage.getItem('cockpit.vue')
-      return v === 'analyse' || v === 'opportunites' || v === 'matiere' ? v : 'situation'
-    } catch {
-      return 'situation'
-    }
-  })
-  const setVue = (v: VueCockpit) => {
-    setVueBrute(v)
-    try {
-      sessionStorage.setItem('cockpit.vue', v)
-    } catch {
-      /* navigation privee : la vue ne se retient pas, l'ecran marche quand meme */
-    }
-  }
+  /* LA VUE EST UNE ADRESSE, plus un etat cache.
+     Elle vivait dans `sessionStorage` : les quatre vues du tableau de bord ne
+     se distinguaient donc ni dans la barre d'adresse, ni dans le menu, ni dans
+     un signet — quatre ecrans de travail differents partageaient une seule
+     porte. C'est la critique qui a ete faite, et elle est juste : un tableau
+     de bord qui melange la synthese, l'analytique et les opportunites sous une
+     entree unique oblige a chercher a chaque fois.
+     Chaque vue a maintenant son chemin, donc sa ligne de menu — comme les
+     pages d'un espace Fiori ou les entrees « Vue d'ensemble / Analyse » d'une
+     application Odoo. */
+  const { vue: vueUrl } = useParams<{ vue?: string }>()
+  const naviguer = useNavigate()
+  const vue: VueCockpit =
+    vueUrl === 'analyse' || vueUrl === 'opportunites' || vueUrl === 'matiere'
+      ? vueUrl
+      : 'situation'
+  const setVue = (v: VueCockpit) =>
+    naviguer(v === 'situation' ? '/tableau-de-bord' : `/tableau-de-bord/${v}`)
 
   const risques = qRisques.data ?? []
   /** Les mois de l'horizon, pris sur la premiere frise : toutes sont alignees. */
@@ -323,22 +321,22 @@ export function Cockpit() {
           {mesFiles.length > 0 && (
             <>
               <TitreBande texte="A traiter" />
-              {/* DES TUILES QUI NE S'ETIRENT PAS. En grille de six colonnes,
-                  une file unique s'etalait sur toute la largeur : un cadre de
-                  mille quatre cents pixels pour trois mots, et cinq colonnes de
-                  vide a sa droite. Les files varient de une a dix selon le role
-                  et selon le jour ; une grille fixe ne peut pas convenir aux
-                  deux. En rangee souple, chaque tuile prend sa place et les
-                  suivantes se mettent a cote — a une seule, elle reste de la
-                  taille d'une tuile. */}
-              <div className="flex flex-wrap gap-3">
-                {mesFiles.map((t) => (
-                  <div key={t.champ} className="w-full min-[380px]:w-[calc(50%-0.375rem)]
-                                                lg:w-[calc(25%-0.5625rem)] xl:w-[240px]">
-                    <TuileCompteur tuile={t} />
-                  </div>
-                ))}
-              </div>
+              {/* UNE BARRE, PAS DES TUILES.
+                  Ni la grille ni la rangee souple ne tenaient. En grille, une
+                  file unique s'etirait sur mille quatre cents pixels pour trois
+                  mots ; en rangee, elle devenait un carre de deux cent quarante
+                  pixels perdu a gauche, avec tout le vide a sa droite. Le
+                  defaut n'etait pas la largeur de la tuile : c'est qu'une
+                  TUILE suppose qu'il y en aura plusieurs.
+                  Les files vont de une a six selon le role et selon le jour.
+                  Ce qui tient a tous les comptes, c'est une BARRE : une bande
+                  d'un seul tenant, divisee en autant de parts qu'il y a de
+                  files. A une, elle fait une ligne pleine largeur qui se lit
+                  comme une phrase ; a six, six parts egales. La largeur est
+                  toujours remplie, et la rangee ne montre jamais du vide.
+                  C'est la « To-Do » de Fiori et le bandeau d'activites
+                  d'Odoo — pour la meme raison. */}
+              <BarreFiles files={mesFiles} />
             </>
           )}
 
@@ -642,8 +640,8 @@ function BarreVues({
   surChoix: (v: VueCockpit) => void
 }) {
   const vues: { cle: VueCockpit; libelle: string }[] = [
-    { cle: 'situation', libelle: 'Situation' },
-    { cle: 'analyse', libelle: 'Analyse' },
+    { cle: 'situation', libelle: 'Synthèse' },
+    { cle: 'analyse', libelle: 'Analytique' },
     { cle: 'opportunites', libelle: 'Opportunités' },
     { cle: 'matiere', libelle: 'Matière' },
   ]
@@ -756,43 +754,59 @@ function Legende({ ton, texte }: { ton: string; texte: string }) {
   )
 }
 
-function TuileCompteur({ tuile: t }: { tuile: Tuile }) {
-  const contenu = (
-    <Carte
-      className={cn('h-full transition-colors', t.vers && 'hover:border-primaire/50 hover:bg-attenue/30')}
+/**
+ * La barre des files a traiter.
+ *
+ * ELLE REMPLIT TOUJOURS LA LARGEUR, quel que soit le nombre de files, parce
+ * qu'une bande divisee en parts egales n'a pas de « colonne manquante ». A une
+ * seule file, la part unique occupe toute la bande et la file se lit en une
+ * ligne : le compte, ce qu'il designe, et ou aller. A cinq, cinq parts.
+ *
+ * LE COMPTE VIENT EN PREMIER, gros et aligne sur les chiffres, parce que c'est
+ * lui qu'on cherche du regard ; le libelle le suit, le detail sous lui. Une
+ * part qui mene quelque part se comporte en lien : tout le rectangle est
+ * cliquable, pas seulement trois mots en bas.
+ */
+function BarreFiles({ files }: { files: Tuile[] }) {
+  return (
+    <div
+      className="grid divide-y divide-bordure overflow-hidden rounded-[var(--radius)]
+                 border border-bordure bg-surface
+                 sm:auto-cols-fr sm:grid-flow-col sm:divide-x sm:divide-y-0"
     >
-      <CarteCorps className="p-3.5">
-        <div className="flex items-start justify-between gap-2">
-          <span className="text-xs text-attenue-texte">{t.libelle}</span>
-          <t.Icone className={cn('size-4 shrink-0', TEINTE[t.ton])} />
-        </div>
-        <div className={cn('mt-1.5 text-2xl font-semibold tabular-nums', TEINTE[t.ton])}>
-          {t.affichage ?? t.valeur}
-        </div>
-        {/* LE DETAIL PASSE A LA LIGNE, IL NE SE COUPE PLUS. `truncate` rendait
-            « Stock magasin sous le minimum » en « Stock magasin sous l… » sur un
-            telephone : une tuile qui ne dit pas ce qu'elle compte ne sert a rien.
-            Deux lignes suffisent, la troisieme est coupee proprement. */}
-        {t.detail && (
-          <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-attenue-texte">
-            {t.detail}
+      {files.map((t) => {
+        const corps = (
+          <div className="flex h-full items-center gap-3 px-4 py-3">
+            <t.Icone className={cn('size-5 shrink-0', TEINTE[t.ton])} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <span className={cn('text-2xl font-semibold leading-none tabular-nums', TEINTE[t.ton])}>
+                  {t.affichage ?? t.valeur}
+                </span>
+                <span className="truncate text-[12.5px] font-medium text-texte">{t.libelle}</span>
+              </div>
+              {t.detail && (
+                <div className="mt-0.5 truncate text-[11px] leading-snug text-attenue-texte">
+                  {t.detail}
+                </div>
+              )}
+            </div>
+            {t.vers && <ArrowRight className="size-4 shrink-0 text-attenue-texte" />}
           </div>
-        )}
-        {t.vers && (
-          <div className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-primaire">
-            ouvrir
-            <ArrowRight className="size-3" />
-          </div>
-        )}
-      </CarteCorps>
-    </Carte>
-  )
-  return t.vers ? (
-    <Link to={t.vers} className="block">
-      {contenu}
-    </Link>
-  ) : (
-    <div>{contenu}</div>
+        )
+        return t.vers ? (
+          <Link
+            key={t.champ}
+            to={t.vers}
+            className="block transition-colors hover:bg-attenue/40"
+          >
+            {corps}
+          </Link>
+        ) : (
+          <div key={t.champ}>{corps}</div>
+        )
+      })}
+    </div>
   )
 }
 

@@ -368,7 +368,9 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
   const destinations = useMemo<Entree[]>(
     () =>
       NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role) && !e.aVenir).map((e) => ({
-        id: e.vers,
+        // La rubrique et sa premiere page partagent un chemin : l'identifiant
+        // porte donc aussi le libelle, sinon la palette n'en montrerait qu'une.
+        id: e.vers + '#' + e.libelle,
         libelle: e.libelle,
         detail: e.section,
         Icone: e.Icone,

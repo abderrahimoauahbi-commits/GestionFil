@@ -106,6 +106,16 @@ export interface EntreeNav {
   section: Section
   /** Presente dans la barre du bas sur mobile. */
   principale?: boolean
+  /**
+   * Entree de second niveau, rangee sous celle qui la precede.
+   *
+   * POURQUOI. Le tableau de bord porte quatre pages de travail distinctes —
+   * synthese, analytique, opportunites, matiere. Sous une entree unique, elles
+   * se melangeaient : on ouvrait le tableau de bord puis on cherchait. SAP les
+   * separe en pages d'un espace, Odoo en entrees de menu d'application ; ici
+   * elles sont declarees a la suite de leur parent, decalees d'un cran.
+   */
+  sous?: boolean
   /** Une ligne disant CE QU'ON Y FAIT. Affichee sur l'accueil, sous le nom :
       « Mouvements » n'apprend rien a qui ne connait pas encore l'outil. */
   resume?: string
@@ -143,6 +153,10 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 1. General -------------------------------------------------------- */
   { vers: '/', libelle: 'Accueil', module: '', Icone: Home, section: 'GENERAL', principale: true },
   { vers: '/tableau-de-bord', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', resume: 'Indicateurs, alertes et mur de risques', principale: true },
+  { vers: '/tableau-de-bord', libelle: 'Synthèse', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', sous: true, resume: 'Les quatre chiffres, les files a traiter, les references en alerte' },
+  { vers: '/tableau-de-bord/analyse', libelle: 'Analytique', module: 'COCKPIT', Icone: BarChart3, section: 'GENERAL', sous: true, resume: 'ABC/XYZ, saisonnalite, concentration des achats' },
+  { vers: '/tableau-de-bord/opportunites', libelle: 'Opportunités', module: 'COCKPIT', Icone: Sparkles, section: 'GENERAL', sous: true, resume: 'Ou l on paie plus cher qu ailleurs, a qualite egale' },
+  { vers: '/tableau-de-bord/matiere', libelle: 'Matière', module: 'COCKPIT', Icone: Boxes, section: 'GENERAL', sous: true, resume: 'Ce que chaque famille pese et immobilise' },
   { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'GENERAL' },
   // La coherence est un ecran de pilotage, pas d'administration : c'est la
   // direction et l'assistante qui corrigent les anomalies, pas l'informaticien.

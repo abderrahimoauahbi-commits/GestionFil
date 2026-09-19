@@ -147,7 +147,14 @@ const ECRANS = (
           tableau de bord. Un ERP ne peut pas ouvrir sur un refus. La page ne
           montre de toute facon que les ecrans deja ouverts a celui qui regarde. */}
       <Route index element={<Accueil />} />
+      {/* QUATRE PAGES SOUS UNE MEME ENTREE, chacune avec son adresse.
+          Synthese, analytique, opportunites et matiere ne se melangent plus
+          derriere une seule porte : chacune se met en signet, se retrouve au
+          menu, et s'ouvre dans son propre onglet. C'est l'organisation des
+          espaces Fiori et des menus d'application Odoo. */}
       <Route path="tableau-de-bord"
+             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+      <Route path="tableau-de-bord/:vue"
              element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
       <Route path="catalogue/completer" element={<ExigeModule module="CATALOGUE"><CompleterCatalogue /></ExigeModule>} />

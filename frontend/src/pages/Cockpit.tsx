@@ -46,7 +46,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
-import { CockpitAnalyse } from './CockpitAnalyse'
+import { CockpitAnalyse, type VueCockpit } from './CockpitAnalyse'
 import { EnTetePage } from '../composants/Coquille'
 import {
   Alerte,
@@ -60,7 +60,7 @@ import {
 import { Infobulle } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { BarresEmpilees, BarresRangees } from '../composants/graphiques/Graphiques'
-import { Layers, Package, ShoppingCart } from 'lucide-react'
+import { Layers, ShoppingCart, Sparkles } from 'lucide-react'
 import { BarreRepartition, CarteStat } from '../composants/CarteStat'
 import { Pareto } from '../composants/graphiques/Pareto'
 import { BullesFournisseurs, type Fournisseur } from '../composants/graphiques/BullesFournisseurs'
@@ -230,16 +230,10 @@ export function Cockpit() {
       vers: '/receptions',
       actionnable: peut('RECEPTIONS', 'LIRE'),
     },
-    {
-      champ: 'nb_refs_sous_minimum',
-      libelle: 'Sous le stock minimum',
-      valeur: n('nb_refs_sous_minimum'),
-      detail: 'projete sous le seuil',
-      ton: 'danger',
-      Icone: TrendingDown,
-      vers: '/plan-achat',
-      actionnable: peut('PLAN_ACHAT', 'LIRE'),
-    },
+    /* « Sous le stock minimum » ne figure plus ici : ce n'est pas une file
+       d'attente mais un ETAT, et il disait le meme chiffre que « A engager »
+       au-dessus. Ce qu'il y a a faire de ces references se lit au plan
+       d'achat, ou la tuile « Propositions a arbitrer » mene deja. */
     {
       champ: 'nb_lots_peremption_proche',
       libelle: 'Lots a moins de 90 j',
@@ -273,100 +267,37 @@ export function Cockpit() {
     },
   ]
 
-  // Les tuiles d'ETAT : elles decrivent la situation, pas une file. Elles
-  // restent affichees a zero — « 0 rupture » est une bonne nouvelle qu'on veut
-  // lire, alors que « 0 bon a valider » est juste une file vide.
-  const etats: Tuile[] = [
-    {
-      champ: 'nb_ruptures',
-      libelle: 'Ruptures',
-      valeur: n('nb_ruptures'),
-      detail: 'stock projete a zero',
-      ton: n('nb_ruptures') > 0 ? 'danger' : 'succes',
-      Icone: PackageX,
-      vers: '/stock',
-      actionnable: peut('STOCK', 'LIRE'),
-      toujours: true,
-    },
-    {
-      champ: 'nb_attention',
-      libelle: 'Sous surveillance',
-      valeur: n('nb_attention'),
-      affichage: `${n('nb_attention')}`,
-      detail: `sur ${n('nb_references')} references`,
-      ton: 'alerte',
-      Icone: TrendingDown,
-      vers: '/stock',
-      actionnable: peut('STOCK', 'LIRE'),
-      toujours: true,
-    },
-    {
-      // Le VETO PHYSIQUE. Ces references ne raisonnent pas : elles sont sous
-      // leur minimum dans les allees, aujourd'hui, quoi que dise la couverture.
-      champ: 'nb_critiques',
-      libelle: 'Sous le minimum',
-      valeur: n('nb_critiques'),
-      detail: 'constate au magasin, pas projete',
-      ton: n('nb_critiques') > 0 ? 'danger' : 'succes',
-      Icone: PackageX,
-      vers: '/stock',
-      actionnable: peut('STOCK', 'LIRE'),
-      toujours: true,
-    },
-    {
-      // SECOND AXE : ne dit pas qu'on va manquer, dit qu'on immobilise.
-      champ: 'nb_sur_stock',
-      libelle: 'En sur-stock',
-      valeur: n('nb_sur_stock'),
-      detail: 'au-dela du maximum',
-      ton: 'neutre',
-      Icone: TrendingDown,
-      vers: '/stock',
-      actionnable: peut('STOCK', 'LIRE'),
-    },
-    {
-      champ: 'nb_ecart_majeur',
-      libelle: 'Écarts a vérifier',
-      valeur: n('nb_ecart_majeur'),
-      detail: 'couverture confortable, magasin bas',
-      ton: n('nb_ecart_majeur') > 0 ? 'alerte' : 'neutre',
-      Icone: TrendingDown,
-      vers: '/stock',
-      actionnable: peut('STOCK', 'LIRE'),
-    },
-    {
-      champ: 'valeur_stock_mad',
-      libelle: 'Valeur du stock',
-      valeur: n('valeur_stock_mad'),
-      affichage: fmt.compact(n('valeur_stock_mad')),
-      detail: 'MAD, au CMUP',
-      ton: 'neutre',
-      Icone: CircleDollarSign,
-      actionnable: true,
-      toujours: true,
-    },
-    {
-      champ: 'montant_bc_ouverts_mad',
-      libelle: 'Engage chez les fournisseurs',
-      valeur: n('montant_bc_ouverts_mad'),
-      affichage: fmt.compact(n('montant_bc_ouverts_mad')),
-      detail: `MAD sur ${n('nb_bc_ouverts')} bons ouverts`,
-      ton: 'neutre',
-      Icone: CircleDollarSign,
-      vers: '/bons-commande',
-      actionnable: peut('BONS_COMMANDE', 'LIRE'),
-      toujours: true,
-    },
-  ]
-
+  // UNE TUILE N'APPARAIT QUE SI ELLE MENE QUELQUE PART. Le role doit pouvoir
+  // VOIR le champ et AGIR dessus ; une file vide s'efface, parce qu'un ecran
+  // couvert de zeros apprend a ne plus etre lu.
   const garder = (t: Tuile) =>
     droits.visible(t.champ) && t.actionnable !== false && (t.toujours || t.valeur > 0)
 
   const mesFiles = files.filter(garder)
-  const mesEtats = etats.filter(garder)
 
   const bloquants = (qCtl.data ?? []).filter((c) => c.criticite === 'BLOQUANT' && c.anomalies > 0)
   const autres = (qCtl.data ?? []).filter((c) => c.criticite !== 'BLOQUANT' && c.anomalies > 0)
+
+  // LA VUE COURANTE, gardee pour la session : revenir au poste de travail apres
+  // avoir ouvert une reference doit ramener la ou l'on etait. `sessionStorage`
+  // et non `localStorage` : une preference d'ecran n'a pas a survivre des
+  // semaines a celui qui l'a prise une fois.
+  const [vue, setVueBrute] = useState<VueCockpit>(() => {
+    try {
+      const v = sessionStorage.getItem('cockpit.vue')
+      return v === 'analyse' || v === 'opportunites' || v === 'matiere' ? v : 'situation'
+    } catch {
+      return 'situation'
+    }
+  })
+  const setVue = (v: VueCockpit) => {
+    setVueBrute(v)
+    try {
+      sessionStorage.setItem('cockpit.vue', v)
+    } catch {
+      /* navigation privee : la vue ne se retient pas, l'ecran marche quand meme */
+    }
+  }
 
   const risques = qRisques.data ?? []
   /** Les mois de l'horizon, pris sur la premiere frise : toutes sont alignees. */
@@ -407,16 +338,15 @@ export function Cockpit() {
             </Alerte>
           )}
 
-          {mesEtats.length > 0 && (
-            <>
-              <TitreBande texte="Situation" />
-              <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4">
-                {mesEtats.map((t) => (
-                  <TuileCompteur key={t.champ} tuile={t} />
-                ))}
-              </div>
-            </>
-          )}
+          {/* LA GRILLE « SITUATION » A DISPARU, et c'est le point de la
+              refonte. Elle reprenait, en sept tuiles de meme taille, ce que la
+              bande du haut venait de dire : ruptures, critiques, attention,
+              sur-stock, ecarts, valeur du stock, engage chez les fournisseurs.
+              Les memes references y etaient comptees trois fois sous trois
+              noms. Un tableau de bord qui se repete apprend a ne plus etre lu ;
+              ce qui restait unique — le sur-stock, les ecarts — est passe dans
+              la ligne discrete sous les quatre chiffres, ou il avertit sans
+              concurrencer. */}
         </>
       )}
 
@@ -458,22 +388,43 @@ export function Cockpit() {
         </p>
       ) : null}
 
-      {/* ---- Les six zones du classeur -------------------------------------
-          Dans l'ordre du cockpit Excel : les graphiques d'abord, parce qu'ils
-          donnent la forme du probleme, puis les tableaux qui la detaillent. */}
-      <TitreBande texte="Analyse" />
-      <CockpitAnalyse />
+      {/* ---- LES VUES, PLUTOT QU'UN ROULEAU ---------------------------------
+          Tout ce qui suit tenait sur la meme page : quatre mille deux cents
+          pixels, dix hauteurs d'ecran. On y trouvait tout, et c'est justement
+          le probleme — une vue qu'on parcourt n'est plus une vue qu'on compare.
+          Les quatre onglets reprennent l'ordre du classeur : ce qui brule, ce
+          que disent les chiffres, ce qu'on pourrait gagner, ou part la matiere. */}
+      <BarreVues vue={vue} surChoix={setVue} />
 
-      {/* ---- Tableau de bord ----------------------------------------------- */}
-      <TitreBande texte="Concentration et dependances" />
-      <Concentration />
+      {vue === 'situation' && <CockpitAnalyse vue="situation" />}
 
-      <TitreBande texte="Ou part la matiere" />
-      <TableauDeBord />
+      {vue === 'analyse' && (
+        <>
+          <CockpitAnalyse vue="analyse" />
+          <TitreBande texte="Concentration et dependances" />
+          <Concentration />
+        </>
+      )}
 
-      {/* ---- Mur de risques ------------------------------------------------ */}
-      {/* L'horizon vient du plan, jamais d'une constante : un plan de six mois
+      {vue === 'opportunites' && <CockpitAnalyse vue="opportunites" />}
+
+      {vue === 'matiere' && (
+        <>
+          <TitreBande texte="Ou part la matiere" />
+          <TableauDeBord />
+        </>
+      )}
+
+      {/* ---- Mur de risques ------------------------------------------------
+          IL RESTE DANS LA VUE « SITUATION », et nulle part ailleurs : c'est le
+          seul ecran qui montre QUAND la rupture arrive, mois par mois. Le
+          releguer dans une vue d'analyse reviendrait a le reserver a ceux qui
+          cherchent, alors qu'il s'adresse a ceux qui decident.
+
+          L'horizon vient du plan, jamais d'une constante : un plan de six mois
           affiche six colonnes, et annoncer « 12 mois » au-dessus serait faux. */}
+      {vue === 'situation' && (
+      <>
       <TitreBande
         texte={
           colonnes.length
@@ -595,6 +546,8 @@ export function Cockpit() {
           )}
         </CarteCorps>
       </Carte>
+      </>
+      )}
 
       {/* ---- Par famille ----------------------------------------------------
            L'atelier compte par famille, comme les classeurs : une feuille par
@@ -602,9 +555,13 @@ export function Cockpit() {
            tete — les cinq plus lourdes — et renvoie a la statistique complete.
            Le detail n'a pas sa place ici : on vient au cockpit pour decider,
            pas pour depouiller.                                                */}
-      {peut('MOUVEMENTS', 'LIRE') && <BlocFamilles />}
+      {vue === 'matiere' && peut('MOUVEMENTS', 'LIRE') && <BlocFamilles />}
 
-      {/* ---- Controles de coherence ---------------------------------------- */}
+      {/* ---- Controles de coherence ----------------------------------------
+           La sante du referentiel accompagne la matiere : les deux repondent a
+           « nos donnees disent-elles vrai ? », pas a « que faire aujourd'hui ». */}
+      {vue === 'matiere' && (
+      <>
       <TitreBande texte="Sante du referentiel" />
       <Carte repliable="cockpit.2">
         <CarteEntete>
@@ -649,14 +606,132 @@ export function Cockpit() {
           )}
         </CarteCorps>
       </Carte>
+      </>
+      )}
     </div>
   )
 }
 
+/**
+ * LA BARRE DES VUES.
+ *
+ * Quatre entrees, dans l'ordre ou l'on decide : ce qui brule, ce que disent les
+ * chiffres, ce qu'on pourrait gagner, ou part la matiere. C'est l'ordre du
+ * classeur, et c'est aussi celui des cockpits des grands ERP — on n'ouvre pas
+ * un tableau de bord pour tout voir, on l'ouvre avec une question.
+ *
+ * LE CHOIX SE GARDE dans la session : revenir au poste de travail apres avoir
+ * ouvert une reference doit ramener la ou l'on etait, pas au debut.
+ */
+function BarreVues({
+  vue,
+  surChoix,
+}: {
+  vue: VueCockpit
+  surChoix: (v: VueCockpit) => void
+}) {
+  const vues: { cle: VueCockpit; libelle: string }[] = [
+    { cle: 'situation', libelle: 'Situation' },
+    { cle: 'analyse', libelle: 'Analyse' },
+    { cle: 'opportunites', libelle: 'Opportunités' },
+    { cle: 'matiere', libelle: 'Matière' },
+  ]
+  return (
+    <div className="mb-3 mt-6 flex flex-wrap gap-1 border-b border-bordure">
+      {vues.map((v) => (
+        <button
+          key={v.cle}
+          type="button"
+          onClick={() => surChoix(v.cle)}
+          className={cn(
+            '-mb-px border-b-2 px-3 py-1.5 text-[12.5px] transition-colors',
+            v.cle === vue
+              ? 'border-primaire font-medium text-texte'
+              : 'border-transparent text-attenue-texte hover:text-texte',
+          )}
+          aria-current={v.cle === vue ? 'page' : undefined}
+        >
+          {v.libelle}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * LA PHRASE DU JOUR — ce que le classeur appelle « Insights du jour ».
+ *
+ * Un tableau de bord qui n'aligne que des nombres laisse a chacun le soin de
+ * les relier, et deux personnes en tirent deux conclusions. La phrase tranche :
+ * elle dit ce qui presse, en francais, avant que l'oeil n'ait a comparer quoi
+ * que ce soit. Tous les cockpits des grands ERP s'ouvrent ainsi.
+ *
+ * ELLE SE CONSTRUIT DES MEMES CHIFFRES QUE LES TUILES, jamais d'une source
+ * parallele : une phrase qui contredirait le nombre affiche a cote d'elle
+ * ruinerait les deux.
+ */
+function phraseDuJour(
+  k: Record<string, unknown>,
+  economiesMad: number,
+  nbOpportunites: number,
+  nbMonoSource: number,
+): string {
+  const n = (c: string) => Number(k[c] ?? 0)
+  const bouts: string[] = []
+
+  // L'AVERTISSEMENT PASSE DEVANT. Si les besoins sont perimes, tout le reste de
+  // la phrase raisonne sur des chiffres qui ne valent plus.
+  if (n('besoins_perimes') > 0) {
+    bouts.push(
+      'Le plan, une recette ou une densité a changé depuis le dernier calcul : relancez-le avant de décider.',
+    )
+  }
+
+  const alerte = n('nb_ruptures') + n('nb_critiques')
+  if (alerte > 0) {
+    bouts.push(
+      `${alerte} référence(s) sur ${n('nb_references')} ne tiendront pas le délai d'approvisionnement` +
+        (n('budget_a_engager_mad') > 0
+          ? ` ; ${fmt.compact(n('budget_a_engager_mad'))} MAD à engager pour les couvrir.`
+          : '.'),
+    )
+  } else {
+    bouts.push(`Aucune rupture prévue sur les ${n('nb_references')} références suivies.`)
+  }
+
+  if (economiesMad > 0) {
+    bouts.push(
+      `${fmt.compact(economiesMad)} MAD par an d'économies identifiées sur ` +
+        `${nbOpportunites} référence(s), à qualité égale.`,
+    )
+  }
+  // LA FRAGILITE DE FOND, qui ne se voit dans aucun compteur : une reference en
+  // tension dont un seul fournisseur sait faire n'a pas de solution de repli.
+  if (nbMonoSource > 0) {
+    bouts.push(`${nbMonoSource} référence(s) en tension n'ont qu'une seule source.`)
+  }
+  if (n('nb_controles_bloquants') > 0) {
+    bouts.push(`${n('nb_controles_bloquants')} contrôle(s) bloquant(s) à lever.`)
+  }
+  return bouts.join(' ')
+}
+
+/**
+ * LE TITRE DE SECTION SEPARE VRAIMENT.
+ *
+ * Il etait un petit libelle gris perdu entre deux grilles : sur une page de
+ * quatre mille pixels, rien ne disait ou finissait une idee et ou commencait la
+ * suivante. Un filet et un peu d'air suffisent — c'est le decoupage qui manque,
+ * pas la decoration.
+ */
 function TitreBande({ texte }: { texte: string }) {
   return (
-    <h2 className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-wider text-attenue-texte first:mt-0">
-      {texte}
+    <h2
+      className="mb-3 mt-8 flex items-center gap-3 text-[11px] font-semibold uppercase
+                 tracking-wider text-attenue-texte first:mt-0"
+    >
+      <span className="whitespace-nowrap">{texte}</span>
+      <span className="h-px flex-1 bg-bordure" />
     </h2>
   )
 }
@@ -974,6 +1049,23 @@ function ChiffresCles() {
     enabled: peut('COCKPIT', 'LIRE'),
   })
 
+  // LES ECONOMIES NE SONT PAS DANS `/api/cockpit`. Elles vivent dans les
+  // indicateurs de l'analyse, et la tuile affichait donc un zero franc a cote
+  // d'un constat annoncant 3,9 millions — deux chiffres contradictoires a deux
+  // centimetres l'un de l'autre. Meme cle de cache que `CockpitAnalyse` : la
+  // requete est deja faite, celle-ci ne coute rien.
+  const qa = useQuery({
+    queryKey: ['cockpit-analyse'],
+    queryFn: () =>
+      api.get<{
+        indicateurs?: { economies_total_mad?: number; nb_opportunites?: number }
+        mono_source?: unknown[]
+      }>('/api/cockpit/analyse'),
+    enabled: peut('COCKPIT', 'LIRE'),
+  })
+  const eco = qa.data?.indicateurs
+  const nbMonoSource = qa.data?.mono_source?.length ?? 0
+
   const k = q.data
   if (q.isLoading) {
     return (
@@ -995,57 +1087,107 @@ function ChiffresCles() {
 
   return (
     <div className="mb-3 flex flex-col gap-3">
-      <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-5">
+      {/* ---- LA SITUATION, EN UNE PHRASE PUIS QUATRE CHIFFRES ---------------
+          L'ecran commencait par quatorze tuiles de meme poids : cinq ici, deux
+          sous « A traiter », sept sous « Situation ». L'oeil n'avait aucun
+          point d'entree, et les memes references y etaient comptees trois fois
+          sous trois noms — « A commander 106 », « Sous le stock minimum 106 »,
+          « Ruptures 59 » deux fois. Un tableau de bord qui repete ses chiffres
+          apprend a ne plus les lire.
+
+          Les cockpits des grands ERP ouvrent tous de la meme facon : UNE PHRASE
+          qui dit ou on en est, puis TROIS OU QUATRE nombres, et ces nombres
+          parlent ARGENT. Un compte de references ne se compare a rien ; des
+          dirhams se comparent entre eux et se hierarchisent tout seuls. Le
+          classeur ne fait pas autre chose avec sa « Zone 1 — Insights du jour ».
+
+          Les comptes n'ont pas disparu : ils sont devenus la PRECISION sous le
+          chiffre, la ou ils expliquent au lieu de concurrencer. */}
+      <Carte className="border-primaire/30 bg-primaire/[0.04]">
+        <CarteCorps className="py-3">
+          <p className="text-[13px] leading-relaxed text-texte">
+            {phraseDuJour(k, eco?.economies_total_mad ?? 0, eco?.nb_opportunites ?? 0, nbMonoSource)}
+          </p>
+        </CarteCorps>
+      </Carte>
+
+      <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4">
         <CarteStat
-          Icone={Package}
-          libelle="Références suivies"
-          valeur={fmt.nombre(n('nb_references'), 0)}
-          precision={`${ok} au vert · ${attention} en attention`}
+          Icone={CircleDollarSign}
+          libelle="Valeur du stock"
+          valeur={fmt.compact(n('valeur_stock_mad'))}
+          unite="MAD"
+          precision={`${fmt.nombre(n('nb_references'), 0)} références · ${ok} au vert`}
           ton="primaire"
-          surClic={() => naviguer('/stock')}
-        />
-        {/* LE LIBELLE DIT CE QUE LE CHIFFRE COMPTE : les references dont le stock
-            PROJETE sur douze mois passe sous le minimum — donc a commander. Il
-            annoncait « stock magasin sous le seuil », un veto physique qu'il ne
-            mesure pas. */}
-        <CarteStat
-          Icone={TrendingDown}
-          libelle="A commander"
-          valeur={fmt.nombre(n('nb_refs_sous_minimum'), 0)}
-          precision="Projete sous le minimum sur 12 mois"
-          ton={n('nb_refs_sous_minimum') > 0 ? 'danger' : 'succes'}
-          surClic={() => naviguer('/plan-achat')}
-          aide="Stock + commandes fiables - besoins du plan sur 12 mois, compare au stock minimum."
-        />
-        <CarteStat
-          Icone={Layers}
-          libelle="Sur-stock"
-          valeur={fmt.nombre(n('nb_sur_stock'), 0)}
-          precision="Au-dela du stock maximum"
-          ton={n('nb_sur_stock') > 0 ? 'alerte' : 'succes'}
-          surClic={() => naviguer('/stock')}
-          aide="Sujet de tresorerie, jamais de rupture : les deux axes sont distincts."
+          surClic={() => naviguer('/valorisation')}
+          aide="Au CMUP, tous magasins confondus."
         />
         <CarteStat
           Icone={ShoppingCart}
-          libelle="Budget a engager"
-          valeur={fmt.nombre(Math.round(n('budget_a_engager_mad')), 0)}
+          libelle="A engager"
+          valeur={fmt.compact(n('budget_a_engager_mad'))}
           unite="MAD"
-          precision={`${n('nb_propositions_a_traiter')} proposition(s) a traiter`}
+          precision={`${n('nb_propositions_a_traiter')} proposition(s) · ${fmt.compact(
+            n('montant_bc_ouverts_mad'),
+          )} deja engages`}
           ton="primaire"
           surClic={() => naviguer('/plan-achat')}
         />
-        {/* Le chiffre compte les CONTROLES en anomalie ; il comptait les alertes
-            ouvertes, une autre table, sous le titre « Controles ». */}
+        {/* LES RUPTURES ET LES CRITIQUES DANS LE MEME CHIFFRE : ce sont les deux
+            crans de la meme echelle, et les separer en deux tuiles obligeait a
+            les additionner de tete pour savoir combien de references vont mal. */}
         <CarteStat
-          Icone={AlertTriangle}
-          libelle="Contrôles en anomalie"
-          valeur={fmt.nombre(bloquants, 0)}
-          precision={`${n('nb_controles_bloquants')} bloquant(s) · ${n('nb_controles_critiques')} critique(s)`}
-          ton={n('nb_controles_bloquants') > 0 ? 'danger' : bloquants > 0 ? 'alerte' : 'succes'}
-          surClic={() => naviguer('/controles')}
-          aide="Coherence des donnees, verifiee en permanence."
+          Icone={TrendingDown}
+          libelle="En alerte"
+          valeur={fmt.nombre(ruptures + critiques, 0)}
+          precision={`${ruptures} rupture(s) · ${critiques} critique(s) · ${attention} en attention`}
+          ton={ruptures > 0 ? 'danger' : critiques > 0 ? 'alerte' : 'succes'}
+          surClic={() => naviguer('/plan-achat')}
+          aide="Stock + commandes fiables - demande pendant le delai d'approvisionnement."
         />
+        <CarteStat
+          Icone={Sparkles}
+          libelle="Economies identifiees"
+          valeur={fmt.compact(eco?.economies_total_mad ?? 0)}
+          unite="MAD/an"
+          precision={`${eco?.nb_opportunites ?? 0} référence(s) au-dessus du prix du groupe`}
+          ton={(eco?.economies_total_mad ?? 0) > 0 ? 'succes' : 'neutre'}
+          surClic={() => naviguer('/matrice-prix')}
+          aide="A qualite egale : le meme titrage, achete moins cher ailleurs dans le catalogue."
+        />
+      </div>
+
+      {/* Les deux chiffres de VERACITE restent visibles, mais en retrait : ils
+          ne pilotent pas, ils avertissent. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-attenue-texte">
+        <button
+          type="button"
+          onClick={() => naviguer('/controles')}
+          className={cn('inline-flex items-center gap-1.5 hover:text-texte',
+            n('nb_controles_bloquants') > 0 && 'font-medium text-danger')}
+        >
+          <AlertTriangle className="size-3.5" />
+          {bloquants} contrôle(s) en anomalie
+          {n('nb_controles_bloquants') > 0 && ` dont ${n('nb_controles_bloquants')} bloquant(s)`}
+        </button>
+        <button
+          type="button"
+          onClick={() => naviguer('/stock')}
+          className="inline-flex items-center gap-1.5 hover:text-texte"
+        >
+          <Layers className="size-3.5" />
+          {n('nb_sur_stock')} référence(s) en sur-stock
+        </button>
+        {n('nb_ecart_majeur') > 0 && (
+          <button
+            type="button"
+            onClick={() => naviguer('/stock')}
+            className="inline-flex items-center gap-1.5 font-medium text-alerte hover:text-texte"
+          >
+            <TrendingDown className="size-3.5" />
+            {n('nb_ecart_majeur')} écart(s) à vérifier
+          </button>
+        )}
       </div>
 
       {ok + attention + critiques + ruptures > 0 && (

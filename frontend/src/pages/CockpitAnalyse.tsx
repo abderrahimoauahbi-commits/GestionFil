@@ -159,7 +159,24 @@ function BlocKpi({
   )
 }
 
-export function CockpitAnalyse() {
+/**
+ * LES VUES DU COCKPIT.
+ *
+ * L'ecran tenait sur UNE PAGE DE QUATRE MILLE DEUX CENTS PIXELS : dix hauteurs
+ * d'ecran a derouler pour aller du premier chiffre au dernier graphique. Ce
+ * n'est plus un tableau de bord, c'est un rouleau — et personne ne descend
+ * jusqu'en bas deux fois.
+ *
+ * Les cockpits des grands ERP se decoupent en vues nommees, chacune tenant a
+ * peu pres sur un ecran, et l'on choisit celle qui repond a la question qu'on
+ * se pose. Ce n'est pas seulement du confort : une vue courte se lit d'un coup
+ * d'oeil, alors qu'une vue longue se parcourt — et parcourir, c'est deja ne
+ * plus comparer.
+ */
+export type VueCockpit = 'situation' | 'analyse' | 'opportunites' | 'matiere'
+
+export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
+  const montre = (v: VueCockpit) => v === vue
   const droits = useDroits(MODULE)
   const q = useQuery({
     queryKey: ['cockpit-analyse'],
@@ -202,44 +219,19 @@ export function CockpitAnalyse() {
     classe: p.classe_abc,
   }))
 
-  const rouges = n('nb_ruptures') + n('nb_critiques')
-
   return (
     <div className="flex flex-col gap-3">
-      {/* ---- ZONE 1 — les constats du jour, en phrases ---------------------
-          Le classeur ouvre sur quatre phrases avant tout chiffre : ce qui est
-          rouge, ce qui est en attention, ce qu'on pourrait economiser, ce qui
-          n'a qu'une source. */}
-      <Carte>
-        <CarteEntete>
-          <CarteTitre className="text-[12px]">Constats du jour</CarteTitre>
-        </CarteEntete>
-        <CarteCorps className="flex flex-col gap-1 text-[13px]">
-          <p className={rouges > 0 ? 'text-danger' : 'text-succes'}>
-            {rouges > 0
-              ? `${rouges} référence(s) en alerte rouge — ${n('nb_ruptures')} rupture(s), ${n('nb_critiques')} critique(s)`
-              : 'Aucune rupture ni alerte critique'}
-          </p>
-          <p className={n('nb_attention') > 0 ? 'text-alerte' : 'text-attenue-texte'}>
-            {n('nb_attention') > 0
-              ? `${n('nb_attention')} référence(s) en attention — lancer la consultation sous 30 jours`
-              : 'Aucune référence en attention'}
-          </p>
-          {voitMontants && ind && ind.nb_opportunites > 0 && (
-            <p>
-              {fmt.nombre(totalEconomies, 0)} MAD par an d’économies théoriques sur{' '}
-              {ind.nb_opportunites} référence(s) — à valider avant de basculer
-            </p>
-          )}
-          {d.mono_source.length > 0 && (
-            <p className="text-alerte">
-              {d.mono_source.length} référence(s) en tension sans seconde source chez un autre fournisseur
-            </p>
-          )}
-        </CarteCorps>
-      </Carte>
-
+      {/* ---- ZONE 1 — LES CONSTATS SONT REMONTES EN TETE D'ECRAN.
+          Le classeur ouvre sur des phrases avant tout chiffre, et c'est
+          juste. Mais elles etaient ICI, sous quatorze tuiles qui disaient
+          deja la meme chose : la troisieme redite d'un chiffre n'informe
+          plus, elle use. La phrase est desormais la PREMIERE ligne de la
+          page, au-dessus des quatre indicateurs, et elle porte ce que
+          cette carte apportait de propre — les mono-sources. */}
+      {montre('situation') && (
+      <>
       {/* ---- ZONE 2 — les references en alerte, par ordre d'urgence -------- */}
+
       {d.alertes.length > 0 && (
         <Carte repliable="cockpit.alertes">
           <CarteEntete>
@@ -308,6 +300,10 @@ export function CockpitAnalyse() {
         </Carte>
       )}
 
+      </>
+      )}
+      {montre('analyse') && (
+      <>
       {/* ---- ZONE 5 — stock, achats, classification, stock dormant -------- */}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <BlocKpi titre="Stock" Icone={Package}>
@@ -493,7 +489,11 @@ export function CockpitAnalyse() {
           le declare plutot que de l inventer.
         </p>
       )}
+      </>
+      )}
 
+      {montre('opportunites') && (
+      <>
       {/* ---- Economies possibles ------------------------------------------ */}
       {droits.visible('valeur_stock_mad') && d.economies.length > 0 && (
         <Carte repliable="cockpit.eco">
@@ -650,6 +650,8 @@ export function CockpitAnalyse() {
         )}
       </div>
 
+      </>
+      )}
       {!droits.visible('valeur_stock_mad') && (
         <Alerte ton="info">
           Les blocs financiers ne sont pas affiches : votre role ne recoit pas les montants. Les

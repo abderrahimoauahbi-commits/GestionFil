@@ -11,6 +11,7 @@ mod briefing;
 mod completion;
 mod auth_routes;
 mod consultation;
+mod devalidation;
 mod entites;
 mod importation;
 mod machines;
@@ -286,6 +287,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/machines/{code}/zones/{zone}", get(machines::etat_zone))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
+        // DEFAIRE SANS EFFACER : le grand livre ne se corrige que par son
+        // inverse, comme dans tous les ERP depuis trente ans.
+        .route("/api/mouvements/{id}/contre-passer", post(stock::contre_passer))
+        // FAIRE RECULER UN DOCUMENT : valider se delegue, defaire la
+        // validation d'un autre est un acte de direction.
+        .route("/api/devalider", get(devalidation::documents_reversibles))
+        .route("/api/devalider/{document}/{id}", post(devalidation::devalider))
         .route("/api/transferts",
                get(stock::lister_transferts).post(stock::creer_transfert))
         .route("/api/transferts/{id}/lignes", post(stock::ajouter_ligne_transfert))
@@ -396,6 +404,7 @@ pub fn router(state: AppState) -> Router {
         // Enregistree apres le motif a deux segments : un chemin plus precis
         // doit etre declare apres celui qu'il precise, sinon il ne sert jamais.
         .route("/api/{entite}/{id}/retenants", get(entites::retenants))
+        .route("/api/{entite}/{id}/activation", post(entites::activation))
         .layer(TraceLayer::new_for_http())
         .layer(cors);
 

@@ -7,9 +7,12 @@
  * formulaire desactive ce que l'utilisateur ne peut pas modifier.
  */
 import { useEffect, useState } from 'react'
-import { ArrowLeft, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
+import { DialogueSuppression } from '../composants/DialogueSuppression'
 import { useCrud } from '../hooks/useCrud'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
@@ -19,7 +22,6 @@ import {
   MenuContenu,
   MenuDeclencheur,
   MenuElement,
-  useConfirmation,
 } from '../composants/ui/surcouches'
 import { Formulaire, type ChampDef } from './Formulaire'
 
@@ -85,7 +87,8 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
   const droits = useDroits(module)
   const [edition, setEdition] = useState<L | null>(null)
   const [creation, setCreation] = useState(false)
-  const confirmation = useConfirmation()
+  const qc = useQueryClient()
+  const [aSupprimer, setASupprimer] = useState<L | null>(null)
 
   const [page, setPage] = useState(0)
   const [taille, setTaille] = useState(25)
@@ -130,22 +133,18 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
     else if (edition) crud.modifier.mutate({ id: String(edition[cle]), donnees }, suite)
   }
 
-  function demanderSuppression(ligne: L) {
-    const nom = String(ligne[cle])
-    confirmation.demander({
-      titre: `Desactiver ${nom} ?`,
-      description:
-        "L'enregistrement reste consultable dans l'historique : les mouvements et commandes " +
-        'qui le citent continuent de fonctionner.',
-      destructif: true,
-      libelleConfirmer: 'Desactiver',
-      action: () =>
-        crud.supprimer.mutate(nom, {
-          onSuccess: () => toast.success(`${nom} desactive.`),
-          onError: (e) => toast.error(e instanceof Error ? e.message : 'Suppression impossible.'),
-        }),
-    })
-  }
+  /* REMETTRE EN SERVICE : le geste inverse de « mettre de cote ».
+     Sans lui, desactiver serait une suppression deguisee et definitive — et
+     personne ne le ferait, ce qui ramenerait tout le monde a vouloir effacer. */
+  const reactiver = useMutation({
+    mutationFn: (nom: string) =>
+      api.post(`/api/${chemin}/${encodeURIComponent(nom)}/activation`, { actif: true }),
+    onSuccess: async (_r, nom) => {
+      await qc.invalidateQueries()
+      toast.success(`${nom} remis en service.`)
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Impossible.'),
+  })
 
   const actions = droits.peutEcrire
     ? (ligne: L) => (
@@ -165,12 +164,20 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
               <Pencil />
               Modifier
             </MenuElement>
-            {ligne.actif !== 0 && (
-              <MenuElement destructif onSelect={() => demanderSuppression(ligne)}>
-                <Trash2 />
-                Desactiver
+            {/* UNE LIGNE MISE DE COTE PEUT REVENIR. */}
+            {ligne.actif === 0 && (
+              <MenuElement onSelect={() => reactiver.mutate(String(ligne[cle]))}>
+                <RotateCcw />
+                Remettre en service
               </MenuElement>
             )}
+            {/* SUPPRIMER RESTE OFFERT MEME SUR UNE LIGNE INACTIVE : une saisie
+                fausse mise de cote reste une saisie fausse, et le dialogue dira
+                lui-meme si quelque chose la retient. */}
+            <MenuElement destructif onSelect={() => setASupprimer(ligne)}>
+              <Trash2 />
+              Supprimer…
+            </MenuElement>
             {actionsExtra?.(ligne)}
           </MenuContenu>
         </Menu>
@@ -217,7 +224,6 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
           </CarteCorps>
         </Carte>
 
-        {confirmation.element}
       </div>
     )
   }
@@ -296,7 +302,13 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
         }
       />
 
-      {confirmation.element}
+      <DialogueSuppression
+        ouvert={!!aSupprimer}
+        surFermeture={() => setASupprimer(null)}
+        entite={chemin}
+        id={aSupprimer ? String(aSupprimer[cle]) : ''}
+        libelle={aSupprimer ? `${libelleUnite} ${String(aSupprimer[cle])}` : undefined}
+      />
     </div>
   )
 }

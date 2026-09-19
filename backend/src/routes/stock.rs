@@ -269,7 +269,13 @@ const ENTETE_MOUVEMENT: &str = "
     COALESCE(tot.bobines_totales, 0)    AS bobines_totales,
     COALESCE(tot.palettes_totales, 0)   AS palettes_totales,
     COALESCE(tot.valeur_totale_mad, 0)  AS valeur_totale_mad,
-    COALESCE(tot.rebut_kg, 0)           AS rebut_kg";
+    COALESCE(tot.rebut_kg, 0)           AS rebut_kg,
+    -- LES DEUX SENS DE L'ANNULATION. Un document doit savoir dire qu'il
+    -- annule, et savoir dire qu'il a ete annule : sans le second, un bon
+    -- defait continue de s'imprimer comme s'il valait encore.
+    m.id_mouvement_contrepasse, m.motif_contrepassation,
+    (SELECT c.numero_mouvement FROM mouvement c
+      WHERE c.id_mouvement_contrepasse = m.id_mouvement) AS contrepasse_par";
 
 const JOINTURES_MOUVEMENT: &str = "
     FROM mouvement m
@@ -342,6 +348,186 @@ pub async fn documents_mouvement(
 /// Un seul appel, parce que c'est ce qu'imprime un bon d'entree ou de sortie.
 /// Assembler le document depuis trois requetes exposerait a l'imprimer a
 /// moitie servi — meme raison que pour le dossier de transfert.
+#[derive(Deserialize)]
+pub struct DemandeContrePassation {
+    /// POURQUOI on defait : obligatoire, et conserve sur la ligne inverse.
+    pub motif: String,
+}
+
+/// `POST /api/mouvements/{id}/contre-passer` — DEFAIRE SANS EFFACER.
+///
+/// LE GRAND LIVRE NE S'EFFACE PAS (R03), et ce n'est pas une rigidite : un
+/// mouvement efface emporte avec lui la reponse a « que s'est-il passe ce
+/// jour-la ». SAP, Oracle et Dynamics font tous la meme chose depuis trente
+/// ans — on poste l'INVERSE. Les deux lignes restent, le solde redevient juste,
+/// et l'histoire se lit encore dans six mois.
+///
+/// LE MOUVEMENT INVERSE PORTE UN TYPE D'AJUSTEMENT, jamais le type d'origine.
+/// Une reception contre-passee n'est pas une « reception negative » : c'est une
+/// correction, et les statistiques d'achat ne doivent pas y voir un achat de
+/// moins.
+///
+/// LE CMUP SE REFAIT ENSUITE. Les types d'ajustement ne le touchent pas : sans
+/// ce rappel, contre-passer une reception valorisee rendrait la quantite mais
+/// laisserait le cout moyen fige sur un achat qui n'a plus lieu.
+///
+/// CE QUI PEUT REFUSER, ET C'EST VOULU : si la marchandise entree est deja
+/// repartie, le declencheur de stock suffisant refuse la sortie inverse. On ne
+/// peut pas defaire une entree dont les kilos ne sont plus la — il faut alors
+/// un inventaire, qui constate au lieu de pretendre annuler.
+pub async fn contre_passer(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(d): Json<DemandeContrePassation>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Valider).await?;
+    // DEFAIRE EST UN ACTE DE DIRECTION. Saisir un mouvement se delegue ;
+    // annuler celui d'un autre, non — c'est une decision sur le passe.
+    if user.role != "ADMIN" && user.role != "DIRECTION" {
+        return Err(AppError::NonAutorise {
+            module: module::MOUVEMENTS.into(),
+            action: "CONTRE_PASSER".into(),
+        });
+    }
+    let motif = d.motif.trim().to_string();
+    if motif.chars().count() < 5 {
+        return Err(AppError::Invalide(
+            "Le motif de la contre-passation est obligatoire : dites en quelques mots \
+             pourquoi ce mouvement est annule."
+                .into(),
+        ));
+    }
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+
+    // L'ORIGINAL, ET LES TROIS RAISONS DE REFUSER.
+    let origine: Option<(String, String, String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT m.numero_mouvement, m.code_type_mvt, m.code_magasin, tm.signe,
+                m.id_mouvement_contrepasse
+           FROM mouvement m
+           JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
+          WHERE m.id_mouvement = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((numero, type_origine, magasin, signe, deja_inverse)) = origine else {
+        return Err(AppError::Introuvable(format!("mouvement {id}")));
+    };
+    if deja_inverse.is_some() {
+        return Err(AppError::RegleMetier(
+            "Ce mouvement EST deja une contre-passation : on n'annule pas une annulation, \
+             on saisit le mouvement qui manque."
+                .into(),
+        ));
+    }
+    let deja: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM mouvement WHERE id_mouvement_contrepasse = $1",
+    )
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if deja > 0 {
+        return Err(AppError::RegleMetier(format!(
+            "{numero} a deja ete contre-passe. Le grand livre porte les deux lignes ; \
+             une troisieme ne corrigerait rien."
+        )));
+    }
+
+    // Le sens s'inverse ; le type devient un ajustement.
+    let type_inverse = if signe == 1 { "AJUST_INV_NEG" } else { "AJUST_INV_POS" };
+
+    let numero_inverse = numeroter(&mut tx, "mouvement", "numero_mouvement", "MVT").await?;
+    let id_inverse = uuid::Uuid::new_v4().to_string();
+
+    sqlx::query(
+        "INSERT INTO mouvement
+             (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
+              code_motif, reference_document, observations_globales,
+              id_utilisateur, id_mouvement_contrepasse, motif_contrepassation)
+         VALUES ($1, $2,
+                 to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),
+                 $3, $4, 'CONTREPASSATION', $5, $6, $7, $8, $9)",
+    )
+    .bind(&id_inverse)
+    .bind(&numero_inverse)
+    .bind(type_inverse)
+    .bind(&magasin)
+    .bind(format!("contre-passation de {numero}"))
+    .bind(format!("Annule {numero} ({type_origine}) — {motif}"))
+    .bind(&user.id)
+    .bind(&id)
+    .bind(&motif)
+    .execute(&mut *tx)
+    .await?;
+
+    // LES MEMES LIGNES, AUX MEMES QUANTITES. Le sens vient du TYPE, jamais du
+    // signe des nombres : une quantite negative dans le grand livre rendrait
+    // toutes les sommes ambigues. Le lot suit, sinon la tracabilite se perdrait
+    // sur la ligne qui corrige.
+    let lignes: Vec<(i64, String, f64, Option<String>)> = sqlx::query_as(
+        "SELECT ligne_numero, code_reference, quantite_kg::float8, lot_fournisseur
+           FROM ligne_mouvement WHERE id_mouvement = $1 ORDER BY ligne_numero",
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if lignes.is_empty() {
+        return Err(AppError::RegleMetier(format!(
+            "{numero} ne porte aucune ligne : il n'y a rien a defaire."
+        )));
+    }
+    // LE MOTIF DE LIGNE EST « R5 — ERREUR DE SAISIE », de categorie CORRECTION.
+    // Les types d'ajustement l'exigent, et c'est le seul des six qui decrive ce
+    // qui se passe ici : on defait NOTRE propre ecriture. R6 dirait « ecart
+    // d'inventaire », c'est-a-dire un ecart constate au magasin — le contraire
+    // de ce qu'on fait. La raison veritable, en toutes lettres, est portee par
+    // le motif du mouvement ; celui-ci n'est qu'une categorie.
+    for (numero_ligne, code_reference, kg, lot) in &lignes {
+        sqlx::query(
+            "INSERT INTO ligne_mouvement
+                 (id_mouvement, ligne_numero, code_reference, quantite_kg,
+                  lot_fournisseur, mode_pesee, code_motif_ligne)
+             VALUES ($1, $2, $3, $4, $5, 'THEORIQUE', 'R5')",
+        )
+        .bind(&id_inverse)
+        .bind(numero_ligne)
+        .bind(code_reference)
+        .bind(kg)
+        .bind(lot)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // LE COUT MOYEN SE REFAIT SUR CE QUI TIENT ENCORE, reference par reference.
+    let mut refaits: Vec<Value> = Vec::new();
+    let mut vues: Vec<&str> = Vec::new();
+    for (_, code_reference, _, _) in &lignes {
+        if vues.contains(&code_reference.as_str()) {
+            continue;
+        }
+        vues.push(code_reference);
+        let prix: Option<f64> = sqlx::query_scalar("SELECT fn_recalculer_cmup($1)::float8")
+            .bind(code_reference)
+            .fetch_one(&mut *tx)
+            .await?;
+        refaits.push(json!({ "code_reference": code_reference, "cmup_mad": prix }));
+    }
+
+    tx.commit().await?;
+
+    Ok(Json(json!({
+        "id_mouvement": id_inverse,
+        "numero_mouvement": numero_inverse,
+        "annule": numero,
+        "type_inverse": type_inverse,
+        "lignes": lignes.len(),
+        "cmup_refaits": refaits,
+    })))
+}
+
 pub async fn dossier_mouvement(
     State(state): State<AppState>,
     user: Utilisateur,

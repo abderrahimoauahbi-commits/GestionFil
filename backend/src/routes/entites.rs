@@ -5,14 +5,17 @@
 //!     POST   /api/{entite}          creation
 //!     GET    /api/{entite}/{id}     lecture
 //!     PATCH  /api/{entite}/{id}     modification partielle
-//!     DELETE /api/{entite}/{id}     desactivation (ou suppression reelle)
+//!     DELETE /api/{entite}/{id}     suppression reelle, si rien ne retient
+//!     GET    /api/{entite}/{id}/retenants   ce qui empeche la suppression
+//!     POST   /api/{entite}/{id}/activation  mettre de cote, ou remettre en service
 
 use crate::auth::Utilisateur;
 use crate::crud::{self, Filtre};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
@@ -133,6 +136,12 @@ pub async fn retenants(
         "entite": e.chemin,
         "cle": id,
         "supprimable": liste.is_empty(),
+        // QUAND ON NE PEUT PAS EFFACER, IL RESTE A METTRE DE COTE. L'ecran a
+        // besoin de le savoir AVANT de proposer quoi que ce soit : offrir une
+        // desactivation sur une table qui n'a pas de colonne `actif` serait un
+        // bouton qui echoue, et annoncer un refus sec quand une sortie existe
+        // serait un mensonge par omission.
+        "desactivable": matches!(e.suppression, crud::Suppression::Logique(_)),
         "total": total,
         "retenants": liste
             .iter()
@@ -175,4 +184,59 @@ pub async fn registre(
         }));
     }
     Ok(Json(Value::Array(sortie)))
+}
+
+#[derive(Deserialize)]
+pub struct DemandeActivation {
+    pub actif: bool,
+}
+
+/// `POST /api/{entite}/{id}/activation` — mettre de cote sans effacer.
+///
+/// POURQUOI UNE ROUTE A PART. Supprimer et desactiver ne sont pas la meme
+/// decision, et la seconde n'est pas un lot de consolation : une couleur qu'on
+/// ne commande plus mais qui dort encore en magasin doit disparaitre des listes
+/// de saisie SANS disparaitre des mouvements qui la citent. C'est la seule issue
+/// quand la suppression est retenue, et elle se prend en connaissance de cause.
+///
+/// ELLE SE FAIT DANS LES DEUX SENS. Une ligne mise de cote se remet en service ;
+/// sinon la desactivation serait une suppression deguisee et definitive, ce que
+/// personne n'accepterait de faire deliberement.
+pub async fn activation(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path((chemin, id)): Path<(String, String)>,
+    Json(d): Json<DemandeActivation>,
+) -> AppResult<Json<Value>> {
+    let e = crud::entite(&chemin)?;
+    user.exiger(&state.db, e.module, crate::auth::rbac::Action::Ecrire)
+        .await?;
+
+    let crud::Suppression::Logique(colonne) = e.suppression else {
+        return Err(AppError::RegleMetier(format!(
+            "« {} » n'a pas d'etat actif/inactif : cette ligne s'efface ou se garde,              il n'y a pas d'entre-deux.",
+            e.chemin
+        )));
+    };
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let res = sqlx::query(&format!(
+        "UPDATE {} SET {colonne} = $2 WHERE {} = $1",
+        e.table, e.cle
+    ))
+    .bind(&id)
+    .bind(i32::from(d.actif))
+    .execute(&mut *tx)
+    .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
+    }
+    tx.commit().await?;
+
+    Ok(Json(serde_json::json!({
+        "entite": e.chemin,
+        "cle": id,
+        "actif": d.actif,
+    })))
 }

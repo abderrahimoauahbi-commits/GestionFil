@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { useOuvrirVue } from '../lib/navigation'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
@@ -683,6 +684,16 @@ export function BonCommande() {
                 Envoyer au fournisseur
               </Bouton>
             )}
+            {/* UN BON VALIDE PAR ERREUR NE RESTE PAS VALIDE. Il redevient
+                brouillon — sauf si le fournisseur a deja livre, auquel cas le
+                serveur refuse et dit pourquoi. */}
+            <BoutonDevalider
+              document="bons-commande"
+              id={id}
+              statut={bc.statut}
+              taille="md"
+              consequence="Le fournisseur devra etre prevenu si le bon lui est deja parti."
+            />
           </>
         }
       />

@@ -40,6 +40,7 @@ import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { SelecteurReference } from '../composants/SelecteurReference'
@@ -1091,6 +1092,15 @@ export function Qualites() {
                 Enregistrer la qualite
               </Bouton>
             )}
+            {/* ROUVRIR UNE QUALITE CLOSE, plutot que d'en creer une copie
+                sous un autre code — qui ferait deux recettes pour un tapis. */}
+            <BoutonDevalider
+              document="qualites"
+              id={entete.code_qualite}
+              statut={entete.statut}
+              taille="md"
+              consequence="La composition redeviendra modifiable, et les plans qui s'y appuient devront etre recalcules."
+            />
           </>
         }
       />

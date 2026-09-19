@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { DialogueSuppression } from './DialogueSuppression'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -28,7 +29,6 @@ import {
   Chargement,
   Selecteur,
 } from './ui/base'
-import { useConfirmation } from './ui/surcouches'
 import { cn } from '../lib/utils'
 
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
@@ -98,8 +98,9 @@ export function MaitreDetail({
 }: Props) {
   const droits = useDroits(module)
   const qc = useQueryClient()
-  const confirmation = useConfirmation()
   const [pointe, setPointe] = useState<string | null>(null)
+  const [detailASupprimer, setDetailASupprimer] = useState<{ id: string; nom: string } | null>(null)
+  const [maitreASupprimer, setMaitreASupprimer] = useState<{ id: string; nom: string } | null>(null)
   const [nouvelle, setNouvelle] = useState<Record<string, string>>({})
   const [nouveauMaitre, setNouveauMaitre] = useState<Record<string, string>>({})
 
@@ -176,14 +177,6 @@ export function MaitreDetail({
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
       api.patch(`/api/${detail.route}/${encodeURIComponent(id)}`, patch),
     onSuccess: rafraichir,
-    onError: echec,
-  })
-  const supprimer = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/${detail.route}/${encodeURIComponent(id)}`),
-    onSuccess: () => {
-      toast.success(`${detail.unite} retiré`)
-      rafraichir()
-    },
     onError: echec,
   })
 
@@ -285,6 +278,25 @@ export function MaitreDetail({
               <CarteTitre>{maitre.libelle(courant)}</CarteTitre>
               <div className="flex items-center gap-2">
                 {actionsLigne?.(courant)}
+                {/* LE NIVEAU DU HAUT SE SUPPRIME AUSSI. Une categorie creee par
+                    erreur n'avait aucune issue : seules ses lignes filles
+                    portaient un bouton, et l'on gardait la categorie vide. */}
+                {ecrire && (
+                  <Bouton
+                    taille="icone-xs"
+                    variante="discret"
+                    className="text-danger hover:bg-danger/10"
+                    aria-label={`Supprimer ${maitre.unite}`}
+                    onClick={() =>
+                      setMaitreASupprimer({
+                        id: String(courant[maitre.cle]),
+                        nom: maitre.libelle(courant),
+                      })
+                    }
+                  >
+                    <Trash2 />
+                  </Bouton>
+                )}
                 <Bouton taille="sm" variante="contour" className="lg:hidden" onClick={() => setPointe(null)}>
                   Retour
                 </Bouton>
@@ -396,13 +408,15 @@ export function MaitreDetail({
                                 variante="discret"
                                 className="text-danger hover:bg-danger/10"
                                 aria-label={`Retirer ${detail.unite}`}
+                                /* LE DIALOGUE DIT CE QUI RETIENT AVANT D'EFFACER.
+                                   La confirmation precedente annoncait une
+                                   desactivation ; le serveur, lui, efface pour
+                                   de bon quand rien ne retient. Promettre le
+                                   contraire est pire que de ne rien dire. */
                                 onClick={() =>
-                                  confirmation.demander({
-                                    titre: `Retirer « ${String(l[detail.colonnes[0].champ] ?? id)} » ?`,
-                                    destructif: true,
-                                    libelleConfirmer: 'Retirer',
-                                    description: 'La ligne sera désactivée.',
-                                    action: () => supprimer.mutate(id),
+                                  setDetailASupprimer({
+                                    id,
+                                    nom: String(l[detail.colonnes[0].champ] ?? id),
                                   })
                                 }
                               >
@@ -468,6 +482,23 @@ export function MaitreDetail({
           </Carte>
         )}
       </div>
+
+      <DialogueSuppression
+        ouvert={!!detailASupprimer}
+        surFermeture={() => setDetailASupprimer(null)}
+        entite={detail.route}
+        id={detailASupprimer?.id ?? ''}
+        libelle={detailASupprimer ? `${detail.unite} « ${detailASupprimer.nom} »` : undefined}
+      />
+
+      <DialogueSuppression
+        ouvert={!!maitreASupprimer}
+        surFermeture={() => setMaitreASupprimer(null)}
+        entite={maitre.route}
+        id={maitreASupprimer?.id ?? ''}
+        libelle={maitreASupprimer ? `${maitre.unite} « ${maitreASupprimer.nom} »` : undefined}
+        surSucces={() => setPointe(null)}
+      />
     </div>
   )
 }

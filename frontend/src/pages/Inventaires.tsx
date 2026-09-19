@@ -17,6 +17,7 @@ import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
   PanneauFiltres,
@@ -470,7 +471,9 @@ export function Inventaires() {
                       confirmation.demander({
                         titre: `Cloturer ${inventaire.numero_inventaire} ?`,
                         description:
-                          "Les ecarts seront convertis en mouvements d'ajustement. Le grand livre etant immuable, cette operation ne s'annule pas.",
+                          "Les ecarts seront convertis en mouvements d'ajustement. Le grand livre etant immuable, "
+                          + "ces mouvements ne s'effacent pas : pour revenir dessus il faudra les contre-passer un a un, "
+                          + "puis rouvrir l'inventaire.",
                         libelleConfirmer: 'Cloturer',
                         action: () => cloturer.mutate(),
                       })
@@ -480,6 +483,15 @@ export function Inventaires() {
                     Cloturer et ajuster
                   </Bouton>
                 )}
+
+                {/* ROUVRIR UN INVENTAIRE CLOS. Le serveur refuse tant que ses
+                    ajustements vivent : il faut d'abord les contre-passer. */}
+                <BoutonDevalider
+                  document="inventaires"
+                  id={inventaire.id_inventaire}
+                  statut={inventaire.statut}
+                  consequence="Le comptage redeviendra saisissable a partir des quantites deja relevees."
+                />
               </CarteCorps>
             </Carte>
 

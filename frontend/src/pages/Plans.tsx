@@ -50,6 +50,7 @@ import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
@@ -810,6 +811,15 @@ export function Plans() {
                     )}
                   </>
                 )}
+                {/* UN PLAN VALIDE SUR DE MAUVAIS COEFFICIENTS NE SE REFAIT PAS
+                    A COTE : il revient en brouillon, on corrige, on revalide. */}
+                <BoutonDevalider
+                  document="plans"
+                  id={courant.id_plan}
+                  statut={statut}
+                  taille="md"
+                  consequence="Les besoins calcules restent, mais devront etre recalcules apres correction."
+                />
                 {statut === 'EN_COURS' && (
                   <>
                     <Bouton

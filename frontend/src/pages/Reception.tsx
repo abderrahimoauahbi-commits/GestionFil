@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
   Alerte,
@@ -563,6 +564,16 @@ export function Reception() {
                 Valider le controle
               </Bouton>
             )}
+            {/* ROUVRIR LE CONTROLE. Le serveur refusera tant que les entrees de
+                stock nees de cette reception vivent encore : le papier ne
+                recule pas pendant que la marchandise avance. */}
+            <BoutonDevalider
+              document="receptions"
+              id={id}
+              statut={rec.statut}
+              taille="md"
+              consequence="Les lignes redeviendront modifiables et devront etre controlees a nouveau."
+            />
           </>
         }
       />

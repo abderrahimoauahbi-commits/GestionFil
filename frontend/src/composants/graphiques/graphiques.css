@@ -69,3 +69,102 @@
 .viz .rangee:hover .marque {
   filter: brightness(1.08);
 }
+
+/* ==========================================================================
+   LES GRAPHIQUES PRENNENT VIE — relief et entree en scene
+   --------------------------------------------------------------------------
+   DEUX EFFETS, ET PAS UN DE PLUS.
+
+   LE RELIEF. Une barre d'aplat uniforme se lit comme un rectangle de couleur ;
+   un degrade tres leger — clair en haut, a peine sombre en bas — la fait lire
+   comme un objet. Il passe par un calque `::after` et non par la couleur
+   elle-meme, qui est posee en style en ligne par le composant : une regle CSS
+   de `background` serait perdue contre elle.
+
+   L'ENTREE. Les barres poussent depuis leur bord, une fois, a l'affichage.
+   Ce n'est pas un ornement : le mouvement dit DANS QUEL SENS la grandeur se
+   lit — de gauche a droite pour une barre rangee, du bas vers le haut pour une
+   colonne — et l'oeil saisit la forme du graphique avant d'en lire un chiffre.
+
+   ELLE NE SE REJOUE PAS a chaque survol ni a chaque filtre : une animation qui
+   revient sans cesse cesse d'informer et devient une gene.
+
+   `prefers-reduced-motion` coupe tout. Pour qui a regle son systeme ainsi, le
+   mouvement n'est pas un agrement, c'est un symptome.
+   ========================================================================== */
+
+.viz .marque,
+.marque {
+  position: relative;
+  overflow: hidden;
+}
+
+.viz .marque::after,
+.marque::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.2) 0%,
+    rgb(255 255 255 / 0.04) 45%,
+    rgb(0 0 0 / 0.07) 100%
+  );
+}
+
+/* En theme sombre, le meme relief s'inverse : c'est le haut qui s'eclaircit
+   le moins, sinon la barre parait delavee. */
+.sombre .viz .marque::after,
+.sombre .marque::after {
+  background: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.12) 0%,
+    rgb(255 255 255 / 0.02) 50%,
+    rgb(0 0 0 / 0.16) 100%
+  );
+}
+
+@keyframes viz-pousse-horizontale {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes viz-pousse-verticale {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+/* Les barres rangees poussent depuis la gauche. */
+.rangee .marque {
+  transform-origin: left center;
+  animation: viz-pousse-horizontale 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Les colonnes temporelles poussent depuis la ligne de base. */
+.viz rect.marque {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: viz-pousse-verticale 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Les courbes se tracent. Le pointille parcourt toute la longueur du chemin,
+   puis se resorbe : le trait apparait comme s'il s'ecrivait. */
+@keyframes viz-trace {
+  from { stroke-dashoffset: var(--viz-longueur, 2000); }
+  to   { stroke-dashoffset: 0; }
+}
+
+.viz path.courbe {
+  stroke-dasharray: var(--viz-longueur, 2000);
+  animation: viz-trace 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rangee .marque,
+  .viz rect.marque,
+  .viz path.courbe {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}

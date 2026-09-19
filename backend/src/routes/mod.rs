@@ -102,6 +102,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sante", get(consultation::sante))
         // L'identite de l'entreprise : pied de page et etats imprimes.
         .route("/api/entreprise", get(consultation::entreprise))
+        // CE QUI S'EST PASSE : le fil de la page d'accueil.
+        .route("/api/actualite", get(consultation::actualite))
         // --- Paquets clients ---------------------------------------------------
         // La LISTE et le TELECHARGEMENT sont ouverts a tout compte connecte :
         // refuser a un magasinier de reinstaller son poste ne protege rien. Le

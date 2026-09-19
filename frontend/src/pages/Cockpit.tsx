@@ -323,9 +323,20 @@ export function Cockpit() {
           {mesFiles.length > 0 && (
             <>
               <TitreBande texte="A traiter" />
-              <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+              {/* DES TUILES QUI NE S'ETIRENT PAS. En grille de six colonnes,
+                  une file unique s'etalait sur toute la largeur : un cadre de
+                  mille quatre cents pixels pour trois mots, et cinq colonnes de
+                  vide a sa droite. Les files varient de une a dix selon le role
+                  et selon le jour ; une grille fixe ne peut pas convenir aux
+                  deux. En rangee souple, chaque tuile prend sa place et les
+                  suivantes se mettent a cote — a une seule, elle reste de la
+                  taille d'une tuile. */}
+              <div className="flex flex-wrap gap-3">
                 {mesFiles.map((t) => (
-                  <TuileCompteur key={t.champ} tuile={t} />
+                  <div key={t.champ} className="w-full min-[380px]:w-[calc(50%-0.375rem)]
+                                                lg:w-[calc(25%-0.5625rem)] xl:w-[240px]">
+                    <TuileCompteur tuile={t} />
+                  </div>
                 ))}
               </div>
             </>

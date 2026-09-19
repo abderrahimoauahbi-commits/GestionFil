@@ -1952,6 +1952,33 @@ pub async fn usages_reference(
 /// Les coordonnees bancaires font exception et sont retirees pour qui n'a pas
 /// acces au module ACHAT : elles n'apparaissent que sur les documents
 /// commerciaux, et un changement de RIB frauduleux est une fraude classique.
+/// `GET /api/actualite` — LE FIL DE CE QUI S'EST PASSE.
+///
+/// POURQUOI UNE PAGE D'ACCUEIL MONTRE DES FAITS, PAS DES BOUTONS. Elle
+/// affichait trente liens ranges par section — le menu de gauche, recopie au
+/// milieu de l'ecran. Un accueil qui ne propose que des destinations n'apprend
+/// rien a celui qui l'ouvre ; celui-ci dit qui a enregistre quoi, quel bon est
+/// parti, quelle reception attend un controle.
+///
+/// ON NE FILTRE PAS PAR DROITS LIGNE A LIGNE, et c'est un choix : le fil ne
+/// porte que des titres de documents et des noms de magasins, jamais un prix ni
+/// une quantite en valeur. Le seul montant qui y figure — celui d'un bon de
+/// commande — est masque comme ailleurs par la grille de champs.
+pub async fn actualite(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    // Tout compte connecte lit le fil : savoir que l'atelier a pese une
+    // reception n'est un secret pour personne, et l'ignorer fait travailler
+    // deux fois.
+    let lignes = sqlx::query("SELECT * FROM v_actualite LIMIT 40")
+        .fetch_all(&state.db)
+        .await?;
+    let mut sortie = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
+    Ok(Json(sortie))
+}
+
 pub async fn entreprise(
     State(state): State<AppState>,
     user: Utilisateur,

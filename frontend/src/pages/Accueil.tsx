@@ -27,7 +27,7 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { estAccessible, MODULES, NAVIGATION } from '../composants/Coquille'
+import { estAccessible, NAVIGATION } from '../composants/Coquille'
 import { cn, fmt } from '../lib/utils'
 
 /** Ce que le rôle veut dire, en une phrase que son titulaire reconnaît. */
@@ -248,6 +248,120 @@ function TauxDeChange() {
   )
 }
 
+/**
+ * LE FIL DE CE QUI S'EST PASSE.
+ *
+ * C'est ce qu'un accueil doit porter : des faits, pas des liens. Qui a
+ * enregistre quel mouvement, quel bon est parti, quelle reception a ete
+ * controlee. Une page qui dit « voici ou aller » suppose qu'on ne le sait pas ;
+ * une page qui dit « voici ce qui a bouge » apprend quelque chose a chaque
+ * ouverture — et c'est elle qui donne le sentiment que l'outil VIT.
+ *
+ * CHAQUE LIGNE S'OUVRE. Un fil dont les evenements ne menent nulle part est une
+ * frise decorative : on le lit une fois, puis on cesse de le voir.
+ */
+interface Evenement {
+  quand: string
+  categorie: string
+  titre: string
+  detail: string | null
+  chemin: string
+  par: string | null
+}
+
+const TEINTE_CATEGORIE: Record<string, string> = {
+  MOUVEMENT: 'bg-primaire/12 text-primaire',
+  RECEPTION: 'bg-succes/15 text-succes',
+  COMMANDE: 'bg-alerte/15 text-alerte',
+  TRANSFERT: 'bg-primaire/10 text-primaire',
+  INVENTAIRE: 'bg-attenue text-attenue-texte',
+  PLAN: 'bg-attenue text-attenue-texte',
+  ACHAT: 'bg-alerte/12 text-alerte',
+  MACHINE: 'bg-attenue text-attenue-texte',
+}
+
+/** « il y a 3 h », « hier », « le 12/09 » — la distance se lit mieux qu'une date. */
+function depuis(iso: string): string {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return ''
+  const min = Math.round((Date.now() - t) / 60000)
+  if (min < 1) return "a l'instant"
+  if (min < 60) return `il y a ${min} min`
+  const h = Math.round(min / 60)
+  if (h < 24) return `il y a ${h} h`
+  const j = Math.round(h / 24)
+  if (j === 1) return 'hier'
+  if (j < 7) return `il y a ${j} jours`
+  return fmt.date(iso)
+}
+
+function FilActualite() {
+  const q = useQuery({
+    queryKey: ['actualite'],
+    queryFn: () => api.get<Evenement[]>('/api/actualite'),
+    staleTime: 60_000,
+  })
+  const evenements = q.data ?? []
+
+  return (
+    <section className="flex flex-col gap-2.5">
+      <h2
+        className="text-[11px] font-semibold uppercase tracking-[0.14em] text-attenue-texte"
+      >
+        Ce qui s'est passé
+      </h2>
+
+      {q.isLoading ? (
+        <div className="space-y-1.5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-11 animate-pulse rounded-[var(--radius-sm)] bg-attenue" />
+          ))}
+        </div>
+      ) : evenements.length === 0 ? (
+        <p className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-3 py-4
+                      text-[13px] text-attenue-texte">
+          Rien n'a encore ete enregistre. Le fil se remplira des la premiere
+          reception, le premier mouvement ou le premier bon de commande.
+        </p>
+      ) : (
+        <ol className="flex flex-col gap-1.5">
+          {evenements.map((e, i) => (
+            <li key={`${e.quand}-${i}`}>
+              <Link
+                to={e.chemin}
+                className={cn(
+                  'group flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5',
+                  'rounded-[var(--radius-sm)] border border-bordure bg-surface px-3 py-2',
+                  'transition-colors hover:border-primaire/40 hover:bg-primaire/[0.04]',
+                )}
+              >
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                    TEINTE_CATEGORIE[e.categorie] ?? 'bg-attenue text-attenue-texte',
+                  )}
+                >
+                  {e.categorie}
+                </span>
+                <span className="text-[13.5px] font-medium text-texte">{e.titre}</span>
+                {e.detail && (
+                  <span className="text-[12px] text-attenue-texte">{e.detail}</span>
+                )}
+                {/* L'AUTEUR ET LE MOMENT FERMENT LA LIGNE, a droite : ce sont
+                    les deux choses qu'on cherche en second, jamais en premier. */}
+                <span className="ml-auto whitespace-nowrap text-[11.5px] text-attenue-texte">
+                  {e.par ? `${e.par} · ` : ''}
+                  {depuis(e.quand)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
 function salutation(): string {
   const h = new Date().getHours()
   if (h < 12) return 'Bonjour'
@@ -276,13 +390,10 @@ export function Accueil() {
   )
   const quotidiens = accessibles.filter((e) => e.principale)
 
-  /* Les rubriques dans l'ordre de MODULES, vides ecartees : une rubrique sans
-     aucun ecran ouvert n'a rien a faire sur l'accueil de quelqu'un. Les ecrans
-     du quotidien n'y reviennent pas — ils sont deja en haut. */
-  const rubriques = MODULES.map((m) => ({
-    ...m,
-    entrees: accessibles.filter((e) => e.section === m.id && !e.principale),
-  })).filter((r) => r.entrees.length > 0)
+  /* LES RUBRIQUES NE SONT PLUS CALCULEES ICI. Elles servaient au mur de trente
+     boutons range par section, qui recopiait le menu de gauche au milieu de
+     l'ecran. La navigation complete reste dans la barre laterale et dans la
+     palette de commandes ; l'accueil, lui, montre ce qui s'est passe. */
 
   return (
     <div className="flex flex-col gap-7 pb-4">
@@ -398,38 +509,17 @@ export function Accueil() {
         </section>
       )}
 
-      {/* ================= LE RESTE, PAR RUBRIQUE ======================= */}
-      {rubriques.map((r) => (
-        <section key={r.id} className="flex flex-col gap-2.5">
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-            <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold
-                           uppercase tracking-[0.14em] text-attenue-texte">
-              <r.Icone className="size-3.5" style={{ color: teinte(r.id).trait }} />
-              {r.libelle}
-            </h2>
-            <span className="text-[11.5px] text-attenue-texte/65">{r.resume}</span>
-          </div>
-          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
-            {r.entrees.map((e) => (
-              <Link
-                key={e.vers}
-                to={e.vers}
-                className={cn(
-                  'group flex items-center gap-2.5 rounded-[var(--radius-sm)] border border-bordure',
-                  'bg-surface px-3 py-2.5 text-[13.5px] text-texte transition-colors',
-                  'hover:border-primaire/40 hover:bg-primaire/[0.04]',
-                )}
-              >
-                <e.Icone
-                  className="size-4 shrink-0 transition-colors"
-                  style={{ color: teinte(e.section).trait }}
-                />
-                <span className="min-w-0 flex-1 truncate">{e.libelle}</span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ))}
+      {/* ================= CE QUI S'EST PASSE ===========================
+          LE MUR DE TRENTE BOUTONS A DISPARU D'ICI. Il rangeait par rubrique —
+          Catalogue, Production, Achats, Stock, Finance, Parametres — c'est-a-
+          dire qu'il recopiait le menu de gauche au milieu de l'ecran. Une page
+          d'accueil qui ne propose que des destinations n'apprend rien a celui
+          qui l'ouvre : il sait deja ou il va, il ouvre l'outil pour savoir ce
+          qui s'est passe pendant son absence.
+
+          La navigation complete reste dans la barre laterale et dans la palette
+          de commandes, ou elle est cherchee quand on en a besoin. */}
+      <FilActualite />
 
       {accessibles.length === 0 && (
         <p className="text-[14px] text-attenue-texte">

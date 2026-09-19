@@ -13,6 +13,7 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -37,6 +38,7 @@ import {
   Chargement,
 } from '../composants/ui/base'
 import { Infobulle } from '../composants/ui/surcouches'
+import { ColonnesTemps } from '../composants/graphiques/Graphiques'
 import { cn, fmt } from '../lib/utils'
 
 type Onglet = 'mouvements' | 'familles' | 'prix' | 'fournisseurs' | 'qualites'
@@ -258,6 +260,35 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
   const maxMois = Math.max(...mois.map((m) => nb(m, 'quantite_kg') ?? 0), 1)
   const voitValeur = a(mois, 'valeur_mad')
 
+  /* LE FLUX PAR MOIS, AGREGE POUR LE GRAPHIQUE.
+     Le tableau detaille par mois ET PAR TYPE : un meme mois y occupe autant de
+     lignes qu'il a connu de sortes de mouvements. Une frise temporelle demande
+     un point par mois — on additionne donc les entrees, et l'on marque en
+     orange les mois ou les sorties l'emportent, ce qui est le seul evenement
+     qui merite d'etre vu d'un coup d'oeil. */
+  const moisAgreges = useMemo(() => {
+    const par = new Map<string, { entrees: number; sorties: number }>()
+    for (const m of mois) {
+      const cle = txt(m, 'annee_mois')
+      if (!cle) continue
+      const c = par.get(cle) ?? { entrees: 0, sorties: 0 }
+      const q = nb(m, 'quantite_kg') ?? 0
+      if (nb(m, 'signe') === 1) c.entrees += q
+      else c.sorties += q
+      par.set(cle, c)
+    }
+    return [...par.entries()]
+      .sort(([a1], [b1]) => a1.localeCompare(b1))
+      .map(([cle, c]) => ({
+        cle,
+        // « 2026-09 » se lit mal ; « 09/26 » se lit d'un coup, et tient sous
+        // une colonne etroite.
+        libelle: cle.length === 7 ? `${cle.slice(5)}/${cle.slice(2, 4)}` : cle,
+        valeur: Math.round(c.entrees),
+        etat: c.sorties > c.entrees ? ('alerte' as const) : undefined,
+      }))
+  }, [mois])
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
@@ -277,9 +308,37 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         />
       </div>
 
+      {/* ---- LE FLUX SE VOIT AVANT DE SE LIRE ------------------------------
+          Il n'existait qu'en tableau : une ligne par mois et par type, triee
+          par rien de particulier. Or la premiere question qu'on pose a des
+          mouvements est « la courbe monte-t-elle ou descend-elle ? », et une
+          colonne de nombres ne repond pas a celle-la — il faut les comparer
+          deux a deux, de tete, dans l'ordre ou ils sont ecrits.
+
+          Le graphique donne la FORME, le tableau garde le DETAIL : le meme
+          composant porte les deux, et le bouton en haut a droite bascule de
+          l'un a l'autre. Rien n'est perdu, l'ordre de lecture change. */}
+      {/* DEUX MOIS AU MOINS, sinon rien. Une frise a une seule colonne remplit
+          la largeur d'un aplat de couleur et n'apprend strictement rien : elle
+          ne montre ni tendance, ni saison, ni rupture. Le tableau ci-dessous
+          dit deja le chiffre. Le graphique apparaitra de lui-meme au deuxieme
+          mois de mouvements. */}
+      {moisAgreges.length > 1 && (
+        <ColonnesTemps
+          titre="Ce qui est entré, mois par mois"
+          sousTitre={
+            moisAgreges.some((m) => m.etat === 'alerte')
+              ? 'en vert les entrées, en orange les sorties'
+              : 'quantités entrées en magasin'
+          }
+          unite="kg"
+          donnees={moisAgreges}
+        />
+      )}
+
       <Carte repliable="statistiques.1">
         <CarteEntete>
-          <CarteTitre>Flux par mois et par type</CarteTitre>
+          <CarteTitre>Flux par mois et par type — le detail</CarteTitre>
         </CarteEntete>
         <CarteCorps className="p-0">
           {mois.length === 0 ? (
@@ -336,9 +395,16 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         </CarteCorps>
       </Carte>
 
+      {/* ---- LE DETAIL PAR REFERENCE, EN TETE SEULEMENT --------------------
+          Soixante lignes s'affichaient d'un coup : mille huit cents pixels de
+          tableau sous un ecran qui n'en fait que neuf cents. Or personne ne lit
+          la quarante-deuxieme ligne d'un tableau de statistiques — on regarde
+          les premieres, puis on va chercher ailleurs si l'on veut tout. Douze
+          suffisent a montrer la forme ; le reste est a l'etat des stocks, qui
+          existe pour cela et sait filtrer. */}
       <Carte repliable="statistiques.2">
         <CarteEntete>
-          <CarteTitre>Par référence</CarteTitre>
+          <CarteTitre>Les references qui ont le plus bouge</CarteTitre>
           <span className="text-[11px] text-attenue-texte">
             la rotation rapporte les sorties au stock actuel — une approximation, faute
             d'historique de stock
@@ -360,7 +426,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
                 </tr>
               </thead>
               <tbody>
-                {refs.slice(0, 60).map((r, i) => {
+                {refs.slice(0, 12).map((r, i) => {
                   const jours = nb(r, 'jours_sans_mouvement')
                   return (
                     <tr key={i} className="border-b border-bordure/60">
@@ -408,6 +474,15 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
                 })}
               </tbody>
             </table>
+            {refs.length > 12 && (
+              <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
+                Les 12 références qui ont le plus bougé, sur {refs.length} suivies.{' '}
+                <Link to="/etat-stock" className="text-primaire hover:underline">
+                  L’état des stocks
+                </Link>{' '}
+                porte la liste complète, avec ses filtres et son export.
+              </p>
+            )}
           </div>
         </CarteCorps>
       </Carte>

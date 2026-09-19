@@ -264,52 +264,29 @@ function OngletInconnu() {
 }
 
 /**
- * AIGUILLAGE DE COQUILLE : QUI RECOIT LES ONGLETS.
+ * Aiguillage de coquille. Le bureau recoit l’atelier complet (onglets, panneau
+ * lateral, barre d’etat) ; le web et la PWA gardent la coquille tactile, mieux
+ * adaptee a un ecran de telephone.
+ */
+/**
+ * Apercu de l'atelier hors Tauri.
  *
- * L'ERP a deux enveloppes. L'ATELIER porte le multifenetrage — onglets,
- * epinglage, fractionnement en deux colonnes, glisser-deposer d'un groupe a
- * l'autre — et suppose un clavier, une souris et de la largeur. La COQUILLE
- * tactile montre un ecran a la fois, ce qui est le bon choix sur un telephone
- * de magasinier.
+ * Compiler l'enveloppe de bureau prend plusieurs minutes ; `?atelier=1` permet
+ * de voir la coquille d'atelier dans un navigateur, et `?atelier=0` de revenir
+ * a la coquille tactile. Le choix est retenu, sinon la premiere navigation
+ * effacerait le parametre et ferait basculer la coquille en pleine session.
  *
- * L'ATELIER N'ETAIT SERVI QU'A TAURI, ce qui etait une erreur de decoupage :
- * le multifenetrage n'a rien d'une affaire d'empaquetage. Celui qui ouvre
- * l'ERP au navigateur depuis un poste de bureau travaille exactement comme
- * celui qui a installe l'application — il compare un catalogue et un bon de
- * commande, il garde le plan d'achat epingle pendant qu'il saisit. Lui refuser
- * les onglets parce qu'il n'a pas installe le paquet ne protegeait personne.
- *
- * LE TEST PORTE SUR LE POSTE, PAS SUR L'ENVELOPPE : un pointeur fin et au
- * moins 1024 px de large. Un telephone et une tablette gardent la coquille
- * tactile, ou les onglets seraient illisibles et la croix de fermeture
- * intouchable.
- *
- * LE CHOIX RESTE REPRENABLE. `?atelier=0` ramene a la coquille tactile sur un
- * grand ecran, `?atelier=1` force l'atelier ailleurs, et la preference est
- * retenue — sinon la premiere navigation effacerait le parametre et ferait
- * basculer la coquille en pleine session.
- *
- * AUCUNE DONNEE NI AUCUN DROIT N'EN DEPEND : les deux coquilles appellent les
- * memes routes, et le serveur applique les memes controles.
+ * Ce n'est qu'un confort de developpement : aucune donnee ni aucun droit ne
+ * depend de la coquille, les deux appellent les memes routes et le serveur
+ * applique les memes controles.
  */
 const CLE_APERCU = 'gestionfil.atelier.apercu'
-
-/** Le poste a-t-il de quoi tenir des onglets ? */
-function posteDeBureau(): boolean {
-  if (typeof window === 'undefined') return false
-  return (
-    window.matchMedia('(pointer: fine)').matches && window.matchMedia('(min-width: 1024px)').matches
-  )
-}
 
 function apercuAtelier(): boolean {
   const demande = new URLSearchParams(window.location.search).get('atelier')
   if (demande === '1') localStorage.setItem(CLE_APERCU, '1')
-  else if (demande === '0') localStorage.setItem(CLE_APERCU, '0')
-  const retenu = localStorage.getItem(CLE_APERCU)
-  if (retenu === '1') return true
-  if (retenu === '0') return false
-  return posteDeBureau()
+  else if (demande === '0') localStorage.removeItem(CLE_APERCU)
+  return localStorage.getItem(CLE_APERCU) === '1'
 }
 
 function Aiguillage() {

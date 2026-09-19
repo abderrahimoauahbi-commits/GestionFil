@@ -133,15 +133,7 @@ const DYNAMIQUES: {
   },
   {
     motif: /^\/receptions\/([^/]+)$/,
-    decrire: (m) => ({ titre: `Reception${court(m[1])}`, Icone: Package }),
-  },
-  {
-    motif: /^\/mouvements\/nouveau$/,
-    decrire: () => ({ titre: 'Nouveau mouvement', detail: 'Stock', Icone: ClipboardList }),
-  },
-  {
-    motif: /^\/mouvements\/([^/]+)$/,
-    decrire: () => ({ titre: 'Bon de mouvement', detail: 'Stock', Icone: FileText }),
+    decrire: (m) => ({ titre: `Reception ${m[1]}`, Icone: Package }),
   },
   {
     motif: /^\/bons-commande\/nouveau$/,
@@ -156,18 +148,6 @@ const DYNAMIQUES: {
     decrire: (m) => ({ titre: `Droits ${m[1]}`, detail: 'Utilisateur', Icone: ShieldCheck }),
   },
 ]
-
-/**
- * Le segment d'identifiant, quand il apprend quelque chose.
- *
- * « BC-2026-0042 » situe l'onglet ; « 955cafed-7064-4a21-ba65-4e29a28216b0 » le
- * remplit d'un bruit que personne ne lit, et qui chasse le titre hors de la
- * largeur d'onglet. Un identifiant technique ne se montre donc pas.
- */
-function court(segment: string) {
-  const technique = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  return technique.test(segment) ? '' : ` ${segment}`
-}
 
 /** Titre et icone d'un chemin, qu'il soit statique ou dynamique. */
 export function decrire(chemin: string): Descripteur {
@@ -184,14 +164,7 @@ export function decrire(chemin: string): Descripteur {
   const parent = NAVIGATION.filter((e) => e.vers !== '/' && chemin.startsWith(e.vers)).sort(
     (a, b) => b.vers.length - a.vers.length,
   )[0]
-  // Le repli nommait l'onglet par son adresse complete. Sur un chemin qui porte
-  // un identifiant, cela donnait une ligne illisible ; le nom de l'ecran parent
-  // dit au moins ou l'on se trouve.
-  return {
-    titre: parent ? parent.libelle : chemin,
-    detail: parent?.section,
-    Icone: parent?.Icone ?? ClipboardList,
-  }
+  return { titre: chemin, Icone: parent?.Icone ?? ClipboardList }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -339,22 +312,9 @@ export function FournisseurOnglets({
 
   /* Onglet actif au moment de la restauration, capture au premier rendu : il
      prime sur le chemin d'ouverture, sinon rouvrir la fenetre ramenerait
-     toujours au cockpit en perdant l'onglet sur lequel on avait quitte.
-
-     MAIS IL NE PRIME PAS SUR UNE ADRESSE DEMANDEE. Ouvrir « /plan-achat »
-     depuis un signet, un lien du tableau de bord, ou simplement rafraichir la
-     page, ramenait l'onglet de la veille : l'adresse etait juste dans la barre,
-     et l'ecran montrait autre chose. Le defaut ne se voyait guere dans
-     l'application de bureau, ou l'on ne tape pas d'adresse ; il devient une
-     panne quotidienne des que l'atelier tourne dans un navigateur.
-
-     La regle est donc : l'adresse gagne quand elle dit quelque chose, la
-     restauration gagne quand elle ne dit rien — c'est-a-dire a la racine, qui
-     est l'entree normale de l'application et non un choix d'ecran. */
+     toujours au cockpit en perdant l'onglet sur lequel on avait quitte. */
   const actifRestaure = useRef(
-    chemin !== '/'
-      ? null
-      : ((etat.groupes.find((g) => g.id === etat.focus) ?? etat.groupes[0])?.actif ?? null),
+    (etat.groupes.find((g) => g.id === etat.focus) ?? etat.groupes[0])?.actif ?? null,
   )
   const premierRendu = useRef(true)
 

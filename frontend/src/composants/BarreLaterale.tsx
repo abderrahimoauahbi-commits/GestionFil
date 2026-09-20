@@ -130,7 +130,7 @@ export function BarreLaterale() {
         <e.Icone className={cn('shrink-0', e.sous ? 'size-3' : 'size-3.5')} />
         <span className="min-w-0 flex-1 truncate">{e.libelle}</span>
         {e.aVenir && (
-          <span className="shrink-0 rounded-[3px] border border-bordure px-1 text-[9px] text-attenue-texte">
+          <span className="shrink-0 rounded-[3px] border border-barre-attenue/40 px-1 text-[9px] text-barre-attenue">
             a venir
           </span>
         )}
@@ -142,10 +142,10 @@ export function BarreLaterale() {
       // dire « ceci est une page de la rubrique du dessus ».
       e.sous ? 'pl-[2.875rem] text-[12px]' : 'pl-8 text-[12.5px]',
       actif
-        ? 'bg-primaire/12 font-medium text-primaire'
+        ? 'bg-barre-actif font-medium text-or'
         : e.aVenir
-          ? 'cursor-not-allowed text-attenue-texte/60'
-          : 'text-attenue-texte hover:bg-attenue hover:text-texte',
+          ? 'cursor-not-allowed text-barre-attenue/50'
+          : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
     )
     if (e.aVenir) {
       return (
@@ -183,8 +183,19 @@ export function BarreLaterale() {
           setOuvert(null)
         }}
         className={cn(
-          'sans-impression hidden flex-col border-r border-bordure',
-          'bg-surface transition-[width] duration-150 ease-out md:flex',
+          'sans-impression hidden flex-col border-r border-barre/40',
+          // LA COLONNE DE NAVIGATION EST SOMBRE, LA ZONE DE TRAVAIL EST CLAIRE.
+          //
+          // Elle etait blanche comme le contenu : rien ne separait « ou je
+          // suis » de « ce que je regarde », et le regard devait chercher le
+          // filet de separation pour savoir ou finissait le menu.
+          //
+          // C'est la disposition des consoles d'administration serieuses —
+          // Gentelella, Fiori, la plupart des ERP — et elle ne tient pas a la
+          // mode : le chrome sombre recule, le contenu clair avance, et la
+          // hierarchie se lit sans y penser. Les jetons `--barre` existaient
+          // deja pour cela et ne servaient nulle part.
+          'bg-barre text-barre-texte transition-[width] duration-150 ease-out md:flex',
           // POSEE DANS LE FLUX SUR LE BUREAU, EN SURIMPRESSION SUR LE WEB.
           //
           // `fixed` la colle aux quatre bords de la fenetre. Dans un
@@ -204,7 +215,7 @@ export function BarreLaterale() {
         )}
       >
         {/* --- Marque et figeage ------------------------------------------ */}
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-bordure px-3">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-barre-attenue/20 px-3">
           {/* La marque porte le retour a l'accueil : l'entete ne l'affiche plus
               en disposition laterale, ce lien doit donc exister ici. */}
           {/* LA MARQUE DE L'ENTREPRISE, PAS DEUX LETTRES. Un carre « GF » ne
@@ -232,8 +243,8 @@ export function BarreLaterale() {
                 className={cn(
                   'grid size-6 shrink-0 place-items-center rounded-[3px] transition-colors',
                   menuFige
-                    ? 'bg-primaire/12 text-primaire'
-                    : 'text-attenue-texte hover:bg-attenue hover:text-texte',
+                    ? 'bg-barre-actif text-or'
+                    : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
                 )}
               >
                 {menuFige ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
@@ -259,8 +270,8 @@ export function BarreLaterale() {
                     'flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-left',
                     'text-[12.5px] transition-colors',
                     contientCourant
-                      ? 'font-medium text-texte'
-                      : 'text-attenue-texte hover:bg-attenue hover:text-texte',
+                      ? 'font-medium text-barre-texte'
+                      : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
                   )}
                 >
                   <m.Icone className="size-4 shrink-0" strokeWidth={contientCourant ? 2.2 : 1.7} />
@@ -289,7 +300,7 @@ export function BarreLaterale() {
         </nav>
 
         {/* --- Pied : reglages et identite --------------------------------- */}
-        <div className="shrink-0 border-t border-bordure p-2">
+        <div className="shrink-0 border-t border-barre-attenue/20 p-2">
           {/* CHAQUE ECRAN PORTE SON PROPRE NOM ET SA PROPRE ICONE.
               Ce pied affichait ceux du MODULE : deux ecrans de reglages s'y
               montraient donc avec la meme icone et la meme infobulle,
@@ -309,8 +320,8 @@ export function BarreLaterale() {
                     'flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-[12.5px]',
                     'transition-colors',
                     courant
-                      ? 'bg-primaire/12 font-medium text-primaire'
-                      : 'text-attenue-texte hover:bg-attenue hover:text-texte',
+                      ? 'bg-barre-actif font-medium text-or'
+                      : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
                   )}
                 >
                   <e.Icone className="size-4 shrink-0" strokeWidth={courant ? 2.2 : 1.7} />
@@ -320,7 +331,7 @@ export function BarreLaterale() {
             })
           })}
           {ouverte && (
-            <div className="px-2 pt-2 text-[10px] text-attenue-texte">
+            <div className="px-2 pt-2 text-[10px] text-barre-attenue">
               {moi?.login} · {moi?.role}
             </div>
           )}

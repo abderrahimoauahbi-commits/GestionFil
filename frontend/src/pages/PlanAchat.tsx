@@ -55,6 +55,7 @@ interface Proposition extends Record<string, unknown> {
   designation: string
   code_fournisseur: string
   fournisseur_nom: string
+  fournisseur_pays: string | null
   quantite_suggeree_kg: number
   quantite_suggeree_unite: number | null
   unite_saisie: string | null
@@ -466,7 +467,30 @@ export function PlanAchat() {
       rendu: (p) => (
         <div className="min-w-0">
           <div className="truncate font-medium">{p.code_reference}</div>
-          <div className="truncate text-[11px] text-attenue-texte">{p.fournisseur_nom}</div>
+          {p.designation && (
+            <div className="truncate text-[11px] text-attenue-texte">{p.designation}</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      /* LE FOURNISSEUR EST UNE COLONNE, PAS UNE SOUS-LIGNE.
+         Il figurait en petit sous la reference : visible, mais impossible a
+         trier et surtout a FILTRER. Or c'est la premiere question qu'on se
+         pose devant un plan d'achat de cent six lignes — « que dois-je
+         commander chez Sujata ? » — parce qu'on ne passe pas une commande par
+         reference, on la passe par fournisseur. Sans ce filtre, il fallait
+         lire les cent six lignes pour en retenir douze. */
+      champ: 'fournisseur_nom',
+      entete: 'Fournisseur',
+      largeur: '150px',
+      filtre: 'liste',
+      rendu: (p) => (
+        <div className="min-w-0">
+          <div className="truncate">{p.fournisseur_nom || '—'}</div>
+          {p.fournisseur_pays && (
+            <div className="truncate text-[11px] text-attenue-texte">{p.fournisseur_pays}</div>
+          )}
         </div>
       ),
     },

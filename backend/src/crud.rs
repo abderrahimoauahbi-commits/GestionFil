@@ -221,6 +221,29 @@ pub const ENTITES: &[Entite] = &[
                           AS nb_fournisseurs",
         tri: "c.ordre_affichage",
     },
+    // CE DANS QUOI LA MATIERE ARRIVE, et donc le mot qu'on emploie pour la
+    // compter. Tout l'ERP disait « bobine », ce qui est juste du fil et faux
+    // de la colle — qui vient en cuves de mille litres sanglees sur palette —
+    // comme de la Bande, dont une palette porte des centaines de petits
+    // rouleaux. Chaque type porte son vocabulaire, et les ecrans l'empruntent.
+    Entite {
+        chemin: "conditionnements",
+        table: "conditionnement",
+        module: "CATALOGUE",
+        cle: "code_conditionnement",
+        cle_generee: false,
+        creation: &[
+            "code_conditionnement", "libelle", "unite_singulier", "unite_pluriel",
+            "se_compte", "contenance_litres", "ordre_affichage", "description", "actif"],
+        modification: &[
+            "libelle", "unite_singulier", "unite_pluriel", "se_compte",
+            "contenance_litres", "ordre_affichage", "description", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*, (SELECT COUNT(*) FROM reference r
+                           WHERE r.code_conditionnement = c.code_conditionnement AND r.actif = 1)
+                          AS nb_references",
+        tri: "c.ordre_affichage",
+    },
     // Le meme rouge, chez chacun : « RED 7612 » chez Hasirci, « OZ 5109 » chez
     // Ozkaralar. C'est ce qui permet a la saisie assistee de reconnaitre une
     // couleur sur une facture, et a l'acheteur de savoir qui sait la fournir.
@@ -282,7 +305,7 @@ pub const ENTITES: &[Entite] = &[
             // completion ne pouvait donc pas le renseigner.
             "code_couleur",
             "reference_fournisseur", "supplement_teinture",
-            "unite_catalogue", "poids_bobine_kg",
+            "unite_catalogue", "code_conditionnement", "poids_bobine_kg",
             "bobines_par_palette", "bobines_par_lot", "densite_kg_ml", "prix_catalogue",
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
@@ -293,7 +316,7 @@ pub const ENTITES: &[Entite] = &[
             "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
             "code_couleur",
             "reference_fournisseur", "supplement_teinture",
-            "unite_catalogue", "poids_bobine_kg",
+            "unite_catalogue", "code_conditionnement", "poids_bobine_kg",
             "bobines_par_palette", "bobines_par_lot", "densite_kg_ml", "prix_catalogue",
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",

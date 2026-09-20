@@ -284,12 +284,40 @@ export function Catalogue() {
         'Le lot est le bain que le fournisseur produit — une unité d’achat, pas de manutention.',
     },
     {
-      champ: 'poids_bobine_kg',
-      libelle: 'Poids par bobine (kg)',
-      type: 'nombre',
-      aide: 'Obligatoire pour une unité Bobine ou Palette.',
+      champ: 'code_conditionnement',
+      libelle: 'Conditionnement',
+      type: 'liste',
+      options: [
+        { valeur: 'BOBINE', libelle: 'Bobines (fil)' },
+        { valeur: 'ROULEAU', libelle: 'Rouleaux sur palette' },
+        { valeur: 'ROULEAU_PETIT', libelle: 'Petits rouleaux (des centaines par palette)' },
+        { valeur: 'CUVE', libelle: 'Cuve IBC / GRV 1000 L (pompée)' },
+        { valeur: 'FUT', libelle: 'Fût 200 L' },
+        { valeur: 'SAC', libelle: 'Sacs' },
+        { valeur: 'CONTENEUR', libelle: 'Conteneur (pièce unique)' },
+        { valeur: 'VRAC', libelle: 'Vrac (ne se compte pas, se pèse)' },
+      ],
+      aide:
+        'Ce dans quoi cette matière arrive, et donc le mot employé pour la compter. ' +
+        'Tant qu’il n’est pas renseigné, l’état du stock affiche les kilos seuls : ' +
+        'mieux vaut aucun comptage qu’un comptage faux.',
     },
-    { champ: 'bobines_par_palette', libelle: 'Bobines par palette', type: 'entier' },
+    {
+      champ: 'poids_bobine_kg',
+      libelle: 'Poids par unité (kg)',
+      type: 'nombre',
+      aide:
+        'Le poids net d’UNE unité de conditionnement : une bobine, un rouleau, ' +
+        'une cuve pleine. Sans lui, aucun comptage n’est possible.',
+    },
+    {
+      champ: 'bobines_par_palette',
+      libelle: 'Unités par palette',
+      type: 'entier',
+      aide:
+        'Combien il en tient sur une palette complète : 120 bobines, ' +
+        '480 petits rouleaux de Bande, 1 seule cuve de colle.',
+    },
     {
       champ: 'bobines_par_lot',
       libelle: 'Bobines par lot',

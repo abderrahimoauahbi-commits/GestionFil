@@ -18,8 +18,43 @@ export type Famille =
   | 'graphite'
   | 'chaud'
   | 'contraste'
+  | 'industriel'
+  | 'terminal'
+  | 'nordique'
+  | 'verre'
+  | 'atlas'
 
 export const FAMILLES: { id: Famille; libelle: string; description: string }[] = [
+  {
+    id: 'industriel',
+    libelle: 'Industrial Clean',
+    description:
+      'Fond clair, bleu franc, beaucoup de blanc. Le choix sur lequel on ne se trompe pas.',
+  },
+  {
+    id: 'atlas',
+    libelle: 'Atlas Data',
+    description:
+      'Bleu profond, angles nets, grille stricte. Pour un ecran charge de chiffres.',
+  },
+  {
+    id: 'nordique',
+    libelle: 'Nordic Textile',
+    description:
+      'Lin, terre cuite, arrondis genereux. Rappelle la matiere ; bon pour recevoir un client.',
+  },
+  {
+    id: 'terminal',
+    libelle: 'Terminal Supply',
+    description:
+      'Console sombre, chiffres a chasse fixe, lignes serrees. Faite pour y rester huit heures.',
+  },
+  {
+    id: 'verre',
+    libelle: 'Glass Industrial',
+    description:
+      'Verre depoli sur degrade sombre. Le flou coute cher : reserve aux cartes.',
+  },
   {
     id: 'ardoise',
     libelle: 'Ardoise',

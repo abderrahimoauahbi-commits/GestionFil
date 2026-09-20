@@ -289,6 +289,7 @@ pub fn router(state: AppState) -> Router {
                    .delete(machines::supprimer_machine))
         // En panne, en sommeil, remise en production, retiree du parc.
         .route("/api/machines/{code}/etat", patch(machines::changer_etat))
+        .route("/api/machines/{code}/contenu", get(machines::contenu_machine))
         .route("/api/machines/{code}/zones/{zone}", get(machines::etat_zone))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
@@ -374,6 +375,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stats/fournisseurs", get(consultation::stats_fournisseurs))
         .route("/api/stats/qualites", get(consultation::stats_qualites))
         .route("/api/controles", get(consultation::controles))
+        .route("/api/supervision", get(consultation::supervision))
         .route("/api/controles/{code}", get(consultation::controle_detail))
         .route("/api/fournisseurs/scorecard", get(consultation::scorecard))
         .route("/api/stock", get(consultation::stock))

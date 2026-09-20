@@ -113,21 +113,11 @@ export function BarreLaterale() {
   const reglages = tous.filter((m) => m.id === 'PARAMETRES')
 
   /** Un ecran de la liste, avec son etat courant et son eventuel « a venir ». */
-  /** Cette entree est-elle la rubrique d'un sous-menu ? */
-  const aDesSous = (e: EntreeNav) => {
-    const i = NAVIGATION.indexOf(e)
-    return i >= 0 && !!NAVIGATION[i + 1]?.sous
-  }
-
   const lien = (e: EntreeNav) => {
-    /* L'ENTREE ACTIVE SE RECONNAIT PAR SON CHEMIN EXACT — sauf le parent d'un
-       sous-menu, qui partage son chemin avec sa premiere page et s'allumerait
-       deux fois. Le parent reste donc eteint des qu'une de ses pages est
-       ouverte : c'est la page qui se designe, pas la rubrique. */
-    const actif = e.vers === courante?.vers && (!!e.sous || !aDesSous(e))
+    const actif = e.vers === courante?.vers
     const contenu = (
       <>
-        <e.Icone className={cn('shrink-0', e.sous ? 'size-3' : 'size-3.5')} />
+        <e.Icone className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{e.libelle}</span>
         {e.aVenir && (
           <span className="shrink-0 rounded-[3px] border border-barre-attenue/40 px-1 text-[9px] text-barre-attenue">
@@ -137,10 +127,8 @@ export function BarreLaterale() {
       </>
     )
     const classe = cn(
-      'flex items-center gap-2 rounded-[var(--radius-sm)] py-1.5 pr-2 transition-colors',
-      // UN CRAN DE PLUS, ET UN PEU PLUS DISCRET : le decalage seul suffit a
-      // dire « ceci est une page de la rubrique du dessus ».
-      e.sous ? 'pl-[2.875rem] text-[12px]' : 'pl-8 text-[12.5px]',
+      'flex items-center gap-2 rounded-[var(--radius-sm)] py-1.5 pl-8 pr-2 text-[12.5px]',
+      'transition-colors',
       actif
         ? 'bg-barre-actif font-medium text-or'
         : e.aVenir

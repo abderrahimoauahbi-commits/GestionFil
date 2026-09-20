@@ -28,6 +28,30 @@ export interface Machine {
   date_etat: string | null
 }
 
+/**
+ * Une ligne du contenu d'une machine : la zone, et ce qui est monte dessus.
+ *
+ * LES ZONES VIDES Y FIGURENT, avec une reference nulle. Un etage sans fil est
+ * une information — c'est la qu'il faut charger — et le retirer donnerait un
+ * metier qui parait plein alors qu'il ne l'est pas.
+ */
+export interface LigneContenu {
+  code_emplacement: string
+  zone_libelle: string
+  role: string
+  numero_etage: number
+  capacite_bobines: number
+  code_reference: string | null
+  designation: string | null
+  couleur: string | null
+  lot_fournisseur: string | null
+  nb_bobines: number | null
+  pourcentage: number | null
+  kg: number | null
+  date_constat: string | null
+  [k: string]: unknown
+}
+
 export interface Zone {
   code_emplacement: string
   code_machine: string
@@ -98,6 +122,20 @@ export interface LigneConso {
 }
 
 /** Une ligne en cours de saisie. */
+/**
+ * Une ligne telle qu'elle part au serveur.
+ *
+ * `lot_force` n'est pose que si l'operateur a confirme apres un refus : c'est
+ * une reponse a une question, jamais une valeur par defaut.
+ */
+export interface LigneEnvoi {
+  code_reference: string
+  lot_fournisseur: string
+  lot_force?: boolean
+  motif_lot_force?: string
+  [k: string]: unknown
+}
+
 export interface LigneSaisie {
   cle: string
   code_reference: string
@@ -155,6 +193,9 @@ export function mouvementeKg(l: LigneSaisie): number {
 export const machinesApi = {
   liste: () => api.get<Machine[]>('/api/machines'),
   plan: (code: string) => api.get<Zone[]>(`/api/machines/${encodeURIComponent(code)}`),
+  /** TOUT ce que la machine porte, zone par zone, en un seul appel. */
+  contenu: (code: string) =>
+    api.get<LigneContenu[]>(`/api/machines/${encodeURIComponent(code)}/contenu`),
   etat: (code: string, zone: string) =>
     api.get<LigneEtat[]>(
       `/api/machines/${encodeURIComponent(code)}/zones/${encodeURIComponent(zone)}`,

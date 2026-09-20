@@ -37,8 +37,6 @@ import {
   Printer,
   Filter,
   Inbox,
-  Minus,
-  Plus,
   Search,
   X,
 } from 'lucide-react'
@@ -64,24 +62,6 @@ export interface ColonneDT<L> {
   numerique?: boolean
   /** Masquee sous 1280 px ; reste presente dans la vue en cartes. */
   secondaire?: boolean
-  /**
-   * PRIORITE D'AFFICHAGE quand la largeur manque : 1 reste jusqu'au bout,
-   * 5 part en premier.
-   *
-   * POURQUOI CE N'EST PLUS UN OUI/NON. `secondaire` ne connaissait que deux
-   * etats et un seul seuil, 1280 px : au-dessus tout s'affichait, en dessous
-   * on perdait d'un coup toutes les colonnes marquees, quelle que soit la
-   * largeur reelle. Sur un ecran de 1100 px, il restait de la place pour deux
-   * d'entre elles ; sur un de 820, la table debordait quand meme.
-   *
-   * Avec une priorite, on retire une colonne A LA FOIS, la moins utile
-   * d'abord, jusqu'a ce que le tableau tienne. Rien n'est perdu : ce qui sort
-   * du tableau passe dans la ligne de detail, sous le bouton « + ».
-   *
-   * Sans valeur : 2 pour une colonne ordinaire, 4 si `secondaire` est mis —
-   * de sorte que les ecrans deja ecrits gardent exactement leur hierarchie.
-   */
-  priorite?: 1 | 2 | 3 | 4 | 5
   largeur?: string
   triable?: boolean
   /**
@@ -212,95 +192,6 @@ export function DataTable<L extends Record<string, unknown>>({
     () => droits.colonnesVisibles(colonnes),
     [colonnes, droits],
   )
-
-  /* ------------------------------------------------------------------------
-     TENIR DANS LA LARGEUR : ON RETIRE, ON NE COUPE PAS
-     ------------------------------------------------------------------------
-     Le tableau debordait et l'on faisait defiler de cote. C'est la pire des
-     reponses a un ecran etroit : on perd la colonne de gauche des qu'on part
-     a droite, donc on ne sait plus de quelle ligne on lit les chiffres.
-
-     On mesure donc la largeur reellement disponible, on estime ce que chaque
-     colonne demande, et l'on retire les moins prioritaires UNE A UNE jusqu'a
-     ce que l'ensemble tienne. Ce qui sort n'est pas perdu : la ligne se
-     deplie sur un « + » et montre les valeurs manquantes en liste.
-     C'est le comportement de DataTables Responsive, et il est juste.
-  */
-  const [largeurDispo, setLargeurDispo] = React.useState(0)
-  const observateur = React.useRef<ResizeObserver | null>(null)
-
-  /* REFERENCE DE RAPPEL, ET NON `useRef` + `useLayoutEffect`.
-     La premiere ecriture posait l'observateur dans un effet a dependances
-     vides. Or le conteneur du tableau n'existe pas au premier rendu — tant que
-     les lignes ne sont pas arrivees, c'est l'etat vide ou le squelette qui
-     occupe la place. L'effet trouvait donc `null`, renoncait, et ne repassait
-     jamais : la largeur restait a zero et aucune colonne n'etait retiree.
-     Mesure a l'appui — conteneur de 823 px, quatorze colonnes, zero masquee.
-     Une reference de rappel est appelee AU MOMENT ou le noeud arrive, ce qui
-     supprime la question. */
-  const conteneur = React.useCallback((el: HTMLDivElement | null) => {
-    observateur.current?.disconnect()
-    observateur.current = null
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const obs = new ResizeObserver((entrees) => {
-      const l = entrees[0]?.contentRect.width ?? 0
-      // Arrondi a 16 px : sans cela, un pixel de variation au defilement
-      // relance le calcul en boucle et fait clignoter les colonnes.
-      setLargeurDispo(Math.round(l / 16) * 16)
-    })
-    obs.observe(el)
-    observateur.current = obs
-    setLargeurDispo(Math.round(el.getBoundingClientRect().width / 16) * 16)
-  }, [])
-
-  React.useEffect(() => () => observateur.current?.disconnect(), [])
-
-  /** Ce qu'une colonne demande, en pixels, quand elle ne le dit pas. */
-  const largeurDemandee = (c: ColonneDT<L>) => {
-    if (c.largeur && c.largeur.endsWith('px')) return parseInt(c.largeur, 10) || 140
-    if (c.largeur && c.largeur.endsWith('%')) return 140
-    // Un nombre tient dans moins de place qu'un libelle : ce n'est pas une
-    // preference, c'est la longueur des chaines.
-    return c.numerique ? 110 : 160
-  }
-
-  const priorite = (c: ColonneDT<L>) => c.priorite ?? (c.secondaire ? 4 : 2)
-
-  /** Les colonnes retirees faute de place, de la moins utile a la plus utile. */
-  const retirees = React.useMemo(() => {
-    if (!largeurDispo) return new Set<string>()
-    // La colonne d'actions et le bouton de depliage prennent aussi leur part.
-    const reserve = (actions ? 56 : 0) + 40
-    let total = visibles.reduce((s, c) => s + largeurDemandee(c), reserve)
-    if (total <= largeurDispo) return new Set<string>()
-
-    // On sacrifie d'abord les priorites les plus hautes, et a priorite egale
-    // la colonne la plus a droite — celle que l'oeil atteint en dernier.
-    const candidats = visibles
-      .map((c, i) => ({ c, i }))
-      .sort((a, b) => priorite(b.c) - priorite(a.c) || b.i - a.i)
-
-    const sortantes = new Set<string>()
-    for (const { c } of candidats) {
-      // LA PREMIERE COLONNE NE PART JAMAIS. Elle porte l'identite de la ligne ;
-      // sans elle, la ligne depliee ne dit plus de quoi elle parle.
-      if (c.champ === visibles[0]?.champ) continue
-      if (total <= largeurDispo) break
-      sortantes.add(c.champ)
-      total -= largeurDemandee(c)
-    }
-    return sortantes
-  }, [visibles, largeurDispo, actions])
-
-  const [dépliees, setDépliees] = React.useState<Set<string>>(() => new Set())
-  const basculerDepli = React.useCallback((id: string) => {
-    setDépliees((d) => {
-      const s = new Set(d)
-      if (s.has(id)) s.delete(id)
-      else s.add(id)
-      return s
-    })
-  }, [])
 
   const definitions = React.useMemo<ColumnDef<L>[]>(
     () =>
@@ -644,7 +535,6 @@ export function DataTable<L extends Record<string, unknown>>({
         <>
           {/* --- Tableau : au-dela de 768 px ----------------------------- */}
           <div
-            ref={conteneur}
             className="defilement-x hidden rounded-lg border border-bordure bg-surface md:block"
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}
           >
@@ -668,9 +558,6 @@ export function DataTable<L extends Record<string, unknown>>({
               <thead className="sticky top-0 z-10">
                 {table.getHeaderGroups().map((groupe) => (
                   <tr key={groupe.id} className="bg-attenue">
-                    {/* La colonne du bouton « + » n'existe que s'il y a
-                        quelque chose a deplier. */}
-                    {retirees.size > 0 && <th className="w-8 bg-attenue px-1" />}
                     {groupe.headers.map((entete) => {
                       const m = meta(entete.column.id)
                       const sens = entete.column.getIsSorted()
@@ -683,7 +570,7 @@ export function DataTable<L extends Record<string, unknown>>({
                             'bg-attenue px-2.5 py-1.5 text-left',
                             'text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap',
                             m.numerique && 'text-right',
-                            retirees.has(entete.column.id) && 'hidden',
+                            m.secondaire && 'hidden xl:table-cell',
                           )}
                         >
                           {entete.column.getCanSort() ? (
@@ -717,8 +604,6 @@ export function DataTable<L extends Record<string, unknown>>({
               </thead>
               <tbody>
                 {rangs.map((rang) => {
-                  const id = cle(rang.original)
-                  const deplie = dépliees.has(id)
                   const ligne = (
                     <tr
                       onClick={surClic ? () => surClic(rang.original) : undefined}
@@ -735,32 +620,6 @@ export function DataTable<L extends Record<string, unknown>>({
                         menuContextuel && 'data-[state=open]:bg-primaire/8',
                       )}
                     >
-                      {/* LE BOUTON QUI DEPLIE. Il ne parait que s'il y a
-                          quelque chose dessous — un « + » qui n'ouvre rien
-                          est une promesse non tenue. Le clic ne doit pas
-                          declencher l'ouverture de la ligne : deplier et
-                          ouvrir sont deux gestes differents. */}
-                      {retirees.size > 0 && (
-                        <td className="w-8 px-1 align-middle">
-                          <button
-                            type="button"
-                            aria-expanded={deplie}
-                            aria-label={deplie ? 'Replier le detail' : 'Voir le detail'}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              basculerDepli(id)
-                            }}
-                            className={cn(
-                              'grid size-5 place-items-center rounded-full border transition-colors',
-                              deplie
-                                ? 'border-primaire bg-primaire text-primaire-texte'
-                                : 'border-bordure text-attenue-texte hover:border-primaire/50 hover:text-texte',
-                            )}
-                          >
-                            {deplie ? <Minus className="size-3" /> : <Plus className="size-3" />}
-                          </button>
-                        </td>
-                      )}
                       {rang.getVisibleCells().map((cellule) => {
                         const m = meta(cellule.column.id)
                         return (
@@ -769,7 +628,7 @@ export function DataTable<L extends Record<string, unknown>>({
                             className={cn(
                               'px-2.5 align-middle',
                               m.numerique && 'text-right tabular-nums',
-                              retirees.has(cellule.column.id) && 'hidden',
+                              m.secondaire && 'hidden xl:table-cell',
                             )}
                           >
                             {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
@@ -787,66 +646,17 @@ export function DataTable<L extends Record<string, unknown>>({
                     </tr>
                   )
 
-                  /* LA LIGNE DE DETAIL porte ce que la largeur a chasse.
-                     En liste libelle / valeur, sur deux ou trois colonnes
-                     selon la place : c'est la forme qui se lit le mieux quand
-                     les champs n'ont aucun rapport entre eux. */
-                  const detail = deplie && retirees.size > 0 && (
-                    <tr key={id + '-detail'} className="bg-attenue/40">
-                      <td
-                        colSpan={visibles.length - retirees.size + 1 + (actions ? 1 : 0)}
-                        className="px-3 py-2.5"
-                      >
-                        <dl className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-3">
-                          {visibles
-                            .filter((c) => retirees.has(c.champ))
-                            .map((c) => (
-                              <div
-                                key={c.champ}
-                                className="flex items-baseline justify-between gap-3
-                                           border-b border-bordure/50 pb-1"
-                              >
-                                <dt className="text-[10.5px] font-medium uppercase
-                                               tracking-wider text-attenue-texte">
-                                  {c.entete}
-                                </dt>
-                                <dd
-                                  className={cn(
-                                    'min-w-0 text-right text-[12px]',
-                                    c.numerique && 'tabular-nums',
-                                  )}
-                                >
-                                  {c.rendu
-                                    ? c.rendu(rang.original)
-                                    : String(rang.original[c.champ] ?? '—')}
-                                </dd>
-                              </div>
-                            ))}
-                        </dl>
-                      </td>
-                    </tr>
-                  )
-
-                  if (!menuContextuel)
-                    return (
-                      <React.Fragment key={id}>
-                        {ligne}
-                        {detail}
-                      </React.Fragment>
-                    )
+                  if (!menuContextuel) return <React.Fragment key={cle(rang.original)}>{ligne}</React.Fragment>
 
                   // `asChild` fait porter le clic droit par le <tr> lui-meme.
                   // Sans lui, Radix inserait un <span> declencheur, que le
                   // navigateur remonterait hors du <tbody> : la ligne se
                   // detacherait du tableau.
                   return (
-                    <React.Fragment key={id}>
-                      <MenuContextuel>
-                        <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
-                        <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
-                      </MenuContextuel>
-                      {detail}
-                    </React.Fragment>
+                    <MenuContextuel key={cle(rang.original)}>
+                      <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
+                      <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
+                    </MenuContextuel>
                   )
                 })}
               </tbody>

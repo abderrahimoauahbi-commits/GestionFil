@@ -31,6 +31,8 @@ import './atelier/palettes.css'
 export type Palette =
   | 'ardoise' | 'graphite' | 'slate' | 'divalto' | 'chaud' | 'contraste'
   | 'glassier' | 'claude' | 'azur'
+  // Les cinq familles demandees le 20/09/2026, aux couleurs dictees.
+  | 'industriel' | 'atlas' | 'nordique' | 'terminal' | 'verre'
 export type Densite = 'compacte' | 'normale' | 'aeree'
 export type Police = 'systeme' | 'inter' | 'geometrique' | 'serif' | 'lisible'
 /** Taille de base, en pixels. Tout le reste est en rem et suit. */
@@ -66,6 +68,45 @@ const DEFAUT: Apparence = {
 const CLE = 'gestionfil.apparence'
 
 export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: string[] }[] = [
+  /* ---------------------------------------------------------------------
+     LES CINQ FAMILLES DEMANDEES, EN TETE DE LISTE
+     ---------------------------------------------------------------------
+     Elles etaient declarees dans `atelier/fenetres.ts`, que seul l'atelier
+     lisait — et l'atelier n'est plus monte depuis qu'on est revenu a une
+     coquille unique. Les palettes existaient donc en CSS, personne ne
+     pouvait les choisir. Meme faute que la banniere de mise a jour posee
+     dans la mauvaise coquille : c'est ICI que vit le selecteur.
+     --------------------------------------------------------------------- */
+  {
+    cle: 'industriel',
+    nom: 'Industrial Clean',
+    resume: 'Fond clair, bleu franc, beaucoup de blanc. Le choix sur lequel on ne se trompe pas.',
+    teintes: ['#FAFAFA', '#2563EB', '#111827'],
+  },
+  {
+    cle: 'atlas',
+    nom: 'Atlas Data',
+    resume: 'Bleu profond, angles nets, grille stricte. Pour un ecran charge de chiffres.',
+    teintes: ['#F5F7FA', '#1E40AF', '#1A202C'],
+  },
+  {
+    cle: 'nordique',
+    nom: 'Nordic Textile',
+    resume: 'Lin et terre cuite, arrondis genereux. Rappelle la matiere ; bon pour recevoir.',
+    teintes: ['#F8F6F3', '#B45309', '#2B2622'],
+  },
+  {
+    cle: 'terminal',
+    nom: 'Terminal Supply',
+    resume: 'Console sombre, chiffres a chasse fixe, lignes serrees. Faite pour y rester huit heures.',
+    teintes: ['#0B0F14', '#22D3EE', '#E5E7EB'],
+  },
+  {
+    cle: 'verre',
+    nom: 'Glass Industrial',
+    resume: 'Verre depoli sur degrade sombre. Le flou est reserve aux cartes, pour la vitesse.',
+    teintes: ['#0F172A', '#38BDF8', '#F8FAFC'],
+  },
   {
     cle: 'ardoise',
     nom: 'Ardoise',

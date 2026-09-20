@@ -108,6 +108,28 @@ interface Risque {
 
 type Ton = 'danger' | 'alerte' | 'succes' | 'neutre'
 
+/**
+ * LES DOMAINES DU TABLEAU DE BORD.
+ *
+ * Ils reprennent le decoupage du menu — achats, stock, production, qualite —
+ * parce qu'une personne travaille dans UN de ces domaines et pas dans les
+ * autres. Un acheteur qui ouvre le poste de travail veut ses commandes, pas
+ * les ecarts d'inventaire ; lui faire traverser tout l'ecran chaque matin,
+ * c'est lui apprendre a ne plus le lire.
+ *
+ * LE FILTRE NE CACHE PAS UNE ALERTE, il la met de cote : on revient a « Tous »
+ * d'un clic, et le compteur de chaque domaine reste visible dans le
+ * selecteur — on sait donc toujours qu'il se passe quelque chose ailleurs.
+ */
+export type Domaine = 'ACHATS' | 'STOCK' | 'PRODUCTION' | 'QUALITE'
+
+const DOMAINES: { cle: Domaine; libelle: string }[] = [
+  { cle: 'ACHATS', libelle: 'Achats' },
+  { cle: 'STOCK', libelle: 'Stock' },
+  { cle: 'PRODUCTION', libelle: 'Production' },
+  { cle: 'QUALITE', libelle: 'Qualite' },
+]
+
 interface Tuile {
   champ: string
   libelle: string
@@ -117,6 +139,14 @@ interface Tuile {
   ton: Ton
   Icone: React.ComponentType<{ className?: string }>
   vers?: string
+  /**
+   * LE DOMAINE METIER de cette file.
+   *
+   * Il sert au selecteur du haut : un acheteur veut voir ses commandes sans
+   * traverser les ruptures de stock, un magasinier l'inverse. Sans domaine,
+   * le filtre n'aurait rien sur quoi mordre.
+   */
+  domaine: Domaine
   /** Faux si le role ne peut rien faire de ce compteur : la tuile disparait. */
   actionnable?: boolean
   /** Une tuile d'ETAT reste visible a zero ; une FILE vide s'efface. */
@@ -150,6 +180,7 @@ export function Cockpit() {
   const files: Tuile[] = [
     {
       champ: 'nb_propositions_a_traiter',
+      domaine: 'ACHATS',
       libelle: 'Propositions a arbitrer',
       valeur: n('nb_propositions_a_traiter'),
       detail: 'plan d achat',
@@ -160,6 +191,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_bc_a_valider',
+      domaine: 'ACHATS',
       libelle: 'Bons a valider',
       valeur: n('nb_bc_a_valider'),
       detail: droits.visible('montant_bc_a_valider_mad')
@@ -172,6 +204,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_bc_a_envoyer',
+      domaine: 'ACHATS',
       libelle: 'Bons a envoyer',
       valeur: n('nb_bc_a_envoyer'),
       detail: 'valides, pas encore partis',
@@ -182,6 +215,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_livraisons_en_retard',
+      domaine: 'ACHATS',
       libelle: 'Livraisons en retard',
       valeur: n('nb_livraisons_en_retard'),
       detail: n('retard_max_jours') > 0 ? `jusqu a ${n('retard_max_jours')} j` : undefined,
@@ -192,6 +226,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_a_controler',
+      domaine: 'QUALITE',
       libelle: 'Réceptions a controler',
       valeur: n('nb_receptions_a_controler'),
       detail: 'en attente du controle qualité',
@@ -202,6 +237,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_en_saisie',
+      domaine: 'STOCK',
       libelle: 'Réceptions en saisie',
       valeur: n('nb_receptions_en_saisie'),
       detail: 'pesees non soumises',
@@ -212,6 +248,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_a_regulariser',
+      domaine: 'STOCK',
       libelle: 'A regulariser',
       valeur: n('nb_receptions_a_regulariser'),
       detail: 'bon non envoye : controle bloque',
@@ -222,6 +259,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_lignes_non_conformes',
+      domaine: 'QUALITE',
       libelle: 'Lignes non conformes',
       valeur: n('nb_lignes_non_conformes'),
       detail: 'quarantaine ou refus',
@@ -236,6 +274,7 @@ export function Cockpit() {
        d'achat, ou la tuile « Propositions a arbitrer » mene deja. */
     {
       champ: 'nb_lots_peremption_proche',
+      domaine: 'QUALITE',
       libelle: 'Lots a moins de 90 j',
       valeur: n('nb_lots_peremption_proche'),
       detail: 'peremption proche',
@@ -246,6 +285,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_refs_dormantes',
+      domaine: 'STOCK',
       libelle: 'Références dormantes',
       valeur: n('nb_refs_dormantes'),
       detail: droits.visible('valeur_dormante_mad')
@@ -258,6 +298,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_controles_bloquants',
+      domaine: 'QUALITE',
       libelle: 'Contrôles bloquants',
       valeur: n('nb_controles_bloquants'),
       detail: 'coherence du referentiel',
@@ -273,7 +314,31 @@ export function Cockpit() {
   const garder = (t: Tuile) =>
     droits.visible(t.champ) && t.actionnable !== false && (t.toujours || t.valeur > 0)
 
-  const mesFiles = files.filter(garder)
+  /* LE DOMAINE CHOISI SE RETIENT POUR LA SESSION. Un acheteur qui a mis
+     « Achats » le retrouve en revenant ; il n'a pas a le reposer dix fois par
+     jour. `sessionStorage` et non `localStorage` : c'est une preference de
+     journee, pas d'annee. */
+  const [domaine, setDomaineBrut] = useState<Domaine | ''>(() => {
+    try {
+      const v = sessionStorage.getItem('cockpit.domaine')
+      return v === 'ACHATS' || v === 'STOCK' || v === 'PRODUCTION' || v === 'QUALITE' ? v : ''
+    } catch {
+      return ''
+    }
+  })
+  const setDomaine = (d: Domaine | '') => {
+    setDomaineBrut(d)
+    try {
+      sessionStorage.setItem('cockpit.domaine', d)
+    } catch {
+      /* navigation privee : le choix ne se retient pas, l'ecran marche quand meme */
+    }
+  }
+
+  const toutesMesFiles = files.filter(garder)
+  const mesFiles = domaine
+    ? toutesMesFiles.filter((f) => f.domaine === domaine)
+    : toutesMesFiles
 
   const bloquants = (qCtl.data ?? []).filter((c) => c.criticite === 'BLOQUANT' && c.anomalies > 0)
   const autres = (qCtl.data ?? []).filter((c) => c.criticite !== 'BLOQUANT' && c.anomalies > 0)
@@ -306,6 +371,30 @@ export function Cockpit() {
       <EnTetePage
         titre="Poste de travail"
         description="Ce qui attend une decision, et ce qui menace le plan de production. Tout est recalcule a l'ouverture."
+        actions={
+          <label className="flex items-center gap-2 text-[12px] text-attenue-texte">
+            Domaine
+            <select
+              value={domaine}
+              onChange={(e) => setDomaine(e.target.value as Domaine | '')}
+              className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-2.5 py-1.5
+                         text-[12px] text-texte outline-none focus:border-primaire/60"
+            >
+              {/* LE COMPTEUR EST DANS LE LIBELLE : on voit ce qui attend
+                  ailleurs sans changer de vue, donc on ne rate rien en
+                  filtrant. */}
+              <option value="">Tous ({toutesMesFiles.length})</option>
+              {DOMAINES.map((d) => {
+                const n = toutesMesFiles.filter((f) => f.domaine === d.cle).length
+                return (
+                  <option key={d.cle} value={d.cle}>
+                    {d.libelle} ({n})
+                  </option>
+                )
+              })}
+            </select>
+          </label>
+        }
       />
 
       <ChiffresCles />

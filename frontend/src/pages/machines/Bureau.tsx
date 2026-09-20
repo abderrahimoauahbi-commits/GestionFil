@@ -11,7 +11,7 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Cog, Layers, Loader2, Plus, Trash2, X } from 'lucide-react'
+import { Check, Cog, Loader2, Minus, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { Alerte, Chargement } from '../../composants/ui/base'
 import { EnTetePage } from '../../composants/Coquille'
@@ -38,7 +38,6 @@ export function MachinesBureau() {
   const [machine, setMachine] = useState<Machine | null>(null)
   const [zone, setZone] = useState<Zone | null>(null)
   const [type, setType] = useState<TypeFiche | null>(null)
-  const [onglet, setOnglet] = useState<'etat' | 'conso'>('etat')
   /* CET ECRAN NE DECLARE PAS DE MACHINE, ET C'EST VOULU. Le parc est du
      parametrage — declarer un metier, corriger ses capacites, dire pourquoi il
      ne tourne pas — et il vit sur son propre ecran, sous PARAMETRES. Ici on
@@ -58,128 +57,396 @@ export function MachinesBureau() {
   if (qMachines.isLoading) return <Chargement texte="Lecture des machines…" />
   const machines = qMachines.data ?? []
 
-  return (
-    <div className="flex flex-col gap-3">
-      <EnTetePage titre="Machines" />
+  /* ----------------------------------------------------------------------
+     L'ENCHAINEMENT DEMANDE, ET POURQUOI IL EST MEILLEUR.
 
-      <div className="grid gap-3 lg:grid-cols-[15rem_16rem_1fr]">
-        {/* --- Colonne 1 : les machines --------------------------------- */}
-        <Colonne
+     Avant : trois colonnes cote a cote — machines, etages, travail. Choisir
+     une machine n'affichait que des nombres d'etages ; il fallait descendre
+     dans un etage pour voir quoi que ce soit, et remonter pour passer au
+     suivant. Sur un metier a huit etages, huit allers-retours pour faire le
+     tour de ce qu'il porte.
+
+     Maintenant : une LISTE de machines, puis UNE PAGE par machine qui montre
+     TOUS ses etages et ce qu'ils portent, avec sur chaque ligne les trois
+     gestes du magasin — charger, decharger, constater. La saisie s'ouvre en
+     fenetre au-dessus de la table, qui reste visible derriere : on voit ce
+     qu'on modifie pendant qu'on le modifie.
+     ---------------------------------------------------------------------- */
+  if (!machine) {
+    return (
+      <div className="flex flex-col gap-3">
+        <EnTetePage
           titre="Machines"
-          action={
+          description="Ce que chaque metier porte, et les trois gestes du magasin."
+          actions={
             parametrable ? (
               <Link
                 to="/parc-machines"
-                className="inline-flex items-center gap-1 rounded-[3px] px-1.5 py-0.5
-                           text-[11px] font-medium text-primaire hover:bg-primaire/10"
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)]
+                           border border-bordure px-2.5 py-1.5 text-[12px] font-medium
+                           transition-colors hover:bg-attenue"
               >
-                <Cog className="size-3" />
+                <Cog className="size-3.5" />
                 Le parc
               </Link>
             ) : null
           }
-        >
-          {machines.length === 0 && (
-            <Vide
-              texte={
-                parametrable
-                  ? 'Aucune machine déclarée. Passez par « Le parc » pour en saisir une.'
-                  : 'Aucune machine déclarée. La direction doit les saisir.'
-              }
-            />
-          )}
-          {machines.map((m) => (
+        />
+        {machines.length === 0 ? (
+          <Vide
+            texte={
+              parametrable
+                ? 'Aucune machine declaree. Passez par « Le parc » pour en saisir une.'
+                : 'Aucune machine declaree. La direction doit les saisir.'
+            }
+          />
+        ) : (
+          <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure
+                          bg-surface shadow-[var(--ombre-pose)]">
+            <table className="grille w-full text-[12.5px]">
+              <thead>
+                <tr className="bg-attenue">
+                  {['Machine', 'Etages', 'Bobines', 'Charge', 'Etat', ''].map((e, i) => (
+                    <th
+                      key={e || i}
+                      className={cn(
+                        'px-3 py-2 text-left text-[10px] font-semibold uppercase',
+                        'tracking-wider text-attenue-texte',
+                        i >= 1 && i <= 2 && 'text-right',
+                      )}
+                    >
+                      {e}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {machines.map((m) => {
+                  const part = m.capacite_bobines
+                    ? (m.bobines_presentes / m.capacite_bobines) * 100
+                    : 0
+                  return (
+                    <tr
+                      key={m.code_machine}
+                      className="cursor-pointer transition-colors hover:bg-primaire/5"
+                      onClick={() => setMachine(m)}
+                    >
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-texte">{m.nom}</div>
+                        <div className="text-[11px] text-attenue-texte">{m.code_machine}</div>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{m.nb_etages}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {m.bobines_presentes} / {m.capacite_bobines}
+                      </td>
+                      <td className="px-3 py-2">
+                        {/* LA CHARGE SE LIT MIEUX EN LONGUEUR QU'EN CHIFFRE :
+                            on compare cinq metiers d'un seul coup d'oeil. */}
+                        <div className="h-2 w-24 rounded-full bg-attenue">
+                          <div
+                            className={cn(
+                              'h-full rounded-full',
+                              part > 90 ? 'bg-succes' : part > 40 ? 'bg-primaire' : 'bg-alerte',
+                            )}
+                            style={{ width: `${Math.min(100, part)}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={cn(
+                            'rounded-full border px-2 py-[1px] text-[10.5px]',
+                            m.etat === 'ACTIVE'
+                              ? 'border-succes/30 bg-succes/10 text-succes'
+                              : 'border-alerte/30 bg-alerte/10 text-alerte',
+                          )}
+                        >
+                          {m.etat}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right text-[12px] text-primaire">
+                        Consulter
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <EnTetePage
+        titre={machine.nom}
+        description={`${machine.code_machine} · ${machine.bobines_presentes} / ${machine.capacite_bobines} bobines`}
+        actions={
+          <div className="flex items-center gap-2">
             <button
-              key={m.code_machine}
               type="button"
               onClick={() => {
-                setMachine(m)
+                setMachine(null)
                 setZone(null)
                 setType(null)
               }}
-              className={cn(
-                'flex w-full flex-col gap-0.5 border-b border-bordure px-3 py-2 text-left',
-                machine?.code_machine === m.code_machine ? 'bg-primaire/10' : 'hover:bg-attenue',
-              )}
+              className="rounded-[var(--radius-sm)] border border-bordure px-2.5 py-1.5
+                         text-[12px] font-medium transition-colors hover:bg-attenue"
             >
-              <span className="truncate text-[13px] font-medium text-texte">{m.nom}</span>
-              <span className="text-[11px] tabular-nums text-attenue-texte">
-                {m.bobines_presentes} / {m.capacite_bobines} bob. · {nb(m.quantite_kg, 0)} kg
-              </span>
+              Toutes les machines
             </button>
-          ))}
-        </Colonne>
-
-        {/* --- Colonne 2 : les zones ------------------------------------ */}
-        <Colonne titre={machine ? machine.nom : 'Zones'}>
-          {!machine && <Vide texte="Choisissez une machine." />}
-          {machine &&
-            (qPlan.data ?? []).map((z) => (
-              <button
-                key={z.code_emplacement}
-                type="button"
-                onClick={() => {
-                  setZone(z)
-                  setType(null)
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 border-b border-bordure px-3 py-2 text-left',
-                  zone?.code_emplacement === z.code_emplacement
-                    ? 'bg-primaire/10'
-                    : 'hover:bg-attenue',
-                )}
+            {parametrable && (
+              <Link
+                to="/parc-machines"
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)]
+                           border border-bordure px-2.5 py-1.5 text-[12px] font-medium
+                           transition-colors hover:bg-attenue"
               >
-                <Layers className="size-3.5 shrink-0 text-attenue-texte" />
-                <span className="flex-1 text-[13px] text-texte">{z.libelle}</span>
-                <span className="text-[11px] tabular-nums text-attenue-texte">
-                  {z.bobines_presentes}/{z.capacite_bobines}
-                </span>
-              </button>
-            ))}
-        </Colonne>
+                <Cog className="size-3.5" />
+                Modifier la machine
+              </Link>
+            )}
+          </div>
+        }
+      />
 
-        {/* --- Colonne 3 : le travail ----------------------------------- */}
-        <div className="min-w-0">
-          {!zone && <Vide texte="Choisissez une zone pour voir son constat." />}
-          {zone && !type && (
-            <ZoneBureau
-              machine={machine!}
-              zone={zone}
-              onglet={onglet}
-              setOnglet={setOnglet}
-              ouvrirFiche={setType}
-            />
-          )}
-          {zone && type && (
+      <TableEtages
+        machine={machine}
+        zones={qPlan.data ?? []}
+        ouvrir={(z, tp) => {
+          setZone(z)
+          setType(tp)
+        }}
+      />
+
+      {/* LE JOURNAL EN ENTIER, PUIS LE FILTRE.
+          Il etait enferme dans un onglet d'une zone : on ne voyait que la
+          consommation de l'etage ouvert, et il fallait passer les huit etages
+          pour faire le compte d'un metier. On montre donc TOUT le journal de
+          la machine, et l'on filtre ensuite — c'est l'ordre naturel, on
+          regarde d'abord, on restreint apres. */}
+      <JournalMachine machine={machine} zones={qPlan.data ?? []} />
+
+      {/* LA SAISIE S'OUVRE AU-DESSUS, la table reste derriere : on voit ce
+          qu'on modifie pendant qu'on le modifie. */}
+      {zone && type && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-auto
+                     bg-accent/40 p-4 backdrop-blur-[2px]"
+        >
+          <div
+            className="w-full max-w-5xl rounded-[var(--radius-lg)] border border-bordure
+                       bg-surface shadow-[var(--ombre-modale)]"
+          >
             <FicheBureau
-              machine={machine!}
+              machine={machine}
               zone={zone}
               type={type}
-              fermer={() => setType(null)}
+              fermer={() => {
+                setType(null)
+                setZone(null)
+              }}
             />
-          )}
+          </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * TOUS LES ETAGES ET LEUR CONTENU, DANS UNE SEULE TABLE.
+ *
+ * C'est la « consultation globale » : on choisit une machine, on voit ce
+ * qu'elle porte — etage par etage, reference par reference, lot par lot — sans
+ * descendre nulle part. Les etages VIDES y figurent : un etage sans fil est
+ * une information de travail, c'est la qu'il faut charger.
+ *
+ * LES TROIS GESTES SONT SUR LA LIGNE DE L'ETAGE, pas dans un menu. Charger,
+ * decharger, constater : ce sont les seules choses que le magasin fait, et
+ * elles doivent etre a un clic de ce qu'elles concernent.
+ */
+function TableEtages({
+  machine,
+  zones,
+  ouvrir,
+}: {
+  machine: Machine
+  zones: Zone[]
+  ouvrir: (z: Zone, t: TypeFiche) => void
+}) {
+  const [filtre, setFiltre] = useState('')
+
+  const q = useQuery({
+    queryKey: ['machine-contenu', machine.code_machine],
+    queryFn: () => machinesApi.contenu(machine.code_machine),
+  })
+  if (q.isLoading) return <Chargement texte="Lecture de la machine…" />
+
+  const lignes = q.data ?? []
+  const visibles = filtre ? lignes.filter((l) => l.code_emplacement === filtre) : lignes
+
+  const parZone = new Map<string, typeof lignes>()
+  for (const l of visibles) {
+    if (!parZone.has(l.code_emplacement)) parZone.set(l.code_emplacement, [])
+    parZone.get(l.code_emplacement)!.push(l)
+  }
+
+  return (
+    <div
+      className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface
+                 shadow-[var(--ombre-pose)]"
+    >
+      <div className="flex flex-wrap items-center gap-3 border-b border-bordure bg-attenue/60 px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-attenue-texte">
+          Etages et composants
+        </span>
+        <label className="ml-auto flex items-center gap-2 text-[12px] text-attenue-texte">
+          Etage
+          <select
+            value={filtre}
+            onChange={(e) => setFiltre(e.target.value)}
+            className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-2 py-1
+                       text-[12px] text-texte outline-none focus:border-primaire/60"
+          >
+            <option value="">Tous</option>
+            {zones.map((z) => (
+              <option key={z.code_emplacement} value={z.code_emplacement}>
+                {z.libelle}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="max-h-[70vh] overflow-auto">
+        <table className="grille w-full text-[12px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-attenue">
+              {['Etage', 'Reference', 'Couleur', 'Lot', 'Bobines', '%', 'Kg', 'Constat', ''].map(
+                (e, i) => (
+                  <th
+                    key={e || i}
+                    className={cn(
+                      'bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold',
+                      'uppercase tracking-wider text-attenue-texte whitespace-nowrap',
+                      i >= 4 && i <= 6 && 'text-right',
+                    )}
+                  >
+                    {e}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {[...parZone.entries()].map(([code, contenu]) => {
+              const zone = zones.find((z) => z.code_emplacement === code)
+              const montees = contenu.reduce((s, x) => s + (x.nb_bobines ?? 0), 0)
+              return contenu.map((l, i) => (
+                <tr key={`${code}-${l.code_reference ?? 'vide'}-${l.lot_fournisseur ?? i}`}>
+                  {/* Le nom de l'etage ne se repete pas sur chaque ligne : il
+                      fusionne sur toute la hauteur de son contenu. */}
+                  {i === 0 && (
+                    <td
+                      rowSpan={contenu.length}
+                      className="whitespace-nowrap px-2.5 py-1.5 align-top font-medium"
+                    >
+                      {l.zone_libelle}
+                      <div className="text-[10.5px] font-normal text-attenue-texte">
+                        {montees} / {l.capacite_bobines}
+                      </div>
+                    </td>
+                  )}
+                  {l.code_reference ? (
+                    <>
+                      <td className="px-2.5 py-1.5">{l.code_reference}</td>
+                      <td className="px-2.5 py-1.5 text-attenue-texte">{l.couleur ?? '—'}</td>
+                      <td className="px-2.5 py-1.5 font-mono text-[11px]">
+                        {l.lot_fournisseur ?? '—'}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right tabular-nums">
+                        {l.nb_bobines ?? '—'}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right tabular-nums">
+                        {l.pourcentage != null ? `${l.pourcentage} %` : '—'}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right tabular-nums">{nb(l.kg ?? 0)}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-attenue-texte">
+                        {l.date_constat ? fmtDate(l.date_constat) : '—'}
+                      </td>
+                    </>
+                  ) : (
+                    <td colSpan={7} className="px-2.5 py-1.5 text-attenue-texte">
+                      Vide — {l.capacite_bobines} emplacements disponibles
+                    </td>
+                  )}
+                  {i === 0 && (
+                    <td rowSpan={contenu.length} className="w-px px-2 py-1.5 align-top">
+                      <div className="flex items-center gap-1">
+                        <BoutonGeste
+                          titre="Charger"
+                          zone={zone}
+                          type="CHARGE"
+                          ouvrir={ouvrir}
+                          Icone={Plus}
+                        />
+                        <BoutonGeste
+                          titre="Decharger"
+                          zone={zone}
+                          type="DECHARGE"
+                          ouvrir={ouvrir}
+                          Icone={Minus}
+                        />
+                        <BoutonGeste
+                          titre="Mettre a jour"
+                          zone={zone}
+                          type="MAJ"
+                          ouvrir={ouvrir}
+                          Icone={RefreshCw}
+                        />
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )
 }
 
-function Colonne({
-  titre, children, action,
+/** Un des trois gestes du magasin, pose sur la ligne de son etage. */
+function BoutonGeste({
+  titre,
+  zone,
+  type,
+  ouvrir,
+  Icone,
 }: {
   titre: string
-  children: React.ReactNode
-  /** Bouton d'en-tete, a droite du titre. Absent pour qui n'y a pas droit. */
-  action?: React.ReactNode
+  zone: Zone | undefined
+  type: TypeFiche
+  ouvrir: (z: Zone, t: TypeFiche) => void
+  Icone: React.ComponentType<{ className?: string }>
 }) {
+  if (!zone) return null
   return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-bordure bg-surface">
-      <div className="flex items-center justify-between gap-2 border-b border-bordure bg-attenue px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-attenue-texte">
-        <span className="truncate">{titre}</span>
-        {action}
-      </div>
-      <div className="max-h-[70vh] overflow-y-auto">{children}</div>
-    </div>
+    <button
+      type="button"
+      title={titre}
+      aria-label={titre}
+      onClick={() => ouvrir(zone, type)}
+      className="grid size-6 place-items-center rounded-[var(--radius-sm)] border border-bordure
+                 text-attenue-texte transition-colors hover:border-primaire/50
+                 hover:bg-primaire/10 hover:text-primaire"
+    >
+      <Icone className="size-3" />
+    </button>
   )
 }
 
@@ -189,137 +456,6 @@ function Vide({ texte }: { texte: string }) {
 
 // =============================================================================
 // LE CONSTAT D'UNE ZONE
-// =============================================================================
-
-function ZoneBureau({
-  machine, zone, onglet, setOnglet, ouvrirFiche,
-}: {
-  machine: Machine
-  zone: Zone
-  onglet: 'etat' | 'conso'
-  setOnglet: (o: 'etat' | 'conso') => void
-  ouvrirFiche: (t: TypeFiche) => void
-}) {
-  const qEtat = useQuery({
-    queryKey: ['machine-etat', machine.code_machine, zone.code_emplacement],
-    queryFn: () => machinesApi.etat(machine.code_machine, zone.code_emplacement),
-  })
-  const qConso = useQuery({
-    queryKey: ['machine-conso', machine.code_machine],
-    queryFn: () => machinesApi.consommation(machine.code_machine),
-    enabled: onglet === 'conso',
-  })
-
-  const lignes = qEtat.data ?? []
-  const totalKg = lignes.reduce((s, l) => s + l.kg, 0)
-  const totalBob = lignes.reduce((s, l) => s + l.nb_bobines, 0)
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2">
-        <div>
-          <div className="text-[15px] font-semibold text-texte">{zone.libelle}</div>
-          <div className="text-[12px] tabular-nums text-attenue-texte">
-            {totalBob} / {zone.capacite_bobines} emplacements · {nb(totalKg)} kg ·
-            dernier constat {fmtDate(zone.dernier_constat)}
-          </div>
-        </div>
-        <div className="flex gap-1.5">
-          {/* TROIS FICHES, PAS QUATRE. La consommation ne se saisit pas : elle est
-              le residu entre deux constats, et l'offrir en saisie inviterait a
-              la declarer deux fois. */}
-          {(['CHARGE', 'DECHARGE', 'MAJ'] as TypeFiche[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => ouvrirFiche(t)}
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-[var(--radius-sm)]
-                         border border-bordure px-3 text-[13px] hover:bg-attenue"
-            >
-              <Plus className="size-3.5" />
-              {LIBELLE_TYPE[t]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex gap-1.5">
-        {(
-          [
-            ['etat', 'Constat courant'],
-            ['conso', 'Journal de consommation'],
-          ] as ['etat' | 'conso', string][]
-        ).map(([c, libelle]) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => setOnglet(c)}
-            className={cn(
-              'min-h-[34px] rounded-[var(--radius-sm)] px-3 text-[13px] font-medium',
-              onglet === c ? 'bg-primaire text-primaire-texte' : 'border border-bordure',
-            )}
-          >
-            {libelle}
-          </button>
-        ))}
-      </div>
-
-      {onglet === 'etat' ? (
-        <div className="overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
-                <th className="px-2 py-1.5 text-left">Référence</th>
-                <th className="px-2 py-1.5 text-left">Lot</th>
-                <th className="px-2 py-1.5 text-right">Bobines</th>
-                <th className="px-2 py-1.5 text-right">Poids/bob.</th>
-                <th className="px-2 py-1.5 text-right">%</th>
-                <th className="px-2 py-1.5 text-right">Total kg</th>
-                <th className="px-2 py-1.5 text-left">Constaté le</th>
-              </tr>
-            </thead>
-            <tbody className="tabular-nums">
-              {lignes.map((l) => (
-                <tr key={l.code_reference + l.lot_fournisseur} className="border-t border-bordure">
-                  <td className="max-w-[20rem] truncate px-2 py-1.5 text-texte">{l.designation}</td>
-                  <td className="px-2 py-1.5 font-mono text-[11px]">{l.lot_fournisseur}</td>
-                  <td className="px-2 py-1.5 text-right">{l.nb_bobines}</td>
-                  <td className="px-2 py-1.5 text-right">{nb(l.poids_unitaire_kg, 3)}</td>
-                  <td className="px-2 py-1.5 text-right">{nb(l.pourcentage, 1)}</td>
-                  <td className="px-2 py-1.5 text-right font-medium text-texte">{nb(l.kg)}</td>
-                  <td className="px-2 py-1.5">{fmtDate(l.date_constat)}</td>
-                </tr>
-              ))}
-              {lignes.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-2 py-6 text-center text-attenue-texte">
-                    Zone vide.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            {lignes.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-ink/20 bg-attenue font-semibold">
-                  <td className="px-2 py-1.5" colSpan={2}>
-                    Total
-                  </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{totalBob}</td>
-                  <td colSpan={2} />
-                  <td className="px-2 py-1.5 text-right tabular-nums">{nb(totalKg)}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      ) : (
-        <TableConso lignes={qConso.data ?? []} />
-      )}
-    </div>
-  )
-}
-
 /**
  * LE JOURNAL DE CONSOMMATION, EN CUMUL.
  *
@@ -327,6 +463,74 @@ function ZoneBureau({
  * revenu, l'etat au depart et a l'arrivee, et le reste. Aucune repartition par
  * fiche — personne ne sait quel chargement a ete tisse quand.
  */
+/**
+ * LE JOURNAL DE CONSOMMATION D'UNE MACHINE, EN ENTIER.
+ *
+ * LA CONSOMMATION NE SE SAISIT PAS, elle se deduit en cumul : etat au depart,
+ * plus les charges, moins les retours, moins l'etat de cloture. C'est la regle
+ * du modele, et elle explique pourquoi ce tableau n'a aucun bouton : il n'y a
+ * rien a y corriger, seulement a lire.
+ *
+ * ON AFFICHE TOUT, PUIS ON FILTRE. Le journal etait enferme dans un onglet de
+ * zone — on ne voyait que l'etage ouvert. Ici la machine entiere est la, et
+ * les deux filtres — etage, reference — reduisent sans changer d'ecran.
+ */
+function JournalMachine({ machine, zones }: { machine: Machine; zones: Zone[] }) {
+  const [zone, setZone] = useState('')
+  const [texte, setTexte] = useState('')
+
+  const q = useQuery({
+    queryKey: ['machine-conso', machine.code_machine],
+    queryFn: () => machinesApi.consommation(machine.code_machine),
+  })
+  if (q.isLoading) return <Chargement texte="Lecture du journal…" />
+
+  const tout = q.data ?? []
+  const motif = texte.trim().toLowerCase()
+  const lignes = tout.filter(
+    (l) =>
+      (!zone || l.zone === zone) &&
+      (!motif ||
+        (l.code_reference ?? '').toLowerCase().includes(motif) ||
+        (l.lot_fournisseur ?? '').toLowerCase().includes(motif)),
+  )
+
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface
+                    shadow-[var(--ombre-pose)]">
+      <div className="flex flex-wrap items-center gap-3 border-b border-bordure bg-attenue/60 px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-attenue-texte">
+          Journal de consommation
+        </span>
+        <span className="text-[11px] text-attenue-texte">
+          {lignes.length} ligne(s){lignes.length !== tout.length ? ` sur ${tout.length}` : ''}
+        </span>
+        <input
+          value={texte}
+          onChange={(e) => setTexte(e.target.value)}
+          placeholder="Référence ou lot…"
+          className="ml-auto w-52 rounded-[var(--radius-sm)] border border-bordure bg-surface
+                     px-2.5 py-1 text-[12px] outline-none focus:border-primaire/60"
+        />
+        <select
+          value={zone}
+          onChange={(e) => setZone(e.target.value)}
+          className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-2 py-1
+                     text-[12px] text-texte outline-none focus:border-primaire/60"
+        >
+          <option value="">Tous les étages</option>
+          {zones.map((z) => (
+            <option key={z.code_emplacement} value={z.libelle}>{z.libelle}</option>
+          ))}
+        </select>
+      </div>
+      <div className="max-h-[50vh] overflow-auto">
+        <TableConso lignes={lignes} />
+      </div>
+    </div>
+  )
+}
+
 function TableConso({ lignes }: { lignes: LigneConso[] }) {
   const total = lignes.reduce((s, l) => s + l.consommation_kg, 0)
   return (
@@ -628,11 +832,51 @@ function FicheBureau({
         </Alerte>
       )}
 
+      {/* LE SOLDE DU LOT NE COUVRE PAS : ON DEMANDE, ON NE REFUSE PAS.
+          Le magasinier a les bobines dans les mains. Lui opposer un mur le
+          pousse a ne plus saisir du tout, ce qui coute bien plus cher que
+          l'imprecision qu'on voulait eviter. La question est posee une fois,
+          la reponse part avec la fiche et reste au journal. */}
+      {f.lotCourt && (
+        <Alerte ton="alerte" titre="Le solde connu de ce lot ne couvre pas la sortie">
+          <p className="leading-relaxed">
+            Quand une bobine redescend d un metier, personne ne sait de quel lot elle
+            venait : le retour est impute au juge, et les soldes par lot derivent. La
+            matiere est donc peut-etre bien la.
+          </p>
+          <p className="mt-1 leading-relaxed">
+            Le solde du <strong>magasin</strong>, lui, reste verifie — on ne charge jamais
+            plus que ce que le magasin porte.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={f.envoi.isPending}
+              onClick={() => f.envoi.mutate(true)}
+              className="inline-flex min-h-[36px] items-center gap-2 rounded-[var(--radius-sm)]
+                         bg-alerte px-3 text-[13px] font-semibold text-surface
+                         disabled:opacity-40"
+            >
+              {f.envoi.isPending && <Loader2 className="size-3.5 animate-spin" />}
+              Charger quand meme
+            </button>
+            <button
+              type="button"
+              onClick={f.oublierLotCourt}
+              className="min-h-[36px] rounded-[var(--radius-sm)] border border-bordure px-3
+                         text-[13px] font-medium"
+            >
+              Corriger la saisie
+            </button>
+          </div>
+        </Alerte>
+      )}
+
       <div className="flex items-center gap-2">
         <button
           type="button"
           disabled={!f.pret || f.envoi.isPending}
-          onClick={() => f.envoi.mutate()}
+          onClick={() => f.envoi.mutate(undefined)}
           className="inline-flex min-h-[40px] items-center gap-2 rounded-[var(--radius-sm)]
                      bg-primaire px-4 text-[14px] font-semibold text-primaire-texte
                      disabled:opacity-40"

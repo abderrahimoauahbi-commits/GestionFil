@@ -679,6 +679,38 @@ pub async fn controles(State(state): State<AppState>, user: Utilisateur) -> AppR
     lister(&state, &user, module::COCKPIT, "SELECT * FROM v_controles").await
 }
 
+/// `GET /api/supervision` — les indicateurs de pilotage de la chaine logistique.
+///
+/// CHAQUE INDICATEUR DIT AUSSI QUAND IL NE SAIT PAS. La vue rend, a cote de la
+/// valeur, un drapeau `disponible` et — s'il vaut zero — la phrase qui explique
+/// ce qu'il faut enregistrer pour l'allumer. L'ecran affiche alors « en
+/// attente : aucune reception enregistree » au lieu de « OTIF 0 % ».
+///
+/// La difference n'est pas cosmetique. Un zero se lit comme un resultat : un
+/// directeur qui voit « OTIF 0 % » conclut que ses fournisseurs sont
+/// catastrophiques, alors que l'ERP n'a simplement jamais vu passer une
+/// reception. La phrase, elle, transforme le tableau de bord en liste de ce
+/// qu'il reste a mettre en route.
+pub async fn supervision(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    lister(
+        &state,
+        &user,
+        module::COCKPIT,
+        "SELECT s.domaine, s.cle, s.libelle, s.unite, s.definition,
+                s.disponible, s.condition, s.sens,
+                s.cible::float8     AS cible,
+                s.vigilance::float8 AS vigilance,
+                v.valeur::float8    AS valeur
+           FROM v_supervision s
+           LEFT JOIN v_supervision_valeurs v USING (cle)
+          ORDER BY s.disponible DESC, s.domaine, s.libelle",
+    )
+    .await
+}
+
 pub async fn controle_detail(
     State(state): State<AppState>,
     user: Utilisateur,

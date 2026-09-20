@@ -76,18 +76,13 @@ export function FilAriane({
           <MenuContenu align="start" className="w-72">
             <MenuTitre>{module?.resume}</MenuTitre>
             <MenuSeparateur />
-            {/* LES PAGES D'UNE RUBRIQUE SE RANGENT SOUS ELLE, decalees d'un
-                cran, pour que le menu du module dise la meme chose que la barre
-                laterale. Un tableau de bord qui ouvre quatre pages de travail
-                doit les montrer, sinon on les cherche a chaque fois. */}
             {ecrans.map((e) => (
               <MenuElement
                 key={e.vers + e.libelle}
                 disabled={Boolean(e.aVenir)}
                 onSelect={() => !e.aVenir && ouvrir(e.vers, false)}
-                className={e.sous ? 'pl-7' : undefined}
               >
-                <e.Icone className={e.sous ? 'size-3.5' : 'size-4'} />
+                <e.Icone className="size-4" />
                 <span className="flex-1 truncate">{e.libelle}</span>
                 {e.aVenir && (
                   <span className="shrink-0 text-[9px] uppercase tracking-wide text-attenue-texte">

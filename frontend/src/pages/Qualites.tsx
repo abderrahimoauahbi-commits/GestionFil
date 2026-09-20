@@ -735,12 +735,6 @@ export function Qualites() {
           }
         />
 
-        {/* Le controle du classeur, avant la liste : on regarde ce qui cloche
-            avant d'ouvrir une qualite au hasard. */}
-        <div className="mb-3">
-          <CoherenceRecettes />
-        </div>
-
         <DataTable
           exportable="composition-qualite"
           imprimable="Composition qualité"
@@ -810,6 +804,19 @@ export function Qualites() {
             </div>
           )}
         />
+
+        {/* LE CONTROLE VIENT APRES CE QU'ON EST VENU FAIRE.
+            Il etait en tete, au-dessus de la liste. C'etait un raisonnement de
+            controleur, pas d'utilisateur : celui qui ouvre cet ecran vient
+            consulter ou modifier UNE qualite, et il devait d'abord traverser
+            un tableau d'anomalies qui ne le concernait pas ce jour-la.
+            Le controle garde toute sa place — on ne le supprime pas, et il
+            reste replie ou deplie a la demande — mais il passe apres : on lit
+            d'abord ses qualites, on verifie ensuite leur coherence. */}
+        <div className="mt-6">
+          <CoherenceRecettes />
+        </div>
+
         {confirmation.element}
       </div>
     )

@@ -42,7 +42,12 @@ export function CoherenceRecettes() {
   const anomalies = lignes.filter((l) => l.verdict === 'ANOMALIE')
 
   return (
-    <Carte repliable="qualites.coherence">
+    /* REPLIE QUAND TOUT VA BIEN, OUVERT QUAND IL Y A A VOIR.
+       Ce bloc est un controle, pas le sujet de l'ecran : deroule en
+       permanence, il occupait le bas de la page pour dire « tout est
+       conforme », ce qui ne demande qu'une ligne. Des qu'une qualite cloche,
+       il s'ouvre de lui-meme — c'est alors qu'il merite la place. */
+    <Carte repliable="qualites.coherence" replieParDefaut={anomalies.length === 0}>
       <CarteEntete>
         <CarteTitre className="flex items-center gap-1.5">
           {anomalies.length ? (

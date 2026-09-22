@@ -64,10 +64,10 @@ fn decrire(nom: &str) -> Option<(String, String)> {
     if plateforme.is_empty() || version.is_empty() {
         return None;
     }
-    // UNE VERSION EST FAITE DE CHIFFRES ET DE POINTS. « 0.4.0.exe » n'en est
-    // pas une, et le refuser ici ferme la porte a tous les noms douteux plutot
+    // UNE VERSION EST FAITE DE CHIFFRES, POINTS, TIRETS ET LETTRES (pour les pre-versions comme 1.2.3-beta).
+    // « 0.4.0.exe » n'en est pas une, et le refuser ici ferme la porte a tous les noms douteux plutot
     // qu'au seul cas qu'on vient de rencontrer.
-    if !version.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
+    if !version.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
         return None;
     }
     Some((plateforme.to_string(), version.to_string()))

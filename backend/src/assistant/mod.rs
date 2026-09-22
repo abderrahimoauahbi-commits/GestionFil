@@ -78,26 +78,198 @@ pub struct Echange {
     pub texte: String,
 }
 
+/// Interroge Ollama et rend la liste de ses modeles, ou `None` s'il se tait.
+///
+/// TROIS SECONDES SUFFISENT : on demande un inventaire, pas une reponse. Si le
+/// moteur met plus longtemps a dire ce qu'il detient, l'ecran a raison de le
+/// declarer injoignable.
+async fn sonder_ollama(url: &str) -> Option<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Modele {
+        name: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Inventaire {
+        models: Vec<Modele>,
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .ok()?;
+    let reponse = client
+        .get(format!("{}/api/tags", url.trim_end_matches('/')))
+        .send()
+        .await
+        .ok()?;
+    if !reponse.status().is_success() {
+        return None;
+    }
+    let inv: Inventaire = reponse.json().await.ok()?;
+    Some(inv.models.into_iter().map(|m| m.name).collect())
+}
+
+/// L'etat de GestionAi, ou `None` si elle se tait.
+///
+/// SA ROUTE DE SANTE EST OUVERTE, sans cle : c'est une sonde, et une sonde qui
+/// exige un secret ne sert plus a diagnostiquer quand le secret est justement
+/// ce qui manque.
+async fn sonder_plateforme(r: &Reglage) -> Option<Value> {
+    let url = r.url_plateforme.as_ref()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .ok()?;
+    let reponse = client.get(format!("{url}/api/sante")).send().await.ok()?;
+    if !reponse.status().is_success() {
+        return None;
+    }
+    reponse.json().await.ok()
+}
+
+/// Delegue la question a l'agent `erp` de GestionAi.
+///
+/// LE JETON DE L'UTILISATEUR PART AVEC LA QUESTION, et c'est le point entier :
+/// l'agent rappellera cet ERP avec CE jeton, donc la grille de droits — par
+/// module et par champ — s'applique exactement comme si la personne avait
+/// clique elle-meme. Un compte de service ferait voir les prix d'achat a un
+/// magasinier.
+async fn deleguer(
+    r: &Reglage,
+    jeton: &str,
+    messages: &[Echange],
+) -> AppResult<Json<Value>> {
+    let url = r
+        .url_plateforme
+        .as_ref()
+        .ok_or_else(|| AppError::Interne(anyhow::anyhow!("adresse de la plateforme absente")))?;
+    let cle = r
+        .cle_plateforme
+        .as_ref()
+        .ok_or_else(|| AppError::Interne(anyhow::anyhow!("cle de la plateforme absente")))?;
+
+    let (derniere, avant) = messages.split_last().ok_or_else(|| {
+        AppError::Invalide("aucune question".into())
+    })?;
+    let historique: Vec<Value> = avant
+        .iter()
+        .map(|e| {
+            json!({
+                "role": if e.role == "assistant" { "assistant" } else { "user" },
+                "content": e.texte,
+            })
+        })
+        .collect();
+
+    // UN DELAI LONG, ASSUME : la plateforme met la question en file, et un
+    // modele local sans carte graphique demande des dizaines de secondes par
+    // tour. Couper a trente secondes ferait echouer une question qui allait
+    // aboutir.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| AppError::Interne(anyhow::anyhow!("client HTTP : {e}")))?;
+
+    let reponse = client
+        .post(format!("{url}/api/agents/erp"))
+        .header("X-Cle-Application", cle)
+        .json(&json!({
+            "question": derniere.texte,
+            "historique": historique,
+            "jeton": jeton,
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            AppError::Interne(anyhow::anyhow!("GestionAi ne repond pas ({url}) : {e}"))
+        })?;
+
+    let code = reponse.status();
+    let corps: Value = reponse.json().await.unwrap_or_else(|_| json!({}));
+    if !code.is_success() {
+        // ON RELAIE LE MOTIF DE LA PLATEFORME. « file saturee » et « modele
+        // absent » demandent deux gestes differents ; les fondre dans un
+        // « erreur 502 » rendrait le diagnostic impossible depuis l'ecran.
+        let motif = corps
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .unwrap_or("motif non precise");
+        return Err(AppError::Interne(anyhow::anyhow!("GestionAi a refuse ({code}) : {motif}")));
+    }
+
+    Ok(Json(json!({
+        "reponse": corps.get("reponse").and_then(|v| v.as_str()).unwrap_or(""),
+        // La plateforme nomme ses outils ; l'ecran les affiche sous le meme
+        // libelle que les competences locales.
+        "competences": corps.get("outils").cloned().unwrap_or_else(|| json!([])),
+        "brouillon": Value::Null,
+        "moteur": format!(
+            "plateforme/{}",
+            corps.get("modele").and_then(|v| v.as_str()).unwrap_or("?")
+        ),
+    })))
+}
+
 /// Reglage courant : quel moteur, quel modele, et s'il repond.
 ///
 /// L'ecran l'affiche pour que la lenteur du moteur local ne passe pas pour une
 /// panne, et que la bascule vers Claude soit un choix eclaire.
 pub async fn etat(State(state): State<AppState>, _user: Utilisateur) -> AppResult<Json<Value>> {
     let r = Reglage::depuis_base(&state.db).await;
-    let joignable = match r.moteur {
-        moteur::Moteur::Ollama => reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-            .ok()
-            .and_then(|c| Some(c.get(format!("{}/api/tags", r.url_ollama.trim_end_matches('/')))))
-            .is_some(),
-        moteur::Moteur::Claude => r.cle_claude.is_some(),
+
+    // CE CONTROLE NE CONTROLAIT RIEN. Il construisait la requete — `c.get(...)`
+    // rend un constructeur — l'enveloppait dans `Some`, puis demandait si ce
+    // `Some` etait un `Some`. Reponse : toujours oui. L'ecran affichait donc
+    // « joignable » meme moteur eteint, et l'on cherchait la panne ailleurs.
+    //
+    // ET REPONDRE NE SUFFIT PAS : Ollama repond tres bien quand le modele
+    // demande n'est pas installe. Il faut donc verifier les DEUX — le moteur
+    // ecoute, et il detient ce qu'on va lui reclamer.
+    let (joignable, modele_present, modeles) = match r.moteur {
+        moteur::Moteur::Ollama => {
+            let liste = sonder_ollama(&r.url_ollama).await;
+            match liste {
+                Some(m) => {
+                    // Ollama accepte « nom » pour « nom:latest » : on compare
+                    // sur la partie avant les deux-points quand l'etiquette est
+                    // absente, sinon un reglage valide passerait pour fautif.
+                    let present = m.iter().any(|x| {
+                        x == &r.modele
+                            || x.split(':').next() == r.modele.split(':').next()
+                                && !r.modele.contains(':')
+                    });
+                    (true, present, m)
+                }
+                None => (false, false, Vec::new()),
+            }
+        }
+        moteur::Moteur::Claude => (r.cle_claude.is_some(), r.cle_claude.is_some(), Vec::new()),
+        // LA PLATEFORME SE SONDE, ELLE AUSSI. Sa route de sante dit si SON
+        // moteur repond et s'il detient son modele : on relaie ce verdict
+        // plutot que d'afficher un voyant vert qui ne repose sur rien.
+        moteur::Moteur::Plateforme => match sonder_plateforme(&r).await {
+            Some(etat) => (
+                etat.get("joignable").and_then(|v| v.as_bool()).unwrap_or(false),
+                etat.get("modele_present").and_then(|v| v.as_bool()).unwrap_or(false),
+                etat.get("modeles_disponibles")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                    .unwrap_or_default(),
+            ),
+            None => (false, false, Vec::new()),
+        },
     };
+
     Ok(Json(json!({
         "moteur": r.moteur.nom(),
         "modele": r.modele,
         "local": r.moteur == moteur::Moteur::Ollama,
         "joignable": joignable,
+        // LE MOTEUR PEUT REPONDRE SANS DETENIR LE MODELE. Le distinguer evite
+        // la question sans issue : « le voyant est vert, pourquoi rien ne
+        // vient ? »
+        "modele_present": modele_present,
+        "modeles_disponibles": modeles,
         // CE QUI A ETE DEMANDE, quand ce n'est pas ce qui repond. L'ecran le
         // dit franchement : sinon on regle « claude » dans les parametres et
         // l'on cherche pendant une heure pourquoi c'est toujours aussi lent.
@@ -109,6 +281,8 @@ pub async fn etat(State(state): State<AppState>, _user: Utilisateur) -> AppResul
                  Sans carte graphique, comptez plusieurs dizaines de secondes par reponse.",
             moteur::Moteur::Claude =>
                 "Les questions et les chiffres necessaires a la reponse sont envoyes a Anthropic.",
+            moteur::Moteur::Plateforme =>
+                "La question est traitee par GestionAi, le service d'agents de l'entreprise.                  Rien ne sort du reseau local, et vos droits s'appliquent : l'agent interroge                  l'ERP avec votre jeton.",
         },
     })))
 }
@@ -117,6 +291,7 @@ pub async fn etat(State(state): State<AppState>, _user: Utilisateur) -> AppResul
 pub async fn discuter(
     State(state): State<AppState>,
     user: Utilisateur,
+    entetes: axum::http::HeaderMap,
     Json(q): Json<Question>,
 ) -> AppResult<Json<Value>> {
     // LE COCKPIT EN LECTURE SUFFIT A DISCUTER. Chaque competence exige ensuite
@@ -129,6 +304,23 @@ pub async fn discuter(
     }
 
     let reglage = Reglage::depuis_base(&state.db).await;
+
+    // EN MODE PLATEFORME, L'ERP NE MONTE NI CONSIGNE NI OUTILS. C'est l'agent
+    // qui les porte, et l'ERP redevient ce qu'il devrait etre : une source de
+    // chiffres, pas un orchestrateur de modeles.
+    if reglage.moteur == moteur::Moteur::Plateforme {
+        let jeton = entetes
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .ok_or_else(|| {
+                AppError::Interne(anyhow::anyhow!(
+                    "mode plateforme : le jeton de l'utilisateur est introuvable dans                      la requete, l'agent ne pourrait pas appliquer vos droits."
+                ))
+            })?;
+        return deleguer(&reglage, jeton, &q.messages).await;
+    }
+
     let outils = competences::outils_autorises(&state, &user).await;
     let consigne = consigne(&user);
 

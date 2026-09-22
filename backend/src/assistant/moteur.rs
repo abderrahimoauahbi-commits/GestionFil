@@ -1,6 +1,6 @@
 //! Le moteur de langage, et sa bascule.
 //!
-//! DEUX MOTEURS, UN SEUL CONTRAT. Le serveur parle a l'un ou a l'autre selon un
+//! TROIS MOTEURS, UN SEUL CONTRAT. Le serveur parle a l'un ou a l'autre selon un
 //! reglage, et le reste du code ignore lequel repond :
 //!
 //!   OLLAMA  un modele qui tourne SUR LE SERVEUR. Rien ne sort de la machine —
@@ -27,6 +27,7 @@ use std::time::Duration;
 pub enum Moteur {
     Ollama,
     Claude,
+    Plateforme,
 }
 
 impl Moteur {
@@ -34,6 +35,7 @@ impl Moteur {
         match self {
             Moteur::Ollama => "ollama",
             Moteur::Claude => "claude",
+            Moteur::Plateforme => "plateforme",
         }
     }
 }
@@ -48,6 +50,13 @@ pub struct Reglage {
     pub modele: String,
     pub url_ollama: String,
     pub cle_claude: Option<String>,
+    /// L'adresse de GestionAi. En base : ce n'est pas un secret, et la
+    /// direction doit pouvoir la changer depuis l'ecran de configuration.
+    pub url_plateforme: Option<String>,
+    /// La cle d'application. DANS L'ENVIRONNEMENT, jamais en base — une
+    /// sauvegarde s'exporte, se copie, se transporte, et un secret qui s'y
+    /// trouve part avec elle. Meme regle que la cle Claude.
+    pub cle_plateforme: Option<String>,
     /// Ce qui a ete DEMANDE, quand ce n'est pas ce qui repond.
     ///
     /// Un parametre qui dit « claude » alors que le moteur local repond — faute
@@ -86,12 +95,19 @@ impl Reglage {
         if let Some(m) = lire("P_AssistantMoteur").await {
             let cle_presente = r.cle_claude.is_some();
             let voulu = m.to_lowercase();
+            // LA PLATEFORME EXIGE SES DEUX MOITIES : une adresse et une cle.
+            // Avec une seule, on retomberait sur des 401 incomprehensibles ;
+            // on replie sur le moteur local et on le SIGNALE.
+            let plateforme_prete =
+                r.url_plateforme.is_some() && r.cle_plateforme.is_some();
             r.moteur = match voulu.as_str() {
                 "claude" | "anthropic" if cle_presente => Moteur::Claude,
+                "plateforme" | "gestionai" if plateforme_prete => Moteur::Plateforme,
                 _ => Moteur::Ollama,
             };
             r.repli_depuis = match voulu.as_str() {
                 "claude" | "anthropic" if !cle_presente => Some("claude"),
+                "plateforme" | "gestionai" if !plateforme_prete => Some("plateforme"),
                 _ => None,
             };
             // Le modele par defaut suit le moteur : basculer sur Claude avec un
@@ -99,7 +115,13 @@ impl Reglage {
             r.modele = match r.moteur {
                 Moteur::Claude => "claude-sonnet-4-5".into(),
                 Moteur::Ollama => "qwen2.5:3b-instruct".into(),
+                // En mode plateforme, c'est ELLE qui choisit le modele : l'ERP
+                // ne le connait pas, et n'a pas a le connaitre.
+                Moteur::Plateforme => "(choisi par la plateforme)".into(),
             };
+        }
+        if let Some(u) = lire("P_AssistantPlateforme").await {
+            r.url_plateforme = Some(u.trim_end_matches('/').to_string());
         }
         if let Some(m) = lire("P_AssistantModele").await {
             // Un modele explicitement choisi prime, mais seulement s'il
@@ -126,8 +148,9 @@ impl Reglage {
         };
 
         let modele = std::env::var("ASSISTANT_MODELE").unwrap_or_else(|_| match moteur {
-            Moteur::Ollama => "qwen2.5:7b-instruct".into(),
+            Moteur::Ollama => "qwen2.5:3b-instruct".into(),
             Moteur::Claude => "claude-sonnet-4-5".into(),
+            Moteur::Plateforme => "(choisi par la plateforme)".into(),
         });
 
         let repli_depuis = match demande.to_lowercase().as_str() {
@@ -141,6 +164,8 @@ impl Reglage {
             url_ollama: std::env::var("OLLAMA_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:11434".into()),
             cle_claude: cle,
+            url_plateforme: std::env::var("GESTIONAI_URL").ok().filter(|v| !v.trim().is_empty()),
+            cle_plateforme: std::env::var("GESTIONAI_CLE").ok().filter(|v| !v.trim().is_empty()),
             repli_depuis,
         }
     }
@@ -182,6 +207,15 @@ pub async fn interroger(
     match reglage.moteur {
         Moteur::Claude => claude(reglage, consigne, messages, outils).await,
         Moteur::Ollama => ollama(reglage, consigne, messages, outils).await,
+        // CE CHEMIN NE DOIT JAMAIS ETRE ATTEINT. En mode plateforme, `discuter`
+        // delegue AVANT d'arriver ici : l'ERP n'assemble plus ni consigne ni
+        // liste d'outils, c'est l'agent qui s'en charge. Y arriver signifie
+        // qu'une branche a ete oubliee en amont — on le dit plutot que de
+        // repondre n'importe quoi.
+        Moteur::Plateforme => Err(AppError::Interne(anyhow::anyhow!(
+            "mode plateforme : la question aurait du etre deleguee a GestionAi \
+             avant d'atteindre le moteur local."
+        ))),
     }
 }
 

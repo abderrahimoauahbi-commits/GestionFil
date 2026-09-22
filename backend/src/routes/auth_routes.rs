@@ -5,7 +5,7 @@ use crate::db::maintenant;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::{extract::State, Json};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -17,13 +17,6 @@ pub struct DemandeConnexion {
     /// au premier appel : le client ne sait pas encore qu'il sera demande.
     #[serde(default)]
     pub code: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ReponseConnexion {
-    pub jeton: String,
-    pub expire_le: i64,
-    pub utilisateur: serde_json::Value,
 }
 
 /// LE BLOCAGE EST PROGRESSIF, ET C'EST UN CHOIX.

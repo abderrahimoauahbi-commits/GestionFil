@@ -1687,6 +1687,89 @@ pub struct StatutBc {
     pub statut: String,
 }
 
+/// `DELETE /api/bons-commande/{id}` — la vraie suppression d'un bon non engage.
+///
+/// POURQUOI UNE SUPPRESSION ET NON UNE ANNULATION. Un bon annule reste dans la
+/// liste, dans les etats, dans la numerotation. C'est juste pour un document
+/// qui a engage quelque chose : on ne fait pas disparaitre un engagement, on
+/// le contre-passe. Mais un BROUILLON n'engage rien, et un bon SOUMIS A
+/// VALIDATION non plus — personne n'a signe, aucun fournisseur n'a ete
+/// prevenu, aucun stock n'a bouge. Le garder « annule » pour la forme encombre
+/// la liste de documents qui n'ont jamais existe pour personne.
+///
+/// LA LIMITE EST NETTE, ET ELLE NE SE NEGOCIE PAS : des qu'un bon est VALIDE,
+/// il a engage l'entreprise. Il ne se supprime plus ; il s'annule, et la trace
+/// demeure. Voir `changer_statut_bc`.
+///
+/// CE QUI EST VERIFIE AVANT D'EFFACER :
+///   * le statut — brouillon ou en attente de validation, rien d'autre ;
+///   * l'absence de reception : une marchandise deja recue contre ce bon en
+///     fait un document engage, quel que soit son statut affiche.
+///
+/// LES PROPOSITIONS D'ACHAT RETOURNENT AU POOL. Sans ce retour, la reference
+/// resterait marquee COMMANDE et le MRP ne la reproposerait jamais : un besoin
+/// disparaitrait pour un bon qui n'existe plus.
+pub async fn supprimer_bc(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
+
+    let statut: String = sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = $1")
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
+
+    if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
+        return Err(AppError::RegleMetier(format!(
+            "ce bon est {} : il a engage l'entreprise et ne se supprime plus.              Annulez-le — la trace restera.",
+            statut.to_lowercase().replace('_', " ")
+        )));
+    }
+
+    let receptions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM reception WHERE id_bc = $1")
+            .bind(&id)
+            .fetch_one(&state.db)
+            .await?;
+    if receptions > 0 {
+        return Err(AppError::RegleMetier(format!(
+            "{receptions} reception(s) se rattachent a ce bon : il a servi, il ne se supprime pas."
+        )));
+    }
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+
+    sqlx::query(
+        "UPDATE plan_achat SET statut = 'PROPOSE', id_bc_genere = NULL
+          WHERE statut = 'COMMANDE'
+            AND id_proposition IN (SELECT id_proposition FROM ligne_bc
+                                    WHERE id_bc = $1 AND id_proposition IS NOT NULL)",
+    )
+    .bind(&id)
+    .execute(&mut *tx)
+    .await?;
+
+    let lignes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ligne_bc WHERE id_bc = $1")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM ligne_bc WHERE id_bc = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM bon_commande WHERE id_bc = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    Ok(Json(json!({ "supprime": id, "lignes": lignes, "statut_avant": statut })))
+}
+
 pub async fn changer_statut_bc(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1708,9 +1791,17 @@ pub async fn changer_statut_bc(
     .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
 
     if s.statut == "VALIDE" {
-        // B4 regle 4 : la contrainte de table le refuse aussi, mais un message
-        // metier vaut mieux qu'un echec de CHECK.
-        if createur == user.id {
+        // B4 regle 4 : la separation des taches. Un declencheur de la base la
+        // tient aussi, mais un message metier vaut mieux qu'une exception SQL.
+        //
+        // LE SUPERVISEUR EN EST DISPENSE, sur decision de la direction. Dans
+        // une PME il est souvent seul a saisir ET seul a pouvoir engager : lui
+        // interdire de valider ne cree pas un second regard, cela cree un bon
+        // bloque — et quelqu'un finit par partager un mot de passe pour en
+        // sortir. Une regle qu'on contourne protege moins qu'une regle qu'on
+        // assume. La TRACE, elle, reste entiere : le journal montre qui a
+        // valide, et donc qu'il s'agissait de l'auteur.
+        if createur == user.id && user.role != "ADMIN" {
             return Err(AppError::RegleMetier(
                 "B4 regle 4 : vous ne pouvez pas valider un bon de commande que vous avez cree.".into(),
             ));

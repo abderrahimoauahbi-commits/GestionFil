@@ -325,7 +325,8 @@ pub fn router(state: AppState) -> Router {
         // --- Achats et receptions ---------------------------------------------
         .route("/api/bons-commande",
                get(stock::lister_bc).post(stock::creer_bc))
-        .route("/api/bons-commande/{id}", patch(stock::modifier_bc))
+        .route("/api/bons-commande/{id}",
+               patch(stock::modifier_bc).delete(stock::supprimer_bc))
         // Sans `{id}` : la liste sert AUSSI a la creation, quand le bon n'existe
         // pas encore et qu'on vient de choisir le fournisseur.
         .route("/api/references-commandables", get(stock::references_commandables))

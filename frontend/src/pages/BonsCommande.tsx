@@ -79,6 +79,15 @@ const LIBELLE: Record<string, string> = {
   ANNULE: 'Annule',
 }
 
+/**
+ * Les statuts qui n'engagent RIEN, et se suppriment donc pour de bon.
+ *
+ * Un bon soumis a validation en fait partie : personne ne l'a signe, aucun
+ * fournisseur n'a ete prevenu, aucun stock n'a bouge. Des qu'il est valide,
+ * il a engage l'entreprise — il s'annule, il ne s'efface plus.
+ */
+const SUPPRIMABLES = ['BROUILLON', 'EN_ATTENTE_VALIDATION']
+
 export function BonsCommande() {
   const droits = useDroits(MODULE)
   const ouvrirEtat = useOuvrirVue()
@@ -89,6 +98,29 @@ export function BonsCommande() {
   const q = useQuery({
     queryKey: ['bons-commande'],
     queryFn: () => api.get<Bc[]>('/api/bons-commande'),
+  })
+
+  /**
+   * LA VRAIE SUPPRESSION, pour ce qui n'a jamais engage personne.
+   *
+   * Un bon annule reste dans la liste, dans les etats, dans la numerotation.
+   * C'est juste pour un document qui a engage quelque chose. Mais un brouillon
+   * — et un bon seulement SOUMIS a validation — n'a prevenu aucun fournisseur
+   * et n'a fait bouger aucun stock. Le garder « annule » pour la forme
+   * encombre la liste de documents qui n'ont jamais existe pour personne.
+   *
+   * Le serveur tient la limite : des qu'un bon est valide, il refuse.
+   */
+  const supprimer = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/bons-commande/${id}`),
+    onSuccess: () => {
+      toast.success('Bon supprime', {
+        description: 'Il n’engageait rien : ses propositions d’achat sont revenues au plan.',
+      })
+      void qc.invalidateQueries({ queryKey: ['bons-commande'] })
+      void qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
+    },
+    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Suppression impossible.'),
   })
 
   const annuler = useMutation({
@@ -322,13 +354,22 @@ export function BonsCommande() {
                 className="text-danger hover:bg-danger/10"
                 onClick={() =>
                   confirmation.demander({
-                    titre: `Annuler ${b.numero_bc} ?`,
+                    titre: SUPPRIMABLES.includes(b.statut)
+                      ? `Supprimer ${b.numero_bc} ?`
+                      : `Annuler ${b.numero_bc} ?`,
                     destructif: true,
-                    libelleConfirmer: 'Annuler le bon',
-                    description:
-                      'Ses lignes seront annulees et les propositions d’achat qui les ont ' +
-                      'produites reviendront au plan.',
-                    action: () => annuler.mutate(b.id_bc),
+                    libelleConfirmer: SUPPRIMABLES.includes(b.statut)
+                      ? 'Supprimer definitivement'
+                      : 'Annuler le bon',
+                    description: SUPPRIMABLES.includes(b.statut)
+                      ? 'Ce bon n’engage rien : il sera EFFACE, sans laisser de trace dans ' +
+                        'la liste ni dans les etats. Ses propositions d’achat reviendront au plan.'
+                      : 'Ses lignes seront annulees et les propositions d’achat qui les ont ' +
+                        'produites reviendront au plan. Le bon restera visible, marque annule.',
+                    action: () =>
+                      SUPPRIMABLES.includes(b.statut)
+                        ? supprimer.mutate(b.id_bc)
+                        : annuler.mutate(b.id_bc),
                   })
                 }
                 aria-label="Annuler"

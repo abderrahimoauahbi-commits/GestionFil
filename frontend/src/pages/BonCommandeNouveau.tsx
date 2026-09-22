@@ -39,7 +39,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Link2, Plus, Save, Trash2, Unlink2 } from 'lucide-react'
+import { ArrowLeft, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -47,7 +47,6 @@ import { useParamVue } from '../lib/navigation'
 import { EnTetePage } from '../composants/Coquille'
 import {
   Alerte,
-  Badge,
   Bouton,
   Carte,
   CarteCorps,
@@ -59,17 +58,18 @@ import {
   Selecteur,
 } from '../composants/ui/base'
 import { Aide } from '../composants/ui/surcouches'
-import { ChampRecherche, type Suggestion } from '../composants/ChampRecherche'
-import { cn, fmt } from '../lib/utils'
+import { fmt } from '../lib/utils'
 import {
-  type Conditionnement,
-  depuisBobines,
-  depuisKg,
-  depuisPalettes,
-  depuisUnite,
-  facteurVersKg,
-  pourChamp,
-} from '../lib/conditionnement'
+  GrilleLignes,
+  corpsLigne,
+  depuisReference,
+  estEbauche,
+  estPrete,
+  kgDe,
+  ligneVide,
+  totalDe,
+  type LigneSaisie,
+} from '../composants/GrilleLignes'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -119,103 +119,7 @@ interface Fournisseur {
   pays?: string
 }
 
-/**
- * LA NATURE D'UNE LIGNE, et ce qu'elle implique jusqu'au quai.
- *
- * MARCHANDISE : une reference du catalogue. Elle se convertit en kilos, se
- * pese a la reception, entre en stock et pese sur le cout de revient.
- *
- * LIBRE : de la marchandise SANS reference — echantillon, type nouveau,
- * article que le fournisseur n'a pas encore. Elle se commande et peut etre
- * constatee a l'arrivee, mais n'entre jamais en stock : il n'y a aucune
- * reference sous laquelle la ranger, donc aucun CMUP a alimenter.
- *
- * SERVICE : ce qui n'est pas de la marchandise du tout — fret, commission,
- * montage. Rien n'arrive au quai.
- */
-type Nature = 'MARCHANDISE' | 'LIBRE' | 'SERVICE'
-
-/** Les unites d'une ligne sans reference : rien ne s'y pese. */
-const UNITES_LIBRES = ['Forfait', 'Unite', 'Heure'] as const
-
-interface LigneSaisie {
-  cle: string
-  nature: Nature
-  /** Vide sur une ligne libre ou une prestation. */
-  code_reference: string
-  /** Ce qui nomme la ligne : la designation du catalogue, ou l'intitule saisi. */
-  intitule: string
-  /** Le conditionnement de la reference, fige au moment du choix. */
-  cond: Conditionnement
-  unite_catalogue: string
-  fournisseur_habituel: string | null
-  /** Ce que le plan reclamait, pour afficher l'ecart si l'on s'en ecarte. */
-  suggere_kg: number | null
-  qte: string
-  unite: string
-  palettes: string
-  bobines: string
-  /** Lie, les trois se repondent ; detache, chacun se saisit seul. */
-  lie: boolean
-  /** Au KILO pour une marchandise, a l'unite saisie sinon. */
-  prix: string
-  /**
-   * CE QUE LE FOURNISSEUR RECONNAIT.
-   *
-   * Le bon part chez lui : il y lit SON code article et SON code couleur, pas
-   * les notres. Ces trois-la appartiennent a la REFERENCE — ce ne sont pas des
-   * proprietes de la commande — mais c'est en preparant la commande qu'on
-   * s'apercoit qu'ils manquent. On les corrige donc ici, et la correction
-   * remonte a la fiche de la reference, la ou l'information a sa place.
-   */
-  reference_fournisseur: string
-  couleur: string
-  code_couleur: string
-}
-
-let compteur = 0
-
-/**
- * UNE LIGNE NEUVE, en attente de ce qu'on va taper dedans.
- *
- * Elle naît en MARCHANDISE : c'est ce qu'on commande neuf fois sur dix. Elle ne
- * bascule en ligne libre que si l'on retient un intitule qui ne correspond a
- * aucune reference — ce n'est donc pas un type qu'on choisit d'avance, mais le
- * constat que ce qu'on commande n'est pas au catalogue.
- */
-function ligneVide(): LigneSaisie {
-  compteur += 1
-  return {
-    cle: `l-${compteur}`,
-    nature: 'MARCHANDISE',
-    code_reference: '',
-    intitule: '',
-    cond: {},
-    unite_catalogue: 'kg',
-    fournisseur_habituel: null,
-    suggere_kg: null,
-    qte: '',
-    unite: 'kg',
-    palettes: '',
-    bobines: '',
-    lie: true,
-    prix: '',
-    reference_fournisseur: '',
-    couleur: '',
-    code_couleur: '',
-  }
-}
-
-/** Une ligne part au serveur quand elle porte de quoi etre comprise. */
-const estPrete = (l: LigneSaisie) =>
-  Number(l.qte) > 0 &&
-  Number(l.prix) > 0 &&
-  (l.nature === 'MARCHANDISE' ? !!l.code_reference : !!l.intitule.trim())
-
 /** Une ligne commencee mais incomplete : elle bloque l'enregistrement. */
-const estEbauche = (l: LigneSaisie) =>
-  !estPrete(l) && (!!l.code_reference || !!l.intitule.trim() || Number(l.prix) > 0)
-
 export function BonCommandeNouveau() {
   const droits = useDroits(MODULE)
   const qc = useQueryClient()
@@ -286,70 +190,6 @@ export function BonCommandeNouveau() {
     [qPlan.data],
   )
 
-  const condDe = (r: RefCommandable): Conditionnement => ({
-    poids_bobine_kg: r.poids_bobine_kg,
-    bobines_par_palette: r.bobines_par_palette,
-    bobines_par_lot: r.bobines_par_lot,
-    densite_kg_ml: r.densite_kg_ml,
-  })
-
-  /**
-   * L'UNITE DANS LAQUELLE ON COMMANDE, et non celle dans laquelle on stocke.
-   *
-   * La ligne naissait en KILOS, et le bon imprime sortait donc en kilos — alors
-   * que les 109 bons d'archive sont en lots et en palettes, sans une seule
-   * mention de poids. Le fournisseur turc ne produit pas 8 601,6 kg : il
-   * produit deux bains de 1344 bobines. Le kilo est notre unite de stock ; ce
-   * n'est pas la sienne, et ce n'est pas celle du document.
-   *
-   * On prend donc la PLUS GROSSE unite que la reference sait exprimer : le lot
-   * s'il porte son bain, sinon la palette, sinon la bobine, et le kilo en
-   * dernier recours. L'acheteur reste libre d'en changer d'un clic.
-   */
-  const uniteDeCommande = (c: Conditionnement): string => {
-    if (facteurVersKg('Lot', c)) return 'Lot'
-    if (facteurVersKg('Palette', c)) return 'Palette'
-    if (facteurVersKg('Bobine', c)) return 'Bobine'
-    return 'kg'
-  }
-
-  /**
-   * Une reference retenue remplit la ligne : sa designation, son
-   * conditionnement, ce que le plan reclame et le prix qu'il propose.
-   */
-  const depuisReference = (r: RefCommandable, cle?: string): LigneSaisie => {
-    const c = condDe(r)
-    const kg = r.qte_a_commander_kg ?? 0
-    const colis = depuisKg(kg, c)
-    const unite = uniteDeCommande(c)
-    // Le plan reclame des KILOS ; on les traduit dans l'unite de commande.
-    // Un facteur absent ne peut pas arriver ici — `uniteDeCommande` ne rend
-    // que des unites dont le facteur existe — mais on se garde quand meme :
-    // une division par null produirait une quantite silencieusement fausse.
-    const f = facteurVersKg(unite, c)
-    const qte = kg > 0 && f ? kg / f : kg
-    compteur += 1
-    return {
-      cle: cle ?? `l-${compteur}`,
-      nature: 'MARCHANDISE',
-      code_reference: r.code_reference,
-      intitule: r.designation ?? r.code_reference,
-      cond: c,
-      unite_catalogue: r.unite_catalogue ?? 'kg',
-      fournisseur_habituel: r.code_fournisseur ?? null,
-      suggere_kg: kg > 0 ? kg : null,
-      qte: qte > 0 ? String(Number(qte.toFixed(unite === 'kg' ? 2 : 3))) : '',
-      unite,
-      palettes: pourChamp(colis.palettes),
-      bobines: pourChamp(colis.bobines),
-      lie: true,
-      prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
-      reference_fournisseur: r.reference_fournisseur ?? '',
-      couleur: r.couleur ?? '',
-      code_couleur: r.code_couleur ?? '',
-    }
-  }
-
   /* --- Arrivee ciblee : /bons-commande/nouveau?reference=X --------------- */
   useEffect(() => {
     const code = qRefDemandee.data?.code_fournisseur
@@ -380,68 +220,17 @@ export function BonCommandeNouveau() {
 
   /* --- La liste deroulante ------------------------------------------------ */
 
-  const dejaPrises = useMemo(
-    () => new Set(lignes.map((l) => l.code_reference).filter(Boolean)),
-    [lignes],
-  )
-
-  const chercher = useMemo(
-    () => async (motif: string): Promise<Suggestion[]> => {
-      // EN MODE PLAN on ne sort pas de ce que le MRP reclame : la liste est
-      // deja en memoire, inutile d'interroger le serveur.
-      if (mode === 'PLAN') {
-        const mots = motif.toLowerCase().split(/\s+/).filter(Boolean)
-        return proposees
-          .filter((r) =>
-            mots.every((m) =>
-              `${r.code_reference} ${r.designation ?? ''}`.toLowerCase().includes(m),
-            ),
-          )
-          .slice(0, 25)
-          .map((r) => versSuggestion(r))
-      }
-      const p = new URLSearchParams({
-        code_fournisseur: entete.code_fournisseur,
-        toutes: '1',
-        recherche: motif,
-        limite: '25',
-      })
-      const refs = await api.get<RefCommandable[]>(`/api/references-commandables?${p}`)
-      return refs.map((r) => versSuggestion(r))
-    },
-    [mode, proposees, entete.code_fournisseur, dejaPrises],
-  )
-
-  const versSuggestion = (r: RefCommandable): Suggestion => {
-    const suggere = r.qte_a_commander_kg ?? 0
-    const etranger = !!r.code_fournisseur && r.code_fournisseur !== entete.code_fournisseur
-    return {
-      valeur: r.code_reference,
-      titre: r.code_reference,
-      detail:
-        [
-          r.designation,
-          r.stock_projete_kg != null ? `projeté ${fmt.nombre(r.stock_projete_kg, 0)} kg` : null,
-          etranger ? `habituellement chez ${r.fournisseur_nom ?? r.code_fournisseur}` : null,
-        ]
-          .filter(Boolean)
-          .join(' · ') || undefined,
-      mention:
-        suggere > 0
-          ? `plan : ${fmt.nombre(suggere, 0)} kg`
-          : r.statut_stock && r.statut_stock !== 'OK'
-            ? r.statut_stock
-            : undefined,
-      ton: suggere > 0 ? 'primaire' : r.statut_stock === 'RUPTURE' ? 'alerte' : 'neutre',
-      desactivee: dejaPrises.has(r.code_reference),
-      charge: r,
-    }
+  const chercherCatalogue = async (motif: string): Promise<RefCommandable[]> => {
+    const p = new URLSearchParams({
+      code_fournisseur: entete.code_fournisseur,
+      toutes: '1',
+      recherche: motif,
+      limite: '25',
+    })
+    return api.get<RefCommandable[]>(`/api/references-commandables?${p}`)
   }
 
   /* --- Les lignes -------------------------------------------------------- */
-
-  const maj = (cle: string, patch: Partial<LigneSaisie>) =>
-    setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
 
   /**
    * CORRIGER LA FICHE DE LA REFERENCE DEPUIS LA COMMANDE.
@@ -467,84 +256,7 @@ export function BonCommandeNouveau() {
       toast.error(e instanceof ErreurApi ? e.message : 'Correction impossible.'),
   })
 
-  /** Le poids d'une ligne de marchandise, quelle que soit l'unite saisie. */
-  const kgDe = (l: LigneSaisie) =>
-    l.nature === 'MARCHANDISE' ? depuisUnite(l.qte, l.unite, l.cond).kg : null
-
   /** Ce que la ligne coute : au kilo pour la marchandise, au forfait sinon. */
-  const totalDe = (l: LigneSaisie) =>
-    l.nature === 'MARCHANDISE'
-      ? (kgDe(l) ?? 0) * Number(l.prix || 0)
-      : Number(l.qte || 0) * Number(l.prix || 0)
-
-  /** Les unites que la REFERENCE autorise, en plus du kilo. */
-  const unitesDe = (l: LigneSaisie): string[] => {
-    const u: string[] = []
-    if (facteurVersKg('Bobine', l.cond)) u.push('Bobine')
-    if (facteurVersKg('Palette', l.cond)) u.push('Palette')
-    // LE LOT NE S'OFFRE QUE SI LA REFERENCE LE PORTE. C'est l'unite dans
-    // laquelle le fournisseur turc produit ; elle n'a de sens que pour les
-    // articles dont on connait le bain.
-    if (facteurVersKg('Lot', l.cond)) u.push('Lot')
-    if (facteurVersKg('ml', l.cond)) u.push('ml')
-    return u
-  }
-
-  /**
-   * LES TROIS EXPRESSIONS SE REPONDENT — palettes, bobines, quantite.
-   *
-   * On saisit celle qu'on a en tete au moment de negocier, les deux autres
-   * suivent les parametres de la reference. Detache, chacune se saisit seule :
-   * un fournisseur livre parfois une palette entamee.
-   */
-  const majColis = (cle: string, source: 'quantite' | 'palettes' | 'bobines', valeur: string) =>
-    setLignes((ls) =>
-      ls.map((l) => {
-        if (l.cle !== cle) return l
-        if (!l.lie || l.nature !== 'MARCHANDISE') {
-          const champ =
-            source === 'quantite' ? 'qte' : source === 'palettes' ? 'palettes' : 'bobines'
-          return { ...l, [champ]: valeur }
-        }
-        const r =
-          source === 'palettes'
-            ? depuisPalettes(valeur, l.cond)
-            : source === 'bobines'
-              ? depuisBobines(valeur, l.cond)
-              : depuisUnite(valeur, l.unite, l.cond)
-        const quantite =
-          source === 'quantite'
-            ? valeur
-            : l.unite === 'Palette'
-              ? pourChamp(r.palettes)
-              : l.unite === 'Bobine'
-                ? pourChamp(r.bobines)
-                : (() => {
-                    const f = facteurVersKg(l.unite, l.cond)
-                    return r.kg !== null && f ? pourChamp(r.kg / f, 3) : l.qte
-                  })()
-        return {
-          ...l,
-          qte: quantite,
-          palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
-          bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
-        }
-      }),
-    )
-
-  /** Changer d'unite ne change pas la marchandise : seule son expression change. */
-  const majUnite = (cle: string, unite: string) =>
-    setLignes((ls) =>
-      ls.map((l) => {
-        if (l.cle !== cle) return l
-        if (l.nature !== 'MARCHANDISE') return { ...l, unite }
-        const kg = depuisUnite(l.qte, l.unite, l.cond).kg
-        const f = facteurVersKg(unite, l.cond)
-        if (!l.lie || kg === null || !f) return { ...l, unite }
-        return { ...l, unite, qte: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
-      }),
-    )
-
   /* --- L'enregistrement --------------------------------------------------- */
 
   const pretes = lignes.filter(estPrete)
@@ -564,27 +276,7 @@ export function BonCommandeNouveau() {
     mutationFn: () =>
       api.post<{ id_bc: string; numero_bc: string; lignes: number }>('/api/bons-commande', {
         ...entete,
-        lignes: pretes.map((l) =>
-          l.nature === 'MARCHANDISE'
-            ? {
-                type_ligne: 'MARCHANDISE',
-                code_reference: l.code_reference,
-                unite_commande: l.unite,
-                quantite_commandee_unite: Number(l.qte),
-                // LE PRIX SE SAISIT AU KILO, le bon l'enregistre par unite
-                // commandee. C'est au kilo que les offres se comparent ; c'est
-                // par palette que le fournisseur facture.
-                prix_unitaire_devise:
-                  Number(l.prix) * (facteurVersKg(l.unite, l.cond) ?? 1),
-              }
-            : {
-                type_ligne: l.nature,
-                libelle: l.intitule.trim(),
-                unite_commande: l.unite,
-                quantite_commandee_unite: Number(l.qte),
-                prix_unitaire_devise: Number(l.prix),
-              },
-        ),
+        lignes: pretes.map(corpsLigne),
       }),
     onSuccess: (r) => {
       toast.success(`${r.numero_bc} cree`, {
@@ -599,9 +291,7 @@ export function BonCommandeNouveau() {
 
   /* --- Rendu -------------------------------------------------------------- */
 
-  const cellule = 'px-1.5 py-1 align-top'
-
-  return (
+    return (
     <div>
       <EnTetePage
         titre="Nouveau bon de commande"
@@ -713,395 +403,29 @@ export function BonCommandeNouveau() {
           <Carte repliable="boncommandenouveau.2">
             <CarteEntete>
               <CarteTitre>Lignes du bon</CarteTitre>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] text-attenue-texte">
-                  {qPlan.isLoading
-                    ? 'lecture du plan…'
-                    : `${proposees.length} proposition(s) du plan`}
-                </span>
-                {/* L'INTERRUPTEUR : ce que la liste deroulante propose. */}
-                <div className="flex overflow-hidden rounded-[var(--radius)] border border-bordure">
-                  {(
-                    [
-                      ['PLAN', 'Du plan d’achat'],
-                      ['CATALOGUE', 'Tout le catalogue'],
-                    ] as const
-                  ).map(([m, libelle]) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setMode(m)}
-                      className={cn(
-                        'px-2.5 py-1 text-[12px]',
-                        mode === m
-                          ? 'bg-primaire/10 font-medium text-primaire'
-                          : 'text-attenue-texte hover:bg-attenue/50',
-                      )}
-                    >
-                      {libelle}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </CarteEntete>
             <CarteCorps className="space-y-3">
               {qPlan.isLoading && <Chargement texte="Lecture du plan d'achat…" />}
 
-              {/* ---- La grille ------------------------------------------- */}
-              {lignes.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1080px] text-[13px]">
-                    <thead>
-                      <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                        <th className="w-8 px-1 py-2 text-right">#</th>
-                        <th className="px-1.5 py-2 text-left" title="Le code interne de la maison">
-                          Notre référence
-                        </th>
-                        <th className="w-28 px-1.5 py-2 text-right">Quantité</th>
-                        <th className="w-32 px-1.5 py-2 text-left" title="Le code que le fournisseur emploie, tel qu'il figure sur sa facture">
-                          Réf. frs
-                        </th>
-                        <th className="w-28 px-1.5 py-2 text-left">Couleur</th>
-                        <th className="w-28 px-1.5 py-2 text-left" title="Le code que CE fournisseur donne a cette couleur">
-                          Code coul. frs
-                        </th>
-                        <th className="w-24 px-1.5 py-2 text-left">Unité</th>
-                        <th className="w-36 px-1.5 py-2 text-center">Pal. / Bob.</th>
-                        <th className="w-28 px-1.5 py-2 text-right">Prix {devise}</th>
-                        <th className="w-28 px-1.5 py-2 text-right">Total</th>
-                        <th className="w-8 px-1 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lignes.map((l, i) => {
-                        const kg = kgDe(l)
-                        const marchandise = l.nature === 'MARCHANDISE'
-                        const ecart =
-                          l.suggere_kg && kg != null ? kg - l.suggere_kg : null
-                        return (
-                          <tr key={l.cle} className="border-b border-bordure/60">
-                            <td className="px-1 py-1 text-right tabular-nums text-attenue-texte">
-                              {i + 1}
-                            </td>
-                            {/* LA LISTE DEROULANTE EST DANS LA LIGNE, a la place
-                                meme de la reference. C'est la qu'on la cherche :
-                                un champ d'ajout pose ailleurs oblige a faire un
-                                aller-retour pour chaque article. */}
-                            <td className={cn(cellule, 'min-w-0')}>
-                              {l.code_reference || (l.nature !== 'MARCHANDISE' && l.intitule) ? (
-                                <>
-                                  <div className="flex items-start gap-1.5">
-                                    <div className="min-w-0 flex-1">
-                                      <div className="truncate font-medium">
-                                        {l.code_reference || l.intitule}
-                                      </div>
-                                      <div className="truncate text-[11px] text-attenue-texte">
-                                        {marchandise ? (
-                                          <>
-                                            {/* LA DESIGNATION NE SE REPETE PAS.
-                                                Dans ce catalogue elle est le
-                                                plus souvent IDENTIQUE au code :
-                                                l'afficher dessous montrait deux
-                                                fois la meme chaine, juste a cote
-                                                des codes du fournisseur — on ne
-                                                savait plus lequel etait lequel. */}
-                                            {l.intitule !== l.code_reference && (
-                                              <span>{l.intitule} · </span>
-                                            )}
-                                            <span>notre code</span>
-                                            {l.fournisseur_habituel &&
-                                              l.fournisseur_habituel !==
-                                                entete.code_fournisseur && (
-                                                <span className="text-alerte">
-                                                  {' '}
-                                                  · habituellement chez {l.fournisseur_habituel}
-                                                </span>
-                                              )}
-                                          </>
-                                        ) : (
-                                          <Badge ton="alerte">hors catalogue</Badge>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        maj(l.cle, {
-                                          nature: 'MARCHANDISE',
-                                          code_reference: '',
-                                          intitule: '',
-                                          cond: {},
-                                          suggere_kg: null,
-                                        })
-                                      }
-                                      className="shrink-0 pt-0.5 text-[11px] text-attenue-texte underline hover:text-texte"
-                                      aria-label="Changer la référence"
-                                    >
-                                      changer
-                                    </button>
-                                  </div>
-                                  {ecart != null && Math.abs(ecart) > 0.5 && (
-                                    <div className="text-[11px] text-alerte">
-                                      {ecart > 0 ? '+' : ''}
-                                      {fmt.nombre(ecart, 0)} kg par rapport au plan
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <ChampRecherche
-                                  valeur=""
-                                  chercher={chercher}
-                                  cleCache={[mode, entete.code_fournisseur, dejaPrises.size]}
-                                  chercherAVide
-                                  surChoix={(s) =>
-                                    maj(l.cle, depuisReference(s.charge as RefCommandable, l.cle))
-                                  }
-                                  placeholder={
-                                    mode === 'PLAN'
-                                      ? 'Référence — le plan propose…'
-                                      : 'Référence — tout le catalogue…'
-                                  }
-                                  aide="Flèches pour parcourir, Entrée pour retenir."
-                                  ariaLabel="Référence de la ligne"
-                                  surAucun={(motif) => (
-                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                      {mode === 'PLAN' && (
-                                        <Bouton
-                                          variante="contour"
-                                          taille="sm"
-                                          onClick={() => setMode('CATALOGUE')}
-                                        >
-                                          Chercher dans tout le catalogue
-                                        </Bouton>
-                                      )}
-                                      <Bouton
-                                        variante="contour"
-                                        taille="sm"
-                                        onClick={() => setACreer(motif)}
-                                      >
-                                        <Plus />
-                                        Ajouter au catalogue
-                                      </Bouton>
-                                      <Bouton
-                                        variante="contour"
-                                        taille="sm"
-                                        onClick={() =>
-                                          maj(l.cle, {
-                                            nature: 'LIBRE',
-                                            intitule: motif,
-                                            unite: 'Forfait',
-                                            qte: '1',
-                                          })
-                                        }
-                                      >
-                                        Garder « {motif} » sans référence
-                                      </Bouton>
-                                    </div>
-                                  )}
-                                />
-                              )}
-                            </td>
-                            <td className={cellule}>
-                              <Champ
-                                type="number"
-                                step="any"
-                                min="0.0001"
-                                value={l.qte}
-                                onChange={(e) => majColis(l.cle, 'quantite', e.target.value)}
-                                className="h-8 text-right tabular-nums"
-                                aria-label="Quantité"
-                              />
-                              {marchandise && l.unite !== 'kg' && (
-                                <div className="mt-0.5 text-right text-[11px] tabular-nums text-attenue-texte">
-                                  {kg === null ? (
-                                    <span className="text-danger">non convertible</span>
-                                  ) : (
-                                    <>= {fmt.nombre(kg, 0)} kg</>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            {/* CE QUE LE FOURNISSEUR RECONNAIT. Modifiable :
-                                la correction remonte a la fiche de la
-                                reference, la ou l'information a sa place. */}
-                            {(['reference_fournisseur', 'couleur', 'code_couleur'] as const).map(
-                              (champ) => (
-                                <td className={cellule} key={champ}>
-                                  {marchandise ? (
-                                    <Champ
-                                      value={l[champ]}
-                                      onChange={(e) => maj(l.cle, { [champ]: e.target.value })}
-                                      onBlur={(e) => {
-                                        const v = e.target.value.trim()
-                                        const initial =
-                                          (parPlan.get(l.code_reference)?.[champ] as string) ?? ''
-                                        if (v !== initial && l.code_reference) {
-                                          corrigerReference.mutate({
-                                            code: l.code_reference,
-                                            champ,
-                                            valeur: v,
-                                          })
-                                        }
-                                      }}
-                                      className="h-8"
-                                      placeholder={
-                                        champ === 'reference_fournisseur'
-                                          ? 'Ssl2279'
-                                          : champ === 'couleur'
-                                            ? 'Cream'
-                                            : 'RED 7612'
-                                      }
-                                      aria-label={
-                                        champ === 'reference_fournisseur'
-                                          ? 'Référence chez le fournisseur'
-                                          : champ === 'couleur'
-                                            ? 'Couleur'
-                                            : 'Code couleur du fournisseur'
-                                      }
-                                    />
-                                  ) : (
-                                    <span className="block text-center text-[11px] text-attenue-texte">
-                                      —
-                                    </span>
-                                  )}
-                                </td>
-                              ),
-                            )}
-                            <td className={cellule}>
-                              <Selecteur
-                                value={l.unite}
-                                onChange={(e) => majUnite(l.cle, e.target.value)}
-                                className="h-8"
-                                aria-label="Unité"
-                              >
-                                {marchandise ? (
-                                  <>
-                                    <option value="kg">kg</option>
-                                    {unitesDe(l).map((u) => (
-                                      <option key={u} value={u}>
-                                        {u}
-                                      </option>
-                                    ))}
-                                  </>
-                                ) : (
-                                  UNITES_LIBRES.map((u) => (
-                                    <option key={u} value={u}>
-                                      {u}
-                                    </option>
-                                  ))
-                                )}
-                              </Selecteur>
-                            </td>
-                            <td className={cellule}>
-                              {marchandise ? (
-                                <div className="flex items-center gap-1">
-                                  <Champ
-                                    type="number"
-                                    min="0"
-                                    value={l.palettes}
-                                    onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
-                                    className="h-8 w-14 text-right tabular-nums"
-                                    placeholder="pal."
-                                    aria-label="Nombre de palettes"
-                                  />
-                                  <Champ
-                                    type="number"
-                                    min="0"
-                                    value={l.bobines}
-                                    onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
-                                    className="h-8 w-16 text-right tabular-nums"
-                                    placeholder="bob."
-                                    aria-label="Nombre de bobines"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => maj(l.cle, { lie: !l.lie })}
-                                    title={
-                                      l.lie
-                                        ? 'Les trois se repondent — cliquez pour saisir chacun separement'
-                                        : 'Calcul detache — cliquez pour relier les trois'
-                                    }
-                                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                    className={cn(
-                                      'shrink-0 rounded-[var(--radius)] p-1',
-                                      l.lie
-                                        ? 'text-primaire hover:bg-primaire/10'
-                                        : 'text-alerte hover:bg-alerte/10',
-                                    )}
-                                  >
-                                    {l.lie ? (
-                                      <Link2 className="size-3.5" />
-                                    ) : (
-                                      <Unlink2 className="size-3.5" />
-                                    )}
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="block text-center text-[11px] text-attenue-texte">
-                                  —
-                                </span>
-                              )}
-                            </td>
-                            <td className={cellule}>
-                              <Champ
-                                type="number"
-                                step="any"
-                                min="0.0001"
-                                value={l.prix}
-                                onChange={(e) => maj(l.cle, { prix: e.target.value })}
-                                className={cn(
-                                  'h-8 text-right tabular-nums',
-                                  !(Number(l.prix) > 0) && estEbauche(l) && 'border-danger',
-                                )}
-                                aria-label={marchandise ? `Prix ${devise} par kg` : `Prix ${devise}`}
-                              />
-                              {marchandise && (
-                                <div className="mt-0.5 text-right text-[11px] text-attenue-texte">
-                                  par kg
-                                </div>
-                              )}
-                            </td>
-                            <td className={cn(cellule, 'pt-2 text-right font-medium tabular-nums')}>
-                              {fmt.nombre(totalDe(l), 2)}
-                            </td>
-                            <td className="px-1 py-1">
-                              <Bouton
-                                variante="discret"
-                                taille="icone-xs"
-                                className="text-danger hover:bg-danger/10"
-                                aria-label="Retirer la ligne"
-                                onClick={() =>
-                                  setLignes((ls) => ls.filter((x) => x.cle !== l.cle))
-                                }
-                              >
-                                <Trash2 />
-                              </Bouton>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* UNE LIGNE DE PLUS, et rien d'autre. Ce qu'on commande se
-                  designe DANS la ligne, pas dans un champ pose a cote. */}
-              <div className="flex flex-wrap items-center gap-2">
-                <Bouton
-                  variante="contour"
-                  taille="sm"
-                  onClick={() => setLignes((ls) => [...ls, ligneVide()])}
-                >
-                  <Plus />
-                  Ajouter une ligne
-                </Bouton>
-                <span className="text-[11px] text-attenue-texte">
-                  {mode === 'PLAN'
-                    ? 'La liste propose ce que le plan d’achat réclame chez ce fournisseur.'
-                    : 'La liste propose tout le catalogue — le rattachement à un fournisseur est une habitude d’achat, pas une exclusivité.'}
-                </span>
-              </div>
+              {/* LA MEME GRILLE QUE L'ECRAN DE MODIFICATION. Elle vivait ici,
+                  en clair ; l'ecran de modification en avait une autre, plus
+                  pauvre. Deux saisies pour un meme article, c'etait une de
+                  trop — elles divergeaient sans que rien ne le signale. */}
+              <GrilleLignes
+                codeFournisseur={entete.code_fournisseur}
+                devise={devise}
+                lignes={lignes}
+                setLignes={setLignes}
+                mode={mode}
+                setMode={setMode}
+                proposees={proposees}
+                chercherCatalogue={chercherCatalogue}
+                surCorrection={(code, champ, valeur) =>
+                  corrigerReference.mutate({ code, champ, valeur })
+                }
+                valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
+                surCreerReference={setACreer}
+              />
 
               {aCreer && (
                 <Alerte ton="info" titre="Créer une référence au catalogue">

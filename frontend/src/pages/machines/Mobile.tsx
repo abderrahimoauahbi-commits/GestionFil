@@ -478,6 +478,7 @@ function FicheMobile({
           </span>
           <span className="font-medium text-texte">{nb(f.totaux.etatKg)} kg constatés</span>
         </div>
+<<<<<<< HEAD
         {/* MEME QUESTION QU'AU BUREAU, en plus court : sur un telephone tenu
             d'une main devant un metier, on lit trois lignes, pas dix. */}
         {f.lotCourt && (
@@ -513,6 +514,12 @@ function FicheMobile({
           type="button"
           disabled={!f.pret || f.envoi.isPending}
           onClick={() => f.envoi.mutate(undefined)}
+=======
+        <button
+          type="button"
+          disabled={!f.pret || f.envoi.isPending}
+          onClick={() => f.envoi.mutate()}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           className="inline-flex min-h-[56px] w-full items-center justify-center gap-2
                      rounded-[var(--radius-sm)] bg-primaire text-[15px] font-semibold
                      text-primaire-texte disabled:opacity-40"

@@ -24,13 +24,21 @@ const varianteBouton = cva(
     'text-[13px] font-medium outline-none select-none ' +
     // LA TRANSITION PORTE AUSSI SUR L'OMBRE ET LA POSITION : sans elles,
     // l'enfoncement est un saut, pas un geste.
+<<<<<<< HEAD
     'transition-[background-color,border-color,color,box-shadow,transform] ' +
     'duration-[140ms] ease-[cubic-bezier(0.4,0,0.2,1)] ' +
+=======
+    'transition-[background-color,border-color,color,box-shadow,transform] duration-100 ' +
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     'focus-visible:ring-2 focus-visible:ring-anneau focus-visible:ring-offset-1 focus-visible:ring-offset-fond ' +
     // UN BOUTON DOIT REPONDRE AU DOIGT. Sans etat enfonce, rien ne distingue
     // un appui pris d'un appui perdu — et sur un ecran tactile, ou il n'y a
     // pas de survol, c'est le SEUL retour que recoit l'operateur.
+<<<<<<< HEAD
     'active:translate-y-px active:shadow-none active:duration-75 ' +
+=======
+    'active:translate-y-px active:shadow-none ' +
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     'disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none ' +
     '[&_svg]:size-3.5 [&_svg]:shrink-0',
   {
@@ -39,6 +47,7 @@ const varianteBouton = cva(
         // L'OMBRE EST UNE MINCE ARETE, PAS UN NUAGE. Elle detache le bouton de
         // son fond sans donner l'air d'une maquette : un liachage de 1 px sous
         // la surface suffit a le faire lire comme un objet qu'on presse.
+<<<<<<< HEAD
         // AU SURVOL, LE BOUTON MONTE D'UN DEMI-PIXEL ET SON OMBRE S'ALLONGE.
         // Le geste dure 140 ms : assez pour se sentir, trop court pour se
         // remarquer. C'est cette micro-elevation, et non la teinte, qui donne
@@ -57,6 +66,16 @@ const varianteBouton = cva(
         danger:
           'bg-danger text-danger-texte shadow-[var(--ombre-pose)] ' +
           'hover:-translate-y-px hover:bg-danger/92 hover:shadow-[var(--ombre-levee)]',
+=======
+        principal:
+          'bg-accent text-accent-texte shadow-sm hover:bg-accent/90 hover:shadow',
+        primaire:
+          'bg-primaire text-primaire-texte shadow-sm hover:bg-primaire/90 hover:shadow',
+        contour:
+          'border border-bordure bg-surface shadow-sm hover:border-primaire/40 hover:bg-attenue',
+        discret: 'hover:bg-attenue hover:text-texte',
+        danger: 'bg-danger text-danger-texte shadow-sm hover:bg-danger/90 hover:shadow',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         lien: 'text-primaire underline-offset-4 hover:underline active:translate-y-0',
       },
       // UN CRAN PLUS BAS QUE LA CONVENTION DU WEB, ET C'EST VOULU. Un bouton de

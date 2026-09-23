@@ -292,6 +292,151 @@ export function BonCommandeNouveau() {
   /* --- Rendu -------------------------------------------------------------- */
 
     return (
+<<<<<<< HEAD
+=======
+      <div
+        className={cn(
+          'rounded-[var(--radius)] border p-2',
+          coche ? 'border-primaire bg-primaire/5' : 'border-bordure',
+        )}
+      >
+        <label className={cn('flex items-start gap-2', deja ? 'opacity-60' : 'cursor-pointer')}>
+          <input
+            type="checkbox"
+            checked={coche}
+            disabled={deja}
+            onChange={() => basculer(r)}
+            className="mt-0.5 size-4 shrink-0"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium">{r.code_reference}</span>
+              {r.statut_stock && (
+                <Badge ton={TON_STOCK[r.statut_stock] ?? 'neutre'}>{r.statut_stock}</Badge>
+              )}
+              {r.tier && <Badge ton={TON_TIER[r.tier] ?? 'neutre'}>{r.tier}</Badge>}
+              {r.classe_abc && <Badge ton="contour">ABC {r.classe_abc}</Badge>}
+              {r.risque_sourcing === 'MONO-SOURCE' && <Badge ton="alerte">mono-source</Badge>}
+              {r.equivalent_de && <Badge ton="info">equivalent</Badge>}
+            </span>
+            <span className="mt-0.5 block truncate text-[12px] text-attenue-texte">
+              {r.designation}
+            </span>
+            {r.equivalent_de && (
+              <span className="mt-1 block text-[11px] text-primaire">
+                Remplace <strong>{r.equivalent_de}</strong>
+                {r.besoin_equivalent_kg != null && (
+                  <> — besoin de {fmt.nombre(r.besoin_equivalent_kg, 0)} kg non couvert</>
+                )}
+              </span>
+            )}
+            <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-attenue-texte">
+              <span>
+                Besoin{' '}
+                <span className="tabular-nums text-texte">
+                  {fmt.nombre(r.besoin_12m_kg ?? 0, 0)} kg
+                </span>
+              </span>
+              <span>
+                Projete{' '}
+                <span className="tabular-nums text-texte">
+                  {fmt.nombre(r.stock_projete_kg ?? 0, 0)} kg
+                </span>
+              </span>
+              {(r.deja_commande_kg ?? 0) > 0 && (
+                <span>
+                  Deja commande{' '}
+                  <span className="tabular-nums text-texte">
+                    {fmt.nombre(r.deja_commande_kg ?? 0, 0)} kg
+                  </span>
+                </span>
+              )}
+              {r.jours_couverture != null && (
+                <span>
+                  Couverture{' '}
+                  <span className="tabular-nums text-texte">
+                    {fmt.nombre(r.jours_couverture, 0)} j
+                  </span>
+                </span>
+              )}
+              {r.delai_livraison_jours != null && <span>Delai {r.delai_livraison_jours} j</span>}
+              {(r.qte_a_commander_kg ?? 0) > 0 && (
+                <span>
+                  Suggere{' '}
+                  <span className="font-medium tabular-nums text-texte">
+                    {fmt.nombre(r.qte_a_commander_kg ?? 0, 0)} kg
+                  </span>
+                </span>
+              )}
+              {r.prix_suggere_devise != null && (
+                <span>
+                  Prix{' '}
+                  <span className="tabular-nums text-texte">
+                    {fmt.nombre(r.prix_suggere_devise, 4)} {devise}
+                  </span>
+                </span>
+              )}
+              {r.source_prix === 'CATALOGUE' && (
+                <span className="text-alerte">prix catalogue, jamais paye</span>
+              )}
+              {r.moq_kg != null && <span>MOQ {fmt.nombre(r.moq_kg, 0)} kg</span>}
+              {deja && <span>déjà sur un bon</span>}
+            </span>
+          </span>
+        </label>
+
+        {coche && (
+          <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-3">
+            <div>
+              <Etiq>Quantité (kg)</Etiq>
+              <Champ
+                type="number"
+                step="any"
+                min="0.0001"
+                value={choix[r.code_reference].qte}
+                onChange={(e) =>
+                  setChoix((c) => ({
+                    ...c,
+                    [r.code_reference]: { ...c[r.code_reference], qte: e.target.value },
+                  }))
+                }
+                className="text-right tabular-nums"
+              />
+            </div>
+            <div>
+              <Etiq>Prix {devise}/kg</Etiq>
+              <Champ
+                type="number"
+                step="any"
+                min="0.0001"
+                value={choix[r.code_reference].prix}
+                onChange={(e) =>
+                  setChoix((c) => ({
+                    ...c,
+                    [r.code_reference]: { ...c[r.code_reference], prix: e.target.value },
+                  }))
+                }
+                className="text-right tabular-nums"
+              />
+            </div>
+            <div>
+              <Etiq>Total ligne</Etiq>
+              <div className="flex h-8 items-center justify-end rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[13px] tabular-nums">
+                {fmt.nombre(
+                  Number(choix[r.code_reference].qte) * Number(choix[r.code_reference].prix),
+                  2,
+                )}{' '}
+                {devise}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     <div>
       <EnTetePage
         titre="Nouveau bon de commande"
@@ -454,8 +599,13 @@ export function BonCommandeNouveau() {
       {entete.code_fournisseur && (
         <div className="sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2 shadow-sm">
           <span className="text-[13px]">
+<<<<<<< HEAD
             {pretes.length === 0 ? (
               <span className="text-attenue-texte">Aucune ligne saisie.</span>
+=======
+            {nb === 0 ? (
+              <span className="text-attenue-texte">Aucune référence selectionnee.</span>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             ) : (
               <>
                 <span className="font-medium">{pretes.length} ligne(s)</span>
@@ -463,6 +613,7 @@ export function BonCommandeNouveau() {
                 <span className="font-semibold tabular-nums">
                   {fmt.nombre(total, 2)} {devise}
                 </span>
+<<<<<<< HEAD
                 {sansFacteur.length > 0 ? (
                   <span className="text-danger">
                     {' '}
@@ -477,6 +628,10 @@ export function BonCommandeNouveau() {
                       — {ebauches.length} ligne(s) incomplète(s) : intitulé, quantité ou prix
                     </span>
                   )
+=======
+                {!complet && (
+                  <span className="text-danger"> — quantité ou prix manquant sur une ligne</span>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
                 )}
               </>
             )}

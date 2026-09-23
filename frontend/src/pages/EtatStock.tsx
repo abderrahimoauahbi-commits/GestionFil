@@ -20,7 +20,11 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+<<<<<<< HEAD
 import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
+=======
+import { ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'

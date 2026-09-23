@@ -447,8 +447,11 @@ export function BonCommande() {
     {
       champ: 'code_reference',
       entete: 'Référence',
+<<<<<<< HEAD
       // UNE PRESTATION N'A PAS DE REFERENCE : c'est son libelle qui la nomme.
       // Sans ce repli, la ligne de transport s'affichait vide.
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-medium">
@@ -1124,3 +1127,257 @@ export function BonCommande() {
   )
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * Saisie des lignes, avec le plan d'achat sous les yeux.
+ *
+ * Une seule liste, celle des references DU FOURNISSEUR du bon — la precedente
+ * offrait deux mille references tous fournisseurs confondus. Chacune arrive avec
+ * son stock, sa couverture et la quantite suggeree, et cocher preremplit la
+ * quantite et le prix. On corrige ensuite ce qu'on veut.
+ */
+function PanneauSaisie({
+  idBc,
+  devise,
+  dejaChoisies,
+  surFermeture,
+  surAjout,
+}: {
+  idBc: string
+  devise: string
+  /** References deja sur le bon OU deja ajoutees au brouillon. */
+  dejaChoisies: string[]
+  surFermeture: () => void
+  surAjout: (
+    ajouts: { code_reference: string; designation: string; quantite: number; prix: number }[],
+  ) => void
+}) {
+  const [choix, setChoix] = useState<Record<string, { qte: string; prix: string }>>({})
+  const [filtre, setFiltre] = useState('')
+  const [erreur, setErreur] = useState<string | null>(null)
+
+  const q = useQuery({
+    queryKey: ['refs-commandables', idBc],
+    queryFn: () => api.get<RefCommandable[]>(`/api/references-commandables?id_bc=${idBc}`),
+  })
+
+  /**
+   * Le panneau ne cree rien : il remonte les lignes au document, qui les garde
+   * en brouillon jusqu'a l'enregistrement. Ajouter une ligne est une intention,
+   * pas un engagement — et une ligne ajoutee par erreur se retire sans avoir
+   * jamais existe en base.
+   */
+  const valider = () => {
+    const ajouts = Object.entries(choix).map(([code, v]) => ({
+      code_reference: code,
+      designation: (q.data ?? []).find((r) => r.code_reference === code)?.designation ?? code,
+      quantite: Number(v.qte),
+      prix: Number(v.prix),
+    }))
+    if (ajouts.some((a) => !(a.quantite > 0) || !(a.prix > 0))) {
+      setErreur('Renseignez une quantite et un prix pour chaque ligne.')
+      return
+    }
+    surAjout(ajouts)
+    setChoix({})
+    surFermeture()
+  }
+
+  const refs = (q.data ?? []).filter(
+    (r) =>
+      !filtre ||
+      r.code_reference.toLowerCase().includes(filtre.toLowerCase()) ||
+      (r.designation ?? '').toLowerCase().includes(filtre.toLowerCase()),
+  )
+
+  const basculer = (r: RefCommandable) =>
+    setChoix((c) => {
+      if (c[r.code_reference]) {
+        const { [r.code_reference]: _, ...reste } = c
+        return reste
+      }
+      // Preremplissage : la quantite suggeree par le plan, et le prix estime
+      // ramene dans la devise du bon. L'acheteur corrige ce qu'il veut.
+      return {
+        ...c,
+        [r.code_reference]: {
+          // La quantite suggeree n'existe que si le plan propose la reference ;
+          // le prix, lui, est toujours connu — c'est le repli CMUP puis catalogue.
+          qte: String(r.qte_a_commander_kg ?? ''),
+          prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
+        },
+      }
+    })
+
+  const nb = Object.keys(choix).length
+  const complet = Object.values(choix).every((v) => Number(v.qte) > 0 && Number(v.prix) > 0)
+
+  return (
+    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
+      <DialogueContenu
+        cote="droite"
+        titre="Ajouter des lignes"
+        description={`References de ce fournisseur, classees par urgence. Prix en ${devise} par kg.`}
+      >
+        <Champ
+          placeholder="Filtrer par référence ou designation…"
+          value={filtre}
+          onChange={(e) => setFiltre(e.target.value)}
+          className="mb-3"
+        />
+
+        {q.isLoading && <Chargement texte="Chargement des références…" />}
+
+        <div className="space-y-1.5">
+          {refs.map((r) => {
+            const coche = !!choix[r.code_reference]
+            const deja = r.deja_sur_le_bon > 0 || dejaChoisies.includes(r.code_reference)
+            return (
+              <div
+                key={r.code_reference}
+                className={cn(
+                  'rounded-[var(--radius)] border p-2',
+                  coche ? 'border-primaire bg-primaire/5' : 'border-bordure',
+                  deja && 'opacity-60',
+                )}
+              >
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={coche}
+                    disabled={deja}
+                    onChange={() => basculer(r)}
+                    className="mt-0.5 size-4 shrink-0"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-medium">{r.code_reference}</span>
+                      {r.statut_stock && (
+                        <Badge ton={TON_STOCK[r.statut_stock] ?? 'neutre'}>{r.statut_stock}</Badge>
+                      )}
+                      {r.tier && <Badge ton="contour">{r.tier}</Badge>}
+                      {r.classe_abc && <Badge ton="neutre">ABC {r.classe_abc}</Badge>}
+                      {deja && <span className="text-[11px] text-attenue-texte">déjà sur ce bon</span>}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[12px] text-attenue-texte">
+                      {r.designation}
+                    </span>
+                    <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-attenue-texte">
+                      <span>
+                        Projete{' '}
+                        <span className="tabular-nums text-texte">
+                          {fmt.nombre(r.stock_projete_kg ?? 0, 0)} kg
+                        </span>
+                      </span>
+                      {r.jours_couverture != null && (
+                        <span>
+                          Couverture{' '}
+                          <span className="tabular-nums text-texte">
+                            {fmt.nombre(r.jours_couverture, 0)} j
+                          </span>
+                        </span>
+                      )}
+                      {r.qte_a_commander_kg != null && (
+                        <span>
+                          Suggere{' '}
+                          <span className="tabular-nums font-medium text-texte">
+                            {fmt.nombre(r.qte_a_commander_kg, 0)} kg
+                          </span>
+                        </span>
+                      )}
+                      {r.moq_kg != null && <span>MOQ {fmt.nombre(r.moq_kg, 0)} kg</span>}
+                      {r.multiple_achat_kg != null && (
+                        <span>multiple {fmt.nombre(r.multiple_achat_kg, 0)} kg</span>
+                      )}
+                      {r.prix_suggere_devise != null && (
+                        <span>
+                          Prix{' '}
+                          <span className="tabular-nums text-texte">
+                            {fmt.nombre(r.prix_suggere_devise, 4)} {devise}
+                          </span>
+                        </span>
+                      )}
+                      {r.source_prix === 'CATALOGUE' && (
+                        <span className="text-alerte">prix catalogue, jamais paye</span>
+                      )}
+                      {r.source_prix === 'CMUP' && <span>coût moyen constate</span>}
+                    </span>
+                  </span>
+                </label>
+
+                {coche && (
+                  <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-2">
+                    <div>
+                      <Etiq>Quantité (kg)</Etiq>
+                      <Champ
+                        type="number"
+                        step="any"
+                        min="0.0001"
+                        value={choix[r.code_reference].qte}
+                        onChange={(e) =>
+                          setChoix((c) => ({
+                            ...c,
+                            [r.code_reference]: { ...c[r.code_reference], qte: e.target.value },
+                          }))
+                        }
+                        className="text-right tabular-nums"
+                      />
+                    </div>
+                    <div>
+                      <Etiq>Prix {devise}/kg</Etiq>
+                      <Champ
+                        type="number"
+                        step="any"
+                        min="0.0001"
+                        value={choix[r.code_reference].prix}
+                        onChange={(e) =>
+                          setChoix((c) => ({
+                            ...c,
+                            [r.code_reference]: { ...c[r.code_reference], prix: e.target.value },
+                          }))
+                        }
+                        className="text-right tabular-nums"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {!q.isLoading && refs.length === 0 && (
+            <p className="py-6 text-center text-[13px] text-attenue-texte">
+              Aucune reference active pour ce fournisseur.
+            </p>
+          )}
+        </div>
+
+        {erreur && (
+          <Alerte ton="danger" className="mt-3">
+            {erreur}
+          </Alerte>
+        )}
+
+        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
+          <span className="text-[11px] text-attenue-texte">
+            {nb} reference(s) — ajoutees au brouillon, enregistrees avec le bon
+          </span>
+          <div className="flex items-center gap-2">
+            <Bouton variante="contour" onClick={surFermeture}>
+              Annuler
+            </Bouton>
+            <Bouton
+              onClick={valider}
+              disabled={!nb || !complet}
+              title={!complet ? 'Renseignez une quantite et un prix pour chaque ligne' : undefined}
+            >
+              <Plus />
+              Ajouter {nb || ''}
+            </Bouton>
+          </div>
+        </div>
+      </DialogueContenu>
+    </Dialogue>
+  )
+}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca

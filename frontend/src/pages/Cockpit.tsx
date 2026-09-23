@@ -226,7 +226,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_a_controler',
+<<<<<<< HEAD
       domaine: 'QUALITE',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Réceptions a controler',
       valeur: n('nb_receptions_a_controler'),
       detail: 'en attente du controle qualité',
@@ -237,7 +240,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_en_saisie',
+<<<<<<< HEAD
       domaine: 'STOCK',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Réceptions en saisie',
       valeur: n('nb_receptions_en_saisie'),
       detail: 'pesees non soumises',
@@ -285,7 +291,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_refs_dormantes',
+<<<<<<< HEAD
       domaine: 'STOCK',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Références dormantes',
       valeur: n('nb_refs_dormantes'),
       detail: droits.visible('valeur_dormante_mad')
@@ -298,7 +307,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_controles_bloquants',
+<<<<<<< HEAD
       domaine: 'QUALITE',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Contrôles bloquants',
       valeur: n('nb_controles_bloquants'),
       detail: 'coherence du referentiel',
@@ -308,9 +320,98 @@ export function Cockpit() {
     },
   ]
 
+<<<<<<< HEAD
   // UNE TUILE N'APPARAIT QUE SI ELLE MENE QUELQUE PART. Le role doit pouvoir
   // VOIR le champ et AGIR dessus ; une file vide s'efface, parce qu'un ecran
   // couvert de zeros apprend a ne plus etre lu.
+=======
+  // Les tuiles d'ETAT : elles decrivent la situation, pas une file. Elles
+  // restent affichees a zero — « 0 rupture » est une bonne nouvelle qu'on veut
+  // lire, alors que « 0 bon a valider » est juste une file vide.
+  const etats: Tuile[] = [
+    {
+      champ: 'nb_ruptures',
+      libelle: 'Ruptures',
+      valeur: n('nb_ruptures'),
+      detail: 'stock projete a zero',
+      ton: n('nb_ruptures') > 0 ? 'danger' : 'succes',
+      Icone: PackageX,
+      vers: '/stock',
+      actionnable: peut('STOCK', 'LIRE'),
+      toujours: true,
+    },
+    {
+      champ: 'nb_attention',
+      libelle: 'Sous surveillance',
+      valeur: n('nb_attention'),
+      affichage: `${n('nb_attention')}`,
+      detail: `sur ${n('nb_references')} references`,
+      ton: 'alerte',
+      Icone: TrendingDown,
+      vers: '/stock',
+      actionnable: peut('STOCK', 'LIRE'),
+      toujours: true,
+    },
+    {
+      // Le VETO PHYSIQUE. Ces references ne raisonnent pas : elles sont sous
+      // leur minimum dans les allees, aujourd'hui, quoi que dise la couverture.
+      champ: 'nb_critiques',
+      libelle: 'Sous le minimum',
+      valeur: n('nb_critiques'),
+      detail: 'constate au magasin, pas projete',
+      ton: n('nb_critiques') > 0 ? 'danger' : 'succes',
+      Icone: PackageX,
+      vers: '/stock',
+      actionnable: peut('STOCK', 'LIRE'),
+      toujours: true,
+    },
+    {
+      // SECOND AXE : ne dit pas qu'on va manquer, dit qu'on immobilise.
+      champ: 'nb_sur_stock',
+      libelle: 'En sur-stock',
+      valeur: n('nb_sur_stock'),
+      detail: 'au-dela du maximum',
+      ton: 'neutre',
+      Icone: TrendingDown,
+      vers: '/stock',
+      actionnable: peut('STOCK', 'LIRE'),
+    },
+    {
+      champ: 'nb_ecart_majeur',
+      libelle: 'Écarts a vérifier',
+      valeur: n('nb_ecart_majeur'),
+      detail: 'couverture confortable, magasin bas',
+      ton: n('nb_ecart_majeur') > 0 ? 'alerte' : 'neutre',
+      Icone: TrendingDown,
+      vers: '/stock',
+      actionnable: peut('STOCK', 'LIRE'),
+    },
+    {
+      champ: 'valeur_stock_mad',
+      libelle: 'Valeur du stock',
+      valeur: n('valeur_stock_mad'),
+      affichage: fmt.compact(n('valeur_stock_mad')),
+      detail: 'MAD, au CMUP',
+      ton: 'neutre',
+      Icone: CircleDollarSign,
+      actionnable: true,
+      toujours: true,
+    },
+    {
+      champ: 'montant_bc_ouverts_mad',
+      libelle: 'Engage chez les fournisseurs',
+      valeur: n('montant_bc_ouverts_mad'),
+      affichage: fmt.compact(n('montant_bc_ouverts_mad')),
+      detail: `MAD sur ${n('nb_bc_ouverts')} bons ouverts`,
+      ton: 'neutre',
+      Icone: CircleDollarSign,
+      vers: '/bons-commande',
+      actionnable: peut('BONS_COMMANDE', 'LIRE'),
+      toujours: true,
+    },
+  ]
+
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   const garder = (t: Tuile) =>
     droits.visible(t.champ) && t.actionnable !== false && (t.toujours || t.valeur > 0)
 
@@ -410,6 +511,7 @@ export function Cockpit() {
           {mesFiles.length > 0 && (
             <>
               <TitreBande texte="A traiter" />
+<<<<<<< HEAD
               {/* UNE BARRE, PAS DES TUILES.
                   Ni la grille ni la rangee souple ne tenaient. En grille, une
                   file unique s'etirait sur mille quatre cents pixels pour trois
@@ -426,6 +528,13 @@ export function Cockpit() {
                   C'est la « To-Do » de Fiori et le bandeau d'activites
                   d'Odoo — pour la meme raison. */}
               <BarreFiles files={mesFiles} />
+=======
+              <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+                {mesFiles.map((t) => (
+                  <TuileCompteur key={t.champ} tuile={t} />
+                ))}
+              </div>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             </>
           )}
 
@@ -436,6 +545,7 @@ export function Cockpit() {
             </Alerte>
           )}
 
+<<<<<<< HEAD
           {/* LA GRILLE « SITUATION » A DISPARU, et c'est le point de la
               refonte. Elle reprenait, en sept tuiles de meme taille, ce que la
               bande du haut venait de dire : ruptures, critiques, attention,
@@ -445,6 +555,18 @@ export function Cockpit() {
               ce qui restait unique — le sur-stock, les ecarts — est passe dans
               la ligne discrete sous les quatre chiffres, ou il avertit sans
               concurrencer. */}
+=======
+          {mesEtats.length > 0 && (
+            <>
+              <TitreBande texte="Situation" />
+              <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4">
+                {mesEtats.map((t) => (
+                  <TuileCompteur key={t.champ} tuile={t} />
+                ))}
+              </div>
+            </>
+          )}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         </>
       )}
 
@@ -863,6 +985,7 @@ function BarreFiles({ files }: { files: Tuile[] }) {
                  border border-bordure bg-surface
                  sm:auto-cols-fr sm:grid-flow-col sm:divide-x sm:divide-y-0"
     >
+<<<<<<< HEAD
       {files.map((t) => {
         const corps = (
           <div className="flex h-full items-center gap-3 px-4 py-3">
@@ -881,6 +1004,29 @@ function BarreFiles({ files }: { files: Tuile[] }) {
               )}
             </div>
             {t.vers && <ArrowRight className="size-4 shrink-0 text-attenue-texte" />}
+=======
+      <CarteCorps className="p-3.5">
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-xs text-attenue-texte">{t.libelle}</span>
+          <t.Icone className={cn('size-4 shrink-0', TEINTE[t.ton])} />
+        </div>
+        <div className={cn('mt-1.5 text-2xl font-semibold tabular-nums', TEINTE[t.ton])}>
+          {t.affichage ?? t.valeur}
+        </div>
+        {/* LE DETAIL PASSE A LA LIGNE, IL NE SE COUPE PLUS. `truncate` rendait
+            « Stock magasin sous le minimum » en « Stock magasin sous l… » sur un
+            telephone : une tuile qui ne dit pas ce qu'elle compte ne sert a rien.
+            Deux lignes suffisent, la troisieme est coupee proprement. */}
+        {t.detail && (
+          <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-attenue-texte">
+            {t.detail}
+          </div>
+        )}
+        {t.vers && (
+          <div className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-primaire">
+            ouvrir
+            <ArrowRight className="size-3" />
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           </div>
         )
         return t.vers ? (
@@ -1201,6 +1347,7 @@ function ChiffresCles() {
 
   return (
     <div className="mb-3 flex flex-col gap-3">
+<<<<<<< HEAD
       {/* ---- LA SITUATION, EN UNE PHRASE PUIS QUATRE CHIFFRES ---------------
           L'ecran commencait par quatorze tuiles de meme poids : cinq ici, deux
           sous « A traiter », sept sous « Situation ». L'oeil n'avait aucun
@@ -1232,6 +1379,14 @@ function ChiffresCles() {
           valeur={fmt.compact(n('valeur_stock_mad'))}
           unite="MAD"
           precision={`${fmt.nombre(n('nb_references'), 0)} références · ${ok} au vert`}
+=======
+      <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-5">
+        <CarteStat
+          Icone={Package}
+          libelle="Références suivies"
+          valeur={fmt.nombre(n('nb_references'), 0)}
+          precision={`${ok} au vert · ${attention} en attention`}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           ton="primaire"
           surClic={() => naviguer('/valorisation')}
           aide="Au CMUP, tous magasins confondus."
@@ -1251,6 +1406,7 @@ function ChiffresCles() {
             crans de la meme echelle, et les separer en deux tuiles obligeait a
             les additionner de tete pour savoir combien de references vont mal. */}
         <CarteStat
+<<<<<<< HEAD
           Icone={TrendingDown}
           libelle="En alerte"
           valeur={fmt.nombre(ruptures + critiques, 0)}
@@ -1268,6 +1424,14 @@ function ChiffresCles() {
           ton={(eco?.economies_total_mad ?? 0) > 0 ? 'succes' : 'neutre'}
           surClic={() => naviguer('/matrice-prix')}
           aide="A qualite egale : le meme titrage, achete moins cher ailleurs dans le catalogue."
+=======
+          Icone={AlertTriangle}
+          libelle="Contrôles en anomalie"
+          valeur={fmt.nombre(n('nb_alertes_ouvertes'), 0)}
+          precision={bloquants > 0 ? `${bloquants} bloquant(s) ou critique(s)` : 'Aucun bloquant'}
+          ton={bloquants > 0 ? 'danger' : n('nb_alertes_ouvertes') > 0 ? 'alerte' : 'succes'}
+          aide="Coherence des donnees, verifiee en permanence."
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         />
       </div>
 

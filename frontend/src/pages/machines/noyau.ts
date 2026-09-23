@@ -28,6 +28,7 @@ export interface Machine {
   date_etat: string | null
 }
 
+<<<<<<< HEAD
 /**
  * Une ligne du contenu d'une machine : la zone, et ce qui est monte dessus.
  *
@@ -52,6 +53,8 @@ export interface LigneContenu {
   [k: string]: unknown
 }
 
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 export interface Zone {
   code_emplacement: string
   code_machine: string
@@ -122,6 +125,7 @@ export interface LigneConso {
 }
 
 /** Une ligne en cours de saisie. */
+<<<<<<< HEAD
 /**
  * Une ligne telle qu'elle part au serveur.
  *
@@ -136,6 +140,8 @@ export interface LigneEnvoi {
   [k: string]: unknown
 }
 
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 export interface LigneSaisie {
   cle: string
   code_reference: string
@@ -193,9 +199,12 @@ export function mouvementeKg(l: LigneSaisie): number {
 export const machinesApi = {
   liste: () => api.get<Machine[]>('/api/machines'),
   plan: (code: string) => api.get<Zone[]>(`/api/machines/${encodeURIComponent(code)}`),
+<<<<<<< HEAD
   /** TOUT ce que la machine porte, zone par zone, en un seul appel. */
   contenu: (code: string) =>
     api.get<LigneContenu[]>(`/api/machines/${encodeURIComponent(code)}/contenu`),
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   etat: (code: string, zone: string) =>
     api.get<LigneEtat[]>(
       `/api/machines/${encodeURIComponent(code)}/zones/${encodeURIComponent(zone)}`,

@@ -145,6 +145,7 @@ const ECRANS = (
           tableau de bord. Un ERP ne peut pas ouvrir sur un refus. La page ne
           montre de toute facon que les ecrans deja ouverts a celui qui regarde. */}
       <Route index element={<Accueil />} />
+<<<<<<< HEAD
       {/* QUATRE PAGES SOUS UNE MEME ENTREE, chacune avec son adresse.
           Synthese, analytique, opportunites et matiere ne se melangent plus
           derriere une seule porte : chacune se met en signet, se retrouve au
@@ -154,6 +155,10 @@ const ECRANS = (
              element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
       <Route path="tableau-de-bord/:vue"
              element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+=======
+      <Route path="tableau-de-bord"
+             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
       <Route path="catalogue/completer" element={<ExigeModule module="CATALOGUE"><CompleterCatalogue /></ExigeModule>} />
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
@@ -258,6 +263,18 @@ const ECRANS = (
   </>
 )
 
+<<<<<<< HEAD
+=======
+/** Onglet dont le chemin n’existe plus : ne jamais rediriger depuis un onglet
+    masque, cela deplacerait la navigation de l’onglet actif. */
+function OngletInconnu() {
+  return (
+    <Alerte ton="alerte" titre="Écran introuvable">
+      Cet onglet pointe vers un ecran qui n’existe plus. Fermez-le (Ctrl+W).
+    </Alerte>
+  )
+}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
 /**
  * UNE SEULE COQUILLE, POUR LE BUREAU COMME POUR LE NAVIGATEUR.

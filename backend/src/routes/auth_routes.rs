@@ -425,10 +425,13 @@ pub async fn moi(
         "role": user.role,
         "plafond_validation_bc_mad": plafond,
         "verrou_inactivite_secondes": state.config.verrou_inactivite_secondes,
+<<<<<<< HEAD
         // L'ecran doit savoir s'il propose « activer » ou « retirer ». Le
         // SECRET, lui, ne sort jamais d'ici : seule l'adresse otpauth le porte,
         // le temps d'un scan.
         "totp_actif": totp_actif == 1,
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         "permissions": permissions.iter()
             .map(|(m, a)| json!({ "module": m, "action": a }))
             .collect::<Vec<_>>(),

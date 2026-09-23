@@ -170,7 +170,21 @@ export function BonCommandeEtat() {
                 Order
               </div>
               <Champ libelle="Date" valeur={fmt.date(bc.date_bc)} />
+<<<<<<< HEAD
               <Champ libelle="Order N°" valeur={bc.numero_bc} />
+=======
+              <Champ
+                libelle="Livraison prévue"
+                valeur={bc.date_livraison_prevue ? fmt.date(bc.date_livraison_prevue) : '—'}
+              />
+              <Champ libelle="Devise" valeur={bc.code_devise} />
+              {prixVisibles && bc.code_devise !== 'MAD' && (
+                <Champ
+                  libelle="Taux engage"
+                  valeur={`${fmt.nombre(bc.taux_change_engage, 4)} MAD`}
+                />
+              )}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             </div>
           </div>
         }
@@ -182,9 +196,13 @@ export function BonCommandeEtat() {
         <TableEtat<LigneBc>
           colonnes={[
             {
+<<<<<<< HEAD
               entete: 'DESCRIPTION OF GOODS',
               // La description COMMERCIALE d'abord. A defaut, la designation
               // interne — imparfaite, mais preferable a une case vide.
+=======
+              entete: 'Référence',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
               valeur: (l) => (
                 <span className="text-[10px] font-medium uppercase">
                   {l.description_commerciale || l.reference_designation || l.libelle}
@@ -192,6 +210,7 @@ export function BonCommandeEtat() {
               ),
             },
             {
+<<<<<<< HEAD
               entete: 'COLOR',
               valeur: (l) => <span className="text-[10px] uppercase">{l.couleur || '—'}</span>,
             },
@@ -212,6 +231,9 @@ export function BonCommandeEtat() {
             },
             {
               entete: 'QUANTITY',
+=======
+              entete: 'Quantité',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
               numerique: true,
               // LA QUANTITE DANS L'UNITE COMMANDEE, et le detail en dessous.
               // Un lot ne dit rien sans son nombre de bobines : c'est ce que

@@ -145,12 +145,15 @@ pub fn router(state: AppState) -> Router {
         // Changer SON mot de passe : aucun droit particulier, mais
         // l'ancien mot de passe est exige (voir auth_routes).
         .route("/api/auth/mot-de-passe", post(auth_routes::changer_mot_de_passe))
+<<<<<<< HEAD
         // Le second facteur : poser, exiger, retirer. Trois gestes distincts,
         // pour qu'un QR mal scanne n'enferme personne dehors.
         .route("/api/auth/2fa/preparer", post(auth_routes::preparer_2fa))
         .route("/api/auth/2fa/activer", post(auth_routes::activer_2fa))
         .route("/api/auth/2fa/desactiver", post(auth_routes::desactiver_2fa))
         .route("/api/auth/connexions", get(auth_routes::journal_connexions))
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         // Le verrou d'inactivite : verifie le mot de passe sans prolonger la
         // session. Voir auth_routes::deverrouiller.
         .route("/api/auth/deverrouiller", post(auth_routes::deverrouiller))
@@ -229,6 +232,7 @@ pub fn router(state: AppState) -> Router {
         // segment fixe passe avant `{id}` : axum donne priorite au statique.
         // MACHINES. Le stock s'y compte, la consommation s'y journalise —
         // et jamais dans le journal des mouvements.
+<<<<<<< HEAD
         // --- Dossiers d'importation : MRP, stock, CUMP -------------------------
         // Lecture pour la saisie d'un dossier ; l'administration du catalogue
         // passe par le referentiel generique /api/types-frais (PARAMETRES).
@@ -268,6 +272,8 @@ pub fn router(state: AppState) -> Router {
                    .put(importation::modifier_reception)
                    .delete(importation::supprimer_reception))
         .route("/api/import/receptions/{id}/valider", post(importation::valider_reception))
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
         .route("/api/machines/consommation", get(machines::journal_consommation))
         .route("/api/machines/fiches",
@@ -289,7 +295,10 @@ pub fn router(state: AppState) -> Router {
                    .delete(machines::supprimer_machine))
         // En panne, en sommeil, remise en production, retiree du parc.
         .route("/api/machines/{code}/etat", patch(machines::changer_etat))
+<<<<<<< HEAD
         .route("/api/machines/{code}/contenu", get(machines::contenu_machine))
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         .route("/api/machines/{code}/zones/{zone}", get(machines::etat_zone))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))

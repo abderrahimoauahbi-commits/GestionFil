@@ -768,12 +768,15 @@ export function ReceptionNouvelle() {
                           <th className="w-28 px-2 py-2 text-right">Qte BL</th>
                           <th className="w-32 px-2 py-2 text-right">Qte pesee</th>
                           <th className="w-24 px-2 py-2 text-left">Unité</th>
+<<<<<<< HEAD
                           <th
                             className="w-40 px-2 py-2 text-center"
                             title="Palettes et bobines comptees : les trois se repondent"
                           >
                             Pal. / Bob.
                           </th>
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
                           <th className="w-24 px-2 py-2 text-right">Écart</th>
                           <th className="w-32 px-2 py-2 text-left">Lot</th>
                           <th className="w-28 px-2 py-2 text-left">Magasin</th>
@@ -1253,6 +1256,7 @@ function PanneauDetail({
                 </p>
               )}
             </div>
+<<<<<<< HEAD
 
             {/* ---- Les colis comptes, qui se repondent avec la pesee -------- */}
             <div className="sm:col-span-2 lg:col-span-4">
@@ -1297,6 +1301,22 @@ function PanneauDetail({
                   calcul pour une palette entamée ou un comptage qui ne suit pas la théorie.
                 </p>
               </div>
+=======
+            <div>
+              <Etiq>Unité de saisie</Etiq>
+              <Selecteur
+                value={ligne.unite}
+                onChange={(e) => maj(ligne.cle, 'unite', e.target.value)}
+              >
+                <option value="kg">kg</option>
+                {ligne.unite_catalogue !== 'kg' && (
+                  <option value={ligne.unite_catalogue}>{ligne.unite_catalogue}</option>
+                )}
+              </Selecteur>
+              <p className="mt-1 text-[11px] text-attenue-texte">
+                Converti en kg a l'enregistrement.
+              </p>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             </div>
           </div>
         )}
@@ -1511,6 +1531,7 @@ function PanneauHorsCommande({
         titre="Article hors commande"
         description="La marchandise est au quai sans bon derriere elle. Saisissez-la : le bon manquant sera cree."
       >
+<<<<<<< HEAD
         <ChampReference
           valeur=""
           surChoix={(r) =>
@@ -1531,6 +1552,23 @@ function PanneauHorsCommande({
             Tapez le début d’un code, d’une désignation ou d’une couleur. Les références retenues
             s’ajoutent ci-dessous, avec leur poids.
           </Alerte>
+=======
+        <div className="mb-2 flex items-center gap-2">
+          <Search className="size-3.5 shrink-0 text-attenue-texte" />
+          <Champ
+            placeholder="Référence ou designation…"
+            value={filtre}
+            onChange={(e) => setFiltre(e.target.value)}
+            className="h-8"
+            autoFocus
+          />
+        </div>
+
+        {q.isLoading && <Chargement texte="Lecture du catalogue…" />}
+
+        {!q.isLoading && refs.length === 0 && (
+          <Alerte ton="info">Aucune référence ne correspond.</Alerte>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         )}
 
         <div className="mt-3 space-y-1">

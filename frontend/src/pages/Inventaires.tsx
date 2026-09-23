@@ -619,9 +619,15 @@ function FormulaireInventaire({
               value={form.type_inventaire}
               onChange={(e) => setForm({ ...form, type_inventaire: e.target.value })}
             >
+<<<<<<< HEAD
               <option value="GLOBAL">Global — tout le catalogue</option>
               <option value="TOURNANT">Tournant — le stock existant</option>
               <option value="CIBLE">Ciblé — le stock existant</option>
+=======
+              <option value="GLOBAL">Global — tout le magasin</option>
+              <option value="TOURNANT">Tournant — par rotation</option>
+              <option value="CIBLE">Cible — références choisies</option>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             </Selecteur>
           </div>
           {erreur && <Alerte ton="danger">{erreur}</Alerte>}

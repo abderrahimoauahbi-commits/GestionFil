@@ -190,8 +190,13 @@ export const POLICES: { cle: Police; nom: string; resume: string; pile: string }
   {
     cle: 'inter',
     nom: 'Inter',
+<<<<<<< HEAD
     resume: 'Dessinee pour les interfaces denses. Livree avec l application.',
     pile: '"Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif',
+=======
+    resume: 'Dessinee pour les interfaces denses. Le defaut précédent.',
+    pile: '"Inter", "Segoe UI", system-ui, sans-serif',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   },
   {
     cle: 'geometrique',

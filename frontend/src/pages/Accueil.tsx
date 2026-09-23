@@ -23,12 +23,19 @@
  * a un seul endroit.
  */
 import { Link } from 'react-router-dom'
+<<<<<<< HEAD
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { estAccessible, NAVIGATION } from '../composants/Coquille'
 import { cn, fmt } from '../lib/utils'
+=======
+import { ArrowRight } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
+import { estAccessible, MODULES, NAVIGATION } from '../composants/Coquille'
+import { cn } from '../lib/utils'
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
 /** Ce que le rôle veut dire, en une phrase que son titulaire reconnaît. */
 const METIER: Record<string, string> = {
@@ -62,6 +69,7 @@ const TEINTE: Record<string, { fond: string; trait: string }> = {
 
 const teinte = (section: string) => TEINTE[section] ?? TEINTE.GENERAL
 
+<<<<<<< HEAD
 /**
  * LES TAUX DE CHANGE EN VIGUEUR, des l'ouverture — pour la direction et
  * l'administrateur (demande du 17/09/2026).
@@ -362,6 +370,8 @@ function FilActualite() {
   )
 }
 
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 function salutation(): string {
   const h = new Date().getHours()
   if (h < 12) return 'Bonjour'
@@ -390,10 +400,20 @@ export function Accueil() {
   )
   const quotidiens = accessibles.filter((e) => e.principale)
 
+<<<<<<< HEAD
   /* LES RUBRIQUES NE SONT PLUS CALCULEES ICI. Elles servaient au mur de trente
      boutons range par section, qui recopiait le menu de gauche au milieu de
      l'ecran. La navigation complete reste dans la barre laterale et dans la
      palette de commandes ; l'accueil, lui, montre ce qui s'est passe. */
+=======
+  /* Les rubriques dans l'ordre de MODULES, vides ecartees : une rubrique sans
+     aucun ecran ouvert n'a rien a faire sur l'accueil de quelqu'un. Les ecrans
+     du quotidien n'y reviennent pas — ils sont deja en haut. */
+  const rubriques = MODULES.map((m) => ({
+    ...m,
+    entrees: accessibles.filter((e) => e.section === m.id && !e.principale),
+  })).filter((r) => r.entrees.length > 0)
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
   return (
     <div className="flex flex-col gap-7 pb-4">
@@ -450,8 +470,11 @@ export function Accueil() {
         </p>
       </header>
 
+<<<<<<< HEAD
       {ROLES_TAUX.includes(moi?.role ?? '') && <TauxDeChange />}
 
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       {/* ================= CE QU'ON OUVRE TOUS LES JOURS ================ */}
       {quotidiens.length > 0 && (
         <section className="flex flex-col gap-3">
@@ -509,6 +532,7 @@ export function Accueil() {
         </section>
       )}
 
+<<<<<<< HEAD
       {/* ================= CE QUI S'EST PASSE ===========================
           LE MUR DE TRENTE BOUTONS A DISPARU D'ICI. Il rangeait par rubrique —
           Catalogue, Production, Achats, Stock, Finance, Parametres — c'est-a-
@@ -520,6 +544,40 @@ export function Accueil() {
           La navigation complete reste dans la barre laterale et dans la palette
           de commandes, ou elle est cherchee quand on en a besoin. */}
       <FilActualite />
+=======
+      {/* ================= LE RESTE, PAR RUBRIQUE ======================= */}
+      {rubriques.map((r) => (
+        <section key={r.id} className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+            <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold
+                           uppercase tracking-[0.14em] text-attenue-texte">
+              <r.Icone className="size-3.5" style={{ color: teinte(r.id).trait }} />
+              {r.libelle}
+            </h2>
+            <span className="text-[11.5px] text-attenue-texte/65">{r.resume}</span>
+          </div>
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
+            {r.entrees.map((e) => (
+              <Link
+                key={e.vers}
+                to={e.vers}
+                className={cn(
+                  'group flex items-center gap-2.5 rounded-[var(--radius-sm)] border border-bordure',
+                  'bg-surface px-3 py-2.5 text-[13.5px] text-texte transition-colors',
+                  'hover:border-primaire/40 hover:bg-primaire/[0.04]',
+                )}
+              >
+                <e.Icone
+                  className="size-4 shrink-0 transition-colors"
+                  style={{ color: teinte(e.section).trait }}
+                />
+                <span className="min-w-0 flex-1 truncate">{e.libelle}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
       {accessibles.length === 0 && (
         <p className="text-[14px] text-attenue-texte">

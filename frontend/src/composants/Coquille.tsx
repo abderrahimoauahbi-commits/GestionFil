@@ -18,7 +18,11 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
+<<<<<<< HEAD
   ArrowLeftRight, BarChart3, Bell, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Container, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
+=======
+  ArrowLeftRight, BarChart3, Bell, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -168,17 +172,23 @@ export const NAVIGATION: EntreeNav[] = [
 
   /* --- 2. Catalogue ------------------------------------------------------ */
   { vers: '/catalogue', libelle: 'Références', module: 'CATALOGUE', Icone: Boxes, section: 'CATALOGUE', resume: 'Les références, leurs prix et leur stock', principale: true },
+<<<<<<< HEAD
   // L'assistant de completion : il lit le code de chaque reference et
   // propose famille, couleur et reference fournisseur. Sa place est ici,
   // sous les references qu'il complete.
   { vers: '/catalogue/completer', libelle: 'Compléter les références', module: 'CATALOGUE', Icone: Sparkles, section: 'CATALOGUE', resume: 'L’assistant déduit famille, couleur et réf. fournisseur' },
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   { vers: '/equivalences', libelle: 'Équivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
   { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'CATALOGUE' },
   // Categories et roles BOM decrivent le PRODUIT : ils quittent l'administration
   // pour rejoindre ce qu'ils qualifient. Chacun ouvre l'ecran des referentiels
   // reduit a son seul onglet — meme code, meme CRUD, pas de doublon.
   { vers: '/categories', libelle: 'Catégories matière', module: 'CATALOGUE', Icone: Shapes, section: 'CATALOGUE' },
+<<<<<<< HEAD
   { vers: '/couleurs', libelle: 'Couleurs', module: 'CATALOGUE', Icone: Palette, section: 'CATALOGUE', resume: 'Le nuancier maison et son code chez chaque fournisseur' },
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   { vers: '/roles-bom', libelle: 'Rôles BOM', module: 'CATALOGUE', Icone: Layers, section: 'CATALOGUE' },
 
   /* --- 3. Production & MRP ----------------------------------------------- */
@@ -191,11 +201,14 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
   { vers: '/receptions', libelle: 'Réceptions', module: 'RECEPTIONS', Icone: PackageCheck, section: 'ACHATS', resume: 'Peser et enregistrer ce qui arrive', principale: true },
+<<<<<<< HEAD
   // L'assistant part du scan et non du formulaire vide : c'est l'ordre du
   // geste reel, la liasse arrive avant le dossier.
   { vers: '/import/assistant', libelle: "Assistant d'import", module: 'IMPORT', Icone: Sparkles, section: 'ACHATS', resume: 'Chargez la liasse scannée, le dossier se crée autour' },
   { vers: '/import', libelle: "Dossiers d'import", module: 'IMPORT', Icone: Ship, section: 'ACHATS', resume: 'Factures, frais et coût de revient des importations' },
   { vers: '/receptions-import', libelle: 'Réceptions import', module: 'RECEPTIONS', Icone: Container, section: 'ACHATS', resume: 'Faire entrer en stock la marchandise importée' },
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   {
     vers: '/historique-prix',
     libelle: 'Historique des prix',

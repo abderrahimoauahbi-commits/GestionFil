@@ -1330,6 +1330,7 @@ async fn ecrire_mouvement(
     }
     Ok(numero)
 }
+}
 
 /// Le cout moyen, du magasin s'il en a un, de la fiche reference sinon.
 async fn cmup(

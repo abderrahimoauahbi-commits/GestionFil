@@ -145,15 +145,12 @@ pub fn router(state: AppState) -> Router {
         // Changer SON mot de passe : aucun droit particulier, mais
         // l'ancien mot de passe est exige (voir auth_routes).
         .route("/api/auth/mot-de-passe", post(auth_routes::changer_mot_de_passe))
-<<<<<<< HEAD
         // Le second facteur : poser, exiger, retirer. Trois gestes distincts,
         // pour qu'un QR mal scanne n'enferme personne dehors.
         .route("/api/auth/2fa/preparer", post(auth_routes::preparer_2fa))
         .route("/api/auth/2fa/activer", post(auth_routes::activer_2fa))
         .route("/api/auth/2fa/desactiver", post(auth_routes::desactiver_2fa))
         .route("/api/auth/connexions", get(auth_routes::journal_connexions))
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         // Le verrou d'inactivite : verifie le mot de passe sans prolonger la
         // session. Voir auth_routes::deverrouiller.
         .route("/api/auth/deverrouiller", post(auth_routes::deverrouiller))

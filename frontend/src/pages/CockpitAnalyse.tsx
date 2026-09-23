@@ -12,7 +12,7 @@
  * ouverture. Les vues `v_cockpit_*` font le calcul, l'ecran dispose.
  */
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Coins, Landmark, Truck } from 'lucide-react'
+import { AlertTriangle, Coins, Landmark, Layers, Package, ShoppingCart, Truck } from 'lucide-react'
 import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import {
@@ -69,6 +69,42 @@ interface Analyse {
     rotation_annuelle: number
     dso_est_un_parametre: boolean
   }
+  /** Zone 2 du classeur : les references en alerte, les plus urgentes d'abord. */
+  alertes: {
+    code_reference: string
+    designation: string | null
+    categorie_libelle: string | null
+    couleur: string | null
+    fournisseur_nom: string | null
+    unite_catalogue: string | null
+    stock_physique_net_kg: number | null
+    conso_mensuelle_kg: number | null
+    jours_couverture: number | null
+    delai_livraison_jours: number | null
+    qte_a_commander_kg: number | null
+    statut: string
+  }[]
+  /** Zone 5 du classeur : ce qui manquait aux blocs financiers. */
+  indicateurs?: {
+    nb_refs_en_alerte: number
+    nb_classe_a: number
+    nb_classe_b: number
+    nb_classe_c: number
+    nb_non_classees: number
+    couverture_ponderee_jours: number | null
+    ecart_pesee_moyen_pct: number | null
+    economies_total_mad?: number
+    nb_opportunites: number
+    budget_ruptures_mad?: number
+    valeur_dormante_mad?: number
+    pct_valeur_dormante?: number | null
+  }
+}
+
+const TON_STATUT: Record<string, string> = {
+  RUPTURE: 'bg-danger/15 text-danger',
+  CRITIQUE: 'bg-danger/10 text-danger',
+  ATTENTION: 'bg-alerte/15 text-alerte',
 }
 
 /** Un indicateur : sa valeur, son libelle, et le mot qui dit l'unite. */
@@ -123,11 +159,33 @@ function BlocKpi({
   )
 }
 
-export function CockpitAnalyse() {
+/**
+ * LES VUES DU COCKPIT.
+ *
+ * L'ecran tenait sur UNE PAGE DE QUATRE MILLE DEUX CENTS PIXELS : dix hauteurs
+ * d'ecran a derouler pour aller du premier chiffre au dernier graphique. Ce
+ * n'est plus un tableau de bord, c'est un rouleau — et personne ne descend
+ * jusqu'en bas deux fois.
+ *
+ * Les cockpits des grands ERP se decoupent en vues nommees, chacune tenant a
+ * peu pres sur un ecran, et l'on choisit celle qui repond a la question qu'on
+ * se pose. Ce n'est pas seulement du confort : une vue courte se lit d'un coup
+ * d'oeil, alors qu'une vue longue se parcourt — et parcourir, c'est deja ne
+ * plus comparer.
+ */
+export type VueCockpit = 'situation' | 'analyse' | 'opportunites' | 'matiere'
+
+export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
+  const montre = (v: VueCockpit) => v === vue
   const droits = useDroits(MODULE)
   const q = useQuery({
     queryKey: ['cockpit-analyse'],
     queryFn: () => api.get<Analyse>('/api/cockpit/analyse'),
+  })
+  // Les compteurs du poste de travail : meme requete, meme cache que les chiffres cles.
+  const qc = useQuery({
+    queryKey: ['cockpit'],
+    queryFn: () => api.get<Record<string, number | string | null>>('/api/cockpit'),
   })
 
   if (q.isLoading) {
@@ -142,9 +200,16 @@ export function CockpitAnalyse() {
   const d = q.data
   if (!d) return null
 
-  const totalEconomies = d.economies.reduce((s, e) => s + e.economie_annuelle_mad, 0)
+  // LE TOTAL DES ECONOMIES VIENT DU SERVEUR, sur toutes les opportunites : il
+  // additionnait ici les vingt premieres lignes seulement.
+  const ind = d.indicateurs
+  const totalEconomies =
+    ind?.economies_total_mad ?? d.economies.reduce((s, e) => s + e.economie_annuelle_mad, 0)
   const top5 = d.economies.slice(0, 5)
   const t = d.tresorerie
+  const k = qc.data
+  const n = (c: string) => Number(k?.[c] ?? 0)
+  const voitMontants = droits.visible('valeur_stock_mad')
 
   const pareto: BarrePareto[] = d.pareto.map((p) => ({
     cle: p.code_reference,
@@ -156,6 +221,150 @@ export function CockpitAnalyse() {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* ---- ZONE 1 — LES CONSTATS SONT REMONTES EN TETE D'ECRAN.
+          Le classeur ouvre sur des phrases avant tout chiffre, et c'est
+          juste. Mais elles etaient ICI, sous quatorze tuiles qui disaient
+          deja la meme chose : la troisieme redite d'un chiffre n'informe
+          plus, elle use. La phrase est desormais la PREMIERE ligne de la
+          page, au-dessus des quatre indicateurs, et elle porte ce que
+          cette carte apportait de propre — les mono-sources. */}
+      {montre('situation') && (
+      <>
+      {/* ---- ZONE 2 — les references en alerte, par ordre d'urgence -------- */}
+
+      {d.alertes.length > 0 && (
+        <Carte repliable="cockpit.alertes">
+          <CarteEntete>
+            <CarteTitre className="flex items-center gap-1.5">
+              <AlertTriangle className="size-3.5" />
+              Références en alerte — {d.alertes.length} plus urgentes
+              {ind ? ` sur ${ind.nb_refs_en_alerte}` : ''}
+            </CarteTitre>
+          </CarteEntete>
+          <CarteCorps className="p-0">
+            <div className="defilement-x">
+              <table className="grille w-full text-[12px]">
+                <thead>
+                  <tr className="bg-attenue">
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Catégorie</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Couleur</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Stock (kg)</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Conso / mois</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Couv. (j)</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Délai (j)</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">À commander (kg)</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold">Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.alertes.map((a) => (
+                    <tr key={a.code_reference} className="hover:bg-attenue/60">
+                      <td className="max-w-[240px] truncate px-2.5 py-1 font-mono text-[11px]">
+                        {a.code_reference}
+                      </td>
+                      <td className="px-2.5 py-1">{a.categorie_libelle ?? '—'}</td>
+                      <td className="px-2.5 py-1">{a.couleur ?? '—'}</td>
+                      <td className="px-2.5 py-1">{a.fournisseur_nom ?? '—'}</td>
+                      <td className="px-2.5 py-1 text-right tabular-nums">
+                        {fmt.nombre(a.stock_physique_net_kg ?? 0, 0)}
+                      </td>
+                      <td className="px-2.5 py-1 text-right tabular-nums">
+                        {a.conso_mensuelle_kg == null ? '—' : fmt.nombre(a.conso_mensuelle_kg, 0)}
+                      </td>
+                      <td className="px-2.5 py-1 text-right tabular-nums">
+                        {a.jours_couverture == null ? '—' : fmt.nombre(a.jours_couverture, 0)}
+                      </td>
+                      <td className="px-2.5 py-1 text-right tabular-nums">
+                        {a.delai_livraison_jours ?? '—'}
+                      </td>
+                      <td className="px-2.5 py-1 text-right font-medium tabular-nums">
+                        {a.qte_a_commander_kg == null ? '—' : fmt.nombre(a.qte_a_commander_kg, 0)}
+                      </td>
+                      <td className="px-2.5 py-1">
+                        <span className={cn('rounded-[3px] px-1.5 py-px text-[11px] font-medium', TON_STATUT[a.statut])}>
+                          {a.statut}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
+              Triées par couverture croissante : une couverture négative veut dire que les besoins
+              du plan dépassent déjà le stock et les commandes. La liste complète est au plan d’achat.
+            </p>
+          </CarteCorps>
+        </Carte>
+      )}
+
+      </>
+      )}
+      {montre('analyse') && (
+      <>
+      {/* ---- ZONE 5 — stock, achats, classification, stock dormant -------- */}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <BlocKpi titre="Stock" Icone={Package}>
+          {voitMontants && t && (
+            <Kpi libelle="Valeur du stock" valeur={fmt.nombre(t.valeur_stock_mad / 1e6, 2)} unite="M MAD" />
+          )}
+          <Kpi libelle="Références suivies" valeur={fmt.nombre(n('nb_references'), 0)} />
+          <Kpi
+            libelle="Couverture pondérée"
+            valeur={ind?.couverture_ponderee_jours == null ? '—' : fmt.nombre(ind.couverture_ponderee_jours, 0)}
+            unite="j"
+            aide="Valeur du stock physique divisée par la valeur consommée par jour. Les références chères pèsent davantage."
+          />
+          <Kpi libelle="Ruptures" valeur={fmt.nombre(n('nb_ruptures'), 0)} ton={n('nb_ruptures') > 0 ? 'danger' : 'succes'} />
+        </BlocKpi>
+        <BlocKpi titre="Achats" Icone={ShoppingCart}>
+          <Kpi libelle="Bons ouverts" valeur={fmt.nombre(n('nb_bc_ouverts'), 0)} />
+          {voitMontants && (
+            <Kpi libelle="Engagé" valeur={fmt.nombre(n('montant_bc_ouverts_mad') / 1e6, 2)} unite="M MAD" />
+          )}
+          <Kpi
+            libelle="Écart de pesée moyen"
+            valeur={ind?.ecart_pesee_moyen_pct == null ? '—' : fmt.nombre(ind.ecart_pesee_moyen_pct, 2)}
+            unite="%"
+            aide="Moyenne des écarts entre poids facturé et poids pesé, sur les réceptions archivées."
+          />
+          <Kpi libelle="Fournisseurs actifs" valeur={fmt.nombre(n('nb_fournisseurs_actifs'), 0)} />
+        </BlocKpi>
+        <BlocKpi titre="Classification ABC" Icone={Layers}>
+          <Kpi libelle="Classe A (80 % de la valeur)" valeur={fmt.nombre(ind?.nb_classe_a ?? 0, 0)} />
+          <Kpi libelle="Classe B (15 %)" valeur={fmt.nombre(ind?.nb_classe_b ?? 0, 0)} />
+          <Kpi libelle="Classe C (5 %)" valeur={fmt.nombre(ind?.nb_classe_c ?? 0, 0)} />
+          <Kpi
+            libelle="Non classées"
+            valeur={fmt.nombre(ind?.nb_non_classees ?? 0, 0)}
+            ton={(ind?.nb_non_classees ?? 0) > 0 ? 'alerte' : undefined}
+            aide="Lancer « Calculer la classification » pour les classer."
+          />
+        </BlocKpi>
+        <BlocKpi titre="Stock dormant" Icone={Coins}>
+          <Kpi libelle="Références dormantes" valeur={fmt.nombre(n('nb_refs_dormantes'), 0)} />
+          {voitMontants && ind && (
+            <>
+              <Kpi libelle="Valeur dormante" valeur={fmt.nombre((ind.valeur_dormante_mad ?? 0) / 1e6, 2)} unite="M MAD" />
+              <Kpi
+                libelle="Part du stock"
+                valeur={ind.pct_valeur_dormante == null ? '—' : fmt.nombre(ind.pct_valeur_dormante, 1)}
+                unite="%"
+                ton={(ind.pct_valeur_dormante ?? 0) > 5 ? 'alerte' : undefined}
+              />
+              <Kpi
+                libelle="Budget des ruptures"
+                valeur={fmt.nombre((ind.budget_ruptures_mad ?? 0) / 1e6, 2)}
+                unite="M MAD"
+                aide="Montant du plan d’achat pour les seules références en rupture : ce qu’il faut dépenser maintenant."
+              />
+            </>
+          )}
+        </BlocKpi>
+      </div>
+
       {/* ---- Les cinq graphiques, deux par rangee ------------------------- */}
       <div className="grid gap-3 xl:grid-cols-2">
         <Pareto
@@ -182,6 +391,9 @@ export function CockpitAnalyse() {
           sousTitre="Combien de références dans chaque tranche de jours"
           unite="references"
           maximum={6}
+          // L'ordre des tranches EST l'information : trier par effectif melangeait
+          // « rupture » et « plus de 180 jours ».
+          trier={false}
           donnees={d.couverture.map((c) => ({
             cle: c.libelle,
             libelle: c.libelle,
@@ -200,7 +412,8 @@ export function CockpitAnalyse() {
           unite="MAD"
           donnees={d.cout_mensuel.map((m) => ({
             cle: m.annee_mois,
-            libelle: m.annee_mois.slice(5),
+            // Mois ET annee : le plan chevauche deux annees civiles.
+            libelle: `${m.annee_mois.slice(5)}/${m.annee_mois.slice(2, 4)}`,
             valeur: m.cout_mad,
           }))}
         />
@@ -251,7 +464,12 @@ export function CockpitAnalyse() {
               libelle="Délai fournisseur (DPO)"
               valeur={fmt.nombre(t.dpo_jours, 0)}
               unite="j"
-              aide="Moyenne des delais de paiement accordes par les fournisseurs."
+              aide="Delais de paiement des fournisseurs, ponderes par le budget annuel de chacun."
+            />
+            <Kpi
+              libelle="Matière consommée par mois"
+              valeur={fmt.nombre(t.cout_matiere_annuel_mad / 12 / 1e6, 2)}
+              unite="M MAD"
             />
             <Kpi
               libelle="Cycle de conversion (CCC)"
@@ -271,7 +489,11 @@ export function CockpitAnalyse() {
           le declare plutot que de l inventer.
         </p>
       )}
+      </>
+      )}
 
+      {montre('opportunites') && (
+      <>
       {/* ---- Economies possibles ------------------------------------------ */}
       {droits.visible('valeur_stock_mad') && d.economies.length > 0 && (
         <Carte repliable="cockpit.eco">
@@ -322,7 +544,7 @@ export function CockpitAnalyse() {
             <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
               Ce montant suppose que l equivalent tient la meme qualite, que le fournisseur suit le
               volume, et que le delai ne se degrade pas. Il se verifie avant de basculer.
-              {d.economies.length > 5 && ` ${d.economies.length - 5} autres lignes au-dela du top 5.`}
+              {ind && ind.nb_opportunites > 5 && ` ${ind.nb_opportunites - 5} autres références au-delà du top 5.`}
             </p>
           </CarteCorps>
         </Carte>
@@ -428,6 +650,8 @@ export function CockpitAnalyse() {
         )}
       </div>
 
+      </>
+      )}
       {!droits.visible('valeur_stock_mad') && (
         <Alerte ton="info">
           Les blocs financiers ne sont pas affiches : votre role ne recoit pas les montants. Les

@@ -90,6 +90,22 @@ pub struct LigneFiche {
     pub nb_bobines_presentes: i64,
     pub poids_unitaire_kg: Option<f64>,
     pub pourcentage: Option<f64>,
+<<<<<<< HEAD
+    /// CHARGER MALGRE UN SOLDE DE LOT INSUFFISANT.
+    ///
+    /// Le lot sert a la tracabilite, pas au comptage : quand une bobine
+    /// redescend d'un metier, personne ne sait de quel lot elle venait, et le
+    /// retour est impute au juge. Les soldes par lot derivent donc, et l'ERP
+    /// finit par refuser un chargement alors que la matiere est bien la.
+    ///
+    /// L'operateur confirme, le mouvement passe, et la trace reste — sans
+    /// quoi un solde force ne se distinguerait plus d'un solde juste.
+    #[serde(default)]
+    pub lot_force: Option<bool>,
+    #[serde(default)]
+    pub motif_lot_force: Option<String>,
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     pub total_kg: f64,
     #[serde(default = "estimation")]
     pub mode_constat: String,
@@ -227,6 +243,56 @@ pub async fn etat_zone(
     Ok(Json(v))
 }
 
+<<<<<<< HEAD
+/// `GET /api/machines/{code}/contenu` — TOUT ce que porte la machine.
+///
+/// POURQUOI CETTE ROUTE MANQUAIT, ET CE QUE CELA COUTAIT. On ne savait lire le
+/// contenu que ZONE PAR ZONE. Choisir une machine n'affichait donc que la
+/// liste de ses etages — des nombres, aucune matiere — et il fallait cliquer
+/// chaque etage l'un apres l'autre pour savoir ce qui etait monte dessus. Sur
+/// un metier a huit etages, huit clics pour repondre a « qu'y a-t-il sur cette
+/// machine ». C'est la premiere question qu'on pose devant un metier charge,
+/// et l'ecran ne savait pas y repondre.
+///
+/// La zone voyage AVEC chaque ligne : sans elle, on saurait ce que la machine
+/// porte sans savoir ou, ce qui ne sert a rien pour aller le chercher.
+pub async fn contenu_machine(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT z.code_emplacement, z.libelle AS zone_libelle, z.role,
+                z.numero_etage, z.capacite_bobines,
+                e.code_reference, r.designation, e.lot_fournisseur,
+                e.nb_bobines, e.nb_palettes,
+                e.poids_unitaire_kg::float8 AS poids_unitaire_kg,
+                e.pourcentage::float8       AS pourcentage,
+                e.kg::float8                AS kg,
+                e.mode_constat, e.date_constat, e.responsable,
+                r.poids_bobine_kg::float8   AS poids_catalogue_kg,
+                c.libelle                   AS couleur
+           FROM machine_emplacement z
+           LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
+           LEFT JOIN reference r ON r.code_reference = e.code_reference
+           LEFT JOIN couleur c ON c.code_couleur_interne = r.code_couleur_interne
+          WHERE z.code_machine = $1
+          -- LES ZONES VIDES RESTENT DANS LA LISTE. Un etage sans fil est une
+          -- information : c'est la qu'il faut charger. Le filtrer donnerait un
+          -- metier qui parait plein alors qu'il ne l'est pas.
+          ORDER BY z.role, z.numero_etage, r.designation, e.lot_fournisseur",
+    )
+    .bind(&code)
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::STOCK, &mut v).await?;
+    Ok(Json(v))
+}
+
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 /// `GET /api/machines/consommation` — le cumul, jamais une repartition.
 ///
 ///     consommation = tout ce qui a ete charge - ce qui est revenu - l'etat actuel
@@ -899,6 +965,12 @@ struct Fiche {
 struct Ligne {
     reference: String,
     lot: String,
+<<<<<<< HEAD
+    /// La confirmation de l'operateur : charger malgre un solde de lot court.
+    lot_force: bool,
+    motif_lot_force: Option<String>,
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     mouvementees: Option<i64>,
     kg_mouvementes: Option<f64>,
     presentes: i64,
@@ -1006,13 +1078,22 @@ async fn charger_fiche(db: &crate::db::Db, id: &str) -> AppResult<Fiche> {
 
 type LigneBrute = (
     String, String, Option<i64>, Option<f64>, i64, Option<f64>, Option<f64>, f64, String,
+<<<<<<< HEAD
+    i64, Option<String>,
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 );
 
 async fn charger_lignes(db: &crate::db::Db, id: &str) -> AppResult<Vec<Ligne>> {
     let l = sqlx::query_as::<_, LigneBrute>(
         "SELECT code_reference, lot_fournisseur, nb_bobines_mouvementees,
                 kg_mouvementes::float8, nb_bobines_presentes,
+<<<<<<< HEAD
+                poids_unitaire_kg::float8, pourcentage::float8, total_kg::float8, mode_constat,
+                lot_force, motif_lot_force
+=======
                 poids_unitaire_kg::float8, pourcentage::float8, total_kg::float8, mode_constat
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
            FROM machine_fiche_ligne WHERE id_fiche = $1 ORDER BY ligne_numero",
     )
     .bind(id)
@@ -1029,6 +1110,11 @@ async fn charger_lignes(db: &crate::db::Db, id: &str) -> AppResult<Vec<Ligne>> {
             pourcentage: t.6,
             total_kg: t.7,
             mode_constat: t.8,
+<<<<<<< HEAD
+            lot_force: t.9 == 1,
+            motif_lot_force: t.10,
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         })
         .collect())
 }
@@ -1093,8 +1179,13 @@ async fn ecrire_lignes(
                  (id_fiche, ligne_numero, code_reference, lot_fournisseur,
                   nb_bobines_mouvementees, kg_mouvementes, nb_palettes,
                   nb_bobines_presentes, poids_unitaire_kg, pourcentage, total_kg,
+<<<<<<< HEAD
+                  mode_constat, notes, lot_force, motif_lot_force)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+=======
                   mode_constat, notes)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         )
         .bind(id)
         .bind(i as i64 + 1)
@@ -1109,6 +1200,15 @@ async fn ecrire_lignes(
         .bind(arrondi_kg(l.total_kg))
         .bind(&l.mode_constat)
         .bind(&l.notes)
+<<<<<<< HEAD
+        // LA CONFIRMATION SE GARDE AVEC LA LIGNE. La fiche se valide parfois
+        // des heures plus tard, et par quelqu'un d'autre : une confirmation
+        // qui n'aurait vecu que dans l'appel de creation serait perdue, et le
+        // chargement se ferait refuser au dernier moment.
+        .bind(i32::from(l.lot_force.unwrap_or(false)))
+        .bind(l.motif_lot_force.as_deref())
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         .execute(&mut *tx)
         .await?;
     }
@@ -1188,8 +1288,14 @@ async fn ecrire_mouvement(
     .await?;
 
     for (i, l) in lignes.iter().enumerate() {
+<<<<<<< HEAD
+        // Un retour rentre au magasin au CMUP connu. Sans CMUP nulle part — un
+        // stock de depart jamais achete —, il rentre sans prix : les kilos
+        // reviennent et le CMUP reste vide, il ne fond pas (2026-09-17b).
+=======
         // Un retour rentre au magasin : il doit porter un prix, sans quoi le fil
         // reviendrait valorise a zero et ferait fondre le CMUP.
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         let prix = if type_mvt == "RETOUR_MACHINE" {
             cmup(&mut *tx, magasin, &l.reference).await?
         } else {
@@ -1199,8 +1305,13 @@ async fn ecrire_mouvement(
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
+<<<<<<< HEAD
+                  lot_fournisseur, nb_bobines, lot_force, motif_lot_force)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+=======
                   lot_fournisseur, nb_bobines)
              VALUES ($1,$2,$3,$4,$5,$6,$7)",
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         )
         .bind(&id)
         .bind(i as i64 + 1)
@@ -1209,10 +1320,16 @@ async fn ecrire_mouvement(
         .bind(prix)
         .bind(&l.lot)
         .bind(l.mouvementees)
+<<<<<<< HEAD
+        .bind(i32::from(l.lot_force))
+        .bind(l.motif_lot_force.as_deref())
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         .execute(&mut *tx)
         .await?;
     }
     Ok(numero)
+}
 }
 
 /// Le cout moyen, du magasin s'il en a un, de la fiche reference sinon.
@@ -1299,8 +1416,13 @@ async fn contre_passer(
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
+<<<<<<< HEAD
+                  lot_fournisseur, nb_bobines, lot_force, motif_lot_force)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+=======
                   lot_fournisseur, nb_bobines)
              VALUES ($1,$2,$3,$4,$5,$6,$7)",
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         )
         .bind(&id)
         .bind(i as i64 + 1)

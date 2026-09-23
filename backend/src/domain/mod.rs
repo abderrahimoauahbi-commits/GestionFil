@@ -5,6 +5,8 @@
 //! module porte les orchestrations (cascades, calculs, generations).
 
 pub mod classification;
+pub mod cours_bam;
+pub mod importation;
 pub mod inventaire;
 pub mod mrp;
 pub mod plan;

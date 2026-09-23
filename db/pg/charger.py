@@ -55,6 +55,7 @@ FICHIERS = [
     "016_controles_classeur.sql",
     "017a_table_frais_approche.sql",
     "017_vues_analyse.sql",
+    "018_schema_import.sql",
 ]
 
 # Les seeds sont SEPARES du schema, et l'ordre y est EXPLICITE.
@@ -88,6 +89,8 @@ SEEDS = [
 PRODUCTION = [
     "seed_110_comptes_production.sql",
     "seed_120_entreprise.sql",
+    "seed_130_import.sql",
+    "seed_140_couleur_famille.sql",
 ]
 
 # LE REFERENTIEL NE VIENT PLUS D'ICI.

@@ -887,35 +887,18 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
 
         let mut n_stock = 0usize;
         for (i, (code_ref, qte)) in a_stocker.iter().enumerate() {
-            // STOCK_INIT exige un prix : on prend le prix catalogue converti en
-            // MAD, en le tracant comme valeur d'ouverture.
-            let prix_mad: Option<f64> = sqlx::query_scalar(
-                "SELECT ROUND(r.prix_catalogue_kg * COALESCE(tc.taux, 1.0), 4)::float8
-                   FROM reference r
-                   LEFT JOIN taux_change tc ON tc.code_devise = r.code_devise_catalogue
-                                           AND tc.date_fin IS NULL
-                  WHERE r.code_reference = $1",
-            )
-            .bind(code_ref)
-            .fetch_optional(&mut *tx)
-            .await?
-            .flatten();
-
-            let Some(prix) = prix_mad.filter(|p| *p > 0.0) else {
-                r.rejet(format!("stock initial '{code_ref}' : prix indisponible"));
-                continue;
-            };
-
+            // LE STOCK DE DEPART ENTRE SANS PRIX (2026-09-17b). Il n'a connu
+            // aucun achat dans l'ERP : c'est la base qui lui donne le prix
+            // catalogue au taux en vigueur (2026-09-17h), et jamais un taux de 1.
             sqlx::query(
                 "INSERT INTO ligne_mouvement
-                     (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad)
-                 VALUES ($1, $2, $3, $4, $5)",
+                     (id_mouvement, ligne_numero, code_reference, quantite_kg)
+                 VALUES ($1, $2, $3, $4)",
             )
             .bind(&id_mvt)
             .bind((i + 1) as i64)
             .bind(code_ref)
             .bind(db::arrondi_kg(*qte))
-            .bind(prix)
             .execute(&mut *tx)
             .await?;
             n_stock += 1;

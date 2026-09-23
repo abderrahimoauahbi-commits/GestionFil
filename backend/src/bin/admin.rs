@@ -490,7 +490,7 @@ async fn reparer(pool: &Db) -> Result<()> {
     sqlx::query("VACUUM (ANALYZE)").execute(pool).await?;
 
     let mortes: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(n_dead_tup), 0) FROM pg_stat_user_tables",
+        "SELECT COALESCE(SUM(n_dead_tup), 0)::bigint FROM pg_stat_user_tables",
     )
     .fetch_one(pool)
     .await

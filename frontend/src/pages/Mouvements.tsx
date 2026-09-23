@@ -6,10 +6,10 @@
  * est affichee AVANT validation — l'operateur doit voir ce qui va reellement
  * entrer en stock.
  */
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ErreurApi } from '../api/client'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
@@ -19,9 +19,8 @@ import {
   type ChampFiltre,
 } from '../composants/PanneauFiltres'
 
-import { Panneau } from '../components/Formulaire'
 import { TableDroits, type Colonne } from '../components/TableDroits'
-import { Bouton, Etiquette, Message, fmt } from '../components/ui'
+import { Bouton, Etiquette, fmt } from '../components/ui'
 import { useEtatDepuisParam } from '../lib/navigation'
 
 const MODULE = 'MOUVEMENTS'
@@ -47,6 +46,8 @@ interface LigneLivre extends Record<string, unknown> {
  * Les valeurs des listes sortent des lignes affichees : un magasin sans
  * mouvement ne figure pas au filtre, puisque le choisir ne montrerait rien.
  */
+<<<<<<< HEAD
+=======
 const CHAMPS_MVT: ChampFiltre<LigneLivre>[] = [
   { cle: 'periode', libelle: 'Période', type: 'periode', valeur: (l) => l.date_mouvement },
   { cle: 'type', libelle: 'Type', type: 'liste', valeur: (l) => l.code_type_mvt },
@@ -137,6 +138,7 @@ function facteur(r: RefCatalogue | undefined, unite: string): number | null {
  *
  * Les deux vues restent, parce que les deux lectures sont legitimes.
  */
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 interface DocMouvement extends Record<string, unknown> {
   id_mouvement: string
   numero_mouvement: string
@@ -169,6 +171,16 @@ const CHAMPS_DOC: ChampFiltre<DocMouvement>[] = [
   { cle: 'responsable', libelle: 'Responsable', type: 'liste', valeur: (d) => d.responsable },
   { cle: 'saisi_par', libelle: 'Saisi par', type: 'liste', valeur: (d) => d.saisi_par },
   { cle: 'document', libelle: 'Document', type: 'texte', valeur: (d) => d.reference_document },
+]
+
+const CHAMPS_MVT: ChampFiltre<LigneLivre>[] = [
+  { cle: 'periode', libelle: 'Période', type: 'periode', valeur: (l) => l.date_mouvement },
+  { cle: 'type', libelle: 'Type', type: 'liste', valeur: (l) => l.code_type_mvt },
+  { cle: 'magasin', libelle: 'Magasin', type: 'liste', valeur: (l) => l.code_magasin },
+  { cle: 'reference', libelle: 'Référence', type: 'liste', valeur: (l) => l.code_reference },
+  { cle: 'lot', libelle: 'Lot', type: 'texte', valeur: (l) => l.lot_fournisseur },
+  { cle: 'of', libelle: "N° d'OF", type: 'texte', valeur: (l) => l.numero_of },
+  { cle: 'utilisateur', libelle: 'Saisi par', type: 'liste', valeur: (l) => l.utilisateur },
 ]
 
 function ListeDocuments({ filtreRef }: { filtreRef: string }) {
@@ -357,8 +369,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
 
 export function Mouvements() {
   const droits = useDroits(MODULE)
-  const qc = useQueryClient()
-  const [saisieOuverte, setSaisieOuverte] = useState(false)
+  const naviguer = useNavigate()
   // Amorce par `?reference=`, pose par le menu contextuel de l'ecran Stock :
   // « voir l'historique » doit arriver sur le livre DEJA filtre, pas sur les
   // trois cents derniers mouvements tous articles confondus.
@@ -516,7 +527,7 @@ export function Mouvements() {
               ))}
             </div>
             {droits.peutEcrire && (
-              <Bouton onClick={() => setSaisieOuverte(true)}>Saisir un mouvement</Bouton>
+              <Bouton onClick={() => naviguer('/mouvements/nouveau')}>Saisir un mouvement</Bouton>
             )}
           </div>
         }
@@ -569,22 +580,12 @@ export function Mouvements() {
       </PageAvecRail>
       )}
 
-      {saisieOuverte && (
-        <SaisieMouvement
-          surFermeture={() => setSaisieOuverte(false)}
-          surSucces={() => {
-            setSaisieOuverte(false)
-            void qc.invalidateQueries({ queryKey: ['mouvements'] })
-            void qc.invalidateQueries({ queryKey: ['mouvements-documents'] })
-            void qc.invalidateQueries({ queryKey: ['stock-projete'] })
-            void qc.invalidateQueries({ queryKey: ['cockpit'] })
-          }}
-        />
-      )}
     </div>
   )
 }
 
+<<<<<<< HEAD
+=======
 function SaisieMouvement({
   surFermeture,
   surSucces,
@@ -1116,3 +1117,4 @@ function EquivalentsDispo({
     </div>
   )
 }
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca

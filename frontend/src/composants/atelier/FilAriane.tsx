@@ -78,7 +78,7 @@ export function FilAriane({
             <MenuSeparateur />
             {ecrans.map((e) => (
               <MenuElement
-                key={e.vers}
+                key={e.vers + e.libelle}
                 disabled={Boolean(e.aVenir)}
                 onSelect={() => !e.aVenir && ouvrir(e.vers, false)}
               >

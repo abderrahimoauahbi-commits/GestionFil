@@ -660,18 +660,34 @@ BEFORE INSERT ON ligne_reception FOR EACH ROW
 EXECUTE FUNCTION fn_trg_ligne_reception_quarantaine();
 
 CREATE OR REPLACE FUNCTION fn_trg_ligne_reception_substitution() RETURNS trigger AS $$
+DECLARE
+    v_type      text;
+    v_commandee text;
 BEGIN
-    IF NEW.id_ligne_bc IS NOT NULL
- AND NEW.code_reference <> (SELECT code_reference FROM ligne_bc
-                             WHERE id_ligne_bc = NEW.id_ligne_bc)
+    IF NEW.id_ligne_bc IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT type_ligne, code_reference INTO v_type, v_commandee
+      FROM ligne_bc WHERE id_ligne_bc = NEW.id_ligne_bc;
+
+    -- Une ligne de service n'attend aucune marchandise : rien ne s'y pese.
+    IF v_type = 'SERVICE' THEN
+        RAISE EXCEPTION 'La ligne de commande visee est une prestation, pas de la marchandise : on ne peut pas y receptionner %.', NEW.code_reference;
+    END IF;
+
+    -- `IS DISTINCT FROM` ET NON `<>`. Compare a une ligne qui ne porte pas de
+    -- reference, `<>` rend NULL — donc jamais vrai — et le garde-fou s'ouvrait
+    -- en grand : n'importe quelle marchandise pouvait se rattacher a une ligne
+    -- de transport, sans un mot.
+    IF NEW.code_reference IS DISTINCT FROM v_commandee
  AND (NEW.substitution_acceptee = 0
       OR NOT EXISTS (
           SELECT 1 FROM v_equivalence e
-           WHERE e.code_reference = (SELECT code_reference FROM ligne_bc
-                                      WHERE id_ligne_bc = NEW.id_ligne_bc)
+           WHERE e.code_reference = v_commandee
              AND e.equivalent_reference = NEW.code_reference
              AND e.interchangeable = 1)) THEN
-        RAISE EXCEPTION 'Reference recue differente de la reference commandee. Elle n''''est acceptable que si les deux references appartiennent au meme groupe d''''equivalence, sont interchangeables (meme unite, meme densite, meme categorie), et que la substitution est explicitement confirmee.';
+        RAISE EXCEPTION 'Reference recue differente de la reference commandee. Elle n''est acceptable que si les deux references appartiennent au meme groupe d''equivalence, sont interchangeables (meme unite, meme densite, meme categorie), et que la substitution est explicitement confirmee.';
     END IF;
     RETURN NEW;
 END;

@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { useOuvrirVue } from '../lib/navigation'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
@@ -34,7 +35,20 @@ import {
   Chargement,
   Etiq,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
+import { Aide, useConfirmation } from '../composants/ui/surcouches'
+import {
+  GrilleLignes,
+  corpsLigne,
+  depuisLigneEnregistree,
+  estEbauche,
+  estPrete,
+  kgDe,
+  ligneVide,
+  totalDe,
+  type LigneSaisie,
+  type RefLigne,
+} from '../composants/GrilleLignes'
+import { facteurVersKg } from '../lib/conditionnement'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'BONS_COMMANDE'
@@ -47,6 +61,8 @@ interface Bc extends Record<string, unknown> {
   fournisseur_nom: string
   date_livraison_prevue: string | null
   conditions_paiement: string | null
+  mention_expedition?: string | null
+  nombre_conteneurs?: number | null
   notes: string | null
   statut: string
   code_devise: string
@@ -62,7 +78,10 @@ interface Bc extends Record<string, unknown> {
 interface LigneBc extends Record<string, unknown> {
   id_ligne_bc: string
   ligne_numero: number
-  code_reference: string
+  /** `MARCHANDISE` ou `SERVICE` — une prestation n'a pas de reference. */
+  type_ligne?: string
+  code_reference: string | null
+  libelle?: string | null
   reference_designation: string
   unite_commande: string
   quantite_commandee_unite: number
@@ -87,27 +106,6 @@ interface LigneBc extends Record<string, unknown> {
   arbitree: number
 }
 
-interface RefCommandable extends Record<string, unknown> {
-  code_reference: string
-  designation: string
-  unite_catalogue: string
-  prix_catalogue?: number
-  classe_abc: string | null
-  moq_kg: number | null
-  multiple_achat_kg: number | null
-  stock_projete_kg: number | null
-  stock_min_kg: number | null
-  jours_couverture: number | null
-  statut_stock: string | null
-  qte_a_commander_kg: number | null
-  /** Prix propose dans la devise du bon : plan d'achat, sinon CMUP, sinon catalogue. */
-  prix_suggere_devise?: number
-  prix_mad_suggere?: number
-  source_prix?: string
-  tier: string | null
-  deja_sur_le_bon: number
-}
-
 const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
   BROUILLON: 'neutre',
   EN_ATTENTE_VALIDATION: 'alerte',
@@ -116,13 +114,6 @@ const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = 
   LIVRE_PARTIEL: 'alerte',
   CLOTURE: 'succes',
   ANNULE: 'danger',
-}
-
-const TON_STOCK: Record<string, 'danger' | 'alerte' | 'succes' | 'neutre'> = {
-  RUPTURE: 'danger',
-  CRITIQUE: 'danger',
-  ATTENTION: 'alerte',
-  OK: 'succes',
 }
 
 export function BonCommande() {
@@ -138,6 +129,8 @@ export function BonCommande() {
     date_bc: '',
     date_livraison_prevue: '',
     conditions_paiement: '',
+    mention_expedition: '',
+    nombre_conteneurs: '',
     notes: '',
   })
   /** Lignes retouchees mais pas encore enregistrees, par identifiant. */
@@ -152,9 +145,16 @@ export function BonCommande() {
    * erreur existe deja quand on s'en apercoit, et il faut la supprimer — donc
    * laisser une trace de quelque chose qui n'aurait jamais du exister.
    */
-  const [nouvelles, setNouvelles] = useState<
-    { cle: string; code_reference: string; designation: string; quantite: number; prix: number }[]
-  >([])
+  const [nouvelles, setNouvelles] = useState<LigneSaisie[]>([])
+  /**
+   * OU LA FRAPPE VA CHERCHER — le plan, ou tout le catalogue.
+   *
+   * L'ecran de modification n'offrait pas ce choix : il ne proposait que les
+   * references du fournisseur, sans jamais montrer ce que le plan d'achat
+   * reclamait ni permettre d'en sortir. La creation, elle, l'offrait depuis
+   * toujours.
+   */
+  const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
   /** Lignes existantes marquees pour suppression, appliquee a l'enregistrement. */
   const [supprimees, setSupprimees] = useState<string[]>([])
 
@@ -168,6 +168,51 @@ export function BonCommande() {
     queryKey: ['lignes-bc', id],
     queryFn: () => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`),
     enabled: !!id,
+  })
+
+  /**
+   * CE QUE LE PLAN RECLAME CHEZ LE FOURNISSEUR DE CE BON.
+   *
+   * L'ecran de modification l'ignorait : il ne chargeait que les references
+   * « commandables » du bon. Or ajouter une ligne apres coup demande la meme
+   * information qu'a la creation — ce qui manque, en quelle quantite, a quel
+   * prix.
+   */
+  const qPlan = useQuery({
+    queryKey: ['refs-plan', bc?.code_fournisseur],
+    queryFn: () =>
+      api.get<RefLigne[]>(
+        `/api/references-commandables?code_fournisseur=${encodeURIComponent(bc!.code_fournisseur)}`,
+      ),
+    enabled: !!bc?.code_fournisseur,
+  })
+  const proposees = useMemo(
+    () => (qPlan.data ?? []).filter((r) => (r.qte_a_commander_kg ?? 0) > 0),
+    [qPlan.data],
+  )
+  const parPlan = useMemo(
+    () => new Map((qPlan.data ?? []).map((r) => [r.code_reference, r])),
+    [qPlan.data],
+  )
+  const chercherCatalogue = async (motif: string): Promise<RefLigne[]> => {
+    const p = new URLSearchParams({
+      code_fournisseur: bc?.code_fournisseur ?? '',
+      toutes: '1',
+      recherche: motif,
+      limite: '25',
+    })
+    return api.get<RefLigne[]>(`/api/references-commandables?${p}`)
+  }
+
+  /** Corriger la fiche de la reference depuis la commande, comme a la creation. */
+  const corrigerReference = useMutation({
+    mutationFn: ({ code, champ, valeur }: { code: string; champ: string; valeur: string }) =>
+      api.patch(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur }),
+    onSuccess: () => {
+      toast.success('Fiche de la référence corrigée')
+      void qc.invalidateQueries({ queryKey: ['refs-plan'] })
+    },
+    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Correction impossible.'),
   })
 
   const rafraichir = () => {
@@ -187,6 +232,8 @@ export function BonCommande() {
       date_bc: bc.date_bc?.slice(0, 10) ?? '',
       date_livraison_prevue: bc.date_livraison_prevue?.slice(0, 10) ?? '',
       conditions_paiement: bc.conditions_paiement ?? '',
+      mention_expedition: bc.mention_expedition ?? '',
+      nombre_conteneurs: bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '',
       notes: bc.notes ?? '',
     })
   }, [bc?.id_bc, bc?.date_bc, bc?.date_livraison_prevue, bc?.conditions_paiement, bc?.notes])
@@ -196,6 +243,9 @@ export function BonCommande() {
     (entete.date_bc !== (bc.date_bc?.slice(0, 10) ?? '') ||
       entete.date_livraison_prevue !== (bc.date_livraison_prevue?.slice(0, 10) ?? '') ||
       entete.conditions_paiement !== (bc.conditions_paiement ?? '') ||
+      entete.mention_expedition !== (bc.mention_expedition ?? '') ||
+      entete.nombre_conteneurs !==
+        (bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '') ||
       entete.notes !== (bc.notes ?? ''))
 
   const changerStatut = useMutation({
@@ -232,17 +282,33 @@ export function BonCommande() {
         if (supprimees.includes(ligne)) continue
         await api.patch(`/api/bons-commande/${id}/lignes/${ligne}`, corps)
       }
-      for (const n of nouvelles) {
-        await api.post(`/api/bons-commande/${id}/lignes`, {
-          code_reference: n.code_reference,
-          unite_commande: 'kg',
-          quantite_commandee_unite: n.quantite,
-          prix_unitaire_devise: n.prix,
-        })
+      // LE MEME CORPS QU'A LA CREATION, produit par la meme fonction. C'est
+      // la seule maniere d'etre sur que les deux saisies donnent le meme
+      // resultat : tant qu'elles construisaient chacune leur JSON, elles
+      // divergeaient sans que rien ne le signale.
+      //
+      // `idExistant` DECIDE DU VERBE : une ligne deja enregistree se corrige,
+      // une ligne neuve se cree. Sans cette distinction, corriger la reference
+      // d'une ligne en creerait une seconde et laisserait l'ancienne.
+      for (const n of nouvelles.filter(estPrete)) {
+        if (n.idExistant) {
+          await api.patch(`/api/bons-commande/${id}/lignes/${n.idExistant}`, corpsLigne(n))
+        } else {
+          await api.post(`/api/bons-commande/${id}/lignes`, corpsLigne(n))
+        }
+      }
+      // CE QU'ON A RETIRE DE LA GRILLE. Une ligne chargee pour correction puis
+      // effacee est une suppression : l'oublier la laisserait en base alors
+      // que l'ecran ne la montre plus.
+      const gardees = new Set(nouvelles.map((n) => n.idExistant).filter(Boolean))
+      for (const l of lignesChargees) {
+        if (!gardees.has(l) && !supprimees.includes(l)) {
+          await api.delete(`/api/bons-commande/${id}/lignes/${l}`)
+        }
       }
       return {
         modifiees: Object.keys(brouillon).filter((l) => !supprimees.includes(l)).length,
-        ajoutees: nouvelles.length,
+        ajoutees: nouvelles.filter((n) => estPrete(n) && !n.idExistant).length,
         retirees: supprimees.length,
       }
     },
@@ -257,11 +323,21 @@ export function BonCommande() {
       })
       setBrouillon({})
       setNouvelles([])
+      setLignesChargees([])
       setSupprimees([])
       rafraichir()
     },
     onError: echec,
   })
+
+  /**
+   * Les identifiants des lignes chargees dans la grille pour correction.
+   *
+   * On les retient pour savoir ce qui a ete RETIRE : une ligne chargee puis
+   * effacee de la grille doit disparaitre en base, sinon l'ecran et la base
+   * cessent de dire la meme chose.
+   */
+  const [lignesChargees, setLignesChargees] = useState<string[]>([])
 
   /** Marque ou demarque une ligne existante pour suppression. */
   const basculerSuppression = (ligne: string) =>
@@ -288,7 +364,9 @@ export function BonCommande() {
     brouillon[l.id_ligne_bc]?.[champ] ?? (l[champ] as number | undefined) ?? null
 
   const ligneModifiee = (l: LigneBc) => !!brouillon[l.id_ligne_bc]
-  const nbModifiees = Object.keys(brouillon).filter((c) => !supprimees.includes(c)).length
+  const nbModifiees =
+    Object.keys(brouillon).filter((c) => !supprimees.includes(c)).length +
+    nouvelles.filter((n) => n.idExistant).length
   const aEnregistrer =
     nbModifiees > 0 || nouvelles.length > 0 || supprimees.length > 0 || enteteModifie
 
@@ -297,19 +375,25 @@ export function BonCommande() {
   // s'en rendre compte.
   const lignesAffichees: LigneBc[] = [
     ...lignes,
-    ...nouvelles.map((n, i) => ({
+    // SEULES LES LIGNES NEUVES s'ajoutent au tableau : celles chargees pour
+    // correction y figurent deja, et les montrer deux fois ferait croire a un
+    // doublon.
+    ...nouvelles.filter((n) => estPrete(n) && !n.idExistant).map((n, i) => ({
       id_ligne_bc: n.cle,
       ligne_numero: lignes.length + i + 1,
       code_reference: n.code_reference,
-      reference_designation: n.designation,
-      unite_commande: 'kg',
-      quantite_commandee_unite: n.quantite,
-      quantite_commandee_kg: n.quantite,
+      reference_designation: n.intitule,
+      // L'UNITE, LE POIDS ET LE PRIX VIENNENT DE LA SAISIE, plus de suppositions.
+      // La ligne en attente s'affiche donc exactement comme elle sera
+      // enregistree — y compris son poids converti, qui faisait defaut.
+      unite_commande: n.unite,
+      quantite_commandee_unite: Number(n.qte),
+      quantite_commandee_kg: kgDe(n) ?? Number(n.qte),
       quantite_recue_kg: 0,
-      quantite_restante_kg: n.quantite,
-      prix_unitaire_devise: n.prix,
-      total_ligne_devise: n.quantite * n.prix,
-      total_ligne_mad: n.quantite * n.prix * (bc?.taux_change_engage ?? 1),
+      quantite_restante_kg: kgDe(n) ?? Number(n.qte),
+      prix_unitaire_devise: Number(n.prix) * (facteurVersKg(n.unite, n.cond) ?? 1),
+      total_ligne_devise: totalDe(n),
+      total_ligne_mad: totalDe(n) * (bc?.taux_change_engage ?? 1),
       taux_change_engage: bc?.taux_change_engage,
       code_devise: bc?.code_devise,
       // Le conditionnement et la categorie viennent du catalogue, que la ligne
@@ -328,12 +412,24 @@ export function BonCommande() {
       arbitree: 0,
     })),
   ]
-  const estNouvelle = (l: LigneBc) => l.id_ligne_bc.startsWith('nouvelle:')
+  /**
+   * NOUVELLE VEUT DIRE « QUI N'EXISTE PAS ENCORE ». Une ligne chargee dans la
+   * grille pour y etre corrigee garde son identifiant : la compter comme
+   * nouvelle la faisait passer pour un ajout dans le tableau et dans le
+   * decompte du bas.
+   */
+  const estNouvelle = (l: LigneBc) =>
+    nouvelles.some((n) => n.cle === l.id_ligne_bc && !n.idExistant)
 
   const modifiable =
     !!droits.peutEcrire &&
     (bc?.statut === 'BROUILLON' || bc?.statut === 'EN_ATTENTE_VALIDATION')
-  const estCreateur = bc?.createur === moi?.login
+  /* LE SUPERVISEUR VALIDE CE QU'IL A CREE, sur decision de la direction. La
+     separation des taches reste en vigueur pour tous les autres roles : dans
+     une PME, l'interdire au seul compte habilite ne cree pas un second regard,
+     cela cree un bon bloque. Le serveur applique la meme exception — l'ecran
+     ne fait que ne pas griser un bouton qui fonctionnerait. */
+  const estCreateur = bc?.createur === moi?.login && moi?.role !== 'ADMIN'
   const plafond = moi?.plafond_validation_bc_mad ?? null
   const depassePlafond = plafond != null && (bc?.montant_total_mad ?? 0) > plafond
 
@@ -351,10 +447,19 @@ export function BonCommande() {
     {
       champ: 'code_reference',
       entete: 'Référence',
+<<<<<<< HEAD
+      // UNE PRESTATION N'A PAS DE REFERENCE : c'est son libelle qui la nomme.
+      // Sans ce repli, la ligne de transport s'affichait vide.
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       rendu: (l) => (
         <div className="min-w-0">
-          <div className="truncate font-medium">{l.code_reference}</div>
-          <div className="truncate text-[11px] text-attenue-texte">{l.reference_designation}</div>
+          <div className="truncate font-medium">
+            {l.code_reference ?? l.libelle ?? '—'}
+          </div>
+          <div className="truncate text-[11px] text-attenue-texte">
+            {l.code_reference ? l.reference_designation : 'prestation — n’entre pas en stock'}
+          </div>
         </div>
       ),
     },
@@ -428,7 +533,11 @@ export function BonCommande() {
       largeur: '120px',
       rendu: (l) => (
         <div className="min-w-0">
-          <div className="truncate">{l.categorie_libelle ?? l.code_categorie ?? '—'}</div>
+          <div className="truncate">
+            {l.type_ligne === 'SERVICE'
+              ? 'Prestation'
+              : (l.categorie_libelle ?? l.code_categorie ?? '—')}
+          </div>
           {l.couleur && (
             <div className="truncate text-[11px] text-attenue-texte">{l.couleur}</div>
           )}
@@ -623,7 +732,7 @@ export function BonCommande() {
               Imprimer
             </Bouton>
             {modifiable && (
-              <Bouton variante="contour" onClick={() => setSaisie(true)}>
+              <Bouton variante="contour" onClick={() => { setNouvelles((n) => (n.length ? n : [ligneVide()])); setSaisie(true) }}>
                 <Plus />
                 Ajouter des lignes
               </Bouton>
@@ -661,6 +770,16 @@ export function BonCommande() {
                 Envoyer au fournisseur
               </Bouton>
             )}
+            {/* UN BON VALIDE PAR ERREUR NE RESTE PAS VALIDE. Il redevient
+                brouillon — sauf si le fournisseur a deja livre, auquel cas le
+                serveur refuse et dit pourquoi. */}
+            <BoutonDevalider
+              document="bons-commande"
+              id={id}
+              statut={bc.statut}
+              taille="md"
+              consequence="Le fournisseur devra etre prevenu si le bon lui est deja parti."
+            />
           </>
         }
       />
@@ -687,13 +806,13 @@ export function BonCommande() {
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq>Fournisseur</Etiq>
+              <Etiq>
+                Fournisseur
+                <Aide>Non modifiable : la devise, le taux et les prix du bon en decoulent.</Aide>
+              </Etiq>
               <div className="flex h-8 items-center rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[13px]">
                 {bc.fournisseur_nom}
               </div>
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Non modifiable : devise, taux et prix en decoulent.
-              </p>
             </div>
             <div>
               <Etiq htmlFor="datebc">Date du bon</Etiq>
@@ -733,6 +852,46 @@ export function BonCommande() {
                 onChange={(e) => setEntete({ ...entete, notes: e.target.value })}
               />
             </div>
+            {/* CE QUI PART SUR LE DOCUMENT FOURNISSEUR, et nulle part ailleurs.
+                La date de livraison prevue pilote le suivi de l'en-cours ; le
+                fournisseur, lui, lit souvent une phrase — « As soon as
+                possible » figurait sur dix-neuf des bons d'archive. */}
+            <div>
+              <Etiq htmlFor="expe">
+                Mention d’expédition
+                <Aide>
+                  Ce que le document fournisseur imprime en face de « SHIPMENT DATE ». Laissée
+                  vide, c’est la livraison prévue qui part. Elle ne remplace pas cette date :
+                  le suivi de l’en-cours continue de s’appuyer dessus.
+                </Aide>
+              </Etiq>
+              <Champ
+                id="expe"
+                placeholder="As soon as possible"
+                value={entete.mention_expedition}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, mention_expedition: e.target.value })}
+              />
+            </div>
+            <div>
+              <Etiq htmlFor="cont">
+                Nombre de conteneurs
+                <Aide>
+                  Laissé vide, il se calcule : total des palettes divisé par les palettes par
+                  conteneur du fournisseur. On ne le saisit que lorsque le transitaire en
+                  décide autrement — une expédition partagée, un conteneur de plus.
+                </Aide>
+              </Etiq>
+              <Champ
+                id="cont"
+                type="number"
+                min="1"
+                className="text-right tabular-nums"
+                value={entete.nombre_conteneurs}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, nombre_conteneurs: e.target.value })}
+              />
+            </div>
           </CarteCorps>
 
           {/* Un bouton explicite plutot qu'un enregistrement a la sortie du
@@ -769,10 +928,39 @@ export function BonCommande() {
           <CarteEntete>
             <CarteTitre>Lignes</CarteTitre>
             {modifiable && (
-              <Bouton variante="contour" taille="sm" onClick={() => setSaisie(true)}>
-                <Plus />
-                Ajouter
-              </Bouton>
+              <div className="flex flex-wrap gap-2">
+                {/* CORRIGER UNE LIGNE DEJA SAISIE passe par la MEME grille.
+                    Les cellules editables du tableau ne donnaient que la
+                    quantite et le prix : changer la reference, l'unite ou un
+                    code fournisseur obligeait a supprimer puis ressaisir. */}
+                <Bouton
+                  variante="contour"
+                  taille="sm"
+                  onClick={() => {
+                    setNouvelles(
+                      lignes.map((l) =>
+                        depuisLigneEnregistree(l, parPlan.get(l.code_reference ?? '')),
+                      ),
+                    )
+                    setLignesChargees(lignes.map((l) => l.id_ligne_bc))
+                    setSaisie(true)
+                  }}
+                  disabled={lignes.length === 0}
+                >
+                  Modifier les lignes
+                </Bouton>
+                <Bouton
+                  variante="contour"
+                  taille="sm"
+                  onClick={() => {
+                    setNouvelles((n) => (n.length ? [...n, ligneVide()] : [ligneVide()]))
+                    setSaisie(true)
+                  }}
+                >
+                  <Plus />
+                  Ajouter
+                </Bouton>
+              </div>
             )}
           </CarteEntete>
           <CarteCorps className="p-0">
@@ -813,6 +1001,53 @@ export function BonCommande() {
             />
           </CarteCorps>
         </Carte>
+
+        {/* LA SAISIE RESTE DANS LA PAGE, sous les lignes existantes.
+            Elle avait d'abord ete posee dans un tiroir modal : on perdait de
+            vue le bon qu'on modifiait, et il fallait fermer pour verifier ce
+            qu'on venait d'ajouter. Un document se saisit devant soi. */}
+        {saisie && bc && (
+          <Carte>
+            <CarteEntete>
+              <CarteTitre>Ajouter des lignes</CarteTitre>
+              <Bouton variante="discret" taille="sm" onClick={() => setSaisie(false)}>
+                Masquer la saisie
+              </Bouton>
+            </CarteEntete>
+            <CarteCorps className="space-y-3">
+              <GrilleLignes
+                codeFournisseur={bc.code_fournisseur}
+                devise={bc.code_devise}
+                lignes={nouvelles}
+                setLignes={setNouvelles}
+                mode={mode}
+                setMode={setMode}
+                proposees={proposees}
+                chercherCatalogue={chercherCatalogue}
+                dejaPrises={
+                  new Set([
+                    ...lignes.map((l) => l.code_reference).filter((c): c is string => !!c),
+                    ...nouvelles.map((n) => n.code_reference).filter(Boolean),
+                  ])
+                }
+                surCorrection={(code, champ, valeur) =>
+                  corrigerReference.mutate({ code, champ, valeur })
+                }
+                valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
+              />
+              <div className="border-t border-bordure pt-2 text-[12px] text-attenue-texte">
+                {nouvelles.filter(estPrete).length} ligne(s) prete(s)
+                {nouvelles.filter(estEbauche).length > 0 && (
+                  <span className="text-danger">
+                    {' '}
+                    — {nouvelles.filter(estEbauche).length} incomplete(s) : référence, quantité ou prix
+                  </span>
+                )}
+                {' · '}rien n’est enregistré tant que vous n’avez pas enregistré le bon.
+              </div>
+            </CarteCorps>
+          </Carte>
+        )}
       </div>
 
       {/* Les deux boutons sont TOUJOURS presents tant que le bon se modifie, et
@@ -834,7 +1069,9 @@ export function BonCommande() {
               <>
                 <span className="font-medium">
                   {[
-                    nouvelles.length > 0 ? `${nouvelles.length} ajoutee(s)` : null,
+                    nouvelles.filter((n) => !n.idExistant).length > 0
+                      ? `${nouvelles.filter((n) => !n.idExistant).length} ajoutee(s)`
+                      : null,
                     nbModifiees > 0 ? `${nbModifiees} modifiee(s)` : null,
                     supprimees.length > 0 ? `${supprimees.length} a retirer` : null,
                     enteteModifie ? 'en-tete modifie' : null,
@@ -863,6 +1100,8 @@ export function BonCommande() {
                     date_bc: bc.date_bc?.slice(0, 10) ?? '',
                     date_livraison_prevue: bc.date_livraison_prevue?.slice(0, 10) ?? '',
                     conditions_paiement: bc.conditions_paiement ?? '',
+                    mention_expedition: bc.mention_expedition ?? '',
+                    nombre_conteneurs: bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '',
                     notes: bc.notes ?? '',
                   })
                 }
@@ -883,25 +1122,13 @@ export function BonCommande() {
         </div>
       )}
 
-      {saisie && (
-        <PanneauSaisie
-          idBc={id}
-          devise={bc.code_devise}
-          dejaChoisies={[...lignes.map((l) => l.code_reference), ...nouvelles.map((n) => n.code_reference)]}
-          surFermeture={() => setSaisie(false)}
-          surAjout={(ajouts) =>
-            setNouvelles((n) => [
-              ...n,
-              ...ajouts.map((a, i) => ({ ...a, cle: `nouvelle:${Date.now()}:${i}` })),
-            ])
-          }
-        />
-      )}
       {confirmation.element}
     </div>
   )
 }
 
+<<<<<<< HEAD
+=======
 /**
  * Saisie des lignes, avec le plan d'achat sous les yeux.
  *
@@ -1153,3 +1380,4 @@ function PanneauSaisie({
     </Dialogue>
   )
 }
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca

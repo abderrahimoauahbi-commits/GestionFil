@@ -23,7 +23,7 @@ use std::collections::HashMap;
 /// Modules du CDC D2.
 ///
 /// L'enumeration est volontairement complete : elle documente la matrice des
-/// permissions et doit rester alignee sur `db/seed/002_securite.sql`.
+/// permissions et doit rester alignee sur `db/pg/seed_002_securite.sql`.
 #[allow(dead_code)]
 pub mod module {
     pub const PARAMETRES: &str = "PARAMETRES";
@@ -36,6 +36,7 @@ pub mod module {
     pub const PLAN_ACHAT: &str = "PLAN_ACHAT";
     pub const BONS_COMMANDE: &str = "BONS_COMMANDE";
     pub const RECEPTIONS: &str = "RECEPTIONS";
+    pub const IMPORT: &str = "IMPORT";
     pub const MOUVEMENTS: &str = "MOUVEMENTS";
     pub const STOCK: &str = "STOCK";
     pub const INVENTAIRE: &str = "INVENTAIRE";

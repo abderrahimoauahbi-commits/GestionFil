@@ -3,6 +3,7 @@
 pub mod jwt;
 pub mod password;
 pub mod rbac;
+pub mod totp;
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;

@@ -163,9 +163,13 @@ pub async fn valider(
 
     // ---- 3. Lignes ----------------------------------------------------------
     let lignes: Vec<LigneReception> = sqlx::query_as(
+        // Chaque NUMERIC est converti ET garde son nom : `FromRow` lie par nom.
         "SELECT id_ligne_reception, id_ligne_bc, code_reference,
-                unite_saisie, facteur_kg, quantite_pesee_unite, quantite_stock_kg, ecart_pct,
-                prix_kg_devise, code_devise, taux_change, prix_kg_mad,
+                unite_saisie, facteur_kg::float8 AS facteur_kg,
+                quantite_pesee_unite::float8 AS quantite_pesee_unite,
+                quantite_stock_kg::float8 AS quantite_stock_kg, ecart_pct::float8 AS ecart_pct,
+                prix_kg_devise::float8 AS prix_kg_devise, code_devise,
+                taux_change::float8 AS taux_change, prix_kg_mad::float8 AS prix_kg_mad,
                 lot_fournisseur, date_fabrication, date_peremption,
                 statut_qualite, code_magasin_dest
            FROM ligne_reception
@@ -361,7 +365,7 @@ pub async fn valider(
         if let Some(id_ligne_bc) = &l.id_ligne_bc {
             sqlx::query(
                 "UPDATE ligne_bc
-                    SET quantite_recue_kg = ROUND(quantite_recue_kg + $2, 4)
+                    SET quantite_recue_kg = ROUND(quantite_recue_kg + $2::numeric, 4)
                   WHERE id_ligne_bc = $1",
             )
             .bind(id_ligne_bc)
@@ -397,9 +401,15 @@ pub async fn valider(
             continue;
         }
 
+        // SEULE LA MARCHANDISE DECIDE DE LA CLOTURE. Une ligne de service —
+        // transport, commission — ne se receptionne jamais : rien ne viendra
+        // jamais la solder. Sans ce filtre, un bon portant du fret resterait
+        // LIVRE_PARTIEL a vie, ressortirait en en-cours d'approvisionnement et
+        // partirait en anomalie au controle C02.
         let restantes: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM ligne_bc
-              WHERE id_bc = $1 AND statut NOT IN ('SOLDE','ANNULE')",
+              WHERE id_bc = $1 AND statut NOT IN ('SOLDE','ANNULE')
+                AND type_ligne = 'MARCHANDISE'",
         )
         .bind(&b.id_bc)
         .fetch_one(&mut *tx)

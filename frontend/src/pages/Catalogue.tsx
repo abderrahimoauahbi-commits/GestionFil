@@ -62,6 +62,17 @@ export function Catalogue() {
     queryKey: ['devises'],
     queryFn: () => api.get<{ code_devise: string; libelle: string }[]>('/api/devises'),
   })
+  // La famille et la couleur interne : deux references qui les partagent sont
+  // le meme fil chez deux fournisseurs.
+  const qFam = useQuery({
+    queryKey: ['familles', ''],
+    queryFn: () => api.get<{ code_famille: string; libelle: string }[]>('/api/familles?actif=1'),
+  })
+  const qCoul = useQuery({
+    queryKey: ['couleurs', ''],
+    queryFn: () =>
+      api.get<{ code_couleur_interne: string; libelle: string }[]>('/api/couleurs?actif=1'),
+  })
 
   const colonnes: Colonne<Reference>[] = [
     {
@@ -76,8 +87,40 @@ export function Catalogue() {
       ),
     },
     { champ: 'code_categorie', entete: 'Catégorie', filtre: 'liste', rendu: (r) => r.categorie_libelle },
+<<<<<<< HEAD
+    {
+      // LE ROLE VIENT DE LA CATEGORIE — Poil, Trame, Chaîne, Colle… : c'est la
+      // place normale de la matiere dans la composition. Le serveur ne trie que
+      // sur les colonnes de la fiche, d'ou l'absence de tri.
+      champ: 'code_role_defaut',
+      entete: 'Rôle',
+      triable: false,
+      rendu: (r) => fmt.texte(r.role_libelle ?? r.code_role_defaut),
+    },
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     { champ: 'fournisseur_nom', entete: 'Fournisseur', filtre: 'liste', rendu: (r) => r.fournisseur_nom },
     { champ: 'couleur', entete: 'Couleur', filtre: 'liste', rendu: (r) => fmt.texte(r.couleur), secondaire: true },
+    {
+      champ: 'code_couleur_interne',
+      entete: 'Couleur interne',
+      filtre: 'liste',
+      rendu: (r) => fmt.texte(r.code_couleur_interne),
+      secondaire: true,
+    },
+    {
+      champ: 'code_famille',
+      entete: 'Famille',
+      filtre: 'liste',
+      rendu: (r) => fmt.texte(r.famille_libelle ?? r.code_famille),
+      secondaire: true,
+    },
+    {
+      champ: 'reference_fournisseur',
+      entete: 'Ref. fournisseur',
+      rendu: (r) => fmt.texte(r.reference_fournisseur),
+      secondaire: true,
+    },
     {
       champ: 'unite_catalogue',
       entete: 'Unité',
@@ -92,16 +135,31 @@ export function Catalogue() {
       champ: 'prix_catalogue',
       entete: 'Prix',
       numerique: true,
+      // L'UNITE EST ECRITE. « 2,500 USD » a cote d'un CMUP au kg laissait croire
+      // a une erreur de calcul sur les references vendues au metre.
       rendu: (r) =>
         r.prix_catalogue === undefined
           ? '—'
-          : `${fmt.nombre(r.prix_catalogue, 3)} ${r.code_devise_catalogue ?? ''}`,
+          : `${fmt.nombre(r.prix_catalogue, 3)} ${r.code_devise_catalogue ?? ''}/${r.unite_catalogue}`,
     },
     {
       champ: 'cmup_mad',
       entete: 'CMUP',
       numerique: true,
-      rendu: (r) => (r.cmup_mad == null ? '—' : fmt.mad(r.cmup_mad)),
+      // LE CMUP DANS L'UNITE D'ACHAT. La base le tient au kg — le stock se
+      // compte en kg —, mais la Bande s'achete au metre : 4 635,20 MAD/kg ne se
+      // compare a rien, 23,18 MAD/ml se compare au prix. Le kg reste en infobulle.
+      rendu: (r) => {
+        if (r.cmup_mad == null) return '—'
+        if (r.unite_catalogue !== 'kg' && r.facteur_kg) {
+          return (
+            <span title={`soit ${fmt.nombre(r.cmup_mad, 2)} MAD/kg (1 ${r.unite_catalogue} = ${r.facteur_kg} kg)`}>
+              {fmt.nombre(r.cmup_mad * r.facteur_kg, 4)} MAD/{r.unite_catalogue}
+            </span>
+          )
+        }
+        return `${fmt.nombre(r.cmup_mad, 2)} MAD/kg`
+      },
     },
     {
       champ: 'quantite_kg',
@@ -150,6 +208,15 @@ export function Catalogue() {
     },
     { champ: 'designation', libelle: 'Designation', obligatoire: true, pleineLargeur: true },
     {
+      champ: 'description_commerciale',
+      libelle: 'Description commerciale (anglais)',
+      pleineLargeur: true,
+      aide:
+        'Ce que le fournisseur lit sur le bon de commande : « 100% POLYPROPYLENE YARN 2900 ' +
+        'DTEX ». Notre code interne ne lui dit rien. Laissée vide, la désignation part à sa ' +
+        'place — au risque qu’il ne la reconnaisse pas.',
+    },
+    {
       champ: 'code_categorie',
       libelle: 'Catégorie matiere',
       type: 'liste',
@@ -165,7 +232,44 @@ export function Catalogue() {
     },
     { champ: 'type_fil', libelle: 'Nature' },
     { champ: 'couleur', libelle: 'Couleur' },
+    {
+      champ: 'origine',
+      libelle: 'Origine',
+      aide: "Quand la matiere n'a pas de couleur — jute, colle, plastique, cuir — c'est la "
+        + "provenance qui prend sa place dans le nom de la reference.",
+    },
     { champ: 'titrage', libelle: 'Titrage' },
+    {
+      champ: 'code_famille',
+      libelle: 'Famille',
+      type: 'liste',
+      options: qFam.data?.map((f) => ({ valeur: f.code_famille, libelle: f.libelle })),
+      aide: 'Le produit independamment du vendeur. Deux references de meme famille et de meme '
+        + 'couleur interne sont le meme fil, chez deux fournisseurs differents.',
+    },
+    {
+      champ: 'code_couleur_interne',
+      libelle: 'Couleur interne',
+      type: 'liste',
+      options: qCoul.data?.map((c) => ({
+        valeur: c.code_couleur_interne,
+        libelle: `${c.code_couleur_interne} — ${c.libelle}`,
+      })),
+      aide: 'Votre code couleur, commun a tous les fournisseurs (C1, C3, CG…).',
+    },
+    {
+      champ: 'reference_fournisseur',
+      libelle: 'Reference fournisseur',
+      aide: "La reference telle que le fournisseur l'ecrit sur sa facture : « GOLD 2117 », "
+        + "« OZ 3034 », « SSL2081 ». C'est elle que la saisie assistée lit.",
+    },
+    {
+      champ: 'supplement_teinture',
+      libelle: 'Supplement de teinture',
+      type: 'nombre',
+      aide: 'En devise par tonne (100, 150, 530…). Le prix de la couleur est le prix de base de '
+        + 'la famille plus ce supplement ramene au kilo.',
+    },
     {
       champ: 'unite_catalogue',
       libelle: 'Unité de stock',
@@ -175,17 +279,65 @@ export function Catalogue() {
         { valeur: 'kg', libelle: 'Kilogramme' },
         { valeur: 'Bobine', libelle: 'Bobine' },
         { valeur: 'Palette', libelle: 'Palette' },
+        { valeur: 'Lot', libelle: 'Lot (bain de production)' },
         { valeur: 'ml', libelle: 'Metre lineaire' },
       ],
+<<<<<<< HEAD
+      aide:
+        'Le stock reste tenu en kg ; les autres unités sont des masques de saisie. ' +
+        'Le lot est le bain que le fournisseur produit — une unité d’achat, pas de manutention.',
+    },
+    {
+      champ: 'code_conditionnement',
+      libelle: 'Conditionnement',
+      type: 'liste',
+      options: [
+        { valeur: 'BOBINE', libelle: 'Bobines (fil)' },
+        { valeur: 'ROULEAU', libelle: 'Rouleaux sur palette' },
+        { valeur: 'ROULEAU_PETIT', libelle: 'Petits rouleaux (des centaines par palette)' },
+        { valeur: 'CUVE', libelle: 'Cuve IBC / GRV 1000 L (pompée)' },
+        { valeur: 'FUT', libelle: 'Fût 200 L' },
+        { valeur: 'SAC', libelle: 'Sacs' },
+        { valeur: 'CONTENEUR', libelle: 'Conteneur (pièce unique)' },
+        { valeur: 'VRAC', libelle: 'Vrac (ne se compte pas, se pèse)' },
+      ],
+      aide:
+        'Ce dans quoi cette matière arrive, et donc le mot employé pour la compter. ' +
+        'Tant qu’il n’est pas renseigné, l’état du stock affiche les kilos seuls : ' +
+        'mieux vaut aucun comptage qu’un comptage faux.',
+=======
       aide: 'Le stock reste tenu en kg ; les autres unités sont des masques de saisie.',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     },
     {
       champ: 'poids_bobine_kg',
-      libelle: 'Poids par bobine (kg)',
+      libelle: 'Poids par unité (kg)',
       type: 'nombre',
-      aide: 'Obligatoire pour une unité Bobine ou Palette.',
+<<<<<<< HEAD
+      aide:
+        'Le poids net d’UNE unité de conditionnement : une bobine, un rouleau, ' +
+        'une cuve pleine. Sans lui, aucun comptage n’est possible.',
     },
-    { champ: 'bobines_par_palette', libelle: 'Bobines par palette', type: 'entier' },
+    {
+      champ: 'bobines_par_palette',
+      libelle: 'Unités par palette',
+      type: 'entier',
+      aide:
+        'Combien il en tient sur une palette complète : 120 bobines, ' +
+        '480 petits rouleaux de Bande, 1 seule cuve de colle.',
+    },
+    {
+      champ: 'bobines_par_lot',
+      libelle: 'Bobines par lot',
+      type: 'entier',
+      aide:
+        'Le bain de production du fournisseur. Il varie d’un article à l’autre, même chez ' +
+        'le même fournisseur : 1344 bobines le plus souvent, parfois 1400, 1688 ou 1720. ' +
+        'Sans lui, la commande au lot est refusée plutôt que convertie au jugé.',
+=======
+      aide: 'Obligatoire pour une unité Bobine ou Palette.',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
+    },
     {
       champ: 'densite_kg_ml',
       libelle: 'Densité (kg/ml)',

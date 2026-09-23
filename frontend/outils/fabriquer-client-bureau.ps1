@@ -23,7 +23,11 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $Serveur = 'http://192.168.1.140:8080'
+    # LE SERVEUR EST EN HTTPS depuis sa mise en production : le port 8080 en
+    # clair ne sert plus qu'au developpement. L'autorite interne doit etre
+    # installee sur le poste, sinon WebView2 refuse le certificat — c'est la
+    # seule condition prealable a l'installation.
+    [string] $Serveur = 'https://192.168.1.140'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,10 +48,16 @@ try {
     Pop-Location
 }
 
-$paquet = Join-Path $racine 'src-tauri\target\release\bundle\nsis\Gestion Fil_0.1.0_x64-setup.exe'
+# LA VERSION SE LIT DANS LA CONFIGURATION, elle ne se recopie pas ici :
+# ecrite en dur, le script cherchait encore la 0.1.0 apres la premiere montee
+# de version et s'arretait sur « installateur introuvable » alors qu'il
+# venait de le fabriquer.
+$version = (Get-Content (Join-Path $racine 'src-tauri\tauri.conf.json') -Raw |
+            ConvertFrom-Json).version
+$paquet = Join-Path $racine ("src-tauri\target\release\bundle\nsis\Gestion Fil_$($version)_x64-setup.exe")
 if (-not (Test-Path $paquet)) { throw "installateur introuvable : $paquet" }
 
 Write-Host ("`n==> Installateur : {0:N1} Mo" -f ((Get-Item $paquet).Length / 1MB)) -ForegroundColor Green
 Write-Host "    $paquet"
 Write-Host "`nA deposer sur le serveur sous le nom gestionfil-windows-<version>.exe :"
-Write-Host "    scp '$paquet' sysadmin@192.168.1.140:/home/sysadmin/paquets/gestionfil-windows-0.1.0.exe"
+Write-Host "    scp '$paquet' sysadmin@192.168.1.140:/home/sysadmin/paquets/gestionfil-windows-$version.exe"

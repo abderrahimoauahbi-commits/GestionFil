@@ -1119,3 +1119,477 @@
 :root.sombre[data-palette="glassier"] table.grille > tbody > tr:hover {
   background-color: rgb(255 255 255 / 0.07);
 }
+
+/* =============================================================================
+   CINQ FAMILLES DE PLUS, AUX COULEURS DICTEES
+   -----------------------------------------------------------------------------
+   Les hexadecimaux fournis sont convertis en HSL parce que c'est la forme des
+   jetons : les variantes — survol, bordure, etat actif — se derivent par
+   decalage de luminosite. Convertir une fois vaut mieux que de maintenir deux
+   ecritures de la meme couleur.
+
+   CHAQUE FAMILLE GARDE SES DEUX MODES. Une palette qui n'existerait qu'en
+   clair ferait basculer l'ecran sur la famille par defaut au coucher du
+   soleil, sans que personne comprenne pourquoi. Les familles nees sombres —
+   Terminal, Glass — declarent la meme palette dans les deux sens : c'est leur
+   caractere, pas un oubli.
+   ========================================================================== */
+
+:root[data-palette="industriel"],
+.atelier[data-palette="industriel"] {
+  --fond: 0 0% 98%;
+  --texte: 221 39% 11%;
+  --surface: 0 0% 100%;
+  --surface-texte: 221 39% 11%;
+  --attenue: 220 14% 96%;
+  --attenue-texte: 220 9% 46%;
+  --accent: 221 39% 11%;
+  --accent-texte: 0 0% 100%;
+  --primaire: 221 83% 53%;
+  --primaire-texte: 0 0% 100%;
+  --danger: 0 84% 60%;
+  --danger-texte: 0 0% 100%;
+  --succes: 160 84% 39%;
+  --alerte: 38 92% 50%;
+  --info: 221 83% 53%;
+  --or: 38 92% 50%;
+  --bordure: 220 13% 91%;
+  --ligne: 220 14% 95%;
+  --champ: 220 13% 86%;
+  --anneau: 221 83% 53%;
+  --barre: 0 0% 100%;
+  --barre-texte: 221 39% 11%;
+  --barre-attenue: 220 9% 46%;
+  --barre-actif: 220 14% 96%;
+  --at-titre: 0 0% 100%;
+  --at-activite: 0 0% 100%;
+  --at-lateral: 0 0% 100%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 0 0% 98%;
+  --at-etat: 0 0% 100%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 0 0% 98%;
+  --at-liste-survol: 220 14% 96%;
+  --at-liste-selection: 221 83% 94%;
+  --at-liste-selection-texte: 221 39% 11%;
+  --at-badge: 221 83% 53%;
+  --at-badge-texte: 0 0% 100%;
+  color-scheme: light;
+}
+
+:root.sombre[data-palette="industriel"],
+.atelier.sombre[data-palette="industriel"] {
+  --fond: 221 39% 8%;
+  --texte: 220 14% 93%;
+  --surface: 221 33% 12%;
+  --surface-texte: 220 14% 93%;
+  --attenue: 220 26% 17%;
+  --attenue-texte: 220 9% 62%;
+  --accent: 220 14% 93%;
+  --accent-texte: 221 39% 8%;
+  --primaire: 217 91% 65%;
+  --primaire-texte: 221 39% 8%;
+  --danger: 0 84% 68%;
+  --danger-texte: 221 39% 8%;
+  --succes: 160 70% 50%;
+  --alerte: 38 92% 60%;
+  --info: 217 91% 65%;
+  --or: 38 92% 62%;
+  --bordure: 220 20% 22%;
+  --ligne: 220 22% 17%;
+  --champ: 220 18% 26%;
+  --anneau: 217 91% 65%;
+  --barre: 221 39% 8%;
+  --barre-texte: 220 14% 93%;
+  --barre-attenue: 220 9% 58%;
+  --barre-actif: 220 26% 17%;
+  --at-titre: 221 39% 8%;
+  --at-activite: 221 39% 8%;
+  --at-lateral: 221 39% 8%;
+  --at-editeur: 221 33% 12%;
+  --at-panneau: 221 39% 10%;
+  --at-etat: 221 39% 8%;
+  --at-onglet-actif: 221 33% 12%;
+  --at-onglet-inactif: 221 39% 10%;
+  --at-liste-survol: 220 26% 17%;
+  --at-liste-selection: 217 60% 24%;
+  --at-liste-selection-texte: 220 14% 96%;
+  --at-badge: 217 91% 65%;
+  --at-badge-texte: 221 39% 8%;
+  color-scheme: dark;
+}
+
+:root[data-palette="terminal"],
+.atelier[data-palette="terminal"] {
+  --fond: 213 29% 6%;
+  --texte: 220 13% 91%;
+  --surface: 212 31% 10%;
+  --surface-texte: 220 13% 91%;
+  --attenue: 215 28% 14%;
+  --attenue-texte: 218 11% 65%;
+  --accent: 188 86% 53%;
+  --accent-texte: 213 29% 6%;
+  --primaire: 188 86% 53%;
+  --primaire-texte: 213 29% 6%;
+  --danger: 0 91% 71%;
+  --danger-texte: 213 29% 6%;
+  --succes: 158 64% 52%;
+  --alerte: 43 96% 56%;
+  --info: 255 92% 76%;
+  --or: 43 96% 56%;
+  --bordure: 215 28% 17%;
+  --ligne: 215 28% 13%;
+  --champ: 215 28% 22%;
+  --anneau: 188 86% 53%;
+  --barre: 213 29% 5%;
+  --barre-texte: 220 13% 91%;
+  --barre-attenue: 218 11% 58%;
+  --barre-actif: 215 28% 14%;
+  --at-titre: 213 29% 5%;
+  --at-activite: 213 29% 5%;
+  --at-lateral: 213 29% 5%;
+  --at-editeur: 212 31% 10%;
+  --at-panneau: 213 29% 7%;
+  --at-etat: 213 29% 5%;
+  --at-onglet-actif: 212 31% 10%;
+  --at-onglet-inactif: 213 29% 7%;
+  --at-liste-survol: 215 28% 14%;
+  --at-liste-selection: 188 60% 18%;
+  --at-liste-selection-texte: 188 86% 85%;
+  --at-badge: 188 86% 53%;
+  --at-badge-texte: 213 29% 6%;
+  color-scheme: light;
+}
+
+:root.sombre[data-palette="terminal"],
+.atelier.sombre[data-palette="terminal"] {
+  --fond: 213 29% 6%;
+  --texte: 220 13% 91%;
+  --surface: 212 31% 10%;
+  --surface-texte: 220 13% 91%;
+  --attenue: 215 28% 14%;
+  --attenue-texte: 218 11% 65%;
+  --accent: 188 86% 53%;
+  --accent-texte: 213 29% 6%;
+  --primaire: 188 86% 53%;
+  --primaire-texte: 213 29% 6%;
+  --danger: 0 91% 71%;
+  --danger-texte: 213 29% 6%;
+  --succes: 158 64% 52%;
+  --alerte: 43 96% 56%;
+  --info: 255 92% 76%;
+  --or: 43 96% 56%;
+  --bordure: 215 28% 17%;
+  --ligne: 215 28% 13%;
+  --champ: 215 28% 22%;
+  --anneau: 188 86% 53%;
+  --barre: 213 29% 5%;
+  --barre-texte: 220 13% 91%;
+  --barre-attenue: 218 11% 58%;
+  --barre-actif: 215 28% 14%;
+  --at-titre: 213 29% 5%;
+  --at-activite: 213 29% 5%;
+  --at-lateral: 213 29% 5%;
+  --at-editeur: 212 31% 10%;
+  --at-panneau: 213 29% 7%;
+  --at-etat: 213 29% 5%;
+  --at-onglet-actif: 212 31% 10%;
+  --at-onglet-inactif: 213 29% 7%;
+  --at-liste-survol: 215 28% 14%;
+  --at-liste-selection: 188 60% 18%;
+  --at-liste-selection-texte: 188 86% 85%;
+  --at-badge: 188 86% 53%;
+  --at-badge-texte: 213 29% 6%;
+  color-scheme: dark;
+}
+
+/* LA SIGNATURE DE LA CONSOLE : des chiffres a chasse fixe, partout, et des
+   lignes serrees. C'est ce qui permet de comparer une colonne d'un coup d'oeil,
+   et c'est la raison d'etre de cette famille — pas sa couleur. */
+:root[data-palette="terminal"] table,
+.atelier[data-palette="terminal"] table {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.3;
+}
+:root[data-palette="terminal"] .grille > tbody > tr:nth-child(even),
+.atelier[data-palette="terminal"] .grille > tbody > tr:nth-child(even) {
+  background-color: hsl(var(--attenue) / 0.55);
+}
+
+:root[data-palette="nordique"],
+.atelier[data-palette="nordique"] {
+  --fond: 36 26% 96%;
+  --texte: 27 12% 15%;
+  --surface: 0 0% 100%;
+  --surface-texte: 27 12% 15%;
+  --attenue: 36 26% 93%;
+  --attenue-texte: 25 5% 45%;
+  --accent: 27 12% 15%;
+  --accent-texte: 36 26% 96%;
+  --primaire: 26 90% 37%;
+  --primaire-texte: 0 0% 100%;
+  --danger: 0 74% 42%;
+  --danger-texte: 0 0% 100%;
+  --succes: 85 85% 35%;
+  --alerte: 32 95% 44%;
+  --info: 193 82% 31%;
+  --or: 32 95% 50%;
+  --bordure: 35 21% 89%;
+  --ligne: 35 21% 93%;
+  --champ: 35 21% 84%;
+  --anneau: 26 90% 37%;
+  --barre: 36 26% 94%;
+  --barre-texte: 27 12% 15%;
+  --barre-attenue: 25 5% 45%;
+  --barre-actif: 35 21% 88%;
+  --at-titre: 36 26% 94%;
+  --at-activite: 36 26% 94%;
+  --at-lateral: 36 26% 94%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 36 26% 96%;
+  --at-etat: 36 26% 94%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 36 26% 96%;
+  --at-liste-survol: 36 26% 93%;
+  --at-liste-selection: 26 60% 90%;
+  --at-liste-selection-texte: 27 12% 15%;
+  --at-badge: 26 90% 37%;
+  --at-badge-texte: 0 0% 100%;
+  /* Arrondis genereux : la signature de la famille. */
+  --radius: 0.875rem;
+  color-scheme: light;
+}
+
+:root.sombre[data-palette="nordique"],
+.atelier.sombre[data-palette="nordique"] {
+  --fond: 27 14% 10%;
+  --texte: 36 26% 92%;
+  --surface: 27 13% 14%;
+  --surface-texte: 36 26% 92%;
+  --attenue: 27 12% 19%;
+  --attenue-texte: 25 8% 62%;
+  --accent: 36 26% 92%;
+  --accent-texte: 27 14% 10%;
+  --primaire: 26 85% 58%;
+  --primaire-texte: 27 14% 10%;
+  --danger: 0 74% 62%;
+  --danger-texte: 27 14% 10%;
+  --succes: 85 60% 52%;
+  --alerte: 32 90% 58%;
+  --info: 193 70% 52%;
+  --or: 32 90% 62%;
+  --bordure: 27 12% 23%;
+  --ligne: 27 12% 18%;
+  --champ: 27 12% 28%;
+  --anneau: 26 85% 58%;
+  --barre: 27 14% 9%;
+  --barre-texte: 36 26% 92%;
+  --barre-attenue: 25 8% 58%;
+  --barre-actif: 27 12% 19%;
+  --at-titre: 27 14% 9%;
+  --at-activite: 27 14% 9%;
+  --at-lateral: 27 14% 9%;
+  --at-editeur: 27 13% 14%;
+  --at-panneau: 27 14% 11%;
+  --at-etat: 27 14% 9%;
+  --at-onglet-actif: 27 13% 14%;
+  --at-onglet-inactif: 27 14% 11%;
+  --at-liste-survol: 27 12% 19%;
+  --at-liste-selection: 26 50% 24%;
+  --at-liste-selection-texte: 36 26% 94%;
+  --at-badge: 26 85% 58%;
+  --at-badge-texte: 27 14% 10%;
+  --radius: 0.875rem;
+  color-scheme: dark;
+}
+
+:root[data-palette="verre"],
+.atelier[data-palette="verre"] {
+  --fond: 222 47% 11%;
+  --texte: 210 40% 98%;
+  --surface: 217 33% 17%;
+  --surface-texte: 210 40% 98%;
+  --attenue: 217 33% 21%;
+  --attenue-texte: 215 20% 65%;
+  --accent: 198 93% 60%;
+  --accent-texte: 222 47% 11%;
+  --primaire: 198 93% 60%;
+  --primaire-texte: 222 47% 11%;
+  --danger: 0 91% 71%;
+  --danger-texte: 222 47% 11%;
+  --succes: 142 69% 58%;
+  --alerte: 48 96% 53%;
+  --info: 198 93% 60%;
+  --or: 48 96% 60%;
+  --bordure: 215 25% 27%;
+  --ligne: 215 25% 22%;
+  --champ: 215 25% 32%;
+  --anneau: 198 93% 60%;
+  --barre: 222 47% 9%;
+  --barre-texte: 210 40% 98%;
+  --barre-attenue: 215 20% 65%;
+  --barre-actif: 217 33% 21%;
+  --at-titre: 222 47% 9%;
+  --at-activite: 222 47% 9%;
+  --at-lateral: 222 47% 9%;
+  --at-editeur: 217 33% 17%;
+  --at-panneau: 222 47% 12%;
+  --at-etat: 222 47% 9%;
+  --at-onglet-actif: 217 33% 17%;
+  --at-onglet-inactif: 222 47% 12%;
+  --at-liste-survol: 217 33% 21%;
+  --at-liste-selection: 198 60% 25%;
+  --at-liste-selection-texte: 210 40% 98%;
+  --at-badge: 198 93% 60%;
+  --at-badge-texte: 222 47% 11%;
+  color-scheme: light;
+}
+
+:root.sombre[data-palette="verre"],
+.atelier.sombre[data-palette="verre"] {
+  --fond: 222 47% 11%;
+  --texte: 210 40% 98%;
+  --surface: 217 33% 17%;
+  --surface-texte: 210 40% 98%;
+  --attenue: 217 33% 21%;
+  --attenue-texte: 215 20% 65%;
+  --accent: 198 93% 60%;
+  --accent-texte: 222 47% 11%;
+  --primaire: 198 93% 60%;
+  --primaire-texte: 222 47% 11%;
+  --danger: 0 91% 71%;
+  --danger-texte: 222 47% 11%;
+  --succes: 142 69% 58%;
+  --alerte: 48 96% 53%;
+  --info: 198 93% 60%;
+  --or: 48 96% 60%;
+  --bordure: 215 25% 27%;
+  --ligne: 215 25% 22%;
+  --champ: 215 25% 32%;
+  --anneau: 198 93% 60%;
+  --barre: 222 47% 9%;
+  --barre-texte: 210 40% 98%;
+  --barre-attenue: 215 20% 65%;
+  --barre-actif: 217 33% 21%;
+  --at-titre: 222 47% 9%;
+  --at-activite: 222 47% 9%;
+  --at-lateral: 222 47% 9%;
+  --at-editeur: 217 33% 17%;
+  --at-panneau: 222 47% 12%;
+  --at-etat: 222 47% 9%;
+  --at-onglet-actif: 217 33% 17%;
+  --at-onglet-inactif: 222 47% 12%;
+  --at-liste-survol: 217 33% 21%;
+  --at-liste-selection: 198 60% 25%;
+  --at-liste-selection-texte: 210 40% 98%;
+  --at-badge: 198 93% 60%;
+  --at-badge-texte: 222 47% 11%;
+  color-scheme: dark;
+}
+
+/* LE VERRE LA OU IL SE VOIT, ET NULLE PART AILLEURS.
+   `backdrop-filter` coute cher dans la WebView de Tauri : pose sur chaque
+   cellule d'un tableau de mille lignes, il fait ramer l'ecran. Il est donc
+   reserve aux CARTES — ce qui flotte au-dessus du fond — et le degrade reste
+   fixe pour qu'il ne se recalcule pas au defilement. */
+:root[data-palette="verre"] body,
+.atelier[data-palette="verre"] {
+  background-image: linear-gradient(135deg, hsl(217 33% 17%), hsl(222 47% 11%));
+  background-attachment: fixed;
+}
+:root[data-palette="verre"] .carte,
+.atelier[data-palette="verre"] .carte {
+  background-color: hsl(var(--surface) / 0.55);
+  backdrop-filter: blur(16px);
+  border-color: hsl(0 0% 100% / 0.10);
+}
+
+:root[data-palette="atlas"],
+.atelier[data-palette="atlas"] {
+  --fond: 216 33% 97%;
+  --texte: 220 26% 14%;
+  --surface: 0 0% 100%;
+  --surface-texte: 220 26% 14%;
+  --attenue: 216 38% 95%;
+  --attenue-texte: 218 17% 35%;
+  --accent: 220 26% 14%;
+  --accent-texte: 0 0% 100%;
+  --primaire: 226 71% 40%;
+  --primaire-texte: 0 0% 100%;
+  --danger: 0 72% 51%;
+  --danger-texte: 0 0% 100%;
+  --succes: 161 94% 30%;
+  --alerte: 32 95% 44%;
+  --info: 192 91% 36%;
+  --or: 262 83% 58%;
+  --bordure: 216 28% 90%;
+  --ligne: 216 28% 94%;
+  --champ: 216 28% 84%;
+  --anneau: 226 71% 40%;
+  --barre: 220 26% 14%;
+  --barre-texte: 216 33% 95%;
+  --barre-attenue: 218 17% 62%;
+  --barre-actif: 220 26% 20%;
+  --at-titre: 220 26% 14%;
+  --at-activite: 220 26% 14%;
+  --at-lateral: 220 26% 14%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 216 33% 97%;
+  --at-etat: 220 26% 14%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 216 33% 97%;
+  --at-liste-survol: 216 38% 95%;
+  --at-liste-selection: 226 60% 92%;
+  --at-liste-selection-texte: 220 26% 14%;
+  --at-badge: 226 71% 40%;
+  --at-badge-texte: 0 0% 100%;
+  /* Grille stricte, angles nets : la hierarchie vient de la
+     taille et du poids, jamais de l'arrondi. */
+  --radius: 0.25rem;
+  color-scheme: light;
+}
+
+:root.sombre[data-palette="atlas"],
+.atelier.sombre[data-palette="atlas"] {
+  --fond: 220 26% 9%;
+  --texte: 216 33% 94%;
+  --surface: 220 24% 13%;
+  --surface-texte: 216 33% 94%;
+  --attenue: 219 22% 18%;
+  --attenue-texte: 218 14% 62%;
+  --accent: 216 33% 94%;
+  --accent-texte: 220 26% 9%;
+  --primaire: 226 80% 66%;
+  --primaire-texte: 220 26% 9%;
+  --danger: 0 72% 62%;
+  --danger-texte: 220 26% 9%;
+  --succes: 161 70% 45%;
+  --alerte: 32 90% 58%;
+  --info: 192 80% 52%;
+  --or: 262 83% 72%;
+  --bordure: 219 20% 23%;
+  --ligne: 219 22% 17%;
+  --champ: 219 20% 28%;
+  --anneau: 226 80% 66%;
+  --barre: 220 26% 7%;
+  --barre-texte: 216 33% 94%;
+  --barre-attenue: 218 14% 58%;
+  --barre-actif: 219 22% 18%;
+  --at-titre: 220 26% 7%;
+  --at-activite: 220 26% 7%;
+  --at-lateral: 220 26% 7%;
+  --at-editeur: 220 24% 13%;
+  --at-panneau: 220 26% 10%;
+  --at-etat: 220 26% 7%;
+  --at-onglet-actif: 220 24% 13%;
+  --at-onglet-inactif: 220 26% 10%;
+  --at-liste-survol: 219 22% 18%;
+  --at-liste-selection: 226 50% 26%;
+  --at-liste-selection-texte: 216 33% 96%;
+  --at-badge: 226 80% 66%;
+  --at-badge-texte: 220 26% 9%;
+  --radius: 0.25rem;
+  color-scheme: dark;
+}

@@ -100,6 +100,7 @@ dependencies = [
  "matchit",
  "memchr",
  "mime",
+ "multer",
  "percent-encoding",
  "pin-project-lite",
  "serde_core",
@@ -601,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "gestionfil"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -609,6 +610,8 @@ dependencies = [
  "calamine",
  "chrono",
  "dotenvy",
+ "hex",
+ "hmac",
  "http-body-util",
  "jsonwebtoken",
  "password-hash",
@@ -617,6 +620,8 @@ dependencies = [
  "rpassword",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
  "sqlx",
  "thiserror",
  "tokio",
@@ -1141,6 +1146,23 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "multer"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http",
+ "httparse",
+ "memchr",
+ "mime",
+ "spin",
+ "version_check",
 ]
 
 [[package]]

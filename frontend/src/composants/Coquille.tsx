@@ -18,21 +18,26 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ArrowLeftRight, BarChart3, Bell, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
+  ArrowLeftRight, BarChart3, Bell, BookOpen, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useEntreprise } from '../lib/entreprise'
-import { cn, estBureau } from '../lib/utils'
+import { cn, sousChemin } from '../lib/utils'
 import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
+import { BoutonRafraichir, useEcranCalcule } from './BoutonRafraichir'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
+import { AideEcran } from './AideEcran'
+import { BandeauMiseAJour } from './BandeauMiseAJour'
+import { MiseAJourAuto } from './MiseAJourAuto'
+import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
+import { DoubleAuthentification } from './DoubleAuthentification'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
 import {
-  Aide,
   Menu,
   MenuContenu,
   MenuDeclencheur,
@@ -159,6 +164,14 @@ export const NAVIGATION: EntreeNav[] = [
     section: 'GENERAL',
     roles: ['DIRECTION'],
   },
+  {
+    vers: '/guide-utilisateur',
+    libelle: 'Guide utilisateur',
+    module: '',
+    Icone: BookOpen,
+    section: 'GENERAL',
+    resume: 'Documentation complète pour utiliser l\'ERP',
+  },
 
 
   /* --- 2. Catalogue ------------------------------------------------------ */
@@ -276,6 +289,7 @@ export function Coquille() {
   const [tiroir, setTiroir] = useState(false)
   const [apparence, setApparence] = useState(false)
   const [motDePasse, setMotDePasse] = useState(false)
+  const [doubleAuth, setDoubleAuth] = useState(false)
   const reglages = useApparence()
   const entreprise = useEntreprise()
 
@@ -284,7 +298,7 @@ export function Coquille() {
   const courante = accessibles.find(
     (e) =>
       e.vers === emplacement.pathname ||
-      (e.vers !== '/' && emplacement.pathname.startsWith(e.vers)),
+      (e.vers !== '/' && sousChemin(emplacement.pathname, e.vers)),
   )
 
   useEffect(() => setTiroir(false), [emplacement.pathname])
@@ -393,7 +407,10 @@ export function Coquille() {
       <header
         className={cn(
           'sans-impression z-30 flex shrink-0 items-center gap-2 border-b border-bordure bg-surface px-3',
-          estBureau() ? 'zone-glisser h-11' : 'h-12',
+          // LA FENETRE A RETROUVE SA BORDURE : l'entete n'a plus a servir de
+          // poignee de deplacement, et rien ne justifie qu'elle soit plus
+          // basse au bureau qu'au navigateur.
+          'h-12',
         )}
       >
         {/* Marque — UNIQUEMENT quand rien d'autre ne la porte.
@@ -563,6 +580,10 @@ export function Coquille() {
               </MenuElement>
             ))}
             <MenuSeparateur />
+            <MenuElement onSelect={() => setDoubleAuth(true)}>
+              <ShieldCheck />
+              Double authentification
+            </MenuElement>
             <MenuElement onSelect={() => setMotDePasse(true)}>
               <KeyRound />
               Changer mon mot de passe
@@ -626,6 +647,18 @@ export function Coquille() {
           className="p-3 lg:p-4"
           style={{ paddingBottom: 'calc(4rem + var(--marge-sure-bas))' }}
         >
+          {/* L'AVIS DE MISE A JOUR VIT ICI, et non plus dans l'atelier.
+              Il etait monte dans l'enveloppe de bureau seule ; celle-ci ayant
+              disparu, l'avis ne paraissait plus nulle part — ce qui explique
+              qu'aucune mise a jour n'ait jamais ete proposee. Il se tait de
+              lui-meme hors de l'application installee, ou la question ne se
+              pose pas : le navigateur sert toujours la version du serveur. */}
+          {/* D'ABORD CELLE QUI SE FAIT TOUTE SEULE. Le bandeau de rappel ne
+              parait qu'en second, pour les postes dont la version installee
+              est trop ancienne pour porter le greffon de mise a jour — ceux-la
+              doivent encore passer par l'installateur, une derniere fois. */}
+          <MiseAJourAuto />
+          <BandeauMiseAJour />
           <Outlet key={emplacement.pathname} />
         </div>
       </main>
@@ -673,8 +706,12 @@ export function Coquille() {
 
       {/* Le tiroir d'apparence : hors de la colonne de contenu, il se pose
           par-dessus tout et n'entre dans aucun flux. */}
+      {/* Le robot de connexion : il s'ouvre seul a la premiere page de la
+          session, et se rappelle par son bouton. */}
+      <RobotConnexion />
       <PanneauApparence ouvert={apparence} surFermeture={() => setApparence(false)} />
       <ChangerMotDePasse ouvert={motDePasse} surFermeture={() => setMotDePasse(false)} />
+      <DoubleAuthentification ouvert={doubleAuth} surFermeture={() => setDoubleAuth(false)} />
 
       {/* --- Barre du bas : mobile ---------------------------------------- */}
       {principales.length > 1 && (
@@ -714,6 +751,7 @@ export function EnTetePage({
   description?: React.ReactNode
   actions?: React.ReactNode
 }) {
+  const calculable = useEcranCalcule()
   return (
     /* L'EN-TETE SUIT LE DEFILEMENT, PARCE QUE C'EST LUI QUI PORTE « VALIDER »
        ET « RETOUR ». Sur une table de plusieurs centaines de lignes, ces deux
@@ -737,9 +775,10 @@ export function EnTetePage({
     >
       <div className="flex min-w-0 items-center gap-1.5">
         <h1 className="text-[15px] font-semibold leading-tight tracking-tight">{titre}</h1>
-        {/* La description tient dans une aide plutot que sous le titre : trois
-            lignes de prose en tete d'ecran repoussent le contenu utile. */}
-        {description && <Aide>{description}</Aide>}
+        {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
+            par la route courante : aucun ecran n'a a la declarer, donc aucun ne
+            peut l'oublier. */}
+        <AideEcran description={description} />
       </div>
       {/* LES ACTIONS PRENNENT LEUR PROPRE LIGNE SUR TELEPHONE.
 
@@ -748,8 +787,16 @@ export function EnTetePage({
           les boutons, eux, ne se retrecissent pas. Resultat, ils sortaient de
           l'ecran. `w-full` en dessous de `sm` tranche : les actions descendent,
           alignees a droite, et rien ne deborde. */}
-      {actions && (
-        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">{actions}</div>
+      {/* LE RAFRAICHISSEMENT SE PLACE SEUL, COMME L'AIDE D'ECRAN. Il connait la
+          liste des ecrans calcules et ne s'affiche que la : aucun ecran n'a a
+          le declarer, donc aucun ne peut l'oublier. Il vient EN DERNIER, apres
+          les actions propres a la page — « Valider » et « Enregistrer »
+          gardent la place de droite, qui est celle qu'on cherche. */}
+      {(actions || calculable) && (
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+          {actions}
+          <BoutonRafraichir />
+        </div>
       )}
     </div>
   )

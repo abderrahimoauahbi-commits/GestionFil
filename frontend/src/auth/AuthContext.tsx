@@ -23,6 +23,12 @@ export interface Moi {
   plafond_validation_bc_mad: number | null
   /** Secondes d'inactivite avant verrouillage. Regle sur le serveur. */
   verrou_inactivite_secondes: number
+<<<<<<< HEAD
+  /** Le compte exige-t-il un code a la connexion ? Le secret, lui, ne sort
+      jamais du serveur. */
+  totp_actif: boolean
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   permissions: { module: string; action: ActionModule }[]
   droits_champ: Record<string, Record<string, Niveau>>
 }
@@ -30,8 +36,10 @@ export interface Moi {
 interface Contexte {
   moi: Moi | null
   chargement: boolean
-  connecter: (login: string, motDePasse: string) => Promise<void>
+  connecter: (login: string, motDePasse: string, code?: string) => Promise<'ok' | 'code'>
   deconnecter: () => void
+  /** Relit le profil : apres avoir pose ou retire le second facteur. */
+  rafraichir: () => Promise<void>
   /** L'utilisateur a-t-il cette action sur ce module ? */
   peut: (module: string, action: ActionModule) => boolean
   /** Niveau de visibilite d'un champ. */
@@ -68,12 +76,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void charger()
   }, [charger])
 
+  /**
+   * LA CONNEXION PEUT DEMANDER UN SECOND FACTEUR.
+   *
+   * Le serveur ne l'annonce qu'APRES avoir verifie le mot de passe — le dire
+   * avant apprendrait a un inconnu quels comptes en portent un. Le premier
+   * appel rend donc soit un jeton, soit `exige_code` ; l'ecran affiche alors le
+   * champ du code et rappelle la meme fonction avec lui.
+   *
+   * Elle rend `'code'` dans ce cas, plutot que de lever une erreur : ce n'est
+   * pas un echec, c'est une etape.
+   */
   const connecter = useCallback(
+<<<<<<< HEAD
+    async (login: string, motDePasse: string, code?: string): Promise<'ok' | 'code'> => {
+      const r = await api.post<{ jeton?: string; expire_le?: number; exige_code?: boolean }>(
+        '/api/auth/connexion',
+        { login, mot_de_passe: motDePasse, code: code?.trim() || null },
+      )
+      if (r.exige_code) return 'code'
+      if (!r.jeton) throw new Error('Réponse de connexion incomplète.')
+=======
     async (login: string, motDePasse: string) => {
       const r = await api.post<{ jeton: string; expire_le: number }>(
         '/api/auth/connexion',
         { login, mot_de_passe: motDePasse },
       )
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       jeton.ecrire(r.jeton)
       /* L'ECHEANCE ABSOLUE DE LA SESSION, gardee a cote du jeton.
          Le verrou d'inactivite se deverrouille sans prolonger la session : il
@@ -81,9 +110,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
          le sait aussi — le jeton porte la meme date et il la fait respecter —
          mais l'interface s'en sert pour fermer proprement plutot que d'attendre
          un 401 au milieu d'une saisie. */
+<<<<<<< HEAD
+      echeance.ecrire(r.expire_le ?? 0)
+=======
       echeance.ecrire(r.expire_le)
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       setChargement(true)
       await charger()
+      return 'ok'
     },
     [charger],
   )
@@ -106,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       chargement,
       connecter,
       deconnecter,
+      rafraichir: charger,
       peut,
       niveau,
       visible: (m, c) => niveau(m, c) !== 'MASQUE',
@@ -114,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // remplacent pas.
       modifiable: (m, c) => niveau(m, c) === 'ECRITURE' && peut(m, 'ECRIRE'),
     }
-  }, [moi, chargement, connecter, deconnecter])
+  }, [moi, chargement, connecter, deconnecter, charger])
 
   return <AuthContext.Provider value={valeur}>{children}</AuthContext.Provider>
 }

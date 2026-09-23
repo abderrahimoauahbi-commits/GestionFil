@@ -23,6 +23,25 @@ After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
 
+# LA LIMITE DE REDEMARRAGE SE DECLARE ICI, PAS DANS [Service]. Elle y etait, et
+# systemd la refusait a chaque lecture de l'unite : « Unknown key
+# 'StartLimitIntervalSec' in section [Service], ignoring. » Le compteur
+# appartient a l'unite, pas au processus : c'est l'unite qu'on empeche de
+# renaitre.
+#
+# CE QUI S'APPLIQUAIT A LA PLACE, ET POURQUOI C'ETAIT PIRE QUE RIEN. La cle
+# ignoree, systemd retombait sur son defaut : cinq demarrages en DIX secondes.
+# Avec RestartSec=5, deux tentatives tiennent dans dix secondes — jamais cinq.
+# La limite etait donc inatteignable : un ERP qui ne peut pas demarrer (base
+# injoignable, .env casse) repartait toutes les cinq secondes, indefiniment,
+# sans jamais s'arreter sur son echec. La panne se cachait au lieu de se voir.
+#
+# Sur une minute, les memes cinq tentatives tiennent en vingt-cinq secondes :
+# la limite se declenche, le service reste arrete, et `systemctl status` dit
+# pourquoi.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=gestionfil
@@ -42,12 +61,8 @@ ExecStart=/opt/gestionfil/gestionfil
 # coute plus cher qu'un redemarrage de trop.
 Restart=always
 RestartSec=5
-
-# Sans limite, une boucle de redemarrage masque la panne au lieu de la
-# signaler : cinq tentatives en une minute, puis le service reste arrete et
-# `systemctl status` dit pourquoi.
-StartLimitIntervalSec=60
-StartLimitBurst=5
+# La limite qui va avec (cinq tentatives en une minute) est declaree dans
+# [Unit] : systemd n'en veut pas ici.
 
 # --- Cloisonnement -----------------------------------------------------------
 # Le service ne fait que trois choses : ecouter un port, parler a PostgreSQL sur

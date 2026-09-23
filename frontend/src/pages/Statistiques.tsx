@@ -13,11 +13,13 @@
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   ArrowDownRight,
   ArrowUpRight,
   Boxes,
   Factory,
+  Layers,
   Minus,
   TrendingUp,
   Truck,
@@ -36,9 +38,10 @@ import {
   Chargement,
 } from '../composants/ui/base'
 import { Infobulle } from '../composants/ui/surcouches'
+import { ColonnesTemps } from '../composants/graphiques/Graphiques'
 import { cn, fmt } from '../lib/utils'
 
-type Onglet = 'mouvements' | 'prix' | 'fournisseurs' | 'qualites'
+type Onglet = 'mouvements' | 'familles' | 'prix' | 'fournisseurs' | 'qualites'
 
 interface Ligne {
   [k: string]: unknown
@@ -57,6 +60,15 @@ const ONGLETS: {
     resume: 'Ce qui bouge, et ce qui dort',
     module: 'MOUVEMENTS',
     Icone: Boxes,
+  },
+  {
+    // La famille est l'axe des classeurs : une feuille par famille, les
+    // couleurs en colonnes. C'est ainsi que l'atelier compte.
+    cle: 'familles',
+    nom: 'Familles',
+    resume: 'Ce que chaque famille pese, et de quelle couleur',
+    module: 'MOUVEMENTS',
+    Icone: Layers,
   },
   {
     cle: 'prix',
@@ -135,6 +147,7 @@ export function Statistiques() {
         {!q.isLoading && q.data && (
           <>
             {onglet === 'mouvements' && <VoletMouvements d={q.data} />}
+            {onglet === 'familles' && <VoletFamilles d={q.data} />}
             {onglet === 'prix' && <VoletPrix d={q.data} />}
             {onglet === 'fournisseurs' && <VoletFournisseurs d={q.data} />}
             {onglet === 'qualites' && <VoletQualites d={q.data} />}
@@ -247,6 +260,35 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
   const maxMois = Math.max(...mois.map((m) => nb(m, 'quantite_kg') ?? 0), 1)
   const voitValeur = a(mois, 'valeur_mad')
 
+  /* LE FLUX PAR MOIS, AGREGE POUR LE GRAPHIQUE.
+     Le tableau detaille par mois ET PAR TYPE : un meme mois y occupe autant de
+     lignes qu'il a connu de sortes de mouvements. Une frise temporelle demande
+     un point par mois — on additionne donc les entrees, et l'on marque en
+     orange les mois ou les sorties l'emportent, ce qui est le seul evenement
+     qui merite d'etre vu d'un coup d'oeil. */
+  const moisAgreges = useMemo(() => {
+    const par = new Map<string, { entrees: number; sorties: number }>()
+    for (const m of mois) {
+      const cle = txt(m, 'annee_mois')
+      if (!cle) continue
+      const c = par.get(cle) ?? { entrees: 0, sorties: 0 }
+      const q = nb(m, 'quantite_kg') ?? 0
+      if (nb(m, 'signe') === 1) c.entrees += q
+      else c.sorties += q
+      par.set(cle, c)
+    }
+    return [...par.entries()]
+      .sort(([a1], [b1]) => a1.localeCompare(b1))
+      .map(([cle, c]) => ({
+        cle,
+        // « 2026-09 » se lit mal ; « 09/26 » se lit d'un coup, et tient sous
+        // une colonne etroite.
+        libelle: cle.length === 7 ? `${cle.slice(5)}/${cle.slice(2, 4)}` : cle,
+        valeur: Math.round(c.entrees),
+        etat: c.sorties > c.entrees ? ('alerte' as const) : undefined,
+      }))
+  }, [mois])
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
@@ -266,9 +308,37 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         />
       </div>
 
+      {/* ---- LE FLUX SE VOIT AVANT DE SE LIRE ------------------------------
+          Il n'existait qu'en tableau : une ligne par mois et par type, triee
+          par rien de particulier. Or la premiere question qu'on pose a des
+          mouvements est « la courbe monte-t-elle ou descend-elle ? », et une
+          colonne de nombres ne repond pas a celle-la — il faut les comparer
+          deux a deux, de tete, dans l'ordre ou ils sont ecrits.
+
+          Le graphique donne la FORME, le tableau garde le DETAIL : le meme
+          composant porte les deux, et le bouton en haut a droite bascule de
+          l'un a l'autre. Rien n'est perdu, l'ordre de lecture change. */}
+      {/* DEUX MOIS AU MOINS, sinon rien. Une frise a une seule colonne remplit
+          la largeur d'un aplat de couleur et n'apprend strictement rien : elle
+          ne montre ni tendance, ni saison, ni rupture. Le tableau ci-dessous
+          dit deja le chiffre. Le graphique apparaitra de lui-meme au deuxieme
+          mois de mouvements. */}
+      {moisAgreges.length > 1 && (
+        <ColonnesTemps
+          titre="Ce qui est entré, mois par mois"
+          sousTitre={
+            moisAgreges.some((m) => m.etat === 'alerte')
+              ? 'en vert les entrées, en orange les sorties'
+              : 'quantités entrées en magasin'
+          }
+          unite="kg"
+          donnees={moisAgreges}
+        />
+      )}
+
       <Carte repliable="statistiques.1">
         <CarteEntete>
-          <CarteTitre>Flux par mois et par type</CarteTitre>
+          <CarteTitre>Flux par mois et par type — le detail</CarteTitre>
         </CarteEntete>
         <CarteCorps className="p-0">
           {mois.length === 0 ? (
@@ -325,9 +395,20 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
         </CarteCorps>
       </Carte>
 
+      {/* ---- LE DETAIL PAR REFERENCE, EN TETE SEULEMENT --------------------
+          Soixante lignes s'affichaient d'un coup : mille huit cents pixels de
+          tableau sous un ecran qui n'en fait que neuf cents. Or personne ne lit
+          la quarante-deuxieme ligne d'un tableau de statistiques — on regarde
+          les premieres, puis on va chercher ailleurs si l'on veut tout. Douze
+          suffisent a montrer la forme ; le reste est a l'etat des stocks, qui
+          existe pour cela et sait filtrer. */}
       <Carte repliable="statistiques.2">
         <CarteEntete>
+<<<<<<< HEAD
+          <CarteTitre>Les references qui ont le plus bouge</CarteTitre>
+=======
           <CarteTitre>Par référence</CarteTitre>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           <span className="text-[11px] text-attenue-texte">
             la rotation rapporte les sorties au stock actuel — une approximation, faute
             d'historique de stock
@@ -349,7 +430,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
                 </tr>
               </thead>
               <tbody>
-                {refs.slice(0, 60).map((r, i) => {
+                {refs.slice(0, 12).map((r, i) => {
                   const jours = nb(r, 'jours_sans_mouvement')
                   return (
                     <tr key={i} className="border-b border-bordure/60">
@@ -397,6 +478,15 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
                 })}
               </tbody>
             </table>
+            {refs.length > 12 && (
+              <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
+                Les 12 références qui ont le plus bougé, sur {refs.length} suivies.{' '}
+                <Link to="/etat-stock" className="text-primaire hover:underline">
+                  L’état des stocks
+                </Link>{' '}
+                porte la liste complète, avec ses filtres et son export.
+              </p>
+            )}
           </div>
         </CarteCorps>
       </Carte>
@@ -407,6 +497,328 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
 /* ========================================================================== */
 /* Prix d'achat                                                                */
 /* ========================================================================== */
+
+/* ========================================================================== */
+/* Familles — la forme des classeurs                                           */
+/* ========================================================================== */
+
+/**
+ * Les classeurs tiennent une feuille par famille, les couleurs en colonnes et
+ * les arrivées en lignes. C'est l'axe sur lequel l'atelier compte : on ne
+ * demande pas « combien de PP-1500 Dtex-Bleu 6666-Hs », on demande « combien de
+ * 1500 dtex, et de quelle couleur ».
+ *
+ * LE CROISEMENT EST LA VUE PRINCIPALE, pas la liste. Une matrice se lit d'un
+ * coup d'œil ; cent lignes ne se lisent pas.
+ *
+ * CE QUI N'EST PAS CLASSÉ EST MONTRÉ QUAND MÊME, sous « Sans famille ».
+ * L'écarter donnerait un total faux et ferait croire le catalogue plus propre
+ * qu'il n'est.
+ */
+function VoletFamilles({ d }: { d: Record<string, Ligne[]> }) {
+  const familles = d.familles ?? []
+  const croisement = d.croisement ?? []
+  const categories = d.categories ?? []
+
+  // Les années présentes dans les données, la plus récente d'abord. On ne
+  // suppose pas l'année en cours : un classeur se relit des années après.
+  const annees = useMemo(() => {
+    const set = new Set<string>()
+    for (const l of croisement) {
+      const an = txt(l, 'annee')
+      if (an) set.add(an)
+    }
+    return [...set].sort().reverse()
+  }, [croisement])
+
+  const [annee, setAnnee] = useState<string | null>(null)
+  const anneeVue = annee ?? annees[0] ?? null
+
+  const duMillesime = useMemo(
+    () => croisement.filter((l) => !anneeVue || txt(l, 'annee') === anneeVue),
+    [croisement, anneeVue],
+  )
+
+  // La matrice : une ligne par famille, une colonne par couleur rencontrée.
+  const matrice = useMemo(() => {
+    const couleurs = new Map<string, string>()
+    const lignes = new Map<string, { libelle: string; cases: Map<string, number>; total: number }>()
+    for (const l of duMillesime) {
+      const cc = txt(l, 'code_couleur') || '—'
+      couleurs.set(cc, txt(l, 'couleur_libelle') || cc)
+      const cf = txt(l, 'code_famille') || '—'
+      const ligne = lignes.get(cf) ?? {
+        libelle: txt(l, 'famille_libelle') || cf,
+        cases: new Map<string, number>(),
+        total: 0,
+      }
+      const kg = nb(l, 'entrees_kg') ?? 0
+      ligne.cases.set(cc, (ligne.cases.get(cc) ?? 0) + kg)
+      ligne.total += kg
+      lignes.set(cf, ligne)
+    }
+    // Les couleurs les plus lourdes d'abord : la colonne qu'on regarde le plus
+    // ne doit pas être la dernière à droite.
+    const poids = new Map<string, number>()
+    for (const l of lignes.values()) {
+      for (const [cc, kg] of l.cases) poids.set(cc, (poids.get(cc) ?? 0) + kg)
+    }
+    const colonnes = [...couleurs.entries()].sort(
+      (x, y) => (poids.get(y[0]) ?? 0) - (poids.get(x[0]) ?? 0),
+    )
+    const rangs = [...lignes.entries()].sort((x, y) => y[1].total - x[1].total)
+    return { colonnes, rangs, poids }
+  }, [duMillesime])
+
+  // Le tableau des familles porte une ligne par (famille, année) : on retient
+  // celle de l'année regardée, et à défaut la ligne sans mouvement.
+  const familleDuMillesime = useMemo(() => {
+    const par = new Map<string, Ligne>()
+    for (const f of familles) {
+      const cf = txt(f, 'code_famille') ?? '—'
+      const an = txt(f, 'annee')
+      if (an === anneeVue || (!par.has(cf) && !an)) par.set(cf, f)
+      else if (!par.has(cf)) par.set(cf, f)
+    }
+    return [...par.values()].sort(
+      (x, y) => (nb(y, 'entrees_kg') ?? 0) - (nb(x, 'entrees_kg') ?? 0) ||
+                (nb(y, 'stock_kg') ?? 0) - (nb(x, 'stock_kg') ?? 0),
+    )
+  }, [familles, anneeVue])
+
+  const voitValeur = a(familles, 'valeur_dhs')
+  const totalEntrees = matrice.rangs.reduce((s, [, l]) => s + l.total, 0)
+  const totalStock = familleDuMillesime.reduce((s, f) => s + (nb(f, 'stock_kg') ?? 0), 0)
+  const nonClassees = familleDuMillesime
+    .filter((f) => txt(f, 'code_famille') === '(sans famille)')
+    .reduce((s, f) => s + (nb(f, 'nb_references') ?? 0), 0)
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+        <Chiffre
+          libelle="Familles qui portent du stock"
+          valeur={String(familleDuMillesime.filter((f) => (nb(f, 'stock_kg') ?? 0) > 0).length)}
+          detail={`sur ${familleDuMillesime.length}`}
+        />
+        <Chiffre libelle="Stock cumulé" valeur={`${fmt.compact(totalStock)} kg`} />
+        <Chiffre
+          libelle={`Entrées ${anneeVue ?? ''}`}
+          valeur={`${fmt.compact(totalEntrees)} kg`}
+          ton="succes"
+        />
+        <Chiffre
+          libelle="Références sans famille"
+          valeur={String(nonClassees)}
+          detail={nonClassees > 0 ? 'à classer dans le catalogue' : 'catalogue complet'}
+          ton={nonClassees > 0 ? 'alerte' : 'succes'}
+        />
+      </div>
+
+      {/* LA FEUILLE DU CLASSEUR : familles en lignes, couleurs en colonnes. */}
+      <Carte repliable="statistiques.fam1">
+        <CarteEntete>
+          <CarteTitre>Entrées par famille et par couleur</CarteTitre>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-attenue-texte">kilos entrés en stock</span>
+            {annees.length > 1 && (
+              <select
+                value={anneeVue ?? ''}
+                onChange={(e) => setAnnee(e.target.value)}
+                className="h-7 rounded border border-bordure bg-surface px-1.5 text-[12px]"
+                aria-label="Année"
+              >
+                {annees.map((an) => (
+                  <option key={an} value={an}>
+                    {an}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </CarteEntete>
+        <CarteCorps className="p-0">
+          {matrice.rangs.length === 0 ? (
+            <div className="px-4 py-6 text-center text-[13px] text-attenue-texte">
+              Aucune entrée enregistrée{anneeVue ? ` en ${anneeVue}` : ''}.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[42rem] text-[13px]">
+                <thead>
+                  <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                    <th className="sticky left-0 bg-surface px-3 py-2 text-left">Famille</th>
+                    {matrice.colonnes.map(([cc, libelle]) => (
+                      <th key={cc} className="px-2 py-2 text-right">
+                        <div className="whitespace-nowrap">{libelle}</div>
+                        <div className="font-normal normal-case tracking-normal text-attenue-texte">
+                          {cc}
+                        </div>
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matrice.rangs.map(([cf, ligne]) => (
+                    <tr key={cf} className="border-b border-bordure/60">
+                      <td className="sticky left-0 max-w-56 truncate bg-surface px-3 py-1.5 font-medium">
+                        {ligne.libelle}
+                      </td>
+                      {matrice.colonnes.map(([cc]) => {
+                        const kg = ligne.cases.get(cc)
+                        return (
+                          <td
+                            key={cc}
+                            className={cn(
+                              'px-2 py-1.5 text-right tabular-nums',
+                              kg ? '' : 'text-attenue-texte',
+                            )}
+                          >
+                            {kg ? fmt.nombre(kg, 0) : '—'}
+                          </td>
+                        )
+                      })}
+                      <td className="px-3 py-1.5 text-right font-semibold tabular-nums">
+                        {fmt.nombre(ligne.total, 0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-bordure text-[12px] font-semibold">
+                    <td className="sticky left-0 bg-surface px-3 py-2">Total</td>
+                    {matrice.colonnes.map(([cc]) => (
+                      <td key={cc} className="px-2 py-2 text-right tabular-nums">
+                        {fmt.nombre(matrice.poids.get(cc) ?? 0, 0)}
+                      </td>
+                    ))}
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {fmt.nombre(totalEntrees, 0)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </CarteCorps>
+      </Carte>
+
+      {/* Ce que chaque famille pèse : stock, valeur, flux, prix moyen. */}
+      <Carte repliable="statistiques.fam2">
+        <CarteEntete>
+          <CarteTitre>Ce que chaque famille pèse</CarteTitre>
+          <span className="text-[11px] text-attenue-texte">
+            le prix moyen est celui payé à l'entrée, pas un tarif
+          </span>
+        </CarteEntete>
+        <CarteCorps className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[42rem] text-[13px] lg:min-w-0">
+              <thead>
+                <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                  <th className="px-3 py-2 text-left">Famille</th>
+                  <th className="w-20 px-2 py-2 text-right">Réf.</th>
+                  <th className="w-28 px-2 py-2 text-right">Stock</th>
+                  <th className="w-36 px-3 py-2 text-left">Part du stock</th>
+                  {voitValeur && <th className="w-32 px-2 py-2 text-right">Valeur</th>}
+                  <th className="w-28 px-2 py-2 text-right">Entrées</th>
+                  <th className="w-28 px-2 py-2 text-right">Sorties</th>
+                  {voitValeur && <th className="w-28 px-2 py-2 text-right">Prix moyen</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {familleDuMillesime.slice(0, 80).map((f, i) => {
+                  const stock = nb(f, 'stock_kg') ?? 0
+                  return (
+                    <tr key={i} className="border-b border-bordure/60">
+                      <td className="max-w-64 px-3 py-1.5">
+                        <div className="truncate font-medium">{txt(f, 'famille_libelle')}</div>
+                        <div className="truncate text-[11px] text-attenue-texte">
+                          {txt(f, 'categorie_libelle')}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {fmt.nombre(nb(f, 'nb_references') ?? 0, 0)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {stock > 0 ? `${fmt.nombre(stock, 0)} kg` : '—'}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <Barre part={totalStock > 0 ? stock / totalStock : 0} />
+                      </td>
+                      {voitValeur && (
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(nb(f, 'valeur_dhs') ?? 0, 0)}
+                        </td>
+                      )}
+                      <td className="px-2 py-1.5 text-right tabular-nums text-succes">
+                        {(nb(f, 'entrees_kg') ?? 0) > 0 ? fmt.nombre(nb(f, 'entrees_kg') ?? 0, 0) : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-alerte">
+                        {(nb(f, 'sorties_kg') ?? 0) > 0 ? fmt.nombre(nb(f, 'sorties_kg') ?? 0, 0) : '—'}
+                      </td>
+                      {voitValeur && (
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {nb(f, 'prix_moyen_entree_mad') != null
+                            ? `${fmt.nombre(nb(f, 'prix_moyen_entree_mad') as number, 2)}`
+                            : '—'}
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CarteCorps>
+      </Carte>
+
+      {/* Le même décompte un cran au-dessus. */}
+      <Carte repliable="statistiques.fam3">
+        <CarteEntete>
+          <CarteTitre>Par catégorie matière</CarteTitre>
+        </CarteEntete>
+        <CarteCorps className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[30rem] text-[13px] lg:min-w-0">
+              <thead>
+                <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                  <th className="px-3 py-2 text-left">Catégorie</th>
+                  <th className="w-24 px-2 py-2 text-right">Familles</th>
+                  <th className="w-24 px-2 py-2 text-right">Réf.</th>
+                  <th className="w-28 px-2 py-2 text-right">Stock</th>
+                  {voitValeur && <th className="w-32 px-2 py-2 text-right">Valeur</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {categories.map((c, i) => (
+                  <tr key={i} className="border-b border-bordure/60">
+                    <td className="px-3 py-1.5 font-medium">{txt(c, 'categorie_libelle')}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {fmt.nombre(nb(c, 'nb_familles') ?? 0, 0)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {fmt.nombre(nb(c, 'nb_references') ?? 0, 0)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {(nb(c, 'stock_kg') ?? 0) > 0 ? `${fmt.nombre(nb(c, 'stock_kg') ?? 0, 0)} kg` : '—'}
+                    </td>
+                    {voitValeur && (
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {fmt.nombre(nb(c, 'valeur_dhs') ?? 0, 0)}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CarteCorps>
+      </Carte>
+    </div>
+  )
+}
 
 function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
   const refs = d.references ?? []

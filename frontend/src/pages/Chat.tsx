@@ -75,6 +75,16 @@ interface Etat {
   /** Le moteur demande, quand ce n'est pas celui qui repond. */
   repli_depuis?: string | null
   manque_cle?: boolean
+  /** Le moteur ecoute-t-il ? */
+  joignable?: boolean
+  /**
+   * DETIENT-IL LE MODELE QU'ON VA LUI RECLAMER ? Un moteur peut repondre
+   * parfaitement et ignorer le modele reglé : chaque question echoue alors
+   * sans que rien ne l'annonce. Les deux etats sont distincts, l'ecran les
+   * distingue.
+   */
+  modele_present?: boolean
+  modeles_disponibles?: string[]
 }
 
 interface ModeleDispo {
@@ -265,6 +275,36 @@ export function Chat() {
           </div>
         }
       />
+
+      {/* DIRE LA PANNE AVANT QU'ON LA CHERCHE. Sans ce bandeau, un moteur
+          eteint ou un modele absent se manifestent de la meme facon : on pose
+          une question, rien ne revient, et rien n'explique pourquoi. */}
+      {etat && etat.joignable === false && (
+        <Carte className="mb-3 border-danger/40 bg-danger/5">
+          <CarteCorps className="text-[13px] text-texte">
+            <strong>Le moteur ne repond pas.</strong>{' '}
+            {local
+              ? "Ollama est injoignable sur le serveur. Aucune question n'aboutira tant qu'il n'a pas redemarre."
+              : "La cle d'acces manque ou a ete refusee."}
+          </CarteCorps>
+        </Carte>
+      )}
+      {etat && etat.joignable && etat.modele_present === false && (
+        <Carte className="mb-3 border-alerte/40 bg-alerte/5">
+          <CarteCorps className="space-y-1 text-[13px] text-texte">
+            <div>
+              <strong>Le moteur repond, mais il n'a pas le modele « {etat.modele} ».</strong> Chaque
+              question echouera. Choisissez-en un autre ci-dessus, ou installez celui-ci sur le
+              serveur.
+            </div>
+            {etat.modeles_disponibles && etat.modeles_disponibles.length > 0 && (
+              <div className="text-attenue-texte">
+                Modeles presents : {etat.modeles_disponibles.join(', ')}
+              </div>
+            )}
+          </CarteCorps>
+        </Carte>
+      )}
 
       {/* LE CHOIX DU MODELE EST DANS L'ECRAN, pas dans un fichier du serveur.
           Chaque ligne porte ce qu'elle coute : sur un processeur sans carte

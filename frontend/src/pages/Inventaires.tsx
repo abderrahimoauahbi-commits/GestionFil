@@ -11,12 +11,13 @@
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ClipboardCheck, FolderOpen, Plus, Printer } from 'lucide-react'
+import { ClipboardCheck, ClipboardList, FolderOpen, Plus, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
   PanneauFiltres,
@@ -36,7 +37,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
+import { Aide, Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'INVENTAIRE'
@@ -401,6 +402,22 @@ export function Inventaires() {
               {/* Le proces-verbal s'imprime des l'ouverture du comptage, pas
                   seulement apres cloture : c'est le document qu'on emporte
                   pour faire signer les ecarts au fur et a mesure. */}
+              {/* DEUX PAPIERS, DANS L'ORDRE OU L'ON S'EN SERT. La feuille de
+                  comptage part dans l'allee, a l'aveugle, sans le theorique ;
+                  le proces-verbal revient ensuite confronter le compte au
+                  theorique. Elle n'existe qu'une fois l'inventaire ouvert :
+                  c'est l'ouverture qui fige ce qu'il y a a compter. */}
+              {i.statut !== 'BROUILLON' && (
+                <Bouton
+                  variante="discret"
+                  taille="icone-xs"
+                  onClick={() => ouvrirEtat(`/etats/inventaire/${i.id_inventaire}/comptage`)}
+                  aria-label="Feuille de comptage"
+                  title="Imprimer la feuille de comptage"
+                >
+                  <ClipboardList />
+                </Bouton>
+              )}
               <Bouton
                 variante="discret"
                 taille="icone-xs"
@@ -454,7 +471,9 @@ export function Inventaires() {
                       confirmation.demander({
                         titre: `Cloturer ${inventaire.numero_inventaire} ?`,
                         description:
-                          "Les ecarts seront convertis en mouvements d'ajustement. Le grand livre etant immuable, cette operation ne s'annule pas.",
+                          "Les ecarts seront convertis en mouvements d'ajustement. Le grand livre etant immuable, "
+                          + "ces mouvements ne s'effacent pas : pour revenir dessus il faudra les contre-passer un a un, "
+                          + "puis rouvrir l'inventaire.",
                         libelleConfirmer: 'Cloturer',
                         action: () => cloturer.mutate(),
                       })
@@ -464,6 +483,15 @@ export function Inventaires() {
                     Cloturer et ajuster
                   </Bouton>
                 )}
+
+                {/* ROUVRIR UN INVENTAIRE CLOS. Le serveur refuse tant que ses
+                    ajustements vivent : il faut d'abord les contre-passer. */}
+                <BoutonDevalider
+                  document="inventaires"
+                  id={inventaire.id_inventaire}
+                  statut={inventaire.statut}
+                  consequence="Le comptage redeviendra saisissable a partir des quantites deja relevees."
+                />
               </CarteCorps>
             </Carte>
 
@@ -576,15 +604,30 @@ function FormulaireInventaire({
           <div>
             <Etiq htmlFor="type" obligatoire>
               Type
+              <Aide>
+                Global : toutes les références actives du catalogue, avec un théorique à zéro là
+                où la base ne connaît pas de stock. C’est le seul qui découvre une marchandise
+                ignorée. Ce qu’il trouve entre au CMUP du magasin, ou à défaut au prix
+                catalogue — l’ajustement d’inventaire ne porte pas de prix. Un stock de départ se
+                charge par l’initialisation de stock, avec ou sans prix. Tournant et ciblé : seulement les
+                références déjà en stock dans ce magasin. Le ciblé ne permet pas encore de choisir
+                ses références.
+              </Aide>
             </Etiq>
             <Selecteur
               id="type"
               value={form.type_inventaire}
               onChange={(e) => setForm({ ...form, type_inventaire: e.target.value })}
             >
+<<<<<<< HEAD
+              <option value="GLOBAL">Global — tout le catalogue</option>
+              <option value="TOURNANT">Tournant — le stock existant</option>
+              <option value="CIBLE">Ciblé — le stock existant</option>
+=======
               <option value="GLOBAL">Global — tout le magasin</option>
               <option value="TOURNANT">Tournant — par rotation</option>
               <option value="CIBLE">Cible — références choisies</option>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             </Selecteur>
           </div>
           {erreur && <Alerte ton="danger">{erreur}</Alerte>}

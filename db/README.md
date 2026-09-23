@@ -2,54 +2,55 @@
 
 Polyfashions Carpet Morocco · pilotage des achats, stocks et production de matières premières.
 
-**Dev** : SQLite 3.51+ (tables `STRICT`) · **Cible prod** : PostgreSQL 16
+**PostgreSQL 18** — SQLite a ete abandonne le 4 septembre 2026. `db/pg/` est la source ;
+toute evolution s'y ecrit ET dans un fichier date de `db/pg/migrations/`.
 
 ---
 
 ## Démarrage
 
 ```powershell
-cd db
-.\build.ps1 -Demo          # schéma + référentiels + jeu de démonstration SH
-.\tests\run-tests.ps1      # 38 tests d'invariants
+cd db\pg
+python charger.py                          # base locale : schéma, vues, contrôles, seeds
+python charger.py --base gestionfil_essai  # une autre base
+python charger.py --production             # comptes réels, référentiel à importer ensuite
 ```
+
+Le chargeur joue les fichiers PAR PASSES : les vues se citent en avant, et PostgreSQL
+résout à la création. Une migration s'applique ensuite à part :
 
 ```powershell
-.\build.ps1                        # sans le jeu de démonstration
-.\build.ps1 -Database recette.db   # base cible différente
+psql -d gestionfil -v ON_ERROR_STOP=1 -f migrations\2026-09-17i_tableau_de_bord.sql
 ```
-
-`build.ps1` reconstruit la base à zéro, puis vérifie `foreign_key_check` et `integrity_check`.
 
 ---
 
 ## Structure
 
 ```
-db/
-├── 001_schema_referentiels.sql   devises, taux, catégories, rôles BOM, magasins,
-│                                 types/motifs de mouvement, paramètres, machine à états
+db/pg/
+├── 001_schema_referentiels.sql   devises, taux, cours Bank Al-Maghrib, catégories,
+│                                 rôles BOM, magasins, types/motifs de mouvement,
+│                                 paramètres, machine à états
 ├── 002_schema_securite.sql       rôles, utilisateurs, permissions, champs restreints
 ├── 003_schema_catalogue.sql      fournisseurs, références, groupes d'équivalence
 ├── 004_schema_production.sql     qualités, densités par rôle, recettes versionnées
-├── 005_schema_planification.sql  plans, plan_recette, besoins MRP, snapshots
+├── 005_schema_planification.sql  plans, saisonnalité, besoins MRP, snapshots
 ├── 006_schema_achats.sql         bons de commande, plan d'achat, historique des prix
 ├── 007_schema_receptions.sql     réceptions, lignes, archives figées
 ├── 008_schema_stock.sql          mouvements, stock par magasin, stock par lot,
 │                                 transferts, inventaires, valorisation
 ├── 009_schema_pilotage.sql       KPI, journal d'audit, alertes, contexte de session
-├── 010_triggers.sql              invariants (voir plus bas)
+├── 009b_schema_machines.sql      métiers, emplacements, fiches de charge
+├── 010_declencheurs.sql          invariants (voir plus bas)
+├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C20
-├── seed/
-│   ├── 001_referentiels.sql      devises, 15 catégories, 8 rôles, 4 magasins,
-│   │                             9 types de mouvement, 26 paramètres, 31 transitions
-│   ├── 002_securite.sql          6 rôles, matrice RBAC du CDC D2, 6 comptes
-│   ├── 003_fournisseurs.sql      12 fournisseurs réels (CDC A4)
-│   ├── 004_qualites.sql          18 qualités réelles + densités par rôle de SH
-│   └── 900_demo_sh.sql           ⚠ DONNÉES DE TEST — prix inventés
-├── build.ps1
-└── tests/run-tests.ps1
+├── 012_controles.sql             contrôles métier C01–C37
+├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
+├── 014_audit_operations.sql      journal d'audit des opérations
+├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
+├── migrations/                   une évolution = un fichier daté, REJOUABLE
+└── charger.py                    chargement par passes
 ```
 
 **51 tables · 36 vues · 51 triggers · 54 index**
@@ -65,7 +66,7 @@ Ce que la base refuse, quel que soit le chemin d'appel — y compris une correct
 | R01 · unité canonique kg | `reference.facteur_kg` colonne générée + 3 `CHECK` conditionnels |
 | R02 · stock jamais négatif | garde avant écriture, par magasin **et** par lot |
 | R03 · historique immuable | refus d'`UPDATE`/`DELETE` sur mouvements, archives, historique prix, audit |
-| R04 · CMUP aux entrées seules | `type_mouvement.impacte_cmup`, contraint à `signe = +1 AND exige_prix = 1` |
+| R04 · CMUP aux entrées seules | `type_mouvement.impacte_cmup`, contraint à `signe = +1`. Sans achat, le CMUP est le prix catalogue × taux en vigueur (`fn_prix_catalogue_mad`, vide sans taux) ; la première réception moyenne avec lui |
 | R07 · Σ % = 100 par rôle | contrôlé au passage à `VALIDE` |
 | R08 · seuls les plans VALIDE alimentent le MRP | index unique partiel sur `(annee) WHERE statut='VALIDE'` |
 | RG-04 · recette validée immuable | verrou sur `ligne_recette` |
@@ -102,11 +103,11 @@ Un rôle BOM sans densité sur la qualité **bloque la validation de la recette*
 ## Contrôles métier
 
 ```powershell
-sqlite3 gestionfil.db "SELECT * FROM v_controles;"          # tableau de bord
-sqlite3 gestionfil.db "SELECT * FROM v_ctl_c05;"            # détail d'un contrôle
+psql -d gestionfil -c "SELECT * FROM v_controles;"          # tableau de bord
+psql -d gestionfil -c "SELECT * FROM v_ctl_c05;"            # détail d'un contrôle
 ```
 
-C01–C14 traduisent les contrôles du CDC en requêtes exécutables. C15–C20 ont été ajoutés :
+C01–C14 traduisent les contrôles du CDC en requêtes exécutables. C15–C37 ont été ajoutés, dont :
 
 - **C15** cohérence stock par lot / stock par magasin
 - **C16** rôle de recette sans densité (le cas du besoin nul silencieux)
@@ -121,56 +122,28 @@ C01–C14 traduisent les contrôles du CDC en requêtes exécutables. C15–C20 
 
 ## Contraintes d'intégration côté service
 
-1. **`PRAGMA foreign_keys = ON` à chaque connexion.** SQLite le désactive par défaut. Sans lui, C03 et C04 ne protègent rien.
-2. **Ne pas activer `recursive_triggers`.** L'historisation des paramètres s'appuie sur son état par défaut.
-3. **Renseigner `_contexte_session` en début de transaction** — sinon le journal d'audit enregistre des actions anonymes :
-   ```sql
-   UPDATE _contexte_session SET id_utilisateur = ?, adresse_ip = ?, session_id = ? WHERE id = 1;
-   ```
-   C'est l'équivalent SQLite de `SET LOCAL app.id_utilisateur` sous PostgreSQL.
-4. **Arrondir à l'écriture** : 4 décimales pour les kg et le CMUP, 2 pour les montants (ADR-001 D-10).
-5. **Les cascades sont à la charge du service**, dans une transaction : réception 3-en-1, transfert, clôture d'inventaire, calcul MRP, plan d'achat, ABC/XYZ (ADR-001 D-04).
+1. **Renseigner le contexte de session en début de transaction écrivante** — sinon le journal
+   d'audit enregistre des actions anonymes. Côté serveur : `user.poser_contexte(&mut tx)`,
+   qui pose `SET LOCAL app.id_utilisateur`, `app.adresse_ip`, `app.session_id`.
+2. **Arrondir à l'écriture** : 4 décimales pour les kg et le CMUP, 2 pour les montants
+   (ADR-001 D-10).
+3. **Les cascades sont à la charge du service**, dans une transaction : réception 3-en-1,
+   transfert, clôture d'inventaire, calcul MRP, plan d'achat, ABC/XYZ (ADR-001 D-04).
+4. **Une requête nouvelle se vérifie avant d'être livrée** : `PREPARE` sur une copie de la base,
+   et types du résultat comparés aux types Rust. Un `NUMERIC` lu en `f64`, un `ROUND(x, n)` sur un
+   flottant ou un `SUM(booléen)` ne se voient qu'à l'exécution — seize requêtes plantaient ainsi
+   le 17 septembre 2026.
 
 ---
 
-## Vérification de bout en bout
+## Ce que la base porte aujourd'hui
 
-Le jeu `900_demo_sh.sql` reproduit l'exemple de calcul F2 du cahier des charges :
-
-```
-Plan SH Juillet, 500 m²
-  PP-3430 (Poil, 6,4 %)  : 500 × 1,760 × 6,4 %          =  56,32 kg   ✓ CDC F2
-  JUT-961 (Trame, 100 %) : 500 × 0,520 × 100 %          = 260,00 kg   ✓ CDC F2
-  CUIR-01 (Cuir, ml/m²)  : 500 × 1,000 × 100 % × 0,35   = 175,00 kg   (non exprimable dans le modèle du CDC)
-```
-
-```powershell
-sqlite3 -header -column gestionfil.db `
-  "SELECT code_reference, quantite_brute_kg, quantite_kg FROM v_besoin_mrp_calcule WHERE mois=7;"
-```
-
----
-
-## Migration vers PostgreSQL 16
-
-Le schéma est écrit pour se transposer sans réécriture de la logique :
-
-| SQLite (dev) | PostgreSQL (prod) |
-|---|---|
-| `TEXT` (UUID v4) | `UUID` |
-| `REAL` | `DECIMAL(12,4)` / `DECIMAL(15,2)` |
-| `TEXT` ISO-8601 UTC | `TIMESTAMPTZ` |
-| `INTEGER` 0/1 | `BOOLEAN` |
-| `TEXT` + `json_valid()` | `JSONB` |
-| triggers `RAISE(ABORT, …)` | fonctions PL/pgSQL `RAISE EXCEPTION` |
-| `_contexte_session` | `SET LOCAL app.*` |
-| trigger anti-chevauchement des taux | contrainte `EXCLUDE USING gist` |
-
-Points de vigilance :
-
-- **`max()` scalaire propage les NULL en SQLite ; `GREATEST` les ignore en PostgreSQL.** Les termes sont déjà tous `COALESCE` — c'est précisément le piège qui mettait à 0 la quantité à commander dans la vue I2 du CDC.
-- Les colonnes générées `VIRTUAL` deviennent `GENERATED ALWAYS AS … STORED`.
-- `strftime('%Y-%m-%dT%H:%M:%fZ','now')` devient `now()`.
+- **125 références**, familles et couleurs alignées sur « Liste ref fil.xlsx ».
+- **18 qualités** et leurs recettes, densités par rôle comprises.
+- Le **plan de production** de l'année et sa saisonnalité, d'où le MRP tire les besoins.
+- Le **CMUP** : prix catalogue × taux en vigueur tant qu'aucun achat ne l'a fixé, puis moyenne
+  pondérée à chaque réception valorisée.
+- Le **cours de référence de Bank Al-Maghrib**, lu pour information à côté du taux de l'ERP.
 
 ---
 

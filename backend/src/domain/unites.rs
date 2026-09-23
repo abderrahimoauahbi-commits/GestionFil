@@ -26,6 +26,11 @@ pub enum Unite {
     Bobine,
     #[serde(rename = "Palette")]
     Palette,
+    /// LE LOT EST UNE UNITE D'ACHAT, pas une unite de stock. Le fournisseur
+    /// turc produit par bains de 1344 bobines — parfois 1400, 1688, 1720 selon
+    /// l'article. Le lot arrive et se defait ; il ne circule pas entre magasins.
+    #[serde(rename = "Lot")]
+    Lot,
     #[serde(rename = "ml")]
     Ml,
 }
@@ -36,6 +41,7 @@ impl Unite {
             Unite::Kg => "kg",
             Unite::Bobine => "Bobine",
             Unite::Palette => "Palette",
+            Unite::Lot => "Lot",
             Unite::Ml => "ml",
         }
     }
@@ -45,6 +51,7 @@ impl Unite {
             "kg" => Some(Unite::Kg),
             "Bobine" => Some(Unite::Bobine),
             "Palette" => Some(Unite::Palette),
+            "Lot" => Some(Unite::Lot),
             "ml" => Some(Unite::Ml),
             _ => None,
         }
@@ -58,6 +65,7 @@ pub struct FacteursReference {
     pub unite_catalogue: String,
     pub poids_bobine_kg: Option<f64>,
     pub bobines_par_palette: Option<i64>,
+    pub bobines_par_lot: Option<i64>,
     pub densite_kg_ml: Option<f64>,
 }
 
@@ -79,6 +87,17 @@ impl FacteursReference {
                     (Some(p), Some(n)) => Ok(p * n as f64),
                     _ => Err(AppError::RegleMetier(format!(
                         "R01 : poids_bobine_kg et/ou bobines_par_palette absents sur {} — saisie en palettes refusee.",
+                        self.code_reference
+                    ))),
+                }
+            }
+            Unite::Lot => {
+                let poids = self.poids_bobine_kg.filter(|v| *v > 0.0);
+                let nb = self.bobines_par_lot.filter(|v| *v > 0);
+                match (poids, nb) {
+                    (Some(p), Some(n)) => Ok(p * n as f64),
+                    _ => Err(AppError::RegleMetier(format!(
+                        "R01 : poids_bobine_kg et/ou bobines_par_lot absents sur {} — saisie au lot refusee.",
                         self.code_reference
                     ))),
                 }
@@ -114,6 +133,7 @@ pub async fn charger(db: &Db, code_reference: &str) -> AppResult<FacteursReferen
         "SELECT code_reference, unite_catalogue,
                 poids_bobine_kg::float8    AS poids_bobine_kg,
                 bobines_par_palette,
+                bobines_par_lot,
                 densite_kg_ml::float8      AS densite_kg_ml
            FROM reference WHERE code_reference = $1",
     )
@@ -133,6 +153,7 @@ mod tests {
             unite_catalogue: "Bobine".into(),
             poids_bobine_kg: Some(3.2),
             bobines_par_palette: Some(240),
+            bobines_par_lot: Some(1344),
             densite_kg_ml: None,
         }
     }
@@ -164,6 +185,23 @@ mod tests {
         assert!(r.facteur(Unite::Palette).is_err());
         // La conversion en bobines reste possible : seule la palette est bloquee.
         assert_eq!(r.facteur(Unite::Bobine).unwrap(), 3.2);
+    }
+
+    #[test]
+    fn le_lot_se_convertit_et_se_refuse_sans_facteur() {
+        let r = ref_pp();
+        // 3,2 kg par bobine x 1344 bobines = 4300,8 kg le lot.
+        assert_eq!(r.facteur(Unite::Lot).unwrap(), 3.2 * 1344.0);
+        assert_eq!(r.vers_kg(2.0, Unite::Lot).unwrap(), 8601.6);
+
+        // Sans `bobines_par_lot`, la saisie au lot est REFUSEE — jamais un
+        // repli sur la palette, qui produirait un bon de commande six fois
+        // trop petit sans que rien ne le signale.
+        let mut sans = ref_pp();
+        sans.bobines_par_lot = None;
+        let err = sans.facteur(Unite::Lot).unwrap_err();
+        assert!(err.to_string().contains("bobines_par_lot"));
+        assert_eq!(sans.facteur(Unite::Palette).unwrap(), 768.0);
     }
 
     #[test]

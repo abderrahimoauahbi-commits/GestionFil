@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
   Alerte,
@@ -36,7 +37,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { Aide, Dialogue, DialogueContenu } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'RECEPTIONS'
@@ -563,6 +564,16 @@ export function Reception() {
                 Valider le controle
               </Bouton>
             )}
+            {/* ROUVRIR LE CONTROLE. Le serveur refusera tant que les entrees de
+                stock nees de cette reception vivent encore : le papier ne
+                recule pas pendant que la marchandise avance. */}
+            <BoutonDevalider
+              document="receptions"
+              id={id}
+              statut={rec.statut}
+              taille="md"
+              consequence="Les lignes redeviendront modifiables et devront etre controlees a nouveau."
+            />
           </>
         }
       />
@@ -635,16 +646,16 @@ export function Reception() {
               />
             </div>
             <div>
-              <Etiq htmlFor="fact">N° de facture</Etiq>
+              <Etiq htmlFor="fact">
+                N° de facture
+                <Aide>Souvent absente a la livraison : elle se saisit plus tard.</Aide>
+              </Etiq>
               <Champ
                 id="fact"
                 value={entete.numero_facture}
                 disabled={!modifiable}
                 onChange={(e) => setEntete({ ...entete, numero_facture: e.target.value })}
               />
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Souvent absente a la livraison : elle se saisit plus tard.
-              </p>
             </div>
             <div>
               <Etiq htmlFor="tr">Transporteur</Etiq>
@@ -668,7 +679,10 @@ export function Reception() {
               />
             </div>
             <div>
-              <Etiq htmlFor="brut">Poids brut (kg)</Etiq>
+              <Etiq htmlFor="brut">
+                Poids brut (kg)
+                <Aide>Releve au pont-bascule, emballage compris.</Aide>
+              </Etiq>
               <Champ
                 id="brut"
                 type="number"
@@ -679,9 +693,6 @@ export function Reception() {
                 onChange={(e) => setEntete({ ...entete, poids_total_brut_kg: e.target.value })}
                 className="text-right tabular-nums"
               />
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Releve au pont-bascule, emballage compris.
-              </p>
             </div>
           </CarteCorps>
         </Carte>

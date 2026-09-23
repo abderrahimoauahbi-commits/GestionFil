@@ -112,14 +112,37 @@ GROUP BY pp.id_plan, lpp.rang_mois, lpp.mois, lpp.annee_mois, rc.code_reference;
 -- pouvait pas attendre.
 DROP VIEW IF EXISTS v_besoin_12m CASCADE;
 CREATE VIEW v_besoin_12m AS
+-- -----------------------------------------------------------------------------
+-- CE QUI RESTE A CONSOMMER, PAS CE QUE LE PLAN PREVOYAIT EN TOUT.
+--
+-- La vue sommait TOUS les mois du plan, passes compris. Or le stock projete
+-- s'ecrit « physique + en-cours - besoin » : le physique a DEJA perdu ce que
+-- les mois passes ont consomme. Ces mois etaient donc retires deux fois — une
+-- fois du stock par les sorties reelles, une seconde fois par le plan.
+--
+-- Mesure sur la base de verification (17/09/2026) : plan d'avril 2026 a mars
+-- 2027, 1 000 kg par mois, 3 000 kg en stock. Le plan d'achat proposait
+-- 11 600 kg ; le besoin reel en appelait 6 600. SURCOMMANDE : 5 000 kg, soit
+-- exactement les cinq mois deja ecoules — et l'ecart grossit d'un mois de
+-- consommation a chaque mois qui passe, jusqu'a la fin du plan.
+--
+-- On ne retient donc que le MOIS COURANT ET LES SUIVANTS. Le mois courant
+-- reste compte en entier : il n'est pas encore consomme, et le retirer serait
+-- l'erreur inverse — une rupture en fin de mois.
+-- -----------------------------------------------------------------------------
 WITH horizon AS (
     -- Nombre de mois REELLEMENT couverts par chaque plan. C'est le plan qui
     -- donne le denominateur, jamais une constante : un plan de six mois divise
     -- par six. Diviser par douze halvait la consommation mensuelle, doublait la
     -- couverture affichee, et retardait d'autant le declenchement des alertes
     -- — verifie : facteur exactement 2,0 sur un plan de six mois.
+    --
+    -- Le denominateur suit le meme horizon que le numerateur : les mois RESTANTS.
+    -- Diviser le reste du plan par ses douze mois d'origine ferait fondre la
+    -- consommation mensuelle au fil de l'annee.
     SELECT id_plan, COUNT(DISTINCT annee_mois) AS mois
       FROM besoin_mrp
+     WHERE annee_mois >= to_char(current_date, 'YYYY-MM')
      GROUP BY id_plan
 )
 SELECT
@@ -147,6 +170,7 @@ JOIN plan_production pp ON pp.id_plan = bm.id_plan
 JOIN horizon h          ON h.id_plan  = bm.id_plan
 WHERE pp.statut = 'EN_COURS'
   AND to_char(current_date, 'YYYY-MM-DD') BETWEEN pp.date_debut AND pp.date_fin
+  AND bm.annee_mois >= to_char(current_date, 'YYYY-MM')
 GROUP BY bm.code_reference;
 
 -- =============================================================================
@@ -195,6 +219,7 @@ FROM ligne_bc lb
 JOIN bon_commande bc ON bc.id_bc = lb.id_bc
 WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
   AND lb.statut NOT IN ('ANNULE','SOLDE')
+  AND lb.type_ligne = 'MARCHANDISE'
   AND lb.quantite_restante_kg > 0
 GROUP BY lb.code_reference;
 
@@ -367,6 +392,7 @@ JOIN bon_commande bc ON bc.id_bc = lb.id_bc
 CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_RetardBCJours') p_ret
 WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
   AND lb.statut NOT IN ('ANNULE','SOLDE')
+  AND lb.type_ligne = 'MARCHANDISE'
   AND lb.quantite_restante_kg > 0
 GROUP BY lb.code_reference;
 
@@ -616,9 +642,14 @@ WITH base AS (
         CASE
             WHEN qte_avec_moq_kg <= 0 THEN 0.0
             WHEN multiple_achat_kg IS NULL OR multiple_achat_kg <= 0 THEN ROUND(qte_avec_moq_kg, 4)
-            ELSE ROUND(CAST(
-                     (qte_avec_moq_kg + multiple_achat_kg - 0.0001) / multiple_achat_kg
-                 AS bigint) * multiple_achat_kg, 4)
+            -- L'ARRONDI AU MULTIPLE SUPERIEUR, VRAIMENT. La formule precedente
+            -- — `CAST((q + m - 0,0001) / m AS bigint)` — supposait qu'une
+            -- conversion en entier TRONQUE. PostgreSQL ARRONDIT. Le resultat
+            -- commandait un multiple de trop dans pres d'un cas sur deux :
+            -- 1 600 kg au multiple de 1 000 donnaient 3 000 kg au lieu de 2 000,
+            -- et un besoin tombant pile sur un multiple en ajoutait un entier.
+            -- Mesure le 17/09/2026. `CEIL` dit exactement ce qu'on veut dire.
+            ELSE ROUND(CEIL(qte_avec_moq_kg / multiple_achat_kg) * multiple_achat_kg, 4)
         END AS qte_a_commander_kg
     FROM calcul
 )
@@ -1414,20 +1445,20 @@ GROUP BY rc.code_fournisseur, f.nom, 3;
 -- douze est plus dangereux qu'une absence de cout.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_stat_qualite CASCADE;
+-- CORRIGE LE 17/09/2026 (2026-09-17i) : chaque composant au CMUP de la fiche.
+-- La valeur du stock en magasin rendait gratuit tout composant sans stock :
+-- Shehrazade a 10,24 MAD/m2 pour 83,62 reels.
 CREATE VIEW v_stat_qualite AS
 WITH cout AS (
     SELECT rc.code_qualite,
            COUNT(*)                                         AS nb_composants,
            COUNT(DISTINCT rc.code_role)                     AS nb_roles,
-           SUM(CASE WHEN COALESCE(sd.valeur_totale_mad, 0) > 0
-                     AND COALESCE(sd.stock_total_kg, 0) > 0 THEN 0 ELSE 1 END)
+           SUM(CASE WHEN r.cmup_mad IS NULL THEN 1 ELSE 0 END)
                                                             AS nb_sans_cmup,
            ROUND(SUM(rc.kg_m2), 6)                          AS kg_m2_total,
-           ROUND(SUM(rc.kg_m2 * CASE WHEN COALESCE(sd.stock_total_kg, 0) > 0
-                                     THEN sd.valeur_totale_mad / sd.stock_total_kg
-                                     ELSE 0 END), 4)        AS cout_matiere_m2_mad
+           ROUND(SUM(rc.kg_m2 * COALESCE(r.cmup_mad, 0)), 4) AS cout_matiere_m2_mad
       FROM v_recette_calculee rc
-      LEFT JOIN v_stock_disponible sd ON sd.code_reference = rc.code_reference
+      JOIN reference r ON r.code_reference = rc.code_reference
      GROUP BY rc.code_qualite
 ),
 production AS (
@@ -1451,9 +1482,6 @@ SELECT
     COALESCE(c.nb_sans_cmup, 0)                  AS nb_sans_cmup,
     c.kg_m2_total,
     c.cout_matiere_m2_mad,
-    -- Ecart entre le poids commercial declare et la somme des kg/m2 de la
-    -- recette : au-dela du bruit d'arrondi, la recette et la fiche produit ne
-    -- decrivent plus le meme tapis.
     CASE WHEN q.poids_commercial_m2 > 0 AND c.kg_m2_total IS NOT NULL
          THEN ROUND((c.kg_m2_total - q.poids_commercial_m2) / q.poids_commercial_m2 * 100.0, 2)
     END                                          AS ecart_poids_pct,
@@ -1477,6 +1505,7 @@ LEFT JOIN production p ON p.code_qualite = q.code_qualite;
 -- on change le melange d'un role.
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_stat_qualite_role CASCADE;
+-- Meme correction (2026-09-17i).
 CREATE VIEW v_stat_qualite_role AS
 SELECT
     rc.code_qualite,
@@ -1485,12 +1514,9 @@ SELECT
     COUNT(*)                                     AS nb_composants,
     ROUND(SUM(rc.pourcentage_composition), 2)    AS somme_pct,
     ROUND(SUM(rc.kg_m2), 6)                      AS kg_m2,
-    ROUND(SUM(rc.kg_m2 * CASE WHEN COALESCE(sd.stock_total_kg, 0) > 0
-                              THEN sd.valeur_totale_mad / sd.stock_total_kg
-                              ELSE 0 END), 4)    AS cout_m2_mad
+    ROUND(SUM(rc.kg_m2 * COALESCE(r.cmup_mad, 0)), 4) AS cout_m2_mad
 FROM v_recette_calculee rc
-LEFT JOIN v_stock_disponible sd ON sd.code_reference = rc.code_reference
--- `rc.role_libelle` depend de `code_role`, deja groupe.
+JOIN reference r ON r.code_reference = rc.code_reference
 GROUP BY rc.code_qualite, rc.code_role, rc.role_libelle;
 
 -- =============================================================================
@@ -1662,3 +1688,38 @@ LEFT JOIN magasin ms    ON ms.code_magasin = t.code_magasin_source
 LEFT JOIN magasin md    ON md.code_magasin = t.code_magasin_dest
 LEFT JOIN utilisateur u ON u.id_utilisateur = t.id_utilisateur
 WHERE t.statut = 'VALIDE';
+
+
+-- -----------------------------------------------------------------------------
+-- v_equivalence_auto — l'equivalence qui se DEDUIT
+-- -----------------------------------------------------------------------------
+-- Deux references de meme famille et de meme couleur interne, chez deux
+-- fournisseurs differents, sont le meme fil. Cette vue les rapproche sans
+-- qu'on ait rien a declarer, et dit si un groupe d'equivalence les couvre deja.
+-- Elle ne remplace pas les groupes : elle montre ce que la donnee dit.
+-- -----------------------------------------------------------------------------
+CREATE VIEW v_equivalence_auto AS
+SELECT a.code_reference                AS code_reference,
+       b.code_reference                AS code_equivalent,
+       a.code_famille,
+       f.libelle                       AS famille_libelle,
+       a.code_couleur_interne,
+       c.libelle                       AS couleur_libelle,
+       a.code_fournisseur              AS fournisseur,
+       b.code_fournisseur              AS fournisseur_equivalent,
+       a.reference_fournisseur         AS reference_chez_fournisseur,
+       b.reference_fournisseur         AS reference_chez_equivalent,
+       (SELECT count(*) FROM reference_groupe_equiv g1
+          JOIN reference_groupe_equiv g2 ON g2.code_groupe_equiv = g1.code_groupe_equiv
+         WHERE g1.code_reference = a.code_reference
+           AND g2.code_reference = b.code_reference
+           AND g1.actif = 1 AND g2.actif = 1) AS deja_groupees
+  FROM reference a
+  JOIN reference b ON b.code_famille = a.code_famille
+                  AND b.code_couleur_interne = a.code_couleur_interne
+                  AND b.code_reference <> a.code_reference
+  LEFT JOIN famille f ON f.code_famille = a.code_famille
+  LEFT JOIN couleur c ON c.code_couleur_interne = a.code_couleur_interne
+ WHERE a.actif = 1 AND b.actif = 1
+   AND a.code_famille IS NOT NULL AND a.code_couleur_interne IS NOT NULL
+   AND a.code_fournisseur <> b.code_fournisseur;

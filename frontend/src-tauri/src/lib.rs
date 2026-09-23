@@ -29,6 +29,21 @@ fn version_application() -> serde_json::Value {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // LA MISE A JOUR SE FAIT TOUTE SEULE, ou ne se fait pas.
+        //
+        // L'application embarque son interface : installee en septembre, elle
+        // montre l'ecran de septembre, quoi qu'il arrive au serveur. Le seul
+        // avis qu'on savait donner etait un bandeau — encore fallait-il que la
+        // version installee le porte deja, ce qui n'etait le cas d'aucune.
+        // C'est le probleme de la poule et de l'oeuf, et il ne se resout pas
+        // par un bandeau de plus : il faut que le poste sache aller chercher.
+        //
+        // Le greffon demande au serveur, verifie la SIGNATURE du paquet contre
+        // la cle publique compilee dans l'application, installe et redemarre.
+        // Sans la cle privee, personne ne peut pousser un paquet sur les
+        // postes — c'est ce qui rend la mise a jour automatique acceptable.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![adresse_serveur, version_application])
         .setup(|app| {
             // En developpement, ouvrir les outils evite d'avoir a les chercher

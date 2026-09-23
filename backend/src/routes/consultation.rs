@@ -24,6 +24,15 @@ pub struct Filtres {
     pub limite: Option<i64>,
     pub statut: Option<String>,
     pub code_reference: Option<String>,
+    /// LE MAGASIN, qui etait recu et IGNORE.
+    ///
+    /// L'ecran de transfert demandait le stock d'un magasin precis ; la requete
+    /// ne filtrait que sur la reference. Il recevait donc le stock de TOUS les
+    /// magasins et l'additionnait : « disponible » annoncait un total que le
+    /// magasin source ne detenait pas. On pouvait preparer un transfert de cinq
+    /// tonnes depuis un magasin qui en tenait une, et seule la regle R02 le
+    /// refusait — a l'expedition, une fois tout saisi.
+    pub code_magasin: Option<String>,
 }
 
 impl Filtres {
@@ -140,18 +149,18 @@ pub async fn risques_rupture(
         .unwrap_or_default();
 
     if !codes.is_empty() {
-        let trous = std::iter::repeat("?").take(codes.len()).collect::<Vec<_>>().join(",");
-        let sql = format!(
+        // `= ANY($1)` et un tableau lie : la version precedente fabriquait des
+        // `?` a la maniere de SQLite, que PostgreSQL refuse. L'ecran recevait une
+        // erreur 500 et affichait « aucune reference ne descend sous son stock de
+        // securite » — en vert, au-dessus de 73 ruptures.
+        let q = sqlx::query(
             "SELECT code_reference, annee_mois, rang_mois, besoin_kg, entrees_kg,
                     stock_fin_kg, stock_min_kg, statut
                FROM v_risque_mensuel
-              WHERE code_reference IN ({trous})
-              ORDER BY code_reference, rang_mois"
-        );
-        let mut q = sqlx::query(&sql);
-        for c in &codes {
-            q = q.bind(c);
-        }
+              WHERE code_reference = ANY($1)
+              ORDER BY code_reference, rang_mois",
+        )
+        .bind(&codes);
         let mois = lignes_en_json(&q.fetch_all(&state.db).await?);
 
         if let (Some(tableau), Some(mois)) = (liste.as_array_mut(), mois.as_array()) {
@@ -219,6 +228,46 @@ pub async fn stats_mouvements(
                 "references",
                 "SELECT * FROM v_stat_mouvement_reference
                   ORDER BY (entrees_kg + sorties_kg) DESC LIMIT 200",
+            ),
+        ],
+    )
+    .await
+}
+
+/// Statistiques par FAMILLE : la forme que les classeurs tiennent depuis
+/// toujours — une feuille par famille, les couleurs en colonnes.
+///
+/// L'atelier ne raisonne pas par reference mais par famille : on ne demande pas
+/// « combien de PP-1500 Dtex-Bleu 6666-Hs », on demande « combien de 1500 dtex,
+/// et de quelle couleur ».
+///
+/// TROIS JEUX, TROIS LECTURES. Les familles pour le poids de chacune ; le
+/// croisement famille x couleur, qui est la feuille du classeur ; les
+/// categories, pour la lecture de direction.
+pub async fn stats_familles(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    dossier(
+        &state,
+        &user,
+        module::MOUVEMENTS,
+        &[
+            // Les familles sans mouvement remontent aussi : une famille qui
+            // dort est precisement ce qu'on cherche a reperer.
+            (
+                "familles",
+                "SELECT * FROM v_stat_famille
+                  ORDER BY COALESCE(entrees_kg, 0) DESC, stock_kg DESC, famille_libelle",
+            ),
+            (
+                "croisement",
+                "SELECT * FROM v_stat_famille_couleur
+                  ORDER BY annee DESC, entrees_kg DESC",
+            ),
+            (
+                "categories",
+                "SELECT * FROM v_stat_categorie ORDER BY stock_kg DESC, categorie_libelle",
             ),
         ],
     )
@@ -487,7 +536,7 @@ pub async fn substituer_proposition(
     // pourrait reporter un besoin de latex sur du fil de jute au motif que
     // quelqu'un les a mis dans le meme groupe par erreur.
     let compat: Option<i64> = sqlx::query_scalar(
-        "SELECT interchangeable FROM v_equivalence
+        "SELECT interchangeable::bigint FROM v_equivalence
           WHERE code_reference = $1 AND equivalent_reference = $2",
     )
     .bind(&code_actuel)
@@ -630,6 +679,38 @@ pub async fn controles(State(state): State<AppState>, user: Utilisateur) -> AppR
     lister(&state, &user, module::COCKPIT, "SELECT * FROM v_controles").await
 }
 
+/// `GET /api/supervision` — les indicateurs de pilotage de la chaine logistique.
+///
+/// CHAQUE INDICATEUR DIT AUSSI QUAND IL NE SAIT PAS. La vue rend, a cote de la
+/// valeur, un drapeau `disponible` et — s'il vaut zero — la phrase qui explique
+/// ce qu'il faut enregistrer pour l'allumer. L'ecran affiche alors « en
+/// attente : aucune reception enregistree » au lieu de « OTIF 0 % ».
+///
+/// La difference n'est pas cosmetique. Un zero se lit comme un resultat : un
+/// directeur qui voit « OTIF 0 % » conclut que ses fournisseurs sont
+/// catastrophiques, alors que l'ERP n'a simplement jamais vu passer une
+/// reception. La phrase, elle, transforme le tableau de bord en liste de ce
+/// qu'il reste a mettre en route.
+pub async fn supervision(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    lister(
+        &state,
+        &user,
+        module::COCKPIT,
+        "SELECT s.domaine, s.cle, s.libelle, s.unite, s.definition,
+                s.disponible, s.condition, s.sens,
+                s.cible::float8     AS cible,
+                s.vigilance::float8 AS vigilance,
+                v.valeur::float8    AS valeur
+           FROM v_supervision s
+           LEFT JOIN v_supervision_valeurs v USING (cle)
+          ORDER BY s.disponible DESC, s.domaine, s.libelle",
+    )
+    .await
+}
+
 pub async fn controle_detail(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -686,16 +767,25 @@ pub async fn stock(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT sm.*, r.designation, m.nom AS magasin_nom, m.inclure_mrp
+        // LE CONDITIONNEMENT VOYAGE AVEC LE STOCK. Transferer se compte en
+        // palettes et en bobines autant qu'en kilos ; sans ces parametres,
+        // l'ecran de transfert devait charger le catalogue entier pour
+        // convertir trois lignes.
+        "SELECT sm.*, r.designation, r.unite_catalogue, r.suivi_lot,
+                r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot,
+                r.densite_kg_ml,
+                m.nom AS magasin_nom, m.inclure_mrp
            FROM stock_magasin sm
            JOIN reference r ON r.code_reference = sm.code_reference
            JOIN magasin   m ON m.code_magasin   = sm.code_magasin
           WHERE ($1 IS NULL OR sm.code_reference = $1)
+            AND ($3 IS NULL OR sm.code_magasin = $3)
           ORDER BY sm.code_reference, sm.code_magasin
           LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
+    .bind(&f.code_magasin)
     .fetch_all(&state.db)
     .await?;
 
@@ -969,7 +1059,13 @@ pub async fn kpi_plan_achat(
                 SUM(CASE WHEN pa.statut = 'RUPTURE' THEN 1 ELSE 0 END) AS nb_ruptures
            FROM v_plan_achat pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
-          GROUP BY pa.code_fournisseur
+          -- REGROUPER SUR LA CLE DU FOURNISSEUR, pas seulement sur le code
+          -- porte par le plan : PostgreSQL n'accepte une colonne hors agregat
+          -- que si elle depend fonctionnellement du groupe, et c'est la cle
+          -- primaire de `fournisseur` qui le garantit pour `f.nom`, `f.pays`,
+          -- `f.code_devise`... SQLite laissait passer ; ici l'ecran du plan
+          -- d'achat tombait en « erreur interne ».
+          GROUP BY f.code_fournisseur, pa.code_fournisseur
           ORDER BY montant_mad DESC",
     )
     .fetch_all(&state.db)
@@ -1157,7 +1253,57 @@ pub async fn cockpit_analyse(
               WHERE r.actif = 1 AND r.classe_abc IS NOT NULL
               GROUP BY r.classe_abc
               ORDER BY r.classe_abc").await?,
+        // ZONE 2 DU COCKPIT DU CLASSEUR : les references en alerte, les plus
+        // urgentes d'abord (couverture croissante), avec ce qu'il faut commander.
+        "alertes":      bloc(&state.db,
+            "SELECT sp.code_reference, sp.designation, cat.libelle AS categorie_libelle,
+                    r.couleur, sp.fournisseur_nom, sp.unite_catalogue,
+                    sp.stock_physique_net_kg, sp.conso_mensuelle_kg, sp.jours_couverture,
+                    sp.delai_livraison_jours, pa.qte_a_commander_kg, sp.statut
+               FROM v_stock_projete sp
+               JOIN reference r ON r.code_reference = sp.code_reference
+               LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
+               LEFT JOIN v_plan_achat pa ON pa.code_reference = sp.code_reference
+              WHERE sp.statut <> 'OK'
+              ORDER BY sp.jours_couverture ASC NULLS LAST, sp.code_reference
+              LIMIT 24").await?,
     });
+
+    // LES INDICATEURS DE LA ZONE 5 DU CLASSEUR qui manquaient. Une seule ligne.
+    //
+    // La couverture ponderee valeur se lit sur le stock PHYSIQUE : le projete de
+    // l'ERP retranche douze mois de besoins et serait negatif presque partout.
+    // Les economies sont sommees sur TOUTES les opportunites — l'ecran n'en
+    // montre que cinq, et en additionnait vingt — une reference presente dans
+    // deux groupes d'equivalence ne compte qu'une fois, a sa meilleure economie.
+    let ind = sqlx::query(
+        "SELECT
+           (SELECT COUNT(*) FROM v_stock_projete WHERE statut <> 'OK')                AS nb_refs_en_alerte,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'A')      AS nb_classe_a,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'B')      AS nb_classe_b,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'C')      AS nb_classe_c,
+           (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc IS NULL)    AS nb_non_classees,
+           (SELECT ROUND(SUM(GREATEST(sp.stock_physique_net_kg, 0) * sp.cmup_mad)
+                         / NULLIF(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * sp.cmup_mad) / 30.0, 0), 1)
+              FROM v_stock_projete sp)                                                AS couverture_ponderee_jours,
+           (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM archive_reception
+             WHERE ecart_pct IS NOT NULL)                                             AS ecart_pesee_moyen_pct,
+           (SELECT ROUND(COALESCE(SUM(e), 0), 2) FROM (
+                SELECT MAX(economie_annuelle_mad) AS e FROM v_cockpit_economies
+                 GROUP BY code_reference) x)                                          AS economies_total_mad,
+           (SELECT COUNT(DISTINCT code_reference) FROM v_cockpit_economies)          AS nb_opportunites,
+           (SELECT ROUND(COALESCE(SUM(montant_estime_mad), 0), 2) FROM v_plan_achat
+             WHERE statut = 'RUPTURE')                                                AS budget_ruptures_mad,
+           (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM v_stock_dormant)      AS valeur_dormante_mad,
+           (SELECT ROUND(100.0 * COALESCE((SELECT SUM(valeur_mad) FROM v_stock_dormant), 0)
+                         / NULLIF(SUM(valeur_mad), 0), 1)
+              FROM stock_magasin)                                                     AS pct_valeur_dormante",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    if let Some(ligne) = lignes_en_json(&ind).as_array().and_then(|a| a.first()).cloned() {
+        sortie["indicateurs"] = ligne;
+    }
 
     // Les indicateurs de tresorerie. DSO vient d'un parametre : sans module de
     // vente, l'ERP ne peut pas le mesurer — il le declare, et l'ecran le dit.
@@ -1168,10 +1314,20 @@ pub async fn cockpit_analyse(
         // `AS numeric` de SQLite devient `numeric` puis `float8` : deux etapes,
         // parce que le parametre est stocke en TEXTE et qu'un texte ne se
         // convertit pas directement en flottant sans passer par le decimal.
+        //
+        // LA VALEUR DU STOCK est celle de la tuile « Valeur du stock » et de la
+        // Valorisation : tous les magasins, chacun a son CMUP. Trois ecrans
+        // donnaient trois chiffres.
+        // LE DPO est pondere par le budget annuel : un fournisseur a 180 jours
+        // qui porte 40 % des achats pese plus qu'un fournisseur de plastique.
         "SELECT
-           ROUND(COALESCE(SUM(sp.valeur_totale_mad), 0), 2)::float8,
+           (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM stock_magasin)::float8,
            ROUND(COALESCE(SUM(sp.conso_mensuelle_kg * 12 * sp.cmup_mad), 0), 2)::float8,
-           ROUND(COALESCE(AVG(f.delai_paiement_jours), 0), 1)::float8,
+           ROUND(COALESCE(
+               SUM(f.delai_paiement_jours * COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0))
+               / NULLIF(SUM(CASE WHEN f.delai_paiement_jours IS NOT NULL
+                                 THEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0) END), 0),
+               AVG(f.delai_paiement_jours), 0), 1)::float8,
            (SELECT CAST(valeur_courante AS numeric)::float8 FROM parametre
              WHERE code_parametre = 'P_DSODefaut'),
            COUNT(*)
@@ -1375,9 +1531,31 @@ pub async fn modifier_proposition(
                     -- kg : les laisser diverger ferait commander deux nombres
                     -- differents selon la colonne lue.
                     WHEN unite_saisie = 'kg' OR unite_saisie IS NULL THEN $2
-                    ELSE ROUND($2 * quantite_suggeree_unite / quantite_suggeree_kg, 4)
+                    -- `round(double precision, integer)` n'existe pas : le `::numeric`
+                    -- manquait, et CHAQUE modification de proposition echouait.
+                    ELSE ROUND($2::numeric * quantite_suggeree_unite / quantite_suggeree_kg, 4)
                 END,
                 prix_estime_mad = COALESCE($3, prix_estime_mad),
+                -- LE PRIX EN DEVISE SUIT LE PRIX NEGOCIE. L'acheteur discute
+                -- en dollars ou en euros ; c'est le montant en dirhams qui en
+                -- decoule, jamais l'inverse. Sans cette ligne, negocier un
+                -- rabais laissait la colonne « Montant devise » afficher
+                -- l'ancien chiffre — celui-la meme qu'on met sur le bon.
+                prix_devise = CASE
+                    WHEN $3 IS NULL OR COALESCE(taux_devise, 0) <= 0 THEN prix_devise
+                    ELSE ROUND($3::numeric / taux_devise, 4)
+                END,
+                montant_devise = CASE
+                    WHEN prix_devise IS NULL THEN montant_devise
+                    ELSE ROUND(COALESCE($2::numeric, quantite_suggeree_kg)
+                               * CASE WHEN $3 IS NULL OR COALESCE(taux_devise, 0) <= 0
+                                      THEN prix_devise ELSE $3::numeric / taux_devise END, 2)
+                END,
+                palettes_a_commander = CASE
+                    WHEN $2 IS NULL OR palettes_a_commander IS NULL
+                         OR quantite_suggeree_kg <= 0 THEN palettes_a_commander
+                    ELSE CEIL(palettes_a_commander * $2::numeric / quantite_suggeree_kg)::bigint
+                END,
                 commentaires    = COALESCE($4, commentaires),
                 statut          = 'EN_REVISION',
                 -- Ce que le calcul proposait AVANT la retouche, garde une seule
@@ -1806,6 +1984,33 @@ pub async fn usages_reference(
 /// Les coordonnees bancaires font exception et sont retirees pour qui n'a pas
 /// acces au module ACHAT : elles n'apparaissent que sur les documents
 /// commerciaux, et un changement de RIB frauduleux est une fraude classique.
+/// `GET /api/actualite` — LE FIL DE CE QUI S'EST PASSE.
+///
+/// POURQUOI UNE PAGE D'ACCUEIL MONTRE DES FAITS, PAS DES BOUTONS. Elle
+/// affichait trente liens ranges par section — le menu de gauche, recopie au
+/// milieu de l'ecran. Un accueil qui ne propose que des destinations n'apprend
+/// rien a celui qui l'ouvre ; celui-ci dit qui a enregistre quoi, quel bon est
+/// parti, quelle reception attend un controle.
+///
+/// ON NE FILTRE PAS PAR DROITS LIGNE A LIGNE, et c'est un choix : le fil ne
+/// porte que des titres de documents et des noms de magasins, jamais un prix ni
+/// une quantite en valeur. Le seul montant qui y figure — celui d'un bon de
+/// commande — est masque comme ailleurs par la grille de champs.
+pub async fn actualite(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    // Tout compte connecte lit le fil : savoir que l'atelier a pese une
+    // reception n'est un secret pour personne, et l'ignorer fait travailler
+    // deux fois.
+    let lignes = sqlx::query("SELECT * FROM v_actualite LIMIT 40")
+        .fetch_all(&state.db)
+        .await?;
+    let mut sortie = lignes_en_json(&lignes);
+    user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
+    Ok(Json(sortie))
+}
+
 pub async fn entreprise(
     State(state): State<AppState>,
     user: Utilisateur,

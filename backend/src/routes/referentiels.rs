@@ -36,6 +36,38 @@ pub async fn devises(State(state): State<AppState>, user: Utilisateur) -> AppRes
     Ok(Json(lignes_en_json(&rows)))
 }
 
+/// Le cours de reference de Bank Al-Maghrib, a cote du taux de l'ERP.
+///
+/// POUR INFORMATION : rien ici ne touche `taux_change`. La lecture de la page
+/// de la banque se fait au passage, si le cours du jour manque ; son echec ne
+/// fait pas echouer la reponse — l'ecran recoit le dernier cours connu et la
+/// raison, en clair.
+pub async fn cours_bam(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PARAMETRES, Action::Lire).await?;
+    let erreur = crate::domain::cours_bam::rafraichir(&state.db).await?;
+    let rows = sqlx::query(
+        "SELECT d.code_devise, c.date_cours, c.cours_mad, c.date_lecture,
+                p.date_cours AS date_precedente, p.cours_mad AS cours_precedent_mad
+           FROM devise d
+           LEFT JOIN LATERAL (SELECT date_cours, cours_mad, date_lecture FROM cours_bam
+                               WHERE code_devise = d.code_devise
+                               ORDER BY date_cours DESC LIMIT 1) c ON true
+           LEFT JOIN LATERAL (SELECT date_cours, cours_mad FROM cours_bam
+                               WHERE code_devise = d.code_devise AND date_cours < c.date_cours
+                               ORDER BY date_cours DESC LIMIT 1) p ON true
+          WHERE d.actif = 1 AND d.est_pivot = 0
+          ORDER BY d.code_devise",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(json!({
+        "source": "Bank Al-Maghrib — cours de référence moyen",
+        "url": crate::domain::cours_bam::URL,
+        "erreur": erreur,
+        "cours": lignes_en_json(&rows),
+    })))
+}
+
 pub async fn taux_change(
     State(state): State<AppState>,
     user: Utilisateur,

@@ -343,6 +343,44 @@ pub const COMPETENCES: &[Competence] = &[
         ecran: Some("/qualites"),
     },
     Competence {
+        nom: "dossiers_import",
+        description:
+            "Les dossiers d'importation et leur avancement : valeur facturee, poids attendu, \
+             poids deja recu, frais engages et coefficient de frais. Repond a « ou en sont les \
+             importations », « quels dossiers sont ouverts ».",
+        module: module::IMPORT,
+        parametres: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "statut": { "type": "string", "enum": ["BROUILLON", "EN_COURS", "CLOTURE"],
+                        "description": "Facultatif. Sans lui, les dossiers non clotures." },
+                    "limite": { "type": "integer", "description": "Nombre maximum, defaut 15." }
+                },
+                "required": []
+            })
+        },
+        ecran: Some("/import"),
+    },
+    Competence {
+        nom: "dossier_import",
+        description:
+            "Le detail d'UN dossier d'importation nomme par son numero (« 55/26 ») : ses \
+             factures, ses frais, ce qui reste a recevoir, et LES DOCUMENTS QUI MANQUENT. \
+             Repond a « qu'est-ce qui manque au dossier 55/26 », « ou en est ce dossier ».",
+        module: module::IMPORT,
+        parametres: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "numero": { "type": "string", "description": "Numero du dossier, ex « 55/26 »." }
+                },
+                "required": ["numero"]
+            })
+        },
+        ecran: Some("/import"),
+    },
+    Competence {
         nom: "preparer_mouvement",
         description:
             "Prepare un BROUILLON de mouvement de stock, pre-rempli, que l'utilisateur relira \
@@ -647,6 +685,130 @@ pub async fn executer(
         }
 
         // ---- Les deux brouillons : ils N'ECRIVENT RIEN -----------------------
+        "dossiers_import" => {
+            let statut = args.get("statut").and_then(Value::as_str);
+            let rows = sqlx::query(
+                "SELECT d.numero, d.statut, d.date_arrivee, d.numero_bl, d.code_devise,
+                        (SELECT string_agg(DISTINCT fo.nom, ', ')
+                           FROM import_factures f
+                           JOIN fournisseur fo ON fo.code_fournisseur = f.code_fournisseur
+                          WHERE f.id_dossier = d.id_dossier) AS fournisseurs,
+                        ROUND(v.valeur_dhs, 2)::float8 AS valeur_dhs,
+                        ROUND(v.poids_kg, 2)::float8   AS poids_attendu_kg,
+                        ROUND(v.recu_kg, 2)::float8    AS poids_recu_kg,
+                        ROUND(v.poids_kg - v.recu_kg, 2)::float8 AS reste_kg,
+                        ROUND(fr.frais_dhs, 2)::float8 AS frais_dhs,
+                        CASE WHEN v.valeur_dhs > 0
+                             THEN ROUND(fr.frais_dhs * 100 / v.valeur_dhs, 2)::float8 END
+                          AS coef_frais_pct
+                   FROM import_dossiers d
+                   LEFT JOIN LATERAL (
+                        SELECT COALESCE(sum(round(l.montant_devise * f.taux_change, 2)), 0) AS valeur_dhs,
+                               COALESCE(sum(l.poids_net_kg) FILTER (WHERE l.type_ligne = 'ERP'), 0) AS poids_kg,
+                               COALESCE(sum(l.quantite_recue_kg), 0) AS recu_kg
+                          FROM import_facture_lignes l
+                          JOIN import_factures f ON f.id_facture = l.id_facture
+                         WHERE f.id_dossier = d.id_dossier) v ON true
+                   LEFT JOIN LATERAL (
+                        SELECT COALESCE(sum(x.montant_dhs) FILTER (WHERE p.inclus_dans_cout = 1), 0) AS frais_dhs
+                          FROM dossier_lignes_frais x
+                          JOIN parametres_frais p ON p.id_frais = x.id_frais
+                         WHERE x.id_dossier = d.id_dossier) fr ON true
+                  WHERE ($1::text IS NULL AND d.statut <> 'CLOTURE') OR d.statut = $1
+                  ORDER BY d.date_creation DESC
+                  LIMIT $2",
+            )
+            .bind(statut)
+            .bind(borne(args, "limite", 15, 60))
+            .fetch_all(&state.db)
+            .await?;
+            json!({ "dossiers": lignes_en_json(&rows) })
+        }
+
+        "dossier_import" => {
+            // Le numero est ce que l'utilisateur prononce ; l'identifiant technique
+            // ne sort jamais de la base.
+            let numero = texte(args, "numero")?;
+            let id: Option<String> = sqlx::query_scalar(
+                "SELECT id_dossier FROM import_dossiers
+                  WHERE numero = $1 OR replace(numero, '/', '') = replace($1, '/', '')",
+            )
+            .bind(&numero)
+            .fetch_optional(&state.db)
+            .await?;
+            let Some(id) = id else {
+                let connus: Vec<String> = sqlx::query_scalar(
+                    "SELECT numero FROM import_dossiers ORDER BY date_creation DESC LIMIT 10",
+                )
+                .fetch_all(&state.db)
+                .await?;
+                return Ok(json!({ "trouve": false, "cherche": numero, "dossiers_connus": connus }));
+            };
+
+            let entete = sqlx::query(
+                "SELECT numero, statut, numero_bl, conteneurs, code_devise, taux_change,
+                        date_arrivee, notes
+                   FROM import_dossiers WHERE id_dossier = $1",
+            )
+            .bind(&id)
+            .fetch_all(&state.db)
+            .await?;
+            let factures = sqlx::query(
+                "SELECT f.numero_facture, fo.nom AS fournisseur, f.date_facture,
+                        f.code_devise, f.taux_change,
+                        (SELECT count(*) FROM import_facture_lignes l
+                          WHERE l.id_facture = f.id_facture) AS nb_lignes,
+                        (SELECT ROUND(COALESCE(sum(l.poids_net_kg)
+                                 FILTER (WHERE l.type_ligne = 'ERP'), 0), 2)::float8
+                           FROM import_facture_lignes l WHERE l.id_facture = f.id_facture)
+                          AS poids_kg,
+                        (SELECT ROUND(COALESCE(sum(l.reste_kg)
+                                 FILTER (WHERE l.type_ligne = 'ERP' AND l.soldee = 0), 0), 2)::float8
+                           FROM import_facture_lignes l WHERE l.id_facture = f.id_facture)
+                          AS reste_kg
+                   FROM import_factures f
+                   LEFT JOIN fournisseur fo ON fo.code_fournisseur = f.code_fournisseur
+                  WHERE f.id_dossier = $1
+                  ORDER BY f.date_facture, f.numero_facture",
+            )
+            .bind(&id)
+            .fetch_all(&state.db)
+            .await?;
+            let frais = sqlx::query(
+                "SELECT p.libelle, p.categorie, p.inclus_dans_cout,
+                        ROUND(x.montant_dhs, 2)::float8 AS montant_dhs
+                   FROM dossier_lignes_frais x
+                   JOIN parametres_frais p ON p.id_frais = x.id_frais
+                  WHERE x.id_dossier = $1
+                  ORDER BY p.categorie, p.libelle",
+            )
+            .bind(&id)
+            .fetch_all(&state.db)
+            .await?;
+
+            // Les documents manquants viennent de la MEME regle que l'ecran des
+            // pieces : une seule definition de ce qu'un dossier doit contenir.
+            let attendues = crate::routes::pieces::attendues(&state.db, &id).await?;
+            let manquantes: Vec<Value> = attendues
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter(|p| p.get("manque").and_then(Value::as_i64).unwrap_or(0) > 0)
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            json!({
+                "trouve": true,
+                "dossier": lignes_en_json(&entete).get(0).cloned().unwrap_or(Value::Null),
+                "factures": lignes_en_json(&factures),
+                "frais": lignes_en_json(&frais),
+                "documents_attendus": attendues,
+                "documents_manquants": manquantes,
+            })
+        }
+
         "preparer_mouvement" => {
             let code = match resoudre_reference(state, &texte(args, "code_reference")?).await? {
                 Resolution::Une(c) => c,

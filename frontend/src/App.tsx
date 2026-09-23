@@ -6,8 +6,6 @@ import { Verrou } from './auth/Verrou'
 import { FournisseurTheme, useTheme } from './composants/Theme'
 import { FournisseurApparence } from './composants/Apparence'
 import { Coquille } from './composants/Coquille'
-import { Atelier } from './composants/atelier/Atelier'
-import { estBureau } from './lib/utils'
 import { Alerte, Chargement } from './composants/ui/base'
 import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
@@ -19,9 +17,14 @@ import { Telecharger } from './pages/Telecharger'
 import { Chat } from './pages/Chat'
 import { Controles } from './pages/Controles'
 import { Etats } from './pages/Etats'
+import { EtatManuel } from './pages/EtatManuel'
+import { FeuilleComptage } from './pages/FeuilleComptage'
 import {
   EtatCatalogue,
+  EtatCategories,
   EtatComptage,
+  EtatCouleur,
+  EtatCouleurs,
   EtatFournisseurs,
   EtatMouvements,
   EtatPlanAchat,
@@ -44,6 +47,8 @@ import { Configuration } from './pages/Configuration'
 import { TransfertNouveau } from './pages/TransfertNouveau'
 import { BonTransfert } from './pages/BonTransfert'
 import { Catalogue } from './pages/Catalogue'
+import { MouvementNouveau } from './pages/MouvementNouveau'
+import { CompleterCatalogue } from './pages/CompleterCatalogue'
 import { Fournisseurs } from './pages/Fournisseurs'
 import { Referentiels } from './pages/Referentiels'
 import { Stock } from './pages/Stock'
@@ -59,6 +64,12 @@ import { Plans } from './pages/Plans'
 import { Besoins } from './pages/Besoins'
 import { BonsCommande } from './pages/BonsCommande'
 import { BonCommande } from './pages/BonCommande'
+import { AssistantImport } from './pages/import/AssistantImport'
+import { DossiersImport } from './pages/import/DossiersImport'
+import { DossierImport } from './pages/import/DossierImport'
+import { FactureImport } from './pages/import/FactureImport'
+import { ReceptionImport } from './pages/import/ReceptionImport'
+import { ReceptionsImport } from './pages/import/ReceptionsImport'
 import { BonCommandeNouveau } from './pages/BonCommandeNouveau'
 import { Receptions } from './pages/Receptions'
 import { Reception } from './pages/Reception'
@@ -134,9 +145,22 @@ const ECRANS = (
           tableau de bord. Un ERP ne peut pas ouvrir sur un refus. La page ne
           montre de toute facon que les ecrans deja ouverts a celui qui regarde. */}
       <Route index element={<Accueil />} />
+<<<<<<< HEAD
+      {/* QUATRE PAGES SOUS UNE MEME ENTREE, chacune avec son adresse.
+          Synthese, analytique, opportunites et matiere ne se melangent plus
+          derriere une seule porte : chacune se met en signet, se retrouve au
+          menu, et s'ouvre dans son propre onglet. C'est l'organisation des
+          espaces Fiori et des menus d'application Odoo. */}
       <Route path="tableau-de-bord"
              element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+      <Route path="tableau-de-bord/:vue"
+             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+=======
+      <Route path="tableau-de-bord"
+             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
+      <Route path="catalogue/completer" element={<ExigeModule module="CATALOGUE"><CompleterCatalogue /></ExigeModule>} />
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
       <Route path="chat" element={<ExigeModule module="COCKPIT"><Chat /></ExigeModule>} />
       <Route path="telecharger" element={<ExigeModule module="COCKPIT"><Telecharger /></ExigeModule>} />
@@ -145,10 +169,19 @@ const ECRANS = (
           donc la direction et les super-utilisateurs. */}
       <Route path="parc-machines" element={<ExigeModule module="PARAMETRES"><ParcMachines /></ExigeModule>} />
       <Route path="mouvements" element={<ExigeModule module="MOUVEMENTS"><Mouvements /></ExigeModule>} />
+      <Route path="mouvements/nouveau" element={<ExigeModule module="MOUVEMENTS"><MouvementNouveau /></ExigeModule>} />
       <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />
       <Route path="receptions" element={<ExigeModule module="RECEPTIONS"><Receptions /></ExigeModule>} />
+      <Route path="import" element={<ExigeModule module="IMPORT"><DossiersImport /></ExigeModule>} />
+      <Route path="import/assistant" element={<ExigeModule module="IMPORT"><AssistantImport /></ExigeModule>} />
+      <Route path="import/:id" element={<ExigeModule module="IMPORT"><DossierImport /></ExigeModule>} />
+      <Route path="import/:id/factures/:idFacture" element={<ExigeModule module="IMPORT"><FactureImport /></ExigeModule>} />
+      {/* La reception d'import est A PART du dossier : sa liste, son ecran, et
+          le module RECEPTIONS — le magasinier y a ses droits, sans voir les prix. */}
+      <Route path="receptions-import" element={<ExigeModule module="RECEPTIONS"><ReceptionsImport /></ExigeModule>} />
+      <Route path="receptions-import/:idReception" element={<ExigeModule module="RECEPTIONS"><ReceptionImport /></ExigeModule>} />
       <Route path="transferts/nouveau" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/modifier" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/bon-sortie" element={<ExigeModule module="MOUVEMENTS"><BonTransfert type="sortie" /></ExigeModule>} />
@@ -163,6 +196,9 @@ const ECRANS = (
           s'ouvrent depuis la ligne, pas depuis un selecteur. Le segment reste
           optionnel pour que l'adresse nue propose encore le choix. */}
       <Route path="etats/receptions/:id" element={<ExigeModule module="RECEPTIONS"><EtatReception /></ExigeModule>} />
+      {/* La feuille qu'on emporte POUR compter, distincte du proces-verbal qui
+          confronte APRES coup le compte au theorique. */}
+      <Route path="etats/inventaire/:id/comptage" element={<ExigeModule module="INVENTAIRE"><FeuilleComptage /></ExigeModule>} />
       <Route path="etats/inventaire/:id" element={<ExigeModule module="INVENTAIRE"><EtatInventaire /></ExigeModule>} />
       <Route path="etats/plan-production/:id" element={<ExigeModule module="PLANS"><EtatPlanProduction /></ExigeModule>} />
       <Route path="etats/besoins/:id" element={<ExigeModule module="MRP"><EtatBesoins /></ExigeModule>} />
@@ -174,6 +210,18 @@ const ECRANS = (
       <Route path="etats/mouvements" element={<ExigeModule module="MOUVEMENTS"><EtatMouvements /></ExigeModule>} />
       <Route path="etats/catalogue" element={<ExigeModule module="CATALOGUE"><EtatCatalogue /></ExigeModule>} />
       <Route path="etats/fournisseurs" element={<ExigeModule module="FOURNISSEURS"><EtatFournisseurs /></ExigeModule>} />
+      {/* LE MANUEL EST SOUS COCKPIT, et non sous un module metier : tout le
+          monde a le droit de lire le mode d'emploi de l'outil qu'il emploie.
+          Chaque fiche, elle, ne decrit que des ecrans que le lecteur peut
+          ouvrir — les droits par champ font le reste. */}
+      <Route path="etats/manuel" element={<ExigeModule module="COCKPIT"><EtatManuel /></ExigeModule>} />
+      <Route path="etats/categories" element={<ExigeModule module="CATALOGUE"><EtatCategories /></ExigeModule>} />
+      <Route path="etats/couleurs" element={<ExigeModule module="CATALOGUE"><EtatCouleurs /></ExigeModule>} />
+      {/* La fiche d'UNE couleur porte son code dans l'adresse : on peut y
+          revenir, l'envoyer, la mettre en favori. L'adresse nue propose
+          encore le choix, comme les autres etats de document. */}
+      <Route path="etats/couleur/:code" element={<ExigeModule module="CATALOGUE"><EtatCouleur /></ExigeModule>} />
+      <Route path="etats/couleur" element={<ExigeModule module="CATALOGUE"><EtatCouleur /></ExigeModule>} />
       <Route path="controles" element={<ExigeModule module="COCKPIT"><Controles /></ExigeModule>} />
       <Route path="matrice-prix" element={<ExigeModule module="CATALOGUE"><MatricePrix /></ExigeModule>} />
       <Route path="historique-prix" element={<ExigeModule module="CATALOGUE"><HistoriquePrix /></ExigeModule>} />
@@ -187,6 +235,10 @@ const ECRANS = (
           seul endroit ou l'on CREE un groupe d'equivalence, et le supprimer
           rendrait les 93 groupes inadministrables. */}
       <Route path="categories" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['categories']} /></ExigeModule>} />
+      {/* LES COULEURS AVAIENT LEUR ECRAN SANS AVOIR DE PORTE. Le CRUD existait
+          dans l'ecran des referentiels, mais aucun menu n'y menait : de
+          l'exterieur, il n'existait pas. Meme code, meme CRUD, une adresse. */}
+      <Route path="couleurs" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['couleurs']} /></ExigeModule>} />
       <Route path="roles-bom" element={<ExigeModule module="CATALOGUE"><Referentiels cles={['roles-bom']} /></ExigeModule>} />
       <Route path="referentiels" element={<ExigeModule module="CATALOGUE"><Referentiels /></ExigeModule>} />
       <Route path="qualites" element={<ExigeModule module="QUALITES"><Qualites /></ExigeModule>} />
@@ -211,6 +263,8 @@ const ECRANS = (
   </>
 )
 
+<<<<<<< HEAD
+=======
 /** Onglet dont le chemin n’existe plus : ne jamais rediriger depuis un onglet
     masque, cela deplacerait la navigation de l’onglet actif. */
 function OngletInconnu() {
@@ -220,57 +274,26 @@ function OngletInconnu() {
     </Alerte>
   )
 }
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
 /**
- * Aiguillage de coquille. Le bureau recoit l’atelier complet (onglets, panneau
- * lateral, barre d’etat) ; le web et la PWA gardent la coquille tactile, mieux
- * adaptee a un ecran de telephone.
- */
-/**
- * Apercu de l'atelier hors Tauri.
+ * UNE SEULE COQUILLE, POUR LE BUREAU COMME POUR LE NAVIGATEUR.
  *
- * Compiler l'enveloppe de bureau prend plusieurs minutes ; `?atelier=1` permet
- * de voir la coquille d'atelier dans un navigateur, et `?atelier=0` de revenir
- * a la coquille tactile. Le choix est retenu, sinon la premiere navigation
- * effacerait le parametre et ferait basculer la coquille en pleine session.
+ * L'APPLICATION INSTALLEE PORTAIT UN « ATELIER » calque sur un editeur de
+ * code : barre de titre dessinee a la main, onglets, groupes fractionnables,
+ * panneau bas, barre d'etat. C'etait une enveloppe de developpeur posee sur un
+ * ERP, et cela se voyait — la fenetre ne se comportait plus comme les autres
+ * fenetres du poste, et la barre laterale vivait sa propre vie.
  *
- * Ce n'est qu'un confort de developpement : aucune donnee ni aucun droit ne
- * depend de la coquille, les deux appellent les memes routes et le serveur
- * applique les memes controles.
+ * CE N'EST PAS CE QU'ON ATTEND D'UN ERP. Un magasinier, une assistante, un
+ * directeur veulent une fenetre ordinaire, un menu a gauche, un ecran a la
+ * fois. C'est ce que fait la coquille — la meme qu'au navigateur, avec les
+ * memes rubriques, les memes sous-menus et les memes habitudes.
+ *
+ * L'ATELIER N'EST PLUS MONTE. Son code reste au depot le temps qu'on soit sur
+ * que rien n'en manque, mais plus aucune adresse n'y mene.
  */
-const CLE_APERCU = 'gestionfil.atelier.apercu'
-
-function apercuAtelier(): boolean {
-  const demande = new URLSearchParams(window.location.search).get('atelier')
-  if (demande === '1') localStorage.setItem(CLE_APERCU, '1')
-  else if (demande === '0') localStorage.removeItem(CLE_APERCU)
-  return localStorage.getItem(CLE_APERCU) === '1'
-}
-
 function Aiguillage() {
-  if (estBureau() || apercuAtelier()) {
-    return (
-      <Routes>
-        <Route path="/connexion" element={<Connexion />} />
-        <Route
-          path="*"
-          element={
-            <Protege>
-              <Atelier
-                routes={
-                  <>
-                    {ECRANS}
-                    <Route path="*" element={<OngletInconnu />} />
-                  </>
-                }
-              />
-            </Protege>
-          }
-        />
-      </Routes>
-    )
-  }
-
   return (
     <Routes>
       <Route path="/connexion" element={<Connexion />} />

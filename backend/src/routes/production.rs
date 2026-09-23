@@ -8,7 +8,6 @@
 
 use super::json::lignes_en_json;
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
-use crate::crud::lier;
 use crate::db::maintenant;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -598,24 +597,21 @@ pub async fn modifier_qualite(
         return Err(AppError::Invalide("aucun champ modifiable".into()));
     }
 
-    // Meme correction que dans `crud.rs` : `$1` porte le code de la qualite.
-    let set: Vec<String> = champs
-        .iter()
-        .enumerate()
-        .map(|(i, (n, _))| format!("{n} = ${}", i + 2))
-        .collect();
+    // LA BASE COULE LES VALEURS DANS LEURS TYPES, comme dans `crud.rs` : un
+    // « 12.5 » envoye en texte sur une colonne numeric etait refuse.
+    let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
+    let charge: serde_json::Map<String, Value> =
+        champs.iter().map(|(n, v)| ((*n).clone(), (*v).clone())).collect();
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
     let sql = format!(
-        "UPDATE qualite SET {} WHERE code_qualite = $1",
+        "UPDATE qualite AS c SET {} FROM jsonb_populate_record(NULL::qualite, $2::jsonb) AS p
+          WHERE c.code_qualite = $1",
         set.join(", ")
     );
-    let mut q = sqlx::query(&sql).bind(&code);
-    for (_, v) in &champs {
-        q = lier(q, v);
-    }
+    let q = sqlx::query(&sql).bind(&code).bind(Value::Object(charge).to_string());
     if q.execute(&mut *tx).await?.rows_affected() == 0 {
         return Err(AppError::Introuvable(format!("qualite {code}")));
     }
@@ -650,9 +646,10 @@ pub async fn cloturer_qualite(
         )));
     }
 
+    // `actif` est desormais CALCULE depuis le statut : l'ecrire est refuse.
     let res = sqlx::query(
-        "UPDATE qualite SET actif = 0, date_cloture = $2, id_utilisateur_cloture = $3
-          WHERE code_qualite = $1 AND actif = 1",
+        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = $2, id_utilisateur_cloture = $3
+          WHERE code_qualite = $1 AND statut <> 'CLOTURE'",
     )
     .bind(&code)
     .bind(maintenant())

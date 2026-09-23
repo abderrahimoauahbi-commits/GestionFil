@@ -478,10 +478,48 @@ function FicheMobile({
           </span>
           <span className="font-medium text-texte">{nb(f.totaux.etatKg)} kg constatés</span>
         </div>
+<<<<<<< HEAD
+        {/* MEME QUESTION QU'AU BUREAU, en plus court : sur un telephone tenu
+            d'une main devant un metier, on lit trois lignes, pas dix. */}
+        {f.lotCourt && (
+          <div className="mb-2 rounded-[var(--radius)] border border-l-[3px] border-alerte/30
+                          border-l-alerte bg-alerte/[0.09] px-3 py-2.5 text-[13px]">
+            <p className="leading-relaxed">
+              Le solde connu de ce lot ne couvre pas la sortie. Les retours de machine
+              sont imputes au juge : la matiere est peut-etre bien la.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                disabled={f.envoi.isPending}
+                onClick={() => f.envoi.mutate(true)}
+                className="min-h-[44px] flex-1 rounded-[var(--radius-sm)] bg-alerte px-3
+                           text-[14px] font-semibold text-surface disabled:opacity-40"
+              >
+                Charger quand meme
+              </button>
+              <button
+                type="button"
+                onClick={f.oublierLotCourt}
+                className="min-h-[44px] rounded-[var(--radius-sm)] border border-bordure px-3
+                           text-[14px] font-medium"
+              >
+                Corriger
+              </button>
+            </div>
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={!f.pret || f.envoi.isPending}
+          onClick={() => f.envoi.mutate(undefined)}
+=======
         <button
           type="button"
           disabled={!f.pret || f.envoi.isPending}
           onClick={() => f.envoi.mutate()}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           className="inline-flex min-h-[56px] w-full items-center justify-center gap-2
                      rounded-[var(--radius-sm)] bg-primaire text-[15px] font-semibold
                      text-primaire-texte disabled:opacity-40"

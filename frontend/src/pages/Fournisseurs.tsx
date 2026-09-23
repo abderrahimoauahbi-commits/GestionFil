@@ -108,6 +108,16 @@ export function Fournisseurs() {
     },
     { champ: 'incoterm', libelle: 'Incoterm' },
     { champ: 'transporteur', libelle: 'Transporteur' },
+    {
+      champ: 'palettes_par_conteneur',
+      libelle: 'Palettes par conteneur',
+      type: 'entier',
+      min: 1,
+      aide:
+        'Combien de palettes entrent dans un conteneur chez ce fournisseur. Le bon de ' +
+        'commande en déduit le nombre de conteneurs à annoncer — le chiffre que le ' +
+        'transitaire attend, et qui figurait sur 71 des anciens bons Excel.',
+    },
     { champ: 'note_globale', libelle: 'Note globale (/100)', type: 'nombre', min: 0, max: 100 },
     {
       champ: 'tolerance_pesee_pct',

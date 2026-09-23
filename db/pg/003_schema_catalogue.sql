@@ -60,6 +60,47 @@ CREATE UNIQUE INDEX ux_contact_principal
 --  * prix_catalogue_kg generalise la regle E2 (prix ramene au kg) aux 4 unites.
 --  * suivi_lot : active la tracabilite par lot (A3). Cf. table stock_lot.
 -- -----------------------------------------------------------------------------
+-- couleur — NOTRE liste de couleurs, commune a tous les fournisseurs
+-- -----------------------------------------------------------------------------
+-- Le meme rouge se nomme « RED 7612 » chez Hasirci, « OZ 5109 » chez Ozkaralar
+-- et « RED 5342 » chez Goral. Le code interne (C3) est ce qui les rapproche.
+--
+-- La classe de teinture est tarifaire : le prix d'une couleur est le prix de
+-- base de sa famille plus un supplement, en devise par tonne, qui ne depend que
+-- de la classe (LIGHT 1,80 / MEDIUM 1,85 / DARK 1,95 / RED 2,10 chez Goral).
+-- C'est ce qui permet de chiffrer une couleur jamais achetee.
+-- -----------------------------------------------------------------------------
+CREATE TABLE couleur (
+    code_couleur_interne text    NOT NULL PRIMARY KEY,
+    libelle              text    NOT NULL,
+    classe_teinture      text    CHECK (classe_teinture IS NULL
+                                        OR classe_teinture IN ('LIGHT','MEDIUM','DARK','RED')),
+    description          text,
+    ordre_affichage      bigint  NOT NULL DEFAULT 0,
+    actif                bigint  NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+);
+
+
+-- -----------------------------------------------------------------------------
+-- famille — le produit, independamment de qui le vend
+-- -----------------------------------------------------------------------------
+-- « FIL 2650 dtex FZ », « FIL VERONA 1500 », « MILIPLY POLYESTER 3000 Deniers » :
+-- c'est le titre des blocs des classeurs de prix. Deux references de meme
+-- famille et de meme couleur sont le meme fil, chez deux vendeurs differents.
+-- -----------------------------------------------------------------------------
+CREATE TABLE famille (
+    code_famille    text    NOT NULL PRIMARY KEY,
+    libelle         text    NOT NULL,
+    code_categorie  text    REFERENCES categorie_matiere(code_categorie),
+    type_fil        text,
+    titrage         text,
+    description     text,
+    ordre_affichage bigint  NOT NULL DEFAULT 0,
+    actif           bigint  NOT NULL DEFAULT 1 CHECK (actif IN (0,1))
+);
+
+
+-- -----------------------------------------------------------------------------
 CREATE TABLE reference (
     code_reference      text    NOT NULL PRIMARY KEY,
     code_categorie      text    NOT NULL REFERENCES categorie_matiere(code_categorie),
@@ -67,7 +108,19 @@ CREATE TABLE reference (
     designation         text    NOT NULL,
     type_fil            text,
     couleur             text,
+    -- La nuance du fournisseur (« 7612 » sur la facture Hasirci), distincte
+    -- du nom de la couleur : c'est elle que la production suit au lot.
+    code_couleur        text,
     titrage             text,
+    -- Le produit et la couleur, en referentiel : ce qui rapproche deux
+    -- fournisseurs du meme fil (voir `famille` et `couleur` ci-dessus).
+    code_famille        text    REFERENCES famille(code_famille),
+    code_couleur_interne text   REFERENCES couleur(code_couleur_interne),
+    -- La reference telle que le fournisseur l'ecrit sur sa facture : c'est
+    -- elle que la saisie assistee lit, et elle seule.
+    reference_fournisseur text,
+    -- Supplement de teinture, en devise par tonne (100, 150, 530...).
+    supplement_teinture numeric(18,4) CHECK (supplement_teinture IS NULL OR supplement_teinture >= 0),
 
     -- Unite de saisie et facteurs de conversion vers le kg
     unite_catalogue     text    NOT NULL CHECK (unite_catalogue IN ('kg','Palette','Bobine','ml')),
@@ -126,6 +179,9 @@ CREATE TABLE reference (
 CREATE INDEX ix_ref_categorie   ON reference(code_categorie);
 CREATE INDEX ix_ref_fournisseur ON reference(code_fournisseur);
 CREATE INDEX ix_ref_abc         ON reference(classe_abc) WHERE actif = 1;
+CREATE INDEX ix_ref_famille_couleur ON reference(code_famille, code_couleur_interne) WHERE actif = 1;
+CREATE INDEX ix_ref_reference_fournisseur ON reference(reference_fournisseur)
+    WHERE reference_fournisseur IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- groupe_equiv  (substitution, CDC F8)

@@ -7,12 +7,17 @@
 
 mod admin;
 mod assistant;
+mod briefing;
+mod completion;
 mod auth_routes;
 mod consultation;
+mod devalidation;
 mod entites;
+mod importation;
 mod machines;
 pub(crate) mod json;
 mod operations;
+pub mod pieces;
 mod production;
 mod referentiels;
 mod stock;
@@ -20,10 +25,45 @@ mod telechargements;
 
 use crate::state::AppState;
 use axum::routing::{delete, get, patch, post, put};
-use axum::Router;
+use axum::{Json, Router};
+use serde_json::json;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
+
+/// UNE ADRESSE D'API SANS ROUTE DOIT LE DIRE.
+///
+/// Sans ce filet, un appel vers une route disparue ne rencontre aucune route et
+/// tombe sur le service de fichiers, qui repond 405 a tout ce qui n'est pas un
+/// GET. C'est le cas le plus courant apres une mise a jour : l'ecran garde en
+/// cache par le navigateur appelle l'adresse d'hier, et l'utilisateur lit
+/// « erreur 405 » sans rien pour la comprendre.
+///
+/// Le filtre ne touche QUE `/api/...` : le reste appartient a l'interface.
+async fn nommer_route_inconnue(
+    requete: axum::extract::Request,
+    suite: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let chemin = requete.uri().path().to_string();
+    let est_api = chemin.starts_with("/api/");
+    let reponse = suite.run(requete).await;
+    if est_api && reponse.status() == axum::http::StatusCode::METHOD_NOT_ALLOWED {
+        return (
+            axum::http::StatusCode::METHOD_NOT_ALLOWED,
+            Json(json!({
+                "code": "ROUTE_INCONNUE",
+                "message": format!(
+                    "L'adresse {chemin} n'existe pas, ou pas pour cette action. \
+                     Rechargez la page avec Ctrl+F5 : l'écran affiché est probablement \
+                     une ancienne version gardée en cache."
+                ),
+            })),
+        )
+            .into_response();
+    }
+    reponse
+}
 
 pub fn router(state: AppState) -> Router {
     let origines: Vec<_> = state
@@ -63,6 +103,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sante", get(consultation::sante))
         // L'identite de l'entreprise : pied de page et etats imprimes.
         .route("/api/entreprise", get(consultation::entreprise))
+        // CE QUI S'EST PASSE : le fil de la page d'accueil.
+        .route("/api/actualite", get(consultation::actualite))
         // --- Paquets clients ---------------------------------------------------
         // La LISTE et le TELECHARGEMENT sont ouverts a tout compte connecte :
         // refuser a un magasinier de reinstaller son poste ne protege rien. Le
@@ -70,6 +112,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/telechargements", get(telechargements::lister))
         .route("/api/telechargements/journal",
                get(telechargements::journal).post(telechargements::inscrire))
+        // CE QUI EXISTE DE PLUS RECENT. L'application de bureau embarque son
+        // interface et se fige au jour de son installation ; sans cette route,
+        // un poste installe en septembre ne saurait jamais qu'il a vieilli.
+        .route("/api/mise-a-jour", get(telechargements::mise_a_jour))
+        // LE POSTE INTERROGE LUI-MEME, SANS JETON : le greffon de mise a jour
+        // s'execute avant toute connexion, et un manifeste qui ne dit que
+        // « telle version existe » n'apprend rien a qui l'intercepte. Ce qui
+        // protege, c'est la signature du paquet, pas le secret du manifeste.
+        .route("/api/maj/{cible}/{arch}/{version}", get(telechargements::manifeste_maj))
         // --- Assistant de direction (lecture seule, role DIRECTION) -----------
         // L'ANCIEN ASSISTANT RESTE, en second. C'est un catalogue ferme de
         // questions : il repond sans modele de langage, donc il repond meme si
@@ -78,6 +129,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/assistant", get(assistant::catalogue))
         .route("/api/assistant/{id}", get(assistant::repondre))
         // --- Le chatbot --------------------------------------------------------
+        // Le robot de connexion : ce qui attend l'utilisateur, filtre par ses
+        // droits. Des comptes, pas une conversation — il doit s'afficher
+        // meme si le moteur de langage est arrete.
+        .route("/api/briefing", get(briefing::briefing))
+        .route("/api/catalogue/completion", get(completion::completion))
         .route("/api/chat", post(crate::assistant::discuter))
         .route("/api/chat/etat", get(crate::assistant::etat))
         .route("/api/chat/competences", get(crate::assistant::liste_competences))
@@ -89,6 +145,12 @@ pub fn router(state: AppState) -> Router {
         // Changer SON mot de passe : aucun droit particulier, mais
         // l'ancien mot de passe est exige (voir auth_routes).
         .route("/api/auth/mot-de-passe", post(auth_routes::changer_mot_de_passe))
+        // Le second facteur : poser, exiger, retirer. Trois gestes distincts,
+        // pour qu'un QR mal scanne n'enferme personne dehors.
+        .route("/api/auth/2fa/preparer", post(auth_routes::preparer_2fa))
+        .route("/api/auth/2fa/activer", post(auth_routes::activer_2fa))
+        .route("/api/auth/2fa/desactiver", post(auth_routes::desactiver_2fa))
+        .route("/api/auth/connexions", get(auth_routes::journal_connexions))
         // Le verrou d'inactivite : verifie le mot de passe sans prolonger la
         // session. Voir auth_routes::deverrouiller.
         .route("/api/auth/deverrouiller", post(auth_routes::deverrouiller))
@@ -107,6 +169,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/registre", get(entites::registre))
         // --- Referentiels a traitement particulier ----------------------------
         .route("/api/devises", get(referentiels::devises))
+        .route("/api/devises/cours-bam", get(referentiels::cours_bam))
         .route("/api/devises/{code}/taux",
                get(referentiels::taux_change).post(referentiels::creer_taux))
         .route("/api/parametres", get(referentiels::parametres))
@@ -166,6 +229,48 @@ pub fn router(state: AppState) -> Router {
         // segment fixe passe avant `{id}` : axum donne priorite au statique.
         // MACHINES. Le stock s'y compte, la consommation s'y journalise —
         // et jamais dans le journal des mouvements.
+<<<<<<< HEAD
+        // --- Dossiers d'importation : MRP, stock, CUMP -------------------------
+        // Lecture pour la saisie d'un dossier ; l'administration du catalogue
+        // passe par le referentiel generique /api/types-frais (PARAMETRES).
+        .route("/api/parametres-frais", get(importation::lister_parametres_frais))
+        .route("/api/import/dossiers",
+               get(importation::lister_dossiers).post(importation::creer_dossier))
+        .route("/api/import/dossiers/{id}",
+               get(importation::lire_dossier)
+                   .patch(importation::modifier_dossier)
+                   .delete(importation::supprimer_dossier))
+        .route("/api/import/dossiers/{id}/factures", post(importation::creer_facture))
+        .route("/api/import/dossiers/{id}/frais", post(importation::ajouter_frais))
+        .route("/api/import/dossiers/{id}/cloturer", post(importation::cloturer))
+        .route("/api/import/factures/{id}",
+               patch(importation::modifier_facture).delete(importation::supprimer_facture))
+        .route("/api/import/factures/{id}/lignes", post(importation::ajouter_ligne))
+        .route("/api/import/lignes/{id}",
+               patch(importation::modifier_ligne).delete(importation::supprimer_ligne))
+        .route("/api/import/lignes/{id}/solder", post(importation::solder_ligne))
+        .route("/api/import/lignes-bc", get(importation::lignes_bc_ouvertes))
+        .route("/api/import/frais/{id}",
+               patch(importation::modifier_frais).delete(importation::supprimer_frais))
+        // La reception est un document A PART : elle ne passe pas par un
+        // dossier, et ses lignes peuvent venir de plusieurs.
+        // Les pieces du dossier : scans, PDF, photos. La limite de corps est
+        // posee sur la seule route qui recoit un fichier — ailleurs, un envoi
+        // volumineux n'a aucune raison d'etre accepte.
+        .route("/api/import/dossiers/{id}/pieces", post(pieces::deposer)
+               .layer(axum::extract::DefaultBodyLimit::max(pieces::TAILLE_MAX + 1024 * 1024)))
+        .route("/api/import/pieces/{id}",
+               get(pieces::telecharger).delete(pieces::supprimer))
+        .route("/api/import/a-recevoir", get(importation::a_recevoir))
+        .route("/api/import/receptions",
+               get(importation::lister_receptions).post(importation::creer_reception))
+        .route("/api/import/receptions/{id}",
+               get(importation::lire_reception)
+                   .put(importation::modifier_reception)
+                   .delete(importation::supprimer_reception))
+        .route("/api/import/receptions/{id}/valider", post(importation::valider_reception))
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
         .route("/api/machines/consommation", get(machines::journal_consommation))
         .route("/api/machines/fiches",
@@ -187,9 +292,20 @@ pub fn router(state: AppState) -> Router {
                    .delete(machines::supprimer_machine))
         // En panne, en sommeil, remise en production, retiree du parc.
         .route("/api/machines/{code}/etat", patch(machines::changer_etat))
+<<<<<<< HEAD
+        .route("/api/machines/{code}/contenu", get(machines::contenu_machine))
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         .route("/api/machines/{code}/zones/{zone}", get(machines::etat_zone))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
+        // DEFAIRE SANS EFFACER : le grand livre ne se corrige que par son
+        // inverse, comme dans tous les ERP depuis trente ans.
+        .route("/api/mouvements/{id}/contre-passer", post(stock::contre_passer))
+        // FAIRE RECULER UN DOCUMENT : valider se delegue, defaire la
+        // validation d'un autre est un acte de direction.
+        .route("/api/devalider", get(devalidation::documents_reversibles))
+        .route("/api/devalider/{document}/{id}", post(devalidation::devalider))
         .route("/api/transferts",
                get(stock::lister_transferts).post(stock::creer_transfert))
         .route("/api/transferts/{id}/lignes", post(stock::ajouter_ligne_transfert))
@@ -215,7 +331,8 @@ pub fn router(state: AppState) -> Router {
         // --- Achats et receptions ---------------------------------------------
         .route("/api/bons-commande",
                get(stock::lister_bc).post(stock::creer_bc))
-        .route("/api/bons-commande/{id}", patch(stock::modifier_bc))
+        .route("/api/bons-commande/{id}",
+               patch(stock::modifier_bc).delete(stock::supprimer_bc))
         // Sans `{id}` : la liste sert AUSSI a la creation, quand le bon n'existe
         // pas encore et qu'on vient de choisir le fournisseur.
         .route("/api/references-commandables", get(stock::references_commandables))
@@ -260,10 +377,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/frais-approche",
              get(consultation::frais_approche).post(operations::creer_frais_approche))
         .route("/api/stats/mouvements", get(consultation::stats_mouvements))
+        .route("/api/stats/familles", get(consultation::stats_familles))
         .route("/api/stats/prix", get(consultation::stats_prix))
         .route("/api/stats/fournisseurs", get(consultation::stats_fournisseurs))
         .route("/api/stats/qualites", get(consultation::stats_qualites))
         .route("/api/controles", get(consultation::controles))
+        .route("/api/supervision", get(consultation::supervision))
         .route("/api/controles/{code}", get(consultation::controle_detail))
         .route("/api/fournisseurs/scorecard", get(consultation::scorecard))
         .route("/api/stock", get(consultation::stock))
@@ -295,6 +414,11 @@ pub fn router(state: AppState) -> Router {
                get(entites::lister).post(entites::creer))
         .route("/api/{entite}/{id}",
                get(entites::lire).patch(entites::modifier).delete(entites::supprimer))
+        // CE QUI RETIENT CETTE LIGNE, demande AVANT d'essayer de l'effacer.
+        // Enregistree apres le motif a deux segments : un chemin plus precis
+        // doit etre declare apres celui qu'il precise, sinon il ne sert jamais.
+        .route("/api/{entite}/{id}/retenants", get(entites::retenants))
+        .route("/api/{entite}/{id}/activation", post(entites::activation))
         .layer(TraceLayer::new_for_http())
         .layer(cors);
 
@@ -324,14 +448,25 @@ pub fn router(state: AppState) -> Router {
             );
 
             routeur
-                .fallback_service(
-                    ServeDir::new(&rep).not_found_service(ServeFile::new(index)),
-                )
+                // LES RESSOURCES CONSTRUITES SE SERVENT A PART, sans repli : un
+                // fichier absent doit repondre 404. Avec le repli general, un
+                // `.js` manquant renverrait la page HTML avec un code 200, et le
+                // navigateur echouerait sur « Unexpected token < » — une panne
+                // illisible pour une simple ressource oubliee.
+                .nest_service("/assets", ServeDir::new(rep.join("assets")))
+                // `fallback` et NON `not_found_service` : le second impose un
+                // code 404 a la reponse de repli. L'ecran s'affichait donc, mais
+                // chaque adresse de l'application repondait « 404 » — de quoi
+                // tromper un cache, une sonde ou un service worker.
+                .fallback_service(ServeDir::new(&rep).fallback(ServeFile::new(index)))
+                .layer(axum::middleware::from_fn(nommer_route_inconnue))
                 .with_state(state)
         }
         None => {
             tracing::info!("aucune interface a servir : API seule");
-            routeur.with_state(state)
+            routeur
+                .layer(axum::middleware::from_fn(nommer_route_inconnue))
+                .with_state(state)
         }
     }
 }

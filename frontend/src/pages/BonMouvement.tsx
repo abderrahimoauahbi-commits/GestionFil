@@ -23,11 +23,13 @@
  * sort en quantites seules — ce qui est le cas normal pour un magasinier, et
  * suffit parfaitement a un bon de sortie.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Undo2 } from 'lucide-react'
 import { api } from '../api/client'
-import { useDroits } from '../auth/AuthContext'
+import { useAuth, useDroits } from '../auth/AuthContext'
+import { ActionMotivee } from '../composants/ActionMotivee'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Bouton, Chargement } from '../composants/ui/base'
 import { fmt } from '../lib/utils'
@@ -61,6 +63,11 @@ interface EnteteMvt {
   palettes_totales?: number
   valeur_totale_mad?: number
   rebut_kg?: number
+  /* CE QUI A DEFAIT, ET CE QUE CELUI-CI DEFAIT. Les deux sens comptent :
+     un document doit dire s'il annule, et s'il a ete annule. */
+  id_mouvement_contrepasse?: string | null
+  motif_contrepassation?: string | null
+  contrepasse_par?: string | null
   [k: string]: unknown
 }
 
@@ -97,6 +104,7 @@ function Champ({ libelle, valeur }: { libelle: string; valeur: React.ReactNode }
 export function BonMouvement() {
   const { id } = useParams<{ id: string }>()
   const droits = useDroits(MODULE)
+  const { moi } = useAuth()
   const auto = useParamVue('imprimer') === '1'
 
   const q = useQuery({
@@ -104,6 +112,8 @@ export function BonMouvement() {
     queryFn: () => api.get<{ entete: EnteteMvt; lignes: LigneMvt[] }>(`/api/mouvements/${id}`),
     enabled: !!id,
   })
+
+  const [defaire, setDefaire] = useState(false)
 
   if (q.isLoading) return <Chargement texte="Preparation du document…" />
   const entete = q.data?.entete
@@ -114,6 +124,13 @@ export function BonMouvement() {
   const entree = entete.signe > 0
   const colis = (entete.palettes_totales ?? 0) > 0 || (entete.bobines_totales ?? 0) > 0
   const retard = entete.jours_de_retard_saisie ?? 0
+  /* DEFAIRE EST UN ACTE DE DIRECTION, et il ne se propose ni sur une
+     contre-passation, ni sur un mouvement deja annule. */
+  const peutDefaire =
+    droits.peutValider &&
+    (moi?.role === 'ADMIN' || moi?.role === 'DIRECTION') &&
+    !entete.id_mouvement_contrepasse &&
+    !entete.contrepasse_par
 
   return (
     <div>
@@ -124,7 +141,54 @@ export function BonMouvement() {
             Retour aux mouvements
           </Link>
         </Bouton>
+
+        {/* CONTRE-PASSER : DEFAIRE SANS EFFACER.
+            Le bouton ne parait que pour la direction, et seulement sur un
+            mouvement qui n'est ni une contre-passation ni deja annule —
+            proposer un geste qui sera refuse est pire que ne rien proposer. */}
+        {peutDefaire && (
+          <Bouton variante="contour" onClick={() => setDefaire(true)}>
+            <Undo2 />
+            Contre-passer
+          </Bouton>
+        )}
       </div>
+
+      {/* L'ANNULATION SE LIT SUR LE DOCUMENT LUI-MEME. Un bon contre-passe qui
+          ne le dirait pas continuerait d'etre imprime, envoye et cru. */}
+      {entete.id_mouvement_contrepasse && (
+        <Alerte ton="info" className="mb-3">
+          Ce document EST une contre-passation : il annule un mouvement precedent.
+          {entete.motif_contrepassation ? ` Motif : ${entete.motif_contrepassation}` : ''}
+        </Alerte>
+      )}
+      {entete.contrepasse_par && (
+        <Alerte ton="alerte" className="mb-3">
+          Ce mouvement a ete annule par {entete.contrepasse_par}. Il reste au grand livre,
+          mais son effet sur le stock a ete defait.
+        </Alerte>
+      )}
+
+      <ActionMotivee
+        ouvert={defaire}
+        surFermeture={() => setDefaire(false)}
+        titre={`Contre-passer ${entete.numero_mouvement}`}
+        description="Le mouvement n'est pas efface : son inverse est enregistre."
+        libelleBouton="Contre-passer"
+        chemin={`/api/mouvements/${id}/contre-passer`}
+        consequence={
+          <>
+            Un mouvement inverse va etre cree, aux memes quantites, et le stock reviendra a ce
+            qu'il etait. Les <strong>deux lignes resteront au grand livre</strong> : c'est ainsi
+            qu'on pourra encore comprendre, dans six mois, ce qui s'est passe aujourd'hui.
+            {prixVisibles && (
+              <>
+                {' '}Le cout moyen sera refait sur les achats qui tiennent encore.
+              </>
+            )}
+          </>
+        }
+      />
 
       {/* L'ECART DE SAISIE EST DIT, PAS CACHE. Un bon etabli apres coup reste
           valable ; le lecteur doit seulement savoir qu'il l'est. */}

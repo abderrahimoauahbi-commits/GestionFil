@@ -64,7 +64,9 @@ pub const ENTITES: &[Entite] = &[
         modification: &["libelle", "description", "code_role_defaut", "ordre_affichage", "actif"],
         suppression: Suppression::Logique("actif"),
         selection: "c.*, (SELECT COUNT(*) FROM reference r
-                           WHERE r.code_categorie = c.code_categorie AND r.actif = 1) AS nb_references",
+                           WHERE r.code_categorie = c.code_categorie AND r.actif = 1) AS nb_references,
+                    (SELECT COUNT(*) FROM famille f
+                      WHERE f.code_categorie = c.code_categorie AND f.actif = 1) AS nb_familles",
         tri: "c.ordre_affichage, c.libelle",
     },
     Entite {
@@ -155,6 +157,27 @@ pub const ENTITES: &[Entite] = &[
                            WHERE g.code_groupe_equiv = c.code_groupe_equiv AND g.actif = 1) AS nb_references",
         tri: "c.code_groupe_equiv",
     },
+    // Le catalogue des frais d'importation. Il s'administre comme un
+    // referentiel : chaque type dit sa piece justificative, s'il est
+    // recuperable, s'il est commun au dossier, et comment il se repartit.
+    // Desactive plutot que supprime : un dossier deja clos cite son type.
+    Entite {
+        chemin: "types-frais",
+        table: "parametres_frais",
+        module: "PARAMETRES",
+        cle: "id_frais",
+        cle_generee: false,
+        creation: &[
+            "id_frais", "libelle", "categorie", "piece_justificative", "recuperable",
+            "commun", "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+        modification: &[
+            "libelle", "categorie", "piece_justificative", "recuperable", "commun",
+            "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*, (SELECT COUNT(*) FROM dossier_lignes_frais d
+                           WHERE d.id_frais = c.id_frais) AS nb_utilisations",
+        tri: "c.ordre",
+    },
     Entite {
         chemin: "fournisseurs",
         table: "fournisseur",
@@ -165,17 +188,107 @@ pub const ENTITES: &[Entite] = &[
             "code_fournisseur", "nom", "contact_principal", "telephone", "email",
             "adresse", "ville", "pays", "delai_livraison_jours", "conditions_paiement",
             "delai_paiement_jours", "code_devise", "incoterm", "transporteur",
-            "note_globale", "tolerance_pesee_pct", "actif"],
+            "note_globale", "tolerance_pesee_pct", "palettes_par_conteneur", "actif"],
         modification: &[
             "nom", "contact_principal", "telephone", "email", "adresse", "ville",
             "pays", "delai_livraison_jours", "conditions_paiement",
             "delai_paiement_jours", "code_devise", "incoterm", "transporteur",
-            "note_globale", "tolerance_pesee_pct", "actif",
+            "note_globale", "tolerance_pesee_pct", "palettes_par_conteneur", "actif",
         ],
         suppression: Suppression::Logique("actif"),
         selection: "c.*, (SELECT COUNT(*) FROM reference r
                            WHERE r.code_fournisseur = c.code_fournisseur AND r.actif = 1) AS nb_references",
         tri: "c.nom",
+    },
+    // NOTRE liste de couleurs (C1 = Or, C3 = Rouge…), commune a tous les
+    // fournisseurs : c'est elle qui rapproche « RED 7612 » de « OZ 5109 ».
+    Entite {
+        chemin: "couleurs",
+        table: "couleur",
+        module: "CATALOGUE",
+        cle: "code_couleur_interne",
+        cle_generee: false,
+        creation: &[
+            "code_couleur_interne", "libelle", "classe_teinture", "description",
+            "ordre_affichage", "actif"],
+        modification: &["libelle", "classe_teinture", "description", "ordre_affichage", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*, (SELECT COUNT(*) FROM reference r
+                           WHERE r.code_couleur_interne = c.code_couleur_interne AND r.actif = 1)
+                          AS nb_references,
+                    (SELECT COUNT(*) FROM couleur_fournisseur cf
+                      WHERE cf.code_couleur_interne = c.code_couleur_interne AND cf.actif = 1)
+                          AS nb_fournisseurs",
+        tri: "c.ordre_affichage",
+    },
+    // CE DANS QUOI LA MATIERE ARRIVE, et donc le mot qu'on emploie pour la
+    // compter. Tout l'ERP disait « bobine », ce qui est juste du fil et faux
+    // de la colle — qui vient en cuves de mille litres sanglees sur palette —
+    // comme de la Bande, dont une palette porte des centaines de petits
+    // rouleaux. Chaque type porte son vocabulaire, et les ecrans l'empruntent.
+    Entite {
+        chemin: "conditionnements",
+        table: "conditionnement",
+        module: "CATALOGUE",
+        cle: "code_conditionnement",
+        cle_generee: false,
+        creation: &[
+            "code_conditionnement", "libelle", "unite_singulier", "unite_pluriel",
+            "se_compte", "contenance_litres", "ordre_affichage", "description", "actif"],
+        modification: &[
+            "libelle", "unite_singulier", "unite_pluriel", "se_compte",
+            "contenance_litres", "ordre_affichage", "description", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*, (SELECT COUNT(*) FROM reference r
+                           WHERE r.code_conditionnement = c.code_conditionnement AND r.actif = 1)
+                          AS nb_references",
+        tri: "c.ordre_affichage",
+    },
+    // Le meme rouge, chez chacun : « RED 7612 » chez Hasirci, « OZ 5109 » chez
+    // Ozkaralar. C'est ce qui permet a la saisie assistee de reconnaitre une
+    // couleur sur une facture, et a l'acheteur de savoir qui sait la fournir.
+    Entite {
+        chemin: "couleurs-fournisseur",
+        table: "couleur_fournisseur",
+        module: "CATALOGUE",
+        cle: "id_couleur_fournisseur",
+        cle_generee: true,
+        creation: &[
+            "code_couleur_interne", "code_fournisseur", "code_couleur", "libelle",
+            "supplement_teinture", "actif"],
+        modification: &[
+            "code_couleur_interne", "code_fournisseur", "code_couleur", "libelle",
+            "supplement_teinture", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*,
+                    (SELECT x.nom FROM fournisseur x WHERE x.code_fournisseur = c.code_fournisseur)
+                        AS fournisseur_nom,
+                    (SELECT x.libelle FROM couleur x
+                      WHERE x.code_couleur_interne = c.code_couleur_interne) AS couleur_libelle",
+        tri: "c.code_couleur_interne, c.code_fournisseur",
+    },
+    // La famille : le produit independamment du vendeur.
+    Entite {
+        chemin: "familles",
+        table: "famille",
+        module: "CATALOGUE",
+        cle: "code_famille",
+        cle_generee: false,
+        creation: &[
+            "code_famille", "libelle", "code_categorie", "type_fil", "titrage",
+            "description", "ordre_affichage", "actif"],
+        modification: &[
+            "libelle", "code_categorie", "type_fil", "titrage", "description",
+            "ordre_affichage", "actif"],
+        suppression: Suppression::Logique("actif"),
+        // En sous-requete : `jointures()` ne declare d'alias que pour la
+        // reference et les groupes d'equivalence.
+        selection: "c.*,
+                    (SELECT x.libelle FROM categorie_matiere x
+                      WHERE x.code_categorie = c.code_categorie) AS categorie_libelle,
+                    (SELECT COUNT(*) FROM reference r
+                      WHERE r.code_famille = c.code_famille AND r.actif = 1) AS nb_references",
+        tri: "c.ordre_affichage",
     },
     Entite {
         chemin: "catalogue",
@@ -185,15 +298,27 @@ pub const ENTITES: &[Entite] = &[
         cle_generee: false,
         creation: &[
             "code_reference", "code_categorie", "code_fournisseur", "designation",
-            "type_fil", "couleur", "titrage", "unite_catalogue", "poids_bobine_kg",
-            "bobines_par_palette", "densite_kg_ml", "prix_catalogue",
+            "type_fil", "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
+            "code_couleur",
+            // Le code que le FOURNISSEUR donne a cette couleur. Il existait en
+            // base sans etre modifiable par aucune route : l'assistant de
+            // completion ne pouvait donc pas le renseigner.
+            "code_couleur",
+            "reference_fournisseur", "supplement_teinture",
+            "unite_catalogue", "code_conditionnement", "poids_bobine_kg",
+            "bobines_par_palette", "bobines_par_lot", "densite_kg_ml", "prix_catalogue",
+            "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
             "couverture_min_mois", "marge_securite_pct", "moq_kg",
             "multiple_achat_kg", "suivi_lot", "actif"],
         modification: &[
             "code_categorie", "code_fournisseur", "designation", "type_fil",
-            "couleur", "titrage", "unite_catalogue", "poids_bobine_kg",
-            "bobines_par_palette", "densite_kg_ml", "prix_catalogue",
+            "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
+            "code_couleur",
+            "reference_fournisseur", "supplement_teinture",
+            "unite_catalogue", "code_conditionnement", "poids_bobine_kg",
+            "bobines_par_palette", "bobines_par_lot", "densite_kg_ml", "prix_catalogue",
+            "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
             "couverture_min_mois", "marge_securite_pct", "moq_kg",
             "multiple_achat_kg", "suivi_lot", "actif",
@@ -203,14 +328,25 @@ pub const ENTITES: &[Entite] = &[
         // s'il existe, sinon le prix catalogue converti au taux en vigueur. Deux
         // regles de prix dans l'application finiraient par donner deux chiffres.
         selection: "c.*, cat.libelle AS categorie_libelle, cat.code_role_defaut,
+                    (SELECT x.libelle FROM role_bom x WHERE x.code_role = cat.code_role_defaut)
+                        AS role_libelle,
                     f.nom AS fournisseur_nom,
-                    COALESCE(c.cmup_mad, ROUND(c.prix_catalogue_kg * COALESCE((
-                        SELECT t.taux FROM taux_change t
-                         WHERE t.code_devise = c.code_devise_catalogue
-                           AND to_char(current_date, 'YYYY-MM-DD') >= t.date_debut
-                           AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') <= t.date_fin)
-                         ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_kg_mad,
+                    (SELECT x.libelle FROM famille x WHERE x.code_famille = c.code_famille)
+                        AS famille_libelle,
+                    (SELECT x.libelle FROM couleur x
+                      WHERE x.code_couleur_interne = c.code_couleur_interne)
+                        AS couleur_interne_libelle,
+                    COALESCE(c.cmup_mad, fn_prix_catalogue_mad(c.code_reference)) AS prix_kg_mad,
                     CASE WHEN c.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END AS source_prix,
+                    -- LE PRIX CATALOGUE SEUL, converti au taux en vigueur (sans repli
+                    -- sur un taux de 1). `prix_kg_mad` rend le CMUP des qu'il existe :
+                    -- la Valorisation comparait donc le CMUP a lui-meme, et l'ecart
+                    -- valait toujours zero.
+                    fn_prix_catalogue_mad(c.code_reference) AS prix_catalogue_mad,
+                    -- La valeur du stock comme la calcule le cockpit : chaque magasin
+                    -- a son CMUP. Un seul chiffre pour les trois ecrans.
+                    (SELECT COALESCE(SUM(s.valeur_mad), 0) FROM stock_magasin s
+                      WHERE s.code_reference = c.code_reference) AS valeur_stock_mad,
                     (SELECT COUNT(*) FROM reference_groupe_equiv g
                       WHERE g.code_reference = c.code_reference AND g.actif = 1) AS nb_groupes,
                     (SELECT COUNT(*) FROM recette lr
@@ -256,7 +392,40 @@ fn jointures(table: &str) -> &'static str {
     }
 }
 
+/// La charge utile, prete a etre coulee dans les types de la table.
+///
+/// LE PROBLEME QUE CECI RESOUT. Un champ de formulaire rend TOUJOURS du texte :
+/// une quantite saisie « 500 » arrive comme la chaine "500", jamais comme le
+/// nombre 500. Liee telle quelle, PostgreSQL recevait un parametre `text` pour
+/// une colonne `numeric` et refusait — chaque enregistrement portant un prix, un
+/// poids ou un seuil tombait en « erreur interne ». Les champs textuels
+/// passaient, les champs chiffres non : l'ecran paraissait capricieux.
+///
+/// LA SOLUTION N'EST PAS DE DEVINER LE TYPE ICI. Convertir « ce qui ressemble a
+/// un nombre » casserait l'inverse : un titrage « 1500 » ou un code « 1234 »
+/// deviendrait un entier, refuse par une colonne texte. Seule la BASE connait le
+/// type de chaque colonne.
+///
+/// `jsonb_populate_record(NULL::table, $1)` le lui demande : PostgreSQL coule
+/// chaque champ du JSON dans le type reel de la colonne du meme nom, avec la
+/// fonction d'entree de ce type. Une seule valeur liee, aucune table de types a
+/// tenir a jour, et la conversion est celle de la base — pas la notre.
+fn charge_jsonb(champs: &[(String, Value)]) -> String {
+    let mut m = Map::new();
+    for (nom, v) in champs {
+        // UN CHAMP VIDE EST UN CHAMP NON RENSEIGNE, pas la chaine vide. Sans
+        // cela, « » atteindrait la fonction d'entree de `numeric`, qui refuse.
+        let valeur = match v {
+            Value::String(s) if s.trim().is_empty() => Value::Null,
+            autre => autre.clone(),
+        };
+        m.insert(nom.clone(), valeur);
+    }
+    Value::Object(m).to_string()
+}
+
 /// Lie une valeur JSON, en respectant son type.
+#[allow(dead_code)]
 pub fn lier<'q>(
     q: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
     v: &'q Value,
@@ -349,26 +518,48 @@ pub async fn lister(
         // et l'ecran des equivalences n'affichait jamais les references d'un
         // groupe. Vu en production, dans le journal : « l'operateur n'existe
         // pas : ? integer ».
-        conditions.push(format!("c.{colonne} = ${}", valeurs.len()));
+        // LA BASE CONVERTIT LA VALEUR DANS LE TYPE DE LA COLONNE : elle arrive en
+        // texte, et `bigint = text` n'existe pas en PostgreSQL — filtrer sur
+        // `suivi_lot` ou `priorite` tombait en erreur. Comparer en `::text`
+        // aurait rate « 2.5 » contre « 2.5000 ».
+        conditions.push(format!(
+            "c.{colonne} IS NOT DISTINCT FROM (jsonb_populate_record(NULL::{table},              jsonb_build_object('{colonne}', ${n}::text))).{colonne}",
+            table = e.table,
+            n = valeurs.len()
+        ));
     }
     if let Some(motif) = &f.recherche {
         // Recherche sur la cle et les colonnes textuelles usuelles.
-        let cibles: Vec<String> = ["libelle", "nom", "designation", "couleur"]
+        //
+        // CHAQUE MOT DOIT ETRE TROUVE, pas la chaine entiere. On tape « bleu
+        // 1500 » en pensant a la matiere, pas a l'ordre des mots de sa
+        // designation ; chercher « bleu 1500 » d'un bloc ne rend rien des que la
+        // reference s'appelle « PP-1500 Dtex-Bleu 6666 ». Les mots se cumulent
+        // en ET, chacun pouvant tomber dans n'importe quelle colonne : la
+        // recherche se resserre a mesure qu'on tape, ce qui est exactement ce
+        // qu'on attend d'une saisie a la frappe.
+        //
+        // `ILIKE` ET NON `LIKE` : PostgreSQL distingue la casse. En `LIKE`,
+        // taper « pes » ne trouvait jamais « PES-3000 Deniers » — le champ de
+        // recherche paraissait casse alors qu'il obeissait a la lettre.
+        let cibles: Vec<String> = ["libelle", "nom", "designation", "couleur", "type_fil"]
             .iter()
             .filter(|c| e.creation.contains(*c))
             .map(|c| format!("c.{c}"))
             .chain(std::iter::once(format!("c.{}", e.cle)))
             .collect();
-        valeurs.push(format!("%{motif}%"));
-        let i = valeurs.len();
-        conditions.push(format!(
-            "({})",
-            cibles
-                .iter()
-                .map(|c| format!("{c} LIKE ${i}"))
-                .collect::<Vec<_>>()
-                .join(" OR ")
-        ));
+        for mot in motif.split_whitespace() {
+            valeurs.push(format!("%{mot}%"));
+            let i = valeurs.len();
+            conditions.push(format!(
+                "({})",
+                cibles
+                    .iter()
+                    .map(|c| format!("COALESCE({c}, '') ILIKE ${i}"))
+                    .collect::<Vec<_>>()
+                    .join(" OR ")
+            ));
+        }
     }
 
     let ou = if conditions.is_empty() {
@@ -489,25 +680,39 @@ pub async fn creer(
 
     let champs = valider_charge(db, user, e.module, e.creation, &reste).await?;
 
-    let mut colonnes = vec![e.cle.to_string()];
-    colonnes.extend(champs.iter().map(|(n, _)| n.clone()));
-    let marques: Vec<String> = (1..=colonnes.len()).map(|i| format!("?{i}")).collect();
-
-    let sql = format!(
-        "INSERT INTO {} ({}) VALUES ({})",
-        e.table,
-        colonnes.join(", "),
-        marques.join(", ")
-    );
+    // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES.
+    //
+    // `jsonb_populate_record(NULL::table, $1)` rend une ligne de la table dont
+    // chaque colonne porte la valeur du champ JSON de meme nom, convertie par la
+    // fonction d'entree de SON type. Le « 500 » d'un formulaire devient un
+    // `numeric`, le « 1500 » d'un titrage reste du texte : c'est la colonne qui
+    // decide, pas nous.
+    let colonnes: Vec<String> = champs.iter().map(|(n, _)| n.clone()).collect();
+    let sql = if colonnes.is_empty() {
+        format!("INSERT INTO {} ({}) VALUES ($2)", e.table, e.cle)
+    } else {
+        format!(
+            "INSERT INTO {} ({}, {}) SELECT $2, {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) p",
+            e.table,
+            e.cle,
+            colonnes.join(", "),
+            colonnes
+                .iter()
+                .map(|c| format!("p.{c}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            e.table,
+        )
+    };
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let mut q = sqlx::query(&sql).bind(&cle_valeur);
-    for (_, v) in &champs {
-        q = lier(q, v);
-    }
-    q.execute(&mut *tx).await?;
+    sqlx::query(&sql)
+        .bind(charge_jsonb(&champs))
+        .bind(&cle_valeur)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     Ok(json!({ e.cle: cle_valeur, "cree": true }))
@@ -523,27 +728,28 @@ pub async fn modifier(
     user.exiger(db, e.module, Action::Ecrire).await?;
     let champs = valider_charge(db, user, e.module, e.modification, charge).await?;
 
-    // `$1` porte l'identifiant, les champs commencent donc a `$2`.
-    let set: Vec<String> = champs
-        .iter()
-        .enumerate()
-        .map(|(i, (n, _))| format!("{n} = ${}", i + 2))
-        .collect();
+    // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES — voir `charge_jsonb`.
+    // Un « 500 » saisi au clavier est du TEXTE ; lie tel quel a une colonne
+    // `numeric`, il faisait echouer l'enregistrement de toute reference portant
+    // un prix, un poids ou un seuil.
+    let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
     let sql = format!(
-        "UPDATE {} SET {} WHERE {} = $1",
+        "UPDATE {} AS c SET {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) AS p
+          WHERE c.{} = $2",
         e.table,
         set.join(", "),
+        e.table,
         e.cle
     );
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let mut q = sqlx::query(&sql).bind(id);
-    for (_, v) in &champs {
-        q = lier(q, v);
-    }
-    let res = q.execute(&mut *tx).await?;
+    let res = sqlx::query(&sql)
+        .bind(charge_jsonb(&champs))
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     if res.rows_affected() == 0 {
         return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
     }
@@ -555,33 +761,99 @@ pub async fn modifier(
     }))
 }
 
+/// La table qui retient une ligne, d'apres la contrainte qui a cede.
+///
+/// ON INTERROGE LE CATALOGUE, PAS LE MESSAGE D'ERREUR. Le detail rendu par
+/// PostgreSQL nomme bien la table — « is still referenced from table "x" » —
+/// mais il est TRADUIT selon la langue du serveur, et le serveur d'ici parle
+/// francais. Lire `pg_constraint` donne la meme reponse dans toutes les langues :
+/// pour une cle etrangere, `conrelid` designe la table qui REFERENCE.
+///
+/// La transaction est morte quand on arrive ici : on interroge donc la base
+/// directement, pas la transaction avortee.
+async fn retenue_par(db: &Db, contrainte: Option<&str>) -> Option<String> {
+    let nom = contrainte?;
+    sqlx::query_scalar::<_, String>(
+        "SELECT conrelid::regclass::text FROM pg_constraint
+          WHERE conname = $1 AND contype = 'f' LIMIT 1",
+    )
+    .bind(nom)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+}
+
 pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let (sql, logique) = match e.suppression {
+    let sql = match e.suppression {
         Suppression::Interdite => {
             return Err(AppError::RegleMetier(format!(
                 "La suppression n'est pas autorisee sur {}.",
                 e.chemin
             )))
         }
-        // Desactivation plutot que suppression : les mouvements, recettes et
-        // commandes passes referencent ces lignes. Les effacer romprait
-        // l'historique, que R03 declare immuable.
-        Suppression::Logique(col) => (
-            format!("UPDATE {} SET {col} = 0 WHERE {} = $1", e.table, e.cle),
-            true,
-        ),
-        Suppression::Physique => (
-            format!("DELETE FROM {} WHERE {} = $1", e.table, e.cle),
-            false,
-        ),
+        // UNE DONNEE DE BASE QUE PERSONNE N'UTILISE SE SUPPRIME VRAIMENT.
+        //
+        // Elle etait DESACTIVEE : la ligne restait en base, et les ecrans qui ne
+        // filtrent pas les inactives continuaient de l'afficher — le bouton
+        // « Retirer » paraissait alors sans le moindre effet, ce qui est pire
+        // qu'un refus.
+        //
+        // C'est la BASE qui decide : une famille qu'aucune reference ne cite
+        // s'efface ; une famille citee est retenue par sa cle etrangere, et l'on
+        // rapporte alors CE QUI la retient plutot qu'un refus muet. L'historique
+        // reste protege sans qu'on ait a le deviner ici — R03 tient par les
+        // contraintes, pas par une convention d'ecran.
+        //
+        // La desactivation reste possible, mais comme un acte a part : on met
+        // `actif` a zero. Retirer et desactiver ne sont pas la meme decision.
+        Suppression::Logique(_) | Suppression::Physique => {
+            format!("DELETE FROM {} WHERE {} = $1", e.table, e.cle)
+        }
     };
 
-    let res = sqlx::query(&sql).bind(id).execute(&mut *tx).await?;
+    let res = match sqlx::query(&sql).bind(id).execute(&mut *tx).await {
+        Ok(r) => r,
+        // 23503 : violation de cle etrangere. Quelque chose s'appuie sur cette
+        // ligne. Le message brut de PostgreSQL ne veut rien dire pour qui
+        // administre un referentiel : on nomme la table qui retient.
+        Err(sqlx::Error::Database(err)) if err.code().as_deref() == Some("23503") => {
+            // TOUT CE QUI RETIENT, ET PAS SEULEMENT LA PREMIERE CONTRAINTE
+            // RENCONTREE. PostgreSQL s'arrete a la premiere cle etrangere
+            // violee : on detachait la table nommee, on relancait, et une
+            // deuxieme apparaissait — puis une troisieme. Autant de refus que
+            // de tables, decouvertes une par une. `fn_retenants` lit le
+            // catalogue et les rend toutes d'un coup, avec leur nombre de
+            // lignes : on sait alors ce qu'il y a a faire avant de commencer.
+            let liste = retenants(db, e.table, id).await;
+            let detail = if liste.is_empty() {
+                // Le catalogue ne voit rien alors que la base a refuse : cle
+                // composite, ou contrainte differee. On le dit plutot que de
+                // pretendre savoir.
+                retenue_par(db, err.constraint())
+                    .await
+                    .map(|t| format!("des lignes de « {t} »"))
+                    .unwrap_or_else(|| "quelque chose ailleurs".into())
+            } else {
+                liste
+                    .iter()
+                    .map(|(table, n)| format!("{n} dans « {table} »"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            return Err(AppError::RegleMetier(format!(
+                "« {id} » est retenu par {detail}. Detachez-les d'abord, ou \
+                 mettez cette ligne a l'etat inactif — son passage doit rester \
+                 lisible."
+            )));
+        }
+        Err(autre) => return Err(autre.into()),
+    };
     if res.rows_affected() == 0 {
         return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
     }
@@ -590,8 +862,30 @@ pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> App
     Ok(json!({
         e.cle: id,
         "supprime": true,
-        "mode": if logique { "desactivation" } else { "suppression" },
+        "mode": "suppression",
     }))
+}
+
+/// CE QUI RETIENT UNE LIGNE : tables liees et nombre de lignes.
+///
+/// LE CATALOGUE REPOND, PAS UNE LISTE ECRITE A LA MAIN. Une liste de tables
+/// codee dans le programme vieillit a chaque migration, et le jour ou elle a
+/// vieilli, elle ne se trompe pas bruyamment : elle laisse passer, puis la base
+/// refuse avec un message que personne ne comprend. `fn_retenants` lit
+/// `pg_constraint`, qui EST la verite.
+///
+/// UN ECHEC NE FAIT PAS ECHOUER L'APPELANT : cette fonction sert a EXPLIQUER un
+/// refus. Si elle ne peut pas repondre, le refus reste — on perd l'explication,
+/// pas la protection.
+pub async fn retenants(db: &Db, table: &str, valeur: &str) -> Vec<(String, i64)> {
+    sqlx::query_as::<_, (String, i64)>(
+        "SELECT table_liee, nb FROM fn_retenants($1, $2) ORDER BY nb DESC, table_liee",
+    )
+    .bind(table)
+    .bind(valeur)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default()
 }
 
 /// Horodatage de derniere modification, pour les entites qui le portent.

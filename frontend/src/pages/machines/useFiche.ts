@@ -152,6 +152,39 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
     }
   }, [lignes, entete.bobinesEtage])
 
+<<<<<<< HEAD
+  /* LE SOLDE DU LOT EST APPROXIMATIF, ET L'ATELIER LE SAIT.
+     Quand une bobine redescend d'un metier, personne ne sait de quel lot elle
+     venait : le retour est impute au juge, et les soldes par lot derivent. Le
+     magasinier se retrouve alors devant des bobines qu'il a dans les mains,
+     et un ERP qui lui dit qu'elles n'existent pas.
+     On ne supprime pas la verification — elle rattrape les vraies fautes de
+     saisie — mais on PROPOSE de passer outre. Le refus devient une question,
+     et la reponse laisse une trace. */
+  const [lotCourt, setLotCourt] = useState<string | null>(null)
+
+  const envoi = useMutation({
+    mutationFn: async (forcerLot?: boolean) => {
+      const corps = corpsFiche(type, machine, zone!.code_emplacement, entete, lignes)
+      if (forcerLot) {
+        corps.lignes = corps.lignes.map((l) => ({
+          ...l,
+          lot_force: true,
+          motif_lot_force:
+            'Retour de machine impute au juge : le solde du lot ne reflete plus le physique.',
+        }))
+      }
+      const r = await machinesApi.creerFiche(corps)
+      return machinesApi.valider(r.id_fiche)
+    },
+    onError: (e: unknown) => {
+      // ON NE DEVINE PAS LE REFUS AU TEXTE ENTIER : le serveur prefixe ce cas
+      // precis par « R02-LOT ». Chercher « insuffisant » attraperait aussi le
+      // refus de magasin, qui lui ne doit JAMAIS etre franchissable.
+      const message = e instanceof Error ? e.message : String(e)
+      if (message.includes('R02-LOT')) setLotCourt(message)
+    },
+=======
   const envoi = useMutation({
     mutationFn: async () => {
       const r = await machinesApi.creerFiche(
@@ -159,11 +192,18 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
       )
       return machinesApi.valider(r.id_fiche)
     },
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['machine-etat'] })
       void qc.invalidateQueries({ queryKey: ['machines'] })
       void qc.invalidateQueries({ queryKey: ['machine-plan'] })
       void qc.invalidateQueries({ queryKey: ['machine-fiches'] })
+<<<<<<< HEAD
+      void qc.invalidateQueries({ queryKey: ['machine-contenu'] })
+      void qc.invalidateQueries({ queryKey: ['machine-conso'] })
+      setLotCourt(null)
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       setAmorcee(null)
     },
   })
@@ -177,6 +217,11 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
     lignes.every((l) => l.lot_fournisseur.trim().length > 0)
 
   return {
+<<<<<<< HEAD
+    /** Le refus de solde de lot, quand il y en a un : l'ecran le propose. */
+    lotCourt, oublierLotCourt: () => setLotCourt(null),
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     etat: qEtat, entete, setEntete, lignes, setLignes,
     majLigne, retirer, ajouter, totaux, envoi, pret,
     reamorcer: () => setAmorcee(null),

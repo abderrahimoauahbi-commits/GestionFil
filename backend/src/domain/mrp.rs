@@ -1,7 +1,7 @@
 //! Calcul MRP : explosion du plan de production par les recettes.
 //!
 //! La formule (CDC F2) est portee par la vue `v_besoin_mrp_calcule`, deja
-//! verifiee par `db/tests/run-tests.ps1` : elle reproduit exactement l'exemple
+//! verifiee contre le classeur (996 cellules, 1 983 938,2 kg) : elle reproduit l'exemple
 //! du cahier des charges (500 m2 de SH -> 56,32 kg de PP-3430). Le service ne
 //! la reimplemente pas ; il l'execute dans une transaction et materialise le
 //! resultat.

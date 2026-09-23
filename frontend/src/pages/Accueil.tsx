@@ -23,10 +23,19 @@
  * a un seul endroit.
  */
 import { Link } from 'react-router-dom'
+<<<<<<< HEAD
+import { useQueries, useQuery } from '@tanstack/react-query'
+import { ArrowRight } from 'lucide-react'
+import { api } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
+import { estAccessible, NAVIGATION } from '../composants/Coquille'
+import { cn, fmt } from '../lib/utils'
+=======
 import { ArrowRight } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { estAccessible, MODULES, NAVIGATION } from '../composants/Coquille'
 import { cn } from '../lib/utils'
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
 /** Ce que le rôle veut dire, en une phrase que son titulaire reconnaît. */
 const METIER: Record<string, string> = {
@@ -60,6 +69,309 @@ const TEINTE: Record<string, { fond: string; trait: string }> = {
 
 const teinte = (section: string) => TEINTE[section] ?? TEINTE.GENERAL
 
+<<<<<<< HEAD
+/**
+ * LES TAUX DE CHANGE EN VIGUEUR, des l'ouverture — pour la direction et
+ * l'administrateur (demande du 17/09/2026).
+ *
+ * Tout le fil s'achete en dollars : le taux fait le prix de revient, le plan
+ * d'achat et la valeur de chaque reception. Il doit se lire sans aller le
+ * chercher dans la configuration, et un taux qui n'a pas bouge depuis longtemps
+ * doit se voir.
+ */
+const ROLES_TAUX = ['DIRECTION', 'ADMIN']
+
+interface TauxDate {
+  taux: number
+  date_debut: string
+  date_fin: string | null
+}
+
+/** Le cours de reference de Bank Al-Maghrib, lu par le serveur — pour information. */
+interface CoursBam {
+  code_devise: string
+  date_cours: string | null
+  cours_mad: number | null
+  date_precedente: string | null
+  cours_precedent_mad: number | null
+}
+
+/** Hausse en rouge, baisse en vert : un taux qui monte renchérit chaque achat. */
+function Variation({ ecart, base, suffixe }: { ecart: number; base: number; suffixe?: string }) {
+  return (
+    <span
+      className={cn(
+        'tabular-nums',
+        ecart > 0 ? 'text-danger' : ecart < 0 ? 'text-succes' : 'text-attenue-texte',
+      )}
+    >
+      {ecart > 0 ? '▲' : ecart < 0 ? '▼' : '='} {fmt.nombre(Math.abs(ecart), 2)} % sur{' '}
+      {fmt.nombre(base, 4)}
+      {suffixe}
+    </span>
+  )
+}
+
+function TauxDeChange() {
+  const qDev = useQuery({
+    queryKey: ['devises'],
+    queryFn: () => api.get<{ code_devise: string; est_pivot: number }[]>('/api/devises'),
+  })
+  // Le serveur ne relit la banque qu'au plus une fois par demi-heure : un
+  // rafraichissement de l'ecran plus frequent ne lui apprendrait rien.
+  const qBam = useQuery({
+    queryKey: ['cours-bam'],
+    queryFn: () =>
+      api.get<{ source: string; url: string; erreur: string | null; cours: CoursBam[] }>(
+        '/api/devises/cours-bam',
+      ),
+    staleTime: 10 * 60_000,
+  })
+  const devises = (qDev.data ?? []).filter((d) => d.est_pivot === 0)
+  const historiques = useQueries({
+    queries: devises.map((d) => ({
+      queryKey: ['taux', d.code_devise],
+      queryFn: () =>
+        api.get<TauxDate[]>(`/api/devises/${encodeURIComponent(d.code_devise)}/taux`),
+    })),
+  })
+  if (devises.length === 0) return null
+
+  return (
+    <section className="flex flex-col gap-3" aria-label="Taux de change en vigueur">
+      <div className="flex flex-wrap items-baseline gap-x-2.5">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-attenue-texte">
+          Taux de change en vigueur
+        </h2>
+        <Link to="/configuration" className="text-[11.5px] text-primaire hover:underline">
+          historique
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+        {devises.map((d, i) => {
+          const lignes = historiques[i]?.data ?? []
+          // En vigueur : la periode ouverte. La precedente est le dernier taux
+          // DIFFERENT — un meme taux ressaisi ne dit rien du mouvement.
+          const courant = lignes.find((l) => !l.date_fin) ?? lignes[0]
+          const precedent = courant && lignes.find((l) => l.date_debut < courant.date_debut && l.taux !== courant.taux)
+          const jours = courant
+            ? Math.floor((Date.now() - new Date(courant.date_debut).getTime()) / 86_400_000)
+            : null
+          const bam = qBam.data?.cours.find((c) => c.code_devise === d.code_devise)
+          // L'ECART QUI COMPTE : le taux de l'ERP rapporte au cours de la banque.
+          // Un taux ERP sous le marche sous-estime le cout de chaque achat.
+          const ecartBam =
+            courant && bam?.cours_mad ? ((courant.taux - bam.cours_mad) / bam.cours_mad) * 100 : null
+          return (
+            <div
+              key={d.code_devise}
+              className="flex flex-col gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3 shadow-sm"
+            >
+              <span className="text-[11.5px] font-medium text-attenue-texte">
+                1 {d.code_devise} en MAD
+              </span>
+
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-attenue-texte">
+                  Taux utilisé par l’ERP
+                </span>
+                <span className="text-[22px] font-semibold leading-tight tabular-nums text-texte">
+                  {courant ? fmt.nombre(courant.taux, 4) : '—'}
+                </span>
+                {courant && (
+                  <span className="text-[11.5px] leading-snug text-attenue-texte">
+                    depuis le {fmt.date(courant.date_debut)}
+                    {jours !== null && jours > 7 && (
+                      <span className="text-alerte"> · {jours} jours sans mise à jour</span>
+                    )}
+                  </span>
+                )}
+                {courant && precedent && (
+                  <span className="text-[11.5px]">
+                    <Variation ecart={((courant.taux - precedent.taux) / precedent.taux) * 100} base={precedent.taux} />
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-0.5 border-t border-bordure pt-2">
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-attenue-texte">
+                  Bank Al-Maghrib · cours de référence
+                </span>
+                {bam?.cours_mad ? (
+                  <>
+                    <span className="text-[17px] font-semibold leading-tight tabular-nums text-texte">
+                      {fmt.nombre(bam.cours_mad, 4)}
+                      <span className="ml-1.5 text-[11.5px] font-normal text-attenue-texte">
+                        au {fmt.date(bam.date_cours)}
+                      </span>
+                    </span>
+                    {bam.cours_precedent_mad && (
+                      <span className="text-[11.5px]">
+                        <Variation
+                          ecart={((bam.cours_mad - bam.cours_precedent_mad) / bam.cours_precedent_mad) * 100}
+                          base={bam.cours_precedent_mad}
+                          suffixe={` au ${fmt.date(bam.date_precedente)}`}
+                        />
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[11.5px] text-attenue-texte">
+                    {qBam.isLoading
+                      ? 'lecture du cours…'
+                      : qBam.isError
+                        ? // Un serveur qui n'a pas encore la route : le dire, plutot
+                          // que de laisser croire que la banque ne cote pas.
+                          'cours indisponible : le serveur doit être mis à jour et redémarré'
+                        : 'aucun cours lu pour cette devise'}
+                  </span>
+                )}
+                {ecartBam !== null && (
+                  // Signale au-dela de 1 % : le prix de revient calcule s'ecarte
+                  // alors sensiblement de ce que la banque facturera.
+                  <span
+                    className={cn(
+                      'mt-0.5 text-[11.5px] tabular-nums',
+                      Math.abs(ecartBam) >= 1 ? 'font-medium text-alerte' : 'text-attenue-texte',
+                    )}
+                  >
+                    {Math.abs(ecartBam) < 0.005
+                      ? 'Taux ERP aligné sur Bank Al-Maghrib'
+                      : `Taux ERP ${fmt.nombre(Math.abs(ecartBam), 2)} % ${ecartBam < 0 ? 'sous le' : 'au-dessus du'} cours BAM`}
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="text-[11px] text-attenue-texte">
+        Pour information : le cours de Bank Al-Maghrib ne modifie jamais le taux de l’ERP.{' '}
+        <a href={qBam.data?.url} target="_blank" rel="noreferrer" className="text-primaire hover:underline">
+          Source : Bank Al-Maghrib
+        </a>
+        {qBam.data?.erreur && <span className="text-alerte"> · {qBam.data.erreur} — dernier cours connu affiché</span>}
+      </p>
+    </section>
+  )
+}
+
+/**
+ * LE FIL DE CE QUI S'EST PASSE.
+ *
+ * C'est ce qu'un accueil doit porter : des faits, pas des liens. Qui a
+ * enregistre quel mouvement, quel bon est parti, quelle reception a ete
+ * controlee. Une page qui dit « voici ou aller » suppose qu'on ne le sait pas ;
+ * une page qui dit « voici ce qui a bouge » apprend quelque chose a chaque
+ * ouverture — et c'est elle qui donne le sentiment que l'outil VIT.
+ *
+ * CHAQUE LIGNE S'OUVRE. Un fil dont les evenements ne menent nulle part est une
+ * frise decorative : on le lit une fois, puis on cesse de le voir.
+ */
+interface Evenement {
+  quand: string
+  categorie: string
+  titre: string
+  detail: string | null
+  chemin: string
+  par: string | null
+}
+
+const TEINTE_CATEGORIE: Record<string, string> = {
+  MOUVEMENT: 'bg-primaire/12 text-primaire',
+  RECEPTION: 'bg-succes/15 text-succes',
+  COMMANDE: 'bg-alerte/15 text-alerte',
+  TRANSFERT: 'bg-primaire/10 text-primaire',
+  INVENTAIRE: 'bg-attenue text-attenue-texte',
+  PLAN: 'bg-attenue text-attenue-texte',
+  ACHAT: 'bg-alerte/12 text-alerte',
+  MACHINE: 'bg-attenue text-attenue-texte',
+}
+
+/** « il y a 3 h », « hier », « le 12/09 » — la distance se lit mieux qu'une date. */
+function depuis(iso: string): string {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return ''
+  const min = Math.round((Date.now() - t) / 60000)
+  if (min < 1) return "a l'instant"
+  if (min < 60) return `il y a ${min} min`
+  const h = Math.round(min / 60)
+  if (h < 24) return `il y a ${h} h`
+  const j = Math.round(h / 24)
+  if (j === 1) return 'hier'
+  if (j < 7) return `il y a ${j} jours`
+  return fmt.date(iso)
+}
+
+function FilActualite() {
+  const q = useQuery({
+    queryKey: ['actualite'],
+    queryFn: () => api.get<Evenement[]>('/api/actualite'),
+    staleTime: 60_000,
+  })
+  const evenements = q.data ?? []
+
+  return (
+    <section className="flex flex-col gap-2.5">
+      <h2
+        className="text-[11px] font-semibold uppercase tracking-[0.14em] text-attenue-texte"
+      >
+        Ce qui s'est passé
+      </h2>
+
+      {q.isLoading ? (
+        <div className="space-y-1.5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-11 animate-pulse rounded-[var(--radius-sm)] bg-attenue" />
+          ))}
+        </div>
+      ) : evenements.length === 0 ? (
+        <p className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-3 py-4
+                      text-[13px] text-attenue-texte">
+          Rien n'a encore ete enregistre. Le fil se remplira des la premiere
+          reception, le premier mouvement ou le premier bon de commande.
+        </p>
+      ) : (
+        <ol className="flex flex-col gap-1.5">
+          {evenements.map((e, i) => (
+            <li key={`${e.quand}-${i}`}>
+              <Link
+                to={e.chemin}
+                className={cn(
+                  'group flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5',
+                  'rounded-[var(--radius-sm)] border border-bordure bg-surface px-3 py-2',
+                  'transition-colors hover:border-primaire/40 hover:bg-primaire/[0.04]',
+                )}
+              >
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                    TEINTE_CATEGORIE[e.categorie] ?? 'bg-attenue text-attenue-texte',
+                  )}
+                >
+                  {e.categorie}
+                </span>
+                <span className="text-[13.5px] font-medium text-texte">{e.titre}</span>
+                {e.detail && (
+                  <span className="text-[12px] text-attenue-texte">{e.detail}</span>
+                )}
+                {/* L'AUTEUR ET LE MOMENT FERMENT LA LIGNE, a droite : ce sont
+                    les deux choses qu'on cherche en second, jamais en premier. */}
+                <span className="ml-auto whitespace-nowrap text-[11.5px] text-attenue-texte">
+                  {e.par ? `${e.par} · ` : ''}
+                  {depuis(e.quand)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 function salutation(): string {
   const h = new Date().getHours()
   if (h < 12) return 'Bonjour'
@@ -88,6 +400,12 @@ export function Accueil() {
   )
   const quotidiens = accessibles.filter((e) => e.principale)
 
+<<<<<<< HEAD
+  /* LES RUBRIQUES NE SONT PLUS CALCULEES ICI. Elles servaient au mur de trente
+     boutons range par section, qui recopiait le menu de gauche au milieu de
+     l'ecran. La navigation complete reste dans la barre laterale et dans la
+     palette de commandes ; l'accueil, lui, montre ce qui s'est passe. */
+=======
   /* Les rubriques dans l'ordre de MODULES, vides ecartees : une rubrique sans
      aucun ecran ouvert n'a rien a faire sur l'accueil de quelqu'un. Les ecrans
      du quotidien n'y reviennent pas — ils sont deja en haut. */
@@ -95,6 +413,7 @@ export function Accueil() {
     ...m,
     entrees: accessibles.filter((e) => e.section === m.id && !e.principale),
   })).filter((r) => r.entrees.length > 0)
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
   return (
     <div className="flex flex-col gap-7 pb-4">
@@ -151,6 +470,11 @@ export function Accueil() {
         </p>
       </header>
 
+<<<<<<< HEAD
+      {ROLES_TAUX.includes(moi?.role ?? '') && <TauxDeChange />}
+
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       {/* ================= CE QU'ON OUVRE TOUS LES JOURS ================ */}
       {quotidiens.length > 0 && (
         <section className="flex flex-col gap-3">
@@ -208,6 +532,19 @@ export function Accueil() {
         </section>
       )}
 
+<<<<<<< HEAD
+      {/* ================= CE QUI S'EST PASSE ===========================
+          LE MUR DE TRENTE BOUTONS A DISPARU D'ICI. Il rangeait par rubrique —
+          Catalogue, Production, Achats, Stock, Finance, Parametres — c'est-a-
+          dire qu'il recopiait le menu de gauche au milieu de l'ecran. Une page
+          d'accueil qui ne propose que des destinations n'apprend rien a celui
+          qui l'ouvre : il sait deja ou il va, il ouvre l'outil pour savoir ce
+          qui s'est passe pendant son absence.
+
+          La navigation complete reste dans la barre laterale et dans la palette
+          de commandes, ou elle est cherchee quand on en a besoin. */}
+      <FilActualite />
+=======
       {/* ================= LE RESTE, PAR RUBRIQUE ======================= */}
       {rubriques.map((r) => (
         <section key={r.id} className="flex flex-col gap-2.5">
@@ -240,6 +577,7 @@ export function Accueil() {
           </div>
         </section>
       ))}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 
       {accessibles.length === 0 && (
         <p className="text-[14px] text-attenue-texte">

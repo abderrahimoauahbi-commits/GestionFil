@@ -83,6 +83,20 @@ CREATE INDEX ix_taux_devise_date ON taux_change(code_devise, date_debut DESC);
 CREATE UNIQUE INDEX ux_taux_devise_debut ON taux_change(code_devise, date_debut);
 
 -- -----------------------------------------------------------------------------
+-- cours_bam — le cours de reference MOYEN de Bank Al-Maghrib, POUR INFORMATION.
+-- Il ne valorise rien : c'est `taux_change` qui le fait. Il se lit a cote, pour
+-- voir si le taux de l'ERP s'est eloigne du marche. Une ligne par devise et par
+-- jour de cotation, gardee : l'ecran s'affiche meme sans Internet.
+-- -----------------------------------------------------------------------------
+CREATE TABLE cours_bam (
+    code_devise         text    NOT NULL REFERENCES devise(code_devise),
+    date_cours          text    NOT NULL CHECK (date_cours ~ '^\d{4}-\d{2}-\d{2}$'),
+    cours_mad           numeric(12,4)   NOT NULL CHECK (cours_mad > 0),
+    date_lecture        text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    PRIMARY KEY (code_devise, date_cours)
+);
+
+-- -----------------------------------------------------------------------------
 -- categorie_matiere
 -- -----------------------------------------------------------------------------
 CREATE TABLE categorie_matiere (
@@ -137,7 +151,10 @@ CREATE TABLE magasin (
 -- (E7) etait instockable ; il est scinde en AJUST_INV_POS / AJUST_INV_NEG.
 -- Cf. ADR-001 D-05.
 --   exige_prix   : le prix_kg_mad de la ligne est obligatoire.
---   impacte_cmup : ce type recalcule le CMUP (uniquement les entrees, R04).
+--   impacte_cmup : ce type recalcule le CMUP (uniquement les entrees, R04) —
+--                  QUAND la ligne porte un prix. Une entree sans prix ajoute
+--                  les kilos et laisse le CMUP tel quel ; un stock sans CMUP
+--                  prend le prix de la premiere entree valorisee.
 -- -----------------------------------------------------------------------------
 CREATE TABLE type_mouvement (
     code_type_mvt       text    NOT NULL PRIMARY KEY,
@@ -149,8 +166,9 @@ CREATE TABLE type_mouvement (
     exige_motif_ligne   bigint NOT NULL DEFAULT 0 CHECK (exige_motif_ligne IN (0,1)),
     couleur             text,
     actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
-    -- Un type ne peut impacter le CMUP que s'il est une entree valorisee (R04).
-    CHECK (impacte_cmup = 0 OR (signe = 1 AND exige_prix = 1))
+    -- Seule une entree peut impacter le CMUP (R04). Le prix, lui, peut etre
+    -- facultatif : un stock de depart dont on ignore le cout entre sans valeur.
+    CONSTRAINT type_mouvement_cmup_entree CHECK (impacte_cmup = 0 OR signe = 1)
 );
 
 -- -----------------------------------------------------------------------------

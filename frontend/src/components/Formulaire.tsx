@@ -21,7 +21,7 @@ import { Lock } from 'lucide-react'
 import { useDroits } from '../auth/AuthContext'
 import { cn } from '../lib/utils'
 import { Alerte, Bouton, Champ, Etiq, Selecteur, Zone } from '../composants/ui/base'
-import { Dialogue, DialogueContenu, Interrupteur } from '../composants/ui/surcouches'
+import { Aide, Dialogue, DialogueContenu, Interrupteur } from '../composants/ui/surcouches'
 
 export type TypeChamp = 'texte' | 'nombre' | 'entier' | 'date' | 'booleen' | 'liste' | 'zone'
 
@@ -162,13 +162,14 @@ export function Formulaire({
                   </span>
                 )}
                 {c.aide && (
-                  /* La note vit dans l'etiquette, a gauche, et non sous le
-                     champ. Sous le champ, elle poussait le suivant d'une ligne
-                     et espacait tout le formulaire ; ici elle occupe une place
-                     deja disponible et ne deplace rien. */
-                  <span className="ml-1 font-normal normal-case text-attenue-texte">
-                    — {c.aide}
-                  </span>
+                  /* LA NOTE SE REPLIE DANS UNE INFO-BULLE.
+                     Ecrite en toutes lettres — sous le champ hier, dans
+                     l'etiquette ensuite — elle faisait passer l'etiquette a la
+                     ligne des qu'elle depassait quelques mots. Les champs d'une
+                     meme rangee ne commencaient alors plus a la meme hauteur, et
+                     le formulaire perdait sa lecture. Repliee, l'explication
+                     reste a portee de survol sans rien deplacer. */
+                  <Aide>{c.aide}</Aide>
                 )}
               </Etiq>
 

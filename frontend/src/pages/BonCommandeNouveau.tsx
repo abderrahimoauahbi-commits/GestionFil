@@ -1,10 +1,36 @@
 /**
  * Nouveau bon de commande — en-tete ET lignes saisis ensemble.
  *
- * Le fournisseur choisi, l'ecran affiche immediatement ce qu'il faut lui
- * commander : les references issues du plan d'achat qui ne sont pas deja dans
- * un bon, avec pour chacune la quantite proposee, le besoin, le risque,
- * l'importance, le prix, le delai et l'urgence.
+ * UNE GRILLE, ET DANS CHAQUE LIGNE UNE LISTE DEROULANTE AVEC RECHERCHE.
+ *
+ * L'ecran proposait auparavant toutes les references du fournisseur en cases a
+ * cocher, et chargeait le catalogue entier pour cela. Sur 124 references cela
+ * passait ; sur mille c'est illisible, et le chargement coute une seconde a
+ * chaque ouverture. On designe desormais ce qu'on commande LA OU ON LE
+ * COMMANDE : dans la cellule « reference » de la ligne. On y clique, la liste
+ * s'ouvre ; on tape, elle se resserre. Le serveur cherche, jamais le navigateur.
+ *
+ * CE QUE LA LISTE PROPOSE — un interrupteur, deux positions :
+ *
+ *   « Du plan d'achat » : ce que le MRP reclame chez ce fournisseur, et rien
+ *   d'autre. C'est le cas courant, et s'y tenir evite de commander par megarde
+ *   une reference dont on a deja trois mois de stock.
+ *
+ *   « Tout le catalogue » : quand on achete pour une autre raison — un prix,
+ *   un delai, une anticipation, un fil qu'on prend d'habitude ailleurs.
+ *
+ * LA GRILLE S'OUVRE VIDE. Le plan PROPOSE, il ne decide pas : verser ses
+ * propositions dans le bon des l'arrivee obligerait a retirer une a une celles
+ * qu'on ne veut pas, alors que le travail reel consiste a ajouter ce qu'on
+ * commande.
+ *
+ * ET SI LA REFERENCE N'EXISTE PAS ? La liste ne dit pas seulement non : elle
+ * propose de l'ajouter au catalogue, ou de garder la ligne telle quelle. Une
+ * ligne sans reference n'est pas une ligne d'un type particulier — c'est
+ * simplement une ligne dont ce qu'on commande n'est pas au catalogue :
+ * echantillon, type nouveau, transport. Elle ne se convertit pas en kilos,
+ * n'entre pas en stock et ne compte dans aucune statistique de matiere, faute
+ * de reference sous laquelle la ranger.
  *
  * Tout part en UNE transaction. Un bon a moitie cree — numero attribue, aucune
  * ligne — serait un document fantome que personne ne saurait interpreter, et
@@ -13,7 +39,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Search } from 'lucide-react'
+import { ArrowLeft, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -21,7 +47,6 @@ import { useParamVue } from '../lib/navigation'
 import { EnTetePage } from '../composants/Coquille'
 import {
   Alerte,
-  Badge,
   Bouton,
   Carte,
   CarteCorps,
@@ -32,7 +57,19 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { cn, fmt } from '../lib/utils'
+import { Aide } from '../composants/ui/surcouches'
+import { fmt } from '../lib/utils'
+import {
+  GrilleLignes,
+  corpsLigne,
+  depuisReference,
+  estEbauche,
+  estPrete,
+  kgDe,
+  ligneVide,
+  totalDe,
+  type LigneSaisie,
+} from '../composants/GrilleLignes'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -40,6 +77,17 @@ interface RefCommandable extends Record<string, unknown> {
   code_reference: string
   designation: string
   unite_catalogue: string
+  /** Le fournisseur HABITUEL de cette reference — pas une exclusivite. */
+  code_fournisseur?: string | null
+  fournisseur_nom?: string | null
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  /** Le bain de production du fournisseur, en bobines. */
+  bobines_par_lot?: number | null
+  densite_kg_ml?: number | null
+  reference_fournisseur?: string | null
+  couleur?: string | null
+  code_couleur?: string | null
   classe_abc: string | null
   moq_kg: number | null
   multiple_achat_kg: number | null
@@ -71,20 +119,7 @@ interface Fournisseur {
   pays?: string
 }
 
-const TON_STOCK: Record<string, 'danger' | 'alerte' | 'succes' | 'neutre'> = {
-  RUPTURE: 'danger',
-  CRITIQUE: 'danger',
-  ATTENTION: 'alerte',
-  OK: 'succes',
-}
-
-const TON_TIER: Record<string, 'danger' | 'alerte' | 'info' | 'neutre'> = {
-  'TIER 1': 'danger',
-  'TIER 2': 'alerte',
-  'TIER 3': 'info',
-  'TIER 4': 'neutre',
-}
-
+/** Une ligne commencee mais incomplete : elle bloque l'enregistrement. */
 export function BonCommandeNouveau() {
   const droits = useDroits(MODULE)
   const qc = useQueryClient()
@@ -97,16 +132,19 @@ export function BonCommandeNouveau() {
     motif_creation: 'MRP',
     notes: '',
   })
-  const [choix, setChoix] = useState<Record<string, { qte: string; prix: string }>>({})
-  const [filtre, setFiltre] = useState('')
+  /**
+   * OU LA FRAPPE VA CHERCHER.
+   *
+   * Le plan par defaut : neuf commandes sur dix ne sortent pas de ce que le MRP
+   * reclame, et l'y restreindre evite de commander par megarde une reference
+   * dont on a deja trois mois de stock. On l'ouvre au catalogue entier quand on
+   * achete pour une autre raison — un prix, un delai, une anticipation.
+   */
+  const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
+  const [lignes, setLignes] = useState<LigneSaisie[]>([])
   const [erreur, setErreur] = useState<string | null>(null)
+  const [aCreer, setACreer] = useState<string | null>(null)
 
-  /* --- Arrivee ciblee : /bons-commande/nouveau?reference=X ----------------
-     Depuis le menu contextuel d'un ecran de stock, l'acheteur a deja designe
-     CE qu'il veut commander. L'ecran doit donc arriver sur le bon fournisseur,
-     la reference cochee, plutot que sur un formulaire vide ou il faudrait la
-     retrouver. Le fournisseur se lit sur la fiche : le deduire du nom affiche
-     ailleurs marcherait jusqu'au premier homonyme. */
   const refDemandee = useParamVue('reference')
   const dejaAmorce = useRef(false)
 
@@ -126,47 +164,119 @@ export function BonCommandeNouveau() {
   const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
   const devise = fournisseur?.code_devise ?? 'MAD'
 
-  // Des le fournisseur choisi : ce qu'il faut lui commander. Pas d'etape
-  // intermediaire, pas de document vide a ouvrir d'abord.
-  const qRefs = useQuery({
-    queryKey: ['refs-commandables', entete.code_fournisseur],
+  /**
+   * CE QUE LE PLAN RECLAME CHEZ CE FOURNISSEUR.
+   *
+   * Cette liste-la reste bornee par nature : c'est ce qui manque, pas le
+   * catalogue. On la charge donc entiere, et elle sert a deux choses — remplir
+   * la grille d'emblee, et nourrir la frappe en mode « plan ».
+   */
+  const qPlan = useQuery({
+    queryKey: ['refs-plan', entete.code_fournisseur],
     queryFn: () =>
       api.get<RefCommandable[]>(
         `/api/references-commandables?code_fournisseur=${encodeURIComponent(entete.code_fournisseur)}`,
       ),
     enabled: !!entete.code_fournisseur,
   })
+  const proposees = useMemo(
+    () => (qPlan.data ?? []).filter((r) => (r.qte_a_commander_kg ?? 0) > 0),
+    [qPlan.data],
+  )
+  // La fiche telle que le serveur l'a rendue : elle sert de point de
+  // comparaison pour ne remonter au catalogue QUE ce qui a change.
+  const parPlan = useMemo(
+    () => new Map((qPlan.data ?? []).map((r) => [r.code_reference, r])),
+    [qPlan.data],
+  )
 
-  // Le fournisseur d'abord : c'est lui qui declenche le chargement des
-  // references commandables.
+  /* --- Arrivee ciblee : /bons-commande/nouveau?reference=X --------------- */
   useEffect(() => {
     const code = qRefDemandee.data?.code_fournisseur
-    if (code && !entete.code_fournisseur) {
-      setEntete((e) => ({ ...e, code_fournisseur: code }))
-      setFiltre(refDemandee)
-    }
-  }, [qRefDemandee.data, entete.code_fournisseur, refDemandee])
+    if (code && !entete.code_fournisseur) setEntete((e) => ({ ...e, code_fournisseur: code }))
+  }, [qRefDemandee.data, entete.code_fournisseur])
 
-  // La reference ensuite, une seule fois. Sans le garde, decocher la ligne la
-  // recocherait au rendu suivant : l'ecran refuserait la decision de l'acheteur.
   useEffect(() => {
     if (dejaAmorce.current || !refDemandee) return
-    const r = qRefs.data?.find((x) => x.code_reference === refDemandee)
+    const r = qPlan.data?.find((x) => x.code_reference === refDemandee)
     if (!r) return
     dejaAmorce.current = true
-    basculer(r)
-  }, [qRefs.data, refDemandee])
+    setLignes((ls) => (ls.some((l) => l.code_reference === r.code_reference) ? ls : [...ls, depuisReference(r)]))
+  }, [qPlan.data, refDemandee])
+
+  /**
+   * LA GRILLE S'OUVRE SUR UNE LIGNE VIDE, jamais remplie d'office.
+   *
+   * Le plan PROPOSE ; il ne decide pas a la place de l'acheteur. Verser ses
+   * vingt-deux propositions dans le bon des l'arrivee obligeait a retirer une a
+   * une celles qu'on ne voulait pas — c'est l'inverse du travail reel, ou l'on
+   * ajoute ce qu'on commande. Les propositions s'affichent dans la liste
+   * deroulante, des qu'on entre dans le champ.
+   */
+  useEffect(() => {
+    if (!entete.code_fournisseur) return
+    setLignes((ls) => (ls.length > 0 ? ls : [ligneVide()]))
+  }, [entete.code_fournisseur])
+
+  /* --- La liste deroulante ------------------------------------------------ */
+
+  const chercherCatalogue = async (motif: string): Promise<RefCommandable[]> => {
+    const p = new URLSearchParams({
+      code_fournisseur: entete.code_fournisseur,
+      toutes: '1',
+      recherche: motif,
+      limite: '25',
+    })
+    return api.get<RefCommandable[]>(`/api/references-commandables?${p}`)
+  }
+
+  /* --- Les lignes -------------------------------------------------------- */
+
+  /**
+   * CORRIGER LA FICHE DE LA REFERENCE DEPUIS LA COMMANDE.
+   *
+   * La reference du fournisseur, sa couleur et son code couleur appartiennent
+   * a la REFERENCE, pas a la ligne de commande. Mais c'est en preparant la
+   * commande qu'on s'apercoit qu'ils manquent — 23 references du catalogue
+   * n'ont aucun code couleur fournisseur. Les corriger ici les ecrit la ou
+   * elles ont leur place, une fois pour toutes : la commande suivante les
+   * trouvera deja renseignes.
+   *
+   * L'ecriture part a la SORTIE du champ, pas a chaque frappe : sinon chaque
+   * lettre deviendrait un enregistrement.
+   */
+  const corrigerReference = useMutation({
+    mutationFn: ({ code, champ, valeur }: { code: string; champ: string; valeur: string }) =>
+      api.patch(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur }),
+    onSuccess: () => {
+      toast.success('Fiche de la référence corrigée')
+      void qc.invalidateQueries({ queryKey: ['refs-plan'] })
+    },
+    onError: (e) =>
+      toast.error(e instanceof ErreurApi ? e.message : 'Correction impossible.'),
+  })
+
+  /** Ce que la ligne coute : au kilo pour la marchandise, au forfait sinon. */
+  /* --- L'enregistrement --------------------------------------------------- */
+
+  const pretes = lignes.filter(estPrete)
+  const ebauches = lignes.filter(estEbauche)
+  // Une unite que la reference ne sait pas convertir sera REFUSEE par le serveur
+  // (R01, jamais de repli sur un facteur de 1). Autant le dire tout de suite.
+  const sansFacteur = pretes.filter((l) => l.nature === 'MARCHANDISE' && kgDe(l) === null)
+  const total = pretes.reduce((s, l) => s + totalDe(l), 0)
+  const pret =
+    !!entete.code_fournisseur &&
+    !!entete.date_bc &&
+    pretes.length > 0 &&
+    ebauches.length === 0 &&
+    sansFacteur.length === 0
 
   const creer = useMutation({
     mutationFn: () =>
       api.post<{ id_bc: string; numero_bc: string; lignes: number }>('/api/bons-commande', {
         ...entete,
-        lignes: Object.entries(choix).map(([code, v]) => ({
-          code_reference: code,
-          unite_commande: 'kg',
-          quantite_commandee_unite: Number(v.qte),
-          prix_unitaire_devise: Number(v.prix),
-        })),
+        lignes: pretes.map(corpsLigne),
       }),
     onSuccess: (r) => {
       toast.success(`${r.numero_bc} cree`, {
@@ -179,55 +289,11 @@ export function BonCommandeNouveau() {
     onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Création impossible.'),
   })
 
-  const refs = useMemo(() => {
-    const l = qRefs.data ?? []
-    const f = filtre.toLowerCase()
-    return l.filter(
-      (r) =>
-        !f ||
-        r.code_reference.toLowerCase().includes(f) ||
-        (r.designation ?? '').toLowerCase().includes(f),
-    )
-  }, [qRefs.data, filtre])
+  /* --- Rendu -------------------------------------------------------------- */
 
-  // Trois sections, dans l'ordre ou l'acheteur decide.
-  //
-  // La deuxieme est la nouveaute : une reference que CE fournisseur livre, sans
-  // besoin propre, mais equivalente a une reference en tension achetee ailleurs.
-  // Elle tombait auparavant dans « les autres references », ou personne ne
-  // faisait le rapprochement — c'est-a-dire au moment precis ou il aurait servi.
-  const aCommander = refs.filter((r) => (r.qte_a_commander_kg ?? 0) > 0)
-  const equivalentes = refs.filter(
-    (r) => !((r.qte_a_commander_kg ?? 0) > 0) && !!r.equivalent_de,
-  )
-  const autres = refs.filter(
-    (r) => !((r.qte_a_commander_kg ?? 0) > 0) && !r.equivalent_de,
-  )
-
-  const basculer = (r: RefCommandable) =>
-    setChoix((c) => {
-      if (c[r.code_reference]) {
-        const { [r.code_reference]: _, ...reste } = c
-        return reste
-      }
-      return {
-        ...c,
-        [r.code_reference]: {
-          qte: String(r.qte_a_commander_kg ?? ''),
-          prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
-        },
-      }
-    })
-
-  const nb = Object.keys(choix).length
-  const complet = Object.values(choix).every((v) => Number(v.qte) > 0 && Number(v.prix) > 0)
-  const total = Object.values(choix).reduce((s, v) => s + Number(v.qte) * Number(v.prix), 0)
-  const pret = !!entete.code_fournisseur && !!entete.date_bc && nb > 0 && complet
-
-  const Ligne = ({ r }: { r: RefCommandable }) => {
-    const coche = !!choix[r.code_reference]
-    const deja = r.deja_sur_le_bon > 0
     return (
+<<<<<<< HEAD
+=======
       <div
         className={cn(
           'rounded-[var(--radius)] border p-2',
@@ -370,10 +436,11 @@ export function BonCommandeNouveau() {
   }
 
   return (
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     <div>
       <EnTetePage
         titre="Nouveau bon de commande"
-        description="Choisissez le fournisseur : ce qu'il faut lui commander s'affiche aussitot. Tout s'enregistre en une fois."
+        description="Choisissez le fournisseur : ce que le plan d'achat lui reclame s'affiche aussitot. Tapez pour ajouter une ligne."
         actions={
           <Bouton variante="contour" onClick={() => naviguer('/bons-commande')}>
             <ArrowLeft />
@@ -405,13 +472,17 @@ export function BonCommandeNouveau() {
             <div className="lg:col-span-2">
               <Etiq htmlFor="frs" obligatoire>
                 Fournisseur
+                <Aide>
+                  Changer de fournisseur remet la saisie a zero : la devise, les prix et les
+                  propositions du plan en dependent tous.
+                </Aide>
               </Etiq>
               <Selecteur
                 id="frs"
                 value={entete.code_fournisseur}
                 onChange={(e) => {
                   setEntete({ ...entete, code_fournisseur: e.target.value })
-                  setChoix({})
+                  setLignes([])
                 }}
               >
                 <option value="">Choisir…</option>
@@ -421,10 +492,6 @@ export function BonCommandeNouveau() {
                   </option>
                 ))}
               </Selecteur>
-              <p className="mt-1 text-[11px] text-attenue-texte">
-                Changer de fournisseur remet la selection a zero : la devise et les prix en
-                dependent.
-              </p>
             </div>
             <div>
               <Etiq htmlFor="datebc" obligatoire>
@@ -472,78 +539,57 @@ export function BonCommandeNouveau() {
 
         {!entete.code_fournisseur && (
           <Alerte ton="info">
-            Choisissez un fournisseur : les references a lui commander s'afficheront ici, avec
-            leur besoin, leur urgence et le prix propose.
+            Choisissez un fournisseur : ce que le plan d'achat lui reclame s'affichera ici, avec la
+            quantite proposee et le prix.
           </Alerte>
         )}
 
         {entete.code_fournisseur && (
           <Carte repliable="boncommandenouveau.2">
             <CarteEntete>
-              <CarteTitre>A commander chez {fournisseur?.nom}</CarteTitre>
-              <div className="flex items-center gap-2">
-                <Search className="size-3.5 text-attenue-texte" />
-                <Champ
-                  placeholder="Filtrer…"
-                  value={filtre}
-                  onChange={(e) => setFiltre(e.target.value)}
-                  className="h-7 w-48"
-                />
-              </div>
+              <CarteTitre>Lignes du bon</CarteTitre>
             </CarteEntete>
-            <CarteCorps>
-              {qRefs.isLoading && <Chargement texte="Lecture du plan d'achat…" />}
+            <CarteCorps className="space-y-3">
+              {qPlan.isLoading && <Chargement texte="Lecture du plan d'achat…" />}
 
-              {!qRefs.isLoading && aCommander.length > 0 && (
-                <>
-                  <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                    Proposees par le plan d'achat ({aCommander.length})
-                  </div>
-                  <div className="space-y-1.5">
-                    {aCommander.map((r) => (
-                      <Ligne key={r.code_reference} r={r} />
-                    ))}
-                  </div>
-                </>
-              )}
+              {/* LA MEME GRILLE QUE L'ECRAN DE MODIFICATION. Elle vivait ici,
+                  en clair ; l'ecran de modification en avait une autre, plus
+                  pauvre. Deux saisies pour un meme article, c'etait une de
+                  trop — elles divergeaient sans que rien ne le signale. */}
+              <GrilleLignes
+                codeFournisseur={entete.code_fournisseur}
+                devise={devise}
+                lignes={lignes}
+                setLignes={setLignes}
+                mode={mode}
+                setMode={setMode}
+                proposees={proposees}
+                chercherCatalogue={chercherCatalogue}
+                surCorrection={(code, champ, valeur) =>
+                  corrigerReference.mutate({ code, champ, valeur })
+                }
+                valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
+                surCreerReference={setACreer}
+              />
 
-              {!qRefs.isLoading && aCommander.length === 0 && (
-                <Alerte ton="info" className="mb-3">
-                  Le plan d'achat ne propose rien pour ce fournisseur : son stock projete couvre les
-                  besoins. Vous pouvez tout de meme commander en choisissant ci-dessous.
+              {aCreer && (
+                <Alerte ton="info" titre="Créer une référence au catalogue">
+                  La fiche complète — code, désignation, catégorie, unité, conditionnement, prix —
+                  se saisit à l’écran Catalogue. Ouvrez-le dans un autre onglet, créez la
+                  référence, puis revenez ici : elle sera trouvée à la frappe.
+                  <div className="mt-2 flex gap-2">
+                    <Bouton
+                      variante="contour"
+                      taille="sm"
+                      onClick={() => window.open('/catalogue', '_blank')}
+                    >
+                      Ouvrir le catalogue
+                    </Bouton>
+                    <Bouton variante="discret" taille="sm" onClick={() => setACreer(null)}>
+                      Fermer
+                    </Bouton>
+                  </div>
                 </Alerte>
-              )}
-
-              {equivalentes.length > 0 && (
-                <>
-                  <div className="mb-1 mt-4 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                    Equivalentes a une reference en tension ({equivalentes.length})
-                  </div>
-                  <p className="mb-2 text-[11px] text-attenue-texte">
-                    Ce fournisseur livre ces references, et chacune peut remplacer une reference
-                    dont le stock projete ne couvre plus le besoin. Le MRP ne les propose pas — il
-                    calcule par reference et ne mutualise jamais le stock d'un groupe — mais elles
-                    couvriraient le manque.
-                  </p>
-                  <div className="space-y-1.5">
-                    {equivalentes.map((r) => (
-                      <Ligne key={r.code_reference} r={r} />
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {autres.length > 0 && (
-                <>
-                  <div className="mb-2 mt-4 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                    Autres references du fournisseur ({autres.length})
-                  </div>
-                  <div className="space-y-1.5">
-                    {autres.map((r) => (
-                      <Ligne key={r.code_reference} r={r} />
-                    ))}
-                  </div>
-                </>
               )}
             </CarteCorps>
           </Carte>
@@ -553,17 +599,39 @@ export function BonCommandeNouveau() {
       {entete.code_fournisseur && (
         <div className="sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2 shadow-sm">
           <span className="text-[13px]">
+<<<<<<< HEAD
+            {pretes.length === 0 ? (
+              <span className="text-attenue-texte">Aucune ligne saisie.</span>
+=======
             {nb === 0 ? (
               <span className="text-attenue-texte">Aucune référence selectionnee.</span>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             ) : (
               <>
-                <span className="font-medium">{nb} ligne(s)</span>
+                <span className="font-medium">{pretes.length} ligne(s)</span>
                 <span className="text-attenue-texte"> · total </span>
                 <span className="font-semibold tabular-nums">
                   {fmt.nombre(total, 2)} {devise}
                 </span>
+<<<<<<< HEAD
+                {sansFacteur.length > 0 ? (
+                  <span className="text-danger">
+                    {' '}
+                    — conversion impossible sur{' '}
+                    {sansFacteur.map((l) => l.code_reference).join(', ')} : renseignez le
+                    conditionnement sur la référence, ou commandez en kg
+                  </span>
+                ) : (
+                  ebauches.length > 0 && (
+                    <span className="text-danger">
+                      {' '}
+                      — {ebauches.length} ligne(s) incomplète(s) : intitulé, quantité ou prix
+                    </span>
+                  )
+=======
                 {!complet && (
                   <span className="text-danger"> — quantité ou prix manquant sur une ligne</span>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
                 )}
               </>
             )}

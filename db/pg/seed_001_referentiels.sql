@@ -81,12 +81,15 @@ INSERT INTO magasin (code_magasin, nom, type, inclure_mrp, est_quarantaine) VALU
 -- TRANSFERT_ENTREE est valorise afin que la valeur suive la marchandise d'un
 -- magasin a l'autre (le CDC l'inserait sans prix, ce qui laissait le stock
 -- destinataire non valorise).
+-- STOCK_INIT et TRANSFERT_ENTREE acceptent une ligne SANS prix (2026-09-17b) :
+-- un stock de depart dont on ignore le cout entre sans valeur, et il doit
+-- pouvoir circuler entre magasins avant le premier achat.
 -- -----------------------------------------------------------------------------
 INSERT INTO type_mouvement (code_type_mvt, libelle, signe, exige_prix, impacte_cmup, exige_of, exige_motif_ligne, couleur) VALUES
-    ('STOCK_INIT',       'Initialisation de stock',  1, 1, 1, 0, 0, '#6366f1'),
+    ('STOCK_INIT',       'Initialisation de stock',  1, 0, 1, 0, 0, '#6366f1'),
     ('ENTREE_REC',       'Entree sur reception',     1, 1, 1, 0, 0, '#10b981'),
     ('RETOUR_PROD',      'Retour de production',     1, 0, 0, 0, 1, '#14b8a6'),
-    ('TRANSFERT_ENTREE', 'Transfert - entree',       1, 1, 1, 0, 0, '#0ea5e9'),
+    ('TRANSFERT_ENTREE', 'Transfert - entree',       1, 0, 1, 0, 0, '#0ea5e9'),
     ('AJUST_INV_POS',    'Ajustement inventaire +',  1, 0, 0, 0, 1, '#a855f7'),
     ('SORTIE_PROD',      'Sortie production',       -1, 0, 0, 1, 0, '#f59e0b'),
     ('RETOUR_FOURN',     'Retour fournisseur',      -1, 0, 0, 0, 1, '#ef4444'),

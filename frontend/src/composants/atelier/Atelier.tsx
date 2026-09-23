@@ -29,6 +29,7 @@ import { FilAriane } from './FilAriane'
 import { BarreEtat } from './BarreEtat'
 import { Onglets } from './Onglets'
 import { PanneauBas, type OngletBas } from './PanneauBas'
+import { BandeauMiseAJour } from '../BandeauMiseAJour'
 import { Palette, type Entree } from './Palette'
 import { decrire, FournisseurOnglets, PART_MINIMALE, useOnglets } from './etat'
 import { etiquetteFenetre, FAMILLES, ouvrirFenetre, usePalette } from './fenetres'
@@ -367,7 +368,9 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
   const destinations = useMemo<Entree[]>(
     () =>
       NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role) && !e.aVenir).map((e) => ({
-        id: e.vers,
+        // La rubrique et sa premiere page partagent un chemin : l'identifiant
+        // porte donc aussi le libelle, sinon la palette n'en montrerait qu'une.
+        id: e.vers + '#' + e.libelle,
         libelle: e.libelle,
         detail: e.section,
         Icone: e.Icone,
@@ -728,6 +731,15 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
       className="flex h-full flex-col overflow-hidden bg-[hsl(var(--at-editeur))]"
     >
       <BarreTitre menus={menus} titre={titreFenetre} />
+
+      {/* L'AVIS DE MISE A JOUR, UNE SEULE FOIS POUR TOUTE LA FENETRE.
+          Il appartient a cette coquille-ci et non a celle du web : le
+          navigateur recoit son interface du serveur a chaque visite, c'est
+          l'application INSTALLEE qui vieillit sans le savoir. Place ici, sous
+          la barre de titre, il ne se repete pas d'un onglet a l'autre. */}
+      <div className="px-2 pt-2 empty:hidden [&>*]:mb-0">
+        <BandeauMiseAJour />
+      </div>
 
       <div className="flex min-h-0 flex-1">
         {/* LA MEME BARRE LATERALE QUE LE WEB.

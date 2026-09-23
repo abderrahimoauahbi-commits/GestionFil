@@ -118,6 +118,17 @@ const DYNAMIQUES: {
   {
     motif: /^\/referentiels$/,
     decrire: () => ({ titre: 'Referentiels', detail: 'Paramètres', Icone: Library }),
+<<<<<<< HEAD
+  },
+  {
+    motif: /^\/receptions-import\/nouvelle$/,
+    decrire: () => ({ titre: 'Nouvelle réception import', Icone: Package }),
+  },
+  {
+    motif: /^\/receptions-import\/([^/]+)$/,
+    decrire: () => ({ titre: 'Réception import', detail: 'Achats', Icone: Package }),
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   },
   {
     motif: /^\/receptions\/nouvelle$/,

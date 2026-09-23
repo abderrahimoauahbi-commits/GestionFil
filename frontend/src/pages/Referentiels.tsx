@@ -13,14 +13,17 @@
 import { useMemo, useState } from 'react'
 import { useEtatDepuisParam } from '../lib/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Printer, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { Equivalences } from './Equivalences'
+import { EnTetePage } from '../composants/Coquille'
 import { EcranReferentiel } from '../components/EcranReferentiel'
 import type { ChampDef } from '../components/Formulaire'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
+import { MaitreDetail } from '../composants/MaitreDetail'
 import { RailLateral, type GroupeRail } from '../composants/RailLateral'
 import type { Colonne } from '../components/TableDroits'
 import {
@@ -36,6 +39,110 @@ import { Etiquette } from '../components/ui'
 
 interface Ligne extends Record<string, unknown> {
   actif: number
+}
+
+/**
+ * LE CHEMIN VERS LE PAPIER, depuis l'ecran qui montre la liste.
+ *
+ * Un referentiel se consulte a l'ecran mais se DIFFUSE sur papier : le nuancier
+ * va au quai, la nomenclature va sur le bureau de qui classe une matiere. Sans
+ * ce lien, il faudrait quitter l'ecran, ouvrir le sommaire des etats et y
+ * retrouver la meme liste sous un autre nom — ce que personne ne fait.
+ */
+/**
+ * L'ECRAN DES COULEURS — le nuancier maison, et son code chez chaque vendeur.
+ *
+ * IL EST UN COMPOSANT A PART, et pas une simple fonction dans la table des
+ * onglets, parce qu'il doit INTERROGER la liste des fournisseurs : le code du
+ * vendeur se saisissait a la main, il fallait le connaitre par coeur et une
+ * faute de frappe creait un rattachement muet vers un fournisseur inexistant.
+ * On le choisit desormais.
+ */
+function EcranCouleurs() {
+  const qFrs = useQuery({
+    queryKey: ['fournisseurs-actifs'],
+    queryFn: () =>
+      api.get<{ code_fournisseur: string; nom: string }[]>(
+        '/api/fournisseurs?actif=1&limite=500',
+      ),
+  })
+  const fournisseurs = (qFrs.data ?? []).map((f) => ({
+    valeur: f.code_fournisseur,
+    libelle: `${f.nom} (${f.code_fournisseur})`,
+  }))
+
+  return (
+    <MaitreDetail
+      titre="Couleurs"
+      module="CATALOGUE"
+      aide="Choisissez une couleur pour voir son code chez chaque fournisseur."
+      actions={<LienEtat vers="/etats/couleurs" titre="Imprimer le nuancier" />}
+      actionsLigne={(l) => (
+        <LienEtat
+          vers={`/etats/couleur/${encodeURIComponent(String(l.code_couleur_interne ?? ''))}`}
+          titre="Imprimer la fiche de cette couleur"
+        />
+      )}
+      maitre={{
+        route: 'couleurs',
+        cle: 'code_couleur_interne',
+        unite: 'Couleur',
+        libelle: (l) => `${l.code_couleur_interne} — ${l.libelle}`,
+        detail: (l) => `${l.nb_references ?? 0} référence(s)`,
+        champs: [
+          { champ: 'code_couleur_interne', entete: 'Code', cleCreation: true, obligatoire: true },
+          { champ: 'libelle', entete: 'Libellé', obligatoire: true },
+          {
+            champ: 'classe_teinture',
+            entete: 'Classe de teinture',
+            options: [
+              { valeur: 'LIGHT', libelle: 'Claire' },
+              { valeur: 'MEDIUM', libelle: 'Moyenne' },
+              { valeur: 'DARK', libelle: 'Sombre' },
+              { valeur: 'RED', libelle: 'Rouge' },
+            ],
+          },
+        ],
+      }}
+      detail={{
+        route: 'couleurs-fournisseur',
+        cle: 'id_couleur_fournisseur',
+        cleEtrangere: 'code_couleur_interne',
+        unite: 'Code fournisseur',
+        colonnes: [
+          {
+            champ: 'code_fournisseur',
+            entete: 'Fournisseur',
+            obligatoire: true,
+            largeur: 'w-52',
+            options: fournisseurs,
+          },
+          {
+            champ: 'code_couleur',
+            entete: 'Code chez lui',
+            obligatoire: true,
+            placeholder: 'RED 7612',
+            largeur: 'w-52',
+          },
+          { champ: 'libelle', entete: 'Son libellé', placeholder: 'ROUGE' },
+          { champ: 'supplement_teinture', entete: 'Supplément ($/t)', largeur: 'w-36' },
+        ],
+      }}
+    />
+  )
+}
+
+function LienEtat({ vers, titre }: { vers: string; titre: string }) {
+  return (
+    <Link
+      to={vers}
+      title={titre}
+      aria-label={titre}
+      className="rounded-[var(--radius)] p-1 text-attenue-texte hover:bg-attenue/60 hover:text-texte"
+    >
+      <Printer className="size-4" />
+    </Link>
+  )
 }
 
 interface Onglet {
@@ -67,6 +174,21 @@ const compte = (champ: string, entete: string): Colonne<Ligne> => ({
   rendu: (l) => <Etiquette>{String(l[champ] ?? 0)}</Etiquette>,
 })
 
+/** Un 0/1 de la base, lu comme une reponse : oui, ou rien. */
+const ouiNon = (champ: string, entete: string): Colonne<Ligne> => ({
+  champ,
+  entete,
+  rendu: (l) =>
+    Number(l[champ]) === 1 ? <Etiquette>oui</Etiquette> : <span className="text-attenue-texte">non</span>,
+})
+
+const METHODES_FRAIS = [
+  { valeur: 'VALEUR', libelle: 'A la valeur' },
+  { valeur: 'POIDS', libelle: 'Au poids' },
+  { valeur: 'QUANTITE', libelle: 'A la quantite' },
+  { valeur: 'PARTS_EGALES', libelle: 'A parts egales' },
+]
+
 const colonneCode = (champ: string, entete: string): Colonne<Ligne> => ({
   champ,
   entete,
@@ -93,12 +215,79 @@ const ROLES_BOM = [
 
 const ONGLETS: Onglet[] = [
   {
+    /**
+     * LA CATEGORIE ET SES FAMILLES, dans un seul ecran. Une famille n'a pas de
+     * sens hors de sa categorie — « FIL 2650 dtex FZ » est du polypropylene —
+     * et une categorie sans famille ne peut rien classer : celles qui n'en
+     * avaient pas ont recu la leur, a leur nom.
+     */
     cle: 'categories',
+<<<<<<< HEAD
+    libelle: 'Catégories et familles',
+=======
     libelle: 'Catégories matiere',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     module: 'CATALOGUE',
     chemin: 'categories',
     identifiant: 'code_categorie',
     unite: 'catégorie',
+<<<<<<< HEAD
+    colonnes: [],
+    champs: [],
+    ecranDedie: () => (
+      <MaitreDetail
+        titre="Catégories matière"
+        module="CATALOGUE"
+        aide="Choisissez une catégorie pour voir et compléter ses familles."
+        actions={<LienEtat vers="/etats/categories" titre="Imprimer catégories et familles" />}
+        maitre={{
+          route: 'categories',
+          cle: 'code_categorie',
+          unite: 'Catégorie',
+          libelle: (l) => String(l.libelle ?? l.code_categorie),
+          detail: (l) => `${l.code_categorie} · ${l.nb_references ?? 0} référence(s)`,
+          champs: [
+            { champ: 'code_categorie', entete: 'Code', cleCreation: true, obligatoire: true },
+            { champ: 'libelle', entete: 'Libellé', obligatoire: true },
+            {
+              champ: 'code_role_defaut',
+              entete: 'Rôle BOM habituel',
+              options: ROLES_BOM.map((r) => ({ valeur: r.valeur, libelle: r.libelle })),
+            },
+          ],
+        }}
+        detail={{
+          route: 'familles',
+          cle: 'code_famille',
+          cleEtrangere: 'code_categorie',
+          unite: 'Famille',
+          colonnes: [
+            { champ: 'code_famille', entete: 'Code', obligatoire: true, cleCreation: true,
+              placeholder: 'FIL-2650-FZ', largeur: 'w-56' },
+            { champ: 'libelle', entete: 'Libellé', obligatoire: true, placeholder: 'FIL 2650 dtex FZ' },
+            { champ: 'titrage', entete: 'Titrage', placeholder: '2650 dtex', largeur: 'w-40' },
+          ],
+        }}
+      />
+    ),
+  },
+  {
+    /**
+     * LA COULEUR INTERNE ET SES CODES FOURNISSEUR. Le rouge de la maison est
+     * C3 ; chez Hasirci il s'ecrit « RED 7612 », chez Ozkaralar « OZ 5109 ».
+     * Cette liste est ce qui permet de reconnaitre une couleur sur une facture
+     * et de rapprocher deux fournisseurs du meme fil.
+     */
+    cle: 'couleurs',
+    libelle: 'Couleurs',
+    module: 'CATALOGUE',
+    chemin: 'couleurs',
+    identifiant: 'code_couleur_interne',
+    unite: 'couleur',
+    colonnes: [],
+    champs: [],
+    ecranDedie: () => <EcranCouleurs />,
+=======
     colonnes: [
       colonneCode('code_categorie', 'Code'),
       { champ: 'libelle', entete: 'Libelle' },
@@ -131,6 +320,7 @@ const ONGLETS: Onglet[] = [
       { champ: 'ordre_affichage', libelle: 'Ordre d affichage', type: 'entier' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   },
   {
     cle: 'roles-bom',
@@ -326,6 +516,105 @@ const ONGLETS: Onglet[] = [
       { champ: 'code_motif_ligne', libelle: 'Code', obligatoire: true, cleCreation: true },
       { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
       { champ: 'categorie', libelle: 'Catégorie' },
+<<<<<<< HEAD
+      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
+    ],
+  },
+  {
+    /**
+     * Le catalogue des frais d'importation. Chaque type porte la PIECE qui le
+     * justifie — ce que l'assistante cherche dans le dossier —, sa
+     * recuperabilite, sa portee et sa methode de repartition.
+     *
+     * On le desactive plutot que de le supprimer : un dossier deja clos cite
+     * son type de frais, et sa repartition doit rester lisible.
+     */
+    cle: 'types-frais',
+    libelle: 'Types de frais',
+    module: 'PARAMETRES',
+    chemin: 'types-frais',
+    identifiant: 'id_frais',
+    unite: 'type de frais',
+    colonnes: [
+      colonneCode('id_frais', 'Code'),
+      { champ: 'libelle', entete: 'Libelle' },
+      {
+        champ: 'piece_justificative',
+        entete: 'Piece justificative',
+        rendu: (l) =>
+          l.piece_justificative ? (
+            String(l.piece_justificative)
+          ) : (
+            <span className="text-attenue-texte">—</span>
+          ),
+      },
+      ouiNon('recuperable', 'Recuperable'),
+      ouiNon('inclus_dans_cout', 'Dans le cout'),
+      ouiNon('commun', 'Commun'),
+      {
+        champ: 'methode_repartition',
+        entete: 'Repartition',
+        rendu: (l) => METHODES_FRAIS.find((m) => m.valeur === l.methode_repartition)?.libelle ?? '—',
+      },
+      compte('nb_utilisations', 'Employe'),
+    ],
+    champs: [
+      { champ: 'id_frais', libelle: 'Code', obligatoire: true, cleCreation: true },
+      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      {
+        champ: 'categorie',
+        libelle: 'Categorie',
+        type: 'liste',
+        obligatoire: true,
+        options: [
+          { valeur: 'DOUANE', libelle: 'Douane' },
+          { valeur: 'TAXE', libelle: 'Taxe' },
+          { valeur: 'TRANSPORT', libelle: 'Transport' },
+          { valeur: 'PORT', libelle: 'Port' },
+          { valeur: 'TRANSIT', libelle: 'Transit' },
+          { valeur: 'AUTRE', libelle: 'Autre' },
+        ],
+      },
+      {
+        champ: 'piece_justificative',
+        libelle: 'Piece justificative',
+        aide: "Le document qui porte ce frais : quittance de la douane, facture du transitaire… "
+          + "C'est ce qu'on cherche dans le dossier, et ce que la saisie assistee reconnaitra.",
+      },
+      {
+        champ: 'recuperable',
+        libelle: 'Recuperable',
+        type: 'booleen',
+        aide: "La TVA a l'importation se recupere : elle se saisit pour que le dossier balance, "
+          + "mais elle n'entre jamais dans le cout de revient.",
+      },
+      {
+        champ: 'inclus_dans_cout',
+        libelle: 'Entre dans le cout de revient',
+        type: 'booleen',
+        defaut: true,
+        aide: 'Un frais recuperable ne peut pas y entrer : la marchandise le paierait deux fois.',
+      },
+      {
+        champ: 'commun',
+        libelle: 'Commun au dossier',
+        type: 'booleen',
+        defaut: true,
+        aide: "Commun : reparti sur toutes les lignes. Sinon, la saisie demande sur quelles "
+          + 'lignes il porte — une analyse, une redevance sur une seule marchandise.',
+      },
+      {
+        champ: 'methode_repartition',
+        libelle: 'Methode de repartition',
+        type: 'liste',
+        options: METHODES_FRAIS,
+        defaut: 'VALEUR',
+        aide: 'Le classeur repartit tout a la valeur. Le poids sert pour un fret facture au kilo, '
+          + 'les parts egales pour une formalite qui ne depend ni du prix ni du poids.',
+      },
+      { champ: 'ordre', libelle: 'Ordre d affichage', type: 'entier' },
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },
@@ -440,7 +729,14 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
   ]
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,13rem)]">
+    <>
+      {/* L'EN-TETE MANQUAIT, ET AVEC LUI LE « ? » DE L'ECRAN. Les fiches d'aide
+          des referentiels existaient, mais rien ne menait a elles : le panneau
+          se trouve par la route, et la route ne portait aucun bouton. Le titre
+          suit l'onglet, pour que « /couleurs » s'annonce « Couleurs » et tombe
+          sur SA fiche, pas sur celle des referentiels en general. */}
+      <EnTetePage titre={onglet.libelle} />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,13rem)]">
       {/* Le contenu vient EN PREMIER dans le flux : sur petit ecran, la liste
           des referentiels passe alors sous le tableau plutot que de le repousser
           hors de l'ecran a chaque ouverture. */}
@@ -474,7 +770,8 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
           surChoix={(c) => setOnglet(visibles.find((o) => o.cle === c) ?? visibles[0])}
         />
       </div>
-    </div>
+      </div>
+    </>
   )
 }
 

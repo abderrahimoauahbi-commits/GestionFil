@@ -31,6 +31,8 @@ import './atelier/palettes.css'
 export type Palette =
   | 'ardoise' | 'graphite' | 'slate' | 'divalto' | 'chaud' | 'contraste'
   | 'glassier' | 'claude' | 'azur'
+  // Les cinq familles demandees le 20/09/2026, aux couleurs dictees.
+  | 'industriel' | 'atlas' | 'nordique' | 'terminal' | 'verre'
 export type Densite = 'compacte' | 'normale' | 'aeree'
 export type Police = 'systeme' | 'inter' | 'geometrique' | 'serif' | 'lisible'
 /** Taille de base, en pixels. Tout le reste est en rem et suit. */
@@ -53,7 +55,11 @@ export interface Apparence {
 const DEFAUT: Apparence = {
   palette: 'ardoise',
   densite: 'normale',
-  police: 'systeme',
+  // INTER PAR DEFAUT, maintenant qu'elle est reellement livree. Elle est
+  // dessinee pour les ecrans denses — chiffres a chasse fixe, lettres qui ne
+  // se confondent pas a 11 px — et ne coute plus aucune attente puisqu'elle
+  // part avec l'application. Les quatre autres restent a un clic.
+  police: 'inter',
   taille: 14,
   disposition: 'laterale',
   piedVisible: false,
@@ -62,6 +68,45 @@ const DEFAUT: Apparence = {
 const CLE = 'gestionfil.apparence'
 
 export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: string[] }[] = [
+  /* ---------------------------------------------------------------------
+     LES CINQ FAMILLES DEMANDEES, EN TETE DE LISTE
+     ---------------------------------------------------------------------
+     Elles etaient declarees dans `atelier/fenetres.ts`, que seul l'atelier
+     lisait — et l'atelier n'est plus monte depuis qu'on est revenu a une
+     coquille unique. Les palettes existaient donc en CSS, personne ne
+     pouvait les choisir. Meme faute que la banniere de mise a jour posee
+     dans la mauvaise coquille : c'est ICI que vit le selecteur.
+     --------------------------------------------------------------------- */
+  {
+    cle: 'industriel',
+    nom: 'Industrial Clean',
+    resume: 'Fond clair, bleu franc, beaucoup de blanc. Le choix sur lequel on ne se trompe pas.',
+    teintes: ['#FAFAFA', '#2563EB', '#111827'],
+  },
+  {
+    cle: 'atlas',
+    nom: 'Atlas Data',
+    resume: 'Bleu profond, angles nets, grille stricte. Pour un ecran charge de chiffres.',
+    teintes: ['#F5F7FA', '#1E40AF', '#1A202C'],
+  },
+  {
+    cle: 'nordique',
+    nom: 'Nordic Textile',
+    resume: 'Lin et terre cuite, arrondis genereux. Rappelle la matiere ; bon pour recevoir.',
+    teintes: ['#F8F6F3', '#B45309', '#2B2622'],
+  },
+  {
+    cle: 'terminal',
+    nom: 'Terminal Supply',
+    resume: 'Console sombre, chiffres a chasse fixe, lignes serrees. Faite pour y rester huit heures.',
+    teintes: ['#0B0F14', '#22D3EE', '#E5E7EB'],
+  },
+  {
+    cle: 'verre',
+    nom: 'Glass Industrial',
+    resume: 'Verre depoli sur degrade sombre. Le flou est reserve aux cartes, pour la vitesse.',
+    teintes: ['#0F172A', '#38BDF8', '#F8FAFC'],
+  },
   {
     cle: 'ardoise',
     nom: 'Ardoise',
@@ -121,9 +166,15 @@ export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: str
 /**
  * Les familles de caracteres proposees.
  *
- * AUCUNE N'EST TELECHARGEE. Toutes reposent sur ce que la machine possede
- * deja : une police distante ajoute une attente au premier affichage, et
- * l'ERP tourne sur un reseau d'usine ou elle n'arriverait pas toujours.
+ * AUCUNE N'EST TELECHARGEE A L'USAGE. Quatre reposent sur ce que la machine
+ * possede deja ; Inter, elle, est EMBARQUEE dans l'application — livree avec
+ * elle, pas demandee a un serveur distant. La nuance compte : l'ERP tourne sur
+ * un reseau d'usine sans acces internet garanti, et une police appelee dehors
+ * n'arriverait pas toujours.
+ *
+ * ELLE ETAIT PROPOSEE SANS ETRE FOURNIE. Choisir « Inter » nommait une police
+ * qu'aucun poste n'a installee : le navigateur retombait sans rien dire sur
+ * Segoe UI. Le reglage existait, le dessin n'arrivait jamais.
  *
  * Le CHIFFRE compte plus que la lettre dans cet outil. Les cinq choix gardent
  * donc tous des chiffres a chasse fixe pour que les colonnes s'alignent — ce
@@ -139,8 +190,13 @@ export const POLICES: { cle: Police; nom: string; resume: string; pile: string }
   {
     cle: 'inter',
     nom: 'Inter',
+<<<<<<< HEAD
+    resume: 'Dessinee pour les interfaces denses. Livree avec l application.',
+    pile: '"Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif',
+=======
     resume: 'Dessinee pour les interfaces denses. Le defaut précédent.',
     pile: '"Inter", "Segoe UI", system-ui, sans-serif',
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   },
   {
     cle: 'geometrique',

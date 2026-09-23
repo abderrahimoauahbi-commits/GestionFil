@@ -27,7 +27,7 @@ import { useMemo } from 'react'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowRight,
@@ -46,7 +46,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
-import { CockpitAnalyse } from './CockpitAnalyse'
+import { CockpitAnalyse, type VueCockpit } from './CockpitAnalyse'
 import { EnTetePage } from '../composants/Coquille'
 import {
   Alerte,
@@ -60,7 +60,7 @@ import {
 import { Infobulle } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { BarresEmpilees, BarresRangees } from '../composants/graphiques/Graphiques'
-import { Layers, Package, ShoppingCart } from 'lucide-react'
+import { Layers, ShoppingCart, Sparkles } from 'lucide-react'
 import { BarreRepartition, CarteStat } from '../composants/CarteStat'
 import { Pareto } from '../composants/graphiques/Pareto'
 import { BullesFournisseurs, type Fournisseur } from '../composants/graphiques/BullesFournisseurs'
@@ -108,6 +108,28 @@ interface Risque {
 
 type Ton = 'danger' | 'alerte' | 'succes' | 'neutre'
 
+/**
+ * LES DOMAINES DU TABLEAU DE BORD.
+ *
+ * Ils reprennent le decoupage du menu — achats, stock, production, qualite —
+ * parce qu'une personne travaille dans UN de ces domaines et pas dans les
+ * autres. Un acheteur qui ouvre le poste de travail veut ses commandes, pas
+ * les ecarts d'inventaire ; lui faire traverser tout l'ecran chaque matin,
+ * c'est lui apprendre a ne plus le lire.
+ *
+ * LE FILTRE NE CACHE PAS UNE ALERTE, il la met de cote : on revient a « Tous »
+ * d'un clic, et le compteur de chaque domaine reste visible dans le
+ * selecteur — on sait donc toujours qu'il se passe quelque chose ailleurs.
+ */
+export type Domaine = 'ACHATS' | 'STOCK' | 'PRODUCTION' | 'QUALITE'
+
+const DOMAINES: { cle: Domaine; libelle: string }[] = [
+  { cle: 'ACHATS', libelle: 'Achats' },
+  { cle: 'STOCK', libelle: 'Stock' },
+  { cle: 'PRODUCTION', libelle: 'Production' },
+  { cle: 'QUALITE', libelle: 'Qualite' },
+]
+
 interface Tuile {
   champ: string
   libelle: string
@@ -117,6 +139,14 @@ interface Tuile {
   ton: Ton
   Icone: React.ComponentType<{ className?: string }>
   vers?: string
+  /**
+   * LE DOMAINE METIER de cette file.
+   *
+   * Il sert au selecteur du haut : un acheteur veut voir ses commandes sans
+   * traverser les ruptures de stock, un magasinier l'inverse. Sans domaine,
+   * le filtre n'aurait rien sur quoi mordre.
+   */
+  domaine: Domaine
   /** Faux si le role ne peut rien faire de ce compteur : la tuile disparait. */
   actionnable?: boolean
   /** Une tuile d'ETAT reste visible a zero ; une FILE vide s'efface. */
@@ -150,6 +180,7 @@ export function Cockpit() {
   const files: Tuile[] = [
     {
       champ: 'nb_propositions_a_traiter',
+      domaine: 'ACHATS',
       libelle: 'Propositions a arbitrer',
       valeur: n('nb_propositions_a_traiter'),
       detail: 'plan d achat',
@@ -160,6 +191,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_bc_a_valider',
+      domaine: 'ACHATS',
       libelle: 'Bons a valider',
       valeur: n('nb_bc_a_valider'),
       detail: droits.visible('montant_bc_a_valider_mad')
@@ -172,6 +204,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_bc_a_envoyer',
+      domaine: 'ACHATS',
       libelle: 'Bons a envoyer',
       valeur: n('nb_bc_a_envoyer'),
       detail: 'valides, pas encore partis',
@@ -182,6 +215,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_livraisons_en_retard',
+      domaine: 'ACHATS',
       libelle: 'Livraisons en retard',
       valeur: n('nb_livraisons_en_retard'),
       detail: n('retard_max_jours') > 0 ? `jusqu a ${n('retard_max_jours')} j` : undefined,
@@ -192,6 +226,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_a_controler',
+<<<<<<< HEAD
+      domaine: 'QUALITE',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Réceptions a controler',
       valeur: n('nb_receptions_a_controler'),
       detail: 'en attente du controle qualité',
@@ -202,6 +240,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_en_saisie',
+<<<<<<< HEAD
+      domaine: 'STOCK',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Réceptions en saisie',
       valeur: n('nb_receptions_en_saisie'),
       detail: 'pesees non soumises',
@@ -212,6 +254,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_receptions_a_regulariser',
+      domaine: 'STOCK',
       libelle: 'A regulariser',
       valeur: n('nb_receptions_a_regulariser'),
       detail: 'bon non envoye : controle bloque',
@@ -222,6 +265,7 @@ export function Cockpit() {
     },
     {
       champ: 'nb_lignes_non_conformes',
+      domaine: 'QUALITE',
       libelle: 'Lignes non conformes',
       valeur: n('nb_lignes_non_conformes'),
       detail: 'quarantaine ou refus',
@@ -230,18 +274,13 @@ export function Cockpit() {
       vers: '/receptions',
       actionnable: peut('RECEPTIONS', 'LIRE'),
     },
-    {
-      champ: 'nb_refs_sous_minimum',
-      libelle: 'Sous le stock minimum',
-      valeur: n('nb_refs_sous_minimum'),
-      detail: 'projete sous le seuil',
-      ton: 'danger',
-      Icone: TrendingDown,
-      vers: '/plan-achat',
-      actionnable: peut('PLAN_ACHAT', 'LIRE'),
-    },
+    /* « Sous le stock minimum » ne figure plus ici : ce n'est pas une file
+       d'attente mais un ETAT, et il disait le meme chiffre que « A engager »
+       au-dessus. Ce qu'il y a a faire de ces references se lit au plan
+       d'achat, ou la tuile « Propositions a arbitrer » mene deja. */
     {
       champ: 'nb_lots_peremption_proche',
+      domaine: 'QUALITE',
       libelle: 'Lots a moins de 90 j',
       valeur: n('nb_lots_peremption_proche'),
       detail: 'peremption proche',
@@ -252,6 +291,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_refs_dormantes',
+<<<<<<< HEAD
+      domaine: 'STOCK',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Références dormantes',
       valeur: n('nb_refs_dormantes'),
       detail: droits.visible('valeur_dormante_mad')
@@ -264,6 +307,10 @@ export function Cockpit() {
     },
     {
       champ: 'nb_controles_bloquants',
+<<<<<<< HEAD
+      domaine: 'QUALITE',
+=======
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       libelle: 'Contrôles bloquants',
       valeur: n('nb_controles_bloquants'),
       detail: 'coherence du referentiel',
@@ -273,6 +320,11 @@ export function Cockpit() {
     },
   ]
 
+<<<<<<< HEAD
+  // UNE TUILE N'APPARAIT QUE SI ELLE MENE QUELQUE PART. Le role doit pouvoir
+  // VOIR le champ et AGIR dessus ; une file vide s'efface, parce qu'un ecran
+  // couvert de zeros apprend a ne plus etre lu.
+=======
   // Les tuiles d'ETAT : elles decrivent la situation, pas une file. Elles
   // restent affichees a zero — « 0 rupture » est une bonne nouvelle qu'on veut
   // lire, alors que « 0 bon a valider » est juste une file vide.
@@ -359,14 +411,57 @@ export function Cockpit() {
     },
   ]
 
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   const garder = (t: Tuile) =>
     droits.visible(t.champ) && t.actionnable !== false && (t.toujours || t.valeur > 0)
 
-  const mesFiles = files.filter(garder)
-  const mesEtats = etats.filter(garder)
+  /* LE DOMAINE CHOISI SE RETIENT POUR LA SESSION. Un acheteur qui a mis
+     « Achats » le retrouve en revenant ; il n'a pas a le reposer dix fois par
+     jour. `sessionStorage` et non `localStorage` : c'est une preference de
+     journee, pas d'annee. */
+  const [domaine, setDomaineBrut] = useState<Domaine | ''>(() => {
+    try {
+      const v = sessionStorage.getItem('cockpit.domaine')
+      return v === 'ACHATS' || v === 'STOCK' || v === 'PRODUCTION' || v === 'QUALITE' ? v : ''
+    } catch {
+      return ''
+    }
+  })
+  const setDomaine = (d: Domaine | '') => {
+    setDomaineBrut(d)
+    try {
+      sessionStorage.setItem('cockpit.domaine', d)
+    } catch {
+      /* navigation privee : le choix ne se retient pas, l'ecran marche quand meme */
+    }
+  }
+
+  const toutesMesFiles = files.filter(garder)
+  const mesFiles = domaine
+    ? toutesMesFiles.filter((f) => f.domaine === domaine)
+    : toutesMesFiles
 
   const bloquants = (qCtl.data ?? []).filter((c) => c.criticite === 'BLOQUANT' && c.anomalies > 0)
   const autres = (qCtl.data ?? []).filter((c) => c.criticite !== 'BLOQUANT' && c.anomalies > 0)
+
+  /* LA VUE EST UNE ADRESSE, plus un etat cache.
+     Elle vivait dans `sessionStorage` : les quatre vues du tableau de bord ne
+     se distinguaient donc ni dans la barre d'adresse, ni dans le menu, ni dans
+     un signet — quatre ecrans de travail differents partageaient une seule
+     porte. C'est la critique qui a ete faite, et elle est juste : un tableau
+     de bord qui melange la synthese, l'analytique et les opportunites sous une
+     entree unique oblige a chercher a chaque fois.
+     Chaque vue a maintenant son chemin, donc sa ligne de menu — comme les
+     pages d'un espace Fiori ou les entrees « Vue d'ensemble / Analyse » d'une
+     application Odoo. */
+  const { vue: vueUrl } = useParams<{ vue?: string }>()
+  const naviguer = useNavigate()
+  const vue: VueCockpit =
+    vueUrl === 'analyse' || vueUrl === 'opportunites' || vueUrl === 'matiere'
+      ? vueUrl
+      : 'situation'
+  const setVue = (v: VueCockpit) =>
+    naviguer(v === 'situation' ? '/tableau-de-bord' : `/tableau-de-bord/${v}`)
 
   const risques = qRisques.data ?? []
   /** Les mois de l'horizon, pris sur la premiere frise : toutes sont alignees. */
@@ -377,6 +472,30 @@ export function Cockpit() {
       <EnTetePage
         titre="Poste de travail"
         description="Ce qui attend une decision, et ce qui menace le plan de production. Tout est recalcule a l'ouverture."
+        actions={
+          <label className="flex items-center gap-2 text-[12px] text-attenue-texte">
+            Domaine
+            <select
+              value={domaine}
+              onChange={(e) => setDomaine(e.target.value as Domaine | '')}
+              className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-2.5 py-1.5
+                         text-[12px] text-texte outline-none focus:border-primaire/60"
+            >
+              {/* LE COMPTEUR EST DANS LE LIBELLE : on voit ce qui attend
+                  ailleurs sans changer de vue, donc on ne rate rien en
+                  filtrant. */}
+              <option value="">Tous ({toutesMesFiles.length})</option>
+              {DOMAINES.map((d) => {
+                const n = toutesMesFiles.filter((f) => f.domaine === d.cle).length
+                return (
+                  <option key={d.cle} value={d.cle}>
+                    {d.libelle} ({n})
+                  </option>
+                )
+              })}
+            </select>
+          </label>
+        }
       />
 
       <ChiffresCles />
@@ -392,11 +511,30 @@ export function Cockpit() {
           {mesFiles.length > 0 && (
             <>
               <TitreBande texte="A traiter" />
+<<<<<<< HEAD
+              {/* UNE BARRE, PAS DES TUILES.
+                  Ni la grille ni la rangee souple ne tenaient. En grille, une
+                  file unique s'etirait sur mille quatre cents pixels pour trois
+                  mots ; en rangee, elle devenait un carre de deux cent quarante
+                  pixels perdu a gauche, avec tout le vide a sa droite. Le
+                  defaut n'etait pas la largeur de la tuile : c'est qu'une
+                  TUILE suppose qu'il y en aura plusieurs.
+                  Les files vont de une a six selon le role et selon le jour.
+                  Ce qui tient a tous les comptes, c'est une BARRE : une bande
+                  d'un seul tenant, divisee en autant de parts qu'il y a de
+                  files. A une, elle fait une ligne pleine largeur qui se lit
+                  comme une phrase ; a six, six parts egales. La largeur est
+                  toujours remplie, et la rangee ne montre jamais du vide.
+                  C'est la « To-Do » de Fiori et le bandeau d'activites
+                  d'Odoo — pour la meme raison. */}
+              <BarreFiles files={mesFiles} />
+=======
               <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
                 {mesFiles.map((t) => (
                   <TuileCompteur key={t.champ} tuile={t} />
                 ))}
               </div>
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
             </>
           )}
 
@@ -407,6 +545,17 @@ export function Cockpit() {
             </Alerte>
           )}
 
+<<<<<<< HEAD
+          {/* LA GRILLE « SITUATION » A DISPARU, et c'est le point de la
+              refonte. Elle reprenait, en sept tuiles de meme taille, ce que la
+              bande du haut venait de dire : ruptures, critiques, attention,
+              sur-stock, ecarts, valeur du stock, engage chez les fournisseurs.
+              Les memes references y etaient comptees trois fois sous trois
+              noms. Un tableau de bord qui se repete apprend a ne plus etre lu ;
+              ce qui restait unique — le sur-stock, les ecarts — est passe dans
+              la ligne discrete sous les quatre chiffres, ou il avertit sans
+              concurrencer. */}
+=======
           {mesEtats.length > 0 && (
             <>
               <TitreBande texte="Situation" />
@@ -417,6 +566,7 @@ export function Cockpit() {
               </div>
             </>
           )}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         </>
       )}
 
@@ -443,12 +593,13 @@ export function Cockpit() {
           les besoins bas, donc la projection haute, donc l'alerte verte. */}
       {n('besoins_perimes') > 0 ? (
         <Alerte ton="danger" titre="Les alertes reposent sur des besoins perimes">
-          Le plan de production a ete modifie apres le dernier calcul MRP
+          Le plan, une recette ou une densité a changé depuis le dernier calcul MRP
           {k.besoins_calcules_le
             ? ` du ${fmt.dateHeure(k.besoins_calcules_le as string)}`
             : ''}
-          . Les couvertures affichees ci-dessous raisonnent sur un plan qui
-          n existe plus. Relancez le calcul avant de decider quoi que ce soit.
+          . Les couvertures affichées ci-dessous raisonnent sur des besoins qui ne
+          correspondent plus aux recettes d’aujourd’hui. Relancez le calcul avant de
+          décider quoi que ce soit.
         </Alerte>
       ) : k.besoins_calcules_le ? (
         <p className="text-[11px] text-attenue-texte">
@@ -457,22 +608,43 @@ export function Cockpit() {
         </p>
       ) : null}
 
-      {/* ---- Les six zones du classeur -------------------------------------
-          Dans l'ordre du cockpit Excel : les graphiques d'abord, parce qu'ils
-          donnent la forme du probleme, puis les tableaux qui la detaillent. */}
-      <TitreBande texte="Analyse" />
-      <CockpitAnalyse />
+      {/* ---- LES VUES, PLUTOT QU'UN ROULEAU ---------------------------------
+          Tout ce qui suit tenait sur la meme page : quatre mille deux cents
+          pixels, dix hauteurs d'ecran. On y trouvait tout, et c'est justement
+          le probleme — une vue qu'on parcourt n'est plus une vue qu'on compare.
+          Les quatre onglets reprennent l'ordre du classeur : ce qui brule, ce
+          que disent les chiffres, ce qu'on pourrait gagner, ou part la matiere. */}
+      <BarreVues vue={vue} surChoix={setVue} />
 
-      {/* ---- Tableau de bord ----------------------------------------------- */}
-      <TitreBande texte="Concentration et dependances" />
-      <Concentration />
+      {vue === 'situation' && <CockpitAnalyse vue="situation" />}
 
-      <TitreBande texte="Ou part la matiere" />
-      <TableauDeBord />
+      {vue === 'analyse' && (
+        <>
+          <CockpitAnalyse vue="analyse" />
+          <TitreBande texte="Concentration et dependances" />
+          <Concentration />
+        </>
+      )}
 
-      {/* ---- Mur de risques ------------------------------------------------ */}
-      {/* L'horizon vient du plan, jamais d'une constante : un plan de six mois
+      {vue === 'opportunites' && <CockpitAnalyse vue="opportunites" />}
+
+      {vue === 'matiere' && (
+        <>
+          <TitreBande texte="Ou part la matiere" />
+          <TableauDeBord />
+        </>
+      )}
+
+      {/* ---- Mur de risques ------------------------------------------------
+          IL RESTE DANS LA VUE « SITUATION », et nulle part ailleurs : c'est le
+          seul ecran qui montre QUAND la rupture arrive, mois par mois. Le
+          releguer dans une vue d'analyse reviendrait a le reserver a ceux qui
+          cherchent, alors qu'il s'adresse a ceux qui decident.
+
+          L'horizon vient du plan, jamais d'une constante : un plan de six mois
           affiche six colonnes, et annoncer « 12 mois » au-dessus serait faux. */}
+      {vue === 'situation' && (
+      <>
       <TitreBande
         texte={
           colonnes.length
@@ -594,8 +766,22 @@ export function Cockpit() {
           )}
         </CarteCorps>
       </Carte>
+      </>
+      )}
 
-      {/* ---- Controles de coherence ---------------------------------------- */}
+      {/* ---- Par famille ----------------------------------------------------
+           L'atelier compte par famille, comme les classeurs : une feuille par
+           famille, les couleurs en colonnes. Le tableau de bord en donne la
+           tete — les cinq plus lourdes — et renvoie a la statistique complete.
+           Le detail n'a pas sa place ici : on vient au cockpit pour decider,
+           pas pour depouiller.                                                */}
+      {vue === 'matiere' && peut('MOUVEMENTS', 'LIRE') && <BlocFamilles />}
+
+      {/* ---- Controles de coherence ----------------------------------------
+           La sante du referentiel accompagne la matiere : les deux repondent a
+           « nos donnees disent-elles vrai ? », pas a « que faire aujourd'hui ». */}
+      {vue === 'matiere' && (
+      <>
       <TitreBande texte="Sante du referentiel" />
       <Carte repliable="cockpit.2">
         <CarteEntete>
@@ -640,14 +826,132 @@ export function Cockpit() {
           )}
         </CarteCorps>
       </Carte>
+      </>
+      )}
     </div>
   )
 }
 
+/**
+ * LA BARRE DES VUES.
+ *
+ * Quatre entrees, dans l'ordre ou l'on decide : ce qui brule, ce que disent les
+ * chiffres, ce qu'on pourrait gagner, ou part la matiere. C'est l'ordre du
+ * classeur, et c'est aussi celui des cockpits des grands ERP — on n'ouvre pas
+ * un tableau de bord pour tout voir, on l'ouvre avec une question.
+ *
+ * LE CHOIX SE GARDE dans la session : revenir au poste de travail apres avoir
+ * ouvert une reference doit ramener la ou l'on etait, pas au debut.
+ */
+function BarreVues({
+  vue,
+  surChoix,
+}: {
+  vue: VueCockpit
+  surChoix: (v: VueCockpit) => void
+}) {
+  const vues: { cle: VueCockpit; libelle: string }[] = [
+    { cle: 'situation', libelle: 'Synthèse' },
+    { cle: 'analyse', libelle: 'Analytique' },
+    { cle: 'opportunites', libelle: 'Opportunités' },
+    { cle: 'matiere', libelle: 'Matière' },
+  ]
+  return (
+    <div className="mb-3 mt-6 flex flex-wrap gap-1 border-b border-bordure">
+      {vues.map((v) => (
+        <button
+          key={v.cle}
+          type="button"
+          onClick={() => surChoix(v.cle)}
+          className={cn(
+            '-mb-px border-b-2 px-3 py-1.5 text-[12.5px] transition-colors',
+            v.cle === vue
+              ? 'border-primaire font-medium text-texte'
+              : 'border-transparent text-attenue-texte hover:text-texte',
+          )}
+          aria-current={v.cle === vue ? 'page' : undefined}
+        >
+          {v.libelle}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * LA PHRASE DU JOUR — ce que le classeur appelle « Insights du jour ».
+ *
+ * Un tableau de bord qui n'aligne que des nombres laisse a chacun le soin de
+ * les relier, et deux personnes en tirent deux conclusions. La phrase tranche :
+ * elle dit ce qui presse, en francais, avant que l'oeil n'ait a comparer quoi
+ * que ce soit. Tous les cockpits des grands ERP s'ouvrent ainsi.
+ *
+ * ELLE SE CONSTRUIT DES MEMES CHIFFRES QUE LES TUILES, jamais d'une source
+ * parallele : une phrase qui contredirait le nombre affiche a cote d'elle
+ * ruinerait les deux.
+ */
+function phraseDuJour(
+  k: Record<string, unknown>,
+  economiesMad: number,
+  nbOpportunites: number,
+  nbMonoSource: number,
+): string {
+  const n = (c: string) => Number(k[c] ?? 0)
+  const bouts: string[] = []
+
+  // L'AVERTISSEMENT PASSE DEVANT. Si les besoins sont perimes, tout le reste de
+  // la phrase raisonne sur des chiffres qui ne valent plus.
+  if (n('besoins_perimes') > 0) {
+    bouts.push(
+      'Le plan, une recette ou une densité a changé depuis le dernier calcul : relancez-le avant de décider.',
+    )
+  }
+
+  const alerte = n('nb_ruptures') + n('nb_critiques')
+  if (alerte > 0) {
+    bouts.push(
+      `${alerte} référence(s) sur ${n('nb_references')} ne tiendront pas le délai d'approvisionnement` +
+        (n('budget_a_engager_mad') > 0
+          ? ` ; ${fmt.compact(n('budget_a_engager_mad'))} MAD à engager pour les couvrir.`
+          : '.'),
+    )
+  } else {
+    bouts.push(`Aucune rupture prévue sur les ${n('nb_references')} références suivies.`)
+  }
+
+  if (economiesMad > 0) {
+    bouts.push(
+      `${fmt.compact(economiesMad)} MAD par an d'économies identifiées sur ` +
+        `${nbOpportunites} référence(s), à qualité égale.`,
+    )
+  }
+  // LA FRAGILITE DE FOND, qui ne se voit dans aucun compteur : une reference en
+  // tension dont un seul fournisseur sait faire n'a pas de solution de repli.
+  if (nbMonoSource > 0) {
+    bouts.push(`${nbMonoSource} référence(s) en tension n'ont qu'une seule source.`)
+  }
+  if (n('nb_controles_bloquants') > 0) {
+    bouts.push(`${n('nb_controles_bloquants')} contrôle(s) bloquant(s) à lever.`)
+  }
+  return bouts.join(' ')
+}
+
+/**
+ * LE TITRE DE SECTION SEPARE VRAIMENT.
+ *
+ * Il etait un petit libelle gris perdu entre deux grilles : sur une page de
+ * quatre mille pixels, rien ne disait ou finissait une idee et ou commencait la
+ * suivante. Un filet et un peu d'air suffisent — c'est le decoupage qui manque,
+ * pas la decoration.
+ */
 function TitreBande({ texte }: { texte: string }) {
   return (
-    <h2 className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-wider text-attenue-texte first:mt-0">
-      {texte}
+    <h2
+      className="mb-3 mt-8 flex items-center gap-3 text-[11px] font-semibold uppercase
+                 tracking-wider text-attenue-texte first:mt-0"
+    >
+      <span className="whitespace-nowrap">{texte}</span>
+      <span className="h-px flex-1 bg-bordure" />
     </h2>
   )
 }
@@ -661,11 +965,46 @@ function Legende({ ton, texte }: { ton: string; texte: string }) {
   )
 }
 
-function TuileCompteur({ tuile: t }: { tuile: Tuile }) {
-  const contenu = (
-    <Carte
-      className={cn('h-full transition-colors', t.vers && 'hover:border-primaire/50 hover:bg-attenue/30')}
+/**
+ * La barre des files a traiter.
+ *
+ * ELLE REMPLIT TOUJOURS LA LARGEUR, quel que soit le nombre de files, parce
+ * qu'une bande divisee en parts egales n'a pas de « colonne manquante ». A une
+ * seule file, la part unique occupe toute la bande et la file se lit en une
+ * ligne : le compte, ce qu'il designe, et ou aller. A cinq, cinq parts.
+ *
+ * LE COMPTE VIENT EN PREMIER, gros et aligne sur les chiffres, parce que c'est
+ * lui qu'on cherche du regard ; le libelle le suit, le detail sous lui. Une
+ * part qui mene quelque part se comporte en lien : tout le rectangle est
+ * cliquable, pas seulement trois mots en bas.
+ */
+function BarreFiles({ files }: { files: Tuile[] }) {
+  return (
+    <div
+      className="grid divide-y divide-bordure overflow-hidden rounded-[var(--radius)]
+                 border border-bordure bg-surface
+                 sm:auto-cols-fr sm:grid-flow-col sm:divide-x sm:divide-y-0"
     >
+<<<<<<< HEAD
+      {files.map((t) => {
+        const corps = (
+          <div className="flex h-full items-center gap-3 px-4 py-3">
+            <t.Icone className={cn('size-5 shrink-0', TEINTE[t.ton])} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <span className={cn('text-2xl font-semibold leading-none tabular-nums', TEINTE[t.ton])}>
+                  {t.affichage ?? t.valeur}
+                </span>
+                <span className="truncate text-[12.5px] font-medium text-texte">{t.libelle}</span>
+              </div>
+              {t.detail && (
+                <div className="mt-0.5 truncate text-[11px] leading-snug text-attenue-texte">
+                  {t.detail}
+                </div>
+              )}
+            </div>
+            {t.vers && <ArrowRight className="size-4 shrink-0 text-attenue-texte" />}
+=======
       <CarteCorps className="p-3.5">
         <div className="flex items-start justify-between gap-2">
           <span className="text-xs text-attenue-texte">{t.libelle}</span>
@@ -687,17 +1026,22 @@ function TuileCompteur({ tuile: t }: { tuile: Tuile }) {
           <div className="mt-1 inline-flex items-center gap-0.5 text-[11px] text-primaire">
             ouvrir
             <ArrowRight className="size-3" />
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           </div>
-        )}
-      </CarteCorps>
-    </Carte>
-  )
-  return t.vers ? (
-    <Link to={t.vers} className="block">
-      {contenu}
-    </Link>
-  ) : (
-    <div>{contenu}</div>
+        )
+        return t.vers ? (
+          <Link
+            key={t.champ}
+            to={t.vers}
+            className="block transition-colors hover:bg-attenue/40"
+          >
+            {corps}
+          </Link>
+        ) : (
+          <div key={t.champ}>{corps}</div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -965,6 +1309,23 @@ function ChiffresCles() {
     enabled: peut('COCKPIT', 'LIRE'),
   })
 
+  // LES ECONOMIES NE SONT PAS DANS `/api/cockpit`. Elles vivent dans les
+  // indicateurs de l'analyse, et la tuile affichait donc un zero franc a cote
+  // d'un constat annoncant 3,9 millions — deux chiffres contradictoires a deux
+  // centimetres l'un de l'autre. Meme cle de cache que `CockpitAnalyse` : la
+  // requete est deja faite, celle-ci ne coute rien.
+  const qa = useQuery({
+    queryKey: ['cockpit-analyse'],
+    queryFn: () =>
+      api.get<{
+        indicateurs?: { economies_total_mad?: number; nb_opportunites?: number }
+        mono_source?: unknown[]
+      }>('/api/cockpit/analyse'),
+    enabled: peut('COCKPIT', 'LIRE'),
+  })
+  const eco = qa.data?.indicateurs
+  const nbMonoSource = qa.data?.mono_source?.length ?? 0
+
   const k = q.data
   if (q.isLoading) {
     return (
@@ -981,57 +1342,133 @@ function ChiffresCles() {
   const ok = n('nb_ok')
   const attention = n('nb_attention')
   const critiques = n('nb_critiques')
+  const ruptures = n('nb_ruptures')
   const bloquants = n('nb_controles_bloquants') + n('nb_controles_critiques')
 
   return (
     <div className="mb-3 flex flex-col gap-3">
+<<<<<<< HEAD
+      {/* ---- LA SITUATION, EN UNE PHRASE PUIS QUATRE CHIFFRES ---------------
+          L'ecran commencait par quatorze tuiles de meme poids : cinq ici, deux
+          sous « A traiter », sept sous « Situation ». L'oeil n'avait aucun
+          point d'entree, et les memes references y etaient comptees trois fois
+          sous trois noms — « A commander 106 », « Sous le stock minimum 106 »,
+          « Ruptures 59 » deux fois. Un tableau de bord qui repete ses chiffres
+          apprend a ne plus les lire.
+
+          Les cockpits des grands ERP ouvrent tous de la meme facon : UNE PHRASE
+          qui dit ou on en est, puis TROIS OU QUATRE nombres, et ces nombres
+          parlent ARGENT. Un compte de references ne se compare a rien ; des
+          dirhams se comparent entre eux et se hierarchisent tout seuls. Le
+          classeur ne fait pas autre chose avec sa « Zone 1 — Insights du jour ».
+
+          Les comptes n'ont pas disparu : ils sont devenus la PRECISION sous le
+          chiffre, la ou ils expliquent au lieu de concurrencer. */}
+      <Carte className="border-primaire/30 bg-primaire/[0.04]">
+        <CarteCorps className="py-3">
+          <p className="text-[13px] leading-relaxed text-texte">
+            {phraseDuJour(k, eco?.economies_total_mad ?? 0, eco?.nb_opportunites ?? 0, nbMonoSource)}
+          </p>
+        </CarteCorps>
+      </Carte>
+
+      <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4">
+        <CarteStat
+          Icone={CircleDollarSign}
+          libelle="Valeur du stock"
+          valeur={fmt.compact(n('valeur_stock_mad'))}
+          unite="MAD"
+          precision={`${fmt.nombre(n('nb_references'), 0)} références · ${ok} au vert`}
+=======
       <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-5">
         <CarteStat
           Icone={Package}
           libelle="Références suivies"
           valeur={fmt.nombre(n('nb_references'), 0)}
           precision={`${ok} au vert · ${attention} en attention`}
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           ton="primaire"
-          surClic={() => naviguer('/stock')}
-        />
-        <CarteStat
-          Icone={TrendingDown}
-          libelle="Sous le minimum"
-          valeur={fmt.nombre(n('nb_refs_sous_minimum'), 0)}
-          precision="Stock magasin sous le seuil calcule"
-          ton={n('nb_refs_sous_minimum') > 0 ? 'danger' : 'succes'}
-          surClic={() => naviguer('/stock')}
-          aide="Veto physique : le magasin est court, quelle que soit la couverture."
-        />
-        <CarteStat
-          Icone={Layers}
-          libelle="Sur-stock"
-          valeur={fmt.nombre(n('nb_sur_stock'), 0)}
-          precision="Au-dela du stock maximum"
-          ton={n('nb_sur_stock') > 0 ? 'alerte' : 'succes'}
-          surClic={() => naviguer('/stock')}
-          aide="Sujet de tresorerie, jamais de rupture : les deux axes sont distincts."
+          surClic={() => naviguer('/valorisation')}
+          aide="Au CMUP, tous magasins confondus."
         />
         <CarteStat
           Icone={ShoppingCart}
-          libelle="Budget a engager"
-          valeur={fmt.nombre(Math.round(n('budget_a_engager_mad')), 0)}
+          libelle="A engager"
+          valeur={fmt.compact(n('budget_a_engager_mad'))}
           unite="MAD"
-          precision={`${n('nb_propositions_a_traiter')} proposition(s) a traiter`}
+          precision={`${n('nb_propositions_a_traiter')} proposition(s) · ${fmt.compact(
+            n('montant_bc_ouverts_mad'),
+          )} deja engages`}
           ton="primaire"
           surClic={() => naviguer('/plan-achat')}
         />
+        {/* LES RUPTURES ET LES CRITIQUES DANS LE MEME CHIFFRE : ce sont les deux
+            crans de la meme echelle, et les separer en deux tuiles obligeait a
+            les additionner de tete pour savoir combien de references vont mal. */}
         <CarteStat
+<<<<<<< HEAD
+          Icone={TrendingDown}
+          libelle="En alerte"
+          valeur={fmt.nombre(ruptures + critiques, 0)}
+          precision={`${ruptures} rupture(s) · ${critiques} critique(s) · ${attention} en attention`}
+          ton={ruptures > 0 ? 'danger' : critiques > 0 ? 'alerte' : 'succes'}
+          surClic={() => naviguer('/plan-achat')}
+          aide="Stock + commandes fiables - demande pendant le delai d'approvisionnement."
+        />
+        <CarteStat
+          Icone={Sparkles}
+          libelle="Economies identifiees"
+          valeur={fmt.compact(eco?.economies_total_mad ?? 0)}
+          unite="MAD/an"
+          precision={`${eco?.nb_opportunites ?? 0} référence(s) au-dessus du prix du groupe`}
+          ton={(eco?.economies_total_mad ?? 0) > 0 ? 'succes' : 'neutre'}
+          surClic={() => naviguer('/matrice-prix')}
+          aide="A qualite egale : le meme titrage, achete moins cher ailleurs dans le catalogue."
+=======
           Icone={AlertTriangle}
           libelle="Contrôles en anomalie"
           valeur={fmt.nombre(n('nb_alertes_ouvertes'), 0)}
           precision={bloquants > 0 ? `${bloquants} bloquant(s) ou critique(s)` : 'Aucun bloquant'}
           ton={bloquants > 0 ? 'danger' : n('nb_alertes_ouvertes') > 0 ? 'alerte' : 'succes'}
           aide="Coherence des donnees, verifiee en permanence."
+>>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         />
       </div>
 
-      {ok + attention + critiques > 0 && (
+      {/* Les deux chiffres de VERACITE restent visibles, mais en retrait : ils
+          ne pilotent pas, ils avertissent. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-attenue-texte">
+        <button
+          type="button"
+          onClick={() => naviguer('/controles')}
+          className={cn('inline-flex items-center gap-1.5 hover:text-texte',
+            n('nb_controles_bloquants') > 0 && 'font-medium text-danger')}
+        >
+          <AlertTriangle className="size-3.5" />
+          {bloquants} contrôle(s) en anomalie
+          {n('nb_controles_bloquants') > 0 && ` dont ${n('nb_controles_bloquants')} bloquant(s)`}
+        </button>
+        <button
+          type="button"
+          onClick={() => naviguer('/stock')}
+          className="inline-flex items-center gap-1.5 hover:text-texte"
+        >
+          <Layers className="size-3.5" />
+          {n('nb_sur_stock')} référence(s) en sur-stock
+        </button>
+        {n('nb_ecart_majeur') > 0 && (
+          <button
+            type="button"
+            onClick={() => naviguer('/stock')}
+            className="inline-flex items-center gap-1.5 font-medium text-alerte hover:text-texte"
+          >
+            <TrendingDown className="size-3.5" />
+            {n('nb_ecart_majeur')} écart(s) à vérifier
+          </button>
+        )}
+      </div>
+
+      {ok + attention + critiques + ruptures > 0 && (
         <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
           <p className="mb-2 text-[11px] uppercase tracking-wide text-attenue-texte">
             Etat du catalogue suivi
@@ -1040,11 +1477,138 @@ function ChiffresCles() {
             parts={[
               { libelle: 'Au vert', valeur: ok, ton: 'succes' },
               { libelle: 'En attention', valeur: attention, ton: 'alerte' },
-              { libelle: 'Critique ou rupture', valeur: critiques, ton: 'danger' },
+              { libelle: 'Critique', valeur: critiques, ton: 'danger' },
+              // Les ruptures manquaient : les trois segments ne faisaient pas le
+              // total des references suivies.
+              { libelle: 'Rupture', valeur: ruptures, ton: 'danger' },
             ]}
           />
         </div>
       )}
     </div>
+  )
+}
+
+
+/**
+ * Les familles qui portent le plus de stock, et ce qui est entre cette annee.
+ *
+ * POURQUOI LA FAMILLE ET NON LA REFERENCE. Une liste de references ne se lit
+ * pas d'un coup d'oeil ; l'atelier raisonne par famille — « combien de 1500
+ * dtex » — et c'est la forme des classeurs depuis toujours.
+ *
+ * CE QUI N'EST PAS CLASSE APPARAIT AUSSI, sous « Sans famille » : l'ecarter
+ * donnerait un total faux et ferait croire le catalogue plus propre qu'il
+ * n'est. Cette ligne-la est une invitation a completer le catalogue.
+ */
+function BlocFamilles() {
+  const naviguer = useNavigate()
+  const droits = useDroits('MOUVEMENTS')
+  const q = useQuery({
+    queryKey: ['stats', 'familles'],
+    queryFn: () => api.get<Record<string, Record<string, unknown>[]>>('/api/stats/familles'),
+    staleTime: 5 * 60_000,
+  })
+
+  const familles = q.data?.familles ?? []
+  // Une ligne par (famille, annee) : on garde la plus recente de chaque famille.
+  const tete = useMemo(() => {
+    const par = new Map<string, Record<string, unknown>>()
+    for (const f of familles) {
+      const cle = String(f.code_famille ?? '')
+      const vue = par.get(cle)
+      if (!vue || String(f.annee ?? '') > String(vue.annee ?? '')) par.set(cle, f)
+    }
+    return [...par.values()]
+      .sort((x, y) => Number(y.stock_kg ?? 0) - Number(x.stock_kg ?? 0))
+      .slice(0, 6)
+  }, [familles])
+
+  const total = tete.reduce((s, f) => s + Number(f.stock_kg ?? 0), 0)
+  const voitValeur = droits.visible('valeur_dhs')
+
+  if (q.isLoading) {
+    return (
+      <>
+        <TitreBande texte="Par famille" />
+        <Carte>
+          <CarteCorps className="space-y-2 p-4">
+            <Squelette className="h-6" />
+            <Squelette className="h-6" />
+          </CarteCorps>
+        </Carte>
+      </>
+    )
+  }
+  if (tete.length === 0) return null
+
+  return (
+    <>
+      <TitreBande texte="Par famille" />
+      <Carte repliable="cockpit.familles">
+        <CarteEntete>
+          <CarteTitre>Ce que chaque famille porte</CarteTitre>
+          <button
+            type="button"
+            onClick={() => naviguer('/statistiques')}
+            className="text-[11.5px] font-medium text-primaire hover:underline"
+          >
+            Toutes les familles et leurs couleurs
+          </button>
+        </CarteEntete>
+        <CarteCorps className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[30rem] text-[13px] lg:min-w-0">
+              <thead>
+                <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                  <th className="px-3 py-2 text-left">Famille</th>
+                  <th className="w-28 px-2 py-2 text-right">Stock</th>
+                  <th className="w-32 px-3 py-2 text-left">Part</th>
+                  <th className="w-28 px-2 py-2 text-right">Entrees</th>
+                  {voitValeur && <th className="w-32 px-2 py-2 text-right">Valeur</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {tete.map((f, i) => {
+                  const stock = Number(f.stock_kg ?? 0)
+                  const sansFamille = String(f.code_famille ?? '') === '(sans famille)'
+                  return (
+                    <tr key={i} className="border-b border-bordure/60">
+                      <td className="max-w-56 px-3 py-1.5">
+                        <div className="truncate font-medium">{String(f.famille_libelle ?? '')}</div>
+                        <div className="truncate text-[11px] text-attenue-texte">
+                          {sansFamille
+                            ? 'a classer dans le catalogue'
+                            : String(f.categorie_libelle ?? '')}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {stock > 0 ? `${fmt.nombre(stock, 0)} kg` : '—'}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-bordure/60">
+                          <div
+                            className={cn('h-full rounded-full', sansFamille ? 'bg-alerte' : 'bg-primaire')}
+                            style={{ width: `${Math.max(1, total > 0 ? (stock / total) * 100 : 0)}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-succes">
+                        {Number(f.entrees_kg ?? 0) > 0 ? fmt.nombre(Number(f.entrees_kg), 0) : '—'}
+                      </td>
+                      {voitValeur && (
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {fmt.nombre(Number(f.valeur_dhs ?? 0), 0)}
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CarteCorps>
+      </Carte>
+    </>
   )
 }

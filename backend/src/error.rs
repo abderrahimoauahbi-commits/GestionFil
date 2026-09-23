@@ -29,6 +29,13 @@ pub enum AppError {
     #[error("Identifiants invalides")]
     IdentifiantsInvalides,
 
+    /// TROP DE TENTATIVES. Distincte d'identifiants invalides, et c'est
+    /// volontaire : celui qui s'est trompe trois fois de suite doit savoir que
+    /// le compte attend, sinon il continue a taper et allonge l'attente sans
+    /// comprendre. Le message porte le delai restant.
+    #[error("{0}")]
+    TropDeTentatives(String),
+
     #[error("Acces refuse : permission {action} manquante sur le module {module}")]
     NonAutorise { module: String, action: String },
 
@@ -61,8 +68,17 @@ impl From<sqlx::Error> for AppError {
             sqlx::Error::RowNotFound => AppError::Introuvable("enregistrement".into()),
             sqlx::Error::Database(db) => {
                 let msg = db.message().to_string();
+                // UN RAISE EXCEPTION DE DECLENCHEUR EST UN MESSAGE METIER, ecrit
+                // pour l'utilisateur. On le reconnait a sa routine d'origine
+                // plutot qu'a sa premiere lettre : « La ligne du bon ... porte
+                // la reference ... » tombait sinon en « erreur interne ».
+                let leve_par_declencheur = db
+                    .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                    .and_then(|pg| pg.routine())
+                    .is_some_and(|r| r == "exec_stmt_raise");
                 // Message metier explicite leve par un trigger.
-                if msg.starts_with('R')
+                if leve_par_declencheur
+                    || msg.starts_with('R')
                     || msg.starts_with('C')
                     || msg.starts_with('B')
                     || msg.contains("Transition")
@@ -71,16 +87,35 @@ impl From<sqlx::Error> for AppError {
                     || msg.contains("quarantaine")
                     || msg.contains("Tracabilite")
                 {
-                    AppError::RegleMetier(msg)
-                } else if msg.contains("UNIQUE constraint failed") {
-                    AppError::Conflit(msg)
-                } else if msg.contains("CHECK constraint failed")
-                    || msg.contains("FOREIGN KEY constraint failed")
-                    || msg.contains("NOT NULL constraint failed")
-                {
-                    AppError::Invalide(msg)
-                } else {
-                    AppError::Sqlx(e)
+                    return AppError::RegleMetier(msg);
+                }
+
+                // LES CONTRAINTES SE LISENT PAR LEUR CODE SQLSTATE, pas par leur
+                // message : PostgreSQL parle la langue du serveur, et « UNIQUE
+                // constraint failed » etait la formule de SQLite. Un numero de
+                // facture deja pris tombait ainsi en « erreur interne », sans un
+                // mot pour celui qui saisit.
+                let detail = db
+                    .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                    .and_then(|pg| pg.detail())
+                    .map(|d| format!(" {d}"))
+                    .unwrap_or_default();
+                match db.code().as_deref() {
+                    Some("23505") => AppError::Conflit(format!("Cet enregistrement existe déjà.{detail}")),
+                    Some("23503") => AppError::Invalide(format!(
+                        "Référence liée absente, ou encore utilisée ailleurs.{detail}"
+                    )),
+                    Some("23514") => AppError::Invalide(format!("Valeur refusée par une règle de la base : {msg}")),
+                    Some("23502") => AppError::Invalide(format!("Un champ obligatoire manque : {msg}")),
+                    // Formules de SQLite, gardees le temps que rien n'en depende.
+                    _ if msg.contains("UNIQUE constraint failed") => AppError::Conflit(msg),
+                    _ if msg.contains("CHECK constraint failed")
+                        || msg.contains("FOREIGN KEY constraint failed")
+                        || msg.contains("NOT NULL constraint failed") =>
+                    {
+                        AppError::Invalide(msg)
+                    }
+                    _ => AppError::Sqlx(e),
                 }
             }
             _ => AppError::Sqlx(e),
@@ -96,6 +131,12 @@ impl IntoResponse for AppError {
             AppError::Invalide(_) => (StatusCode::BAD_REQUEST, "INVALIDE"),
             AppError::NonAuthentifie => (StatusCode::UNAUTHORIZED, "NON_AUTHENTIFIE"),
             AppError::IdentifiantsInvalides => (StatusCode::UNAUTHORIZED, "IDENTIFIANTS_INVALIDES"),
+            // 429 et non 401 : ce n'est pas le mot de passe qui est refuse,
+            // c'est la cadence. Un client qui reessaie en boucle doit pouvoir
+            // faire la difference.
+            AppError::TropDeTentatives(_) => {
+                (StatusCode::TOO_MANY_REQUESTS, "TROP_DE_TENTATIVES")
+            }
             AppError::NonAutorise { .. } => (StatusCode::FORBIDDEN, "NON_AUTORISE"),
             AppError::ChampNonModifiable { .. } => (StatusCode::FORBIDDEN, "CHAMP_NON_MODIFIABLE"),
             AppError::Conflit(_) => (StatusCode::CONFLICT, "CONFLIT"),

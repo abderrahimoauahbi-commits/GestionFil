@@ -5,7 +5,7 @@
  * interne et un style cohérent avec l'application.
  */
 import { useEffect, useState } from 'react'
-import { BookOpen, FileText, ArrowLeft } from 'lucide-react'
+import { ArrowLeft, BookOpen } from 'lucide-react'
 import { EnTetePage } from '../composants/Coquille'
 import { Bouton } from '../composants/ui/base'
 import { useNavigate } from 'react-router-dom'
@@ -19,7 +19,7 @@ interface MarkdownSection {
 
 export function GuideUtilisateur() {
   const naviguer = useNavigate()
-  const [content, setContent] = useState<string>('')
+  const [, setContent] = useState<string>('')
   const [sections, setSections] = useState<MarkdownSection[]>([])
   const [activeSection, setActiveSection] = useState<string>('')
   const [loading, setLoading] = useState(true)

@@ -11,11 +11,7 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-<<<<<<< HEAD
 import { Check, Cog, Loader2, Minus, Plus, RefreshCw, Trash2, X } from 'lucide-react'
-=======
-import { Check, Cog, Layers, Loader2, Plus, Trash2, X } from 'lucide-react'
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 import { api } from '../../api/client'
 import { Alerte, Chargement } from '../../composants/ui/base'
 import { EnTetePage } from '../../composants/Coquille'
@@ -42,10 +38,6 @@ export function MachinesBureau() {
   const [machine, setMachine] = useState<Machine | null>(null)
   const [zone, setZone] = useState<Zone | null>(null)
   const [type, setType] = useState<TypeFiche | null>(null)
-<<<<<<< HEAD
-=======
-  const [onglet, setOnglet] = useState<'etat' | 'conso'>('etat')
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   /* CET ECRAN NE DECLARE PAS DE MACHINE, ET C'EST VOULU. Le parc est du
      parametrage — declarer un metier, corriger ses capacites, dire pourquoi il
      ne tourne pas — et il vit sur son propre ecran, sous PARAMETRES. Ici on
@@ -65,7 +57,6 @@ export function MachinesBureau() {
   if (qMachines.isLoading) return <Chargement texte="Lecture des machines…" />
   const machines = qMachines.data ?? []
 
-<<<<<<< HEAD
   /* ----------------------------------------------------------------------
      L'ENCHAINEMENT DEMANDE, ET POURQUOI IL EST MEILLEUR.
 
@@ -96,29 +87,10 @@ export function MachinesBureau() {
                            transition-colors hover:bg-attenue"
               >
                 <Cog className="size-3.5" />
-=======
-  return (
-    <div className="flex flex-col gap-3">
-      <EnTetePage titre="Machines" />
-
-      <div className="grid gap-3 lg:grid-cols-[15rem_16rem_1fr]">
-        {/* --- Colonne 1 : les machines --------------------------------- */}
-        <Colonne
-          titre="Machines"
-          action={
-            parametrable ? (
-              <Link
-                to="/parc-machines"
-                className="inline-flex items-center gap-1 rounded-[3px] px-1.5 py-0.5
-                           text-[11px] font-medium text-primaire hover:bg-primaire/10"
-              >
-                <Cog className="size-3" />
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
                 Le parc
               </Link>
             ) : null
           }
-<<<<<<< HEAD
         />
         {machines.length === 0 ? (
           <Vide
@@ -443,95 +415,11 @@ function TableEtages({
             })}
           </tbody>
         </table>
-=======
-        >
-          {machines.length === 0 && (
-            <Vide
-              texte={
-                parametrable
-                  ? 'Aucune machine déclarée. Passez par « Le parc » pour en saisir une.'
-                  : 'Aucune machine déclarée. La direction doit les saisir.'
-              }
-            />
-          )}
-          {machines.map((m) => (
-            <button
-              key={m.code_machine}
-              type="button"
-              onClick={() => {
-                setMachine(m)
-                setZone(null)
-                setType(null)
-              }}
-              className={cn(
-                'flex w-full flex-col gap-0.5 border-b border-bordure px-3 py-2 text-left',
-                machine?.code_machine === m.code_machine ? 'bg-primaire/10' : 'hover:bg-attenue',
-              )}
-            >
-              <span className="truncate text-[13px] font-medium text-texte">{m.nom}</span>
-              <span className="text-[11px] tabular-nums text-attenue-texte">
-                {m.bobines_presentes} / {m.capacite_bobines} bob. · {nb(m.quantite_kg, 0)} kg
-              </span>
-            </button>
-          ))}
-        </Colonne>
-
-        {/* --- Colonne 2 : les zones ------------------------------------ */}
-        <Colonne titre={machine ? machine.nom : 'Zones'}>
-          {!machine && <Vide texte="Choisissez une machine." />}
-          {machine &&
-            (qPlan.data ?? []).map((z) => (
-              <button
-                key={z.code_emplacement}
-                type="button"
-                onClick={() => {
-                  setZone(z)
-                  setType(null)
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 border-b border-bordure px-3 py-2 text-left',
-                  zone?.code_emplacement === z.code_emplacement
-                    ? 'bg-primaire/10'
-                    : 'hover:bg-attenue',
-                )}
-              >
-                <Layers className="size-3.5 shrink-0 text-attenue-texte" />
-                <span className="flex-1 text-[13px] text-texte">{z.libelle}</span>
-                <span className="text-[11px] tabular-nums text-attenue-texte">
-                  {z.bobines_presentes}/{z.capacite_bobines}
-                </span>
-              </button>
-            ))}
-        </Colonne>
-
-        {/* --- Colonne 3 : le travail ----------------------------------- */}
-        <div className="min-w-0">
-          {!zone && <Vide texte="Choisissez une zone pour voir son constat." />}
-          {zone && !type && (
-            <ZoneBureau
-              machine={machine!}
-              zone={zone}
-              onglet={onglet}
-              setOnglet={setOnglet}
-              ouvrirFiche={setType}
-            />
-          )}
-          {zone && type && (
-            <FicheBureau
-              machine={machine!}
-              zone={zone}
-              type={type}
-              fermer={() => setType(null)}
-            />
-          )}
-        </div>
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       </div>
     </div>
   )
 }
 
-<<<<<<< HEAD
 /** Un des trois gestes du magasin, pose sur la ligne de son etage. */
 function BoutonGeste({
   titre,
@@ -559,24 +447,6 @@ function BoutonGeste({
     >
       <Icone className="size-3" />
     </button>
-=======
-function Colonne({
-  titre, children, action,
-}: {
-  titre: string
-  children: React.ReactNode
-  /** Bouton d'en-tete, a droite du titre. Absent pour qui n'y a pas droit. */
-  action?: React.ReactNode
-}) {
-  return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-bordure bg-surface">
-      <div className="flex items-center justify-between gap-2 border-b border-bordure bg-attenue px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-attenue-texte">
-        <span className="truncate">{titre}</span>
-        {action}
-      </div>
-      <div className="max-h-[70vh] overflow-y-auto">{children}</div>
-    </div>
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   )
 }
 
@@ -586,140 +456,6 @@ function Vide({ texte }: { texte: string }) {
 
 // =============================================================================
 // LE CONSTAT D'UNE ZONE
-<<<<<<< HEAD
-=======
-// =============================================================================
-
-function ZoneBureau({
-  machine, zone, onglet, setOnglet, ouvrirFiche,
-}: {
-  machine: Machine
-  zone: Zone
-  onglet: 'etat' | 'conso'
-  setOnglet: (o: 'etat' | 'conso') => void
-  ouvrirFiche: (t: TypeFiche) => void
-}) {
-  const qEtat = useQuery({
-    queryKey: ['machine-etat', machine.code_machine, zone.code_emplacement],
-    queryFn: () => machinesApi.etat(machine.code_machine, zone.code_emplacement),
-  })
-  const qConso = useQuery({
-    queryKey: ['machine-conso', machine.code_machine],
-    queryFn: () => machinesApi.consommation(machine.code_machine),
-    enabled: onglet === 'conso',
-  })
-
-  const lignes = qEtat.data ?? []
-  const totalKg = lignes.reduce((s, l) => s + l.kg, 0)
-  const totalBob = lignes.reduce((s, l) => s + l.nb_bobines, 0)
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2">
-        <div>
-          <div className="text-[15px] font-semibold text-texte">{zone.libelle}</div>
-          <div className="text-[12px] tabular-nums text-attenue-texte">
-            {totalBob} / {zone.capacite_bobines} emplacements · {nb(totalKg)} kg ·
-            dernier constat {fmtDate(zone.dernier_constat)}
-          </div>
-        </div>
-        <div className="flex gap-1.5">
-          {/* TROIS FICHES, PAS QUATRE. La consommation ne se saisit pas : elle est
-              le residu entre deux constats, et l'offrir en saisie inviterait a
-              la declarer deux fois. */}
-          {(['CHARGE', 'DECHARGE', 'MAJ'] as TypeFiche[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => ouvrirFiche(t)}
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-[var(--radius-sm)]
-                         border border-bordure px-3 text-[13px] hover:bg-attenue"
-            >
-              <Plus className="size-3.5" />
-              {LIBELLE_TYPE[t]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex gap-1.5">
-        {(
-          [
-            ['etat', 'Constat courant'],
-            ['conso', 'Journal de consommation'],
-          ] as ['etat' | 'conso', string][]
-        ).map(([c, libelle]) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => setOnglet(c)}
-            className={cn(
-              'min-h-[34px] rounded-[var(--radius-sm)] px-3 text-[13px] font-medium',
-              onglet === c ? 'bg-primaire text-primaire-texte' : 'border border-bordure',
-            )}
-          >
-            {libelle}
-          </button>
-        ))}
-      </div>
-
-      {onglet === 'etat' ? (
-        <div className="overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
-                <th className="px-2 py-1.5 text-left">Référence</th>
-                <th className="px-2 py-1.5 text-left">Lot</th>
-                <th className="px-2 py-1.5 text-right">Bobines</th>
-                <th className="px-2 py-1.5 text-right">Poids/bob.</th>
-                <th className="px-2 py-1.5 text-right">%</th>
-                <th className="px-2 py-1.5 text-right">Total kg</th>
-                <th className="px-2 py-1.5 text-left">Constaté le</th>
-              </tr>
-            </thead>
-            <tbody className="tabular-nums">
-              {lignes.map((l) => (
-                <tr key={l.code_reference + l.lot_fournisseur} className="border-t border-bordure">
-                  <td className="max-w-[20rem] truncate px-2 py-1.5 text-texte">{l.designation}</td>
-                  <td className="px-2 py-1.5 font-mono text-[11px]">{l.lot_fournisseur}</td>
-                  <td className="px-2 py-1.5 text-right">{l.nb_bobines}</td>
-                  <td className="px-2 py-1.5 text-right">{nb(l.poids_unitaire_kg, 3)}</td>
-                  <td className="px-2 py-1.5 text-right">{nb(l.pourcentage, 1)}</td>
-                  <td className="px-2 py-1.5 text-right font-medium text-texte">{nb(l.kg)}</td>
-                  <td className="px-2 py-1.5">{fmtDate(l.date_constat)}</td>
-                </tr>
-              ))}
-              {lignes.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-2 py-6 text-center text-attenue-texte">
-                    Zone vide.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            {lignes.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-ink/20 bg-attenue font-semibold">
-                  <td className="px-2 py-1.5" colSpan={2}>
-                    Total
-                  </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{totalBob}</td>
-                  <td colSpan={2} />
-                  <td className="px-2 py-1.5 text-right tabular-nums">{nb(totalKg)}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      ) : (
-        <TableConso lignes={qConso.data ?? []} />
-      )}
-    </div>
-  )
-}
-
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 /**
  * LE JOURNAL DE CONSOMMATION, EN CUMUL.
  *
@@ -727,7 +463,6 @@ function ZoneBureau({
  * revenu, l'etat au depart et a l'arrivee, et le reste. Aucune repartition par
  * fiche — personne ne sait quel chargement a ete tisse quand.
  */
-<<<<<<< HEAD
 /**
  * LE JOURNAL DE CONSOMMATION D'UNE MACHINE, EN ENTIER.
  *
@@ -796,8 +531,6 @@ function JournalMachine({ machine, zones }: { machine: Machine; zones: Zone[] })
   )
 }
 
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 function TableConso({ lignes }: { lignes: LigneConso[] }) {
   const total = lignes.reduce((s, l) => s + l.consommation_kg, 0)
   return (
@@ -1099,7 +832,6 @@ function FicheBureau({
         </Alerte>
       )}
 
-<<<<<<< HEAD
       {/* LE SOLDE DU LOT NE COUVRE PAS : ON DEMANDE, ON NE REFUSE PAS.
           Le magasinier a les bobines dans les mains. Lui opposer un mur le
           pousse a ne plus saisir du tout, ce qui coute bien plus cher que
@@ -1140,17 +872,11 @@ function FicheBureau({
         </Alerte>
       )}
 
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       <div className="flex items-center gap-2">
         <button
           type="button"
           disabled={!f.pret || f.envoi.isPending}
-<<<<<<< HEAD
           onClick={() => f.envoi.mutate(undefined)}
-=======
-          onClick={() => f.envoi.mutate()}
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           className="inline-flex min-h-[40px] items-center gap-2 rounded-[var(--radius-sm)]
                      bg-primaire px-4 text-[14px] font-semibold text-primaire-texte
                      disabled:opacity-40"

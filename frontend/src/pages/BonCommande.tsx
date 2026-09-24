@@ -11,10 +11,10 @@
  * suggere d'en commander et a quel prix. Choisir devient une decision, pas une
  * saisie de code a l'aveugle.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Printer, Save, Send, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Printer, Save, Send, ShieldCheck, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
@@ -40,10 +40,8 @@ import {
   GrilleLignes,
   corpsLigne,
   depuisLigneEnregistree,
-  estEbauche,
   estPrete,
   kgDe,
-  ligneVide,
   totalDe,
   type LigneSaisie,
   type RefLigne,
@@ -124,7 +122,6 @@ export function BonCommande() {
   const naviguer = useNavigate()
   const ouvrir = useOuvrirVue()
   const confirmation = useConfirmation()
-  const [saisie, setSaisie] = useState(false)
   const [entete, setEntete] = useState({
     date_bc: '',
     date_livraison_prevue: '',
@@ -325,6 +322,9 @@ export function BonCommande() {
       setNouvelles([])
       setLignesChargees([])
       setSupprimees([])
+      // La grille se rechargera depuis le serveur : c'est lui qui detient
+      // desormais les identifiants des lignes qu'on vient de creer.
+      amorcee.current = null
       rafraichir()
     },
     onError: echec,
@@ -343,7 +343,8 @@ export function BonCommande() {
   const basculerSuppression = (ligne: string) =>
     setSupprimees((l) => (l.includes(ligne) ? l.filter((x) => x !== ligne) : [...l, ligne]))
 
-  const lignes = qLignes.data ?? []
+  const lignes = useMemo(() => qLignes.data ?? [], [qLignes.data])
+
 
   // --- Brouillon local des lignes -------------------------------------------
   // Une valeur n'entre dans le brouillon que si elle DIFFERE de celle du
@@ -364,9 +365,21 @@ export function BonCommande() {
     brouillon[l.id_ligne_bc]?.[champ] ?? (l[champ] as number | undefined) ?? null
 
   const ligneModifiee = (l: LigneBc) => !!brouillon[l.id_ligne_bc]
+  /*
+   * MODIFIEE VEUT DIRE « QUI A CHANGE », pas « qui est dans la grille ».
+   *
+   * Compter toute ligne chargee affichait « 1 modifiee(s) » des l'ouverture,
+   * sans que personne ait touche a rien — et le bouton d'enregistrement restait
+   * actif en permanence. On compare donc chaque ligne a ce qu'elle etait en
+   * arrivant, par le corps meme qui partira au serveur : ce qui ne changerait
+   * rien pour lui ne compte pas comme une modification.
+   */
   const nbModifiees =
     Object.keys(brouillon).filter((c) => !supprimees.includes(c)).length +
-    nouvelles.filter((n) => n.idExistant).length
+    nouvelles.filter(
+      (n) =>
+        n.idExistant && JSON.stringify(corpsLigne(n)) !== initiales.current.get(n.idExistant),
+    ).length
   const aEnregistrer =
     nbModifiees > 0 || nouvelles.length > 0 || supprimees.length > 0 || enteteModifie
 
@@ -424,6 +437,31 @@ export function BonCommande() {
   const modifiable =
     !!droits.peutEcrire &&
     (bc?.statut === 'BROUILLON' || bc?.statut === 'EN_ATTENTE_VALIDATION')
+  /*
+   * LES LIGNES ENREGISTREES ENTRENT DANS LA GRILLE, une fois par document.
+   *
+   * `amorcee` retient POUR QUEL bon la grille a ete remplie. Sans ce garde,
+   * chaque rafraichissement de la liste — et il y en a a chaque frappe dans une
+   * autre requete — rechargerait les lignes depuis le serveur et effacerait ce
+   * que l'acheteur vient de corriger sans l'avoir enregistre.
+   */
+  const amorcee = useRef<string | null>(null)
+  /** Ce que chaque ligne valait en arrivant, pour savoir ce qui a bouge. */
+  const initiales = useRef<Map<string, string>>(new Map())
+  useEffect(() => {
+    if (!modifiable || !id || qLignes.isLoading) return
+    if (amorcee.current === id) return
+    amorcee.current = id
+    const chargees = lignes.map((l) =>
+      depuisLigneEnregistree(l, parPlan.get(l.code_reference ?? '')),
+    )
+    initiales.current = new Map(
+      chargees.map((l) => [l.idExistant as string, JSON.stringify(corpsLigne(l))]),
+    )
+    setNouvelles(chargees)
+    setLignesChargees(lignes.map((l) => l.id_ligne_bc))
+  }, [id, modifiable, qLignes.isLoading, lignes, parPlan])
+
   /* LE SUPERVISEUR VALIDE CE QU'IL A CREE, sur decision de la direction. La
      separation des taches reste en vigueur pour tous les autres roles : dans
      une PME, l'interdire au seul compte habilite ne cree pas un second regard,
@@ -447,11 +485,8 @@ export function BonCommande() {
     {
       champ: 'code_reference',
       entete: 'Référence',
-<<<<<<< HEAD
       // UNE PRESTATION N'A PAS DE REFERENCE : c'est son libelle qui la nomme.
       // Sans ce repli, la ligne de transport s'affichait vide.
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       rendu: (l) => (
         <div className="min-w-0">
           <div className="truncate font-medium">
@@ -731,12 +766,6 @@ export function BonCommande() {
               <Printer />
               Imprimer
             </Bouton>
-            {modifiable && (
-              <Bouton variante="contour" onClick={() => { setNouvelles((n) => (n.length ? n : [ligneVide()])); setSaisie(true) }}>
-                <Plus />
-                Ajouter des lignes
-              </Bouton>
-            )}
             {droits.peutEcrire && bc.statut === 'BROUILLON' && (
               <Bouton
                 variante="contour"
@@ -924,97 +953,27 @@ export function BonCommande() {
           </CarteCorps>
         </Carte>
 
+        {/* LES LIGNES SE MODIFIENT SUR PLACE, chacune avec ses boutons.
+            Il y avait auparavant deux endroits : un tableau pour regarder, et
+            une grille en dessous pour corriger. On corrigeait donc une ligne
+            sans la voir a cote des autres, et il fallait un bouton « Modifier
+            les lignes » pour basculer de l'un a l'autre. Une ligne se corrige
+            la ou elle est.
+
+            LE TABLEAU RESTE POUR LA CONSULTATION : un bon envoye ou clos ne se
+            modifie plus, et l'on veut alors l'export, l'impression et le choix
+            des colonnes. */}
         <Carte repliable="boncommande.2">
           <CarteEntete>
             <CarteTitre>Lignes</CarteTitre>
-            {modifiable && (
-              <div className="flex flex-wrap gap-2">
-                {/* CORRIGER UNE LIGNE DEJA SAISIE passe par la MEME grille.
-                    Les cellules editables du tableau ne donnaient que la
-                    quantite et le prix : changer la reference, l'unite ou un
-                    code fournisseur obligeait a supprimer puis ressaisir. */}
-                <Bouton
-                  variante="contour"
-                  taille="sm"
-                  onClick={() => {
-                    setNouvelles(
-                      lignes.map((l) =>
-                        depuisLigneEnregistree(l, parPlan.get(l.code_reference ?? '')),
-                      ),
-                    )
-                    setLignesChargees(lignes.map((l) => l.id_ligne_bc))
-                    setSaisie(true)
-                  }}
-                  disabled={lignes.length === 0}
-                >
-                  Modifier les lignes
-                </Bouton>
-                <Bouton
-                  variante="contour"
-                  taille="sm"
-                  onClick={() => {
-                    setNouvelles((n) => (n.length ? [...n, ligneVide()] : [ligneVide()]))
-                    setSaisie(true)
-                  }}
-                >
-                  <Plus />
-                  Ajouter
-                </Bouton>
-              </div>
-            )}
+            <span className="text-[11px] text-attenue-texte">
+              {modifiable
+                ? 'Chaque ligne se corrige sur place — rien n’est enregistré tant que vous n’avez pas enregistré le bon.'
+                : `${lignes.length} ligne(s)`}
+            </span>
           </CarteEntete>
-          <CarteCorps className="p-0">
-            <DataTable<LigneBc>
-          exportable="lignes-du-bon"
-          imprimable="Lignes du bon"
-              module={MODULE}
-              colonnes={colonnes}
-              lignes={lignesAffichees}
-              chargement={qLignes.isLoading}
-              cle={(l) => l.id_ligne_bc}
-              recherche={false}
-              pagination={false}
-              tailleParDefaut={500}
-              titreCarte={(l) => l.code_reference}
-              videTitre="Aucune ligne"
-              videDescription="Ajoutez des references : le plan d'achat vous dira quoi commander."
-              actions={
-                modifiable
-                  ? (l) => (
-                      <Bouton
-                        variante="discret"
-                        taille="icone-xs"
-                        className="text-danger hover:bg-danger/10"
-                        onClick={() =>
-                          estNouvelle(l)
-                            ? setNouvelles((n) => n.filter((x) => x.cle !== l.id_ligne_bc))
-                            : basculerSuppression(l.id_ligne_bc)
-                        }
-                        aria-label="Retirer"
-                        title="Marquer la ligne a retirer — effectif a l'enregistrement"
-                      >
-                        <Trash2 />
-                      </Bouton>
-                    )
-                  : undefined
-              }
-            />
-          </CarteCorps>
-        </Carte>
-
-        {/* LA SAISIE RESTE DANS LA PAGE, sous les lignes existantes.
-            Elle avait d'abord ete posee dans un tiroir modal : on perdait de
-            vue le bon qu'on modifiait, et il fallait fermer pour verifier ce
-            qu'on venait d'ajouter. Un document se saisit devant soi. */}
-        {saisie && bc && (
-          <Carte>
-            <CarteEntete>
-              <CarteTitre>Ajouter des lignes</CarteTitre>
-              <Bouton variante="discret" taille="sm" onClick={() => setSaisie(false)}>
-                Masquer la saisie
-              </Bouton>
-            </CarteEntete>
-            <CarteCorps className="space-y-3">
+          <CarteCorps className={modifiable ? 'space-y-3' : 'p-0'}>
+            {modifiable && bc ? (
               <GrilleLignes
                 codeFournisseur={bc.code_fournisseur}
                 devise={bc.code_devise}
@@ -1024,30 +983,30 @@ export function BonCommande() {
                 setMode={setMode}
                 proposees={proposees}
                 chercherCatalogue={chercherCatalogue}
-                dejaPrises={
-                  new Set([
-                    ...lignes.map((l) => l.code_reference).filter((c): c is string => !!c),
-                    ...nouvelles.map((n) => n.code_reference).filter(Boolean),
-                  ])
-                }
                 surCorrection={(code, champ, valeur) =>
                   corrigerReference.mutate({ code, champ, valeur })
                 }
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
               />
-              <div className="border-t border-bordure pt-2 text-[12px] text-attenue-texte">
-                {nouvelles.filter(estPrete).length} ligne(s) prete(s)
-                {nouvelles.filter(estEbauche).length > 0 && (
-                  <span className="text-danger">
-                    {' '}
-                    — {nouvelles.filter(estEbauche).length} incomplete(s) : référence, quantité ou prix
-                  </span>
-                )}
-                {' · '}rien n’est enregistré tant que vous n’avez pas enregistré le bon.
-              </div>
-            </CarteCorps>
-          </Carte>
-        )}
+            ) : (
+              <DataTable<LigneBc>
+                exportable="lignes-du-bon"
+                imprimable="Lignes du bon"
+                module={MODULE}
+                colonnes={colonnes}
+                lignes={lignesAffichees}
+                chargement={qLignes.isLoading}
+                cle={(l) => l.id_ligne_bc}
+                recherche={false}
+                pagination={false}
+                tailleParDefaut={500}
+                titreCarte={(l) => l.code_reference}
+                videTitre="Aucune ligne"
+                videDescription="Ajoutez des references : le plan d'achat vous dira quoi commander."
+              />
+            )}
+          </CarteCorps>
+        </Carte>
       </div>
 
       {/* Les deux boutons sont TOUJOURS presents tant que le bon se modifie, et
@@ -1127,257 +1086,3 @@ export function BonCommande() {
   )
 }
 
-<<<<<<< HEAD
-=======
-/**
- * Saisie des lignes, avec le plan d'achat sous les yeux.
- *
- * Une seule liste, celle des references DU FOURNISSEUR du bon — la precedente
- * offrait deux mille references tous fournisseurs confondus. Chacune arrive avec
- * son stock, sa couverture et la quantite suggeree, et cocher preremplit la
- * quantite et le prix. On corrige ensuite ce qu'on veut.
- */
-function PanneauSaisie({
-  idBc,
-  devise,
-  dejaChoisies,
-  surFermeture,
-  surAjout,
-}: {
-  idBc: string
-  devise: string
-  /** References deja sur le bon OU deja ajoutees au brouillon. */
-  dejaChoisies: string[]
-  surFermeture: () => void
-  surAjout: (
-    ajouts: { code_reference: string; designation: string; quantite: number; prix: number }[],
-  ) => void
-}) {
-  const [choix, setChoix] = useState<Record<string, { qte: string; prix: string }>>({})
-  const [filtre, setFiltre] = useState('')
-  const [erreur, setErreur] = useState<string | null>(null)
-
-  const q = useQuery({
-    queryKey: ['refs-commandables', idBc],
-    queryFn: () => api.get<RefCommandable[]>(`/api/references-commandables?id_bc=${idBc}`),
-  })
-
-  /**
-   * Le panneau ne cree rien : il remonte les lignes au document, qui les garde
-   * en brouillon jusqu'a l'enregistrement. Ajouter une ligne est une intention,
-   * pas un engagement — et une ligne ajoutee par erreur se retire sans avoir
-   * jamais existe en base.
-   */
-  const valider = () => {
-    const ajouts = Object.entries(choix).map(([code, v]) => ({
-      code_reference: code,
-      designation: (q.data ?? []).find((r) => r.code_reference === code)?.designation ?? code,
-      quantite: Number(v.qte),
-      prix: Number(v.prix),
-    }))
-    if (ajouts.some((a) => !(a.quantite > 0) || !(a.prix > 0))) {
-      setErreur('Renseignez une quantite et un prix pour chaque ligne.')
-      return
-    }
-    surAjout(ajouts)
-    setChoix({})
-    surFermeture()
-  }
-
-  const refs = (q.data ?? []).filter(
-    (r) =>
-      !filtre ||
-      r.code_reference.toLowerCase().includes(filtre.toLowerCase()) ||
-      (r.designation ?? '').toLowerCase().includes(filtre.toLowerCase()),
-  )
-
-  const basculer = (r: RefCommandable) =>
-    setChoix((c) => {
-      if (c[r.code_reference]) {
-        const { [r.code_reference]: _, ...reste } = c
-        return reste
-      }
-      // Preremplissage : la quantite suggeree par le plan, et le prix estime
-      // ramene dans la devise du bon. L'acheteur corrige ce qu'il veut.
-      return {
-        ...c,
-        [r.code_reference]: {
-          // La quantite suggeree n'existe que si le plan propose la reference ;
-          // le prix, lui, est toujours connu — c'est le repli CMUP puis catalogue.
-          qte: String(r.qte_a_commander_kg ?? ''),
-          prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
-        },
-      }
-    })
-
-  const nb = Object.keys(choix).length
-  const complet = Object.values(choix).every((v) => Number(v.qte) > 0 && Number(v.prix) > 0)
-
-  return (
-    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
-      <DialogueContenu
-        cote="droite"
-        titre="Ajouter des lignes"
-        description={`References de ce fournisseur, classees par urgence. Prix en ${devise} par kg.`}
-      >
-        <Champ
-          placeholder="Filtrer par référence ou designation…"
-          value={filtre}
-          onChange={(e) => setFiltre(e.target.value)}
-          className="mb-3"
-        />
-
-        {q.isLoading && <Chargement texte="Chargement des références…" />}
-
-        <div className="space-y-1.5">
-          {refs.map((r) => {
-            const coche = !!choix[r.code_reference]
-            const deja = r.deja_sur_le_bon > 0 || dejaChoisies.includes(r.code_reference)
-            return (
-              <div
-                key={r.code_reference}
-                className={cn(
-                  'rounded-[var(--radius)] border p-2',
-                  coche ? 'border-primaire bg-primaire/5' : 'border-bordure',
-                  deja && 'opacity-60',
-                )}
-              >
-                <label className="flex cursor-pointer items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={coche}
-                    disabled={deja}
-                    onChange={() => basculer(r)}
-                    className="mt-0.5 size-4 shrink-0"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-medium">{r.code_reference}</span>
-                      {r.statut_stock && (
-                        <Badge ton={TON_STOCK[r.statut_stock] ?? 'neutre'}>{r.statut_stock}</Badge>
-                      )}
-                      {r.tier && <Badge ton="contour">{r.tier}</Badge>}
-                      {r.classe_abc && <Badge ton="neutre">ABC {r.classe_abc}</Badge>}
-                      {deja && <span className="text-[11px] text-attenue-texte">déjà sur ce bon</span>}
-                    </span>
-                    <span className="mt-0.5 block truncate text-[12px] text-attenue-texte">
-                      {r.designation}
-                    </span>
-                    <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-attenue-texte">
-                      <span>
-                        Projete{' '}
-                        <span className="tabular-nums text-texte">
-                          {fmt.nombre(r.stock_projete_kg ?? 0, 0)} kg
-                        </span>
-                      </span>
-                      {r.jours_couverture != null && (
-                        <span>
-                          Couverture{' '}
-                          <span className="tabular-nums text-texte">
-                            {fmt.nombre(r.jours_couverture, 0)} j
-                          </span>
-                        </span>
-                      )}
-                      {r.qte_a_commander_kg != null && (
-                        <span>
-                          Suggere{' '}
-                          <span className="tabular-nums font-medium text-texte">
-                            {fmt.nombre(r.qte_a_commander_kg, 0)} kg
-                          </span>
-                        </span>
-                      )}
-                      {r.moq_kg != null && <span>MOQ {fmt.nombre(r.moq_kg, 0)} kg</span>}
-                      {r.multiple_achat_kg != null && (
-                        <span>multiple {fmt.nombre(r.multiple_achat_kg, 0)} kg</span>
-                      )}
-                      {r.prix_suggere_devise != null && (
-                        <span>
-                          Prix{' '}
-                          <span className="tabular-nums text-texte">
-                            {fmt.nombre(r.prix_suggere_devise, 4)} {devise}
-                          </span>
-                        </span>
-                      )}
-                      {r.source_prix === 'CATALOGUE' && (
-                        <span className="text-alerte">prix catalogue, jamais paye</span>
-                      )}
-                      {r.source_prix === 'CMUP' && <span>coût moyen constate</span>}
-                    </span>
-                  </span>
-                </label>
-
-                {coche && (
-                  <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-2">
-                    <div>
-                      <Etiq>Quantité (kg)</Etiq>
-                      <Champ
-                        type="number"
-                        step="any"
-                        min="0.0001"
-                        value={choix[r.code_reference].qte}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [r.code_reference]: { ...c[r.code_reference], qte: e.target.value },
-                          }))
-                        }
-                        className="text-right tabular-nums"
-                      />
-                    </div>
-                    <div>
-                      <Etiq>Prix {devise}/kg</Etiq>
-                      <Champ
-                        type="number"
-                        step="any"
-                        min="0.0001"
-                        value={choix[r.code_reference].prix}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [r.code_reference]: { ...c[r.code_reference], prix: e.target.value },
-                          }))
-                        }
-                        className="text-right tabular-nums"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          {!q.isLoading && refs.length === 0 && (
-            <p className="py-6 text-center text-[13px] text-attenue-texte">
-              Aucune reference active pour ce fournisseur.
-            </p>
-          )}
-        </div>
-
-        {erreur && (
-          <Alerte ton="danger" className="mt-3">
-            {erreur}
-          </Alerte>
-        )}
-
-        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
-          <span className="text-[11px] text-attenue-texte">
-            {nb} reference(s) — ajoutees au brouillon, enregistrees avec le bon
-          </span>
-          <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={surFermeture}>
-              Annuler
-            </Bouton>
-            <Bouton
-              onClick={valider}
-              disabled={!nb || !complet}
-              title={!complet ? 'Renseignez une quantite et un prix pour chaque ligne' : undefined}
-            >
-              <Plus />
-              Ajouter {nb || ''}
-            </Bouton>
-          </div>
-        </div>
-      </DialogueContenu>
-    </Dialogue>
-  )
-}
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca

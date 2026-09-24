@@ -222,16 +222,11 @@ const ONGLETS: Onglet[] = [
      * avaient pas ont recu la leur, a leur nom.
      */
     cle: 'categories',
-<<<<<<< HEAD
     libelle: 'Catégories et familles',
-=======
-    libelle: 'Catégories matiere',
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     module: 'CATALOGUE',
     chemin: 'categories',
     identifiant: 'code_categorie',
     unite: 'catégorie',
-<<<<<<< HEAD
     colonnes: [],
     champs: [],
     ecranDedie: () => (
@@ -287,40 +282,6 @@ const ONGLETS: Onglet[] = [
     colonnes: [],
     champs: [],
     ecranDedie: () => <EcranCouleurs />,
-=======
-    colonnes: [
-      colonneCode('code_categorie', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
-      {
-        champ: 'code_role_defaut',
-        entete: 'Role BOM habituel',
-        rendu: (l) =>
-          l.code_role_defaut ? (
-            String(l.code_role_defaut)
-          ) : (
-            <span className="text-attenue-texte">—</span>
-          ),
-      },
-      { champ: 'description', entete: 'Description', secondaire: true },
-      compte('nb_references', 'References'),
-    ],
-    champs: [
-      { champ: 'code_categorie', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
-      {
-        champ: 'code_role_defaut',
-        libelle: 'Role BOM habituel',
-        type: 'liste',
-        options: ROLES_BOM,
-        aide:
-          "Aide a la saisie : la composition d'une qualite proposera d'abord les matieres " +
-          'de cette categorie pour ce role. Rien n\'interdit de la faire servir ailleurs.',
-      },
-      { champ: 'description', libelle: 'Description', type: 'zone' },
-      { champ: 'ordre_affichage', libelle: 'Ordre d affichage', type: 'entier' },
-      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
-    ],
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   },
   {
     cle: 'roles-bom',
@@ -516,7 +477,6 @@ const ONGLETS: Onglet[] = [
       { champ: 'code_motif_ligne', libelle: 'Code', obligatoire: true, cleCreation: true },
       { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
       { champ: 'categorie', libelle: 'Catégorie' },
-<<<<<<< HEAD
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },
@@ -613,8 +573,6 @@ const ONGLETS: Onglet[] = [
           + 'les parts egales pour une formalite qui ne depend ni du prix ni du poids.',
       },
       { champ: 'ordre', libelle: 'Ordre d affichage', type: 'entier' },
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },

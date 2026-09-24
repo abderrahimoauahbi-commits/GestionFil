@@ -20,17 +20,14 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-<<<<<<< HEAD
 import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
-=======
-import { ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { Alerte, Chargement } from '../composants/ui/base'
-import { cn } from '../lib/utils'
+import { TableauImprimable } from '../composants/Etat'
+import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'STOCK'
 
@@ -469,7 +466,13 @@ function TableauLarge({
   totaux: { global: number; magasins: number; machines: number; valeur: number }
 }) {
   return (
-    <div className="hidden overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface md:block">
+    <>
+    /* CE TABLEAU EST CELUI DE L'ECRAN. La version papier est rendue par
+       `TableauImprimable`, plus bas : elle porte l'en-tete de societe, la date
+       d'edition et le nom de qui imprime — un etat, pas une photo d'ecran.
+       C'est ce qui manquait ici : « Imprimer » sortait la barre laterale, les
+       filtres, et le tableau tasse dans ce qui restait de largeur. */
+    <div className="sans-impression hidden overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface md:block">
       <table className="w-full text-[12px]">
         <thead className="sticky top-0 z-10">
           <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
@@ -611,6 +614,24 @@ function TableauLarge({
         </tfoot>
       </table>
     </div>
+
+      {/* L'ETAT PAPIER : en-tete de societe, date, operateur. Il ne s'affiche
+          jamais a l'ecran (`hidden print:block`) et remplace entierement la
+          page a l'impression. */}
+      <TableauImprimable<LigneStock>
+        titre="Etat du stock"
+        resume={`${toutes.length} reference(s) · global ${fmt.nombre(totaux.global, 0)} kg · magasins ${fmt.nombre(totaux.magasins, 0)} kg · machines ${fmt.nombre(totaux.machines, 0)} kg`}
+        lignes={toutes}
+        colonnes={[
+          { entete: 'Reference', valeur: (l) => l.code_reference },
+          { entete: 'Designation', valeur: (l) => l.designation },
+          { entete: 'Fournisseur', valeur: (l) => l.fournisseur_nom ?? '—' },
+          { entete: 'Magasins', numerique: true, valeur: (l) => fmt.nombre(l.magasins_kg ?? 0, 0) },
+          { entete: 'Machines', numerique: true, valeur: (l) => fmt.nombre(l.machines_kg ?? 0, 0) },
+          { entete: 'Global (kg)', numerique: true, valeur: (l) => fmt.nombre(l.stock_global_kg ?? 0, 0) },
+        ]}
+      />
+    </>
   )
 }
 

@@ -534,6 +534,11 @@ export function DataTable<L extends Record<string, unknown>>({
       ) : (
         <>
           {/* --- Tableau : au-dela de 768 px ----------------------------- */}
+          {/* CE TABLEAU-CI EST CELUI DE L'ECRAN, et il ne s'imprime pas :
+              `TableauImprimable`, plus bas, rend la version papier avec
+              l'en-tete de societe. Lui donner `zone-impression` posait DEUX
+              zones absolues l'une sur l'autre — l'en-tete colle du tableau
+              d'ecran venait chevaucher le titre de l'etat. */}
           <div
             className="defilement-x hidden rounded-lg border border-bordure bg-surface md:block"
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}

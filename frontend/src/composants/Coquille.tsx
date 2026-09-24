@@ -769,9 +769,14 @@ export function EnTetePage({
        composant change son nombre de crochets d'un rendu a l'autre. Deux
        regimes de hauteur suffisent : compact des `sm`, plus haut en dessous ou
        les actions passent a la ligne. */
+    /* `sans-impression` : L'EN-TETE D'ECRAN N'EST PAS L'EN-TETE DE L'ETAT.
+       Titre, « Imprimer », « Export », « Rafraichir » se retrouvaient en haut
+       du papier, au-dessus de l'entete de societe — deux titres pour un seul
+       document. L'etat porte le sien. */
     <div
-      className="sticky top-0 z-30 mb-3 -mx-3 flex flex-wrap items-center justify-between gap-3
-                 border-b border-bordure bg-fond px-3 pb-2 pt-1 sm:-mx-4 sm:px-4"
+      className="sans-impression sticky top-0 z-30 mb-3 -mx-3 flex flex-wrap items-center
+                 justify-between gap-3 border-b border-bordure bg-fond px-3 pb-2 pt-1
+                 sm:-mx-4 sm:px-4"
     >
       <div className="flex min-w-0 items-center gap-1.5">
         <h1 className="text-[15px] font-semibold leading-tight tracking-tight">{titre}</h1>

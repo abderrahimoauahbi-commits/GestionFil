@@ -152,7 +152,6 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
     }
   }, [lignes, entete.bobinesEtage])
 
-<<<<<<< HEAD
   /* LE SOLDE DU LOT EST APPROXIMATIF, ET L'ATELIER LE SAIT.
      Quand une bobine redescend d'un metier, personne ne sait de quel lot elle
      venait : le retour est impute au juge, et les soldes par lot derivent. Le
@@ -184,26 +183,14 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
       const message = e instanceof Error ? e.message : String(e)
       if (message.includes('R02-LOT')) setLotCourt(message)
     },
-=======
-  const envoi = useMutation({
-    mutationFn: async () => {
-      const r = await machinesApi.creerFiche(
-        corpsFiche(type, machine, zone!.code_emplacement, entete, lignes),
-      )
-      return machinesApi.valider(r.id_fiche)
-    },
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['machine-etat'] })
       void qc.invalidateQueries({ queryKey: ['machines'] })
       void qc.invalidateQueries({ queryKey: ['machine-plan'] })
       void qc.invalidateQueries({ queryKey: ['machine-fiches'] })
-<<<<<<< HEAD
       void qc.invalidateQueries({ queryKey: ['machine-contenu'] })
       void qc.invalidateQueries({ queryKey: ['machine-conso'] })
       setLotCourt(null)
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       setAmorcee(null)
     },
   })
@@ -217,11 +204,8 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
     lignes.every((l) => l.lot_fournisseur.trim().length > 0)
 
   return {
-<<<<<<< HEAD
     /** Le refus de solde de lot, quand il y en a un : l'ecran le propose. */
     lotCourt, oublierLotCourt: () => setLotCourt(null),
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     etat: qEtat, entete, setEntete, lignes, setLignes,
     majLigne, retirer, ajouter, totaux, envoi, pret,
     reamorcer: () => setAmorcee(null),

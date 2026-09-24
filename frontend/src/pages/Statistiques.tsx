@@ -404,11 +404,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
           existe pour cela et sait filtrer. */}
       <Carte repliable="statistiques.2">
         <CarteEntete>
-<<<<<<< HEAD
           <CarteTitre>Les references qui ont le plus bouge</CarteTitre>
-=======
-          <CarteTitre>Par référence</CarteTitre>
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
           <span className="text-[11px] text-attenue-texte">
             la rotation rapporte les sorties au stock actuel — une approximation, faute
             d'historique de stock

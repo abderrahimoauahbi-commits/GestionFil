@@ -1373,10 +1373,17 @@ pub async fn lignes_bc(
                 -- l'on commande represente-t-il ? Sans les deux caracteristiques
                 -- de conditionnement, la question n'a pas de reponse — et l'on
                 -- affiche alors rien plutot qu'un zero qui passerait pour vrai.
-                CASE WHEN r.poids_bobine_kg > 0 AND r.bobines_par_palette > 0
-                     THEN ROUND(l.quantite_commandee_kg
-                                / (r.poids_bobine_kg * r.bobines_par_palette), 2)
-                END AS nb_palettes,
+                -- LE CONSTAT PRIME SUR LE CALCUL. Renseigne, quelqu'un a vu un
+                -- colisage que la regle ne sait pas deviner ; son constat vaut
+                -- mieux qu'une division.
+                COALESCE(
+                    l.nb_palettes_saisi,
+                    CASE WHEN r.poids_bobine_kg > 0 AND r.bobines_par_palette > 0
+                         THEN ROUND(l.quantite_commandee_kg
+                                    / (r.poids_bobine_kg * r.bobines_par_palette), 2)
+                    END
+                ) AS nb_palettes,
+                l.nb_bobines_saisi AS nb_bobines,
 
                 COALESCE(b.besoin_12m_kg, 0) AS besoin_kg_actuel,
                 CASE WHEN l.besoin_kg_origine IS NULL THEN NULL
@@ -1415,6 +1422,22 @@ pub struct LigneBc {
     pub quantite_commandee_unite: f64,
     pub prix_unitaire_devise: f64,
     pub date_livraison_prevue: Option<String>,
+    /// LE COLISAGE CONSTATE, quand il s'ecarte du calcul.
+    ///
+    /// La grille permet de DETACHER palettes, bobines et quantite : un
+    /// fournisseur livre une palette entamee, et dix-sept palettes pleines plus
+    /// une aux trois quarts ne se deduisent d'aucun poids. Sans ces deux
+    /// champs, le nombre saisi partait au serveur qui ne le demandait pas : le
+    /// detachement ne detachait rien, et le calcul reprenait la main au
+    /// rechargement.
+    ///
+    /// `None` : on calcule, comme avant. C'est le cas courant.
+    /// Decimal : une palette entamee se compte 21,64, pas 22.
+    #[serde(default)]
+    pub nb_palettes: Option<f64>,
+    /// Entier : une bobine ne se coupe pas.
+    #[serde(default)]
+    pub nb_bobines: Option<i64>,
 }
 
 impl LigneBc {
@@ -1532,11 +1555,12 @@ async fn inserer_ligne_bc(
              (id_ligne_bc, id_bc, ligne_numero, type_ligne, code_reference, libelle,
               designation, unite_commande, facteur_kg, quantite_commandee_unite,
               quantite_commandee_kg, prix_unitaire_devise, code_devise,
-              date_livraison_prevue, id_proposition, besoin_kg_origine)
+              date_livraison_prevue, nb_palettes_saisi, nb_bobines_saisi,
+              id_proposition, besoin_kg_origine)
          VALUES ($1, $2, $3, $4, $5, $6,
                  COALESCE((SELECT r.designation FROM reference r
                             WHERE r.code_reference = $5), $6),
-                 $7, $8, $9, $10, $11, $12, $13, {proposition}, {besoin})"
+                 $7, $8, $9, $10, $11, $12, $13, $14, $15, {proposition}, {besoin})"
     ))
     .bind(id_ligne)
     .bind(id_bc)
@@ -1556,6 +1580,12 @@ async fn inserer_ligne_bc(
     .bind(l.prix_unitaire_devise)
     .bind(devise)
     .bind(&l.date_livraison_prevue)
+    // LES TROIS EXPRESSIONS SE STOCKENT, LIEES OU NON. Quantite, palettes et
+    // bobines disent la meme marchandise de trois facons ; n'en garder qu'une
+    // obligeait a rededuire les autres, et la deduction se trompe des que le
+    // colisage reel s'ecarte du theorique.
+    .bind(l.nb_palettes)
+    .bind(l.nb_bobines)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -1567,6 +1597,20 @@ pub struct ModifLigneBc {
     pub quantite_commandee_unite: Option<f64>,
     pub prix_unitaire_devise: Option<f64>,
     pub date_livraison_prevue: Option<String>,
+    /// CORRIGER UNE LIGNE DOIT COUTER CE QUE COUTE LA SAISIR, pas davantage.
+    ///
+    /// Ces trois-la manquaient : on ne pouvait retoucher qu'une quantite et un
+    /// prix. Changer la reference, l'unite ou le colisage obligeait a supprimer
+    /// la ligne et a la refaire — et l'ecran, lui, les envoyait deja : ils
+    /// etaient acceptes puis ignores en silence, ce qui est pire qu'un refus.
+    #[serde(default)]
+    pub code_reference: Option<String>,
+    #[serde(default)]
+    pub unite_commande: Option<String>,
+    #[serde(default)]
+    pub nb_palettes: Option<f64>,
+    #[serde(default)]
+    pub nb_bobines: Option<i64>,
 }
 
 /// Recalcule les totaux de l'entete a partir des lignes.
@@ -2255,6 +2299,57 @@ pub async fn modifier_ligne_bc(
         return Err(AppError::RegleMetier(format!(
             "Un bon de commande {statut_bc} ne peut plus etre modifie."
         )));
+    }
+
+    // LA REFERENCE ET L'UNITE SE TRAITENT AVANT LA QUANTITE : elles changent
+    // le facteur de conversion, donc les kilos que la quantite represente.
+    // Les poser apres recalculerait le poids avec l'ancien facteur.
+    let code_reference = match l.code_reference.as_deref().map(str::trim) {
+        Some(c) if !c.is_empty() && Some(c) != code_reference.as_deref() => {
+            if recue > 0.0 {
+                return Err(AppError::RegleMetier(format!(
+                    "Deja {recue:.2} kg receptionnes sur cette ligne : sa reference ne peut                      plus changer. Retirez la ligne et saisissez-en une autre."
+                )));
+            }
+            sqlx::query(
+                "UPDATE ligne_bc SET code_reference = $2,
+                        designation = COALESCE((SELECT r.designation FROM reference r
+                                                 WHERE r.code_reference = $2), designation)
+                  WHERE id_ligne_bc = $1",
+            )
+            .bind(&ligne)
+            .bind(c)
+            .execute(&mut *tx)
+            .await?;
+            Some(c.to_string())
+        }
+        _ => code_reference,
+    };
+    let unite = match l.unite_commande.as_deref().map(str::trim) {
+        Some(u) if !u.is_empty() => {
+            sqlx::query("UPDATE ligne_bc SET unite_commande = $2 WHERE id_ligne_bc = $1")
+                .bind(&ligne)
+                .bind(u)
+                .execute(&mut *tx)
+                .await?;
+            u.to_string()
+        }
+        _ => unite,
+    };
+
+    // LE COLISAGE SE GARDE, LIE OU DETACHE. Les trois expressions disent la
+    // meme marchandise ; n'en retenir qu'une obligeait a rededuire les autres,
+    // et la deduction se trompe des que le colisage reel s'ecarte du theorique.
+    if l.nb_palettes.is_some() || l.nb_bobines.is_some() {
+        sqlx::query(
+            "UPDATE ligne_bc SET nb_palettes_saisi = $2, nb_bobines_saisi = $3
+              WHERE id_ligne_bc = $1",
+        )
+        .bind(&ligne)
+        .bind(l.nb_palettes)
+        .bind(l.nb_bobines)
+        .execute(&mut *tx)
+        .await?;
     }
 
     if let Some(q) = l.quantite_commandee_unite {

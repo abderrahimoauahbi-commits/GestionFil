@@ -94,7 +94,7 @@ export function RobotConnexion() {
           title="Ce qui vous attend"
           aria-label="Ce qui vous attend"
           data-robot-bouton
-          className="fixed right-4 z-40 grid size-11 place-items-center rounded-full border border-bordure bg-surface text-primaire shadow-lg transition-transform hover:scale-105"
+          className="sans-impression fixed right-4 z-40 grid size-11 place-items-center rounded-full border border-bordure bg-surface text-primaire shadow-lg transition-transform hover:scale-105"
           style={{ bottom: 'calc(1rem + var(--barre-basse, 0px))' }}
         >
           <Bot className="size-5" />
@@ -109,7 +109,7 @@ export function RobotConnexion() {
       {ouvert && (
         <div
           data-robot
-          className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-[var(--radius)] border border-bordure bg-surface shadow-lg"
+          className="sans-impression fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-[var(--radius)] border border-bordure bg-surface shadow-lg"
           style={{ bottom: 'calc(1rem + var(--barre-basse, 0px))' }}
         >
           <div className="flex items-start gap-2 border-b border-bordure bg-attenue/40 px-3 py-2">

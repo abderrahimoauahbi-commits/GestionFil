@@ -118,11 +118,7 @@ export function Valorisation() {
           libelle="Sans CMUP"
           valeur={String(total.sansCmup)}
           ton={total.sansCmup > 0 ? 'alerte' : undefined}
-<<<<<<< HEAD
           aide="Ni achat, ni prix catalogue convertible (taux absent) : ces références comptent pour zéro."
-=======
-          aide="Aucune reception valorisee : ces références ne comptent pas dans le total."
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
         />
         <Chiffre
           libelle={`Ecart superieur a ${ECART_NOTABLE} %`}

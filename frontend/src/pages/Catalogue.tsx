@@ -87,7 +87,6 @@ export function Catalogue() {
       ),
     },
     { champ: 'code_categorie', entete: 'Catégorie', filtre: 'liste', rendu: (r) => r.categorie_libelle },
-<<<<<<< HEAD
     {
       // LE ROLE VIENT DE LA CATEGORIE — Poil, Trame, Chaîne, Colle… : c'est la
       // place normale de la matiere dans la composition. Le serveur ne trie que
@@ -97,8 +96,6 @@ export function Catalogue() {
       triable: false,
       rendu: (r) => fmt.texte(r.role_libelle ?? r.code_role_defaut),
     },
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     { champ: 'fournisseur_nom', entete: 'Fournisseur', filtre: 'liste', rendu: (r) => r.fournisseur_nom },
     { champ: 'couleur', entete: 'Couleur', filtre: 'liste', rendu: (r) => fmt.texte(r.couleur), secondaire: true },
     {
@@ -282,7 +279,6 @@ export function Catalogue() {
         { valeur: 'Lot', libelle: 'Lot (bain de production)' },
         { valeur: 'ml', libelle: 'Metre lineaire' },
       ],
-<<<<<<< HEAD
       aide:
         'Le stock reste tenu en kg ; les autres unités sont des masques de saisie. ' +
         'Le lot est le bain que le fournisseur produit — une unité d’achat, pas de manutention.',
@@ -305,15 +301,11 @@ export function Catalogue() {
         'Ce dans quoi cette matière arrive, et donc le mot employé pour la compter. ' +
         'Tant qu’il n’est pas renseigné, l’état du stock affiche les kilos seuls : ' +
         'mieux vaut aucun comptage qu’un comptage faux.',
-=======
-      aide: 'Le stock reste tenu en kg ; les autres unités sont des masques de saisie.',
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     },
     {
       champ: 'poids_bobine_kg',
       libelle: 'Poids par unité (kg)',
       type: 'nombre',
-<<<<<<< HEAD
       aide:
         'Le poids net d’UNE unité de conditionnement : une bobine, un rouleau, ' +
         'une cuve pleine. Sans lui, aucun comptage n’est possible.',
@@ -334,9 +326,6 @@ export function Catalogue() {
         'Le bain de production du fournisseur. Il varie d’un article à l’autre, même chez ' +
         'le même fournisseur : 1344 bobines le plus souvent, parfois 1400, 1688 ou 1720. ' +
         'Sans lui, la commande au lot est refusée plutôt que convertie au jugé.',
-=======
-      aide: 'Obligatoire pour une unité Bobine ou Palette.',
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
     },
     {
       champ: 'densite_kg_ml',

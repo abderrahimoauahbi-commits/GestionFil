@@ -23,12 +23,9 @@ export interface Moi {
   plafond_validation_bc_mad: number | null
   /** Secondes d'inactivite avant verrouillage. Regle sur le serveur. */
   verrou_inactivite_secondes: number
-<<<<<<< HEAD
   /** Le compte exige-t-il un code a la connexion ? Le secret, lui, ne sort
       jamais du serveur. */
   totp_actif: boolean
-=======
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
   permissions: { module: string; action: ActionModule }[]
   droits_champ: Record<string, Record<string, Niveau>>
 }
@@ -88,7 +85,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * pas un echec, c'est une etape.
    */
   const connecter = useCallback(
-<<<<<<< HEAD
     async (login: string, motDePasse: string, code?: string): Promise<'ok' | 'code'> => {
       const r = await api.post<{ jeton?: string; expire_le?: number; exige_code?: boolean }>(
         '/api/auth/connexion',
@@ -96,13 +92,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       )
       if (r.exige_code) return 'code'
       if (!r.jeton) throw new Error('Réponse de connexion incomplète.')
-=======
-    async (login: string, motDePasse: string) => {
-      const r = await api.post<{ jeton: string; expire_le: number }>(
-        '/api/auth/connexion',
-        { login, mot_de_passe: motDePasse },
-      )
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       jeton.ecrire(r.jeton)
       /* L'ECHEANCE ABSOLUE DE LA SESSION, gardee a cote du jeton.
          Le verrou d'inactivite se deverrouille sans prolonger la session : il
@@ -110,11 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
          le sait aussi — le jeton porte la meme date et il la fait respecter —
          mais l'interface s'en sert pour fermer proprement plutot que d'attendre
          un 401 au milieu d'une saisie. */
-<<<<<<< HEAD
       echeance.ecrire(r.expire_le ?? 0)
-=======
-      echeance.ecrire(r.expire_le)
->>>>>>> b12ddbbaab00dcf9c7e5e767fc70a7998f5a28ca
       setChargement(true)
       await charger()
       return 'ok'

@@ -164,6 +164,10 @@ export function depuisLigneEnregistree(
     couleur?: string | null
     poids_bobine_kg?: number | null
     bobines_par_palette?: number | null
+    /* Le colisage TEL QU'IL A ETE SAISI. Present, il prime sur le calcul :
+       c'est le sens meme de l'avoir enregistre. */
+    nb_palettes?: number | null
+    nb_bobines?: number | null
   },
   fiche?: RefLigne,
 ): LigneSaisie {
@@ -188,9 +192,12 @@ export function depuisLigneEnregistree(
     suggere_kg: null,
     qte: String(l.quantite_commandee_unite),
     unite: l.unite_commande,
-    palettes: pourChamp(colis.palettes),
-    bobines: pourChamp(colis.bobines),
-    lie: true,
+    palettes: l.nb_palettes != null ? String(l.nb_palettes) : pourChamp(colis.palettes),
+    bobines: l.nb_bobines != null ? String(l.nb_bobines) : pourChamp(colis.bobines),
+    // DETACHE DES QU'UN COLISAGE A ETE ENREGISTRE : le relier d'office
+    // recalculerait les deux autres champs et effacerait ce qu'on avait
+    // constate, a la premiere frappe.
+    lie: l.nb_palettes == null && l.nb_bobines == null,
     prix:
       l.prix_unitaire_devise == null
         ? ''
@@ -294,12 +301,27 @@ export const estEbauche = (l: LigneSaisie) =>
  * ecrans peuvent etre d'accord.
  */
 export function corpsLigne(l: LigneSaisie) {
+  /* LES TROIS EXPRESSIONS PARTENT TOUTES, liees ou detachees.
+     Quantite, palettes et bobines disent la meme marchandise de trois facons.
+     Seule la quantite partait : les deux autres etaient recalculees a la
+     lecture, et le detachement — celui qui sert a declarer une palette
+     entamee — ne survivait donc pas au rechargement. */
+  const nombre = (v: string, arrondi: boolean) => {
+    const n = Number(v)
+    if (v.trim() === '' || !Number.isFinite(n) || n < 0) return null
+    // UNE BOBINE NE SE COUPE PAS ; une palette s'entame. D'ou l'arrondi sur
+    // l'une et deux decimales sur l'autre : le calcul rend 21,64 palettes pour
+    // 22 638 kg, et l'arrondir changerait un chiffre que l'ecran affiche.
+    return arrondi ? Math.round(n) : Number(n.toFixed(2))
+  }
   return l.nature === 'MARCHANDISE'
     ? {
         type_ligne: 'MARCHANDISE',
         code_reference: l.code_reference,
         unite_commande: l.unite,
         quantite_commandee_unite: Number(l.qte),
+        nb_palettes: nombre(l.palettes, false),
+        nb_bobines: nombre(l.bobines, true),
         prix_unitaire_devise: Number(
           (Number(l.prix) * (facteurVersKg(l.unite, l.cond) ?? 1)).toFixed(DECIMALES_PRIX),
         ),

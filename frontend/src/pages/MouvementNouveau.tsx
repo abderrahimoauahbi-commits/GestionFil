@@ -26,9 +26,8 @@ import { ChampReference, type RefTrouvee } from '../composants/ChampReference'
 import { Bouton, Message, fmt } from '../components/ui'
 import {
   depuisBobines,
+  depuisKg,
   depuisPalettes,
-  depuisUnite,
-  facteurVersKg,
   pourChamp,
 } from '../lib/conditionnement'
 
@@ -188,6 +187,32 @@ export function MouvementNouveau() {
   const retenir = (r: RefTrouvee) =>
     setRefsRetenues((m) => new Map(m).set(r.code_reference, r as unknown as RefCatalogue))
 
+  /**
+   * Ce qui part au serveur pour la quantite d'une ligne.
+   *
+   * L'ECRAN SAISIT DES KILOS ; LA BASE ARCHIVE L'EXPRESSION DECLAREE — trois
+   * palettes, cinq bobines, un poids. Les deux ont leur raison d'etre : le
+   * stock se compte au kilo, mais le bon que releve le cariste porte le
+   * compte de colis. La traduction se fait ICI, une fois, plutot qu'a chaque
+   * frappe dans le champ.
+   *
+   * SIX DECIMALES, ET NON QUATRE. La colonne n'en garde que quatre, mais le
+   * serveur deduit les KILOS de ce nombre AVANT que la base n'arrondisse : un
+   * arrondi trop tot ici deplacerait le poids reel de quelques grammes, et le
+   * stock ne se rattrape pas.
+   *
+   * FACTEUR INCONNU : on n'invente pas une expression. On envoie des kilos,
+   * que la base recoit toujours, plutot qu'un nombre faux dans une unite
+   * qu'on ne sait pas convertir.
+   */
+  const quantitePourServeur = (l: Saisie) => {
+    const kg = Number(l.quantite_saisie)
+    const f = facteur(parReference.get(l.code_reference), l.unite_saisie)
+    return f
+      ? { quantite_saisie: Number((kg / f).toFixed(6)), unite_saisie: l.unite_saisie }
+      : { quantite_saisie: kg, unite_saisie: 'kg' }
+  }
+
   const enregistrer = useMutation({
     mutationFn: () =>
       api.post('/api/mouvements', {
@@ -200,8 +225,7 @@ export function MouvementNouveau() {
           .filter((l) => l.code_reference && l.quantite_saisie)
           .map((l) => ({
             code_reference: l.code_reference,
-            quantite_saisie: Number(l.quantite_saisie),
-            unite_saisie: l.unite_saisie,
+            ...quantitePourServeur(l),
             prix_kg_mad: l.prix_kg_mad ? Number(l.prix_kg_mad) : null,
             nb_palettes: l.nb_palettes ? Number(l.nb_palettes) : null,
             nb_bobines: l.nb_bobines ? Number(l.nb_bobines) : null,
@@ -246,22 +270,17 @@ export function MouvementNouveau() {
         const c =
           source === 'palettes' ? depuisPalettes(valeur, r)
           : source === 'bobines' ? depuisBobines(valeur, r)
-          : depuisUnite(valeur, l.unite_saisie, r)
+          : depuisKg(valeur, r)
 
-        // La quantite se reexprime dans l'unite choisie pour la ligne.
-        const quantite =
-          source === 'quantite'
-            ? valeur
-            : l.unite_saisie === 'Palette' ? pourChamp(c.palettes)
-            : l.unite_saisie === 'Bobine' ? pourChamp(c.bobines)
-            : (() => {
-                const f = facteurVersKg(l.unite_saisie, r)
-                return c.kg !== null && f ? pourChamp(c.kg / f, 3) : ''
-              })()
-
+        /* LA QUANTITE EST TOUJOURS EN KILOS, quelle que soit l'unite choisie.
+           Elle etait exprimee dans l'unite de la ligne : il fallait donc
+           choisir son unite AVANT de taper, et changer d'unite reecrivait le
+           nombre sous les yeux du saisisseur. L'unite ne sert plus qu'a dire
+           dans quoi le mouvement sera archive ; la conversion a lieu a
+           l'envoi, une seule fois, au seul endroit qui la connait. */
         return {
           ...l,
-          quantite_saisie: quantite,
+          quantite_saisie: source === 'quantite' ? valeur : pourChamp(c.kg, 3),
           nb_palettes: source === 'palettes' ? valeur : pourChamp(c.palettes),
           nb_bobines: source === 'bobines' ? valeur : pourChamp(c.bobines),
         }
@@ -272,10 +291,8 @@ export function MouvementNouveau() {
     'w-full rounded-lg border border-champ px-3 py-2 text-sm outline-none focus:border-anneau'
 
   const pretes = lignes.filter((l) => l.code_reference && Number(l.quantite_saisie) > 0)
-  const totalKg = pretes.reduce((s, l) => {
-    const f = facteur(parReference.get(l.code_reference), l.unite_saisie)
-    return s + (f ? Number(l.quantite_saisie) * f : 0)
-  }, 0)
+  // PLUS DE CONVERSION ICI : la quantite saisie EST le poids.
+  const totalKg = pretes.reduce((s, l) => s + Number(l.quantite_saisie || 0), 0)
 
   return (
     <>
@@ -436,7 +453,7 @@ export function MouvementNouveau() {
           {lignes.map((l, i) => {
             const r = parReference.get(l.code_reference)
             const f = facteur(r, l.unite_saisie)
-            const kg = f && l.quantite_saisie ? Number(l.quantite_saisie) * f : null
+            const kg = l.quantite_saisie ? Number(l.quantite_saisie) : null
 
             // Sur une sortie, la quantite demandee depasse-t-elle le stock ?
             const type = qTypes.data?.find((t) => t.code_type_mvt === entete.code_type_mvt)
@@ -494,7 +511,7 @@ export function MouvementNouveau() {
                       type="number"
                       step="any"
                       min="0"
-                      placeholder="Quantité"
+                      placeholder="Quantité (kg)"
                       value={l.quantite_saisie}
                       onChange={(e) => majColis(i, 'quantite', e.target.value)}
                       className={champ}

@@ -359,7 +359,11 @@ export function corpsLigne(l: LigneSaisie) {
         type_ligne: 'MARCHANDISE',
         code_reference: l.code_reference,
         unite_commande: l.unite,
-        quantite_commandee_unite: Number((Number(l.qte) / facteur).toFixed(4)),
+        // SIX DECIMALES, ET NON QUATRE. La colonne n’en garde que quatre, mais le
+        // serveur deduit les KILOS de ce nombre AVANT que la base n’arrondisse.
+        // Arrondir ici deplacerait le poids commande de quelques grammes a
+        // chaque ligne — invisible a l’ecran, cumule dans le stock.
+        quantite_commandee_unite: Number((Number(l.qte) / facteur).toFixed(6)),
         nb_palettes: nombre(l.palettes, false),
         nb_bobines: nombre(l.bobines, true),
         prix_unitaire_devise: Number((Number(l.prix) * facteur).toFixed(DECIMALES_PRIX)),

@@ -24,7 +24,7 @@
  *   negocie au millieme.
  */
 import type { Dispatch, SetStateAction } from 'react'
-import { Link2, Plus, Trash2, Unlink2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
@@ -99,12 +99,29 @@ export interface LigneSaisie {
   fournisseur_habituel: string | null
   /** Ce que le plan reclamait, pour afficher l'ecart si l'on s'en ecarte. */
   suggere_kg: number | null
+  /**
+   * POUR UNE MARCHANDISE : TOUJOURS DES KILOS, quelle que soit `unite`.
+   *
+   * Les trois expressions — kilos, palettes, bobines — se saisissent
+   * indifferemment et se repondent. Faire dependre ce champ de l'unite choisie
+   * obligeait a decider de son unite de saisie AVANT de taper, alors qu'on a en
+   * tete tantot un poids, tantot un nombre de palettes, selon qu'on lit une
+   * offre ou qu'on compte un quai. On tape ce qu'on sait ; le reste se deduit.
+   *
+   * Pour une prestation, c'est la quantite dans son unite libre (forfait,
+   * heure), ou il n'y a rien a convertir.
+   */
   qte: string
+  /**
+   * COMMENT LA LIGNE S'EXPRIME SUR LE BON — pas comment on la saisit.
+   *
+   * Elle decide de ce que lira le fournisseur et de la base sur laquelle il
+   * facturera. La changer ne touche donc AUCUN des trois champs : la
+   * marchandise est la meme, seule sa formulation change.
+   */
   unite: string
   palettes: string
   bobines: string
-  /** Lie, les trois se repondent ; detache, chacun se saisit seul. */
-  lie: boolean
   /** Au KILO pour une marchandise, a l'unite saisie sinon. */
   prix: string
   reference_fournisseur: string
@@ -130,7 +147,6 @@ export function ligneVide(): LigneSaisie {
     unite: 'kg',
     palettes: '',
     bobines: '',
-    lie: true,
     prix: '',
     reference_fournisseur: '',
     couleur: '',
@@ -190,14 +206,19 @@ export function depuisLigneEnregistree(
     unite_catalogue: fiche?.unite_catalogue ?? 'kg',
     fournisseur_habituel: fiche?.code_fournisseur ?? null,
     suggere_kg: null,
-    qte: String(l.quantite_commandee_unite),
+    // RELU EN KILOS. La base garde la quantite dans l'unite commandee ; la
+    // grille, elle, saisit toujours des kilos. La conversion se fait donc a la
+    // relecture, avec le facteur de l'unite enregistree.
+    qte: marchandise
+      ? pourChamp(colis.kg ?? l.quantite_commandee_unite * f, 3)
+      : String(l.quantite_commandee_unite),
     unite: l.unite_commande,
+    // LE COLISAGE ENREGISTRE PRIME SUR LE CALCUL : c'est le sens meme de
+    // l'avoir enregistre. Un fournisseur livre une palette entamee, et
+    // 21 palettes pleines plus une aux trois quarts ne se deduisent d'aucun
+    // poids. Recalculer d'office effacerait ce qu'on avait constate.
     palettes: l.nb_palettes != null ? String(l.nb_palettes) : pourChamp(colis.palettes),
     bobines: l.nb_bobines != null ? String(l.nb_bobines) : pourChamp(colis.bobines),
-    // DETACHE DES QU'UN COLISAGE A ETE ENREGISTRE : le relier d'office
-    // recalculerait les deux autres champs et effacerait ce qu'on avait
-    // constate, a la premiere frappe.
-    lie: l.nb_palettes == null && l.nb_bobines == null,
     prix:
       l.prix_unitaire_devise == null
         ? ''
@@ -246,8 +267,6 @@ export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {
   const kg = r.qte_a_commander_kg ?? 0
   const colis = depuisKg(kg, c)
   const unite = uniteDeCommande(c)
-  const f = facteurVersKg(unite, c)
-  const qte = kg > 0 && f ? kg / f : kg
   compteur += 1
   return {
     cle: cle ?? `l-${compteur}`,
@@ -258,11 +277,13 @@ export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {
     unite_catalogue: r.unite_catalogue ?? 'kg',
     fournisseur_habituel: r.code_fournisseur ?? null,
     suggere_kg: kg > 0 ? kg : null,
-    qte: qte > 0 ? String(Number(qte.toFixed(unite === 'kg' ? 2 : 3))) : '',
+    // CE QUE LE PLAN RECLAME EST DEJA UN POIDS : on le reprend tel quel, sans
+    // le traduire dans l'unite de commande. C'est cette traduction qui faisait
+    // apparaitre « 21,64 » dans un champ cense porter une quantite.
+    qte: kg > 0 ? pourChamp(kg, 2) : '',
     unite,
     palettes: pourChamp(colis.palettes),
     bobines: pourChamp(colis.bobines),
-    lie: true,
     // LE PRIX N'EST PAS ARRONDI A L'ENTREE. Un prix negocie au millieme
     // perdrait son dernier chiffre avant meme d'avoir ete relu.
     prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
@@ -272,9 +293,18 @@ export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {
   }
 }
 
-/** Le poids d'une ligne de marchandise, quelle que soit l'unite saisie. */
-export const kgDe = (l: LigneSaisie) =>
-  l.nature === 'MARCHANDISE' ? depuisUnite(l.qte, l.unite, l.cond).kg : null
+/**
+ * Le poids d'une ligne de marchandise : c'est le champ lui-meme.
+ *
+ * Il fallait autrefois le deduire de l'unite de saisie. Maintenant que la
+ * quantite EST un poids, il n'y a plus rien a convertir — et plus rien a se
+ * tromper : c'est la meme valeur qui s'affiche, se totalise et part au serveur.
+ */
+export const kgDe = (l: LigneSaisie) => {
+  if (l.nature !== 'MARCHANDISE') return null
+  const n = Number(l.qte)
+  return l.qte.trim() === '' || !Number.isFinite(n) ? null : n
+}
 
 /** Ce que la ligne coute : au kilo pour la marchandise, au forfait sinon. */
 export const totalDe = (l: LigneSaisie) =>
@@ -314,17 +344,19 @@ export function corpsLigne(l: LigneSaisie) {
     // 22 638 kg, et l'arrondir changerait un chiffre que l'ecran affiche.
     return arrondi ? Math.round(n) : Number(n.toFixed(2))
   }
+  // LA SAISIE EST EN KILOS, LA BASE ATTEND L'UNITE COMMANDEE. La traduction se
+  // fait ici, au seul endroit que les deux ecrans partagent : ailleurs, elle
+  // finirait par differer de l'un a l'autre sans que rien ne le signale.
+  const facteur = facteurVersKg(l.unite, l.cond) ?? 1
   return l.nature === 'MARCHANDISE'
     ? {
         type_ligne: 'MARCHANDISE',
         code_reference: l.code_reference,
         unite_commande: l.unite,
-        quantite_commandee_unite: Number(l.qte),
+        quantite_commandee_unite: Number((Number(l.qte) / facteur).toFixed(4)),
         nb_palettes: nombre(l.palettes, false),
         nb_bobines: nombre(l.bobines, true),
-        prix_unitaire_devise: Number(
-          (Number(l.prix) * (facteurVersKg(l.unite, l.cond) ?? 1)).toFixed(DECIMALES_PRIX),
-        ),
+        prix_unitaire_devise: Number((Number(l.prix) * facteur).toFixed(DECIMALES_PRIX)),
       }
     : {
         type_ligne: l.nature,
@@ -380,15 +412,25 @@ export function GrilleLignes({
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
 
   /**
-   * LES TROIS EXPRESSIONS SE REPONDENT — palettes, bobines, quantite. On saisit
-   * celle qu'on a en tete au moment de negocier. Detache, chacune se saisit
-   * seule : un fournisseur livre parfois une palette entamee.
+   * LES TROIS EXPRESSIONS SE REPONDENT — kilos, palettes, bobines.
+   *
+   * On tape dans celui qu'on a sous les yeux : un poids quand on lit une offre,
+   * un nombre de palettes quand on compte un quai. Les deux autres se
+   * deduisent, et LE CHAMP QU'ON VIENT DE TAPER NE REVIENT JAMAIS CORRIGE —
+   * sans quoi une palette entamee, saisie a 21, se rearrondirait sous les
+   * doigts a la frappe suivante.
+   *
+   * Il n'y a plus de bascule « lier / detacher ». Elle demandait de decider,
+   * avant de taper, dans quel champ on avait le droit d'ecrire — une question
+   * que le metier ne pose pas. Les trois valeurs partent de toute facon au
+   * serveur, telles qu'affichees.
    */
   const majColis = (cle: string, source: 'quantite' | 'palettes' | 'bobines', valeur: string) =>
     setLignes((ls) =>
       ls.map((l) => {
         if (l.cle !== cle) return l
-        if (!l.lie || l.nature !== 'MARCHANDISE') {
+        // Une prestation ne se convertit pas : il n'y a ni bobine ni palette.
+        if (l.nature !== 'MARCHANDISE') {
           const champ =
             source === 'quantite' ? 'qte' : source === 'palettes' ? 'palettes' : 'bobines'
           return { ...l, [champ]: valeur }
@@ -398,39 +440,28 @@ export function GrilleLignes({
             ? depuisPalettes(valeur, l.cond)
             : source === 'bobines'
               ? depuisBobines(valeur, l.cond)
-              : depuisUnite(valeur, l.unite, l.cond)
-        const quantite =
-          source === 'quantite'
-            ? valeur
-            : l.unite === 'Palette'
-              ? pourChamp(r.palettes)
-              : l.unite === 'Bobine'
-                ? pourChamp(r.bobines)
-                : (() => {
-                    const f = facteurVersKg(l.unite, l.cond)
-                    return r.kg !== null && f ? pourChamp(r.kg / f, 3) : l.qte
-                  })()
+              : depuisKg(valeur, l.cond)
         return {
           ...l,
-          qte: quantite,
+          qte: source === 'quantite' ? valeur : pourChamp(r.kg, 2),
           palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
           bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
         }
       }),
     )
 
-  /** Changer d'unite ne change pas la marchandise : seule son expression change. */
+  /**
+   * Changer d'unite ne change pas la marchandise : seule son expression change.
+   *
+   * ET DESORMAIS PLUS AUCUN CHIFFRE NE BOUGE. Tant que la quantite etait
+   * exprimee dans l'unite choisie, passer de kg a Palette la reecrivait sous
+   * les yeux du saisisseur — 22 638 devenait 21, et l'on ne savait plus si le
+   * poids avait ete perdu ou seulement traduit. Les kilos restent les kilos ;
+   * l'unite ne decide que de ce qui sera imprime sur le bon et de la base de
+   * facturation, et la traduction n'a lieu qu'a l'envoi (`corpsLigne`).
+   */
   const majUnite = (cle: string, unite: string) =>
-    setLignes((ls) =>
-      ls.map((l) => {
-        if (l.cle !== cle) return l
-        if (l.nature !== 'MARCHANDISE') return { ...l, unite }
-        const kg = depuisUnite(l.qte, l.unite, l.cond).kg
-        const f = facteurVersKg(unite, l.cond)
-        if (!l.lie || kg === null || !f) return { ...l, unite }
-        return { ...l, unite, qte: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
-      }),
-    )
+    setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, unite } : l)))
 
   const versSuggestion = (r: RefLigne): Suggestion => {
     const suggere = r.qte_a_commander_kg ?? 0
@@ -517,10 +548,15 @@ export function GrilleLignes({
               <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                 <th className="w-8 px-1 py-2 text-right">#</th>
                 <th className="px-1.5 py-2 text-left">Notre référence</th>
-                {/* L'UNITE AVANT LA QUANTITE : elle donne son sens au nombre. */}
-                <th className="w-28 px-1.5 py-2 text-left">Unité</th>
-                <th className="w-36 px-1.5 py-2 text-right">Quantité</th>
-                <th className="w-40 px-1.5 py-2 text-center">Pal. / Bob.</th>
+                {/* L'UNITE NE COMMANDE PLUS LA SAISIE. Elle disait autrefois
+                    dans quoi la quantite etait exprimee, et devait donc etre
+                    choisie avant de taper. La quantite est maintenant toujours
+                    en kilos : l'unite ne decide plus que de ce qui sera imprime
+                    sur le bon et de la base de facturation. Elle reste en tete
+                    parce que c'est la qu'on l'a prise l'habitude de la lire. */}
+                <th className="w-28 px-1.5 py-2 text-left">Unité au bon</th>
+                <th className="w-36 px-1.5 py-2 text-right">Quantité (kg)</th>
+                <th className="w-40 px-1.5 py-2 text-center">Palettes / Bobines</th>
                 <th className="w-36 px-1.5 py-2 text-right">Prix {devise}</th>
                 <th className="w-36 px-1.5 py-2 text-right">Total</th>
                 <th className="w-32 px-1.5 py-2 text-left">Réf. frs</th>
@@ -682,15 +718,25 @@ export function GrilleLignes({
                         value={l.qte}
                         onChange={(e) => majColis(l.cle, 'quantite', e.target.value)}
                         className="h-9 text-right text-[14px] tabular-nums"
-                        aria-label="Quantité"
+                        aria-label={marchandise ? 'Quantité en kilos' : 'Quantité'}
                       />
-                      {marchandise && l.unite !== 'kg' && (
+                      {/* CE QUE LE FOURNISSEUR LIRA. Le rappel disait avant
+                          « = N kg », ce qui n'apprend plus rien puisque le
+                          champ EST en kilos. Ce qu'on ne voit pas, en revanche,
+                          c'est la quantite telle qu'elle partira sur le bon
+                          quand il se commande a la palette ou au lot. */}
+                      {marchandise && l.unite !== 'kg' && kg !== null && (
                         <div className="mt-0.5 text-right text-[11px] tabular-nums text-attenue-texte">
-                          {kg === null ? (
-                            <span className="text-danger">non convertible</span>
-                          ) : (
-                            <>= {fmt.nombre(kg, 0)} kg</>
-                          )}
+                          {(() => {
+                            const f = facteurVersKg(l.unite, l.cond)
+                            return f ? (
+                              <>
+                                = {fmt.nombre(kg / f, 2)} {l.unite.toLowerCase()}
+                              </>
+                            ) : (
+                              <span className="text-danger">non convertible</span>
+                            )
+                          })()}
                         </div>
                       )}
                     </td>
@@ -716,24 +762,6 @@ export function GrilleLignes({
                             placeholder="bob."
                             aria-label="Nombre de bobines"
                           />
-                          <button
-                            type="button"
-                            onClick={() => maj(l.cle, { lie: !l.lie })}
-                            title={
-                              l.lie
-                                ? 'Les trois se repondent — cliquez pour saisir chacun separement'
-                                : 'Calcul detache — cliquez pour relier les trois'
-                            }
-                            aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                            className={cn(
-                              'shrink-0 rounded-[var(--radius)] p-1',
-                              l.lie
-                                ? 'text-primaire hover:bg-primaire/10'
-                                : 'text-alerte hover:bg-alerte/10',
-                            )}
-                          >
-                            {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
-                          </button>
                         </div>
                       ) : (
                         <span className="block text-center text-[11px] text-attenue-texte">—</span>

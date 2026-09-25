@@ -3277,3 +3277,132 @@ pub async fn supprimer_ligne_reception(
 
     Ok(Json(json!({ "supprime": true })))
 }
+
+/// Ce qu'une ligne de reception peut encore corriger.
+///
+/// TOUT EST FACULTATIF : l'ecran n'envoie que ce qu'il a touche. Un champ
+/// absent reste tel quel, un champ vide aussi — la convention est celle de
+/// `ModifLigneBc`, et deux conventions differentes pour un meme geste
+/// finiraient par se contredire.
+///
+/// CE QUI N'EST PAS CORRIGEABLE : la reference. Elle commande le prix, la
+/// devise, le taux du jour et le rattachement a la ligne de commande — quatre
+/// valeurs deduites a la creation. Les rededuire ici reviendrait a recreer la
+/// ligne en faisant croire qu'on la modifie. Une erreur de reference se corrige
+/// en retirant la ligne et en la ressaisissant, ce que l'ecran sait faire.
+#[derive(Debug, Deserialize)]
+pub struct ModifLigneReception {
+    pub unite_saisie: Option<String>,
+    pub quantite_pesee_unite: Option<f64>,
+    pub quantite_bl_kg: Option<f64>,
+    pub nb_colis_ligne: Option<i64>,
+    pub lot_fournisseur: Option<String>,
+    pub date_fabrication: Option<String>,
+    pub date_peremption: Option<String>,
+    pub statut_qualite: Option<String>,
+    pub code_magasin_dest: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Corriger une pesee, sans supprimer ni recreer la ligne.
+///
+/// POURQUOI CETTE ROUTE N'EXISTAIT PAS, et pourquoi il fallait l'ecrire. Une
+/// ligne de reception ne savait qu'etre creee ou supprimee. Corriger un poids
+/// obligeait donc l'ecran a effacer la ligne puis a la reposter — trois
+/// consequences, toutes mauvaises :
+///
+///   * le numero de ligne changeait a chaque correction, si bien que le bon
+///     imprime ne portait plus le meme ordre d'un tirage a l'autre ;
+///   * entre la suppression et la recreation, la reception existait sans sa
+///     ligne : une validation concurrente aurait valide une reception amputee ;
+///   * le journal d'audit enregistrait une suppression, ce qui se lit comme un
+///     retrait de marchandise alors qu'on corrigeait une virgule.
+///
+/// LE POIDS SE RECALCULE ICI, jamais cote ecran : c'est `vers_kg` qui fait foi,
+/// avec les facteurs de la fiche. L'ecran propose, le serveur pese.
+pub async fn modifier_ligne_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path((id, ligne)): Path<(String, String)>,
+    Json(m): Json<ModifLigneReception>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+
+    // L'etat AVANT correction, et celui de la reception qui la porte.
+    let (statut, code_reference, unite_actuelle, qte_actuelle): (String, String, String, f64) =
+        sqlx::query_as(
+            "SELECT rc.statut, lr.code_reference, lr.unite_saisie,
+                    lr.quantite_pesee_unite::float8
+               FROM ligne_reception lr
+               JOIN reception rc ON rc.id_reception = lr.id_reception
+              WHERE lr.id_ligne_reception = $1 AND lr.id_reception = $2",
+        )
+        .bind(&ligne)
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("ligne de reception {ligne}")))?;
+
+    // MEME FRONTIERE QUE LA SUPPRESSION, et non celle de l'ajout. Une reception
+    // « a controler » est precisement celle qu'on est en train de verifier :
+    // lui interdire la correction obligerait a la supprimer pour la refaire.
+    if statut == "VALIDE" || statut == "CLOTURE" {
+        return Err(AppError::RegleMetier(
+            "Une reception validee est figee : ses lignes ont deja alimente le stock.".into(),
+        ));
+    }
+
+    let unite = m.unite_saisie.clone().unwrap_or(unite_actuelle);
+    let quantite = m.quantite_pesee_unite.unwrap_or(qte_actuelle);
+    if quantite <= 0.0 {
+        return Err(AppError::Invalide("la quantite pesee doit etre positive".into()));
+    }
+    let (kg, facteur) = vers_kg(&state.db, &code_reference, quantite, &unite).await?;
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+
+    // Les declencheurs de la base veillent toujours : ecart de pesee hors
+    // tolerance sans derogation, ligne non conforme dirigee hors quarantaine.
+    // On ne les contourne pas, on leur donne les valeurs corrigees.
+    sqlx::query(
+        "UPDATE ligne_reception SET
+             unite_saisie = $3,
+             facteur_kg = $4,
+             quantite_pesee_unite = $5,
+             quantite_stock_kg = $6,
+             quantite_bl_kg     = COALESCE($7, quantite_bl_kg),
+             nb_colis_ligne     = COALESCE($8, nb_colis_ligne),
+             lot_fournisseur    = COALESCE(NULLIF(TRIM($9), ''), lot_fournisseur),
+             date_fabrication   = COALESCE(NULLIF(TRIM($10), ''), date_fabrication),
+             date_peremption    = COALESCE(NULLIF(TRIM($11), ''), date_peremption),
+             statut_qualite     = COALESCE(NULLIF(TRIM($12), ''), statut_qualite),
+             code_magasin_dest  = COALESCE(NULLIF(TRIM($13), ''), code_magasin_dest),
+             notes              = COALESCE(NULLIF(TRIM($14), ''), notes)
+          WHERE id_ligne_reception = $1 AND id_reception = $2",
+    )
+    .bind(&ligne)
+    .bind(&id)
+    .bind(&unite)
+    .bind(facteur)
+    .bind(quantite)
+    .bind(kg)
+    .bind(m.quantite_bl_kg)
+    .bind(m.nb_colis_ligne)
+    .bind(&m.lot_fournisseur)
+    .bind(&m.date_fabrication)
+    .bind(&m.date_peremption)
+    .bind(&m.statut_qualite)
+    .bind(&m.code_magasin_dest)
+    .bind(&m.notes)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(json!({
+        "id_ligne_reception": ligne,
+        "quantite_stock_kg": kg,
+        "facteur_kg": facteur
+    })))
+}

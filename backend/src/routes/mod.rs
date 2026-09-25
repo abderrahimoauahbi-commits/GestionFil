@@ -343,7 +343,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lignes-attendues", get(stock::lignes_attendues))
         .route("/api/receptions/{id}/lignes",
                get(stock::lignes_reception).post(stock::ajouter_ligne_reception))
-        .route("/api/receptions/{id}/lignes/{ligne}", delete(stock::supprimer_ligne_reception))
+        .route(
+            "/api/receptions/{id}/lignes/{ligne}",
+            patch(stock::modifier_ligne_reception).delete(stock::supprimer_ligne_reception),
+        )
         .route("/api/receptions/{id}/statut", put(stock::changer_statut_reception))
         .route("/api/receptions/{id}/valider", post(operations::valider_reception))
         .route("/api/plan-achat", get(consultation::plan_achat))

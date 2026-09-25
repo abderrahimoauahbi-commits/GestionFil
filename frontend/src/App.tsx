@@ -14,6 +14,7 @@ import { HistoriquePrix } from './pages/HistoriquePrix'
 import { BonCommandeEtat } from './pages/BonCommandeEtat'
 import { BonMouvement } from './pages/BonMouvement'
 import { Telecharger } from './pages/Telecharger'
+import { GuideUtilisateur } from './pages/GuideUtilisateur'
 import { Chat } from './pages/Chat'
 import { Controles } from './pages/Controles'
 import { Etats } from './pages/Etats'
@@ -159,6 +160,11 @@ const ECRANS = (
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
       <Route path="chat" element={<ExigeModule module="COCKPIT"><Chat /></ExigeModule>} />
       <Route path="telecharger" element={<ExigeModule module="COCKPIT"><Telecharger /></ExigeModule>} />
+      {/* PAS D'`ExigeModule` ICI : la documentation n'est pas un module de
+          l'ERP, et son entree de menu porte `module: ''`. L'exiger aurait
+          rendu le guide invisible a qui en a le plus besoin — un magasinier
+          qui n'a que STOCK. Le `Verrou` d'authentification suffit. */}
+      <Route path="guide-utilisateur" element={<GuideUtilisateur />} />
       <Route path="machines" element={<ExigeModule module="STOCK"><Machines /></ExigeModule>} />
       {/* LE PARC EST DU PARAMETRAGE, pas de l exploitation : module PARAMETRES,
           donc la direction et les super-utilisateurs. */}

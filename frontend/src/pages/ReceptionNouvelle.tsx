@@ -50,7 +50,6 @@ import {
   depuisBobines,
   depuisKg,
   depuisPalettes,
-  depuisUnite,
   facteurVersKg,
   pourChamp,
 } from '../lib/conditionnement'
@@ -379,24 +378,16 @@ export function ReceptionNouvelle() {
             ? depuisPalettes(valeur, c0)
             : source === 'bobines'
               ? depuisBobines(valeur, c0)
-              : depuisUnite(valeur, l.unite, c0)
+              : depuisKg(valeur, c0)
 
-        // La quantite se reexprime dans l'unite choisie pour la ligne.
-        const quantite =
-          source === 'quantite'
-            ? valeur
-            : l.unite === 'Palette'
-              ? pourChamp(c.palettes)
-              : l.unite === 'Bobine'
-                ? pourChamp(c.bobines)
-                : (() => {
-                    const f = facteurVersKg(l.unite, c0)
-                    return c.kg !== null && f ? pourChamp(c.kg / f, 3) : l.qte
-                  })()
-
+        /* LE POIDS PESE EST TOUJOURS EN KILOS. Exprime dans l'unite de la
+           ligne, il obligeait le receptionnaire a choisir son unite avant de
+           poser la marchandise sur la bascule, et changer d'unite reecrivait
+           le nombre. Or c'est une PESEE : elle est en kilos par nature.
+           L'unite ne dit plus que dans quoi la reception sera archivee. */
         return {
           ...l,
-          qte: quantite,
+          qte: source === 'quantite' ? valeur : pourChamp(c.kg, 3),
           palettes: source === 'palettes' ? valeur : pourChamp(c.palettes),
           bobines: source === 'bobines' ? valeur : pourChamp(c.bobines),
         }
@@ -409,28 +400,44 @@ export function ReceptionNouvelle() {
    * « palettes » multiplierait la reception par mille.
    */
   const majUnite = (cle: string, unite: string) =>
-    setLignes((ls) =>
-      ls.map((l) => {
-        if (l.cle !== cle) return l
-        const c0 = condDe(l)
-        const kg = depuisUnite(l.qte, l.unite, c0).kg
-        const f = facteurVersKg(unite, c0)
-        if (kg === null || !f) return { ...l, unite }
-        return { ...l, unite, qte: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
-      }),
-    )
+    setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, unite } : l)))
 
-  /** Ce que la ligne pese REELLEMENT, quelle que soit l'unite saisie. */
-  const kgDe = (l: Ligne) => depuisUnite(l.qte, l.unite, condDe(l)).kg
+  /**
+   * Ce qui part au serveur pour la quantite d'une ligne.
+   *
+   * LE QUAI PESE DES KILOS ; LA BASE ARCHIVE L'EXPRESSION DECLAREE. SIX
+   * DECIMALES : la colonne n'en garde que quatre, mais le serveur deduit les
+   * KILOS de ce nombre avant que la base n'arrondisse. Arrondir ici
+   * deplacerait le poids RECU de quelques grammes par ligne — et une
+   * reception fausse cree du stock qui n'existe pas.
+   *
+   * Facteur inconnu : on envoie des kilos plutot qu'un nombre faux dans une
+   * unite qu'on ne sait pas convertir. Le garde ci-dessous l'annonce deja au
+   * receptionnaire, mais mieux vaut une donnee juste qu'un refus tardif.
+   */
+  const quantitePourServeur = (l: Ligne) => {
+    const kg = Number(l.qte)
+    const f = facteurVersKg(l.unite, condDe(l))
+    return f
+      ? { unite_saisie: l.unite, quantite_pesee_unite: Number((kg / f).toFixed(6)) }
+      : { unite_saisie: 'kg', quantite_pesee_unite: kg }
+  }
+
+  /** Ce que la ligne pese : le champ lui-meme, sans rien a deduire. */
+  const kgDe = (l: Ligne) => (l.qte.trim() === '' ? null : Number(l.qte))
 
   const retenues = lignes.filter((l) => l.retenue)
   const nbHorsCommande = retenues.filter((l) => !l.id_ligne_bc).length
   const totalKg = retenues.reduce((s, l) => s + (kgDe(l) ?? 0), 0)
   const sansQte = retenues.filter((l) => !(Number(l.qte) > 0))
-  // Une ligne saisie dans une unite que la reference ne sait pas convertir sera
-  // REFUSEE par le serveur (R01, aucun repli sur un facteur de 1). Autant le
-  // dire au quai plutot qu'apres avoir tout saisi.
-  const sansFacteur = retenues.filter((l) => Number(l.qte) > 0 && kgDe(l) === null)
+  /* L'UNITE D'ARCHIVAGE DOIT ETRE CONVERTIBLE. Le poids est pese, il ne peut
+     plus manquer — mais si la reference ne sait pas dire ce que vaut une
+     palette, on ne peut pas archiver « 3 palettes », et le serveur refuse
+     (R01, aucun repli sur un facteur de 1). Autant le dire au quai plutot
+     qu'apres avoir tout saisi. */
+  const sansFacteur = retenues.filter(
+    (l) => Number(l.qte) > 0 && facteurVersKg(l.unite, condDe(l)) === null,
+  )
   const sansLot = retenues.filter((l) => l.suivi_lot === 1 && !l.lot.trim())
   // Une substitution sans motif serait acceptee par la base mais illisible dans
   // six mois : c'est l'ecran qui exige l'explication, au moment ou on l'a.
@@ -484,8 +491,7 @@ export function ReceptionNouvelle() {
           substitution_acceptee: l.code_recu !== l.code_reference ? true : undefined,
           motif_substitution:
             l.code_recu !== l.code_reference ? l.motif_substitution.trim() : undefined,
-          unite_saisie: l.unite,
-          quantite_pesee_unite: Number(l.qte),
+          ...quantitePourServeur(l),
           quantite_bl_kg: l.qteBl ? Number(l.qteBl) : undefined,
           nb_colis_ligne: l.colis ? Number(l.colis) : undefined,
           code_magasin_dest: l.magasin,
@@ -852,7 +858,7 @@ export function ReceptionNouvelle() {
                                   onChange={(e) => maj(l.cle, 'qteBl', e.target.value)}
                                   onClick={(e) => e.stopPropagation()}
                                   className="h-7 text-right tabular-nums"
-                                  aria-label="Quantité du bon de livraison"
+                                  aria-label="Quantité du bon de livraison, en kilos"
                                 />
                               </td>
                               <td className="px-2 py-1">
@@ -867,7 +873,7 @@ export function ReceptionNouvelle() {
                                     'h-7 text-right font-medium tabular-nums',
                                     (hors || manqueQte) && 'border-danger',
                                   )}
-                                  aria-label="Quantité pesee"
+                                  aria-label="Quantité pesée, en kilos"
                                 />
                                 {l.unite !== 'kg' && (
                                   <div className="mt-0.5 text-right text-[11px] tabular-nums text-attenue-texte">
@@ -1149,7 +1155,7 @@ function PanneauDetail({
         {onglet === 'quantite' && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq>Quantité annoncee au BL</Etiq>
+              <Etiq>Quantité annoncée au BL (kg)</Etiq>
               <Champ
                 type="number"
                 step="any"
@@ -1166,7 +1172,7 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq obligatoire>Quantité pesee</Etiq>
+              <Etiq obligatoire>Quantité pesée (kg)</Etiq>
               <Champ
                 type="number"
                 step="any"

@@ -55,7 +55,6 @@ import {
   depuisBobines,
   depuisKg,
   depuisPalettes,
-  depuisUnite,
   facteurVersKg,
   pourChamp,
 } from '../lib/conditionnement'
@@ -177,9 +176,11 @@ export function TransfertNouveau() {
         cle: `l:${l.ligne_numero}`,
         code_reference: l.code_reference,
         designation: l.designation ?? '',
-        // La quantite se reprend DANS L'UNITE SAISIE : reafficher des kg
-        // obligerait a reconvertir de tete ce qui avait ete compte en bobines.
-        quantite: String(l.quantite_saisie ?? l.quantite_kg),
+        // LA REPRISE RECHARGE DES KILOS, puisque c'est ce que le champ porte
+        // desormais. Y remettre `quantite_saisie` — l'expression archivee, en
+        // palettes ou en bobines — ferait lire « 56 » a un champ qui annonce
+        // des kilos, et le brouillon repris ne pesait plus rien.
+        quantite: String(l.quantite_kg),
         unite: l.unite_saisie ?? 'kg',
         bobines: l.nb_bobines != null ? String(l.nb_bobines) : '',
         palettes: l.nb_palettes != null ? String(l.nb_palettes) : '',
@@ -276,39 +277,28 @@ export function TransfertNouveau() {
             ? depuisPalettes(valeur, c)
             : source === 'bobines'
               ? depuisBobines(valeur, c)
-              : depuisUnite(valeur, l.unite, c)
-        const quantite =
-          source === 'quantite'
-            ? valeur
-            : l.unite === 'Palette'
-              ? pourChamp(r.palettes)
-              : l.unite === 'Bobine'
-                ? pourChamp(r.bobines)
-                : (() => {
-                    const f = facteurVersKg(l.unite, c)
-                    return r.kg !== null && f ? pourChamp(r.kg / f, 3) : l.quantite
-                  })()
+              : depuisKg(valeur, c)
+        /* LA QUANTITE EST TOUJOURS EN KILOS. Exprimee dans l'unite de la
+           ligne, elle obligeait a choisir son unite avant de taper, et
+           changer d'unite la reecrivait sous les yeux du cariste. L'unite ne
+           dit plus que dans quoi le transfert sera archive ; la conversion a
+           lieu a l'envoi, une seule fois. */
         return {
           ...l,
-          quantite,
+          quantite: source === 'quantite' ? valeur : pourChamp(r.kg, 3),
           palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
           bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
         }
       }),
     )
 
-  /** Changer d'unite ne change pas la marchandise : seule son expression change. */
+  /**
+   * Changer d'unite ne change pas la marchandise, et ne touche plus AUCUN
+   * chiffre : les kilos restent les kilos. Seule change la maniere dont le
+   * transfert sera archive.
+   */
   const majUnite = (cle: string, unite: string) =>
-    setLignes((ls) =>
-      ls.map((l) => {
-        if (l.cle !== cle) return l
-        const c = condDe(l.code_reference)
-        const kg = depuisUnite(l.quantite, l.unite, c).kg
-        const f = facteurVersKg(unite, c)
-        if (kg === null || !f) return { ...l, unite }
-        return { ...l, unite, quantite: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
-      }),
-    )
+    setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, unite } : l)))
 
   /**
    * Conversion en kg, pour totaliser et alerter avant l'envoi.
@@ -317,12 +307,16 @@ export function TransfertNouveau() {
    * nul quand la reference ne portait pas son poids de bobine : dix bobines
    * pesaient alors zero kilo, le total etait faux et rien ne le signalait.
    */
-  const enKg = (l: Ligne) => depuisUnite(l.quantite, l.unite, condDe(l.code_reference)).kg
+  const enKg = (l: Ligne) => (l.quantite.trim() === '' ? null : Number(l.quantite))
 
   const totalKg = lignes.reduce((s, l) => s + (enKg(l) ?? 0), 0)
-  // Une unite que la reference ne sait pas convertir sera refusee par le serveur
-  // (R01). Autant le dire pendant la saisie.
-  const sansFacteur = lignes.filter((l) => Number(l.quantite) > 0 && enKg(l) === null)
+  /* L'UNITE D'ARCHIVAGE DOIT ETRE CONVERTIBLE. Le poids, lui, est saisi
+     directement et ne peut plus manquer — mais si la reference ne sait pas
+     dire ce que vaut une palette, on ne peut pas archiver « 3 palettes ».
+     Autant le dire pendant la saisie plutot que de se faire refuser. */
+  const sansFacteur = lignes.filter(
+    (l) => Number(l.quantite) > 0 && facteurVersKg(l.unite, condDe(l.code_reference)) === null,
+  )
   const totalBobines = lignes.reduce((s, l) => s + (Number(l.bobines) || 0), 0)
   const totalPalettes = lignes.reduce((s, l) => s + (Number(l.palettes) || 0), 0)
 
@@ -345,6 +339,25 @@ export function TransfertNouveau() {
     !auDela.length &&
     !sansFacteur.length
 
+  /**
+   * Ce qui part au serveur pour la quantite d'une ligne.
+   *
+   * L'ecran saisit des kilos ; la base archive l'expression declaree. SIX
+   * DECIMALES : la colonne n'en garde que quatre, mais le serveur deduit les
+   * KILOS de ce nombre avant que la base n'arrondisse. Arrondir ici
+   * deplacerait le poids transfere de quelques grammes par ligne.
+   *
+   * Facteur inconnu : on envoie des kilos plutot qu'un nombre faux dans une
+   * unite qu'on ne sait pas convertir.
+   */
+  const quantitePourServeur = (l: Ligne) => {
+    const kg = Number(l.quantite)
+    const f = facteurVersKg(l.unite, condDe(l.code_reference))
+    return f
+      ? { quantite_saisie: Number((kg / f).toFixed(6)), unite_saisie: l.unite }
+      : { quantite_saisie: kg, unite_saisie: 'kg' }
+  }
+
   const charge = () => ({
     code_magasin_source: entete.code_magasin_source,
     code_magasin_dest: entete.code_magasin_dest,
@@ -354,8 +367,7 @@ export function TransfertNouveau() {
     observations: entete.observations || undefined,
     lignes: lignes.map((l) => ({
       code_reference: l.code_reference,
-      quantite_saisie: Number(l.quantite),
-      unite_saisie: l.unite,
+      ...quantitePourServeur(l),
       lot_fournisseur: l.lot || undefined,
       nb_bobines: l.bobines ? Number(l.bobines) : undefined,
       nb_palettes: l.palettes ? Number(l.palettes) : undefined,
@@ -617,7 +629,7 @@ export function TransfertNouveau() {
                           <th className="w-10 px-1 py-2 text-right">#</th>
                           <th className="px-2 py-2 text-left">Référence</th>
                           <th className="w-28 px-2 py-2 text-right">Dispo</th>
-                          <th className="w-28 px-2 py-2 text-right">Quantité</th>
+                          <th className="w-28 px-2 py-2 text-right">Quantité (kg)</th>
                           <th className="w-24 px-2 py-2 text-left">Unité</th>
                           <th className="w-24 px-2 py-2 text-right">En kg</th>
                           <th className="w-24 px-2 py-2 text-right">Bobines</th>

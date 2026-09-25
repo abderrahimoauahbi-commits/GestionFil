@@ -68,3 +68,7 @@ srv*.out
 .idea/
 .DS_Store
 Thumbs.db
+
+# Cache Python de db/pg/charger.py — regenere a chaque execution.
+__pycache__/
+*.pyc

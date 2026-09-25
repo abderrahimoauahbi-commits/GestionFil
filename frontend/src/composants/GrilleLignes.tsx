@@ -23,7 +23,7 @@
  *   arrondir a l'ecran faisait disparaitre le quatrieme chiffre d'un prix
  *   negocie au millieme.
  */
-import type { Dispatch, SetStateAction } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { Check, Plus, Trash2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
@@ -122,6 +122,20 @@ export interface LigneSaisie {
   unite: string
   palettes: string
   bobines: string
+  /**
+   * CE QUE LE DOCUMENT AJOUTE, et que la grille ne connait pas.
+   *
+   * Une reception porte un lot, un magasin, un statut qualite, une quantite
+   * annoncee au bon de livraison ; un transfert porte un lot ; un mouvement un
+   * motif. Rien de cela n'a de sens pour un bon de commande, et les declarer
+   * ici obligerait chaque ecran a porter les champs des autres.
+   *
+   * La grille les TRANSPORTE sans les comprendre : elle les range, les rend
+   * par les colonnes que l'ecran lui donne, et les rend a l'ecran au moment
+   * d'enregistrer. C'est ce qui permet a quatre documents differents de
+   * partager une seule grille sans qu'aucun impose sa forme aux autres.
+   */
+  extra?: Record<string, string>
   /** Au KILO pour une marchandise, a l'unite saisie sinon. */
   prix: string
   reference_fournisseur: string
@@ -420,6 +434,39 @@ export interface ProprietesGrille {
   enCours?: Set<string>
   /** Les lignes qui different de ce qu'elles valaient en arrivant, par cle. */
   modifiees?: Set<string>
+  /**
+   * LES COLONNES PROPRES AU DOCUMENT, posees avant les actions de la ligne.
+   *
+   * L'ecran decrit ce qu'il veut voir ; la grille le place et lui donne de quoi
+   * l'ecrire dans `extra`. Elle n'a rien a savoir d'un lot ni d'un magasin.
+   */
+  colonnesSupplementaires?: ColonneGrille[]
+  /**
+   * CE QU'ON N'AFFICHE PAS. Une reception ne negocie pas son prix — il vient du
+   * bon de commande — et la reference du fournisseur n'a rien a faire sur un
+   * transfert entre deux magasins a nous. Masquer vaut mieux que griser : une
+   * colonne qu'on ne peut pas remplir n'apprend rien et prend la place de
+   * celles qui comptent.
+   */
+  sansPrix?: boolean
+  sansFournisseur?: boolean
+}
+
+/** Une colonne que l'ecran ajoute a la grille, et qu'il sait seul rendre. */
+export interface ColonneGrille {
+  /** La cle dans `extra`, et celle du rendu React. */
+  cle: string
+  entete: string
+  /** Largeur Tailwind, par exemple `w-28`. Sans elle, la colonne s'adapte. */
+  largeur?: string
+  alignement?: 'left' | 'right' | 'center'
+  /**
+   * Ce que la cellule affiche, et comment elle ecrit.
+   *
+   * `poser` range la valeur dans `extra` de CETTE ligne : l'ecran n'a pas a
+   * savoir ou la grille la garde, ni a reconstruire le tableau des lignes.
+   */
+  rendu: (l: LigneSaisie, poser: (valeur: string) => void) => ReactNode
 }
 
 export function GrilleLignes({
@@ -440,6 +487,9 @@ export function GrilleLignes({
   surSupprimerLigne,
   enCours,
   modifiees,
+  colonnesSupplementaires = [],
+  sansPrix = false,
+  sansFournisseur = false,
 }: ProprietesGrille) {
   const prises = dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean))
 
@@ -592,11 +642,27 @@ export function GrilleLignes({
                 <th className="w-28 px-1.5 py-2 text-left">Unité au bon</th>
                 <th className="w-36 px-1.5 py-2 text-right">Quantité (kg)</th>
                 <th className="w-40 px-1.5 py-2 text-center">Palettes / Bobines</th>
-                <th className="w-36 px-1.5 py-2 text-right">Prix {devise}</th>
-                <th className="w-36 px-1.5 py-2 text-right">Total</th>
-                <th className="w-32 px-1.5 py-2 text-left">Réf. frs</th>
-                <th className="w-28 px-1.5 py-2 text-left">Couleur</th>
-                <th className="w-28 px-1.5 py-2 text-left">Code coul. frs</th>
+                {!sansPrix && (
+                  <>
+                    <th className="w-36 px-1.5 py-2 text-right">Prix {devise}</th>
+                    <th className="w-36 px-1.5 py-2 text-right">Total</th>
+                  </>
+                )}
+                {!sansFournisseur && (
+                  <>
+                    <th className="w-32 px-1.5 py-2 text-left">Réf. frs</th>
+                    <th className="w-28 px-1.5 py-2 text-left">Couleur</th>
+                    <th className="w-28 px-1.5 py-2 text-left">Code coul. frs</th>
+                  </>
+                )}
+                {colonnesSupplementaires.map((c) => (
+                  <th
+                    key={c.cle}
+                    className={cn('px-1.5 py-2', c.largeur, `text-${c.alignement ?? 'left'}`)}
+                  >
+                    {c.entete}
+                  </th>
+                ))}
                 <th className="w-8 px-1 py-2"></th>
               </tr>
             </thead>
@@ -803,33 +869,38 @@ export function GrilleLignes({
                       )}
                     </td>
 
-                    <td className={cellule}>
-                      <Champ
-                        type="number"
-                        // `any` ET NON `0.01` : la base garde quatre decimales,
-                        // un pas au centime interdirait de les saisir.
-                        step="any"
-                        min="0.0001"
-                        value={l.prix}
-                        onChange={(e) => maj(l.cle, { prix: e.target.value })}
-                        className={cn(
-                          'h-9 text-right text-[14px] tabular-nums',
-                          !(Number(l.prix) > 0) && estEbauche(l) && 'border-danger',
+                    {!sansPrix && (
+                      <td className={cellule}>
+                        <Champ
+                          type="number"
+                          // `any` ET NON `0.01` : la base garde quatre decimales,
+                          // un pas au centime interdirait de les saisir.
+                          step="any"
+                          min="0.0001"
+                          value={l.prix}
+                          onChange={(e) => maj(l.cle, { prix: e.target.value })}
+                          className={cn(
+                            'h-9 text-right text-[14px] tabular-nums',
+                            !(Number(l.prix) > 0) && estEbauche(l) && 'border-danger',
+                          )}
+                          aria-label={marchandise ? `Prix ${devise} par kg` : `Prix ${devise}`}
+                        />
+                        {marchandise && (
+                          <div className="mt-0.5 text-right text-[11px] text-attenue-texte">par kg</div>
                         )}
-                        aria-label={marchandise ? `Prix ${devise} par kg` : `Prix ${devise}`}
-                      />
-                      {marchandise && (
-                        <div className="mt-0.5 text-right text-[11px] text-attenue-texte">par kg</div>
-                      )}
-                    </td>
+                      </td>
+                    )}
 
-                    <td className={cn(cellule, 'pt-2 text-right font-medium tabular-nums')}>
-                      {fmt.nombre(totalDe(l), 2)}
-                    </td>
+                    {!sansPrix && (
+                      <td className={cn(cellule, 'pt-2 text-right font-medium tabular-nums')}>
+                        {fmt.nombre(totalDe(l), 2)}
+                      </td>
+                    )}
 
                     {/* CE QUE LE FOURNISSEUR RECONNAIT. La correction remonte a
                         la fiche de la reference, la ou l'information a sa place. */}
-                    {(['reference_fournisseur', 'couleur', 'code_couleur'] as const).map((champ) => (
+                    {!sansFournisseur &&
+                      (['reference_fournisseur', 'couleur', 'code_couleur'] as const).map((champ) => (
                       <td className={cellule} key={champ}>
                         {marchandise ? (
                           <Champ
@@ -860,6 +931,20 @@ export function GrilleLignes({
                           />
                         ) : (
                           <span className="block text-center text-[11px] text-attenue-texte">—</span>
+                        )}
+                        </td>
+                      ))}
+
+                    {/* CE QUE LE DOCUMENT AJOUTE. La grille place la cellule et
+                        tend de quoi ecrire ; elle n'a rien a savoir de ce qui
+                        s'y met. */}
+                    {colonnesSupplementaires.map((c) => (
+                      <td
+                        key={c.cle}
+                        className={cn(cellule, c.alignement === 'right' && 'text-right')}
+                      >
+                        {c.rendu(l, (valeur) =>
+                          maj(l.cle, { extra: { ...(l.extra ?? {}), [c.cle]: valeur } }),
                         )}
                       </td>
                     ))}

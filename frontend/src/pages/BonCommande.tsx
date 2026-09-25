@@ -144,6 +144,38 @@ export function BonCommande() {
    * laisser une trace de quelque chose qui n'aurait jamais du exister.
    */
   const [nouvelles, setNouvelles] = useState<LigneSaisie[]>([])
+  /*
+   * CES DEUX REFERENCES SONT DECLAREES TOUT EN HAUT, avant le moindre usage.
+   *
+   * Elles vivaient trois cents lignes plus bas, a cote de l'effet qui les
+   * remplit — ce qui se defend a la lecture, mais pas a l'execution : `const`
+   * n'est pas remonte comme une fonction, et `initiales.current` lu pendant le
+   * rendu levait « Cannot access 'initiales' before initialization ». React
+   * perdait tout le composant, donc la page entiere restait blanche.
+   *
+   * LE DEFAUT A DORMI longtemps parce que `nouvelles` etait toujours vide :
+   * `filter` n'appelait jamais sa fonction, donc personne ne lisait la
+   * reference. Le jour ou la grille s'est enfin remplie, il s'est reveille —
+   * d'ou l'impression qu'une reparation avait casse quelque chose, alors
+   * qu'elle n'avait fait que decouvrir.
+   *
+   * `amorcee` retient POUR QUEL bon la grille a ete remplie : sans ce garde,
+   * chaque rafraichissement rechargerait les lignes du serveur et effacerait
+   * ce que l'acheteur vient de corriger sans l'avoir enregistre.
+   */
+  const amorcee = useRef<string | null>(null)
+  /** Ce que chaque ligne valait a son dernier enregistrement, par identifiant. */
+  /*
+   * UN ETAT, PAS UNE REFERENCE — et c'est une correction, pas un detail.
+   *
+   * Ces valeurs sont LUES PENDANT LE RENDU : c'est elles qui decident si le
+   * bouton vert d'une ligne s'allume. Dans un `useRef`, les modifier ne
+   * redessine rien ; le bouton serait reste allume apres l'enregistrement,
+   * ou eteint alors qu'il y avait quelque chose a envoyer, jusqu'a ce qu'un
+   * autre evenement provoque un rendu par hasard. `react-hooks/refs` le
+   * signale, et il a raison : ce qui commande l'affichage doit etre un etat.
+   */
+  const [initiales, setInitiales] = useState<Map<string, string>>(new Map())
   /**
    * OU LA FRAPPE VA CHERCHER — le plan, ou tout le catalogue.
    *
@@ -283,89 +315,112 @@ export function BonCommande() {
   })
 
   /**
-   * Enregistrement GLOBAL : l'en-tete et toutes les lignes retouchees partent
-   * ensemble, et seulement quand on le demande.
+   * L'EN-TETE S'ENREGISTRE SEUL. Les lignes ont chacune leur bouton.
    *
-   * La saisie precedente envoyait chaque cellule des qu'on la quittait. Deux
-   * consequences vecues : une faute de frappe etait deja enregistree avant
-   * qu'on s'en apercoive, et une ligne passait « arbitree » — donc cessait de
-   * suivre le plan — sans qu'aucune valeur ait vraiment change.
+   * CE QUI ETAIT LA AVANT, et pourquoi il fallait le retirer. Un unique
+   * enregistrement partait chercher, dans QUATRE registres paralleles — le
+   * brouillon des cellules, les lignes marquees a supprimer, la grille, et la
+   * liste de ce qui avait ete charge — ce qu'il devait creer, corriger ou
+   * effacer. Cette reconciliation s'est trompee : sa derniere boucle supprimait
+   * toute ligne absente de la grille, y compris celle qui n'etait que dans le
+   * brouillon. Elle effacait donc des lignes qu'elle aurait du enregistrer.
    *
-   * Ici rien ne part avant le clic. Tant qu'on n'a pas enregistre, on annule
-   * une ligne ou tout le brouillon sans laisser de trace.
+   * Une ligne, un geste, une reponse : il n'y a plus rien a reconcilier, et une
+   * ligne refusee est la seule a echouer.
    */
   const enregistrer = useMutation({
-    mutationFn: async () => {
-      if (enteteModifie) await api.patch(`/api/bons-commande/${id}`, entete)
-
-      // Suppressions d'abord : une ligne retiree ne doit pas etre modifiee au
-      // passage, et sa proposition d'achat revient au plan.
-      for (const ligne of supprimees) {
-        await api.delete(`/api/bons-commande/${id}/lignes/${ligne}`)
-      }
-      for (const [ligne, corps] of Object.entries(brouillon)) {
-        if (supprimees.includes(ligne)) continue
-        await api.patch(`/api/bons-commande/${id}/lignes/${ligne}`, corps)
-      }
-      // LE MEME CORPS QU'A LA CREATION, produit par la meme fonction. C'est
-      // la seule maniere d'etre sur que les deux saisies donnent le meme
-      // resultat : tant qu'elles construisaient chacune leur JSON, elles
-      // divergeaient sans que rien ne le signale.
-      //
-      // `idExistant` DECIDE DU VERBE : une ligne deja enregistree se corrige,
-      // une ligne neuve se cree. Sans cette distinction, corriger la reference
-      // d'une ligne en creerait une seconde et laisserait l'ancienne.
-      for (const n of nouvelles.filter(estPrete)) {
-        if (n.idExistant) {
-          await api.patch(`/api/bons-commande/${id}/lignes/${n.idExistant}`, corpsLigne(n))
-        } else {
-          await api.post(`/api/bons-commande/${id}/lignes`, corpsLigne(n))
-        }
-      }
-      // CE QU'ON A RETIRE DE LA GRILLE. Une ligne chargee pour correction puis
-      // effacee est une suppression : l'oublier la laisserait en base alors
-      // que l'ecran ne la montre plus.
-      const gardees = new Set(nouvelles.map((n) => n.idExistant).filter(Boolean))
-      for (const l of lignesChargees) {
-        if (!gardees.has(l) && !supprimees.includes(l)) {
-          await api.delete(`/api/bons-commande/${id}/lignes/${l}`)
-        }
-      }
-      return {
-        modifiees: Object.keys(brouillon).filter((l) => !supprimees.includes(l)).length,
-        ajoutees: nouvelles.filter((n) => estPrete(n) && !n.idExistant).length,
-        retirees: supprimees.length,
-      }
-    },
-    onSuccess: (r) => {
-      const parts = [
-        r.ajoutees > 0 ? `${r.ajoutees} ajoutee(s)` : null,
-        r.modifiees > 0 ? `${r.modifiees} modifiee(s)` : null,
-        r.retirees > 0 ? `${r.retirees} retiree(s)` : null,
-      ].filter(Boolean)
-      toast.success('Bon enregistre', {
-        description: parts.length ? `Lignes : ${parts.join(' · ')}.` : undefined,
-      })
-      setBrouillon({})
-      setNouvelles([])
-      setLignesChargees([])
-      setSupprimees([])
-      // La grille se rechargera depuis le serveur : c'est lui qui detient
-      // desormais les identifiants des lignes qu'on vient de creer.
-      amorcee.current = null
+    mutationFn: () => api.patch(`/api/bons-commande/${id}`, entete),
+    onSuccess: () => {
+      toast.success('En-tete enregistre')
       rafraichir()
     },
     onError: echec,
   })
 
+  /** Les lignes dont un envoi est en cours : leurs boutons attendent. */
+  const [enCours, setEnCours] = useState<Set<string>>(new Set())
+  const marquer = (cle: string, actif: boolean) =>
+    setEnCours((s) => {
+      const n = new Set(s)
+      if (actif) n.add(cle)
+      else n.delete(cle)
+      return n
+    })
+
   /**
-   * Les identifiants des lignes chargees dans la grille pour correction.
+   * Enregistrer UNE ligne : la creer si elle est neuve, la corriger sinon.
    *
-   * On les retient pour savoir ce qui a ete RETIRE : une ligne chargee puis
-   * effacee de la grille doit disparaitre en base, sinon l'ecran et la base
-   * cessent de dire la meme chose.
+   * `idExistant` DECIDE DU VERBE. Sans cette distinction, corriger la reference
+   * d'une ligne en creerait une seconde et laisserait l'ancienne.
+   *
+   * LE CORPS EST PRODUIT PAR `corpsLigne`, la meme fonction qu'a la creation du
+   * bon. C'est la seule maniere d'etre sur que les deux ecrans donnent le meme
+   * resultat : tant qu'ils construisaient chacun leur JSON, ils divergeaient
+   * sans que rien ne le signale.
    */
-  const [lignesChargees, setLignesChargees] = useState<string[]>([])
+  const enregistrerLigne = async (l: LigneSaisie) => {
+    if (!id || enCours.has(l.cle)) return
+    marquer(l.cle, true)
+    try {
+      const corps = corpsLigne(l)
+      if (l.idExistant) {
+        await api.patch(`/api/bons-commande/${id}/lignes/${l.idExistant}`, corps)
+        setInitiales((m) => new Map(m).set(l.idExistant as string, JSON.stringify(corps)))
+        toast.success(`Ligne ${l.code_reference || l.intitule} enregistrée`)
+      } else {
+        // LE SERVEUR REND L'IDENTIFIANT DE LA LIGNE CREEE : on le pose tout de
+        // suite sur la ligne de la grille. Sans cela, un second clic la
+        // recreerait au lieu de la corriger.
+        const r = await api.post<{ id_ligne_bc: string }>(
+          `/api/bons-commande/${id}/lignes`,
+          corps,
+        )
+        setInitiales((m) => new Map(m).set(r.id_ligne_bc, JSON.stringify(corps)))
+        setNouvelles((ls) =>
+          ls.map((x) => (x.cle === l.cle ? { ...x, idExistant: r.id_ligne_bc } : x)),
+        )
+        toast.success(`Ligne ${l.code_reference || l.intitule} ajoutée`)
+      }
+      rafraichir()
+    } catch (e) {
+      echec(e)
+    } finally {
+      marquer(l.cle, false)
+    }
+  }
+
+  /**
+   * Supprimer une ligne deja enregistree, tout de suite.
+   *
+   * Sa proposition d'achat revient au plan — c'est le serveur qui s'en charge.
+   * La ligne ne quitte la grille QU'UNE FOIS le serveur d'accord : la retirer
+   * d'abord montrerait un ecran qui ment si la suppression est refusee, par
+   * exemple parce que le fournisseur a deja livre dessus.
+   */
+  const supprimerLigne = async (l: LigneSaisie) => {
+    if (!id || !l.idExistant || enCours.has(l.cle)) return
+    marquer(l.cle, true)
+    try {
+      await api.delete(`/api/bons-commande/${id}/lignes/${l.idExistant}`)
+      setInitiales((m) => {
+        const n = new Map(m)
+        n.delete(l.idExistant as string)
+        return n
+      })
+      setNouvelles((ls) => ls.filter((x) => x.cle !== l.cle))
+      toast.success(`Ligne ${l.code_reference || l.intitule} supprimée`)
+      rafraichir()
+    } catch (e) {
+      echec(e)
+    } finally {
+      marquer(l.cle, false)
+    }
+  }
+
+  /* `lignesChargees` a disparu ici. Il servait a deviner, au moment de
+     l'enregistrement global, quelles lignes avaient ete retirees de la grille
+     — une deduction qui se trompait. Une ligne retiree est maintenant
+     supprimee au moment ou on la retire : il n'y a plus rien a deviner. */
 
   /** Marque ou demarque une ligne existante pour suppression. */
   const basculerSuppression = (ligne: string) =>
@@ -394,45 +449,20 @@ export function BonCommande() {
 
   const ligneModifiee = (l: LigneBc) => !!brouillon[l.id_ligne_bc]
   /*
-   * CES DEUX REFERENCES SONT DECLAREES ICI, avant leur premiere lecture.
-   *
-   * Elles vivaient soixante-dix lignes plus bas, a cote de l'effet qui les
-   * remplit — ce qui se defend a la lecture, mais pas a l'execution : `const`
-   * n'est pas remonte, et `initiales.current` lu au rendu levait
-   * « Cannot access 'initiales' before initialization ». Tout le composant
-   * tombait, donc la page entiere restait blanche.
-   *
-   * LE DEFAUT A DORMI parce que `nouvelles` etait toujours vide : `filter`
-   * n'appelait jamais sa fonction, donc personne ne lisait la reference. Le
-   * jour ou la grille s'est enfin remplie, il s'est reveille. Une panne latente
-   * qu'un autre correctif revele — d'ou l'impression que la reparation avait
-   * casse quelque chose.
-   *
-   * `amorcee` retient POUR QUEL bon la grille a ete remplie : sans ce garde,
-   * chaque rafraichissement rechargerait les lignes du serveur et effacerait
-   * ce que l'acheteur vient de corriger sans l'avoir enregistre.
-   */
-  const amorcee = useRef<string | null>(null)
-  /** Ce que chaque ligne valait en arrivant, pour savoir ce qui a bouge. */
-  const initiales = useRef<Map<string, string>>(new Map())
-
-  /*
    * MODIFIEE VEUT DIRE « QUI A CHANGE », pas « qui est dans la grille ».
    *
    * Compter toute ligne chargee affichait « 1 modifiee(s) » des l'ouverture,
-   * sans que personne ait touche a rien — et le bouton d'enregistrement restait
-   * actif en permanence. On compare donc chaque ligne a ce qu'elle etait en
-   * arrivant, par le corps meme qui partira au serveur : ce qui ne changerait
-   * rien pour lui ne compte pas comme une modification.
+   * sans que personne ait touche a rien. On compare donc chaque ligne a ce
+   * qu'elle valait a son dernier enregistrement, par le corps meme qui partira
+   * au serveur : ce qui ne changerait rien pour lui ne compte pas.
+   *
+   * Ce nombre ne commande plus aucun bouton — chaque ligne a le sien. Il ne
+   * sert qu'a avertir, en bas de page, qu'il reste des lignes non enregistrees
+   * avant de quitter l'ecran.
    */
-  const nbModifiees =
-    Object.keys(brouillon).filter((c) => !supprimees.includes(c)).length +
-    nouvelles.filter(
-      (n) =>
-        n.idExistant && JSON.stringify(corpsLigne(n)) !== initiales.current.get(n.idExistant),
-    ).length
-  const aEnregistrer =
-    nbModifiees > 0 || nouvelles.length > 0 || supprimees.length > 0 || enteteModifie
+  const nbModifiees = nouvelles.filter(
+    (n) => n.idExistant && JSON.stringify(corpsLigne(n)) !== initiales.get(n.idExistant),
+  ).length
 
   // Les lignes ajoutees s'affichent avec les autres, marquees « nouvelle ».
   // Les voir dans le tableau evite de saisir deux fois la meme reference sans
@@ -509,11 +539,10 @@ export function BonCommande() {
     const chargees = lignes.map((l) =>
       depuisLigneEnregistree(l, parPlan.get(l.code_reference ?? '')),
     )
-    initiales.current = new Map(
-      chargees.map((l) => [l.idExistant as string, JSON.stringify(corpsLigne(l))]),
+    setInitiales(
+      new Map(chargees.map((l) => [l.idExistant as string, JSON.stringify(corpsLigne(l))])),
     )
     setNouvelles(chargees)
-    setLignesChargees(lignes.map((l) => l.id_ligne_bc))
   }, [id, modifiable, qLignes.isSuccess, lignes, parPlan])
 
   /* LE SUPERVISEUR VALIDE CE QU'IL A CREE, sur decision de la direction. La
@@ -1075,6 +1104,23 @@ export function BonCommande() {
                   corrigerReference.mutate({ code, champ, valeur })
                 }
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
+                surEnregistrerLigne={enregistrerLigne}
+                surSupprimerLigne={supprimerLigne}
+                enCours={enCours}
+                // CE QUI A CHANGE DEPUIS LE DERNIER ENREGISTREMENT, mesure par
+                // le corps meme qui partira au serveur : ce qui ne changerait
+                // rien pour lui n'allume pas le bouton.
+                modifiees={
+                  new Set(
+                    nouvelles
+                      .filter(
+                        (n) =>
+                          n.idExistant &&
+                          JSON.stringify(corpsLigne(n)) !== initiales.get(n.idExistant),
+                      )
+                      .map((n) => n.cle),
+                  )
+                }
               />
             ) : (
               <DataTable<LigneBc>
@@ -1097,51 +1143,43 @@ export function BonCommande() {
         </Carte>
       </div>
 
-      {/* Les deux boutons sont TOUJOURS presents tant que le bon se modifie, et
+      {/* CETTE BARRE NE PORTE PLUS QUE L'EN-TETE. Les lignes ont chacune leur
+          bouton, sur leur ligne : elles s'enregistrent une par une, et une
+          ligne refusee n'empeche plus les autres de passer.
+
+          Les deux boutons restent TOUJOURS presents tant que le bon se modifie,
           simplement desactives quand il n'y a rien a enregistrer. Une barre qui
           n'apparait qu'une fois la saisie commencee laisse chercher ou l'on
-          enregistre — on ne trouve pas un bouton qu'on n'a jamais vu.
-
-          L'enregistrement est global : l'entete et toutes les lignes retouchees
-          partent ensemble, et rien n'est envoye avant le clic. */}
+          enregistre — on ne trouve pas un bouton qu'on n'a jamais vu. */}
       {modifiable && (
         <div
           className={cn(
             'sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
-            aEnregistrer ? 'border-primaire' : 'border-bordure',
+            enteteModifie || nbModifiees > 0 ? 'border-primaire' : 'border-bordure',
           )}
         >
           <span className="text-[13px]">
-            {aEnregistrer ? (
+            {enteteModifie ? (
               <>
-                <span className="font-medium">
-                  {[
-                    nouvelles.filter((n) => !n.idExistant).length > 0
-                      ? `${nouvelles.filter((n) => !n.idExistant).length} ajoutee(s)`
-                      : null,
-                    nbModifiees > 0 ? `${nbModifiees} modifiee(s)` : null,
-                    supprimees.length > 0 ? `${supprimees.length} a retirer` : null,
-                    enteteModifie ? 'en-tete modifie' : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-                <span className="text-alerte"> — rien n'est encore enregistré.</span>
+                <span className="font-medium">En-tête modifié</span>
+                <span className="text-alerte"> — pas encore enregistré.</span>
               </>
+            ) : nbModifiees > 0 ? (
+              <span className="text-alerte">
+                {nbModifiees} ligne(s) modifiée(s) — enregistrez-les avec le bouton vert de
+                chaque ligne.
+              </span>
             ) : (
               <span className="text-attenue-texte">
-                Modifiez l'en-tete ou une ligne, puis enregistrez.
+                Chaque ligne s’enregistre sur sa ligne. Cette barre ne concerne que l’en-tête.
               </span>
             )}
           </span>
           <div className="flex items-center gap-2">
             <Bouton
               variante="contour"
-              disabled={!aEnregistrer}
+              disabled={!enteteModifie}
               onClick={() => {
-                setBrouillon({})
-                setNouvelles([])
-                setSupprimees([])
                 if (bc) {
                   setEntete({
                     date_bc: bc.date_bc?.slice(0, 10) ?? '',
@@ -1155,15 +1193,15 @@ export function BonCommande() {
               }}
             >
               <Undo2 />
-              Annuler les modifications
+              Annuler les modifications de l’en-tête
             </Bouton>
             <Bouton
               onClick={() => enregistrer.mutate()}
               chargement={enregistrer.isPending}
-              disabled={!aEnregistrer}
+              disabled={!enteteModifie}
             >
               <Save />
-              Enregistrer les modifications
+              Enregistrer l’en-tête
             </Bouton>
           </div>
         </div>

@@ -24,7 +24,7 @@
  *   negocie au millieme.
  */
 import type { Dispatch, SetStateAction } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Check, Plus, Trash2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
@@ -167,6 +167,18 @@ export function ligneVide(): LigneSaisie {
  * la grille le montre au kilo, comme a la saisie. Sans cette division, ouvrir
  * une ligne en palettes afficherait un prix cent fois trop grand.
  */
+/* DECLAREE AVANT SES APPELANTS. `const` n'est pas remonte comme une fonction :
+   tant qu'elle vivait plus bas, elle ne tenait que parce que ses appelants sont
+   des declarations de fonction, executees plus tard. Un seul appel au niveau du
+   module aurait suffi a tout faire tomber — c'est la faute exacte qui a laisse
+   une page blanche le 25/09. */
+export const condDe = (r: RefLigne): Conditionnement => ({
+  poids_bobine_kg: r.poids_bobine_kg,
+  bobines_par_palette: r.bobines_par_palette,
+  bobines_par_lot: r.bobines_par_lot,
+  densite_kg_ml: r.densite_kg_ml,
+})
+
 export function depuisLigneEnregistree(
   l: {
     id_ligne_bc: string
@@ -229,12 +241,6 @@ export function depuisLigneEnregistree(
   }
 }
 
-export const condDe = (r: RefLigne): Conditionnement => ({
-  poids_bobine_kg: r.poids_bobine_kg,
-  bobines_par_palette: r.bobines_par_palette,
-  bobines_par_lot: r.bobines_par_lot,
-  densite_kg_ml: r.densite_kg_ml,
-})
 
 /**
  * L'UNITE DANS LAQUELLE ON COMMANDE, et non celle dans laquelle on stocke.
@@ -389,6 +395,27 @@ export interface ProprietesGrille {
   valeurOrigine?: (code: string, champ: string) => string
   surCreerReference?: (motif: string) => void
   modifiable?: boolean
+  /**
+   * CHAQUE LIGNE S'ENREGISTRE SEULE, sur son propre bouton.
+   *
+   * Sans ces deux rappels, la grille reste purement locale : c'est ce qu'il
+   * faut a la CREATION, ou le document n'existe pas encore et ou il n'y a rien
+   * a quoi envoyer une ligne. Des que le document existe, la page les fournit
+   * et le bouton de la ligne appelle vraiment le serveur.
+   *
+   * Pourquoi par ligne plutot qu'un enregistrement global : un envoi groupe
+   * doit reconcilier ce qui a ete ajoute, change et retire, et cette
+   * reconciliation s'est trompee — elle supprimait des lignes qu'elle aurait
+   * du enregistrer. Une ligne, un geste, une reponse : il n'y a plus rien a
+   * reconcilier.
+   */
+  surEnregistrerLigne?: (l: LigneSaisie) => void
+  /** Retirer une ligne. Deja enregistree, la page doit la supprimer en base. */
+  surSupprimerLigne?: (l: LigneSaisie) => void
+  /** Les lignes dont un envoi est en cours, par cle : leurs boutons attendent. */
+  enCours?: Set<string>
+  /** Les lignes qui different de ce qu'elles valaient en arrivant, par cle. */
+  modifiees?: Set<string>
 }
 
 export function GrilleLignes({
@@ -405,6 +432,10 @@ export function GrilleLignes({
   valeurOrigine,
   surCreerReference,
   modifiable = true,
+  surEnregistrerLigne,
+  surSupprimerLigne,
+  enCours,
+  modifiees,
 }: ProprietesGrille) {
   const prises = dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean))
 
@@ -829,13 +860,56 @@ export function GrilleLignes({
                       </td>
                     ))}
 
-                    <td className="px-1 py-1">
+                    {/* LES ACTIONS DE LA LIGNE, SUR LA LIGNE. Enregistrer ne
+                        porte que sur elle : la voisine a moitie remplie ne
+                        bloque plus rien, et une ligne refusee par le serveur
+                        est la seule a rester en rouge. */}
+                    <td className="whitespace-nowrap px-1 py-1">
+                      {surEnregistrerLigne && (
+                        <Bouton
+                          variante="discret"
+                          taille="icone-xs"
+                          className="text-succes hover:bg-succes/10"
+                          // RIEN A ENREGISTRER, RIEN A CLIQUER. Une ligne neuve
+                          // s'enregistre des qu'elle est complete ; une ligne
+                          // deja en base, seulement si elle a change.
+                          disabled={
+                            enCours?.has(l.cle) ||
+                            !estPrete(l) ||
+                            (!!l.idExistant && !modifiees?.has(l.cle))
+                          }
+                          aria-label={l.idExistant ? 'Enregistrer la modification' : 'Enregistrer la ligne'}
+                          title={
+                            !estPrete(l)
+                              ? 'Complétez la référence, la quantité et le prix'
+                              : l.idExistant && !modifiees?.has(l.cle)
+                                ? 'Rien n’a changé sur cette ligne'
+                                : 'Enregistrer cette ligne'
+                          }
+                          onClick={() => surEnregistrerLigne(l)}
+                        >
+                          <Check />
+                        </Bouton>
+                      )}
                       <Bouton
                         variante="discret"
                         taille="icone-xs"
                         className="text-danger hover:bg-danger/10"
-                        aria-label="Retirer la ligne"
-                        onClick={() => setLignes((ls) => ls.filter((x) => x.cle !== l.cle))}
+                        disabled={enCours?.has(l.cle)}
+                        aria-label={l.idExistant ? 'Supprimer la ligne' : 'Retirer la ligne'}
+                        title={
+                          l.idExistant
+                            ? 'Supprimer cette ligne du bon'
+                            : 'Retirer cette ligne — elle n’a jamais été enregistrée'
+                        }
+                        // UNE LIGNE JAMAIS ENREGISTREE SE RETIRE SANS RIEN
+                        // DEMANDER au serveur : il n'a jamais entendu parler
+                        // d'elle. Celle qui existe en base doit y etre effacee,
+                        // sinon l'ecran et la base cessent de s'accorder.
+                        onClick={() => {
+                          if (l.idExistant && surSupprimerLigne) surSupprimerLigne(l)
+                          else setLignes((ls) => ls.filter((x) => x.cle !== l.cle))
+                        }}
                       >
                         <Trash2 />
                       </Bouton>

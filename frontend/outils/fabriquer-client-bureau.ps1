@@ -54,7 +54,13 @@ try {
 # venait de le fabriquer.
 $version = (Get-Content (Join-Path $racine 'src-tauri\tauri.conf.json') -Raw |
             ConvertFrom-Json).version
-$paquet = Join-Path $racine ("src-tauri\target\release\bundle\nsis\Gestion Fil_$($version)_x64-setup.exe")
+# LE BUNDLE NE SUIT PAS TOUJOURS LE PROJET. Tauri obeit a CARGO_TARGET_DIR
+# comme le reste de cargo : quand ce reglage existe, l'installateur est ecrit
+# hors du depot, dans <CARGO_TARGET_DIR>\release\bundle. Meme cause et meme
+# remede que pour la version ci-dessus — on demande, on ne suppose pas.
+$racineCompil = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR }
+                else { Join-Path $racine 'src-tauri\target' }
+$paquet = Join-Path $racineCompil ("release\bundle\nsis\Gestion Fil_$($version)_x64-setup.exe")
 if (-not (Test-Path $paquet)) { throw "installateur introuvable : $paquet" }
 
 Write-Host ("`n==> Installateur : {0:N1} Mo" -f ((Get-Item $paquet).Length / 1MB)) -ForegroundColor Green

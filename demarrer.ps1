@@ -64,7 +64,14 @@ Push-Location $back
 if ($LASTEXITCODE -ne 0) { Pop-Location; throw "compilation echouee" }
 Pop-Location
 
-$exe = Join-Path $back 'target\debug\gestionfil.exe'
+# OU CARGO A-T-IL POSE LE BINAIRE ? Pas forcement dans backend\target : quand
+# CARGO_TARGET_DIR est defini, toute la compilation sort du projet et se
+# partage entre tous les projets Rust du poste. Coder le chemin en dur faisait
+# echouer le demarrage avec un « binaire introuvable » des que ce reglage
+# existait. On demande donc a l'environnement plutot que de supposer.
+$racineCompil = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $back 'target' }
+$exe = Join-Path $racineCompil 'debug\gestionfil.exe'
+if (-not (Test-Path $exe)) { throw "Binaire introuvable : $exe" }
 $api = Start-Process -FilePath $exe -WorkingDirectory $back -PassThru
 Write-Host "Backend demarre (pid $($api.Id))..." -ForegroundColor Cyan
 

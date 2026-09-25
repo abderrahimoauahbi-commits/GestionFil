@@ -466,7 +466,7 @@ async fn diagnostic(pool: &Db) -> Result<()> {
 /// Reindexe, compacte et reanalyse.
 ///
 /// CE QUE CETTE COMMANDE NE FAIT PAS : corriger une donnee. Elle ne touche
-/// qu'aux structures internes de SQLite — index, pages libres, statistiques.
+/// qu'aux structures internes de PostgreSQL — index, espace mort, statistiques.
 /// Une anomalie metier ne se repare pas par une commande de maintenance : elle
 /// se corrige dans l'application, par quelqu'un qui sait ce que la ligne devrait
 /// porter. Laisser croire le contraire ferait plus de degats que le probleme.

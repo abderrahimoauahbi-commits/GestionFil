@@ -1902,8 +1902,9 @@ pub async fn audit(
 /// Usages d'une reference du catalogue, et verdict de suppression.
 ///
 /// Les cles etrangeres empechent deja de supprimer une reference utilisee, mais
-/// elles le disent en « FOREIGN KEY constraint failed » — un message qui ne
-/// nomme ni la reference ni ce qui la retient. Cet endpoint compte les usages
+/// elles le disent en « violates foreign key constraint » suivi du nom de la
+/// contrainte — une cle technique, qui ne nomme ni la reference ni ce qui la
+/// retient. Cet endpoint compte les usages
 /// AVANT, pour que l'ecran puisse expliquer, et pour ne proposer le bouton que
 /// lorsqu'il aboutira.
 ///

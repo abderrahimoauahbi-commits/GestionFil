@@ -1,6 +1,6 @@
 //! Erreurs applicatives et leur traduction HTTP.
 //!
-//! Les messages metier leves par les triggers SQLite (`RAISE(ABORT, ...)`)
+//! Les messages metier leves par les declencheurs PL/pgSQL (`RAISE EXCEPTION`)
 //! remontent ici via `sqlx::Error::Database`. Ils sont volontairement renvoyes
 //! tels quels au client : ce sont des messages redigees pour l'utilisateur
 //! ("R02 : stock insuffisant..."), pas des details d'implementation.
@@ -107,14 +107,6 @@ impl From<sqlx::Error> for AppError {
                     )),
                     Some("23514") => AppError::Invalide(format!("Valeur refusée par une règle de la base : {msg}")),
                     Some("23502") => AppError::Invalide(format!("Un champ obligatoire manque : {msg}")),
-                    // Formules de SQLite, gardees le temps que rien n'en depende.
-                    _ if msg.contains("UNIQUE constraint failed") => AppError::Conflit(msg),
-                    _ if msg.contains("CHECK constraint failed")
-                        || msg.contains("FOREIGN KEY constraint failed")
-                        || msg.contains("NOT NULL constraint failed") =>
-                    {
-                        AppError::Invalide(msg)
-                    }
                     _ => AppError::Sqlx(e),
                 }
             }

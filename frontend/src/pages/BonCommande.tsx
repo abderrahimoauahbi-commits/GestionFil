@@ -476,8 +476,22 @@ export function BonCommande() {
   const amorcee = useRef<string | null>(null)
   /** Ce que chaque ligne valait en arrivant, pour savoir ce qui a bouge. */
   const initiales = useRef<Map<string, string>>(new Map())
+  /*
+   * ON N'AMORCE QUE SUR UN SUCCES, jamais sur « plus en chargement ».
+   *
+   * Le garde testait `!qLignes.isLoading`. Or une requete EN ERREUR n'est pas
+   * en chargement : elle passait donc le garde avec `lignes` vide, posait
+   * `amorcee.current = id`, et remplissait la grille de rien. Le second garde
+   * faisait le reste — au reessai, la requete reussissait, mais `amorcee`
+   * disait deja « ce bon est fait » et les lignes n'entraient JAMAIS.
+   *
+   * Une page ouverte pendant une panne de base restait donc vide pour de bon,
+   * meme apres la reparation, sans un seul message pour le dire. C'est ce qui
+   * s'est produit le 25/09 : quatre migrations manquaient, la lecture des
+   * lignes echouait, et l'ecran est reste muet une fois la base reparee.
+   */
   useEffect(() => {
-    if (!modifiable || !id || qLignes.isLoading) return
+    if (!modifiable || !id || !qLignes.isSuccess) return
     if (amorcee.current === id) return
     amorcee.current = id
     const chargees = lignes.map((l) =>
@@ -488,7 +502,7 @@ export function BonCommande() {
     )
     setNouvelles(chargees)
     setLignesChargees(lignes.map((l) => l.id_ligne_bc))
-  }, [id, modifiable, qLignes.isLoading, lignes, parPlan])
+  }, [id, modifiable, qLignes.isSuccess, lignes, parPlan])
 
   /* LE SUPERVISEUR VALIDE CE QU'IL A CREE, sur decision de la direction. La
      separation des taches reste en vigueur pour tous les autres roles : dans
@@ -865,6 +879,20 @@ export function BonCommande() {
         <Alerte ton="info" className="mb-3">
           Bon {bc.statut.toLowerCase().replace(/_/g, ' ')} : les lignes sont figees. Seules les
           receptions le font encore evoluer.
+        </Alerte>
+      )}
+
+      {/* UNE LECTURE QUI ECHOUE DOIT SE VOIR. L'ecran se contentait d'afficher
+          une grille vide, qu'on ne pouvait pas distinguer d'un bon sans ligne :
+          on croyait avoir perdu sa saisie alors que rien n'avait bouge en base.
+          Le message dit ce qui s'est passe, et surtout ce qui n'a PAS eu lieu. */}
+      {qLignes.isError && (
+        <Alerte ton="danger" titre="Les lignes n’ont pas pu être lues" className="mb-3">
+          {qLignes.error instanceof ErreurApi
+            ? qLignes.error.message
+            : 'La base n’a pas répondu.'}{' '}
+          Rien n’a été perdu : la grille reste vide tant que la lecture échoue. Rechargez la
+          page une fois la cause levée.
         </Alerte>
       )}
 

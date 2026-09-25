@@ -2993,7 +2993,11 @@ pub async fn lignes_reception(
         //   ecart_cmd_kg  : ce qu'on a COMMANDE contre ce qu'on PESE
         //                   — une livraison incomplete ou excedentaire ;
         //   poids par colis : detecte un conditionnement inattendu.
+        // LE CONDITIONNEMENT SUIT LA LIGNE. Sans le poids d'une bobine ni le
+        // nombre par palette, l'ecran ne peut pas convertir une pesee en colis
+        // — et la grille de saisie affiche des cases vides qu'on croit fausses.
         "SELECT l.*, r.designation AS reference_designation, r.unite_catalogue, r.suivi_lot,
+                r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot, r.densite_kg_ml,
                 lb.code_reference AS reference_commandee,
                 CASE WHEN l.id_ligne_bc IS NOT NULL
                       AND lb.code_reference <> l.code_reference

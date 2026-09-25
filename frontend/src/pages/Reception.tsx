@@ -14,16 +14,28 @@
  * archive, historique de prix — et elle appartient au controle qualite, pas au
  * peseur (separation B4).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Save, Send, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Save, Send, ShieldCheck, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
+import {
+  GrilleLignes,
+  type ColonneGrille,
+  type LigneSaisie,
+  type RefLigne,
+} from '../composants/GrilleLignes'
+import {
+  type Conditionnement,
+  depuisKg,
+  facteurVersKg,
+  pourChamp,
+} from '../lib/conditionnement'
 import {
   Alerte,
   Badge,
@@ -37,7 +49,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Aide, Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { Aide } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'RECEPTIONS'
@@ -50,6 +62,7 @@ interface Reception extends Record<string, unknown> {
   date_reception: string
   code_fournisseur: string
   fournisseur_nom: string
+  code_devise?: string
   numero_bc: string | null
   id_bc: string | null
   num_bon_livraison: string | null
@@ -93,6 +106,13 @@ interface LigneRec extends Record<string, unknown> {
   lot_fournisseur: string | null
   statut_qualite: string
   code_magasin_dest: string
+  unite_catalogue?: string
+  /* LE CONDITIONNEMENT DE LA FICHE, ajoute a la requete : sans lui, la grille
+     ne sait pas convertir une pesee en palettes ni en bobines. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  bobines_par_lot?: number | null
+  densite_kg_ml?: number | null
 }
 
 interface LigneAttendue extends Record<string, unknown> {
@@ -109,25 +129,15 @@ interface LigneAttendue extends Record<string, unknown> {
   suivi_lot: number
   deja_pesee_kg: number
   numero_bc: string
+  /* Le conditionnement de la fiche : la grille en a besoin pour convertir. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  bobines_par_lot?: number | null
+  densite_kg_ml?: number | null
   date_livraison_prevue: string | null
   retard_jours: number | null
 }
 
-/** Une pesee saisie mais pas encore enregistree. */
-interface Pesee {
-  cle: string
-  id_ligne_bc: string | null
-  code_reference: string
-  designation: string
-  unite_saisie: string
-  quantite: number
-  quantite_bl: number | null
-  attendu_kg: number | null
-  colis: number | null
-  lot: string
-  magasin: string
-  statut_qualite: string
-}
 
 const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
   BROUILLON: 'neutre',
@@ -143,13 +153,89 @@ const TON_QUALITE: Record<string, 'succes' | 'alerte' | 'danger'> = {
   NON_CONFORME: 'danger',
 }
 
+/**
+ * Une ligne deja pesee entre dans la grille — la MEME que celle du bon de
+ * commande.
+ *
+ * La reception saisit toujours des KILOS : c'est une pesee. La base, elle,
+ * archive l'expression declaree (`quantite_pesee_unite` dans `unite_saisie`),
+ * et la traduction se fait ici a la lecture, comme a l’envoi.
+ *
+ * `extra` PORTE CE QUE LA GRILLE NE CONNAIT PAS : lot, magasin, qualite,
+ * quantite annoncee au bon de livraison, colis. La grille les range et les
+ * rend ; c'est cet ecran qui sait ce qu'ils veulent dire.
+ */
+function depuisLigneReception(l: LigneRec): LigneSaisie {
+  const cond: Conditionnement = {
+    poids_bobine_kg: l.poids_bobine_kg,
+    bobines_par_palette: l.bobines_par_palette,
+    bobines_par_lot: l.bobines_par_lot,
+    densite_kg_ml: l.densite_kg_ml,
+  }
+  const colis = depuisKg(l.quantite_stock_kg, cond)
+  return {
+    cle: l.id_ligne_reception,
+    idExistant: l.id_ligne_reception,
+    nature: 'MARCHANDISE',
+    code_reference: l.code_reference,
+    intitule: l.reference_designation ?? l.code_reference,
+    cond,
+    unite_catalogue: l.unite_catalogue ?? 'kg',
+    fournisseur_habituel: null,
+    suggere_kg: l.quantite_commandee_kg,
+    qte: pourChamp(l.quantite_stock_kg, 3),
+    unite: l.unite_saisie,
+    palettes: pourChamp(colis.palettes),
+    bobines: pourChamp(colis.bobines),
+    prix: l.prix_kg_devise != null ? String(l.prix_kg_devise) : '',
+    reference_fournisseur: '',
+    couleur: '',
+    code_couleur: '',
+    extra: {
+      bl: l.quantite_bl_kg != null ? String(l.quantite_bl_kg) : '',
+      colis: l.nb_colis_ligne != null ? String(l.nb_colis_ligne) : '',
+      lot: l.lot_fournisseur ?? '',
+      magasin: l.code_magasin_dest,
+      qualite: l.statut_qualite,
+    },
+  }
+}
+
+/**
+ * Ce que le serveur attend pour UNE ligne de reception.
+ *
+ * LA PESEE EST EN KILOS, L'ARCHIVE DANS L'UNITE DECLAREE. Six decimales : la
+ * colonne n'en garde que quatre, mais le serveur deduit les KILOS de ce nombre
+ * avant que la base n'arrondisse. Arrondir ici deplacerait le poids RECU de
+ * quelques grammes — et une reception fausse cree du stock qui n’existe pas.
+ *
+ * Facteur inconnu : on envoie des kilos plutot qu'un nombre faux dans une
+ * unite qu'on ne sait pas convertir.
+ */
+function corpsReception(l: LigneSaisie) {
+  const kg = Number(l.qte)
+  const f = facteurVersKg(l.unite, l.cond)
+  const e = l.extra ?? {}
+  const nombre = (v: string | undefined) => {
+    const n = Number(v)
+    return v && v.trim() !== '' && Number.isFinite(n) && n >= 0 ? n : undefined
+  }
+  return {
+    unite_saisie: f ? l.unite : 'kg',
+    quantite_pesee_unite: f ? Number((kg / f).toFixed(6)) : kg,
+    quantite_bl_kg: nombre(e.bl),
+    nb_colis_ligne: nombre(e.colis) != null ? Math.round(nombre(e.colis) as number) : undefined,
+    lot_fournisseur: e.lot?.trim() || undefined,
+    code_magasin_dest: e.magasin,
+    statut_qualite: e.qualite,
+  }
+}
 export function Reception() {
   const { id = '' } = useParams()
   const droits = useDroits(MODULE)
   const { moi } = useAuth()
   const qc = useQueryClient()
   const naviguer = useNavigate()
-  const [saisie, setSaisie] = useState(false)
 
   const [entete, setEntete] = useState({
     num_bon_livraison: '',
@@ -158,8 +244,20 @@ export function Reception() {
     nombre_colis: '',
     poids_total_brut_kg: '',
   })
-  const [pesees, setPesees] = useState<Pesee[]>([])
-  const [supprimees, setSupprimees] = useState<string[]>([])
+  /*
+   * UNE SEULE SOURCE POUR LES LIGNES, comme sur le bon de commande.
+   *
+   * `pesees` et `supprimees` tenaient chacun la moitie de la verite, et
+   * l'enregistrement groupe devait les reconcilier. Sur le bon de commande, la
+   * meme construction a fait disparaitre une ligne de 36 tonnes sans rien
+   * signaler. Ici aussi elle supprimait puis recreait chaque ligne corrigee.
+   */
+  const [nouvelles, setNouvelles] = useState<LigneSaisie[]>([])
+  const amorcee = useRef<string | null>(null)
+  /** Ce que chaque ligne valait a son dernier enregistrement, par identifiant. */
+  const [initiales, setInitiales] = useState<Map<string, string>>(new Map())
+  /** Les lignes dont un envoi est en cours : leurs boutons attendent. */
+  const [enCours, setEnCours] = useState<Set<string>>(new Set())
 
   const qRec = useQuery({
     queryKey: ['receptions'],
@@ -201,6 +299,250 @@ export function Reception() {
     rec?.poids_total_brut_kg,
   ])
 
+  /* DECLARE AVANT L'EFFET QUI LE LIT. `const` n'est pas remonte : plus bas, il
+     levait « used before its declaration » et la page entiere tombait. */
+  const modifiable =
+    !!droits.peutEcrire && (rec?.statut === 'BROUILLON' || rec?.statut === 'A_CONTROLER')
+
+  const lignesServeur = useMemo(() => qLignes.data ?? [], [qLignes.data])
+
+  /*
+   * LES LIGNES PESEES ENTRENT DANS LA GRILLE, une fois par reception.
+   *
+   * On n'amorce que sur `isSuccess`, jamais sur « plus en chargement » : une
+   * requete EN ERREUR n'est pas en chargement, et franchirait le garde avec
+   * zero ligne — la grille resterait vide pour de bon, meme apres reparation.
+   */
+  useEffect(() => {
+    if (!modifiable || !id || !qLignes.isSuccess) return
+    if (amorcee.current === id) return
+    amorcee.current = id
+    const chargees = lignesServeur.map(depuisLigneReception)
+    setInitiales(
+      new Map(chargees.map((l) => [l.idExistant as string, JSON.stringify(corpsReception(l))])),
+    )
+    setNouvelles(chargees)
+  }, [id, modifiable, qLignes.isSuccess, lignesServeur])
+
+  const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
+
+  const qMagasins = useQuery({
+    queryKey: ['magasins'],
+    queryFn: () =>
+      api.get<{ code_magasin: string; nom: string; est_quarantaine: number }[]>(
+        '/api/magasins',
+      ),
+  })
+
+  /*
+   * CE QUE LE BON DE COMMANDE ATTEND ENCORE, propose comme references.
+   *
+   * C'est l'equivalent du plan d'achat sur un bon : ce qui reste a livrer chez
+   * ce fournisseur. Le catalogue entier reste accessible — une livraison hors
+   * commande arrive, et la refuser ne la ferait pas disparaitre du quai.
+   */
+  const qAttendues = useQuery({
+    queryKey: ['lignes-attendues', id, rec?.code_fournisseur],
+    queryFn: () =>
+      api.get<LigneAttendue[]>(
+        `/api/lignes-attendues?id_reception=${id}&code_fournisseur=${encodeURIComponent(
+          rec?.code_fournisseur ?? "",
+        )}`,
+      ),
+    enabled: !!id && !!rec?.code_fournisseur,
+  })
+
+  const proposees = useMemo<RefLigne[]>(
+    () =>
+      (qAttendues.data ?? [])
+        .filter((a) => a.quantite_restante_kg > 0.001)
+        .map((a) => ({
+          code_reference: a.code_reference,
+          designation: a.designation,
+          unite_catalogue: a.unite_catalogue,
+          code_fournisseur: rec?.code_fournisseur ?? null,
+          poids_bobine_kg: a.poids_bobine_kg,
+          bobines_par_palette: a.bobines_par_palette,
+          bobines_par_lot: a.bobines_par_lot,
+          densite_kg_ml: a.densite_kg_ml,
+          // Le RESTE a livrer sert de proposition : c’est ce qu’on attend,
+          // et c’est presque toujours ce qui arrive.
+          qte_a_commander_kg: a.quantite_restante_kg,
+          prix_suggere_devise: a.prix_kg_devise,
+        })),
+    [qAttendues.data, rec?.code_fournisseur],
+  )
+
+  const chercherCatalogue = async (motif: string): Promise<RefLigne[]> => {
+    const q = new URLSearchParams({
+      code_fournisseur: rec?.code_fournisseur ?? '',
+      toutes: '1',
+      recherche: motif,
+      limite: '25',
+    })
+    return api.get<RefLigne[]>(`/api/references-commandables?${q}`)
+  }
+
+  /*
+   * LES COLONNES QUE LA RECEPTION AJOUTE A LA GRILLE.
+   *
+   * La grille ne sait pas ce qu'est un lot ni un magasin de destination : elle
+   * les range dans `extra` et les rend par ces descriptions. C’est ce qui lui
+   * permet de servir quatre documents sans porter les champs des trois autres.
+   */
+  const colonnesReception: ColonneGrille[] = [
+    {
+      cle: 'bl',
+      entete: 'Qté BL (kg)',
+      largeur: 'w-28',
+      alignement: 'right',
+      rendu: (l, poser) => (
+        <Champ
+          type="number"
+          step="any"
+          min="0"
+          value={l.extra?.bl ?? ''}
+          onChange={(e) => poser(e.target.value)}
+          className="h-9 text-right tabular-nums"
+          aria-label="Quantité annoncée au bon de livraison, en kilos"
+        />
+      ),
+    },
+    {
+      cle: 'colis',
+      entete: 'Colis',
+      largeur: 'w-20',
+      alignement: 'right',
+      rendu: (l, poser) => (
+        <Champ
+          type="number"
+          min="0"
+          value={l.extra?.colis ?? ''}
+          onChange={(e) => poser(e.target.value)}
+          className="h-9 text-right tabular-nums"
+          aria-label="Nombre de colis"
+        />
+      ),
+    },
+    {
+      cle: 'lot',
+      entete: 'Lot fournisseur',
+      largeur: 'w-32',
+      rendu: (l, poser) => (
+        <Champ
+          value={l.extra?.lot ?? ''}
+          onChange={(e) => poser(e.target.value)}
+          className="h-9"
+          aria-label="Lot du fournisseur"
+        />
+      ),
+    },
+    {
+      cle: 'magasin',
+      entete: 'Magasin',
+      largeur: 'w-36',
+      rendu: (l, poser) => (
+        <Selecteur
+          value={l.extra?.magasin ?? ''}
+          onChange={(e) => poser(e.target.value)}
+          className="h-9"
+          aria-label="Magasin de destination"
+        >
+          <option value="">—</option>
+          {(qMagasins.data ?? []).map((m) => (
+            <option key={m.code_magasin} value={m.code_magasin}>
+              {m.nom}
+            </option>
+          ))}
+        </Selecteur>
+      ),
+    },
+    {
+      cle: 'qualite',
+      entete: 'Qualité',
+      largeur: 'w-36',
+      rendu: (l, poser) => (
+        <Selecteur
+          value={l.extra?.qualite ?? 'CONFORME'}
+          onChange={(e) => poser(e.target.value)}
+          className="h-9"
+          aria-label="Statut qualité de la ligne"
+        >
+          <option value="CONFORME">Conforme</option>
+          <option value="QUARANTAINE">Quarantaine</option>
+          <option value="NON_CONFORME">Non conforme</option>
+        </Selecteur>
+      ),
+    },
+  ]
+  const marquer = (cle: string, actif: boolean) =>
+    setEnCours((s) => {
+      const n = new Set(s)
+      if (actif) n.add(cle)
+      else n.delete(cle)
+      return n
+    })
+
+  /**
+   * Enregistrer UNE pesee : la creer si elle est neuve, la corriger sinon.
+   *
+   * `idExistant` DECIDE DU VERBE. Le PATCH existe depuis peu ; avant lui,
+   * corriger un poids obligeait a supprimer la ligne et a la reposter — ce qui
+   * changeait son numero et inscrivait une SUPPRESSION au journal d'audit pour
+   * une virgule deplacee.
+   */
+  const enregistrerLigne = async (l: LigneSaisie) => {
+    if (!id || enCours.has(l.cle)) return
+    marquer(l.cle, true)
+    try {
+      const corps = corpsReception(l)
+      if (l.idExistant) {
+        await api.patch(`/api/receptions/${id}/lignes/${l.idExistant}`, corps)
+        setInitiales((m) => new Map(m).set(l.idExistant as string, JSON.stringify(corps)))
+      } else {
+        const r = await api.post<{ id_ligne_reception: string }>(
+          `/api/receptions/${id}/lignes`,
+          { ...corps, code_reference: l.code_reference, id_ligne_bc: l.extra?.id_ligne_bc },
+        )
+        setInitiales((m) => new Map(m).set(r.id_ligne_reception, JSON.stringify(corps)))
+        setNouvelles((ls) =>
+          ls.map((x) => (x.cle === l.cle ? { ...x, idExistant: r.id_ligne_reception } : x)),
+        )
+      }
+      toast.success(`Ligne ${l.code_reference} enregistrée`)
+      rafraichir()
+    } catch (e) {
+      echec(e)
+    } finally {
+      marquer(l.cle, false)
+    }
+  }
+
+  /**
+   * Retirer une pesee deja enregistree.
+   *
+   * La ligne ne quitte la grille QU'UNE FOIS le serveur d'accord : la retirer
+   * d'abord montrerait un ecran qui ment si la suppression est refusee.
+   */
+  const supprimerLigne = async (l: LigneSaisie) => {
+    if (!id || !l.idExistant || enCours.has(l.cle)) return
+    marquer(l.cle, true)
+    try {
+      await api.delete(`/api/receptions/${id}/lignes/${l.idExistant}`)
+      setInitiales((m) => {
+        const n = new Map(m)
+        n.delete(l.idExistant as string)
+        return n
+      })
+      setNouvelles((ls) => ls.filter((x) => x.cle !== l.cle))
+      toast.success(`Ligne ${l.code_reference} retirée`)
+      rafraichir()
+    } catch (e) {
+      echec(e)
+    } finally {
+      marquer(l.cle, false)
+    }
+  }
   const enteteModifie =
     !!rec &&
     (entete.num_bon_livraison !== (rec.num_bon_livraison ?? '') ||
@@ -210,51 +552,28 @@ export function Reception() {
       entete.poids_total_brut_kg !== (rec.poids_total_brut_kg?.toString() ?? ''))
 
   const lignes = qLignes.data ?? []
-  const modifiable =
-    !!droits.peutEcrire && (rec?.statut === 'BROUILLON' || rec?.statut === 'A_CONTROLER')
-  const aEnregistrer = pesees.length > 0 || supprimees.length > 0 || enteteModifie
-
+  /**
+   * L'EN-TETE S'ENREGISTRE SEUL. Les lignes ont chacune leur bouton.
+   *
+   * L'enregistrement groupe allait chercher dans deux registres paralleles ce
+   * qu'il devait creer et supprimer. Pire : faute de PATCH cote serveur, il
+   * SUPPRIMAIT puis RECREAIT chaque ligne corrigee — le numero de ligne
+   * changeait, et le journal d'audit enregistrait un retrait de marchandise
+   * pour une virgule deplacee.
+   */
   const enregistrer = useMutation({
-    mutationFn: async () => {
-      if (enteteModifie) {
-        await api.patch(`/api/receptions/${id}`, {
-          num_bon_livraison: entete.num_bon_livraison || undefined,
-          numero_facture: entete.numero_facture || undefined,
-          transporteur: entete.transporteur || undefined,
-          nombre_colis: entete.nombre_colis ? Number(entete.nombre_colis) : undefined,
-          poids_total_brut_kg: entete.poids_total_brut_kg
-            ? Number(entete.poids_total_brut_kg)
-            : undefined,
-        })
-      }
-      for (const ligne of supprimees) {
-        await api.delete(`/api/receptions/${id}/lignes/${ligne}`)
-      }
-      for (const p of pesees) {
-        await api.post(`/api/receptions/${id}/lignes`, {
-          code_reference: p.code_reference,
-          id_ligne_bc: p.id_ligne_bc ?? undefined,
-          unite_saisie: p.unite_saisie,
-          quantite_pesee_unite: p.quantite,
-          quantite_bl_kg: p.quantite_bl ?? undefined,
-          nb_colis_ligne: p.colis ?? undefined,
-          code_magasin_dest: p.magasin,
-          lot_fournisseur: p.lot || undefined,
-          statut_qualite: p.statut_qualite,
-        })
-      }
-      return { pesees: pesees.length, retirees: supprimees.length }
-    },
-    onSuccess: (r) => {
-      const parts = [
-        r.pesees > 0 ? `${r.pesees} pesee(s)` : null,
-        r.retirees > 0 ? `${r.retirees} retiree(s)` : null,
-      ].filter(Boolean)
-      toast.success('Reception enregistree', {
-        description: parts.length ? `Lignes : ${parts.join(' · ')}.` : undefined,
-      })
-      setPesees([])
-      setSupprimees([])
+    mutationFn: () =>
+      api.patch(`/api/receptions/${id}`, {
+        num_bon_livraison: entete.num_bon_livraison || undefined,
+        numero_facture: entete.numero_facture || undefined,
+        transporteur: entete.transporteur || undefined,
+        nombre_colis: entete.nombre_colis ? Number(entete.nombre_colis) : undefined,
+        poids_total_brut_kg: entete.poids_total_brut_kg
+          ? Number(entete.poids_total_brut_kg)
+          : undefined,
+      }),
+    onSuccess: () => {
+      toast.success('En-tete enregistre')
       rafraichir()
     },
     onError: echec,
@@ -280,36 +599,18 @@ export function Reception() {
     onError: echec,
   })
 
-  const basculerSuppression = (ligne: string) =>
-    setSupprimees((l) => (l.includes(ligne) ? l.filter((x) => x !== ligne) : [...l, ligne]))
-
-  const estNouvelle = (l: LigneRec) => l.id_ligne_reception.startsWith('pesee:')
-
-  const lignesAffichees: LigneRec[] = [
-    ...lignes,
-    ...pesees.map((p, i) => ({
-      id_ligne_reception: p.cle,
-      ligne_numero: lignes.length + i + 1,
-      code_reference: p.code_reference,
-      reference_designation: p.designation,
-      unite_saisie: p.unite_saisie,
-      quantite_pesee_unite: p.quantite,
-      quantite_stock_kg: p.quantite,
-      quantite_commandee_kg: p.attendu_kg,
-      quantite_bl_kg: p.quantite_bl,
-      ecart_pct:
-        p.attendu_kg && p.attendu_kg > 0
-          ? Math.round(((p.quantite - p.attendu_kg) / p.attendu_kg) * 1000) / 10
-          : null,
-      ecart_bl_kg: p.quantite_bl == null ? null : Math.round((p.quantite - p.quantite_bl) * 1e4) / 1e4,
-      ecart_cmd_kg: p.attendu_kg == null ? null : Math.round((p.quantite - p.attendu_kg) * 1e4) / 1e4,
-      nb_colis_ligne: p.colis,
-      poids_moyen_colis_kg: p.colis && p.colis > 0 ? Math.round((p.quantite / p.colis) * 1e3) / 1e3 : null,
-      lot_fournisseur: p.lot || null,
-      statut_qualite: p.statut_qualite,
-      code_magasin_dest: p.magasin,
-    })),
-  ]
+  /*
+   * PLUS DE FUSION ENTRE LE SERVEUR ET UN BROUILLON LOCAL.
+   *
+   * L'ecran melangeait les lignes du serveur et les pesees pas encore
+   * envoyees, en fabriquant pour celles-ci de faux identifiants « pesee: » et
+   * de faux ecarts calcules a la main. Deux verites coexistaient, et les
+   * ecarts affiches n'etaient pas ceux que le serveur calculerait.
+   *
+   * Desormais la grille tient les lignes modifiables et le tableau n'affiche
+   * que ce que le serveur a vraiment enregistre.
+   */
+  const lignesAffichees: LigneRec[] = lignes
 
   const horsTolerance = useMemo(
     () => lignesAffichees.filter((l) => Math.abs(l.ecart_pct ?? 0) > TOLERANCE_PCT).length,
@@ -466,37 +767,11 @@ export function Reception() {
           fmt.nombre(l.prix_kg_mad, 4)
         ),
     },
-    {
-      champ: 'ligne_numero',
-      entete: 'État',
-      largeur: '150px',
-      rendu: (l) =>
-        estNouvelle(l) ? (
-          <div className="flex items-center gap-1.5">
-            <Badge ton="succes">nouvelle</Badge>
-            <button
-              type="button"
-              className="text-[11px] underline text-attenue-texte hover:text-texte"
-              onClick={() => setPesees((p) => p.filter((x) => x.cle !== l.id_ligne_reception))}
-            >
-              retirer
-            </button>
-          </div>
-        ) : supprimees.includes(l.id_ligne_reception) ? (
-          <div className="flex items-center gap-1.5">
-            <Badge ton="danger">a retirer</Badge>
-            <button
-              type="button"
-              className="text-[11px] underline text-attenue-texte hover:text-texte"
-              onClick={() => basculerSuppression(l.id_ligne_reception)}
-            >
-              garder
-            </button>
-          </div>
-        ) : (
-          <span className="text-attenue-texte">enregistree</span>
-        ),
-    },
+    /* LA COLONNE « ETAT » A DISPARU. Elle distinguait « nouvelle », « a
+       retirer » et « enregistree » — trois etats qui n'existaient que le temps
+       d'un brouillon local. Maintenant qu'une ligne part au serveur au moment
+       ou on la valide, ce tableau ne montre que des lignes enregistrees : la
+       colonne n'aurait plus qu'un seul mot a dire. */
   ]
 
   if (qRec.isLoading) return <Chargement />
@@ -527,21 +802,17 @@ export function Reception() {
               <ArrowLeft />
               Retour
             </Bouton>
-            {modifiable && (
-              <Bouton variante="contour" onClick={() => setSaisie(true)}>
-                <Plus />
-                Peser des lignes
-              </Bouton>
-            )}
+            {/* Le bouton « Peser des lignes » est parti avec son panneau : on
+                ajoute une ligne dans la grille, comme sur un bon de commande. */}
             {droits.peutEcrire && rec.statut === 'BROUILLON' && (
               <Bouton
                 variante="contour"
                 onClick={() => changerStatut.mutate('A_CONTROLER')}
-                disabled={lignes.length === 0 || aEnregistrer}
+                disabled={lignes.length === 0 || enteteModifie}
                 title={
                   lignes.length === 0
                     ? 'Aucune ligne pesee'
-                    : aEnregistrer
+                    : enteteModifie
                       ? 'Enregistrez d’abord les modifications en cours'
                       : undefined
                 }
@@ -700,49 +971,58 @@ export function Reception() {
         <Carte repliable="reception.2">
           <CarteEntete>
             <CarteTitre>Pesees</CarteTitre>
-            {modifiable && (
-              <Bouton variante="contour" taille="sm" onClick={() => setSaisie(true)}>
-                <Plus />
-                Peser
-              </Bouton>
-            )}
           </CarteEntete>
           <CarteCorps className="p-0">
-            <DataTable<LigneRec>
-          exportable="lignes-de-reception"
-          imprimable="Lignes de reception"
-              module={MODULE}
-              colonnes={colonnes}
-              lignes={lignesAffichees}
-              chargement={qLignes.isLoading}
-              cle={(l) => l.id_ligne_reception}
-              recherche={false}
-              pagination={false}
-              tailleParDefaut={500}
-              titreCarte={(l) => l.code_reference}
-              videTitre="Aucune pesee"
-              videDescription="Ajoutez les lignes attendues du bon de commande, puis enregistrez."
-              actions={
-                modifiable
-                  ? (l) => (
-                      <Bouton
-                        variante="discret"
-                        taille="icone-xs"
-                        className="text-danger hover:bg-danger/10"
-                        onClick={() =>
-                          estNouvelle(l)
-                            ? setPesees((p) => p.filter((x) => x.cle !== l.id_ligne_reception))
-                            : basculerSuppression(l.id_ligne_reception)
-                        }
-                        aria-label="Retirer"
-                        title="Marquer la ligne a retirer — effectif a l'enregistrement"
-                      >
-                        <Trash2 />
-                      </Bouton>
-                    )
-                  : undefined
-              }
-            />
+            {modifiable ? (
+              /* LA MEME GRILLE QUE LE BON DE COMMANDE. Les colonnes propres a
+                 la reception — BL, colis, lot, magasin, qualite — lui sont
+                 decrites ; elle les place et les rend, sans avoir a les
+                 comprendre. Le prix et les champs fournisseur sont masques :
+                 une reception ne negocie rien, son prix vient du bon. */
+              <GrilleLignes
+                codeFournisseur={rec.code_fournisseur ?? ''}
+                devise={rec.code_devise ?? 'MAD'}
+                lignes={nouvelles}
+                setLignes={setNouvelles}
+                mode={mode}
+                setMode={setMode}
+                proposees={proposees}
+                chercherCatalogue={chercherCatalogue}
+                sansPrix
+                sansFournisseur
+                colonnesSupplementaires={colonnesReception}
+                surEnregistrerLigne={enregistrerLigne}
+                surSupprimerLigne={supprimerLigne}
+                enCours={enCours}
+                modifiees={
+                  new Set(
+                    nouvelles
+                      .filter(
+                        (n) =>
+                          n.idExistant &&
+                          JSON.stringify(corpsReception(n)) !== initiales.get(n.idExistant),
+                      )
+                      .map((n) => n.cle),
+                  )
+                }
+              />
+            ) : (
+              <DataTable<LigneRec>
+                exportable="lignes-de-reception"
+                imprimable="Lignes de reception"
+                module={MODULE}
+                colonnes={colonnes}
+                lignes={lignesAffichees}
+                chargement={qLignes.isLoading}
+                cle={(l) => l.id_ligne_reception}
+                recherche={false}
+                pagination={false}
+                tailleParDefaut={500}
+                titreCarte={(l) => l.code_reference}
+                videTitre="Aucune pesee"
+                videDescription="Cette reception ne porte aucune ligne."
+              />
+            )}
           </CarteCorps>
         </Carte>
       </div>
@@ -751,36 +1031,27 @@ export function Reception() {
         <div
           className={cn(
             'sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
-            aEnregistrer ? 'border-primaire' : 'border-bordure',
+            enteteModifie ? 'border-primaire' : 'border-bordure',
           )}
         >
           <span className="text-[13px]">
-            {aEnregistrer ? (
+            {enteteModifie ? (
               <>
-                <span className="font-medium">
-                  {[
-                    pesees.length > 0 ? `${pesees.length} pesee(s)` : null,
-                    supprimees.length > 0 ? `${supprimees.length} a retirer` : null,
-                    enteteModifie ? 'en-tete modifie' : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-                <span className="text-alerte"> — rien n'est encore enregistré.</span>
+                <span className="font-medium">En-tête modifié</span>
+                <span className="text-alerte"> — pas encore enregistré.</span>
               </>
             ) : (
               <span className="text-attenue-texte">
-                Pesez des lignes ou modifiez l'en-tete, puis enregistrez.
+                Chaque pesée s’enregistre sur sa ligne. Cette barre ne concerne que
+                l’en-tête.
               </span>
             )}
           </span>
           <div className="flex items-center gap-2">
             <Bouton
               variante="contour"
-              disabled={!aEnregistrer}
+              disabled={!enteteModifie}
               onClick={() => {
-                setPesees([])
-                setSupprimees([])
                 if (rec) {
                   setEntete({
                     num_bon_livraison: rec.num_bon_livraison ?? '',
@@ -793,363 +1064,28 @@ export function Reception() {
               }}
             >
               <Undo2 />
-              Annuler les modifications
+              Annuler les modifications de l’en-tête
             </Bouton>
             <Bouton
               onClick={() => enregistrer.mutate()}
               chargement={enregistrer.isPending}
-              disabled={!aEnregistrer}
+              disabled={!enteteModifie}
             >
               <Save />
-              Enregistrer les modifications
+              Enregistrer l’en-tête
             </Bouton>
           </div>
         </div>
       )}
 
-      {saisie && (
-        <PanneauPesee
-          idReception={id}
-          codeFournisseur={rec.code_fournisseur}
-          dejaPesees={[...lignes.map((l) => l.code_reference), ...pesees.map((p) => p.code_reference)]}
-          surFermeture={() => setSaisie(false)}
-          surAjout={(ajouts) =>
-            setPesees((p) => [
-              ...p,
-              ...ajouts.map((a, i) => ({ ...a, cle: `pesee:${Date.now()}:${i}` })),
-            ])
-          }
-        />
-      )}
+      {/* LE PANNEAU « PESER » A DISPARU. Il ouvrait une fenetre pour choisir
+          des lignes attendues, alors que la grille propose exactement les
+          memes par son champ de recherche — deux chemins pour un seul geste,
+          et deux endroits ou corriger le jour ou la regle change. */}
     </div>
   )
 }
 
-/**
- * Saisie des pesees, a partir de ce qui est ATTENDU.
- *
- * Chaque ligne du bon encore due est proposee avec son reste a livrer, prerempli
- * comme quantite. Le magasinier corrige avec ce que la bascule affiche.
- */
-function PanneauPesee({
-  idReception,
-  codeFournisseur,
-  dejaPesees,
-  surFermeture,
-  surAjout,
-}: {
-  idReception: string
-  codeFournisseur: string
-  dejaPesees: string[]
-  surFermeture: () => void
-  surAjout: (ajouts: Omit<Pesee, 'cle'>[]) => void
-}) {
-  const [choix, setChoix] = useState<
-    Record<
-      string,
-      {
-        qte: string
-        qteBl: string
-        colis: string
-        unite: string
-        lot: string
-        magasin: string
-        qualite: string
-      }
-    >
-  >({})
-  const [erreur, setErreur] = useState<string | null>(null)
-
-  // On interroge par FOURNISSEUR, pas par bon : un camion porte parfois deux
-  // bons, et n'offrir que celui de l'en-tete obligerait a ouvrir une seconde
-  // reception pour un seul dechargement.
-  const q = useQuery({
-    queryKey: ['lignes-attendues', idReception, codeFournisseur],
-    queryFn: () =>
-      api.get<LigneAttendue[]>(
-        `/api/lignes-attendues?id_reception=${idReception}&code_fournisseur=${encodeURIComponent(codeFournisseur)}`,
-      ),
-  })
-
-  const qMag = useQuery({
-    queryKey: ['magasins'],
-    queryFn: () =>
-      api.get<{ code_magasin: string; nom: string; est_quarantaine: number }[]>('/api/magasins'),
-  })
-
-  const attendues = (q.data ?? []).filter((l) => l.quantite_restante_kg > 0.001)
-
-  const basculer = (l: LigneAttendue) =>
-    setChoix((c) => {
-      if (c[l.id_ligne_bc]) {
-        const { [l.id_ligne_bc]: _, ...reste } = c
-        return reste
-      }
-      return {
-        ...c,
-        [l.id_ligne_bc]: {
-          // Le reste a livrer sert de proposition : c'est ce qu'on attend, et
-          // c'est presque toujours ce qui arrive.
-          qte: String(Math.max(0, l.quantite_restante_kg - l.deja_pesee_kg)),
-          qteBl: String(Math.max(0, l.quantite_restante_kg - l.deja_pesee_kg)),
-          colis: '',
-          unite: 'kg',
-          lot: '',
-          magasin: 'MP-01',
-          qualite: 'CONFORME',
-        },
-      }
-    })
-
-  const valider = () => {
-    const ajouts = attendues
-      .filter((l) => choix[l.id_ligne_bc])
-      .map((l) => {
-        const v = choix[l.id_ligne_bc]
-        return {
-          id_ligne_bc: l.id_ligne_bc,
-          code_reference: l.code_reference,
-          designation: l.designation,
-          unite_saisie: v.unite,
-          quantite: Number(v.qte),
-          quantite_bl: v.qteBl ? Number(v.qteBl) : null,
-          attendu_kg: l.quantite_restante_kg,
-          colis: v.colis ? Number(v.colis) : null,
-          lot: v.lot,
-          magasin: v.magasin,
-          statut_qualite: v.qualite,
-        }
-      })
-    if (ajouts.some((a) => !(a.quantite > 0))) {
-      setErreur('Renseignez une quantite pour chaque ligne pesee.')
-      return
-    }
-    const sansLot = attendues.filter(
-      (l) => choix[l.id_ligne_bc] && l.suivi_lot === 1 && !choix[l.id_ligne_bc].lot.trim(),
-    )
-    if (sansLot.length > 0) {
-      setErreur(
-        `Lot obligatoire pour ${sansLot.map((l) => l.code_reference).join(', ')} : ces references sont suivies par lot.`,
-      )
-      return
-    }
-    surAjout(ajouts)
-    setChoix({})
-    surFermeture()
-  }
-
-  const nb = Object.keys(choix).length
-
-  return (
-    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
-      <DialogueContenu
-        cote="droite"
-        titre="Peser les lignes attendues"
-        description="Le reste a livrer est propose : corrigez avec ce que la bascule affiche."
-      >
-        {q.isLoading && <Chargement texte="Lecture du bon de commande…" />}
-
-        {!q.isLoading && attendues.length === 0 && (
-          <Alerte ton="info">
-            Rien n'est en attente chez ce fournisseur : tout a ete livre, ou aucun bon n'a encore
-            ete envoye.
-          </Alerte>
-        )}
-
-        <div className="space-y-1.5">
-          {attendues.map((l) => {
-            const coche = !!choix[l.id_ligne_bc]
-            const deja = dejaPesees.includes(l.code_reference)
-            return (
-              <div
-                key={l.id_ligne_bc}
-                className={cn(
-                  'rounded-[var(--radius)] border p-2',
-                  coche ? 'border-primaire bg-primaire/5' : 'border-bordure',
-                )}
-              >
-                <label className="flex cursor-pointer items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={coche}
-                    onChange={() => basculer(l)}
-                    className="mt-0.5 size-4 shrink-0"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-medium">{l.code_reference}</span>
-                      <span className="text-[11px] tabular-nums text-attenue-texte">
-                        {l.numero_bc}
-                      </span>
-                      {(l.retard_jours ?? 0) > 0 && (
-                        <Badge ton="danger">{l.retard_jours} j de retard</Badge>
-                      )}
-                      {l.suivi_lot === 1 && <Badge ton="info">lot obligatoire</Badge>}
-                      {deja && (
-                        <span className="text-[11px] text-attenue-texte">déjà pesee ici</span>
-                      )}
-                    </span>
-                    <span className="mt-0.5 block truncate text-[12px] text-attenue-texte">
-                      {l.designation}
-                    </span>
-                    <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-attenue-texte">
-                      <span>
-                        Commande{' '}
-                        <span className="tabular-nums text-texte">
-                          {fmt.nombre(l.quantite_commandee_kg, 0)} kg
-                        </span>
-                      </span>
-                      <span>
-                        Deja recu{' '}
-                        <span className="tabular-nums text-texte">
-                          {fmt.nombre(l.quantite_recue_kg, 0)} kg
-                        </span>
-                      </span>
-                      <span>
-                        Reste{' '}
-                        <span className="tabular-nums font-medium text-texte">
-                          {fmt.nombre(l.quantite_restante_kg, 0)} kg
-                        </span>
-                      </span>
-                      {l.prix_kg_devise != null && (
-                        <span>
-                          Prix engage{' '}
-                          <span className="tabular-nums text-texte">
-                            {fmt.nombre(l.prix_kg_devise, 4)} {l.code_devise}
-                          </span>
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                </label>
-
-                {coche && (
-                  <div className="mt-2 grid gap-2 pl-6 sm:grid-cols-3 lg:grid-cols-6">
-                    <div>
-                      <Etiq>Qte BL (kg)</Etiq>
-                      <Champ
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={choix[l.id_ligne_bc].qteBl}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [l.id_ligne_bc]: { ...c[l.id_ligne_bc], qteBl: e.target.value },
-                          }))
-                        }
-                        className="text-right tabular-nums"
-                      />
-                    </div>
-                    <div>
-                      <Etiq obligatoire>Qte pesee</Etiq>
-                      <Champ
-                        type="number"
-                        step="any"
-                        min="0.0001"
-                        value={choix[l.id_ligne_bc].qte}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [l.id_ligne_bc]: { ...c[l.id_ligne_bc], qte: e.target.value },
-                          }))
-                        }
-                        className="text-right tabular-nums"
-                      />
-                    </div>
-                    <div>
-                      <Etiq>Unité</Etiq>
-                      <Selecteur
-                        value={choix[l.id_ligne_bc].unite}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [l.id_ligne_bc]: { ...c[l.id_ligne_bc], unite: e.target.value },
-                          }))
-                        }
-                      >
-                        <option value="kg">kg</option>
-                        {l.unite_catalogue !== 'kg' && (
-                          <option value={l.unite_catalogue}>{l.unite_catalogue}</option>
-                        )}
-                      </Selecteur>
-                    </div>
-                    <div>
-                      <Etiq>Nb colis</Etiq>
-                      <Champ
-                        type="number"
-                        min="1"
-                        value={choix[l.id_ligne_bc].colis}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [l.id_ligne_bc]: { ...c[l.id_ligne_bc], colis: e.target.value },
-                          }))
-                        }
-                        className="text-right tabular-nums"
-                      />
-                    </div>
-                    <div>
-                      <Etiq obligatoire={l.suivi_lot === 1}>Lot fournisseur</Etiq>
-                      <Champ
-                        value={choix[l.id_ligne_bc].lot}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [l.id_ligne_bc]: { ...c[l.id_ligne_bc], lot: e.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <Etiq>Destination</Etiq>
-                      <Selecteur
-                        value={choix[l.id_ligne_bc].magasin}
-                        onChange={(e) =>
-                          setChoix((c) => ({
-                            ...c,
-                            [l.id_ligne_bc]: { ...c[l.id_ligne_bc], magasin: e.target.value },
-                          }))
-                        }
-                      >
-                        {(qMag.data ?? []).map((m) => (
-                          <option key={m.code_magasin} value={m.code_magasin}>
-                            {m.nom}
-                          </option>
-                        ))}
-                      </Selecteur>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        {erreur && (
-          <Alerte ton="danger" className="mt-3">
-            {erreur}
-          </Alerte>
-        )}
-
-        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
-          <span className="text-[11px] text-attenue-texte">
-            {nb} ligne(s) — ajoutees au brouillon, enregistrees avec la reception
-          </span>
-          <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={surFermeture}>
-              Annuler
-            </Bouton>
-            <Bouton onClick={valider} disabled={!nb}>
-              <Plus />
-              Ajouter {nb || ''}
-            </Bouton>
-          </div>
-        </div>
-      </DialogueContenu>
-    </Dialogue>
-  )
-}
 
 /** Un chiffre de l'OTIF, avec son libelle. */
 function Indicateur({

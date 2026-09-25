@@ -259,8 +259,11 @@ export function BonCommandeNouveau() {
   /** Ce que la ligne coute : au kilo pour la marchandise, au forfait sinon. */
   /* --- L'enregistrement --------------------------------------------------- */
 
-  const pretes = lignes.filter(estPrete)
-  const ebauches = lignes.filter(estEbauche)
+  // `(l) => estPrete(l)` ET NON `estPrete` : `filter` passe l’index en second
+  // argument, qui deviendrait `sansPrix`. Des la deuxieme ligne, le controle du
+  // prix aurait saute sans rien dire.
+  const pretes = lignes.filter((l) => estPrete(l))
+  const ebauches = lignes.filter((l) => estEbauche(l))
   // Une unite que la reference ne sait pas convertir sera REFUSEE par le serveur
   // (R01, jamais de repli sur un facteur de 1). Autant le dire tout de suite.
   const sansFacteur = pretes.filter((l) => l.nature === 'MARCHANDISE' && kgDe(l) === null)

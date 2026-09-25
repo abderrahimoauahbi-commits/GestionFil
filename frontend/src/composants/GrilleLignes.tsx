@@ -332,15 +332,24 @@ export const totalDe = (l: LigneSaisie) =>
     ? (kgDe(l) ?? 0) * Number(l.prix || 0)
     : Number(l.qte || 0) * Number(l.prix || 0)
 
-/** Une ligne part au serveur quand elle porte de quoi etre comprise. */
-export const estPrete = (l: LigneSaisie) =>
+/**
+ * Une ligne part au serveur quand elle porte de quoi etre comprise.
+ *
+ * `sansPrix` POUR LES DOCUMENTS QUI N'EN SAISISSENT PAS. Une reception ne
+ * negocie rien : son prix vient du bon de commande, et le serveur l'y prend
+ * lui-meme. Exiger un prix rendrait toute ligne de reception incomplete, donc
+ * son bouton d'enregistrement eteint pour toujours — un ecran qui refuse en
+ * silence est pire qu'un ecran qui manque.
+ */
+export const estPrete = (l: LigneSaisie, sansPrix = false) =>
   Number(l.qte) > 0 &&
-  Number(l.prix) > 0 &&
+  (sansPrix || Number(l.prix) > 0) &&
   (l.nature === 'MARCHANDISE' ? !!l.code_reference : !!l.intitule.trim())
 
 /** Une ligne commencee mais incomplete : elle bloque l'enregistrement. */
-export const estEbauche = (l: LigneSaisie) =>
-  !estPrete(l) && (!!l.code_reference || !!l.intitule.trim() || Number(l.prix) > 0)
+export const estEbauche = (l: LigneSaisie, sansPrix = false) =>
+  !estPrete(l, sansPrix) &&
+  (!!l.code_reference || !!l.intitule.trim() || Number(l.prix) > 0)
 
 /**
  * Le corps que le serveur attend, pour UNE ligne.
@@ -881,7 +890,7 @@ export function GrilleLignes({
                           onChange={(e) => maj(l.cle, { prix: e.target.value })}
                           className={cn(
                             'h-9 text-right text-[14px] tabular-nums',
-                            !(Number(l.prix) > 0) && estEbauche(l) && 'border-danger',
+                            !(Number(l.prix) > 0) && estEbauche(l, sansPrix) && 'border-danger',
                           )}
                           aria-label={marchandise ? `Prix ${devise} par kg` : `Prix ${devise}`}
                         />
@@ -964,12 +973,12 @@ export function GrilleLignes({
                           // deja en base, seulement si elle a change.
                           disabled={
                             enCours?.has(l.cle) ||
-                            !estPrete(l) ||
+                            !estPrete(l, sansPrix) ||
                             (!!l.idExistant && !modifiees?.has(l.cle))
                           }
                           aria-label={l.idExistant ? 'Enregistrer la modification' : 'Enregistrer la ligne'}
                           title={
-                            !estPrete(l)
+                            !estPrete(l, sansPrix)
                               ? 'Complétez la référence, la quantité et le prix'
                               : l.idExistant && !modifiees?.has(l.cle)
                                 ? 'Rien n’a changé sur cette ligne'

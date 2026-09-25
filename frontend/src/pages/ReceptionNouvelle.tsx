@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCheck, Link2, Plus, Save, Trash2, Unlink2, X } from 'lucide-react'
+import { ArrowLeft, CheckCheck, Plus, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -126,14 +126,6 @@ interface Ligne {
    */
   palettes: string
   bobines: string
-  /**
-   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
-   *
-   * Detache, chaque champ se saisit seul : une palette entamee reste une
-   * palette a manutentionner, et un poids pese ne se deduit pas d'un compte.
-   * C'est l'operateur qui le sait, pas la formule.
-   */
-  lie: boolean
   lot: string
   fabrication: string
   peremption: string
@@ -302,7 +294,6 @@ export function ReceptionNouvelle() {
         // combien de places il doit trouver dans l'allee.
         palettes: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).palettes),
         bobines: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).bobines),
-        lie: true,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -352,7 +343,6 @@ export function ReceptionNouvelle() {
         colis: '',
         palettes: pourChamp(depuisKg(qte, ref).palettes),
         bobines: pourChamp(depuisKg(qte, ref).bobines),
-        lie: true,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -384,11 +374,6 @@ export function ReceptionNouvelle() {
       ls.map((l) => {
         if (l.cle !== cle) return l
         const c0 = condDe(l)
-        if (!l.lie) {
-          const champ =
-            source === 'quantite' ? 'qte' : source === 'palettes' ? 'palettes' : 'bobines'
-          return { ...l, [champ]: valeur }
-        }
         const c =
           source === 'palettes'
             ? depuisPalettes(valeur, c0)
@@ -430,7 +415,7 @@ export function ReceptionNouvelle() {
         const c0 = condDe(l)
         const kg = depuisUnite(l.qte, l.unite, c0).kg
         const f = facteurVersKg(unite, c0)
-        if (!l.lie || kg === null || !f) return { ...l, unite }
+        if (kg === null || !f) return { ...l, unite }
         return { ...l, unite, qte: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
       }),
     )
@@ -932,31 +917,9 @@ export function ReceptionNouvelle() {
                                     placeholder="bob."
                                     aria-label="Nombre de bobines"
                                   />
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      maj(l.cle, 'lie', !l.lie)
-                                    }}
-                                    title={
-                                      l.lie
-                                        ? 'Les trois se repondent — cliquez pour saisir chacun separement'
-                                        : 'Calcul detache — cliquez pour relier les trois'
-                                    }
-                                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                    className={cn(
-                                      'rounded-[var(--radius)] p-1',
-                                      l.lie
-                                        ? 'text-primaire hover:bg-primaire/10'
-                                        : 'text-alerte hover:bg-alerte/10',
-                                    )}
-                                  >
-                                    {l.lie ? (
-                                      <Link2 className="size-3.5" />
-                                    ) : (
-                                      <Unlink2 className="size-3.5" />
-                                    )}
-                                  </button>
+                                  {/* PLUS D'INTERRUPTEUR : les trois se
+                                      repondent toujours, et le champ qu'on
+                                      vient de taper n'est jamais reecrit. */}
                                 </div>
                               </td>
                               <td
@@ -1277,24 +1240,11 @@ function PanneauDetail({
                     className="text-right tabular-nums"
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => maj(ligne.cle, 'lie', !ligne.lie)}
-                  aria-label={ligne.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                  className={cn(
-                    'mb-1 flex items-center gap-1.5 rounded-[var(--radius)] border px-2.5 py-1.5 text-[12px]',
-                    ligne.lie
-                      ? 'border-primaire/40 text-primaire hover:bg-primaire/10'
-                      : 'border-alerte/50 text-alerte hover:bg-alerte/10',
-                  )}
-                >
-                  {ligne.lie ? <Link2 className="size-4" /> : <Unlink2 className="size-4" />}
-                  {ligne.lie ? 'Calcul lié' : 'Calcul détaché'}
-                </button>
                 <p className="mb-1.5 flex-1 text-[11px] leading-snug text-attenue-texte">
                   Palettes, bobines et pesée disent la même quantité : saisissez celle que vous avez
-                  sous les yeux, les deux autres suivent les paramètres de la référence. Détachez le
-                  calcul pour une palette entamée ou un comptage qui ne suit pas la théorie.
+                  sous les yeux, les deux autres suivent les paramètres de la référence. Le champ
+                  que vous venez de saisir n’est jamais réécrit — une palette entamée comptée à 21
+                  reste à 21.
                 </p>
               </div>
             </div>

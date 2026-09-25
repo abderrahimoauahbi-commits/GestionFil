@@ -20,7 +20,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Link2, Unlink2 } from 'lucide-react'
 import { api, ErreurApi } from '../api/client'
 import { EnTetePage } from '../components/Layout'
 import { ChampReference, type RefTrouvee } from '../composants/ChampReference'
@@ -64,15 +63,6 @@ interface Saisie {
   nb_bobines: string
   lot_fournisseur: string
   code_motif_ligne: string
-  /**
-   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
-   *
-   * Lie, saisir un des trois colis remplit les deux autres. Detache, chacun se
-   * saisit seul — c'est le cas d'une palette incomplete, d'un reliquat, d'un
-   * comptage qui ne suit pas la theorie. La formule ne sait pas cela ;
-   * l'operateur, si.
-   */
-  lie: boolean
 }
 
 const LIGNE_VIDE: Saisie = {
@@ -84,7 +74,7 @@ const LIGNE_VIDE: Saisie = {
   nb_bobines: '',
   lot_fournisseur: '',
   code_motif_ligne: '',
-  lie: true,
+
 }
 
 /** La date du jour, au format d'un `<input type="date">` et en heure locale. */
@@ -245,8 +235,10 @@ export function MouvementNouveau() {
       ls.map((l, k) => {
         if (k !== i) return l
         const r = parReference.get(l.code_reference)
-        // Lien detache : chaque champ se saisit seul, rien ne se recalcule.
-        if (!r || !l.lie) {
+        // SANS REFERENCE, RIEN A CONVERTIR : on ne connait ni le poids d'une
+        // bobine ni le nombre par palette. Le champ se saisit alors seul, non
+        // par choix mais faute de savoir.
+        if (!r) {
           const champ = source === 'quantite' ? 'quantite_saisie'
             : source === 'palettes' ? 'nb_palettes' : 'nb_bobines'
           return { ...l, [champ]: valeur }
@@ -557,29 +549,12 @@ export function MouvementNouveau() {
                   {/* LES COLIS COMPTES. Une palette incomplete reste une
                       palette a manutentionner : le compte reel ne se deduit pas
                       du poids, il se compte sur le quai. */}
-                  {/* L'INTERRUPTEUR DU CALCUL, au plus pres des colis qu'il
-                      relie. Lie, les trois se repondent ; detache, chacun se
-                      saisit seul — une palette incomplete, un reliquat. */}
-                  <div className="flex shrink-0 items-center">
-                    <button
-                      type="button"
-                      onClick={() => majLigne(i, 'lie', !l.lie as unknown as string)}
-                      title={
-                        l.lie
-                          ? 'Calcul lié : saisir un colis remplit les autres. Cliquez pour détacher.'
-                          : 'Calcul détaché : chaque colis se saisit seul. Cliquez pour relier.'
-                      }
-                      aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                      className={
-                        'grid size-8 place-items-center rounded-lg border ' +
-                        (l.lie
-                          ? 'border-anneau text-anneau'
-                          : 'border-bordure text-attenue-texte')
-                      }
-                    >
-                      {l.lie ? <Link2 className="size-4" /> : <Unlink2 className="size-4" />}
-                    </button>
-                  </div>
+                  {/* L'INTERRUPTEUR DU CALCUL A DISPARU. Il demandait de
+                      decider, AVANT de taper, dans quel champ on avait le droit
+                      d'ecrire — une question que le metier ne pose pas. Les
+                      trois colis se repondent maintenant toujours, et celui
+                      qu'on vient de taper n'est jamais reecrit : une palette
+                      incomplete saisie a 21 y reste. */}
 
                   <div className="w-20 shrink-0">
                     <input

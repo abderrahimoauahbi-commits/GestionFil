@@ -25,12 +25,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
-  Link2,
   Plus,
   Save,
   Search,
   Trash2,
-  Unlink2,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -97,15 +95,6 @@ interface Ligne {
   unite: string
   bobines: string
   palettes: string
-  /**
-   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
-   *
-   * Lie, saisir un des trois — quantite, bobines, palettes — remplit les deux
-   * autres par les parametres de la reference. Detache, chacun se saisit seul :
-   * deux palettes completes et quatre bobines isolees ne forment pas une
-   * fraction de palette, et c'est le cariste qui le sait.
-   */
-  lie: boolean
   lot: string
 }
 
@@ -194,9 +183,6 @@ export function TransfertNouveau() {
         unite: l.unite_saisie ?? 'kg',
         bobines: l.nb_bobines != null ? String(l.nb_bobines) : '',
         palettes: l.nb_palettes != null ? String(l.nb_palettes) : '',
-        // Un brouillon repris garde le calcul DETACHE : ses comptes ont ete
-        // poses par quelqu'un, et les relier les recalculerait en silence.
-        lie: l.nb_bobines == null && l.nb_palettes == null,
         lot: l.lot_fournisseur ?? '',
       })),
     )
@@ -266,7 +252,6 @@ export function TransfertNouveau() {
         // combien de places il doit trouver dans le camion.
         bobines: pourChamp(depuisKg(qte, condDe(ref.code_reference)).bobines),
         palettes: pourChamp(depuisKg(qte, condDe(ref.code_reference)).palettes),
-        lie: true,
         lot: ref.lot_fournisseur ?? '',
       })),
     ])
@@ -286,11 +271,6 @@ export function TransfertNouveau() {
       ls.map((l) => {
         if (l.cle !== cle) return l
         const c = condDe(l.code_reference)
-        if (!l.lie) {
-          const champ =
-            source === 'quantite' ? 'quantite' : source === 'palettes' ? 'palettes' : 'bobines'
-          return { ...l, [champ]: valeur }
-        }
         const r =
           source === 'palettes'
             ? depuisPalettes(valeur, c)
@@ -325,7 +305,7 @@ export function TransfertNouveau() {
         const c = condDe(l.code_reference)
         const kg = depuisUnite(l.quantite, l.unite, c).kg
         const f = facteurVersKg(unite, c)
-        if (!l.lie || kg === null || !f) return { ...l, unite }
+        if (kg === null || !f) return { ...l, unite }
         return { ...l, unite, quantite: pourChamp(kg / f, unite === 'kg' ? 3 : 0) }
       }),
     )
@@ -725,30 +705,11 @@ export function TransfertNouveau() {
                                     onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
                                     className="h-7 text-right tabular-nums"
                                   />
-                                  {!parti && (
-                                    <button
-                                      type="button"
-                                      onClick={() => maj(l.cle, 'lie', !l.lie)}
-                                      title={
-                                        l.lie
-                                          ? 'Les trois se repondent — cliquez pour saisir chacun separement'
-                                          : 'Calcul detache — cliquez pour relier les trois'
-                                      }
-                                      aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                      className={cn(
-                                        'shrink-0 rounded-[var(--radius)] p-1',
-                                        l.lie
-                                          ? 'text-primaire hover:bg-primaire/10'
-                                          : 'text-alerte hover:bg-alerte/10',
-                                      )}
-                                    >
-                                      {l.lie ? (
-                                        <Link2 className="size-3.5" />
-                                      ) : (
-                                        <Unlink2 className="size-3.5" />
-                                      )}
-                                    </button>
-                                  )}
+                                  {/* PLUS D'INTERRUPTEUR. Il fallait decider,
+                                      avant de taper, dans quel champ on avait
+                                      le droit d'ecrire. Les trois se repondent
+                                      desormais toujours, et celui qu'on vient
+                                      de taper n'est jamais reecrit. */}
                                 </div>
                               </td>
                               <td className="px-2 py-1">

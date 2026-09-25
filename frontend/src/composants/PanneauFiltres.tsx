@@ -15,6 +15,15 @@ import { ChevronDown, Filter, FilterX } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { dansPeriode, SelecteurPeriode, type Periode } from './SelecteurPeriode'
 
+/* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
+   plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
+   rendus apres l’evaluation du module. Un seul usage au niveau du fichier
+   aurait suffi a tout faire tomber. */
+const CLASSE = cn(
+  'h-7 w-full rounded-[3px] border border-champ bg-surface px-1.5 text-[12px]',
+  'text-texte outline-none focus:border-primaire disabled:opacity-50',
+)
+
 export interface ChampFiltre<L> {
   /** Identifiant du filtre, libre. */
   cle: string
@@ -398,7 +407,3 @@ export function BarreFiltres<L>({
   )
 }
 
-const CLASSE = cn(
-  'h-7 w-full rounded-[3px] border border-champ bg-surface px-1.5 text-[12px]',
-  'text-texte outline-none focus:border-primaire disabled:opacity-50',
-)

@@ -17,6 +17,52 @@ interface MarkdownSection {
   level: number
 }
 
+/**
+ * Decoupe le guide en sections, aux titres markdown.
+ *
+ * HORS DU COMPOSANT, ET SANS TOUCHER A L'ETAT. Cette fonction vivait a
+ * l'interieur, declaree APRES l'effet qui l'appelle, et posait elle-meme les
+ * deux etats. Trois defauts en un :
+ *
+ *   - `const` n'est pas remonte : l'appel ne tenait que parce qu'il se produit
+ *     dans une promesse, donc apres le rendu. Deplacer cet appel d'une ligne au
+ *     mauvais endroit aurait laisse la page blanche, comme le 25/09 ;
+ *   - melanger le decoupage et la pose d'etat rend l'un intestable sans
+ *     l'autre ;
+ *   - recreee a chaque rendu, elle ne peut pas etre une dependance honnete.
+ *
+ * Elle prend un texte, elle rend des sections. C'est tout.
+ */
+function decouperSections(markdown: string): MarkdownSection[] {
+  const sections: MarkdownSection[] = []
+  let courante: MarkdownSection | null = null
+  let contenu: string[] = []
+
+  for (const ligne of markdown.split('\n')) {
+    const titre = ligne.match(/^(#{1,6})\s+(.+)$/)
+    if (titre) {
+      if (courante) {
+        courante.content = contenu.join('\n')
+        sections.push(courante)
+      }
+      courante = {
+        id: titre[2].toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        title: titre[2],
+        content: '',
+        level: titre[1].length,
+      }
+      contenu = []
+    } else if (courante) {
+      contenu.push(ligne)
+    }
+  }
+  if (courante) {
+    courante.content = contenu.join('\n')
+    sections.push(courante)
+  }
+  return sections
+}
+
 export function GuideUtilisateur() {
   const naviguer = useNavigate()
   const [, setContent] = useState<string>('')
@@ -35,7 +81,9 @@ export function GuideUtilisateur() {
       })
       .then((text) => {
         setContent(text)
-        parseSections(text)
+        const trouvees = decouperSections(text)
+        setSections(trouvees)
+        if (trouvees.length > 0) setActiveSection(trouvees[0].id)
         setLoading(false)
       })
       .catch((err) => {
@@ -44,45 +92,6 @@ export function GuideUtilisateur() {
         setLoading(false)
       })
   }, [])
-
-  const parseSections = (markdown: string) => {
-    const lines = markdown.split('\n')
-    const parsedSections: MarkdownSection[] = []
-    let currentSection: MarkdownSection | null = null
-    let currentContent: string[] = []
-
-    for (const line of lines) {
-      const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
-      if (headingMatch) {
-        // Sauvegarder la section précédente
-        if (currentSection) {
-          currentSection.content = currentContent.join('\n')
-          parsedSections.push(currentSection)
-        }
-
-        // Créer une nouvelle section
-        const level = headingMatch[1].length
-        const title = headingMatch[2]
-        const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-
-        currentSection = { id, title, content: '', level }
-        currentContent = []
-      } else if (currentSection) {
-        currentContent.push(line)
-      }
-    }
-
-    // Ajouter la dernière section
-    if (currentSection) {
-      currentSection.content = currentContent.join('\n')
-      parsedSections.push(currentSection)
-    }
-
-    setSections(parsedSections)
-    if (parsedSections.length > 0) {
-      setActiveSection(parsedSections[0].id)
-    }
-  }
 
   const renderMarkdown = (text: string): string => {
     // Conversion markdown basique vers HTML

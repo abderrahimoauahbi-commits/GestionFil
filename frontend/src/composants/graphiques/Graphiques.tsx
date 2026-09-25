@@ -23,6 +23,13 @@
 import { useId, useMemo, useState } from 'react'
 import { Table2, BarChart3 } from 'lucide-react'
 import { cn } from '../../lib/utils'
+
+/* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
+   plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
+   rendus apres l’evaluation du module. Un seul usage au niveau du fichier
+   aurait suffi a tout faire tomber. */
+const fmtNombre = (v: number) =>
+  v >= 1000 ? Math.round(v).toLocaleString('fr-FR') : v.toFixed(v < 10 ? 2 : 1)
 import './graphiques.css'
 
 /* -------------------------------------------------------------------------- */
@@ -155,8 +162,6 @@ function TableauValeurs({
   )
 }
 
-const fmtNombre = (v: number) =>
-  v >= 1000 ? Math.round(v).toLocaleString('fr-FR') : v.toFixed(v < 10 ? 2 : 1)
 
 /* -------------------------------------------------------------------------- */
 /* Barres rangees — une grandeur, plusieurs categories                         */

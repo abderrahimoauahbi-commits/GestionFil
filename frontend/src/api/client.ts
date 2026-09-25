@@ -214,7 +214,9 @@ async function envoyerFichier<T>(route: string, donnees: FormData): Promise<T> {
     throw new ErreurApi(0, 'SERVEUR_INJOIGNABLE', "Le serveur ne repond pas pendant l'envoi.")
   }
   const texte = await reponse.text()
-  let corps: { code?: string; message?: string } | null = null
+  // PAS D'INITIALISATION INUTILE : le `catch` leve, donc `corps` est toujours
+  // affecte avant d'etre lu. Le `= null` faisait croire a un cas qui n'existe pas.
+  let corps: { code?: string; message?: string } | null
   try {
     corps = texte ? JSON.parse(texte) : null
   } catch {

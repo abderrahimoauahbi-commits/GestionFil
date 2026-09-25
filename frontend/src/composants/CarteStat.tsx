@@ -16,6 +16,18 @@
  */
 import { cn } from '../lib/utils'
 
+/* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
+   plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
+   rendus apres l’evaluation du module. Un seul usage au niveau du fichier
+   aurait suffi a tout faire tomber. */
+const TRAIT: Record<TonStat, string> = {
+  neutre: 'text-attenue-texte',
+  primaire: 'text-primaire',
+  succes: 'text-succes',
+  alerte: 'text-alerte',
+  danger: 'text-danger',
+}
+
 /**
  * LE MINI-GRAPHIQUE DE LA CARTE (sparkline).
  *
@@ -102,13 +114,6 @@ const PASTILLE: Record<TonStat, string> = {
   danger: 'bg-danger/15 text-danger',
 }
 
-const TRAIT: Record<TonStat, string> = {
-  neutre: 'text-attenue-texte',
-  primaire: 'text-primaire',
-  succes: 'text-succes',
-  alerte: 'text-alerte',
-  danger: 'text-danger',
-}
 
 const CHIFFRE: Record<TonStat, string> = {
   neutre: 'text-texte',

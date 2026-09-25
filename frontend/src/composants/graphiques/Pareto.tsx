@@ -50,16 +50,22 @@ export function Pareto({
     const total = triees.reduce((s, d) => s + d.valeur, 0)
     if (!total) return null
 
-    let cumul = 0
-    const points = triees.map((d, i) => {
-      cumul += d.valeur
-      return {
-        ...d,
-        rang: i + 1,
-        partRang: ((i + 1) / triees.length) * 100,
-        partCumulee: (cumul / total) * 100,
-      }
-    })
+    /* LE CUMUL SE CALCULE, IL NE S'ACCUMULE PLUS DANS UNE VARIABLE.
+       Un `let` modifie a l'interieur d'un `map` melange deux choses : parcourir
+       et retenir. L'ordre du parcours devient alors porteur de sens, et toute
+       reorganisation du code — un filtre ajoute, un tri deplace — change le
+       resultat sans toucher au calcul. Ici chaque point porte la somme de ceux
+       qui le precedent, dite explicitement. */
+    const cumuls = triees.reduce<number[]>(
+      (acc, d) => [...acc, (acc[acc.length - 1] ?? 0) + d.valeur],
+      [],
+    )
+    const points = triees.map((d, i) => ({
+      ...d,
+      rang: i + 1,
+      partRang: ((i + 1) / triees.length) * 100,
+      partCumulee: (cumuls[i] / total) * 100,
+    }))
 
     const rangA = points.find((p) => p.partCumulee >= seuilA)?.rang ?? points.length
     const rangB = points.find((p) => p.partCumulee >= seuilB)?.rang ?? points.length

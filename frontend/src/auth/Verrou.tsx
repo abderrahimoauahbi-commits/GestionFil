@@ -43,7 +43,11 @@ export function Verrou() {
      Un seul minuteur, relance a chaque signe de vie. `mousemove` se declenche
      des dizaines de fois par seconde : on ne relance qu'une fois par seconde,
      sinon la page passe son temps a reprogrammer un minuteur. */
-  const echeanceInactivite = useRef(Date.now() + delai)
+  /* ZERO, ET NON `Date.now()`. Lire l’horloge pendant le rendu rend celui-ci
+     impur : deux rendus du meme etat ne donnent plus le meme resultat, et
+     React se reserve le droit de rendre deux fois. La valeur etait de toute
+     facon ecrasee par l’effet ci-dessous des le premier passage. */
+  const echeanceInactivite = useRef(0)
 
   useEffect(() => {
     if (!moi || verrouille) return

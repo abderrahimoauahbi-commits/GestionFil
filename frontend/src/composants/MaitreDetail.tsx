@@ -47,7 +47,9 @@ export interface ColonneDetail {
   cleCreation?: boolean
 }
 
-export interface Ligne extends Record<string, unknown> {}
+/* UN ALIAS, PAS UNE INTERFACE VIDE. `interface X extends Y {}` ne dit rien de
+   plus que `Y` et laisse croire qu'on ajoutera des membres un jour. */
+export type Ligne = Record<string, unknown>
 
 interface Props {
   titre: string

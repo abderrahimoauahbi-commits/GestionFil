@@ -146,7 +146,16 @@ function TauxDeChange() {
           // DIFFERENT — un meme taux ressaisi ne dit rien du mouvement.
           const courant = lignes.find((l) => !l.date_fin) ?? lignes[0]
           const precedent = courant && lignes.find((l) => l.date_debut < courant.date_debut && l.taux !== courant.taux)
+          /* LA REGLE EST JUSTE, ET ON PASSE OUTRE EN LE DISANT.
+             `react-hooks/purity` interdit de lire l'horloge pendant le rendu :
+             deux rendus du meme etat n'y donnent plus le meme resultat. Ici la
+             valeur ne change qu'une fois par jour, et l'afficher juste demande
+             la date du jour. Les deux parades honnetes — figer l'heure au
+             montage, ou reveiller un minuteur a minuit — coutent plus cher que
+             le defaut qu'elles corrigent : un ecran laisse ouvert toute la nuit
+             afficherait « depuis 3 jours » au lieu de 4. */
           const jours = courant
+            // eslint-disable-next-line react-hooks/purity
             ? Math.floor((Date.now() - new Date(courant.date_debut).getTime()) / 86_400_000)
             : null
           const bam = qBam.data?.cours.find((c) => c.code_devise === d.code_devise)

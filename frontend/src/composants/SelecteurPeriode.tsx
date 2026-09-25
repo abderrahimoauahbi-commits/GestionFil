@@ -13,6 +13,14 @@ import { useMemo } from 'react'
 import { CalendarRange } from 'lucide-react'
 import { cn } from '../lib/utils'
 
+/* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
+   plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
+   rendus apres l’evaluation du module. Un seul usage au niveau du fichier
+   aurait suffi a tout faire tomber. */
+const CLASSE =
+  'h-7 rounded-[3px] border border-champ bg-surface px-1.5 text-[12px] text-texte ' +
+  'outline-none focus:border-primaire'
+
 const MOIS_COURT = [
   'jan', 'fev', 'mar', 'avr', 'mai', 'jun',
   'jul', 'aou', 'sep', 'oct', 'nov', 'dec',
@@ -137,6 +145,3 @@ export function SelecteurPeriode({
   )
 }
 
-const CLASSE =
-  'h-7 rounded-[3px] border border-champ bg-surface px-1.5 text-[12px] text-texte ' +
-  'outline-none focus:border-primaire'

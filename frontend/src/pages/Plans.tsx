@@ -281,6 +281,11 @@ export function Plans() {
 
   // --- Mutations -------------------------------------------------------------
 
+  /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte : la mutation qui
+     l’appelle est definie plus haut dans le fichier, et ne tenait que parce
+     qu’elle ne s’execute qu’au clic. */
+  const coef = (q: string, mois: number) => coefs[`${q}|${mois}`] ?? 1
+
   const enregistrement = useMutation({
     mutationFn: () =>
       api.put<{ id_plan: string; cree: boolean; lignes_generees: number; m2_total: number }>(
@@ -394,7 +399,6 @@ export function Plans() {
 
   // --- Grille locale ---------------------------------------------------------
 
-  const coef = (q: string, mois: number) => coefs[`${q}|${mois}`] ?? 1
   const majCoef = (q: string, mois: number, v: number) =>
     setCoefs((c) => ({ ...c, [`${q}|${mois}`]: v }))
 

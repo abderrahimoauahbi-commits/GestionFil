@@ -8,6 +8,13 @@
  */
 import { api } from '../../api/client'
 
+/* DECLAREE TOUT EN HAUT, avant les calculs qui l’appellent.
+   Elle vivait dans la section « formatage », en bas du fichier : `const`
+   n’etant pas remonte, elle ne tenait que parce que ses appelants sont des
+   fonctions, executees plus tard. C’est exactement le montage qui a laisse
+   une page blanche le 25/09 des qu’un appel s’est produit plus tot. */
+export const arrondi = (v: number) => Math.round(v * 10000) / 10000
+
 // =============================================================================
 // LES FORMES
 // =============================================================================
@@ -287,7 +294,6 @@ export function corpsFiche(
 // LE FORMATAGE
 // =============================================================================
 
-export const arrondi = (v: number) => Math.round(v * 10000) / 10000
 
 export const nb = (v: number | null | undefined, d = 2) =>
   v == null || Number.isNaN(v)

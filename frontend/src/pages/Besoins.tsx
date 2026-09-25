@@ -47,6 +47,14 @@ import { Aide } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { exporterCsv } from '../lib/export'
 
+/* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
+   plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
+   rendus apres l’evaluation du module. Un seul usage au niveau du fichier
+   aurait suffi a tout faire tomber. */
+const CLASSE_FILTRE =
+  'h-8 rounded-[var(--radius-sm)] border border-champ bg-surface px-2 text-[12px] ' +
+  'text-texte outline-none focus:border-primaire'
+
 const MODULE = 'MRP'
 
 /**
@@ -293,6 +301,9 @@ export function Besoins() {
      par cellule. L'ancienne version l'appliquait par expression reguliere sur
      le fichier entier, ce qui transformait aussi les codes de reference
      contenant un point suivi d'un chiffre. */
+  /* Declaree avant son usage : `const` n’est pas remonte. */
+  const plan = d?.plan
+
   function exporter() {
     exporterCsv(
       `besoins-${plan?.libelle ?? 'plan'}`,
@@ -330,7 +341,6 @@ export function Besoins() {
     )
   }
 
-  const plan = d?.plan
 
   return (
     <div>
@@ -699,6 +709,3 @@ export function Besoins() {
   )
 }
 
-const CLASSE_FILTRE =
-  'h-8 rounded-[var(--radius-sm)] border border-champ bg-surface px-2 text-[12px] ' +
-  'text-texte outline-none focus:border-primaire'

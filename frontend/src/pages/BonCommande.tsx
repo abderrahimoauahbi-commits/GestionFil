@@ -394,6 +394,29 @@ export function BonCommande() {
 
   const ligneModifiee = (l: LigneBc) => !!brouillon[l.id_ligne_bc]
   /*
+   * CES DEUX REFERENCES SONT DECLAREES ICI, avant leur premiere lecture.
+   *
+   * Elles vivaient soixante-dix lignes plus bas, a cote de l'effet qui les
+   * remplit — ce qui se defend a la lecture, mais pas a l'execution : `const`
+   * n'est pas remonte, et `initiales.current` lu au rendu levait
+   * « Cannot access 'initiales' before initialization ». Tout le composant
+   * tombait, donc la page entiere restait blanche.
+   *
+   * LE DEFAUT A DORMI parce que `nouvelles` etait toujours vide : `filter`
+   * n'appelait jamais sa fonction, donc personne ne lisait la reference. Le
+   * jour ou la grille s'est enfin remplie, il s'est reveille. Une panne latente
+   * qu'un autre correctif revele — d'ou l'impression que la reparation avait
+   * casse quelque chose.
+   *
+   * `amorcee` retient POUR QUEL bon la grille a ete remplie : sans ce garde,
+   * chaque rafraichissement rechargerait les lignes du serveur et effacerait
+   * ce que l'acheteur vient de corriger sans l'avoir enregistre.
+   */
+  const amorcee = useRef<string | null>(null)
+  /** Ce que chaque ligne valait en arrivant, pour savoir ce qui a bouge. */
+  const initiales = useRef<Map<string, string>>(new Map())
+
+  /*
    * MODIFIEE VEUT DIRE « QUI A CHANGE », pas « qui est dans la grille ».
    *
    * Compter toute ligne chargee affichait « 1 modifiee(s) » des l'ouverture,
@@ -465,17 +488,6 @@ export function BonCommande() {
   const modifiable =
     !!droits.peutEcrire &&
     (bc?.statut === 'BROUILLON' || bc?.statut === 'EN_ATTENTE_VALIDATION')
-  /*
-   * LES LIGNES ENREGISTREES ENTRENT DANS LA GRILLE, une fois par document.
-   *
-   * `amorcee` retient POUR QUEL bon la grille a ete remplie. Sans ce garde,
-   * chaque rafraichissement de la liste — et il y en a a chaque frappe dans une
-   * autre requete — rechargerait les lignes depuis le serveur et effacerait ce
-   * que l'acheteur vient de corriger sans l'avoir enregistre.
-   */
-  const amorcee = useRef<string | null>(null)
-  /** Ce que chaque ligne valait en arrivant, pour savoir ce qui a bouge. */
-  const initiales = useRef<Map<string, string>>(new Map())
   /*
    * ON N'AMORCE QUE SUR UN SUCCES, jamais sur « plus en chargement ».
    *

@@ -23,6 +23,7 @@ import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { Badge, Bouton } from '../composants/ui/base'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { SUPPRIMABLES } from '../lib/statuts'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -86,7 +87,6 @@ const LIBELLE: Record<string, string> = {
  * fournisseur n'a ete prevenu, aucun stock n'a bouge. Des qu'il est valide,
  * il a engage l'entreprise — il s'annule, il ne s'efface plus.
  */
-const SUPPRIMABLES = ['BROUILLON', 'EN_ATTENTE_VALIDATION']
 
 export function BonsCommande() {
   const droits = useDroits(MODULE)
@@ -347,6 +347,12 @@ export function BonsCommande() {
             >
               <FileText />
             </Bouton>
+            {/* LE BOUTON DIT CE QU'IL FAIT. Il annoncait « Annuler le bon »
+                meme quand il EFFACE un brouillon, si bien qu'on croyait garder
+                une trace la ou il n'en reste aucune. Un brouillon n'a que deux
+                issues : on le complete, ou il disparait. Annuler et le laisser
+                en base ne servirait qu'a encombrer la liste d'un document mort
+                dont le numero n'a jamais rien engage. */}
             {droits.peutEcrire && !['CLOTURE', 'ANNULE'].includes(b.statut) && (
               <Bouton
                 variante="discret"
@@ -372,8 +378,12 @@ export function BonsCommande() {
                         : annuler.mutate(b.id_bc),
                   })
                 }
-                aria-label="Annuler"
-                title="Annuler le bon"
+                aria-label={SUPPRIMABLES.includes(b.statut) ? 'Supprimer' : 'Annuler'}
+                title={
+                  SUPPRIMABLES.includes(b.statut)
+                    ? 'Supprimer definitivement ce brouillon'
+                    : 'Annuler le bon'
+                }
               >
                 <Trash2 />
               </Bouton>

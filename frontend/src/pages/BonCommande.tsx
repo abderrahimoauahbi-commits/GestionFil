@@ -14,7 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Printer, Save, Send, ShieldCheck, Undo2 } from 'lucide-react'
+import { ArrowLeft, Printer, Save, Send, ShieldCheck, Trash2, Undo2 } from 'lucide-react'
+import { SUPPRIMABLES } from '../lib/statuts'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
@@ -250,6 +251,33 @@ export function BonCommande() {
     onSuccess: (_r, statut) => {
       toast.success(`Bon passe en ${statut.toLowerCase().replace(/_/g, ' ')}`)
       rafraichir()
+    },
+    onError: echec,
+  })
+
+  /**
+   * SUPPRIMER LE BROUILLON, depuis le bon lui-meme.
+   *
+   * L'action n'existait que dans la liste : on ouvrait un brouillon, on
+   * decidait qu'il n'avait pas lieu d'etre, et il fallait ressortir pour s'en
+   * defaire. C'est le moment ou l'on sait, donc le moment ou l'on doit pouvoir.
+   *
+   * SUPPRIMER ET NON ANNULER. Un bon annule reste en base, dans les listes et
+   * dans les etats, avec un numero qui n'a jamais rien engage — il encombre
+   * sans rien prouver. L'annulation garde son sens des que le bon est VALIDE :
+   * la, le numero est parti chez un fournisseur, et l'effacer creerait un trou
+   * qu'aucun controle ne saurait expliquer. Le serveur tient la meme frontiere
+   * et refuse au-dela de EN_ATTENTE_VALIDATION.
+   */
+  const supprimerBon = useMutation({
+    mutationFn: () => api.delete(`/api/bons-commande/${id}`),
+    onSuccess: () => {
+      toast.success('Brouillon supprime', {
+        description: 'Il n’engageait rien : ses propositions d’achat sont revenues au plan.',
+      })
+      void qc.invalidateQueries({ queryKey: ['bons-commande'] })
+      void qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
+      naviguer('/bons-commande')
     },
     onError: echec,
   })
@@ -809,6 +837,26 @@ export function BonCommande() {
               taille="md"
               consequence="Le fournisseur devra etre prevenu si le bon lui est deja parti."
             />
+            {droits.peutEcrire && SUPPRIMABLES.includes(bc.statut) && (
+              <Bouton
+                variante="contour"
+                className="text-danger hover:bg-danger/10"
+                onClick={() =>
+                  confirmation.demander({
+                    titre: `Supprimer ${bc.numero_bc} ?`,
+                    destructif: true,
+                    libelleConfirmer: 'Supprimer definitivement',
+                    description:
+                      'Ce bon n’engage rien : il sera EFFACE, sans laisser de trace dans la ' +
+                      'liste ni dans les etats. Ses propositions d’achat reviendront au plan.',
+                    action: () => supprimerBon.mutate(),
+                  })
+                }
+              >
+                <Trash2 />
+                Supprimer le brouillon
+              </Bouton>
+            )}
           </>
         }
       />

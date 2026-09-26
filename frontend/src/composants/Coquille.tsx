@@ -207,6 +207,18 @@ export const NAVIGATION: EntreeNav[] = [
     section: 'ACHATS',
     resume: 'Dossiers, factures et frais d’approche',
   },
+  /* LA RECEPTION D'IMPORT N'AVAIT PAS NON PLUS D'ENTREE. Elle vit a part du
+     dossier — une reception peut prendre des lignes de plusieurs factures —,
+     et l'on n'y arrivait que par un lien interne. Meme defaut que l'Importation
+     avant le 25/09. */
+  {
+    vers: '/receptions-import',
+    libelle: 'Réceptions import',
+    module: 'RECEPTIONS',
+    Icone: PackageCheck,
+    section: 'ACHATS',
+    resume: 'Recevoir les conteneurs d’un dossier d’import',
+  },
   {
     vers: '/historique-prix',
     libelle: 'Historique des prix',

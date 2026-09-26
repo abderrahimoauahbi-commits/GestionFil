@@ -7,7 +7,7 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Lock, Plus, Ship } from 'lucide-react'
+import { Lock, Plus, ScanText, Ship } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
@@ -97,10 +97,19 @@ export function DossiersImport() {
         description="Factures, frais et coût de revient de chaque expédition — et ce qu'elle fait entrer en stock."
         actions={
           droits.peutEcrire && (
-            <Bouton onClick={() => setCreation(true)}>
-              <Plus />
-              Nouveau dossier
-            </Bouton>
+            <>
+              {/* L'ASSISTANT N'AVAIT AUCUNE ENTREE : sa route existait, rien n'y
+                  menait. C'est pourtant le geste reel — on part de la liasse
+                  scannee, pas d'un formulaire vide. */}
+              <Bouton variante="contour" onClick={() => ouvrir('/import/assistant')}>
+                <ScanText />
+                Depuis un scan
+              </Bouton>
+              <Bouton onClick={() => setCreation(true)}>
+                <Plus />
+                Nouveau dossier
+              </Bouton>
+            </>
           )
         }
       />

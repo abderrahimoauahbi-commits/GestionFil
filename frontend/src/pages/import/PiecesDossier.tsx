@@ -201,7 +201,7 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
                   <th className={cn(th, 'w-24 text-right')}>Taille</th>
                   <th className={cn(th, 'w-32 text-left')}>Déposé le</th>
                   <th className={cn(th, 'w-28 text-left')}>Par</th>
-                  <th className={cn(th, 'w-24')} />
+                  <th className={cn(th, 'w-36')} />
                 </tr>
               </thead>
               <tbody>
@@ -235,14 +235,16 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
                         >
                           <Eye />
                         </Bouton>
+                        {/* UN LIBELLE, PAS UNE ICONE SEULE : une icone muette a
+                            cote de l'oeil passait inapercue. */}
                         <Bouton
-                          taille="icone-xs"
-                          variante="discret"
-                          title="Lire la pièce : saisie assistée"
-                          aria-label="Lire la pièce"
+                          taille="xs"
+                          variante="contour"
+                          title="Lire la pièce : saisie assistée, scan à côté"
                           onClick={() => ouvrir(`/import/${idDossier}/pieces/${p.id_piece}`)}
                         >
                           <ScanText />
+                          Lire
                         </Bouton>
                         {ecrire && (
                           <Bouton

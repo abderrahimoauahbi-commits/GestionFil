@@ -280,3 +280,11 @@ export const TON_RECEPTION: Record<Facture['statut_reception'], 'neutre' | 'aler
 }
 
 export const UNITE: Record<Ligne['unite'], string> = { kg: 'kg', ml: 'm', piece: 'pce' }
+
+/**
+ * LA SAISIE ASSISTEE PAR SCAN EST MASQUEE, PAS RETIREE (decision du 26/09/2026 :
+ * « pour l'instant elle ne me sert pas »). L'assistant, la lecture des pieces et
+ * leurs routes restent en place ; seuls les boutons qui y menent disparaissent.
+ * Passer a `true` les fait revenir.
+ */
+export const SAISIE_ASSISTEE_VISIBLE = false

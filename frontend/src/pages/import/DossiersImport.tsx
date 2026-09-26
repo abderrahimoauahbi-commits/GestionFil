@@ -17,7 +17,13 @@ import { Badge, Bouton, Champ, Etiq, Selecteur } from '../../composants/ui/base'
 import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
-import { LIBELLE_STATUT, TON_STATUT, type DossierResume, type StatutDossier } from './types'
+import {
+  LIBELLE_STATUT,
+  SAISIE_ASSISTEE_VISIBLE,
+  TON_STATUT,
+  type DossierResume,
+  type StatutDossier,
+} from './types'
 
 const MODULE = 'IMPORT'
 
@@ -101,10 +107,12 @@ export function DossiersImport() {
               {/* L'ASSISTANT N'AVAIT AUCUNE ENTREE : sa route existait, rien n'y
                   menait. C'est pourtant le geste reel — on part de la liasse
                   scannee, pas d'un formulaire vide. */}
-              <Bouton variante="contour" onClick={() => ouvrir('/import/assistant')}>
-                <ScanText />
-                Depuis un scan
-              </Bouton>
+              {SAISIE_ASSISTEE_VISIBLE && (
+                <Bouton variante="contour" onClick={() => ouvrir('/import/assistant')}>
+                  <ScanText />
+                  Depuis un scan
+                </Bouton>
+              )}
               <Bouton onClick={() => setCreation(true)}>
                 <Plus />
                 Nouveau dossier

@@ -28,7 +28,12 @@ import { useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { echec, useRafraichir } from './dialogues'
-import { NATURE_PIECE, type DossierComplet, type Piece } from './types'
+import {
+  NATURE_PIECE,
+  SAISIE_ASSISTEE_VISIBLE,
+  type DossierComplet,
+  type Piece,
+} from './types'
 
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
 const td = 'px-2 py-1.5'
@@ -201,7 +206,7 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
                   <th className={cn(th, 'w-24 text-right')}>Taille</th>
                   <th className={cn(th, 'w-32 text-left')}>Déposé le</th>
                   <th className={cn(th, 'w-28 text-left')}>Par</th>
-                  <th className={cn(th, 'w-36')} />
+                  <th className={cn(th, SAISIE_ASSISTEE_VISIBLE ? 'w-36' : 'w-24')} />
                 </tr>
               </thead>
               <tbody>
@@ -237,15 +242,17 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
                         </Bouton>
                         {/* UN LIBELLE, PAS UNE ICONE SEULE : une icone muette a
                             cote de l'oeil passait inapercue. */}
-                        <Bouton
-                          taille="xs"
-                          variante="contour"
-                          title="Lire la pièce : saisie assistée, scan à côté"
-                          onClick={() => ouvrir(`/import/${idDossier}/pieces/${p.id_piece}`)}
-                        >
-                          <ScanText />
-                          Lire
-                        </Bouton>
+                        {SAISIE_ASSISTEE_VISIBLE && (
+                          <Bouton
+                            taille="xs"
+                            variante="contour"
+                            title="Lire la pièce : saisie assistée, scan à côté"
+                            onClick={() => ouvrir(`/import/${idDossier}/pieces/${p.id_piece}`)}
+                          >
+                            <ScanText />
+                            Lire
+                          </Bouton>
+                        )}
                         {ecrire && (
                           <Bouton
                             taille="icone-xs"

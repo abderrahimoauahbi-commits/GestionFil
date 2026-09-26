@@ -1438,6 +1438,11 @@ pub struct LigneBc {
     /// Entier : une bobine ne se coupe pas.
     #[serde(default)]
     pub nb_bobines: Option<i64>,
+    /// LA REMISE NEGOCIEE, en % du prix brut — condition de prix de la ligne,
+    /// comme dans SAP. Absente : 0. Le prix unitaire reste BRUT ; la base
+    /// calcule le net, et c'est le net qui valorise l'entree en stock.
+    #[serde(default)]
+    pub remise_pct: Option<f64>,
 }
 
 impl LigneBc {
@@ -1524,6 +1529,22 @@ async fn poids_ligne_bc(db: &Db, l: &LigneBc) -> AppResult<(f64, f64)> {
 /// ajoutee apres coup ne le fait pas — la proposition ne serait alors marquee
 /// COMMANDE nulle part, et resterait comptee parmi les arbitrages ouverts.
 #[allow(clippy::too_many_arguments)]
+/// Une remise se controle avant d'atteindre la base.
+///
+/// La contrainte CHECK la refuserait aussi, mais avec un message SQL que
+/// l'acheteur ne sait pas lire. 100 % est exclu : une ligne gratuite n'est pas
+/// une remise, c'est un don, et son prix net nul casserait la valorisation du
+/// stock (prix au kilo a zero, donc CUMP tire vers le bas sans raison).
+fn remise_valide(r: Option<f64>) -> AppResult<f64> {
+    let r = r.unwrap_or(0.0);
+    if !(0.0..100.0).contains(&r) {
+        return Err(AppError::Invalide(format!(
+            "remise de {r} % : elle doit etre comprise entre 0 et 100 % exclus"
+        )));
+    }
+    Ok((r * 100.0).round() / 100.0)
+}
+
 async fn inserer_ligne_bc(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id_ligne: &str,
@@ -1556,11 +1577,11 @@ async fn inserer_ligne_bc(
               designation, unite_commande, facteur_kg, quantite_commandee_unite,
               quantite_commandee_kg, prix_unitaire_devise, code_devise,
               date_livraison_prevue, nb_palettes_saisi, nb_bobines_saisi,
-              id_proposition, besoin_kg_origine)
+              remise_pct, id_proposition, besoin_kg_origine)
          VALUES ($1, $2, $3, $4, $5, $6,
                  COALESCE((SELECT r.designation FROM reference r
                             WHERE r.code_reference = $5), $6),
-                 $7, $8, $9, $10, $11, $12, $13, $14, $15, {proposition}, {besoin})"
+                 $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, {proposition}, {besoin})"
     ))
     .bind(id_ligne)
     .bind(id_bc)
@@ -1586,6 +1607,7 @@ async fn inserer_ligne_bc(
     // colisage reel s'ecarte du theorique.
     .bind(l.nb_palettes)
     .bind(l.nb_bobines)
+    .bind(remise_valide(l.remise_pct)?)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -1611,6 +1633,11 @@ pub struct ModifLigneBc {
     pub nb_palettes: Option<f64>,
     #[serde(default)]
     pub nb_bobines: Option<i64>,
+    /// LA REMISE NEGOCIEE, en % du prix brut — condition de prix de la ligne,
+    /// comme dans SAP. Absente : 0. Le prix unitaire reste BRUT ; la base
+    /// calcule le net, et c'est le net qui valorise l'entree en stock.
+    #[serde(default)]
+    pub remise_pct: Option<f64>,
 }
 
 /// Recalcule les totaux de l'entete a partir des lignes.
@@ -2340,6 +2367,13 @@ pub async fn modifier_ligne_bc(
     // LE COLISAGE SE GARDE, LIE OU DETACHE. Les trois expressions disent la
     // meme marchandise ; n'en retenir qu'une obligeait a rededuire les autres,
     // et la deduction se trompe des que le colisage reel s'ecarte du theorique.
+    if let Some(r) = l.remise_pct {
+        sqlx::query("UPDATE ligne_bc SET remise_pct = $2 WHERE id_ligne_bc = $1")
+            .bind(&ligne)
+            .bind(remise_valide(Some(r))?)
+            .execute(&mut *tx)
+            .await?;
+    }
     if l.nb_palettes.is_some() || l.nb_bobines.is_some() {
         sqlx::query(
             "UPDATE ligne_bc SET nb_palettes_saisi = $2, nb_bobines_saisi = $3

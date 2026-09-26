@@ -166,6 +166,12 @@ export interface LigneSaisie {
   extra?: Record<string, string>
   /** Au KILO pour une marchandise, a l'unite saisie sinon. */
   prix: string
+  /**
+   * LA REMISE, en % du prix brut — condition de prix de la ligne, comme dans
+   * SAP. Facultative : seules les grilles de commande l'affichent. Le prix
+   * reste BRUT ; le net se deduit, et c'est lui qui valorise le stock.
+   */
+  remise?: string
   reference_fournisseur: string
   couleur: string
   code_couleur: string
@@ -232,6 +238,7 @@ export function depuisLigneEnregistree(
     unite_commande: string
     quantite_commandee_unite: number
     prix_unitaire_devise?: number
+    remise_pct?: number | null
     couleur?: string | null
     poids_bobine_kg?: number | null
     bobines_par_palette?: number | null
@@ -278,6 +285,7 @@ export function depuisLigneEnregistree(
     // compte que la regle ne sait pas deviner. Relier d'office recalculerait
     // les deux autres champs et effacerait ce constat a la premiere frappe.
     lie: l.nb_palettes == null && l.nb_bobines == null,
+    remise: l.remise_pct ? String(Number(l.remise_pct)) : '',
     prix:
       l.prix_unitaire_devise == null
         ? ''
@@ -361,10 +369,17 @@ export const kgDe = (l: LigneSaisie) => {
 }
 
 /** Ce que la ligne coute : au kilo pour la marchandise, au forfait sinon. */
-export const totalDe = (l: LigneSaisie) =>
+/** Le coefficient net d'une ligne : 1 sans remise, 0,95 pour 5 %. */
+export const coefNet = (l: LigneSaisie) => 1 - (Number(l.remise || 0) || 0) / 100
+
+/** Le montant BRUT d'une ligne, avant remise. */
+export const brutDe = (l: LigneSaisie) =>
   l.nature === 'MARCHANDISE'
     ? (kgDe(l) ?? 0) * Number(l.prix || 0)
     : Number(l.qte || 0) * Number(l.prix || 0)
+
+/** Le montant NET d'une ligne : c'est lui que le bon additionne. */
+export const totalDe = (l: LigneSaisie) => brutDe(l) * coefNet(l)
 
 /**
  * Une ligne part au serveur quand elle porte de quoi etre comprise.
@@ -424,6 +439,7 @@ export function corpsLigne(l: LigneSaisie) {
         nb_palettes: nombre(l.palettes, false),
         nb_bobines: nombre(l.bobines, true),
         prix_unitaire_devise: Number((Number(l.prix) * facteur).toFixed(DECIMALES_PRIX)),
+        remise_pct: Number(l.remise || 0) || 0,
       }
     : {
         type_ligne: l.nature,
@@ -431,6 +447,7 @@ export function corpsLigne(l: LigneSaisie) {
         unite_commande: l.unite,
         quantite_commandee_unite: Number(l.qte),
         prix_unitaire_devise: Number(Number(l.prix).toFixed(DECIMALES_PRIX)),
+        remise_pct: Number(l.remise || 0) || 0,
       }
 }
 
@@ -500,6 +517,8 @@ export interface ProprietesGrille {
    * son comportement precedent.
    */
   validationLocale?: boolean
+  /** Afficher la colonne « Remise % » — sur les bons de commande seulement. */
+  avecRemise?: boolean
 }
 
 /** Une colonne que l'ecran ajoute a la grille, et qu'il sait seul rendre. */
@@ -541,6 +560,7 @@ export function GrilleLignes({
   sansPrix = false,
   sansFournisseur = false,
   validationLocale = false,
+  avecRemise = false,
 }: ProprietesGrille) {
   const prises = dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean))
 
@@ -702,6 +722,7 @@ export function GrilleLignes({
                 {!sansPrix && (
                   <>
                     <th className="w-36 px-1.5 py-2 text-right">Prix {devise}</th>
+                    {avecRemise && <th className="w-24 px-1.5 py-2 text-right">Remise %</th>}
                     <th className="w-36 px-1.5 py-2 text-right">Total</th>
                   </>
                 )}
@@ -978,6 +999,22 @@ export function GrilleLignes({
                         {marchandise && (
                           <div className="mt-0.5 text-right text-[11px] text-attenue-texte">par kg</div>
                         )}
+                      </td>
+                    )}
+
+                    {!sansPrix && avecRemise && (
+                      <td className={cellule} inert={verrou}>
+                        <Champ
+                          type="number"
+                          step="any"
+                          min="0"
+                          max="99.99"
+                          value={l.remise ?? ''}
+                          onChange={(e) => maj(l.cle, { remise: e.target.value })}
+                          className="h-9 text-right tabular-nums"
+                          placeholder="0"
+                          aria-label="Remise en pourcentage du prix brut"
+                        />
                       </td>
                     )}
 

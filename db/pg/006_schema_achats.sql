@@ -104,9 +104,18 @@ CREATE TABLE ligne_bc (
 
     -- Prix : saisi par unite de commande, ramene au kg (unite canonique)
     prix_unitaire_devise numeric(18,4)   NOT NULL CHECK (prix_unitaire_devise > 0),
-    prix_kg_devise      numeric(18,4)    GENERATED ALWAYS AS (prix_unitaire_devise / facteur_kg) STORED,
+    -- NET DE REMISE : c'est ce prix qui valorise l'entree en stock (RG-09).
+    prix_kg_devise      numeric(18,4)    GENERATED ALWAYS AS
+                            (prix_unitaire_devise * (1 - remise_pct / 100) / facteur_kg) STORED,
     code_devise         text    NOT NULL REFERENCES devise(code_devise),
-    total_ligne_devise  numeric(18,2)    GENERATED ALWAYS AS (quantite_commandee_unite * prix_unitaire_devise) STORED,
+    -- NET DE REMISE, donc le montant du bon qui en fait la somme aussi.
+    total_ligne_devise  numeric(18,2)    GENERATED ALWAYS AS
+                            (quantite_commandee_unite * prix_unitaire_devise * (1 - remise_pct / 100)) STORED,
+    -- LA REMISE, condition de prix de la ligne comme dans SAP. Le prix
+    -- unitaire reste BRUT : c'est celui qu'on negocie et que le fournisseur
+    -- imprime. Voir la migration 2026-09-26b_ligne_bc_remise.sql.
+    remise_pct          numeric(5,2)     NOT NULL DEFAULT 0
+                            CHECK (remise_pct >= 0 AND remise_pct < 100),
 
     date_livraison_prevue text,
     statut              text    NOT NULL DEFAULT 'EN_ATTENTE'

@@ -70,6 +70,7 @@ import {
   totalDe,
   type LigneSaisie,
 } from '../composants/GrilleLignes'
+import { TotauxCommande } from '../composants/TotauxCommande'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -428,7 +429,12 @@ export function BonCommandeNouveau() {
                 }
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
                 surCreerReference={setACreer}
+                avecRemise
               />
+              {/* LES MEMES TOTAUX QU'EN MODIFICATION : brut, remise, net HT. Pas
+                  d'equivalent en dirhams ici — le taux n'est engage qu'a la
+                  creation du bon, et un montant au taux du jour mentirait. */}
+              <TotauxCommande lignes={pretes} devise={devise} />
 
               {aCreer && (
                 <Alerte ton="info" titre="Créer une référence au catalogue">

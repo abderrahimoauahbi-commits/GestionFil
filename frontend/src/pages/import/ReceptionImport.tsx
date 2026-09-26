@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, PackageCheck, Plus, Save, Search, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, Link2, PackageCheck, Pencil, Plus, Save, Search, Trash2, Unlink2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
@@ -34,6 +34,13 @@ import {
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
+import {
+  type Conditionnement,
+  depuisBobines,
+  depuisKg,
+  depuisPalettes,
+  pourChamp,
+} from '../../lib/conditionnement'
 import { echec, nombre, useRafraichir } from './dialogues'
 
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
@@ -62,6 +69,9 @@ interface ARecevoir {
   nb_bobines: number
   nb_palettes: number
   numero_bc: string | null
+  /** Le conditionnement de la fiche, pour relier poids, bobines et palettes. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
 }
 
 interface ReceptionLue {
@@ -95,6 +105,8 @@ interface ReceptionLue {
     deja_recu_kg: number
     reste_kg: number
     numero_bc: string | null
+    poids_bobine_kg?: number | null
+    bobines_par_palette?: number | null
   }[]
 }
 
@@ -116,6 +128,15 @@ interface LigneRecue {
   couleur: string
   libelleCouleur: string
   magasin: string
+  cond: Conditionnement
+  /**
+   * LIE, poids, bobines et palettes se repondent ; DETACHE, chacun se saisit
+   * seul — une palette entamee, un reliquat, un compte qui ne suit pas la
+   * theorie. Meme regle que sur le bon de commande et la reception nationale.
+   */
+  lie: boolean
+  /** Validee a l'ecran : figee, et prete a partir avec « Enregistrer ». */
+  valide: boolean
 }
 
 /** « Dossier 46/26 · IHR2026… · HASIRCI · BC-0012 » : d'ou vient la ligne. */
@@ -190,6 +211,10 @@ export function ReceptionImport() {
         couleur: l.code_couleur ?? '',
         libelleCouleur: l.libelle_couleur ?? '',
         magasin: l.code_magasin,
+        cond: { poids_bobine_kg: l.poids_bobine_kg, bobines_par_palette: l.bobines_par_palette },
+        // Des comptes enregistres ont ete CONSTATES : relier les recalculerait.
+        lie: !(l.nb_bobines > 0 || l.nb_palettes > 0),
+        valide: true,
       })),
     )
     setModifie(false)
@@ -248,6 +273,12 @@ export function ReceptionImport() {
           couleur: r.code_couleur ?? '',
           libelleCouleur: r.libelle_couleur ?? '',
           magasin: magasinDefaut,
+          cond: { poids_bobine_kg: r.poids_bobine_kg, bobines_par_palette: r.bobines_par_palette },
+          // ENTIERE, la ligne reprend les comptes de la facture : ce sont des
+          // constats du fournisseur, pas une deduction — on ne les relie pas.
+          // PARTIELLE, on part du poids et les comptes se deduisent.
+          lie: !entiere,
+          valide: false,
         }
       })
     setLignes((ls) => [...ls, ...nouvelles])
@@ -258,11 +289,33 @@ export function ReceptionImport() {
     setLignes((ls) => ls.map((l) => (l.id_ligne === id ? { ...l, ...patch } : l)))
     setModifie(true)
   }
+  /** Poids, bobines, palettes : lies, le champ tape commande les deux autres. */
+  const majColis = (id: string, source: 'quantite' | 'bobines' | 'palettes', valeur: string) => {
+    setLignes((ls) =>
+      ls.map((l) => {
+        if (l.id_ligne !== id) return l
+        if (!l.lie) return { ...l, [source]: valeur }
+        const r =
+          source === 'palettes'
+            ? depuisPalettes(valeur, l.cond)
+            : source === 'bobines'
+              ? depuisBobines(valeur, l.cond)
+              : depuisKg(valeur, l.cond)
+        return {
+          ...l,
+          quantite: source === 'quantite' ? valeur : r.kg != null ? pourChamp(r.kg, 3) : l.quantite,
+          bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
+          palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
+        }
+      }),
+    )
+    setModifie(true)
+  }
 
   const complete =
     !!entete.date_reception &&
     lignes.length > 0 &&
-    lignes.every((l) => nombre(l.quantite) > 0 && l.magasin) &&
+    lignes.every((l) => nombre(l.quantite) > 0 && l.magasin && l.valide) &&
     (!entete.litige || entete.motif_litige.trim())
 
   const corps = () => ({
@@ -357,13 +410,6 @@ export function ReceptionImport() {
               <ArrowLeft />
               Toutes les réceptions
             </Bouton>
-            {editable && (
-              <Bouton variante="contour" disabled={!complete || (!nouvelle && !modifie)} chargement={enregistrer.isPending}
-                onClick={() => enregistrer.mutate()}>
-                <Save />
-                Enregistrer
-              </Bouton>
-            )}
             {peutValider && (
               <Bouton disabled={!complete} chargement={valider.isPending} onClick={() => valider.mutate()}>
                 <PackageCheck />
@@ -456,15 +502,16 @@ export function ReceptionImport() {
                     <th className={cn(th, 'w-20 text-left')}>Code couleur</th>
                     <th className={cn(th, 'w-24 text-left')}>Libellé couleur</th>
                     <th className={cn(th, 'w-36 text-left')}>Magasin</th>
-                    {editable && <th className={cn(th, 'w-8')} />}
+                    {editable && <th className={cn(th, 'w-16')} />}
                   </tr>
                 </thead>
                 <tbody>
                   {lignes.map((l) => {
                     const ecart = ecartDe(l)
                     const horsTolerance = nombre(l.quantite) > l.reste_kg * (1 + TOLERANCE_PCT / 100) + 0.001
+                    const verrou = editable && l.valide
                     return (
-                      <tr key={l.id_ligne} className="border-b border-bordure/60 align-top">
+                      <tr key={l.id_ligne} className={cn('border-b border-bordure/60 align-top', verrou && 'bg-succes/[0.05]')}>
                         <td className={cn(td, 'pt-1.5')}>
                           <div className="font-medium">{l.code_reference}</div>
                           <div className="text-[11px] text-attenue-texte">{origine(l)}</div>
@@ -472,20 +519,32 @@ export function ReceptionImport() {
                         <td className={cn(td, 'pt-1.5 text-right tabular-nums')}>{fmt.nombre(l.poids_net_kg, 2)}</td>
                         <td className={cn(td, 'pt-1.5 text-right tabular-nums text-attenue-texte')}>{fmt.nombre(l.deja_recu_kg, 2)}</td>
                         <td className={cn(td, 'pt-1.5 text-right tabular-nums')}>{fmt.nombre(l.reste_kg, 2)}</td>
-                        <td className={td}>
+                        <td className={td} inert={verrou}>
                           <Champ className={cn(champ, 'text-right', horsTolerance && 'border-danger')} inputMode="decimal"
-                            value={l.quantite} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { quantite: e.target.value })} />
+                            value={l.quantite} disabled={!editable} onChange={(e) => majColis(l.id_ligne, 'quantite', e.target.value)} />
                           {horsTolerance && <div className="text-[10.5px] text-danger">au-delà du reste + {TOLERANCE_PCT} %</div>}
                         </td>
                         <td className={cn(td, 'pt-1.5 text-right tabular-nums', Math.abs(ecart) > 0.5 && 'text-alerte')}>
                           {statut === 'VALIDEE' ? '—' : fmt.nombre(ecart, 2)}
                         </td>
-                        <td className={td}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.bobines} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { bobines: e.target.value })} /></td>
-                        <td className={td}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.palettes} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { palettes: e.target.value })} /></td>
-                        <td className={td}><Champ className={champ} value={l.lot} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { lot: e.target.value })} /></td>
-                        <td className={td}><Champ className={champ} value={l.couleur} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { couleur: e.target.value })} /></td>
-                        <td className={td}><Champ className={champ} value={l.libelleCouleur} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { libelleCouleur: e.target.value })} /></td>
-                        <td className={td}>
+                        <td className={td} inert={verrou}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.bobines} disabled={!editable} onChange={(e) => majColis(l.id_ligne, 'bobines', e.target.value)} /></td>
+                        <td className={td} inert={verrou}>
+                          <div className="flex items-center gap-1">
+                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.palettes} disabled={!editable} onChange={(e) => majColis(l.id_ligne, 'palettes', e.target.value)} />
+                            {editable && (
+                              <button type="button" onClick={() => majLigne(l.id_ligne, { lie: !l.lie })}
+                                title={l.lie ? 'Poids, bobines et palettes se répondent — cliquez pour saisir chacun séparément' : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'}
+                                aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                                className={cn('shrink-0 rounded-[var(--radius)] p-1', l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
+                                {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className={td} inert={verrou}><Champ className={champ} value={l.lot} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { lot: e.target.value })} /></td>
+                        <td className={td} inert={verrou}><Champ className={champ} value={l.couleur} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { couleur: e.target.value })} /></td>
+                        <td className={td} inert={verrou}><Champ className={champ} value={l.libelleCouleur} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { libelleCouleur: e.target.value })} /></td>
+                        <td className={td} inert={verrou}>
                           <Selecteur className={champ} value={l.magasin} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { magasin: e.target.value })}>
                             <option value="">Choisir…</option>
                             {(qMagasins.data ?? []).map((m) => (
@@ -494,7 +553,15 @@ export function ReceptionImport() {
                           </Selecteur>
                         </td>
                         {editable && (
-                          <td className={cn(td, 'pt-1.5')}>
+                          <td className={cn(td, 'whitespace-nowrap pt-1.5')}>
+                            <Bouton taille="icone-xs" variante="discret"
+                              className={verrou ? 'text-attenue-texte hover:bg-attenue' : 'text-succes hover:bg-succes/10'}
+                              disabled={!verrou && !(nombre(l.quantite) > 0 && l.magasin)}
+                              aria-label={verrou ? 'Modifier la ligne' : 'Valider la ligne'}
+                              title={verrou ? 'Ligne validée — cliquez pour la modifier' : nombre(l.quantite) > 0 && l.magasin ? 'Valider cette ligne — elle partira avec « Enregistrer »' : 'Saisissez le poids reçu et le magasin'}
+                              onClick={() => majLigne(l.id_ligne, { valide: !l.valide })}>
+                              {verrou ? <Pencil /> : <Check />}
+                            </Bouton>
                             <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
                               onClick={() => { setLignes((ls) => ls.filter((x) => x.id_ligne !== l.id_ligne)); setModifie(true) }}>
                               <Trash2 />
@@ -523,6 +590,44 @@ export function ReceptionImport() {
           )}
         </CarteCorps>
       </Carte>
+
+      {/* L'EN-TETE ET LES LIGNES S'ENREGISTRENT ICI, ENSEMBLE — comme sur le bon
+          de commande et la reception nationale. Le bouton de chaque ligne la
+          valide a l'ecran ; celui-ci ecrit tout. « Valider — entree en stock »
+          reste en haut : c'est un changement de statut, pas un enregistrement. */}
+      {editable && (
+        <div
+          className={cn(
+            'sticky bottom-0 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
+            modifie || nouvelle ? 'border-primaire' : 'border-bordure',
+          )}
+        >
+          <span className="text-[13px]">
+            {lignes.some((l) => !l.valide) ? (
+              <span className="text-alerte">
+                {lignes.filter((l) => !l.valide).length} ligne(s) à valider avec le bouton ✓ de la
+                ligne avant d’enregistrer.
+              </span>
+            ) : modifie || nouvelle ? (
+              <span className="text-alerte">Modifications en cours — rien n’est encore enregistré.</span>
+            ) : (
+              <span className="text-attenue-texte">
+                Validez chaque ligne avec son bouton ✓, puis enregistrez l’en-tête et les lignes
+                ensemble.
+              </span>
+            )}
+          </span>
+          <Bouton
+            disabled={!complete || (!nouvelle && !modifie)}
+            chargement={enregistrer.isPending}
+            onClick={() => enregistrer.mutate()}
+            title={lignes.some((l) => !l.valide) ? 'Validez d’abord chaque ligne avec son bouton ✓' : undefined}
+          >
+            <Save />
+            Enregistrer
+          </Bouton>
+        </div>
+      )}
 
       {/* ================= Choix des lignes de facture ======================== */}
       {editable && (

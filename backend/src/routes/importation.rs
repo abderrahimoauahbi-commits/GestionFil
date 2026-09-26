@@ -852,7 +852,10 @@ pub async fn a_recevoir(
                 l.ligne_numero, l.code_reference, r.designation, l.lot_fournisseur, l.code_couleur,
                 l.libelle_couleur,
                 l.poids_net_kg, l.quantite_recue_kg, l.reste_kg, l.nb_bobines, l.nb_palettes,
-                bc.numero_bc
+                bc.numero_bc,
+                -- LE CONDITIONNEMENT DE LA FICHE : sans lui, l'ecran ne sait pas
+                -- relier une pesee a un compte de palettes et de bobines.
+                r.poids_bobine_kg, r.bobines_par_palette
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
            JOIN import_dossiers d ON d.id_dossier = f.id_dossier
@@ -1031,7 +1034,8 @@ pub async fn lire_reception(
                 f.numero_facture, fo.nom AS fournisseur_nom, fl.code_reference,
                 ref.designation, fl.poids_net_kg, fl.quantite_recue_kg AS deja_recu_kg,
                 fl.reste_kg, fl.nb_bobines AS bobines_facturees,
-                fl.nb_palettes AS palettes_facturees, bc.numero_bc
+                fl.nb_palettes AS palettes_facturees, bc.numero_bc,
+                ref.poids_bobine_kg, ref.bobines_par_palette
            FROM import_reception_lignes rl
            JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
            JOIN import_factures f ON f.id_facture = fl.id_facture

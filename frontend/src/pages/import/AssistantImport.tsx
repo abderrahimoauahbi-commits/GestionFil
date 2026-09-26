@@ -6,11 +6,12 @@
  * d'abord les documents, ensuite les informations, le scan restant visible
  * pendant qu'on les recopie.
  *
- * IL NE LIT PAS LES DOCUMENTS. Aucun OCR n'est installé, et prétendre lire un
- * numéro de facture pour se tromper d'un chiffre coûterait plus cher que de le
- * taper. Ce qu'il fait, lui, personne ne le fait à sa place : garder la page
- * sous les yeux pendant la saisie, dire ce qui manque encore, et enchaîner les
- * étapes sans qu'on ait à savoir quel écran ouvrir.
+ * IL NE LIT PAS LES DOCUMENTS LUI-MÊME. La lecture se fait une fois le dossier
+ * créé, pièce par pièce, dans « Lecture de la pièce » (LecturePiece) : GestionAi
+ * y propose des champs contrôlés par le calcul, jamais une saisie. Ce que fait
+ * l'assistant, personne ne le fait à sa place : garder la page sous les yeux
+ * pendant la saisie, dire ce qui manque encore, et enchaîner les étapes sans
+ * qu'on ait à savoir quel écran ouvrir.
  *
  * LES FICHIERS NE PARTENT QU'À LA CRÉATION. Tant que le dossier n'existe pas,
  * ils restent dans le navigateur : un dossier à moitié créé parce qu'on a

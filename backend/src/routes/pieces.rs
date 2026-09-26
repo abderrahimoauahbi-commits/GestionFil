@@ -381,3 +381,116 @@ pub async fn lister_du_dossier(db: &crate::db::Db, id_dossier: &str) -> AppResul
     .await?;
     Ok(lignes_en_json(&lignes))
 }
+
+// ============================================================================
+// La lecture d'une piece (saisie assistee)
+// ============================================================================
+
+/// `GET /api/import/pieces/{id}/lecture` — la derniere lecture, ou `null`.
+pub async fn lecture(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Lire).await?;
+    let ligne = sqlx::query(
+        "SELECT l.resultat, l.duree_s::float8 AS duree_s, l.date_lecture, u.login AS lu_par
+           FROM piece_lecture l
+           LEFT JOIN utilisateur u ON u.id_utilisateur = l.id_utilisateur
+          WHERE l.id_piece = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.db)
+    .await?;
+    Ok(Json(match ligne {
+        Some(l) => json!({
+            "resultat": l.get::<Value, _>("resultat"),
+            "duree_s": l.get::<Option<f64>, _>("duree_s"),
+            "date_lecture": l.get::<String, _>("date_lecture"),
+            "lu_par": l.get::<Option<String>, _>("lu_par"),
+        }),
+        None => Value::Null,
+    }))
+}
+
+/// `POST /api/import/pieces/{id}/lecture` — fait lire la piece par GestionAi.
+///
+/// L'ERP NE LIT RIEN LUI-MEME. Il designe la piece ; GestionAi la telecharge
+/// AVEC LE JETON DE L'UTILISATEUR — donc avec ses droits —, la lit, en extrait
+/// les documents et rend des champs PROPOSES, chacun avec son statut. Rien
+/// n'entre dans le dossier par ce chemin : l'operateur confirme a l'ecran.
+///
+/// Le resultat est garde (`piece_lecture`) : une liasse de vingt pages demande
+/// deux minutes de lecture, qu'on ne refait qu'a la demande.
+pub async fn lire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    entetes: axum::http::HeaderMap,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let existe: Option<String> =
+        sqlx::query_scalar("SELECT id_piece FROM piece_jointe WHERE id_piece = $1")
+            .bind(&id)
+            .fetch_optional(&state.db)
+            .await?;
+    existe.ok_or_else(|| AppError::Introuvable(format!("piece {id}")))?;
+
+    let reglage = crate::assistant::moteur::Reglage::depuis_base(&state.db).await;
+    let (Some(url), Some(cle)) = (reglage.url_plateforme.as_ref(), reglage.cle_plateforme.as_ref())
+    else {
+        return Err(AppError::RegleMetier(
+            "La lecture des pieces passe par GestionAi, qui n'est pas configuree sur ce \
+             serveur (adresse ou cle d'application absente)."
+                .into(),
+        ));
+    };
+    let jeton = entetes
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(AppError::NonAuthentifie)?;
+
+    // UN DELAI LONG, ASSUME : quelques secondes par page, et la file de
+    // GestionAi peut faire attendre derriere une autre lecture.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(900))
+        .build()
+        .map_err(|e| AppError::Interne(anyhow::anyhow!("client HTTP : {e}")))?;
+    let reponse = client
+        .post(format!("{}/api/extraction/pieces/{id}", url.trim_end_matches('/')))
+        .header("X-Cle-Application", cle)
+        .json(&json!({ "jeton": jeton }))
+        .send()
+        .await
+        .map_err(|e| AppError::RegleMetier(format!("GestionAi ne repond pas ({url}) : {e}")))?;
+    let code = reponse.status();
+    let corps: Value = reponse.json().await.unwrap_or_else(|_| json!({}));
+    if !code.is_success() {
+        // Le motif de la plateforme, tel quel : « file saturee », « OCR non
+        // installe » et « piece introuvable » appellent trois gestes differents.
+        let motif = corps.get("detail").and_then(|v| v.as_str()).unwrap_or("motif non precise");
+        return Err(AppError::RegleMetier(format!("GestionAi n'a pas pu lire la piece : {motif}")));
+    }
+    let duree = corps.get("duree_s").and_then(Value::as_f64);
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    sqlx::query(
+        "INSERT INTO piece_lecture (id_piece, resultat, duree_s, id_utilisateur)
+         VALUES ($1, $2, $3::float8, $4)
+         ON CONFLICT (id_piece) DO UPDATE
+            SET resultat = excluded.resultat, duree_s = excluded.duree_s,
+                id_utilisateur = excluded.id_utilisateur,
+                date_lecture = to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')",
+    )
+    .bind(&id)
+    .bind(&corps)
+    .bind(duree)
+    .bind(&user.id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    lecture(State(state), user, Path(id)).await
+}

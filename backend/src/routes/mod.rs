@@ -260,6 +260,9 @@ pub fn router(state: AppState) -> Router {
         // volumineux n'a aucune raison d'etre accepte.
         .route("/api/import/dossiers/{id}/pieces", post(pieces::deposer)
                .layer(axum::extract::DefaultBodyLimit::max(pieces::TAILLE_MAX + 1024 * 1024)))
+        // La lecture assistee : GestionAi lit la piece, l'ERP garde le resultat.
+        .route("/api/import/pieces/{id}/lecture",
+               get(pieces::lecture).post(pieces::lire))
         .route("/api/import/pieces/{id}",
                get(pieces::telecharger).delete(pieces::supprimer))
         .route("/api/import/a-recevoir", get(importation::a_recevoir))

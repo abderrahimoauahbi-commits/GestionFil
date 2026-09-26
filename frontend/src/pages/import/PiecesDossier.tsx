@@ -12,7 +12,7 @@
  */
 import { useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Eye, FileCheck2, FileWarning, Trash2, Upload } from 'lucide-react'
+import { Eye, FileCheck2, FileWarning, ScanText, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import {
@@ -25,6 +25,7 @@ import {
   Selecteur,
 } from '../../composants/ui/base'
 import { useConfirmation } from '../../composants/ui/surcouches'
+import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { echec, useRafraichir } from './dialogues'
 import { NATURE_PIECE, type DossierComplet, type Piece } from './types'
@@ -49,6 +50,7 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
   const idDossier = d.dossier.id_dossier
   const rafraichir = useRafraichir(idDossier)
   const confirmation = useConfirmation()
+  const ouvrir = useOuvrirVue()
   const champFichier = useRef<HTMLInputElement>(null)
   const [nature, setNature] = useState<Piece['nature']>('AUTRE')
   const [survol, setSurvol] = useState(false)
@@ -232,6 +234,15 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
                           onClick={() => voir(p)}
                         >
                           <Eye />
+                        </Bouton>
+                        <Bouton
+                          taille="icone-xs"
+                          variante="discret"
+                          title="Lire la pièce : saisie assistée"
+                          aria-label="Lire la pièce"
+                          onClick={() => ouvrir(`/import/${idDossier}/pieces/${p.id_piece}`)}
+                        >
+                          <ScanText />
                         </Bouton>
                         {ecrire && (
                           <Bouton

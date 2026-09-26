@@ -21,6 +21,8 @@ export interface DossierResume extends Record<string, unknown> {
   date_cloture: string | null
   nb_factures: number
   fournisseurs: string | null
+  /** Les numeros d'engagement d'importation, separes par des virgules. */
+  engagements?: string | null
   valeur_dhs: number
   poids_kg: number
   recu_kg: number
@@ -215,6 +217,18 @@ export interface DossierComplet {
   pieces: Piece[]
   attendues: PieceAttendue[]
   ajustements: Ajustement[]
+  engagements?: Engagement[]
+}
+
+/** Un engagement d'importation (EI) ouvert en banque, cite par la DUM. */
+export interface Engagement {
+  id_engagement: string
+  numero_ei: string
+  banque: string | null
+  date_ei: string | null
+  quantite_kg: number | null
+  montant_devise: number | null
+  code_devise: string | null
 }
 
 /**

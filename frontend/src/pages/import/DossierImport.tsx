@@ -40,6 +40,7 @@ import { cn, fmt } from '../../lib/utils'
 import { Avancement, PastilleStatut } from './DossiersImport'
 import { CiblesDialogue, ClotureDialogue, echec, nombre, Tuile, useRafraichir } from './dialogues'
 import { PiecesDossier } from './PiecesDossier'
+import { EngagementsDossier } from './EngagementsDossier'
 import {
   LIBELLE_RECEPTION,
   METHODE_REPARTITION,
@@ -109,6 +110,7 @@ export function DossierImport() {
 
       <Synthese d={d} />
       <Informations d={d} ecrire={ecrire} />
+      <EngagementsDossier d={d} ecrire={ecrire} />
       <FraisDossier d={d} ecrire={ecrire} />
       <FacturesDossier d={d} ecrire={ecrire} />
       <PiecesDossier d={d} ecrire={ecrire} />

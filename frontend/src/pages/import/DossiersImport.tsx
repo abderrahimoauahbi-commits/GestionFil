@@ -68,6 +68,9 @@ export function DossiersImport() {
     },
     { champ: 'statut', entete: 'Statut', rendu: (d) => <PastilleStatut statut={d.statut} /> },
     { champ: 'fournisseurs', entete: 'Fournisseurs', rendu: (d) => d.fournisseurs ?? '—' },
+    // PAR ICI QU'ON RETROUVE UN DOSSIER quand la banque ou le transitaire le
+    // designe par son numero d'engagement, pas par le notre.
+    { champ: 'engagements', entete: 'Engagements (EI)', rendu: (d) => d.engagements ?? '—', secondaire: true },
     { champ: 'nb_factures', entete: 'Factures', numerique: true, secondaire: true },
     { champ: 'date_arrivee', entete: 'Arrivée', rendu: (d) => fmt.date(d.date_arrivee), secondaire: true },
     { champ: 'valeur_dhs', entete: 'Valeur (DH)', numerique: true, rendu: (d) => fmt.nombre(d.valeur_dhs, 2) },

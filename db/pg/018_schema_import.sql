@@ -529,3 +529,24 @@ SELECT l.id_ligne,
   LEFT JOIN ligne_bc lb   ON lb.id_ligne_bc = l.id_ligne_bc
   LEFT JOIN bon_commande bc ON bc.id_bc = lb.id_bc
   LEFT JOIN frais fr      ON fr.id_article_dossier = l.id_ligne;
+
+-- -----------------------------------------------------------------------------
+-- Engagements d'importation (EI) — voir la migration 2026-09-26e.
+-- Reference seulement : ils servent a retrouver et classer un dossier ; le
+-- suivi du credit (consommation, echeances) appartient a la tresorerie.
+-- -----------------------------------------------------------------------------
+CREATE TABLE import_engagements (
+    id_engagement   text PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    id_dossier      text NOT NULL REFERENCES import_dossiers (id_dossier) ON DELETE CASCADE,
+    numero_ei       text NOT NULL CHECK (btrim(numero_ei) <> ''),
+    banque          text,
+    date_ei         text,
+    quantite_kg     numeric(18, 2) CHECK (quantite_kg IS NULL OR quantite_kg >= 0),
+    montant_devise  numeric(18, 2) CHECK (montant_devise IS NULL OR montant_devise >= 0),
+    code_devise     text,
+    notes           text,
+    id_utilisateur_creation text,
+    date_creation   text NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    UNIQUE (id_dossier, numero_ei)
+);
+CREATE INDEX idx_import_engagements_numero ON import_engagements (numero_ei);

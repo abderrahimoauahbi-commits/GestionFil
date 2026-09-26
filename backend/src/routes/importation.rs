@@ -82,6 +82,10 @@ pub async fn lister_dossiers(
                 (SELECT string_agg(DISTINCT fo.nom, ', ')
                    FROM import_factures f JOIN fournisseur fo ON fo.code_fournisseur = f.code_fournisseur
                   WHERE f.id_dossier = d.id_dossier) AS fournisseurs,
+                -- Les numeros d'engagement : c'est souvent par eux que la
+                -- banque ou le transitaire designe le dossier.
+                (SELECT string_agg(e.numero_ei, ', ' ORDER BY e.numero_ei)
+                   FROM import_engagements e WHERE e.id_dossier = d.id_dossier) AS engagements,
                 v.valeur_dhs, v.poids_kg, v.recu_kg, v.nb_palettes, v.nb_bobines,
                 fr.frais_dhs, fr.tva_dhs,
                 CASE WHEN v.valeur_dhs > 0 THEN round(fr.frais_dhs * 100 / v.valeur_dhs, 2) END AS coef_frais_pct
@@ -255,6 +259,14 @@ pub async fn lire_dossier(
     .fetch_all(db)
     .await?;
 
+    let engagements = sqlx::query(
+        "SELECT * FROM import_engagements WHERE id_dossier = $1
+          ORDER BY date_ei NULLS LAST, numero_ei",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+
     let pieces = super::pieces::lister_du_dossier(db, &id).await?;
     let attendues = super::pieces::attendues(db, &id).await?;
 
@@ -267,6 +279,7 @@ pub async fn lire_dossier(
         "frais": lignes_en_json(&frais),
         "repartition": lignes_en_json(&repartition),
         "ajustements": lignes_en_json(&ajustements),
+        "engagements": lignes_en_json(&engagements),
     });
     user.masquer(db, IMPORT, &mut v).await?;
     Ok(Json(v))
@@ -1162,4 +1175,95 @@ pub async fn cloturer(
     let mut v = metier::cloturer(&state.db, &user, &id, simuler).await?;
     user.masquer(&state.db, IMPORT, &mut v).await?;
     Ok(Json(v))
+}
+
+
+// ============================================================================
+// Engagements d'importation (EI)
+// ============================================================================
+
+/// Un engagement d'importation, tel que la banque et la DUM le citent.
+///
+/// REFERENCE SEULEMENT : il sert a retrouver et a classer le dossier. Le suivi
+/// du credit — consommation, echeances, reglements — appartient a la
+/// tresorerie, et ne se fait pas ici.
+#[derive(Deserialize)]
+pub struct EngagementSaisi {
+    numero_ei: String,
+    banque: Option<String>,
+    date_ei: Option<String>,
+    quantite_kg: Option<f64>,
+    montant_devise: Option<f64>,
+    code_devise: Option<String>,
+    notes: Option<String>,
+}
+
+/// `POST /api/import/dossiers/{id}/engagements`
+pub async fn ajouter_engagement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id_dossier): Path<String>,
+    Json(e): Json<EngagementSaisi>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    // LE NUMERO SE RECOPIE SANS ESPACES. La banque l'imprime d'un bloc, la DUM
+    // parfois en groupes : sans cela, le meme engagement serait saisi deux fois
+    // sous deux formes, et la recherche n'en trouverait qu'une.
+    let numero: String = e.numero_ei.chars().filter(|c| !c.is_whitespace()).collect();
+    if numero.is_empty() {
+        return Err(AppError::Invalide("Le numero de l'engagement est obligatoire.".into()));
+    }
+    let vide = |s: &Option<String>| s.as_deref().map(str::trim).filter(|x| !x.is_empty()).map(String::from);
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let id: String = sqlx::query_scalar(
+        "INSERT INTO import_engagements
+                (id_dossier, numero_ei, banque, date_ei, quantite_kg, montant_devise,
+                 code_devise, notes, id_utilisateur_creation)
+         VALUES ($1, $2, $3, $4, $5, $6,
+                 COALESCE($7, (SELECT code_devise FROM import_dossiers WHERE id_dossier = $1)),
+                 $8, $9)
+         RETURNING id_engagement",
+    )
+    .bind(&id_dossier)
+    .bind(&numero)
+    .bind(vide(&e.banque))
+    .bind(vide(&e.date_ei))
+    .bind(e.quantite_kg)
+    .bind(e.montant_devise)
+    .bind(vide(&e.code_devise))
+    .bind(vide(&e.notes))
+    .bind(&user.id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| match &err {
+        // Le meme engagement deux fois sur le meme dossier : on le dit en clair.
+        sqlx::Error::Database(d) if d.code().as_deref() == Some("23505") => AppError::Conflit(
+            format!("L'engagement {numero} est deja rattache a ce dossier."),
+        ),
+        _ => AppError::from(err),
+    })?;
+    tx.commit().await?;
+    Ok(Json(json!({ "id_engagement": id, "numero_ei": numero })))
+}
+
+/// `DELETE /api/import/engagements/{id}`
+pub async fn supprimer_engagement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let n = sqlx::query("DELETE FROM import_engagements WHERE id_engagement = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if n == 0 {
+        return Err(AppError::Introuvable(format!("engagement {id}")));
+    }
+    tx.commit().await?;
+    Ok(Json(json!({ "supprime": id })))
 }

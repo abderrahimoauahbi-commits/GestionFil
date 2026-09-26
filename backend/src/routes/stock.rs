@@ -2544,6 +2544,13 @@ pub struct ModifReception {
     pub transporteur: Option<String>,
     pub nombre_colis: Option<i64>,
     pub poids_total_brut_kg: Option<f64>,
+    /// LA DATE A LAQUELLE LA MARCHANDISE EST ARRIVEE, au format AAAA-MM-JJ.
+    ///
+    /// Elle n'etait pas modifiable : la base la posait a l'instant ou l'on
+    /// ouvrait le document. Or une reception se saisit souvent le lendemain,
+    /// quand les papiers du camion arrivent au bureau — et c'est cette date,
+    /// pas celle de la saisie, que l'OTIF compare a la livraison promise.
+    pub date_reception: Option<String>,
 }
 
 /// Modifie l'entete d'une reception tant qu'elle n'est pas validee.
@@ -2559,6 +2566,23 @@ pub async fn modifier_reception(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
 
+    // UNE DATE DE RECEPTION NE PEUT PAS ETRE DANS LE FUTUR : on ne recoit pas
+    // demain ce qui n’est pas encore arrive. Et elle doit etre une vraie date —
+    // la base la garde en texte, et « 31/02 » y entrerait sans broncher.
+    let date = match m.date_reception.as_deref().map(str::trim) {
+        Some(d) if !d.is_empty() => {
+            let jour = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| {
+                AppError::Invalide(format!("date de reception invalide : {d} (attendu AAAA-MM-JJ)"))
+            })?;
+            if jour > chrono::Utc::now().date_naive() {
+                return Err(AppError::RegleMetier(
+                    "La date de reception ne peut pas etre dans le futur.".into(),
+                ));
+            }
+            Some(jour.format("%Y-%m-%d").to_string())
+        }
+        _ => None,
+    };
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
@@ -2580,7 +2604,8 @@ pub async fn modifier_reception(
                 numero_facture      = COALESCE($6, numero_facture),
                 transporteur        = COALESCE($3, transporteur),
                 nombre_colis        = COALESCE($4, nombre_colis),
-                poids_total_brut_kg = COALESCE($5, poids_total_brut_kg)
+                poids_total_brut_kg = COALESCE($5, poids_total_brut_kg),
+                date_reception      = COALESCE($7, date_reception)
           WHERE id_reception = $1",
     )
     .bind(&id)
@@ -2589,6 +2614,7 @@ pub async fn modifier_reception(
     .bind(m.nombre_colis)
     .bind(m.poids_total_brut_kg)
     .bind(&m.numero_facture)
+    .bind(&date)
     .execute(&mut *tx)
     .await?;
 

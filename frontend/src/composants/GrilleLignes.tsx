@@ -24,7 +24,7 @@
  *   negocie au millieme.
  */
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { Check, Link2, Plus, Trash2, Unlink2 } from 'lucide-react'
+import { Check, Link2, Pencil, Plus, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
@@ -141,6 +141,15 @@ export interface LigneSaisie {
    * le colisage a ete enregistre revient detachee d'elle-meme.
    */
   lie: boolean
+  /**
+   * LA LIGNE EST-ELLE VALIDEE A L'ECRAN ? (mode `validationLocale`)
+   *
+   * Valider n'ecrit RIEN en base : cela dit « cette ligne est juste, elle
+   * partira ». La ligne se fige pour qu'une frappe egaree ne la change plus
+   * en douce ; le crayon la rouvre. C'est le bouton du bas qui enregistre
+   * l'en-tete et toutes les lignes ensemble.
+   */
+  valide?: boolean
   /**
    * CE QUE LE DOCUMENT AJOUTE, et que la grille ne connait pas.
    *
@@ -484,6 +493,13 @@ export interface ProprietesGrille {
    */
   sansPrix?: boolean
   sansFournisseur?: boolean
+  /**
+   * VALIDER A L'ECRAN, ENREGISTRER EN BAS. Le petit bouton de la ligne la
+   * valide et la fige, sans rien envoyer ; la page enregistre l'en-tete et
+   * les lignes validees d'un seul geste. Sans cette propriete, la grille garde
+   * son comportement precedent.
+   */
+  validationLocale?: boolean
 }
 
 /** Une colonne que l'ecran ajoute a la grille, et qu'il sait seul rendre. */
@@ -524,6 +540,7 @@ export function GrilleLignes({
   colonnesSupplementaires = [],
   sansPrix = false,
   sansFournisseur = false,
+  validationLocale = false,
 }: ProprietesGrille) {
   const prises = dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean))
 
@@ -711,14 +728,20 @@ export function GrilleLignes({
                 const kg = kgDe(l)
                 const marchandise = l.nature === 'MARCHANDISE'
                 const ecart = l.suggere_kg && kg != null ? kg - l.suggere_kg : null
+                // `inert` FIGE LES CELLULES, pas la ligne : le bouton d'action
+                // reste cliquable, sans quoi une ligne validee ne se rouvrirait plus.
+                const verrou = validationLocale && !!l.valide
                 return (
-                  <tr key={l.cle} className="border-b border-bordure/60">
+                  <tr
+                    key={l.cle}
+                    className={cn('border-b border-bordure/60', verrou && 'bg-succes/[0.05]')}
+                  >
                     <td className="px-1 py-1 text-right tabular-nums text-attenue-texte">{i + 1}</td>
 
                     {/* LA LISTE DEROULANTE EST DANS LA LIGNE, a la place meme de
                         la reference : un champ d'ajout pose ailleurs oblige a un
                         aller-retour par article. */}
-                    <td className={cn(cellule, 'min-w-0')}>
+                    <td className={cn(cellule, 'min-w-0')} inert={verrou}>
                       {l.code_reference || (l.nature !== 'MARCHANDISE' && l.intitule) ? (
                         <>
                           <div className="flex items-start gap-1.5">
@@ -825,7 +848,7 @@ export function GrilleLignes({
                       )}
                     </td>
 
-                    <td className={cellule}>
+                    <td className={cellule} inert={verrou}>
                       <Selecteur
                         value={l.unite}
                         onChange={(e) => majUnite(l.cle, e.target.value)}
@@ -851,7 +874,7 @@ export function GrilleLignes({
                       </Selecteur>
                     </td>
 
-                    <td className={cellule}>
+                    <td className={cellule} inert={verrou}>
                       <Champ
                         type="number"
                         step="any"
@@ -882,7 +905,7 @@ export function GrilleLignes({
                       )}
                     </td>
 
-                    <td className={cellule}>
+                    <td className={cellule} inert={verrou}>
                       {marchandise ? (
                         <div className="flex items-center gap-1">
                           <Champ
@@ -937,7 +960,7 @@ export function GrilleLignes({
                     </td>
 
                     {!sansPrix && (
-                      <td className={cellule}>
+                      <td className={cellule} inert={verrou}>
                         <Champ
                           type="number"
                           // `any` ET NON `0.01` : la base garde quatre decimales,
@@ -968,7 +991,7 @@ export function GrilleLignes({
                         la fiche de la reference, la ou l'information a sa place. */}
                     {!sansFournisseur &&
                       (['reference_fournisseur', 'couleur', 'code_couleur'] as const).map((champ) => (
-                      <td className={cellule} key={champ}>
+                      <td className={cellule} key={champ} inert={verrou}>
                         {marchandise ? (
                           <Champ
                             value={l[champ]}
@@ -1008,6 +1031,7 @@ export function GrilleLignes({
                     {colonnesSupplementaires.map((c) => (
                       <td
                         key={c.cle}
+                        inert={verrou}
                         className={cn(cellule, c.alignement === 'right' && 'text-right')}
                       >
                         {c.rendu(l, (valeur) =>
@@ -1021,6 +1045,29 @@ export function GrilleLignes({
                         bloque plus rien, et une ligne refusee par le serveur
                         est la seule a rester en rouge. */}
                     <td className="whitespace-nowrap px-1 py-1">
+                      {validationLocale && (
+                        <Bouton
+                          variante="discret"
+                          taille="icone-xs"
+                          className={
+                            verrou ? 'text-attenue-texte hover:bg-attenue' : 'text-succes hover:bg-succes/10'
+                          }
+                          disabled={!verrou && !estPrete(l, sansPrix)}
+                          aria-label={verrou ? 'Modifier la ligne' : 'Valider la ligne'}
+                          title={
+                            verrou
+                              ? 'Ligne validée — cliquez pour la modifier'
+                              : !estPrete(l, sansPrix)
+                                ? sansPrix
+                                  ? 'Complétez la référence et la quantité'
+                                  : 'Complétez la référence, la quantité et le prix'
+                                : 'Valider cette ligne — elle partira avec « Enregistrer »'
+                          }
+                          onClick={() => maj(l.cle, { valide: !l.valide })}
+                        >
+                          {verrou ? <Pencil /> : <Check />}
+                        </Bouton>
+                      )}
                       {surEnregistrerLigne && (
                         <Bouton
                           variante="discret"
@@ -1055,7 +1102,9 @@ export function GrilleLignes({
                         aria-label={l.idExistant ? 'Supprimer la ligne' : 'Retirer la ligne'}
                         title={
                           l.idExistant
-                            ? 'Supprimer cette ligne du bon'
+                            ? validationLocale
+                              ? 'Retirer cette ligne — elle sera supprimée à l’enregistrement'
+                              : 'Supprimer cette ligne du bon'
                             : 'Retirer cette ligne — elle n’a jamais été enregistrée'
                         }
                         // UNE LIGNE JAMAIS ENREGISTREE SE RETIRE SANS RIEN

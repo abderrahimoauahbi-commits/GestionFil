@@ -14,7 +14,7 @@
  * archive, historique de prix — et elle appartient au controle qualite, pas au
  * peseur (separation B4).
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Save, Send, ShieldCheck, Undo2 } from 'lucide-react'
@@ -201,7 +201,11 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
     reference_fournisseur: '',
     couleur: '',
     code_couleur: '',
+    // RELUE DEPUIS LA BASE, LA LIGNE ARRIVE VALIDEE — donc figee. On la rouvre
+    // au crayon ; une frappe egaree ne la modifie pas en passant.
+    valide: true,
     extra: {
+      prix_mad: l.prix_kg_mad != null ? String(l.prix_kg_mad) : '',
       bl: l.quantite_bl_kg != null ? String(l.quantite_bl_kg) : '',
       colis: l.nb_colis_ligne != null ? String(l.nb_colis_ligne) : '',
       lot: l.lot_fournisseur ?? '',
@@ -253,6 +257,91 @@ function corpsReception(l: LigneSaisie) {
     statut_qualite: e.qualite,
   }
 }
+/**
+ * LES TOTAUX DE LA RECEPTION : des QUANTITES, pas une facture.
+ *
+ * La reception est le document de celui qui compte sur le quai. Ses totaux
+ * disent ce qui est arrive et de combien il s'ecarte de ce qu'on attendait —
+ * du BL d'un cote, du bon de commande de l'autre. La TVA et le TTC n'ont rien
+ * a faire ici : c'est la facture qui les porte, et elle releve de la
+ * comptabilite. La seule valeur affichee est celle du STOCK entre, hors taxes.
+ *
+ * Les ecarts ne portent que sur les lignes qui ont un terme de comparaison :
+ * une ligne sans quantite au BL ne doit pas creuser un faux ecart au BL.
+ */
+function TotauxReception({ lignes }: { lignes: LigneSaisie[] }) {
+  if (lignes.length === 0) return null
+  const n = (v?: string) => {
+    const x = Number(v)
+    return v != null && v.trim() !== '' && Number.isFinite(x) ? x : null
+  }
+  let kg = 0
+  let palettes = 0
+  let bobines = 0
+  let bl = 0
+  let kgAvecBl = 0
+  let bc = 0
+  let kgAvecBc = 0
+  let valeur = 0
+  let sansValeur = 0
+  for (const l of lignes) {
+    const k = n(l.qte) ?? 0
+    kg += k
+    palettes += n(l.palettes) ?? 0
+    bobines += n(l.bobines) ?? 0
+    const b = n(l.extra?.bl)
+    if (b != null) {
+      bl += b
+      kgAvecBl += k
+    }
+    if (l.suggere_kg != null) {
+      bc += l.suggere_kg
+      kgAvecBc += k
+    }
+    const pm = n(l.extra?.prix_mad)
+    if (pm != null) valeur += k * pm
+    else if (k > 0) sansValeur += 1
+  }
+  const ecart = (v: number) => (
+    <span
+      className={cn(
+        'tabular-nums',
+        Math.abs(v) > 0.001 && (v < 0 ? 'text-danger' : 'text-alerte'),
+      )}
+    >
+      {v > 0 ? '+' : ''}
+      {fmt.nombre(v, 2)} kg
+    </span>
+  )
+  const cases: [string, ReactNode][] = [
+    ['Poids reçu', <>{fmt.nombre(kg, 2)} kg</>],
+    ['Palettes', fmt.nombre(palettes, 2)],
+    ['Bobines', fmt.nombre(bobines, 0)],
+    ['Annoncé au BL', bl ? <>{fmt.nombre(bl, 2)} kg · {ecart(kgAvecBl - bl)}</> : '—'],
+    ['Attendu au BC', bc ? <>{fmt.nombre(bc, 2)} kg · {ecart(kgAvecBc - bc)}</> : '—'],
+    ['Valeur du stock (HT)', fmt.mad(valeur)],
+  ]
+  return (
+    <div className="border-t border-bordure px-3 py-2">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-3 lg:grid-cols-6">
+        {cases.map(([libelle, contenu]) => (
+          <div key={libelle}>
+            <dt className="text-[11px] uppercase tracking-wider text-attenue-texte">{libelle}</dt>
+            <dd className="font-medium tabular-nums">{contenu}</dd>
+          </div>
+        ))}
+      </dl>
+      {sansValeur > 0 && (
+        <p className="mt-1.5 text-[11px] text-attenue-texte">
+          {sansValeur} ligne(s) pas encore enregistrée(s) : leur valeur sera connue après
+          l’enregistrement, quand le serveur aura appliqué le prix du bon et le taux du jour.
+        </p>
+      )}
+    </div>
+  )
+}
+
+
 export function Reception() {
   const { id = '' } = useParams()
   const droits = useDroits(MODULE)
@@ -266,6 +355,7 @@ export function Reception() {
     transporteur: '',
     nombre_colis: '',
     poids_total_brut_kg: '',
+    date_reception: '',
   })
   /*
    * UNE SEULE SOURCE POUR LES LIGNES, comme sur le bon de commande.
@@ -279,8 +369,15 @@ export function Reception() {
   const amorcee = useRef<string | null>(null)
   /** Ce que chaque ligne valait a son dernier enregistrement, par identifiant. */
   const [initiales, setInitiales] = useState<Map<string, string>>(new Map())
-  /** Les lignes dont un envoi est en cours : leurs boutons attendent. */
-  const [enCours, setEnCours] = useState<Set<string>>(new Set())
+  /*
+   * LES LIGNES DEJA ENREGISTREES QU’ON A RETIREES, et elles seules.
+   *
+   * On ne DEVINE plus une suppression a l'absence d'une ligne dans la grille :
+   * c’est cette deduction qui a efface une ligne de 36 tonnes sur le bon de
+   * commande. Une ligne n’est supprimee en base que si quelqu’un a clique sur
+   * sa corbeille — et son identifiant est alors ecrit ici, noir sur blanc.
+   */
+  const [supprimees, setSupprimees] = useState<string[]>([])
 
   const qRec = useQuery({
     queryKey: ['receptions'],
@@ -312,6 +409,7 @@ export function Reception() {
       transporteur: rec.transporteur ?? '',
       nombre_colis: rec.nombre_colis?.toString() ?? '',
       poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
+      date_reception: rec.date_reception?.slice(0, 10) ?? '',
     })
   }, [
     rec?.id_reception,
@@ -320,6 +418,7 @@ export function Reception() {
     rec?.transporteur,
     rec?.nombre_colis,
     rec?.poids_total_brut_kg,
+    rec?.date_reception,
   ])
 
   /* DECLARE AVANT L'EFFET QUI LE LIT. `const` n'est pas remonte : plus bas, il
@@ -498,105 +597,87 @@ export function Reception() {
       ),
     },
   ]
-  const marquer = (cle: string, actif: boolean) =>
-    setEnCours((s) => {
-      const n = new Set(s)
-      if (actif) n.add(cle)
-      else n.delete(cle)
-      return n
-    })
-
-  /**
-   * Enregistrer UNE pesee : la creer si elle est neuve, la corriger sinon.
-   *
-   * `idExistant` DECIDE DU VERBE. Le PATCH existe depuis peu ; avant lui,
-   * corriger un poids obligeait a supprimer la ligne et a la reposter — ce qui
-   * changeait son numero et inscrivait une SUPPRESSION au journal d'audit pour
-   * une virgule deplacee.
-   */
-  const enregistrerLigne = async (l: LigneSaisie) => {
-    if (!id || enCours.has(l.cle)) return
-    marquer(l.cle, true)
-    try {
-      const corps = corpsReception(l)
-      if (l.idExistant) {
-        await api.patch(`/api/receptions/${id}/lignes/${l.idExistant}`, corps)
-        setInitiales((m) => new Map(m).set(l.idExistant as string, JSON.stringify(corps)))
-      } else {
-        const r = await api.post<{ id_ligne_reception: string }>(
-          `/api/receptions/${id}/lignes`,
-          { ...corps, code_reference: l.code_reference, id_ligne_bc: l.extra?.id_ligne_bc },
-        )
-        setInitiales((m) => new Map(m).set(r.id_ligne_reception, JSON.stringify(corps)))
-        setNouvelles((ls) =>
-          ls.map((x) => (x.cle === l.cle ? { ...x, idExistant: r.id_ligne_reception } : x)),
-        )
-      }
-      toast.success(`Ligne ${l.code_reference} enregistrée`)
-      rafraichir()
-    } catch (e) {
-      echec(e)
-    } finally {
-      marquer(l.cle, false)
-    }
+  /** Retirer une ligne : de l'ecran tout de suite, de la base a l'enregistrement. */
+  const retirerLigne = (ligne: LigneSaisie) => {
+    if (ligne.idExistant) setSupprimees((s) => [...s, ligne.idExistant as string])
+    setNouvelles((ls) => ls.filter((x) => x.cle !== ligne.cle))
   }
 
-  /**
-   * Retirer une pesee deja enregistree.
-   *
-   * La ligne ne quitte la grille QU'UNE FOIS le serveur d'accord : la retirer
-   * d'abord montrerait un ecran qui ment si la suppression est refusee.
-   */
-  const supprimerLigne = async (l: LigneSaisie) => {
-    if (!id || !l.idExistant || enCours.has(l.cle)) return
-    marquer(l.cle, true)
-    try {
-      await api.delete(`/api/receptions/${id}/lignes/${l.idExistant}`)
-      setInitiales((m) => {
-        const n = new Map(m)
-        n.delete(l.idExistant as string)
-        return n
-      })
-      setNouvelles((ls) => ls.filter((x) => x.cle !== l.cle))
-      toast.success(`Ligne ${l.code_reference} retirée`)
-      rafraichir()
-    } catch (e) {
-      echec(e)
-    } finally {
-      marquer(l.cle, false)
-    }
-  }
   const enteteModifie =
     !!rec &&
     (entete.num_bon_livraison !== (rec.num_bon_livraison ?? '') ||
       entete.numero_facture !== (rec.numero_facture ?? '') ||
       entete.transporteur !== (rec.transporteur ?? '') ||
       entete.nombre_colis !== (rec.nombre_colis?.toString() ?? '') ||
-      entete.poids_total_brut_kg !== (rec.poids_total_brut_kg?.toString() ?? ''))
+      entete.poids_total_brut_kg !== (rec.poids_total_brut_kg?.toString() ?? '') ||
+      entete.date_reception !== (rec.date_reception?.slice(0, 10) ?? ''))
 
   const lignes = qLignes.data ?? []
+
+  /* CE QUI PARTIRA A L'ENREGISTREMENT, calcule a partir de la grille seule. */
+  const aCreer = nouvelles.filter((n) => !n.idExistant)
+  const aCorriger = nouvelles.filter(
+    (n) => n.idExistant && JSON.stringify(corpsReception(n)) !== initiales.get(n.idExistant),
+  )
+  const nonValidees = nouvelles.filter((n) => !n.valide)
+  const aEnregistrer =
+    enteteModifie || supprimees.length > 0 || aCreer.length > 0 || aCorriger.length > 0
+
   /**
-   * L'EN-TETE S'ENREGISTRE SEUL. Les lignes ont chacune leur bouton.
+   * L'EN-TETE ET LES LIGNES PARTENT ENSEMBLE, sur le bouton du bas.
    *
-   * L'enregistrement groupe allait chercher dans deux registres paralleles ce
-   * qu'il devait creer et supprimer. Pire : faute de PATCH cote serveur, il
-   * SUPPRIMAIT puis RECREAIT chaque ligne corrigee — le numero de ligne
-   * changeait, et le journal d'audit enregistrait un retrait de marchandise
-   * pour une virgule deplacee.
+   * Le petit bouton de chaque ligne ne fait que la VALIDER a l'ecran. Rien
+   * n'est ecrit en base avant ce clic-ci — et il refuse de partir tant qu'une
+   * ligne n'est pas validee, pour qu'on n'enregistre jamais une ligne a moitie
+   * relue.
+   *
+   * UNE SEULE SOURCE : la grille. Les suppressions viennent du registre ecrit
+   * par la corbeille, jamais d'une deduction. Les corrections passent par le
+   * PATCH, qui garde le numero de la ligne et n'inscrit pas une suppression au
+   * journal pour une virgule deplacee.
    */
   const enregistrer = useMutation({
-    mutationFn: () =>
-      api.patch(`/api/receptions/${id}`, {
-        num_bon_livraison: entete.num_bon_livraison || undefined,
-        numero_facture: entete.numero_facture || undefined,
-        transporteur: entete.transporteur || undefined,
-        nombre_colis: entete.nombre_colis ? Number(entete.nombre_colis) : undefined,
-        poids_total_brut_kg: entete.poids_total_brut_kg
-          ? Number(entete.poids_total_brut_kg)
-          : undefined,
-      }),
-    onSuccess: () => {
-      toast.success('En-tete enregistre')
+    mutationFn: async () => {
+      if (enteteModifie) {
+        await api.patch(`/api/receptions/${id}`, {
+          num_bon_livraison: entete.num_bon_livraison || undefined,
+          numero_facture: entete.numero_facture || undefined,
+          transporteur: entete.transporteur || undefined,
+          nombre_colis: entete.nombre_colis ? Number(entete.nombre_colis) : undefined,
+          poids_total_brut_kg: entete.poids_total_brut_kg
+            ? Number(entete.poids_total_brut_kg)
+            : undefined,
+          date_reception: entete.date_reception || undefined,
+        })
+      }
+      for (const ligne of supprimees) {
+        await api.delete(`/api/receptions/${id}/lignes/${ligne}`)
+      }
+      for (const n of aCorriger) {
+        await api.patch(`/api/receptions/${id}/lignes/${n.idExistant}`, corpsReception(n))
+      }
+      for (const n of aCreer) {
+        await api.post(`/api/receptions/${id}/lignes`, {
+          ...corpsReception(n),
+          code_reference: n.code_reference,
+          id_ligne_bc: n.extra?.id_ligne_bc,
+        })
+      }
+      return { crees: aCreer.length, corrigees: aCorriger.length, retirees: supprimees.length }
+    },
+    onSuccess: (r) => {
+      const parts = [
+        r.crees ? `${r.crees} ajoutée(s)` : null,
+        r.corrigees ? `${r.corrigees} corrigée(s)` : null,
+        r.retirees ? `${r.retirees} retirée(s)` : null,
+      ].filter(Boolean)
+      toast.success('Réception enregistrée', {
+        description: parts.length ? `Lignes : ${parts.join(' · ')}.` : undefined,
+      })
+      setSupprimees([])
+      // La grille se recharge depuis le serveur : c'est lui qui detient
+      // desormais les identifiants des lignes qu'on vient de creer.
+      amorcee.current = null
       rafraichir()
     },
     onError: echec,
@@ -960,6 +1041,21 @@ export function Reception() {
                 onChange={(e) => setEntete({ ...entete, transporteur: e.target.value })}
               />
             </div>
+            {/* LA DATE DE RECEPTION MANQUAIT. La base la posait a l'instant de
+                la saisie ; or on saisit souvent le lendemain, et c'est la date
+                d'arrivee — pas celle de la frappe — que l'OTIF compare a la
+                livraison promise. */}
+            <div>
+              <Etiq htmlFor="date-reception">Date de réception</Etiq>
+              <Champ
+                id="date-reception"
+                type="date"
+                max={new Date().toISOString().slice(0, 10)}
+                value={entete.date_reception}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, date_reception: e.target.value })}
+              />
+            </div>
             <div>
               <Etiq htmlFor="colis">Nombre de colis</Etiq>
               <Champ
@@ -1014,20 +1110,8 @@ export function Reception() {
                 sansPrix
                 sansFournisseur
                 colonnesSupplementaires={colonnesReception}
-                surEnregistrerLigne={enregistrerLigne}
-                surSupprimerLigne={supprimerLigne}
-                enCours={enCours}
-                modifiees={
-                  new Set(
-                    nouvelles
-                      .filter(
-                        (n) =>
-                          n.idExistant &&
-                          JSON.stringify(corpsReception(n)) !== initiales.get(n.idExistant),
-                      )
-                      .map((n) => n.cle),
-                  )
-                }
+                validationLocale
+                surSupprimerLigne={retirerLigne}
               />
             ) : (
               <DataTable<LigneRec>
@@ -1046,6 +1130,9 @@ export function Reception() {
                 videDescription="Cette reception ne porte aucune ligne."
               />
             )}
+            <TotauxReception
+              lignes={modifiable ? nouvelles : lignesServeur.map(depuisLigneReception)}
+            />
           </CarteCorps>
         </Carte>
       </div>
@@ -1054,26 +1141,40 @@ export function Reception() {
         <div
           className={cn(
             'sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
-            enteteModifie ? 'border-primaire' : 'border-bordure',
+            aEnregistrer ? 'border-primaire' : 'border-bordure',
           )}
         >
           <span className="text-[13px]">
-            {enteteModifie ? (
+            {nonValidees.length > 0 ? (
+              <span className="text-alerte">
+                {nonValidees.length} ligne(s) à valider avec le bouton ✓ de la ligne avant
+                d’enregistrer.
+              </span>
+            ) : aEnregistrer ? (
               <>
-                <span className="font-medium">En-tête modifié</span>
-                <span className="text-alerte"> — pas encore enregistré.</span>
+                <span className="font-medium">
+                  {[
+                    enteteModifie ? 'en-tête modifié' : null,
+                    aCreer.length ? `${aCreer.length} ligne(s) ajoutée(s)` : null,
+                    aCorriger.length ? `${aCorriger.length} corrigée(s)` : null,
+                    supprimees.length ? `${supprimees.length} retirée(s)` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+                <span className="text-alerte"> — rien n’est encore enregistré.</span>
               </>
             ) : (
               <span className="text-attenue-texte">
-                Chaque pesée s’enregistre sur sa ligne. Cette barre ne concerne que
-                l’en-tête.
+                Validez chaque ligne avec son bouton ✓, puis enregistrez l’en-tête et les lignes
+                ensemble.
               </span>
             )}
           </span>
           <div className="flex items-center gap-2">
             <Bouton
               variante="contour"
-              disabled={!enteteModifie}
+              disabled={!aEnregistrer && nonValidees.length === 0}
               onClick={() => {
                 if (rec) {
                   setEntete({
@@ -1082,24 +1183,33 @@ export function Reception() {
                     transporteur: rec.transporteur ?? '',
                     nombre_colis: rec.nombre_colis?.toString() ?? '',
                     poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
+                    date_reception: rec.date_reception?.slice(0, 10) ?? '',
                   })
                 }
+                setSupprimees([])
+                setNouvelles(lignesServeur.map(depuisLigneReception))
               }}
             >
               <Undo2 />
-              Annuler les modifications de l’en-tête
+              Annuler les modifications
             </Bouton>
             <Bouton
               onClick={() => enregistrer.mutate()}
               chargement={enregistrer.isPending}
-              disabled={!enteteModifie}
+              disabled={!aEnregistrer || nonValidees.length > 0}
+              title={
+                nonValidees.length > 0
+                  ? 'Validez d’abord chaque ligne avec son bouton ✓'
+                  : undefined
+              }
             >
               <Save />
-              Enregistrer l’en-tête
+              Enregistrer
             </Bouton>
           </div>
         </div>
       )}
+
 
       {/* LE PANNEAU « PESER » A DISPARU. Il ouvrait une fenetre pour choisir
           des lignes attendues, alors que la grille propose exactement les

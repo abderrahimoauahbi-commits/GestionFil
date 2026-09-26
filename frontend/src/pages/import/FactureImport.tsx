@@ -20,10 +20,12 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  Link2,
   Lock,
   Plus,
   Save,
   Trash2,
+  Unlink2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -107,6 +109,7 @@ interface LigneEdit {
    * fournisseur qu'on recopie : si elle annonce 3 palettes pour un poids qui
    * n'en fait que 2,7, c'est elle qui fait foi, et l'ecart se discute.
    */
+  lie: boolean
   prix_unitaire_devise: string
   supprimee: boolean
   recue: boolean
@@ -133,6 +136,7 @@ function versEdition(l: Ligne): LigneEdit {
     nb_palettes: texte(l.nb_palettes),
     // Une ligne deja enregistree garde ses comptes tels quels : les relier les
     // recalculerait en silence, alors qu'ils viennent de la facture.
+    lie: l.nb_bobines == null && l.nb_palettes == null,
     prix_unitaire_devise: texte(l.prix_unitaire_devise),
     supprimee: false,
     recue: l.quantite_recue_kg > 0,
@@ -145,7 +149,7 @@ function ligneVide(type: 'ERP' | 'HORS_ERP' = 'ERP'): LigneEdit {
   return {
     cle: `n-${compteur}`, type_ligne: type, code_reference: '', libelle: '', id_ligne_bc: '', numero_bc: '',
     lot_fournisseur: '', code_couleur: '', libelle_couleur: '', unite: type === 'ERP' ? 'kg' : 'piece', poids_net_kg: '', quantite: '',
-    nb_bobines: '', nb_palettes: '', prix_unitaire_devise: '', supprimee: false, recue: false,
+    nb_bobines: '', nb_palettes: '', lie: true, prix_unitaire_devise: '', supprimee: false, recue: false,
   }
 }
 
@@ -264,6 +268,9 @@ export function FactureImport() {
    * reperent les erreurs de recopie.
    */
   const majColis = (l: LigneEdit, source: 'poids' | 'palettes' | 'bobines', valeur: string) => {
+    const champ =
+      source === 'poids' ? 'poids_net_kg' : source === 'palettes' ? 'nb_palettes' : 'nb_bobines'
+    if (!l.lie) return majLigne(l.cle, { [champ]: valeur })
     const c = condDe(l.code_reference)
     const r =
       source === 'palettes'
@@ -602,9 +609,17 @@ export function FactureImport() {
                         <td className={td}>
                           <div className="flex items-center gap-1">
                             <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.nb_palettes} disabled={!ecrire} onChange={(e) => majColis(l, 'palettes', e.target.value)} />
-                            {/* PLUS D’INTERRUPTEUR : poids, bobines et
-                                palettes se repondent toujours, et le champ
-                                qu’on vient de saisir n’est jamais reecrit. */}
+                            {ecrire && (
+                              <button type="button" onClick={() => majLigne(l.cle, { lie: !l.lie })}
+                                title={l.lie
+                                  ? 'Poids, bobines et palettes se repondent — cliquez pour saisir chacun separement'
+                                  : 'Calcul detache — cliquez pour relier les trois'}
+                                aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                                className={cn('shrink-0 rounded-[var(--radius)] p-1',
+                                  l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
+                                {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
+                              </button>
+                            )}
                           </div>
                         </td>
                         <td className={td}>

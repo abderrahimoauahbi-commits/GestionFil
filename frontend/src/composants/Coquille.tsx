@@ -194,6 +194,19 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
   { vers: '/receptions', libelle: 'Réceptions', module: 'RECEPTIONS', Icone: PackageCheck, section: 'ACHATS', resume: 'Peser et enregistrer ce qui arrive', principale: true },
+  /* L'IMPORTATION N'ETAIT DANS AUCUN MENU. Ses quatre ecrans existaient et
+     etaient routes — /import, /import/assistant, /import/:id et la facture —
+     mais rien n'y menait. Un module complet, branche, invisible : on ne
+     trouve pas une page qu'on n'a jamais vue. Meme defaut que le guide
+     utilisateur, retrouve le 25/09. */
+  {
+    vers: '/import',
+    libelle: 'Importation',
+    module: 'IMPORT',
+    Icone: Ship,
+    section: 'ACHATS',
+    resume: 'Dossiers, factures et frais d’approche',
+  },
   {
     vers: '/historique-prix',
     libelle: 'Historique des prix',

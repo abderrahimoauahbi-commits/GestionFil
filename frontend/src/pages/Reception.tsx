@@ -99,6 +99,11 @@ interface LigneRec extends Record<string, unknown> {
   ecart_bl_kg: number | null
   ecart_cmd_kg: number | null
   nb_colis_ligne: number | null
+  /* CE QU'ON A COMPTE sur le quai, la ou nb_colis_ligne porte ce que le bon
+     de livraison ANNONCE. L'ecart entre les deux est justement ce qu'on
+     cherche a voir. */
+  nb_palettes: number | null
+  nb_bobines: number | null
   poids_moyen_colis_kg: number | null
   prix_kg_devise?: number
   code_devise?: string
@@ -185,8 +190,13 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
     suggere_kg: l.quantite_commandee_kg,
     qte: pourChamp(l.quantite_stock_kg, 3),
     unite: l.unite_saisie,
-    palettes: pourChamp(colis.palettes),
-    bobines: pourChamp(colis.bobines),
+    palettes: l.nb_palettes != null ? String(l.nb_palettes) : pourChamp(colis.palettes),
+    bobines: l.nb_bobines != null ? String(l.nb_bobines) : pourChamp(colis.bobines),
+    // DETACHEE DES QU'UN COLISAGE A ETE CONSTATE. Sur un quai, « 21 palettes
+    // ET ce poids-la » est la regle plutot que l'exception : une palette
+    // entamee ne se deduit d'aucune pesee. Relier d'office effacerait le
+    // constat du receptionnaire a la premiere frappe.
+    lie: l.nb_palettes == null && l.nb_bobines == null,
     prix: l.prix_kg_devise != null ? String(l.prix_kg_devise) : '',
     reference_fournisseur: '',
     couleur: '',
@@ -212,6 +222,14 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
  * Facteur inconnu : on envoie des kilos plutot qu'un nombre faux dans une
  * unite qu'on ne sait pas convertir.
  */
+/** Un compte de colis utilisable, ou rien. Une chaine vide n'est pas un zero. */
+function nombreLigne(v: string, entier: boolean) {
+  const n = Number(v)
+  if (v.trim() === '' || !Number.isFinite(n) || n < 0) return undefined
+  // UNE BOBINE NE SE COUPE PAS ; une palette s'entame.
+  return entier ? Math.round(n) : Number(n.toFixed(2))
+}
+
 function corpsReception(l: LigneSaisie) {
   const kg = Number(l.qte)
   const f = facteurVersKg(l.unite, l.cond)
@@ -224,6 +242,11 @@ function corpsReception(l: LigneSaisie) {
     unite_saisie: f ? l.unite : 'kg',
     quantite_pesee_unite: f ? Number((kg / f).toFixed(6)) : kg,
     quantite_bl_kg: nombre(e.bl),
+    // LES DEUX COMPTES PARTENT, lies ou detaches. Les retenir obligerait a
+    // les rededuire a la lecture, et la deduction se trompe des que le
+    // colisage reel s'ecarte du theorique — ce qui est la regle du quai.
+    nb_palettes: nombreLigne(l.palettes, false),
+    nb_bobines: nombreLigne(l.bobines, true),
     nb_colis_ligne: nombre(e.colis) != null ? Math.round(nombre(e.colis) as number) : undefined,
     lot_fournisseur: e.lot?.trim() || undefined,
     code_magasin_dest: e.magasin,
@@ -410,7 +433,7 @@ export function Reception() {
     },
     {
       cle: 'colis',
-      entete: 'Colis',
+      entete: 'Colis (BL)',
       largeur: 'w-20',
       alignement: 'right',
       rendu: (l, poser) => (
@@ -420,7 +443,7 @@ export function Reception() {
           value={l.extra?.colis ?? ''}
           onChange={(e) => poser(e.target.value)}
           className="h-9 text-right tabular-nums"
-          aria-label="Nombre de colis"
+          aria-label="Nombre de colis annoncé au bon de livraison"
         />
       ),
     },
@@ -717,7 +740,7 @@ export function Reception() {
       // Un poids par colis inhabituel revele un conditionnement different de
       // celui negocie : c'est ce qui se voit avant que le stock ne l'absorbe.
       champ: 'nb_colis_ligne',
-      entete: 'Colis',
+      entete: 'Colis (BL)',
       numerique: true,
       largeur: '110px',
       secondaire: true,

@@ -104,7 +104,17 @@ CREATE TABLE ligne_reception (
     quantite_bl_kg      numeric(18,4)    CHECK (quantite_bl_kg IS NULL OR quantite_bl_kg >= 0),
     -- Nombre de colis de CETTE ligne. Le poids moyen par colis qui s'en deduit
     -- detecte un conditionnement different de celui annonce au catalogue.
+    -- LES COLIS ANNONCES par le bon de livraison.
     nb_colis_ligne      bigint CHECK (nb_colis_ligne IS NULL OR nb_colis_ligne > 0),
+    -- LES COLIS COMPTES sur le quai, qui ne se deduisent pas de la pesee :
+    -- une palette entamee reste une palette a manutentionner, un reliquat
+    -- aussi. Les trois autres documents portaient deja ces deux colonnes ;
+    -- la reception, c'est-a-dire l'endroit ou l'on COMPTE vraiment, ne les
+    -- avait pas. Voir la migration 2026-09-26_reception_colisage.sql.
+    nb_palettes_saisi   numeric(18, 2)
+        CHECK (nb_palettes_saisi IS NULL OR nb_palettes_saisi >= 0),
+    nb_bobines_saisi    bigint
+        CHECK (nb_bobines_saisi IS NULL OR nb_bobines_saisi >= 0),
     lot_fournisseur     text,
     date_fabrication    text,
     date_peremption     text,

@@ -2998,6 +2998,16 @@ pub async fn lignes_reception(
         // — et la grille de saisie affiche des cases vides qu'on croit fausses.
         "SELECT l.*, r.designation AS reference_designation, r.unite_catalogue, r.suivi_lot,
                 r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot, r.densite_kg_ml,
+                -- LE CONSTAT PRIME SUR LE CALCUL. Renseigne, quelqu'un a compte
+                -- sur le quai un colisage que la regle ne sait pas deviner.
+                COALESCE(
+                    l.nb_palettes_saisi,
+                    CASE WHEN r.poids_bobine_kg > 0 AND r.bobines_par_palette > 0
+                         THEN ROUND(l.quantite_stock_kg
+                                    / (r.poids_bobine_kg * r.bobines_par_palette), 2)
+                    END
+                ) AS nb_palettes,
+                l.nb_bobines_saisi AS nb_bobines,
                 lb.code_reference AS reference_commandee,
                 CASE WHEN l.id_ligne_bc IS NOT NULL
                       AND lb.code_reference <> l.code_reference
@@ -3030,6 +3040,12 @@ pub struct LigneReception {
     /// est un litige de transport, distinct de l'ecart au commande.
     pub quantite_bl_kg: Option<f64>,
     pub nb_colis_ligne: Option<i64>,
+    /// LES COLIS COMPTES SUR LE QUAI, distincts de ceux annonces au BL.
+    ///
+    /// Ils ne se deduisent pas du poids : une palette entamee reste une
+    /// palette a manutentionner, et c'est le receptionnaire qui le sait.
+    pub nb_palettes: Option<f64>,
+    pub nb_bobines: Option<i64>,
     pub notes: Option<String>,
     pub prix_kg_devise: Option<f64>,
     pub code_magasin_dest: String,
@@ -3149,9 +3165,10 @@ pub async fn ajouter_ligne_reception(
               lot_fournisseur, date_fabrication, date_peremption, statut_qualite,
               code_magasin_dest, derogation_ecart, id_utilisateur_derogation, motif_derogation,
               quantite_bl_kg, nb_colis_ligne, notes,
-              substitution_acceptee, motif_substitution)
+              substitution_acceptee, motif_substitution,
+              nb_palettes_saisi, nb_bobines_saisi)
          SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
+                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
            FROM reference r WHERE r.code_reference = $5",
     )
     .bind(&id_ligne)
@@ -3181,6 +3198,8 @@ pub async fn ajouter_ligne_reception(
     .bind(&l.notes)
     .bind(i64::from(l.substitution_acceptee.unwrap_or(false)))
     .bind(&l.motif_substitution)
+    .bind(l.nb_palettes)
+    .bind(l.nb_bobines)
     .execute(&mut *tx)
     .await?;
 
@@ -3300,6 +3319,8 @@ pub struct ModifLigneReception {
     pub quantite_pesee_unite: Option<f64>,
     pub quantite_bl_kg: Option<f64>,
     pub nb_colis_ligne: Option<i64>,
+    pub nb_palettes: Option<f64>,
+    pub nb_bobines: Option<i64>,
     pub lot_fournisseur: Option<String>,
     pub date_fabrication: Option<String>,
     pub date_peremption: Option<String>,
@@ -3377,6 +3398,8 @@ pub async fn modifier_ligne_reception(
              quantite_stock_kg = $6,
              quantite_bl_kg     = COALESCE($7, quantite_bl_kg),
              nb_colis_ligne     = COALESCE($8, nb_colis_ligne),
+             nb_palettes_saisi  = COALESCE($15, nb_palettes_saisi),
+             nb_bobines_saisi   = COALESCE($16, nb_bobines_saisi),
              lot_fournisseur    = COALESCE(NULLIF(TRIM($9), ''), lot_fournisseur),
              date_fabrication   = COALESCE(NULLIF(TRIM($10), ''), date_fabrication),
              date_peremption    = COALESCE(NULLIF(TRIM($11), ''), date_peremption),
@@ -3399,6 +3422,8 @@ pub async fn modifier_ligne_reception(
     .bind(&m.statut_qualite)
     .bind(&m.code_magasin_dest)
     .bind(&m.notes)
+    .bind(m.nb_palettes)
+    .bind(m.nb_bobines)
     .execute(&mut *tx)
     .await?;
 

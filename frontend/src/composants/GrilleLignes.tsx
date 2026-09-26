@@ -24,7 +24,7 @@
  *   negocie au millieme.
  */
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { Check, Plus, Trash2 } from 'lucide-react'
+import { Check, Link2, Plus, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
@@ -123,6 +123,25 @@ export interface LigneSaisie {
   palettes: string
   bobines: string
   /**
+   * LES TROIS SE REPONDENT-ILS SUR CETTE LIGNE ?
+   *
+   * LIE, on saisit celui qu'on a sous les yeux et les deux autres suivent.
+   * DETACHE, chacun se saisit seul — et c'est indispensable : une palette
+   * entamee, un reliquat, un comptage qui ne suit pas la theorie. « 21
+   * palettes ET ce poids-la » est la realite d'un quai ; la formule ne sait
+   * pas cela, le magasinier si.
+   *
+   * J'avais supprime cette bascule en croyant retirer une gene. Elle retirait
+   * une capacite : lie en permanence, corriger les kilos rearrondissait les
+   * palettes, et corriger les palettes reecrivait les kilos. On ne pouvait
+   * plus jamais declarer un colisage qui s'ecarte du theorique.
+   *
+   * CE QUI A CHANGE DEPUIS : on ne choisit plus AVANT de taper. La ligne
+   * arrive liee ; on la detache quand on en a besoin, et une ligne relue dont
+   * le colisage a ete enregistre revient detachee d'elle-meme.
+   */
+  lie: boolean
+  /**
    * CE QUE LE DOCUMENT AJOUTE, et que la grille ne connait pas.
    *
    * Une reception porte un lot, un magasin, un statut qualite, une quantite
@@ -161,6 +180,7 @@ export function ligneVide(): LigneSaisie {
     unite: 'kg',
     palettes: '',
     bobines: '',
+    lie: true,
     prix: '',
     reference_fournisseur: '',
     couleur: '',
@@ -245,6 +265,10 @@ export function depuisLigneEnregistree(
     // poids. Recalculer d'office effacerait ce qu'on avait constate.
     palettes: l.nb_palettes != null ? String(l.nb_palettes) : pourChamp(colis.palettes),
     bobines: l.nb_bobines != null ? String(l.nb_bobines) : pourChamp(colis.bobines),
+    // DETACHEE DES QU'UN COLISAGE A ETE ENREGISTRE : quelqu'un a constate un
+    // compte que la regle ne sait pas deviner. Relier d'office recalculerait
+    // les deux autres champs et effacerait ce constat a la premiere frappe.
+    lie: l.nb_palettes == null && l.nb_bobines == null,
     prix:
       l.prix_unitaire_devise == null
         ? ''
@@ -304,6 +328,7 @@ export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {
     unite,
     palettes: pourChamp(colis.palettes),
     bobines: pourChamp(colis.bobines),
+    lie: true,
     // LE PRIX N'EST PAS ARRONDI A L'ENTREE. Un prix negocie au millieme
     // perdrait son dernier chiffre avant meme d'avoir ete relu.
     prix: r.prix_suggere_devise != null ? String(r.prix_suggere_devise) : '',
@@ -529,6 +554,12 @@ export function GrilleLignes({
             source === 'quantite' ? 'qte' : source === 'palettes' ? 'palettes' : 'bobines'
           return { ...l, [champ]: valeur }
         }
+        // DETACHE : chaque champ se saisit seul, rien ne se recalcule.
+        if (!l.lie) {
+          const champ =
+            source === 'quantite' ? 'qte' : source === 'palettes' ? 'palettes' : 'bobines'
+          return { ...l, [champ]: valeur }
+        }
         const r =
           source === 'palettes'
             ? depuisPalettes(valeur, l.cond)
@@ -649,7 +680,7 @@ export function GrilleLignes({
                     sur le bon et de la base de facturation. Elle reste en tete
                     parce que c'est la qu'on l'a prise l'habitude de la lire. */}
                 <th className="w-28 px-1.5 py-2 text-left">Unité au bon</th>
-                <th className="w-36 px-1.5 py-2 text-right">Quantité (kg)</th>
+                <th className="w-44 px-1.5 py-2 text-right">Quantité (kg)</th>
                 <th className="w-40 px-1.5 py-2 text-center">Palettes / Bobines</th>
                 {!sansPrix && (
                   <>
@@ -872,6 +903,33 @@ export function GrilleLignes({
                             placeholder="bob."
                             aria-label="Nombre de bobines"
                           />
+                          {/* L'INTERRUPTEUR, AU PLUS PRES DES COLIS QU'IL RELIE.
+                              On ne choisit plus avant de taper : la ligne arrive
+                              liee. On la detache quand la realite s’ecarte de la
+                              theorie — une palette entamee, un reliquat, un
+                              comptage qui ne suit pas le calcul. */}
+                          <button
+                            type="button"
+                            onClick={() => maj(l.cle, { lie: !l.lie })}
+                            title={
+                              l.lie
+                                ? 'Les trois se répondent — cliquez pour saisir chacun séparément'
+                                : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'
+                            }
+                            aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                            className={cn(
+                              'shrink-0 rounded-[var(--radius)] p-1',
+                              l.lie
+                                ? 'text-primaire hover:bg-primaire/10'
+                                : 'text-alerte hover:bg-alerte/10',
+                            )}
+                          >
+                            {l.lie ? (
+                              <Link2 className="size-3.5" />
+                            ) : (
+                              <Unlink2 className="size-3.5" />
+                            )}
+                          </button>
                         </div>
                       ) : (
                         <span className="block text-center text-[11px] text-attenue-texte">—</span>

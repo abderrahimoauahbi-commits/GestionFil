@@ -7,7 +7,7 @@
 //!   * `recalculer_repartition` — les frais inclus dans le cout sont repartis
 //!     sur les lignes AU PRORATA DE LA VALEUR, au centime pres ;
 //!   * `valider_reception` — une facture, plusieurs ou une partie entrent en
-//!     stock A LA VALEUR FACTURE (cout provisoire), par le journal existant ;
+//!     stock A LA VALEUR FACTURE (cout reel : reglee par la banque sur l'engagement d'importation, au taux de la facture), par le journal existant ;
 //!   * `cloturer` — les frais s'ajoutent au CUMP du stock encore present ;
 //!     la part de ce qui est deja sorti est tracee, pas reinjectee.
 //!
@@ -205,7 +205,7 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
 /// Valide une reception : une facture, plusieurs, ou une partie — d'un ou de
 /// plusieurs dossiers.
 ///
-/// Chaque ligne entre en stock A LA VALEUR FACTURE (cout provisoire), par un
+/// Chaque ligne entre en stock A LA VALEUR FACTURE — un cout REEL, pas une estimation : la facture est reglee par la banque sur l'engagement d'importation, au taux qu'elle porte. Elle entre par un
 /// mouvement ENTREE_REC : c'est le declencheur existant qui met a jour le
 /// solde, le lot et le CUMP. Aucun circuit de stock parallele.
 pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) -> AppResult<Value> {
@@ -269,7 +269,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
         return Err(AppError::RegleMetier("Aucune ligne : rien à faire entrer en stock.".into()));
     }
 
-    // ---- Controles, puis prix provisoire de chaque ligne --------------------
+    // ---- Controles, puis prix facture (reel) de chaque ligne --------------------
     struct Entree {
         id_reception_ligne: String,
         id_ligne: String,
@@ -308,7 +308,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
         }
         let montant_devise: f64 = l.try_get("montant_devise")?;
         let taux: f64 = l.try_get("taux")?;
-        // Le cout PROVISOIRE : la valeur facture ramenee au kg. Les frais
+        // Le cout FACTURE, reel : la valeur facture ramenee au kg. Les frais
         // viendront a la cloture.
         let prix_kg_devise = arrondi_kg(montant_devise / poids_net);
         entrees.push(Entree {

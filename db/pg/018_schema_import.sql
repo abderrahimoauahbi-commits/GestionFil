@@ -142,7 +142,11 @@ CREATE TABLE import_facture_lignes (
     nb_palettes         bigint  NOT NULL DEFAULT 0 CHECK (nb_palettes >= 0),
     prix_unitaire_devise numeric(18,4) NOT NULL CHECK (prix_unitaire_devise > 0),
     -- La BASE de la repartition des frais.
-    montant_devise      numeric(18,2) GENERATED ALWAYS AS (round(quantite * prix_unitaire_devise, 2)) STORED,
+    -- NET DE REMISE : c'est lui qui valorise le stock. Voir 2026-09-26c.
+    montant_devise      numeric(18,2) GENERATED ALWAYS AS
+                            (round(quantite * prix_unitaire_devise * (1 - remise_pct / 100), 2)) STORED,
+    remise_pct          numeric(5,2) NOT NULL DEFAULT 0
+                            CHECK (remise_pct >= 0 AND remise_pct < 100),
     -- Part de la ligne dans la valeur du dossier, en %, tenue par le calcul.
     pct_dossier         numeric(13,10),
 
@@ -514,7 +518,9 @@ SELECT l.id_ligne,
        l.quantite_recue_kg,
        l.reste_kg,
        l.soldee,
-       l.libelle_couleur
+       l.libelle_couleur,
+       -- Voir 2026-09-26d : la remise, en derniere colonne.
+       l.remise_pct
   FROM import_facture_lignes l
   JOIN import_factures f  ON f.id_facture = l.id_facture
   JOIN import_dossiers d  ON d.id_dossier = f.id_dossier

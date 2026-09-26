@@ -111,6 +111,8 @@ interface LigneEdit {
    */
   lie: boolean
   prix_unitaire_devise: string
+  /** La remise du fournisseur, en % du prix brut. Le prix reste brut. */
+  remise: string
   supprimee: boolean
   recue: boolean
 }
@@ -138,6 +140,7 @@ function versEdition(l: Ligne): LigneEdit {
     // recalculerait en silence, alors qu'ils viennent de la facture.
     lie: l.nb_bobines == null && l.nb_palettes == null,
     prix_unitaire_devise: texte(l.prix_unitaire_devise),
+    remise: l.remise_pct ? String(Number(l.remise_pct)) : '',
     supprimee: false,
     recue: l.quantite_recue_kg > 0,
   }
@@ -149,14 +152,22 @@ function ligneVide(type: 'ERP' | 'HORS_ERP' = 'ERP'): LigneEdit {
   return {
     cle: `n-${compteur}`, type_ligne: type, code_reference: '', libelle: '', id_ligne_bc: '', numero_bc: '',
     lot_fournisseur: '', code_couleur: '', libelle_couleur: '', unite: type === 'ERP' ? 'kg' : 'piece', poids_net_kg: '', quantite: '',
-    nb_bobines: '', nb_palettes: '', lie: true, prix_unitaire_devise: '', supprimee: false, recue: false,
+    nb_bobines: '', nb_palettes: '', lie: true, prix_unitaire_devise: '', remise: '', supprimee: false, recue: false,
   }
 }
 
 /** La quantite qui multiplie le prix : le poids net quand on facture au kg. */
 const quantiteFacturee = (l: LigneEdit) =>
   l.type_ligne === 'ERP' && l.unite === 'kg' ? nombre(l.poids_net_kg) : nombre(l.quantite)
-const montantLigne = (l: LigneEdit) => Math.round(quantiteFacturee(l) * nombre(l.prix_unitaire_devise) * 100) / 100
+/** Le montant BRUT, avant remise. */
+const brutLigne = (l: LigneEdit) => Math.round(quantiteFacturee(l) * nombre(l.prix_unitaire_devise) * 100) / 100
+/**
+ * Le montant NET, celui que la base calcule et qui valorise le stock. Meme
+ * formule qu'elle — quantite x prix x (1 - remise), arrondie au centime — pour
+ * que l'ecran et le cout de revient ne different jamais d'un centime.
+ */
+const montantLigne = (l: LigneEdit) =>
+  Math.round(quantiteFacturee(l) * nombre(l.prix_unitaire_devise) * (1 - nombre(l.remise) / 100) * 100) / 100
 const ligneComplete = (l: LigneEdit) =>
   l.type_ligne === 'ERP'
     ? !!l.code_reference && nombre(l.poids_net_kg) > 0 && nombre(l.prix_unitaire_devise) > 0 &&
@@ -179,6 +190,7 @@ function corpsLigne(l: LigneEdit) {
     nb_bobines: l.nb_bobines ? nombre(l.nb_bobines) : 0,
     nb_palettes: l.nb_palettes ? nombre(l.nb_palettes) : 0,
     prix_unitaire_devise: nombre(l.prix_unitaire_devise),
+    remise_pct: nombre(l.remise),
   }
 }
 
@@ -379,6 +391,7 @@ export function FactureImport() {
   // ---- Totaux et repartition -----------------------------------------------
   const visibles = lignes.filter((l) => !l.supprimee)
   const totalDevise = visibles.reduce((t, l) => t + montantLigne(l), 0)
+  const totalBrut = visibles.reduce((t, l) => t + brutLigne(l), 0)
   const taux = nombre(entete.taux_change)
   const totalPoids = visibles.reduce((t, l) => t + (l.type_ligne === 'ERP' ? nombre(l.poids_net_kg) : 0), 0)
   const totalBobines = visibles.reduce((t, l) => t + nombre(l.nb_bobines || 0), 0)
@@ -518,6 +531,7 @@ export function FactureImport() {
                   <th className={cn(th, 'w-20 text-right')}>Bobines</th>
                   <th className={cn(th, 'w-20 text-right')}>Palettes</th>
                   <th className={cn(th, 'w-24 text-right')}>Prix unit.</th>
+                  <th className={cn(th, 'w-20 text-right')}>Remise %</th>
                   <th className={cn(th, 'w-28 text-right')}>Montant</th>
                   <th className={cn(th, 'w-20 text-right')}>% dossier</th>
                   {coutVisible && <th className={cn(th, 'w-28 text-right')}>Frais DH</th>}
@@ -626,6 +640,11 @@ export function FactureImport() {
                           <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.prix_unitaire_devise} disabled={fige}
                             onChange={(e) => majLigne(l.cle, { prix_unitaire_devise: e.target.value })} />
                         </td>
+                        <td className={td}>
+                          <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.remise} disabled={fige} placeholder="0"
+                            aria-label="Remise du fournisseur en pourcentage"
+                            onChange={(e) => majLigne(l.cle, { remise: e.target.value })} />
+                        </td>
                         <td className={cn(td, 'pt-2 text-right font-medium tabular-nums')}>{fmt.nombre(montantLigne(l), 2)}</td>
                         <td className={cn(td, 'pt-2 text-right tabular-nums text-attenue-texte')}>
                           {s?.pct_dossier == null ? '—' : `${fmt.nombre(s.pct_dossier, 2)} %`}
@@ -666,7 +685,7 @@ export function FactureImport() {
                       {detail && (
                         <tr className="border-b border-bordure/60 bg-attenue/25">
                           <td />
-                          <td colSpan={15 + (ecrire ? 1 : 0)} className="px-2 py-2">
+                          <td colSpan={15 + (coutVisible ? 2 : 0) + (ecrire ? 1 : 0)} className="px-2 py-2">
                             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
                               <span className="text-attenue-texte">
                                 Valeur d'achat <strong className="text-texte tabular-nums">{fmt.nombre(s!.valeur_achat_dhs, 2)} DH</strong>
@@ -710,7 +729,13 @@ export function FactureImport() {
         </CarteEntete>
         <CarteCorps>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] md:grid-cols-4">
-            <Total libelle={`Montant (${entete.code_devise})`} valeur={fmt.nombre(totalDevise, 2)}
+            {totalBrut - totalDevise > 0.005 && (
+              <>
+                <Total libelle={`Montant brut (${entete.code_devise})`} valeur={fmt.nombre(totalBrut, 2)} />
+                <Total libelle={`Remise (${entete.code_devise})`} valeur={`− ${fmt.nombre(totalBrut - totalDevise, 2)}`} />
+              </>
+            )}
+            <Total libelle={`Montant net (${entete.code_devise})`} valeur={fmt.nombre(totalDevise, 2)}
               controle={entete.montant_devise ? `imprimé ${fmt.nombre(nombre(entete.montant_devise), 2)}` : undefined} alerte={ecartMontant} />
             <Total libelle="Valeur (DH)" valeur={fmt.nombre(taux > 0 ? totalDevise * taux : 0, 2)} controle={`au taux ${fmt.nombre(taux, 4)}`} />
             <Total libelle="Poids net (kg)" valeur={fmt.nombre(totalPoids, 2)} />

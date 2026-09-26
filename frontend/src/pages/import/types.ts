@@ -85,6 +85,8 @@ export interface Ligne {
   nb_bobines: number
   nb_palettes: number
   prix_unitaire_devise: number
+  /** Remise du fournisseur, en % du prix brut. */
+  remise_pct?: number | null
   code_devise: string
   taux_change: number
   montant_devise: number

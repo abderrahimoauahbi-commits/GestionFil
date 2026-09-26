@@ -1535,7 +1535,7 @@ async fn poids_ligne_bc(db: &Db, l: &LigneBc) -> AppResult<(f64, f64)> {
 /// l'acheteur ne sait pas lire. 100 % est exclu : une ligne gratuite n'est pas
 /// une remise, c'est un don, et son prix net nul casserait la valorisation du
 /// stock (prix au kilo a zero, donc CUMP tire vers le bas sans raison).
-fn remise_valide(r: Option<f64>) -> AppResult<f64> {
+pub(crate) fn remise_valide(r: Option<f64>) -> AppResult<f64> {
     let r = r.unwrap_or(0.0);
     if !(0.0..100.0).contains(&r) {
         return Err(AppError::Invalide(format!(

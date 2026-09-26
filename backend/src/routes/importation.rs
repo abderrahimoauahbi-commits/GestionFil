@@ -499,6 +499,9 @@ pub struct LigneSaisie {
     nb_bobines: Option<i64>,
     nb_palettes: Option<i64>,
     prix_unitaire_devise: Option<f64>,
+    /// La remise du fournisseur, en % du prix brut. Absente : 0 a la
+    /// creation, inchangee a la correction.
+    remise_pct: Option<f64>,
 }
 
 /// `POST /api/import/factures/{id}/lignes`
@@ -529,7 +532,7 @@ pub async fn ajouter_ligne(
         "INSERT INTO import_facture_lignes
                 (id_facture, ligne_numero, type_ligne, code_reference, libelle, id_ligne_bc,
                  lot_fournisseur, code_couleur, unite, quantite, poids_net_kg,
-                 nb_bobines, nb_palettes, prix_unitaire_devise, libelle_couleur)
+                 nb_bobines, nb_palettes, prix_unitaire_devise, libelle_couleur, remise_pct)
          SELECT $1,
                 COALESCE((SELECT max(ligne_numero) FROM import_facture_lignes WHERE id_facture = $1), 0) + 1,
                 -- Chaine vide = rien : une ligne « libre » arrive avec un BC
@@ -537,7 +540,8 @@ pub async fn ajouter_ligne(
                 $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''),
                 COALESCE(NULLIF($7, ''), (SELECT code_couleur FROM reference WHERE code_reference = $3)),
                 $8, $9, $10, COALESCE($11, 0), COALESCE($12, 0), $13,
-                COALESCE(NULLIF($14, ''), (SELECT couleur FROM reference WHERE code_reference = $3))
+                COALESCE(NULLIF($14, ''), (SELECT couleur FROM reference WHERE code_reference = $3)),
+                $15
          RETURNING id_ligne",
     )
     .bind(&id_facture)
@@ -554,6 +558,7 @@ pub async fn ajouter_ligne(
     .bind(l.nb_palettes)
     .bind(prix)
     .bind(&l.libelle_couleur)
+    .bind(super::stock::remise_valide(l.remise_pct)?)
     .fetch_one(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
@@ -585,7 +590,8 @@ pub async fn modifier_ligne(
                 quantite = COALESCE($8, CASE WHEN COALESCE($7, unite) = 'kg' THEN $9 END, quantite),
                 poids_net_kg = COALESCE($9, poids_net_kg),
                 nb_bobines = COALESCE($10, nb_bobines), nb_palettes = COALESCE($11, nb_palettes),
-                prix_unitaire_devise = COALESCE($12, prix_unitaire_devise)
+                prix_unitaire_devise = COALESCE($12, prix_unitaire_devise),
+                remise_pct = COALESCE($14, remise_pct)
           WHERE id_ligne = $1",
     )
     .bind(&id)
@@ -601,6 +607,7 @@ pub async fn modifier_ligne(
     .bind(l.nb_palettes)
     .bind(l.prix_unitaire_devise)
     .bind(&l.libelle_couleur)
+    .bind(match l.remise_pct { Some(r) => Some(super::stock::remise_valide(Some(r))?), None => None })
     .execute(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;

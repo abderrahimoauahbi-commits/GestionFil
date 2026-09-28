@@ -112,6 +112,14 @@ interface Ligne {
   code_recu: string
   equivalents: string[]
   motif_substitution: string
+  /**
+   * LA DEROGATION D'ECART (controle C10). Au-dela de la tolerance, la base
+   * refuse la ligne sans derogation nominative et motivee. L'ecran l'annoncait
+   * sans jamais permettre de la donner : une livraison partielle ne pouvait
+   * donc pas s'enregistrer (constate le 28/09/2026).
+   */
+  derogation: boolean
+  motifDerogation: string
   qte: string
   qteBl: string
   unite: string
@@ -287,6 +295,8 @@ export function ReceptionNouvelle() {
         code_recu: a.code_reference,
         equivalents: (a.equivalents_recevables ?? '').split(',').filter(Boolean),
         motif_substitution: '',
+        derogation: false,
+        motifDerogation: '',
         reste_kg: a.quantite_restante_kg,
         unite_catalogue: a.unite_catalogue,
         suivi_lot: a.suivi_lot,
@@ -341,6 +351,8 @@ export function ReceptionNouvelle() {
         code_recu: ref.code_reference,
         equivalents: [],
         motif_substitution: '',
+        derogation: false,
+        motifDerogation: '',
         reste_kg: null,
         unite_catalogue: ref.unite_catalogue,
         suivi_lot: ref.suivi_lot,
@@ -473,6 +485,14 @@ export function ReceptionNouvelle() {
       ? ((kg - l.reste_kg) / l.reste_kg) * 100
       : null
   }
+  const horsTolerance = (l: Ligne) => {
+    const e = ecartDe(l)
+    return e != null && Math.abs(e) > TOLERANCE_PCT
+  }
+  // Hors tolerance, la derogation cochee ET motivee : c'est ce que la base exige.
+  const sansDerogation = retenues.filter(
+    (l) => horsTolerance(l) && (!l.derogation || !l.motifDerogation.trim()),
+  )
 
   const creer = useMutation({
     mutationFn: () =>
@@ -514,6 +534,9 @@ export function ReceptionNouvelle() {
           date_fabrication: l.fabrication || undefined,
           date_peremption: l.peremption || undefined,
           statut_qualite: l.qualite,
+          derogation_ecart: horsTolerance(l) && l.derogation ? true : undefined,
+          motif_derogation:
+            horsTolerance(l) && l.derogation ? l.motifDerogation.trim() : undefined,
           // Le prix n'accompagne que les lignes hors commande : ailleurs c'est
           // le prix ENGAGE du bon qui fait foi, et le renvoyer l'ecraserait.
           prix_kg_devise: !l.id_ligne_bc && l.prix ? Number(l.prix) : undefined,
@@ -979,6 +1002,36 @@ export function ReceptionNouvelle() {
                                     {fmt.nombre(ecart, 1)} %
                                   </>
                                 )}
+                                {/* Au-dela de la tolerance : la derogation, nominative
+                                    et motivee, sans laquelle la base refuse la ligne. */}
+                                {hors && l.retenue && (
+                                  <div
+                                    className="mt-1 space-y-1 text-left font-normal text-texte"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <label className="flex items-center justify-end gap-1 text-[11px]">
+                                      <input
+                                        type="checkbox"
+                                        checked={l.derogation}
+                                        onChange={(e) => maj(l.cle, 'derogation', e.target.checked)}
+                                        className="size-3.5"
+                                      />
+                                      Dérogation
+                                    </label>
+                                    {l.derogation && (
+                                      <Champ
+                                        value={l.motifDerogation}
+                                        onChange={(e) => maj(l.cle, 'motifDerogation', e.target.value)}
+                                        placeholder="Motif (ex. livraison partielle)"
+                                        className={cn(
+                                          'h-7 text-[11.5px]',
+                                          !l.motifDerogation.trim() && 'border-danger',
+                                        )}
+                                        aria-label="Motif de la dérogation"
+                                      />
+                                    )}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-2 py-1">
                                 <Champ
@@ -1078,6 +1131,13 @@ export function ReceptionNouvelle() {
                     {sansMotif.map((l) => l.code_recu).join(', ')}
                   </span>
                 )}
+                {sansDerogation.length > 0 && (
+                  <span className="text-danger">
+                    {' '}
+                    — écart hors tolérance ({TOLERANCE_PCT} %) : cochez « Dérogation » et donnez
+                    le motif sur {sansDerogation.map((l) => l.code_recu).join(', ')}
+                  </span>
+                )}
                 {sansFacteur.length > 0 && (
                   <span className="text-danger">
                     {' '}
@@ -1099,7 +1159,7 @@ export function ReceptionNouvelle() {
                 creer.mutate()
               }}
               chargement={creer.isPending}
-              disabled={!pret || !droits.peutEcrire}
+              disabled={!pret || sansDerogation.length > 0 || !droits.peutEcrire}
             >
               <Save />
               Enregistrer la reception

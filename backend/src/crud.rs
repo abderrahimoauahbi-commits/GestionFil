@@ -417,6 +417,13 @@ fn charge_jsonb(champs: &[(String, Value)]) -> String {
         // cela, « » atteindrait la fonction d'entree de `numeric`, qui refuse.
         let valeur = match v {
             Value::String(s) if s.trim().is_empty() => Value::Null,
+            // UNE CASE A COCHER ARRIVE EN `true`/`false`, et la base tient ses
+            // indicateurs en entiers 0/1 (`actif`, `suivi_lot`...). La fonction
+            // d'entree de `bigint` refuse « true » : la creation d'une reference
+            // au catalogue tombait en « erreur interne » (28/09/2026, en prod
+            // comme en local). 1/0 convient aux deux cas — `bigint` le lit, et
+            // `boolean` accepte aussi « 1 » et « 0 ».
+            Value::Bool(b) => Value::from(i64::from(*b)),
             autre => autre.clone(),
         };
         m.insert(nom.clone(), valeur);
@@ -892,4 +899,25 @@ pub async fn retenants(db: &Db, table: &str, valeur: &str) -> Vec<(String, i64)>
 #[allow(dead_code)]
 pub fn horodatage() -> String {
     maintenant()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::charge_jsonb;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn une_case_a_cocher_devient_un_entier() {
+        let champs = vec![
+            ("actif".to_string(), json!(true)),
+            ("suivi_lot".to_string(), json!(false)),
+            ("stock_min_kg".to_string(), json!("")),
+            ("designation".to_string(), json!("Jute 24/1")),
+        ];
+        let v: Value = serde_json::from_str(&charge_jsonb(&champs)).unwrap();
+        assert_eq!(v["actif"], json!(1));
+        assert_eq!(v["suivi_lot"], json!(0));
+        assert_eq!(v["stock_min_kg"], Value::Null);
+        assert_eq!(v["designation"], json!("Jute 24/1"));
+    }
 }

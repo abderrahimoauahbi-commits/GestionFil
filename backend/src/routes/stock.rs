@@ -2997,11 +2997,18 @@ pub async fn creer_reception(
                   quantite_commandee_kg, quantite_bl_kg, nb_colis_ligne, prix_kg_devise,
                   code_devise, taux_change, prix_kg_mad, lot_fournisseur, date_fabrication,
                   date_peremption, statut_qualite, code_magasin_dest, notes,
-                  substitution_acceptee, motif_substitution)
+                  substitution_acceptee, motif_substitution,
+                  derogation_ecart, id_utilisateur_derogation, motif_derogation,
+                  nb_palettes_saisi, nb_bobines_saisi)
              SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13,
-                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+                    $25, $26, $27, $28, $29
                FROM reference r WHERE r.code_reference = $5",
         )
+        // LA DEROGATION ET LE COLISAGE PARTENT AUSSI A LA CREATION. Cette
+        // insertion les oubliait, quand celle de l'ajout de ligne les portait :
+        // une livraison partielle cochee « derogation » etait refusee par C10
+        // (28/09/2026), et les palettes et bobines saisies se perdaient.
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(&id)
         .bind(&id_ligne_bc)
@@ -3026,6 +3033,11 @@ pub async fn creer_reception(
         .bind(&l.notes)
         .bind(i64::from(l.substitution_acceptee.unwrap_or(false)))
         .bind(&l.motif_substitution)
+        .bind(i64::from(l.derogation_ecart.unwrap_or(false)))
+        .bind(if l.derogation_ecart.unwrap_or(false) { Some(&user.id) } else { None })
+        .bind(&l.motif_derogation)
+        .bind(l.nb_palettes)
+        .bind(l.nb_bobines)
         .execute(&mut *tx)
         .await?;
         posees += 1;

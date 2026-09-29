@@ -326,10 +326,7 @@ export function Formulaire({
           'flex justify-end gap-2',
           avecSections &&
             'sticky bottom-[var(--barre-basse)] z-20 -mx-3 border-t border-bordure bg-fond/95 ' +
-              'px-3 py-2 backdrop-blur-sm sm:-mx-4 sm:px-4 md:bottom-0 ' +
-              // AU TELEPHONE, LA BULLE DE L'ASSISTANT FLOTTE EN BAS A DROITE — pile
-              // sur « Enregistrer ». Les boutons s'arretent donc avant elle.
-              'max-md:pr-16',
+              'px-3 py-2 backdrop-blur-sm sm:-mx-4 sm:px-4 md:bottom-0',
         )}
       >
         {surAnnuler && (

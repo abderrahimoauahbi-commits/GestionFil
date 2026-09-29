@@ -498,6 +498,10 @@ export function Coquille() {
           </Bouton>
         </div>
 
+        {/* Le robot de connexion : il s'ouvre seul a la premiere page de la
+            session, et se rappelle par son bouton, ici. */}
+        <RobotConnexion />
+
         {/* Apparence : un tiroir plutot qu'une page, pour que le tableau
             reste visible pendant qu'on regle sa couleur. */}
         <button
@@ -731,9 +735,6 @@ export function Coquille() {
 
       {/* Le tiroir d'apparence : hors de la colonne de contenu, il se pose
           par-dessus tout et n'entre dans aucun flux. */}
-      {/* Le robot de connexion : il s'ouvre seul a la premiere page de la
-          session, et se rappelle par son bouton. */}
-      <RobotConnexion />
       <PanneauApparence ouvert={apparence} surFermeture={() => setApparence(false)} />
       <ChangerMotDePasse ouvert={motDePasse} surFermeture={() => setMotDePasse(false)} />
       <DoubleAuthentification ouvert={doubleAuth} surFermeture={() => setDoubleAuth(false)} />
@@ -804,7 +805,9 @@ export function EnTetePage({
                  sm:-mx-4 sm:px-4"
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <h1 className="text-[15px] font-semibold leading-tight tracking-tight">{titre}</h1>
+        {/* 17 PX ET NON 15. A quinze, le titre ne depassait le texte courant que
+            d'un pixel ou deux : la page n'avait pas de point d'entree. */}
+        <h1 className="text-[17px] font-semibold leading-tight tracking-[-0.015em]">{titre}</h1>
         {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
             par la route courante : aucun ecran n'a a la declarer, donc aucun ne
             peut l'oublier. */}

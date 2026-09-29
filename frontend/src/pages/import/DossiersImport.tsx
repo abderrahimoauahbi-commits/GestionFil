@@ -143,6 +143,7 @@ export function DossiersImport() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(d) => d.id_dossier}
         surClic={(d) => ouvrir(`/import/${d.id_dossier}`)}
         titreCarte={(d) => `Dossier ${d.numero}`}

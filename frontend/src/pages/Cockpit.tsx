@@ -534,7 +534,7 @@ export function Cockpit() {
         <CarteEntete>
           <CarteTitre>Tenue du plan de production</CarteTitre>
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-attenue-texte">
-            <Legende ton="bg-succes/70" texte="couvert" />
+            <Legende ton="bg-succes/25" texte="couvert" />
             <Legende ton="bg-alerte" texte="tendu : sous le stock de sécurité" />
             <Legende ton="bg-danger" texte="rupture" />
           </div>
@@ -556,7 +556,7 @@ export function Cockpit() {
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                  <tr className="border-b border-bordure bg-attenue/50 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte">
                     <th className="px-3 py-2 text-left">Référence</th>
                     <th className="w-28 px-2 py-2 text-left">Sourcing</th>
                     <th className="w-20 px-2 py-2 text-right">Délai</th>
@@ -608,7 +608,9 @@ export function Cockpit() {
                                   ? 'bg-danger'
                                   : m.statut === 'TENDU'
                                     ? 'bg-alerte'
-                                    : 'bg-succes/70',
+                                    // Couvert reste en retrait : le regard doit
+                                    // tomber sur les mois tendus et en rupture.
+                                    : 'bg-succes/25',
                               )}
                             />
                           </Infobulle>
@@ -1217,13 +1219,13 @@ function ChiffresCles() {
 
           Les comptes n'ont pas disparu : ils sont devenus la PRECISION sous le
           chiffre, la ou ils expliquent au lieu de concurrencer. */}
-      <Carte className="border-primaire/30 bg-primaire/[0.04]">
-        <CarteCorps className="py-3">
-          <p className="text-[13px] leading-relaxed text-texte">
-            {phraseDuJour(k, eco?.economies_total_mad ?? 0, eco?.nb_opportunites ?? 0, nbMonoSource)}
-          </p>
-        </CarteCorps>
-      </Carte>
+      {/* LA PHRASE DU JOUR SE LIT COMME UN CHAPEAU D'ARTICLE, pas comme une
+          alerte : un filet laiton a gauche, un corps plus grand, aucune boite.
+          Encadree et teintee, elle ressemblait a un avertissement, et l'oeil
+          la sautait comme on saute les bandeaux. */}
+      <p className="max-w-[110ch] border-l-2 border-or pl-3 text-[14.5px] leading-relaxed text-texte">
+        {phraseDuJour(k, eco?.economies_total_mad ?? 0, eco?.nb_opportunites ?? 0, nbMonoSource)}
+      </p>
 
       <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4">
         <CarteStat
@@ -1313,7 +1315,7 @@ function ChiffresCles() {
             parts={[
               { libelle: 'Au vert', valeur: ok, ton: 'succes' },
               { libelle: 'En attention', valeur: attention, ton: 'alerte' },
-              { libelle: 'Critique', valeur: critiques, ton: 'danger' },
+              { libelle: 'Critique', valeur: critiques, ton: 'grave' },
               // Les ruptures manquaient : les trois segments ne faisaient pas le
               // total des references suivies.
               { libelle: 'Rupture', valeur: ruptures, ton: 'danger' },

@@ -1075,6 +1075,7 @@ export function BonCommande() {
                 colonnes={colonnes}
                 lignes={lignesAffichees}
                 chargement={qLignes.isLoading}
+                erreur={qLignes.error}
                 cle={(l) => l.id_ligne_bc}
                 recherche={false}
                 pagination={false}

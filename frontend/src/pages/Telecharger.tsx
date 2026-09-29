@@ -204,6 +204,7 @@ export function Telecharger() {
             colonnes={colonnes}
             lignes={qJournal.data ?? []}
             chargement={qJournal.isLoading}
+            erreur={qJournal.error}
             cle={(l) => `${l.date_telechargement}-${l.fichier}-${l.utilisateur}`}
             titreCarte={(l) => `${l.plateforme} ${l.version}`}
             texteVide="Aucun telechargement pour l instant."

@@ -660,14 +660,20 @@ export function Qualites() {
         rendu: (q) => <span className="font-medium">{q.code_qualite}</span>,
       },
       { champ: 'nom', entete: 'Nom', filtre: 'texte' },
-      {
-        champ: 'description',
-        entete: 'Description',
-        secondaire: true,
-        rendu: (q) => (
-          <span className="text-attenue-texte">{fmt.texte(q.description)}</span>
-        ),
-      },
+      // UNE COLONNE VIDE PARTOUT NE S'AFFICHE PAS : dix-huit tirets occupaient
+      // le quart de la largeur. Elle revient des qu'une qualite a sa description.
+      ...((qQualites.data ?? []).some((q) => q.description)
+        ? [
+            {
+              champ: 'description',
+              entete: 'Description',
+              secondaire: true,
+              rendu: (q: Qualite) => (
+                <span className="text-attenue-texte">{fmt.texte(q.description)}</span>
+              ),
+            },
+          ]
+        : []),
       {
         champ: 'statut',
         entete: 'Statut',
@@ -742,6 +748,7 @@ export function Qualites() {
           colonnes={colonnes}
           lignes={qQualites.data}
           chargement={qQualites.isLoading}
+          erreur={qQualites.error}
           cle={(q) => q.code_qualite}
           surClic={ouvrir}
           placeholderRecherche="Code, nom, description..."

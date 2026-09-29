@@ -265,6 +265,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
         colonnes={colonnes}
         lignes={vues}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(d) => d.id_mouvement}
         surClic={(d) => navigate(`/mouvements/${d.id_mouvement}`)}
         titreCarte={(d) => `${d.numero_mouvement} · ${d.type_libelle ?? d.code_type_mvt}`}
@@ -480,6 +481,7 @@ export function Mouvements() {
           colonnes={colonnes}
           lignes={lignesVues}
           chargement={qLivre.isLoading}
+          erreur={qLivre.error}
           cle={(l) => `${l.numero_mouvement}-${l.code_reference}-${l.quantite_kg}`}
           titreCarte={(l) => `${l.code_reference} · ${l.code_type_mvt}`}
           texteVide="Aucun mouvement."

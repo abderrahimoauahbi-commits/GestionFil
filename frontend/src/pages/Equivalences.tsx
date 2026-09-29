@@ -26,6 +26,7 @@ import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { useParamVue } from '../lib/navigation'
 import { EnTetePage } from '../composants/Coquille'
+import { BarreRepartition } from '../composants/CarteStat'
 import {
   Alerte,
   Badge,
@@ -92,6 +93,29 @@ interface RefCatalogue {
   code_fournisseur: string | null
 }
 
+/** Du plus sain au moins utile : l'ordre des filtres et de la legende. */
+const ORDRE_QUALIF: Groupe['qualification'][] = [
+  'ALTERNATIF',
+  'MEME FOURNISSEUR',
+  'HETEROGENE',
+  'MONO-REFERENCE',
+]
+
+const LIBELLE_QUALIF: Record<Groupe['qualification'], string> = {
+  ALTERNATIF: 'Alternative réelle',
+  'MEME FOURNISSEUR': 'Même fournisseur',
+  HETEROGENE: 'Hétérogène',
+  'MONO-REFERENCE': 'Une seule réf.',
+}
+
+/** L'etat se lit a la pastille, et le libelle l'accompagne toujours quelque part. */
+const POINT_QUALIF: Record<Groupe['qualification'], string> = {
+  ALTERNATIF: 'bg-succes',
+  'MEME FOURNISSEUR': 'bg-alerte',
+  HETEROGENE: 'bg-danger',
+  'MONO-REFERENCE': 'bg-attenue-texte/45',
+}
+
 const TON_QUALIF: Record<Groupe['qualification'], 'succes' | 'alerte' | 'danger' | 'neutre'> = {
   ALTERNATIF: 'succes',
   'MONO-REFERENCE': 'neutre',
@@ -124,7 +148,7 @@ export function Equivalences() {
 
   const [pointe, setPointe] = useState<string | null>(null)
   const [filtre, setFiltre] = useState('')
-  const [seulementAlternatifs, setSeulementAlternatifs] = useState(false)
+  const [qualif, setQualif] = useState<Groupe['qualification'] | null>(null)
   const [ajout, setAjout] = useState(false)
 
   /* --- Arrivee ciblee : /equivalences?reference=X -------------------------
@@ -172,14 +196,26 @@ export function Equivalences() {
   const groupes = useMemo(() => {
     const f = filtre.trim().toLowerCase()
     return (qGroupes.data ?? [])
-      .filter((g) => !seulementAlternatifs || g.qualification === 'ALTERNATIF')
+      .filter((g) => !qualif || g.qualification === qualif)
       .filter(
         (g) =>
           !f ||
           g.code_groupe_equiv.toLowerCase().includes(f) ||
           (g.libelle ?? '').toLowerCase().includes(f),
       )
-  }, [qGroupes.data, filtre, seulementAlternatifs])
+  }, [qGroupes.data, filtre, qualif])
+
+  /** Combien de groupes dans chaque etat : le bilan qu'on lit avant de choisir. */
+  const parQualif = useMemo(() => {
+    const n: Record<Groupe['qualification'], number> = {
+      ALTERNATIF: 0,
+      'MEME FOURNISSEUR': 0,
+      HETEROGENE: 0,
+      'MONO-REFERENCE': 0,
+    }
+    for (const g of qGroupes.data ?? []) n[g.qualification] += 1
+    return n
+  }, [qGroupes.data])
 
   const groupe = qGroupes.data?.find((g) => g.code_groupe_equiv === pointe) ?? null
   const membres = useMemo(
@@ -294,79 +330,107 @@ export function Equivalences() {
           On montre donc la liste, puis le detail a sa place, avec un retour.
           A partir de `lg` la place existe : les deux colonnes reviennent, et
           les classes ci-dessous ne s'appliquent plus. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,25rem)_minmax(0,1fr)]">
         {/* ---- Groupes ---------------------------------------------------- */}
         <Carte className={cn('h-fit min-w-0', pointe && 'hidden lg:block')}>
           <CarteEntete>
             <CarteTitre>Groupes</CarteTitre>
-            <span className="text-[11px] text-attenue-texte">
+            <span className="text-[11px] tabular-nums text-attenue-texte">
               {groupes.length} / {qGroupes.data?.length ?? 0}
             </span>
           </CarteEntete>
-          <CarteCorps className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Search className="size-3.5 shrink-0 text-attenue-texte" />
+          <CarteCorps className="space-y-2.5">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-attenue-texte" />
               <Champ
-                placeholder="Code ou libelle…"
+                placeholder="Code ou libellé…"
                 value={filtre}
                 onChange={(e) => setFiltre(e.target.value)}
-                className="h-8"
+                className="h-9 pl-8"
+                aria-label="Chercher un groupe"
               />
             </div>
-            <label className="flex cursor-pointer items-center gap-2 text-[12px] text-attenue-texte">
-              <input
-                type="checkbox"
-                checked={seulementAlternatifs}
-                onChange={(e) => setSeulementAlternatifs(e.target.checked)}
-                className="size-3.5"
-              />
-              Seulement ceux qui offrent une vraie alternative
-            </label>
+
+            {/* UN FILTRE PAR ETAT, AVEC SON COMPTE. L'ancienne case ne savait
+                isoler que les vraies alternatives ; or la question la plus
+                frequente est l'inverse — « quels groupes ne protegent de rien ». */}
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrer par état">
+              <PuceFiltre actif={!qualif} surClic={() => setQualif(null)}>
+                Tous <span className="tabular-nums">{qGroupes.data?.length ?? 0}</span>
+              </PuceFiltre>
+              {ORDRE_QUALIF.map((q) => (
+                <PuceFiltre
+                  key={q}
+                  actif={qualif === q}
+                  surClic={() => setQualif(qualif === q ? null : q)}
+                >
+                  <span className={cn('size-2 rounded-full', POINT_QUALIF[q])} />
+                  {LIBELLE_QUALIF[q]} <span className="tabular-nums">{parQualif[q]}</span>
+                </PuceFiltre>
+              ))}
+            </div>
 
             {qGroupes.isLoading && <Chargement texte="Lecture des groupes…" />}
+            {qGroupes.isError && (
+              <Alerte ton="danger">Les groupes n'ont pas pu être lus. Rechargez la page.</Alerte>
+            )}
 
-            <div className="max-h-[32rem] space-y-1 overflow-y-auto">
+            <ul className="-mx-4 max-h-[calc(100dvh-19rem)] min-h-[16rem] divide-y divide-ligne overflow-y-auto border-y border-ligne">
               {groupes.map((g) => (
-                <button
-                  key={g.code_groupe_equiv}
-                  type="button"
-                  onClick={() => setPointe(g.code_groupe_equiv)}
-                  className={cn(
-                    'w-full rounded-[var(--radius)] border p-2 text-left transition-colors',
-                    pointe === g.code_groupe_equiv
-                      ? 'border-primaire bg-primaire/5'
-                      : 'border-bordure hover:bg-attenue/30',
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-[13px] font-medium">{g.libelle}</span>
-                    <Badge ton={TON_QUALIF[g.qualification]}>{g.nb_references}</Badge>
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11px] text-attenue-texte">
-                    <span className="tabular-nums">{g.code_groupe_equiv}</span>
-                    <span>{g.nb_fournisseurs} fourn.</span>
-                    {g.stock_cumule_kg > 0 && (
-                      <span className="tabular-nums">{fmt.compact(g.stock_cumule_kg)} kg</span>
+                <li key={g.code_groupe_equiv}>
+                  <button
+                    type="button"
+                    onClick={() => setPointe(g.code_groupe_equiv)}
+                    aria-current={pointe === g.code_groupe_equiv ? 'true' : undefined}
+                    className={cn(
+                      'relative flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors',
+                      pointe === g.code_groupe_equiv
+                        ? 'bg-primaire/[0.07] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-primaire'
+                        : 'hover:bg-attenue/60',
                     )}
-                  </div>
-                </button>
+                  >
+                    <span
+                      className={cn('mt-[7px] size-2 shrink-0 rounded-full', POINT_QUALIF[g.qualification])}
+                      title={LIBELLE_QUALIF[g.qualification]}
+                    />
+                    <span className="min-w-0 flex-1">
+                      {/* Le nom passe a la ligne plutot que d'etre coupe : deux
+                          groupes voisins ne se distinguent souvent que par la fin. */}
+                      <span className="line-clamp-2 text-[13px] font-medium leading-snug">
+                        {g.libelle}
+                      </span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[11.5px] text-attenue-texte">
+                        <span className="tabular-nums">{g.code_groupe_equiv}</span>
+                        <span>
+                          {g.nb_references} réf. · {g.nb_fournisseurs} fourn.
+                        </span>
+                        {g.stock_cumule_kg > 0 && (
+                          <span className="tabular-nums">{fmt.compact(g.stock_cumule_kg)} kg</span>
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                </li>
               ))}
               {!qGroupes.isLoading && groupes.length === 0 && (
-                <p className="py-4 text-center text-[12px] text-attenue-texte">
-                  Aucun groupe ne correspond.
-                </p>
+                <li className="px-4 py-8 text-center text-[12.5px] text-attenue-texte">
+                  {qGroupes.data?.length
+                    ? 'Aucun groupe ne correspond à ces critères.'
+                    : 'Aucun groupe d’équivalence n’est encore déclaré.'}
+                </li>
               )}
-            </div>
+            </ul>
           </CarteCorps>
         </Carte>
 
         {/* ---- Membres du groupe pointe ------------------------------------ */}
         <div className={cn('min-w-0 space-y-3', !pointe && 'hidden lg:block')}>
           {!groupe ? (
-            <Alerte ton="info">
-              Choisissez un groupe pour voir ses references, changer leur ordre de preference, en
-              rattacher ou en detacher.
-            </Alerte>
+            <BilanGroupes
+              parQualif={parQualif}
+              total={qGroupes.data?.length ?? 0}
+              peutEcrire={droits.peutEcrire}
+            />
           ) : (
             <>
               {/* LE RETOUR N'EXISTE QUE LA OU IL SERT. Au bureau les deux
@@ -408,9 +472,9 @@ export function Equivalences() {
                     </p>
                   ) : (
                     <div className="defilement-x">
-                    <table className="w-full min-w-[46rem] text-[13px] lg:min-w-0">
+                    <table className="grille w-full min-w-[46rem] text-[13px] lg:min-w-0">
                       <thead>
-                        <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                        <tr className="bg-attenue/50 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte">
                           <th className="w-16 px-2 py-2 text-right">Ordre</th>
                           <th className="px-3 py-2 text-left">Référence</th>
                           <th className="w-40 px-2 py-2 text-left">Fournisseur</th>
@@ -425,7 +489,7 @@ export function Equivalences() {
                           const c = chiffres.get(m.code_reference)
                           const dort = (c?.stock ?? 0) > 0 && (c?.besoin ?? 0) === 0
                           return (
-                            <tr key={m.id_ref_grp} className="border-b border-bordure/60">
+                            <tr key={m.id_ref_grp} className="hover:bg-attenue/40">
                               <td className="px-2 py-1.5 text-right tabular-nums text-attenue-texte">
                                 {m.priorite}
                               </td>
@@ -560,6 +624,92 @@ export function Equivalences() {
 
       {confirmation.element}
     </div>
+  )
+}
+
+function PuceFiltre({
+  actif,
+  surClic,
+  children,
+}: {
+  actif: boolean
+  surClic: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={surClic}
+      aria-pressed={actif}
+      className={cn(
+        'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] transition-colors',
+        actif
+          ? 'border-primaire bg-primaire/10 font-medium text-texte'
+          : 'border-bordure text-attenue-texte hover:bg-attenue/60 hover:text-texte',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * CE QUE L'ON VOIT AVANT DE CHOISIR UN GROUPE.
+ *
+ * La colonne de droite restait vide, avec une phrase d'invite : la moitie de
+ * l'ecran pour dire « cliquez a gauche ». Elle porte desormais le bilan du
+ * referentiel — combien de groupes protegent reellement l'approvisionnement,
+ * et pourquoi les autres ne le font pas.
+ */
+function BilanGroupes({
+  parQualif,
+  total,
+  peutEcrire,
+}: {
+  parQualif: Record<Groupe['qualification'], number>
+  total: number
+  peutEcrire: boolean
+}) {
+  return (
+    <Carte>
+      <CarteEntete>
+        <CarteTitre>Bilan des groupes</CarteTitre>
+        <span className="text-[11px] tabular-nums text-attenue-texte">{total} groupe(s)</span>
+      </CarteEntete>
+      <CarteCorps className="space-y-5">
+        {total > 0 && (
+          <BarreRepartition
+            parts={ORDRE_QUALIF.map((q) => ({
+              libelle: LIBELLE_QUALIF[q],
+              valeur: parQualif[q],
+              ton: TON_QUALIF[q],
+            }))}
+          />
+        )}
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+          {ORDRE_QUALIF.map((q) => (
+            <div key={q} className="flex gap-2.5">
+              <span className={cn('mt-[6px] size-2 shrink-0 rounded-full', POINT_QUALIF[q])} />
+              <div className="min-w-0">
+                <dt className="text-[13px] font-medium">
+                  {LIBELLE_QUALIF[q]}{' '}
+                  <span className="font-normal tabular-nums text-attenue-texte">
+                    {parQualif[q]}
+                  </span>
+                </dt>
+                <dd className="text-[12px] leading-snug text-attenue-texte">{EXPLICATION[q]}</dd>
+              </div>
+            </div>
+          ))}
+        </dl>
+        <p className="border-t border-ligne pt-3 text-[12px] text-attenue-texte">
+          {/* On n'annonce que ce que ce compte peut faire. */}
+          {peutEcrire
+            ? 'Choisissez un groupe à gauche pour voir ses références, changer leur ordre de préférence, en rattacher ou en détacher.'
+            : 'Choisissez un groupe à gauche pour voir ses références et leur ordre de préférence.'}
+        </p>
+      </CarteCorps>
+    </Carte>
   )
 }
 

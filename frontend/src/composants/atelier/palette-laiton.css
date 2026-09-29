@@ -1,0 +1,146 @@
+/* =============================================================================
+   LAITON — la famille par defaut depuis le 29/09/2026
+   -----------------------------------------------------------------------------
+   UNE IDENTITE TIREE DU METIER, PAS D'UN CATALOGUE DE THEMES. L'usine file et
+   tisse : laine, jute, polyester, bobines sur des metiers. D'ou trois choix :
+
+   - DES GRIS PIERRE, legerement chauds. Les gris-bleu d'« Ardoise » etaient
+     ceux de n'importe quel outil de gestion ; ceux-ci rappellent la fibre
+     brute, et fatiguent moins l'oeil sous l'eclairage jaune d'un atelier.
+   - UNE ENCRE PETROLE pour agir (boutons, liens, selection). Profonde, elle se
+     lit comme serieuse sans virer au bleu « logiciel » ; elle ne se confond
+     avec aucune couleur d'etat.
+   - UN OR LAITON pour reperer : l'ecran actif dans la navigation, les chiffres
+     qui comptent. Il est employe avec parcimonie — c'est ce qui le rend
+     precieux, et c'est la preference exprimee de longue date (gris, or ancien,
+     jamais de magenta).
+
+   LA BARRE LATERALE EST SOMBRE, meme en clair : elle cadre l'ecran, et le
+   contenu — la ou l'on lit des chiffres — reste la surface la plus claire.
+
+   Contrastes (texte sur surface) : texte 15,9:1 ; texte attenue 6,3:1 ; encre
+   petrole 7,9:1 en clair. En sombre : texte 14,4:1 ; attenue 6,6:1.
+   ========================================================================== */
+
+:root[data-palette="laiton"],
+.atelier[data-palette="laiton"] {
+  --fond: 45 12% 95%;
+  --texte: 213 13% 13%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 213 13% 13%;
+
+  --attenue: 43 15% 92%;
+  --attenue-texte: 220 6% 38%;
+
+  --accent: 194 56% 28%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 194 56% 28%;
+  --primaire-texte: 0 0% 100%;
+
+  --or: 36 46% 45%;
+
+  --danger: 4 76% 40%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 156 79% 27%;
+  --alerte: 30 90% 37%;
+  --info: 214 73% 42%;
+
+  --bordure: 40 12% 87%;
+  --ligne: 43 13% 91%;
+  --champ: 40 10% 76%;
+  --anneau: 194 56% 28%;
+
+  --barre: 213 14% 12%;
+  --barre-texte: 43 13% 91%;
+  --barre-attenue: 48 3% 62%;
+  --barre-actif: 214 13% 19%;
+
+  --ombre-pose: 0 1px 2px -1px hsl(30 15% 20% / 0.08), 0 1px 3px hsl(30 15% 20% / 0.05);
+  --ombre-levee: 0 2px 4px -2px hsl(30 15% 20% / 0.10), 0 6px 14px -4px hsl(30 15% 20% / 0.10);
+
+  --at-titre: 213 14% 12%;
+  --at-activite: 213 14% 12%;
+  --at-lateral: 43 15% 94%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 43 15% 94%;
+  --at-etat: 213 14% 12%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 43 15% 92%;
+  --at-liste-survol: 43 15% 92%;
+  --at-liste-selection: 194 40% 90%;
+  --at-liste-selection-texte: 194 56% 18%;
+  --at-badge: 36 46% 45%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-palette="laiton"],
+.atelier.sombre[data-palette="laiton"] {
+  --fond: 210 10% 8%;
+  --texte: 43 13% 90%;
+
+  --surface: 214 12% 12%;
+  --surface-texte: 43 13% 90%;
+
+  --attenue: 213 11% 15%;
+  --attenue-texte: 42 4% 61%;
+
+  --accent: 192 47% 57%;
+  --accent-texte: 194 48% 8%;
+
+  --primaire: 192 47% 57%;
+  --primaire-texte: 194 48% 8%;
+
+  --or: 39 53% 62%;
+
+  --danger: 4 82% 67%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 151 50% 53%;
+  --alerte: 33 87% 61%;
+  --info: 209 81% 68%;
+
+  --bordure: 213 11% 19%;
+  --ligne: 213 11% 15%;
+  --champ: 212 10% 26%;
+  --anneau: 192 47% 57%;
+
+  --barre: 210 13% 6%;
+  --barre-texte: 43 13% 90%;
+  --barre-attenue: 43 4% 56%;
+  --barre-actif: 213 13% 14%;
+
+  --at-titre: 210 13% 6%;
+  --at-activite: 210 13% 6%;
+  --at-lateral: 210 12% 7%;
+  --at-editeur: 214 12% 12%;
+  --at-panneau: 210 12% 7%;
+  --at-etat: 210 13% 6%;
+  --at-onglet-actif: 214 12% 12%;
+  --at-onglet-inactif: 210 13% 6%;
+  --at-liste-survol: 213 11% 15%;
+  --at-liste-selection: 194 40% 20%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 39 53% 62%;
+  --at-badge-texte: 210 13% 6%;
+
+  color-scheme: dark;
+}
+
+/* --- Les codes et references ------------------------------------------------
+   UNE SEULE FAMILLE DE CARACTERES. Quatre-vingt-sept endroits posaient les codes
+   et les references en chasse fixe : lourd, plus large — les noms de reference
+   finissaient tronques — et d'une autre voix que le reste de l'ecran. Sous
+   Laiton, le « code » s'ecrit dans la police de l'interface, chiffres alignes
+   (tabular-nums) : les colonnes restent comparables, la page parle d'une voix. */
+:root[data-palette="laiton"] {
+  --font-mono: var(--font-sans);
+}
+:root[data-palette="laiton"] .font-mono {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}

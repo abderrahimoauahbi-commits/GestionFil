@@ -640,6 +640,7 @@ export function Plans() {
           colonnes={colonnes}
           lignes={qPlans.data}
           chargement={qPlans.isLoading}
+          erreur={qPlans.error}
           cle={(p) => p.id_plan}
           surClic={ouvrir}
           placeholderRecherche="Libelle, scenario, statut..."

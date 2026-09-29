@@ -806,6 +806,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
               colonnes={colonnes}
               lignes={qTaux.data ?? []}
               chargement={qTaux.isLoading}
+              erreur={qTaux.error}
               cle={(t) => `${t.code_devise}-${t.date_debut}`}
               recherche={false}
               pagination={false}

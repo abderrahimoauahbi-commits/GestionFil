@@ -204,6 +204,7 @@ export function Recettes() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(l) => `${l.code_qualite}|${l.ligne_numero}`}
         placeholderRecherche="Qualité, référence, designation, role..."
         titreCarte={(l) => `${l.code_qualite} · ${l.code_reference}`}

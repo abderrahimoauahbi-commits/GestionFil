@@ -513,6 +513,7 @@ export function Inventaires() {
               colonnes={colonnesLignes}
               lignes={qLignes.data}
               chargement={qLignes.isLoading}
+              erreur={qLignes.error}
               cle={(l) => l.id_ligne_inv}
               titreCarte={(l) => l.code_reference}
               placeholderRecherche="Chercher une référence..."

@@ -243,19 +243,19 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
           </CarteEntete>
           <CarteCorps className="p-0">
             <div className="defilement-x">
-              <table className="grille w-full text-[12px]">
+              <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Catégorie</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Couleur</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Stock (kg)</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Conso / mois</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Couv. (j)</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Délai (j)</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">À commander (kg)</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Statut</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Référence</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Catégorie</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couleur</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Fournisseur</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Stock (kg)</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Conso / mois</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couv. (j)</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Délai (j)</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">À commander (kg)</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Statut</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -505,15 +505,15 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
           </CarteEntete>
           <CarteCorps className="p-0">
             <div className="defilement-x">
-              <table className="grille w-full text-[12px]">
+              <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur actuel</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Prix actuel</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Prix mini du groupe</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Source alternative</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Economie / an</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Référence</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Fournisseur actuel</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Prix actuel</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Prix mini du groupe</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Source alternative</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Economie / an</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -562,13 +562,13 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             </CarteEntete>
             <CarteCorps className="p-0">
               <div className="defilement-x">
-                <table className="grille w-full text-[12px]">
+                <table className="grille w-full text-[13px]">
                   <thead>
                     <tr className="bg-attenue">
-                      <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
-                      <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur unique</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">Délai</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">Couverture</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Référence</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Fournisseur unique</th>
+                      <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Délai</th>
+                      <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couverture</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -606,13 +606,13 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               </CarteTitre>
             </CarteEntete>
             <CarteCorps className="p-0">
-              <table className="grille w-full text-[12px]">
+              <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Devise</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Références</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Budget annuel</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Part</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Devise</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Références</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Budget annuel</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Part</th>
                   </tr>
                 </thead>
                 <tbody>

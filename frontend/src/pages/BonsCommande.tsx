@@ -321,6 +321,7 @@ export function BonsCommande() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(b) => b.id_bc}
         surClic={(b) => naviguer(`/bons-commande/${b.id_bc}`)}
         placeholderRecherche="N° de bon, fournisseur, statut..."

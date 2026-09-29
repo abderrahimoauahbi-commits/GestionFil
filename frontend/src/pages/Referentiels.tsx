@@ -24,7 +24,7 @@ import { EcranReferentiel } from '../components/EcranReferentiel'
 import type { ChampDef } from '../components/Formulaire'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { MaitreDetail } from '../composants/MaitreDetail'
-import { RailLateral, type GroupeRail } from '../composants/RailLateral'
+import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import type { Colonne } from '../components/TableDroits'
 import {
   Alerte,
@@ -640,6 +640,7 @@ function ReferentielLecture({
         colonnes={onglet.lectureSeule.colonnes}
         lignes={q.data ?? []}
         chargement={q.isLoading}
+        erreur={q.error}
         // La machine a etats n'a pas de cle simple : c'est le TRIPLET
         // (entite, source, cible) qui identifie une transition.
         cle={(l) =>
@@ -677,23 +678,44 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
 
   // Deux groupes, parce que les deux derniers ne se modifient pas : les melanger
   // laisserait chercher un bouton de creation qui n'existe pas.
-  const groupes: GroupeRail[] = [
+  const groupes = ([
     {
-      titre: 'Modifiables',
+      titre: 'À tenir',
       entrees: visibles.filter((o) => !o.lectureSeule).map((o) => ({
         cle: o.cle,
         libelle: o.libelle,
       })),
     },
     {
-      titre: 'Structurels',
+      titre: 'En consultation',
       entrees: visibles.filter((o) => o.lectureSeule).map((o) => ({
         cle: o.cle,
         libelle: o.libelle,
         resume: 'lecture seule',
       })),
     },
-  ]
+  ] as GroupeRail[]).filter((g) => g.entrees.length > 0)
+
+  const contenu = onglet.ecranDedie ? (
+    <div key={onglet.cle}>{onglet.ecranDedie()}</div>
+  ) : onglet.lectureSeule ? (
+    <ReferentielLecture
+      key={onglet.cle}
+      onglet={onglet as Onglet & { lectureSeule: NonNullable<Onglet['lectureSeule']> }}
+    />
+  ) : (
+    <EcranReferentiel<Ligne>
+      key={onglet.cle}
+      titre={onglet.libelle}
+      module={onglet.module}
+      chemin={onglet.chemin}
+      cle={onglet.identifiant}
+      colonnes={onglet.colonnes}
+      champs={onglet.champs}
+      libelleUnite={onglet.unite}
+      titreCarte={(l) => String(l[onglet.identifiant])}
+    />
+  )
 
   return (
     <>
@@ -703,41 +725,26 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
           suit l'onglet, pour que « /couleurs » s'annonce « Couleurs » et tombe
           sur SA fiche, pas sur celle des referentiels en general. */}
       <EnTetePage titre={onglet.libelle} />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,13rem)]">
-      {/* Le contenu vient EN PREMIER dans le flux : sur petit ecran, la liste
-          des referentiels passe alors sous le tableau plutot que de le repousser
-          hors de l'ecran a chaque ouverture. */}
-      <div className="min-w-0 lg:order-1">
-        {onglet.ecranDedie ? (
-          <div key={onglet.cle}>{onglet.ecranDedie()}</div>
-        ) : onglet.lectureSeule ? (
-          <ReferentielLecture
-            key={onglet.cle}
-            onglet={onglet as Onglet & { lectureSeule: NonNullable<Onglet['lectureSeule']> }}
-          />
-        ) : (
-          <EcranReferentiel<Ligne>
-            key={onglet.cle}
-            titre={onglet.libelle}
-            module={onglet.module}
-            chemin={onglet.chemin}
-            cle={onglet.identifiant}
-            colonnes={onglet.colonnes}
-            champs={onglet.champs}
-            libelleUnite={onglet.unite}
-            titreCarte={(l) => String(l[onglet.identifiant])}
-          />
-        )}
-      </div>
-
-      <div className="lg:order-2">
-        <RailLateral
-          groupes={groupes}
-          actif={onglet.cle}
-          surChoix={(c) => setOnglet(visibles.find((o) => o.cle === c) ?? visibles[0])}
-        />
-      </div>
-      </div>
+      {/* LE RAIL A GAUCHE, COMME PARTOUT. Il etait seul de l'application a
+          droite : on le cherchait la ou Stock, Mouvements et Configuration
+          l'ont appris, et il prenait a la liste la largeur dont elle manquait.
+          Au telephone il se replie sur une ligne au-dessus du tableau. */}
+      {/* Un seul referentiel monte (« /categories ») : rien a choisir, pas de rail. */}
+      {visibles.length > 1 ? (
+        <PageAvecRail
+          rail={
+            <RailLateral
+              groupes={groupes}
+              actif={onglet.cle}
+              surChoix={(c) => setOnglet(visibles.find((o) => o.cle === c) ?? visibles[0])}
+            />
+          }
+        >
+          {contenu}
+        </PageAvecRail>
+      ) : (
+        contenu
+      )}
     </>
   )
 }

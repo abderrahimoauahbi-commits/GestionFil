@@ -943,6 +943,7 @@ export function PlanAchat() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(p) => p.id_proposition}
         titreCarte={(p) => p.code_reference}
         placeholderRecherche="Référence, fournisseur, urgence..."

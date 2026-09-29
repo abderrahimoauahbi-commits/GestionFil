@@ -27,9 +27,12 @@ import type { ReactNode } from 'react'
 // toujours monte. La laisser au seul atelier faisait que le navigateur ne la
 // chargeait jamais — le reglage existait, sans effet.
 import './atelier/palettes.css'
+// LA FAMILLE PAR DEFAUT, a part et chargee apres les autres : c'est elle qui
+// porte l'identite de l'outil depuis la refonte du 29/09/2026.
+import './atelier/palette-laiton.css'
 
 export type Palette =
-  | 'ardoise' | 'graphite' | 'slate' | 'divalto' | 'chaud' | 'contraste'
+  | 'laiton' | 'ardoise' | 'graphite' | 'slate' | 'divalto' | 'chaud' | 'contraste'
   | 'glassier' | 'claude' | 'azur'
   // Les cinq familles demandees le 20/09/2026, aux couleurs dictees.
   | 'industriel' | 'atlas' | 'nordique' | 'terminal' | 'verre'
@@ -53,7 +56,7 @@ export interface Apparence {
 }
 
 const DEFAUT: Apparence = {
-  palette: 'ardoise',
+  palette: 'laiton',
   densite: 'normale',
   // INTER PAR DEFAUT, maintenant qu'elle est reellement livree. Elle est
   // dessinee pour les ecrans denses — chiffres a chasse fixe, lettres qui ne
@@ -66,8 +69,16 @@ const DEFAUT: Apparence = {
   menuFige: false,
 }
 const CLE = 'gestionfil.apparence'
+/** Marque la bascule unique d'Ardoise vers Laiton (voir `lire`). */
+const CLE_BASCULE = 'gestionfil.apparence.laiton'
 
 export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: string[] }[] = [
+  {
+    cle: 'laiton',
+    nom: 'Laiton',
+    resume: 'Gris pierre, encre petrole et or laiton, barre laterale sombre. L identite de l outil — recommandee.',
+    teintes: ['#F4F3F0', '#1F5B6E', '#A67C3D'],
+  },
   /* ---------------------------------------------------------------------
      LES CINQ FAMILLES DEMANDEES, EN TETE DE LISTE
      ---------------------------------------------------------------------
@@ -265,7 +276,17 @@ function lire(): Apparence {
     if (!brut) return DEFAUT
     // Fusion avec le defaut : un reglage ajoute plus tard ne doit pas rendre
     // illisible une preference enregistree avant lui.
-    return { ...DEFAUT, ...(JSON.parse(brut) as Partial<Apparence>) }
+    const lu = { ...DEFAUT, ...(JSON.parse(brut) as Partial<Apparence>) }
+    // LE NOUVEAU DEFAUT ATTEINT AUSSI CEUX QUI N'AVAIENT RIEN CHOISI. « Ardoise »
+    // etait le defaut jusqu'au 29/09/2026 : un poste qui la porte encore ne l'a,
+    // le plus souvent, jamais choisie. Il passe une fois a « Laiton » ; celui
+    // qui avait choisi une autre famille la garde, et celui qui revient ensuite
+    // a Ardoise la garde aussi (la bascule ne se fait qu'une fois).
+    if (lu.palette === 'ardoise' && !localStorage.getItem(CLE_BASCULE)) {
+      lu.palette = 'laiton'
+      localStorage.setItem(CLE_BASCULE, '1')
+    }
+    return lu
   } catch {
     return DEFAUT
   }

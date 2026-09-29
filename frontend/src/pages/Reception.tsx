@@ -1121,6 +1121,7 @@ export function Reception() {
                 colonnes={colonnes}
                 lignes={lignesAffichees}
                 chargement={qLignes.isLoading}
+                erreur={qLignes.error}
                 cle={(l) => l.id_ligne_reception}
                 recherche={false}
                 pagination={false}

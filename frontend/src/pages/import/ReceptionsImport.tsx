@@ -102,6 +102,7 @@ export function ReceptionsImport() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(r) => r.id_reception}
         surClic={(r) => ouvrir(`/receptions-import/${r.id_reception}`)}
         titreCarte={(r) => `Réception ${r.numero_reception}`}

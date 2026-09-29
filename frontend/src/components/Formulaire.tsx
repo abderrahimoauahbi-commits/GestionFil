@@ -20,7 +20,18 @@ import type { ReactNode } from 'react'
 import { Lock } from 'lucide-react'
 import { useDroits } from '../auth/AuthContext'
 import { cn } from '../lib/utils'
-import { Alerte, Bouton, Champ, Etiq, Selecteur, Zone } from '../composants/ui/base'
+import {
+  Alerte,
+  Bouton,
+  Carte,
+  CarteCorps,
+  CarteEntete,
+  CarteTitre,
+  Champ,
+  Etiq,
+  Selecteur,
+  Zone,
+} from '../composants/ui/base'
 import { Aide, Dialogue, DialogueContenu, Interrupteur } from '../composants/ui/surcouches'
 
 export type TypeChamp = 'texte' | 'nombre' | 'entier' | 'date' | 'booleen' | 'liste' | 'zone'
@@ -49,7 +60,20 @@ export interface ChampDef {
   max?: number
   pas?: number
   pleineLargeur?: boolean
+  /**
+   * LA SECTION DU CHAMP (« Général », « Achat »…). Des qu'un seul champ en
+   * declare une, le formulaire se range en cartes titrees, dans l'ordre ou les
+   * sections apparaissent ; un champ sans section va dans « Autres
+   * informations ». Aucun champ n'en declare : le formulaire reste tel qu'il
+   * etait, a l'identique.
+   */
+  section?: string
+  /** Dans un formulaire a sections : le champ occupe deux colonnes au lieu d'une. */
+  etendue?: 2
 }
+
+/** Le nom de la section qui recueille les champs qui n'en declarent pas. */
+const SECTION_PAR_DEFAUT = 'Autres informations'
 
 interface Props {
   module: string
@@ -137,23 +161,43 @@ export function Formulaire({
     surValider(charge)
   }
 
-  return (
-    <form onSubmit={soumettre} className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2">
-        {visibles.map((c) => {
-          const actif = saisissable(c)
-          const manque = manquants.includes(c.champ)
-          const valeur = donnees[c.champ]
-          const type = c.type ?? 'texte'
-          const maj = (v: unknown) => setDonnees((d) => ({ ...d, [c.champ]: v }))
-          const id = `ch-${c.champ}`
+  const avecSections = champs.some((c) => c.section)
 
-          return (
+  /**
+   * Un champ, son etiquette et son controle.
+   *
+   * EN SECTIONS, TOUT CE QUI EST SUR UNE MEME RANGEE A LA MEME HAUTEUR. Le champ
+   * texte fait 32 px, l'interrupteur etait pose dans une boite de 36 : sur une
+   * grille de trois colonnes, la difference se voyait d'un coup d'oeil, comme un
+   * champ decale. L'etiquette garde aussi une hauteur fixe, pour que la mention
+   * « lecture seule » ou l'aide n'abaisse pas son seul controle.
+   */
+  const rendreChamp = (c: ChampDef) => {
+    const actif = saisissable(c)
+    const manque = manquants.includes(c.champ)
+    const valeur = donnees[c.champ]
+    const type = c.type ?? 'texte'
+    const maj = (v: unknown) => setDonnees((d) => ({ ...d, [c.champ]: v }))
+    const id = `ch-${c.champ}`
+    const large = c.pleineLargeur || type === 'zone'
+
+    return (
             <div
               key={c.champ}
-              className={cn((c.pleineLargeur || type === 'zone') && 'sm:col-span-2')}
+              className={cn(
+                avecSections
+                  ? large
+                    ? 'sm:col-span-2 xl:col-span-3'
+                    : c.etendue === 2 && 'sm:col-span-2'
+                  : large && 'sm:col-span-2',
+                avecSections && 'min-w-0',
+              )}
             >
-              <Etiq htmlFor={id} obligatoire={c.obligatoire && actif}>
+              <Etiq
+                htmlFor={id}
+                obligatoire={c.obligatoire && actif}
+                className={avecSections ? 'h-4 whitespace-nowrap' : undefined}
+              >
                 {c.libelle}
                 {!actif && (
                   <span className="ml-1 inline-flex items-center gap-1 text-xs font-normal text-attenue-texte">
@@ -174,7 +218,7 @@ export function Formulaire({
               </Etiq>
 
               {type === 'booleen' ? (
-                <div className="flex h-9 items-center gap-2">
+                <div className={cn('flex items-center gap-2', avecSections ? 'h-8' : 'h-9')}>
                   <Interrupteur
                     id={id}
                     disabled={!actif}
@@ -227,9 +271,42 @@ export function Formulaire({
               )}
 
             </div>
-          )
-        })}
-      </div>
+    )
+  }
+
+  /* Les sections, dans l'ordre ou elles apparaissent ; une section dont tous
+     les champs sont masques par les droits disparait, sans carte vide. */
+  const sections: { nom: string; champs: ChampDef[] }[] = []
+  if (avecSections) {
+    for (const c of visibles) {
+      const nom = c.section ?? SECTION_PAR_DEFAUT
+      let s = sections.find((x) => x.nom === nom)
+      if (!s) sections.push((s = { nom, champs: [] }))
+      s.champs.push(c)
+    }
+  }
+
+  return (
+    <form onSubmit={soumettre} className={avecSections ? 'space-y-3' : 'space-y-5'}>
+      {avecSections ? (
+        sections.map((s) => (
+          <Carte key={s.nom}>
+            <CarteEntete>
+              <CarteTitre>{s.nom}</CarteTitre>
+            </CarteEntete>
+            <CarteCorps className="p-4">
+              {/* Une colonne au telephone, deux des 640 px, trois des 1280 px :
+                  des colonnes EGALES, pour que les champs s'alignent d'une
+                  rangee a l'autre et d'une section a l'autre. */}
+              <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
+                {s.champs.map(rendreChamp)}
+              </div>
+            </CarteCorps>
+          </Carte>
+        ))
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">{visibles.map(rendreChamp)}</div>
+      )}
 
       {enfants}
 
@@ -238,7 +315,23 @@ export function Formulaire({
       )}
       {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 
-      <div className="flex justify-end gap-2">
+      {/* EN SECTIONS, « ENREGISTRER » RESTE A PORTEE. Une fiche de trente champs
+          fait plusieurs ecrans de haut au telephone : le bouton, pose en bas,
+          obligeait a tout faire defiler pour valider. La barre colle au bas de
+          l'ecran, AU-DESSUS de la barre de navigation du telephone
+          (`--barre-basse`, publiee par la coquille) — et au ras du bord des
+          qu'elle disparait, a partir de 768 px. */}
+      <div
+        className={cn(
+          'flex justify-end gap-2',
+          avecSections &&
+            'sticky bottom-[var(--barre-basse)] z-20 -mx-3 border-t border-bordure bg-fond/95 ' +
+              'px-3 py-2 backdrop-blur-sm sm:-mx-4 sm:px-4 md:bottom-0 ' +
+              // AU TELEPHONE, LA BULLE DE L'ASSISTANT FLOTTE EN BAS A DROITE — pile
+              // sur « Enregistrer ». Les boutons s'arretent donc avant elle.
+              'max-md:pr-16',
+        )}
+      >
         {surAnnuler && (
           <Bouton type="button" variante="contour" onClick={surAnnuler}>
             Annuler

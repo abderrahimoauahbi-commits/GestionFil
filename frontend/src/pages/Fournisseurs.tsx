@@ -72,42 +72,51 @@ export function Fournisseurs() {
   ]
 
   const champs: ChampDef[] = [
+    /* --- Identité ---------------------------------------------------- */
     {
       champ: 'code_fournisseur',
       libelle: 'Code',
       obligatoire: true,
       cleCreation: true,
       aide: 'Cite par le catalogue et les commandes : non modifiable ensuite.',
+      section: 'Identité',
     },
-    { champ: 'nom', libelle: 'Raison sociale', obligatoire: true },
-    { champ: 'contact_principal', libelle: 'Contact' },
-    { champ: 'telephone', libelle: 'Telephone' },
-    { champ: 'email', libelle: 'Email', pleineLargeur: true },
-    { champ: 'ville', libelle: 'Ville' },
-    { champ: 'pays', libelle: 'Pays', obligatoire: true },
-    { champ: 'adresse', libelle: 'Adresse', type: 'zone', pleineLargeur: true },
+    { champ: 'nom', libelle: 'Raison sociale', obligatoire: true, section: 'Identité', etendue: 2 },
+    { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identité' },
+    /* --- Contact ----------------------------------------------------- */
+    { champ: 'contact_principal', libelle: 'Contact', section: 'Contact' },
+    { champ: 'telephone', libelle: 'Telephone', section: 'Contact' },
+    { champ: 'email', libelle: 'Email', section: 'Contact' },
+    { champ: 'ville', libelle: 'Ville', section: 'Contact' },
+    { champ: 'pays', libelle: 'Pays', obligatoire: true, section: 'Contact' },
+    { champ: 'adresse', libelle: 'Adresse', type: 'zone', pleineLargeur: true, section: 'Contact' },
+    /* --- Conditions commerciales ------------------------------------- */
+    {
+      champ: 'code_devise',
+      libelle: 'Devise de facturation',
+      type: 'liste',
+      options: qDev.data?.map((d) => ({ valeur: d.code_devise, libelle: d.code_devise })),
+      section: 'Conditions commerciales',
+    },
+    { champ: 'conditions_paiement', libelle: 'Conditions de paiement', section: 'Conditions commerciales' },
+    {
+      champ: 'delai_paiement_jours',
+      libelle: 'Délai de paiement (jours)',
+      type: 'entier',
+      aide: 'Alimente le DPO du cockpit.',
+      section: 'Conditions commerciales',
+    },
+    { champ: 'incoterm', libelle: 'Incoterm', section: 'Conditions commerciales' },
+    /* --- Logistique et réception ------------------------------------- */
     {
       champ: 'delai_livraison_jours',
       libelle: 'Délai de livraison (jours)',
       type: 'entier',
       min: 1,
       aide: 'Entre dans le calcul du stock minimum dynamique (formule F3).',
+      section: 'Logistique et réception',
     },
-    { champ: 'conditions_paiement', libelle: 'Conditions de paiement' },
-    {
-      champ: 'delai_paiement_jours',
-      libelle: 'Délai de paiement (jours)',
-      type: 'entier',
-      aide: 'Alimente le DPO du cockpit.',
-    },
-    {
-      champ: 'code_devise',
-      libelle: 'Devise de facturation',
-      type: 'liste',
-      options: qDev.data?.map((d) => ({ valeur: d.code_devise, libelle: d.code_devise })),
-    },
-    { champ: 'incoterm', libelle: 'Incoterm' },
-    { champ: 'transporteur', libelle: 'Transporteur' },
+    { champ: 'transporteur', libelle: 'Transporteur', section: 'Logistique et réception' },
     {
       champ: 'palettes_par_conteneur',
       libelle: 'Palettes par conteneur',
@@ -117,16 +126,18 @@ export function Fournisseurs() {
         'Combien de palettes entrent dans un conteneur chez ce fournisseur. Le bon de ' +
         'commande en déduit le nombre de conteneurs à annoncer — le chiffre que le ' +
         'transitaire attend, et qui figurait sur 71 des anciens bons Excel.',
+      section: 'Logistique et réception',
     },
-    { champ: 'note_globale', libelle: 'Note globale (/100)', type: 'nombre', min: 0, max: 100 },
     {
       champ: 'tolerance_pesee_pct',
       libelle: 'Tolerance de pesee (%)',
       type: 'nombre',
       min: 0,
       aide: 'Au-dela, une reception exige une derogation nominative.',
+      section: 'Logistique et réception',
     },
-    { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
+    /* --- Évaluation -------------------------------------------------- */
+    { champ: 'note_globale', libelle: 'Note globale (/100)', type: 'nombre', min: 0, max: 100, section: 'Évaluation' },
   ]
 
   return (

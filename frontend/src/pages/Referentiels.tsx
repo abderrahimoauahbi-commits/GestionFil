@@ -332,24 +332,26 @@ const ONGLETS: Onglet[] = [
       compte('nb_references_en_stock', 'En stock'),
     ],
     champs: [
-      { champ: 'code_magasin', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'nom', libelle: 'Nom', obligatoire: true },
-      { champ: 'type', libelle: 'Type' },
-      { champ: 'responsable', libelle: 'Responsable' },
-      { champ: 'adresse', libelle: 'Adresse', type: 'zone' },
+      { champ: 'code_magasin', libelle: 'Code', obligatoire: true, cleCreation: true, section: 'Identification' },
+      { champ: 'nom', libelle: 'Nom', obligatoire: true, section: 'Identification' },
+      { champ: 'type', libelle: 'Type', section: 'Identification' },
+      { champ: 'responsable', libelle: 'Responsable', section: 'Identification' },
+      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identification' },
+      { champ: 'adresse', libelle: 'Adresse', type: 'zone', section: 'Identification' },
       {
         champ: 'inclure_mrp',
         libelle: 'Compte dans le stock disponible',
         type: 'booleen',
         aide: 'Decoche pour exclure ce magasin du calcul de couverture et du plan d achat.',
+        section: 'Règles de stock',
       },
       {
         champ: 'est_quarantaine',
         libelle: 'Zone de quarantaine',
         type: 'booleen',
         aide: 'Destination imposee des receptions non conformes. Exclut automatiquement du MRP.',
+        section: 'Règles de stock',
       },
-      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },
   {
@@ -406,8 +408,8 @@ const ONGLETS: Onglet[] = [
       compte('nb_mouvements', 'Mouvements'),
     ],
     champs: [
-      { champ: 'code_type_mvt', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      { champ: 'code_type_mvt', libelle: 'Code', obligatoire: true, cleCreation: true, section: 'Identification' },
+      { champ: 'libelle', libelle: 'Libelle', obligatoire: true, section: 'Identification' },
       {
         champ: 'signe',
         libelle: 'Sens',
@@ -421,13 +423,14 @@ const ONGLETS: Onglet[] = [
         aide:
           'Fige a la creation : les mouvements deja enregistres ont ete appliques avec ce sens, ' +
           'le changer les inverserait retroactivement dans le grand livre.',
+        section: 'Identification',
       },
-      { champ: 'exige_prix', libelle: 'Exige un prix', type: 'booleen' },
-      { champ: 'impacte_cmup', libelle: 'Impacte le CMUP', type: 'booleen', cleCreation: true },
-      { champ: 'exige_of', libelle: 'Exige un numéro d OF', type: 'booleen' },
-      { champ: 'exige_motif_ligne', libelle: 'Exige un motif de ligne', type: 'booleen' },
-      { champ: 'couleur', libelle: 'Couleur', aide: 'Code hexadecimal, ex. #10b981.' },
-      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
+      { champ: 'couleur', libelle: 'Couleur', aide: 'Code hexadecimal, ex. #10b981.', section: 'Identification' },
+      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identification' },
+      { champ: 'exige_prix', libelle: 'Exige un prix', type: 'booleen', section: 'Règles de saisie' },
+      { champ: 'impacte_cmup', libelle: 'Impacte le CMUP', type: 'booleen', cleCreation: true, section: 'Règles de saisie' },
+      { champ: 'exige_of', libelle: 'Exige un numéro d OF', type: 'booleen', section: 'Règles de saisie' },
+      { champ: 'exige_motif_ligne', libelle: 'Exige un motif de ligne', type: 'booleen', section: 'Règles de saisie' },
     ],
   },
   {
@@ -519,8 +522,8 @@ const ONGLETS: Onglet[] = [
       compte('nb_utilisations', 'Employe'),
     ],
     champs: [
-      { champ: 'id_frais', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      { champ: 'id_frais', libelle: 'Code', obligatoire: true, cleCreation: true, section: 'Identification' },
+      { champ: 'libelle', libelle: 'Libelle', obligatoire: true, section: 'Identification' },
       {
         champ: 'categorie',
         libelle: 'Categorie',
@@ -534,19 +537,24 @@ const ONGLETS: Onglet[] = [
           { valeur: 'TRANSIT', libelle: 'Transit' },
           { valeur: 'AUTRE', libelle: 'Autre' },
         ],
+        section: 'Identification',
       },
       {
         champ: 'piece_justificative',
         libelle: 'Piece justificative',
         aide: "Le document qui porte ce frais : quittance de la douane, facture du transitaire… "
           + "C'est ce qu'on cherche dans le dossier, et ce que la saisie assistee reconnaitra.",
+        section: 'Identification',
       },
+      { champ: 'ordre', libelle: 'Ordre d affichage', type: 'entier', section: 'Identification' },
+      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identification' },
       {
         champ: 'recuperable',
         libelle: 'Recuperable',
         type: 'booleen',
         aide: "La TVA a l'importation se recupere : elle se saisit pour que le dossier balance, "
           + "mais elle n'entre jamais dans le cout de revient.",
+        section: 'Coût de revient',
       },
       {
         champ: 'inclus_dans_cout',
@@ -554,6 +562,7 @@ const ONGLETS: Onglet[] = [
         type: 'booleen',
         defaut: true,
         aide: 'Un frais recuperable ne peut pas y entrer : la marchandise le paierait deux fois.',
+        section: 'Coût de revient',
       },
       {
         champ: 'commun',
@@ -562,6 +571,7 @@ const ONGLETS: Onglet[] = [
         defaut: true,
         aide: "Commun : reparti sur toutes les lignes. Sinon, la saisie demande sur quelles "
           + 'lignes il porte — une analyse, une redevance sur une seule marchandise.',
+        section: 'Coût de revient',
       },
       {
         champ: 'methode_repartition',
@@ -571,9 +581,8 @@ const ONGLETS: Onglet[] = [
         defaut: 'VALEUR',
         aide: 'Le classeur repartit tout a la valeur. Le poids sert pour un fret facture au kilo, '
           + 'les parts egales pour une formalite qui ne depend ni du prix ni du poids.',
+        section: 'Coût de revient',
       },
-      { champ: 'ordre', libelle: 'Ordre d affichage', type: 'entier' },
-      { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },
   {

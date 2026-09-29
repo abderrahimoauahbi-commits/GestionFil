@@ -1,0 +1,18 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml"
+  },
+  "ignore": {
+    "customPatterns": [
+      "**/node_modules/**",
+      "**/target/**",
+      "**/dist/**",
+      "**/.git/**",
+      "**/backend/pieces/**",
+      "**/*.pdf",
+      "**/*.log.err",
+      "**/seed_100_referentiel_reel.sql"
+    ]
+  }
+}

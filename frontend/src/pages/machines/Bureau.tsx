@@ -21,6 +21,7 @@ import {
   type LigneConso, type Machine, type TypeFiche, type Zone,
 } from './noyau'
 import { useFiche } from './useFiche'
+import { QuestionStock, useValiderFiche } from './Questions'
 import { useAuth } from '../../auth/AuthContext'
 import { Link } from 'react-router-dom'
 
@@ -612,6 +613,7 @@ function FicheBureau({
   fermer: () => void
 }) {
   const f = useFiche(machine.code_machine, zone, type)
+  const v = useValiderFiche(f)
   const [ajout, setAjout] = useState(false)
 
   const qMag = useQuery({
@@ -827,7 +829,8 @@ function FicheBureau({
       {f.envoi.isSuccess && (
         <Alerte ton="succes" titre="Fiche validée">
           Le constat est enregistré
-          {f.envoi.data?.mouvement && ` · mouvement ${f.envoi.data.mouvement}`}.
+          {f.envoi.data?.mouvement && ` · mouvement ${f.envoi.data.mouvement}`}
+          {f.envoi.data?.correction && ` · correction de stock ${f.envoi.data.correction}`}.
           La consommation se lit dans le journal, en cumul.
         </Alerte>
       )}
@@ -852,7 +855,7 @@ function FicheBureau({
             <button
               type="button"
               disabled={f.envoi.isPending}
-              onClick={() => f.envoi.mutate(true)}
+              onClick={() => f.envoi.mutate({ forcerLot: true })}
               className="inline-flex min-h-[36px] items-center gap-2 rounded-[var(--radius-sm)]
                          bg-alerte px-3 text-[13px] font-semibold text-surface
                          disabled:opacity-40"
@@ -872,11 +875,14 @@ function FicheBureau({
         </Alerte>
       )}
 
+      <QuestionStock f={f} />
+      {v.element}
+
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={!f.pret || f.envoi.isPending}
-          onClick={() => f.envoi.mutate(undefined)}
+          disabled={!f.pret || f.envoi.isPending || !!f.stockCourt}
+          onClick={v.valider}
           className="inline-flex min-h-[40px] items-center gap-2 rounded-[var(--radius-sm)]
                      bg-primaire px-4 text-[14px] font-semibold text-primaire-texte
                      disabled:opacity-40"

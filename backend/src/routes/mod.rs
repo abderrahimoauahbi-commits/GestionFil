@@ -244,6 +244,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/import/dossiers/{id}/engagements", post(importation::ajouter_engagement))
         .route("/api/import/engagements/{id}", delete(importation::supprimer_engagement))
         .route("/api/import/dossiers/{id}/cloturer", post(importation::cloturer))
+        .route("/api/import/dossiers/{id}/valider", post(importation::valider_dossier))
         .route("/api/import/factures/{id}",
                patch(importation::modifier_facture).delete(importation::supprimer_facture))
         .route("/api/import/factures/{id}/lignes", post(importation::ajouter_ligne))

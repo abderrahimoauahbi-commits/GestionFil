@@ -411,11 +411,45 @@ export function ReceptionImport() {
               Toutes les réceptions
             </Bouton>
             {peutValider && (
-              <Bouton disabled={!complete} chargement={valider.isPending} onClick={() => valider.mutate()}>
+              <Bouton
+                disabled={!complete}
+                chargement={valider.isPending}
+                onClick={() => {
+                  /* LE LOT INTERNE, ANNONCE AVANT D'ETRE POSE (01/10/2026) :
+                     une ligne sans lot recoit celui de sa facture, sinon le
+                     numero de la reception et son rang — si la reference est
+                     suivie par lot. On fait confirmer ; on peut encore saisir
+                     le vrai lot a la place. */
+                  const sansLot = lignes.filter((l) => Number(l.quantite) > 0 && !l.lot.trim())
+                  if (sansLot.length === 0) return valider.mutate()
+                  confirmation.demander({
+                    titre: `${sansLot.length} ligne(s) sans lot`,
+                    libelleConfirmer: 'Générer les lots et valider',
+                    description: (
+                      <>
+                        Pour les références suivies par lot, chaque ligne recevra le lot de sa facture
+                        s’il existe, sinon un lot interne : {r ? r.numero : 'le numéro de la réception'}-01,
+                        -02… Cette livraison ne se mélangera pas aux autres.
+                        <ul className="mt-2 space-y-0.5 text-[12px]">
+                          {sansLot.map((l) => (
+                            <li key={l.id_ligne}>
+                              {l.code_reference}
+                              {l.numero_facture && <span className="text-attenue-texte"> · facture {l.numero_facture}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                        <span className="mt-2 block">Pour saisir le vrai lot à la place, annulez et corrigez la ligne.</span>
+                      </>
+                    ),
+                    action: () => valider.mutate(),
+                  })
+                }}
+              >
                 <PackageCheck />
                 Valider — entrée en stock
               </Bouton>
             )}
+            {confirmation.element}
           </>
         }
       />

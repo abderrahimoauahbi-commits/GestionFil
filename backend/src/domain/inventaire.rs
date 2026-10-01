@@ -78,8 +78,9 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
     //
     // CE QUI RESTE HORS CHAMP : une reference SUIVIE AU LOT et sans aucun lot en
     // stock. Lui ouvrir une ligne sans lot creerait un ajustement que le suivi de
-    // lot refuserait a la cloture. Aucune reference n'est suivie au lot
-    // aujourd'hui ; le jour ou il y en aura, il faudra saisir le lot trouve.
+    // lot refuserait a la cloture. Depuis le 01/10/2026 les fils sont suivis
+    // au lot : un lot trouve en rayon se saisit au comptage, qui lui ouvre sa
+    // ligne (theorique zero) — voir `saisir_comptage`.
     let global = type_inventaire == "GLOBAL";
     let res = sqlx::query(
         "INSERT INTO ligne_inventaire

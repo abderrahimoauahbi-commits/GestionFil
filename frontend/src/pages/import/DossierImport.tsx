@@ -16,11 +16,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { ChevronRight, Lock, Plus, Save, Target, Trash2 } from 'lucide-react'
+import { ChevronRight, Lock, Plus, Save, ShieldCheck, Target, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
+import { BoutonDevalider } from '../../composants/BoutonDevalider'
 import {
   Alerte,
   Badge,
@@ -34,11 +35,11 @@ import {
   Etiq,
   Selecteur,
 } from '../../composants/ui/base'
-import { useConfirmation } from '../../composants/ui/surcouches'
+import { Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { Avancement, PastilleStatut } from './DossiersImport'
-import { CiblesDialogue, ClotureDialogue, echec, nombre, Tuile, useRafraichir } from './dialogues'
+import { CiblesDialogue, ClotureDialogue, echec, nombre, Tuile, useEnregistrerTout, useRafraichir, type Signaler } from './dialogues'
 import { PiecesDossier } from './PiecesDossier'
 import { EngagementsDossier } from './EngagementsDossier'
 import {
@@ -58,12 +59,36 @@ export function DossierImport() {
   const { id = '' } = useParams()
   const droits = useDroits(MODULE)
   const ouvrir = useOuvrirVue()
+  const rafraichir = useRafraichir(id)
+  const confirmation = useConfirmation()
   const [cloture, setCloture] = useState(false)
+  const tout = useEnregistrerTout()
 
   const q = useQuery({
     queryKey: ['import-dossier', id],
     queryFn: () => api.get<DossierComplet>(`/api/import/dossiers/${id}`),
     enabled: !!id,
+  })
+
+  /* LE CYCLE DE VIE DU DOSSIER, sur son ecran (demande du 30/09/2026) :
+     valider le brouillon, le supprimer tant qu'il n'est que brouillon,
+     cloturer, devalider une cloture. */
+  const valider = useMutation({
+    mutationFn: () => api.post(`/api/import/dossiers/${id}/valider`),
+    onSuccess: () => {
+      toast.success('Dossier validé — il est en cours')
+      rafraichir()
+    },
+    onError: echec,
+  })
+  const supprimer = useMutation({
+    mutationFn: () => api.delete(`/api/import/dossiers/${id}`),
+    onSuccess: () => {
+      toast.success('Brouillon supprimé')
+      rafraichir()
+      ouvrir('/import')
+    },
+    onError: echec,
   })
 
   if (q.isLoading) return <Chargement texte="Lecture du dossier…" />
@@ -90,6 +115,57 @@ export function DossierImport() {
             <Bouton variante="contour" onClick={() => ouvrir('/import')}>
               Tous les dossiers
             </Bouton>
+            {ecrire && (
+              <Bouton
+                disabled={tout.aEnregistrer.length === 0}
+                chargement={tout.enCours}
+                title={tout.aEnregistrer.length ? `À enregistrer : ${tout.aEnregistrer.join(', ')}` : 'Rien à enregistrer'}
+                onClick={() => void tout.toutEnregistrer()}
+              >
+                <Save />
+                Enregistrer tout
+                {tout.aEnregistrer.length > 0 && (
+                  <span className="rounded bg-primaire-texte/15 px-1 text-[10px]">{tout.aEnregistrer.length}</span>
+                )}
+              </Bouton>
+            )}
+            {droits.peutEcrire && dossier.statut === 'BROUILLON' && (
+              <Bouton
+                variante="contour"
+                className="text-danger hover:bg-danger/10"
+                onClick={() =>
+                  confirmation.demander({
+                    titre: `Supprimer le dossier ${dossier.numero} ?`,
+                    destructif: true,
+                    libelleConfirmer: 'Supprimer',
+                    description:
+                      'Un brouillon n’a rien fait entrer en stock : il est effacé avec ses factures, ses frais et ses engagements.',
+                    action: () => supprimer.mutate(),
+                  })
+                }
+              >
+                <Trash2 />
+                Supprimer le brouillon
+              </Bouton>
+            )}
+            {droits.peutValider && dossier.statut === 'BROUILLON' && (
+              <Bouton
+                chargement={valider.isPending}
+                disabled={d.factures.length === 0}
+                title={d.factures.length === 0 ? 'Ajoutez d’abord les factures du dossier' : undefined}
+                onClick={() => valider.mutate()}
+              >
+                <ShieldCheck />
+                Valider
+              </Bouton>
+            )}
+            <BoutonDevalider
+              document="dossiers-import"
+              id={id}
+              statut={dossier.statut}
+              taille="md"
+              consequence="L’ajustement du CUMP fait à la clôture reste au journal ; la prochaine clôture n’ajoutera que la différence."
+            />
             {droits.peutValider && dossier.statut === 'EN_COURS' && (
               <Bouton onClick={() => setCloture(true)}>
                 <Lock />
@@ -108,15 +184,56 @@ export function DossierImport() {
         </Alerte>
       )}
 
-      <Synthese d={d} />
-      <Informations d={d} ecrire={ecrire} />
-      <EngagementsDossier d={d} ecrire={ecrire} />
-      <FraisDossier d={d} ecrire={ecrire} />
-      <FacturesDossier d={d} ecrire={ecrire} />
+      {/* DISPOSITION (demandes des 30/09 et 01/10/2026) : le dossier et sa
+          DUM en haut ; frais, factures et engagements dans leurs onglets —
+          les engagements par fournisseur, chaque facture sur le sien ; le
+          recapitulatif et les totaux en bas, dans leur cadre. */}
+      <Informations d={d} ecrire={ecrire} signaler={tout.signaler} />
+
+      {/* LES TROIS ONGLETS RESTENT MONTES, seulement masques : une saisie
+          commencee dans l'un (un engagement, un frais) ne doit pas se perdre
+          quand on passe a l'autre avant « Enregistrer tout ». */}
+      <Onglets defaultValue="frais">
+        <OngletsListe>
+          <Onglet value="frais">
+            Frais
+            <span className="text-[11px] tabular-nums text-attenue-texte">{d.frais.length}</span>
+          </Onglet>
+          <Onglet value="factures">
+            Factures
+            <span className="text-[11px] tabular-nums text-attenue-texte">{d.factures.length}</span>
+          </Onglet>
+          <Onglet value="engagements">
+            Engagements
+            <span className="text-[11px] tabular-nums text-attenue-texte">{(d.engagements ?? []).length}</span>
+            {d.factures.some((f) => !f.id_engagement) && <span className="size-1.5 rounded-full bg-alerte" title="Facture(s) sans engagement" />}
+          </Onglet>
+        </OngletsListe>
+        <OngletContenu value="frais" forceMount className="mt-3 data-[state=inactive]:hidden">
+          <FraisDossier d={d} ecrire={ecrire} signaler={tout.signaler} />
+        </OngletContenu>
+        <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
+          <FacturesDossier d={d} ecrire={ecrire} />
+        </OngletContenu>
+        <OngletContenu value="engagements" forceMount className="mt-3 data-[state=inactive]:hidden">
+          <EngagementsDossier d={d} ecrire={ecrire} signaler={tout.signaler} />
+        </OngletContenu>
+      </Onglets>
+
       <PiecesDossier d={d} ecrire={ecrire} />
       {d.ajustements.length > 0 && <JournalCloture d={d} />}
 
+      <Carte>
+        <CarteEntete>
+          <CarteTitre>Récapitulatif et totaux</CarteTitre>
+        </CarteEntete>
+        <CarteCorps>
+          <Synthese d={d} />
+        </CarteCorps>
+      </Carte>
+
       <ClotureDialogue idDossier={id} ouvert={cloture} surFermer={() => setCloture(false)} />
+      {confirmation.element}
     </div>
   )
 }
@@ -157,16 +274,18 @@ function Synthese({ d }: { d: DossierComplet }) {
 // 1. Informations du dossier
 // ============================================================================
 
-function Informations({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
+function Informations({ d, ecrire, signaler }: { d: DossierComplet; ecrire: boolean; signaler?: Signaler }) {
   const rafraichir = useRafraichir(d.dossier.id_dossier)
   const { dossier } = d
   const initial = () => ({
     numero: dossier.numero,
     numero_bl: dossier.numero_bl ?? '',
     conteneurs: dossier.conteneurs ?? '',
-    taux_change: String(dossier.taux_change),
     date_arrivee: dossier.date_arrivee?.slice(0, 10) ?? '',
     notes: dossier.notes ?? '',
+    numero_dum: dossier.numero_dum ?? '',
+    regime_douanier: dossier.regime_douanier ?? '010',
+    date_dum: dossier.date_dum?.slice(0, 10) ?? '',
   })
   const [f, setF] = useState(initial)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -177,8 +296,8 @@ function Informations({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
     mutationFn: () =>
       api.patch(`/api/import/dossiers/${dossier.id_dossier}`, {
         ...f,
-        taux_change: nombre(f.taux_change),
         date_arrivee: f.date_arrivee || null,
+        date_dum: f.date_dum || null,
       }),
     onSuccess: () => {
       toast.success('Dossier enregistré')
@@ -188,6 +307,11 @@ function Informations({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
   })
   const maj = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setF((x) => ({ ...x, [k]: e.target.value }))
+  // Se signaler a « Enregistrer tout » tant qu'un champ a change.
+  useEffect(() => {
+    signaler?.('informations', modifie && ecrire ? { libelle: 'informations du dossier', enregistrer: () => enregistrer.mutateAsync() } : null)
+  })
+  useEffect(() => () => signaler?.('informations', null), [signaler])
 
   return (
     <Carte>
@@ -201,7 +325,9 @@ function Informations({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
         )}
       </CarteEntete>
       <CarteCorps>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {/* PAS DE DEVISE SUR LE DOSSIER (01/10/2026) : en groupage, chaque
+            facture porte la sienne. LA DUM est celle du dossier, une seule. */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
           <div>
             <Etiq>Numéro</Etiq>
             <Champ value={f.numero} onChange={maj('numero')} disabled={!ecrire} />
@@ -214,19 +340,23 @@ function Informations({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
             <Etiq>Conteneur(s)</Etiq>
             <Champ value={f.conteneurs} onChange={maj('conteneurs')} disabled={!ecrire} />
           </div>
-          <div>
-            <Etiq>Devise globale</Etiq>
-            <Champ value={dossier.code_devise} disabled />
+          <div className="md:col-span-2">
+            <Etiq>N° DUM</Etiq>
+            <Champ value={f.numero_dum} onChange={maj('numero_dum')} disabled={!ecrire} placeholder="Bureau · régime · année · série" />
           </div>
           <div>
-            <Etiq>Taux de change</Etiq>
-            <Champ inputMode="decimal" value={f.taux_change} onChange={maj('taux_change')} disabled={!ecrire} />
+            <Etiq>Régime</Etiq>
+            <Champ value={f.regime_douanier} onChange={maj('regime_douanier')} disabled={!ecrire} placeholder="010" />
+          </div>
+          <div>
+            <Etiq>Date DUM</Etiq>
+            <Champ type="date" value={f.date_dum} onChange={maj('date_dum')} disabled={!ecrire} />
           </div>
           <div>
             <Etiq>Date d'arrivée</Etiq>
             <Champ type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} disabled={!ecrire} />
           </div>
-          <div className="col-span-2 md:col-span-3 xl:col-span-6">
+          <div className="col-span-2 md:col-span-4 xl:col-span-7">
             <Etiq>Notes</Etiq>
             <Champ value={f.notes} onChange={maj('notes')} disabled={!ecrire} />
           </div>
@@ -240,7 +370,7 @@ function Informations({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
 // 2. Frais du dossier — saisis dans le tableau
 // ============================================================================
 
-function FraisDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
+function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: boolean; signaler?: Signaler }) {
   const idDossier = d.dossier.id_dossier
   const rafraichir = useRafraichir(idDossier)
   const confirmation = useConfirmation()
@@ -304,6 +434,11 @@ function FraisDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
   const complet = n.id_frais && nombre(n.montant_devise) > 0 && (n.code_devise === 'MAD' || nombre(n.cours_change) > 0)
   const maj = (k: keyof typeof n) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setN((x) => ({ ...x, [k]: e.target.value, ...(k === 'code_devise' && e.target.value === 'MAD' ? { cours_change: '1' } : {}) }))
+  // Le frais en cours de saisie, complet, part avec « Enregistrer tout ».
+  useEffect(() => {
+    signaler?.('frais', complet && ecrire ? { libelle: 'nouveau frais', enregistrer: () => ajouter.mutateAsync() } : null)
+  })
+  useEffect(() => () => signaler?.('frais', null), [signaler])
 
   return (
     <Carte>
@@ -455,6 +590,7 @@ function FraisDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) {
         </div>
       </CarteCorps>
       <CiblesDialogue idDossier={idDossier} frais={cible} lignes={d.lignes} surFermer={() => setCible(null)} />
+      {confirmation.element}
     </Carte>
   )
 }

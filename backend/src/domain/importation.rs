@@ -20,7 +20,7 @@ use crate::db::{arrondi_kg, maintenant, Db};
 use crate::error::{AppError, AppResult};
 use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Tolerance de reception, en % du poids facture : une ligne dont le reste est
 /// sous ce seuil est consideree comme recue. Meme ordre que la tolerance de
@@ -247,6 +247,31 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
         )));
     }
     let numeros_dossiers: Vec<&str> = dossiers.iter().map(|(_, n, _)| n.as_str()).collect();
+
+    // LE LOT INTERNE, quand le fournisseur n'en a pas mis (01/10/2026) : le lot
+    // de la ligne de facture s'il y en a un, sinon le numero de la reception et
+    // le rang de la ligne. Deux livraisons ne se rangent jamais sous un meme
+    // « sans lot ». Un lot saisi n'est jamais touche.
+    sqlx::query(
+        "WITH rangs AS (
+             SELECT rl.id_reception_ligne, l.lot_fournisseur AS lot_facture,
+                    row_number() OVER (ORDER BY f.numero_facture, l.ligne_numero) AS rang
+               FROM import_reception_lignes rl
+               JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+               JOIN import_factures f ON f.id_facture = l.id_facture
+               JOIN reference r ON r.code_reference = l.code_reference AND r.suivi_lot = 1
+              WHERE rl.id_reception = $1
+                AND COALESCE(btrim(rl.lot_fournisseur), '') = '')
+         UPDATE import_reception_lignes rl
+            SET lot_fournisseur = COALESCE(NULLIF(btrim(g.lot_facture), ''),
+                                           $2 || '-' || lpad(g.rang::text, 2, '0'))
+           FROM rangs g
+          WHERE rl.id_reception_ligne = g.id_reception_ligne",
+    )
+    .bind(id_reception)
+    .bind(&numero)
+    .execute(&mut *tx)
+    .await?;
 
     let lignes = sqlx::query(
         "SELECT rl.id_reception_ligne, rl.id_ligne,
@@ -668,6 +693,27 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     .bind(id_dossier)
     .fetch_all(&mut *tx)
     .await?;
+
+    // UNE CLOTURE QUI SUIT UNE DEVALIDATION n'ajoute que la DIFFERENCE. Le
+    // journal garde ce que les clotures precedentes ont deja porte au CUMP ;
+    // reprendre le total ajouterait les memes frais une seconde fois.
+    let deja: HashMap<String, i64> = sqlx::query_as::<_, (String, i64)>(
+        "SELECT code_reference, (sum(montant_dhs) * 100)::bigint
+           FROM import_ajustements_cump WHERE id_dossier = $1
+          GROUP BY code_reference",
+    )
+    .bind(id_dossier)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+    let references: Vec<(String, i64, f64)> = references
+        .into_iter()
+        .map(|(r, f, q)| {
+            let d = deja.get(&r).copied().unwrap_or(0);
+            (r, f - d, q)
+        })
+        .collect();
 
     let horodatage = maintenant();
     let mut detail = Vec::new();

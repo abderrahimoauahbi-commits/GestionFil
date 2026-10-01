@@ -532,7 +532,11 @@ pub async fn valider_fiche(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
 ) -> AppResult<Json<Value>> {
+    // `?corriger=1` : l'operateur a confirme DEUX fois — charger malgre un
+    // stock insuffisant, puis creer le mouvement de correction (01/10/2026).
+    let corriger = matches!(q.get("corriger").map(String::as_str), Some("1" | "true"));
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
 
     let f = charger_fiche(&state.db, &id).await?;
@@ -544,7 +548,7 @@ pub async fn valider_fiche(
         )));
     }
 
-    let lignes = charger_lignes(&state.db, &id).await?;
+    let mut lignes = charger_lignes(&state.db, &id).await?;
     if lignes.is_empty() {
         return Err(AppError::Invalide("la fiche ne porte aucune ligne".into()));
     }
@@ -647,8 +651,106 @@ pub async fn valider_fiche(
         }));
     }
 
+    // --- 0. LE STOCK DU MAGASIN COUVRE-T-IL LE CHARGEMENT ? -----------------
+    //
+    // LA MATIERE EST LA, LE STOCK DIT LE CONTRAIRE. Le magasinier a les
+    // bobines devant lui ; l'ERP, lui, n'en connait pas assez — une reception
+    // oubliee, un retour mal impute. Refuser net le pousserait a ne plus rien
+    // saisir. On refuse donc AVEC LE DETAIL, et l'ecran pose deux questions :
+    // charger quand meme ? creer la correction ? Sans correction, on bloque —
+    // un chargement ne fait jamais du stock negatif en silence.
+    let mut manques: Vec<(usize, f64)> = Vec::new();
+    if f.type_fiche == "CHARGE" {
+        if let Some(magasin) = f.code_magasin.as_deref() {
+            let mut detail = Vec::new();
+            for (i, l) in lignes.iter().enumerate() {
+                let kg = l.kg_mouvementes.unwrap_or(0.0);
+                if kg <= 0.0 {
+                    continue;
+                }
+                let stock: f64 = sqlx::query_scalar(
+                    "SELECT COALESCE((SELECT quantite_kg::float8 FROM stock_magasin
+                                       WHERE code_reference = $1 AND code_magasin = $2), 0)",
+                )
+                .bind(&l.reference)
+                .bind(magasin)
+                .fetch_one(&state.db)
+                .await?;
+                let manque = arrondi_kg(kg - stock);
+                if manque > 0.0005 {
+                    manques.push((i, manque));
+                    detail.push(format!(
+                        "{} (lot {}) : {} kg a charger, {} kg en stock, il manque {} kg",
+                        l.reference, l.lot, arrondi_kg(kg), arrondi_kg(stock), manque
+                    ));
+                }
+            }
+            if !manques.is_empty() && !corriger {
+                return Err(AppError::RegleMetier(format!(
+                    "R02-MAG : stock insuffisant au magasin {magasin} — {}",
+                    detail.join(" ; ")
+                )));
+            }
+        }
+    }
+    // Le lot corrige porte desormais le chargement : son solde n'a pas a
+    // bloquer une seconde fois.
+    for (i, _) in &manques {
+        lignes[*i].lot_force = true;
+        if lignes[*i].motif_lot_force.is_none() {
+            lignes[*i].motif_lot_force =
+                Some("Correction de stock confirmee avant chargement".into());
+        }
+    }
+
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+
+    // --- 0 bis. LA CORRECTION, tracee, avant le chargement --------------------
+    let mut numero_correction: Option<String> = None;
+    if corriger && !manques.is_empty() {
+        let magasin = f.code_magasin.clone().unwrap_or_default();
+        let numero = numeroter(&mut tx, "mouvement", "numero_mouvement", "MVT").await?;
+        let id_mvt = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO mouvement
+                 (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
+                  code_motif, reference_document, observations_globales, responsable, id_utilisateur)
+             VALUES ($1,$2,$3,'AJUST_INV_POS',$4,'INVENTAIRE',$5,$6,$7,$8)",
+        )
+        .bind(&id_mvt)
+        .bind(&numero)
+        .bind(&f.date_fiche)
+        .bind(&magasin)
+        .bind(&f.numero)
+        .bind(format!(
+            "Correction avant chargement {} : matiere presente physiquement, stock insuffisant. Confirme par l operateur.",
+            f.numero
+        ))
+        .bind(&f.responsable)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+        for (n, (i, manque)) in manques.iter().enumerate() {
+            let l = &lignes[*i];
+            let prix = cmup(&mut tx, &magasin, &l.reference).await?;
+            sqlx::query(
+                "INSERT INTO ligne_mouvement
+                     (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
+                      lot_fournisseur, code_motif_ligne)
+                 VALUES ($1,$2,$3,$4,$5,$6,'R6')",
+            )
+            .bind(&id_mvt)
+            .bind(n as i64 + 1)
+            .bind(&l.reference)
+            .bind(*manque)
+            .bind(prix)
+            .bind(&l.lot)
+            .execute(&mut *tx)
+            .await?;
+        }
+        numero_correction = Some(numero);
+    }
 
     // --- 1. LE MOUVEMENT, cote magasin seulement -----------------------------
     let mut numero_mvt: Option<String> = None;
@@ -811,6 +913,7 @@ pub async fn valider_fiche(
         "numero_fiche": f.numero,
         "statut": "VALIDE",
         "mouvement": numero_mvt,
+        "correction": numero_correction,
     })))
 }
 

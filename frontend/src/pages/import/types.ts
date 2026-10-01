@@ -47,6 +47,10 @@ export interface Dossier {
   date_cloture: string | null
   cree_par: string | null
   cloture_par: string | null
+  /** La DUM du dossier — une seule par expedition en groupage. */
+  numero_dum: string | null
+  regime_douanier: string
+  date_dum: string | null
 }
 
 export interface Facture {
@@ -63,6 +67,8 @@ export interface Facture {
   nb_bobines: number | null
   nb_lignes: number
   statut_reception: 'NON_RECUE' | 'PARTIELLE' | 'RECUE'
+  /** L'engagement d'importation sur lequel la facture s'impute. */
+  id_engagement: string | null
 }
 
 /** Une ligne de `v_import_cout_revient`. */
@@ -229,6 +235,11 @@ export interface Engagement {
   quantite_kg: number | null
   montant_devise: number | null
   code_devise: string | null
+  /** La remarque, saisie avec l'engagement (colonne `notes`). */
+  notes: string | null
+  /** Le fournisseur dont la proforma est couverte — vide sur les anciens. */
+  code_fournisseur: string | null
+  fournisseur_nom: string | null
 }
 
 /**

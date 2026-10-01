@@ -30,6 +30,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   Calculator,
+  CalendarDays,
+  LayoutGrid,
   Camera,
   FileText,
   Layers,
@@ -66,7 +68,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Aide, Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
+import { Aide, Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'PLANS'
@@ -998,7 +1000,27 @@ export function Plans() {
           </CarteCorps>
         </Carte>
 
-        {/* --- Recettes retenues ------------------------------------------- */}
+        {/* TROIS TABLEAUX, TROIS ONGLETS (demande du 30/09/2026) : les
+            qualites produites, leur saisonnalite et le plan deploye ne
+            s'empilent plus sur une longue page ; chacun a toute la largeur. */}
+        <Onglets defaultValue="qualites">
+          <OngletsListe>
+            <Onglet value="qualites">
+              <Layers className="size-3.5" />
+              Qualités produites
+              <span className="text-[11px] tabular-nums text-attenue-texte">{lignes.length}</span>
+            </Onglet>
+            <Onglet value="saisonnalite" disabled={lignes.length === 0} title={lignes.length === 0 ? 'Ajoutez d’abord une qualité' : undefined}>
+              <CalendarDays className="size-3.5" />
+              Saisonnalité
+            </Onglet>
+            <Onglet value="plan" disabled={lignes.length === 0 || periode.length === 0} title={lignes.length === 0 ? 'Ajoutez d’abord une qualité' : undefined}>
+              <LayoutGrid className="size-3.5" />
+              Plan déployé
+              <span className="text-[11px] tabular-nums text-attenue-texte">{fmt.entier(totalPeriode)} m²</span>
+            </Onglet>
+          </OngletsListe>
+          <OngletContenu value="qualites" className="mt-3">
         <Carte repliable="plans.2">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
@@ -1068,8 +1090,10 @@ export function Plans() {
             )}
           </CarteCorps>
         </Carte>
+          </OngletContenu>
 
         {/* --- Saisonnalite ------------------------------------------------ */}
+          <OngletContenu value="saisonnalite" className="mt-3">
         {lignes.length > 0 && (
           <Carte repliable="plans.3">
             <CarteEntete>
@@ -1166,8 +1190,10 @@ export function Plans() {
             </CarteCorps>
           </Carte>
         )}
+          </OngletContenu>
 
         {/* --- Grille deduite ---------------------------------------------- */}
+          <OngletContenu value="plan" className="mt-3">
         {lignes.length > 0 && periode.length > 0 && (
           <Carte repliable="plans.4">
             <CarteEntete>
@@ -1292,6 +1318,8 @@ export function Plans() {
             </CarteCorps>
           </Carte>
         )}
+          </OngletContenu>
+        </Onglets>
 
         {/* --- Pied -------------------------------------------------------- */}
         {modifiable && (

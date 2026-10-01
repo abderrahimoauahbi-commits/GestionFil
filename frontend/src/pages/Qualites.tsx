@@ -59,7 +59,7 @@ import {
   Selecteur,
   Zone,
 } from '../composants/ui/base'
-import { Aide, useConfirmation } from '../composants/ui/surcouches'
+import { Aide, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'QUALITES'
@@ -1314,7 +1314,23 @@ export function Qualites() {
 
           </Carte>
 
-        <div className="grid items-start gap-3 @5xl:grid-cols-[minmax(0,330px)_minmax(0,1fr)]">
+        {/* DEUX TABLEAUX, DEUX ONGLETS (demande du 30/09/2026) : la composition
+            et les densites ne s'ecrasent plus cote a cote ; chacune a toute la
+            largeur. La composition, plan de travail de l'ecran, s'ouvre d'abord. */}
+        <Onglets defaultValue="composition">
+          <OngletsListe>
+            <Onglet value="composition">
+              <Boxes className="size-3.5" />
+              Composition
+              <span className="text-[11px] tabular-nums text-attenue-texte">{composition.length}</span>
+            </Onglet>
+            <Onglet value="densites">
+              <Layers className="size-3.5" />
+              Densité par rôle
+              <span className="text-[11px] tabular-nums text-attenue-texte">{lignes.length}</span>
+            </Onglet>
+          </OngletsListe>
+          <OngletContenu value="densites" className="mt-3">
           <Carte repliable="qualites.2">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
@@ -1385,6 +1401,8 @@ export function Qualites() {
 
             </CarteCorps>
           </Carte>
+          </OngletContenu>
+          <OngletContenu value="composition" className="mt-3">
         <Carte repliable="qualites.3">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
@@ -1471,8 +1489,8 @@ export function Qualites() {
 
           </CarteCorps>
         </Carte>
-
-        </div>
+          </OngletContenu>
+        </Onglets>
 
         {/* --- Pied : verifications et validation unique -------------------- */}
         {modifiable && (

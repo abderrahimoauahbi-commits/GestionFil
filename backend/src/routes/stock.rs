@@ -1133,6 +1133,48 @@ pub async fn saisir_comptage(
         .execute(&mut *tx)
         .await?;
 
+        // UN LOT TROUVE AU COMPTAGE (01/10/2026). Le rayon porte un lot que la
+        // base ne connait pas — c'est ainsi que le stock « sans lot » se
+        // repartit entre de vrais lots. On ouvre sa ligne, theorique zero ; la
+        // cloture l'ajuste comme les autres, et le lot entre au stock par lot.
+        // Seulement pour une reference suivie, dans le magasin de l'inventaire.
+        let lot_saisi = c.lot_fournisseur.as_deref().map(str::trim).filter(|l| !l.is_empty());
+        if res.rows_affected() == 0 {
+            if let Some(lot) = lot_saisi {
+                let admis: bool = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM inventaire i, reference r
+                                     WHERE i.id_inventaire = $1 AND i.code_magasin = $2
+                                       AND r.code_reference = $3 AND r.suivi_lot = 1)",
+                )
+                .bind(&id)
+                .bind(&c.code_magasin)
+                .bind(&c.code_reference)
+                .fetch_one(&mut *tx)
+                .await?;
+                if admis {
+                    sqlx::query(
+                        "INSERT INTO ligne_inventaire
+                             (id_ligne_inv, id_inventaire, code_reference, code_magasin, lot_fournisseur,
+                              quantite_theorique_kg, quantite_comptee_kg, motif_ecart, statut_ligne,
+                              id_utilisateur_comptage, date_comptage)
+                         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, 'COMPTE', $8, $9)",
+                    )
+                    .bind(uuid::Uuid::new_v4().to_string())
+                    .bind(&id)
+                    .bind(&c.code_reference)
+                    .bind(&c.code_magasin)
+                    .bind(lot)
+                    .bind(arrondi_kg(c.quantite_comptee_kg))
+                    .bind(c.motif_ecart.clone().or_else(|| Some("Lot trouvé au comptage".into())))
+                    .bind(&user.id)
+                    .bind(&horodatage)
+                    .execute(&mut *tx)
+                    .await?;
+                    n += 1;
+                    continue;
+                }
+            }
+        }
         if res.rows_affected() == 0 {
             return Err(AppError::Introuvable(format!(
                 "ligne d'inventaire pour {} au magasin {}{}",
@@ -1225,6 +1267,9 @@ pub struct NouveauBc {
     pub date_livraison_prevue: Option<String>,
     pub motif_creation: Option<String>,
     pub notes: Option<String>,
+    /// LA DEVISE DU BON, au choix (01/10/2026). Absente : celle de la fiche
+    /// fournisseur, comme avant.
+    pub code_devise: Option<String>,
     /// Lignes saisies en meme temps que l'entete. Tout part dans UNE
     /// transaction : un bon a moitie cree, avec un numero attribue et aucune
     /// ligne, serait un document fantome que personne ne saurait interpreter.
@@ -1241,7 +1286,7 @@ pub async fn creer_bc(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let (devise, conditions): (String, Option<String>) = sqlx::query_as(
+    let (devise_fiche, conditions): (String, Option<String>) = sqlx::query_as(
         "SELECT COALESCE(code_devise, 'MAD'), conditions_paiement
            FROM fournisseur WHERE code_fournisseur = $1",
     )
@@ -1249,6 +1294,13 @@ pub async fn creer_bc(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("fournisseur {}", b.code_fournisseur)))?;
+    let devise = b
+        .code_devise
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(String::from)
+        .unwrap_or(devise_fiche);
 
     // RG-09 : le taux est fige a la creation puis reevalue a la validation.
     let taux: f64 = sqlx::query_scalar(
@@ -1998,6 +2050,9 @@ pub struct ModifBc {
     /// Une chaine vide vaut « reprends le calcul » — d'ou `Option<String>` :
     /// un `Option<i64>` ne saurait pas distinguer « efface » de « ne touche pas ».
     pub nombre_conteneurs: Option<String>,
+    /// Changer la devise du bon : le taux engage est repris au taux en vigueur
+    /// de la nouvelle devise, les lignes suivent, les totaux sont recalcules.
+    pub code_devise: Option<String>,
 }
 
 /// Modifie l'entete d'un bon de commande tant qu'il n'est pas engage.
@@ -2059,6 +2114,38 @@ pub async fn modifier_bc(
     .bind(&b.nombre_conteneurs)
     .execute(&mut *tx)
     .await?;
+
+    // LA DEVISE AU CHOIX (01/10/2026). Les PRIX des lignes ne sont pas
+    // convertis : un prix negocie en euros ne devient pas un prix en dollars
+    // par un calcul. L'ecran demande de les reverifier.
+    if let Some(devise) = b.code_devise.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        let taux: f64 = sqlx::query_scalar(
+            "SELECT taux::float8 FROM taux_change
+              WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
+                AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
+              ORDER BY date_debut DESC LIMIT 1",
+        )
+        .bind(devise)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise}.")))?;
+        sqlx::query(
+            "UPDATE bon_commande SET code_devise = $2, taux_change_engage = $3, date_taux_engage = $4
+              WHERE id_bc = $1 AND code_devise <> $2",
+        )
+        .bind(&id)
+        .bind(devise)
+        .bind(taux)
+        .bind(maintenant())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE ligne_bc SET code_devise = $2 WHERE id_bc = $1 AND code_devise <> $2")
+            .bind(&id)
+            .bind(devise)
+            .execute(&mut *tx)
+            .await?;
+        recalculer_bc(&mut tx, &id).await?;
+    }
 
     tx.commit().await?;
     Ok(Json(json!({ "id_bc": id, "modifie": true })))

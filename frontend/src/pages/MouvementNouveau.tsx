@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link2, Unlink2 } from 'lucide-react'
 import { api, ErreurApi } from '../api/client'
+import { ChampLot } from '../composants/ChampLot'
 import { EnTetePage } from '../components/Layout'
 import { ChampReference, type RefTrouvee } from '../composants/ChampReference'
 import { Bouton, Message, fmt } from '../components/ui'
@@ -623,11 +624,15 @@ export function MouvementNouveau() {
 
                   {r?.suivi_lot === 1 && (
                     <div className="w-full lg:w-52">
-                      <input
-                        placeholder="Lot fournisseur (obligatoire)"
-                        value={l.lot_fournisseur}
-                        onChange={(e) => majLigne(i, 'lot_fournisseur', e.target.value)}
+                      {/* LE LOT SE CHOISIT dans ce que le magasin tient, le
+                          plus ancien d'abord ; « Autre lot… » pour une entree. */}
+                      <ChampLot
+                        reference={l.code_reference}
+                        magasin={entete.code_magasin}
+                        valeur={l.lot_fournisseur}
+                        onChange={(v) => majLigne(i, 'lot_fournisseur', v)}
                         className={champ}
+                        invalide={!l.lot_fournisseur.trim()}
                       />
                     </div>
                   )}

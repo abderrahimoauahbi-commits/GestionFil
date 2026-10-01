@@ -215,11 +215,13 @@ export const machinesApi = {
     ),
   creerFiche: (corps: unknown) =>
     api.post<{ id_fiche: string; numero_fiche: string }>('/api/machines/fiches', corps),
-  valider: (id: string) =>
-    api.post<{ consomme_kg: number; mouvement: string | null }>(
-      `/api/machines/fiches/${id}/valider`,
+  /** `corriger` : charger malgre un stock insuffisant, en tracant la correction. */
+  valider: (id: string, corriger = false) =>
+    api.post<{ consomme_kg: number; mouvement: string | null; correction?: string | null }>(
+      `/api/machines/fiches/${id}/valider${corriger ? '?corriger=1' : ''}`,
       {},
     ),
+  remplacerFiche: (id: string, corps: unknown) => api.put(`/api/machines/fiches/${id}`, corps),
   annuler: (id: string, motif: string) =>
     api.post(`/api/machines/fiches/${id}/annuler`, { motif }),
 

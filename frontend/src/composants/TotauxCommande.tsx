@@ -13,7 +13,7 @@
  */
 import type { ReactNode } from 'react'
 import { brutDe, kgDe, totalDe, type LigneSaisie } from './GrilleLignes'
-import { fmt } from '../lib/utils'
+import { auCentime, fmt } from '../lib/utils'
 
 export function TotauxCommande({
   lignes,
@@ -30,8 +30,11 @@ export function TotauxCommande({
     const n = Number(v)
     return v.trim() !== '' && Number.isFinite(n) ? n : 0
   }
-  const brut = somme(brutDe)
-  const net = somme(totalDe)
+  // CHAQUE LIGNE ARRONDIE AU CENTIME, puis additionnee : c'est ainsi que la
+  // base calcule le total du bon. Additionner des lignes non arrondies
+  // decalait le pied de page de quelques centimes par rapport a l'en-tete.
+  const brut = auCentime(somme((l) => auCentime(brutDe(l))))
+  const net = auCentime(somme((l) => auCentime(totalDe(l))))
   const remise = brut - net
   const argent = (v: number) => `${fmt.nombre(v, 2)} ${devise}`
 
@@ -43,7 +46,7 @@ export function TotauxCommande({
     ['Remise', remise > 0.005 ? <span className="text-succes">− {argent(remise)}</span> : '—'],
     ['Net HT', <span className="text-primaire">{argent(net)}</span>],
   ]
-  if (taux && taux > 0 && devise !== 'MAD') cases.push(['Soit, au taux engagé', fmt.mad(net * taux)])
+  if (taux && taux > 0 && devise !== 'MAD') cases.push(['Soit, au taux engagé', fmt.mad(auCentime(net * taux))])
 
   return (
     <div className="border-t border-bordure px-3 py-2">

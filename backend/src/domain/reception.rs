@@ -161,6 +161,26 @@ pub async fn valider(
         )));
     }
 
+    // ---- 2 bis. LE LOT INTERNE, quand le fournisseur n'en a pas mis ---------
+    // (decision du 01/10/2026). Deux livraisons sont presque toujours deux
+    // productions : les ranger sous un meme « sans lot » les melangerait au
+    // tissage. Chaque ligne d'une reference suivie, laissee sans lot, recoit
+    // donc le sien : numero de reception et numero de ligne, REC-2026-0012-03.
+    // L'ecran l'a annonce et fait confirmer ; un lot saisi n'est jamais touche.
+    sqlx::query(
+        "UPDATE ligne_reception lr
+            SET lot_fournisseur = $2 || '-' || lpad(lr.ligne_numero::text, 2, '0')
+           FROM reference r
+          WHERE lr.id_reception = $1
+            AND r.code_reference = lr.code_reference
+            AND r.suivi_lot = 1
+            AND COALESCE(btrim(lr.lot_fournisseur), '') = ''",
+    )
+    .bind(id_reception)
+    .bind(&entete.numero_reception)
+    .execute(&mut *tx)
+    .await?;
+
     // ---- 3. Lignes ----------------------------------------------------------
     let lignes: Vec<LigneReception> = sqlx::query_as(
         // Chaque NUMERIC est converti ET garde son nom : `FromRow` lie par nom.

@@ -3,7 +3,7 @@
  * le choix des lignes d'un frais cible, la tuile de chiffre, et trois petites
  * aides de saisie.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Lock } from 'lucide-react'
 import { toast } from 'sonner'
@@ -32,6 +32,66 @@ export function useRafraichir(idDossier?: string) {
     void qc.invalidateQueries({ queryKey: ['import-a-recevoir'] })
     void qc.invalidateQueries({ queryKey: ['import-receptions'] })
   }
+}
+
+/**
+ * « ENREGISTRER TOUT » (demande du 30/09/2026).
+ *
+ * Chaque partie du dossier — ses informations, l'engagement et le frais en
+ * cours de saisie — SE SIGNALE quand elle a quelque chose a enregistrer, et
+ * dit comment. Le bouton du haut les enregistre l'une apres l'autre.
+ *
+ * LES FONCTIONS VIVENT DANS UNE REFERENCE, pas dans l'etat : elles changent a
+ * chaque rendu, et les mettre dans l'etat ferait boucler le rendu. L'etat ne
+ * retient que les libelles — ce que le bouton affiche.
+ *
+ * Une partie enregistree se vide (c'est deja le cas de chacune) : un nouvel
+ * essai apres un echec partiel ne recree donc jamais ce qui est deja passe.
+ */
+export type Signaler = (cle: string, a: { libelle: string; enregistrer: () => Promise<unknown> } | null) => void
+
+export function useEnregistrerTout() {
+  const fonctions = useRef(new Map<string, () => Promise<unknown>>())
+  const [libelles, setLibelles] = useState<Record<string, string>>({})
+  const [enCours, setEnCours] = useState(false)
+
+  const signaler = useCallback<Signaler>((cle, a) => {
+    if (a) fonctions.current.set(cle, a.enregistrer)
+    else fonctions.current.delete(cle)
+    setLibelles((x) => {
+      if ((x[cle] ?? null) === (a?.libelle ?? null)) return x
+      const y = { ...x }
+      if (a) y[cle] = a.libelle
+      else delete y[cle]
+      return y
+    })
+  }, [])
+
+  const toutEnregistrer = async () => {
+    setEnCours(true)
+    const reussis: string[] = []
+    const echecs: string[] = []
+    // Dans l'ordre : l'en-tete d'abord, il peut changer ce que lisent les autres.
+    for (const cle of ['informations', 'engagement', 'frais']) {
+      const f = fonctions.current.get(cle)
+      if (!f) continue
+      try {
+        await f()
+        reussis.push(libelles[cle] ?? cle)
+      } catch (e) {
+        echecs.push(`${libelles[cle] ?? cle} : ${e instanceof ErreurApi ? e.message : 'refusé'}`)
+      }
+    }
+    setEnCours(false)
+    if (echecs.length === 0) toast.success(`Enregistré : ${reussis.join(', ')}`)
+    else
+      toast.error(`${echecs.length} partie(s) non enregistrée(s)`, {
+        description: [...(reussis.length ? [`Enregistré : ${reussis.join(', ')}.`] : []), ...echecs].join(' — '),
+        duration: 10000,
+      })
+  }
+
+  return { signaler, aEnregistrer: Object.values(libelles), enCours, toutEnregistrer }
 }
 
 export function Tuile({

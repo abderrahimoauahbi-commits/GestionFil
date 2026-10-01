@@ -43,7 +43,7 @@ import {
   Chargement,
   EtatVide,
 } from '../composants/ui/base'
-import { Aide } from '../composants/ui/surcouches'
+import { Aide, Onglet, OngletContenu, Onglets, OngletsListe } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { exporterCsv } from '../lib/export'
 
@@ -458,6 +458,23 @@ export function Besoins() {
             </Alerte>
           )}
 
+          {/* DEUX TABLEAUX, DEUX ONGLETS (demande du 30/09/2026). Les besoins
+              matiere, resultat que l'on vient chercher, s'ouvrent d'abord ; la
+              production planifiee qui les explique est a cote. */}
+          <Onglets defaultValue="besoins">
+            <OngletsListe>
+              <Onglet value="besoins">
+                <Package className="size-3.5" />
+                Besoins matière
+                <span className="text-[11px] tabular-nums text-attenue-texte">{fmt.nombre(totalKg, 0)} kg</span>
+              </Onglet>
+              <Onglet value="production">
+                <Factory className="size-3.5" />
+                Production planifiée
+                <span className="text-[11px] tabular-nums text-attenue-texte">{fmt.entier(totalM2)} m²</span>
+              </Onglet>
+            </OngletsListe>
+            <OngletContenu value="production" className="mt-3">
           {/* --- 1. Production ---------------------------------------------- */}
           <Carte repliable="besoins.2">
             <CarteEntete>
@@ -538,6 +555,8 @@ export function Besoins() {
             </CarteCorps>
           </Carte>
 
+            </OngletContenu>
+            <OngletContenu value="besoins" className="mt-3">
           {/* --- 2. Besoins matiere ----------------------------------------- */}
           <Carte repliable="besoins.3">
             <CarteEntete>
@@ -703,6 +722,8 @@ export function Besoins() {
               )}
             </CarteCorps>
           </Carte>
+            </OngletContenu>
+          </Onglets>
         </div>
       )}
     </div>

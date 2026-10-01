@@ -39,6 +39,7 @@ import {
 } from '../composants/ui/base'
 import { Aide, Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { SANS_LOT } from '../lib/lots'
 
 const MODULE = 'INVENTAIRE'
 
@@ -206,7 +207,9 @@ export function Inventaires() {
         <div className="min-w-0">
           <div className="truncate font-medium">{l.code_reference}</div>
           {l.lot_fournisseur && (
-            <div className="truncate text-xs text-attenue-texte">lot {l.lot_fournisseur}</div>
+            <div className="truncate text-xs text-attenue-texte">
+              {l.lot_fournisseur === SANS_LOT ? 'sans lot' : `lot ${l.lot_fournisseur}`}
+            </div>
           )}
         </div>
       ),
@@ -508,6 +511,15 @@ export function Inventaires() {
               </Alerte>
             )}
 
+            {saisissable && inventaire && (
+              <LotTrouve
+                magasin={inventaire.code_magasin}
+                references={[...new Set((qLignes.data ?? []).map((l) => l.code_reference))]}
+                enCours={compter.isPending}
+                ajouter={(c) => compter.mutateAsync({ ...c, code_magasin: inventaire.code_magasin })}
+              />
+            )}
+
             <DataTable<LigneInv>
               module={MODULE}
               colonnes={colonnesLignes}
@@ -637,5 +649,53 @@ function FormulaireInventaire({
         </form>
       </DialogueContenu>
     </Dialogue>
+  )
+}
+
+/**
+ * UN LOT TROUVE AU COMPTAGE (01/10/2026).
+ *
+ * Le rayon porte un lot que la base ne connait pas — le plus souvent du stock
+ * « sans lot » qu'on identifie enfin. On le saisit ici : le serveur lui ouvre
+ * sa ligne au theorique zero, et la cloture fait entrer ce lot tout en
+ * soldant ce qui ne se retrouve plus (comptez alors « Sans lot » a ce qui
+ * reste vraiment). Seulement pour une reference suivie par lot.
+ */
+function LotTrouve({
+  magasin, references, enCours, ajouter,
+}: {
+  magasin: string
+  references: string[]
+  enCours: boolean
+  ajouter: (c: { code_reference: string; lot_fournisseur: string; quantite_comptee_kg: number }) => Promise<unknown>
+}) {
+  const [ref, setRef] = useState('')
+  const [lot, setLot] = useState('')
+  const [kg, setKg] = useState('')
+  const pret = !!ref.trim() && !!lot.trim() && Number(kg.replace(',', '.')) >= 0 && kg.trim() !== ''
+  const champ = 'h-8 rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[12.5px]'
+  return (
+    <div className="mb-3 flex flex-wrap items-end gap-2 rounded-[var(--radius)] border border-dashed border-bordure bg-attenue/20 p-2">
+      <div className="w-full text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte">
+        Lot trouvé au comptage — magasin {magasin}
+      </div>
+      <input list="refs-inventaire" value={ref} onChange={(e) => setRef(e.target.value)}
+        placeholder="Référence" aria-label="Référence du lot trouvé" className={cn(champ, 'w-64')} />
+      <datalist id="refs-inventaire">
+        {references.map((r) => <option key={r} value={r} />)}
+      </datalist>
+      <input value={lot} onChange={(e) => setLot(e.target.value)} placeholder="N° de lot"
+        aria-label="Numéro du lot trouvé" className={cn(champ, 'w-44')} />
+      <input value={kg} onChange={(e) => setKg(e.target.value)} inputMode="decimal" placeholder="Compté (kg)"
+        aria-label="Quantité comptée en kilos" className={cn(champ, 'w-32 text-right')} />
+      <Bouton taille="sm" className="h-8" disabled={!pret} chargement={enCours}
+        onClick={async () => {
+          await ajouter({ code_reference: ref.trim(), lot_fournisseur: lot.trim(), quantite_comptee_kg: Number(kg.replace(',', '.')) })
+          setLot('')
+          setKg('')
+        }}>
+        Ajouter le lot
+      </Bouton>
+    </div>
   )
 }

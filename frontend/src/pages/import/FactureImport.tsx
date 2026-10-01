@@ -221,11 +221,14 @@ export function FactureImport() {
     code_fournisseur: facture?.code_fournisseur ?? '',
     numero_facture: facture?.numero_facture ?? '',
     date_facture: facture?.date_facture?.slice(0, 10) ?? '',
-    code_devise: facture?.code_devise ?? d?.dossier.code_devise ?? 'USD',
-    taux_change: texte(facture?.taux_change ?? d?.dossier.taux_change ?? ''),
+    // EN GROUPAGE, LA DEVISE EST CELLE DE LA FACTURE : celle de la fiche
+    // fournisseur par defaut, posee au choix du fournisseur (01/10/2026).
+    code_devise: facture?.code_devise ?? '',
+    taux_change: texte(facture?.taux_change ?? ''),
     montant_devise: texte(facture?.montant_devise),
     nb_palettes: texte(facture?.nb_palettes),
     nb_bobines: texte(facture?.nb_bobines),
+    id_engagement: facture?.id_engagement ?? '',
   })
   const [entete, setEntete] = useState(enteteInitial)
   const [lignes, setLignes] = useState<LigneEdit[]>([])
@@ -244,7 +247,7 @@ export function FactureImport() {
 
   const qFournisseurs = useQuery({
     queryKey: ['fournisseurs-actifs'],
-    queryFn: () => api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: () => api.get<{ code_fournisseur: string; nom: string; code_devise?: string }[]>('/api/fournisseurs?actif=1&limite=500'),
   })
   const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
   const qBc = useQuery({
@@ -325,7 +328,7 @@ export function FactureImport() {
   })
   const incompletes = lignes.filter((l) => !l.supprimee && !ligneComplete(l) && (l.id_ligne || l.code_reference || l.libelle || l.prix_unitaire_devise))
   const modifie = nouvelle || enteteModifie || lignesModifiees.length > 0
-  const enteteComplet = entete.code_fournisseur && entete.numero_facture.trim() && entete.date_facture && nombre(entete.taux_change) > 0
+  const enteteComplet = entete.code_fournisseur && entete.numero_facture.trim() && entete.date_facture && entete.code_devise && nombre(entete.taux_change) > 0
 
   /** L'identifiant d'une facture creee pendant l'enregistrement en cours. */
   const creeeRef = useRef<string | null>(null)
@@ -341,6 +344,7 @@ export function FactureImport() {
         montant_devise: entete.montant_devise ? nombre(entete.montant_devise) : null,
         nb_palettes: entete.nb_palettes ? nombre(entete.nb_palettes) : null,
         nb_bobines: entete.nb_bobines ? nombre(entete.nb_bobines) : null,
+        id_engagement: entete.id_engagement,
       }
       let id = idFacture
       if (nouvelle) {
@@ -442,7 +446,14 @@ export function FactureImport() {
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="col-span-2">
               <Etiq obligatoire>Fournisseur</Etiq>
-              <Selecteur value={entete.code_fournisseur} onChange={maj('code_fournisseur')}
+              <Selecteur value={entete.code_fournisseur}
+                onChange={(e) => {
+                  const code = e.target.value
+                  const devise = qFournisseurs.data?.find((x) => x.code_fournisseur === code)?.code_devise
+                  // Changer de fournisseur change d'engagement ; la devise suit sa fiche.
+                  setEntete((x) => ({ ...x, code_fournisseur: code, id_engagement: '', code_devise: devise ?? x.code_devise,
+                    taux_change: devise === 'MAD' ? '1' : x.taux_change }))
+                }}
                 disabled={!ecrire || lignesServeur.some((l) => l.quantite_recue_kg > 0)}>
                 <option value="">Choisir…</option>
                 {(qFournisseurs.data ?? []).map((x) => (
@@ -460,10 +471,25 @@ export function FactureImport() {
             </div>
             <div>
               <Etiq>Devise</Etiq>
-              <Selecteur value={entete.code_devise} onChange={maj('code_devise')} disabled={!ecrire}>
-                {(qDevises.data ?? [{ code_devise: entete.code_devise }]).map((x) => (
+              <Selecteur value={entete.code_devise} disabled={!ecrire}
+                onChange={(e) => setEntete((x) => ({ ...x, code_devise: e.target.value, taux_change: e.target.value === 'MAD' ? '1' : x.taux_change }))}>
+                <option value="">Choisir…</option>
+                {(qDevises.data ?? (entete.code_devise ? [{ code_devise: entete.code_devise }] : [])).map((x) => (
                   <option key={x.code_devise}>{x.code_devise}</option>
                 ))}
+              </Selecteur>
+            </div>
+            <div className="col-span-2">
+              <Etiq>Engagement d’importation</Etiq>
+              <Selecteur value={entete.id_engagement} onChange={maj('id_engagement')} disabled={!ecrire || !entete.code_fournisseur}>
+                <option value="">Sans engagement</option>
+                {(d.engagements ?? [])
+                  .filter((e) => !e.code_fournisseur || e.code_fournisseur === entete.code_fournisseur)
+                  .map((e) => (
+                    <option key={e.id_engagement} value={e.id_engagement}>
+                      {e.numero_ei}{e.code_devise ? ` · ${e.code_devise}` : ''}{e.banque ? ` · ${e.banque}` : ''}
+                    </option>
+                  ))}
               </Selecteur>
             </div>
             <div>

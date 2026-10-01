@@ -49,7 +49,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Aide } from '../composants/ui/surcouches'
+import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'RECEPTIONS'
@@ -88,6 +88,8 @@ interface Reception extends Record<string, unknown> {
 interface LigneRec extends Record<string, unknown> {
   id_ligne_reception: string
   ligne_numero: number
+  /** 1 : la reference se suit par lot (le lot est exige a l'entree en stock). */
+  suivi_lot?: number
   code_reference: string
   reference_designation: string
   unite_saisie: string
@@ -692,6 +694,7 @@ export function Reception() {
     onError: echec,
   })
 
+  const confirmation = useConfirmation()
   const valider = useMutation({
     mutationFn: () => api.post(`/api/receptions/${id}/valider`),
     onSuccess: () => {
@@ -927,7 +930,33 @@ export function Reception() {
             )}
             {droits.peutValider && rec.statut === 'A_CONTROLER' && (
               <Bouton
-                onClick={() => valider.mutate()}
+                onClick={() => {
+                  /* LE LOT INTERNE, ANNONCE AVANT D'ETRE POSE (01/10/2026).
+                     Une reference suivie sans lot recoit a la validation le
+                     numero de la reception et de sa ligne. On le dit, on fait
+                     confirmer : on peut encore saisir le vrai lot a la place. */
+                  const aGenerer = lignes.filter((l) => l.suivi_lot === 1 && !(l.lot_fournisseur ?? '').trim())
+                  if (aGenerer.length === 0) return valider.mutate()
+                  confirmation.demander({
+                    titre: `${aGenerer.length} ligne(s) sans lot fournisseur`,
+                    libelleConfirmer: 'Générer les lots et valider',
+                    description: (
+                      <>
+                        Le fournisseur n’a pas mis de lot : chaque ligne recevra un lot interne, pour
+                        que cette livraison ne se mélange pas aux autres.
+                        <ul className="mt-2 space-y-0.5 font-mono text-[12px]">
+                          {aGenerer.map((l) => (
+                            <li key={l.id_ligne_reception}>
+                              {l.code_reference} → {rec.numero_reception}-{String(l.ligne_numero).padStart(2, '0')}
+                            </li>
+                          ))}
+                        </ul>
+                        <span className="mt-2 block">Pour saisir le vrai lot à la place, annulez et corrigez la ligne.</span>
+                      </>
+                    ),
+                    action: () => valider.mutate(),
+                  })
+                }}
                 disabled={estPeseur}
                 title={
                   estPeseur
@@ -939,6 +968,7 @@ export function Reception() {
                 Valider le controle
               </Bouton>
             )}
+            {confirmation.element}
             {/* ROUVRIR LE CONTROLE. Le serveur refusera tant que les entrees de
                 stock nees de cette reception vivent encore : le papier ne
                 recule pas pendant que la marchandise avance. */}

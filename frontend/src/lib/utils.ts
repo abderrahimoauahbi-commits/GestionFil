@@ -67,3 +67,18 @@ export const sousChemin = (chemin: string, vers: string) =>
 
 export const estBureau = () =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+/**
+ * ARRONDI AU CENTIME, comme `round(x, 2)` de PostgreSQL : a la moitie, on
+ * s'eloigne de zero. Le decalage d'un epsilon rattrape les flottants qui
+ * tombent juste sous la moitie (1,005 vaut 1,00499… en binaire).
+ *
+ * C'EST LA REGLE DES DOCUMENTS : chaque ligne s'arrondit au centime, le total
+ * est la somme des lignes arrondies, et la contre-valeur en dirhams
+ * s'arrondit une fois, sur ce total. L'ecran et la base comptent ainsi pareil.
+ */
+export const auCentime = (x: number) => {
+  if (!Number.isFinite(x)) return 0
+  const s = Math.sign(x)
+  return (s * Math.round(Math.abs(x) * 100 + 1e-7)) / 100
+}

@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
+import { ChampLot } from '../composants/ChampLot'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import {
@@ -764,11 +765,15 @@ export function TransfertNouveau() {
                                 </div>
                               </td>
                               <td className="px-2 py-1">
-                                <Champ
-                                  value={l.lot}
-                                  onChange={(e) => maj(l.cle, 'lot', e.target.value)}
-                                  className={cn('h-7', manqueLot && 'border-danger')}
-                                  placeholder={c?.suivi_lot === 1 ? 'obligatoire' : ''}
+                                {/* LE LOT SUIT LA MATIERE : on choisit parmi ceux du
+                                    magasin source, le plus ancien d'abord. */}
+                                <ChampLot
+                                  reference={l.code_reference}
+                                  magasin={entete.code_magasin_source}
+                                  valeur={l.lot}
+                                  onChange={(v) => maj(l.cle, 'lot', v)}
+                                  className="h-7 w-full rounded-[var(--radius-sm)] border border-bordure bg-fond px-1.5 text-[12.5px]"
+                                  invalide={manqueLot}
                                 />
                               </td>
                               <td className="px-1 py-1">

@@ -11,6 +11,8 @@ interface Props<L> {
   colonnes: Colonne<L>[]
   lignes: L[] | undefined
   chargement?: boolean
+  /** Erreur de la requete : affichee comme telle, jamais comme une liste vide. */
+  erreur?: unknown
   cle: (ligne: L) => string
   surClic?: (ligne: L) => void
   menuContextuel?: (ligne: L) => React.ReactNode

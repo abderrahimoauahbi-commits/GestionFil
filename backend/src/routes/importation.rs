@@ -123,6 +123,10 @@ pub struct DossierSaisie {
     taux_change: Option<f64>,
     date_arrivee: Option<String>,
     notes: Option<String>,
+    /// La DUM du dossier — une seule (groupage, regime 010 par defaut).
+    numero_dum: Option<String>,
+    regime_douanier: Option<String>,
+    date_dum: Option<String>,
 }
 
 /// Le numero suivant, au format du classeur : « 06/26 ».
@@ -145,9 +149,10 @@ pub async fn creer_dossier(
     Json(d): Json<DossierSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
-    let code_devise = d.code_devise.unwrap_or_else(|| "USD".into());
-    let taux = d.taux_change.filter(|t| *t > 0.0)
-        .ok_or_else(|| AppError::Invalide("Taux de change du dossier obligatoire.".into()))?;
+    // LA DEVISE EST CELLE DE CHAQUE FACTURE (groupage, 01/10/2026). Le dossier
+    // ne garde devise et taux que comme repli : MAD au taux 1 s'ils manquent.
+    let code_devise = d.code_devise.unwrap_or_else(|| "MAD".into());
+    let taux = d.taux_change.filter(|t| *t > 0.0).unwrap_or(1.0);
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -157,8 +162,9 @@ pub async fn creer_dossier(
     };
     let id: String = sqlx::query_scalar(
         "INSERT INTO import_dossiers (numero, numero_bl, conteneurs, code_devise, taux_change,
-                                      date_arrivee, notes, id_utilisateur_creation)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                      date_arrivee, notes, id_utilisateur_creation,
+                                      numero_dum, regime_douanier, date_dum)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, '010'), $11)
          RETURNING id_dossier",
     )
     .bind(&numero)
@@ -169,6 +175,9 @@ pub async fn creer_dossier(
     .bind(&d.date_arrivee)
     .bind(&d.notes)
     .bind(&user.id)
+    .bind(&d.numero_dum)
+    .bind(&d.regime_douanier)
+    .bind(&d.date_dum)
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -260,8 +269,11 @@ pub async fn lire_dossier(
     .await?;
 
     let engagements = sqlx::query(
-        "SELECT * FROM import_engagements WHERE id_dossier = $1
-          ORDER BY date_ei NULLS LAST, numero_ei",
+        "SELECT e.*, fo.nom AS fournisseur_nom
+           FROM import_engagements e
+           LEFT JOIN fournisseur fo ON fo.code_fournisseur = e.code_fournisseur
+          WHERE e.id_dossier = $1
+          ORDER BY fo.nom NULLS LAST, e.date_ei NULLS LAST, e.numero_ei",
     )
     .bind(&id)
     .fetch_all(db)
@@ -301,7 +313,8 @@ pub async fn modifier_dossier(
             SET numero = COALESCE($2, numero), numero_bl = COALESCE($3, numero_bl),
                 conteneurs = COALESCE($4, conteneurs), code_devise = COALESCE($5, code_devise),
                 taux_change = COALESCE($6, taux_change), date_arrivee = COALESCE($7, date_arrivee),
-                notes = COALESCE($8, notes)
+                notes = COALESCE($8, notes), numero_dum = COALESCE($9, numero_dum),
+                regime_douanier = COALESCE($10, regime_douanier), date_dum = COALESCE($11, date_dum)
           WHERE id_dossier = $1",
     )
     .bind(&id)
@@ -312,6 +325,9 @@ pub async fn modifier_dossier(
     .bind(d.taux_change)
     .bind(&d.date_arrivee)
     .bind(&d.notes)
+    .bind(&d.numero_dum)
+    .bind(&d.regime_douanier)
+    .bind(&d.date_dum)
     .execute(&mut *tx)
     .await?
     .rows_affected();
@@ -378,6 +394,8 @@ pub struct FactureSaisie {
     montant_devise: Option<f64>,
     nb_palettes: Option<i64>,
     nb_bobines: Option<i64>,
+    /// L'engagement sur lequel la facture s'impute. Chaine vide = le retirer.
+    id_engagement: Option<String>,
 }
 
 /// `POST /api/import/dossiers/{id}/factures` — devise et taux du dossier par
@@ -400,9 +418,12 @@ pub async fn creer_facture(
     let id: String = sqlx::query_scalar(
         "INSERT INTO import_factures (id_dossier, code_fournisseur, numero_facture, date_facture,
                                       code_devise, taux_change, montant_devise, nb_palettes,
-                                      nb_bobines, id_utilisateur_creation)
-         SELECT d.id_dossier, $2, $3, $4, COALESCE($5, d.code_devise), COALESCE($6, d.taux_change),
-                $7, $8, $9, $10
+                                      nb_bobines, id_utilisateur_creation, id_engagement)
+         SELECT d.id_dossier, $2, $3, $4,
+                -- La devise de la fiche fournisseur par defaut, celle du dossier en repli.
+                COALESCE($5, (SELECT fo.code_devise FROM fournisseur fo WHERE fo.code_fournisseur = $2),
+                         d.code_devise),
+                COALESCE($6, d.taux_change), $7, $8, $9, $10, NULLIF($11, '')
            FROM import_dossiers d WHERE d.id_dossier = $1
          RETURNING id_facture",
     )
@@ -416,6 +437,7 @@ pub async fn creer_facture(
     .bind(f.nb_palettes)
     .bind(f.nb_bobines)
     .bind(&user.id)
+    .bind(&f.id_engagement)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("dossier {id_dossier}")))?;
@@ -440,7 +462,8 @@ pub async fn modifier_facture(
                 numero_facture = COALESCE($3, numero_facture), date_facture = COALESCE($4, date_facture),
                 code_devise = COALESCE($5, code_devise), taux_change = COALESCE($6, taux_change),
                 montant_devise = COALESCE($7, montant_devise), nb_palettes = COALESCE($8, nb_palettes),
-                nb_bobines = COALESCE($9, nb_bobines)
+                nb_bobines = COALESCE($9, nb_bobines),
+                id_engagement = CASE WHEN $10::text IS NULL THEN id_engagement ELSE NULLIF($10, '') END
           WHERE id_facture = $1",
     )
     .bind(&id)
@@ -452,6 +475,7 @@ pub async fn modifier_facture(
     .bind(f.montant_devise)
     .bind(f.nb_palettes)
     .bind(f.nb_bobines)
+    .bind(&f.id_engagement)
     .execute(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
@@ -1177,6 +1201,52 @@ pub async fn cloturer(
     Ok(Json(v))
 }
 
+/// `POST /api/import/dossiers/{id}/valider` — le brouillon passe EN COURS.
+///
+/// DEMANDE DU 30/09/2026 : on valide le dossier a la main, sans attendre la
+/// premiere reception (qui le fait toujours d'elle-meme). Valide, il ne se
+/// supprime plus — le declencheur ne l'admet qu'en brouillon.
+pub async fn valider_dossier(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let statut: Option<String> =
+        sqlx::query_scalar("SELECT statut FROM import_dossiers WHERE id_dossier = $1")
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    match statut.as_deref() {
+        None => return Err(AppError::Introuvable(format!("dossier {id}"))),
+        Some("BROUILLON") => {}
+        Some(s) => {
+            return Err(AppError::Invalide(format!(
+                "Seul un dossier en brouillon se valide (celui-ci est {}).",
+                s.to_lowercase().replace('_', " ")
+            )))
+        }
+    }
+    let factures: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM import_factures WHERE id_dossier = $1")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if factures == 0 {
+        return Err(AppError::Invalide(
+            "Un dossier sans facture ne se valide pas : ajoutez d'abord ses factures.".into(),
+        ));
+    }
+    sqlx::query("UPDATE import_dossiers SET statut = 'EN_COURS' WHERE id_dossier = $1 AND statut = 'BROUILLON'")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "id_dossier": id, "statut": "EN_COURS" })))
+}
+
 
 // ============================================================================
 // Engagements d'importation (EI)
@@ -1196,6 +1266,9 @@ pub struct EngagementSaisi {
     montant_devise: Option<f64>,
     code_devise: Option<String>,
     notes: Option<String>,
+    /// Le fournisseur dont la proforma est couverte : sa devise est celle de
+    /// l'engagement, sauf saisie contraire.
+    code_fournisseur: Option<String>,
 }
 
 /// `POST /api/import/dossiers/{id}/engagements`
@@ -1219,10 +1292,11 @@ pub async fn ajouter_engagement(
     let id: String = sqlx::query_scalar(
         "INSERT INTO import_engagements
                 (id_dossier, numero_ei, banque, date_ei, quantite_kg, montant_devise,
-                 code_devise, notes, id_utilisateur_creation)
+                 code_devise, notes, id_utilisateur_creation, code_fournisseur)
          VALUES ($1, $2, $3, $4, $5, $6,
-                 COALESCE($7, (SELECT code_devise FROM import_dossiers WHERE id_dossier = $1)),
-                 $8, $9)
+                 COALESCE($7, (SELECT code_devise FROM fournisseur WHERE code_fournisseur = $10),
+                          (SELECT code_devise FROM import_dossiers WHERE id_dossier = $1)),
+                 $8, $9, $10)
          RETURNING id_engagement",
     )
     .bind(&id_dossier)
@@ -1234,6 +1308,7 @@ pub async fn ajouter_engagement(
     .bind(vide(&e.code_devise))
     .bind(vide(&e.notes))
     .bind(&user.id)
+    .bind(vide(&e.code_fournisseur))
     .fetch_one(&mut *tx)
     .await
     .map_err(|err| match &err {

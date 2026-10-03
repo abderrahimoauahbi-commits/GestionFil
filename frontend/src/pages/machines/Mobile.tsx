@@ -13,23 +13,55 @@
  *      precisement ce qu'on relit en tapant ;
  *   3. cibles d'au moins 48 px, 56 px pour le bouton qui valide.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Check, ChevronDown, ChevronLeft, ChevronRight, Layers, Loader2,
+  Check, ChevronDown, ChevronLeft, ChevronRight, Layers, Loader2, Plus, Search, X,
 } from 'lucide-react'
 import { api } from '../../api/client'
 import { Alerte, Chargement } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
+import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import {
-  etatKg, fmtDate, LIBELLE_TYPE, machinesApi, nb,
+  CLASSE_ECART, ecartPoidsBobine, etatKg, fmtDate, LIBELLE_TYPE, ligneNeuve, machinesApi, nb,
+  rappelCatalogue, signePct,
   type Machine, type TypeFiche, type Zone,
 } from './noyau'
 import { useFiche } from './useFiche'
+import { QuestionStock, useValiderFiche } from './Questions'
 
 interface Magasin {
   code_magasin: string
   nom: string
+}
+
+
+/** Ce que le magasin tient d'une reference, tous lots confondus. */
+interface StockMagasin {
+  code_reference: string
+  designation: string
+  quantite_kg: number
+  suivi_lot: number
+  poids_bobine_kg: number | null
+}
+
+/** Une reference du catalogue, pour charger ce que le stock ne connait pas. */
+interface RefCatalogue {
+  code_reference: string
+  designation: string
+  poids_bobine_kg: number | null
+}
+
+/** Un lot en stock dans un magasin — ce qu'on peut monter sur la machine. */
+interface LotDispo {
+  code_reference: string
+  designation: string
+  poids_bobine_kg: number | null
+  lot_fournisseur: string
+  code_couleur: string | null
+  quantite_kg: number
+  nb_bobines: number
+  date_premiere_entree: string
 }
 
 export function MachinesMobile() {
@@ -193,6 +225,7 @@ function ZoneMobile({
   ouvrir: (t: TypeFiche) => void
 }) {
   const [deplie, setDeplie] = useState<string | null>(null)
+  const tolerances = useTolerancesLot()
   const q = useQuery({
     queryKey: ['machine-etat', machine.code_machine, zone.code_emplacement],
     queryFn: () => machinesApi.etat(machine.code_machine, zone.code_emplacement),
@@ -200,7 +233,7 @@ function ZoneMobile({
   const lignes = q.data ?? []
 
   return (
-    <div className="flex flex-col gap-3 pb-28">
+    <div className="flex flex-col gap-3 pb-28 max-md:pb-48">
       <Fil titre={zone.libelle} sous={machine.nom} retour={retour} />
 
       <div className="rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2 text-[12px] tabular-nums">
@@ -238,7 +271,7 @@ function ZoneMobile({
               >
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13px] text-texte">{l.designation}</div>
-                  <div className="font-mono text-[11px] text-attenue-texte">{l.lot_fournisseur}</div>
+                  <div className="font-mono text-[11px] text-attenue-texte">{libelleLot(l.lot_fournisseur)}</div>
                 </div>
                 <div className="shrink-0 text-right">
                   <div className="text-[14px] font-semibold tabular-nums text-texte">
@@ -253,15 +286,32 @@ function ZoneMobile({
                   className={cn('size-4 shrink-0 text-attenue-texte transition-transform', ouvert && 'rotate-180')}
                 />
               </button>
-              {ouvert && (
+              {ouvert && (() => {
+                /* L'ECART AU CATALOGUE, a cote du poids constate : le meme
+                   calcul et les memes couleurs que pendant la saisie. */
+                const pct = ecartPoidsBobine({
+                  poids_unitaire: l.poids_unitaire_kg ?? 0,
+                  poids_catalogue: l.poids_catalogue_kg,
+                })
+                const c = couleurEcart(pct, tolerances)
+                return (
                 <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 bg-attenue px-3 pb-3 pt-1 text-[12px]">
-                  <D t="Poids par bobine" v={`${nb(l.poids_unitaire_kg, 3)} kg`} />
+                  <D
+                    t="Poids par bobine"
+                    v={`${nb(l.poids_unitaire_kg, 3)} kg`}
+                    suffixe={
+                      pct != null && c ? (
+                        <span className={cn('ml-1.5 font-medium', CLASSE_ECART[c])}>{signePct(pct)}</span>
+                      ) : null
+                    }
+                  />
                   <D t="Catalogue" v={`${nb(l.poids_catalogue_kg, 3)} kg`} />
                   <D t="Mode du constat" v={l.mode_constat === 'PESEE' ? 'Pesée' : 'Estimation'} />
                   <D t="Constaté le" v={fmtDate(l.date_constat)} />
                   <D t="Par" v={l.responsable ?? '—'} />
                 </dl>
-              )}
+                )
+              })()}
             </div>
           )
         })}
@@ -272,7 +322,7 @@ function ZoneMobile({
 
       {/* La barre de gestes, collee en bas au-dessus de la zone sûre. */}
       <div
-        className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-3 gap-1.5 border-t border-bordure
+        className="fixed inset-x-0 bottom-0 z-20 max-md:bottom-[calc(3.2rem+var(--marge-sure-bas,0px))] grid grid-cols-3 gap-1.5 border-t border-bordure
                    bg-surface p-2 shadow-[0_-2px_12px_rgba(0,0,0,.08)]"
         style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}
       >
@@ -294,11 +344,14 @@ function ZoneMobile({
   )
 }
 
-function D({ t, v }: { t: string; v: string }) {
+function D({ t, v, suffixe }: { t: string; v: string; suffixe?: ReactNode }) {
   return (
     <>
       <dt className="text-attenue-texte">{t}</dt>
-      <dd className="text-right tabular-nums text-texte">{v}</dd>
+      <dd className="text-right tabular-nums text-texte">
+        {v}
+        {suffixe}
+      </dd>
     </>
   )
 }
@@ -316,7 +369,9 @@ function FicheMobile({
   retour: () => void
 }) {
   const f = useFiche(machine.code_machine, zone, type)
+  const v = useValiderFiche(f)
   const [active, setActive] = useState(0)
+  const tolerances = useTolerancesLot()
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
     queryFn: () => api.get<Magasin[]>('/api/magasins?actif=1'),
@@ -325,6 +380,29 @@ function FicheMobile({
 
   const l = f.lignes[active]
   const toucheMagasin = type === 'CHARGE' || type === 'DECHARGE'
+  const [choix, setChoix] = useState(false)
+
+  /* LES LOTS DU MAGASIN D'ORIGINE, LE PLUS ANCIEN D'ABORD (FIFO). Au
+     telephone, on ne tape pas une reference : on la choisit parmi ce que le
+     magasin tient vraiment, lot par lot. */
+  const qLots = useQuery({
+    queryKey: ['stock-lots-magasin', f.entete.magasin],
+    queryFn: () =>
+      api.get<LotDispo[]>(`/api/stock/lots?code_magasin=${encodeURIComponent(f.entete.magasin)}&limite=5000`),
+    enabled: type === 'CHARGE' && !!f.entete.magasin,
+  })
+  const qStock = useQuery({
+    queryKey: ['stock-magasin', f.entete.magasin],
+    queryFn: () =>
+      api.get<StockMagasin[]>(`/api/stock?code_magasin=${encodeURIComponent(f.entete.magasin)}&limite=5000`),
+    enabled: type === 'CHARGE' && !!f.entete.magasin,
+  })
+  const lotsDe = (code: string) => (qLots.data ?? []).filter((x) => x.code_reference === code)
+  const ajouterLot = (code: string, designation: string, poids: number | null, lot: string) => {
+    f.ajouter({ ...ligneNeuve(code, designation, poids ?? 0, poids), lot_fournisseur: lot })
+    setActive(f.lignes.length)
+    setChoix(false)
+  }
 
   if (f.envoi.isSuccess) {
     return (
@@ -334,6 +412,7 @@ function FicheMobile({
           {f.envoi.data?.mouvement
             ? `Mouvement ${f.envoi.data.mouvement} enregistré au magasin.`
             : 'Aucun mouvement : cette fiche ne touche aucun magasin.'}
+          {f.envoi.data?.correction && ` Correction de stock ${f.envoi.data.correction} tracée.`}
         </Alerte>
         <button
           type="button"
@@ -347,8 +426,22 @@ function FicheMobile({
     )
   }
 
+  if (choix) {
+    return (
+      <ChoixLot
+        magasin={f.entete.magasin}
+        lots={qLots.data ?? []}
+        stock={(qStock.data ?? []).filter((x) => x.quantite_kg > 0)}
+        chargement={qLots.isLoading || qStock.isLoading}
+        dejaPris={new Set(f.lignes.map((x) => `${x.code_reference}|${x.lot_fournisseur}`))}
+        choisir={ajouterLot}
+        fermer={() => setChoix(false)}
+      />
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-3 pb-28">
+    <div className="flex flex-col gap-3 pb-28 max-md:pb-48">
       <Fil titre={LIBELLE_TYPE[type]} sous={zone.libelle} retour={retour} />
 
       {/* --- L'entete, replie en trois champs -------------------------- */}
@@ -385,6 +478,23 @@ function FicheMobile({
         )}
       </div>
 
+      {/* --- AJOUTER UNE REFERENCE (chargement) ------------------------
+          Le bureau l'avait, le telephone non : une zone vide ne se chargeait
+          donc pas depuis le terrain. */}
+      {type === 'CHARGE' && (
+        <button
+          type="button"
+          disabled={!f.entete.magasin}
+          onClick={() => setChoix(true)}
+          className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-[var(--radius-sm)]
+                     border border-dashed border-primaire text-[14px] font-medium text-primaire
+                     disabled:border-bordure disabled:text-attenue-texte"
+        >
+          <Plus className="size-4" />
+          {f.entete.magasin ? 'Ajouter une référence' : 'Choisissez d’abord le magasin d’origine'}
+        </button>
+      )}
+
       {/* --- Le sélecteur de ligne -------------------------------------- */}
       {f.lignes.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1">
@@ -419,8 +529,34 @@ function FicheMobile({
           </div>
 
           {/* --- La saisie, un champ par ligne ------------------------- */}
-          <ChampM label="Lot" v={l.lot_fournisseur}
-                  set={(v) => f.majLigne(l.cle, 'lot_fournisseur', v)} />
+          {type === 'CHARGE' ? (
+            <label className="flex flex-col gap-1">
+              <span className="text-[12px] text-attenue-texte">Lot (le plus ancien d’abord)</span>
+              <select
+                value={l.lot_fournisseur}
+                onChange={(e) => f.majLigne(l.cle, 'lot_fournisseur', e.target.value)}
+                className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
+              >
+                {!lotsDe(l.code_reference).some((x) => x.lot_fournisseur === l.lot_fournisseur) &&
+                  l.lot_fournisseur !== SANS_LOT && (
+                    <option value={l.lot_fournisseur}>{l.lot_fournisseur || '—'}</option>
+                  )}
+                {lotsDe(l.code_reference)
+                  .filter((x) => x.lot_fournisseur !== SANS_LOT)
+                  .map((x) => (
+                    <option key={x.lot_fournisseur} value={x.lot_fournisseur}>
+                      {x.lot_fournisseur} · {nb(x.quantite_kg, 0)} kg · {fmtDate(x.date_premiere_entree)}
+                    </option>
+                  ))}
+                {/* TOUJOURS PROPOSE : le fournisseur n'a pas toujours mis de
+                    lot, et certaines references ne se gerent pas par lot. */}
+                <option value={SANS_LOT}>Sans lot</option>
+              </select>
+            </label>
+          ) : (
+            <ChampM label="Lot" v={l.lot_fournisseur}
+                    set={(v) => f.majLigne(l.cle, 'lot_fournisseur', v)} />
+          )}
           {(type === 'CHARGE' || type === 'DECHARGE') && (
             <ChampNum
               label={type === 'DECHARGE' ? 'Bobines retirées' : 'Bobines chargées'}
@@ -444,8 +580,20 @@ function FicheMobile({
               set={(v) => f.majLigne(l.cle, 'presentes', v)}
             />
           )}
+          {/* LE RAPPEL CATALOGUE SOUS LE CHAMP : la bobine pesee ou lue sur
+              l'etiquette se compare au catalogue sans quitter la saisie. */}
           <ChampNum label="Poids par bobine (kg)" v={l.poids_unitaire} pas={0.001}
-                    set={(v) => f.majLigne(l.cle, 'poids_unitaire', v)} />
+                    set={(v) => f.majLigne(l.cle, 'poids_unitaire', v)}
+                    aide={(() => {
+                      const rappel = rappelCatalogue(l)
+                      if (!rappel) return 'Pas de poids de bobine au catalogue'
+                      const c = couleurEcart(ecartPoidsBobine(l), tolerances)
+                      return (
+                        <span className={cn('font-medium', c ? CLASSE_ECART[c] : 'text-attenue-texte')}>
+                          {rappel}
+                        </span>
+                      )
+                    })()} />
           <ChampNum label="Pourcentage restant" v={l.pourcentage} pas={0.1} max={100}
                     set={(v) => f.majLigne(l.cle, 'pourcentage', v)} grand />
         </>
@@ -468,7 +616,7 @@ function FicheMobile({
       )}
 
       <div
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-bordure bg-surface p-2
+        className="fixed inset-x-0 bottom-0 z-20 max-md:bottom-[calc(3.2rem+var(--marge-sure-bas,0px))] border-t border-bordure bg-surface p-2
                    shadow-[0_-2px_12px_rgba(0,0,0,.08)]"
         style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}
       >
@@ -491,7 +639,7 @@ function FicheMobile({
               <button
                 type="button"
                 disabled={f.envoi.isPending}
-                onClick={() => f.envoi.mutate(true)}
+                onClick={() => f.envoi.mutate({ forcerLot: true })}
                 className="min-h-[44px] flex-1 rounded-[var(--radius-sm)] bg-alerte px-3
                            text-[14px] font-semibold text-surface disabled:opacity-40"
               >
@@ -509,10 +657,12 @@ function FicheMobile({
           </div>
         )}
 
+        <QuestionStock f={f} grand />
+        {v.element}
         <button
           type="button"
-          disabled={!f.pret || f.envoi.isPending}
-          onClick={() => f.envoi.mutate(undefined)}
+          disabled={!f.pret || f.envoi.isPending || !!f.stockCourt}
+          onClick={v.valider}
           className="inline-flex min-h-[56px] w-full items-center justify-center gap-2
                      rounded-[var(--radius-sm)] bg-primaire text-[15px] font-semibold
                      text-primaire-texte disabled:opacity-40"
@@ -559,7 +709,7 @@ function ChampM({
 }
 
 function ChampNum({
-  label, v, set, pas = 1, max, grand,
+  label, v, set, pas = 1, max, grand, aide,
 }: {
   label: string
   v: number
@@ -567,6 +717,8 @@ function ChampNum({
   pas?: number
   max?: number
   grand?: boolean
+  /** Une ligne de rappel sous le champ (le catalogue, par exemple). */
+  aide?: ReactNode
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -583,6 +735,181 @@ function ChampNum({
           grand ? 'text-[20px]' : 'text-[16px]',
         )}
       />
+      {aide && <span className="text-[13px] tabular-nums text-attenue-texte">{aide}</span>}
     </label>
+  )
+}
+
+/**
+ * CHOISIR CE QU'ON CHARGE — toute reference, avec ou sans lot.
+ *
+ * Le point de depart est le STOCK DU MAGASIN : chaque reference qu'il tient,
+ * avec le detail de ses lots quand elle en a, le plus ancien d'abord (FIFO), et
+ * « Sans lot » pour ce que les lots n'expliquent pas. Une reference qui ne se
+ * gere pas par lot se choisit d'un geste, sans lot.
+ *
+ * ET SI LE MAGASIN NE LA CONNAIT PAS ? La recherche s'ouvre a tout le
+ * catalogue : la matiere est parfois la sans que le stock le sache. Le
+ * chargement le dira a la validation, et proposera la correction.
+ *
+ * Un ecran entier, pas une fenetre : au telephone, devant le metier, on lit
+ * une liste a la fois.
+ */
+function ChoixLot({
+  magasin, lots, stock, chargement, dejaPris, choisir, fermer,
+}: {
+  magasin: string
+  lots: LotDispo[]
+  stock: StockMagasin[]
+  chargement: boolean
+  dejaPris: Set<string>
+  choisir: (code: string, designation: string, poids: number | null, lot: string) => void
+  fermer: () => void
+}) {
+  const [motif, setMotif] = useState('')
+  const [catalogue, setCatalogue] = useState(false)
+  const qCat = useQuery({
+    queryKey: ['catalogue-machine'],
+    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
+    enabled: catalogue,
+  })
+  const mots = motif.toLowerCase().split(/\s+/).filter(Boolean)
+  const correspond = (t: string) => mots.every((m) => t.toLowerCase().includes(m))
+
+  // Par reference du magasin : ses lots (le plus ancien d'abord), puis ce que
+  // les lots n'expliquent pas.
+  const refs = stock
+    .map((st) => {
+      const ls = lots
+        .filter((x) => x.code_reference === st.code_reference && x.lot_fournisseur !== SANS_LOT)
+        .sort((a, b) => a.date_premiere_entree.localeCompare(b.date_premiere_entree))
+      const sansLot = st.quantite_kg - ls.reduce((t, x) => t + x.quantite_kg, 0)
+      return { st, ls, sansLot }
+    })
+    .filter(({ st, ls }) =>
+      correspond(`${st.code_reference} ${st.designation} ${ls.map((x) => `${x.lot_fournisseur} ${x.code_couleur ?? ''}`).join(' ')}`),
+    )
+  const horsStock = (qCat.data ?? []).filter(
+    (c) => !stock.some((x) => x.code_reference === c.code_reference) && correspond(`${c.code_reference} ${c.designation}`),
+  )
+
+  const Choix = ({ code, designation, poids, lot, kg, detail, ancien }: {
+    code: string; designation: string; poids: number | null; lot: string; kg?: number; detail?: string; ancien?: boolean
+  }) => {
+    const pris = dejaPris.has(`${code}|${lot}`)
+    return (
+      <button
+        type="button"
+        disabled={pris}
+        onClick={() => choisir(code, designation, poids, lot)}
+        className="flex min-h-[52px] w-full items-center gap-2 px-3 py-2 text-left active:bg-attenue disabled:opacity-40"
+      >
+        <div className="min-w-0 flex-1">
+          <div className={cn('text-[13px] text-texte', lot === SANS_LOT ? 'italic' : 'font-mono')}>
+            {libelleLot(lot)}
+            {ancien && (
+              <span className="ml-2 rounded-full bg-info/15 px-1.5 py-0.5 font-sans text-[10px] font-medium not-italic text-info">
+                le plus ancien
+              </span>
+            )}
+          </div>
+          {detail && <div className="text-[11px] text-attenue-texte">{detail}</div>}
+        </div>
+        <div className="shrink-0 text-right tabular-nums">
+          {kg != null && (
+            <div className="text-[14px] font-semibold text-texte">
+              {nb(kg, 0)}<span className="ml-0.5 text-[10px] font-normal text-attenue-texte">kg</span>
+            </div>
+          )}
+          {pris && <div className="text-[11px] text-attenue-texte">déjà sur la fiche</div>}
+        </div>
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-3 pb-4">
+      <Fil titre="Choisir une référence" sous={`Magasin ${magasin}`} retour={fermer} />
+      <label className="flex min-h-[48px] items-center gap-2 rounded-[var(--radius-sm)] border border-bordure bg-fond px-3">
+        <Search className="size-4 shrink-0 text-attenue-texte" />
+        <input
+          autoFocus
+          value={motif}
+          onChange={(e) => setMotif(e.target.value)}
+          placeholder="Référence, lot, couleur…"
+          aria-label="Chercher une référence ou un lot"
+          className="min-w-0 flex-1 bg-transparent text-[15px] outline-none"
+        />
+        {motif && (
+          <button type="button" onClick={() => setMotif('')} aria-label="Effacer" className="p-1 text-attenue-texte">
+            <X className="size-4" />
+          </button>
+        )}
+      </label>
+
+      {chargement && <Chargement texte="Lecture du magasin…" />}
+      {!chargement && refs.length === 0 && (
+        <p className="py-3 text-center text-[13px] text-attenue-texte">
+          {stock.length === 0 ? 'Ce magasin ne tient aucun stock.' : 'Rien ne correspond dans ce magasin.'}
+        </p>
+      )}
+
+      {refs.map(({ st, ls, sansLot }) => (
+        <div key={st.code_reference} className="overflow-hidden rounded-[var(--radius)] border border-bordure bg-surface">
+          <div className="border-b border-bordure bg-attenue px-3 py-1.5">
+            <div className="truncate text-[13px] font-medium text-texte">{st.designation}</div>
+            <div className="text-[11px] text-attenue-texte">
+              {st.code_reference} · {nb(st.quantite_kg, 0)} kg en stock{st.suivi_lot ? '' : ' · ne se gère pas par lot'}
+            </div>
+          </div>
+          <div className="divide-y divide-bordure">
+            {ls.map((x, i) => (
+              <Choix key={x.lot_fournisseur} code={st.code_reference} designation={st.designation}
+                poids={st.poids_bobine_kg} lot={x.lot_fournisseur} kg={x.quantite_kg}
+                detail={`${x.code_couleur ? `${x.code_couleur} · ` : ''}entré le ${fmtDate(x.date_premiere_entree)}`}
+                ancien={i === 0 && ls.length > 1} />
+            ))}
+            {(ls.length === 0 || sansLot > 0.0005) && (
+              <Choix code={st.code_reference} designation={st.designation} poids={st.poids_bobine_kg}
+                lot={SANS_LOT} kg={ls.length === 0 ? st.quantite_kg : sansLot}
+                detail={st.suivi_lot ? 'stock dont le lot n’est pas connu' : undefined} />
+            )}
+          </div>
+        </div>
+      ))}
+
+      {/* HORS DU STOCK DE CE MAGASIN : tout le catalogue, sans lot. */}
+      {!catalogue ? (
+        <button
+          type="button"
+          onClick={() => setCatalogue(true)}
+          className="min-h-[48px] rounded-[var(--radius-sm)] border border-dashed border-bordure text-[14px] text-attenue-texte"
+        >
+          Chercher dans tout le catalogue
+        </button>
+      ) : (
+        <div className="overflow-hidden rounded-[var(--radius)] border border-bordure bg-surface">
+          <div className="border-b border-bordure bg-attenue px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-attenue-texte">
+            Hors du stock de ce magasin
+          </div>
+          {qCat.isLoading && <Chargement texte="Lecture du catalogue…" />}
+          <div className="divide-y divide-bordure">
+            {horsStock.slice(0, 40).map((c) => (
+              <div key={c.code_reference}>
+                <div className="px-3 pt-2 text-[13px] font-medium text-texte">{c.designation}</div>
+                <Choix code={c.code_reference} designation={c.designation} poids={c.poids_bobine_kg}
+                  lot={SANS_LOT} detail={`${c.code_reference} · aucun stock connu ici`} />
+              </div>
+            ))}
+            {!qCat.isLoading && horsStock.length === 0 && (
+              <p className="px-3 py-3 text-[13px] text-attenue-texte">Rien ne correspond.</p>
+            )}
+            {horsStock.length > 40 && (
+              <p className="px-3 py-2 text-[11px] text-attenue-texte">Précisez la recherche : {horsStock.length} références.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

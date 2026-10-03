@@ -341,6 +341,7 @@ export function Receptions() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(r) => r.id_reception}
         surClic={(r) => naviguer(`/receptions/${r.id_reception}`)}
         placeholderRecherche="N° de reception, fournisseur, bon de livraison..."

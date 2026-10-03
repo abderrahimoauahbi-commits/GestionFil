@@ -18,16 +18,17 @@
  * Sur telephone, une carte par reference qui se deplie : la meme information,
  * mais lue une reference a la fois.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Layers, Cog, Download, Printer, Search, Warehouse, X } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { BarreFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
-import { Alerte, Chargement } from '../composants/ui/base'
+import { Alerte, Badge, Chargement } from '../composants/ui/base'
 import { TableauImprimable } from '../composants/Etat'
 import { cn, fmt } from '../lib/utils'
+import { SANS_LOT } from '../lib/lots'
 
 const MODULE = 'STOCK'
 
@@ -465,13 +466,16 @@ function TableauLarge({
   magasins: { code: string; nom: string }[]
   totaux: { global: number; magasins: number; machines: number; valeur: number }
 }) {
+  // UNE REFERENCE DEPLIEE A LA FOIS : son detail par lot s'ouvre sous la ligne.
+  const [lotsDe, setLotsDe] = useState<string | null>(null)
+  const nbColonnes = 1 + 2 + magasins.length + 2 + 3 + 3
   return (
     <>
-    /* CE TABLEAU EST CELUI DE L'ECRAN. La version papier est rendue par
+    {/* CE TABLEAU EST CELUI DE L'ECRAN. La version papier est rendue par
        `TableauImprimable`, plus bas : elle porte l'en-tete de societe, la date
        d'edition et le nom de qui imprime — un etat, pas une photo d'ecran.
        C'est ce qui manquait ici : « Imprimer » sortait la barre laterale, les
-       filtres, et le tableau tasse dans ce qui restait de largeur. */
+       filtres, et le tableau tasse dans ce qui restait de largeur. */}
     <div className="sans-impression hidden overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface md:block">
       <table className="w-full text-[12px]">
         <thead className="sticky top-0 z-10">
@@ -513,13 +517,25 @@ function TableauLarge({
 
         <tbody className="tabular-nums">
           {lignes.map((l) => (
-            <tr key={l.code_reference} className="border-t border-bordure hover:bg-attenue/50">
+            <Fragment key={l.code_reference}>
+            <tr className={cn('border-t border-bordure hover:bg-attenue/50', lotsDe === l.code_reference && 'bg-attenue/60')}>
               <td className="max-w-[22rem] px-2 py-1.5">
+                <button
+                  type="button"
+                  className="flex w-full min-w-0 items-start gap-1 text-left"
+                  aria-expanded={lotsDe === l.code_reference}
+                  title="Voir le stock par lot"
+                  onClick={() => setLotsDe(lotsDe === l.code_reference ? null : l.code_reference)}
+                >
+                  <ChevronRight className={cn('mt-0.5 size-3.5 shrink-0 text-attenue-texte transition-transform', lotsDe === l.code_reference && 'rotate-90')} />
+                  <span className="min-w-0">
                 <div className="truncate font-medium text-texte">{l.designation}</div>
                 <div className="truncate text-[10px] text-attenue-texte">
                   {l.fournisseur_nom ?? '—'}
                   {l.classe_abc && <span className="ml-1.5">· {l.classe_abc}{l.classe_xyz}</span>}
                 </div>
+                  </span>
+                </button>
               </td>
 
               <td className="border-l border-bordure px-2 py-1.5 text-right font-semibold text-texte">
@@ -588,6 +604,14 @@ function TableauLarge({
                 {(l.a_commander_kg ?? 0) > 0 ? nb(l.a_commander_kg) : ''}
               </td>
             </tr>
+            {lotsDe === l.code_reference && (
+              <tr className="bg-attenue/30">
+                <td colSpan={nbColonnes} className="px-6 py-2">
+                  <LotsReference ligne={l} magasins={magasins} />
+                </td>
+              </tr>
+            )}
+            </Fragment>
           ))}
         </tbody>
 
@@ -746,6 +770,9 @@ function ListeTelephone({
                 {(l.nb_equivalents ?? 0) > 0 && (
                   <D t="Equivalents" v={String(l.nb_equivalents)} />
                 )}
+                <div className="col-span-2 pt-2">
+                  <LotsReference ligne={l} magasins={magasins} />
+                </div>
               </dl>
             )}
           </div>
@@ -817,4 +844,113 @@ function exporter(lignes: LigneStock[], magasins: { code: string; nom: string }[
   a.download = `etat-des-stocks-${new Date().toISOString().slice(0, 10)}.csv`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+interface LotStock {
+  code_reference: string
+  code_magasin: string
+  magasin_nom: string
+  lot_fournisseur: string
+  code_couleur: string | null
+  quantite_kg: number
+  nb_bobines: number
+  date_premiere_entree: string
+}
+
+/**
+ * LE STOCK D'UNE REFERENCE, LOT PAR LOT (demande du 01/10/2026).
+ *
+ * Un lot est une production du fournisseur : meme bain, meme nuance. Deux lots
+ * d'une meme reference peuvent differer de teinte, et la difference se voit au
+ * tissage. D'ou ce detail : par magasin, chaque lot avec sa couleur, ses
+ * kilos, ses bobines et sa date d'entree — le plus ancien d'abord, l'ordre
+ * dans lequel il doit sortir (FIFO).
+ *
+ * « SANS LOT » FERME LE COMPTE : c'est le stock du magasin que les lots
+ * n'expliquent pas (le stock entre avant le suivi par lot, surtout). Le total
+ * par magasin reste donc celui de l'etat, au kilo pres.
+ */
+function LotsReference({ ligne, magasins }: { ligne: LigneStock; magasins: { code: string; nom: string }[] }) {
+  const q = useQuery({
+    queryKey: ['stock-lots', ligne.code_reference],
+    queryFn: () =>
+      api.get<LotStock[]>(`/api/stock/lots?code_reference=${encodeURIComponent(ligne.code_reference)}&limite=500`),
+  })
+  if (q.isLoading) return <Chargement texte="Lecture des lots…" />
+  if (q.error) return <Alerte ton="danger">Les lots n’ont pas pu être lus.</Alerte>
+  const lots = q.data ?? []
+  // Les magasins qui portent du stock ou des lots : un lot sans stock connu du
+  // magasin doit se voir autant qu'un stock sans lot.
+  const codes = [
+    ...new Set([
+      ...magasins.map((m) => m.code).filter((c) => (ligne.par_magasin?.[c] ?? 0) > 0),
+      ...lots.map((x) => x.code_magasin),
+    ]),
+  ]
+  const nom = (c: string) =>
+    magasins.find((m) => m.code === c)?.nom ?? lots.find((x) => x.code_magasin === c)?.magasin_nom ?? c
+
+  return (
+    <div className="space-y-2 text-[12px]">
+      <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte">
+        <Layers className="size-3.5" />
+        Stock par lot — {ligne.designation}
+      </div>
+      {codes.length === 0 && <p className="text-attenue-texte">Aucun stock.</p>}
+      {codes.map((c) => {
+        const duMagasin = lots.filter((x) => x.code_magasin === c)
+        const enLots = duMagasin.reduce((t, x) => t + x.quantite_kg, 0)
+        const total = ligne.par_magasin?.[c]
+        const sansLot = total != null ? total - enLots : null
+        return (
+          <table key={c} className="w-full max-w-3xl tabular-nums">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wide text-attenue-texte">
+                <th className="py-0.5 text-left font-semibold">{nom(c)}</th>
+                <th className="w-28 py-0.5 text-left">Couleur</th>
+                <th className="w-28 py-0.5 text-right">Kg</th>
+                <th className="w-20 py-0.5 text-right">Bobines</th>
+                <th className="w-28 py-0.5 text-right">Entré le</th>
+              </tr>
+            </thead>
+            <tbody>
+              {duMagasin.map((x, i) => (
+                <tr key={x.lot_fournisseur} className="border-t border-bordure/60">
+                  <td className="py-1 font-medium">
+                    {x.lot_fournisseur === SANS_LOT ? <em className="font-normal">Sans lot</em> : `Lot ${x.lot_fournisseur}`}
+                    {i === 0 && duMagasin.length > 1 && (
+                      <Badge ton="info" className="ml-1.5">à sortir d’abord</Badge>
+                    )}
+                  </td>
+                  <td className="py-1 text-attenue-texte">{x.code_couleur ?? '—'}</td>
+                  <td className="py-1 text-right">{nb(x.quantite_kg)}</td>
+                  <td className="py-1 text-right text-attenue-texte">{nb(x.nb_bobines, 0)}</td>
+                  <td className="py-1 text-right text-attenue-texte">{fmt.date(x.date_premiere_entree)}</td>
+                </tr>
+              ))}
+              {sansLot != null && Math.abs(sansLot) > 0.0005 && (
+                <tr className="border-t border-bordure/60 italic text-attenue-texte">
+                  <td className="py-1" colSpan={2}>
+                    Sans lot
+                    {sansLot < 0 && (
+                      <span className="not-italic text-danger"> — les lots dépassent le stock du magasin</span>
+                    )}
+                  </td>
+                  <td className={cn('py-1 text-right', sansLot < 0 && 'text-danger')}>{nb(sansLot)}</td>
+                  <td colSpan={2} />
+                </tr>
+              )}
+              {total != null && (
+                <tr className="border-t border-bordure font-semibold">
+                  <td className="py-1" colSpan={2}>Total magasin</td>
+                  <td className="py-1 text-right">{nb(total)}</td>
+                  <td colSpan={2} />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )
+      })}
+    </div>
+  )
 }

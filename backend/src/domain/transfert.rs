@@ -52,6 +52,8 @@ struct LigneTransfert {
     lot_fournisseur: Option<String>,
     /// CMUP du magasin source, fige au depart. Nul tant que rien n'est parti.
     prix_kg_mad: Option<f64>,
+    /// Les bobines transferees : elles font le poids theorique du lot.
+    nb_bobines: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,7 +100,7 @@ async fn dossier(
         "SELECT ligne_numero, code_reference, quantite_kg::float8 AS quantite_kg,
                 quantite_saisie::float8 AS quantite_saisie, unite_saisie,
                 facteur_conversion::float8 AS facteur_conversion, lot_fournisseur,
-                prix_kg_mad::float8 AS prix_kg_mad
+                prix_kg_mad::float8 AS prix_kg_mad, nb_bobines::bigint AS nb_bobines
            FROM ligne_transfert WHERE id_transfert = $1 ORDER BY ligne_numero",
     )
     .bind(id_transfert)
@@ -214,8 +216,8 @@ pub async fn expedier(
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur, nb_bobines)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(&id_sortie)
         .bind(l.ligne_numero)
@@ -225,6 +227,7 @@ pub async fn expedier(
         .bind(&l.unite_saisie)
         .bind(l.facteur_conversion)
         .bind(&l.lot_fournisseur)
+        .bind(l.nb_bobines.filter(|b| *b > 0))
         .execute(&mut *tx)
         .await?;
 
@@ -298,8 +301,8 @@ pub async fn receptionner(
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                  quantite_saisie, unite_saisie, facteur_conversion, lot_fournisseur, nb_bobines)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(&id_entree)
         .bind(l.ligne_numero)
@@ -310,6 +313,7 @@ pub async fn receptionner(
         .bind(&l.unite_saisie)
         .bind(l.facteur_conversion)
         .bind(&l.lot_fournisseur)
+        .bind(l.nb_bobines.filter(|b| *b > 0))
         .execute(&mut *tx)
         .await?;
 

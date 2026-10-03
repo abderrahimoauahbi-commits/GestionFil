@@ -13,7 +13,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, Search, Trash2 } from 'lucide-react'
 import { DialogueSuppression } from './DialogueSuppression'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
@@ -31,9 +31,15 @@ import {
 } from './ui/base'
 import { cn } from '../lib/utils'
 
-const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
+const th = 'px-2 py-2 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte'
 const td = 'px-2 py-1'
 const champ = 'h-7 px-1.5 text-[12.5px]'
+/* UNE CELLULE DEJA SAISIE SE LIT COMME DU TEXTE. Un cadre par cellule
+   transformait la grille en formulaire de quarante champs ; le cadre revient
+   au survol et a la saisie. En lecture seule, plus de pave gris « desactive ». */
+const champLigne =
+  champ +
+  ' border-transparent bg-transparent hover:border-champ disabled:bg-transparent disabled:text-texte disabled:cursor-default'
 
 export interface ColonneDetail {
   champ: string
@@ -105,6 +111,7 @@ export function MaitreDetail({
   const [maitreASupprimer, setMaitreASupprimer] = useState<{ id: string; nom: string } | null>(null)
   const [nouvelle, setNouvelle] = useState<Record<string, string>>({})
   const [nouveauMaitre, setNouveauMaitre] = useState<Record<string, string>>({})
+  const [filtre, setFiltre] = useState('')
 
   const qMaitre = useQuery({
     queryKey: [maitre.route],
@@ -123,6 +130,10 @@ export function MaitreDetail({
    */
   useEffect(() => {
     if (pointe !== null) return
+    // AU BUREAU SEULEMENT. Au telephone, liste et detail ne tiennent pas
+    // ensemble : pointer d'office masquait la liste des l'ouverture, et l'on
+    // arrivait sur une categorie qu'on n'avait pas choisie.
+    if (!window.matchMedia('(min-width: 1024px)').matches) return
     const premier = qMaitre.data?.[0]
     if (premier) setPointe(String(premier[maitre.cle] ?? ''))
   }, [qMaitre.data, pointe, maitre.cle])
@@ -185,6 +196,12 @@ export function MaitreDetail({
   if (qMaitre.isLoading) return <Chargement texte={`Lecture des ${titre.toLowerCase()}…`} />
 
   const tous = qMaitre.data ?? []
+  const f = filtre.trim().toLowerCase()
+  const visibles = f
+    ? tous.filter((l) =>
+        `${maitre.libelle(l)} ${maitre.detail?.(l) ?? ''}`.toLowerCase().includes(f),
+      )
+    : tous
   const courant = tous.find((l) => String(l[maitre.cle]) === pointe)
   const ecrire = droits.peutEcrire
   const complet = detail.colonnes
@@ -192,19 +209,37 @@ export function MaitreDetail({
     .every((c) => (nouvelle[c.champ] ?? '').trim())
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[20rem_1fr]">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       {/* ---- Le niveau du haut ------------------------------------------- */}
       <Carte className={cn('h-fit', pointe && 'hidden lg:block')}>
         <CarteEntete>
           <CarteTitre>{titre}</CarteTitre>
           <div className="flex items-center gap-2">
-            <span className="text-[11.5px] text-attenue-texte">{tous.length}</span>
+            <span className="text-[11.5px] tabular-nums text-attenue-texte">{tous.length}</span>
             {actions}
           </div>
         </CarteEntete>
         <CarteCorps className="p-0">
-          <ul className="divide-y divide-bordure/60">
-            {tous.map((l) => {
+          {/* Chercher des qu'on ne voit plus tout d'un coup d'oeil. */}
+          {tous.length > 10 && (
+            <div className="relative border-b border-ligne p-2">
+              <Search className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-attenue-texte" />
+              <Champ
+                className="h-8 pl-8 text-[12.5px]"
+                placeholder="Chercher…"
+                aria-label={`Chercher dans ${titre.toLowerCase()}`}
+                value={filtre}
+                onChange={(e) => setFiltre(e.target.value)}
+              />
+            </div>
+          )}
+          <ul className="max-h-[calc(100dvh-17rem)] divide-y divide-ligne overflow-y-auto">
+            {visibles.length === 0 && (
+              <li className="px-3 py-6 text-center text-[12px] text-attenue-texte">
+                {tous.length ? 'Aucune ligne ne correspond.' : 'Rien n’est encore saisi.'}
+              </li>
+            )}
+            {visibles.map((l) => {
               const id = String(l[maitre.cle])
               const nb = (qDetail.data ?? []).filter(
                 (d) => String(d[detail.cleEtrangere] ?? '') === id,
@@ -214,9 +249,12 @@ export function MaitreDetail({
                   <button
                     type="button"
                     onClick={() => setPointe(id)}
+                    aria-current={pointe === id ? 'true' : undefined}
                     className={cn(
-                      'flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[12.5px] hover:bg-attenue/40',
-                      pointe === id && 'bg-attenue/60 font-medium',
+                      'relative flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-[13px] transition-colors',
+                      pointe === id
+                        ? 'bg-primaire/[0.07] font-medium before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-primaire'
+                        : 'hover:bg-attenue/60',
                     )}
                   >
                     <span className="min-w-0">
@@ -227,9 +265,11 @@ export function MaitreDetail({
                         </span>
                       )}
                     </span>
-                    <span className="flex items-center gap-1 text-[11px] text-attenue-texte">
+                    <span
+                      className="shrink-0 rounded-full bg-attenue px-2 py-0.5 text-[11px] tabular-nums text-attenue-texte"
+                      title={`${nb} ${detail.unite.toLowerCase()}(s)`}
+                    >
                       {nb}
-                      <ChevronRight className="size-3.5" />
                     </span>
                   </button>
                 </li>
@@ -237,7 +277,7 @@ export function MaitreDetail({
             })}
           </ul>
           {ecrire && maitre.champs && (
-            <div className="space-y-1.5 border-t border-bordure p-2">
+            <div className="space-y-1.5 border-t border-bordure bg-attenue/30 p-2.5">
               {maitre.champs.filter((c) => c.cleCreation || c.obligatoire).map((c) => (
                 <Champ
                   key={c.champ}
@@ -277,7 +317,18 @@ export function MaitreDetail({
         ) : (
           <Carte>
             <CarteEntete>
-              <CarteTitre>{maitre.libelle(courant)}</CarteTitre>
+              <div className="flex min-w-0 items-center gap-1">
+                <Bouton
+                  taille="icone-xs"
+                  variante="discret"
+                  className="-ml-1.5 lg:hidden"
+                  aria-label="Retour à la liste"
+                  onClick={() => setPointe(null)}
+                >
+                  <ArrowLeft />
+                </Bouton>
+                <CarteTitre className="truncate">{maitre.libelle(courant)}</CarteTitre>
+              </div>
               <div className="flex items-center gap-2">
                 {actionsLigne?.(courant)}
                 {/* LE NIVEAU DU HAUT SE SUPPRIME AUSSI. Une categorie creee par
@@ -299,19 +350,16 @@ export function MaitreDetail({
                     <Trash2 />
                   </Bouton>
                 )}
-                <Bouton taille="sm" variante="contour" className="lg:hidden" onClick={() => setPointe(null)}>
-                  Retour
-                </Bouton>
               </div>
             </CarteEntete>
             {maitre.champs && (
-              <CarteCorps className="flex flex-wrap gap-2 border-b border-bordure">
+              <CarteCorps className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 border-b border-bordure bg-attenue/25">
                 {maitre.champs.filter((c) => !c.cleCreation).map((c) => (
-                  <label key={c.champ} className="text-[11px] text-attenue-texte">
+                  <label key={c.champ} className="flex flex-col gap-1 text-[11px] font-medium text-attenue-texte">
                     {c.entete}
                     {c.options ? (
                       <Selecteur
-                        className={cn(champ, 'mt-0.5 w-44')}
+                        className={cn(champ, 'h-8 w-full')}
                         aria-label={c.entete}
                         value={String(courant[c.champ] ?? '')}
                         disabled={!ecrire}
@@ -329,7 +377,7 @@ export function MaitreDetail({
                       </Selecteur>
                     ) : (
                       <Champ
-                        className={cn(champ, 'mt-0.5 w-44')}
+                        className={cn(champ, 'h-8 w-full')}
                         aria-label={c.entete}
                         defaultValue={String(courant[c.champ] ?? '')}
                         disabled={!ecrire}
@@ -351,9 +399,9 @@ export function MaitreDetail({
             )}
             <CarteCorps className="p-0">
               <div className="defilement-x">
-                <table className="w-full min-w-[40rem] text-[12.5px]">
+                <table className="grille w-full min-w-[40rem] text-[12.5px]">
                   <thead>
-                    <tr className="border-b border-bordure">
+                    <tr className="bg-attenue/50">
                       {detail.colonnes.map((c) => (
                         <th key={c.champ} className={cn(th, 'text-left', c.largeur)}>
                           {c.entete}
@@ -366,12 +414,12 @@ export function MaitreDetail({
                     {lignes.map((l) => {
                       const id = String(l[detail.cle])
                       return (
-                        <tr key={id} className="border-b border-bordure/60">
+                        <tr key={id} className="hover:bg-attenue/40">
                           {detail.colonnes.map((c) => (
                             <td key={c.champ} className={td}>
                               {c.options ? (
                                 <Selecteur
-                                  className={champ}
+                                  className={champLigne}
                                   aria-label={c.entete}
                                   value={String(l[c.champ] ?? '')}
                                   disabled={!ecrire || c.cleCreation}
@@ -388,7 +436,7 @@ export function MaitreDetail({
                                 </Selecteur>
                               ) : (
                                 <Champ
-                                  className={champ}
+                                  className={champLigne}
                                   aria-label={c.entete}
                                   defaultValue={String(l[c.champ] ?? '')}
                                   disabled={!ecrire || c.cleCreation}
@@ -432,7 +480,7 @@ export function MaitreDetail({
 
                     {/* La ligne de saisie, a la suite : on tape et on ajoute. */}
                     {ecrire && (
-                      <tr className="border-b border-bordure/60 bg-attenue/25">
+                      <tr className="bg-primaire/[0.03]">
                         {detail.colonnes.map((c) => (
                           <td key={c.champ} className={td}>
                             {c.options ? (

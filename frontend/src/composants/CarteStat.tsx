@@ -25,6 +25,7 @@ const TRAIT: Record<TonStat, string> = {
   primaire: 'text-primaire',
   succes: 'text-succes',
   alerte: 'text-alerte',
+  grave: 'text-danger',
   danger: 'text-danger',
 }
 
@@ -104,13 +105,19 @@ function Courbe({ points, ton }: { points: number[]; ton: TonStat }) {
   )
 }
 
-export type TonStat = 'neutre' | 'primaire' | 'succes' | 'alerte' | 'danger'
+/**
+ * `grave` est le cran entre `alerte` et `danger` (« critique » avant « rupture »).
+ * Les deux partageaient le meme rouge : dans la barre d'etat du catalogue, on ne
+ * distinguait plus les critiques des ruptures sans lire la legende.
+ */
+export type TonStat = 'neutre' | 'primaire' | 'succes' | 'alerte' | 'grave' | 'danger'
 
 const PASTILLE: Record<TonStat, string> = {
   neutre: 'bg-attenue text-attenue-texte',
   primaire: 'bg-primaire/12 text-primaire',
   succes: 'bg-succes/15 text-succes',
   alerte: 'bg-alerte/18 text-alerte',
+  grave: 'bg-danger/10 text-danger',
   danger: 'bg-danger/15 text-danger',
 }
 
@@ -120,6 +127,7 @@ const CHIFFRE: Record<TonStat, string> = {
   primaire: 'text-texte',
   succes: 'text-succes',
   alerte: 'text-alerte',
+  grave: 'text-danger',
   danger: 'text-danger',
 }
 
@@ -159,13 +167,15 @@ export function CarteStat({
         // difference qu'on percoit entre un ecran fait et un ecran soigne, et
         // elle ne coute que quatre pixels.
         'relative flex items-start gap-3.5 overflow-hidden rounded-[var(--radius-lg)]',
-        'border border-bordure bg-surface p-4 text-left shadow-[var(--ombre-pose)]',
+        'border border-bordure bg-surface p-3 text-left shadow-[var(--ombre-pose)] sm:p-4',
         surClic && 'carte-active cursor-pointer',
       )}
     >
       <span
         className={cn(
-          'grid size-10 shrink-0 place-items-center rounded-[var(--radius)]',
+          // AU TELEPHONE, DEUX CARTES PAR LIGNE : la pastille y prenait la
+          // place du libelle, tronque en « VALEUR DU ST… ». Le chiffre prime.
+          'hidden size-10 shrink-0 place-items-center rounded-[var(--radius)] sm:grid',
           PASTILLE[ton],
         )}
       >
@@ -181,7 +191,7 @@ export function CarteStat({
             // UN CHIFFRE PLUS GRAND ET PLUS SERRE. C'est lui qu'on vient
             // chercher ; il doit se lire de loin, et le resserrement evite
             // qu'un montant a sept chiffres parte a la ligne.
-            'valeur-arrive text-[26px] font-semibold leading-none tabular-nums tracking-[-0.02em]',
+            'valeur-arrive whitespace-nowrap text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em] sm:text-[26px]',
             CHIFFRE[ton],
           )}
         >
@@ -193,7 +203,7 @@ export function CarteStat({
           )}
         </span>
         {precision && (
-          <span className="truncate text-[11.5px] leading-tight text-attenue-texte">
+          <span className="text-[11.5px] leading-tight text-attenue-texte max-sm:line-clamp-2 sm:truncate">
             {precision}
           </span>
         )}
@@ -220,17 +230,27 @@ export function BarreRepartition({
   const total = parts.reduce((s, p) => s + p.valeur, 0)
   if (!total) return null
 
+  /* DES CRANS DE STATUT, PAS DES COULEURS DE SERIE. Chaque etat a sa teinte
+     et la garde partout ; « critique » est un rouge eclairci, « rupture » le
+     rouge plein — la gravite se lit dans l'intensite, et le libelle l'ecrit. */
   const FOND: Record<TonStat, string> = {
     neutre: 'bg-attenue-texte/40',
     primaire: 'bg-primaire',
     succes: 'bg-succes',
     alerte: 'bg-alerte',
+    grave: 'bg-danger/55',
     danger: 'bg-danger',
+  }
+  const pct = (v: number) => {
+    const x = (v / total) * 100
+    return x > 0 && x < 1 ? '<1 %' : `${Math.round(x)} %`
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex h-2 gap-[2px] overflow-hidden rounded-full">
+    <div className="flex flex-col gap-2">
+      {/* Un filet de fond de 2 px entre les segments : sans lui, deux teintes
+          voisines se fondent en une seule longueur. */}
+      <div className="flex h-2.5 gap-[2px] overflow-hidden rounded-full bg-surface">
         {parts
           .filter((p) => p.valeur > 0)
           .map((p) => (
@@ -238,19 +258,20 @@ export function BarreRepartition({
               key={p.libelle}
               className={cn('h-full first:rounded-l-full last:rounded-r-full', FOND[p.ton])}
               style={{ width: `${(p.valeur / total) * 100}%` }}
-              title={`${p.libelle} : ${p.valeur}`}
+              title={`${p.libelle} : ${p.valeur} (${pct(p.valeur)})`}
             />
           ))}
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1">
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
         {parts.map((p) => (
           <span
             key={p.libelle}
-            className="flex items-center gap-1.5 text-[11px] text-attenue-texte"
+            className="flex items-center gap-1.5 text-[11.5px] text-attenue-texte"
           >
-            <span className={cn('size-2 shrink-0 rounded-full', FOND[p.ton])} />
+            <span className={cn('size-2.5 shrink-0 rounded-[3px]', FOND[p.ton])} />
             {p.libelle}
-            <span className="font-medium tabular-nums text-texte">{p.valeur}</span>
+            <span className="font-semibold tabular-nums text-texte">{p.valeur}</span>
+            <span className="tabular-nums">{pct(p.valeur)}</span>
           </span>
         ))}
       </div>

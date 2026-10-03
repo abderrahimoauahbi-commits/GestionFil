@@ -13,7 +13,7 @@ import { api, ErreurApi } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
 import { DataTable, type ColonneDT } from '../../composants/DataTable'
-import { Badge, Bouton, Champ, Etiq, Selecteur } from '../../composants/ui/base'
+import { Badge, Bouton, Champ, Etiq } from '../../composants/ui/base'
 import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
@@ -143,6 +143,7 @@ export function DossiersImport() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(d) => d.id_dossier}
         surClic={(d) => ouvrir(`/import/${d.id_dossier}`)}
         titreCarte={(d) => `Dossier ${d.numero}`}
@@ -163,14 +164,8 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
     numero: '',
     numero_bl: '',
     conteneurs: '',
-    code_devise: 'USD',
-    taux_change: '',
     date_arrivee: '',
-  })
-  const qDevises = useQuery({
-    queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
-    enabled: ouvert,
+    numero_dum: '',
   })
 
   const creer = useMutation({
@@ -178,8 +173,8 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
       api.post<{ id_dossier: string; numero: string }>('/api/import/dossiers', {
         ...f,
         numero: f.numero.trim() || null,
-        taux_change: Number(f.taux_change.replace(',', '.')),
         date_arrivee: f.date_arrivee || null,
+        numero_dum: f.numero_dum.trim() || null,
       }),
     onSuccess: (r) => {
       toast.success(`Dossier ${r.numero} créé`)
@@ -197,7 +192,7 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
     <Dialogue open={ouvert} onOpenChange={(o) => !o && surFermer()}>
       <DialogueContenu
         titre="Nouveau dossier d'importation"
-        description="La devise et le taux seront proposés à chaque facture du dossier."
+        description="Une expédition en groupage : chaque facture portera sa devise, son taux et son engagement."
       >
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -216,24 +211,15 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
             <Etiq>Conteneur(s)</Etiq>
             <Champ value={f.conteneurs} onChange={maj('conteneurs')} placeholder="CMAU4385688" />
           </div>
-          <div>
-            <Etiq obligatoire>Devise</Etiq>
-            <Selecteur value={f.code_devise} onChange={maj('code_devise')}>
-              {(qDevises.data ?? [{ code_devise: 'USD' }]).map((d) => (
-                <option key={d.code_devise}>{d.code_devise}</option>
-              ))}
-            </Selecteur>
-          </div>
-          <div>
-            <Etiq obligatoire>Taux de change</Etiq>
-            <Champ inputMode="decimal" value={f.taux_change} onChange={maj('taux_change')} placeholder="9,2224" />
+          <div className="col-span-2">
+            <Etiq>N° DUM</Etiq>
+            <Champ value={f.numero_dum} onChange={maj('numero_dum')} placeholder="Peut se saisir plus tard" />
           </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Bouton variante="contour" onClick={surFermer}>Annuler</Bouton>
           <Bouton
             chargement={creer.isPending}
-            disabled={!(Number(f.taux_change.replace(',', '.')) > 0)}
             onClick={() => creer.mutate()}
           >
             <Ship />

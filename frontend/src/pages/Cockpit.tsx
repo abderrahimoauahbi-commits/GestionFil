@@ -30,6 +30,7 @@ import { toast } from 'sonner'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
+  ArrowDownUp,
   ArrowRight,
   CheckCircle2,
   CircleDollarSign,
@@ -38,9 +39,12 @@ import {
   FileCheck2,
   FileClock,
   Moon,
+  Lock,
   PackageX,
+  Scale,
   Send,
   ShieldAlert,
+  ShieldCheck,
   TrendingDown,
   Truck,
 } from 'lucide-react'
@@ -151,6 +155,12 @@ interface Tuile {
   actionnable?: boolean
   /** Une tuile d'ETAT reste visible a zero ; une FILE vide s'efface. */
   toujours?: boolean
+  /**
+   * Compteur lu HORS de la grille de champs du cockpit (les lots, sous le
+   * module STOCK) : il n'a pas de ligne dans `champ_configurable` COCKPIT, et
+   * `visible` le dirait donc masque. Sa permission de module suffit.
+   */
+  horsGrille?: boolean
 }
 
 const TEINTE: Record<Ton, string> = {
@@ -176,6 +186,16 @@ export function Cockpit() {
 
   const k = qKpi.data ?? {}
   const n = (champ: string) => Number(k[champ] ?? 0)
+
+  /* LES FILES DES LOTS (02/10/2026). Elles se lisent sous le module STOCK,
+     comme le registre : un role qui ne lit pas le stock n'a pas a les voir. */
+  const lisStock = peut('STOCK', 'LIRE')
+  const qLots = useQuery({
+    queryKey: ['cockpit-lots'],
+    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    enabled: lisStock,
+  })
+  const nl = (champ: string) => Number(qLots.data?.[champ] ?? 0)
 
   const files: Tuile[] = [
     {
@@ -297,6 +317,66 @@ export function Cockpit() {
       actionnable: peut('STOCK', 'LIRE'),
     },
     {
+      champ: 'lots_a_basculer',
+      domaine: 'STOCK',
+      libelle: 'Lots à basculer',
+      valeur: nl('lots_a_basculer'),
+      detail: 'Projet passés sous le seuil des Restes',
+      ton: 'alerte',
+      Icone: ArrowDownUp,
+      vers: '/lots?vue=a_basculer',
+      actionnable: peut('STOCK', 'ECRIRE'),
+      horsGrille: true,
+    },
+    {
+      champ: 'lots_dormants',
+      domaine: 'STOCK',
+      libelle: 'Lots dormants',
+      valeur: nl('lots_dormants'),
+      detail: 'sans activité : à décider',
+      ton: 'alerte',
+      Icone: Moon,
+      vers: '/lots?vue=dormants',
+      actionnable: peut('STOCK', 'VALIDER'),
+      horsGrille: true,
+    },
+    {
+      champ: 'lots_bloques',
+      domaine: 'QUALITE',
+      libelle: 'Lots bloqués',
+      valeur: nl('lots_bloques'),
+      detail: 'en attente d’une décision qualité',
+      ton: 'danger',
+      Icone: Lock,
+      vers: '/lots?vue=bloques',
+      actionnable: peut('STOCK', 'VALIDER'),
+      horsGrille: true,
+    },
+    {
+      champ: 'lots_en_derive',
+      domaine: 'QUALITE',
+      libelle: 'Lots en dérive de poids',
+      valeur: nl('lots_en_derive'),
+      detail: 'écart cumulé hors tolérance',
+      ton: 'alerte',
+      Icone: Scale,
+      vers: '/lots?vue=derive',
+      actionnable: lisStock,
+      horsGrille: true,
+    },
+    {
+      champ: 'autorisations_en_attente',
+      domaine: 'STOCK',
+      libelle: 'Autorisations à donner',
+      valeur: nl('autorisations_en_attente'),
+      detail: 'demandes en attente de décision',
+      ton: 'danger',
+      Icone: ShieldCheck,
+      vers: '/autorisations',
+      actionnable: peut('STOCK', 'VALIDER'),
+      horsGrille: true,
+    },
+    {
       champ: 'nb_controles_bloquants',
       domaine: 'QUALITE',
       libelle: 'Contrôles bloquants',
@@ -312,7 +392,9 @@ export function Cockpit() {
   // VOIR le champ et AGIR dessus ; une file vide s'efface, parce qu'un ecran
   // couvert de zeros apprend a ne plus etre lu.
   const garder = (t: Tuile) =>
-    droits.visible(t.champ) && t.actionnable !== false && (t.toujours || t.valeur > 0)
+    (t.horsGrille || droits.visible(t.champ)) &&
+    t.actionnable !== false &&
+    (t.toujours || t.valeur > 0)
 
   /* LE DOMAINE CHOISI SE RETIENT POUR LA SESSION. Un acheteur qui a mis
      « Achats » le retrouve en revenant ; il n'a pas a le reposer dix fois par
@@ -534,7 +616,7 @@ export function Cockpit() {
         <CarteEntete>
           <CarteTitre>Tenue du plan de production</CarteTitre>
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-attenue-texte">
-            <Legende ton="bg-succes/70" texte="couvert" />
+            <Legende ton="bg-succes/25" texte="couvert" />
             <Legende ton="bg-alerte" texte="tendu : sous le stock de sécurité" />
             <Legende ton="bg-danger" texte="rupture" />
           </div>
@@ -556,7 +638,7 @@ export function Cockpit() {
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
+                  <tr className="border-b border-bordure bg-attenue/50 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte">
                     <th className="px-3 py-2 text-left">Référence</th>
                     <th className="w-28 px-2 py-2 text-left">Sourcing</th>
                     <th className="w-20 px-2 py-2 text-right">Délai</th>
@@ -608,7 +690,9 @@ export function Cockpit() {
                                   ? 'bg-danger'
                                   : m.statut === 'TENDU'
                                     ? 'bg-alerte'
-                                    : 'bg-succes/70',
+                                    // Couvert reste en retrait : le regard doit
+                                    // tomber sur les mois tendus et en rupture.
+                                    : 'bg-succes/25',
                               )}
                             />
                           </Infobulle>
@@ -1217,13 +1301,13 @@ function ChiffresCles() {
 
           Les comptes n'ont pas disparu : ils sont devenus la PRECISION sous le
           chiffre, la ou ils expliquent au lieu de concurrencer. */}
-      <Carte className="border-primaire/30 bg-primaire/[0.04]">
-        <CarteCorps className="py-3">
-          <p className="text-[13px] leading-relaxed text-texte">
-            {phraseDuJour(k, eco?.economies_total_mad ?? 0, eco?.nb_opportunites ?? 0, nbMonoSource)}
-          </p>
-        </CarteCorps>
-      </Carte>
+      {/* LA PHRASE DU JOUR SE LIT COMME UN CHAPEAU D'ARTICLE, pas comme une
+          alerte : un filet laiton a gauche, un corps plus grand, aucune boite.
+          Encadree et teintee, elle ressemblait a un avertissement, et l'oeil
+          la sautait comme on saute les bandeaux. */}
+      <p className="max-w-[110ch] border-l-2 border-or pl-3 text-[14.5px] leading-relaxed text-texte">
+        {phraseDuJour(k, eco?.economies_total_mad ?? 0, eco?.nb_opportunites ?? 0, nbMonoSource)}
+      </p>
 
       <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:grid-cols-4">
         <CarteStat
@@ -1313,7 +1397,7 @@ function ChiffresCles() {
             parts={[
               { libelle: 'Au vert', valeur: ok, ton: 'succes' },
               { libelle: 'En attention', valeur: attention, ton: 'alerte' },
-              { libelle: 'Critique', valeur: critiques, ton: 'danger' },
+              { libelle: 'Critique', valeur: critiques, ton: 'grave' },
               // Les ruptures manquaient : les trois segments ne faisaient pas le
               // total des references suivies.
               { libelle: 'Rupture', valeur: ruptures, ton: 'danger' },

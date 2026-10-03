@@ -62,6 +62,11 @@ pub async fn generer_plan_achat(
 pub struct DemandeConversion {
     /// Propositions a convertir. Vide ou absent : toutes celles ouvertes.
     pub propositions: Option<Vec<String>>,
+    /// LE BON VISE, par fournisseur (01/10/2026). Absent pour un fournisseur :
+    /// un bon neuf s'ouvre, comme avant. Present : les lignes completent ce
+    /// bon, s'il est du meme fournisseur et encore modifiable.
+    #[serde(default)]
+    pub cibles: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Convertit des propositions d'achat en bons de commande.
@@ -76,7 +81,7 @@ pub async fn convertir_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
     user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
-    let r = plan_achat::convertir(&state.db, &user, d.propositions.as_deref()).await?;
+    let r = plan_achat::convertir(&state.db, &user, d.propositions.as_deref(), d.cibles.as_ref()).await?;
     Ok(Json(serde_json::to_value(r)?))
 }
 

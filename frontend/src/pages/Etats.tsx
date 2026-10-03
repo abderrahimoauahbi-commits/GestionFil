@@ -23,11 +23,15 @@ import {
   ClipboardList,
   FileSpreadsheet,
   Gauge,
+  Hourglass,
   Library,
+  Moon,
   Package,
   Palette,
   Printer,
+  Scale,
   ShoppingCart,
+  Tags,
   Truck,
   type LucideIcon,
 } from 'lucide-react'
@@ -55,6 +59,8 @@ interface Comptes {
   propositions: number
   refsEnAlerte: number
   receptionsEnCours: number
+  lotsDormants: number
+  lotsABasculer: number
 }
 
 const ETATS: EtatDisponible[] = [
@@ -90,6 +96,52 @@ const ETATS: EtatDisponible[] = [
     Icone: ClipboardList,
     famille: 'Stock',
     compte: (d) => (d.inventairesOuverts ? `${d.inventairesOuverts} en cours` : null),
+  },
+
+  /* --- Lots ------------------------------------------------------------- */
+  /* Une seule page, quatre vues : le parametre choisit (voir EtatLots). La
+     route `etats/lots` est a declarer dans App.tsx, sous le module STOCK. */
+  {
+    cle: 'lots-stock',
+    titre: 'Stock par lot',
+    description:
+      'La vue comptable : chaque lot qui porte du stock, avec sa categorie (Projet ou Restes), son statut, son solde et sa derniere activite.',
+    chemin: '/etats/lots?vue=stock',
+    module: 'STOCK',
+    Icone: Tags,
+    famille: 'Lots',
+  },
+  {
+    cle: 'lots-dormants',
+    titre: 'Lots dormants',
+    description:
+      'Les lots qui portent du stock sans activite depuis le delai de dormance. La liste a trancher : reprendre, declasser ou detruire.',
+    chemin: '/etats/lots?vue=dormants',
+    module: 'STOCK',
+    Icone: Moon,
+    famille: 'Lots',
+    compte: (d) => (d.lotsDormants ? `${d.lotsDormants} dormant${d.lotsDormants > 1 ? 's' : ''}` : null),
+  },
+  {
+    cle: 'lots-restes',
+    titre: 'Restes',
+    description:
+      'Les lots libres de categorie Restes : hors plan d achat, a ecouler en priorite. Avec le seuil qui les a fait basculer.',
+    chemin: '/etats/lots?vue=restes',
+    module: 'STOCK',
+    Icone: Hourglass,
+    famille: 'Lots',
+    compte: (d) => (d.lotsABasculer ? `${d.lotsABasculer} a basculer` : null),
+  },
+  {
+    cle: 'lots-ecarts',
+    titre: 'Écart de poids par fournisseur',
+    description:
+      'Le poids pese d une bobine face au poids catalogue, par fournisseur : ecart moyen, mini, maxi et kilos, avec le niveau de tolerance.',
+    chemin: '/etats/lots?vue=ecarts',
+    module: 'STOCK',
+    Icone: Scale,
+    famille: 'Lots',
   },
 
   /* --- Achats ------------------------------------------------------------ */
@@ -223,11 +275,19 @@ export function Etats() {
     queryFn: () => api.get<Record<string, number>>('/api/cockpit'),
   })
   const k = q.data ?? {}
+  const qLots = useQuery({
+    queryKey: ['cockpit-lots'],
+    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    enabled: peut('STOCK', 'LIRE'),
+  })
+  const kl = qLots.data ?? {}
   const comptes: Comptes = {
     inventairesOuverts: 0,
     propositions: k.nb_propositions_a_traiter ?? 0,
     refsEnAlerte: (k.nb_ruptures ?? 0) + (k.nb_critiques ?? 0) + (k.nb_attention ?? 0),
     receptionsEnCours: (k.nb_receptions_en_saisie ?? 0) + (k.nb_receptions_a_controler ?? 0),
+    lotsDormants: kl.lots_dormants ?? 0,
+    lotsABasculer: kl.lots_a_basculer ?? 0,
   }
 
   const visibles = ETATS.filter((e) => peut(e.module, 'LIRE'))

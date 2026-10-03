@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ArrowLeftRight, BarChart3, Bell, BookOpen, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
+  ArrowLeftRight, BadgeCheck, BarChart3, Bell, BookOpen, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, Tags, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -249,6 +249,10 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 5. Stock & mouvements --------------------------------------------- */
   { vers: '/etat-stock', libelle: 'État des stocks', module: 'STOCK', Icone: Warehouse, section: 'STOCK', resume: 'Ce que chaque magasin porte, en kilos', principale: true },
   { vers: '/stock', libelle: 'Stock projeté & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
+  // Le stock lot par lot (cahier du 02/10/2026) : vues Projet / Restes, alertes
+  // a traiter, fiche de vie ; et la file des demandes d'autorisation.
+  { vers: '/lots', libelle: 'Lots', module: 'STOCK', Icone: Tags, section: 'STOCK', resume: 'Projet, Restes, lots bloqués et dormants' },
+  { vers: '/autorisations', libelle: 'Autorisations', module: 'STOCK', Icone: BadgeCheck, section: 'STOCK' },
   { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: ArrowLeftRight, section: 'STOCK', resume: 'Entrées, sorties, transferts', principale: true },
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
   // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :
@@ -498,6 +502,10 @@ export function Coquille() {
           </Bouton>
         </div>
 
+        {/* Le robot de connexion : il s'ouvre seul a la premiere page de la
+            session, et se rappelle par son bouton, ici. */}
+        <RobotConnexion />
+
         {/* Apparence : un tiroir plutot qu'une page, pour que le tableau
             reste visible pendant qu'on regle sa couleur. */}
         <button
@@ -731,9 +739,6 @@ export function Coquille() {
 
       {/* Le tiroir d'apparence : hors de la colonne de contenu, il se pose
           par-dessus tout et n'entre dans aucun flux. */}
-      {/* Le robot de connexion : il s'ouvre seul a la premiere page de la
-          session, et se rappelle par son bouton. */}
-      <RobotConnexion />
       <PanneauApparence ouvert={apparence} surFermeture={() => setApparence(false)} />
       <ChangerMotDePasse ouvert={motDePasse} surFermeture={() => setMotDePasse(false)} />
       <DoubleAuthentification ouvert={doubleAuth} surFermeture={() => setDoubleAuth(false)} />
@@ -804,7 +809,9 @@ export function EnTetePage({
                  sm:-mx-4 sm:px-4"
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <h1 className="text-[15px] font-semibold leading-tight tracking-tight">{titre}</h1>
+        {/* 17 PX ET NON 15. A quinze, le titre ne depassait le texte courant que
+            d'un pixel ou deux : la page n'avait pas de point d'entree. */}
+        <h1 className="text-[17px] font-semibold leading-tight tracking-[-0.015em]">{titre}</h1>
         {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
             par la route courante : aucun ecran n'a a la declarer, donc aucun ne
             peut l'oublier. */}

@@ -132,6 +132,8 @@ export function BonCommandeNouveau() {
     date_livraison_prevue: '',
     motif_creation: 'MRP',
     notes: '',
+    /** Au choix ; celle de la fiche fournisseur par defaut (01/10/2026). */
+    code_devise: '',
   })
   /**
    * OU LA FRAPPE VA CHERCHER.
@@ -163,7 +165,8 @@ export function BonCommandeNouveau() {
     queryFn: () => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500'),
   })
   const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
-  const devise = fournisseur?.code_devise ?? 'MAD'
+  const devise = entete.code_devise || fournisseur?.code_devise || 'MAD'
+  const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
 
   /**
    * CE QUE LE PLAN RECLAME CHEZ CE FOURNISSEUR.
@@ -340,7 +343,12 @@ export function BonCommandeNouveau() {
                 id="frs"
                 value={entete.code_fournisseur}
                 onChange={(e) => {
-                  setEntete({ ...entete, code_fournisseur: e.target.value })
+                  const code = e.target.value
+                  setEntete({
+                    ...entete,
+                    code_fournisseur: code,
+                    code_devise: qFrs.data?.find((f) => f.code_fournisseur === code)?.code_devise ?? '',
+                  })
                   setLignes([])
                 }}
               >
@@ -379,6 +387,22 @@ export function BonCommandeNouveau() {
                 value={entete.notes}
                 onChange={(e) => setEntete({ ...entete, notes: e.target.value })}
               />
+            </div>
+            <div>
+              <Etiq htmlFor="devise">
+                Devise
+                <Aide>Celle de la fiche fournisseur par défaut. Le taux engagé est celui en vigueur pour la devise choisie.</Aide>
+              </Etiq>
+              <Selecteur
+                id="devise"
+                value={devise}
+                disabled={!entete.code_fournisseur}
+                onChange={(e) => setEntete({ ...entete, code_devise: e.target.value })}
+              >
+                {(qDevises.data ?? [{ code_devise: devise }]).map((d) => (
+                  <option key={d.code_devise}>{d.code_devise}</option>
+                ))}
+              </Selecteur>
             </div>
             <div>
               <Etiq htmlFor="motif">Motif</Etiq>

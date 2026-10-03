@@ -356,7 +356,10 @@ export function ReceptionNouvelle() {
         reste_kg: null,
         unite_catalogue: ref.unite_catalogue,
         suivi_lot: ref.suivi_lot,
-        devise: ref.code_devise_catalogue ?? null,
+        // SANS BON DE COMMANDE, LE SERVEUR ENREGISTRE LE PRIX EN MAD, au taux 1.
+        // Annoncer la devise du catalogue faisait saisir des euros enregistres
+        // comme des dirhams.
+        devise: 'MAD',
         qte: String(qte),
         qteBl: String(qte),
         unite: 'kg',
@@ -475,7 +478,7 @@ export function ReceptionNouvelle() {
     !!entete.code_fournisseur &&
     retenues.length > 0 &&
     !sansQte.length &&
-    !sansLot.length &&
+    // UN LOT VIDE NE BLOQUE PLUS : un lot interne sera genere a la validation.
     !sansMotif.length &&
     !sansFacteur.length
 
@@ -1034,14 +1037,17 @@ export function ReceptionNouvelle() {
                                 )}
                               </td>
                               <td className="px-2 py-1">
-                                <Champ
-                                  value={l.lot}
-                                  onChange={(e) => maj(l.cle, 'lot', e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className={cn('h-7', manqueLot && 'border-danger')}
-                                  placeholder={l.suivi_lot === 1 ? 'obligatoire' : ''}
-                                  aria-label="Lot fournisseur"
-                                />
+                                <div className="flex items-center gap-1">
+                                  <Champ
+                                    value={l.lot}
+                                    onChange={(e) => maj(l.cle, 'lot', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={cn('h-7', manqueLot && 'border-danger')}
+                                    placeholder={l.suivi_lot === 1 ? 'vide : lot interne' : ''}
+                                    title={l.suivi_lot === 1 ? 'Laissé vide, un lot interne sera généré à la validation' : undefined}
+                                    aria-label="Lot fournisseur"
+                                  />
+                                </div>
                               </td>
                               <td className="px-2 py-1">
                                 <Selecteur
@@ -1119,9 +1125,9 @@ export function ReceptionNouvelle() {
                   <span className="text-danger"> — quantite manquante sur {sansQte.length}</span>
                 )}
                 {sansLot.length > 0 && (
-                  <span className="text-danger">
+                  <span className="text-attenue-texte">
                     {' '}
-                    — lot obligatoire : {sansLot.map((l) => l.code_reference).join(', ')}
+                    — {sansLot.length} ligne(s) sans lot : un lot interne sera généré à la validation
                   </span>
                 )}
                 {sansMotif.length > 0 && (
@@ -1378,7 +1384,9 @@ function PanneauDetail({
               />
               {ligne.suivi_lot === 1 && (
                 <p className="mt-1 text-[11px] text-attenue-texte">
-                  Reference suivie par lot : sans lot, pas d'entree en stock.
+                  Référence suivie par lot. Si le fournisseur n’en a pas mis, laissez vide : un
+                  lot interne (numéro de réception et de ligne) sera généré à la validation, après
+                  confirmation.
                 </p>
               )}
             </div>

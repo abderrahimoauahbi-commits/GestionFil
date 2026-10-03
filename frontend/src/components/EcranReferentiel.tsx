@@ -191,6 +191,19 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
      s'efface le temps de la saisie. Rien ne change cote droits : le formulaire
      est le meme, et c'est le serveur qui tranche a l'enregistrement. */
   if (creation || edition) {
+    const formulaire = (
+      <Formulaire
+        module={module}
+        champs={champs}
+        valeurs={creation ? {} : (edition as Record<string, unknown>)}
+        creation={creation}
+        enCours={crud.enCours}
+        erreur={crud.erreur}
+        surAnnuler={fermer}
+        surValider={enregistrer}
+        libelleValider={creation ? 'Creer' : 'Enregistrer'}
+      />
+    )
     return (
       <div>
         <EnTetePage
@@ -208,21 +221,15 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
           }
         />
 
-        <Carte>
-          <CarteCorps>
-            <Formulaire
-              module={module}
-              champs={champs}
-              valeurs={creation ? {} : (edition as Record<string, unknown>)}
-              creation={creation}
-              enCours={crud.enCours}
-              erreur={crud.erreur}
-              surAnnuler={fermer}
-              surValider={enregistrer}
-              libelleValider={creation ? 'Creer' : 'Enregistrer'}
-            />
-          </CarteCorps>
-        </Carte>
+        {/* UN FORMULAIRE A SECTIONS PORTE SES PROPRES CARTES : l'envelopper
+            dans une carte de plus mettait des cadres dans un cadre. */}
+        {champs.some((c) => c.section) ? (
+          formulaire
+        ) : (
+          <Carte>
+            <CarteCorps>{formulaire}</CarteCorps>
+          </Carte>
+        )}
 
       </div>
     )

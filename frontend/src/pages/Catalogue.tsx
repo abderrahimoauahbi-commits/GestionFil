@@ -203,15 +203,16 @@ export function Catalogue() {
   ]
 
   const champs: ChampDef[] = [
+    /* --- Général ----------------------------------------------------- */
     {
       champ: 'code_reference',
       libelle: 'Référence',
       obligatoire: true,
       cleCreation: true,
-      pleineLargeur: true,
       aide: 'Identifiant cité par les recettes et les mouvements : il ne pourra plus être changé.',
+      section: 'Général',
     },
-    { champ: 'designation', libelle: 'Designation', obligatoire: true, pleineLargeur: true },
+    { champ: 'designation', libelle: 'Designation', obligatoire: true, section: 'Général', etendue: 2 },
     {
       champ: 'description_commerciale',
       libelle: 'Description commerciale (anglais)',
@@ -220,6 +221,7 @@ export function Catalogue() {
         'Ce que le fournisseur lit sur le bon de commande : « 100% POLYPROPYLENE YARN 2900 ' +
         'DTEX ». Notre code interne ne lui dit rien. Laissée vide, la désignation part à sa ' +
         'place — au risque qu’il ne la reconnaisse pas.',
+      section: 'Général',
     },
     {
       champ: 'code_categorie',
@@ -227,23 +229,8 @@ export function Catalogue() {
       type: 'liste',
       obligatoire: true,
       options: qCat.data?.map((c) => ({ valeur: c.code_categorie, libelle: c.libelle })),
+      section: 'Général',
     },
-    {
-      champ: 'code_fournisseur',
-      libelle: 'Fournisseur',
-      type: 'liste',
-      obligatoire: true,
-      options: qFour.data?.map((f) => ({ valeur: f.code_fournisseur, libelle: f.nom })),
-    },
-    { champ: 'type_fil', libelle: 'Nature' },
-    { champ: 'couleur', libelle: 'Couleur' },
-    {
-      champ: 'origine',
-      libelle: 'Origine',
-      aide: "Quand la matiere n'a pas de couleur — jute, colle, plastique, cuir — c'est la "
-        + "provenance qui prend sa place dans le nom de la reference.",
-    },
-    { champ: 'titrage', libelle: 'Titrage' },
     {
       champ: 'code_famille',
       libelle: 'Famille',
@@ -251,7 +238,28 @@ export function Catalogue() {
       options: qFam.data?.map((f) => ({ valeur: f.code_famille, libelle: f.libelle })),
       aide: 'Le produit independamment du vendeur. Deux references de meme famille et de meme '
         + 'couleur interne sont le meme fil, chez deux fournisseurs differents.',
+      section: 'Général',
     },
+    {
+      champ: 'code_fournisseur',
+      libelle: 'Fournisseur',
+      type: 'liste',
+      obligatoire: true,
+      options: qFour.data?.map((f) => ({ valeur: f.code_fournisseur, libelle: f.nom })),
+      section: 'Général',
+    },
+    {
+      champ: 'reference_fournisseur',
+      libelle: 'Reference fournisseur',
+      aide: "La reference telle que le fournisseur l'ecrit sur sa facture : « GOLD 2117 », "
+        + "« OZ 3034 », « SSL2081 ». C'est elle que la saisie assistée lit.",
+      section: 'Général',
+    },
+    { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Général' },
+    /* --- Paramètres techniques --------------------------------------- */
+    { champ: 'type_fil', libelle: 'Nature', section: 'Paramètres techniques' },
+    { champ: 'titrage', libelle: 'Titrage', section: 'Paramètres techniques' },
+    { champ: 'couleur', libelle: 'Couleur', section: 'Paramètres techniques' },
     {
       champ: 'code_couleur_interne',
       libelle: 'Couleur interne',
@@ -261,20 +269,23 @@ export function Catalogue() {
         libelle: `${c.code_couleur_interne} — ${c.libelle}`,
       })),
       aide: 'Votre code couleur, commun a tous les fournisseurs (C1, C3, CG…).',
+      section: 'Paramètres techniques',
     },
     {
-      champ: 'reference_fournisseur',
-      libelle: 'Reference fournisseur',
-      aide: "La reference telle que le fournisseur l'ecrit sur sa facture : « GOLD 2117 », "
-        + "« OZ 3034 », « SSL2081 ». C'est elle que la saisie assistée lit.",
+      champ: 'origine',
+      libelle: 'Origine',
+      aide: "Quand la matiere n'a pas de couleur — jute, colle, plastique, cuir — c'est la "
+        + "provenance qui prend sa place dans le nom de la reference.",
+      section: 'Paramètres techniques',
     },
     {
-      champ: 'supplement_teinture',
-      libelle: 'Supplement de teinture',
+      champ: 'densite_kg_ml',
+      libelle: 'Densité (kg/ml)',
       type: 'nombre',
-      aide: 'En devise par tonne (100, 150, 530…). Le prix de la couleur est le prix de base de '
-        + 'la famille plus ce supplement ramene au kilo.',
+      aide: 'Obligatoire pour une unité ml : sans elle, la conversion est refusee.',
+      section: 'Paramètres techniques',
     },
+    /* --- Conditionnement et stockage --------------------------------- */
     {
       champ: 'unite_catalogue',
       libelle: 'Unité de stock',
@@ -290,6 +301,7 @@ export function Catalogue() {
       aide:
         'Le stock reste tenu en kg ; les autres unités sont des masques de saisie. ' +
         'Le lot est le bain que le fournisseur produit — une unité d’achat, pas de manutention.',
+      section: 'Conditionnement et stockage',
     },
     {
       champ: 'code_conditionnement',
@@ -309,6 +321,7 @@ export function Catalogue() {
         'Ce dans quoi cette matière arrive, et donc le mot employé pour la compter. ' +
         'Tant qu’il n’est pas renseigné, l’état du stock affiche les kilos seuls : ' +
         'mieux vaut aucun comptage qu’un comptage faux.',
+      section: 'Conditionnement et stockage',
     },
     {
       champ: 'poids_bobine_kg',
@@ -317,6 +330,7 @@ export function Catalogue() {
       aide:
         'Le poids net d’UNE unité de conditionnement : une bobine, un rouleau, ' +
         'une cuve pleine. Sans lui, aucun comptage n’est possible.',
+      section: 'Conditionnement et stockage',
     },
     {
       champ: 'bobines_par_palette',
@@ -325,37 +339,65 @@ export function Catalogue() {
       aide:
         'Combien il en tient sur une palette complète : 120 bobines, ' +
         '480 petits rouleaux de Bande, 1 seule cuve de colle.',
+      section: 'Conditionnement et stockage',
     },
     {
-      champ: 'bobines_par_lot',
-      libelle: 'Bobines par lot',
-      type: 'entier',
+      champ: 'suivi_lot',
+      libelle: 'Suivi par lot',
+      type: 'booleen',
       aide:
-        'Le bain de production du fournisseur. Il varie d’un article à l’autre, même chez ' +
-        'le même fournisseur : 1344 bobines le plus souvent, parfois 1400, 1688 ou 1720. ' +
-        'Sans lui, la commande au lot est refusée plutôt que convertie au jugé.',
+        'Le lot est le bain de teinture du fournisseur : deux lots d’une même couleur ne donnent pas ' +
+        'exactement la même nuance. Activé, chaque mouvement porte son lot, et les réglages ci-contre s’appliquent.',
+      section: 'Gestion des lots',
     },
     {
-      champ: 'densite_kg_ml',
-      libelle: 'Densité (kg/ml)',
-      type: 'nombre',
-      aide: 'Obligatoire pour une unité ml : sans elle, la conversion est refusee.',
-    },
-    { champ: 'prix_catalogue', libelle: 'Prix par unité', type: 'nombre', obligatoire: true },
-    {
-      champ: 'code_devise_catalogue',
-      libelle: 'Devise',
+      champ: 'type_lot',
+      libelle: 'Type de lot',
       type: 'liste',
-      obligatoire: true,
-      options: qDev.data?.map((d) => ({ valeur: d.code_devise, libelle: d.code_devise })),
+      defaut: 'INDIFFERENT',
+      actifSi: { champ: 'suivi_lot', raison: 'suivi par lot désactivé' },
+      options: [
+        { valeur: 'OBLIGATOIRE', libelle: 'Obligatoire — n° du fournisseur exigé' },
+        { valeur: 'GENERIQUE', libelle: 'Générique — l’ERP numérote' },
+        { valeur: 'INDIFFERENT', libelle: 'Optionnel — n° du fournisseur s’il existe, sinon généré' },
+      ],
+      aide:
+        'D’où vient le numéro de lot à la réception. Obligatoire : sans le numéro de l’étiquette, la réception ' +
+        'est refusée. Générique : l’ERP attribue toujours FOURNISSEUR-JJMMAA-NN. Optionnel : le numéro du ' +
+        'fournisseur s’il est saisi, sinon un numéro généré.',
+      section: 'Gestion des lots',
+    },
+    {
+      champ: 'seuil_lot_valeur',
+      libelle: 'Minimum d’un lot pour produire',
+      type: 'nombre',
+      actifSi: { champ: 'suivi_lot', raison: 'suivi par lot désactivé' },
+      aide:
+        'La quantité à partir de laquelle un lot suffit pour lancer une production. Elle se compte dans ' +
+        'l’unité du conditionnement (des bobines pour le fil), en kilos pour un article sans poids par unité. ' +
+        'Au-dessus, le lot compte pour le plan d’achat ; en dessous, c’est une fin de lot (Restes), hors plan ' +
+        'd’achat. Vide : un étage de machine, 1 344 bobines — ou 5 000 kg sans poids par unité.',
+      section: 'Gestion des lots',
+    },
+    {
+      champ: 'fusion_lot',
+      libelle: 'Fusion de lots autorisée',
+      type: 'booleen',
+      defaut: 1,
+      actifSi: { champ: 'suivi_lot', raison: 'suivi par lot désactivé' },
+      aide:
+        'Permet de réunir deux lots de cet article (même couleur, même fournisseur) en un seul. À refuser ' +
+        'pour un fil dont les bains ne doivent jamais se mélanger.',
+      section: 'Gestion des lots',
     },
     {
       champ: 'stock_min_kg',
       libelle: 'Stock minimum (kg)',
       type: 'nombre',
       aide: 'Laisser vide pour un minimum calcule dynamiquement (formule F3).',
+      section: 'Conditionnement et stockage',
     },
-    { champ: 'couverture_min_mois', libelle: 'Couverture minimale (mois)', type: 'nombre' },
+    { champ: 'couverture_min_mois', libelle: 'Couverture minimale (mois)', type: 'nombre', section: 'Conditionnement et stockage' },
     {
       champ: 'marge_securite_pct',
       libelle: 'Marge de sécurité (%)',
@@ -363,6 +405,17 @@ export function Catalogue() {
       aide:
         'Majore le stock minimum de cette reference. Vide : la valeur generale des parametres ' +
         's applique.',
+      section: 'Conditionnement et stockage',
+    },
+    /* --- Achat ------------------------------------------------------- */
+    { champ: 'prix_catalogue', libelle: 'Prix par unité', type: 'nombre', obligatoire: true, section: 'Achat' },
+    {
+      champ: 'code_devise_catalogue',
+      libelle: 'Devise',
+      type: 'liste',
+      obligatoire: true,
+      options: qDev.data?.map((d) => ({ valeur: d.code_devise, libelle: d.code_devise })),
+      section: 'Achat',
     },
     {
       champ: 'date_prix_catalogue',
@@ -371,16 +424,29 @@ export function Catalogue() {
       aide:
         'Depuis quand ce tarif est annonce. Un prix sans date ne dit pas s il date du mois ' +
         'dernier ou de trois ans.',
+      section: 'Achat',
     },
-    { champ: 'moq_kg', libelle: 'Quantité minimale de commande (kg)', type: 'nombre' },
-    { champ: 'multiple_achat_kg', libelle: 'Multiple d achat (kg)', type: 'nombre' },
     {
-      champ: 'suivi_lot',
-      libelle: 'Suivi par lot',
-      type: 'booleen',
-      aide: 'Rend le lot obligatoire sur chaque mouvement. Determinant quand le bain de teinture conditionne la nuance.',
+      champ: 'supplement_teinture',
+      libelle: 'Supplement de teinture',
+      type: 'nombre',
+      aide: 'En devise par tonne (100, 150, 530…). Le prix de la couleur est le prix de base de '
+        + 'la famille plus ce supplement ramene au kilo.',
+      section: 'Achat',
     },
-    { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
+    { champ: 'moq_kg', libelle: 'Quantité minimale de commande (kg)', type: 'nombre', section: 'Achat' },
+    {
+      champ: 'arrondi_palette',
+      libelle: 'Arrondi à la palette pleine',
+      type: 'booleen',
+      defaut: 0,
+      aide:
+        'Facultatif. Coché, le plan d’achat complète la commande jusqu’à la palette pleine : un besoin de ' +
+        '0,85 palette devient 1 palette, et les 0,15 ajoutés sont le « complément de palette », affiché à part ' +
+        'dans le plan d’achat. Poids d’une palette = poids d’une bobine × bobines par palette — une estimation, ' +
+        'car le fournisseur change parfois le poids de ses bobines ; les kilos exacts sont ceux de la réception.',
+      section: 'Achat',
+    },
   ]
 
   /* Filtres serveur. Tous portent sur des colonnes de la liste blanche du

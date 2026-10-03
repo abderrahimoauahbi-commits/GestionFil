@@ -207,7 +207,9 @@ pub async fn lire_droits(
 
     let rows = sqlx::query(
         "SELECT cc.module, cc.champ, cc.libelle, cc.sensible, cc.ordre,
-                COALESCE(dc.niveau, cc.niveau_defaut) AS niveau,
+                -- L'administrateur : ecriture partout, quoi que porte sa grille.
+                CASE WHEN u.code_role_user = 'ADMIN' THEN 'ECRITURE'
+                     ELSE COALESCE(dc.niveau, cc.niveau_defaut) END AS niveau,
                 (dc.niveau IS NOT NULL)               AS explicite,
                 cc.niveau_defaut,
                 mdc.niveau                            AS niveau_modele,

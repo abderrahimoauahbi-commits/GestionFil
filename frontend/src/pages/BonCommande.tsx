@@ -35,6 +35,7 @@ import {
   Champ,
   Chargement,
   Etiq,
+  Selecteur,
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import {
@@ -49,7 +50,7 @@ import {
 } from '../composants/GrilleLignes'
 import { TotauxCommande } from '../composants/TotauxCommande'
 import { facteurVersKg } from '../lib/conditionnement'
-import { cn, fmt } from '../lib/utils'
+import { auCentime, cn, fmt } from '../lib/utils'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -89,6 +90,8 @@ interface LigneBc extends Record<string, unknown> {
   quantite_recue_kg: number
   quantite_restante_kg: number
   prix_unitaire_devise?: number
+  /** Remise du fournisseur, en % du prix brut. */
+  remise_pct?: number | null
   total_ligne_devise?: number
   total_ligne_mad?: number
   taux_change_engage?: number
@@ -131,6 +134,7 @@ export function BonCommande() {
     mention_expedition: '',
     nombre_conteneurs: '',
     notes: '',
+    code_devise: '',
   })
   /** Lignes retouchees mais pas encore enregistrees, par identifiant. */
   const [brouillon, setBrouillon] = useState<
@@ -266,8 +270,10 @@ export function BonCommande() {
       mention_expedition: bc.mention_expedition ?? '',
       nombre_conteneurs: bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '',
       notes: bc.notes ?? '',
+      code_devise: bc.code_devise,
     })
-  }, [bc?.id_bc, bc?.date_bc, bc?.date_livraison_prevue, bc?.conditions_paiement, bc?.notes])
+  }, [bc?.id_bc, bc?.date_bc, bc?.date_livraison_prevue, bc?.conditions_paiement, bc?.notes, bc?.code_devise])
+  const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
 
   const enteteModifie =
     !!bc &&
@@ -277,7 +283,8 @@ export function BonCommande() {
       entete.mention_expedition !== (bc.mention_expedition ?? '') ||
       entete.nombre_conteneurs !==
         (bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '') ||
-      entete.notes !== (bc.notes ?? ''))
+      entete.notes !== (bc.notes ?? '') ||
+      entete.code_devise !== bc.code_devise)
 
   const changerStatut = useMutation({
     mutationFn: (statut: string) => api.put(`/api/bons-commande/${id}/statut`, { statut }),
@@ -400,6 +407,17 @@ export function BonCommande() {
     brouillon[l.id_ligne_bc]?.[champ] ?? (l[champ] as number | undefined) ?? null
 
   const ligneModifiee = (l: LigneBc) => !!brouillon[l.id_ligne_bc]
+  /**
+   * LE MONTANT D'UNE LIGNE, NET DE REMISE, ARRONDI AU CENTIME : la formule
+   * meme de `ligne_bc.total_ligne_devise`. La colonne oubliait la remise, et
+   * affichait donc un montant que ni le bon ni la base ne retenaient.
+   */
+  const montantLigne = (l: LigneBc) =>
+    auCentime(
+      (valeurDe(l, 'quantite_commandee_unite') ?? 0) *
+        (valeurDe(l, 'prix_unitaire_devise') ?? 0) *
+        (1 - Number(l.remise_pct ?? 0) / 100),
+    )
   /*
    * MODIFIEE VEUT DIRE « QUI A CHANGE », pas « qui est dans la grille ».
    *
@@ -571,8 +589,10 @@ export function BonCommande() {
       },
     },
     {
+      // LA DEVISE EST CELLE DU BON, dite une fois dans le titre de colonne —
+      // jamais repetee sur chaque ligne (decision du 01/10/2026).
       champ: 'prix_unitaire_devise',
-      entete: 'Prix unitaire',
+      entete: `Prix unitaire ${bc?.code_devise ?? ''}`.trim(),
       numerique: true,
       largeur: '150px',
       rendu: (l) => {
@@ -586,7 +606,7 @@ export function BonCommande() {
                 '—'
               ) : (
                 <span className={change ? 'font-medium text-primaire' : undefined}>
-                  {fmt.nombre(v, 4)} {l.code_devise ?? ''}
+                  {fmt.nombre(v, 4)}
                   {change && l.prix_unitaire_devise != null && (
                     <span className="block text-[11px] text-attenue-texte line-through">
                       {fmt.nombre(l.prix_unitaire_devise, 4)}
@@ -646,13 +666,11 @@ export function BonCommande() {
     },
     {
       champ: 'total_ligne_devise',
-      entete: 'Montant devise',
+      entete: `Montant ${bc?.code_devise ?? 'devise'}`,
       numerique: true,
       largeur: '140px',
       rendu: (l) => {
-        const q = valeurDe(l, 'quantite_commandee_unite') ?? 0
-        const px = valeurDe(l, 'prix_unitaire_devise') ?? 0
-        return `${fmt.nombre(q * px, 2)} ${l.code_devise ?? ''}`
+        return fmt.nombre(montantLigne(l), 2)
       },
     },
     {
@@ -664,18 +682,9 @@ export function BonCommande() {
       numerique: true,
       largeur: '140px',
       rendu: (l) => {
-        const q = valeurDe(l, 'quantite_commandee_unite') ?? 0
-        const px = valeurDe(l, 'prix_unitaire_devise') ?? 0
         const taux = l.taux_change_engage ?? 1
         return (
-          <div className="text-right">
-            <div className="tabular-nums font-medium">{fmt.nombre(q * px * taux, 2)}</div>
-            {l.code_devise && l.code_devise !== 'MAD' && (
-              <div className="text-[11px] text-attenue-texte tabular-nums">
-                taux {fmt.nombre(taux, 3)}
-              </div>
-            )}
-          </div>
+          <div className="text-right tabular-nums font-medium">{fmt.nombre(auCentime(montantLigne(l) * taux), 2)}</div>
         )
       },
     },
@@ -920,6 +929,27 @@ export function BonCommande() {
               </div>
             </div>
             <div>
+              <Etiq htmlFor="devise">
+                Devise
+                <Aide>Modifiable tant que le bon n’est pas validé. Le taux engagé suit la devise ; les prix des lignes ne sont pas convertis.</Aide>
+              </Etiq>
+              <Selecteur
+                id="devise"
+                value={entete.code_devise}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, code_devise: e.target.value })}
+              >
+                {(qDevises.data ?? [{ code_devise: entete.code_devise }]).map((d) => (
+                  <option key={d.code_devise}>{d.code_devise}</option>
+                ))}
+              </Selecteur>
+              {entete.code_devise !== bc.code_devise && lignes.length > 0 && (
+                <p className="mt-1 text-[11px] text-alerte">
+                  Les prix des lignes restent tels quels : vérifiez-les en {entete.code_devise}.
+                </p>
+              )}
+            </div>
+            <div>
               <Etiq htmlFor="datebc">Date du bon</Etiq>
               <Champ
                 id="datebc"
@@ -1052,7 +1082,7 @@ export function BonCommande() {
             {modifiable && bc ? (
               <GrilleLignes
                 codeFournisseur={bc.code_fournisseur}
-                devise={bc.code_devise}
+                devise={entete.code_devise || bc.code_devise}
                 lignes={nouvelles}
                 setLignes={setNouvelles}
                 mode={mode}
@@ -1075,6 +1105,7 @@ export function BonCommande() {
                 colonnes={colonnes}
                 lignes={lignesAffichees}
                 chargement={qLignes.isLoading}
+                erreur={qLignes.error}
                 cle={(l) => l.id_ligne_bc}
                 recherche={false}
                 pagination={false}
@@ -1150,6 +1181,7 @@ export function BonCommande() {
                     mention_expedition: bc.mention_expedition ?? '',
                     nombre_conteneurs: bc.nombre_conteneurs != null ? String(bc.nombre_conteneurs) : '',
                     notes: bc.notes ?? '',
+                    code_devise: bc.code_devise,
                   })
                 }
                 setSupprimees([])

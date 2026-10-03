@@ -201,6 +201,7 @@ pub async fn convertir(
     db: &Db,
     user: &Utilisateur,
     propositions: Option<&[String]>,
+    cibles: Option<&std::collections::HashMap<String, String>>,
 ) -> AppResult<ResultatConversion> {
     use crate::error::AppError;
 
@@ -255,7 +256,32 @@ pub async fn convertir(
         let id_bc = match ouverts.last() {
             Some((f, id)) if f == fournisseur => id.clone(),
             _ => {
-                let id = ouvrir_bon(&mut tx, user, fournisseur, date_besoin.as_deref()).await?;
+                // UN BON EXISTANT, si l'acheteur l'a designe : on le complete
+                // au lieu d'en ouvrir un second pour le meme fournisseur.
+                let id = match cibles.and_then(|c| c.get(fournisseur)) {
+                    Some(id_bc) => {
+                        let (frs, statut, numero): (String, String, String) = sqlx::query_as(
+                            "SELECT code_fournisseur, statut, numero_bc FROM bon_commande
+                              WHERE id_bc = $1 FOR UPDATE",
+                        )
+                        .bind(id_bc)
+                        .fetch_optional(&mut *tx)
+                        .await?
+                        .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id_bc}")))?;
+                        if &frs != fournisseur {
+                            return Err(AppError::RegleMetier(format!(
+                                "Le bon {numero} est d'un autre fournisseur ({frs}) : il ne recoit pas les lignes de {fournisseur}."
+                            )));
+                        }
+                        if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
+                            return Err(AppError::RegleMetier(format!(
+                                "Le bon {numero} est {statut} : il ne se complete plus. Choisissez un brouillon ou un nouveau bon."
+                            )));
+                        }
+                        id_bc.clone()
+                    }
+                    None => ouvrir_bon(&mut tx, user, fournisseur, date_besoin.as_deref()).await?,
+                };
                 ouverts.push((fournisseur.clone(), id.clone()));
                 id
             }

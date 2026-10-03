@@ -16,11 +16,15 @@ import { api } from '../../api/client'
 import { Alerte, Chargement } from '../../composants/ui/base'
 import { EnTetePage } from '../../composants/Coquille'
 import { cn } from '../../lib/utils'
+import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
+import { ChampLot } from '../../composants/ChampLot'
 import {
-  etatKg, fmtDate, LIBELLE_TYPE, machinesApi, nb,
+  CLASSE_ECART, ecartPoidsBobine, etatKg, fmtDate, LIBELLE_TYPE, ligneNeuve, machinesApi, nb,
+  rappelCatalogue,
   type LigneConso, type Machine, type TypeFiche, type Zone,
 } from './noyau'
 import { useFiche } from './useFiche'
+import { QuestionStock, useValiderFiche } from './Questions'
 import { useAuth } from '../../auth/AuthContext'
 import { Link } from 'react-router-dom'
 
@@ -612,7 +616,9 @@ function FicheBureau({
   fermer: () => void
 }) {
   const f = useFiche(machine.code_machine, zone, type)
+  const v = useValiderFiche(f)
   const [ajout, setAjout] = useState(false)
+  const tolerances = useTolerancesLot()
 
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
@@ -694,11 +700,41 @@ function FicheBureau({
                 <tr key={l.cle} className="border-t border-bordure">
                   <td className="max-w-[16rem] truncate px-2 py-1 text-texte">{l.designation}</td>
                   <td className="px-1 py-1">
-                    <input
-                      value={l.lot_fournisseur}
-                      onChange={(e) => f.majLigne(l.cle, 'lot_fournisseur', e.target.value)}
-                      className="min-h-[30px] w-28 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
-                    />
+                    {/* AU CHARGEMENT, LE LOT SE CHOISIT dans ce que le magasin
+                        d'origine tient de cette reference, le plus ancien
+                        d'abord. Sans magasin, ou pour un retour et une mise a
+                        jour, la saisie reste libre. */}
+                    {type === 'CHARGE' && f.entete.magasin ? (
+                      <ChampLot
+                        reference={l.code_reference}
+                        magasin={f.entete.magasin}
+                        valeur={l.lot_fournisseur}
+                        onChange={(v) => f.majLigne(l.cle, 'lot_fournisseur', v)}
+                        invalide={!l.lot_fournisseur}
+                        className="min-h-[30px] w-44 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
+                      />
+                    ) : l.lot_fournisseur === SANS_LOT ? (
+                      /* « Sans lot » se lit en clair ; l'effacer rouvre la saisie. */
+                      <span className="inline-flex min-h-[30px] items-center gap-1.5 px-1.5 text-[11px] italic text-attenue-texte">
+                        {libelleLot(l.lot_fournisseur)}
+                        <button
+                          type="button"
+                          onClick={() => f.majLigne(l.cle, 'lot_fournisseur', '')}
+                          className="not-italic text-attenue-texte hover:text-texte"
+                          aria-label="Saisir un lot"
+                          title="Saisir un lot"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ) : (
+                      <input
+                        value={l.lot_fournisseur}
+                        onChange={(e) => f.majLigne(l.cle, 'lot_fournisseur', e.target.value)}
+                        aria-label="Lot fournisseur"
+                        className="min-h-[30px] w-28 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
+                      />
+                    )}
                   </td>
                   <td className="px-2 py-1 text-right text-attenue-texte">
                     {l.avant_bobines} · {nb(l.avant_kg, 1)}
@@ -711,9 +747,23 @@ function FicheBureau({
                     <Case v={l.presentes} set={(v) => f.majLigne(l.cle, 'presentes', v)}
                           desactive={type === 'MAJ'} />
                   </td>
-                  <td className="px-1 py-1">
+                  <td className="px-1 py-1 text-right">
                     <Case v={l.poids_unitaire} pas={0.001}
                           set={(v) => f.majLigne(l.cle, 'poids_unitaire', v)} />
+                    {/* LA DIVERGENCE AVEC LE CATALOGUE, sous la valeur : une
+                        bobine plus legere ou plus lourde que prevu se voit
+                        pendant qu'on tape, coloree selon les tolerances. */}
+                    {(() => {
+                      const rappel = rappelCatalogue(l)
+                      if (!rappel) return null
+                      const c = couleurEcart(ecartPoidsBobine(l), tolerances)
+                      return (
+                        <div className={cn('mt-0.5 whitespace-nowrap text-[10.5px]',
+                                           c ? CLASSE_ECART[c] : 'text-attenue-texte')}>
+                          {rappel}
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td className="px-1 py-1">
                     <Case v={l.pourcentage} pas={0.1} max={100}
@@ -764,13 +814,8 @@ function FicheBureau({
                 onChange={(e) => {
                   const r = (qCat.data ?? []).find((x) => x.code_reference === e.target.value)
                   if (r) {
-                    f.ajouter({
-                      cle: '', code_reference: r.code_reference, designation: r.designation,
-                      lot_fournisseur: '', mouvementees: 0, presentes: 0, nb_palettes: null,
-                      poids_unitaire: r.poids_bobine_kg ?? 0, pourcentage: 100,
-                      mode: 'ESTIMATION', pese_kg: 0,
-                      avant_bobines: 0, avant_pourcentage: null, avant_kg: 0, avant_date: null,
-                    })
+                    f.ajouter(ligneNeuve(r.code_reference, r.designation,
+                                         r.poids_bobine_kg ?? 0, r.poids_bobine_kg))
                     setAjout(false)
                   }
                 }}
@@ -827,7 +872,8 @@ function FicheBureau({
       {f.envoi.isSuccess && (
         <Alerte ton="succes" titre="Fiche validée">
           Le constat est enregistré
-          {f.envoi.data?.mouvement && ` · mouvement ${f.envoi.data.mouvement}`}.
+          {f.envoi.data?.mouvement && ` · mouvement ${f.envoi.data.mouvement}`}
+          {f.envoi.data?.correction && ` · correction de stock ${f.envoi.data.correction}`}.
           La consommation se lit dans le journal, en cumul.
         </Alerte>
       )}
@@ -852,7 +898,7 @@ function FicheBureau({
             <button
               type="button"
               disabled={f.envoi.isPending}
-              onClick={() => f.envoi.mutate(true)}
+              onClick={() => f.envoi.mutate({ forcerLot: true })}
               className="inline-flex min-h-[36px] items-center gap-2 rounded-[var(--radius-sm)]
                          bg-alerte px-3 text-[13px] font-semibold text-surface
                          disabled:opacity-40"
@@ -872,11 +918,14 @@ function FicheBureau({
         </Alerte>
       )}
 
+      <QuestionStock f={f} />
+      {v.element}
+
       <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={!f.pret || f.envoi.isPending}
-          onClick={() => f.envoi.mutate(undefined)}
+          disabled={!f.pret || f.envoi.isPending || !!f.stockCourt}
+          onClick={v.valider}
           className="inline-flex min-h-[40px] items-center gap-2 rounded-[var(--radius-sm)]
                      bg-primaire px-4 text-[14px] font-semibold text-primaire-texte
                      disabled:opacity-40"

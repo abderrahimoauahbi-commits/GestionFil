@@ -19,7 +19,7 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Ban, FileCheck2, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Ban, FileCheck2, Gauge, ListChecks, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -37,8 +37,9 @@ import {
   Champ,
   Chargement,
   Etiq,
+  Selecteur,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
+import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'PLAN_ACHAT'
@@ -71,6 +72,8 @@ interface Proposition extends Record<string, unknown> {
   montant_devise?: number | null
   taux_devise?: number | null
   palettes_a_commander?: number | null
+  /** Ce que l'arrondi a la palette pleine ajoute au besoin (kg). */
+  complement_palette_kg?: number | null
   date_besoin_prevue: string
   urgence: string
   risque_identifie: string | null
@@ -209,6 +212,7 @@ export function PlanAchat() {
   const qc = useQueryClient()
   const confirmation = useConfirmation()
   const [coches, setCoches] = useState<Record<string, boolean>>({})
+  const [onglet, setOnglet] = useState('besoins')
 
   const q = useQuery({
     queryKey: ['plan-achat-propositions'],
@@ -259,13 +263,13 @@ export function PlanAchat() {
   })
 
   const commander = useMutation({
-    mutationFn: (propositions: string[]) =>
+    mutationFn: (v: { propositions: string[]; cibles: Record<string, string> }) =>
       api.post<{
         propositions_converties: number
         bons: { numero_bc: string; code_fournisseur: string; lignes: number; montant_total_mad: number }[]
-      }>('/api/plan-achat/commander', { propositions }),
+      }>('/api/plan-achat/commander', v),
     onSuccess: async (r) => {
-      toast.success(`${r.bons.length} bon(s) de commande cree(s) en brouillon`, {
+      toast.success(`Lignes envoyées : ${r.bons.map((b) => b.numero_bc).join(', ')}`, {
         description: `${r.propositions_converties} proposition(s) converties · ${fmt.mad(
           r.bons.reduce((s, b) => s + b.montant_total_mad, 0),
         )}`,
@@ -638,6 +642,22 @@ export function PlanAchat() {
         ),
     },
     {
+      // LE COMPLEMENT DE PALETTE : ce qui est commande pour fermer la palette,
+      // pas pour produire. Vide quand l'article n'est pas arrondi a la palette.
+      champ: 'complement_palette_kg',
+      entete: 'Complément palette',
+      numerique: true,
+      largeur: '120px',
+      rendu: (p) =>
+        !p.complement_palette_kg || p.complement_palette_kg <= 0 ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <span className="tabular-nums" title="Ajouté pour fermer la palette, pas pour produire">
+            + {fmt.nombre(p.complement_palette_kg, 0)} kg
+          </span>
+        ),
+    },
+    {
       champ: 'date_besoin_prevue',
       entete: 'Besoin le',
       largeur: '110px',
@@ -695,49 +715,38 @@ export function PlanAchat() {
       <EnTetePage
         titre="Plan d'achat"
         description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engage avant sa validation."
-        actions={
-          droits.peutEcrire && (
-            <>
-              <Bouton
-                variante="contour"
-                onClick={() =>
-                  confirmation.demander({
-                    titre: 'Regenerer les propositions ?',
-                    libelleConfirmer: 'Regenerer',
-                    description:
-                      'Les propositions ouvertes seront remplacees par un nouveau calcul. Celles ' +
-                      'deja converties en commande, et celles que vous avez ecartees, sont conservees.',
-                    action: () => generer.mutate(),
-                  })
-                }
-                chargement={generer.isPending}
-              >
-                <RefreshCw />
-                Regenerer
-              </Bouton>
-              <Bouton
-                onClick={() => commander.mutate(selection)}
-                chargement={commander.isPending}
-                disabled={selection.length === 0}
-                title={
-                  selection.length
-                    ? `${selection.length} proposition(s) · ${fournisseursSelection} fournisseur(s)`
-                    : 'Cochez au moins une proposition'
-                }
-              >
-                <FileCheck2 />
-                Generer les commandes
-                {selection.length > 0 && (
-                  <span className="rounded bg-primaire-texte/15 px-1 text-[10px]">
-                    {selection.length}
-                  </span>
-                )}
-              </Bouton>
-            </>
-          )
-        }
       />
 
+      {/* LES ONGLETS (demandes des 30/09 et 01/10/2026). Le travail se fait en
+          deux temps, chacun dans son onglet : les BESOINS, qu'on regenere et
+          qu'on coche ; les LIGNES A COMMANDER, ce qu'on a coche, qu'on envoie
+          au bon de commande — neuf ou deja ouvert. Repartition et situation
+          restent a cote, pour lire. */}
+      <Onglets value={onglet} onValueChange={setOnglet}>
+        <OngletsListe className="mb-3">
+          <Onglet value="besoins">
+            <ShoppingCart className="size-3.5" />
+            Besoins
+            <span className="text-[11px] tabular-nums text-attenue-texte">{ouvertes.length}</span>
+          </Onglet>
+          <Onglet value="lignes">
+            <ListChecks className="size-3.5" />
+            Lignes à commander
+            <span className={cn('text-[11px] tabular-nums', selection.length ? 'font-semibold text-primaire' : 'text-attenue-texte')}>
+              {selection.length}
+            </span>
+          </Onglet>
+          <Onglet value="fournisseurs" disabled={(qKpi.data?.fournisseurs ?? []).length === 0}>
+            <Truck className="size-3.5" />
+            Par fournisseur
+            <span className="text-[11px] tabular-nums text-attenue-texte">{(qKpi.data?.fournisseurs ?? []).length}</span>
+          </Onglet>
+          <Onglet value="situation" disabled={!kpi}>
+            <Gauge className="size-3.5" />
+            Situation
+          </Onglet>
+        </OngletsListe>
+        <OngletContenu value="situation">
       {/* ---- KPI : les trois blocs de la feuille Plan_Achat -------------------
            Tout se lit dans le STOCK. Une reference apparait ici parce que son
            projete est passe sous son minimum, pas parce qu'on l'a saisie. ---- */}
@@ -814,6 +823,8 @@ export function PlanAchat() {
         </div>
       )}
 
+        </OngletContenu>
+        <OngletContenu value="fournisseurs">
       {/* ---- Repartition par fournisseur, classee par budget ---------------- */}
       {(qKpi.data?.fournisseurs ?? []).length > 0 && (
         <Carte className="mb-4">
@@ -885,6 +896,47 @@ export function PlanAchat() {
         </Carte>
       )}
 
+        </OngletContenu>
+        <OngletContenu value="lignes">
+          <LignesACommander
+            lignes={ouvertes.filter((p) => coches[p.id_proposition])}
+            retirer={(id) => setCoches((c) => ({ ...c, [id]: false }))}
+            enCours={commander.isPending}
+            ecrire={droits.peutEcrire}
+            envoyer={(cibles) => commander.mutate({ propositions: selection, cibles })}
+            revenir={() => setOnglet('besoins')}
+          />
+        </OngletContenu>
+        <OngletContenu value="besoins">
+      {/* LA REGENERATION VIT ICI, avec ce qu'elle produit. */}
+      {droits.peutEcrire && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Bouton
+            variante="contour"
+            onClick={() =>
+              confirmation.demander({
+                titre: 'Regenerer les propositions ?',
+                libelleConfirmer: 'Regenerer',
+                description:
+                  'Les propositions ouvertes seront remplacees par un nouveau calcul. Celles ' +
+                  'deja converties en commande, et celles que vous avez ecartees, sont conservees.',
+                action: () => generer.mutate(),
+              })
+            }
+            chargement={generer.isPending}
+          >
+            <RefreshCw />
+            Regenerer
+          </Bouton>
+          <Bouton disabled={selection.length === 0} onClick={() => setOnglet('lignes')}>
+            Lignes à commander
+            {selection.length > 0 && (
+              <span className="rounded bg-primaire-texte/15 px-1 text-[10px]">{selection.length}</span>
+            )}
+            <ArrowRight />
+          </Bouton>
+        </div>
+      )}
       {ouvertes.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-3">
           <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
@@ -943,6 +995,7 @@ export function PlanAchat() {
         colonnes={colonnes}
         lignes={lignes}
         chargement={q.isLoading}
+        erreur={q.error}
         cle={(p) => p.id_proposition}
         titreCarte={(p) => p.code_reference}
         placeholderRecherche="Référence, fournisseur, urgence..."
@@ -1035,6 +1088,8 @@ export function PlanAchat() {
             : undefined
         }
       />
+        </OngletContenu>
+      </Onglets>
 
       {arbitrage && (
         <PanneauEquivalent
@@ -1218,5 +1273,156 @@ function PanneauEquivalent({
         </div>
       </DialogueContenu>
     </Dialogue>
+  )
+}
+
+interface BcResume {
+  id_bc: string
+  numero_bc: string
+  code_fournisseur: string
+  statut: string
+  date_bc: string
+  nb_lignes: number
+}
+
+/**
+ * LES LIGNES A COMMANDER — ce qu'on a coche dans les besoins, par fournisseur.
+ *
+ * Chaque ligne se retire d'un geste (elle redevient un simple besoin). Pour
+ * chaque fournisseur, on choisit ou ses lignes vont : un NOUVEAU bon, ou un
+ * bon du meme fournisseur encore en brouillon — on complete au lieu d'en
+ * ouvrir un second. Rien n'est engage : le bon reste a valider.
+ */
+function LignesACommander({
+  lignes, retirer, enCours, ecrire, envoyer, revenir,
+}: {
+  lignes: Proposition[]
+  retirer: (id: string) => void
+  enCours: boolean
+  ecrire: boolean
+  envoyer: (cibles: Record<string, string>) => void
+  revenir: () => void
+}) {
+  const [cibles, setCibles] = useState<Record<string, string>>({})
+  const qBc = useQuery({
+    queryKey: ['bons-commande'],
+    queryFn: () => api.get<BcResume[]>('/api/bons-commande'),
+  })
+  const groupes = useMemo(() => {
+    const m = new Map<string, Proposition[]>()
+    for (const p of lignes) m.set(p.code_fournisseur, [...(m.get(p.code_fournisseur) ?? []), p])
+    return [...m.entries()]
+  }, [lignes])
+  const ouverts = (frs: string) =>
+    (qBc.data ?? []).filter(
+      (b) => b.code_fournisseur === frs && (b.statut === 'BROUILLON' || b.statut === 'EN_ATTENTE_VALIDATION'),
+    )
+
+  if (lignes.length === 0) {
+    return (
+      <Alerte ton="info" titre="Aucune ligne à commander">
+        Cochez des besoins dans l’onglet Besoins : ils apparaîtront ici, groupés par fournisseur.{' '}
+        <button type="button" className="underline" onClick={revenir}>Aller aux besoins</button>
+      </Alerte>
+    )
+  }
+
+  const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
+  const totalMad = lignes.reduce((t, p) => t + (p.montant_total_mad ?? 0), 0)
+
+  return (
+    <div className="space-y-3">
+      {groupes.map(([frs, ls]) => {
+        const devise = ls[0].code_devise ?? ''
+        const montantDevise = ls.reduce((t, p) => t + (p.montant_devise ?? 0), 0)
+        return (
+          <Carte key={frs}>
+            <CarteEntete>
+              <CarteTitre>{ls[0].fournisseur_nom || frs}</CarteTitre>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11.5px] text-attenue-texte">Envoyer vers</span>
+                <Selecteur
+                  className="h-8 w-80 max-w-full"
+                  value={cibles[frs] ?? ''}
+                  disabled={!ecrire}
+                  onChange={(e) => setCibles((c) => ({ ...c, [frs]: e.target.value }))}
+                  aria-label={`Bon de commande pour ${ls[0].fournisseur_nom || frs}`}
+                >
+                  <option value="">Un nouveau bon</option>
+                  {ouverts(frs).map((b) => (
+                    <option key={b.id_bc} value={b.id_bc}>
+                      {b.numero_bc} · {b.statut === 'BROUILLON' ? 'brouillon' : 'en attente'} · {b.nb_lignes} ligne(s)
+                    </option>
+                  ))}
+                </Selecteur>
+              </div>
+            </CarteEntete>
+            <CarteCorps className="p-0">
+              <div className="defilement-x">
+                <table className="w-full min-w-[44rem] text-[12.5px]">
+                  <thead>
+                    <tr className="border-b border-bordure">
+                      <th className={cn(th, 'text-left')}>Référence</th>
+                      <th className={cn(th, 'w-24 text-left')}>Urgence</th>
+                      <th className={cn(th, 'w-32 text-right')}>Quantité</th>
+                      <th className={cn(th, 'w-28 text-right')}>Prix {devise}</th>
+                      <th className={cn(th, 'w-32 text-right')}>Montant {devise}</th>
+                      <th className={cn(th, 'w-36 text-right')}>Montant MAD</th>
+                      {ecrire && <th className={cn(th, 'w-10')} />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ls.map((p) => (
+                      <tr key={p.id_proposition} className="border-b border-bordure/60">
+                        <td className="px-2 py-1.5">
+                          <div className="font-medium">{p.code_reference}</div>
+                          {p.designation && <div className="text-[11px] text-attenue-texte">{p.designation}</div>}
+                        </td>
+                        <td className="px-2 py-1.5"><Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge></td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt.nombre(p.quantite_suggeree_kg, 0)} kg</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{p.prix_devise == null ? '—' : fmt.nombre(p.prix_devise, 3)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{p.montant_devise == null ? '—' : fmt.nombre(p.montant_devise, 2)}</td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{p.montant_total_mad == null ? '—' : fmt.mad(p.montant_total_mad)}</td>
+                        {ecrire && (
+                          <td className="px-2 py-1.5">
+                            <Bouton taille="icone-xs" variante="discret" aria-label={`Retirer ${p.code_reference}`}
+                              title="Retirer de la commande : la ligne redevient un simple besoin"
+                              onClick={() => retirer(p.id_proposition)}>
+                              <X />
+                            </Bouton>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-attenue/40 font-semibold">
+                      <td className="px-2 py-1.5" colSpan={4}>{ls.length} ligne(s)</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{fmt.nombre(montantDevise, 2)}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{fmt.mad(ls.reduce((t, p) => t + (p.montant_total_mad ?? 0), 0))}</td>
+                      {ecrire && <td />}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CarteCorps>
+          </Carte>
+        )
+      })}
+
+      {ecrire && (
+        <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-primaire bg-surface px-3 py-2 shadow-sm">
+          <span className="text-[13px]">
+            <span className="font-medium">{lignes.length} ligne(s)</span>
+            <span className="text-attenue-texte"> · {groupes.length} fournisseur(s) · {fmt.mad(totalMad)}</span>
+            <span className="text-attenue-texte"> — les bons restent en brouillon, rien n’est engagé.</span>
+          </span>
+          <Bouton chargement={enCours} onClick={() => envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)))}>
+            <FileCheck2 />
+            Envoyer au bon de commande
+          </Bouton>
+        </div>
+      )}
+    </div>
   )
 }

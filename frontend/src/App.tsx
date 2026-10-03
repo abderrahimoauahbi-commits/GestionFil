@@ -30,6 +30,7 @@ import {
   EtatMouvements,
   EtatPlanAchat,
   EtatStockImprime,
+  EtatLots,
 } from './pages/EtatsListes'
 import {
   EtatBesoins,
@@ -81,6 +82,9 @@ import { Utilisateurs } from './pages/Utilisateurs'
 import { Droits } from './pages/Droits'
 import { Valorisation } from './pages/Valorisation'
 import { EtatStock } from './pages/EtatStock'
+import { Lots } from './pages/lots/Lots'
+import { FicheLot } from './pages/lots/FicheLot'
+import { Autorisations } from './pages/lots/Autorisations'
 import { Assistant } from './pages/Assistant'
 import { Audit } from './pages/Audit'
 
@@ -193,6 +197,7 @@ const ECRANS = (
       <Route path="equivalences" element={<ExigeModule module="CATALOGUE"><Equivalences /></ExigeModule>} />
       <Route path="etats" element={<ExigeModule module="COCKPIT"><Etats /></ExigeModule>} />
       <Route path="etats/stock" element={<ExigeModule module="STOCK"><EtatStockImprime /></ExigeModule>} />
+      <Route path="etats/lots" element={<ExigeModule module="STOCK"><EtatLots /></ExigeModule>} />
       <Route path="etats/comptage" element={<ExigeModule module="INVENTAIRE"><EtatComptage /></ExigeModule>} />
       <Route path="etats/plan-achat" element={<ExigeModule module="PLAN_ACHAT"><EtatPlanAchat /></ExigeModule>} />
       {/* Les etats de DOCUMENT portent l'identifiant de leur objet : ils
@@ -255,6 +260,11 @@ const ECRANS = (
       <Route path="bons-commande/:id" element={<ExigeModule module="BONS_COMMANDE"><BonCommande /></ExigeModule>} />
       <Route path="assistant" element={<ExigeModule module="COCKPIT"><Assistant /></ExigeModule>} />
       <Route path="etat-stock" element={<ExigeModule module="STOCK"><EtatStock /></ExigeModule>} />
+      {/* Les lots (cahier du 02/10/2026) : trois vues de stock, les alertes,
+          la fiche de vie et la file des autorisations. */}
+      <Route path="lots" element={<ExigeModule module="STOCK"><Lots /></ExigeModule>} />
+      <Route path="lots/fiche" element={<ExigeModule module="STOCK"><FicheLot /></ExigeModule>} />
+      <Route path="autorisations" element={<ExigeModule module="STOCK"><Autorisations /></ExigeModule>} />
       <Route path="rapports" element={<ExigeModule module="VALORISATION"><RapportsFinanciers /></ExigeModule>} />
       <Route path="landed-cost" element={<ExigeModule module="VALORISATION"><CoutRevient /></ExigeModule>} />
       <Route path="classification" element={<ExigeModule module="STOCK"><AnalyseAbcXyz /></ExigeModule>} />

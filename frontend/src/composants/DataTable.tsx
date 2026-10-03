@@ -38,6 +38,7 @@ import {
   Filter,
   Inbox,
   Search,
+  TriangleAlert,
   X,
 } from 'lucide-react'
 import { useDroits } from '../auth/AuthContext'
@@ -98,6 +99,12 @@ interface Props<L> {
   colonnes: ColonneDT<L>[]
   lignes: L[] | undefined
   chargement?: boolean
+  /**
+   * L'erreur de la requete qui alimente la liste. Sans elle, un refus du
+   * serveur s'affichait « Aucune reception » : une panne deguisee en liste
+   * vide, et l'on concluait qu'il n'y avait rien a traiter.
+   */
+  erreur?: unknown
   cle: (ligne: L) => string
   surClic?: (ligne: L) => void
   /** Colonne d'actions, toujours rendue en fin de ligne. */
@@ -151,6 +158,7 @@ export function DataTable<L extends Record<string, unknown>>({
   colonnes,
   lignes,
   chargement,
+  erreur,
   cle,
   surClic,
   actions,
@@ -298,6 +306,18 @@ export function DataTable<L extends Record<string, unknown>>({
     )
   }
 
+  if (erreur && !lignes?.length) {
+    const message =
+      erreur instanceof Error && erreur.message ? erreur.message : 'Le serveur n’a pas répondu.'
+    return (
+      <EtatVide
+        icone={TriangleAlert}
+        titre="La liste n’a pas pu être chargée"
+        description={`${message} Rechargez la page ; si l’erreur revient, signalez-la.`}
+      />
+    )
+  }
+
   if (!visibles.length) {
     return (
       <EtatVide
@@ -313,6 +333,20 @@ export function DataTable<L extends Record<string, unknown>>({
   const pagination = serveur
     ? { pageIndex: serveur.page, pageSize: serveur.taille }
     : table.getState().pagination
+
+  /* LA CARTE NE REPETE PAS SON TITRE. « 8F — 8F MOSQUEE » en tete, puis
+     « Code 8F » et « Nom 8F MOSQUEE » dessous : deux lignes sur huit pour
+     redire ce qu'on vient de lire. Une valeur texte qui est, mot pour mot, un
+     segment du titre n'est pas reprise. */
+  const dejaDansTitre = (l: L, champ: string) => {
+    if (!titreCarte) return false
+    const titre = titreCarte(l)
+    if (typeof titre !== 'string') return false
+    const c = visibles.find((v) => v.champ === champ)
+    const v = l[champ]
+    if (!c || c.numerique || typeof v !== 'string' || v.trim().length < 2) return false
+    return titre.split(' — ').some((segment) => segment.trim() === v.trim())
+  }
 
   const meta = (id: string) =>
     (definitions.find((d) => d.id === id)?.meta ?? {}) as {
@@ -346,13 +380,14 @@ export function DataTable<L extends Record<string, unknown>>({
                      gap-1.5 border-b border-bordure bg-fond px-1 py-2 sm:top-[2.5rem]"
         >
           {recherche && (
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-attenue-texte" />
+            <div className="relative min-w-0 flex-1 sm:flex-none">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-attenue-texte" />
               <Champ
                 value={filtre}
                 onChange={(e) => setFiltre(e.target.value)}
                 placeholder={placeholderRecherche}
-                className="w-56 pl-7"
+                aria-label="Rechercher dans la liste"
+                className="w-full pl-8 sm:w-72"
               />
             </div>
           )}
@@ -543,7 +578,9 @@ export function DataTable<L extends Record<string, unknown>>({
             className="defilement-x hidden rounded-lg border border-bordure bg-surface md:block"
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}
           >
-            <table className="grille w-full text-[12px]">
+            {/* 13 PX, PAS 12. Le tableau est ce qu'on lit le plus longtemps ;
+                il etait pourtant le texte le plus petit de l'ecran. */}
+            <table className="grille w-full text-[13px]">
               {/* L'en-tete se colle SOUS la barre d'outils : `top-12` la laisse
                   passer, sinon les deux se recouvrent au defilement. */}
               {/* CET EN-TETE NE COLLE PAS, ET CE N'EST PAS FAUTE DE `sticky`.
@@ -572,8 +609,8 @@ export function DataTable<L extends Record<string, unknown>>({
                           key={entete.id}
                           style={m.largeur ? { width: m.largeur } : undefined}
                           className={cn(
-                            'bg-attenue px-2.5 py-1.5 text-left',
-                            'text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap',
+                            'bg-attenue px-2.5 py-2 text-left',
+                            'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap',
                             m.numerique && 'text-right',
                             m.secondaire && 'hidden xl:table-cell',
                           )}
@@ -699,22 +736,24 @@ export function DataTable<L extends Record<string, unknown>>({
                 key={rang.id}
                 onClick={surClic ? () => surClic(rang.original) : undefined}
                 className={cn(
-                  'rounded-lg border border-bordure bg-surface p-3',
-                  surClic && 'active:bg-attenue',
+                  'rounded-lg border border-bordure bg-surface p-3.5 shadow-[var(--ombre-pose)]',
+                  surClic && 'cursor-pointer active:bg-attenue',
                 )}
               >
-                <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="mb-2.5 flex items-start justify-between gap-2 border-b border-ligne pb-2">
                   {titreCarte && (
-                    <div className="min-w-0 font-medium">{titreCarte(rang.original)}</div>
+                    <div className="min-w-0 text-[14px] font-semibold leading-snug">
+                      {titreCarte(rang.original)}
+                    </div>
                   )}
                   {actions && (
                     <div onClick={(e) => e.stopPropagation()}>{actions(rang.original)}</div>
                   )}
                 </div>
-                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                  {rang.getVisibleCells().map((cellule) => (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[13px]">
+                  {rang.getVisibleCells().filter((cellule) => !dejaDansTitre(rang.original, cellule.column.id)).map((cellule) => (
                     <div key={cellule.id} className="min-w-0">
-                      <dt className="text-xs text-attenue-texte">
+                      <dt className="text-[10.5px] font-medium uppercase tracking-[0.04em] text-attenue-texte">
                         {visibles.find((v) => v.champ === cellule.column.id)?.entete}
                       </dt>
                       {/* UNE CARTE A LA PLACE DE PASSER A LA LIGNE, une table

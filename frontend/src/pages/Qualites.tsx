@@ -59,7 +59,7 @@ import {
   Selecteur,
   Zone,
 } from '../composants/ui/base'
-import { Aide, useConfirmation } from '../composants/ui/surcouches'
+import { Aide, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'QUALITES'
@@ -660,14 +660,20 @@ export function Qualites() {
         rendu: (q) => <span className="font-medium">{q.code_qualite}</span>,
       },
       { champ: 'nom', entete: 'Nom', filtre: 'texte' },
-      {
-        champ: 'description',
-        entete: 'Description',
-        secondaire: true,
-        rendu: (q) => (
-          <span className="text-attenue-texte">{fmt.texte(q.description)}</span>
-        ),
-      },
+      // UNE COLONNE VIDE PARTOUT NE S'AFFICHE PAS : dix-huit tirets occupaient
+      // le quart de la largeur. Elle revient des qu'une qualite a sa description.
+      ...((qQualites.data ?? []).some((q) => q.description)
+        ? [
+            {
+              champ: 'description',
+              entete: 'Description',
+              secondaire: true,
+              rendu: (q: Qualite) => (
+                <span className="text-attenue-texte">{fmt.texte(q.description)}</span>
+              ),
+            },
+          ]
+        : []),
       {
         champ: 'statut',
         entete: 'Statut',
@@ -742,6 +748,7 @@ export function Qualites() {
           colonnes={colonnes}
           lignes={qQualites.data}
           chargement={qQualites.isLoading}
+          erreur={qQualites.error}
           cle={(q) => q.code_qualite}
           surClic={ouvrir}
           placeholderRecherche="Code, nom, description..."
@@ -1307,7 +1314,23 @@ export function Qualites() {
 
           </Carte>
 
-        <div className="grid items-start gap-3 @5xl:grid-cols-[minmax(0,330px)_minmax(0,1fr)]">
+        {/* DEUX TABLEAUX, DEUX ONGLETS (demande du 30/09/2026) : la composition
+            et les densites ne s'ecrasent plus cote a cote ; chacune a toute la
+            largeur. La composition, plan de travail de l'ecran, s'ouvre d'abord. */}
+        <Onglets defaultValue="composition">
+          <OngletsListe>
+            <Onglet value="composition">
+              <Boxes className="size-3.5" />
+              Composition
+              <span className="text-[11px] tabular-nums text-attenue-texte">{composition.length}</span>
+            </Onglet>
+            <Onglet value="densites">
+              <Layers className="size-3.5" />
+              Densité par rôle
+              <span className="text-[11px] tabular-nums text-attenue-texte">{lignes.length}</span>
+            </Onglet>
+          </OngletsListe>
+          <OngletContenu value="densites" className="mt-3">
           <Carte repliable="qualites.2">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
@@ -1378,6 +1401,8 @@ export function Qualites() {
 
             </CarteCorps>
           </Carte>
+          </OngletContenu>
+          <OngletContenu value="composition" className="mt-3">
         <Carte repliable="qualites.3">
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
@@ -1464,8 +1489,8 @@ export function Qualites() {
 
           </CarteCorps>
         </Carte>
-
-        </div>
+          </OngletContenu>
+        </Onglets>
 
         {/* --- Pied : verifications et validation unique -------------------- */}
         {modifiable && (

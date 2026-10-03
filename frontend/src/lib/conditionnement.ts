@@ -180,3 +180,25 @@ export function pourChamp(n: number | null, decimales = 0): string {
   if (n === null) return ''
   return decimales > 0 ? String(Number(n.toFixed(decimales))) : String(Math.round(n))
 }
+
+/**
+ * LA QUANTITE TELLE QU'ELLE PART AU SERVEUR, sans perdre un gramme.
+ *
+ * Le serveur refait les kilos : quantite saisie x facteur. 2 500 kg en
+ * palettes de 980 kg font 2,551020… palettes, et 2,551020 x 980 rend
+ * 2 499,9996 kg — quatre decigrammes perdus a chaque ligne, cumules dans le
+ * stock. Une ligne ne part donc dans son unite que si la traduction est
+ * exacte ; sinon elle part en kilos, qui sont ce que l'on a pese.
+ */
+export function saisieExacte(
+  kg: number,
+  unite: string,
+  facteur: number | null,
+): { unite_saisie: string; quantite_saisie: number } {
+  if (!facteur) return { unite_saisie: 'kg', quantite_saisie: kg }
+  const q = Number((kg / facteur).toFixed(6))
+  const refait = Math.round(q * facteur * 10_000) / 10_000
+  return Math.abs(refait - kg) < 0.00005
+    ? { unite_saisie: unite, quantite_saisie: q }
+    : { unite_saisie: 'kg', quantite_saisie: kg }
+}

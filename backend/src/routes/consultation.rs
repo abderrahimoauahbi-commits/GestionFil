@@ -871,14 +871,27 @@ pub async fn lots(
     Query(f): Query<Filtres>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    // LE STOCK PAR LOT, tel que la base le tient (`stock_lot`) — avec ce qui
+    // distingue deux lots au metier : la couleur, les bobines, l'entree. Un lot
+    // est une production du fournisseur ; deux lots d'une meme reference
+    // peuvent differer de nuance, et cela se voit au tissage (01/10/2026).
     let rows = sqlx::query(
-        "SELECT * FROM v_lot_fefo
-          WHERE ($1 IS NULL OR code_reference = $1)
-          ORDER BY code_reference, rang_fefo
+        "SELECT sl.code_reference, r.designation, r.poids_bobine_kg::float8 AS poids_bobine_kg,
+                sl.code_magasin, mg.nom AS magasin_nom, mg.type AS magasin_type,
+                sl.lot_fournisseur, sl.code_couleur, sl.quantite_kg, sl.nb_bobines,
+                sl.prix_entree_mad, sl.date_premiere_entree, sl.date_fabrication, sl.date_peremption
+           FROM stock_lot sl
+           JOIN magasin mg ON mg.code_magasin = sl.code_magasin
+           JOIN reference r ON r.code_reference = sl.code_reference
+          WHERE sl.quantite_kg > 0
+            AND ($1::text IS NULL OR sl.code_reference = $1)
+            AND ($3::text IS NULL OR sl.code_magasin = $3)
+          ORDER BY sl.code_reference, sl.code_magasin, sl.date_premiere_entree
           LIMIT $2",
     )
     .bind(&f.code_reference)
     .bind(f.limite())
+    .bind(&f.code_magasin)
     .fetch_all(&state.db)
     .await?;
 
@@ -950,6 +963,10 @@ pub async fn propositions_achat(
                 -- qu'une comparaison faite maintenant ne peut pas mentir.
                 (SELECT ROUND(vpa.qte_a_commander_kg, 3) FROM v_plan_achat vpa
                   WHERE vpa.code_reference = pa.code_reference)       AS quantite_calculee_kg,
+                -- Le complement de palette : ce que l'arrondi a la palette
+                -- pleine ajoute au besoin, pour la seule logistique.
+                (SELECT ROUND(vpa.complement_palette_kg, 3) FROM v_plan_achat vpa
+                  WHERE vpa.code_reference = pa.code_reference)       AS complement_palette_kg,
                 CASE WHEN pa.figee = 1 THEN ROUND(
                     pa.quantite_suggeree_kg
                   - COALESCE((SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa

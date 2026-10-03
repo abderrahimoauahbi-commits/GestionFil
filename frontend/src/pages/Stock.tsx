@@ -614,6 +614,7 @@ export function Stock() {
           colonnes={colonnes}
           lignes={lignes}
           chargement={q.isLoading}
+          erreur={q.error}
           cle={(l) => l.code_reference}
           titreCarte={(l) => l.code_reference}
           texteVide="Aucune reference pour ce filtre."

@@ -389,7 +389,9 @@ BEGIN
         END IF;
         RETURN OLD;
     END IF;
-    IF OLD.statut = 'CLOTURE' THEN
+    -- La devalidation (CLOTURE -> EN_COURS, migration 2026-09-30) est le seul
+    -- geste admis sur un dossier clos : elle le rend modifiable.
+    IF OLD.statut = 'CLOTURE' AND NEW.statut IS DISTINCT FROM 'EN_COURS' THEN
         RAISE EXCEPTION 'Dossier cloture : il ne se modifie plus.' USING ERRCODE = 'check_violation';
     END IF;
     RETURN NEW;

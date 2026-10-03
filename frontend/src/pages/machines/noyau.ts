@@ -156,6 +156,12 @@ export interface LigneSaisie {
   presentes_forcees?: boolean
   nb_palettes: number | null
   poids_unitaire: number
+  /**
+   * Le poids d'une bobine au catalogue, garde a cote de `poids_unitaire` pour
+   * montrer la divergence pendant la saisie. Il ne part PAS au serveur : c'est
+   * un rappel, pas une donnee de la fiche. Nul si le catalogue n'en porte pas.
+   */
+  poids_catalogue?: number | null
   pourcentage: number
   mode: 'ESTIMATION' | 'PESEE'
   /** En pesee, c'est l'operateur qui le donne ; en estimation, il se calcule. */
@@ -182,6 +188,23 @@ export function etatKg(l: LigneSaisie): number {
 export function mouvementeKg(l: LigneSaisie): number {
   return l.mouvementees * l.poids_unitaire
 }
+
+/**
+ * LA DIVERGENCE DE POIDS PAR BOBINE, en % du catalogue.
+ *
+ * Positive quand la bobine saisie est plus lourde que le catalogue. Nulle —
+ * et non zero — quand il n'y a rien a comparer : pas de poids catalogue, ou
+ * pas encore de poids saisi. La couleur se lit ensuite avec `couleurEcart` et
+ * les tolerances des reglages, jamais avec des seuils codes ici.
+ */
+export function ecartPoidsBobine(l: Pick<LigneSaisie, 'poids_unitaire' | 'poids_catalogue'>): number | null {
+  const cat = l.poids_catalogue
+  if (cat == null || !(cat > 0) || !(l.poids_unitaire > 0)) return null
+  return ((l.poids_unitaire - cat) / cat) * 100
+}
+
+/** La classe de texte d'une couleur d'ecart (vert, orange, rouge). */
+export const CLASSE_ECART = { vert: 'text-succes', orange: 'text-alerte', rouge: 'text-danger' } as const
 
 /* LA CONSOMMATION NE SE CALCULE PLUS ICI, ET C'EST VOULU.
  *
@@ -215,11 +238,13 @@ export const machinesApi = {
     ),
   creerFiche: (corps: unknown) =>
     api.post<{ id_fiche: string; numero_fiche: string }>('/api/machines/fiches', corps),
-  valider: (id: string) =>
-    api.post<{ consomme_kg: number; mouvement: string | null }>(
-      `/api/machines/fiches/${id}/valider`,
+  /** `corriger` : charger malgre un stock insuffisant, en tracant la correction. */
+  valider: (id: string, corriger = false) =>
+    api.post<{ consomme_kg: number; mouvement: string | null; correction?: string | null }>(
+      `/api/machines/fiches/${id}/valider${corriger ? '?corriger=1' : ''}`,
       {},
     ),
+  remplacerFiche: (id: string, corps: unknown) => api.put(`/api/machines/fiches/${id}`, corps),
   annuler: (id: string, motif: string) =>
     api.post(`/api/machines/fiches/${id}/annuler`, { motif }),
 
@@ -300,6 +325,20 @@ export const nb = (v: number | null | undefined, d = 2) =>
     ? '—'
     : v.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d })
 
+/** Un ecart en %, signe : « +1,54 % », « -0,80 % ». */
+export const signePct = (pct: number) => `${pct > 0 ? '+' : ''}${nb(pct, 2)} %`
+
+/**
+ * Le rappel catalogue d'une ligne, tel qu'il s'affiche sous le poids saisi :
+ * « cat. 2,600 · +1,54 % ». Nul s'il n'y a pas de poids catalogue.
+ */
+export function rappelCatalogue(l: Pick<LigneSaisie, 'poids_unitaire' | 'poids_catalogue'>): string | null {
+  const cat = l.poids_catalogue
+  if (cat == null || !(cat > 0)) return null
+  const pct = ecartPoidsBobine(l)
+  return pct == null ? `cat. ${nb(cat, 3)}` : `cat. ${nb(cat, 3)} · ${signePct(pct)}`
+}
+
 export function fmtDate(d: string | null | undefined): string {
   if (!d) return '—'
   const [a, m, j] = String(d).slice(0, 10).split('-')
@@ -324,6 +363,7 @@ export function depuisEtat(e: LigneEtat): LigneSaisie {
     presentes: e.nb_bobines,
     nb_palettes: e.nb_palettes,
     poids_unitaire: e.poids_unitaire_kg ?? e.poids_catalogue_kg ?? 0,
+    poids_catalogue: e.poids_catalogue_kg,
     pourcentage: e.pourcentage ?? 100,
     mode: 'ESTIMATION',
     pese_kg: e.kg,
@@ -334,11 +374,18 @@ export function depuisEtat(e: LigneEtat): LigneSaisie {
   }
 }
 
-/** Une ligne neuve, pour une reference qui n'etait pas sur la zone. */
+/**
+ * Une ligne neuve, pour une reference qui n'etait pas sur la zone.
+ *
+ * Le poids propose vient du catalogue : sauf avis contraire, c'est donc aussi
+ * le poids catalogue de reference — l'ecart part de zero et ne bouge que si
+ * l'operateur corrige le poids de la bobine.
+ */
 export function ligneNeuve(
   code_reference: string,
   designation: string,
   poids_unitaire: number,
+  poids_catalogue?: number | null,
 ): LigneSaisie {
   return {
     cle: `${code_reference}`,
@@ -349,6 +396,7 @@ export function ligneNeuve(
     presentes: 0,
     nb_palettes: null,
     poids_unitaire,
+    poids_catalogue: poids_catalogue !== undefined ? poids_catalogue : poids_unitaire || null,
     pourcentage: 100,
     mode: 'ESTIMATION',
     pese_kg: 0,

@@ -133,14 +133,23 @@ impl Niveau {
 /// Un champ sans ligne dans `droit_champ` prend le `niveau_defaut` du catalogue.
 /// Sans ce repli, l'ajout d'un champ au produit le rendrait invisible pour tout
 /// le monde jusqu'a reconfiguration manuelle de chaque compte.
+///
+/// L'ADMINISTRATEUR A TOUS LES DROITS, SANS EXCEPTION (decision du 02/10/2026) :
+/// chaque champ lui est ouvert en ecriture, quel que soit le reglage de sa
+/// grille ou le niveau par defaut d'un champ ajoute plus tard. Une grille ne
+/// restreint que les autres roles. Ce qui reste protege l'est par l'entite
+/// elle-meme (un champ calcule n'est dans aucune liste `modification`).
 pub async fn droits_champ(
     db: &Db,
     id_utilisateur: &str,
     module: &str,
 ) -> AppResult<HashMap<String, Niveau>> {
     let lignes: Vec<(String, String)> = sqlx::query_as(
-        "SELECT cc.champ, COALESCE(dc.niveau, cc.niveau_defaut)
+        "SELECT cc.champ,
+                CASE WHEN u.code_role_user = 'ADMIN' THEN 'ECRITURE'
+                     ELSE COALESCE(dc.niveau, cc.niveau_defaut) END
            FROM champ_configurable cc
+           LEFT JOIN utilisateur u ON u.id_utilisateur = $1
            LEFT JOIN droit_champ dc
                   ON dc.module = cc.module AND dc.champ = cc.champ
                  AND dc.id_utilisateur = $1

@@ -12,9 +12,9 @@
  * ouverture. Les vues `v_cockpit_*` font le calcul, l'ecran dispose.
  */
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Coins, Landmark, Layers, Package, ShoppingCart, Truck } from 'lucide-react'
+import { AlertTriangle, Coins, Landmark, Layers, Package, ShoppingCart, Tags, Truck } from 'lucide-react'
 import { api } from '../api/client'
-import { useDroits } from '../auth/AuthContext'
+import { useAuth, useDroits } from '../auth/AuthContext'
 import {
   BarresEmpilees,
   BarresRangees,
@@ -25,6 +25,7 @@ import {
 import { Alerte, Carte, CarteCorps, CarteEntete, CarteTitre, Squelette } from '../composants/ui/base'
 import { fmt } from '../components/ui'
 import { cn } from '../lib/utils'
+import { couleurEcart, useTolerancesLot } from '../lib/lots'
 
 const MODULE = 'COCKPIT'
 
@@ -140,10 +141,13 @@ function Kpi({
 function BlocKpi({
   titre,
   Icone,
+  large = false,
   children,
 }: {
   titre: string
   Icone: typeof Coins
+  /** Toute la largeur, indicateurs sur une ligne : un bloc seul sur sa rangee. */
+  large?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -154,7 +158,9 @@ function BlocKpi({
           {titre}
         </CarteTitre>
       </CarteEntete>
-      <CarteCorps className="grid grid-cols-2 gap-x-4 gap-y-3">{children}</CarteCorps>
+      <CarteCorps className={cn('grid grid-cols-2 gap-x-4 gap-y-3', large && 'md:grid-cols-4')}>
+        {children}
+      </CarteCorps>
     </Carte>
   )
 }
@@ -187,6 +193,16 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
     queryKey: ['cockpit'],
     queryFn: () => api.get<Record<string, number | string | null>>('/api/cockpit'),
   })
+  /* LES LOTS, lus sous le module STOCK. Meme cle que l'onglet « Lots » des
+     statistiques : un seul appel quand on passe de l'un a l'autre. */
+  const { peut } = useAuth()
+  const lisStock = peut('STOCK', 'LIRE')
+  const ql = useQuery({
+    queryKey: ['stats', 'lots'],
+    queryFn: () => api.get<Record<string, unknown>>('/api/stats/lots'),
+    enabled: lisStock && vue === 'analyse',
+  })
+  const tolerances = useTolerancesLot()
 
   if (q.isLoading) {
     return (
@@ -210,6 +226,26 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
   const k = qc.data
   const n = (c: string) => Number(k?.[c] ?? 0)
   const voitMontants = droits.visible('valeur_stock_mad')
+
+  // Les compteurs des lots et l'ecart moyen par bobine, pondere par les
+  // bobines pesees — la ponderation de la vue serveur.
+  const lots = (ql.data?.cockpit ?? null) as Record<string, number | null> | null
+  const nlot = (c: string) => Number(lots?.[c] ?? 0)
+  const ecartBobine = (() => {
+    const f = Array.isArray(ql.data?.divergence_fournisseur)
+      ? (ql.data.divergence_fournisseur as Record<string, number | null>[])
+      : []
+    let poids = 0
+    let cumul = 0
+    for (const l of f) {
+      const b = Number(l.bobines ?? 0)
+      if (l.ecart_moyen_pct == null || b <= 0) continue
+      poids += b
+      cumul += Number(l.ecart_moyen_pct) * b
+    }
+    return poids > 0 ? cumul / poids : null
+  })()
+  const tonEcart = couleurEcart(ecartBobine, tolerances)
 
   const pareto: BarrePareto[] = d.pareto.map((p) => ({
     cle: p.code_reference,
@@ -243,19 +279,19 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
           </CarteEntete>
           <CarteCorps className="p-0">
             <div className="defilement-x">
-              <table className="grille w-full text-[12px]">
+              <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Catégorie</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Couleur</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Stock (kg)</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Conso / mois</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Couv. (j)</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Délai (j)</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">À commander (kg)</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Statut</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Référence</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Catégorie</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couleur</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Fournisseur</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Stock (kg)</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Conso / mois</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couv. (j)</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Délai (j)</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">À commander (kg)</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Statut</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -364,6 +400,46 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
           )}
         </BlocKpi>
       </div>
+
+      {/* ---- Lots : ou est le stock, et ce que pesent les bobines ---------- */}
+      {lisStock && lots && (
+        <BlocKpi titre="Lots" Icone={Tags} large>
+          <Kpi
+            libelle="Stock Projet"
+            valeur={fmt.nombre(nlot('projet_kg'), 0)}
+            unite="kg"
+            aide="Lots libres de categorie Projet : ce qui compte pour le plan d'achat."
+          />
+          <Kpi
+            libelle="Restes"
+            valeur={fmt.nombre(nlot('restes_kg'), 0)}
+            unite="kg"
+            ton={nlot('lots_a_basculer') > 0 ? 'alerte' : undefined}
+            aide={
+              nlot('lots_a_basculer') > 0
+                ? `${nlot('lots_a_basculer')} lot(s) Projet passe(s) sous le seuil, a basculer en Restes.`
+                : 'Lots libres de categorie Restes : a ecouler, hors plan.'
+            }
+          />
+          <Kpi
+            libelle="Lots en dérive de poids"
+            valeur={fmt.nombre(nlot('lots_en_derive'), 0)}
+            ton={nlot('lots_en_derive') > 0 ? 'alerte' : 'succes'}
+            aide="Lots dont l'ecart cumule de poids depasse la tolerance orange reglee dans les parametres."
+          />
+          <Kpi
+            libelle="Écart moyen par bobine"
+            valeur={
+              ecartBobine == null
+                ? '—'
+                : `${ecartBobine > 0 ? '+' : ''}${fmt.nombre(ecartBobine, 2)}`
+            }
+            unite={ecartBobine == null ? undefined : '%'}
+            ton={tonEcart === 'rouge' ? 'danger' : tonEcart === 'orange' ? 'alerte' : tonEcart === 'vert' ? 'succes' : undefined}
+            aide="Poids pese face au poids catalogue d'une bobine, pondere par les bobines pesees. Les couleurs suivent les tolerances des parametres."
+          />
+        </BlocKpi>
+      )}
 
       {/* ---- Les cinq graphiques, deux par rangee ------------------------- */}
       <div className="grid gap-3 xl:grid-cols-2">
@@ -505,15 +581,15 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
           </CarteEntete>
           <CarteCorps className="p-0">
             <div className="defilement-x">
-              <table className="grille w-full text-[12px]">
+              <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur actuel</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Prix actuel</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Prix mini du groupe</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Source alternative</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Economie / an</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Référence</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Fournisseur actuel</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Prix actuel</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Prix mini du groupe</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Source alternative</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Economie / an</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -562,13 +638,13 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             </CarteEntete>
             <CarteCorps className="p-0">
               <div className="defilement-x">
-                <table className="grille w-full text-[12px]">
+                <table className="grille w-full text-[13px]">
                   <thead>
                     <tr className="bg-attenue">
-                      <th className="px-2.5 py-1.5 text-left font-semibold">Référence</th>
-                      <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur unique</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">Délai</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">Couverture</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Référence</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Fournisseur unique</th>
+                      <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Délai</th>
+                      <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Couverture</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -606,13 +682,13 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               </CarteTitre>
             </CarteEntete>
             <CarteCorps className="p-0">
-              <table className="grille w-full text-[12px]">
+              <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">Devise</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Références</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Budget annuel</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Part</th>
+                    <th className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Devise</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Références</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Budget annuel</th>
+                    <th className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap">Part</th>
                   </tr>
                 </thead>
                 <tbody>

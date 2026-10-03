@@ -6,8 +6,10 @@
  * elle qui garantit qu'un chargement saisi au telephone donne exactement le
  * meme resultat que le meme chargement saisi au bureau.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '../../api/client'
+import { SANS_LOT } from '../../lib/lots'
 import {
   corpsFiche, depuisEtat, etatKg, machinesApi,
   type LigneSaisie, type TypeFiche, type Zone,
@@ -161,9 +163,18 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
      saisie — mais on PROPOSE de passer outre. Le refus devient une question,
      et la reponse laisse une trace. */
   const [lotCourt, setLotCourt] = useState<string | null>(null)
+  /* LE STOCK DU MAGASIN NE COUVRE PAS LE CHARGEMENT (R02-MAG, 01/10/2026).
+     La matiere est la, le stock dit le contraire. Deux questions suivent :
+     charger quand meme, puis creer la correction. Sans correction : bloque. */
+  const [stockCourt, setStockCourt] = useState<string | null>(null)
+  /* LE BROUILLON DEJA CREE. Une validation refusee laissait la fiche en
+     brouillon, et l'essai suivant en creait une seconde — puis une troisieme.
+     On reprend la meme : remplacee si ses lignes changent, revalidee sinon. */
+  const brouillon = useRef<string | null>(null)
 
   const envoi = useMutation({
-    mutationFn: async (forcerLot?: boolean) => {
+    mutationFn: async (o?: { forcerLot?: boolean; corriger?: boolean }) => {
+      const forcerLot = o?.forcerLot ?? false
       const corps = corpsFiche(type, machine, zone!.code_emplacement, entete, lignes)
       if (forcerLot) {
         corps.lignes = corps.lignes.map((l) => ({
@@ -173,8 +184,12 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
             'Retour de machine impute au juge : le solde du lot ne reflete plus le physique.',
         }))
       }
-      const r = await machinesApi.creerFiche(corps)
-      return machinesApi.valider(r.id_fiche)
+      if (brouillon.current) {
+        await machinesApi.remplacerFiche(brouillon.current, corps)
+      } else {
+        brouillon.current = (await machinesApi.creerFiche(corps)).id_fiche
+      }
+      return machinesApi.valider(brouillon.current, o?.corriger ?? false)
     },
     onError: (e: unknown) => {
       // ON NE DEVINE PAS LE REFUS AU TEXTE ENTIER : le serveur prefixe ce cas
@@ -182,6 +197,7 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
       // refus de magasin, qui lui ne doit JAMAIS etre franchissable.
       const message = e instanceof Error ? e.message : String(e)
       if (message.includes('R02-LOT')) setLotCourt(message)
+      if (message.includes('R02-MAG')) setStockCourt(message)
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['machine-etat'] })
@@ -191,6 +207,8 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
       void qc.invalidateQueries({ queryKey: ['machine-contenu'] })
       void qc.invalidateQueries({ queryKey: ['machine-conso'] })
       setLotCourt(null)
+      setStockCourt(null)
+      brouillon.current = null
       setAmorcee(null)
     },
   })
@@ -203,9 +221,58 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
     (type === 'MAJ' || type === 'CONSO' || !!entete.magasin) &&
     lignes.every((l) => l.lot_fournisseur.trim().length > 0)
 
+  /* LES LOTS DU MAGASIN D'ORIGINE, pour le FIFO : ce qu'on charge doit etre
+     le plus ancien de sa reference. */
+  const qLots = useQuery({
+    queryKey: ['stock-lots-magasin', entete.magasin],
+    queryFn: () =>
+      api.get<{ code_reference: string; lot_fournisseur: string; date_premiere_entree: string }[]>(
+        `/api/stock/lots?code_magasin=${encodeURIComponent(entete.magasin)}&limite=5000`,
+      ),
+    enabled: type === 'CHARGE' && !!entete.magasin,
+  })
+
+  /**
+   * CE QUI MERITE UNE CONFIRMATION AVANT D'ENVOYER (01/10/2026).
+   *
+   * LE MELANGE DE LOTS : deux lots d'une meme reference sur une meme zone. Deux
+   * productions du fournisseur peuvent differer de nuance, et cela se voit au
+   * tissage. « Sans lot » ne compte pas : on ne sait pas.
+   *
+   * LE FIFO : un lot plus ancien de la meme reference attend au magasin.
+   *
+   * Ce ne sont pas des refus — le metier a parfois ses raisons — mais on ne
+   * passe pas sans l'avoir lu.
+   */
+  const avertissements = useMemo(() => {
+    const a: string[] = []
+    if (type !== 'CHARGE') return a
+    const parRef = new Map<string, Set<string>>()
+    for (const l of lignes)
+      if (l.presentes > 0 && l.lot_fournisseur && l.lot_fournisseur !== SANS_LOT)
+        parRef.set(l.code_reference, new Set([...(parRef.get(l.code_reference) ?? []), l.lot_fournisseur]))
+    for (const [ref, lots] of parRef)
+      if (lots.size > 1)
+        a.push(`Mélange de lots sur la zone : ${ref} — lots ${[...lots].join(', ')}. La nuance peut différer au tissage.`)
+    for (const l of lignes) {
+      if (!(l.mouvementees > 0) || !l.lot_fournisseur || l.lot_fournisseur === SANS_LOT) continue
+      const dispo = (qLots.data ?? []).filter((x) => x.code_reference === l.code_reference && x.lot_fournisseur !== SANS_LOT)
+      const choisi = dispo.find((x) => x.lot_fournisseur === l.lot_fournisseur)
+      const plusAncien = dispo
+        .filter((x) => !choisi || x.date_premiere_entree < choisi.date_premiere_entree)
+        .sort((x, y) => x.date_premiere_entree.localeCompare(y.date_premiere_entree))[0]
+      if (choisi && plusAncien)
+        a.push(`FIFO : ${l.code_reference} — le lot ${plusAncien.lot_fournisseur} est plus ancien que ${l.lot_fournisseur} au magasin.`)
+    }
+    return a
+  }, [type, lignes, qLots.data])
+
   return {
     /** Le refus de solde de lot, quand il y en a un : l'ecran le propose. */
     lotCourt, oublierLotCourt: () => setLotCourt(null),
+    /** Le refus de stock du magasin : deux questions, puis correction ou blocage. */
+    stockCourt, oublierStockCourt: () => setStockCourt(null),
+    avertissements,
     etat: qEtat, entete, setEntete, lignes, setLignes,
     majLigne, retirer, ajouter, totaux, envoi, pret,
     reamorcer: () => setAmorcee(null),

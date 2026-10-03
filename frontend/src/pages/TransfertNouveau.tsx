@@ -12,6 +12,13 @@
  * l'ecran devient consultatif — les mouvements sont au grand livre, que R03
  * rend immuable.
  *
+ * LA GRILLE EST CELLE DU BON DE COMMANDE (02/10/2026). La reference se choisit
+ * DANS la ligne, parmi ce que le magasin source detient ; kilos, palettes et
+ * bobines se repondent comme partout ailleurs. Le panneau lateral « Charger des
+ * references » a disparu : un document ne se saisit jamais dans une fenetre
+ * surgissante, et deux chemins pour un meme geste font deux endroits a corriger
+ * le jour ou la regle change.
+ *
  * Les lignes portent le CONDITIONNEMENT reellement charge — bobines, palettes —
  * en plus du poids. Ce n'est pas une conversion du kg : un camion emporte trois
  * palettes completes et quatre bobines isolees, et c'est ce decompte que le
@@ -20,26 +27,22 @@
  * Rien ne part au serveur avant le clic final.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Link2,
-  Plus,
-  Save,
-  Search,
-  Trash2,
-  Unlink2,
-  XCircle,
-} from 'lucide-react'
+import { ArrowLeft, ArrowRight, Save, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
+import { ChampLot } from '../composants/ChampLot'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import {
+  GrilleLignes,
+  type ColonneGrille,
+  type LigneSaisie,
+  type RefLigne,
+} from '../composants/GrilleLignes'
+import {
   Alerte,
-  Badge,
   Bouton,
   Carte,
   CarteCorps,
@@ -50,62 +53,39 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
+import { useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { libelleLot, useTolerancesLot } from '../lib/lots'
 import {
   type Conditionnement,
-  depuisBobines,
   depuisKg,
-  depuisPalettes,
   facteurVersKg,
-  pourChamp,
-} from '../lib/conditionnement'
+  pourChamp, saisieExacte } from '../lib/conditionnement'
 
 const MODULE = 'MOUVEMENTS'
 
+/** La base refuse le lot comme unite de transfert : c'est une unite d'achat. */
+const UNITES_TRANSFERT = ['Bobine', 'Palette', 'ml']
+
+/** Une ligne du stock du magasin source, avec le conditionnement de la reference. */
 interface RefStock extends Record<string, unknown> {
   code_reference: string
   designation: string
   code_magasin: string
   quantite_kg: number
-  lot_fournisseur?: string | null
+  unite_catalogue?: string | null
+  suivi_lot?: number | boolean | null
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  densite_kg_ml?: number | null
 }
 
-interface RefCatalogue extends Record<string, unknown> {
-  code_reference: string
-  designation: string
-  unite_catalogue: string
-  poids_bobine_kg: number | null
-  bobines_par_palette: number | null
-  suivi_lot: number
-}
-
-/**
- * La ligne ne porte QUE ce que l'operateur saisit.
- *
- * Le poids d'une bobine, le suivi de lot, le stock disponible sont lus dans le
- * catalogue et dans le stock au moment de l'affichage. Les recopier ici les
- * figerait a l'instant du chargement : un brouillon repris trois jours plus tard
- * afficherait un stock qui n'existe plus.
- */
-interface Ligne {
-  cle: string
-  code_reference: string
-  designation: string
-  quantite: string
-  unite: string
-  bobines: string
-  palettes: string
-  /**
-   * LE CALCUL EST-IL LIE SUR CETTE LIGNE ?
-   *
-   * Lie, saisir un des trois — quantite, bobines, palettes — remplit les deux
-   * autres par les parametres de la reference. Detache, chacun se saisit seul :
-   * deux palettes completes et quatre bobines isolees ne forment pas une
-   * fraction de palette, et c'est le cariste qui le sait.
-   */
-  lie: boolean
-  lot: string
+/** Un lot que le magasin source tient d'une reference. */
+interface LotMagasin {
+  lot_fournisseur: string
+  quantite_kg: number
+  nb_bobines: number | null
+  date_premiere_entree: string
 }
 
 interface DossierLigne extends Record<string, unknown> {
@@ -131,11 +111,113 @@ interface DossierEntete extends Record<string, unknown> {
   observations: string | null
 }
 
+/**
+ * Le conditionnement d'une reference, lu dans le stock du magasin source.
+ *
+ * SANS LE BAIN (`bobines_par_lot`). La grille prend la plus grosse unite que la
+ * reference sait exprimer, et le lot passerait devant la palette — or la base
+ * refuse le lot sur un transfert. Le retirer ici laisse la palette en tete.
+ */
+const condDuStock = (s: RefStock | undefined): Conditionnement =>
+  s
+    ? {
+        poids_bobine_kg: s.poids_bobine_kg,
+        bobines_par_palette: s.bobines_par_palette,
+        densite_kg_ml: s.densite_kg_ml,
+      }
+    : {}
+
+/** Le suivi par lot, quelle que soit la forme que la base lui donne. */
+const estSuiviLot = (s: RefStock | undefined) => {
+  const v = s?.suivi_lot
+  return v === true || Number(v) === 1
+}
+
+/** Un nombre lu du serveur — numeric peut arriver en texte. */
+const num = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Une ligne du brouillon revient dans la grille.
+ *
+ * RELUE EN KILOS : la base garde la quantite dans l'unite declaree, la grille
+ * saisit toujours des kilos. Le colisage enregistre prime sur le calcul — il a
+ * ete compte par quelqu'un — et la ligne revient alors DETACHEE, pour que la
+ * premiere frappe ne le recalcule pas en silence. Elle arrive VALIDEE : on la
+ * rouvre au crayon.
+ */
+function depuisLigneTransfert(l: DossierLigne, fiche: RefStock | undefined): LigneSaisie {
+  const cond = condDuStock(fiche)
+  const kg = num(l.quantite_kg) ?? 0
+  const palettes = num(l.nb_palettes)
+  const bobines = num(l.nb_bobines)
+  const colis = depuisKg(kg, cond)
+  return {
+    cle: `t:${l.ligne_numero}`,
+    nature: 'MARCHANDISE',
+    code_reference: l.code_reference,
+    intitule: l.designation ?? l.code_reference,
+    cond,
+    unite_catalogue: fiche?.unite_catalogue ?? 'kg',
+    fournisseur_habituel: null,
+    suggere_kg: null,
+    qte: pourChamp(kg, 3),
+    unite: l.unite_saisie ?? 'kg',
+    palettes: palettes != null ? String(palettes) : pourChamp(colis.palettes),
+    bobines: bobines != null ? String(bobines) : pourChamp(colis.bobines),
+    lie: palettes == null && bobines == null,
+    valide: true,
+    prix: '',
+    reference_fournisseur: '',
+    couleur: '',
+    code_couleur: '',
+    extra: { lot: l.lot_fournisseur ?? '' },
+  }
+}
+
+/** Un compte de colis utilisable, ou rien. Une chaine vide n'est pas un zero. */
+function nombreColis(v: string, entier: boolean) {
+  const n = Number(v)
+  if (v.trim() === '' || !Number.isFinite(n) || n < 0) return undefined
+  // UNE BOBINE NE SE COUPE PAS ; une palette s'entame.
+  return entier ? Math.round(n) : Number(n.toFixed(2))
+}
+
+/**
+ * Ce que le serveur attend pour UNE ligne de transfert.
+ *
+ * L'ecran saisit des kilos ; la base archive l'expression declaree. SIX
+ * DECIMALES : la colonne n'en garde que quatre, mais le serveur deduit les
+ * KILOS de ce nombre avant que la base n'arrondisse. Arrondir ici deplacerait
+ * le poids transfere de quelques grammes par ligne.
+ *
+ * Facteur inconnu : on envoie des kilos plutot qu'un nombre faux dans une
+ * unite qu'on ne sait pas convertir.
+ */
+function corpsTransfert(l: LigneSaisie) {
+  const kg = Number(l.qte)
+  const f = facteurVersKg(l.unite, l.cond)
+  return {
+    code_reference: l.code_reference,
+    ...saisieExacte(kg, l.unite, f),
+    lot_fournisseur: l.extra?.lot?.trim() || undefined,
+    nb_palettes: nombreColis(l.palettes, false),
+    nb_bobines: nombreColis(l.bobines, true),
+  }
+}
+
+/** Une ligne laissee vide — ajoutee puis jamais remplie — ne compte pas. */
+const estRemplie = (l: LigneSaisie) => !!l.code_reference || !!l.intitule.trim()
+
 export function TransfertNouveau() {
   const droits = useDroits(MODULE)
   const qc = useQueryClient()
   const naviguer = useNavigate()
   const confirmation = useConfirmation()
+  const tolerances = useTolerancesLot()
   const { id } = useParams()
   const reprise = !!id
 
@@ -147,8 +229,7 @@ export function TransfertNouveau() {
     transporteur: '',
     observations: '',
   })
-  const [lignes, setLignes] = useState<Ligne[]>([])
-  const [ajout, setAjout] = useState(false)
+  const [lignes, setLignes] = useState<LigneSaisie[]>([])
   const [erreur, setErreur] = useState<string | null>(null)
 
   // --- Reprise d'un brouillon ---------------------------------------------
@@ -164,55 +245,14 @@ export function TransfertNouveau() {
     refetchOnReconnect: false,
   })
 
-  // Le formulaire se remplit UNE FOIS depuis le serveur, a l'ouverture du
-  // document. Le relier a chaque arrivee de donnees ferait de la saisie un
-  // combat : chaque rafraichissement rendrait au champ sa valeur d'origine, et
-  // la correction d'une faute de frappe semblerait simplement impossible.
-  const rempli = useRef<string | null>(null)
-
-  useEffect(() => {
-    const d = qDossier.data
-    if (!d?.entete || rempli.current === id) return
-    rempli.current = id ?? null
-    setEntete({
-      code_magasin_source: d.entete.code_magasin_source ?? '',
-      code_magasin_dest: d.entete.code_magasin_dest ?? '',
-      date_transfert: (d.entete.date_transfert ?? '').slice(0, 10),
-      responsable: d.entete.responsable ?? '',
-      transporteur: d.entete.transporteur ?? '',
-      observations: d.entete.observations ?? '',
-    })
-    setLignes(
-      d.lignes.map((l) => ({
-        cle: `l:${l.ligne_numero}`,
-        code_reference: l.code_reference,
-        designation: l.designation ?? '',
-        // LA REPRISE RECHARGE DES KILOS, puisque c'est ce que le champ porte
-        // desormais. Y remettre `quantite_saisie` — l'expression archivee, en
-        // palettes ou en bobines — ferait lire « 56 » a un champ qui annonce
-        // des kilos, et le brouillon repris ne pesait plus rien.
-        quantite: String(l.quantite_kg),
-        unite: l.unite_saisie ?? 'kg',
-        bobines: l.nb_bobines != null ? String(l.nb_bobines) : '',
-        palettes: l.nb_palettes != null ? String(l.nb_palettes) : '',
-        // Un brouillon repris garde le calcul DETACHE : ses comptes ont ete
-        // poses par quelqu'un, et les relier les recalculerait en silence.
-        lie: l.nb_bobines == null && l.nb_palettes == null,
-        lot: l.lot_fournisseur ?? '',
-      })),
-    )
-  }, [qDossier.data, id])
-
-  const statut = qDossier.data?.entete?.statut
-  const parti = reprise && !!statut && statut !== 'BROUILLON'
-
   const qMag = useQuery({
     queryKey: ['magasins'],
     queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
   })
 
   // Ce que le magasin source a REELLEMENT en stock : on ne transfere pas ce
-  // qu'on n'a pas, et R02 le refuserait de toute facon a l'expedition.
+  // qu'on n'a pas, et R02 le refuserait de toute facon a l'expedition. Le
+  // conditionnement et le suivi de lot voyagent avec chaque ligne.
   const qStock = useQuery({
     queryKey: ['stock-magasin', entete.code_magasin_source],
     queryFn: () =>
@@ -222,161 +262,218 @@ export function TransfertNouveau() {
     enabled: !!entete.code_magasin_source,
   })
 
-
-  /**
-   * LE CONDITIONNEMENT VIENT DU STOCK, PAS DU CATALOGUE.
-   *
-   * L'ecran chargeait les deux mille references actives pour connaitre le poids
-   * d'une bobine. Or on ne transfere QUE ce qui est en stock dans le magasin
-   * source — une liste bien plus courte, deja chargee, et qui porte desormais
-   * le conditionnement de chaque reference.
-   */
-  const catalogue = useMemo(() => {
-    const m = new Map<string, RefCatalogue>()
-    for (const r of qStock.data ?? []) m.set(r.code_reference, r as unknown as RefCatalogue)
+  /** Le stock de la source, par reference. */
+  const parRef = useMemo(() => {
+    const m = new Map<string, RefStock>()
+    for (const r of qStock.data ?? []) m.set(r.code_reference, r)
     return m
   }, [qStock.data])
 
-  /** Le conditionnement d'une reference — vide si elle n'en porte pas. */
-  const condDe = (code: string): Conditionnement => catalogue.get(code) ?? {}
+  // Le formulaire se remplit UNE FOIS depuis le serveur, a l'ouverture du
+  // document. Le relier a chaque arrivee de donnees ferait de la saisie un
+  // combat : chaque rafraichissement rendrait au champ sa valeur d'origine, et
+  // la correction d'une faute de frappe semblerait simplement impossible.
+  //
+  // EN DEUX TEMPS : l'en-tete d'abord, qui designe le magasin source ; les
+  // lignes ensuite, une fois le stock de ce magasin lu — c'est lui qui porte le
+  // conditionnement sans lequel une ligne en palettes ne se relit pas en kilos.
+  const enteteRempli = useRef<string | null>(null)
+  const lignesRemplies = useRef<string | null>(null)
+
+  useEffect(() => {
+    const d = qDossier.data
+    if (!d?.entete || enteteRempli.current === id) return
+    enteteRempli.current = id ?? null
+    setEntete({
+      code_magasin_source: d.entete.code_magasin_source ?? '',
+      code_magasin_dest: d.entete.code_magasin_dest ?? '',
+      date_transfert: (d.entete.date_transfert ?? '').slice(0, 10),
+      responsable: d.entete.responsable ?? '',
+      transporteur: d.entete.transporteur ?? '',
+      observations: d.entete.observations ?? '',
+    })
+  }, [qDossier.data, id])
+
+  const stockLu = qStock.isSuccess || qStock.isError
+  useEffect(() => {
+    const d = qDossier.data
+    if (!d?.entete || lignesRemplies.current === id) return
+    // Le stock lu doit etre celui de la source du document, pas d'un autre.
+    if (entete.code_magasin_source !== d.entete.code_magasin_source || !stockLu) return
+    lignesRemplies.current = id ?? null
+    setLignes(d.lignes.map((l) => depuisLigneTransfert(l, parRef.get(l.code_reference))))
+  }, [qDossier.data, id, entete.code_magasin_source, stockLu, parRef])
+
+  const statut = qDossier.data?.entete?.statut
+  const parti = reprise && !!statut && statut !== 'BROUILLON'
+  const modifiable = !parti && droits.peutEcrire
 
   const disponibles = useMemo(
     () => (qStock.data ?? []).filter((s) => s.quantite_kg > 0.001),
     [qStock.data],
   )
 
-  const stock = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const s of qStock.data ?? [])
-      m.set(s.code_reference, (m.get(s.code_reference) ?? 0) + s.quantite_kg)
-    return m
-  }, [qStock.data])
-
-  const dispoDe = (code: string) => stock.get(code) ?? 0
-
-  const ajouter = (choix: { ref: RefStock; qte: number }[]) =>
-    setLignes((l) => [
-      ...l,
-      ...choix.map<Ligne>(({ ref, qte }, i) => ({
-        cle: `l:${Date.now()}:${i}`,
-        code_reference: ref.code_reference,
-        designation: ref.designation ?? catalogue.get(ref.code_reference)?.designation ?? '',
-        quantite: String(qte),
-        unite: 'kg',
-        // Ce que la quantite represente au quai, tout de suite : le cariste sait
-        // combien de places il doit trouver dans le camion.
-        bobines: pourChamp(depuisKg(qte, condDe(ref.code_reference)).bobines),
-        palettes: pourChamp(depuisKg(qte, condDe(ref.code_reference)).palettes),
-        lie: true,
-        lot: ref.lot_fournisseur ?? '',
+  /*
+   * CE QUE LA LISTE DEROULANTE PROPOSE : le stock de la source, et lui seul.
+   *
+   * Le stock disponible s'affiche en mention de la suggestion — c'est ce que
+   * le cariste veut lire avant de choisir. Le champ `statut_stock` ne sert a la
+   * grille qu'a cet affichage.
+   */
+  const proposees = useMemo<RefLigne[]>(
+    () =>
+      disponibles.map((s) => ({
+        code_reference: s.code_reference,
+        designation: s.designation,
+        unite_catalogue: s.unite_catalogue ?? 'kg',
+        ...condDuStock(s),
+        bobines_par_lot: null,
+        statut_stock: `${fmt.nombre(s.quantite_kg, 0)} kg en stock`,
       })),
-    ])
+    [disponibles],
+  )
 
-  const maj = (cle: string, champ: keyof Ligne, v: string | boolean) =>
-    setLignes((l) => l.map((x) => (x.cle === cle ? { ...x, [champ]: v } : x)))
-
-  /**
-   * LES TROIS EXPRESSIONS SE REPONDENT — quantite, bobines, palettes.
-   *
-   * On saisit celle qu'on a sous les yeux, les deux autres se calculent par les
-   * PARAMETRES DE LA REFERENCE. Detache, chacune se saisit seule : deux palettes
-   * completes et quatre bobines isolees ne forment pas 2,03 palette.
-   */
-  const majColis = (cle: string, source: 'quantite' | 'palettes' | 'bobines', valeur: string) =>
-    setLignes((ls) =>
-      ls.map((l) => {
-        if (l.cle !== cle) return l
-        const c = condDe(l.code_reference)
-        if (!l.lie) {
-          const champ =
-            source === 'quantite' ? 'quantite' : source === 'palettes' ? 'palettes' : 'bobines'
-          return { ...l, [champ]: valeur }
-        }
-        const r =
-          source === 'palettes'
-            ? depuisPalettes(valeur, c)
-            : source === 'bobines'
-              ? depuisBobines(valeur, c)
-              : depuisKg(valeur, c)
-        /* LA QUANTITE EST TOUJOURS EN KILOS. Exprimee dans l'unite de la
-           ligne, elle obligeait a choisir son unite avant de taper, et
-           changer d'unite la reecrivait sous les yeux du cariste. L'unite ne
-           dit plus que dans quoi le transfert sera archive ; la conversion a
-           lieu a l'envoi, une seule fois. */
-        return {
-          ...l,
-          quantite: source === 'quantite' ? valeur : pourChamp(r.kg, 3),
-          palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
-          bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
-        }
-      }),
+  /** On ne transfere que ce que la source detient : la recherche reste locale. */
+  const chercherStock = async (motif: string): Promise<RefLigne[]> => {
+    const mots = motif.toLowerCase().split(/\s+/).filter(Boolean)
+    return proposees.filter((r) =>
+      mots.every((m) => `${r.code_reference} ${r.designation ?? ''}`.toLowerCase().includes(m)),
     )
+  }
 
-  /**
-   * Changer d'unite ne change pas la marchandise, et ne touche plus AUCUN
-   * chiffre : les kilos restent les kilos. Seule change la maniere dont le
-   * transfert sera archive.
-   */
-  const majUnite = (cle: string, unite: string) =>
-    setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, unite } : l)))
+  const dispoDe = (code: string) => parRef.get(code)?.quantite_kg ?? 0
 
-  /**
-   * Conversion en kg, pour totaliser et alerter avant l'envoi.
+  /*
+   * LES LOTS DE LA SOURCE, pour chaque reference posee sur le document.
    *
-   * ELLE PEUT ECHOUER, et le dire. L'ancienne version repliait sur un facteur
-   * nul quand la reference ne portait pas son poids de bobine : dix bobines
-   * pesaient alors zero kilo, le total etait faux et rien ne le signalait.
+   * Meme cle que le selecteur de lot : la liste n'est lue qu'une fois, et la
+   * colonne « Dispo » montre ce que le lot choisi contient vraiment.
    */
-  const enKg = (l: Ligne) => (l.quantite.trim() === '' ? null : Number(l.quantite))
-
-  const totalKg = lignes.reduce((s, l) => s + (enKg(l) ?? 0), 0)
-  /* L'UNITE D'ARCHIVAGE DOIT ETRE CONVERTIBLE. Le poids, lui, est saisi
-     directement et ne peut plus manquer — mais si la reference ne sait pas
-     dire ce que vaut une palette, on ne peut pas archiver « 3 palettes ».
-     Autant le dire pendant la saisie plutot que de se faire refuser. */
-  const sansFacteur = lignes.filter(
-    (l) => Number(l.quantite) > 0 && facteurVersKg(l.unite, condDe(l.code_reference)) === null,
+  const refsPosees = useMemo(
+    () => [...new Set(lignes.map((l) => l.code_reference).filter(Boolean))],
+    [lignes],
   )
-  const totalBobines = lignes.reduce((s, l) => s + (Number(l.bobines) || 0), 0)
-  const totalPalettes = lignes.reduce((s, l) => s + (Number(l.palettes) || 0), 0)
+  const qLots = useQueries({
+    queries: refsPosees.map((ref) => ({
+      queryKey: ['lots-reference-magasin', ref, entete.code_magasin_source],
+      queryFn: () =>
+        api.get<LotMagasin[]>(
+          `/api/stock/lots?code_reference=${encodeURIComponent(ref)}&code_magasin=${encodeURIComponent(entete.code_magasin_source)}&limite=200`,
+        ),
+      enabled: !!entete.code_magasin_source,
+    })),
+  })
+  const lotsParRef = new Map<string, LotMagasin[]>()
+  refsPosees.forEach((ref, i) => lotsParRef.set(ref, qLots[i]?.data ?? []))
+  const lotDe = (ref: string, lot: string) =>
+    lot ? lotsParRef.get(ref)?.find((x) => x.lot_fournisseur === lot) : undefined
 
-  const sansQte = lignes.filter((l) => !(Number(l.quantite) > 0))
-  const sansLot = lignes.filter(
-    (l) => catalogue.get(l.code_reference)?.suivi_lot === 1 && !l.lot.trim(),
-  )
-  const auDela = lignes.filter((l) => (enKg(l) ?? 0) > dispoDe(l.code_reference) + 0.001)
+  const remplies = lignes.filter(estRemplie)
+  const kgDeLigne = (l: LigneSaisie) => Number(l.qte) || 0
+
+  /** Ce que le document demande d'une reference, toutes lignes confondues. */
+  const demandeRef = (ref: string) =>
+    remplies.filter((l) => l.code_reference === ref).reduce((s, l) => s + kgDeLigne(l), 0)
+  /** Ce que le document demande d'un lot precis. */
+  const demandeLot = (ref: string, lot: string) =>
+    remplies
+      .filter((l) => l.code_reference === ref && (l.extra?.lot ?? '').trim() === lot)
+      .reduce((s, l) => s + kgDeLigne(l), 0)
+
+  /** La ligne demande-t-elle plus que la source n'a — de la reference, ou du lot choisi ? */
+  const depasse = (l: LigneSaisie) => {
+    if (!l.code_reference) return false
+    if (demandeRef(l.code_reference) > dispoDe(l.code_reference) + 0.001) return true
+    const lot = (l.extra?.lot ?? '').trim()
+    const s = lotDe(l.code_reference, lot)
+    return !!s && demandeLot(l.code_reference, lot) > s.quantite_kg + 0.001
+  }
+
+  const manqueLot = (l: LigneSaisie) =>
+    !!l.code_reference && estSuiviLot(parRef.get(l.code_reference)) && !(l.extra?.lot ?? '').trim()
+
+  /*
+   * LES COLONNES QUE LE TRANSFERT AJOUTE A LA GRILLE : le lot qui part, et ce
+   * que la source en detient.
+   */
+  const colonnesTransfert: ColonneGrille[] = [
+    {
+      cle: 'lot',
+      entete: 'Lot',
+      largeur: 'w-52',
+      rendu: (l, poser) =>
+        !l.code_reference ? (
+          <span className="block pt-2 text-[11px] text-attenue-texte">—</span>
+        ) : (
+          /* LE LOT SUIT LA MATIERE : on choisit parmi ceux du magasin SOURCE,
+             le plus ancien d'abord. Obligatoire si la reference se suit par lot. */
+          <ChampLot
+            reference={l.code_reference}
+            magasin={entete.code_magasin_source}
+            valeur={l.extra?.lot ?? ''}
+            onChange={poser}
+            className="h-9 w-full rounded-[var(--radius-sm)] border border-bordure bg-fond px-1.5 text-[12.5px]"
+            invalide={manqueLot(l)}
+          />
+        ),
+    },
+    {
+      cle: 'dispo',
+      entete: 'Dispo',
+      largeur: 'w-32',
+      alignement: 'right',
+      rendu: (l) => {
+        if (!l.code_reference) return <span className="text-attenue-texte">—</span>
+        const lot = (l.extra?.lot ?? '').trim()
+        const s = lotDe(l.code_reference, lot)
+        const dispo = s ? s.quantite_kg : dispoDe(l.code_reference)
+        const demande = s ? demandeLot(l.code_reference, lot) : demandeRef(l.code_reference)
+        const trop = demande > dispo + 0.001
+        return (
+          <div
+            className="pt-1.5 text-[12px] tabular-nums"
+            title={`Demandé sur le document : ${fmt.nombre(demande, 2)} kg`}
+          >
+            <div className={cn('font-medium', trop && 'text-danger')}>
+              {fmt.nombre(dispo, 0)} kg
+            </div>
+            <div className={cn('text-[11px]', trop ? 'text-danger' : 'text-attenue-texte')}>
+              {trop
+                ? 'dépassé'
+                : s
+                  ? `lot ${libelleLot(lot)}${s.nb_bobines != null ? ` · ${fmt.nombre(s.nb_bobines, 0)} bob.` : ''}`
+                  : lot
+                    ? 'lot absent de la source'
+                    : 'toute la référence'}
+            </div>
+          </div>
+        )
+      },
+    },
+  ]
+
+  const totalKg = remplies.reduce((s, l) => s + kgDeLigne(l), 0)
+  const totalBobines = remplies.reduce((s, l) => s + (Number(l.bobines) || 0), 0)
+  const totalPalettes = remplies.reduce((s, l) => s + (Number(l.palettes) || 0), 0)
+
+  /* CE QUI BLOQUE L'ENREGISTREMENT — dit en clair dans la barre du bas. */
+  const horsStock = remplies.filter((l) => l.nature !== 'MARCHANDISE')
+  const nonValidees = remplies.filter((l) => !l.valide)
+  const sansLot = remplies.filter(manqueLot)
+  const auDela = remplies.filter(depasse)
   const memeMagasin =
     !!entete.code_magasin_source && entete.code_magasin_source === entete.code_magasin_dest
 
   const pret =
-    !parti &&
+    modifiable &&
     !!entete.code_magasin_source &&
     !!entete.code_magasin_dest &&
     !memeMagasin &&
-    lignes.length > 0 &&
-    !sansQte.length &&
+    remplies.length > 0 &&
+    !horsStock.length &&
+    !nonValidees.length &&
     !sansLot.length &&
-    !auDela.length &&
-    !sansFacteur.length
-
-  /**
-   * Ce qui part au serveur pour la quantite d'une ligne.
-   *
-   * L'ecran saisit des kilos ; la base archive l'expression declaree. SIX
-   * DECIMALES : la colonne n'en garde que quatre, mais le serveur deduit les
-   * KILOS de ce nombre avant que la base n'arrondisse. Arrondir ici
-   * deplacerait le poids transfere de quelques grammes par ligne.
-   *
-   * Facteur inconnu : on envoie des kilos plutot qu'un nombre faux dans une
-   * unite qu'on ne sait pas convertir.
-   */
-  const quantitePourServeur = (l: Ligne) => {
-    const kg = Number(l.quantite)
-    const f = facteurVersKg(l.unite, condDe(l.code_reference))
-    return f
-      ? { quantite_saisie: Number((kg / f).toFixed(6)), unite_saisie: l.unite }
-      : { quantite_saisie: kg, unite_saisie: 'kg' }
-  }
+    !auDela.length
 
   const charge = () => ({
     code_magasin_source: entete.code_magasin_source,
@@ -385,13 +482,7 @@ export function TransfertNouveau() {
     responsable: entete.responsable || undefined,
     transporteur: entete.transporteur || undefined,
     observations: entete.observations || undefined,
-    lignes: lignes.map((l) => ({
-      code_reference: l.code_reference,
-      ...quantitePourServeur(l),
-      lot_fournisseur: l.lot || undefined,
-      nb_bobines: l.bobines ? Number(l.bobines) : undefined,
-      nb_palettes: l.palettes ? Number(l.palettes) : undefined,
-    })),
+    lignes: remplies.map(corpsTransfert),
   })
 
   const rafraichir = () => {
@@ -421,6 +512,8 @@ export function TransfertNouveau() {
     onError: echec,
   })
 
+  // LA MODIFICATION REMPLACE TOUTES LES LIGNES : le serveur recoit le document
+  // entier, il n'y a rien a reconcilier ligne par ligne.
   const enregistrer = useMutation({
     mutationFn: () => api.put<{ lignes: number }>(`/api/transferts/${id}`, charge()),
     onSuccess: (r) => {
@@ -465,6 +558,8 @@ export function TransfertNouveau() {
   }
 
   const enCours = creer.isPending || enregistrer.isPending
+  const codes = (ls: LigneSaisie[]) =>
+    [...new Set(ls.map((l) => l.code_reference || l.intitule))].join(', ')
 
   return (
     <div>
@@ -477,7 +572,7 @@ export function TransfertNouveau() {
         }
         actions={
           <>
-            {reprise && !parti && droits.peutEcrire && (
+            {reprise && modifiable && (
               <Bouton
                 variante="contour"
                 className="text-danger"
@@ -519,7 +614,9 @@ export function TransfertNouveau() {
         </Alerte>
       )}
 
-      <fieldset disabled={parti} className="contents">
+      {/* FIGE, LE DOCUMENT SE LIT SANS SE TOUCHER. Le fieldset desactive aussi
+          les champs de la grille, que sa propriete `modifiable` laisse ouverts. */}
+      <fieldset disabled={!modifiable} className="contents">
         <div className="space-y-3">
           <Carte repliable="transfertnouveau.1">
             <CarteEntete>
@@ -620,7 +717,7 @@ export function TransfertNouveau() {
             <Carte repliable="transfertnouveau.2">
               <CarteEntete>
                 <CarteTitre>
-                  Lignes{lignes.length > 0 && ` (${lignes.length})`}
+                  Lignes{remplies.length > 0 && ` (${remplies.length})`}
                   {entete.code_magasin_dest && (
                     <span className="ml-2 inline-flex items-center gap-1 text-[12px] font-normal text-attenue-texte">
                       {entete.code_magasin_source}
@@ -629,186 +726,60 @@ export function TransfertNouveau() {
                     </span>
                   )}
                 </CarteTitre>
-                {!parti && (
-                  <Bouton variante="contour" taille="sm" onClick={() => setAjout(true)}>
-                    <Plus />
-                    Charger une reference
-                  </Bouton>
-                )}
+                <span className="text-[11px] text-attenue-texte">
+                  {qStock.isLoading
+                    ? 'Lecture du stock de la source…'
+                    : `${disponibles.length} référence(s) en stock à la source`}
+                </span>
               </CarteEntete>
-              <CarteCorps className="p-0">
-                {lignes.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-[13px] text-attenue-texte">
-                    Aucune ligne. Chargez ce que le camion emporte.
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[13px]">
-                      <thead>
-                        <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                          <th className="w-10 px-1 py-2 text-right">#</th>
-                          <th className="px-2 py-2 text-left">Référence</th>
-                          <th className="w-28 px-2 py-2 text-right">Dispo</th>
-                          <th className="w-28 px-2 py-2 text-right">Quantité (kg)</th>
-                          <th className="w-24 px-2 py-2 text-left">Unité</th>
-                          <th className="w-24 px-2 py-2 text-right">En kg</th>
-                          <th className="w-24 px-2 py-2 text-right">Bobines</th>
-                          <th className="w-24 px-2 py-2 text-right">Palettes</th>
-                          <th className="w-36 px-2 py-2 text-left">Lot fournisseur</th>
-                          <th className="w-10 px-1 py-2"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {lignes.map((l, i) => {
-                          const c = catalogue.get(l.code_reference)
-                          const dispo = dispoDe(l.code_reference)
-                          const kg = enKg(l)
-                          const trop = (kg ?? 0) > dispo + 0.001
-                          const manqueLot = c?.suivi_lot === 1 && !l.lot.trim()
-                          return (
-                            <tr key={l.cle} className="border-b border-bordure/60">
-                              <td className="px-1 py-1 text-right tabular-nums text-attenue-texte">
-                                {i + 1}
-                              </td>
-                              <td className="max-w-56 px-2 py-1">
-                                <div className="truncate font-medium">{l.code_reference}</div>
-                                <div className="truncate text-[11px] text-attenue-texte">
-                                  {l.designation}
-                                </div>
-                              </td>
-                              <td className="px-2 py-1 text-right tabular-nums text-attenue-texte">
-                                {fmt.nombre(dispo, 0)} kg
-                              </td>
-                              <td className="px-2 py-1">
-                                <Champ
-                                  type="number"
-                                  step="any"
-                                  min="0.0001"
-                                  value={l.quantite}
-                                  onChange={(e) => majColis(l.cle, 'quantite', e.target.value)}
-                                  className={cn(
-                                    'h-7 text-right tabular-nums',
-                                    (trop || !(Number(l.quantite) > 0)) && 'border-danger',
-                                  )}
-                                />
-                              </td>
-                              <td className="px-2 py-1">
-                                <Selecteur
-                                  value={l.unite}
-                                  onChange={(e) => majUnite(l.cle, e.target.value)}
-                                  className="h-7"
-                                >
-                                  <option value="kg">kg</option>
-                                  {c?.poids_bobine_kg != null && (
-                                    <option value="Bobine">Bobine</option>
-                                  )}
-                                  {c?.poids_bobine_kg != null && c?.bobines_par_palette != null && (
-                                    <option value="Palette">Palette</option>
-                                  )}
-                                </Selecteur>
-                              </td>
-                              <td
-                                className={cn(
-                                  'px-2 py-1 text-right tabular-nums',
-                                  trop && 'font-medium text-danger',
-                                )}
-                              >
-                                {kg === null ? (
-                                  <span className="text-[11px] text-danger">non convertible</span>
-                                ) : (
-                                  fmt.nombre(kg, 1)
-                                )}
-                              </td>
-                              <td className="px-2 py-1">
-                                <Champ
-                                  type="number"
-                                  min="0"
-                                  value={l.bobines}
-                                  onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
-                                  className="h-7 text-right tabular-nums"
-                                />
-                              </td>
-                              <td className="px-2 py-1">
-                                <div className="flex items-center gap-1">
-                                  <Champ
-                                    type="number"
-                                    min="0"
-                                    value={l.palettes}
-                                    onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
-                                    className="h-7 text-right tabular-nums"
-                                  />
-                                  {!parti && (
-                                    <button
-                                      type="button"
-                                      onClick={() => maj(l.cle, 'lie', !l.lie)}
-                                      title={
-                                        l.lie
-                                          ? 'Les trois se repondent — cliquez pour saisir chacun separement'
-                                          : 'Calcul detache — cliquez pour relier les trois'
-                                      }
-                                      aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                      className={cn(
-                                        'shrink-0 rounded-[var(--radius)] p-1',
-                                        l.lie
-                                          ? 'text-primaire hover:bg-primaire/10'
-                                          : 'text-alerte hover:bg-alerte/10',
-                                      )}
-                                    >
-                                      {l.lie ? (
-                                        <Link2 className="size-3.5" />
-                                      ) : (
-                                        <Unlink2 className="size-3.5" />
-                                      )}
-                                    </button>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-2 py-1">
-                                <Champ
-                                  value={l.lot}
-                                  onChange={(e) => maj(l.cle, 'lot', e.target.value)}
-                                  className={cn('h-7', manqueLot && 'border-danger')}
-                                  placeholder={c?.suivi_lot === 1 ? 'obligatoire' : ''}
-                                />
-                              </td>
-                              <td className="px-1 py-1">
-                                {!parti && (
-                                  <Bouton
-                                    variante="discret"
-                                    taille="icone-xs"
-                                    className="text-danger hover:bg-danger/10"
-                                    onClick={() =>
-                                      setLignes((x) => x.filter((y) => y.cle !== l.cle))
-                                    }
-                                    aria-label="Retirer"
-                                  >
-                                    <Trash2 />
-                                  </Bouton>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t-2 border-bordure font-medium">
-                          <td colSpan={5} className="px-2 py-2 text-right">
-                            Total charge
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums">
-                            {fmt.nombre(totalKg, 1)}
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums">
-                            {totalBobines || '—'}
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums">
-                            {totalPalettes || '—'}
-                          </td>
-                          <td colSpan={2}></td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
+              <CarteCorps className="space-y-3">
+                {/* LA MEME GRILLE QUE LE BON DE COMMANDE. La reference se
+                    choisit dans la ligne, parmi le stock de la source ; le prix
+                    et les champs fournisseur n'ont rien a faire entre deux
+                    magasins a nous. Une meme reference peut revenir sur
+                    plusieurs lignes : un lot par ligne. */}
+                <GrilleLignes
+                  codeFournisseur={`stock:${entete.code_magasin_source}`}
+                  devise="MAD"
+                  lignes={lignes}
+                  setLignes={setLignes}
+                  mode="CATALOGUE"
+                  setMode={() => {}}
+                  proposees={proposees}
+                  chercherCatalogue={chercherStock}
+                  modifiable={modifiable}
+                  sansSource
+                  sansPrix
+                  sansFournisseur
+                  validationLocale
+                  doublonsReference
+                  unitesAutorisees={UNITES_TRANSFERT}
+                  libelles={{
+                    reference: 'Référence',
+                    unite: 'Unité',
+                    recherche: 'Référence — stock du magasin source…',
+                    aide: 'La liste ne propose que ce que le magasin source a en stock.',
+                  }}
+                  poidsBobine={tolerances}
+                  colonnesSupplementaires={colonnesTransfert}
+                />
+                {remplies.length > 0 && (
+                  <dl className="grid grid-cols-3 gap-x-6 border-t border-bordure pt-2 text-[13px] sm:max-w-md">
+                    {(
+                      [
+                        ['Poids chargé', `${fmt.nombre(totalKg, 2)} kg`],
+                        ['Palettes', fmt.nombre(totalPalettes, 2)],
+                        ['Bobines', fmt.nombre(totalBobines, 0)],
+                      ] as const
+                    ).map(([libelle, valeur]) => (
+                      <div key={libelle}>
+                        <dt className="text-[11px] uppercase tracking-wider text-attenue-texte">
+                          {libelle}
+                        </dt>
+                        <dd className="font-medium tabular-nums">{valeur}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 )}
               </CarteCorps>
             </Carte>
@@ -816,198 +787,70 @@ export function TransfertNouveau() {
         </div>
       </fieldset>
 
-      {entete.code_magasin_source && !parti && (
-        <div className="sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2 shadow-sm">
+      {entete.code_magasin_source && modifiable && (
+        <div
+          className={cn(
+            'sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
+            pret ? 'border-primaire' : 'border-bordure',
+          )}
+        >
           <span className="text-[13px]">
-            {lignes.length === 0 ? (
-              <span className="text-attenue-texte">Aucune ligne chargee.</span>
+            {remplies.length === 0 ? (
+              <span className="text-attenue-texte">
+                Aucune ligne chargee. Ajoutez une ligne et tapez une référence du stock.
+              </span>
             ) : (
               <>
-                <span className="font-medium">{lignes.length} ligne(s)</span>
+                <span className="font-medium">{remplies.length} ligne(s)</span>
                 <span className="text-attenue-texte"> · </span>
                 <span className="font-semibold tabular-nums">{fmt.nombre(totalKg, 1)} kg</span>
-                {totalPalettes > 0 && (
-                  <span className="text-attenue-texte"> · {totalPalettes} palette(s)</span>
+                {nonValidees.length > 0 && (
+                  <span className="text-alerte">
+                    {' '}
+                    — {nonValidees.length} ligne(s) à valider avec le bouton ✓ de la ligne
+                  </span>
                 )}
-                {totalBobines > 0 && (
-                  <span className="text-attenue-texte"> · {totalBobines} bobine(s)</span>
+                {sansLot.length > 0 && (
+                  <span className="text-danger"> — lot obligatoire : {codes(sansLot)}</span>
                 )}
                 {auDela.length > 0 && (
                   <span className="text-danger">
                     {' '}
-                    — au-dela du stock disponible : {auDela.map((l) => l.code_reference).join(', ')}
+                    — au-dela du stock disponible : {codes(auDela)}
                   </span>
                 )}
-                {sansLot.length > 0 && (
+                {horsStock.length > 0 && (
                   <span className="text-danger">
                     {' '}
-                    — lot obligatoire : {sansLot.map((l) => l.code_reference).join(', ')}
-                  </span>
-                )}
-                {sansFacteur.length > 0 && (
-                  <span className="text-danger">
-                    {' '}
-                    — conversion impossible : {sansFacteur.map((l) => l.code_reference).join(', ')}{' '}
-                    (renseignez le conditionnement sur la référence, ou saisissez en kg)
+                    — sans référence, ne se transfère pas : {codes(horsStock)}
                   </span>
                 )}
               </>
             )}
           </span>
-          <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={() => naviguer('/transferts')}>
-              Annuler
-            </Bouton>
-            <Bouton
-              onClick={() => {
-                setErreur(null)
-                if (reprise) enregistrer.mutate()
-                else creer.mutate()
-              }}
-              chargement={enCours}
-              disabled={!pret || !droits.peutEcrire}
-            >
-              <Save />
-              {reprise ? 'Enregistrer les modifications' : 'Enregistrer le transfert'}
-            </Bouton>
-          </div>
+          <Bouton
+            onClick={() => {
+              setErreur(null)
+              if (reprise) enregistrer.mutate()
+              else creer.mutate()
+            }}
+            chargement={enCours}
+            disabled={!pret}
+            title={
+              nonValidees.length > 0
+                ? 'Validez d’abord chaque ligne avec son bouton ✓'
+                : sansLot.length > 0
+                  ? 'Choisissez le lot des références suivies par lot'
+                  : undefined
+            }
+          >
+            <Save />
+            Enregistrer le transfert
+          </Bouton>
         </div>
-      )}
-
-      {ajout && (
-        <PanneauChargement
-          references={disponibles}
-          deja={lignes.map((l) => l.code_reference)}
-          chargement={qStock.isLoading}
-          surFermeture={() => setAjout(false)}
-          surChoix={(c) => {
-            ajouter(c)
-            setAjout(false)
-          }}
-        />
       )}
 
       {confirmation.element}
     </div>
-  )
-}
-
-/** Ce que le magasin source peut reellement fournir. */
-function PanneauChargement({
-  references,
-  deja,
-  chargement,
-  surFermeture,
-  surChoix,
-}: {
-  references: RefStock[]
-  deja: string[]
-  chargement: boolean
-  surFermeture: () => void
-  surChoix: (c: { ref: RefStock; qte: number }[]) => void
-}) {
-  const [filtre, setFiltre] = useState('')
-  const [choix, setChoix] = useState<Record<string, string>>({})
-
-  const liste = useMemo(() => {
-    const f = filtre.trim().toLowerCase()
-    return references
-      .filter((r) => !deja.includes(r.code_reference))
-      .filter(
-        (r) =>
-          !f ||
-          r.code_reference.toLowerCase().includes(f) ||
-          (r.designation ?? '').toLowerCase().includes(f),
-      )
-      .slice(0, 60)
-  }, [references, deja, filtre])
-
-  const retenues = Object.entries(choix).filter(([, v]) => Number(v) > 0)
-
-  return (
-    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
-      <DialogueContenu
-        cote="droite"
-        titre="Charger des références"
-        description="Seul ce que le magasin source a en stock peut partir."
-      >
-        <div className="mb-2 flex items-center gap-2">
-          <Search className="size-3.5 shrink-0 text-attenue-texte" />
-          <Champ
-            placeholder="Référence ou designation…"
-            value={filtre}
-            onChange={(e) => setFiltre(e.target.value)}
-            className="h-8"
-            autoFocus
-          />
-        </div>
-
-        {chargement && <Chargement texte="Lecture du stock…" />}
-
-        {!chargement && liste.length === 0 && (
-          <Alerte ton="info">
-            Aucune reference disponible dans ce magasin pour ce filtre.
-          </Alerte>
-        )}
-
-        <div className="space-y-1">
-          {liste.map((r) => (
-            <div
-              key={r.code_reference}
-              className={cn(
-                'flex items-center gap-2 rounded-[var(--radius)] border p-2',
-                Number(choix[r.code_reference]) > 0
-                  ? 'border-primaire bg-primaire/5'
-                  : 'border-bordure',
-              )}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-medium">{r.code_reference}</span>
-                  <Badge ton="neutre">{fmt.nombre(r.quantite_kg, 0)} kg</Badge>
-                </div>
-                <div className="truncate text-[11px] text-attenue-texte">{r.designation}</div>
-              </div>
-              <Champ
-                type="number"
-                step="any"
-                min="0"
-                max={r.quantite_kg}
-                placeholder="kg"
-                value={choix[r.code_reference] ?? ''}
-                onChange={(e) => setChoix((c) => ({ ...c, [r.code_reference]: e.target.value }))}
-                className="h-8 w-28 text-right tabular-nums"
-                aria-label={`Quantite pour ${r.code_reference}`}
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
-          <span className="text-[11px] text-attenue-texte">
-            {retenues.length} reference(s) — ajoutees au document, rien n est enregistre
-          </span>
-          <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={surFermeture}>
-              Annuler
-            </Bouton>
-            <Bouton
-              disabled={!retenues.length}
-              onClick={() =>
-                surChoix(
-                  retenues.map(([code, v]) => ({
-                    ref: references.find((r) => r.code_reference === code)!,
-                    qte: Number(v),
-                  })),
-                )
-              }
-            >
-              <Plus />
-              Charger {retenues.length || ''}
-            </Bouton>
-          </div>
-        </div>
-      </DialogueContenu>
-    </Dialogue>
   )
 }

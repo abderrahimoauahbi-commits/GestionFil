@@ -12,6 +12,7 @@
  * conversation, elle, reste dans l'ecran Assistant.
  */
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Bot, Check, ChevronRight, X } from 'lucide-react'
 import { api } from '../api/client'
@@ -78,6 +79,14 @@ export function RobotConnexion() {
     setOuvert(true)
   }, [moi, q.data])
 
+  // Echap referme, comme tout panneau de l'application.
+  useEffect(() => {
+    if (!ouvert) return
+    const f = (e: KeyboardEvent) => e.key === 'Escape' && setOuvert(false)
+    window.addEventListener('keydown', f)
+    return () => window.removeEventListener('keydown', f)
+  }, [ouvert])
+
   if (!moi) return null
 
   const points = q.data?.points ?? []
@@ -85,32 +94,40 @@ export function RobotConnexion() {
 
   return (
     <>
-      {/* Ferme, le robot reste a portee : une pastille au coin, au-dessus de la
-          barre du telephone. Il ne recouvre jamais la saisie. */}
-      {!ouvert && (
-        <button
-          type="button"
-          onClick={() => setOuvert(true)}
-          title="Ce qui vous attend"
-          aria-label="Ce qui vous attend"
-          data-robot-bouton
-          className="sans-impression fixed right-4 z-40 grid size-11 place-items-center rounded-full border border-bordure bg-surface text-primaire shadow-lg transition-transform hover:scale-105"
-          style={{ bottom: 'calc(1rem + var(--barre-basse, 0px))' }}
-        >
-          <Bot className="size-5" />
-          {urgents > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 grid size-5 place-items-center rounded-full bg-alerte text-[10px] font-semibold text-white">
-              {urgents}
-            </span>
-          )}
-        </button>
-      )}
+      {/* LE BOUTON VIT DANS LE BANDEAU, PAS AU COIN DE L'ECRAN.
+          Pastille flottante en bas a droite, il se posait au telephone sur la
+          derniere page de la pagination et sur « Enregistrer » ; chaque ecran
+          devait lui menager une marge. Dans le bandeau, a cote des alertes, il
+          ne recouvre plus rien et se trouve la ou l'on cherche les rappels. */}
+      <button
+        type="button"
+        onClick={() => setOuvert((o) => !o)}
+        title="Ce qui vous attend"
+        aria-label={`Ce qui vous attend${urgents ? ` (${urgents} urgent(s))` : ''}`}
+        aria-expanded={ouvert}
+        data-robot-bouton
+        className={cn(
+          'relative grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] transition-colors hover:bg-attenue hover:text-texte',
+          ouvert ? 'bg-attenue text-texte' : 'text-attenue-texte',
+        )}
+      >
+        <Bot className="size-4" />
+        {urgents > 0 && (
+          <span className="absolute -right-0.5 -top-0.5 grid min-w-3.5 place-items-center rounded-full bg-alerte px-1 text-[9px] font-semibold leading-[14px] text-white">
+            {urgents}
+          </span>
+        )}
+      </button>
 
-      {ouvert && (
+      {/* Le panneau s'ouvre SOUS le bandeau, rendu a la racine du document :
+          le bandeau forme son propre empilement, et la barre du telephone
+          passerait sinon par-dessus. */}
+      {ouvert && createPortal(
         <div
           data-robot
-          className="sans-impression fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-[var(--radius)] border border-bordure bg-surface shadow-lg"
-          style={{ bottom: 'calc(1rem + var(--barre-basse, 0px))' }}
+          role="dialog"
+          aria-label="Ce qui vous attend"
+          className="sans-impression fixed right-2 top-14 z-50 w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-levee)]"
         >
           <div className="flex items-start gap-2 border-b border-bordure bg-attenue/40 px-3 py-2">
             <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-primaire/10 text-primaire">
@@ -136,7 +153,7 @@ export function RobotConnexion() {
             </button>
           </div>
 
-          <ul className="max-h-[60vh] divide-y divide-bordure/60 overflow-y-auto">
+          <ul className="max-h-[min(60vh,28rem)] divide-y divide-bordure/60 overflow-y-auto">
             {q.isLoading && (
               <li className="px-3 py-3 text-[12.5px] text-attenue-texte">Je regarde…</li>
             )}
@@ -176,7 +193,8 @@ export function RobotConnexion() {
               Fermer
             </Bouton>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )

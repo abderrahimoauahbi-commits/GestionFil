@@ -276,6 +276,7 @@ export function HistoriquePrix() {
           colonnes={colonnes}
           lignes={vues}
           chargement={q.isLoading}
+          erreur={q.error}
           cle={(l) => l.id_histo_prix}
           titreCarte={(l) => `${l.code_reference} · ${(l.date_achat ?? '').slice(0, 10)}`}
           texteVide={

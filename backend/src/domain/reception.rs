@@ -61,6 +61,8 @@ struct LigneReception {
     date_peremption: Option<String>,
     statut_qualite: String,
     code_magasin_dest: String,
+    /// Les bobines comptees au quai : elles font le poids theorique du lot.
+    nb_bobines_saisi: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,23 +164,57 @@ pub async fn valider(
     }
 
     // ---- 2 bis. LE LOT INTERNE, quand le fournisseur n'en a pas mis ---------
-    // (decision du 01/10/2026). Deux livraisons sont presque toujours deux
-    // productions : les ranger sous un meme « sans lot » les melangerait au
-    // tissage. Chaque ligne d'une reference suivie, laissee sans lot, recoit
-    // donc le sien : numero de reception et numero de ligne, REC-2026-0012-03.
-    // L'ecran l'a annonce et fait confirmer ; un lot saisi n'est jamais touche.
-    sqlx::query(
-        "UPDATE ligne_reception lr
-            SET lot_fournisseur = $2 || '-' || lpad(lr.ligne_numero::text, 2, '0')
-           FROM reference r
-          WHERE lr.id_reception = $1
-            AND r.code_reference = lr.code_reference
-            AND r.suivi_lot = 1
-            AND COALESCE(btrim(lr.lot_fournisseur), '') = ''",
+    // Deux livraisons sont presque toujours deux productions : les ranger sous
+    // un meme « sans lot » les melangerait au tissage. Chaque ligne d'une
+    // reference suivie, laissee sans lot, recoit donc le sien, au format du
+    // cahier « Gestion des lots » : FOURNISSEUR-JJMMAA-NN (HASIRCI-280826-01).
+    // NN continue la numerotation du meme fournisseur le meme jour : deux
+    // livraisons du meme jour n'ont jamais le meme lot.
+    //
+    // LE TYPE DE LOT DE L'ARTICLE decide (fiche article, « Gestion des lots ») :
+    //   OBLIGATOIRE — le numero du fournisseur est exige : une ligne sans lot
+    //                 est refusee, on ne l'invente pas ;
+    //   GENERIQUE   — l'ERP numerote toujours, meme si un numero a ete saisi ;
+    //   INDIFFERENT — le numero saisi s'il y en a un, sinon un numero genere.
+    let manquants: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT lr.code_reference
+           FROM ligne_reception lr JOIN reference r ON r.code_reference = lr.code_reference
+          WHERE lr.id_reception = $1 AND r.suivi_lot = 1 AND r.type_lot = 'OBLIGATOIRE'
+            AND COALESCE(btrim(lr.lot_fournisseur), '') = ''
+          ORDER BY 1",
     )
     .bind(id_reception)
-    .bind(&entete.numero_reception)
-    .execute(&mut *tx)
+    .fetch_all(&mut *tx)
+    .await?;
+    if !manquants.is_empty() {
+        return Err(AppError::RegleMetier(format!(
+            "Lot obligatoire : le numero de lot du fournisseur manque pour {}. \
+             Lisez-le sur l'etiquette et saisissez-le sur la ligne.",
+            manquants.join(", ")
+        )));
+    }
+    let lots_generes: Vec<String> = sqlx::query_scalar(
+        "WITH prefixe AS (
+             SELECT upper(regexp_replace(split_part(btrim(f.nom), ' ', 1), '[^A-Za-z0-9]', '', 'g'))
+                    || '-' || to_char(substr(rc.date_reception, 1, 10)::date, 'DDMMYY') AS p
+               FROM reception rc JOIN fournisseur f ON f.code_fournisseur = rc.code_fournisseur
+              WHERE rc.id_reception = $1
+         ), deja AS (
+             SELECT count(*) AS n FROM lot, prefixe WHERE lot.lot_fournisseur LIKE prefixe.p || '-%'
+         ), cible AS (
+             SELECT lr.id_ligne_reception, row_number() OVER (ORDER BY lr.ligne_numero) AS rang
+               FROM ligne_reception lr JOIN reference r ON r.code_reference = lr.code_reference
+              WHERE lr.id_reception = $1 AND r.suivi_lot = 1
+                AND (r.type_lot = 'GENERIQUE' OR COALESCE(btrim(lr.lot_fournisseur), '') = '')
+         )
+         UPDATE ligne_reception lr
+            SET lot_fournisseur = prefixe.p || '-' || lpad((deja.n + cible.rang)::text, 2, '0')
+           FROM cible, prefixe, deja
+          WHERE lr.id_ligne_reception = cible.id_ligne_reception
+      RETURNING lr.lot_fournisseur",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *tx)
     .await?;
 
     // ---- 3. Lignes ----------------------------------------------------------
@@ -191,7 +227,7 @@ pub async fn valider(
                 prix_kg_devise::float8 AS prix_kg_devise, code_devise,
                 taux_change::float8 AS taux_change, prix_kg_mad::float8 AS prix_kg_mad,
                 lot_fournisseur, date_fabrication, date_peremption,
-                statut_qualite, code_magasin_dest
+                statut_qualite, code_magasin_dest, nb_bobines_saisi
            FROM ligne_reception
           WHERE id_reception = $1
           ORDER BY ligne_numero",
@@ -281,8 +317,8 @@ pub async fn valider(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                       quantite_saisie, unite_saisie, facteur_conversion,
-                      lot_fournisseur, date_fabrication, date_peremption, statut_qualite)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                      lot_fournisseur, date_fabrication, date_peremption, statut_qualite, nb_bobines)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
@@ -296,6 +332,7 @@ pub async fn valider(
             .bind(&l.date_fabrication)
             .bind(&l.date_peremption)
             .bind(&l.statut_qualite)
+            .bind(l.nb_bobines_saisi.filter(|b| *b > 0))
             .execute(&mut *tx)
             .await?;
 
@@ -479,6 +516,32 @@ pub async fn valider(
     .bind(taux_entete)
     .execute(&mut *tx)
     .await?;
+
+    // LA FICHE DU LOT DIT D'OU IL VIENT : le fournisseur de cette reception,
+    // et « genere » pour ceux que l'ERP a numerotes.
+    sqlx::query(
+        "UPDATE lot l
+            SET code_fournisseur = rc.code_fournisseur,
+                origine = CASE WHEN l.lot_fournisseur = ANY($2) THEN 'GENERE' ELSE l.origine END
+           FROM ligne_reception lr JOIN reception rc ON rc.id_reception = lr.id_reception
+          WHERE lr.id_reception = $1
+            AND l.code_reference = lr.code_reference AND l.lot_fournisseur = lr.lot_fournisseur",
+    )
+    .bind(id_reception)
+    .bind(&lots_generes)
+    .execute(&mut *tx)
+    .await?;
+
+    // LE POIDS D'UNE BOBINE ET LES BOBINES PAR PALETTE SUIVENT LA LIVRAISON :
+    // la mesure de cette reception est historisee (avec le prix paye) et la
+    // fiche article mise a jour — sauf mesure aberrante, gardee mais ecartee.
+    // Apres les mouvements : ils ont deja fige l'ancien poids, contre lequel
+    // l'ecart de la livraison se lit.
+    sqlx::query("SELECT fn_suivi_conditionnement('RECEPTION', $1, $2)")
+        .bind(id_reception)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
 
     tx.commit().await?;
 

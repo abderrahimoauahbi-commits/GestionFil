@@ -963,6 +963,10 @@ pub async fn propositions_achat(
                 -- qu'une comparaison faite maintenant ne peut pas mentir.
                 (SELECT ROUND(vpa.qte_a_commander_kg, 3) FROM v_plan_achat vpa
                   WHERE vpa.code_reference = pa.code_reference)       AS quantite_calculee_kg,
+                -- Le complement de palette : ce que l'arrondi a la palette
+                -- pleine ajoute au besoin, pour la seule logistique.
+                (SELECT ROUND(vpa.complement_palette_kg, 3) FROM v_plan_achat vpa
+                  WHERE vpa.code_reference = pa.code_reference)       AS complement_palette_kg,
                 CASE WHEN pa.figee = 1 THEN ROUND(
                     pa.quantite_suggeree_kg
                   - COALESCE((SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa

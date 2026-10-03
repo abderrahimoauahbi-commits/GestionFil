@@ -14,6 +14,7 @@ mod consultation;
 mod devalidation;
 mod entites;
 mod importation;
+mod lots;
 mod machines;
 pub(crate) mod json;
 mod operations;
@@ -393,6 +394,19 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stock/projete", get(consultation::stock_projete))
         .route("/api/stock/dormant", get(consultation::stock_dormant))
         .route("/api/stock/lots", get(consultation::lots))
+        // Le registre des lots (02/10/2026) : vues, fiche de vie, decisions.
+        .route("/api/lots", get(lots::lister))
+        .route("/api/lots/compteurs", get(lots::compteurs))
+        .route("/api/lots/vie", get(lots::vie))
+        .route("/api/lots/statut", post(lots::changer_statut))
+        .route("/api/lots/basculer", post(lots::basculer))
+        .route("/api/lots/dormant", post(lots::decider_dormant))
+        .route("/api/lots/fusion", post(lots::fusionner))
+        .route("/api/lots/identifier", post(lots::identifier))
+        .route("/api/autorisations", get(lots::lister_demandes).post(lots::creer_demande))
+        .route("/api/autorisations/{id}/decider", post(lots::decider))
+        .route("/api/stats/lots", get(lots::statistiques))
+        .route("/api/cockpit/lots", get(lots::cockpit))
         .route("/api/substitutions", get(consultation::substitutions))
         .route("/api/equivalences", get(consultation::equivalences))
         .route(

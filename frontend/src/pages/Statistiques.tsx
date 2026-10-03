@@ -5,6 +5,8 @@
  *   Prix d'achat : d'ou vient la hausse — du fournisseur ou du change ?
  *   Fournisseurs : qui tient ses promesses, et dans quel sens ca evolue ?
  *   Qualites     : combien coute le metre carre, et ou part cet argent ?
+ *   Lots         : ou est le stock, depuis quand, et les bobines pesent-elles
+ *                  ce que dit le catalogue ? (module STOCK, voir stats-lots/)
  *
  * Chaque famille est lue sous le module dont elle releve — MOUVEMENTS,
  * VALORISATION, FOURNISSEURS, QUALITES — et non sous un module « statistiques »
@@ -21,6 +23,7 @@ import {
   Factory,
   Layers,
   Minus,
+  Tags,
   TrendingUp,
   Truck,
 } from 'lucide-react'
@@ -40,8 +43,9 @@ import {
 import { Infobulle } from '../composants/ui/surcouches'
 import { ColonnesTemps } from '../composants/graphiques/Graphiques'
 import { cn, fmt } from '../lib/utils'
+import { VoletLots } from './stats-lots/VoletLots'
 
-type Onglet = 'mouvements' | 'familles' | 'prix' | 'fournisseurs' | 'qualites'
+type Onglet = 'mouvements' | 'familles' | 'prix' | 'fournisseurs' | 'qualites' | 'lots'
 
 interface Ligne {
   [k: string]: unknown
@@ -90,6 +94,14 @@ const ONGLETS: {
     resume: 'Ce que coute le metre carre',
     module: 'QUALITES',
     Icone: Factory,
+  },
+  {
+    // Lu sous STOCK, comme le registre des lots : `/api/stats/lots` l'exige.
+    cle: 'lots',
+    nom: 'Lots',
+    resume: 'Projet, Restes, age et poids des bobines',
+    module: 'STOCK',
+    Icone: Tags,
   },
 ]
 
@@ -151,6 +163,7 @@ export function Statistiques() {
             {onglet === 'prix' && <VoletPrix d={q.data} />}
             {onglet === 'fournisseurs' && <VoletFournisseurs d={q.data} />}
             {onglet === 'qualites' && <VoletQualites d={q.data} />}
+            {onglet === 'lots' && <VoletLots d={q.data} />}
           </>
         )}
       </PageAvecRail>

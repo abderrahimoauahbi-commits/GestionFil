@@ -30,6 +30,7 @@ import { toast } from 'sonner'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
+  ArrowDownUp,
   ArrowRight,
   CheckCircle2,
   CircleDollarSign,
@@ -38,9 +39,12 @@ import {
   FileCheck2,
   FileClock,
   Moon,
+  Lock,
   PackageX,
+  Scale,
   Send,
   ShieldAlert,
+  ShieldCheck,
   TrendingDown,
   Truck,
 } from 'lucide-react'
@@ -151,6 +155,12 @@ interface Tuile {
   actionnable?: boolean
   /** Une tuile d'ETAT reste visible a zero ; une FILE vide s'efface. */
   toujours?: boolean
+  /**
+   * Compteur lu HORS de la grille de champs du cockpit (les lots, sous le
+   * module STOCK) : il n'a pas de ligne dans `champ_configurable` COCKPIT, et
+   * `visible` le dirait donc masque. Sa permission de module suffit.
+   */
+  horsGrille?: boolean
 }
 
 const TEINTE: Record<Ton, string> = {
@@ -176,6 +186,16 @@ export function Cockpit() {
 
   const k = qKpi.data ?? {}
   const n = (champ: string) => Number(k[champ] ?? 0)
+
+  /* LES FILES DES LOTS (02/10/2026). Elles se lisent sous le module STOCK,
+     comme le registre : un role qui ne lit pas le stock n'a pas a les voir. */
+  const lisStock = peut('STOCK', 'LIRE')
+  const qLots = useQuery({
+    queryKey: ['cockpit-lots'],
+    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    enabled: lisStock,
+  })
+  const nl = (champ: string) => Number(qLots.data?.[champ] ?? 0)
 
   const files: Tuile[] = [
     {
@@ -297,6 +317,66 @@ export function Cockpit() {
       actionnable: peut('STOCK', 'LIRE'),
     },
     {
+      champ: 'lots_a_basculer',
+      domaine: 'STOCK',
+      libelle: 'Lots à basculer',
+      valeur: nl('lots_a_basculer'),
+      detail: 'Projet passés sous le seuil des Restes',
+      ton: 'alerte',
+      Icone: ArrowDownUp,
+      vers: '/lots?vue=a_basculer',
+      actionnable: peut('STOCK', 'ECRIRE'),
+      horsGrille: true,
+    },
+    {
+      champ: 'lots_dormants',
+      domaine: 'STOCK',
+      libelle: 'Lots dormants',
+      valeur: nl('lots_dormants'),
+      detail: 'sans activité : à décider',
+      ton: 'alerte',
+      Icone: Moon,
+      vers: '/lots?vue=dormants',
+      actionnable: peut('STOCK', 'VALIDER'),
+      horsGrille: true,
+    },
+    {
+      champ: 'lots_bloques',
+      domaine: 'QUALITE',
+      libelle: 'Lots bloqués',
+      valeur: nl('lots_bloques'),
+      detail: 'en attente d’une décision qualité',
+      ton: 'danger',
+      Icone: Lock,
+      vers: '/lots?vue=bloques',
+      actionnable: peut('STOCK', 'VALIDER'),
+      horsGrille: true,
+    },
+    {
+      champ: 'lots_en_derive',
+      domaine: 'QUALITE',
+      libelle: 'Lots en dérive de poids',
+      valeur: nl('lots_en_derive'),
+      detail: 'écart cumulé hors tolérance',
+      ton: 'alerte',
+      Icone: Scale,
+      vers: '/lots?vue=derive',
+      actionnable: lisStock,
+      horsGrille: true,
+    },
+    {
+      champ: 'autorisations_en_attente',
+      domaine: 'STOCK',
+      libelle: 'Autorisations à donner',
+      valeur: nl('autorisations_en_attente'),
+      detail: 'demandes en attente de décision',
+      ton: 'danger',
+      Icone: ShieldCheck,
+      vers: '/autorisations',
+      actionnable: peut('STOCK', 'VALIDER'),
+      horsGrille: true,
+    },
+    {
       champ: 'nb_controles_bloquants',
       domaine: 'QUALITE',
       libelle: 'Contrôles bloquants',
@@ -312,7 +392,9 @@ export function Cockpit() {
   // VOIR le champ et AGIR dessus ; une file vide s'efface, parce qu'un ecran
   // couvert de zeros apprend a ne plus etre lu.
   const garder = (t: Tuile) =>
-    droits.visible(t.champ) && t.actionnable !== false && (t.toujours || t.valeur > 0)
+    (t.horsGrille || droits.visible(t.champ)) &&
+    t.actionnable !== false &&
+    (t.toujours || t.valeur > 0)
 
   /* LE DOMAINE CHOISI SE RETIENT POUR LA SESSION. Un acheteur qui a mis
      « Achats » le retrouve en revenant ; il n'a pas a le reposer dix fois par

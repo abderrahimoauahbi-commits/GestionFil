@@ -72,6 +72,8 @@ interface Proposition extends Record<string, unknown> {
   montant_devise?: number | null
   taux_devise?: number | null
   palettes_a_commander?: number | null
+  /** Ce que l'arrondi a la palette pleine ajoute au besoin (kg). */
+  complement_palette_kg?: number | null
   date_besoin_prevue: string
   urgence: string
   risque_identifie: string | null
@@ -637,6 +639,22 @@ export function PlanAchat() {
           <span className="text-attenue-texte">—</span>
         ) : (
           <span className="tabular-nums">{fmt.entier(p.palettes_a_commander)}</span>
+        ),
+    },
+    {
+      // LE COMPLEMENT DE PALETTE : ce qui est commande pour fermer la palette,
+      // pas pour produire. Vide quand l'article n'est pas arrondi a la palette.
+      champ: 'complement_palette_kg',
+      entete: 'Complément palette',
+      numerique: true,
+      largeur: '120px',
+      rendu: (p) =>
+        !p.complement_palette_kg || p.complement_palette_kg <= 0 ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <span className="tabular-nums" title="Ajouté pour fermer la palette, pas pour produire">
+            + {fmt.nombre(p.complement_palette_kg, 0)} kg
+          </span>
         ),
     },
     {

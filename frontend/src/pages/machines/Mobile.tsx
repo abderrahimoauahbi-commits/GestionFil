@@ -13,7 +13,7 @@
  *      precisement ce qu'on relit en tapant ;
  *   3. cibles d'au moins 48 px, 56 px pour le bouton qui valide.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Check, ChevronDown, ChevronLeft, ChevronRight, Layers, Loader2, Plus, Search, X,
@@ -21,9 +21,10 @@ import {
 import { api } from '../../api/client'
 import { Alerte, Chargement } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
-import { libelleLot, SANS_LOT } from '../../lib/lots'
+import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import {
-  etatKg, fmtDate, LIBELLE_TYPE, ligneNeuve, machinesApi, nb,
+  CLASSE_ECART, ecartPoidsBobine, etatKg, fmtDate, LIBELLE_TYPE, ligneNeuve, machinesApi, nb,
+  rappelCatalogue, signePct,
   type Machine, type TypeFiche, type Zone,
 } from './noyau'
 import { useFiche } from './useFiche'
@@ -224,6 +225,7 @@ function ZoneMobile({
   ouvrir: (t: TypeFiche) => void
 }) {
   const [deplie, setDeplie] = useState<string | null>(null)
+  const tolerances = useTolerancesLot()
   const q = useQuery({
     queryKey: ['machine-etat', machine.code_machine, zone.code_emplacement],
     queryFn: () => machinesApi.etat(machine.code_machine, zone.code_emplacement),
@@ -284,15 +286,32 @@ function ZoneMobile({
                   className={cn('size-4 shrink-0 text-attenue-texte transition-transform', ouvert && 'rotate-180')}
                 />
               </button>
-              {ouvert && (
+              {ouvert && (() => {
+                /* L'ECART AU CATALOGUE, a cote du poids constate : le meme
+                   calcul et les memes couleurs que pendant la saisie. */
+                const pct = ecartPoidsBobine({
+                  poids_unitaire: l.poids_unitaire_kg ?? 0,
+                  poids_catalogue: l.poids_catalogue_kg,
+                })
+                const c = couleurEcart(pct, tolerances)
+                return (
                 <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 bg-attenue px-3 pb-3 pt-1 text-[12px]">
-                  <D t="Poids par bobine" v={`${nb(l.poids_unitaire_kg, 3)} kg`} />
+                  <D
+                    t="Poids par bobine"
+                    v={`${nb(l.poids_unitaire_kg, 3)} kg`}
+                    suffixe={
+                      pct != null && c ? (
+                        <span className={cn('ml-1.5 font-medium', CLASSE_ECART[c])}>{signePct(pct)}</span>
+                      ) : null
+                    }
+                  />
                   <D t="Catalogue" v={`${nb(l.poids_catalogue_kg, 3)} kg`} />
                   <D t="Mode du constat" v={l.mode_constat === 'PESEE' ? 'Pesée' : 'Estimation'} />
                   <D t="Constaté le" v={fmtDate(l.date_constat)} />
                   <D t="Par" v={l.responsable ?? '—'} />
                 </dl>
-              )}
+                )
+              })()}
             </div>
           )
         })}
@@ -325,11 +344,14 @@ function ZoneMobile({
   )
 }
 
-function D({ t, v }: { t: string; v: string }) {
+function D({ t, v, suffixe }: { t: string; v: string; suffixe?: ReactNode }) {
   return (
     <>
       <dt className="text-attenue-texte">{t}</dt>
-      <dd className="text-right tabular-nums text-texte">{v}</dd>
+      <dd className="text-right tabular-nums text-texte">
+        {v}
+        {suffixe}
+      </dd>
     </>
   )
 }
@@ -349,6 +371,7 @@ function FicheMobile({
   const f = useFiche(machine.code_machine, zone, type)
   const v = useValiderFiche(f)
   const [active, setActive] = useState(0)
+  const tolerances = useTolerancesLot()
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
     queryFn: () => api.get<Magasin[]>('/api/magasins?actif=1'),
@@ -376,7 +399,7 @@ function FicheMobile({
   })
   const lotsDe = (code: string) => (qLots.data ?? []).filter((x) => x.code_reference === code)
   const ajouterLot = (code: string, designation: string, poids: number | null, lot: string) => {
-    f.ajouter({ ...ligneNeuve(code, designation, poids ?? 0), lot_fournisseur: lot })
+    f.ajouter({ ...ligneNeuve(code, designation, poids ?? 0, poids), lot_fournisseur: lot })
     setActive(f.lignes.length)
     setChoix(false)
   }
@@ -557,8 +580,20 @@ function FicheMobile({
               set={(v) => f.majLigne(l.cle, 'presentes', v)}
             />
           )}
+          {/* LE RAPPEL CATALOGUE SOUS LE CHAMP : la bobine pesee ou lue sur
+              l'etiquette se compare au catalogue sans quitter la saisie. */}
           <ChampNum label="Poids par bobine (kg)" v={l.poids_unitaire} pas={0.001}
-                    set={(v) => f.majLigne(l.cle, 'poids_unitaire', v)} />
+                    set={(v) => f.majLigne(l.cle, 'poids_unitaire', v)}
+                    aide={(() => {
+                      const rappel = rappelCatalogue(l)
+                      if (!rappel) return 'Pas de poids de bobine au catalogue'
+                      const c = couleurEcart(ecartPoidsBobine(l), tolerances)
+                      return (
+                        <span className={cn('font-medium', c ? CLASSE_ECART[c] : 'text-attenue-texte')}>
+                          {rappel}
+                        </span>
+                      )
+                    })()} />
           <ChampNum label="Pourcentage restant" v={l.pourcentage} pas={0.1} max={100}
                     set={(v) => f.majLigne(l.cle, 'pourcentage', v)} grand />
         </>
@@ -674,7 +709,7 @@ function ChampM({
 }
 
 function ChampNum({
-  label, v, set, pas = 1, max, grand,
+  label, v, set, pas = 1, max, grand, aide,
 }: {
   label: string
   v: number
@@ -682,6 +717,8 @@ function ChampNum({
   pas?: number
   max?: number
   grand?: boolean
+  /** Une ligne de rappel sous le champ (le catalogue, par exemple). */
+  aide?: ReactNode
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -698,6 +735,7 @@ function ChampNum({
           grand ? 'text-[20px]' : 'text-[16px]',
         )}
       />
+      {aide && <span className="text-[13px] tabular-nums text-attenue-texte">{aide}</span>}
     </label>
   )
 }

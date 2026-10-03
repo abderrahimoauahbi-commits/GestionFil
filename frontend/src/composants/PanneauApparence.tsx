@@ -9,13 +9,9 @@
  * A DROITE, ET PAS A GAUCHE. La navigation occupe deja le bord gauche. Deux
  * tiroirs du meme cote se recouvriraient, et l'un fermerait l'autre.
  *
- * DES SELECTEURS, PAS DES GRILLES DE VIGNETTES. Neuf familles de couleurs et
- * cinq polices en cartes remplissaient le panneau sur trois ecrans de
- * defilement : on ne comparait plus rien, on cherchait. Un selecteur tient sur
- * une ligne, montre la valeur courante sans la deviner, s'ouvre au clavier et
- * se manipule au doigt sur tablette avec la liste du systeme. L'APERCU RESTE,
- * mais sous le selecteur, comme consequence du choix, au lieu de tenir lieu de
- * choix.
+ * UN SEUL STYLE (02/10/2026) : plus de famille de couleurs ni de police a
+ * choisir. Restent le mode clair / sombre, la taille, la densite et la
+ * navigation — les reglages qui dependent du poste, pas du gout.
  *
  * AUCUN BOUTON DE VALIDATION. Chaque reglage s'applique et se garde. Un panneau
  * de preferences qui demande de valider fait douter qu'on ait bien choisi ; ici
@@ -26,14 +22,10 @@ import { RotateCcw, X } from 'lucide-react'
 import {
   DENSITES,
   DISPOSITIONS,
-  PALETTES,
-  POLICES,
   TAILLES,
   useApparence,
   type Densite,
   type Disposition,
-  type Palette,
-  type Police,
   type Taille,
 } from './Apparence'
 import { useTheme, type Theme } from './Theme'
@@ -45,11 +37,6 @@ const MODES: { cle: Theme; nom: string }[] = [
   { cle: 'sombre', nom: 'Sombre' },
   { cle: 'systeme', nom: 'Suivre le système' },
 ]
-
-/** Les trois familles ajoutees pour l'aspect, separees des six familles de
- *  travail : le regroupement evite de choisir un fond translucide en croyant
- *  prendre un gris sobre. */
-const MODERNES: Palette[] = ['glassier', 'claude', 'azur']
 
 /** Un titre de section. */
 function Titre({ children }: { children: React.ReactNode }) {
@@ -88,9 +75,7 @@ function Note({ children }: { children: React.ReactNode }) {
 export function ControlesApparence() {
   const { theme, definir: definirTheme } = useTheme()
   const {
-    palette,
     densite,
-    police,
     taille,
     disposition,
     piedVisible,
@@ -98,13 +83,8 @@ export function ControlesApparence() {
     definir,
   } = useApparence()
 
-  const paletteChoisie = PALETTES.find((p) => p.cle === palette)
-  const policeChoisie = POLICES.find((p) => p.cle === police)
   const dispoChoisie = DISPOSITIONS.find((d) => d.cle === disposition)
   const densiteChoisie = DENSITES.find((d) => d.cle === densite)
-
-  const sobres = PALETTES.filter((p) => !MODERNES.includes(p.cle))
-  const modernes = PALETTES.filter((p) => MODERNES.includes(p.cle))
 
   return (
     <>
@@ -125,61 +105,8 @@ export function ControlesApparence() {
         </Selecteur>
       </Ligne>
 
-      <Ligne pour="ap-palette" nom="Famille">
-        <Selecteur
-          id="ap-palette"
-          value={palette}
-          onChange={(e) => definir({ palette: e.target.value as Palette })}
-        >
-          <optgroup label="Sobres">
-            {sobres.map((p) => (
-              <option key={p.cle} value={p.cle}>
-                {p.nom}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label="Modernes">
-            {modernes.map((p) => (
-              <option key={p.cle} value={p.cle}>
-                {p.nom}
-              </option>
-            ))}
-          </optgroup>
-        </Selecteur>
-      </Ligne>
-
-      {/* L'apercu suit le choix au lieu de le porter : fond, accent, texte,
-          les trois couleurs qui decident de la lisibilite d'un tableau. */}
-      {paletteChoisie && (
-        <div className="mt-1 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-2">
-          <span className="flex h-4 self-start overflow-hidden rounded-[3px] border border-bordure">
-            {paletteChoisie.teintes.map((t) => (
-              <span key={t} className="w-5" style={{ background: t }} />
-            ))}
-          </span>
-          <p className="text-[10.5px] leading-relaxed text-attenue-texte">
-            {paletteChoisie.resume}
-          </p>
-        </div>
-      )}
-
       {/* --- Texte -------------------------------------------------------- */}
       <Titre>Texte</Titre>
-
-      <Ligne pour="ap-police" nom="Police">
-        <Selecteur
-          id="ap-police"
-          value={police}
-          onChange={(e) => definir({ police: e.target.value as Police })}
-          style={{ fontFamily: policeChoisie?.pile }}
-        >
-          {POLICES.map((p) => (
-            <option key={p.cle} value={p.cle} style={{ fontFamily: p.pile }}>
-              {p.nom}
-            </option>
-          ))}
-        </Selecteur>
-      </Ligne>
 
       <Ligne pour="ap-taille" nom="Taille">
         <Selecteur
@@ -196,15 +123,13 @@ export function ControlesApparence() {
       </Ligne>
 
       {/* L'echantillon est ecrit DANS la police et A la taille choisies : on
-          juge un caractere sur des chiffres alignes et un zero, pas sur son
-          nom. */}
+          juge une taille sur des chiffres alignes, pas sur son nom. */}
       <div
         className="mt-1.5 rounded-[var(--radius-sm)] border border-bordure bg-attenue/40 px-2.5 py-2 tabular-nums"
-        style={{ fontFamily: policeChoisie?.pile, fontSize: taille }}
+        style={{ fontSize: taille }}
       >
         Ref. PP-1500 — 1 048,50 kg — 0 O
       </div>
-      {policeChoisie && <Note>{policeChoisie.resume}</Note>}
 
       {/* --- Tableaux ------------------------------------------------------ */}
       <Titre>Tableaux</Titre>

@@ -391,8 +391,14 @@ pub async fn moi(
     // applique de toute facon la meme grille — l'interface ne fait qu'eviter a
     // l'utilisateur de saisir ce qui sera refuse.
     let droits: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT cc.module, cc.champ, COALESCE(dc.niveau, cc.niveau_defaut)
+        // L'administrateur a tous les droits, sans exception : meme regle que
+        // `rbac::droits_champ`, sans quoi l'ecran griserait ce que le serveur
+        // accepte.
+        "SELECT cc.module, cc.champ,
+                CASE WHEN u.code_role_user = 'ADMIN' THEN 'ECRITURE'
+                     ELSE COALESCE(dc.niveau, cc.niveau_defaut) END
            FROM champ_configurable cc
+           LEFT JOIN utilisateur u ON u.id_utilisateur = $1
            LEFT JOIN droit_champ dc
                   ON dc.module = cc.module AND dc.champ = cc.champ
                  AND dc.id_utilisateur = $1

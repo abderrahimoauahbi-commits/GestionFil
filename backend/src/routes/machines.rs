@@ -781,6 +781,20 @@ pub async fn valider_fiche(
     .execute(&mut *tx)
     .await?;
 
+    // UN CONSTAT EST UNE ACTIVITE DU LOT : un lot qui tourne sur un metier ne
+    // devient pas « dormant » faute de mouvement de magasin (cahier, regle 3).
+    for l in &lignes {
+        sqlx::query(
+            "UPDATE lot SET date_derniere_activite = $3
+              WHERE code_reference = $1 AND lot_fournisseur = $2",
+        )
+        .bind(&l.reference)
+        .bind(&l.lot)
+        .bind(crate::db::maintenant())
+        .execute(&mut *tx)
+        .await?;
+    }
+
     // --- 2 bis. LE PARAMETRAGE SUIT LE CONSTAT -------------------------------
     //
     // L'ENTETE FAIT AUTORITE, ET CELA DOIT DURER. Le magasinier compte le
@@ -1426,12 +1440,19 @@ async fn contre_passer(
     user: &Utilisateur,
     f: &Fiche,
 ) -> AppResult<()> {
+    // SEULS LE CHARGEMENT ET LE RETOUR DE LA FICHE S'ANNULENT. La correction de
+    // stock confirmee avant un chargement (AJUST_INV_POS, meme numero de
+    // document) constatait une matiere bien presente : elle reste. Chaque
+    // mouvement s'inverse dans SON sens — deviner le sens sur la premiere ligne
+    // lue, sans ordre, pouvait annuler la correction comme un chargement.
     let lignes = sqlx::query_as::<_, (String, Option<String>, f64, Option<f64>, Option<i64>, String)>(
         "SELECT lm.code_reference, lm.lot_fournisseur, lm.quantite_kg::float8,
                 lm.prix_kg_mad::float8, lm.nb_bobines, mv.code_type_mvt
            FROM mouvement mv
            JOIN ligne_mouvement lm ON lm.id_mouvement = mv.id_mouvement
-          WHERE mv.reference_document = $1",
+          WHERE mv.reference_document = $1
+            AND mv.code_type_mvt IN ('CHARGE_MACHINE', 'RETOUR_MACHINE')
+          ORDER BY mv.date_creation, lm.ligne_numero",
     )
     .bind(&f.numero)
     .fetch_all(&mut *tx)
@@ -1439,57 +1460,63 @@ async fn contre_passer(
     if lignes.is_empty() {
         return Ok(());
     }
-
-    let inverse = if lignes[0].5 == "CHARGE_MACHINE" {
-        "RETOUR_MACHINE"
-    } else {
-        "CHARGE_MACHINE"
-    };
     let magasin = f.code_magasin.clone().unwrap_or_default();
-    let numero = numeroter(tx, "mouvement", "numero_mouvement", "MVT").await?;
-    let id = uuid::Uuid::new_v4().to_string();
 
-    sqlx::query(
-        "INSERT INTO mouvement
-             (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif,
-              reference_document, observations_globales, responsable, id_utilisateur)
-         VALUES ($1,$2,$3,$4,'MACHINE',$5,$6,$7,$8)",
-    )
-    .bind(&id)
-    .bind(&numero)
-    .bind(inverse)
-    .bind(&magasin)
-    .bind(format!("Annulation {}", f.numero))
-    .bind(format!("Annulation de la fiche {}", f.numero))
-    .bind(&f.responsable)
-    .bind(&user.id)
-    .execute(&mut *tx)
-    .await?;
-
-    for (i, (reference, lot, kg, prix, bobines, _)) in lignes.iter().enumerate() {
-        let prix_retour = if inverse == "RETOUR_MACHINE" {
-            match prix {
-                Some(p) => Some(*p),
-                None => cmup(&mut *tx, &magasin, reference).await?,
-            }
-        } else {
-            None
-        };
+    for type_origine in ["CHARGE_MACHINE", "RETOUR_MACHINE"] {
+        let du_type: Vec<_> = lignes.iter().filter(|l| l.5 == type_origine).collect();
+        if du_type.is_empty() {
+            continue;
+        }
+        let inverse = if type_origine == "CHARGE_MACHINE" { "RETOUR_MACHINE" } else { "CHARGE_MACHINE" };
+        let numero = numeroter(tx, "mouvement", "numero_mouvement", "MVT").await?;
+        let id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO ligne_mouvement
-                 (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                  lot_fournisseur, nb_bobines, lot_force, motif_lot_force)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            "INSERT INTO mouvement
+                 (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif,
+                  reference_document, observations_globales, responsable, id_utilisateur)
+             VALUES ($1,$2,$3,$4,'MACHINE',$5,$6,$7,$8)",
         )
         .bind(&id)
-        .bind(i as i64 + 1)
-        .bind(reference)
-        .bind(kg)
-        .bind(prix_retour)
-        .bind(lot)
-        .bind(bobines)
+        .bind(&numero)
+        .bind(inverse)
+        .bind(&magasin)
+        .bind(format!("Annulation {}", f.numero))
+        .bind(format!("Annulation de la fiche {}", f.numero))
+        .bind(&f.responsable)
+        .bind(&user.id)
         .execute(&mut *tx)
         .await?;
+
+        for (i, (reference, lot, kg, prix, bobines, _)) in du_type.iter().enumerate() {
+            let prix_retour = if inverse == "RETOUR_MACHINE" {
+                match prix {
+                    Some(p) => Some(*p),
+                    None => cmup(&mut *tx, &magasin, reference).await?,
+                }
+            } else {
+                None
+            };
+            // L'annulation remet la matiere la ou elle etait : le solde connu
+            // du lot peut avoir derive entre-temps, ce n'est pas une raison de
+            // refuser de defaire la fiche.
+            sqlx::query(
+                "INSERT INTO ligne_mouvement
+                     (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
+                      lot_fournisseur, nb_bobines, lot_force, motif_lot_force)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            )
+            .bind(&id)
+            .bind(i as i64 + 1)
+            .bind(reference)
+            .bind(kg)
+            .bind(prix_retour)
+            .bind(lot)
+            .bind(bobines)
+            .bind(i64::from(inverse == "CHARGE_MACHINE"))
+            .bind(if inverse == "CHARGE_MACHINE" { Some(format!("Annulation de la fiche {}", f.numero)) } else { None })
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     Ok(())
 }

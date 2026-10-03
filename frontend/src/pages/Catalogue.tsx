@@ -342,21 +342,53 @@ export function Catalogue() {
       section: 'Conditionnement et stockage',
     },
     {
-      champ: 'bobines_par_lot',
-      libelle: 'Bobines par lot',
-      type: 'entier',
-      aide:
-        'Le bain de production du fournisseur. Il varie d’un article à l’autre, même chez ' +
-        'le même fournisseur : 1344 bobines le plus souvent, parfois 1400, 1688 ou 1720. ' +
-        'Sans lui, la commande au lot est refusée plutôt que convertie au jugé.',
-      section: 'Conditionnement et stockage',
-    },
-    {
       champ: 'suivi_lot',
       libelle: 'Suivi par lot',
       type: 'booleen',
-      aide: 'Rend le lot obligatoire sur chaque mouvement. Determinant quand le bain de teinture conditionne la nuance.',
-      section: 'Conditionnement et stockage',
+      aide:
+        'Le lot est le bain de teinture du fournisseur : deux lots d’une même couleur ne donnent pas ' +
+        'exactement la même nuance. Activé, chaque mouvement porte son lot, et les réglages ci-contre s’appliquent.',
+      section: 'Gestion des lots',
+    },
+    {
+      champ: 'type_lot',
+      libelle: 'Type de lot',
+      type: 'liste',
+      defaut: 'INDIFFERENT',
+      actifSi: { champ: 'suivi_lot', raison: 'suivi par lot désactivé' },
+      options: [
+        { valeur: 'OBLIGATOIRE', libelle: 'Obligatoire — n° du fournisseur exigé' },
+        { valeur: 'GENERIQUE', libelle: 'Générique — l’ERP numérote' },
+        { valeur: 'INDIFFERENT', libelle: 'Optionnel — n° du fournisseur s’il existe, sinon généré' },
+      ],
+      aide:
+        'D’où vient le numéro de lot à la réception. Obligatoire : sans le numéro de l’étiquette, la réception ' +
+        'est refusée. Générique : l’ERP attribue toujours FOURNISSEUR-JJMMAA-NN. Optionnel : le numéro du ' +
+        'fournisseur s’il est saisi, sinon un numéro généré.',
+      section: 'Gestion des lots',
+    },
+    {
+      champ: 'seuil_lot_valeur',
+      libelle: 'Minimum d’un lot pour produire',
+      type: 'nombre',
+      actifSi: { champ: 'suivi_lot', raison: 'suivi par lot désactivé' },
+      aide:
+        'La quantité à partir de laquelle un lot suffit pour lancer une production. Elle se compte dans ' +
+        'l’unité du conditionnement (des bobines pour le fil), en kilos pour un article sans poids par unité. ' +
+        'Au-dessus, le lot compte pour le plan d’achat ; en dessous, c’est une fin de lot (Restes), hors plan ' +
+        'd’achat. Vide : un étage de machine, 1 344 bobines — ou 5 000 kg sans poids par unité.',
+      section: 'Gestion des lots',
+    },
+    {
+      champ: 'fusion_lot',
+      libelle: 'Fusion de lots autorisée',
+      type: 'booleen',
+      defaut: 1,
+      actifSi: { champ: 'suivi_lot', raison: 'suivi par lot désactivé' },
+      aide:
+        'Permet de réunir deux lots de cet article (même couleur, même fournisseur) en un seul. À refuser ' +
+        'pour un fil dont les bains ne doivent jamais se mélanger.',
+      section: 'Gestion des lots',
     },
     {
       champ: 'stock_min_kg',
@@ -403,7 +435,18 @@ export function Catalogue() {
       section: 'Achat',
     },
     { champ: 'moq_kg', libelle: 'Quantité minimale de commande (kg)', type: 'nombre', section: 'Achat' },
-    { champ: 'multiple_achat_kg', libelle: 'Multiple d achat (kg)', type: 'nombre', section: 'Achat' },
+    {
+      champ: 'arrondi_palette',
+      libelle: 'Arrondi à la palette pleine',
+      type: 'booleen',
+      defaut: 0,
+      aide:
+        'Facultatif. Coché, le plan d’achat complète la commande jusqu’à la palette pleine : un besoin de ' +
+        '0,85 palette devient 1 palette, et les 0,15 ajoutés sont le « complément de palette », affiché à part ' +
+        'dans le plan d’achat. Poids d’une palette = poids d’une bobine × bobines par palette — une estimation, ' +
+        'car le fournisseur change parfois le poids de ses bobines ; les kilos exacts sont ceux de la réception.',
+      section: 'Achat',
+    },
   ]
 
   /* Filtres serveur. Tous portent sur des colonnes de la liste blanche du

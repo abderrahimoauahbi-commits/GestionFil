@@ -73,7 +73,7 @@ pub struct LigneMouvement {
     /// incomplete reste une palette a manutentionner. Le bon imprime porte ce
     /// compte, parce que c'est lui que le cariste verifie.
     pub nb_bobines: Option<i64>,
-    pub nb_palettes: Option<i64>,
+    pub nb_palettes: Option<f64>,
     pub lot_fournisseur: Option<String>,
     pub date_fabrication: Option<String>,
     pub date_peremption: Option<String>,
@@ -759,7 +759,7 @@ pub struct LigneTransfert {
     pub lot_fournisseur: Option<String>,
     /// Conditionnement compte au quai, independant de la conversion en kg.
     pub nb_bobines: Option<i64>,
-    pub nb_palettes: Option<i64>,
+    pub nb_palettes: Option<f64>,
 }
 
 pub async fn ajouter_ligne_transfert(
@@ -1071,6 +1071,10 @@ pub struct Comptage {
     /// compte, pas la reference.
     pub lot_fournisseur: Option<String>,
     pub motif_ecart: Option<String>,
+    /// LE COMPTAGE EN COLIS (02/10/2026) : bobines et palettes comptees, pour
+    /// lire l'ecart de poids par bobine au moment meme du comptage.
+    pub nb_bobines: Option<i64>,
+    pub nb_palettes: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1116,7 +1120,8 @@ pub async fn saisir_comptage(
         let res = sqlx::query(
             "UPDATE ligne_inventaire
                 SET quantite_comptee_kg = $3, motif_ecart = $4, statut_ligne = 'COMPTE',
-                    id_utilisateur_comptage = $5, date_comptage = $6
+                    id_utilisateur_comptage = $5, date_comptage = $6,
+                    nb_bobines_comptees = $9, nb_palettes_comptees = $10
               WHERE id_inventaire = $1 AND code_reference = $2 AND code_magasin = $7
                 -- `IS $8` etait du SQLite : PostgreSQL le refuse, et chaque saisie
                 -- de comptage tombait en erreur interne.
@@ -1130,6 +1135,8 @@ pub async fn saisir_comptage(
         .bind(&horodatage)
         .bind(&c.code_magasin)
         .bind(&c.lot_fournisseur)
+        .bind(c.nb_bobines)
+        .bind(c.nb_palettes)
         .execute(&mut *tx)
         .await?;
 
@@ -1156,8 +1163,10 @@ pub async fn saisir_comptage(
                         "INSERT INTO ligne_inventaire
                              (id_ligne_inv, id_inventaire, code_reference, code_magasin, lot_fournisseur,
                               quantite_theorique_kg, quantite_comptee_kg, motif_ecart, statut_ligne,
-                              id_utilisateur_comptage, date_comptage)
-                         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, 'COMPTE', $8, $9)",
+                              id_utilisateur_comptage, date_comptage, nb_bobines_theorique,
+                              nb_bobines_comptees, nb_palettes_comptees, poids_unitaire_theorique_kg)
+                         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, 'COMPTE', $8, $9, 0, $10, $11,
+                                 (SELECT NULLIF(poids_bobine_kg, 0) FROM reference WHERE code_reference = $3))",
                     )
                     .bind(uuid::Uuid::new_v4().to_string())
                     .bind(&id)
@@ -1168,6 +1177,8 @@ pub async fn saisir_comptage(
                     .bind(c.motif_ecart.clone().or_else(|| Some("Lot trouvé au comptage".into())))
                     .bind(&user.id)
                     .bind(&horodatage)
+                    .bind(c.nb_bobines)
+                    .bind(c.nb_palettes)
                     .execute(&mut *tx)
                     .await?;
                     n += 1;

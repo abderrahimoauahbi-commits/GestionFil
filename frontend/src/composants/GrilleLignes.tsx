@@ -28,6 +28,7 @@ import { Check, Link2, Pencil, Plus, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
+import { couleurEcart } from '../lib/lots'
 import {
   type Conditionnement,
   depuisBobines,
@@ -519,6 +520,29 @@ export interface ProprietesGrille {
   validationLocale?: boolean
   /** Afficher la colonne « Remise % » — sur les bons de commande seulement. */
   avecRemise?: boolean
+  /*
+   * LES DOCUMENTS DE STOCK (mouvement, transfert, inventaire — 02/10/2026).
+   * La grille du bon de commande leur sert telle quelle, moins ce qui n'a de
+   * sens qu'a l'achat. Aucune de ces options ne change le bon de commande.
+   */
+  /** Pas de choix « plan d'achat / catalogue » : la frappe cherche dans `proposees`, puis au catalogue. */
+  sansSource?: boolean
+  /** Pas de bouton « Ajouter une ligne » : les lignes viennent du serveur (inventaire). */
+  sansAjout?: boolean
+  /** La reference d'une ligne ne se change pas (inventaire). */
+  referenceFigee?: boolean
+  /** Les unites proposees, en plus du kilo. Absent : toutes celles de la reference. */
+  unitesAutorisees?: string[]
+  /** La meme reference peut revenir sur plusieurs lignes — un lot par ligne. */
+  doublonsReference?: boolean
+  /** Les libelles des colonnes « reference » et « unite », de la recherche et de l'aide. */
+  libelles?: { reference?: string; unite?: string; recherche?: string; aide?: string }
+  /**
+   * LE POIDS PAR BOBINE : le poids reel moyen (kilos / bobines) compare au
+   * poids catalogue, avec l'ecart en couleur selon les tolerances. C'est ce
+   * qui revele, au moment de la saisie, un fil plus leger que l'annonce.
+   */
+  poidsBobine?: { orange: number; rouge: number }
 }
 
 /** Une colonne que l'ecran ajoute a la grille, et qu'il sait seul rendre. */
@@ -561,8 +585,17 @@ export function GrilleLignes({
   sansFournisseur = false,
   validationLocale = false,
   avecRemise = false,
+  sansSource = false,
+  sansAjout = false,
+  referenceFigee = false,
+  unitesAutorisees,
+  doublonsReference = false,
+  libelles,
+  poidsBobine,
 }: ProprietesGrille) {
-  const prises = dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean))
+  const prises = doublonsReference
+    ? new Set<string>()
+    : (dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean)))
 
   const maj = (cle: string, patch: Partial<LigneSaisie>) =>
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
@@ -652,6 +685,17 @@ export function GrilleLignes({
   }
 
   const chercher = async (motif: string): Promise<Suggestion[]> => {
+    // SANS SOURCE (documents de stock) : ce que le document propose d'abord
+    // (le stock du magasin), puis le catalogue, sans doublon.
+    if (sansSource) {
+      const mots = motif.toLowerCase().split(/\s+/).filter(Boolean)
+      const locales = proposees.filter((r) =>
+        mots.every((m) => `${r.code_reference} ${r.designation ?? ''}`.toLowerCase().includes(m)),
+      )
+      const autres = motif.trim().length >= 2 ? await chercherCatalogue(motif) : []
+      const vus = new Set(locales.map((r) => r.code_reference))
+      return [...locales, ...autres.filter((r) => !vus.has(r.code_reference))].slice(0, 25).map(versSuggestion)
+    }
     // EN MODE PLAN on ne sort pas de ce que le MRP reclame : la liste est deja
     // en memoire, inutile d'interroger le serveur.
     if (mode === 'PLAN') {
@@ -672,7 +716,7 @@ export function GrilleLignes({
           entierement a l'ecran de modification, ou l'on ne pouvait ajouter que
           des references du fournisseur, sans jamais voir ce que le plan
           reclamait ni sortir vers le reste du catalogue. */}
-      <div className="flex flex-wrap items-center gap-2">
+      {!sansSource && <div className="flex flex-wrap items-center gap-2">
         <div className="flex overflow-hidden rounded-[var(--radius)] border border-bordure">
           {(
             [
@@ -698,7 +742,7 @@ export function GrilleLignes({
         <span className="text-[11px] text-attenue-texte">
           {proposees.length} proposition(s) du plan
         </span>
-      </div>
+      </div>}
 
       {lignes.length > 0 && (
         <div className="overflow-x-auto">
@@ -709,16 +753,17 @@ export function GrilleLignes({
             <thead>
               <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                 <th className="w-8 px-1 py-2 text-right">#</th>
-                <th className="px-1.5 py-2 text-left">Notre référence</th>
+                <th className="px-1.5 py-2 text-left">{libelles?.reference ?? 'Notre référence'}</th>
                 {/* L'UNITE NE COMMANDE PLUS LA SAISIE. Elle disait autrefois
                     dans quoi la quantite etait exprimee, et devait donc etre
                     choisie avant de taper. La quantite est maintenant toujours
                     en kilos : l'unite ne decide plus que de ce qui sera imprime
                     sur le bon et de la base de facturation. Elle reste en tete
                     parce que c'est la qu'on l'a prise l'habitude de la lire. */}
-                <th className="w-28 px-1.5 py-2 text-left">Unité au bon</th>
+                <th className="w-28 px-1.5 py-2 text-left">{libelles?.unite ?? 'Unité au bon'}</th>
                 <th className="w-44 px-1.5 py-2 text-right">Quantité (kg)</th>
                 <th className="w-40 px-1.5 py-2 text-center">Palettes / Bobines</th>
+                {poidsBobine && <th className="w-36 px-1.5 py-2 text-right">Poids / bobine</th>}
                 {!sansPrix && (
                   <>
                     <th className="w-36 px-1.5 py-2 text-right">Prix {devise}</th>
@@ -788,7 +833,7 @@ export function GrilleLignes({
                                 )}
                               </div>
                             </div>
-                            {modifiable && (
+                            {modifiable && !referenceFigee && (
                               <button
                                 type="button"
                                 onClick={() =>
@@ -822,9 +867,10 @@ export function GrilleLignes({
                           chercherAVide
                           surChoix={(s) => maj(l.cle, depuisReference(s.charge as RefLigne, l.cle))}
                           placeholder={
-                            mode === 'PLAN'
+                            libelles?.recherche ??
+                            (mode === 'PLAN'
                               ? 'Référence — le plan propose…'
-                              : 'Référence — tout le catalogue…'
+                              : 'Référence — tout le catalogue…')
                           }
                           aide="Flèches pour parcourir, Entrée pour retenir."
                           ariaLabel="Référence de la ligne"
@@ -849,7 +895,9 @@ export function GrilleLignes({
                                   Ajouter au catalogue
                                 </Bouton>
                               )}
-                              <Bouton
+                              {/* Un document de stock ne porte que des references :
+                                  une ligne libre n'a pas de stock a deplacer. */}
+                              {!sansSource && <Bouton
                                 variante="contour"
                                 taille="sm"
                                 onClick={() =>
@@ -862,7 +910,7 @@ export function GrilleLignes({
                                 }
                               >
                                 Garder « {motif} » sans référence
-                              </Bouton>
+                              </Bouton>}
                             </div>
                           )}
                         />
@@ -879,7 +927,7 @@ export function GrilleLignes({
                         {marchandise ? (
                           <>
                             <option value="kg">kg</option>
-                            {unitesDe(l).map((u) => (
+                            {unitesDe(l).filter((u) => !unitesAutorisees || unitesAutorisees.includes(u)).map((u) => (
                               <option key={u} value={u}>
                                 {u}
                               </option>
@@ -979,6 +1027,30 @@ export function GrilleLignes({
                         <span className="block text-center text-[11px] text-attenue-texte">—</span>
                       )}
                     </td>
+
+                    {poidsBobine && (
+                      <td className={cn(cellule, 'pt-2 text-right text-[12px] tabular-nums')}>
+                        {(() => {
+                          const kgL = kgDe(l)
+                          const bob = Number(l.bobines)
+                          const cat = Number(l.cond.poids_bobine_kg ?? 0)
+                          if (!marchandise || kgL == null || !(bob > 0)) return <span className="text-attenue-texte">—</span>
+                          const reel = kgL / bob
+                          const pct = cat > 0 ? ((reel - cat) / cat) * 100 : null
+                          const c = couleurEcart(pct, poidsBobine)
+                          return (
+                            <div title={cat > 0 ? `Catalogue : ${fmt.nombre(cat, 3)} kg` : 'Pas de poids de bobine au catalogue'}>
+                              <div className="font-medium">{fmt.nombre(reel, 3)} kg</div>
+                              {pct != null && (
+                                <div className={cn('text-[11px]', c === 'rouge' ? 'text-danger' : c === 'orange' ? 'text-alerte' : 'text-succes')}>
+                                  {pct > 0 ? '+' : ''}{fmt.nombre(pct, 2)} % / cat. {fmt.nombre(cat, 3)}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
+                      </td>
+                    )}
 
                     {!sansPrix && (
                       <td className={cellule} inert={verrou}>
@@ -1164,7 +1236,7 @@ export function GrilleLignes({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      {!sansAjout && <div className="flex flex-wrap items-center gap-2">
         <Bouton
           variante="contour"
           taille="sm"
@@ -1175,11 +1247,13 @@ export function GrilleLignes({
           Ajouter une ligne
         </Bouton>
         <span className="text-[11px] text-attenue-texte">
-          {mode === 'PLAN'
-            ? 'La liste propose ce que le plan d’achat réclame chez ce fournisseur.'
-            : 'La liste propose tout le catalogue — le rattachement à un fournisseur est une habitude d’achat, pas une exclusivité.'}
+          {libelles?.aide ?? (sansSource
+            ? 'Tapez une référence : le stock du magasin d’abord, puis tout le catalogue.'
+            : mode === 'PLAN'
+              ? 'La liste propose ce que le plan d’achat réclame chez ce fournisseur.'
+              : 'La liste propose tout le catalogue — le rattachement à un fournisseur est une habitude d’achat, pas une exclusivité.')}
         </span>
-      </div>
+      </div>}
     </div>
   )
 }

@@ -784,7 +784,9 @@ SELECT
     r2.code_fournisseur         AS fournisseur_substitut,
     rge2.priorite               AS priorite_substitut,
     rge2.est_preferentielle,
-    sd2.stock_mrp_kg            AS stock_substitut_kg,
+    -- LE STOCK D'UN SUBSTITUT SE LIT NET : sans ses lots Restes ni ses lots
+    -- bloques (02/10/2026). Un Reste ne remplace pas un lot de production.
+    ph2.stock_physique_net_kg   AS stock_substitut_kg,
     sp2.stock_projete_kg        AS stock_projete_substitut
 FROM reference r1
 JOIN reference_groupe_equiv rge1 ON rge1.code_reference = r1.code_reference AND rge1.actif = 1
@@ -795,10 +797,10 @@ JOIN reference_groupe_equiv rge2 ON rge2.code_groupe_equiv = rge1.code_groupe_eq
 JOIN reference              r2   ON r2.code_reference = rge2.code_reference AND r2.actif = 1
 JOIN v_stock_projete       sp1   ON sp1.code_reference = r1.code_reference
 JOIN v_stock_projete       sp2   ON sp2.code_reference = r2.code_reference
-JOIN v_stock_disponible    sd2   ON sd2.code_reference = r2.code_reference
+JOIN v_stock_physique     ph2   ON ph2.code_reference = r2.code_reference
 WHERE r1.actif = 1
   AND sp1.statut IN ('RUPTURE','CRITIQUE')
-  AND sd2.stock_mrp_kg > 0
+  AND ph2.stock_physique_net_kg > 0
 ORDER BY r1.code_reference, rge2.est_preferentielle DESC, rge2.priorite;
 
 -- -----------------------------------------------------------------------------

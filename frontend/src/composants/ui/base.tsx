@@ -39,24 +39,23 @@ const varianteBouton = cva(
         // L'OMBRE EST UNE MINCE ARETE, PAS UN NUAGE. Elle detache le bouton de
         // son fond sans donner l'air d'une maquette : un liachage de 1 px sous
         // la surface suffit a le faire lire comme un objet qu'on presse.
-        // AU SURVOL, LE BOUTON MONTE D'UN DEMI-PIXEL ET SON OMBRE S'ALLONGE.
-        // Le geste dure 140 ms : assez pour se sentir, trop court pour se
-        // remarquer. C'est cette micro-elevation, et non la teinte, qui donne
-        // aux interfaces soignees leur impression de reactivite.
+        // AU SURVOL, LA TEINTE SEULE CHANGE (02/10/2026) : le bouton ne monte
+        // plus. Le style sobre n'a presque pas d'ombre, et un objet qui bouge
+        // au passage de la souris distrait d'un tableau qu'on lit.
         principal:
           'bg-accent text-accent-texte shadow-[var(--ombre-pose)] ' +
-          'hover:-translate-y-px hover:bg-accent/92 hover:shadow-[var(--ombre-levee)]',
+          'hover:bg-accent/92 hover:shadow-[var(--ombre-levee)]',
         primaire:
           'bg-primaire text-primaire-texte shadow-[var(--ombre-pose)] ' +
-          'hover:-translate-y-px hover:bg-primaire/92 hover:shadow-[var(--ombre-levee)]',
+          'hover:bg-primaire/92 hover:shadow-[var(--ombre-levee)]',
         contour:
           'border border-bordure bg-surface shadow-[var(--ombre-pose)] ' +
-          'hover:-translate-y-px hover:border-primaire/35 hover:bg-attenue/60 ' +
+          'hover:border-primaire/35 hover:bg-attenue/60 ' +
           'hover:shadow-[var(--ombre-levee)]',
         discret: 'hover:bg-attenue hover:text-texte',
         danger:
           'bg-danger text-danger-texte shadow-[var(--ombre-pose)] ' +
-          'hover:-translate-y-px hover:bg-danger/92 hover:shadow-[var(--ombre-levee)]',
+          'hover:bg-danger/92 hover:shadow-[var(--ombre-levee)]',
         lien: 'text-primaire underline-offset-4 hover:underline active:translate-y-0',
       },
       // UN CRAN PLUS BAS QUE LA CONVENTION DU WEB, ET C'EST VOULU. Un bouton de

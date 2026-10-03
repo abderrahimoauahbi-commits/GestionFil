@@ -25,6 +25,9 @@ import { useDroits } from '../auth/AuthContext'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement, Selecteur } from '../composants/ui/base'
 import { fmt } from '../components/ui'
+import { couleurEcart, libelleLot, useTolerancesLot } from '../lib/lots'
+import { useEtatDepuisParam } from '../lib/navigation'
+import { libelleSeuil } from './lots/modele'
 
 /* -------------------------------------------------------------------------- */
 /* Etat des stocks                                                             */
@@ -1151,6 +1154,341 @@ export function EtatCouleur() {
             />
           )}
         </section>
+      </EtatImprimable>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Lots : stock par lot, dormants, restes, ecart de poids par fournisseur      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * QUATRE ETATS, UNE SEULE PAGE. Ils lisent le meme registre (`/api/lots`, ou
+ * `/api/stats/lots` pour les ecarts) et ne different que par la vue : le
+ * parametre `?vue=` choisit, et le selecteur au-dessus de l'apercu permet de
+ * passer de l'un a l'autre sans revenir au centre des etats.
+ *
+ *   stock    — la vue comptable : tout lot qui porte du stock, avec sa
+ *              categorie et son statut ;
+ *   dormants — les lots sans activite depuis le delai de dormance ;
+ *   restes   — les lots libres de categorie Restes, a ecouler ;
+ *   ecarts   — l'ecart de poids par bobine, par fournisseur.
+ */
+type VueEtatLots = 'stock' | 'dormants' | 'restes' | 'ecarts'
+
+const VUES_ETAT_LOTS: { cle: VueEtatLots; titre: string; api?: string }[] = [
+  { cle: 'stock', titre: 'Stock par lot', api: 'comptable' },
+  { cle: 'dormants', titre: 'Lots dormants', api: 'dormants' },
+  { cle: 'restes', titre: 'Restes', api: 'restes' },
+  { cle: 'ecarts', titre: 'Écart de poids par bobine, par fournisseur' },
+]
+
+interface LigneLot {
+  code_reference: string
+  designation: string | null
+  lot_fournisseur: string
+  fournisseur_nom: string | null
+  code_fournisseur: string | null
+  statut: string
+  categorie: string
+  date_creation: string | null
+  date_derniere_activite: string | null
+  solde_kg: number | null
+  solde_bobines: number | null
+  seuil_valeur: number | null
+  seuil_unite: string | null
+  seuil_restes_kg: number | null
+  jours_sans_activite: number | null
+  dormant: boolean | null
+  a_basculer: boolean | null
+  valeur_mad?: number | null
+  [k: string]: unknown
+}
+
+interface LigneEcartFournisseur {
+  code_fournisseur: string | null
+  fournisseur_nom: string | null
+  nb_lignes: number | null
+  bobines: number | null
+  ecart_moyen_pct: number | null
+  ecart_min_pct: number | null
+  ecart_max_pct: number | null
+  ecart_kg: number | null
+}
+
+interface ColonneLot {
+  entete: string
+  valeur: (l: LigneLot) => React.ReactNode
+  numerique?: boolean
+}
+
+const LIBELLE_CATEGORIE_LOT: Record<string, string> = { PROJET: 'Projet', RESTES: 'Restes' }
+const LIBELLE_STATUT_LOT: Record<string, string> = {
+  LIBRE: 'Libre',
+  BLOQUE: 'Bloqué',
+  SOLDE: 'Soldé',
+}
+
+/** Le statut d'un lot, dormance comprise : elle se calcule, elle ne se stocke pas. */
+const statutLot = (l: LigneLot) =>
+  [
+    LIBELLE_STATUT_LOT[l.statut] ?? l.statut,
+    l.dormant ? 'dormant' : null,
+    l.a_basculer ? 'à basculer' : null,
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+const pctSigne = (v: number | null, dec = 2) =>
+  v == null ? '—' : `${v > 0 ? '+' : ''}${fmt.nombre(v, dec)} %`
+
+export function EtatLots() {
+  const droits = useDroits('STOCK')
+  const tolerances = useTolerancesLot()
+  const [param, setVue] = useEtatDepuisParam('vue')
+  const def = VUES_ETAT_LOTS.find((v) => v.cle === param) ?? VUES_ETAT_LOTS[0]
+  const vue = def.cle
+
+  const qLots = useQuery({
+    queryKey: ['lots', def.api ?? '', 'etat'],
+    queryFn: () => api.get<LigneLot[]>(`/api/lots?vue=${def.api}&limite=10000`),
+    enabled: !!def.api,
+  })
+  const qStats = useQuery({
+    queryKey: ['stats', 'lots'],
+    queryFn: () => api.get<Record<string, unknown>>('/api/stats/lots'),
+    enabled: vue === 'ecarts',
+  })
+
+  const selecteur = (
+    <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
+      <span className="text-[12px] text-attenue-texte">État :</span>
+      <Selecteur value={vue} onChange={(e) => setVue(e.target.value)} className="w-80">
+        {VUES_ETAT_LOTS.map((v) => (
+          <option key={v.cle} value={v.cle}>
+            {v.titre}
+          </option>
+        ))}
+      </Selecteur>
+    </div>
+  )
+
+  if (vue === 'ecarts') {
+    if (qStats.isLoading) return <Chargement texte="Preparation de l etat…" />
+    const brut = qStats.data?.divergence_fournisseur
+    const lignes = (Array.isArray(brut) ? brut : []) as LigneEcartFournisseur[]
+    // Le niveau s'ecrit en toutes lettres : le papier ne porte pas la couleur.
+    const niveau = (p: number | null) => {
+      const c = couleurEcart(p, tolerances)
+      return c === 'rouge'
+        ? 'Rouge'
+        : c === 'orange'
+          ? 'Orange'
+          : c === 'vert'
+            ? 'Dans la tolérance'
+            : '—'
+    }
+    const ecartKg = lignes.reduce((s, l) => s + (l.ecart_kg ?? 0), 0)
+    const bobines = lignes.reduce((s, l) => s + (l.bobines ?? 0), 0)
+    return (
+      <div>
+        {selecteur}
+        <EtatImprimable
+          titre={def.titre}
+          sousTitre="Poids pesé face au poids catalogue d'une bobine, entrées et sorties confondues"
+          enTete={
+            <div className="flex flex-wrap gap-x-8 gap-y-1">
+              <span>
+                <span className="text-neutral-600">Fournisseurs : </span>
+                <span className="font-semibold">{lignes.length}</span>
+              </span>
+              <span>
+                <span className="text-neutral-600">Bobines pesées : </span>
+                <span className="font-semibold">{fmt.entier(bobines)}</span>
+              </span>
+              <span>
+                <span className="text-neutral-600">Tolérances : </span>
+                <span className="font-semibold">
+                  orange au-delà de {fmt.nombre(tolerances.orange, 1)} %, rouge au-delà de{' '}
+                  {fmt.nombre(tolerances.rouge, 1)} %
+                </span>
+              </span>
+            </div>
+          }
+        >
+          {lignes.length === 0 ? (
+            <p className="text-[11px] text-neutral-600">Aucune bobine pesée pour l'instant.</p>
+          ) : (
+            <TableEtat<LigneEcartFournisseur>
+              colonnes={[
+                {
+                  entete: 'Fournisseur',
+                  valeur: (l) => (
+                    <>
+                      <div className="font-medium">{l.fournisseur_nom ?? 'Fournisseur inconnu'}</div>
+                      {l.code_fournisseur && (
+                        <div className="font-mono text-[9px] text-neutral-600">
+                          {l.code_fournisseur}
+                        </div>
+                      )}
+                    </>
+                  ),
+                },
+                {
+                  entete: 'Lignes pesées',
+                  numerique: true,
+                  valeur: (l) => fmt.entier(l.nb_lignes ?? 0),
+                },
+                { entete: 'Bobines', numerique: true, valeur: (l) => fmt.entier(l.bobines ?? 0) },
+                { entete: 'Écart moyen', numerique: true, valeur: (l) => pctSigne(l.ecart_moyen_pct) },
+                { entete: 'Écart mini', numerique: true, valeur: (l) => pctSigne(l.ecart_min_pct) },
+                { entete: 'Écart maxi', numerique: true, valeur: (l) => pctSigne(l.ecart_max_pct) },
+                {
+                  entete: 'Écart kg',
+                  numerique: true,
+                  valeur: (l) => (l.ecart_kg == null ? '—' : fmt.nombre(l.ecart_kg, 1)),
+                },
+                {
+                  entete: 'Niveau',
+                  valeur: (l) => (
+                    <span
+                      className={
+                        couleurEcart(l.ecart_moyen_pct, tolerances) === 'rouge' ? 'font-bold' : ''
+                      }
+                    >
+                      {niveau(l.ecart_moyen_pct)}
+                    </span>
+                  ),
+                },
+              ]}
+              lignes={lignes}
+              total={['Total', '', fmt.entier(bobines), '', '', '', fmt.nombre(ecartKg, 1), '']}
+            />
+          )}
+        </EtatImprimable>
+      </div>
+    )
+  }
+
+  if (qLots.isLoading) return <Chargement texte="Preparation de l etat…" />
+  if (qLots.isError) {
+    return (
+      <div>
+        {selecteur}
+        <Alerte ton="danger">Le registre des lots n'a pas pu être lu.</Alerte>
+      </div>
+    )
+  }
+  const lignes = qLots.data ?? []
+  const valeurVisible = droits.visible('valeur_mad')
+  const kg = lignes.reduce((s, l) => s + (l.solde_kg ?? 0), 0)
+  const valeur = lignes.reduce((s, l) => s + (l.valeur_mad ?? 0), 0)
+
+  const colRef: ColonneLot = {
+    entete: 'Référence',
+    valeur: (l) => (
+      <>
+        <div className="font-mono text-[10px] font-medium">{l.code_reference}</div>
+        {l.designation && <div className="text-[9px] text-neutral-600">{l.designation}</div>}
+      </>
+    ),
+  }
+  // « SANS-LOT » se lit « Sans lot » : un lot inconnu, pas un numero invente.
+  const colLot: ColonneLot = { entete: 'Lot', valeur: (l) => libelleLot(l.lot_fournisseur) }
+  const colFour: ColonneLot = {
+    entete: 'Fournisseur',
+    valeur: (l) => l.fournisseur_nom ?? l.code_fournisseur ?? '—',
+  }
+  const colCategorie: ColonneLot = {
+    entete: 'Catégorie',
+    valeur: (l) => LIBELLE_CATEGORIE_LOT[l.categorie] ?? l.categorie,
+  }
+  const colStatut: ColonneLot = { entete: 'Statut', valeur: statutLot }
+  const colKg: ColonneLot = {
+    entete: 'Solde kg',
+    numerique: true,
+    valeur: (l) => fmt.nombre(l.solde_kg ?? 0, 1),
+  }
+  const colBobines: ColonneLot = {
+    entete: 'Bobines',
+    numerique: true,
+    valeur: (l) => fmt.entier(l.solde_bobines ?? 0),
+  }
+  const colActivite: ColonneLot = {
+    entete: 'Dernière activité',
+    valeur: (l) => (l.date_derniere_activite ?? '').slice(0, 10) || '—',
+  }
+  const colJours: ColonneLot = {
+    entete: 'Sans activité',
+    numerique: true,
+    valeur: (l) => (l.jours_sans_activite == null ? '—' : `${l.jours_sans_activite} j`),
+  }
+  const colSeuil: ColonneLot = {
+    entete: 'Min. pour produire',
+    numerique: true,
+    valeur: (l) => libelleSeuil(l),
+  }
+  const colValeur: ColonneLot = {
+    entete: 'Valeur MAD',
+    numerique: true,
+    valeur: (l) => (l.valeur_mad == null ? '—' : fmt.nombre(l.valeur_mad, 2)),
+  }
+
+  const colonnes: ColonneLot[] =
+    vue === 'dormants'
+      ? [colRef, colLot, colFour, colCategorie, colStatut, colKg, colActivite, colJours]
+      : vue === 'restes'
+        ? [colRef, colLot, colFour, colKg, colBobines, colSeuil, colActivite]
+        : [colRef, colLot, colFour, colCategorie, colStatut, colKg, colBobines, colActivite]
+  if (valeurVisible) colonnes.push(colValeur)
+  const total = colonnes.map((c, i) =>
+    i === 0
+      ? 'Total'
+      : c === colKg
+        ? fmt.nombre(kg, 1)
+        : c === colValeur
+          ? fmt.nombre(valeur, 2)
+          : '',
+  )
+
+  const sousTitre =
+    vue === 'dormants'
+      ? 'Lots qui portent du stock sans activité depuis le délai de dormance réglé dans les paramètres'
+      : vue === 'restes'
+        ? 'Lots libres de catégorie Restes : hors plan d’achat, à écouler'
+        : 'Vue comptable : tout lot qui porte du stock, quels que soient sa catégorie et son statut'
+
+  return (
+    <div>
+      {selecteur}
+      <EtatImprimable
+        titre={def.titre}
+        sousTitre={sousTitre}
+        enTete={
+          <div className="flex flex-wrap gap-x-8 gap-y-1">
+            <span>
+              <span className="text-neutral-600">Lots : </span>
+              <span className="font-semibold">{lignes.length}</span>
+            </span>
+            <span>
+              <span className="text-neutral-600">Solde total : </span>
+              <span className="font-semibold">{fmt.nombre(kg, 1)} kg</span>
+            </span>
+            {valeurVisible && (
+              <span>
+                <span className="text-neutral-600">Valeur : </span>
+                <span className="font-semibold">{fmt.nombre(valeur, 2)} MAD</span>
+              </span>
+            )}
+          </div>
+        }
+      >
+        {lignes.length === 0 ? (
+          <p className="text-[11px] text-neutral-600">Aucun lot dans cette vue.</p>
+        ) : (
+          <TableEtat<LigneLot> colonnes={colonnes} lignes={lignes} total={total} />
+        )}
       </EtatImprimable>
     </div>
   )

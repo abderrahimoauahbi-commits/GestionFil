@@ -23,6 +23,9 @@ struct LigneEcart {
     lot_fournisseur: Option<String>,
     ecart_kg: f64,
     cmup_mad: Option<f64>,
+    /// L'ecart en bobines, quand le comptage les a donnees : il fait le poids
+    /// theorique de l'ajustement, donc la variation du lot.
+    ecart_bobines: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -84,13 +87,16 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
     let global = type_inventaire == "GLOBAL";
     let res = sqlx::query(
         "INSERT INTO ligne_inventaire
-             (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg)
-         SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg
+             (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg,
+              nb_bobines_theorique, poids_unitaire_theorique_kg)
+         SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg,
+                sl.nb_bobines, NULLIF(r.poids_bobine_kg, 0)
            FROM stock_lot sl
            JOIN reference r ON r.code_reference = sl.code_reference AND r.suivi_lot = 1
           WHERE sl.code_magasin = $2 AND sl.quantite_kg > 0
          UNION ALL
-         SELECT $1, r.code_reference, $2, NULL, COALESCE(sm.quantite_kg, 0)
+         SELECT $1, r.code_reference, $2, NULL, COALESCE(sm.quantite_kg, 0),
+                sm.nb_bobines, NULLIF(r.poids_bobine_kg, 0)
            FROM reference r
            LEFT JOIN stock_magasin sm ON sm.code_reference = r.code_reference
                                      AND sm.code_magasin   = $2
@@ -170,7 +176,8 @@ pub async fn cloturer(
 
     let ecarts: Vec<LigneEcart> = sqlx::query_as(
         "SELECT li.id_ligne_inv, li.code_reference, li.lot_fournisseur,
-                li.ecart_kg::float8 AS ecart_kg, sm.cmup_mad::float8 AS cmup_mad
+                li.ecart_kg::float8 AS ecart_kg, sm.cmup_mad::float8 AS cmup_mad,
+                (li.nb_bobines_comptees - li.nb_bobines_theorique) AS ecart_bobines
            FROM ligne_inventaire li
            LEFT JOIN stock_magasin sm ON sm.code_reference = li.code_reference
                                      AND sm.code_magasin   = li.code_magasin
@@ -232,14 +239,17 @@ pub async fn cloturer(
             sqlx::query(
                 "INSERT INTO ligne_mouvement
                      (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                      lot_fournisseur, code_motif_ligne)
-                 VALUES ($1, $2, $3, $4, $5, 'R6')",
+                      lot_fournisseur, code_motif_ligne, nb_bobines)
+                 VALUES ($1, $2, $3, $4, $5, 'R6', $6)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
             .bind(&l.code_reference)
             .bind(quantite)
             .bind(&l.lot_fournisseur)
+            // Les bobines ne comptent que si elles vont dans le meme sens que
+            // les kilos : sinon l'ecart de poids par bobine n'a pas de sens.
+            .bind(l.ecart_bobines.filter(|b| *b != 0 && (*b > 0) == (signe > 0.0)).map(|b| b.abs()))
             .execute(&mut *tx)
             .await?;
 

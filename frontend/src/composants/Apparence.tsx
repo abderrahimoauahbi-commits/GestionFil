@@ -1,11 +1,9 @@
 /**
  * Les preferences d'apparence, et leur application.
  *
- * QUATRE REGLAGES, ET AUCUN N'EST DECORATIF.
- *
- * La FAMILLE de couleurs et le MODE clair/sombre se combinent : la famille dit
- * quelle teinte, le mode quelle luminosite. Les separer permet de garder sa
- * famille en passant du bureau eclaire du matin a l'atelier du soir.
+ * UN SEUL STYLE DEPUIS LE 02/10/2026. Les familles de couleurs et le choix de
+ * police sont retires : l'outil a une apparence, claire ou sombre (voir
+ * `Theme.tsx`). Restent les reglages qui servent le POSTE, pas le gout.
  *
  * La DENSITE change la hauteur des lignes. Sur une tablette de magasin on veut
  * de l'air pour viser au doigt ; sur un poste de bureau on veut voir quarante
@@ -22,31 +20,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 
-// Les familles de couleurs vivent dans la feuille de l'atelier, mais servent
-// desormais partout : elle est donc importee ICI, par le fournisseur qui est
-// toujours monte. La laisser au seul atelier faisait que le navigateur ne la
-// chargeait jamais — le reglage existait, sans effet.
-import './atelier/palettes.css'
-// LA FAMILLE PAR DEFAUT, a part et chargee apres les autres : c'est elle qui
-// porte l'identite de l'outil depuis la refonte du 29/09/2026.
-import './atelier/palette-laiton.css'
-
-export type Palette =
-  | 'laiton' | 'ardoise' | 'graphite' | 'slate' | 'divalto' | 'chaud' | 'contraste'
-  | 'glassier' | 'claude' | 'azur'
-  // Les cinq familles demandees le 20/09/2026, aux couleurs dictees.
-  | 'industriel' | 'atlas' | 'nordique' | 'terminal' | 'verre'
 export type Densite = 'compacte' | 'normale' | 'aeree'
-export type Police = 'systeme' | 'inter' | 'geometrique' | 'serif' | 'lisible'
 /** Taille de base, en pixels. Tout le reste est en rem et suit. */
 export type Taille = 13 | 14 | 15 | 16 | 17
 /** Ou vit la navigation. */
 export type Disposition = 'laterale' | 'entete' | 'mixte'
 
 export interface Apparence {
-  palette: Palette
   densite: Densite
-  police: Police
   taille: Taille
   disposition: Disposition
   /** Une barre de pied portant les raccourcis et l'etat de la base. */
@@ -56,173 +37,13 @@ export interface Apparence {
 }
 
 const DEFAUT: Apparence = {
-  palette: 'laiton',
   densite: 'normale',
-  // INTER PAR DEFAUT, maintenant qu'elle est reellement livree. Elle est
-  // dessinee pour les ecrans denses — chiffres a chasse fixe, lettres qui ne
-  // se confondent pas a 11 px — et ne coute plus aucune attente puisqu'elle
-  // part avec l'application. Les quatre autres restent a un clic.
-  police: 'inter',
   taille: 14,
   disposition: 'laterale',
   piedVisible: false,
   menuFige: false,
 }
 const CLE = 'gestionfil.apparence'
-/** Marque la bascule unique d'Ardoise vers Laiton (voir `lire`). */
-const CLE_BASCULE = 'gestionfil.apparence.laiton'
-
-export const PALETTES: { cle: Palette; nom: string; resume: string; teintes: string[] }[] = [
-  {
-    cle: 'laiton',
-    nom: 'Laiton',
-    resume: 'Gris pierre, encre petrole et or laiton, barre laterale sombre. L identite de l outil — recommandee.',
-    teintes: ['#F4F3F0', '#1F5B6E', '#A67C3D'],
-  },
-  /* ---------------------------------------------------------------------
-     LES CINQ FAMILLES DEMANDEES, EN TETE DE LISTE
-     ---------------------------------------------------------------------
-     Elles etaient declarees dans `atelier/fenetres.ts`, que seul l'atelier
-     lisait — et l'atelier n'est plus monte depuis qu'on est revenu a une
-     coquille unique. Les palettes existaient donc en CSS, personne ne
-     pouvait les choisir. Meme faute que la banniere de mise a jour posee
-     dans la mauvaise coquille : c'est ICI que vit le selecteur.
-     --------------------------------------------------------------------- */
-  {
-    cle: 'industriel',
-    nom: 'Industrial Clean',
-    resume: 'Fond clair, bleu franc, beaucoup de blanc. Le choix sur lequel on ne se trompe pas.',
-    teintes: ['#FAFAFA', '#2563EB', '#111827'],
-  },
-  {
-    cle: 'atlas',
-    nom: 'Atlas Data',
-    resume: 'Bleu profond, angles nets, grille stricte. Pour un ecran charge de chiffres.',
-    teintes: ['#F5F7FA', '#1E40AF', '#1A202C'],
-  },
-  {
-    cle: 'nordique',
-    nom: 'Nordic Textile',
-    resume: 'Lin et terre cuite, arrondis genereux. Rappelle la matiere ; bon pour recevoir.',
-    teintes: ['#F8F6F3', '#B45309', '#2B2622'],
-  },
-  {
-    cle: 'terminal',
-    nom: 'Terminal Supply',
-    resume: 'Console sombre, chiffres a chasse fixe, lignes serrees. Faite pour y rester huit heures.',
-    teintes: ['#0B0F14', '#22D3EE', '#E5E7EB'],
-  },
-  {
-    cle: 'verre',
-    nom: 'Glass Industrial',
-    resume: 'Verre depoli sur degrade sombre. Le flou est reserve aux cartes, pour la vitesse.',
-    teintes: ['#0F172A', '#38BDF8', '#F8FAFC'],
-  },
-  {
-    cle: 'ardoise',
-    nom: 'Ardoise',
-    resume: 'Gris-bleu froid, accent bleu calme. Douce pour une journée entiere.',
-    teintes: ['#F5F7FA', '#1F6FEB', '#2E3A4A'],
-  },
-  {
-    cle: 'graphite',
-    nom: 'Graphite',
-    resume: 'Gris neutres, accent bleu vif. Austere, tres lisible.',
-    teintes: ['#F4F4F5', '#2563EB', '#27272A'],
-  },
-  {
-    cle: 'slate',
-    nom: 'Slate industriel',
-    resume: 'Sombre par nature, dense. Pensee pour les tableaux de chiffres.',
-    teintes: ['#0F172A', '#38BDF8', '#1E293B'],
-  },
-  {
-    cle: 'divalto',
-    nom: 'Divalto',
-    resume: 'Bleu profond et accents francs, dans l esprit des ERP classiques.',
-    teintes: ['#EEF2F7', '#0B5FAF', '#123A5E'],
-  },
-  {
-    cle: 'chaud',
-    nom: 'Chaud',
-    resume: 'Gris tirant sur le sable, accent ambre. Moins froid en fin de journée.',
-    teintes: ['#FAF7F2', '#B45309', '#3B342C'],
-  },
-  {
-    cle: 'contraste',
-    nom: 'Contraste renforce',
-    resume: 'Bordures marquees et texte plus noir. Pour un ecran d atelier ou une vue basse.',
-    teintes: ['#FFFFFF', '#0033AA', '#000000'],
-  },
-  {
-    cle: 'glassier',
-    nom: 'Verre liquide',
-    resume: 'Maille de degrades floutee, comme un decor hors de mise au point. Toutes les surfaces sont en verre — tableaux compris — et la lentille deforme ce qui passe dessous.',
-    teintes: ['#DDE5EF', '#1A73E8', '#0D1219'],
-  },
-  {
-    cle: 'claude',
-    nom: 'Claude',
-    resume: 'Creme chaud et terre cuite. Le creme reflechit moins que le blanc sous un neon d atelier.',
-    teintes: ['#F5F4EE', '#D97757', '#2B2823'],
-  },
-  {
-    cle: 'azur',
-    nom: 'Azur',
-    resume: 'Bleu franc sur gris neutres. La grammaire visuelle que tout le monde a déjà pratiquee.',
-    teintes: ['#F8F9FA', '#1A73E8', '#202124'],
-  },
-]
-
-/**
- * Les familles de caracteres proposees.
- *
- * AUCUNE N'EST TELECHARGEE A L'USAGE. Quatre reposent sur ce que la machine
- * possede deja ; Inter, elle, est EMBARQUEE dans l'application — livree avec
- * elle, pas demandee a un serveur distant. La nuance compte : l'ERP tourne sur
- * un reseau d'usine sans acces internet garanti, et une police appelee dehors
- * n'arriverait pas toujours.
- *
- * ELLE ETAIT PROPOSEE SANS ETRE FOURNIE. Choisir « Inter » nommait une police
- * qu'aucun poste n'a installee : le navigateur retombait sans rien dire sur
- * Segoe UI. Le reglage existait, le dessin n'arrivait jamais.
- *
- * Le CHIFFRE compte plus que la lettre dans cet outil. Les cinq choix gardent
- * donc tous des chiffres a chasse fixe pour que les colonnes s'alignent — ce
- * qui les separe, c'est la lisibilite du texte autour.
- */
-export const POLICES: { cle: Police; nom: string; resume: string; pile: string }[] = [
-  {
-    cle: 'systeme',
-    nom: 'Système',
-    resume: 'Celle de Windows. Nette a toute taille, aucune attente au chargement.',
-    pile: '"Segoe UI", system-ui, -apple-system, sans-serif',
-  },
-  {
-    cle: 'inter',
-    nom: 'Inter',
-    resume: 'Dessinee pour les interfaces denses. Livree avec l application.',
-    pile: '"Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif',
-  },
-  {
-    cle: 'geometrique',
-    nom: 'Geometrique',
-    resume: 'Formes rondes et ouvertes. Plus douce, un peu plus large.',
-    pile: '"Century Gothic", "Futura", "Trebuchet MS", system-ui, sans-serif',
-  },
-  {
-    cle: 'serif',
-    nom: 'Serif',
-    resume: 'Empattements. Reposante sur un long texte, moins sur un tableau.',
-    pile: 'Georgia, "Times New Roman", serif',
-  },
-  {
-    cle: 'lisible',
-    nom: 'Haute lisibilite',
-    resume: 'Lettres tres differenciees, utile en cas de vue basse ou d ecran d atelier.',
-    pile: 'Verdana, Tahoma, "DejaVu Sans", sans-serif',
-  },
-]
 
 /**
  * Les trois dispositions, et ce que chacune coute.
@@ -277,16 +98,15 @@ function lire(): Apparence {
     // Fusion avec le defaut : un reglage ajoute plus tard ne doit pas rendre
     // illisible une preference enregistree avant lui.
     const lu = { ...DEFAUT, ...(JSON.parse(brut) as Partial<Apparence>) }
-    // LE NOUVEAU DEFAUT ATTEINT AUSSI CEUX QUI N'AVAIENT RIEN CHOISI. « Ardoise »
-    // etait le defaut jusqu'au 29/09/2026 : un poste qui la porte encore ne l'a,
-    // le plus souvent, jamais choisie. Il passe une fois a « Laiton » ; celui
-    // qui avait choisi une autre famille la garde, et celui qui revient ensuite
-    // a Ardoise la garde aussi (la bascule ne se fait qu'une fois).
-    if (lu.palette === 'ardoise' && !localStorage.getItem(CLE_BASCULE)) {
-      lu.palette = 'laiton'
-      localStorage.setItem(CLE_BASCULE, '1')
+    // Les anciens reglages de famille et de police restent dans le navigateur
+    // sans effet ; on ne garde que ce qui existe encore.
+    return {
+      densite: lu.densite,
+      taille: lu.taille,
+      disposition: lu.disposition,
+      piedVisible: lu.piedVisible,
+      menuFige: lu.menuFige,
     }
-    return lu
   } catch {
     return DEFAUT
   }
@@ -297,15 +117,9 @@ export function FournisseurApparence({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const r = document.documentElement
-    r.setAttribute('data-palette', etat.palette)
+    r.removeAttribute('data-palette')
     r.setAttribute('data-densite', etat.densite)
     r.setAttribute('data-disposition', etat.disposition)
-    // La pile est posee en variable plutot qu'en classe : les feuilles de style
-    // la lisent deja sous ce nom, rien d'autre n'a a changer.
-    r.style.setProperty(
-      '--font-sans',
-      POLICES.find((p) => p.cle === etat.police)?.pile ?? POLICES[0].pile,
-    )
     // La taille de base commande tout le reste : les tailles de l'interface
     // sont en rem, elles suivent sans qu'on y touche.
     r.style.fontSize = `${etat.taille}px`

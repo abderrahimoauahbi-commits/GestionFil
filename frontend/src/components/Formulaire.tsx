@@ -70,7 +70,18 @@ export interface ChampDef {
   section?: string
   /** Dans un formulaire a sections : le champ occupe deux colonnes au lieu d'une. */
   etendue?: 2
+  /**
+   * LE CHAMP N'A DE SENS QUE SI UN INTERRUPTEUR EST ALLUME. Eteint, le champ
+   * reste visible mais grise, avec la raison ; sa valeur n'est pas envoyee —
+   * elle est gardee en base et revient si l'on rallume. Ex. : le stock minimum
+   * par lot ne vaut que pour une reference suivie par lot.
+   */
+  actifSi?: { champ: string; raison: string }
 }
+
+/** L'interrupteur dont depend un champ est-il allume ? */
+const conditionRemplie = (c: ChampDef, donnees: Record<string, unknown>) =>
+  !c.actifSi || donnees[c.actifSi.champ] === 1 || donnees[c.actifSi.champ] === true
 
 /** Le nom de la section qui recueille les champs qui n'en declarent pas. */
 const SECTION_PAR_DEFAUT = 'Autres informations'
@@ -153,7 +164,7 @@ export function Formulaire({
 
     const charge: Record<string, unknown> = {}
     for (const c of visibles) {
-      if (!saisissable(c)) continue
+      if (!saisissable(c) || !conditionRemplie(c, donnees)) continue
       const v = donnees[c.champ]
       if (v === undefined) continue
       charge[c.champ] = v === '' && !c.obligatoire ? null : v
@@ -173,7 +184,8 @@ export function Formulaire({
    * « lecture seule » ou l'aide n'abaisse pas son seul controle.
    */
   const rendreChamp = (c: ChampDef) => {
-    const actif = saisissable(c)
+    const condition = conditionRemplie(c, donnees)
+    const actif = saisissable(c) && condition
     const manque = manquants.includes(c.champ)
     const valeur = donnees[c.champ]
     const type = c.type ?? 'texte'
@@ -202,7 +214,9 @@ export function Formulaire({
                 {!actif && (
                   <span className="ml-1 inline-flex items-center gap-1 text-xs font-normal text-attenue-texte">
                     <Lock className="size-3" />
-                    {c.cleCreation && !creation ? 'non modifiable' : 'lecture seule'}
+                    {!condition && c.actifSi
+                      ? c.actifSi.raison
+                      : c.cleCreation && !creation ? 'non modifiable' : 'lecture seule'}
                   </span>
                 )}
                 {c.aide && (

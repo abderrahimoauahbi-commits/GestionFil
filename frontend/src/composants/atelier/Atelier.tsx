@@ -34,7 +34,6 @@ import { Palette, type Entree } from './Palette'
 import { decrire, FournisseurOnglets, PART_MINIMALE, useOnglets } from './etat'
 import { etiquetteFenetre, FAMILLES, ouvrirFenetre, usePalette } from './fenetres'
 import './atelier.css'
-import './palettes.css'
 
 const VERSION = '0.1.0'
 

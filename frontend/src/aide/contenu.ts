@@ -76,16 +76,25 @@ export const SUJETS: Sujet[] = [
       },
       { nom: 'Prix catalogue', description: 'Le tarif du fournisseur, dans SA devise. Ce n’est pas le coût moyen.' },
       {
+        nom: 'Minimum d’un lot pour produire',
+        description:
+          'La quantité à partir de laquelle UN lot suffit pour lancer une production. Au-dessus, le lot est « Projet » et le plan d’achat compte dessus ; en dessous, c’est une fin de lot (« Restes ») que le plan d’achat ne compte plus.',
+        valeurs: 'dans l’unité du conditionnement (bobines pour le fil) ; en kilos sans poids par unité',
+        defaut: 'vide : un étage de machine, 1 344 bobines — ou 5 000 kg pour un article sans poids de bobine',
+      },
+      {
+        nom: 'Supplement de teinture',
+        description:
+          'Ce que le fournisseur facture EN PLUS pour teindre cette couleur, en devise par tonne (100, 150, 530…). Le prix d’une couleur = prix de base de la famille + ce supplément ramené au kilo. Il varie d’un fournisseur à l’autre : il se tient d’abord sur la couleur du fournisseur (Référentiels → Couleurs).',
+        valeurs: 'devise du fournisseur par tonne',
+      },
+      {
         nom: 'Stock minimum (kg)',
         description: 'Le plancher sous lequel le calcul d’achat déclenche une proposition.',
       },
       {
         nom: 'MOQ (kg)',
         description: 'Quantité minimale que le fournisseur accepte de livrer. Le plan d’achat l’applique.',
-      },
-      {
-        nom: 'Multiple d’achat (kg)',
-        description: 'La quantité se commande par multiples de cette valeur — un conteneur, une palette complète.',
       },
       { nom: 'Suivi de lot', description: 'Quand il est actif, chaque entrée exige un numéro de bain de teinture.' },
     ],
@@ -589,7 +598,7 @@ export const SUJETS: Sujet[] = [
     ],
     regles: [
       'Régénérer efface les propositions qui n’engagent rien ; celles qui ont produit un bon et celles qu’on a écartées survivent.',
-      'La quantité proposée tient compte du stock minimum, du MOQ, du multiple d’achat et de ce qui est déjà en route.',
+      'La quantité proposée tient compte du stock minimum, du MOQ et de ce qui est déjà en route, puis, si la fiche article le demande (« Arrondi à la palette pleine »), se complète jusqu’à la palette pleine : un besoin de 0,85 palette devient 1 palette. Les 0,15 ajoutés sont le COMPLÉMENT DE PALETTE, affiché dans sa colonne : ce qui est commandé pour la logistique, pas pour produire. Le poids d’une palette est une estimation, les kilos exacts sont ceux de la réception.',
       'Le calcul ne MUTUALISE PAS les équivalents : l’équivalent disponible est affiché, mais la bascule reste un geste explicite et tracé.',
     ],
     liens: [
@@ -826,6 +835,7 @@ export const SUJETS: Sujet[] = [
       { nom: 'Magasin de destination', description: 'Où la marchandise est rangée.', obligatoire: true },
     ],
     regles: [
+      'À CHAQUE RÉCEPTION VALIDÉE, le poids d’une bobine (kilos ÷ bobines) et les bobines par palette (si les palettes sont entières) mettent la fiche article à jour, et le prix au kilo est historisé. Une mesure à plus de 50 % de la fiche est gardée mais écartée (erreur de saisie probable). L’évaluation des fournisseurs — poids, colisage, prix — se lit dans Statistiques → Lots.',
       'La saisie propose ce qui est ATTENDU : sans cette liste, on réceptionne la mauvaise couleur.',
       'Un arrivage SANS COMMANDE se saisit ici : le serveur crée le bon manquant en brouillon, et la réception ne se validera qu’une fois ce bon régularisé.',
       'Peser et valider sont deux gestes, et deux rôles : la validation déclenche la cascade stock, coût moyen, archive, historique.',
@@ -1048,6 +1058,209 @@ export const SUJETS: Sujet[] = [
       { route: '/mouvements', libelle: 'Mouvements' },
       { route: '/valorisation', libelle: 'Valorisation' },
     ],
+  },
+
+  /* ============================================================= LOTS ===== */
+  {
+    route: '/lots',
+    titre: 'Lots',
+    chemin: 'Stock → Lots',
+    objectif:
+      'Voir le stock LOT PAR LOT et traiter ce qui demande une décision : lots à basculer en Restes, lots dormants, lots bloqués, poids de bobine anormal.',
+    prerequis: [
+      'Un lot naît tout seul à la première entrée en stock (réception, import, mouvement) : il n’y a rien à créer à la main.',
+    ],
+    droits:
+      'Lecture du module Stock pour consulter ; écriture pour basculer en Restes ; validation pour bloquer, débloquer et décider du sort d’un lot dormant. La valeur en MAD n’apparaît que pour un rôle qui a le droit de la voir.',
+    procedures: [
+      {
+        titre: 'Comprendre ce qu’est un lot',
+        etapes: [
+          'Un lot, c’est une fabrication du fournisseur sous un même numéro : toutes ses bobines sortent du même bain de teinture et ont exactement la même couleur.',
+          'Mélanger deux lots sur un même tapis, c’est risquer une différence de teinte visible. D’où le suivi lot par lot.',
+          'Quand le fournisseur n’a pas mis de numéro, ou que l’article ne se suit pas par lot, la marchandise est rangée sous « Sans lot ».',
+        ],
+      },
+      {
+        titre: 'Lire les onglets',
+        etapes: [
+          'Comptable — tout le stock, sans exception : bloqués et dormants compris.',
+          'Projet — les lots assez gros pour lancer une production : ils remplissent au moins un étage de machine (1 344 bobines par défaut). Le plan d’achat compte sur eux.',
+          'Restes — les fins de lot, qui ne remplissent plus un étage. Ils servent aux petits travaux ; le plan d’achat ne compte PAS dessus, et achète donc pour les projets.',
+          'Les quatre onglets suivants sont des ALERTES : à 0, il n’y a rien à faire.',
+          'À basculer — des lots Projet passés sous le seuil : quelqu’un doit confirmer leur passage en Restes.',
+          'Dormants — des lots sans aucun mouvement depuis un an : il faut décider de les garder, de les solder ou de les détruire.',
+          'Bloqués — des lots arrêtés par la qualité : on ne peut ni les déplacer ni les charger sur une machine.',
+          'Dérive de poids — des lots dont les bobines ne pèsent pas le poids annoncé par le catalogue.',
+        ],
+      },
+      {
+        titre: 'Basculer un lot en Restes',
+        etapes: [
+          'Ouvrez l’onglet « À basculer ».',
+          'Cliquez « Basculer en Restes » sur la ligne, ou « Tout basculer » pour traiter toute la liste.',
+          'Confirmez.',
+        ],
+        resultat:
+          'Le lot passe dans les Restes : le plan d’achat cesse de compter dessus. Le geste est inscrit dans la vie du lot, avec son auteur.',
+      },
+      {
+        titre: 'Bloquer ou débloquer un lot',
+        etapes: [
+          'Cliquez « Bloquer » (ou « Débloquer ») sur la ligne ou sur la fiche du lot.',
+          'Écrivez le motif : ce que la qualité a constaté, ou pourquoi le lot est libéré.',
+          'Confirmez.',
+        ],
+        resultat:
+          'Bloqué, le lot ne peut plus sortir ni être chargé sur une machine, et le plan d’achat ne compte plus dessus.',
+      },
+      {
+        titre: 'Décider du sort d’un lot dormant',
+        etapes: [
+          'Ouvrez l’onglet « Dormants » et cliquez « Décider » sur la ligne.',
+          'Choisissez : Garder (il reste en stock), Solder (vendu ou cédé) ou Détruire.',
+          'Écrivez le motif et confirmez.',
+        ],
+        resultat:
+          'Solder ou détruire sort le lot du stock par un mouvement d’ajustement, magasin par magasin ; le lot passe « Soldé ». Garder le laisse en place.',
+      },
+    ],
+    champs: [
+      { nom: 'Article', description: 'La référence du catalogue, avec sa désignation dessous.' },
+      {
+        nom: 'Lot',
+        description: 'Le numéro du lot.',
+        valeurs: '« Sans lot » : le fournisseur n’a pas mis de numéro, ou l’article n’est pas suivi par lot.',
+      },
+      {
+        nom: 'Origine',
+        description: 'D’où vient ce numéro.',
+        valeurs:
+          'Fournisseur — écrit sur la marchandise · Numéro attribué — créé par nous à la réception · Fusion — plusieurs lots réunis en un · Sans lot',
+      },
+      { nom: 'Fournisseur', description: 'Le fournisseur qui a livré ce lot.' },
+      { nom: 'Catégorie', description: 'Projet ou Restes, comme les onglets.', valeurs: 'Projet · Restes' },
+      {
+        nom: 'Statut',
+        description: 'Ce qu’on a le droit de faire du lot.',
+        valeurs: 'Libre — utilisable · Bloqué — arrêté par la qualité · Soldé — épuisé',
+      },
+      { nom: 'Solde kg', description: 'Ce qui reste en stock de ce lot, tous magasins confondus.', valeurs: 'kg' },
+      {
+        nom: 'Bobines',
+        description:
+          'Le nombre de bobines en stock. Il reste à 0 quand l’article n’a pas de poids de bobine au catalogue (le jute, par exemple).',
+      },
+      {
+        nom: 'Min. pour produire',
+        description:
+          'La limite entre Projet et Restes pour cet article, dans l’unité où l’atelier la compte. Par défaut, un étage de machine : 1 344 bobines (un étage de CRM1, TINGIS ou CRX). Exemple : 1 882 bobines de 2,2 kg (4 140 kg) remplissent un étage — le lot est Projet.',
+        valeurs: 'bobines pour le fil ; kilos pour un article sans poids par unité',
+        defaut:
+          '1 344 bobines (réglage général) ; 5 000 kg pour un article sans poids de bobine (jute, colle). Réglable par article sur sa fiche du catalogue, carte « Gestion des lots » : « Minimum d’un lot pour produire ».',
+      },
+      {
+        nom: 'Sans activité',
+        description: 'Depuis combien de jours le lot n’a pas bougé. À 365 jours, il devient dormant.',
+        valeurs: 'jours',
+      },
+      {
+        nom: 'Dérive',
+        description:
+          'L’écart entre le poids réel des bobines et le poids du catalogue, sur toute la vie du lot. Exemple : des bobines de 2,66 kg pour 2,60 kg au catalogue font +2,31 %.',
+        valeurs: 'Vert : moins de 1 % · Orange : de 1 à 3 % · Rouge : plus de 3 %',
+      },
+      { nom: 'Valeur MAD', description: 'La valeur du lot au coût moyen. Visible seulement si votre rôle y a droit.' },
+      { nom: 'Montrer aussi les lots soldés', description: 'Dans l’onglet Comptable, affiche aussi les lots épuisés.' },
+    ],
+    regles: [
+      'Un lot neuf est classé tout seul : Projet s’il atteint le seuil de son article, Restes sinon.',
+      'Quand le seuil se compte en bobines et que le lot porte son nombre de bobines, la comparaison se fait EN BOBINES : un fil un peu plus léger que le catalogue ne fait pas passer un lot complet en Restes. Sinon, elle se fait en kilos.',
+      'Le passage de Restes à Projet est automatique (une entrée fait remonter le lot au-dessus du seuil) ; le passage de Projet à Restes, lui, se CONFIRME à la main — c’est l’onglet « À basculer ».',
+      'Revenir de Restes en Projet demande un motif.',
+      'Un lot dormant n’est jamais supprimé en silence : il faut une décision, avec son motif.',
+      'Les seuils de couleur de la dérive (1 % et 3 %) se règlent dans les paramètres.',
+    ],
+    messages: [
+      {
+        message: 'LOT-BLOQUE',
+        cause:
+          'Le lot est bloqué par la qualité : un mouvement ou un chargement machine le concernant est refusé tant qu’il n’est pas débloqué.',
+      },
+    ],
+    liens: [
+      { route: '/autorisations', libelle: 'Autorisations' },
+      { route: '/etats/lots', libelle: 'États imprimables des lots' },
+    ],
+  },
+  {
+    route: '/lots/fiche',
+    titre: 'Fiche d’un lot',
+    chemin: 'Stock → Lots → clic sur une ligne',
+    objectif:
+      'Tout savoir d’un lot : où il se trouve, ce qui lui est arrivé depuis son entrée, et ce qu’il faut en faire.',
+    droits: 'Lecture du module Stock ; les actions demandent les mêmes droits que sur la liste des lots.',
+    procedures: [
+      {
+        titre: 'Fusionner d’autres lots dans celui-ci',
+        etapes: [
+          'Ouvrez la section « Fusionner d’autres lots dans celui-ci ».',
+          'Choisissez le magasin, puis cochez les lots à réunir. Seuls les lots du même article, du même fournisseur et de la même couleur, non bloqués, sont proposés ; la raison est donnée pour ceux qui ne le sont pas.',
+          'Écrivez le motif et cliquez « Fusionner ».',
+        ],
+        resultat:
+          'Les kilos et les bobines des lots cochés passent dans ce lot, dans le même magasin ; les lots vidés passent « Soldé ». Le stock du magasin et son coût ne changent pas.',
+      },
+    ],
+    champs: [
+      {
+        nom: 'Variation cumulée',
+        description: 'L’écart total entre le poids réel et le poids catalogue, sur toutes les pesées du lot.',
+        valeurs: '% et kg',
+      },
+      { nom: 'Poids moyen d’une bobine', description: 'Le poids réel moyen d’une bobine, face au poids du catalogue.' },
+      { nom: 'En magasin', description: 'Le solde du lot dans chaque magasin.' },
+      { nom: 'Sur machine', description: 'Les bobines de ce lot actuellement chargées sur une machine.' },
+      {
+        nom: 'Vie du lot',
+        description:
+          'Chaque entrée, sortie, chargement, décision et autorisation, du plus ancien au plus récent, avec son document, son lieu, son auteur et son motif.',
+      },
+    ],
+    regles: [
+      'Le bandeau du haut dit ce qui demande une action : lot bloqué, dormant, à basculer, ou poids en dérive.',
+      'La fiche s’imprime (« Imprimer ») : c’est la traçabilité du lot sur papier.',
+    ],
+    liens: [{ route: '/lots', libelle: 'Lots' }],
+  },
+  {
+    route: '/autorisations',
+    titre: 'Autorisations',
+    chemin: 'Stock → Autorisations',
+    objectif:
+      'Donner ou refuser l’accord demandé quand une opération sort des règles — par exemple un écart de poids hors tolérance.',
+    droits:
+      'Validation du module Stock pour décider. On ne décide pas de sa propre demande : un autre responsable doit répondre (sauf l’administrateur).',
+    procedures: [
+      {
+        titre: 'Répondre à une demande',
+        etapes: [
+          'Ouvrez l’onglet « À décider » : les demandes les plus anciennes viennent en premier.',
+          'Cliquez « Accorder » ou « Refuser ».',
+          'Écrivez le motif — obligatoire pour un refus — et confirmez.',
+        ],
+        resultat: 'La décision est inscrite dans la vie du lot concerné, avec son auteur et sa date.',
+      },
+      {
+        titre: 'Retirer sa propre demande',
+        etapes: ['Cliquez « Retirer » sur votre demande encore en attente.'],
+      },
+    ],
+    regles: [
+      'Une même demande n’est pas créée deux fois tant que la première attend une réponse.',
+      'L’onglet « Historique » garde toutes les demandes tranchées, les plus récentes en premier.',
+    ],
+    liens: [{ route: '/lots', libelle: 'Lots' }],
   },
 
   /* ========================================================== ANALYSE ===== */

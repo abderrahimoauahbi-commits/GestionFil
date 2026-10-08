@@ -363,6 +363,26 @@ def scenario_colisage_ecran_et_base(c, infra):
                  f"« {cas['nom']} » : la base dit {msg or 'rien'}, l'ecran dit {cas['attendu']}")
 
 
+def scenario_audit_montants(c, infra):
+    """Un prix de ligne de bon modifie laisse sa trace : ancienne et nouvelle valeur, et qui (P2-11)."""
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [{
+        "code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 100, "prix_unitaire_devise": 20}]})
+    lignes = c.ok("Assistante", "GET", f"/api/bons-commande/{bc['id_bc']}/lignes")
+    lignes = lignes.get("lignes", lignes) if isinstance(lignes, dict) else lignes
+    id_ligne = lignes[0]["id_ligne_bc"]
+    c.ok("Assistante", "PATCH", f"/api/bons-commande/{bc['id_bc']}/lignes/{id_ligne}", {"prix_unitaire_devise": 21.5})
+    trace = infra.sql(
+        "SELECT a.anciennes_valeurs, a.nouvelles_valeurs, u.login FROM audit_log a "
+        "LEFT JOIN utilisateur u ON u.id_utilisateur = a.id_utilisateur "
+        f"WHERE a.table_concernee = 'ligne_bc' AND a.operation = 'UPDATE' AND a.id_enregistrement = '{id_ligne}' "
+        "ORDER BY a.date_operation DESC LIMIT 1")
+    verifier(trace, "la modification du prix n'est pas au journal")
+    ancien, nouveau, qui = trace[0]
+    verifier('"prix_unitaire_devise": 20' in ancien and '"prix_unitaire_devise": 21.5' in nouveau,
+             f"valeurs du journal inattendues : {ancien} -> {nouveau}")
+    verifier(qui == "Assistante", f"l'auteur de la modification n'est pas inscrit : {qui}")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -375,6 +395,7 @@ SCENARIOS = [
     scenario_colisage_ecran_et_base,
     scenario_import,
     scenario_declencheurs,
+    scenario_audit_montants,
     scenario_masquage,
     scenario_controles_finaux,
 ]

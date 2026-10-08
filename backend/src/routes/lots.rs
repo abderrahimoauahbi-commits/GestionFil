@@ -763,6 +763,9 @@ pub async fn creer_demande(
     if let Some(id) = existante {
         return Ok(Json(json!({ "id_demande": id, "reprise": true })));
     }
+    // Le contexte pose : la demande entre au journal avec son auteur.
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
     let id: String = sqlx::query_scalar(
         "INSERT INTO demande_autorisation (type_demande, niveau, code_reference, lot_fournisseur, document,
                                            details, motif, id_demandeur)
@@ -776,8 +779,9 @@ pub async fn creer_demande(
     .bind(&d.details)
     .bind(&motif)
     .bind(&user.id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({ "id_demande": id, "reprise": false })))
 }
 

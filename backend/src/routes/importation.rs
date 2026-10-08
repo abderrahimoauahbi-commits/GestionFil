@@ -1482,9 +1482,13 @@ pub async fn supprimer_reception(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    // Dans une transaction qui pose le contexte : sans lui, le journal
+    // inscrivait la suppression sans auteur (audit v4).
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
     let n = sqlx::query("DELETE FROM import_receptions WHERE id_reception = $1 AND statut = 'BROUILLON'")
         .bind(&id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
     if n == 0 {
@@ -1492,6 +1496,7 @@ pub async fn supprimer_reception(
             "Seule une réception en brouillon se supprime.".into(),
         ));
     }
+    tx.commit().await?;
     Ok(Json(json!({ "supprime": id })))
 }
 

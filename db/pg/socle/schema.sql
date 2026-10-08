@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 96 (voir inclus.txt).
+-- Migrations comprises : 97 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict 6Sb4gnSVEOPtNgVt4aTCHZ7iMt9ffTMH27VYdh2qCdEXVpHCPgIVV3fTGrRfakb
+\restrict XDCs7jKcelkUc7guZXSe7UT1v937pOXwtaWdRPMuORhyXwrXjVnNJsQYKyVwzYU
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -866,6 +866,61 @@ $$;
 
 
 ALTER FUNCTION public.fn_trg_audit_ligne_qualite() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_audit_modification(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_audit_modification() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_ancien  jsonb;
+    v_nouveau jsonb;
+    v_cle     text;
+    v_ignore  text[] := ARRAY['date_modification', 'date_maj', 'date_derniere_modif'] || TG_ARGV;
+    v_col     text;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        v_ancien := '{}'::jsonb;
+        v_nouveau := '{}'::jsonb;
+        FOR v_col IN SELECT key FROM jsonb_each(to_jsonb(NEW)) LOOP
+            CONTINUE WHEN v_col = ANY (v_ignore);
+            IF to_jsonb(OLD) -> v_col IS DISTINCT FROM to_jsonb(NEW) -> v_col THEN
+                v_ancien := v_ancien || jsonb_build_object(v_col, to_jsonb(OLD) -> v_col);
+                v_nouveau := v_nouveau || jsonb_build_object(v_col, to_jsonb(NEW) -> v_col);
+            END IF;
+        END LOOP;
+        IF v_nouveau = '{}'::jsonb THEN
+            RETURN NEW;    -- rien qui compte n'a change
+        END IF;
+    ELSIF TG_OP = 'INSERT' THEN
+        v_nouveau := to_jsonb(NEW);
+    ELSE
+        v_ancien := to_jsonb(OLD);
+    END IF;
+
+    -- La cle, meme composee (un lot : reference|lot fournisseur).
+    SELECT string_agg(COALESCE(to_jsonb(NEW), to_jsonb(OLD)) ->> a.attname, '|'
+                      ORDER BY array_position(c.conkey, a.attnum)) INTO v_cle
+      FROM pg_constraint c
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+     WHERE c.contype = 'p' AND c.conrelid = TG_RELID;
+
+    INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
+                           anciennes_valeurs, nouvelles_valeurs,
+                           id_utilisateur, adresse_ip, session_id)
+    VALUES (TG_TABLE_NAME, TG_OP, COALESCE(v_cle, '(cle composite)'),
+            v_ancien::text, v_nouveau::text,
+            current_setting('gestionfil.id_utilisateur', true),
+            current_setting('gestionfil.adresse_ip', true),
+            current_setting('gestionfil.session_id', true));
+    RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_audit_modification() OWNER TO gestionfil;
 
 --
 -- Name: fn_trg_audit_mouvement(); Type: FUNCTION; Schema: public; Owner: gestionfil
@@ -12254,6 +12309,97 @@ CREATE TRIGGER trg_audit_ligne_qualite AFTER UPDATE OF densite ON public.ligne_q
 
 
 --
+-- Name: bon_commande trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.bon_commande FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification('statut');
+
+
+--
+-- Name: demande_autorisation trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.demande_autorisation FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: dossier_lignes_frais trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR DELETE OR UPDATE ON public.dossier_lignes_frais FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: import_dossiers trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.import_dossiers FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: import_facture_lignes trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.import_facture_lignes FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification('quantite_recue_kg');
+
+
+--
+-- Name: import_factures trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.import_factures FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: import_reception_lignes trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR DELETE OR UPDATE ON public.import_reception_lignes FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: import_receptions trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.import_receptions FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: ligne_bc trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.ligne_bc FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: lot trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.lot FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification('date_derniere_activite');
+
+
+--
+-- Name: plan_achat trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER UPDATE OF statut ON public.plan_achat FOR EACH ROW WHEN ((old.statut IS DISTINCT FROM new.statut)) EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: reception trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification('statut');
+
+
+--
+-- Name: taux_change trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.taux_change FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
 -- Name: mouvement trg_audit_mouvement; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
@@ -12629,6 +12775,13 @@ CREATE TRIGGER trg_audit_suppression BEFORE DELETE ON public.type_mouvement FOR 
 --
 
 CREATE TRIGGER trg_audit_suppression BEFORE DELETE ON public.utilisateur FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_suppression();
+
+
+--
+-- Name: plan_achat trg_audit_suppression_plan_achat; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_suppression_plan_achat AFTER DELETE ON public.plan_achat FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
 
 
 --
@@ -14859,5 +15012,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 6Sb4gnSVEOPtNgVt4aTCHZ7iMt9ffTMH27VYdh2qCdEXVpHCPgIVV3fTGrRfakb
+\unrestrict XDCs7jKcelkUc7guZXSe7UT1v937pOXwtaWdRPMuORhyXwrXjVnNJsQYKyVwzYU
 

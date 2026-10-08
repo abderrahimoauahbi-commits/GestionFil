@@ -53,6 +53,9 @@ import { cn, fmt } from '../lib/utils'
    fiche machine ; le retour fournisseur reste, voie de correction (regle 8). */
 const TYPES_SAISIE_LIBRE = ['SORTIE_PROD', 'RETOUR_FOURN', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT']
 const LIBELLE_SAISIE: Record<string, string> = { SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)' }
+/** Decision 5 (audit v4) : la sortie production se dit dechet OU consommation
+    d'une matiere hors machine sur un OF. Une seule liste, deux choix. */
+const CONSO_HORS_MACHINE = 'SORTIE_PROD#CONSOMMATION'
 
 interface TypeMvt {
   code_type_mvt: string
@@ -207,6 +210,7 @@ export function MouvementNouveau() {
     responsable: '',
     reference_document: '',
     numero_of: '',
+    nature_sortie: 'DECHET' as 'DECHET' | 'CONSOMMATION',
     observations_globales: '',
   })
   const [lignes, setLignes] = useState<LigneSaisie[]>(() => [ligneVide()])
@@ -589,8 +593,15 @@ export function MouvementNouveau() {
             </label>
             <select
               required
-              value={entete.code_type_mvt}
-              onChange={(e) => setEntete({ ...entete, code_type_mvt: e.target.value })}
+              value={entete.nature_sortie === 'CONSOMMATION' ? CONSO_HORS_MACHINE : entete.code_type_mvt}
+              onChange={(e) => {
+                const conso = e.target.value === CONSO_HORS_MACHINE
+                setEntete({
+                  ...entete,
+                  code_type_mvt: conso ? 'SORTIE_PROD' : e.target.value,
+                  nature_sortie: conso ? 'CONSOMMATION' : 'DECHET',
+                })
+              }}
               className={champ}
             >
               <option value="">—</option>
@@ -600,12 +611,17 @@ export function MouvementNouveau() {
               {qTypes.data?.filter((t) =>
                 t.code_type_mvt === 'STOCK_INIT' ? moi?.role === 'ADMIN'
                   : t.code_type_mvt.startsWith('AJUST_INV') ? peut('INVENTAIRE', 'VALIDER')
-                  : true).map((t) => (
+                  // Rendre au fournisseur defait une reception (decision 5).
+                  : t.code_type_mvt === 'RETOUR_FOURN' ? peut('RECEPTIONS', 'VALIDER')
+                  : true).flatMap((t) => [
                 <option key={t.code_type_mvt} value={t.code_type_mvt}>
                   {t.signe > 0 ? '+ ' : '− '}
                   {LIBELLE_SAISIE[t.code_type_mvt] ?? t.libelle}
-                </option>
-              ))}
+                </option>,
+                ...(t.code_type_mvt === 'SORTIE_PROD'
+                  ? [<option key={CONSO_HORS_MACHINE} value={CONSO_HORS_MACHINE}>− Consommation hors machine (colle, jute… sur un OF)</option>]
+                  : []),
+              ])}
             </select>
           </div>
 
@@ -701,9 +717,20 @@ export function MouvementNouveau() {
             <input
               value={entete.reference_document}
               onChange={(e) => setEntete({ ...entete, reference_document: e.target.value })}
-              placeholder="N BL, bon de commande, OF..."
+              required={entete.code_type_mvt === 'RETOUR_FOURN'}
+              placeholder={entete.code_type_mvt === 'RETOUR_FOURN' ? 'N° de la réception d’origine (REC-… ou RIM-…)' : 'N BL, bon de commande, OF...'}
               className={champ}
             />
+            {entete.code_type_mvt === 'RETOUR_FOURN' && (
+              <p className="mt-0.5 text-[11px] text-attenue-texte">
+                Obligatoire : on ne rend pas plus que cette réception n’a fait entrer.
+              </p>
+            )}
+            {entete.code_type_mvt === 'SORTIE_PROD' && entete.nature_sortie !== 'CONSOMMATION' && (
+              <p className="mt-0.5 text-[11px] text-attenue-texte">
+                Au-delà de 50 kg, un déchet demande le droit de valider l’inventaire.
+              </p>
+            )}
           </div>
         </div>
 

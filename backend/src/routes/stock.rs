@@ -104,6 +104,11 @@ pub struct NouveauMouvement {
     pub numero_of: Option<String>,
     pub reference_document: Option<String>,
     pub observations_globales: Option<String>,
+    /// Pour une sortie production : DECHET (par defaut, motif R4) ou
+    /// CONSOMMATION — une matiere hors machine (colle, jute…) consommee sur un
+    /// OF (decision 5 de l'audit v4).
+    #[serde(default)]
+    pub nature_sortie: Option<String>,
     pub lignes: Vec<LigneMouvement>,
 }
 
@@ -202,9 +207,129 @@ pub async fn creer_mouvement(
             vers_kg(&state.db, &l.code_reference, l.quantite_saisie, &l.unite_saisie).await?;
         converties.push((l, kg, facteur));
     }
+    let total_kg: f64 = converties.iter().map(|(_, kg, _)| kg).sum();
+    let consommation = m.code_type_mvt == "SORTIE_PROD"
+        && m.nature_sortie.as_deref() == Some("CONSOMMATION");
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+
+    // LES SORTIES QUI ENGAGENT LA VALEUR (decision 5 de l'audit v4). Un
+    // manquant pouvait sortir par un « dechet » ou un retour fournisseur au
+    // seul droit d'ecrire : la sortie la plus discrete du stock.
+    match m.code_type_mvt.as_str() {
+        "SORTIE_PROD" if consommation => {
+            // Le fil des machines se consomme par ses fiches ; seule une
+            // matiere qui n'y passe pas se declare ici, sur un OF.
+            if m.numero_of.as_deref().map(str::trim).unwrap_or("").is_empty() {
+                return Err(AppError::RegleMetier(
+                    "Une consommation hors machine se rattache a un ordre de fabrication : saisissez son numero.".into(),
+                ));
+            }
+            let refs: Vec<String> = converties.iter().map(|(l, _, _)| l.code_reference.clone()).collect();
+            let sur_machine: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT lm.code_reference
+                   FROM ligne_mouvement lm JOIN mouvement mv ON mv.id_mouvement = lm.id_mouvement
+                  WHERE mv.code_type_mvt = 'CHARGE_MACHINE' AND lm.code_reference = ANY($1)
+                  ORDER BY 1",
+            )
+            .bind(&refs)
+            .fetch_all(&mut *tx)
+            .await?;
+            if !sur_machine.is_empty() {
+                return Err(AppError::RegleMetier(format!(
+                    "{} se charge sur les machines : sa consommation se lit sur les fiches machine \
+                     (chargement, constat, dechargement), pas en saisie libre.",
+                    sur_machine.join(", ")
+                )));
+            }
+        }
+        "SORTIE_PROD" => {
+            let seuil: f64 = sqlx::query_scalar::<_, Option<f64>>(
+                "SELECT CAST(valeur_courante AS float8) FROM parametre WHERE code_parametre = 'P_DechetSeuilValiderKg'",
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten()
+            .unwrap_or(50.0);
+            if total_kg > seuil + 1e-9 {
+                // Comme un ajustement negatif : il faut le droit de cloturer un
+                // inventaire, que le magasinier n'a pas.
+                user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await.map_err(|_| {
+                    AppError::RegleMetier(format!(
+                        "Un dechet de {} kg depasse {seuil} kg : il se valide comme un ajustement \
+                         d'inventaire (droit VALIDER sur l'inventaire). Faites-le saisir par la Direction.",
+                        arrondi_kg(total_kg)
+                    ))
+                })?;
+            }
+        }
+        "RETOUR_FOURN" => {
+            // Rendre au fournisseur defait une reception : le droit de la
+            // valider, et la reception d'origine, dont on ne rend pas plus
+            // qu'elle n'a fait entrer.
+            user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
+            let doc = m.reference_document.as_deref().map(str::trim).unwrap_or("");
+            if doc.is_empty() {
+                return Err(AppError::RegleMetier(
+                    "Un retour fournisseur se rattache a sa reception : saisissez son numero \
+                     (REC-… ou RIM-…) dans « Document de reference »."
+                        .into(),
+                ));
+            }
+            let mut par_ref: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+            for (l, kg, _) in &converties {
+                *par_ref.entry(l.code_reference.clone()).or_default() += kg;
+            }
+            let connue: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM reception WHERE numero_reception = $1 AND statut IN ('VALIDE','CLOTURE'))
+                     OR EXISTS (SELECT 1 FROM import_receptions WHERE numero = $1 AND statut = 'VALIDEE')",
+            )
+            .bind(doc)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !connue {
+                return Err(AppError::RegleMetier(format!(
+                    "« {doc} » n'est pas une reception validee : un retour fournisseur se rattache a la reception \
+                     qui a fait entrer la marchandise."
+                )));
+            }
+            for (reference, kg) in &par_ref {
+                let (recu, deja): (f64, f64) = sqlx::query_as(
+                    "SELECT
+                       COALESCE((SELECT sum(lr.quantite_stock_kg) FROM ligne_reception lr
+                                   JOIN reception r ON r.id_reception = lr.id_reception
+                                  WHERE r.numero_reception = $1 AND r.statut IN ('VALIDE','CLOTURE')
+                                    AND lr.code_reference = $2), 0)::float8
+                     + COALESCE((SELECT sum(rl.quantite_recue_kg) FROM import_reception_lignes rl
+                                   JOIN import_receptions r ON r.id_reception = rl.id_reception
+                                   JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+                                  WHERE r.numero = $1 AND r.statut = 'VALIDEE'
+                                    AND fl.code_reference = $2), 0)::float8,
+                       COALESCE((SELECT sum(lm.quantite_kg) FROM ligne_mouvement lm
+                                   JOIN mouvement mv ON mv.id_mouvement = lm.id_mouvement
+                                  WHERE mv.code_type_mvt = 'RETOUR_FOURN' AND mv.reference_document = $1
+                                    AND lm.code_reference = $2
+                                    AND NOT EXISTS (SELECT 1 FROM mouvement inv
+                                                     WHERE inv.id_mouvement_contrepasse = mv.id_mouvement)), 0)::float8",
+                )
+                .bind(doc)
+                .bind(reference)
+                .fetch_one(&mut *tx)
+                .await?;
+                if *kg > recu - deja + 0.0005 {
+                    return Err(AppError::RegleMetier(format!(
+                        "{reference} : {} kg rendus, mais la reception {doc} n'en a fait entrer que {} kg \
+                         ({} kg deja rendus).",
+                        arrondi_kg(*kg),
+                        arrondi_kg(recu),
+                        arrondi_kg(deja)
+                    )));
+                }
+            }
+        }
+        _ => {}
+    }
 
     let numero = numeroter(&mut tx, "mouvement", "numero_mouvement", "MVT").await?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -286,8 +411,13 @@ pub async fn creer_mouvement(
         .bind(&l.lot_fournisseur)
         .bind(&l.date_fabrication)
         .bind(&l.date_peremption)
-        // Une sortie libre est un DECHET (regle 12) : rebut, chute non reutilisable.
-        .bind(if m.code_type_mvt == "SORTIE_PROD" { Some("R4".to_string()) } else { l.code_motif_ligne.clone() })
+        // Une sortie libre est un DECHET (regle 12) : rebut, chute non
+        // reutilisable — sauf la consommation hors machine, sans motif de rebut.
+        .bind(if m.code_type_mvt == "SORTIE_PROD" && !consommation {
+            Some("R4".to_string())
+        } else {
+            l.code_motif_ligne.clone()
+        })
         .bind(l.numero_of.clone().or_else(|| m.numero_of.clone()))
         .execute(&mut *tx)
         .await?;

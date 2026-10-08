@@ -253,7 +253,7 @@ ALTER VIEW v_ctl_c10 OWNER TO gestionfil;
 -- C44 : plus d'un inventaire en cours sur un meme magasin (audit v4). L'index
 -- ux_inventaire_en_cours l'interdit ; une base ou la migration du 08/10 n'a pas
 -- pu le poser (doublon deja present) le montre ici au lieu de le taire.
-DROP VIEW IF EXISTS v_ctl_c44 CASCADE;
+-- Pas de DROP ... CASCADE ici : rejouee, la migration emporterait v_controles.
 CREATE OR REPLACE VIEW v_ctl_c44 AS
 SELECT code_magasin, count(*) AS nb_en_cours,
        string_agg(numero_inventaire, ', ' ORDER BY numero_inventaire) AS inventaires
@@ -274,5 +274,66 @@ BEGIN
                 ' ''CRITIQUE''::text, (SELECT count(*) FROM v_ctl_c44)';
     END IF;
 END $$;
+
+-- =============================================================================
+-- 8. SAISIE LIBRE : LE DECHET IMPORTANT SE VALIDE (decision 5)
+-- =============================================================================
+INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, unite, description, categorie, modifiable_par) VALUES
+  ('P_DechetSeuilValiderKg', 'Dechet : seuil de validation (kg)', '50', 'DECIMAL', 'kg',
+   'Au-dela, un dechet saisi a la main demande le droit de valider l''inventaire, comme un ajustement negatif.',
+   'STOCK', 'DIRECTION')
+ON CONFLICT (code_parametre) DO NOTHING;
+
+-- =============================================================================
+-- 9. LE MOIS EN COURS SE PRORATISE DANS LA DEMANDE (decision 6)
+-- =============================================================================
+-- L'horizon comptait le mois en cours en entier, comme s'il commencait
+-- aujourd'hui : le 8 octobre, les besoins d'octobre deja consommes (22 t sur la
+-- copie) etaient demandes une seconde fois. Le premier mois ne couvre plus que
+-- ses jours restants ; les suivants commencent a sa fin. La cadence (besoin du
+-- mois / 30 jours) ne change pas.
+CREATE OR REPLACE VIEW v_besoin_horizon AS
+ WITH p AS (
+         SELECT ( SELECT parametre.valeur_courante::numeric AS valeur_courante
+                   FROM parametre
+                  WHERE parametre.code_parametre = 'P_DelaiDefaut'::text) AS delai_defaut,
+            ( SELECT parametre.valeur_courante::numeric AS valeur_courante
+                   FROM parametre
+                  WHERE parametre.code_parametre = 'P_MargeJours'::text) AS marge_jours,
+            -- La part du mois en cours qui reste a courir, aujourd'hui compris.
+            ((date_trunc('month', CURRENT_DATE) + interval '1 month')::date - CURRENT_DATE)::numeric
+              / extract(day FROM (date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day'))::numeric
+              AS reste_mois
+        ), mois AS (
+         SELECT i.i,
+            to_char(date_trunc('month'::text, CURRENT_DATE::timestamp with time zone) + (((i.i - 1) || ' month'::text)::interval), 'YYYY-MM'::text) AS annee_mois,
+            CASE WHEN i.i = 1 THEN 0::numeric ELSE 30.0 * p.reste_mois + (i.i - 2)::numeric * 30.0 END AS debut_j,
+            30.0 * p.reste_mois + (i.i - 1)::numeric * 30.0 AS fin_j,
+            CASE WHEN i.i = 1 THEN p.reste_mois ELSE 1::numeric END AS part
+           FROM generate_series(1, 12) i(i)
+             CROSS JOIN p
+        ), fenetre AS (
+         SELECT r.code_reference,
+            COALESCE(f.delai_livraison_jours::numeric, p.delai_defaut) AS lead_j,
+            COALESCE(f.couverture_commande_j::numeric, p.marge_jours) AS couv_j
+           FROM reference r
+             LEFT JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
+             CROSS JOIN p
+        ), besoin AS (
+         SELECT bm.code_reference, bm.annee_mois, bm.quantite_kg
+           FROM besoin_mrp bm
+           JOIN plan_production pp ON pp.id_plan = bm.id_plan
+          WHERE pp.statut = 'EN_COURS'
+        )
+ SELECT w.code_reference,
+    w.lead_j,
+    w.couv_j,
+    round(COALESCE(sum(bm.quantite_kg * GREATEST(0::numeric, LEAST(m.fin_j, w.lead_j) - m.debut_j) / 30.0), 0::numeric), 4) AS dem_lead_kg,
+    round(COALESCE(sum(bm.quantite_kg * GREATEST(0::numeric, LEAST(m.fin_j, w.lead_j + w.couv_j) - GREATEST(m.debut_j, w.lead_j)) / 30.0), 0::numeric), 4) AS sorties_prevues_kg
+   FROM fenetre w
+     CROSS JOIN mois m
+     LEFT JOIN besoin bm ON bm.code_reference = w.code_reference AND bm.annee_mois = m.annee_mois
+  GROUP BY w.code_reference, w.lead_j, w.couv_j;
+ALTER VIEW v_besoin_horizon OWNER TO gestionfil;
 
 COMMIT;

@@ -23,7 +23,9 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
   ('P_MachineEcartVertKg',   'Ecart machine : vert jusqu''a (kg)',   '10', 'DECIMAL', 'kg', 'Le seuil vert est le plus grand de ce poids et du pourcentage vert de la ligne.', 'MACHINE', 'DIRECTION'),
   ('P_MachineEcartVertPct',  'Ecart machine : vert jusqu''a (%)',    '1',  'DECIMAL', '%',  'Pourcentage du poids de la ligne.', 'MACHINE', 'DIRECTION'),
   ('P_MachineEcartRougeKg',  'Ecart machine : rouge au-dela de (kg)', '50', 'DECIMAL', 'kg', 'Le seuil rouge est le plus grand de ce poids et du pourcentage rouge de la ligne.', 'MACHINE', 'DIRECTION'),
-  ('P_MachineEcartRougePct', 'Ecart machine : rouge au-dela de (%)',  '5',  'DECIMAL', '%',  'Pourcentage du poids de la ligne.', 'MACHINE', 'DIRECTION')
+  ('P_MachineEcartRougePct', 'Ecart machine : rouge au-dela de (%)',  '5',  'DECIMAL', '%',  'Pourcentage du poids de la ligne.', 'MACHINE', 'DIRECTION'),
+  ('P_DechetSeuilValiderKg', 'Dechet : seuil de validation (kg)', '50', 'DECIMAL', 'kg',
+   'Au-dela, un dechet saisi a la main demande le droit de valider l''inventaire, comme un ajustement negatif.', 'STOCK', 'DIRECTION')
 ON CONFLICT (code_parametre) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

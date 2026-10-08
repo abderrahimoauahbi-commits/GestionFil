@@ -152,7 +152,10 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'reception_ajustements_cmup'
                            AND column_name = 'origine')
-            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c44')",
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c44')
+            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_DechetSeuilValiderKg')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
+                                                 AND definition LIKE '%reste_mois%')",
     ),
 ];
 

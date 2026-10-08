@@ -356,7 +356,10 @@ export function DataTable<L extends Record<string, unknown>>({
     }
 
   return (
-    <div className="space-y-2">
+    // LA BASCULE SE FAIT SUR LA PLACE DE LA LISTE, PAS SUR CELLE DE LA FENETRE
+    // (audit v4, tablette) : a 768 px, le menu en prend 230 et la table
+    // n'avait plus que 540 px. Conteneur sous 768 px : des cartes.
+    <div className="@container space-y-2">
       {/* --- Barre d'outils ----------------------------------------------
           ELLE RESTE EN HAUT, ET C'EST INDISPENSABLE SUR UNE GRANDE TABLE.
           Sur quatre cents references, l'utilisateur qui veut changer de filtre
@@ -579,8 +582,8 @@ export function DataTable<L extends Record<string, unknown>>({
               Hauteur par defaut quand l'ecran n'en fixe pas. */}
           <div
             className={cn(
-              'cadre-table defilement-x hidden rounded-lg border border-bordure bg-surface md:block',
-              !hauteurMax && 'md:max-h-[calc(100dvh-12rem)] md:overflow-y-auto',
+              'cadre-table defilement-x hidden rounded-lg border border-bordure bg-surface @3xl:block',
+              !hauteurMax && '@3xl:max-h-[calc(100dvh-12rem)] @3xl:overflow-y-auto',
             )}
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}
           >
@@ -738,7 +741,7 @@ export function DataTable<L extends Record<string, unknown>>({
           )}
 
           {/* --- Cartes : telephone et tablette portrait ------------------ */}
-          <div className="space-y-2 md:hidden">
+          <div className="space-y-2 @3xl:hidden">
             {rangs.map((rang) => (
               <div
                 key={rang.id}

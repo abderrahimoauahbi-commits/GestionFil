@@ -32,7 +32,7 @@
 
   --bordure: 214 20% 89%;
   --ligne: 215 22% 93%;
-  --champ: 214 18% 80%;
+  --champ: 214 18% 59.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 210 64% 40%;
 
   --barre: 218 24% 96%;
@@ -82,7 +82,7 @@
 
   --bordure: 215 16% 20%;
   --ligne: 218 16% 16%;
-  --champ: 215 14% 27%;
+  --champ: 215 14% 44%; /* 3:1 sur la surface (audit v4) */
   --anneau: 210 63% 60%;
 
   --barre: 215 19% 9%;
@@ -132,7 +132,7 @@
 
   --bordure: 0 0% 90%;
   --ligne: 0 0% 93%;
-  --champ: 0 0% 80%;
+  --champ: 0 0% 58%; /* 3:1 sur la surface (audit v4) */
   --anneau: 210 100% 36%;
 
   --barre: 0 0% 97%;
@@ -182,7 +182,7 @@
 
   --bordure: 0 0% 17%;
   --ligne: 240 2% 15%;
-  --champ: 0 0% 24%;
+  --champ: 0 0% 41.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 207 100% 42%;
 
   --barre: 0 0% 9%;
@@ -232,7 +232,7 @@
 
   --bordure: 44 16% 87%;
   --ligne: 44 18% 92%;
-  --champ: 42 14% 78%;
+  --champ: 42 14% 55%; /* 3:1 sur la surface (audit v4) */
   --anneau: 157 40% 30%;
 
   --barre: 44 20% 94%;
@@ -282,7 +282,7 @@
 
   --bordure: 40 7% 21%;
   --ligne: 40 7% 17%;
-  --champ: 40 7% 28%;
+  --champ: 40 7% 42%; /* 3:1 sur la surface (audit v4) */
   --anneau: 155 42% 52%;
 
   --barre: 40 8% 9%;
@@ -436,7 +436,7 @@
 
   --bordure: 210 24% 86%;
   --ligne: 210 26% 92%;
-  --champ: 210 20% 76%;
+  --champ: 210 20% 59%; /* 3:1 sur la surface (audit v4) */
   --anneau: 207 88% 34%;
 
   
@@ -487,7 +487,7 @@
 
   --bordure: 210 18% 22%;
   --ligne: 210 18% 18%;
-  --champ: 210 16% 30%;
+  --champ: 210 16% 44%; /* 3:1 sur la surface (audit v4) */
   --anneau: 205 80% 62%;
 
   --barre: 208 45% 16%;
@@ -542,7 +542,7 @@
 
   --bordure: 214 32% 91%;
   --ligne: 210 40% 96%;
-  --champ: 213 27% 84%;
+  --champ: 213 27% 60%; /* 3:1 sur la surface (audit v4) */
   --anneau: 224 76% 48%;
 
   --barre: 210 40% 96%;
@@ -601,7 +601,7 @@
   
   --bordure: 217 33% 17%;
   --ligne: 222 40% 13%;
-  --champ: 215 16% 35%;
+  --champ: 215 16% 41%; /* 3:1 sur la surface (audit v4) */
   --anneau: 221 83% 53%;
 
   --barre: 229 84% 4%;
@@ -645,7 +645,7 @@
   --or: 38 92% 50%;
   --bordure: 220 13% 91%;
   --ligne: 220 14% 95%;
-  --champ: 220 13% 86%;
+  --champ: 220 13% 60%; /* 3:1 sur la surface (audit v4) */
   --anneau: 221 83% 53%;
   --barre: 0 0% 100%;
   --barre-texte: 221 39% 11%;
@@ -686,7 +686,7 @@
   --or: 38 92% 62%;
   --bordure: 220 20% 22%;
   --ligne: 220 22% 17%;
-  --champ: 220 18% 26%;
+  --champ: 220 18% 43%; /* 3:1 sur la surface (audit v4) */
   --anneau: 217 91% 65%;
   --barre: 221 39% 8%;
   --barre-texte: 220 14% 93%;
@@ -727,7 +727,7 @@
   --or: 43 96% 56%;
   --bordure: 215 28% 17%;
   --ligne: 215 28% 13%;
-  --champ: 215 28% 22%;
+  --champ: 215 28% 42%; /* 3:1 sur la surface (audit v4) */
   --anneau: 188 86% 53%;
   --barre: 213 29% 5%;
   --barre-texte: 220 13% 91%;
@@ -768,7 +768,7 @@
   --or: 43 96% 56%;
   --bordure: 215 28% 17%;
   --ligne: 215 28% 13%;
-  --champ: 215 28% 22%;
+  --champ: 215 28% 42%; /* 3:1 sur la surface (audit v4) */
   --anneau: 188 86% 53%;
   --barre: 213 29% 5%;
   --barre-texte: 220 13% 91%;
@@ -820,7 +820,7 @@
   --or: 32 95% 50%;
   --bordure: 35 21% 89%;
   --ligne: 35 21% 93%;
-  --champ: 35 21% 84%;
+  --champ: 35 21% 55.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 26 90% 37%;
   --barre: 36 26% 94%;
   --barre-texte: 27 12% 15%;
@@ -863,7 +863,7 @@
   --or: 32 90% 62%;
   --bordure: 27 12% 23%;
   --ligne: 27 12% 18%;
-  --champ: 27 12% 28%;
+  --champ: 27 12% 42.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 26 85% 58%;
   --barre: 27 14% 9%;
   --barre-texte: 36 26% 92%;
@@ -905,7 +905,7 @@
   --or: 262 83% 58%;
   --bordure: 216 28% 90%;
   --ligne: 216 28% 94%;
-  --champ: 216 28% 84%;
+  --champ: 216 28% 61%; /* 3:1 sur la surface (audit v4) */
   --anneau: 226 71% 40%;
   --barre: 220 26% 14%;
   --barre-texte: 216 33% 95%;
@@ -948,7 +948,7 @@
   --or: 262 83% 72%;
   --bordure: 219 20% 23%;
   --ligne: 219 22% 17%;
-  --champ: 219 20% 28%;
+  --champ: 219 20% 44%; /* 3:1 sur la surface (audit v4) */
   --anneau: 226 80% 66%;
   --barre: 220 26% 7%;
   --barre-texte: 216 33% 94%;
@@ -998,7 +998,7 @@
 
   --bordure: 40 12% 87%;
   --ligne: 43 13% 91%;
-  --champ: 40 10% 76%;
+  --champ: 40 10% 56.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 194 56% 28%;
 
   --barre: 213 14% 12%;
@@ -1053,7 +1053,7 @@
 
   --bordure: 213 11% 19%;
   --ligne: 213 11% 15%;
-  --champ: 212 10% 26%;
+  --champ: 212 10% 42%; /* 3:1 sur la surface (audit v4) */
   --anneau: 192 47% 57%;
 
   --barre: 210 13% 6%;
@@ -1107,7 +1107,7 @@
   --info: 211 48% 43.7%;
   --bordure: 46 20% 83.3%;
   --ligne: 47 22.6% 87.8%;
-  --champ: 46 13.7% 70%;
+  --champ: 46 13.7% 53.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 15 63.1% 59.6%;
   --barre: 37 10.3% 15.3%;
   --barre-texte: 51 25.9% 94.7%;
@@ -1134,7 +1134,7 @@
   --info: 213 67.1% 72.5%;
   --bordure: 36 9.4% 20.8%;
   --ligne: 38 9.1% 17.3%;
-  --champ: 37 9.6% 26.5%;
+  --champ: 37 9.6% 42%; /* 3:1 sur la surface (audit v4) */
   --anneau: 16 65.4% 64.9%;
   --barre: 36 12.2% 8%;
   --barre-texte: 44 23.4% 90.8%;
@@ -1161,7 +1161,7 @@
   --info: 214 81.7% 50.6%;
   --bordure: 220 8.8% 86.7%;
   --ligne: 216 12.2% 92%;
-  --champ: 213 7.3% 75.9%;
+  --champ: 213 7.3% 58.9%; /* 3:1 sur la surface (audit v4) */
   --anneau: 214 81.7% 50.6%;
   --barre: 0 0% 100%;
   --barre-texte: 225 5.9% 13.3%;
@@ -1188,7 +1188,7 @@
   --info: 217 88.7% 75.7%;
   --bordure: 206 5.5% 24.9%;
   --ligne: 225 4% 19.6%;
-  --champ: 213 4.5% 39%;
+  --champ: 213 4.5% 45.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 217 88.7% 75.7%;
   --barre: 225 6.9% 11.4%;
   --barre-texte: 216 12.2% 92%;

@@ -170,6 +170,24 @@ pub async fn creer_mouvement(
     if m.lignes.is_empty() {
         return Err(AppError::Invalide("au moins une ligne est requise".into()));
     }
+    // REGLE 12 (08/10/2026). Un ajustement corrige le stock : c'est un acte de
+    // validation de l'inventaire. Le stock initial constitue le stock d'ouverture : il revient
+    // a l'administrateur.
+    match m.code_type_mvt.as_str() {
+        // Un ajustement corrige l'inventaire : il se valide comme une cloture
+        // d'inventaire, que le magasinier n'a pas (regle 10).
+        "AJUST_INV_POS" | "AJUST_INV_NEG" => {
+            user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+        }
+        "STOCK_INIT" if user.role != "ADMIN" => {
+            return Err(AppError::RegleMetier(
+                "Le stock initial est reserve a l'administrateur : il ouvre le stock, il ne le corrige pas. \
+                 Pour corriger, saisissez un ajustement."
+                    .into(),
+            ));
+        }
+        _ => {}
+    }
 
     // La conversion se fait avant d'ouvrir la transaction : un facteur manquant
     // doit echouer avant toute ecriture, avec un message qui nomme la reference.
@@ -214,6 +232,32 @@ pub async fn creer_mouvement(
 
     // Les triggers appliquent le solde, recalculent le CMUP et refusent une
     // sortie superieure au stock, un OF manquant ou un lot absent.
+    //
+    // LE PRIX EST IMPOSE : LE CMUP EN COURS (regle 12, 08/10/2026). Un prix
+    // tape a la main sur une entree libre refaisait le CMUP : seuls les achats
+    // valorisent le stock. Une entree au CMUP le laisse ou il est. Une
+    // reference jamais recue n'a pas de CMUP : on n'y fait pas entrer de kilos
+    // a la main — sauf le stock d'ouverture, au prix catalogue a defaut.
+    let entree = matches!(m.code_type_mvt.as_str(), "AJUST_INV_POS" | "RETOUR_PROD" | "STOCK_INIT");
+    let mut prix_imposes: Vec<Option<f64>> = Vec::with_capacity(converties.len());
+    for (l, _, _) in &converties {
+        let cmup: Option<f64> =
+            sqlx::query_scalar("SELECT cmup_mad::float8 FROM reference WHERE code_reference = $1")
+                .bind(&l.code_reference)
+                .fetch_optional(&mut *tx)
+                .await?
+                .flatten()
+                .filter(|c: &f64| *c > 0.0);
+        let prix = if m.code_type_mvt == "STOCK_INIT" { cmup.or(l.prix_kg_mad) } else { cmup };
+        if entree && prix.is_none() && m.code_type_mvt != "STOCK_INIT" {
+            return Err(AppError::RegleMetier(format!(
+                "{} n'a jamais ete recue : elle n'a pas de CMUP. Une entree libre se valorise au CMUP \
+                 en cours ; faites d'abord entrer cette reference par une reception.",
+                l.code_reference
+            )));
+        }
+        prix_imposes.push(prix);
+    }
     for (i, (l, kg, facteur)) in converties.iter().enumerate() {
         sqlx::query(
             "INSERT INTO ligne_mouvement
@@ -228,7 +272,7 @@ pub async fn creer_mouvement(
         .bind((i + 1) as i64)
         .bind(&l.code_reference)
         .bind(kg)
-        .bind(l.prix_kg_mad)
+        .bind(prix_imposes[i])
         .bind(l.quantite_saisie)
         .bind(&l.unite_saisie)
         .bind(facteur)
@@ -505,6 +549,23 @@ pub async fn contre_passer(
     .bind(&id)
     .fetch_one(&mut *tx)
     .await?;
+    // De meme, une reception locale CLOTUREE avec sa facture : sa valeur
+    // definitive est au CMUP ; on la corrige par un avoir (regle 6 et 8).
+    let cloturee: Option<String> = sqlx::query_scalar(
+        "SELECT rc.numero_reception FROM reception rc
+          WHERE rc.statut = 'CLOTURE'
+            AND rc.id_reception IN (SELECT lr.id_reception FROM ligne_reception lr WHERE lr.id_mouvement_genere = $1)
+          LIMIT 1",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(r) = cloturee {
+        return Err(AppError::RegleMetier(format!(
+            "{numero} est l'entree de la reception {r}, cloturee avec sa facture : elle ne s'annule plus. \
+             Corrigez par un avoir ou un retour fournisseur."
+        )));
+    }
     if let Some(dossiers) = dedouanes {
         return Err(AppError::RegleMetier(format!(
             "{numero} est l'entree d'une reception d'import dont le dossier {dossiers} est dedouane : \
@@ -2114,6 +2175,53 @@ pub async fn changer_statut_bc(
             ));
         }
 
+        // UN TAUX PERIME N'ENGAGE PAS (regle 18, 08/10/2026). Le bon s'engage
+        // au taux de reference de l'ERP ; s'il date de plus de
+        // P_AncienneteTauxJours (7 j), il ne dit plus le marche : on demande le
+        // taux du jour avant de valider. Le taux de chaque facture d'import,
+        // lui, reste celui de sa facture (cours BAM du jour).
+        let (devise_bc, date_taux): (String, Option<String>) = sqlx::query_as(
+            "SELECT bc.code_devise,
+                    (SELECT t.date_debut FROM taux_change t
+                      WHERE t.code_devise = bc.code_devise
+                        AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                        AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
+                      ORDER BY t.date_debut DESC LIMIT 1)
+               FROM bon_commande bc WHERE bc.id_bc = $1",
+        )
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if devise_bc != "MAD" {
+            let limite: i64 = sqlx::query_scalar(
+                "SELECT COALESCE((SELECT CAST(valeur_courante AS bigint) FROM parametre
+                                   WHERE code_parametre = 'P_AncienneteTauxJours'), 7)",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            let age: Option<i64> = match &date_taux {
+                Some(d) => sqlx::query_scalar("SELECT (current_date - substr($1, 1, 10)::date)::bigint")
+                    .bind(d)
+                    .fetch_one(&mut *tx)
+                    .await?,
+                None => None,
+            };
+            match age {
+                None => {
+                    return Err(AppError::RegleMetier(format!(
+                        "Aucun taux {devise_bc} en vigueur : saisissez le taux du jour (cours BAM) avant de valider ce bon."
+                    )))
+                }
+                Some(a) if a > limite => {
+                    return Err(AppError::RegleMetier(format!(
+                        "Le taux {devise_bc} en vigueur date de {a} jours (au-dela de {limite}) : saisissez le taux \
+                         du jour (cours BAM, Configuration → Devises et taux) avant de valider ce bon."
+                    )))
+                }
+                _ => {}
+            }
+        }
+
         // RG-09 : le taux retenu est celui du jour de la validation, pas celui de
         // la creation. Un bon de commande se prepare sur des semaines ; le change
         // a bouge entre-temps.
@@ -3598,6 +3706,13 @@ pub async fn changer_statut_reception(
     if s.statut == "VALIDE" {
         return Err(AppError::RegleMetier(
             "La validation passe par /valider : elle declenche la cascade de stock.".into(),
+        ));
+    }
+    // La cloture porte la facture et rend la valeur definitive (regle 6) :
+    // elle ne se fait que par /cloturer, jamais par un simple changement d'etat.
+    if s.statut == "CLOTURE" {
+        return Err(AppError::RegleMetier(
+            "La cloture passe par « Clôturer avec la facture » : elle porte la valeur definitive au stock.".into(),
         ));
     }
 

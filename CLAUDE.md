@@ -149,5 +149,6 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
 - `docs/ADR-001-decisions-fondatrices.md` — décisions d'architecture.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
-- `db/README.md` — invariants, vues, contrôles C01–C37 (C38–C42, machines, ajoutés par la migration du 05/10/2026).
+- `db/README.md` — invariants, vues, contrôles C01–C37 (C38–C42, machines, ajoutés par la migration du 05/10/2026 ; C43, colisage incohérent, par celle du 08/10/2026).
+- Règles de gestion validées le 08/10/2026 : migration `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 13, une par règle) ; le colisage incohérent se SIGNALE, il ne bloque jamais.
 - `deploiement/README.md` — serveur, migrations en production, sauvegardes, assistant.

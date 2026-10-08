@@ -440,6 +440,7 @@ export function BonCommandeNouveau() {
                   pauvre. Deux saisies pour un meme article, c'etait une de
                   trop — elles divergeaient sans que rien ne le signale. */}
               <GrilleLignes
+                controleColisage
                 codeFournisseur={entete.code_fournisseur}
                 devise={devise}
                 lignes={lignes}

@@ -252,6 +252,11 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
    */
   const avertissements = useMemo(() => {
     const a: string[] = []
+    // L'ECART ORANGE SE CONFIRME (regle 1, 08/10/2026) : ni anodin, ni assez
+    // grand pour exiger la Direction. Le rouge, lui, est un blocage du serveur.
+    for (const l of apercuAJour ? apercu!.resultat.lignes : [])
+      if (l.niveau_ecart === 'ORANGE')
+        a.push(`Écart de ${l.ecart_kg.toLocaleString('fr-FR')} kg sur ${l.code_reference} (lot ${l.lot_fournisseur}) : au-delà du seuil vert, à confirmer.`)
     if (type !== 'CHARGE') return a
     const parRef = new Map<string, Set<string>>()
     for (const l of lignes)
@@ -271,7 +276,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
         a.push(`FIFO : ${l.code_reference} — le lot ${plusAncien.lot_fournisseur} est plus ancien que ${l.lot_fournisseur} au magasin.`)
     }
     return a
-  }, [type, lignes, envoyees, qLots.data])
+  }, [type, lignes, envoyees, qLots.data, apercuAJour, apercu])
 
   return {
     zone, changerZone, motifs, motifDe,

@@ -28,6 +28,7 @@ import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Save } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
 import { api, ErreurApi } from '../api/client'
 import { ChampLot } from '../composants/ChampLot'
 import { EnTetePage } from '../components/Layout'
@@ -247,7 +248,11 @@ export function MouvementNouveau() {
      un stock initial, qui peut entrer sans prix — il prend alors le prix
      catalogue : une colonne a part, que la validation de ligne n'exige pas. */
   const prixGrille = typeActif?.exige_prix === 1
-  const prixOption = !prixGrille && typeActif?.impacte_cmup === 1
+  /* LE PRIX EST IMPOSE (regle 12, 08/10/2026) : toute saisie libre entre ou sort
+     au CMUP en cours, que le serveur applique. Seul le stock d'ouverture peut
+     porter un prix, pour une reference qui n'a encore jamais ete recue. */
+  const prixOption = !prixGrille && typeActif?.code_type_mvt === 'STOCK_INIT'
+  const { moi, peut } = useAuth()
 
   const qMotifsLigne = useQuery({
     queryKey: ['motifs-ligne'],
@@ -585,7 +590,13 @@ export function MouvementNouveau() {
               className={champ}
             >
               <option value="">—</option>
-              {qTypes.data?.map((t) => (
+              {/* REGLE 12 : l'ajustement demande le droit de valider, le stock
+                  initial est a l'administrateur — l'ecran ne propose que ce que
+                  le serveur acceptera. */}
+              {qTypes.data?.filter((t) =>
+                t.code_type_mvt === 'STOCK_INIT' ? moi?.role === 'ADMIN'
+                  : t.code_type_mvt.startsWith('AJUST_INV') ? peut('INVENTAIRE', 'VALIDER')
+                  : true).map((t) => (
                 <option key={t.code_type_mvt} value={t.code_type_mvt}>
                   {t.signe > 0 ? '+ ' : '− '}
                   {t.libelle}

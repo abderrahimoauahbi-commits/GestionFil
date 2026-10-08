@@ -190,6 +190,8 @@ CREATE TABLE plan_achat (
     id_proposition      text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     date_generation     text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    -- Quand la proposition a ete ecartee : elle expire au bout de P_DureeEcartJours (regle 17).
+    date_ecartee        text,
     id_plan             text    REFERENCES plan_production(id_plan),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
 

@@ -40,6 +40,8 @@ pub mod module {
     pub const MOUVEMENTS: &str = "MOUVEMENTS";
     pub const STOCK: &str = "STOCK";
     pub const INVENTAIRE: &str = "INVENTAIRE";
+    /// Les decisions sur un lot : derogation, blocage, dormant (regle 5).
+    pub const LOTS: &str = "LOTS";
     pub const VALORISATION: &str = "VALORISATION";
     pub const COCKPIT: &str = "COCKPIT";
     pub const AUDIT: &str = "AUDIT";

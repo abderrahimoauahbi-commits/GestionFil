@@ -7,6 +7,7 @@
 pub mod classification;
 pub mod cours_bam;
 pub mod decision_machine;
+pub mod facture_locale;
 pub mod importation;
 pub mod inventaire;
 pub mod mrp;

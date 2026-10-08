@@ -13,6 +13,8 @@ import { api, ErreurApi } from '../../api/client'
 import { libelleLot } from '../../lib/lots'
 
 export const MODULE = 'STOCK'
+/** Les decisions sur un lot (derogation, blocage, dormant) : regle 5. */
+export const MODULE_DECISION = 'LOTS'
 
 // ============================================================================
 // Types — les champs exacts de `v_lot`, `v_lot_vie` et `demande_autorisation`

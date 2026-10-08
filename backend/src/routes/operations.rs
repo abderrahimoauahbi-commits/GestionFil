@@ -142,6 +142,34 @@ pub async fn cloturer_inventaire(
 }
 
 #[derive(Debug, serde::Deserialize)]
+pub struct FactureReception {
+    pub numero_facture: String,
+    pub montant_facture_mad: f64,
+    #[serde(default)]
+    pub frais_mad: f64,
+    #[serde(default)]
+    pub simuler: bool,
+}
+
+/// `POST /api/receptions/{id}/cloturer` — la facture du fournisseur arrive :
+/// la valeur provisoire (prix du bon) devient definitive (regle 6). Avec
+/// `simuler`, tout est calcule et rien n'est ecrit : l'apercu avant de signer.
+pub async fn cloturer_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(f): Json<FactureReception>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
+    Ok(Json(
+        crate::domain::facture_locale::cloturer(
+            &state.db, &user, &id, &f.numero_facture, f.montant_facture_mad, f.frais_mad, f.simuler,
+        )
+        .await?,
+    ))
+}
+
+#[derive(Debug, serde::Deserialize)]
 pub struct MotifAnnulation {
     pub motif: String,
 }

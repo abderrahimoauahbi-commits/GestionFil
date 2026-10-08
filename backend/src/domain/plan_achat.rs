@@ -124,10 +124,18 @@ pub async fn generer(
           -- CLOTURE est en stock : ce qui reste a proposer est un vrai besoin.
           -- Seul un bon pas encore valide (BROUILLON, EN_ATTENTE_VALIDATION),
           -- que l'en-cours ne compte pas, ecarte encore la reference.
+          --
+          -- UNE PROPOSITION ECARTEE EXPIRE (regle 17, 08/10/2026). Ecartee, elle
+          -- masquait la reference A VIE : le besoin ne revenait jamais. Au-dela
+          -- de P_DureeEcartJours (90 j), elle cesse de masquer ; elle reste en
+          -- base, jamais supprimee, marquee expiree.
           WHERE NOT EXISTS (
                 SELECT 1 FROM plan_achat pa2
                  WHERE pa2.code_reference = pa.code_reference
-                   AND (pa2.statut = 'IGNORE'
+                   AND ((pa2.statut = 'IGNORE'
+                         AND substr(COALESCE(pa2.date_ecartee, pa2.date_generation), 1, 10)::date
+                             > current_date - COALESCE((SELECT CAST(valeur_courante AS integer) FROM parametre
+                                                         WHERE code_parametre = 'P_DureeEcartJours'), 90))
                         OR (pa2.statut = 'COMMANDE'
                             AND EXISTS (SELECT 1 FROM bon_commande bc
                                          WHERE bc.id_bc = pa2.id_bc_genere

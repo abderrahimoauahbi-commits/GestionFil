@@ -23,7 +23,7 @@ import { Badge, Bouton } from '../../composants/ui/base'
 import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { libelleLot } from '../../lib/lots'
 import { cn } from '../../lib/utils'
-import { MODULE, libelleSeuil, lienFiche, messageErreur, nb, useApresDecision, useBasculerRestes, type Lot } from './modele'
+import { MODULE, MODULE_DECISION, libelleSeuil, lienFiche, messageErreur, nb, useApresDecision, useBasculerRestes, type Lot } from './modele'
 
 export function LienLot({ reference, lot, className }: { reference: string; lot: string; className?: string }) {
   return (
@@ -200,8 +200,8 @@ type Geste = 'bloquer' | 'debloquer' | 'projet' | 'restes' | 'dormant'
  * sur le stock ; basculer demande ECRIRE.
  */
 export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boolean }) {
-  const { peut } = useAuth()
-  const peutValider = peut(MODULE, 'VALIDER')
+  const { moi, peut } = useAuth()
+  const peutValider = peut(MODULE_DECISION, 'VALIDER') || moi?.role === 'DIRECTION'
   const peutEcrire = peut(MODULE, 'ECRIRE')
   const [geste, setGeste] = useState<Geste | null>(null)
   const apres = useApresDecision()

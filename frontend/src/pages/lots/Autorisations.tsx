@@ -11,8 +11,7 @@
  * validation des bons) : le serveur le refuse, l'ecran ne propose donc pas le
  * bouton, et dit pourquoi.
  *
- * Decider demande le droit VALIDER sur le stock, en attendant les profils
- * « responsable qualite » et « chef d'atelier » [A DEFINIR au cahier].
+ * Decider demande le droit VALIDER du module LOTS, ou la Direction (regle 5).
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -28,7 +27,7 @@ import { Onglet, Onglets, OngletsListe } from '../../composants/ui/surcouches'
 import { libelleLot } from '../../lib/lots'
 import { cn, fmt } from '../../lib/utils'
 import { DecisionMotivee, LienLot } from './commun'
-import { MODULE, STATUTS_DEMANDE, TYPES_DEMANDE, messageErreur, useApresDecision, type Demande } from './modele'
+import { MODULE_DECISION, STATUTS_DEMANDE, TYPES_DEMANDE, messageErreur, useApresDecision, type Demande } from './modele'
 
 type Geste = { demande: Demande; decision: 'ACCORDEE' | 'REFUSEE' | 'ANNULEE' }
 
@@ -43,7 +42,8 @@ function resumeDetails(d: unknown): string {
 
 export function Autorisations() {
   const { moi, peut } = useAuth()
-  const peutDecider = peut(MODULE, 'VALIDER')
+  // Regle 5 : le droit VALIDER des lots, ou la Direction.
+  const peutDecider = peut(MODULE_DECISION, 'VALIDER') || moi?.role === 'DIRECTION'
   const apres = useApresDecision()
   const [onglet, setOnglet] = useState('attente')
   const [type, setType] = useState('')

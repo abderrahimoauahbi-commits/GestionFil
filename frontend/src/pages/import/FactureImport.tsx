@@ -55,6 +55,7 @@ import {
   depuisPalettes,
   pourChamp,
 } from '../../lib/conditionnement'
+import { AvisColisage } from '../../composants/AvisColisage'
 import { echec, nombre, useRafraichir } from './dialogues'
 import { UNITE, type DossierComplet, type Ligne } from './types'
 
@@ -721,6 +722,8 @@ export function FactureImport() {
                               </button>
                             )}
                           </div>
+                          <AvisColisage className="max-w-[18rem]" kg={l.poids_net_kg} bobines={l.nb_bobines}
+                            palettes={l.nb_palettes} cond={condDe(l.code_reference)} />
                         </td>
                         <td className={td}>
                           <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.prix_unitaire_devise} disabled={fige}

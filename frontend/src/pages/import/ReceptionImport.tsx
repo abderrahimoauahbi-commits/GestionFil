@@ -10,7 +10,7 @@
  * Enregistrer garde un brouillon ; Valider fait entrer la marchandise en stock
  * a la valeur facture. Validee, la reception est figee.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, Link2, PackageCheck, Pencil, Plus, RotateCcw, Save, Search, Send, Trash2, Unlink2 } from 'lucide-react'
@@ -32,16 +32,19 @@ import {
   Selecteur,
 } from '../../composants/ui/base'
 import { useConfirmation } from '../../composants/ui/surcouches'
+import { AvisColisage } from '../../composants/AvisColisage'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import {
   type Conditionnement,
+  controleColisage,
   depuisBobines,
   depuisKg,
   depuisPalettes,
   pourChamp,
 } from '../../lib/conditionnement'
 import { echec, nombre, useRafraichir } from './dialogues'
+import { useTolerancesColisage } from '../../lib/lots'
 
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
 const td = 'px-2 py-1'
@@ -266,6 +269,7 @@ export function ReceptionImport() {
     )
   }, [restants, filtre])
 
+  const tolColisage = useTolerancesColisage()
   const ajouter = (ids: string[]) => {
     const nouvelles = (qReste.data ?? [])
       .filter((r) => ids.includes(r.id_ligne) && !lignes.some((l) => l.id_ligne === r.id_ligne))
@@ -273,6 +277,17 @@ export function ReceptionImport() {
         // Tout le reste propose : le cas ordinaire est « tout est arrive ».
         // Les compteurs ne sont repris que si la ligne arrive entiere.
         const entiere = r.quantite_recue_kg === 0
+        const cond: Conditionnement = { poids_bobine_kg: r.poids_bobine_kg, bobines_par_palette: r.bobines_par_palette }
+        // UN PEU DE RAISONNEMENT (08/10/2026). Partielle, la ligne arrivait
+        // sans bobines ni palettes : on les deduit du poids. Entiere, elle
+        // reprend les comptes de la facture — sauf des palettes qui se
+        // contredisent (des colis saisis comme palettes) : elles se recalculent
+        // depuis les bobines, et l'avis de la ligne le dit.
+        const deduit = depuisKg(r.reste_kg, cond)
+        const palettesFacture =
+          entiere && controleColisage(r.reste_kg, r.nb_bobines, r.nb_palettes, cond, tolColisage).niveau === 'incoherent'
+            ? pourChamp(depuisBobines(r.nb_bobines, cond).palettes ?? deduit.palettes)
+            : String(r.nb_palettes)
         return {
           id_ligne: r.id_ligne,
           numero_dossier: r.numero_dossier,
@@ -284,14 +299,14 @@ export function ReceptionImport() {
           deja_recu_kg: r.quantite_recue_kg,
           reste_kg: r.reste_kg,
           quantite: String(r.reste_kg),
-          bobines: entiere ? String(r.nb_bobines) : '',
-          palettes: entiere ? String(r.nb_palettes) : '',
+          bobines: entiere && r.nb_bobines > 0 ? String(r.nb_bobines) : pourChamp(deduit.bobines),
+          palettes: entiere && r.nb_bobines > 0 ? palettesFacture : pourChamp(deduit.palettes),
           lot: r.lot_fournisseur ?? '',
           couleur: r.code_couleur ?? '',
           libelleCouleur: r.libelle_couleur ?? '',
           magasin: magasinDefaut,
           qualite: 'CONFORME',
-          cond: { poids_bobine_kg: r.poids_bobine_kg, bobines_par_palette: r.bobines_par_palette },
+          cond,
           // ENTIERE, la ligne reprend les comptes de la facture : ce sont des
           // constats du fournisseur, pas une deduction — on ne les relie pas.
           // PARTIELLE, on part du poids et les comptes se deduisent.
@@ -592,23 +607,22 @@ export function ReceptionImport() {
               Aucune ligne : choisissez ci-dessous les lignes de facture que le camion apporte.
             </p>
           ) : (
+            /* LES LIGNES SUR DEUX ETAGES (08/10/2026). Treize colonnes cote a
+               cote obligeaient a defiler de cote, et le lot ou la couleur
+               tenaient dans six caracteres. En haut, ce qu'on pese et ou on le
+               range ; en dessous, ce qu'on lit sur l'etiquette — lot et
+               couleur — avec la place de les lire, et l'avis de colisage. */
             <div className="defilement-x">
-              <table className="w-full min-w-[82rem] text-[12.5px]">
+              <table className="w-full min-w-[60rem] text-[12.5px]">
                 <thead>
                   <tr className="border-b border-bordure">
                     <th className={cn(th, 'text-left')}>Référence · origine</th>
-                    <th className={cn(th, 'w-24 text-right')}>Facturé</th>
-                    <th className={cn(th, 'w-24 text-right')}>Déjà reçu</th>
-                    <th className={cn(th, 'w-24 text-right')}>Reste</th>
-                    <th className={cn(th, 'w-28 text-right')}>Reçu (kg)</th>
-                    <th className={cn(th, 'w-20 text-right')}>Écart</th>
-                    <th className={cn(th, 'w-20 text-right')}>Bobines</th>
-                    <th className={cn(th, 'w-20 text-right')}>Palettes</th>
-                    <th className={cn(th, 'w-24 text-left')}>Lot</th>
-                    <th className={cn(th, 'w-20 text-left')}>Code couleur</th>
-                    <th className={cn(th, 'w-24 text-left')}>Libellé couleur</th>
-                    <th className={cn(th, 'w-36 text-left')}>Magasin</th>
-                    <th className={cn(th, 'w-32 text-left')}>Qualité</th>
+                    <th className={cn(th, 'w-36 text-right')}>Reste à recevoir</th>
+                    <th className={cn(th, 'w-32 text-right')}>Reçu (kg)</th>
+                    <th className={cn(th, 'w-24 text-right')}>Bobines</th>
+                    <th className={cn(th, 'w-28 text-right')}>Palettes</th>
+                    <th className={cn(th, 'w-40 text-left')}>Magasin</th>
+                    <th className={cn(th, 'w-36 text-left')}>Qualité</th>
                     {editable && <th className={cn(th, 'w-16')} />}
                   </tr>
                 </thead>
@@ -617,87 +631,124 @@ export function ReceptionImport() {
                     const ecart = ecartDe(l)
                     const horsTolerance = nombre(l.quantite) > l.reste_kg * (1 + TOLERANCE_PCT / 100) + 0.001
                     const verrou = editable && l.valide
+                    const fond = verrou ? 'bg-succes/[0.05]' : undefined
                     return (
-                      <tr key={l.id_ligne} className={cn('border-b border-bordure/60 align-top', verrou && 'bg-succes/[0.05]')}>
-                        <td className={cn(td, 'pt-1.5')}>
-                          <div className="font-medium">{l.code_reference}</div>
-                          <div className="text-[11px] text-attenue-texte">{origine(l)}</div>
-                        </td>
-                        <td className={cn(td, 'pt-1.5 text-right tabular-nums')}>{fmt.nombre(l.poids_net_kg, 2)}</td>
-                        <td className={cn(td, 'pt-1.5 text-right tabular-nums text-attenue-texte')}>{fmt.nombre(l.deja_recu_kg, 2)}</td>
-                        <td className={cn(td, 'pt-1.5 text-right tabular-nums')}>{fmt.nombre(l.reste_kg, 2)}</td>
-                        <td className={td} inert={verrou}>
-                          <Champ className={cn(champ, 'text-right', horsTolerance && 'border-danger')} inputMode="decimal"
-                            value={l.quantite} disabled={!editable} onChange={(e) => majColis(l.id_ligne, 'quantite', e.target.value)} />
-                          {horsTolerance && <div className="text-[10.5px] text-danger">au-delà du reste + {TOLERANCE_PCT} %</div>}
-                        </td>
-                        <td className={cn(td, 'pt-1.5 text-right tabular-nums', Math.abs(ecart) > 0.5 && 'text-alerte')}>
-                          {statut === 'VALIDEE' ? '—' : fmt.nombre(ecart, 2)}
-                        </td>
-                        <td className={td} inert={verrou}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.bobines} disabled={!editable} onChange={(e) => majColis(l.id_ligne, 'bobines', e.target.value)} /></td>
-                        <td className={td} inert={verrou}>
-                          <div className="flex items-center gap-1">
-                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.palettes} disabled={!editable} onChange={(e) => majColis(l.id_ligne, 'palettes', e.target.value)} />
-                            {editable && (
-                              <button type="button" onClick={() => majLigne(l.id_ligne, { lie: !l.lie })}
-                                title={l.lie ? 'Poids, bobines et palettes se répondent — cliquez pour saisir chacun séparément' : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'}
-                                aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                className={cn('shrink-0 rounded-[var(--radius)] p-1', l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
-                                {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className={td} inert={verrou}><Champ className={champ} value={l.lot} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { lot: e.target.value })} /></td>
-                        <td className={td} inert={verrou}><Champ className={champ} value={l.couleur} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { couleur: e.target.value })} /></td>
-                        <td className={td} inert={verrou}><Champ className={champ} value={l.libelleCouleur} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { libelleCouleur: e.target.value })} /></td>
-                        <td className={td} inert={verrou}>
-                          <Selecteur className={champ} value={l.magasin} disabled={!editable} onChange={(e) => majLigne(l.id_ligne, { magasin: e.target.value })}>
-                            <option value="">Choisir…</option>
-                            {(qMagasins.data ?? []).map((m) => (
-                              <option key={m.code_magasin} value={m.code_magasin}>{m.nom}</option>
-                            ))}
-                          </Selecteur>
-                        </td>
-                        <td className={td} inert={verrou}>
-                          <Selecteur className={cn(champ, l.qualite !== 'CONFORME' && 'border-alerte')} value={l.qualite} disabled={!editable}
-                            onChange={(e) => majLigne(l.id_ligne, { qualite: e.target.value as Qualite })}>
-                            {QUALITES.map((q) => (
-                              <option key={q.v} value={q.v}>{q.l}</option>
-                            ))}
-                          </Selecteur>
-                        </td>
-                        {editable && (
-                          <td className={cn(td, 'whitespace-nowrap pt-1.5')}>
-                            <Bouton taille="icone-xs" variante="discret"
-                              className={verrou ? 'text-attenue-texte hover:bg-attenue' : 'text-succes hover:bg-succes/10'}
-                              disabled={!verrou && !(nombre(l.quantite) > 0 && l.magasin)}
-                              aria-label={verrou ? 'Modifier la ligne' : 'Valider la ligne'}
-                              title={verrou ? 'Ligne validée — cliquez pour la modifier' : nombre(l.quantite) > 0 && l.magasin ? 'Valider cette ligne — elle partira avec « Enregistrer »' : 'Saisissez le poids reçu et le magasin'}
-                              onClick={() => majLigne(l.id_ligne, { valide: !l.valide })}>
-                              {verrou ? <Pencil /> : <Check />}
-                            </Bouton>
-                            <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
-                              onClick={() => { setLignes((ls) => ls.filter((x) => x.id_ligne !== l.id_ligne)); setModifie(true) }}>
-                              <Trash2 />
-                            </Bouton>
+                      <Fragment key={l.id_ligne}>
+                        <tr className={cn('align-top', fond)}>
+                          <td className={cn(td, 'pt-2')}>
+                            <div className="font-medium">{l.code_reference}</div>
+                            <div className="text-[11px] text-attenue-texte">{origine(l)}</div>
                           </td>
-                        )}
-                      </tr>
+                          <td className={cn(td, 'pt-2 text-right tabular-nums')}>
+                            <div className="font-medium">{fmt.nombre(l.reste_kg, 2)} kg</div>
+                            <div className="text-[11px] text-attenue-texte">
+                              facturé {fmt.nombre(l.poids_net_kg, 0)}
+                              {l.deja_recu_kg > 0 && ` · reçu ${fmt.nombre(l.deja_recu_kg, 0)}`}
+                            </div>
+                          </td>
+                          <td className={td} inert={verrou}>
+                            <Champ className={cn(champ, 'text-right', horsTolerance && 'border-danger')} inputMode="decimal"
+                              value={l.quantite} disabled={!editable} aria-label="Poids reçu en kg"
+                              onChange={(e) => majColis(l.id_ligne, 'quantite', e.target.value)} />
+                            {horsTolerance ? (
+                              <div className="text-right text-[10.5px] text-danger">au-delà du reste + {TOLERANCE_PCT} %</div>
+                            ) : statut !== 'VALIDEE' && Math.abs(ecart) > 0.5 ? (
+                              <div className="text-right text-[10.5px] tabular-nums text-alerte">
+                                écart {ecart > 0 ? '+' : ''}{fmt.nombre(ecart, 2)} kg
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className={td} inert={verrou}>
+                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.bobines} disabled={!editable}
+                              aria-label="Bobines" onChange={(e) => majColis(l.id_ligne, 'bobines', e.target.value)} />
+                          </td>
+                          <td className={td} inert={verrou}>
+                            <div className="flex items-center gap-1">
+                              <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.palettes} disabled={!editable}
+                                aria-label="Palettes" onChange={(e) => majColis(l.id_ligne, 'palettes', e.target.value)} />
+                              {editable && (
+                                <button type="button" onClick={() => majLigne(l.id_ligne, { lie: !l.lie })}
+                                  title={l.lie ? 'Poids, bobines et palettes se répondent — cliquez pour saisir chacun séparément' : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'}
+                                  aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                                  className={cn('shrink-0 rounded-[var(--radius)] p-1', l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
+                                  {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className={td} inert={verrou}>
+                            <Selecteur className={champ} value={l.magasin} disabled={!editable} aria-label="Magasin"
+                              onChange={(e) => majLigne(l.id_ligne, { magasin: e.target.value })}>
+                              <option value="">Choisir…</option>
+                              {(qMagasins.data ?? []).map((m) => (
+                                <option key={m.code_magasin} value={m.code_magasin}>{m.nom}</option>
+                              ))}
+                            </Selecteur>
+                          </td>
+                          <td className={td} inert={verrou}>
+                            <Selecteur className={cn(champ, l.qualite !== 'CONFORME' && 'border-alerte')} value={l.qualite} disabled={!editable}
+                              aria-label="Qualité" onChange={(e) => majLigne(l.id_ligne, { qualite: e.target.value as Qualite })}>
+                              {QUALITES.map((q) => (
+                                <option key={q.v} value={q.v}>{q.l}</option>
+                              ))}
+                            </Selecteur>
+                          </td>
+                          {editable && (
+                            <td className={cn(td, 'whitespace-nowrap pt-1.5')} rowSpan={2}>
+                              <Bouton taille="icone-xs" variante="discret"
+                                className={verrou ? 'text-attenue-texte hover:bg-attenue' : 'text-succes hover:bg-succes/10'}
+                                disabled={!verrou && !(nombre(l.quantite) > 0 && l.magasin)}
+                                aria-label={verrou ? 'Modifier la ligne' : 'Valider la ligne'}
+                                title={verrou ? 'Ligne validée — cliquez pour la modifier' : nombre(l.quantite) > 0 && l.magasin ? 'Valider cette ligne — elle partira avec « Enregistrer »' : 'Saisissez le poids reçu et le magasin'}
+                                onClick={() => majLigne(l.id_ligne, { valide: !l.valide })}>
+                                {verrou ? <Pencil /> : <Check />}
+                              </Bouton>
+                              <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
+                                onClick={() => { setLignes((ls) => ls.filter((x) => x.id_ligne !== l.id_ligne)); setModifie(true) }}>
+                                <Trash2 />
+                              </Bouton>
+                            </td>
+                          )}
+                        </tr>
+                        <tr className={cn('border-b border-bordure/60', fond)}>
+                          <td colSpan={7} className="px-2 pb-2 pt-0.5" inert={verrou}>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                              <label className="flex items-center gap-1.5 text-[11px] text-attenue-texte">
+                                Lot
+                                <Champ className={cn(champ, 'w-48')} value={l.lot} disabled={!editable}
+                                  placeholder="du fournisseur" onChange={(e) => majLigne(l.id_ligne, { lot: e.target.value })} />
+                              </label>
+                              <label className="flex items-center gap-1.5 text-[11px] text-attenue-texte">
+                                Code couleur
+                                <Champ className={cn(champ, 'w-32')} value={l.couleur} disabled={!editable}
+                                  onChange={(e) => majLigne(l.id_ligne, { couleur: e.target.value })} />
+                              </label>
+                              <label className="flex items-center gap-1.5 text-[11px] text-attenue-texte">
+                                Libellé couleur
+                                <Champ className={cn(champ, 'w-56')} value={l.libelleCouleur} disabled={!editable}
+                                  onChange={(e) => majLigne(l.id_ligne, { libelleCouleur: e.target.value })} />
+                              </label>
+                            </div>
+                            <AvisColisage kg={l.quantite} bobines={l.bobines} palettes={l.palettes} cond={l.cond} />
+                          </td>
+                        </tr>
+                      </Fragment>
                     )
                   })}
                 </tbody>
                 <tfoot>
                   <tr className="bg-attenue/40 font-semibold">
                     <td className={td}>Total de la réception</td>
-                    <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(total((l) => l.poids_net_kg), 2)}</td>
-                    <td className={td} />
-                    <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(total((l) => l.reste_kg), 2)}</td>
-                    <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(total((l) => nombre(l.quantite)), 2)}</td>
-                    <td className={cn(td, 'text-right tabular-nums')}>{statut === 'VALIDEE' ? '—' : fmt.nombre(total(ecartDe), 2)}</td>
+                    <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(total((l) => l.reste_kg), 2)} kg</td>
+                    <td className={cn(td, 'text-right tabular-nums')}>
+                      {fmt.nombre(total((l) => nombre(l.quantite)), 2)}
+                      {statut !== 'VALIDEE' && Math.abs(total(ecartDe)) > 0.5 && (
+                        <div className="text-[10.5px] font-normal text-alerte">écart {fmt.nombre(total(ecartDe), 2)} kg</div>
+                      )}
+                    </td>
                     <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(total((l) => nombre(l.bobines || 0)))}</td>
                     <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(total((l) => nombre(l.palettes || 0)))}</td>
-                    <td className={td} colSpan={editable ? 6 : 5} />
+                    <td className={td} colSpan={editable ? 3 : 2} />
                   </tr>
                 </tfoot>
               </table>

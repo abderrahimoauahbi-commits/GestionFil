@@ -23,12 +23,14 @@
  *   arrondir a l'ecran faisait disparaitre le quatrieme chiffre d'un prix
  *   negocie au millieme.
  */
+import { Fragment } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { Check, Link2, Pencil, Plus, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
 import { couleurEcart } from '../lib/lots'
+import { AvisColisage } from './AvisColisage'
 import {
   type Conditionnement,
   depuisBobines,
@@ -455,6 +457,12 @@ export function corpsLigne(l: LigneSaisie) {
 const cellule = 'px-1.5 py-1 align-top'
 
 export interface ProprietesGrille {
+  /**
+   * Documents d'achat (bon, reception) : kilos, bobines et palettes sont
+   * confrontes a la fiche article, et l'ecart est SIGNALE sous la ligne —
+   * jamais bloquant (08/10/2026).
+   */
+  controleColisage?: boolean
   codeFournisseur: string
   devise: string
   lignes: LigneSaisie[]
@@ -592,6 +600,7 @@ export function GrilleLignes({
   doublonsReference = false,
   libelles,
   poidsBobine,
+  controleColisage = false,
 }: ProprietesGrille) {
   const prises = doublonsReference
     ? new Set<string>()
@@ -797,10 +806,19 @@ export function GrilleLignes({
                 // `inert` FIGE LES CELLULES, pas la ligne : le bouton d'action
                 // reste cliquable, sans quoi une ligne validee ne se rouvrirait plus.
                 const verrou = validationLocale && !!l.valide
+                const nbColonnes =
+                  6 +
+                  (poidsBobine ? 1 : 0) +
+                  (sansPrix ? 0 : 2 + (avecRemise ? 1 : 0)) +
+                  (sansFournisseur ? 0 : 3) +
+                  colonnesSupplementaires.length
                 return (
+                  <Fragment key={l.cle}>
                   <tr
-                    key={l.cle}
-                    className={cn('border-b border-bordure/60', verrou && 'bg-succes/[0.05]')}
+                    className={cn(
+                      verrou && 'bg-succes/[0.05]',
+                      controleColisage && marchandise ? '' : 'border-b border-bordure/60',
+                    )}
                   >
                     <td className="px-1 py-1 text-right tabular-nums text-attenue-texte">{i + 1}</td>
 
@@ -1229,6 +1247,15 @@ export function GrilleLignes({
                       </Bouton>
                     </td>
                   </tr>
+                  {controleColisage && marchandise && (
+                    <tr className="border-b border-bordure/60">
+                      <td />
+                      <td colSpan={nbColonnes - 1} className="px-1.5 pb-1">
+                        <AvisColisage kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} className="mt-0" />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

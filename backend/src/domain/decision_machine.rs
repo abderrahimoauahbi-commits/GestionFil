@@ -79,6 +79,10 @@ pub struct Calculee {
     /// ni constate : ce que l'ecran montre a cote du % declare.
     pub pourcentage_theorique: Option<f64>,
     pub ecart_kg: f64,
+    /// VERT, ORANGE ou ROUGE selon les seuils machine (regle 1) ; AUCUN sans
+    /// ecart. Orange se confirme a l'ecran ; rouge exige le droit de valider
+    /// l'inventaire et un motif ecrit.
+    pub niveau_ecart: String,
     pub effet_ecart: String,
     pub code_motif: String,
     pub motif_texte: Option<String>,
@@ -179,13 +183,72 @@ async fn motifs(c: &mut sqlx::PgConnection) -> AppResult<HashMap<String, Motif>>
 /// validation : l'ecran montre exactement ce qui sera enregistre.
 /// `privilegie` : l'administrateur ou le directeur, seuls admis a rendre au
 /// magasin plus de kilos que la ligne n'en portait (correction de leur fait).
+/// LES SEUILS D'ECART MACHINE (regle 1, 08/10/2026) : le plus grand d'un poids
+/// fixe et d'un pourcentage du poids de la ligne. Vert jusqu'a MAX(10 kg, 1 %),
+/// rouge au-dela de MAX(50 kg, 5 %), orange entre les deux.
+pub struct SeuilsEcart {
+    vert_kg: f64,
+    vert_pct: f64,
+    rouge_kg: f64,
+    rouge_pct: f64,
+}
+
+async fn seuils_ecart(c: &mut sqlx::PgConnection) -> AppResult<SeuilsEcart> {
+    let val = |v: Option<f64>, d: f64| v.filter(|x| *x >= 0.0).unwrap_or(d);
+    let lire = |code: &'static str| {
+        sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT CAST(valeur_courante AS float8) FROM parametre WHERE code_parametre = $1",
+        )
+        .bind(code)
+    };
+    Ok(SeuilsEcart {
+        vert_kg: val(lire("P_MachineEcartVertKg").fetch_optional(&mut *c).await?.flatten(), 10.0),
+        vert_pct: val(lire("P_MachineEcartVertPct").fetch_optional(&mut *c).await?.flatten(), 1.0),
+        rouge_kg: val(lire("P_MachineEcartRougeKg").fetch_optional(&mut *c).await?.flatten(), 50.0),
+        rouge_pct: val(lire("P_MachineEcartRougePct").fetch_optional(&mut *c).await?.flatten(), 5.0),
+    })
+}
+
+/// Le niveau d'un ecart, rapporte au poids de la ligne.
+pub fn niveau_ecart(ecart_kg: f64, poids_ligne_kg: f64, s: &SeuilsEcart) -> &'static str {
+    let e = ecart_kg.abs();
+    if e < 0.0005 {
+        return "AUCUN";
+    }
+    let base = poids_ligne_kg.abs();
+    let vert = s.vert_kg.max(base * s.vert_pct / 100.0);
+    let rouge = s.rouge_kg.max(base * s.rouge_pct / 100.0);
+    if e <= vert {
+        "VERT"
+    } else if e > rouge {
+        "ROUGE"
+    } else {
+        "ORANGE"
+    }
+}
+
+/// Celui qui peut valider un ecart rouge : le droit de valider l'inventaire —
+/// un ecart rouge corrige le stock, comme une cloture d'inventaire.
+pub async fn peut_valider_ecart_rouge(c: &mut sqlx::PgConnection, role: &str) -> AppResult<bool> {
+    Ok(role == "ADMIN"
+        || sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM permission
+                             WHERE code_role_user = $1 AND module = 'INVENTAIRE' AND action = 'VALIDER')",
+        )
+        .bind(role)
+        .fetch_one(&mut *c)
+        .await?)
+}
+
 pub async fn calculer(
     c: &mut sqlx::PgConnection,
     f: &FicheDecision,
     saisies: &[Saisie],
     capacite: i64,
     privilegie: bool,
+    autorise_rouge: bool,
 ) -> AppResult<Calcul> {
+    let seuils = seuils_ecart(c).await?;
     let avant = etat_etage(c, &f.code_emplacement).await?;
     let par_cle: HashMap<String, EtatLigne> =
         avant.iter().map(|e| (cle(&e.code_reference, &e.lot_fournisseur), e.clone())).collect();
@@ -212,7 +275,15 @@ pub async fn calculer(
         // ici ferait naitre un ecart sur une ligne que personne n'a touchee. Il
         // ne sert que pour une ligne qui arrive sur l'etage.
         let nominal_etage = e.and_then(|e| e.poids_unitaire_kg).filter(|p| *p > 0.0);
-        let nominal: Option<f64> = match nominal_etage {
+        // LE POIDS DECLARE AU CHARGEMENT DEVIENT LE NOMINAL DE LA LIGNE (regle 2,
+        // 08/10/2026). Une ligne qui arrive sur l'etage prenait le poids du
+        // catalogue meme quand le magasinier avait declare le poids reel de ses
+        // bobines. Desormais le poids declare fait le nominal de la ligne, fige
+        // ensuite ; le catalogue n'est qu'une proposition.
+        let declare = (f.type_fiche == "CHARGE" && nominal_etage.is_none())
+            .then(|| s.poids_retenu.filter(|p| *p > 0.0))
+            .flatten();
+        let nominal: Option<f64> = match nominal_etage.or(declare) {
             Some(p) => Some(p),
             None => sqlx::query_scalar::<_, Option<f64>>(
                 "SELECT poids_bobine_kg::float8 FROM reference WHERE code_reference = $1",
@@ -259,6 +330,7 @@ pub async fn calculer(
             kg_apres: kg_avant,
             pourcentage_theorique: None,
             ecart_kg: 0.0,
+            niveau_ecart: "AUCUN".into(),
             effet_ecart: "AUCUN".into(),
             code_motif: code_motif.clone(),
             motif_texte: s.motif_texte.clone().filter(|t| !t.trim().is_empty()),
@@ -395,6 +467,27 @@ pub async fn calculer(
             // exactement ce qu'elle portait.
             calc.kg_mouvementes = arrondi_kg(calc.kg_mouvementes + calc.ecart_kg);
             calc.ecart_kg = 0.0;
+        }
+
+        // LE NIVEAU DE L'ECART (regle 1) : rapporte au poids de la ligne — ce
+        // qu'elle portait, plus ce qu'on y charge.
+        let poids_ligne = if f.type_fiche == "CHARGE" { kg_avant + calc.kg_mouvementes } else { kg_avant };
+        calc.niveau_ecart = niveau_ecart(calc.ecart_kg, poids_ligne, &seuils).to_string();
+        if calc.niveau_ecart == "ROUGE" {
+            let seuil = seuils.rouge_kg.max(poids_ligne.abs() * seuils.rouge_pct / 100.0);
+            if !autorise_rouge {
+                blocages.push(format!(
+                    "{lib} : ecart de {} kg, au-dela du seuil rouge ({} kg) — la validation revient a la Direction (droit de valider l'inventaire)",
+                    calc.ecart_kg,
+                    arrondi_kg(seuil)
+                ));
+            }
+            if calc.motif_texte.is_none() {
+                blocages.push(format!(
+                    "{lib} : ecart rouge de {} kg — ecrivez ce qui l'explique dans le commentaire du motif",
+                    calc.ecart_kg
+                ));
+            }
         }
 
         // L'EFFET DE L'ECART, selon la matrice.
@@ -743,7 +836,8 @@ pub async fn valider(
     capacite: i64,
 ) -> AppResult<Value> {
     let privilegie = matches!(user.role.as_str(), "ADMIN" | "DIRECTION");
-    let calc = calculer(c, f, saisies, capacite, privilegie).await?;
+    let autorise_rouge = peut_valider_ecart_rouge(c, &user.role).await?;
+    let calc = calculer(c, f, saisies, capacite, privilegie, autorise_rouge).await?;
     if !calc.blocages.is_empty() {
         return Err(AppError::RegleMetier(calc.blocages.join(" ; ")));
     }
@@ -1212,4 +1306,30 @@ pub async fn journal_changement_etage(
 ) -> AppResult<()> {
     journal(c, user, Some(id_fiche), None, "CHANGEMENT_ETAGE", nouveau, None, json!({ "ancien": ancien, "nouveau": nouveau }))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{niveau_ecart, SeuilsEcart};
+
+    fn seuils() -> SeuilsEcart {
+        SeuilsEcart { vert_kg: 10.0, vert_pct: 1.0, rouge_kg: 50.0, rouge_pct: 5.0 }
+    }
+
+    #[test]
+    fn petite_ligne_seuils_en_kilos() {
+        // 400 kg : 1 % = 4 kg, 5 % = 20 kg — les kilos l'emportent.
+        assert_eq!(niveau_ecart(8.0, 400.0, &seuils()), "VERT");
+        assert_eq!(niveau_ecart(-30.0, 400.0, &seuils()), "ORANGE");
+        assert_eq!(niveau_ecart(60.0, 400.0, &seuils()), "ROUGE");
+    }
+
+    #[test]
+    fn grosse_ligne_seuils_en_pourcentage() {
+        // 3 000 kg : 1 % = 30 kg, 5 % = 150 kg.
+        assert_eq!(niveau_ecart(25.0, 3000.0, &seuils()), "VERT");
+        assert_eq!(niveau_ecart(120.0, 3000.0, &seuils()), "ORANGE");
+        assert_eq!(niveau_ecart(151.0, 3000.0, &seuils()), "ROUGE");
+        assert_eq!(niveau_ecart(0.0, 3000.0, &seuils()), "AUCUN");
+    }
 }

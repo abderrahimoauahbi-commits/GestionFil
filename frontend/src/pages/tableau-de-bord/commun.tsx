@@ -58,6 +58,8 @@ export function useFiles(): { files: File[]; chargement: boolean; erreur: boolea
   const droits = useDroits('COCKPIT')
   const { peut } = useAuth()
   const lisStock = peut('STOCK', 'LIRE')
+  const { moi } = useAuth()
+  const decideLots = peut('LOTS', 'VALIDER') || moi?.role === 'DIRECTION'
   const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Record<string, unknown>>('/api/cockpit') })
   const qLots = useQuery({
     queryKey: ['cockpit-lots'],
@@ -79,10 +81,10 @@ export function useFiles(): { files: File[]; chargement: boolean; erreur: boolea
     { champ: 'nb_lignes_non_conformes', domaine: 'QUALITE', libelle: 'Lignes non conformes', valeur: nn('nb_lignes_non_conformes'), ton: 'danger', Icone: PackageX, vers: '/receptions', actionnable: peut('RECEPTIONS', 'LIRE') },
     { champ: 'nb_refs_dormantes', domaine: 'STOCK', libelle: 'Références dormantes', valeur: nn('nb_refs_dormantes'), ton: 'alerte', Icone: Moon, vers: '/stock', actionnable: peut('STOCK', 'LIRE') },
     { champ: 'lots_a_basculer', domaine: 'STOCK', libelle: 'Lots à basculer', valeur: nl('lots_a_basculer'), ton: 'alerte', Icone: ArrowDownUp, vers: '/lots?vue=a_basculer', actionnable: peut('STOCK', 'ECRIRE'), horsGrille: true },
-    { champ: 'lots_dormants', domaine: 'STOCK', libelle: 'Lots dormants', valeur: nl('lots_dormants'), ton: 'alerte', Icone: Moon, vers: '/lots?vue=dormants', actionnable: peut('STOCK', 'VALIDER'), horsGrille: true },
-    { champ: 'lots_bloques', domaine: 'QUALITE', libelle: 'Lots bloqués', valeur: nl('lots_bloques'), ton: 'danger', Icone: Lock, vers: '/lots?vue=bloques', actionnable: peut('STOCK', 'VALIDER'), horsGrille: true },
+    { champ: 'lots_dormants', domaine: 'STOCK', libelle: 'Lots dormants', valeur: nl('lots_dormants'), ton: 'alerte', Icone: Moon, vers: '/lots?vue=dormants', actionnable: decideLots, horsGrille: true },
+    { champ: 'lots_bloques', domaine: 'QUALITE', libelle: 'Lots bloqués', valeur: nl('lots_bloques'), ton: 'danger', Icone: Lock, vers: '/lots?vue=bloques', actionnable: decideLots, horsGrille: true },
     { champ: 'lots_en_derive', domaine: 'QUALITE', libelle: 'Lots en dérive de poids', valeur: nl('lots_en_derive'), ton: 'alerte', Icone: Scale, vers: '/lots?vue=derive', actionnable: lisStock, horsGrille: true },
-    { champ: 'autorisations_en_attente', domaine: 'STOCK', libelle: 'Autorisations à donner', valeur: nl('autorisations_en_attente'), ton: 'danger', Icone: ShieldCheck, vers: '/autorisations', actionnable: peut('STOCK', 'VALIDER'), horsGrille: true },
+    { champ: 'autorisations_en_attente', domaine: 'STOCK', libelle: 'Autorisations à donner', valeur: nl('autorisations_en_attente'), ton: 'danger', Icone: ShieldCheck, vers: '/autorisations', actionnable: decideLots, horsGrille: true },
     { champ: 'nb_controles_bloquants', domaine: 'QUALITE', libelle: 'Contrôles bloquants', valeur: nn('nb_controles_bloquants'), ton: 'danger', Icone: AlertTriangle, vers: '/controles', actionnable: true },
   ]
   const mesFiles = files

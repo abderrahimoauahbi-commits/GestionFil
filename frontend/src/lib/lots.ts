@@ -41,3 +41,19 @@ export type CouleurEcart = 'vert' | 'orange' | 'rouge'
 /** La couleur d'un ecart en %, selon les tolerances. */
 export const couleurEcart = (pct: number | null, t: { orange: number; rouge: number }): CouleurEcart | null =>
   pct == null || !Number.isFinite(pct) ? null : Math.abs(pct) > t.rouge ? 'rouge' : Math.abs(pct) > t.orange ? 'orange' : 'vert'
+
+/** Les seuils du controle de colisage (parametres P_ColisageTol*). */
+export function useTolerancesColisage() {
+  const q = useQuery({
+    queryKey: ['parametres'],
+    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const val = (code: string, defaut: number) => {
+    const p = q.data?.find((x) => x.code_parametre === code)
+    const n = p ? Number(p.valeur_courante) : NaN
+    return Number.isFinite(n) ? n : defaut
+  }
+  return { alerte: val('P_ColisageTolAlertePct', 10), refus: val('P_ColisageTolRefusPct', 25) }
+}

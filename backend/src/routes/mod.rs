@@ -368,6 +368,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/receptions/{id}/statut", put(stock::changer_statut_reception))
         .route("/api/receptions/{id}/valider", post(operations::valider_reception))
+        .route("/api/receptions/{id}/cloturer", post(operations::cloturer_reception))
         .route("/api/plan-achat", get(consultation::plan_achat))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))

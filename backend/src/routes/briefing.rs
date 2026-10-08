@@ -105,6 +105,23 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
     }
 
     if peut(module::BONS_COMMANDE) {
+        // Regle 18 : un taux de reference de plus de P_AncienneteTauxJours
+        // bloque la validation des bons dans cette devise. On le dit avant.
+        let perimes = compter(
+            db,
+            "SELECT count(DISTINCT t.code_devise) FROM taux_change t
+              WHERE t.code_devise <> 'MAD' AND t.date_fin IS NULL
+                AND substr(t.date_debut, 1, 10)::date
+                    < current_date - COALESCE((SELECT CAST(valeur_courante AS integer) FROM parametre
+                                                WHERE code_parametre = 'P_AncienneteTauxJours'), 7)
+                AND NOT EXISTS (SELECT 1 FROM taux_change t2
+                                 WHERE t2.code_devise = t.code_devise AND t2.date_debut > t.date_debut)",
+        )
+        .await;
+        if perimes > 0 {
+            points.push(point("taux_perimes", "taux de change à mettre à jour", perimes, "alerte",
+                              "/configuration", "plus de 7 jours : les bons en devise ne se valident pas"));
+        }
         let n = compter(
             db,
             "SELECT count(*) FROM bon_commande

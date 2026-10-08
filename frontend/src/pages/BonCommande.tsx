@@ -1081,6 +1081,7 @@ export function BonCommande() {
           <CarteCorps className={modifiable ? 'space-y-3' : 'p-0'}>
             {modifiable && bc ? (
               <GrilleLignes
+                controleColisage
                 codeFournisseur={bc.code_fournisseur}
                 devise={entete.code_devise || bc.code_devise}
                 lignes={nouvelles}

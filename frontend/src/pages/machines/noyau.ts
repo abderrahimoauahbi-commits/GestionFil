@@ -149,9 +149,18 @@ export interface LigneCalculee {
   kg_apres: number
   pourcentage_theorique: number | null
   ecart_kg: number
+  /** VERT, ORANGE, ROUGE (regle 1) ou AUCUN. */
+  niveau_ecart?: 'AUCUN' | 'VERT' | 'ORANGE' | 'ROUGE'
   effet_ecart: string
   code_motif: string
   motif_texte: string | null
+}
+
+/** La couleur d'un niveau d'ecart machine, en classes de theme. */
+export const TON_ECART: Record<string, string> = {
+  VERT: 'text-succes',
+  ORANGE: 'text-alerte',
+  ROUGE: 'text-danger',
 }
 
 export interface Apercu {

@@ -83,7 +83,8 @@ INSERT INTO permission (code_role_user, module, action) VALUES
     ('DIRECTION','MOUVEMENTS',   'VALIDER'),
     ('ACHAT',    'BONS_COMMANDE','VALIDER'),   -- plafonne a 100k MAD (B4 regle 3)
     ('QUALITE',  'RECEPTIONS',   'VALIDER'),
-    ('MAGASIN',  'MOUVEMENTS',   'VALIDER');
+    ('MAGASIN',  'MOUVEMENTS',   'VALIDER'),
+    ('DIRECTION','LOTS',         'VALIDER');
     -- MAGASIN / INVENTAIRE / VALIDER retire le 08/10/2026 (regle 10) : celui qui
     -- compte ne cloture pas son propre comptage.
 

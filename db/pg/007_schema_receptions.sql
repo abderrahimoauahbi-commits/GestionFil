@@ -52,6 +52,12 @@ CREATE TABLE reception (
     id_utilisateur_controle  text REFERENCES utilisateur(id_utilisateur),
     date_controle       text,
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    -- LA VALEUR DEFINITIVE (regle 6, 08/10/2026) : la facture et ses frais,
+    -- portes au stock a la cloture (domain/facture_locale.rs).
+    montant_facture_mad numeric(18,2),
+    frais_facture_mad   numeric(18,2),
+    date_cloture        text,
+    id_utilisateur_cloture text REFERENCES utilisateur(id_utilisateur),
 
     -- B4 regle 2 : le magasinier qui pese n'est pas celui qui libere la marchandise
     CHECK (id_utilisateur_controle IS NULL
@@ -198,3 +204,27 @@ CREATE TABLE archive_reception (
 
 CREATE INDEX ix_archive_ref  ON archive_reception(code_reference, date_reception DESC);
 CREATE INDEX ix_archive_four ON archive_reception(code_fournisseur, date_reception DESC);
+
+-- -----------------------------------------------------------------------------
+-- reception_ajustements_cmup — ce que la cloture d'une reception locale a fait
+-- au CMUP (regle 6). IMMUABLE (declencheur dans 010_declencheurs.sql).
+--   STOCK      : une ligne par magasin ou la reference restait en stock.
+--   ECART_PRIX : la part qui revenait aux kilos deja sortis, tracee hors CMUP.
+-- -----------------------------------------------------------------------------
+CREATE TABLE reception_ajustements_cmup (
+    id_ajustement       text    NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    id_reception        text    NOT NULL REFERENCES reception(id_reception),
+    code_reference      text    NOT NULL REFERENCES reference(code_reference),
+    nature              text    NOT NULL CHECK (nature IN ('STOCK','ECART_PRIX')),
+    code_magasin        text    REFERENCES magasin(code_magasin),
+    quantite_recue_kg   numeric(18,4) NOT NULL CHECK (quantite_recue_kg >= 0),
+    stock_kg            numeric(18,4) NOT NULL CHECK (stock_kg >= 0),
+    cmup_avant          numeric(18,4),
+    cmup_apres          numeric(18,4),
+    montant_mad         numeric(18,2) NOT NULL,
+    date_ajustement     text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    id_utilisateur      text    NOT NULL REFERENCES utilisateur(id_utilisateur),
+    CHECK ((nature = 'STOCK' AND code_magasin IS NOT NULL AND cmup_apres IS NOT NULL)
+        OR (nature = 'ECART_PRIX' AND code_magasin IS NULL))
+);
+CREATE INDEX ix_rec_ajust_reception ON reception_ajustements_cmup(id_reception);

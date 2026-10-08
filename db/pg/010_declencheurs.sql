@@ -736,6 +736,85 @@ BEFORE INSERT OR UPDATE OF quantite_stock_kg, quantite_commandee_kg, derogation_
 ON ligne_reception FOR EACH ROW
 EXECUTE FUNCTION fn_trg_ligne_reception_ecart();
 
+-- -----------------------------------------------------------------------------
+-- LA COHERENCE DU COLISAGE (08/10/2026)
+-- -----------------------------------------------------------------------------
+-- Kilos, bobines et palettes disent la meme marchandise. Une facture saisie a
+-- 4 032 kg, 1 920 bobines et 20 palettes pour un fil de 2,1 kg la bobine et
+-- 336 bobines par palette ne decrit rien de reel : il faut 6 palettes, pas 20
+-- (des colis ou des cartons avaient ete saisis comme palettes). Le controle
+-- raisonne a partir de la fiche article :
+--   * le poids moyen d'une bobine (kilos / bobines) ne s'ecarte pas de la fiche
+--     de plus de P_ColisageTolRefusPct (25 %) ;
+--   * les palettes ne depassent pas le minimum necessaire plus une palette
+--     entamee, et aucune palette ne porte plus que sa capacite (+ la meme
+--     tolerance).
+-- Sans bobines, le nombre de bobines se deduit des kilos. Une fiche sans poids
+-- de bobine ou sans colisage ne permet pas de juger : on ne juge pas.
+-- Rend NULL si la ligne est coherente, sinon le message qui explique.
+-- ON SIGNALE, ON NE BLOQUE PAS (decision du 08/10/2026) : l'ecran l'affiche sur
+-- la ligne a la saisie, et le controle C43 liste les documents ouverts qui
+-- portent encore une ligne incoherente.
+CREATE OR REPLACE FUNCTION fn_controle_colisage(p_ref text, p_kg numeric, p_bob numeric, p_pal numeric)
+RETURNS text AS $$
+DECLARE
+    v_pb    numeric;
+    v_bpp   numeric;
+    v_tol   numeric;
+    v_beff  numeric;
+    v_ecart numeric;
+    v_pmin  numeric;
+BEGIN
+    IF p_ref IS NULL THEN
+        RETURN NULL;
+    END IF;
+    SELECT NULLIF(poids_bobine_kg, 0), NULLIF(bobines_par_palette, 0) INTO v_pb, v_bpp
+      FROM reference WHERE code_reference = p_ref;
+    v_tol := COALESCE((SELECT CAST(valeur_courante AS numeric) FROM parametre
+                        WHERE code_parametre = 'P_ColisageTolRefusPct'), 25);
+
+    IF COALESCE(p_bob, 0) > 0 AND v_pb IS NOT NULL AND COALESCE(p_kg, 0) > 0 THEN
+        v_ecart := (p_kg / p_bob - v_pb) / v_pb * 100;
+        IF abs(v_ecart) > v_tol THEN
+            RETURN format('%s : %s kg pour %s bobines, soit %s kg par bobine, alors que la fiche en annonce %s (ecart %s %%, refus au-dela de %s %%). Verifiez les kilos et les bobines ; si le fournisseur a change de bobine, corrigez d''abord la fiche article.',
+                          p_ref, round(p_kg, 2), round(p_bob), round(p_kg / p_bob, 3), round(v_pb, 3),
+                          round(v_ecart, 1), round(v_tol));
+        END IF;
+    END IF;
+
+    v_beff := COALESCE(NULLIF(p_bob, 0), CASE WHEN v_pb IS NOT NULL THEN p_kg / v_pb END);
+    IF COALESCE(p_pal, 0) > 0 AND v_bpp IS NOT NULL AND COALESCE(v_beff, 0) > 0 THEN
+        v_pmin := ceil(v_beff / v_bpp - 0.000001);
+        IF p_pal > v_pmin + 1 THEN
+            RETURN format('%s : %s palettes pour %s bobines. A %s bobines par palette, il en faut %s (%s au plus avec une palette entamee). Des colis ou des cartons ont-ils ete saisis comme palettes ?',
+                          p_ref, round(p_pal), round(v_beff), round(v_bpp), v_pmin, v_pmin + 1);
+        END IF;
+        IF v_beff / p_pal > v_bpp * (1 + v_tol / 100.0) THEN
+            RETURN format('%s : %s bobines sur %s palette(s), soit %s par palette, alors qu''une palette en porte %s. Il faut au moins %s palettes.',
+                          p_ref, round(v_beff), round(p_pal), round(v_beff / p_pal), round(v_bpp), v_pmin);
+        END IF;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- La date ou une proposition est ecartee : elle expire ensuite (regle 17).
+CREATE OR REPLACE FUNCTION fn_trg_plan_achat_date_ecartee() RETURNS trigger AS $$
+BEGIN
+    IF NEW.statut = 'IGNORE' AND OLD.statut IS DISTINCT FROM 'IGNORE' THEN
+        NEW.date_ecartee := to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_plan_achat_date_ecartee
+BEFORE UPDATE OF statut ON plan_achat FOR EACH ROW EXECUTE FUNCTION fn_trg_plan_achat_date_ecartee();
+
+CREATE TRIGGER trg_rec_ajust_immuable
+BEFORE UPDATE OR DELETE ON reception_ajustements_cmup FOR EACH ROW
+EXECUTE FUNCTION fn_refuser('Le journal des ajustements de CMUP d''une reception est immuable.');
+
 CREATE TRIGGER trg_plan_achat_figement_trace
 BEFORE UPDATE OF figee ON plan_achat FOR EACH ROW
 WHEN (NEW.figee = 1

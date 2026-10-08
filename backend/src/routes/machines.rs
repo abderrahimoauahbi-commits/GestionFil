@@ -731,7 +731,8 @@ pub async fn apercu_fiche(
     let (f, saisies, capacite, _) = charger_decision(&mut tx, &id).await?;
     refuser_conso(&f.type_fiche)?;
     let privilegie = matches!(user.role.as_str(), "ADMIN" | "DIRECTION");
-    let calc = dm::calculer(&mut tx, &f, &saisies, capacite, privilegie).await?;
+    let autorise_rouge = dm::peut_valider_ecart_rouge(&mut tx, &user.role).await?;
+    let calc = dm::calculer(&mut tx, &f, &saisies, capacite, privilegie, autorise_rouge).await?;
     let mut blocages = calc.blocages.clone();
     if calc.blocages.is_empty() {
         blocages.extend(dm::controles_complementaires(&mut tx, &f, &calc).await?);

@@ -53,6 +53,7 @@ import {
   facteurVersKg,
   pourChamp,
 } from '../lib/conditionnement'
+import { AvisColisage } from '../composants/AvisColisage'
 
 const MODULE = 'RECEPTIONS'
 /** Un EXCEDENT au-dela exige une derogation motivee (controle C10) ; un manque, non. */
@@ -992,6 +993,8 @@ export function ReceptionNouvelle() {
                                     )}
                                   </button>
                                 </div>
+                                <AvisColisage className="max-w-[16rem]" kg={kgDe(l)} bobines={l.bobines}
+                                  palettes={l.palettes} cond={condDe(l)} />
                               </td>
                               <td
                                 className={cn(

@@ -30,6 +30,7 @@ import {
   LIBELLE_EFFET, LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue,
   type Apercu, type Destination, type Fiche, type FicheDetail, type LigneSaisie, type Machine,
   type TypeFiche, type Zone,
+  TON_ECART,
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
@@ -522,7 +523,10 @@ export function TableApercu({
               <td className="py-1 pr-2 text-right">{l.nb_apres} · {nb(l.kg_apres, 1)} kg</td>
               <td className="py-1 pr-2 text-right">{l.pourcentage_apres != null ? `${nb(l.pourcentage_apres, 1)} %` : '—'}</td>
               <td className="py-1 pr-2 text-right text-attenue-texte">{l.pourcentage_theorique != null ? `${nb(l.pourcentage_theorique, 1)} %` : '—'}</td>
-              <td className={cn('py-1 pr-2 text-right font-medium', l.ecart_kg < -0.0005 && 'text-alerte')}>{nb(l.ecart_kg, 1)} kg</td>
+              <td className={cn('py-1 pr-2 text-right font-medium', TON_ECART[l.niveau_ecart ?? ''] ?? (l.ecart_kg < -0.0005 && 'text-alerte'))}
+                title={l.niveau_ecart && l.niveau_ecart !== 'AUCUN' ? `Écart ${l.niveau_ecart.toLowerCase()}` : undefined}>
+                {nb(l.ecart_kg, 1)} kg
+              </td>
               <td className={cn('py-1 pr-2', l.effet_ecart === 'NON_QUALIFIE' || l.effet_ecart === 'REGULARISATION' ? 'text-alerte' : 'text-attenue-texte')}>
                 {LIBELLE_EFFET[l.effet_ecart] ?? l.effet_ecart}
               </td>

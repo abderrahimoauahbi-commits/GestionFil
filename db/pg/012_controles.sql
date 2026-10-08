@@ -108,6 +108,39 @@ WHERE lr.ecart_pct IS NOT NULL
   -- L'excedent seul (08/10/2026) : un manque est une livraison partielle.
   AND lr.ecart_pct > fn_tolerance_pesee(lr.id_reception);
 
+DROP VIEW IF EXISTS v_ctl_c43 CASCADE;
+CREATE OR REPLACE VIEW v_ctl_c43 AS
+-- C43 : colisage incoherent sur un document d'achat encore ouvert — kilos,
+-- bobines et palettes ne s'accordent pas avec la fiche article (08/10/2026).
+SELECT *
+  FROM (SELECT 'BON DE COMMANDE' AS document, bc.numero_bc AS numero, lb.code_reference,
+               lb.quantite_commandee_kg AS kg, lb.nb_bobines_saisi AS bobines, lb.nb_palettes_saisi AS palettes,
+               fn_controle_colisage(lb.code_reference, lb.quantite_commandee_kg,
+                                    lb.nb_bobines_saisi, lb.nb_palettes_saisi) AS message
+          FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
+         WHERE lb.type_ligne = 'MARCHANDISE' AND bc.statut NOT IN ('CLOTURE', 'ANNULE')
+        UNION ALL
+        SELECT 'FACTURE IMPORT', f.numero_facture, fl.code_reference, fl.poids_net_kg, fl.nb_bobines, fl.nb_palettes,
+               fn_controle_colisage(fl.code_reference, fl.poids_net_kg, fl.nb_bobines, fl.nb_palettes)
+          FROM import_facture_lignes fl
+          JOIN import_factures f ON f.id_facture = fl.id_facture
+          JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+         WHERE d.statut <> 'CLOTURE'
+        UNION ALL
+        SELECT 'RECEPTION IMPORT', r.numero, fl.code_reference, rl.quantite_recue_kg, rl.nb_bobines, rl.nb_palettes,
+               fn_controle_colisage(fl.code_reference, rl.quantite_recue_kg, rl.nb_bobines, rl.nb_palettes)
+          FROM import_reception_lignes rl
+          JOIN import_receptions r ON r.id_reception = rl.id_reception
+          JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+         WHERE r.statut IN ('BROUILLON', 'A_CONTROLER')
+        UNION ALL
+        SELECT 'RECEPTION', rc.numero_reception, lr.code_reference, lr.quantite_stock_kg,
+               lr.nb_bobines_saisi, lr.nb_palettes_saisi,
+               fn_controle_colisage(lr.code_reference, lr.quantite_stock_kg, lr.nb_bobines_saisi, lr.nb_palettes_saisi)
+          FROM ligne_reception lr JOIN reception rc ON rc.id_reception = lr.id_reception
+         WHERE rc.statut IN ('BROUILLON', 'A_CONTROLER')) x
+ WHERE x.message IS NOT NULL;
+
 -- C11 / C15 : DERIVE entre le solde cache (stock_magasin) et le grand livre.
 -- Controle central : stock_magasin est un cache recalculable, ligne_mouvement
 -- est la verite. Toute divergence signale un bug d'application.
@@ -521,4 +554,5 @@ SELECT 'C33', 'Emplacement de machine au-dela de sa capacite',          'BLOQUAN
 SELECT 'C34', 'Machine au-dela de sa capacite totale',                  'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c34) UNION ALL
 SELECT 'C35', 'Estimation de poids hors tolerance en machine',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c35) UNION ALL
 SELECT 'C36', 'Emplacement de machine sans inventaire recent',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c36) UNION ALL
-SELECT 'C37', 'Bobines sans kilos, ou kilos sans bobines, en machine',  'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c37);
+SELECT 'C37', 'Bobines sans kilos, ou kilos sans bobines, en machine',  'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c37) UNION ALL
+SELECT 'C43', 'Colisage incoherent sur un document d''achat ouvert',    'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c43);

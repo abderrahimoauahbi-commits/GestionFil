@@ -23,6 +23,7 @@ import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
+import { ClotureFacture } from './ReceptionCloture'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
   GrilleLignes,
@@ -989,10 +990,18 @@ export function Reception() {
 
       {!modifiable && !['ANNULE'].includes(rec.statut) && (
         <Alerte ton={rec.statut === 'VALIDE' || rec.statut === 'CLOTURE' ? 'succes' : 'info'} className="mb-3">
-          {rec.statut === 'VALIDE' || rec.statut === 'CLOTURE'
-            ? 'Reception validee : le stock, le CMUP et l’historique de prix ont ete mis a jour. Les lignes sont figees.'
-            : 'Reception figee.'}
+          {rec.statut === 'CLOTURE'
+            ? `Reception cloturee avec la facture${rec.numero_facture ? ` ${rec.numero_facture}` : ''} : la valeur definitive est au stock. Une correction passe par un avoir.`
+            : rec.statut === 'VALIDE'
+              ? 'Reception validee au prix du bon (valeur provisoire) : le stock, le CMUP et l’historique de prix ont ete mis a jour. La facture la rendra definitive.'
+              : 'Reception figee.'}
         </Alerte>
+      )}
+      {/* LA VALEUR DEFINITIVE (regle 6) : la facture, puis la cloture. */}
+      {rec.statut === 'VALIDE' && droits.peutValider && (
+        <div className="mb-3">
+          <ClotureFacture idReception={id!} numeroFacture={rec.numero_facture} surCloture={rafraichir} />
+        </div>
       )}
 
       {horsTolerance > 0 && (
@@ -1133,6 +1142,7 @@ export function Reception() {
                  comprendre. Le prix et les champs fournisseur sont masques :
                  une reception ne negocie rien, son prix vient du bon. */
               <GrilleLignes
+                controleColisage
                 codeFournisseur={rec.code_fournisseur ?? ''}
                 devise={rec.code_devise ?? 'MAD'}
                 lignes={nouvelles}

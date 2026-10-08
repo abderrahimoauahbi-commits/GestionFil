@@ -226,6 +226,17 @@ pub struct DecisionStatut {
     pub motif: String,
 }
 
+/// DECIDER D'UN LOT (regle 5, 08/10/2026) : accorder une derogation, bloquer,
+/// debloquer, trancher un dormant. Ces decisions demandaient STOCK / VALIDER,
+/// que seul l'administrateur detenait : la Direction ne pouvait pas repondre.
+/// L'autorite est desormais le droit VALIDER du module LOTS, ou la Direction.
+async fn exiger_decision_lot(state: &AppState, user: &Utilisateur) -> AppResult<()> {
+    if user.role == "DIRECTION" {
+        return Ok(());
+    }
+    user.exiger(&state.db, module::LOTS, Action::Valider).await
+}
+
 /// `POST /api/lots/statut` — BLOCAGE QUALITE (regle 4). Un lot bloque ne bouge
 /// plus du tout : la base refuse le mouvement (LOT-BLOQUE). Seul un
 /// responsable le debloque, avec un motif.
@@ -234,7 +245,7 @@ pub async fn changer_statut(
     user: Utilisateur,
     Json(d): Json<DecisionStatut>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Valider).await?;
+    exiger_decision_lot(&state, &user).await?;
     let motif = texte_requis(&d.motif, "Le motif")?;
     let (nouveau, evt) = match d.action.as_str() {
         "BLOQUER" => ("BLOQUE", "BLOCAGE"),
@@ -319,7 +330,7 @@ pub async fn decider_dormant(
     user: Utilisateur,
     Json(d): Json<DecisionDormant>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Valider).await?;
+    exiger_decision_lot(&state, &user).await?;
     let motif = texte_requis(&d.motif, "Le motif")?;
     if !matches!(d.decision.as_str(), "GARDER" | "SOLDER" | "DETRUIRE") {
         return Err(AppError::Invalide(format!("decision inconnue : {}", d.decision)));
@@ -805,7 +816,7 @@ pub async fn decider(
             }
         }
         "ACCORDEE" | "REFUSEE" => {
-            user.exiger(&state.db, module::STOCK, Action::Valider).await?;
+            exiger_decision_lot(&state, &user).await?;
             if demandeur == user.id && user.role != "ADMIN" {
                 return Err(AppError::RegleMetier("On n'autorise pas sa propre demande : un autre responsable doit repondre.".into()));
             }

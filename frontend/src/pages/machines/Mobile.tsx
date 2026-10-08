@@ -26,6 +26,7 @@ import {
   CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, LIBELLE_DESTINATION, LIBELLE_EFFET,
   LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue, signePct,
   type Destination, type Machine, type TypeFiche, type Zone,
+  TON_ECART,
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
@@ -662,7 +663,7 @@ function FicheMobile({
               <div key={l.ligne_numero}>
                 <span className="font-mono text-[11px]">{l.lot_fournisseur}</span>{' '}
                 {l.nb_avant} · {nb(l.kg_avant, 1)} → <strong>{l.nb_apres} · {nb(l.kg_apres, 1)} kg</strong>
-                <span className="text-attenue-texte">
+                <span className={TON_ECART[l.niveau_ecart ?? ''] ?? 'text-attenue-texte'}>
                   {' '}· écart {nb(l.ecart_kg, 1)} kg{l.ecart_kg !== 0 && ` (${LIBELLE_EFFET[l.effet_ecart] ?? l.effet_ecart})`}
                 </span>
               </div>

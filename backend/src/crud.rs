@@ -510,6 +510,18 @@ pub async fn lister(
 ) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Lire).await?;
 
+    // ON NE TRIE NI NE FILTRE SUR CE QU'ON NE VOIT PAS (audit v4) : trier les
+    // fournisseurs par un prix masque, ou filtrer sur sa valeur, revelait le
+    // prix par l'ordre ou par la reponse.
+    let droits = user.droits(db, e.module).await?;
+    let masque = |c: &str| matches!(droits.get(c), Some(crate::auth::rbac::Niveau::Masque));
+    if let Some(c) = f.tri.as_deref().filter(|c| masque(c)) {
+        return Err(AppError::Invalide(format!("tri impossible : le champ {c} vous est masque")));
+    }
+    if let Some((c, _)) = f.egalites.iter().find(|(c, _)| masque(c)) {
+        return Err(AppError::Invalide(format!("filtre impossible : le champ {c} vous est masque")));
+    }
+
     let mut conditions = Vec::new();
     let mut valeurs: Vec<String> = Vec::new();
 

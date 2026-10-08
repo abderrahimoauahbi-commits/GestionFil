@@ -9,7 +9,7 @@ mod admin;
 mod assistant;
 mod briefing;
 mod completion;
-mod auth_routes;
+pub(crate) mod auth_routes;
 mod consultation;
 mod devalidation;
 mod entites;

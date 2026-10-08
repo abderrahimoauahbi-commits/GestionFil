@@ -279,6 +279,9 @@ def scenario_masquage(c, infra):
     verifier("prix_entree_mad" not in str(lots), "le magasinier lit le prix d'entree des lots")
     stock = c.ok("Magasinie", "GET", "/api/stock")
     verifier("cmup_mad" not in str(stock), "le magasinier lit le CMUP")
+    # Un bon a soi, pour ne pas dependre des scenarios precedents.
+    c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [{
+        "code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 50, "prix_unitaire_devise": 20}]})
     bons = c.ok("Assistante", "GET", "/api/bons-commande")
     verifier(any(b.get("montant_total_mad") for b in bons), "l'assistante ne lit plus le montant de ses bons")
 
@@ -548,6 +551,28 @@ def scenario_machine(c, infra):
         "code_magasin": MAG, "responsable": "Banc", "lignes": []}, contient="retiree")
 
 
+def scenario_sessions(c, infra):
+    """Mot de passe de 12 au serveur ; changer son mot de passe ferme les autres sessions et rend un
+    jeton neuf ; on ne trie pas sur un champ masque (audit v4, P2-18)."""
+    import time
+    from banc import MOT_DE_PASSE
+    c.ok("Tarik", "GET", "/api/auth/moi")
+    ancien_jeton = c.jetons["Tarik"]
+    time.sleep(1.2)  # le jeton date a la seconde : le changement doit lui etre posterieur
+    c.refus("Tarik", "POST", "/api/auth/mot-de-passe", {"ancien": MOT_DE_PASSE, "nouveau": "Court-2026"}, contient="12")
+    r = c.ok("Tarik", "POST", "/api/auth/mot-de-passe", {"ancien": MOT_DE_PASSE, "nouveau": "Nouveau-Banc-2026!"})
+    verifier(r.get("jeton"), "le changement de mot de passe ne rend pas de jeton neuf")
+    c.jetons["Tarik"] = ancien_jeton
+    code, _ = c.appel("Tarik", "GET", "/api/auth/moi")
+    verifier(code == 401, f"l'ancien jeton reste valide apres le changement de mot de passe : {code}")
+    c.jetons["Tarik"] = r["jeton"]
+    c.ok("Tarik", "GET", "/api/auth/moi")
+    r = c.ok("Tarik", "POST", "/api/auth/mot-de-passe", {"ancien": "Nouveau-Banc-2026!", "nouveau": MOT_DE_PASSE})
+    c.jetons["Tarik"] = r["jeton"]
+    # Le prix catalogue est masque au magasinier : ni tri, ni filtre dessus.
+    c.refus("Magasinie", "GET", "/api/catalogue?tri=prix_catalogue", contient="masque")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -566,5 +591,6 @@ SCENARIOS = [
     scenario_declencheurs,
     scenario_audit_montants,
     scenario_masquage,
+    scenario_sessions,
     scenario_controles_finaux,
 ]

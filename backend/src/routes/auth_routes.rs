@@ -40,14 +40,24 @@ fn attente_secondes(echecs: i64) -> i64 {
 /// `ConnectInfo` ne voit que 127.0.0.1 : le serveur est derriere un proxy. Sans
 /// cet en-tete, le journal des connexions dirait « c'est le serveur qui a
 /// essaye », ce qui ne sert a rien.
-fn adresse_client(entetes: &axum::http::HeaderMap, direct: Option<String>) -> Option<String> {
-    entetes
-        .get("x-real-ip")
-        .or_else(|| entetes.get("x-forwarded-for"))
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.split(',').next().unwrap_or(v).trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or(direct)
+///
+/// LES EN-TETES NE SONT CRUS QUE VENANT DU PROXY LOCAL (audit v4). Un poste
+/// qui joint le service en direct pouvait ecrire n'importe quelle adresse
+/// dans `X-Forwarded-For` et se faire inscrire sous celle d'un autre. Seul
+/// nginx, sur la meme machine (127.0.0.1), est cru ; sinon l'adresse vue.
+pub(crate) fn adresse_client(entetes: &axum::http::HeaderMap, direct: Option<std::net::IpAddr>) -> Option<String> {
+    let par_proxy = direct.map(|ip| ip.is_loopback()).unwrap_or(false);
+    par_proxy
+        .then(|| {
+            entetes
+                .get("x-real-ip")
+                .or_else(|| entetes.get("x-forwarded-for"))
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.split(',').next().unwrap_or(v).trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+        .flatten()
+        .or_else(|| direct.map(|ip| ip.to_string()))
 }
 
 /// Inscrit la tentative au journal. N'echoue jamais la connexion : un journal
@@ -85,16 +95,16 @@ pub async fn connexion(
 ) -> AppResult<Json<Value>> {
     // L'en-tete de nginx d'abord ; a defaut l'adresse vue par le serveur, pour
     // qu'un appel direct sur le port 8080 laisse tout de meme une trace.
-    let ip = adresse_client(&entetes, Some(direct.ip().to_string()));
+    let ip = adresse_client(&entetes, Some(direct.ip()));
     let agent = entetes
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok());
     let login = demande.login.trim().to_string();
 
-    let compte: Option<(String, String, String, String, i64, i64, Option<String>, Option<String>, i64)> =
+    let compte: Option<(String, String, String, String, i64, i64, Option<String>, Option<String>, i64, Option<i64>)> =
         sqlx::query_as(
             "SELECT id_utilisateur, mot_de_passe_hash, nom, code_role_user, actif,
-                    echecs_consecutifs, bloque_jusqu_a, secret_totp, totp_actif
+                    echecs_consecutifs, bloque_jusqu_a, secret_totp, totp_actif, totp_dernier_pas
                FROM utilisateur WHERE login = $1",
         )
         .bind(&login)
@@ -103,7 +113,7 @@ pub async fn connexion(
 
     // Un compte inconnu et un mot de passe faux renvoient la meme erreur : ne
     // pas reveler quels logins existent.
-    let Some((id, hash, nom, role, actif, echecs, bloque, secret, totp_actif)) = compte else {
+    let Some((id, hash, nom, role, actif, _echecs, bloque, secret, totp_actif, dernier_pas)) = compte else {
         journaliser(&state.db, &login, None, "INCONNU", ip.as_deref(), agent).await;
         return Err(AppError::IdentifiantsInvalides);
     };
@@ -130,20 +140,28 @@ pub async fn connexion(
         let db = state.db.clone();
         let (id, login, ip2, agent2) = (id.clone(), login.clone(), ip.clone(), agent.map(String::from));
         async move {
-            let n = echecs + 1;
-            let attente = attente_secondes(n);
-            let jusqu_a = (attente > 0).then(|| crate::db::dans_secondes(attente));
-            let _ = sqlx::query(
+            // LE COMPTEUR S'INCREMENTE EN BASE (audit v4) : relu puis recrit,
+            // dix essais simultanes ne comptaient que pour un.
+            let n: i64 = sqlx::query_scalar(
                 "UPDATE utilisateur
-                    SET echecs_consecutifs = $2, bloque_jusqu_a = $3, dernier_echec = $4
-                  WHERE id_utilisateur = $1",
+                    SET echecs_consecutifs = echecs_consecutifs + 1, dernier_echec = $2
+                  WHERE id_utilisateur = $1
+              RETURNING echecs_consecutifs",
             )
             .bind(&id)
-            .bind(n)
-            .bind(&jusqu_a)
             .bind(maintenant())
-            .execute(&db)
-            .await;
+            .fetch_one(&db)
+            .await
+            .unwrap_or(1);
+            let attente = attente_secondes(n);
+            let jusqu_a = (attente > 0).then(|| crate::db::dans_secondes(attente));
+            if jusqu_a.is_some() {
+                let _ = sqlx::query("UPDATE utilisateur SET bloque_jusqu_a = $2 WHERE id_utilisateur = $1")
+                    .bind(&id)
+                    .bind(&jusqu_a)
+                    .execute(&db)
+                    .await;
+            }
             journaliser(&db, &login, Some(&id), raison, ip2.as_deref(), agent2.as_deref()).await;
             match jusqu_a {
                 Some(_) => AppError::TropDeTentatives(format!(
@@ -166,8 +184,17 @@ pub async fn connexion(
             return Ok(Json(json!({ "exige_code": true })));
         };
         let secret = secret.unwrap_or_default();
-        if !crate::auth::totp::verifier(&secret, code, horodatage_unix()) {
-            return Err(echouer("CODE").await);
+        // UN CODE NE SERT QU'UNE FOIS (audit v4) : son pas de temps doit etre
+        // posterieur au dernier accepte.
+        match crate::auth::totp::verifier_pas(&secret, code, horodatage_unix()) {
+            Some(pas) if dernier_pas.is_none_or(|d| pas > d) => {
+                sqlx::query("UPDATE utilisateur SET totp_dernier_pas = $2 WHERE id_utilisateur = $1")
+                    .bind(&id)
+                    .bind(pas)
+                    .execute(&state.db)
+                    .await?;
+            }
+            _ => return Err(echouer("CODE").await),
         }
     }
 
@@ -250,7 +277,18 @@ pub struct DemandeMotDePasse {
 pub async fn preparer_2fa(
     State(state): State<AppState>,
     user: Utilisateur,
+    Json(d): Json<DemandeMotDePasse>,
 ) -> AppResult<Json<Value>> {
+    // LE MOT DE PASSE EST EXIGE ICI AUSSI (audit v4) : sur un poste laisse
+    // ouvert, poser son propre second facteur fermait la porte au titulaire.
+    let hash: String =
+        sqlx::query_scalar("SELECT mot_de_passe_hash FROM utilisateur WHERE id_utilisateur = $1")
+            .bind(&user.id)
+            .fetch_one(&state.db)
+            .await?;
+    if !password::verifier(&d.mot_de_passe, &hash) {
+        return Err(AppError::IdentifiantsInvalides);
+    }
     let deja: i64 = sqlx::query_scalar("SELECT totp_actif FROM utilisateur WHERE id_utilisateur = $1")
         .bind(&user.id)
         .fetch_one(&state.db)
@@ -302,18 +340,19 @@ pub async fn activer_2fa(
         ));
     };
 
-    if !crate::auth::totp::verifier(&secret, &d.code, horodatage_unix()) {
+    let Some(pas) = crate::auth::totp::verifier_pas(&secret, &d.code, horodatage_unix()) else {
         return Err(AppError::Invalide(
             "Ce code ne correspond pas. Vérifiez l'heure de votre téléphone, puis réessayez."
                 .into(),
         ));
-    }
-
+    };
     sqlx::query(
-        "UPDATE utilisateur SET totp_actif = 1, totp_active_le = $2 WHERE id_utilisateur = $1",
+        "UPDATE utilisateur SET totp_actif = 1, totp_active_le = $2, totp_dernier_pas = $3
+          WHERE id_utilisateur = $1",
     )
     .bind(&user.id)
     .bind(maintenant())
+    .bind(pas)
     .execute(&state.db)
     .await?;
 
@@ -496,13 +535,22 @@ pub async fn changer_mot_de_passe(
     .await?;
     tx.commit().await?;
 
-    // LE JETON RESTE VALIDE. Le revoquer obligerait a se reconnecter
-    // immediatement apres avoir change son mot de passe, ce qui n'apporte rien
-    // ici : le jeton appartient deja a la bonne personne, qui vient de prouver
-    // qu'elle connait l'ancien mot de passe.
+    // LES AUTRES SESSIONS SE FERMENT (audit v4) : la base date le changement,
+    // et tout jeton plus ancien est refuse. Celle-ci recoit un jeton neuf : la
+    // personne vient de prouver qu'elle connait l'ancien mot de passe.
+    let (jeton, claims) = jwt::emettre(
+        &state.config.jwt_secret,
+        &user.id,
+        &user.login,
+        &user.role,
+        state.config.jwt_ttl_minutes,
+    )
+    .map_err(AppError::Interne)?;
     Ok(Json(json!({
         "change": true,
         "le": maintenant(),
+        "jeton": jeton,
+        "expire_le": claims.exp,
     })))
 }
 

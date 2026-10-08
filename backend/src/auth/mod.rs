@@ -45,21 +45,24 @@ impl FromRequestParts<AppState> for Utilisateur {
         // compte retrograde perdait sinon ses droits huit heures plus tard
         // seulement, avec les permissions de l'ancien role et la grille de
         // champs du nouveau.
-        let compte: Option<(i64, String)> = sqlx::query_as(
-            "SELECT actif, code_role_user FROM utilisateur WHERE id_utilisateur = $1",
+        // LE CHANGEMENT DE MOT DE PASSE FERME LES SESSIONS ANTERIEURES (audit
+        // v4) : un jeton emis avant reste refuse, meme non expire.
+        let compte: Option<(i64, String, Option<i64>)> = sqlx::query_as(
+            "SELECT actif, code_role_user, mot_de_passe_change_le FROM utilisateur WHERE id_utilisateur = $1",
         )
         .bind(&claims.sub)
         .fetch_optional(&state.db)
         .await?;
         let role = match compte {
-            Some((1, role)) => role,
+            Some((1, _, Some(change))) if claims.iat < change => return Err(AppError::NonAuthentifie),
+            Some((1, role, _)) => role,
             _ => return Err(AppError::NonAuthentifie),
         };
 
-        let adresse_ip = parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|ConnectInfo(a)| a.ip().to_string());
+        // L'adresse du poste, telle que nginx la transmet (audit v4 : l'audit
+        // inscrivait 127.0.0.1, l'adresse du proxy).
+        let directe = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(a)| a.ip());
+        let adresse_ip = crate::routes::auth_routes::adresse_client(&parts.headers, directe);
 
         Ok(Utilisateur {
             id: claims.sub,

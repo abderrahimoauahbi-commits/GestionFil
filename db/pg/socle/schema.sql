@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 102 (voir inclus.txt).
+-- Migrations comprises : 103 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict Hdt0OoNbpVezsYvH4a9clOFls9y9NWROBhTjD8hqgQ0LFBuUh2bQwIf1CgCWPGR
+\restrict yEItOgJQZvxbnD5W9B3G5XS1DKNI9c2sY9ZZom3LhFU2KAP60D6mFKdhVu12nsi
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -3066,6 +3066,28 @@ $$;
 
 ALTER FUNCTION public.fn_trg_transition_transfert() OWNER TO gestionfil;
 
+--
+-- Name: fn_trg_utilisateur_mdp_change(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_utilisateur_mdp_change() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.mot_de_passe_hash IS DISTINCT FROM OLD.mot_de_passe_hash THEN
+        NEW.mot_de_passe_change_le := floor(extract(epoch FROM clock_timestamp()))::bigint;
+    END IF;
+    -- Un nouveau secret repart d'un compteur vierge.
+    IF NEW.secret_totp IS DISTINCT FROM OLD.secret_totp THEN
+        NEW.totp_dernier_pas := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_utilisateur_mdp_change() OWNER TO gestionfil;
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -5734,6 +5756,8 @@ CREATE TABLE public.utilisateur (
     secret_totp text,
     totp_actif bigint DEFAULT 0 NOT NULL,
     totp_active_le text,
+    mot_de_passe_change_le bigint,
+    totp_dernier_pas bigint,
     CONSTRAINT ck_utilisateur_totp CHECK (((totp_actif = 0) OR (secret_totp IS NOT NULL))),
     CONSTRAINT utilisateur_actif_check CHECK ((actif = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT utilisateur_echecs_consecutifs_check CHECK ((echecs_consecutifs >= 0)),
@@ -13594,6 +13618,13 @@ CREATE TRIGGER trg_transition_transfert BEFORE UPDATE OF statut ON public.transf
 
 
 --
+-- Name: utilisateur trg_utilisateur_mdp_change; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_utilisateur_mdp_change BEFORE UPDATE OF mot_de_passe_hash, secret_totp ON public.utilisateur FOR EACH ROW EXECUTE FUNCTION public.fn_trg_utilisateur_mdp_change();
+
+
+--
 -- Name: alerte alerte_code_role_destinataire_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
@@ -15261,5 +15292,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Hdt0OoNbpVezsYvH4a9clOFls9y9NWROBhTjD8hqgQ0LFBuUh2bQwIf1CgCWPGR
+\unrestrict yEItOgJQZvxbnD5W9B3G5XS1DKNI9c2sY9ZZom3LhFU2KAP60D6mFKdhVu12nsi
 

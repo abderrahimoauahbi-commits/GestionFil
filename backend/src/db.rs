@@ -184,6 +184,16 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "2026-10-08g_revalidation_reception.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_archive_reception_courante')",
     ),
+    (
+        // Sessions : la connexion et chaque requete lisent ces deux colonnes.
+        "2026-10-08j_sessions.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'utilisateur'
+                           AND column_name = 'mot_de_passe_change_le')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'utilisateur'
+                           AND column_name = 'totp_dernier_pas')",
+    ),
 ];
 
 async fn verifier_schema(pool: &Db) -> anyhow::Result<()> {

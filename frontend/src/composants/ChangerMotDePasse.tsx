@@ -14,12 +14,12 @@
  */
 import { useState } from 'react'
 import { KeyRound, Loader2 } from 'lucide-react'
-import { api, ErreurApi } from '../api/client'
+import { api, echeance, ErreurApi, jeton } from '../api/client'
 import { Alerte, Bouton, Champ, Etiq } from './ui/base'
 import { Dialogue, DialogueContenu } from './ui/surcouches'
 
 /** Longueur minimale, la meme que celle appliquee par le serveur. */
-const LONGUEUR_MINIMALE = 8
+const LONGUEUR_MINIMALE = 12
 
 export function ChangerMotDePasse({
   ouvert,
@@ -58,7 +58,12 @@ export function ChangerMotDePasse({
     setErreur(null)
     setEnvoi(true)
     try {
-      await api.post('/api/auth/mot-de-passe', { ancien, nouveau })
+      // Les autres sessions se ferment ; celle-ci recoit un jeton neuf.
+      const r = await api.post<{ jeton?: string; expire_le?: number }>('/api/auth/mot-de-passe', { ancien, nouveau })
+      if (r.jeton) {
+        jeton.ecrire(r.jeton)
+        if (r.expire_le) echeance.ecrire(r.expire_le)
+      }
       setFait(true)
     } catch (ex) {
       setErreur(

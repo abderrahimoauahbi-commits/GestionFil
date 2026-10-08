@@ -113,7 +113,8 @@ def main():
 
     with open(SOCLE / "inclus.txt", "w", encoding="utf-8", newline="\n") as fh:
         for m in migrations:
-            fh.write(f"{m.name} {hashlib.sha256(m.read_bytes()).hexdigest()}\n")
+            # Aux fins de ligne Unix, comme migrer.py : Git les convertit selon le poste.
+            fh.write(f"{m.name} {hashlib.sha256(m.read_bytes().replace(b'\r\n', b'\n')).hexdigest()}\n")
 
     print(f"socle regenere depuis {source} : {len(migrations)} migrations comprises, "
           f"{len(CONFIGURATION)} tables de configuration.")

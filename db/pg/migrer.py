@@ -36,7 +36,9 @@ JOURNAL = "2026-10-08c_journal_migrations.sql"
 
 
 def empreinte(chemin: Path) -> str:
-    return hashlib.sha256(chemin.read_bytes()).hexdigest()
+    # Sur le contenu aux fins de ligne Unix : Git les convertit selon le poste,
+    # et un fichier identique ne doit pas paraitre modifie.
+    return hashlib.sha256(chemin.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 class Base:

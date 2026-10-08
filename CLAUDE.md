@@ -48,6 +48,14 @@ cargo check
 cargo test                                        # tests unitaires (#[test] dans src/)
 cargo test --bin gestionfil domain::plan          # un module / un test par filtre de nom
 cargo run --bin gestionfil-admin -- verifier      # contrôles métier
+
+# BANC DE TESTS (exigé par fabriquer-paquet.ps1) : base jetable bâtie depuis le socle,
+# serveur d'essai sur 8096 lancé depuis un dossier vide (aucun .env lu), scénarios métier
+# (réception, clôture, avoir, écart de pesée, saisie libre, inventaire, import, colisage,
+# déclencheurs, masquage). Base supprimée à la fin. PGPASSWORD = mot de passe postgres.
+python backend\tests\banc\banc.py --cible <CARGO_TARGET_DIR>          # tout
+python backend\tests\banc\banc.py import inventaire --garder         # quelques scénarios, base gardée
+cd frontend; npm test                              # node --test : colisage, mêmes cas que la base
 # autres sous-commandes admin : definir-mot-de-passe <login>, lister-comptes, sauvegarder,
 # lister-sauvegardes, restaurer, diagnostic, reparer
 

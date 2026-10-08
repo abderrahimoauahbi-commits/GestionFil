@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint . && tsc --noEmit",
+    "test": "node --test \"tests/**/*.test.ts\"",
     "tauri": "tauri",
     "bureau:dev": "tauri dev",
     "bureau:build": "tauri build",

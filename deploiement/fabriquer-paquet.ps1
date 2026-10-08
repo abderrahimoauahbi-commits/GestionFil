@@ -19,10 +19,19 @@
 .EXAMPLE
     .\fabriquer-paquet.ps1
     .\fabriquer-paquet.ps1 -SansInterface   # binaires seuls
+    .\fabriquer-paquet.ps1 -SansTests -Motif "correctif urgent, banc rejoue apres"
+
+    LES TESTS SONT EXIGES (audit v4) : cargo test, npm test, puis le banc
+    (backend\tests\banc\banc.py : base jetable, serveur d'essai, scenarios
+    metier). Un paquet ne part pas si l'un echoue. Le banc a besoin de
+    PostgreSQL et du mot de passe postgres dans PGPASSWORD. -SansTests exige
+    un motif, ecrit dans le paquet.
 #>
 [CmdletBinding()]
 param(
-    [switch] $SansInterface
+    [switch] $SansInterface,
+    [switch] $SansTests,
+    [string] $Motif
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +40,37 @@ $sortie = Join-Path $racine 'deploiement\paquet'
 $date   = Get-Date -Format 'yyyyMMdd-HHmm'
 
 function Dire($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
+
+# --- 0. Les tests -------------------------------------------------------------
+# Les regles qui comptent vivent dans la base et dans les cascades : le banc
+# les rejoue sur une base neuve a chaque paquet. Le contourner se motive.
+if ($SansTests) {
+    if (-not $Motif) { throw "-SansTests exige -Motif : dites pourquoi ce paquet part sans tests." }
+    Write-Host "  TESTS NON JOUES : $Motif" -ForegroundColor Yellow
+} else {
+    Dire "Tests"
+    # Un repertoire de compilation a part : le binaire du serveur de developpement
+    # (8080) peut etre en cours d'execution, donc verrouille.
+    $cible = Join-Path ([IO.Path]::GetTempPath()) 'gestionfil-paquet-cible'
+    Push-Location (Join-Path $racine 'backend')
+    try {
+        $env:CARGO_TARGET_DIR = $cible
+        & cargo test --bins
+        if ($LASTEXITCODE -ne 0) { throw "cargo test a echoue" }
+        & cargo build --bins
+        if ($LASTEXITCODE -ne 0) { throw "la compilation des binaires d'essai a echoue" }
+    } finally {
+        Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+        Pop-Location
+    }
+    Push-Location (Join-Path $racine 'frontend')
+    try {
+        & npm test
+        if ($LASTEXITCODE -ne 0) { throw "npm test a echoue" }
+    } finally { Pop-Location }
+    & python (Join-Path $racine 'backend\tests\banc\banc.py') --cible $cible
+    if ($LASTEXITCODE -ne 0) { throw "le banc de tests a echoue : le paquet ne part pas" }
+}
 
 # --- 1. L'interface ----------------------------------------------------------
 if (-not $SansInterface) {
@@ -57,6 +97,11 @@ if (-not $SansInterface) {
 Dire "Assemblage"
 if (Test-Path $sortie) { Remove-Item $sortie -Recurse -Force }
 New-Item -ItemType Directory -Path $sortie -Force | Out-Null
+if ($SansTests) {
+    # Le paquet garde la trace de ce qu'il n'a pas verifie.
+    "Paquet fabrique SANS les tests le $date. Motif : $Motif" |
+        Set-Content -Path (Join-Path $sortie 'TESTS-NON-JOUES.txt') -Encoding UTF8
+}
 
 Copy-Item (Join-Path $racine 'backend\src')        (Join-Path $sortie 'src')  -Recurse
 Copy-Item (Join-Path $racine 'backend\Cargo.toml') $sortie

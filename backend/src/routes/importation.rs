@@ -1508,9 +1508,18 @@ pub async fn cloturer(
     user: Utilisateur,
     Path(id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
+    corps: axum::body::Bytes,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Valider).await?;
-    let simuler = matches!(q.get("simuler").map(String::as_str), Some("1" | "true"));
+    // L'APERCU SE DEMANDE DANS L'ADRESSE OU DANS LE CORPS (audit v4). La
+    // cloture locale le prend dans le corps : un appel qui suivait la meme
+    // forme ici cloturait pour de bon le dossier qu'il croyait seulement
+    // simuler.
+    let dans_corps = serde_json::from_slice::<Value>(&corps)
+        .ok()
+        .and_then(|v| v.get("simuler").and_then(Value::as_bool))
+        .unwrap_or(false);
+    let simuler = dans_corps || matches!(q.get("simuler").map(String::as_str), Some("1" | "true"));
     let mut v = metier::cloturer(&state.db, &user, &id, simuler).await?;
     user.masquer(&state.db, IMPORT, &mut v).await?;
     Ok(Json(v))

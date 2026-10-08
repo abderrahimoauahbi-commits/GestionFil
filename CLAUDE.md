@@ -16,10 +16,8 @@ premières (fil pour tapis). Tout le code, les commentaires, les messages et l'i
   de code pour le web (PWA) et le bureau (Tauri 2, `frontend/src-tauri`).
 - `deploiement/` — scripts du serveur Ubuntu (192.168.1.140) : paquet, publication, retour arrière.
 
-> Les README racine et `backend/README.md` sont en partie périmés : `db/build.ps1`,
-> `db/tests/run-tests.ps1`, `backend/tests/e2e.ps1` et toute mention de SQLite (`gestionfil.db`,
-> `sqlite3` dans `demarrer.ps1`) ne correspondent plus au dépôt. `db/README.md` et
-> `deploiement/README.md` sont à jour.
+> Les README (racine, `backend/`, `db/`, `deploiement/`) ont été remis à jour le 08/10/2026 ;
+> `demarrer.ps1` ne cherche plus de base SQLite.
 
 ## Commandes
 
@@ -160,6 +158,7 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
 ## Documentation
 
 - `docs/ADR-001-decisions-fondatrices.md` — décisions d'architecture.
+- `docs/ADR-002-regles-de-gestion-2026-10.md` — les 18 règles du 08/10/2026 : décision, lieu de la garantie, contrôle.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
 - `db/README.md` — invariants, vues, contrôles C01–C37 (C38–C42, machines, ajoutés par la migration du 05/10/2026 ; C43, colisage incohérent, par celle du 08/10/2026).

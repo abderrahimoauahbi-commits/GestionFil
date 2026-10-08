@@ -365,7 +365,7 @@ export const SUJETS: Sujet[] = [
       {
         nom: 'Tolérance de pesée (%)',
         description:
-          'L’écart admis entre le poids commandé et le poids pesé à la réception. Au-delà, la réception signale l’écart au lieu de le laisser passer.',
+          'L’EXCÉDENT admis entre le poids pesé et le reste à recevoir, en local comme à l’import. Au-delà, l’excédent demande une dérogation motivée ; un manque n’est pas un écart, c’est une livraison partielle. À défaut de réglage : le paramètre P_TolerEcartPesee (2 %).',
         valeurs: 'pourcentage',
       },
       {
@@ -530,6 +530,10 @@ export const SUJETS: Sujet[] = [
       { route: '/import/assistant', libelle: 'Assistant d’import' },
       { route: '/receptions-import', libelle: 'Réceptions import' },
     ],
+    regles: [
+      'La clôture porte les frais aux lots du dossier encore en stock, là où ils sont ; la part sortie va au consommé. Une reclôture à la baisse retire au même prorata.',
+      'La facture se saisit au cours Bank Al-Maghrib de sa date ; un taux 1 en devise est refusé, un écart de plus de 3 % se confirme.',
+    ],
   },
 
   {
@@ -565,6 +569,11 @@ export const SUJETS: Sujet[] = [
       'Enregistrer garde un brouillon ; SOUMETTRE la passe au contrôle ; VALIDER fait entrer en stock et fige la réception.',
       'Celui qui a saisi la réception ne la valide pas (séparation des tâches).',
       'Une ligne d’un dossier clôturé ne se reçoit plus.',
+      'Un excédent au-delà de la tolérance du fournisseur demande une dérogation motivée sur la ligne ; il n’est plus refusé sec.',
+      'Pour un fil suivi au lot, les bobines se comptent : ni recopiées de la facture, ni déduites des kilos.',
+      'Soumise au contrôle, la pesée est figée : le contrôleur porte la qualité, le magasin, le lot ; pour changer un poids, on rouvre en brouillon.',
+      'Une facture dont une ligne est reçue ne change plus de fournisseur, de devise, de taux ni de montant (IMPORT-FIGEE).',
+      'Avant la DUM, contre-passer l’entrée annule la réception et rend son reste à la facture et au bon.',
     ],
     messages: [
       {
@@ -600,9 +609,12 @@ export const SUJETS: Sujet[] = [
       },
     ],
     regles: [
-      'Régénérer efface les propositions qui n’engagent rien ; celles qui ont produit un bon et celles qu’on a écartées survivent.',
+      'Régénérer efface les propositions qui n’engagent rien ; celles qui ont produit un bon restent, et celles qu’on a écartées masquent le besoin pendant 90 jours (P_DureeEcartJours) puis expirent : le besoin est reproposé.',
       'La quantité proposée tient compte du stock minimum, du MOQ et de ce qui est déjà en route, puis, si la fiche article le demande (« Arrondi à la palette pleine »), se complète jusqu’à la palette pleine : un besoin de 0,85 palette devient 1 palette. Les 0,15 ajoutés sont le COMPLÉMENT DE PALETTE, affiché dans sa colonne : ce qui est commandé pour la logistique, pas pour produire. Le poids d’une palette est une estimation, les kilos exacts sont ceux de la réception.',
       'Le calcul ne MUTUALISE PAS les équivalents : l’équivalent disponible est affiché, mais la bascule reste un geste explicite et tracé.',
+      'Le fil sur machine compte comme stock (P_MrpInclureStockMachine), s’il a été constaté depuis moins de 30 jours ; il se lit à part dans la colonne « sur machine ».',
+      'Le mois en cours ne compte que ses jours restants ; au-delà du dernier mois du plan, la demande se prolonge à la moyenne du plan (P_HorizonProlonge).',
+      'Une commande en retard reste dans l’en-cours (P_EncoursRetardInclus) : on la relance, on ne la rachète pas. La marchandise d’import facturée et non reçue compte aussi.',
     ],
     liens: [
       { route: '/besoins', libelle: 'Besoins (MRP)' },
@@ -814,34 +826,60 @@ export const SUJETS: Sujet[] = [
     route: '/receptions',
     titre: 'Réceptions',
     chemin: 'Achats → Réceptions',
-    objectif: 'Peser et enregistrer ce qui arrive au quai, puis le faire contrôler avant l’entrée en stock.',
-    prerequis: ['Un bon de commande envoyé, sauf arrivage sans commande.'],
-    droits: 'Écriture du module Réceptions pour peser ; validation pour le contrôle qualité.',
+    objectif: 'Peser ce qui arrive au quai, le faire contrôler avant l’entrée en stock, puis clôturer avec la facture du fournisseur.',
+    prerequis: ['Un bon de commande envoyé, sauf arrivage sans commande.', 'Pour un bon en devise : un taux du jour (Référentiels → Taux de change).'],
+    droits: 'Écriture du module Réceptions pour peser et soumettre ; validation pour le contrôle, la clôture par facture et l’avoir.',
     procedures: [
       {
         titre: 'Réceptionner une livraison',
         etapes: [
           'Créez une réception et appelez le bon de commande : ses lignes restant à livrer s’ajoutent à la grille.',
-          'Appelez un second bon si le camion en porte deux : les lignes s’ajoutent sans effacer les premières.',
-          'Décochez « retenue » pour ce qui n’est pas descendu du camion.',
-          'Saisissez le poids pesé, les colis, le lot si la référence est suivie.',
-          'Enregistrez, puis faites valider par le contrôle qualité.',
+          'Saisissez le poids pesé, le lot si la référence est suivie, et — pour un fil suivi au lot — le nombre de bobines COMPTÉES.',
+          'Un excédent au-delà de la tolérance du fournisseur se justifie : cochez la dérogation et écrivez son motif.',
+          'Soumettez au contrôle : l’écart se rejuge alors contre ce qui reste à recevoir sur le bon à cet instant.',
+          'Un autre compte, qui a le droit de valider, contrôle et valide : la marchandise entre au prix du bon (valeur provisoire).',
         ],
-        resultat:
-          'Le stock monte, le coût moyen est recalculé, le prix entre dans l’historique et la ligne de commande est soldée.',
+        resultat: 'Le stock monte, le coût moyen est recalculé, le prix entre dans l’historique et la ligne de commande avance.',
+      },
+      {
+        titre: 'Clôturer avec la facture',
+        etapes: [
+          'Sur la réception validée, « Clôturer avec la facture ».',
+          'Saisissez le numéro, la date et le montant dans la devise du bon ; le cours Bank Al-Maghrib de la date est proposé.',
+          'Cochez les autres réceptions du même fournisseur si la facture les couvre : le montant se répartit au prorata de leur valeur.',
+          'Faites l’aperçu : la différence va aux lots de la réception encore en stock ; la part déjà sortie reste en écart de prix.',
+          'Clôturez.',
+        ],
+        resultat: 'La valeur définitive est au stock. La réception ne se dévalide plus : une erreur se corrige par un avoir.',
+      },
+      {
+        titre: 'Corriger après clôture : avoir ou facture complémentaire',
+        etapes: ['« Avoir ou facture complémentaire », numéro de pièce, montant en MAD, motif.', 'Aperçu, puis enregistrer.'],
+        resultat: 'La valeur baisse (avoir) ou monte (complément) par le même calcul que la clôture ; tout est journalisé.',
       },
     ],
     champs: [
       { nom: 'Quantité pesée', description: 'Le poids réel. C’est lui qui fait foi, pas la quantité commandée.', obligatoire: true },
       { nom: 'Lot fournisseur', description: 'Le numéro de bain de teinture, obligatoire pour les références suivies au lot.' },
-      { nom: 'Retenue', description: 'Décochez pour ce qui n’est pas arrivé : la ligne reste visible, mais n’entre pas.' },
+      { nom: 'Bobines', description: 'Comptées sur le quai, jamais déduites des kilos : exigées à la soumission pour un fil suivi au lot. Le poids réel par bobine juge le fournisseur.' },
+      { nom: 'Dérogation', description: 'Un excédent au-delà de la tolérance du fournisseur, assumé et motivé.' },
       { nom: 'Magasin de destination', description: 'Où la marchandise est rangée.', obligatoire: true },
     ],
     regles: [
-      'À CHAQUE RÉCEPTION VALIDÉE, le poids d’une bobine (kilos ÷ bobines) et les bobines par palette (si les palettes sont entières) mettent la fiche article à jour, et le prix au kilo est historisé. Une mesure à plus de 50 % de la fiche est gardée mais écartée (erreur de saisie probable). L’évaluation des fournisseurs — poids, colisage, prix — se lit dans Statistiques → Lots.',
-      'La saisie propose ce qui est ATTENDU : sans cette liste, on réceptionne la mauvaise couleur.',
+      'Seul l’EXCÉDENT au-delà de la tolérance du fournisseur demande une dérogation ; un manque est une livraison partielle.',
+      'Peser et valider sont deux gestes, et deux comptes (séparation des tâches).',
+      'Validée, l’entrée est au prix du bon (provisoire) ; clôturée avec la facture, elle est à sa valeur définitive.',
+      'Une réception clôturée ne se dévalide plus : avoir ou facture complémentaire, motivés.',
+      'Une réception dont l’entrée a été contre-passée ne se clôture pas. Une réception contre-passée puis dévalidée se corrige et se revalide.',
+      'Une facture qui s’écarte de plus de 10 % de la valeur au prix du bon lève un avis (P_ClotureEcartAvisPct) ; elle ne se bloque pas.',
+      'Une ligne de bon servie par un dossier d’import ne se reçoit pas ici (et inversement).',
+      'Un bon en devise sans taux du jour ne se reçoit pas : la marchandise entrerait au taux du dirham.',
+      'Un colisage incohérent avec la fiche article se signale (contrôle C43), il ne bloque jamais.',
       'Un arrivage SANS COMMANDE se saisit ici : le serveur crée le bon manquant en brouillon, et la réception ne se validera qu’une fois ce bon régularisé.',
-      'Peser et valider sont deux gestes, et deux rôles : la validation déclenche la cascade stock, coût moyen, archive, historique.',
+    ],
+    liens: [
+      { route: '/bons-commande', libelle: 'Bons de commande' },
+      { route: '/receptions-import', libelle: 'Réceptions import' },
     ],
   },
 
@@ -850,48 +888,45 @@ export const SUJETS: Sujet[] = [
     route: '/mouvements',
     titre: 'Mouvements',
     chemin: 'Stock → Mouvements',
-    objectif: 'Enregistrer une entrée, une sortie ou un transfert, et consulter le grand livre des mouvements.',
-    droits: 'Écriture du module Mouvements.',
+    objectif: 'Consulter le grand livre des mouvements, et saisir à la main ce qui n’a pas de document : ajustements, déchets, consommation hors machine, retours fournisseur.',
+    droits: 'Écriture du module Mouvements. Ajustement et déchet de plus de 50 kg : validation de l’inventaire. Retour fournisseur : validation des réceptions. Contre-passer : la Direction.',
     procedures: [
       {
-        titre: 'Saisir une sortie pour la production',
+        titre: 'Saisir un mouvement libre',
         etapes: [
-          'Choisissez le type de mouvement et le motif.',
-          'Indiquez le magasin et, si le motif l’exige, le numéro d’ordre de fabrication.',
-          'Saisissez la référence et la quantité dans l’unité de manutention.',
-          'Vérifiez la conversion en kilos affichée avant de valider.',
-          'Nommez le responsable — celui qui prend la marchandise, pas vous.',
+          'Choisissez le type : ajustement, déchet, consommation hors machine (sur un OF), retour fournisseur.',
+          'Indiquez le magasin, la date du fait et, pour un retour, le numéro de la réception d’origine.',
+          'Saisissez la référence et la quantité ; la conversion en kilos s’affiche avant validation.',
+          'Nommez le responsable — celui qui remet ou reçoit la marchandise, pas vous.',
           'Enregistrez, puis imprimez le bon pour le faire contresigner.',
         ],
-        resultat: 'Le stock baisse et le mouvement entre au grand livre, où il devient immuable.',
+        resultat: 'Le mouvement entre au grand livre, où il devient immuable, au coût moyen en cours.',
+      },
+      {
+        titre: 'Défaire un mouvement (contre-passation)',
+        etapes: ['Sur le mouvement, « Contre-passer », avec le motif.'],
+        resultat: 'L’inverse est posté ; les deux lignes restent. Pour une réception d’import avant DUM, la réception s’annule et facture et bon retrouvent leur reste.',
       },
     ],
     champs: [
       { nom: 'Type de mouvement', description: 'Il porte le sens : entrée ou sortie. Ce n’est pas au signe de la quantité de le dire.', obligatoire: true },
-      { nom: 'Motif', description: 'La raison du mouvement. Certains motifs exigent un numéro d’ordre de fabrication.', obligatoire: true },
       { nom: 'Date du mouvement', description: 'La date du FAIT. Elle peut être dans le passé, jamais dans le futur.', obligatoire: true },
-      {
-        nom: 'Quantité',
-        description: 'Saisie dans l’unité de manutention ; la conversion en kilos s’affiche avant validation.',
-        obligatoire: true,
-        valeurs: 'kg, Bobine, Palette, ml',
-      },
-      {
-        nom: 'Responsable',
-        description:
-          'La personne qui remet ou reçoit physiquement la marchandise. À ne pas confondre avec le compte qui saisit.',
-      },
+      { nom: 'Document de référence', description: 'Pour un retour fournisseur : la réception d’origine (REC-… ou RIM-…), obligatoire.' },
+      { nom: 'Quantité', description: 'Saisie dans l’unité de manutention ; la conversion en kilos s’affiche avant validation.', obligatoire: true, valeurs: 'kg, Bobine, Palette, ml' },
+      { nom: 'Responsable', description: 'La personne qui remet ou reçoit physiquement la marchandise. À ne pas confondre avec le compte qui saisit.' },
     ],
     regles: [
-      'Un mouvement validé est IMMUABLE : on le compense par un autre mouvement, on ne le corrige pas.',
+      'La saisie libre se limite aux ajustements, aux déchets, à la consommation hors machine et aux retours fournisseur : réceptions, transferts, fusions et fiches machine naissent de leur document.',
+      'Le prix d’une entrée ou d’une sortie libre est le coût moyen en cours, jamais une saisie.',
+      'Un déchet au-delà de 50 kg (P_DechetSeuilValiderKg) se valide comme un ajustement : droit de valider l’inventaire.',
+      'Un retour fournisseur se rattache à sa réception et ne rend pas plus qu’elle n’a fait entrer.',
+      'La consommation hors machine (colle, jute…) se déclare sur un OF ; un fil qui se charge sur machine se consomme par ses fiches.',
+      'Un mouvement validé est IMMUABLE : on le compense par une contre-passation, on ne le corrige pas.',
       'Le stock ne peut pas devenir négatif.',
-      'Le bon imprimé porte deux responsables et deux dates ; l’écart entre la date du fait et celle de la saisie est imprimé.',
     ],
     messages: [
-      {
-        message: 'Le stock ne peut pas devenir négatif.',
-        cause: 'Sortir plus que ce qui est là cache toujours autre chose : une entrée oubliée, ou une référence confondue.',
-      },
+      { message: 'R02 : stock insuffisant…', cause: 'Sortir plus que ce qui est là cache toujours autre chose : une entrée oubliée, ou une référence confondue.' },
+      { message: 'Un dechet de … kg depasse 50 kg', cause: 'Un déchet important se valide comme un ajustement d’inventaire : faites-le saisir par la Direction.' },
     ],
   },
 
@@ -925,6 +960,9 @@ export const SUJETS: Sujet[] = [
       'Un seul inventaire en cours par magasin.',
       'Clôturer ou annuler un inventaire demande la validation du module Inventaire : celui qui compte ne clôture pas son propre comptage.',
       'Un inventaire ouvert par erreur ou devenu périmé s’annule, avec un motif ; aucun ajustement n’est passé.',
+      'Un seul inventaire en cours par magasin (contrôle C44 si une base en porte deux).',
+      'Celui qui compte ne clôture pas : la clôture écrit au stock et revient au droit de valider l’inventaire.',
+      'Un inventaire ouvert par erreur s’annule avec un motif.',
     ],
   },
 
@@ -1080,7 +1118,7 @@ export const SUJETS: Sujet[] = [
       'La machine et ses étages déclarés dans « Le parc ».',
       'Pour un chargement : le fil présent au magasin d’origine, dans le lot chargé.',
     ],
-    droits: 'Écriture du module Stock pour saisir et valider ; retirer une décision d’un autre jour demande un administrateur ou un directeur.',
+    droits: 'Écriture du module Mouvements pour saisir et valider un constat ; VALIDER pour valider un chargement ou un déchargement et pour retirer une décision ; un écart rouge revient au droit de valider l’inventaire (Direction).',
     procedures: [
       {
         titre: 'Charger un étage',
@@ -1166,6 +1204,11 @@ export const SUJETS: Sujet[] = [
       'Valider un chargement ou un déchargement, et retirer une décision validée, demandent le droit VALIDER (ils font bouger le magasin) ; valider un constat demande le droit d’écrire.',
       'Seule la dernière décision d’un étage se défait, par son auteur le jour même, ou par un administrateur ou un directeur. Si une décision plus récente s’est appuyée sur elle, on passe par un constat « Correction ».',
       'Les mouvements nés d’une fiche machine ne se contre-passent pas depuis l’écran des mouvements : ils se défont en dévalidant ou en annulant la fiche.',
+      'VERT, ORANGE, ROUGE (règle 1) ne jugent que les écarts NON EXPLIQUÉS : une consommation, un déchet, une perte ou une casse déclarés restent en vert. Orange : à confirmer avant de valider. Rouge : la Direction (droit de valider l’inventaire) et un commentaire.',
+      'Un gain (plus de fil qu’attendu) est une régularisation, jamais une consommation.',
+      'Un lot bloqué ne se charge pas ; il se décharge vers le magasin. Une dérogation se demande depuis la fiche refusée : accordée, elle sert une fois, pour ce lot et cette fiche.',
+      'Une machine retirée ne porte plus de fiche ; une zone retirée qui a un passé se désactive.',
+      'La consommation se date à la fiche (le fait), pas à sa validation.',
     ],
     messages: [
       {
@@ -1198,7 +1241,7 @@ export const SUJETS: Sujet[] = [
       'Un lot naît tout seul à la première entrée en stock (réception, import, mouvement) : il n’y a rien à créer à la main.',
     ],
     droits:
-      'Lecture du module Stock pour consulter ; écriture pour basculer en Restes ; validation pour bloquer, débloquer et décider du sort d’un lot dormant. La valeur en MAD n’apparaît que pour un rôle qui a le droit de la voir.',
+      'Lecture du module Lots pour consulter ; écriture pour basculer en Restes ; validation du module Lots (ou la Direction) pour bloquer, débloquer et décider du sort d’un lot dormant. La valeur en MAD n’apparaît que pour un rôle qui a le droit de la voir.',
     procedures: [
       {
         titre: 'Comprendre ce qu’est un lot',
@@ -1312,7 +1355,7 @@ export const SUJETS: Sujet[] = [
       {
         message: 'LOT-BLOQUE',
         cause:
-          'Le lot est bloqué par la qualité : un mouvement ou un chargement machine le concernant est refusé tant qu’il n’est pas débloqué.',
+          'Le lot est bloqué par la qualité : il ne part ni en production, ni sur machine, ni en fusion. Il peut revenir d’une machine, aller en quarantaine ou retourner au fournisseur. Un chargement exceptionnel se demande en dérogation depuis la fiche machine refusée.',
       },
     ],
     liens: [
@@ -1326,7 +1369,7 @@ export const SUJETS: Sujet[] = [
     chemin: 'Stock → Lots → clic sur une ligne',
     objectif:
       'Tout savoir d’un lot : où il se trouve, ce qui lui est arrivé depuis son entrée, et ce qu’il faut en faire.',
-    droits: 'Lecture du module Stock ; les actions demandent les mêmes droits que sur la liste des lots.',
+    droits: 'Lecture du module Lots ; les actions demandent les mêmes droits que sur la liste des lots.',
     procedures: [
       {
         titre: 'Fusionner d’autres lots dans celui-ci',
@@ -1367,7 +1410,7 @@ export const SUJETS: Sujet[] = [
     objectif:
       'Donner ou refuser l’accord demandé quand une opération sort des règles — par exemple un écart de poids hors tolérance.',
     droits:
-      'Validation du module Stock pour décider. On ne décide pas de sa propre demande : un autre responsable doit répondre (sauf l’administrateur).',
+      'Validation du module Lots, ou la Direction, pour décider. On ne décide pas de sa propre demande : un autre responsable doit répondre (sauf l’administrateur). Demander demande d’écrire sur les lots, ou d’écrire le mouvement refusé.',
     procedures: [
       {
         titre: 'Répondre à une demande',
@@ -1386,6 +1429,9 @@ export const SUJETS: Sujet[] = [
     regles: [
       'Une même demande n’est pas créée deux fois tant que la première attend une réponse.',
       'L’onglet « Historique » garde toutes les demandes tranchées, les plus récentes en premier.',
+      'Un accord s’explique comme un refus : le motif est obligatoire.',
+      'Une seule réponse : si deux responsables répondent en même temps, le second trouve la demande déjà tranchée.',
+      'Une dérogation de lot bloqué sert une fois, pour le lot et la fiche qu’elle nomme.',
     ],
     liens: [{ route: '/lots', libelle: 'Lots' }],
   },
@@ -1528,9 +1574,145 @@ export const SUJETS: Sujet[] = [
     ],
     regles: [
       'Le masquage se fait au SERVEUR : un champ masqué n’est pas seulement grisé, il n’arrive pas.',
-      'Un champ non déclaré dans la grille est masqué pour tout le monde.',
+      'La grille du module fait foi pour les champs qu’elle déclare. Un montant qu’elle ne déclare pas est masqué à qui il est masqué ailleurs (valorisation, tableau de bord).',
+      'Changer son mot de passe ferme ses autres sessions ; la session courante continue. Poser la double authentification demande le mot de passe, et un code ne sert qu’une fois.',
       'Le mot de passe fait au minimum douze caractères.',
     ],
+  },
+
+  /* ============================================ ÉCRANS SANS FICHE (08/10) == */
+  {
+    route: '/tableau-de-bord',
+    titre: 'Tableau de bord',
+    chemin: 'Tableau de bord',
+    objectif: 'Voir d’un coup d’œil ce qui demande une action : files de documents à traiter, alertes de stock, contrôles en anomalie.',
+    droits: 'Lecture du module Cockpit. Les montants n’apparaissent qu’à qui voit la valeur du stock.',
+    regles: [
+      'Chaque tuile mène à la liste qu’elle compte : on y traite, on ne recopie pas.',
+      'Les réceptions locales et d’import à contrôler sont comptées ensemble.',
+    ],
+    liens: [{ route: '/controles', libelle: 'Contrôles' }],
+  },
+  {
+    route: '/controles',
+    titre: 'Contrôles',
+    chemin: 'Pilotage → Contrôles',
+    objectif: 'Lire les contrôles de cohérence de la base (C01 à C45) et ouvrir le détail de ceux qui sont en anomalie.',
+    droits: 'Lecture du module Cockpit.',
+    regles: [
+      'Un contrôle BLOQUANT ou CRITIQUE en anomalie se traite avant tout : C11 (cache égal au grand livre), C44 (deux inventaires en cours), C45 (une ligne de bon reçue en local et à l’import).',
+      'Un contrôle d’ATTENTION signale sans bloquer : C43 (colisage incohérent), C41 (régularisation machine).',
+      'C38 (consommation machine négative) est une sentinelle : il doit rester à zéro.',
+    ],
+  },
+  {
+    route: '/recettes',
+    titre: 'Recettes',
+    chemin: 'Production → Recettes',
+    objectif: 'Décrire la composition d’une qualité de tapis : quelles références, dans quels rôles, en quels pourcentages.',
+    droits: 'Écriture du module Recettes ; validation pour la mettre en service.',
+    regles: [
+      'La somme des pourcentages fait 100 % : la base refuse une recette qui ne tombe pas juste.',
+      'Une recette en service alimente le calcul des besoins ; la figer garde la photo utilisée par un plan.',
+    ],
+    liens: [{ route: '/qualites', libelle: 'Qualités' }, { route: '/plans', libelle: 'Plans de production' }],
+  },
+  {
+    route: '/plans',
+    titre: 'Plans de production',
+    chemin: 'Production → Plans',
+    objectif: 'Planifier les mètres carrés à produire par qualité et par mois ; le plan en service donne les besoins de matière.',
+    droits: 'Écriture du module Plans ; validation pour mettre en service ou clôturer.',
+    regles: [
+      'Seul le plan EN SERVICE alimente les besoins ; un brouillon ou une simulation ne compte pas.',
+      'Clôturer un plan en service arrête ses besoins : c’est un acte de validation.',
+      'Au-delà du dernier mois du plan, le plan d’achat prolonge la demande à la moyenne du plan.',
+    ],
+    liens: [{ route: '/besoins', libelle: 'Besoins' }, { route: '/plan-achat', libelle: 'Plan d’achat' }],
+  },
+  {
+    route: '/parc-machines',
+    titre: 'Parc machines',
+    chemin: 'Stock → Parc machines',
+    objectif: 'Déclarer les machines, leurs étages et leurs places, et changer leur état (active, en panne, en sommeil, retirée).',
+    droits: 'Écriture du module Paramètres.',
+    regles: [
+      'Une machine retirée doit être vide ; retirée, elle ne porte plus de fiche.',
+      'Une zone retirée qui a un passé se désactive ; seule une zone jamais employée s’efface.',
+      'Une machine qui a travaillé ne se supprime pas : elle se retire, son historique reste.',
+    ],
+    liens: [{ route: '/machines', libelle: 'Machines' }],
+  },
+  {
+    route: '/matrice-prix',
+    titre: 'Matrice des prix',
+    chemin: 'Pilotage → Matrice des prix',
+    objectif: 'Comparer les prix d’une même matière entre fournisseurs, pour arbitrer un achat.',
+    droits: 'Lecture du module Cockpit ; les prix n’apparaissent qu’à qui a le droit de les voir.',
+  },
+  {
+    route: '/historique-prix',
+    titre: 'Historique des prix',
+    chemin: 'Pilotage → Historique des prix',
+    objectif: 'Suivre le prix au kilo payé à chaque réception, par référence et par fournisseur.',
+    droits: 'Lecture ; les prix n’apparaissent qu’à qui a le droit de les voir.',
+    regles: ['Une réception revalidée garde son entrée d’origine dans l’historique (même prix de bon).'],
+  },
+  {
+    route: '/roles-bom',
+    titre: 'Rôles de composition',
+    chemin: 'Production → Rôles',
+    objectif: 'Les rôles qu’une matière tient dans un tapis — poil, trame, chaîne… — et leur densité, qui convertit les mètres carrés en kilos.',
+    droits: 'Écriture du module Recettes.',
+  },
+  {
+    route: '/configuration',
+    titre: 'Configuration',
+    chemin: 'Réglages → Configuration',
+    objectif: 'Régler les paramètres de gestion : tolérances, seuils, délais, horizons.',
+    droits: 'Les paramètres marqués « Direction » ne se modifient que par elle.',
+    regles: [
+      'Réglages du 08/10 : P_TolerEcartPesee (2 %), P_ClotureEcartAvisPct (10 %), P_DechetSeuilValiderKg (50 kg), P_MachineEcartVert/Rouge (kg et %), P_MrpInclureStockMachine, P_JoursInventMachine (30 j), P_DureeEcartJours (90 j), P_AncienneteTauxJours (7 j), P_EncoursRetardInclus, P_HorizonProlonge.',
+      'Chaque modification est journalisée avec son auteur.',
+    ],
+  },
+  {
+    route: '/etat-stock',
+    titre: 'État du stock',
+    chemin: 'Stock → État du stock',
+    objectif: 'L’état imprimable du stock par magasin et par référence, à une date.',
+    droits: 'Lecture du module Stock ; la valeur n’apparaît qu’à qui voit le coût.',
+  },
+  {
+    route: '/receptions/nouvelle',
+    titre: 'Nouvelle réception',
+    chemin: 'Achats → Réceptions → Nouvelle',
+    objectif: 'Saisir la pesée d’un camion : appeler le bon, peser, compter les bobines, ranger.',
+    droits: 'Écriture du module Réceptions.',
+    regles: [
+      'Pour un fil suivi au lot, le champ des bobines part vide : on les compte, on ne les déduit pas.',
+      'La tolérance affichée est celle du fournisseur.',
+      'L’enregistrement garde un brouillon ; rien n’entre en stock avant le contrôle.',
+    ],
+    liens: [{ route: '/receptions', libelle: 'Réceptions' }],
+  },
+  {
+    route: '/mouvements/nouveau',
+    titre: 'Saisie libre',
+    chemin: 'Stock → Mouvements → Nouveau',
+    objectif: 'Saisir un ajustement, un déchet, une consommation hors machine ou un retour fournisseur.',
+    droits: 'Voir la fiche « Mouvements » : chaque type a son droit.',
+    regles: [
+      'Le type « Consommation hors machine » demande un OF et refuse un fil qui se charge sur machine.',
+      'Le retour fournisseur demande la réception d’origine.',
+    ],
+    liens: [{ route: '/mouvements', libelle: 'Mouvements' }],
+  },
+  {
+    route: '/telecharger',
+    titre: 'Télécharger',
+    chemin: 'Télécharger',
+    objectif: 'Installer l’application de bureau ou mobile sur un poste de l’usine.',
   },
 ]
 

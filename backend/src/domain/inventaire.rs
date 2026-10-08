@@ -238,9 +238,13 @@ pub async fn cloturer(
     let injustifiees: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM ligne_inventaire
           WHERE id_inventaire = $1
-            AND ecart_pct IS NOT NULL
-            AND abs(ecart_pct) > (SELECT CAST(valeur_courante AS numeric) FROM parametre
-                                   WHERE code_parametre = 'P_TolerEcartPesee')
+            AND ((ecart_pct IS NOT NULL
+                  AND abs(ecart_pct) > (SELECT CAST(valeur_courante AS numeric) FROM parametre
+                                         WHERE code_parametre = 'P_TolerEcartPesee'))
+                 -- Un theorique nul n'a pas de pourcentage : trouver du stock la
+                 -- ou il n'y en avait pas est un ecart, et il s'explique aussi
+                 -- (regle 10, reserve de l'audit v4).
+                 OR (COALESCE(quantite_theorique_kg, 0) = 0 AND COALESCE(quantite_comptee_kg, 0) > 0))
             AND (motif_ecart IS NULL OR trim(motif_ecart) = '')",
     )
     .bind(id_inventaire)

@@ -189,4 +189,5 @@ dérogation).
 ## Documentation
 
 - [ADR-001 — Décisions fondatrices](../docs/ADR-001-decisions-fondatrices.md)
+- [ADR-002 — Les 18 règles de gestion du 08/10/2026](../docs/ADR-002-regles-de-gestion-2026-10.md)
 - [Écarts au cahier des charges](../docs/ecarts-cahier-des-charges.md)

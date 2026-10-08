@@ -766,7 +766,12 @@ pub async fn valider_fiche(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    corps: axum::body::Bytes,
 ) -> AppResult<Json<Value>> {
+    let confirme_orange = serde_json::from_slice::<Value>(&corps)
+        .ok()
+        .and_then(|v| v.get("confirme_orange").and_then(Value::as_bool))
+        .unwrap_or(false);
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -786,7 +791,7 @@ pub async fn valider_fiche(
         ));
     }
     verrouiller_zone(&mut tx, &f.code_emplacement, &libelle).await?;
-    let r = dm::valider(&mut tx, &user, &f, &saisies, capacite).await?;
+    let r = dm::valider(&mut tx, &user, &f, &saisies, capacite, confirme_orange).await?;
     tx.commit().await?;
     Ok(Json(r))
 }
@@ -907,6 +912,17 @@ fn verifier_entete(f: &NouvelleFiche) -> AppResult<()> {
 }
 
 async fn resoudre_zone(db: &crate::db::Db, machine: &str, zone: &str) -> AppResult<Zone> {
+    // UNE MACHINE RETIREE NE SE CHARGE PLUS (audit v4) : sa zone restait
+    // ouverte aux fiches.
+    let etat: Option<String> = sqlx::query_scalar("SELECT etat FROM machine WHERE code_machine = $1")
+        .bind(machine)
+        .fetch_optional(db)
+        .await?;
+    if etat.as_deref() == Some("RETIREE") {
+        return Err(AppError::RegleMetier(format!(
+            "la machine {machine} est retiree du parc : elle ne porte plus de fiche. Remettez-la en service d'abord"
+        )));
+    }
     sqlx::query_as::<_, (String, i64)>(
         "SELECT libelle, capacite_bobines FROM machine_emplacement
           WHERE code_machine = $1 AND code_emplacement = $2 AND actif = 1",
@@ -1384,11 +1400,37 @@ pub async fn modifier_machine(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    // Les zones retirees — vides, on vient de le verifier.
+    // Les zones retirees — vides, on vient de le verifier. CELLES QUI ONT UN
+    // PASSE SE DESACTIVENT (audit v4) : fiches, decisions, consommation et
+    // etats les citent ; les effacer emportait l'historique, ou echouait.
+    // Seule une zone que personne n'a jamais employee s'efface.
     let gardees: Vec<String> = zones.iter().map(|z| z.code.clone()).collect();
     sqlx::query(
-        "DELETE FROM machine_emplacement
-          WHERE code_machine = $1 AND code_emplacement <> ALL($2)",
+        "UPDATE machine_emplacement e SET actif = 0
+          WHERE e.code_machine = $1 AND e.code_emplacement <> ALL($2) AND e.actif = 1
+            AND (EXISTS (SELECT 1 FROM machine_fiche x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_decision x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_consommation x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_fiche_journal x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_cliche x WHERE x.code_emplacement = e.code_emplacement))",
+    )
+    .bind(&code)
+    .bind(&gardees)
+    .execute(&mut *tx)
+    .await?;
+    // Les zones sans passe : leurs lignes d'etat (a zero bobine), puis elles.
+    sqlx::query(
+        "DELETE FROM machine_etat x USING machine_emplacement e
+          WHERE x.code_emplacement = e.code_emplacement
+            AND e.code_machine = $1 AND e.code_emplacement <> ALL($2) AND e.actif = 1",
+    )
+    .bind(&code)
+    .bind(&gardees)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM machine_emplacement e
+          WHERE e.code_machine = $1 AND e.code_emplacement <> ALL($2) AND e.actif = 1",
     )
     .bind(&code)
     .bind(&gardees)

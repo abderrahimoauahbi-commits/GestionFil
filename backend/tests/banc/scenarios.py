@@ -474,6 +474,80 @@ def scenario_import_coherence(c, infra):
     c.ok("Choukri", "PATCH", f"/api/import/factures/{id_facture}", {"montant_devise": 2100})
 
 
+def taux_usd_du_jour(infra):
+    jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    if infra.valeur(f"SELECT count(*) FROM taux_change WHERE code_devise = 'USD' AND substr(date_debut, 1, 10) = '{jour}'") == "0":
+        infra.sql(f"UPDATE taux_change SET date_fin = '{jour}' WHERE code_devise = 'USD' AND date_fin IS NULL")
+        infra.sql("INSERT INTO taux_change (id_taux, code_devise, taux, date_debut, source) "
+                  f"VALUES (gen_random_uuid()::text, 'USD', 9.30, '{jour}', 'banc')")
+    return jour
+
+
+def scenario_machine(c, infra):
+    """Une machine du banc : chargement, constat ordinaire en vert, gain refuse comme consommation,
+    dechargement au magasin, grand livre juste ; retiree, elle ne se charge plus."""
+    ref, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-MACH-1"
+    jour = taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 520, 2.0)], frs="FRS-001")
+    rid = reception_validee(c, id_bc, lignes, [520], lot_fournisseur=lot, nb_bobines=200)
+    stock0 = kg(infra, ref)
+
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANC1", "nom": "Machine du banc",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    zone = "BANC1-E1"
+
+    def fiche(type_fiche, lignes, mag=MAG):
+        f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANC1", "code_emplacement": zone, "date_fiche": jour,
+            "code_magasin": mag if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes})
+        return f["id_fiche"]
+
+    # 1. Chargement : 100 bobines de 2,6 kg, pleines.
+    f1 = fiche("CHARGE", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
+                           "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/apercu", {})
+    verifier(not ap["blocages"], f"apercu du chargement bloque : {ap['blocages']}")
+    # Le magasinier a VALIDER sur les mouvements (configuration reelle) : il charge.
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {})
+    verifier(abs(kg(infra, ref) - (stock0 - 260)) < 0.01, f"le chargement n'a pas sorti 260 kg : {stock0 - kg(infra, ref)}")
+
+    # 2. Constat ordinaire : 50 % restent, 130 kg consommes -> vert, au droit d'ecrire.
+    f2 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
+                        "pourcentage": 50, "code_motif": "MJ_ORDINAIRE"}])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f2}/apercu", {})
+    verifier(not ap["blocages"], f"constat ordinaire bloque : {ap['blocages']}")
+    verifier(all(l.get("niveau_ecart") in ("VERT", "AUCUN") for l in ap["lignes"]), f"constat ordinaire hors du vert : {ap['lignes']}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f2}/valider", {})
+
+    # 3. Un gain declare comme consommation : le moteur le classe en regularisation,
+    #    jamais en consommation negative (C38 reste une sentinelle a zero).
+    f3 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
+                        "pourcentage": 60, "code_motif": "MJ_CORRECTION", "effet_ecart": "CONSOMMATION",
+                        "motif_texte": "essai du banc"}])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f3}/apercu", {})
+    verifier([l.get("effet_ecart") for l in ap["lignes"]] == ["REGULARISATION"],
+             f"un gain n'est pas classe en regularisation : {[(l.get('ecart_kg'), l.get('effet_ecart')) for l in ap['lignes']]}")
+    # 26 kg sur une ligne de 260 : orange. Le serveur exige la confirmation.
+    verifier([l.get("niveau_ecart") for l in ap["lignes"]] == ["ORANGE"], f"niveau attendu ORANGE : {ap['lignes']}")
+    c.refus("Magasinie", "POST", f"/api/machines/fiches/{f3}/valider", {}, contient="ORANGE")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f3}/annuler", {"motif": "Essai du banc"})
+
+    # 4. Dechargement de tout au magasin : 100 bobines a 50 %.
+    f4 = fiche("DECHARGE", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
+                             "pct_retirees": 50, "destination": "MAGASIN", "code_motif": "DE_CHGT_PROD"}])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/apercu", {})
+    verifier(not ap["blocages"], f"dechargement bloque : {ap['blocages']}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/valider", {})
+    verifier(abs(kg(infra, ref) - (stock0 - 130)) < 0.01, f"stock apres dechargement : {kg(infra, ref)} au lieu de {stock0 - 130}")
+    verifier(controle(infra, "C11") == 0 and controle(infra, "C38") == 0, "C11 ou C38 apres le parcours machine")
+
+    # 5. Retiree, elle ne porte plus de fiche.
+    c.ok("Choukri", "PATCH", "/api/machines/BANC1/etat", {"etat": "RETIREE", "motif": "Fin du banc"})
+    c.refus("Magasinie", "POST", "/api/machines/fiches", {
+        "type_fiche": "CHARGE", "code_machine": "BANC1", "code_emplacement": zone, "date_fiche": jour,
+        "code_magasin": MAG, "responsable": "Banc", "lignes": []}, contient="retiree")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -488,6 +562,7 @@ SCENARIOS = [
     scenario_import,
     scenario_import_coherence,
     scenario_lots_autorisations,
+    scenario_machine,
     scenario_declencheurs,
     scenario_audit_montants,
     scenario_masquage,

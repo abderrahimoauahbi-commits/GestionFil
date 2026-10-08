@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 100 (voir inclus.txt).
+-- Migrations comprises : 102 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict 0hFfheoviOH7XEEQKjTlNqyjYrNAQbMmvvD8nTA8P6ReQnXWrJldAjWTsvwCFnk
+\restrict HtkXv1fgBbFuG9eshThHAd2GCcsdKT31lW2tjbAlgDqYfU71WV7rTbxvfpa9UFQ
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -4125,6 +4125,8 @@ P_MachineEcartRougeKg	Ecart machine : rouge au-dela de (kg)	50	DECIMAL	kg	Le seu
 P_MachineEcartRougePct	Ecart machine : rouge au-dela de (%)	5	DECIMAL	%	Pourcentage du poids de la ligne.	MACHINE	DIRECTION	0	2026-10-08T16:47:34.827Z	\N	\N	1
 P_ClotureEcartAvisPct	Cloture facture : avis au-dela de l'ecart	10	DECIMAL	%	Au-dela, l'apercu de cloture signale que la facture s'ecarte de la valeur au prix du bon (sans bloquer).	RECEPT	DIRECTION	0	2026-10-08T19:10:15.827Z	\N	\N	1
 P_DechetSeuilValiderKg	Dechet : seuil de validation (kg)	50	DECIMAL	kg	Au-dela, un dechet saisi a la main demande le droit de valider l'inventaire, comme un ajustement negatif.	STOCK	DIRECTION	0	2026-10-08T19:37:54.660Z	\N	\N	1
+P_EncoursRetardInclus	Compter les commandes en retard dans l'en-cours	1	ENTIER	\N	1 : une ligne de bon en retard reste comptee dans l'en-cours (le retard se relance) ; 0 : elle en sort et le besoin est repropose.	STOCK	DIRECTION	0	2026-10-08T20:48:18.505Z	\N	\N	1
+P_HorizonProlonge	Prolonger la demande au-dela du plan	1	ENTIER	\N	1 : au-dela du dernier mois du plan en service, la demande se prolonge a la moyenne mensuelle du plan ; 0 : elle est nulle.	STOCK	DIRECTION	0	2026-10-08T20:48:18.505Z	\N	\N	1
 \.
 
 
@@ -4402,5 +4404,5 @@ ALTER TABLE public.type_mouvement ENABLE TRIGGER ALL;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 0hFfheoviOH7XEEQKjTlNqyjYrNAQbMmvvD8nTA8P6ReQnXWrJldAjWTsvwCFnk
+\unrestrict HtkXv1fgBbFuG9eshThHAd2GCcsdKT31lW2tjbAlgDqYfU71WV7rTbxvfpa9UFQ
 

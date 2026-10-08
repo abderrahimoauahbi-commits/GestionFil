@@ -371,11 +371,12 @@ export const machinesApi = {
   remplacerFiche: (id: string, corps: unknown) => api.put(`/api/machines/fiches/${id}`, corps),
   /** Ce que la validation enregistrera, sans rien ecrire. */
   apercu: (id: string) => api.post<Apercu>(`/api/machines/fiches/${id}/apercu`, {}),
-  valider: (id: string) =>
+  /** `confirmeOrange` : l'ecran a montre l'ecart orange et l'operateur a confirme. */
+  valider: (id: string, confirmeOrange = false) =>
     api.post<{ consomme_kg: number; mouvement: string | null; numero_validation: number
                id_fiche: string; numero_fiche: string }>(
       `/api/machines/fiches/${id}/valider`,
-      {},
+      { confirme_orange: confirmeOrange },
     ),
 
   /* LE PARC MACHINE EST DU PARAMETRAGE (PARAMETRES/ECRIRE). */

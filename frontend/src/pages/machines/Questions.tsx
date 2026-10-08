@@ -27,7 +27,7 @@ export function useValiderFiche(f: Fiche) {
           ))}
         </ul>
       ),
-      action: () => f.envoi.mutate(undefined),
+      action: () => f.envoi.mutate(true),
     })
   }
   return { valider, element: confirmation.element }

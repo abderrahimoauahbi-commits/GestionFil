@@ -229,9 +229,11 @@ pub fn niveau_ecart(ecart_kg: f64, poids_ligne_kg: f64, s: &SeuilsEcart) -> &'st
 
 /// Celui qui peut valider un ecart rouge : le droit de valider l'inventaire —
 /// un ecart rouge corrige le stock, comme une cloture d'inventaire.
+/// LE DROIT AU ROUGE VIENT DE LA GRILLE (audit v4) : la permission VALIDER de
+/// l'inventaire, active, et rien d'autre — l'administrateur l'a dans la grille,
+/// il n'est plus code ici.
 pub async fn peut_valider_ecart_rouge(c: &mut sqlx::PgConnection, role: &str) -> AppResult<bool> {
-    Ok(role == "ADMIN"
-        || sqlx::query_scalar::<_, bool>(
+    Ok(sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS (SELECT 1 FROM permission
                              WHERE code_role_user = $1 AND module = 'INVENTAIRE' AND action = 'VALIDER'
                                AND actif = 1)",
@@ -926,12 +928,27 @@ pub async fn valider(
     f: &FicheDecision,
     saisies: &[Saisie],
     capacite: i64,
+    confirme_orange: bool,
 ) -> AppResult<Value> {
     let privilegie = matches!(user.role.as_str(), "ADMIN" | "DIRECTION");
     let autorise_rouge = peut_valider_ecart_rouge(c, &user.role).await?;
     let calc = calculer(c, f, saisies, capacite, privilegie, autorise_rouge).await?;
     if !calc.blocages.is_empty() {
         return Err(AppError::RegleMetier(calc.blocages.join(" ; ")));
+    }
+    // L'ORANGE SE CONFIRME AUSSI AU SERVEUR (regle 1, audit v4) : l'ecran le
+    // demandait, un appel direct le sautait.
+    let oranges: Vec<String> = calc
+        .lignes
+        .iter()
+        .filter(|l| l.niveau_ecart == "ORANGE")
+        .map(|l| format!("{} ({} kg)", l.code_reference, l.ecart_kg))
+        .collect();
+    if !oranges.is_empty() && !confirme_orange {
+        return Err(AppError::RegleMetier(format!(
+            "ORANGE : ecart a confirmer avant de valider — {}",
+            oranges.join(", ")
+        )));
     }
     let magasin = f.code_magasin.clone().unwrap_or_default();
     if f.type_fiche == "CHARGE" {

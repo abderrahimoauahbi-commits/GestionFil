@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 100 (voir inclus.txt).
+-- Migrations comprises : 102 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict GfoyOBiZzlYDdjbcoBVb7aiFsigGSiCXPdhxRn7aj3lIMFQuYEwc18ucjRMBdNK
+\restrict Hdt0OoNbpVezsYvH4a9clOFls9y9NWROBhTjD8hqgQ0LFBuUh2bQwIf1CgCWPGR
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -29,52 +29,54 @@ SET row_security = off;
 
 CREATE FUNCTION public.f_machine_consommation(p_machine text DEFAULT NULL::text, p_debut text DEFAULT NULL::text, p_fin text DEFAULT NULL::text) RETURNS TABLE(code_machine text, machine_nom text, code_emplacement text, zone text, code_reference text, designation text, lot_fournisseur text, date_debut text, kg_debut numeric, kg_charge numeric, kg_retourne numeric, kg_sorti_autre numeric, date_fin text, kg_fin numeric, consommation_kg numeric, dechet_perte_casse_kg numeric, non_qualifie_kg numeric, regularisation_kg numeric, erreur_saisie_kg numeric)
     LANGUAGE sql STABLE
-    AS $$
-    WITH periode AS (
-        SELECT e.*, l.nb_mouvementees
-          FROM v_machine_ecart e
-          JOIN machine_decision_ligne l ON l.id_decision = e.id_decision
-                                       AND l.ligne_numero = e.ligne_numero
-         WHERE e.nature <> 'DEPART'
-           AND (p_machine IS NULL OR e.code_machine = p_machine)
-           AND (p_debut   IS NULL OR substr(e.date_decision, 1, 10) >= substr(p_debut, 1, 10))
-           AND (p_fin     IS NULL OR substr(e.date_decision, 1, 10) <= substr(p_fin, 1, 10))
-    ),
-    bornes AS (
-        SELECT DISTINCT ON (p.code_emplacement, p.code_reference, p.lot_fournisseur)
-               p.code_emplacement, p.code_reference, p.lot_fournisseur,
-               p.date_decision AS date_debut, p.kg_avant AS kg_debut
-          FROM periode p
-         ORDER BY p.code_emplacement, p.code_reference, p.lot_fournisseur, p.date_decision
-    ),
-    fins AS (
-        SELECT DISTINCT ON (p.code_emplacement, p.code_reference, p.lot_fournisseur)
-               p.code_emplacement, p.code_reference, p.lot_fournisseur,
-               p.date_decision AS date_fin, p.kg_apres AS kg_fin
-          FROM periode p
-         ORDER BY p.code_emplacement, p.code_reference, p.lot_fournisseur, p.date_decision DESC
-    )
-    SELECT p.code_machine, m.nom, p.code_emplacement, p.zone, p.code_reference, p.designation,
-           p.lot_fournisseur, b.date_debut, ROUND(b.kg_debut, 3),
-           ROUND(SUM(CASE WHEN p.nature = 'CHARGE' THEN p.kg_mouvementes ELSE 0 END), 3),
-           ROUND(SUM(CASE WHEN p.nature = 'DECHARGE' AND p.destination = 'MAGASIN'
-                          THEN p.kg_mouvementes ELSE 0 END), 3),
-           ROUND(SUM(CASE WHEN p.nature = 'DECHARGE' AND p.destination <> 'MAGASIN'
-                          THEN p.kg_mouvementes ELSE 0 END), 3),
-           fn.date_fin, ROUND(fn.kg_fin, 3),
-           ROUND(SUM(CASE WHEN p.effet_ecart = 'CONSOMMATION' THEN p.ecart_kg ELSE 0 END), 3),
-           ROUND(SUM(CASE WHEN p.effet_ecart IN ('DECHET', 'PERTE', 'CASSE') THEN p.ecart_kg ELSE 0 END), 3),
-           ROUND(SUM(CASE WHEN p.effet_ecart = 'NON_QUALIFIE' THEN p.ecart_kg ELSE 0 END), 3),
-           ROUND(SUM(CASE WHEN p.effet_ecart = 'REGULARISATION' THEN p.ecart_kg ELSE 0 END), 3),
-           ROUND(SUM(CASE WHEN p.effet_ecart = 'ERREUR_SAISIE' THEN p.ecart_kg ELSE 0 END), 3)
-      FROM periode p
-      JOIN machine m ON m.code_machine = p.code_machine
-      JOIN bornes b  ON b.code_emplacement = p.code_emplacement
-                    AND b.code_reference = p.code_reference AND b.lot_fournisseur = p.lot_fournisseur
-      JOIN fins fn   ON fn.code_emplacement = p.code_emplacement
-                    AND fn.code_reference = p.code_reference AND fn.lot_fournisseur = p.lot_fournisseur
-     GROUP BY p.code_machine, m.nom, p.code_emplacement, p.zone, p.code_reference, p.designation,
-              p.lot_fournisseur, b.date_debut, b.kg_debut, fn.date_fin, fn.kg_fin
+    AS $$
+    WITH periode AS (
+        SELECT e.*, l.nb_mouvementees
+          FROM v_machine_ecart e
+          JOIN machine_decision_ligne l ON l.id_decision = e.id_decision
+                                       AND l.ligne_numero = e.ligne_numero
+          LEFT JOIN machine_fiche fi ON fi.id_fiche = e.id_fiche
+         WHERE e.nature <> 'DEPART'
+           AND (p_machine IS NULL OR e.code_machine = p_machine)
+           -- La date du FAIT (la fiche), a defaut celle de la validation.
+           AND (p_debut   IS NULL OR substr(COALESCE(fi.date_fiche, e.date_decision), 1, 10) >= substr(p_debut, 1, 10))
+           AND (p_fin     IS NULL OR substr(COALESCE(fi.date_fiche, e.date_decision), 1, 10) <= substr(p_fin, 1, 10))
+    ),
+    bornes AS (
+        SELECT DISTINCT ON (p.code_emplacement, p.code_reference, p.lot_fournisseur)
+               p.code_emplacement, p.code_reference, p.lot_fournisseur,
+               p.date_decision AS date_debut, p.kg_avant AS kg_debut
+          FROM periode p
+         ORDER BY p.code_emplacement, p.code_reference, p.lot_fournisseur, p.date_decision
+    ),
+    fins AS (
+        SELECT DISTINCT ON (p.code_emplacement, p.code_reference, p.lot_fournisseur)
+               p.code_emplacement, p.code_reference, p.lot_fournisseur,
+               p.date_decision AS date_fin, p.kg_apres AS kg_fin
+          FROM periode p
+         ORDER BY p.code_emplacement, p.code_reference, p.lot_fournisseur, p.date_decision DESC
+    )
+    SELECT p.code_machine, m.nom, p.code_emplacement, p.zone, p.code_reference, p.designation,
+           p.lot_fournisseur, b.date_debut, ROUND(b.kg_debut, 3),
+           ROUND(SUM(CASE WHEN p.nature = 'CHARGE' THEN p.kg_mouvementes ELSE 0 END), 3),
+           ROUND(SUM(CASE WHEN p.nature = 'DECHARGE' AND p.destination = 'MAGASIN'
+                          THEN p.kg_mouvementes ELSE 0 END), 3),
+           ROUND(SUM(CASE WHEN p.nature = 'DECHARGE' AND p.destination <> 'MAGASIN'
+                          THEN p.kg_mouvementes ELSE 0 END), 3),
+           fn.date_fin, ROUND(fn.kg_fin, 3),
+           ROUND(SUM(CASE WHEN p.effet_ecart = 'CONSOMMATION' THEN p.ecart_kg ELSE 0 END), 3),
+           ROUND(SUM(CASE WHEN p.effet_ecart IN ('DECHET', 'PERTE', 'CASSE') THEN p.ecart_kg ELSE 0 END), 3),
+           ROUND(SUM(CASE WHEN p.effet_ecart = 'NON_QUALIFIE' THEN p.ecart_kg ELSE 0 END), 3),
+           ROUND(SUM(CASE WHEN p.effet_ecart = 'REGULARISATION' THEN p.ecart_kg ELSE 0 END), 3),
+           ROUND(SUM(CASE WHEN p.effet_ecart = 'ERREUR_SAISIE' THEN p.ecart_kg ELSE 0 END), 3)
+      FROM periode p
+      JOIN machine m ON m.code_machine = p.code_machine
+      JOIN bornes b  ON b.code_emplacement = p.code_emplacement
+                    AND b.code_reference = p.code_reference AND b.lot_fournisseur = p.lot_fournisseur
+      JOIN fins fn   ON fn.code_emplacement = p.code_emplacement
+                    AND fn.code_reference = p.code_reference AND fn.lot_fournisseur = p.lot_fournisseur
+     GROUP BY p.code_machine, m.nom, p.code_emplacement, p.zone, p.code_reference, p.designation,
+              p.lot_fournisseur, b.date_debut, b.kg_debut, fn.date_fin, fn.kg_fin
 $$;
 
 
@@ -5958,7 +5960,10 @@ CREATE VIEW public.v_besoin_horizon AS
             ( SELECT (parametre.valeur_courante)::numeric AS valeur_courante
                    FROM public.parametre
                   WHERE (parametre.code_parametre = 'P_MargeJours'::text)) AS marge_jours,
-            (((((date_trunc('month'::text, (CURRENT_DATE)::timestamp with time zone) + '1 mon'::interval))::date - CURRENT_DATE))::numeric / EXTRACT(day FROM (date_trunc('month'::text, (CURRENT_DATE)::timestamp with time zone) + '1 mon -1 days'::interval))) AS reste_mois
+            (((((date_trunc('month'::text, (CURRENT_DATE)::timestamp with time zone) + '1 mon'::interval))::date - CURRENT_DATE))::numeric / EXTRACT(day FROM (date_trunc('month'::text, (CURRENT_DATE)::timestamp with time zone) + '1 mon -1 days'::interval))) AS reste_mois,
+            (COALESCE(( SELECT parametre.valeur_courante
+                   FROM public.parametre
+                  WHERE (parametre.code_parametre = 'P_HorizonProlonge'::text)), '1'::text) = '1'::text) AS prolonger
         ), mois AS (
          SELECT i.i,
             to_char((date_trunc('month'::text, (CURRENT_DATE)::timestamp with time zone) + (((i.i - 1) || ' month'::text))::interval), 'YYYY-MM'::text) AS annee_mois,
@@ -5966,11 +5971,7 @@ CREATE VIEW public.v_besoin_horizon AS
                     WHEN (i.i = 1) THEN (0)::numeric
                     ELSE ((30.0 * p.reste_mois) + (((i.i - 2))::numeric * 30.0))
                 END AS debut_j,
-            ((30.0 * p.reste_mois) + (((i.i - 1))::numeric * 30.0)) AS fin_j,
-                CASE
-                    WHEN (i.i = 1) THEN p.reste_mois
-                    ELSE (1)::numeric
-                END AS part
+            ((30.0 * p.reste_mois) + (((i.i - 1))::numeric * 30.0)) AS fin_j
            FROM (generate_series(1, 12) i(i)
              CROSS JOIN p)
         ), fenetre AS (
@@ -5980,13 +5981,32 @@ CREATE VIEW public.v_besoin_horizon AS
            FROM ((public.reference r
              LEFT JOIN public.fournisseur f ON ((f.code_fournisseur = r.code_fournisseur)))
              CROSS JOIN p)
-        ), besoin AS (
+        ), besoin_plan AS (
          SELECT bm_1.code_reference,
             bm_1.annee_mois,
             bm_1.quantite_kg
            FROM (public.besoin_mrp bm_1
              JOIN public.plan_production pp ON ((pp.id_plan = bm_1.id_plan)))
           WHERE (pp.statut = 'EN_COURS'::text)
+        ), etendue AS (
+         SELECT max(besoin_plan.annee_mois) AS dernier,
+            count(DISTINCT besoin_plan.annee_mois) AS nb
+           FROM besoin_plan
+        ), besoin AS (
+         SELECT besoin_plan.code_reference,
+            besoin_plan.annee_mois,
+            besoin_plan.quantite_kg
+           FROM besoin_plan
+        UNION ALL
+         SELECT b.code_reference,
+            m_1.annee_mois,
+            (sum(b.quantite_kg) / (NULLIF(e.nb, 0))::numeric)
+           FROM (((besoin_plan b
+             CROSS JOIN etendue e)
+             CROSS JOIN mois m_1)
+             CROSS JOIN p)
+          WHERE (p.prolonger AND (m_1.annee_mois > e.dernier))
+          GROUP BY b.code_reference, m_1.annee_mois, e.nb
         )
  SELECT w.code_reference,
     w.lead_j,
@@ -6102,39 +6122,60 @@ ALTER VIEW public.v_conso_retenue OWNER TO gestionfil;
 --
 
 CREATE VIEW public.v_encours_fiable AS
- SELECT lb.code_reference,
-    round(sum(
-        CASE
-            WHEN ((substr(lb.date_livraison_prevue, 1, 10) >= to_char(((CURRENT_DATE - (p_ret.v)::integer))::timestamp with time zone, 'YYYY-MM-DD'::text)) OR (lb.date_livraison_prevue IS NULL)) THEN lb.quantite_restante_kg
-            ELSE (0)::numeric
-        END), 4) AS encours_fiable_kg,
-    round(sum(
-        CASE
-            WHEN (substr(lb.date_livraison_prevue, 1, 10) < to_char(((CURRENT_DATE - (p_ret.v)::integer))::timestamp with time zone, 'YYYY-MM-DD'::text)) THEN lb.quantite_restante_kg
-            ELSE (0)::numeric
-        END), 4) AS encours_retarde_kg,
-    sum(
-        CASE
-            WHEN (substr(lb.date_livraison_prevue, 1, 10) < to_char(((CURRENT_DATE - (p_ret.v)::integer))::timestamp with time zone, 'YYYY-MM-DD'::text)) THEN 1
-            ELSE 0
-        END) AS nb_lignes_retardees,
-    min(
-        CASE
-            WHEN (substr(lb.date_livraison_prevue, 1, 10) < to_char(((CURRENT_DATE - (p_ret.v)::integer))::timestamp with time zone, 'YYYY-MM-DD'::text)) THEN lb.date_livraison_prevue
-            ELSE NULL::text
-        END) AS plus_ancien_retard,
-    max(
-        CASE
-            WHEN (substr(lb.date_livraison_prevue, 1, 10) < to_char(((CURRENT_DATE - (p_ret.v)::integer))::timestamp with time zone, 'YYYY-MM-DD'::text)) THEN ((CURRENT_DATE - (lb.date_livraison_prevue)::date))::bigint
-            ELSE NULL::bigint
-        END) AS retard_max_jours
-   FROM ((public.ligne_bc lb
-     JOIN public.bon_commande bc ON ((bc.id_bc = lb.id_bc)))
-     CROSS JOIN ( SELECT (parametre.valeur_courante)::numeric AS v
-           FROM public.parametre
-          WHERE (parametre.code_parametre = 'P_RetardBCJours'::text)) p_ret)
-  WHERE ((bc.statut = ANY (ARRAY['VALIDE'::text, 'ENVOYE'::text, 'LIVRE_PARTIEL'::text])) AND (lb.statut <> ALL (ARRAY['ANNULE'::text, 'SOLDE'::text])) AND (lb.type_ligne = 'MARCHANDISE'::text) AND (lb.quantite_restante_kg > (0)::numeric))
-  GROUP BY lb.code_reference;
+ WITH p_ret AS (
+         SELECT ( SELECT (parametre.valeur_courante)::numeric AS valeur_courante
+                   FROM public.parametre
+                  WHERE (parametre.code_parametre = 'P_RetardBCJours'::text)) AS v,
+            (COALESCE(( SELECT parametre.valeur_courante
+                   FROM public.parametre
+                  WHERE (parametre.code_parametre = 'P_EncoursRetardInclus'::text)), '1'::text) = '1'::text) AS inclure
+        ), bons AS (
+         SELECT lb.code_reference,
+            lb.quantite_restante_kg AS kg,
+            (substr(lb.date_livraison_prevue, 1, 10) < to_char(((CURRENT_DATE - (p_ret.v)::integer))::timestamp with time zone, 'YYYY-MM-DD'::text)) AS en_retard,
+            lb.date_livraison_prevue
+           FROM ((public.ligne_bc lb
+             JOIN public.bon_commande bc ON ((bc.id_bc = lb.id_bc)))
+             CROSS JOIN p_ret)
+          WHERE ((bc.statut = ANY (ARRAY['VALIDE'::text, 'ENVOYE'::text, 'LIVRE_PARTIEL'::text])) AND (lb.statut <> ALL (ARRAY['ANNULE'::text, 'SOLDE'::text])) AND (lb.type_ligne = 'MARCHANDISE'::text) AND (lb.quantite_restante_kg > (0)::numeric))
+        ), port AS (
+         SELECT fl.code_reference,
+            sum(fl.reste_kg) AS kg
+           FROM ((public.import_facture_lignes fl
+             JOIN public.import_factures f ON ((f.id_facture = fl.id_facture)))
+             JOIN public.import_dossiers d ON ((d.id_dossier = f.id_dossier)))
+          WHERE ((d.statut <> 'CLOTURE'::text) AND (fl.type_ligne = 'ERP'::text) AND (fl.soldee = 0) AND (fl.id_ligne_bc IS NULL) AND (fl.reste_kg > (0)::numeric))
+          GROUP BY fl.code_reference
+        ), refs AS (
+         SELECT bons.code_reference
+           FROM bons
+        UNION
+         SELECT port.code_reference
+           FROM port
+        )
+ SELECT code_reference,
+    round((COALESCE(( SELECT sum(b.kg) AS sum
+           FROM (bons b
+             CROSS JOIN p_ret)
+          WHERE ((b.code_reference = r.code_reference) AND ((NOT COALESCE(b.en_retard, false)) OR p_ret.inclure))), (0)::numeric) + COALESCE(( SELECT po.kg
+           FROM port po
+          WHERE (po.code_reference = r.code_reference)), (0)::numeric)), 4) AS encours_fiable_kg,
+    round(COALESCE(( SELECT sum(b.kg) AS sum
+           FROM bons b
+          WHERE ((b.code_reference = r.code_reference) AND b.en_retard)), (0)::numeric), 4) AS encours_retarde_kg,
+    ( SELECT count(*) AS count
+           FROM bons b
+          WHERE ((b.code_reference = r.code_reference) AND b.en_retard)) AS nb_lignes_retardees,
+    ( SELECT min(b.date_livraison_prevue) AS min
+           FROM bons b
+          WHERE ((b.code_reference = r.code_reference) AND b.en_retard)) AS plus_ancien_retard,
+    ( SELECT (max((CURRENT_DATE - (b.date_livraison_prevue)::date)))::bigint AS max
+           FROM bons b
+          WHERE ((b.code_reference = r.code_reference) AND b.en_retard)) AS retard_max_jours,
+    round(COALESCE(( SELECT po.kg
+           FROM port po
+          WHERE (po.code_reference = r.code_reference)), (0)::numeric), 4) AS encours_import_kg
+   FROM refs r;
 
 
 ALTER VIEW public.v_encours_fiable OWNER TO gestionfil;
@@ -15220,5 +15261,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict GfoyOBiZzlYDdjbcoBVb7aiFsigGSiCXPdhxRn7aj3lIMFQuYEwc18ucjRMBdNK
+\unrestrict Hdt0OoNbpVezsYvH4a9clOFls9y9NWROBhTjD8hqgQ0LFBuUh2bQwIf1CgCWPGR
 

@@ -190,9 +190,9 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
      bloque, comme un stock insuffisant. L'apercu le dit avant la validation ;
      le magasinier previent le directeur ou l'administrateur, qui corrigent. */
   const envoi = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (confirme?: boolean) => {
       if (!apercuAJour || !brouillon.current) throw new Error('Faites d’abord l’aperçu : il montre ce qui sera enregistré.')
-      return machinesApi.valider(brouillon.current)
+      return machinesApi.valider(brouillon.current, !!confirme)
     },
     onSuccess: async () => {
       for (const k of ['machines', 'machine-plan', 'machine-fiches', 'machine-contenu', 'machine-conso', 'machine-fiche'])

@@ -133,9 +133,13 @@ fn normaliser_date_mouvement(v: &Option<String>) -> Option<String> {
 /// contre-passation — qui tient leur contrepartie : saisis seuls, ils creaient
 /// du stock sans origine (une « entree de transfert » sans transfert) ou un
 /// mouvement que rien ne savait plus defaire.
+// REGLE 12 (08/10/2026, confirmee par l'utilisateur) : la saisie libre se
+// limite aux ajustements et aux dechets. La sortie production n'y reste que
+// comme DECHET (motif R4 impose) ; le retour de production en sort — un
+// retour d'atelier passe par le dechargement d'une fiche machine. Le retour
+// fournisseur reste : c'est la voie de correction apres dedouanement (regle 8).
 pub(crate) const TYPES_SAISIE_LIBRE: &[&str] = &[
     "SORTIE_PROD",
-    "RETOUR_PROD",
     "RETOUR_FOURN",
     "AJUST_INV_POS",
     "AJUST_INV_NEG",
@@ -150,6 +154,7 @@ fn document_du_type(t: &str) -> &'static str {
         "CHARGE_MACHINE" | "RETOUR_MACHINE" | "ANNUL_CHARGE_MACHINE" | "ANNUL_RETOUR_MACHINE" => {
             "d'une fiche machine (Stock → Machines)"
         }
+        "RETOUR_PROD" => "du dechargement d'une fiche machine (Stock → Machines)",
         _ => "de son document",
     }
 }
@@ -281,7 +286,8 @@ pub async fn creer_mouvement(
         .bind(&l.lot_fournisseur)
         .bind(&l.date_fabrication)
         .bind(&l.date_peremption)
-        .bind(&l.code_motif_ligne)
+        // Une sortie libre est un DECHET (regle 12) : rebut, chute non reutilisable.
+        .bind(if m.code_type_mvt == "SORTIE_PROD" { Some("R4".to_string()) } else { l.code_motif_ligne.clone() })
         .bind(l.numero_of.clone().or_else(|| m.numero_of.clone()))
         .execute(&mut *tx)
         .await?;

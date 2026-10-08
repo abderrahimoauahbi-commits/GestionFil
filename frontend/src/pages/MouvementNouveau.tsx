@@ -48,7 +48,11 @@ import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
 
 
-const TYPES_SAISIE_LIBRE = ['SORTIE_PROD', 'RETOUR_PROD', 'RETOUR_FOURN', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT']
+/* REGLE 12 : ajustements et dechets. La sortie production n'est plus qu'un
+   dechet (motif R4 pose par le serveur) ; le retour de production passe par une
+   fiche machine ; le retour fournisseur reste, voie de correction (regle 8). */
+const TYPES_SAISIE_LIBRE = ['SORTIE_PROD', 'RETOUR_FOURN', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT']
+const LIBELLE_SAISIE: Record<string, string> = { SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)' }
 
 interface TypeMvt {
   code_type_mvt: string
@@ -599,7 +603,7 @@ export function MouvementNouveau() {
                   : true).map((t) => (
                 <option key={t.code_type_mvt} value={t.code_type_mvt}>
                   {t.signe > 0 ? '+ ' : '− '}
-                  {t.libelle}
+                  {LIBELLE_SAISIE[t.code_type_mvt] ?? t.libelle}
                 </option>
               ))}
             </select>

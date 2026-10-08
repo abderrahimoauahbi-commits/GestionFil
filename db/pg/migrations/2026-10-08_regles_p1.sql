@@ -24,6 +24,7 @@
 --     lots ou la Direction.
 -- 13. Reception locale en deux temps (regle 6) : cloture avec la facture,
 --     prorata au stock present, ecart de prix trace.
+-- 14. Grille des champs : les montants d'entree suivent la valeur du stock.
 --
 -- Rejouable : CREATE OR REPLACE, DROP TRIGGER IF EXISTS.
 -- A jouer apres 2026-10-06_preferences_utilisateur.sql.
@@ -701,5 +702,33 @@ DROP TRIGGER IF EXISTS trg_rec_ajust_immuable ON reception_ajustements_cmup;
 CREATE TRIGGER trg_rec_ajust_immuable
 BEFORE UPDATE OR DELETE ON reception_ajustements_cmup FOR EACH ROW
 EXECUTE FUNCTION fn_refuser('Le journal des ajustements de CMUP d''une reception est immuable.');
+
+-- -----------------------------------------------------------------------------
+-- 14. LES MONTANTS D'ENTREE SUIVENT LA VALEUR DU STOCK (grille des champs)
+-- -----------------------------------------------------------------------------
+-- Qui ne voit pas la valeur du stock (MOUVEMENTS.valeur_dhs masque) ne voit pas
+-- davantage la valeur des entrees ni le prix moyen d'entree : l'assistante les
+-- lisait au tableau de bord « Matiere ». Compte par compte, puis role par role.
+WITH masques AS (
+    SELECT id_utilisateur FROM droit_champ
+     WHERE module = 'MOUVEMENTS' AND champ = 'valeur_dhs' AND niveau = 'MASQUE'
+), champs AS (
+    SELECT champ FROM champ_configurable
+     WHERE module = 'MOUVEMENTS' AND champ IN ('entrees_dhs', 'entrees_mad', 'prix_moyen_entree_mad')
+)
+INSERT INTO droit_champ (id_utilisateur, module, champ, niveau)
+SELECT m.id_utilisateur, 'MOUVEMENTS', c.champ, 'MASQUE' FROM masques m CROSS JOIN champs c
+ON CONFLICT (id_utilisateur, module, champ) DO UPDATE SET niveau = 'MASQUE';
+
+WITH masques AS (
+    SELECT code_role_user FROM modele_droit_champ
+     WHERE module = 'MOUVEMENTS' AND champ = 'valeur_dhs' AND niveau = 'MASQUE'
+), champs AS (
+    SELECT champ FROM champ_configurable
+     WHERE module = 'MOUVEMENTS' AND champ IN ('entrees_dhs', 'entrees_mad', 'prix_moyen_entree_mad')
+)
+INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
+SELECT m.code_role_user, 'MOUVEMENTS', c.champ, 'MASQUE' FROM masques m CROSS JOIN champs c
+ON CONFLICT (code_role_user, module, champ) DO UPDATE SET niveau = 'MASQUE';
 
 COMMIT;

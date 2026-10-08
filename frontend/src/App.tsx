@@ -1,3 +1,4 @@
+import { lazy } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
@@ -9,88 +10,89 @@ import { Coquille } from './composants/Coquille'
 import { Alerte, Chargement } from './composants/ui/base'
 import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
-import { HistoriquePrix } from './pages/HistoriquePrix'
-import { BonCommandeEtat } from './pages/BonCommandeEtat'
-import { BonMouvement } from './pages/BonMouvement'
-import { Telecharger } from './pages/Telecharger'
-import { GuideUtilisateur } from './pages/GuideUtilisateur'
-import { Chat } from './pages/Chat'
-import { Controles } from './pages/Controles'
-import { Etats } from './pages/Etats'
-import { EtatManuel } from './pages/EtatManuel'
-import { FeuilleComptage } from './pages/FeuilleComptage'
-import {
-  EtatCatalogue,
-  EtatCategories,
-  EtatComptage,
-  EtatCouleur,
-  EtatCouleurs,
-  EtatFournisseurs,
-  EtatMouvements,
-  EtatPlanAchat,
-  EtatStockImprime,
-  EtatLots,
-} from './pages/EtatsListes'
-import {
-  EtatBesoins,
-  EtatInventaire,
-  EtatPlanProduction,
-  EtatReception,
-} from './pages/EtatsDocuments'
-import { AnalyseAbcXyz } from './pages/AnalyseAbcXyz'
-import { VueEnsemble } from './pages/tableau-de-bord/VueEnsemble'
-import { PageTableauDeBord } from './pages/tableau-de-bord/Page'
-import { CoutRevient } from './pages/CoutRevient'
-import { RapportsFinanciers } from './pages/RapportsFinanciers'
-import { QualiteEtat } from './pages/QualiteEtat'
-import { MatricePrix } from './pages/MatricePrix'
-import { Statistiques } from './pages/Statistiques'
-import { Equivalences } from './pages/Equivalences'
-import { Configuration } from './pages/Configuration'
-import { TransfertNouveau } from './pages/TransfertNouveau'
-import { BonTransfert } from './pages/BonTransfert'
-import { Catalogue } from './pages/Catalogue'
-import { MouvementNouveau } from './pages/MouvementNouveau'
-import { CompleterCatalogue } from './pages/CompleterCatalogue'
-import { Fournisseurs } from './pages/Fournisseurs'
-import { Referentiels } from './pages/Referentiels'
-import { Stock } from './pages/Stock'
-import { Machines } from './pages/Machines'
-import { MachineEcran } from './pages/machines/Bureau'
-import { FicheMachine, NouvelleFicheMachine } from './pages/machines/Fiche'
-import { ParcMachines } from './pages/ParcMachines'
-import { Accueil } from './pages/Accueil'
-import { Mouvements } from './pages/Mouvements'
-import { Transferts } from './pages/Transferts'
-import { Inventaires } from './pages/Inventaires'
-import { Qualites } from './pages/Qualites'
-import { Recettes } from './pages/Recettes'
-import { Plans } from './pages/Plans'
-import { Besoins } from './pages/Besoins'
-import { BonsCommande } from './pages/BonsCommande'
-import { BonCommande } from './pages/BonCommande'
-import { AssistantImport } from './pages/import/AssistantImport'
-import { LecturePiece } from './pages/import/LecturePiece'
-import { DossiersImport } from './pages/import/DossiersImport'
-import { DossierImport } from './pages/import/DossierImport'
-import { FactureImport } from './pages/import/FactureImport'
-import { ReceptionImport } from './pages/import/ReceptionImport'
-import { ReceptionsImport } from './pages/import/ReceptionsImport'
-import { BonCommandeNouveau } from './pages/BonCommandeNouveau'
-import { Receptions } from './pages/Receptions'
-import { Reception } from './pages/Reception'
-import { ReceptionNouvelle } from './pages/ReceptionNouvelle'
-import { PlanAchat } from './pages/PlanAchat'
-import { Utilisateurs } from './pages/Utilisateurs'
-import { Droits } from './pages/Droits'
-import { Valorisation } from './pages/Valorisation'
-import { EtatStock } from './pages/EtatStock'
-import { Lots } from './pages/lots/Lots'
-import { FicheLot } from './pages/lots/FicheLot'
-import { Autorisations } from './pages/lots/Autorisations'
-import { Assistant } from './pages/Assistant'
-import { Audit } from './pages/Audit'
+const HistoriquePrix = lazy(() => import('./pages/HistoriquePrix').then((m) => ({ default: m.HistoriquePrix })))
+const BonCommandeEtat = lazy(() => import('./pages/BonCommandeEtat').then((m) => ({ default: m.BonCommandeEtat })))
+const BonMouvement = lazy(() => import('./pages/BonMouvement').then((m) => ({ default: m.BonMouvement })))
+const Telecharger = lazy(() => import('./pages/Telecharger').then((m) => ({ default: m.Telecharger })))
+const GuideUtilisateur = lazy(() => import('./pages/GuideUtilisateur').then((m) => ({ default: m.GuideUtilisateur })))
+const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })))
+const Controles = lazy(() => import('./pages/Controles').then((m) => ({ default: m.Controles })))
+const Etats = lazy(() => import('./pages/Etats').then((m) => ({ default: m.Etats })))
+const EtatManuel = lazy(() => import('./pages/EtatManuel').then((m) => ({ default: m.EtatManuel })))
+const FeuilleComptage = lazy(() => import('./pages/FeuilleComptage').then((m) => ({ default: m.FeuilleComptage })))
+const EtatCatalogue = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCatalogue })))
+const EtatCategories = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCategories })))
+const EtatComptage = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatComptage })))
+const EtatCouleur = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCouleur })))
+const EtatCouleurs = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCouleurs })))
+const EtatFournisseurs = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatFournisseurs })))
+const EtatMouvements = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatMouvements })))
+const EtatPlanAchat = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatPlanAchat })))
+const EtatStockImprime = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatStockImprime })))
+const EtatLots = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatLots })))
+const EtatBesoins = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatBesoins })))
+const EtatInventaire = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatInventaire })))
+const EtatPlanProduction = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatPlanProduction })))
+const EtatReception = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatReception })))
+const AnalyseAbcXyz = lazy(() => import('./pages/AnalyseAbcXyz').then((m) => ({ default: m.AnalyseAbcXyz })))
+const VueEnsemble = lazy(() => import('./pages/tableau-de-bord/VueEnsemble').then((m) => ({ default: m.VueEnsemble })))
+const PageTableauDeBord = lazy(() => import('./pages/tableau-de-bord/Page').then((m) => ({ default: m.PageTableauDeBord })))
+const CoutRevient = lazy(() => import('./pages/CoutRevient').then((m) => ({ default: m.CoutRevient })))
+const RapportsFinanciers = lazy(() => import('./pages/RapportsFinanciers').then((m) => ({ default: m.RapportsFinanciers })))
+const QualiteEtat = lazy(() => import('./pages/QualiteEtat').then((m) => ({ default: m.QualiteEtat })))
+const MatricePrix = lazy(() => import('./pages/MatricePrix').then((m) => ({ default: m.MatricePrix })))
+const Statistiques = lazy(() => import('./pages/Statistiques').then((m) => ({ default: m.Statistiques })))
+const Equivalences = lazy(() => import('./pages/Equivalences').then((m) => ({ default: m.Equivalences })))
+const Configuration = lazy(() => import('./pages/Configuration').then((m) => ({ default: m.Configuration })))
+const TransfertNouveau = lazy(() => import('./pages/TransfertNouveau').then((m) => ({ default: m.TransfertNouveau })))
+const BonTransfert = lazy(() => import('./pages/BonTransfert').then((m) => ({ default: m.BonTransfert })))
+const Catalogue = lazy(() => import('./pages/Catalogue').then((m) => ({ default: m.Catalogue })))
+const MouvementNouveau = lazy(() => import('./pages/MouvementNouveau').then((m) => ({ default: m.MouvementNouveau })))
+const CompleterCatalogue = lazy(() => import('./pages/CompleterCatalogue').then((m) => ({ default: m.CompleterCatalogue })))
+const Fournisseurs = lazy(() => import('./pages/Fournisseurs').then((m) => ({ default: m.Fournisseurs })))
+const Referentiels = lazy(() => import('./pages/Referentiels').then((m) => ({ default: m.Referentiels })))
+const Stock = lazy(() => import('./pages/Stock').then((m) => ({ default: m.Stock })))
+const Machines = lazy(() => import('./pages/Machines').then((m) => ({ default: m.Machines })))
+const MachineEcran = lazy(() => import('./pages/machines/Bureau').then((m) => ({ default: m.MachineEcran })))
+const FicheMachine = lazy(() => import('./pages/machines/Fiche').then((m) => ({ default: m.FicheMachine })))
+const NouvelleFicheMachine = lazy(() => import('./pages/machines/Fiche').then((m) => ({ default: m.NouvelleFicheMachine })))
+const ParcMachines = lazy(() => import('./pages/ParcMachines').then((m) => ({ default: m.ParcMachines })))
+const Accueil = lazy(() => import('./pages/Accueil').then((m) => ({ default: m.Accueil })))
+const Mouvements = lazy(() => import('./pages/Mouvements').then((m) => ({ default: m.Mouvements })))
+const Transferts = lazy(() => import('./pages/Transferts').then((m) => ({ default: m.Transferts })))
+const Inventaires = lazy(() => import('./pages/Inventaires').then((m) => ({ default: m.Inventaires })))
+const Qualites = lazy(() => import('./pages/Qualites').then((m) => ({ default: m.Qualites })))
+const Recettes = lazy(() => import('./pages/Recettes').then((m) => ({ default: m.Recettes })))
+const Plans = lazy(() => import('./pages/Plans').then((m) => ({ default: m.Plans })))
+const Besoins = lazy(() => import('./pages/Besoins').then((m) => ({ default: m.Besoins })))
+const BonsCommande = lazy(() => import('./pages/BonsCommande').then((m) => ({ default: m.BonsCommande })))
+const BonCommande = lazy(() => import('./pages/BonCommande').then((m) => ({ default: m.BonCommande })))
+const AssistantImport = lazy(() => import('./pages/import/AssistantImport').then((m) => ({ default: m.AssistantImport })))
+const LecturePiece = lazy(() => import('./pages/import/LecturePiece').then((m) => ({ default: m.LecturePiece })))
+const DossiersImport = lazy(() => import('./pages/import/DossiersImport').then((m) => ({ default: m.DossiersImport })))
+const DossierImport = lazy(() => import('./pages/import/DossierImport').then((m) => ({ default: m.DossierImport })))
+const FactureImport = lazy(() => import('./pages/import/FactureImport').then((m) => ({ default: m.FactureImport })))
+const ReceptionImport = lazy(() => import('./pages/import/ReceptionImport').then((m) => ({ default: m.ReceptionImport })))
+const ReceptionsImport = lazy(() => import('./pages/import/ReceptionsImport').then((m) => ({ default: m.ReceptionsImport })))
+const BonCommandeNouveau = lazy(() => import('./pages/BonCommandeNouveau').then((m) => ({ default: m.BonCommandeNouveau })))
+const Receptions = lazy(() => import('./pages/Receptions').then((m) => ({ default: m.Receptions })))
+const Reception = lazy(() => import('./pages/Reception').then((m) => ({ default: m.Reception })))
+const ReceptionNouvelle = lazy(() => import('./pages/ReceptionNouvelle').then((m) => ({ default: m.ReceptionNouvelle })))
+const PlanAchat = lazy(() => import('./pages/PlanAchat').then((m) => ({ default: m.PlanAchat })))
+const Utilisateurs = lazy(() => import('./pages/Utilisateurs').then((m) => ({ default: m.Utilisateurs })))
+const Droits = lazy(() => import('./pages/Droits').then((m) => ({ default: m.Droits })))
+const Valorisation = lazy(() => import('./pages/Valorisation').then((m) => ({ default: m.Valorisation })))
+const EtatStock = lazy(() => import('./pages/EtatStock').then((m) => ({ default: m.EtatStock })))
+const Lots = lazy(() => import('./pages/lots/Lots').then((m) => ({ default: m.Lots })))
+const FicheLot = lazy(() => import('./pages/lots/FicheLot').then((m) => ({ default: m.FicheLot })))
+const Autorisations = lazy(() => import('./pages/lots/Autorisations').then((m) => ({ default: m.Autorisations })))
+const Assistant = lazy(() => import('./pages/Assistant').then((m) => ({ default: m.Assistant })))
+const Audit = lazy(() => import('./pages/Audit').then((m) => ({ default: m.Audit })))
 
+/* LES ECRANS SE CHARGENT A LA DEMANDE (audit v4, P3) : le paquet initial
+   portait les soixante-dix ecrans, 1,6 Mo a lire avant le premier affichage,
+   lourd sur une tablette de magasin. La coquille les attend dans un Suspense
+   et une barriere d'erreur (composants/Coquille.tsx). */
 const client = new QueryClient({
   defaultOptions: {
     queries: {

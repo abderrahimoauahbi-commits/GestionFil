@@ -30,6 +30,7 @@ import {
   type Fiche, type LigneConso, type Machine, type TypeFiche, type Zone,
 } from './noyau'
 import { GesteRetrait } from './Fiche'
+import { PanneRequetes } from '../../composants/PanneRequetes'
 
 // =============================================================================
 // LA LISTE DES MACHINES
@@ -52,7 +53,8 @@ export function MachinesBureau() {
         description="Ce que chaque métier porte, et les trois gestes du magasin."
         actions={parametrable ? <LienParc libelle="Le parc" /> : null}
       />
-      {machines.length === 0 ? (
+      <PanneRequetes requetes={[['Les machines', qMachines]]} />
+      {qMachines.isError ? null : machines.length === 0 ? (
         <Vide
           texte={
             parametrable

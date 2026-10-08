@@ -71,6 +71,7 @@ import {
   type LigneSaisie,
 } from '../composants/GrilleLignes'
 import { TotauxCommande } from '../composants/TotauxCommande'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -145,6 +146,8 @@ export function BonCommandeNouveau() {
    */
   const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
+  // Un bon en cours de saisie ne se perd pas d'un clic dans le menu (audit v4).
+  useGardeSaisie(lignes.length > 0)
   const [erreur, setErreur] = useState<string | null>(null)
   const [aCreer, setACreer] = useState<string | null>(null)
 

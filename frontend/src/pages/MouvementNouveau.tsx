@@ -46,6 +46,8 @@ import { Alerte, Bouton, Champ, Selecteur } from '../composants/ui/base'
 import { type Conditionnement, depuisKg, facteurVersKg, pourChamp, saisieExacte } from '../lib/conditionnement'
 import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { PanneRequetes } from '../composants/PanneRequetes'
 
 
 /* REGLE 12 : ajustements et dechets. La sortie production n'est plus qu'un
@@ -362,6 +364,8 @@ export function MouvementNouveau() {
     (l) => l.nature !== 'MARCHANDISE' || !!l.code_reference || l.qte.trim() !== '',
   )
   const horsCatalogue = utiles.filter((l) => l.nature !== 'MARCHANDISE')
+  // Une saisie en cours ne se perd pas d'un clic dans le menu (audit v4).
+  useGardeSaisie(utiles.length > 0)
   const nonValidees = utiles.filter((l) => !l.valide)
   const lotsManquants = utiles.filter(
     (l) => suiviDe(l.code_reference) === 1 && !(l.extra?.lot ?? '').trim(),
@@ -571,6 +575,7 @@ export function MouvementNouveau() {
         titre="Saisir un mouvement"
         sous_titre="La quantité est convertie en kilogrammes avant enregistrement, par les paramètres de la référence."
       />
+      <PanneRequetes requetes={[['Les types de mouvement', qTypes], ['Les magasins', qMag], ['Les motifs', qMotifs], ['Le stock du magasin', qStock]]} />
       {/* LE FORMULAIRE NE PORTE QUE L'EN-TETE. Les boutons de la grille ne
           declarent pas de type : places dans un formulaire, chacun —
           valider une ligne, en ajouter une — l'aurait soumis. Le bouton du bas

@@ -54,6 +54,8 @@ import {
   pourChamp,
 } from '../lib/conditionnement'
 import { AvisColisage } from '../composants/AvisColisage'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { PanneRequetes } from '../composants/PanneRequetes'
 
 const MODULE = 'RECEPTIONS'
 
@@ -163,6 +165,8 @@ export function ReceptionNouvelle() {
     poids_total_brut_kg: '',
   })
   const [lignes, setLignes] = useState<Ligne[]>([])
+  // Une pesee en cours ne se perd pas d'un clic dans le menu (audit v4).
+  useGardeSaisie(lignes.length > 0)
   const [pointee, setPointee] = useState<string | null>(null)
   const [bonAReprendre, setBonAReprendre] = useState('')
   const [horsCommande, setHorsCommande] = useState(false)
@@ -585,6 +589,7 @@ export function ReceptionNouvelle() {
           </Bouton>
         }
       />
+      <PanneRequetes requetes={[['Les fournisseurs', qFrs], ['Les magasins', qMag], ['Les lignes attendues', qAtt]]} />
 
       {erreur && (
         <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">

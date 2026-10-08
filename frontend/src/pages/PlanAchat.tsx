@@ -349,7 +349,6 @@ export function PlanAchat() {
     [ouvertes, coches],
   )
 
-  const budgetOuvert = ouvertes.reduce((s, p) => s + (p.montant_total_mad ?? 0), 0)
   const budgetSelection = ouvertes
     .filter((p) => coches[p.id_proposition])
     .reduce((s, p) => s + (p.montant_total_mad ?? 0), 0)
@@ -937,25 +936,14 @@ export function PlanAchat() {
           </Bouton>
         </div>
       )}
-      {ouvertes.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-3">
-          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Budget a engager</div>
-            <div className="text-lg font-semibold tabular-nums">{fmt.mad(budgetOuvert)}</div>
-          </div>
-          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Propositions ouvertes</div>
-            <div className="text-lg font-semibold tabular-nums">{ouvertes.length}</div>
-          </div>
-          {selection.length > 0 && (
-            <div data-ton="primaire" className="carte-stat rounded-[var(--radius)] border border-primaire bg-primaire/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">
-                Selection · {fournisseursSelection} fournisseur(s)
-              </div>
-              <div className="text-lg font-semibold tabular-nums">{fmt.mad(budgetSelection)}</div>
-            </div>
-          )}
-        </div>
+      {/* PAS DE TUILES EN TETE D'UNE LISTE DE TRAVAIL (preference de
+          l'entreprise, audit v4) : les indicateurs vivent au tableau de bord et
+          dans les statistiques ; ici, on traite les lignes. */}
+      {selection.length > 0 && (
+        <p className="mb-3 text-[12.5px] text-attenue-texte">
+          Sélection : <span className="font-semibold text-texte tabular-nums">{fmt.mad(budgetSelection)}</span>
+          {' '}· {fournisseursSelection} fournisseur(s)
+        </p>
       )}
 
       {droits.peutEcrire && ouvertes.length > 0 && (

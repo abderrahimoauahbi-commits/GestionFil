@@ -10,7 +10,6 @@
  * n°, date, fournisseur, livraison prevue, statut, montant devise et MAD,
  * % livre, nombre de lignes, statut de livraison.
  */
-import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { FileText, Plus, Printer, Trash2 } from 'lucide-react'
@@ -136,16 +135,6 @@ export function BonsCommande() {
   })
 
   const lignes = q.data ?? []
-
-  const totaux = useMemo(() => {
-    const ouverts = lignes.filter((b) => !['CLOTURE', 'ANNULE'].includes(b.statut))
-    return {
-      ouverts: ouverts.length,
-      engage: ouverts.reduce((s, b) => s + (b.montant_total_mad ?? 0), 0),
-      aValider: lignes.filter((b) => b.statut === 'EN_ATTENTE_VALIDATION').length,
-      brouillons: lignes.filter((b) => b.statut === 'BROUILLON').length,
-    }
-  }, [lignes])
 
   const colonnes: ColonneDT<Bc>[] = [
     {
@@ -287,32 +276,9 @@ export function BonsCommande() {
         }
       />
 
-      {lignes.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-3">
-          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Engage, bons ouverts</div>
-            <div className="text-lg font-semibold tabular-nums">{fmt.mad(totaux.engage)}</div>
-          </div>
-          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Bons ouverts</div>
-            <div className="text-lg font-semibold tabular-nums">{totaux.ouverts}</div>
-          </div>
-          {totaux.brouillons > 0 && (
-            <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En brouillon</div>
-              <div className="text-lg font-semibold tabular-nums">{totaux.brouillons}</div>
-            </div>
-          )}
-          {totaux.aValider > 0 && (
-            <div data-ton="alerte" className="carte-stat rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En attente de validation</div>
-              <div className="text-lg font-semibold tabular-nums text-alerte">
-                {totaux.aValider}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* PAS DE TUILES EN TETE D'UNE LISTE DE TRAVAIL (preference de
+          l'entreprise, audit v4) : les indicateurs vivent au tableau de bord et
+          dans les statistiques ; ici, on traite les lignes. */}
 
       <DataTable<Bc>
           exportable="bons-de-commande"

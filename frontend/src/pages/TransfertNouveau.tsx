@@ -61,6 +61,7 @@ import {
   depuisKg,
   facteurVersKg,
   pourChamp, saisieExacte } from '../lib/conditionnement'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -230,6 +231,8 @@ export function TransfertNouveau() {
     observations: '',
   })
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
+  // Un transfert en cours de saisie ne se perd pas d'un clic dans le menu (audit v4).
+  useGardeSaisie(lignes.length > 0)
   const [erreur, setErreur] = useState<string | null>(null)
 
   // --- Reprise d'un brouillon ---------------------------------------------

@@ -9,7 +9,6 @@
  * pesees, ou en est le controle qualite. Le poids et la valorisation ne se
  * fixent qu'a la validation, par la cascade.
  */
-import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { FileText, Plus, Printer, Trash2 } from 'lucide-react'
@@ -89,27 +88,6 @@ export function Receptions() {
   })
 
   const lignes = q.data ?? []
-  const totaux = useMemo(() => {
-    // OTIF = produit des trois criteres, jamais leur moyenne : une livraison a
-    // l'heure mais incomplete ne sert a rien a l'atelier. On ne compte que les
-    // receptions MESURABLES — sans bon de commande, il n'y a pas de promesse a
-    // comparer, et les inclure ferait mentir le taux.
-    const mesurables = lignes.filter(
-      (r) => ['VALIDE', 'CLOTURE'].includes(r.statut) && r.on_time != null,
-    )
-    const otif = mesurables.filter(
-      (r) => r.on_time === 1 && r.in_full !== 0 && r.in_spec !== 0,
-    ).length
-    return {
-      enSaisie: lignes.filter((r) => r.statut === 'BROUILLON').length,
-      aControler: lignes.filter((r) => r.statut === 'A_CONTROLER').length,
-      mesurables: mesurables.length,
-      otif,
-      tauxOtif: mesurables.length ? (otif / mesurables.length) * 100 : null,
-      enRetard: mesurables.filter((r) => (r.retard_jours ?? 0) > 0).length,
-    }
-  }, [lignes])
-
   const colonnes: ColonneDT<Reception>[] = [
     {
       champ: 'numero_reception',
@@ -284,56 +262,9 @@ export function Receptions() {
         }
       />
 
-      {(totaux.enSaisie > 0 || totaux.aControler > 0 || totaux.mesurables > 0) && (
-        <div className="mb-4 flex flex-wrap gap-3">
-          {totaux.enSaisie > 0 && (
-            <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En saisie</div>
-              <div className="text-lg font-semibold tabular-nums">{totaux.enSaisie}</div>
-            </div>
-          )}
-          {totaux.aControler > 0 && (
-            <div data-ton="alerte" className="carte-stat rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En attente de contrôle</div>
-              <div className="text-lg font-semibold tabular-nums text-alerte">
-                {totaux.aControler}
-              </div>
-            </div>
-          )}
-          {totaux.tauxOtif != null && (
-            <div
-              data-ton={totaux.tauxOtif >= 95 ? 'succes' : 'alerte'}
-              className={cn(
-                'carte-stat rounded-[var(--radius)] border px-4 py-2.5',
-                totaux.tauxOtif >= 95 ? 'border-succes bg-succes/5' : 'border-alerte bg-alerte/5',
-              )}
-            >
-              <div className="text-[11px] text-attenue-texte">
-                OTIF sur {totaux.mesurables} livraison(s)
-              </div>
-              <div
-                className={cn(
-                  'text-lg font-semibold tabular-nums',
-                  totaux.tauxOtif >= 95 ? 'text-succes' : 'text-alerte',
-                )}
-              >
-                {fmt.nombre(totaux.tauxOtif, 1)} %
-              </div>
-              <div className="text-[11px] text-attenue-texte">
-                {totaux.otif} a l'heure, completes et conformes
-              </div>
-            </div>
-          )}
-          {totaux.enRetard > 0 && (
-            <div className="rounded-[var(--radius)] border border-danger bg-danger/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">Livrees en retard</div>
-              <div className="text-lg font-semibold tabular-nums text-danger">
-                {totaux.enRetard}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* PAS DE TUILES EN TETE D'UNE LISTE DE TRAVAIL (preference de
+          l'entreprise, audit v4) : les indicateurs vivent au tableau de bord et
+          dans les statistiques ; ici, on traite les lignes. */}
 
       <DataTable<Reception>
           exportable="receptions"

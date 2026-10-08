@@ -45,6 +45,8 @@ import {
 } from '../../lib/conditionnement'
 import { echec, nombre, useRafraichir } from './dialogues'
 import { useTolerancesColisage } from '../../lib/lots'
+import { useGardeSaisie } from '../../hooks/useGardeSaisie'
+import { PanneRequetes } from '../../composants/PanneRequetes'
 
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
 const td = 'px-2 py-1'
@@ -201,6 +203,8 @@ export function ReceptionImport() {
   const [lignes, setLignes] = useState<LigneRecue[]>([])
   const [choix, setChoix] = useState<string[]>([])
   const [modifie, setModifie] = useState(false)
+  // Une pesee non enregistree ne se perd pas d'un clic dans le menu (audit v4).
+  useGardeSaisie(modifie)
   const [filtre, setFiltre] = useState({ dossier: '', fournisseur: '', texte: '' })
 
   // Charger la reception existante, ou partir d'une feuille vierge datee du jour.
@@ -554,6 +558,7 @@ export function ReceptionImport() {
           </>
         }
       />
+      <PanneRequetes requetes={[['Les lignes à recevoir', qReste], ['La réception', qReception], ['Les magasins', qMagasins]]} />
 
       {statut === 'VALIDEE' && (
         <Alerte ton="succes">
@@ -879,7 +884,9 @@ export function ReceptionImport() {
               <div className="p-3"><Chargement texte="Lecture de ce qui reste à recevoir…" /></div>
             ) : disponibles.length === 0 ? (
               <p className="p-3 text-[12.5px] text-attenue-texte">
-                {restants.length > 0
+                {qReste.isError
+                  ? 'Les lignes à recevoir n’ont pas pu être lues (voir le bandeau en haut).'
+                  : restants.length > 0
                   ? 'Aucune ligne ne répond à ces filtres.'
                   : lignes.length > 0
                     ? 'Toutes les lignes restantes sont dans cette réception.'

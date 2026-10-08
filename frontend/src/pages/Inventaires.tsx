@@ -58,6 +58,7 @@ import {
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { SANS_LOT, couleurEcart, libelleLot, useTolerancesLot } from '../lib/lots'
+import { PanneRequetes } from '../composants/PanneRequetes'
 
 const MODULE = 'INVENTAIRE'
 
@@ -525,6 +526,7 @@ export function Inventaires() {
           )
         }
       />
+      <PanneRequetes requetes={[['Les inventaires', qInv], ['Les lignes de l’inventaire', qLignes]]} />
 
       <PageAvecRail
         large

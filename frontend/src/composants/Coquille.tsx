@@ -14,7 +14,7 @@
  * Les entrees dont le module n'est pas accessible ne sont pas rendues : la
  * navigation reflete exactement ce que l'utilisateur peut faire.
  */
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -36,6 +36,8 @@ import { MiseAJourAuto } from './MiseAJourAuto'
 import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { DoubleAuthentification } from './DoubleAuthentification'
+import { BarriereErreur } from './BarriereErreur'
+import { Chargement } from './ui/base'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
 import {
@@ -729,7 +731,13 @@ export function Coquille() {
               doivent encore passer par l'installateur, une derniere fois. */}
           <MiseAJourAuto />
           <BandeauMiseAJour />
-          <Outlet key={emplacement.pathname} />
+          {/* L'ECRAN, DANS SA BARRIERE (audit v4) : une erreur reste dans son
+              cadre, le menu demeure ; l'ecran se charge a la demande. */}
+          <BarriereErreur cle={emplacement.pathname}>
+            <Suspense fallback={<Chargement />}>
+              <Outlet key={emplacement.pathname} />
+            </Suspense>
+          </BarriereErreur>
         </div>
       </main>
 

@@ -66,7 +66,7 @@ pub struct FactureLocale {
 async fn provisoire(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(String, i64, f64)>> {
     Ok(sqlx::query_as(
         "SELECT a.code_reference, round(sum(a.total_mad) * 100)::bigint, sum(a.quantite_stock_kg)::float8
-           FROM archive_reception a
+           FROM v_archive_reception_courante a
            JOIN ligne_reception lr ON lr.id_ligne_reception = a.id_ligne_reception
           WHERE lr.id_reception = $1
           GROUP BY a.code_reference

@@ -1342,7 +1342,7 @@ pub async fn cockpit_analyse(
            (SELECT ROUND(SUM(GREATEST(sp.stock_physique_net_kg, 0) * sp.cmup_mad)
                          / NULLIF(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * sp.cmup_mad) / 30.0, 0), 1)
               FROM v_stock_projete sp)                                                AS couverture_ponderee_jours,
-           (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM archive_reception
+           (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM v_archive_reception_courante
              WHERE ecart_pct IS NOT NULL)                                             AS ecart_pesee_moyen_pct,
            (SELECT ROUND(COALESCE(SUM(e), 0), 2) FROM (
                 SELECT MAX(economie_annuelle_mad) AS e FROM v_cockpit_economies

@@ -157,6 +157,18 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
                                                  AND definition LIKE '%reste_mois%')",
     ),
+    (
+        // La derogation de lot bloque : le service lit date_consommation.
+        "2026-10-08e_lots_derogation.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'demande_autorisation'
+                           AND column_name = 'date_consommation')",
+    ),
+    (
+        // La revalidation d'une reception : archive versionnee, vue courante.
+        "2026-10-08g_revalidation_reception.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_archive_reception_courante')",
+    ),
 ];
 
 async fn verifier_schema(pool: &Db) -> anyhow::Result<()> {

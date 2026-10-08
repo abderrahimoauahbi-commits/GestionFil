@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 98 (voir inclus.txt).
+-- Migrations comprises : 100 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict ez97hDpGt6n98GYlL0gebPMHzwVYM8udqM2seJxruHGfgIwhf1DInulb5b0RbOH
+\restrict GfoyOBiZzlYDdjbcoBVb7aiFsigGSiCXPdhxRn7aj3lIMFQuYEwc18ucjRMBdNK
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1545,6 +1545,78 @@ $$;
 ALTER FUNCTION public.fn_trg_import_facture_engagement() OWNER TO gestionfil;
 
 --
+-- Name: fn_trg_import_facture_figee(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_import_facture_figee() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF (NEW.code_fournisseur, NEW.code_devise, NEW.taux_change, NEW.montant_devise)
+           IS DISTINCT FROM (OLD.code_fournisseur, OLD.code_devise, OLD.taux_change, OLD.montant_devise)
+       AND EXISTS (SELECT 1 FROM import_facture_lignes l WHERE l.id_facture = NEW.id_facture
+                      AND l.quantite_recue_kg > 0) THEN
+        RAISE EXCEPTION 'IMPORT-FIGEE : la facture % a deja fait entrer de la marchandise : son fournisseur, sa devise, son taux et son montant ne bougent plus. Corrigez par les frais du dossier, ou contre-passez la reception avant la DUM.',
+            NEW.numero_facture USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_import_facture_figee() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_import_hors_reception_locale(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_import_hors_reception_locale() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE v_reception text;
+BEGIN
+    IF NEW.id_ligne_bc IS NOT NULL THEN
+        SELECT r.numero_reception INTO v_reception
+          FROM ligne_reception lr JOIN reception r ON r.id_reception = lr.id_reception
+         WHERE lr.id_ligne_bc = NEW.id_ligne_bc AND r.statut <> 'ANNULE'
+         LIMIT 1;
+        IF v_reception IS NOT NULL THEN
+            RAISE EXCEPTION 'ETANCHEITE : cette ligne de bon est deja recue en reception locale (%) : elle ne se rattache pas a un dossier d''import.',
+                v_reception USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_import_hors_reception_locale() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_import_ligne_figee(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_import_ligne_figee() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF OLD.quantite_recue_kg > 0
+       AND (NEW.code_reference, NEW.type_ligne, NEW.unite, NEW.quantite, NEW.poids_net_kg,
+            NEW.prix_unitaire_devise, NEW.remise_pct, NEW.id_ligne_bc)
+           IS DISTINCT FROM
+           (OLD.code_reference, OLD.type_ligne, OLD.unite, OLD.quantite, OLD.poids_net_kg,
+            OLD.prix_unitaire_devise, OLD.remise_pct, OLD.id_ligne_bc) THEN
+        RAISE EXCEPTION 'IMPORT-FIGEE : la ligne % de la facture est deja recue (% kg) : reference, poids, prix et bon ne bougent plus. Soldez-la, ou contre-passez la reception avant la DUM.',
+            OLD.code_reference, OLD.quantite_recue_kg USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_import_ligne_figee() OWNER TO gestionfil;
+
+--
 -- Name: fn_trg_import_reception_segregation(); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -2688,6 +2760,34 @@ $$;
 ALTER FUNCTION public.fn_trg_qualite_activer_somme() OWNER TO gestionfil;
 
 --
+-- Name: fn_trg_reception_locale_hors_import(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_reception_locale_hors_import() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE v_dossier text;
+BEGIN
+    IF NEW.id_ligne_bc IS NOT NULL THEN
+        SELECT d.numero INTO v_dossier
+          FROM import_facture_lignes fl
+          JOIN import_factures f ON f.id_facture = fl.id_facture
+          JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+         WHERE fl.id_ligne_bc = NEW.id_ligne_bc
+         LIMIT 1;
+        IF v_dossier IS NOT NULL THEN
+            RAISE EXCEPTION 'ETANCHEITE : cette ligne de bon (%) est servie par le dossier d''import % : elle se recoit par la reception d''import, pas en reception locale.',
+                NEW.code_reference, v_dossier USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_reception_locale_hors_import() OWNER TO gestionfil;
+
+--
 -- Name: fn_trg_reception_sod_acheteur(); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -3040,6 +3140,7 @@ CREATE TABLE public.archive_reception (
     photos text,
     date_archive text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_utilisateur_archive text,
+    version smallint DEFAULT 1 NOT NULL,
     CONSTRAINT archive_reception_conformite_delai_check CHECK (((conformite_delai IS NULL) OR (conformite_delai = ANY (ARRAY[(0)::bigint, (1)::bigint])))),
     CONSTRAINT archive_reception_conformite_quantite_check CHECK (((conformite_quantite IS NULL) OR (conformite_quantite = ANY (ARRAY[(0)::bigint, (1)::bigint])))),
     CONSTRAINT archive_reception_conformite_specifications_check CHECK (((conformite_specifications IS NULL) OR (conformite_specifications = ANY (ARRAY[(0)::bigint, (1)::bigint])))),
@@ -6350,6 +6451,46 @@ CREATE VIEW public.v_analyse_abc_xyz AS
 ALTER VIEW public.v_analyse_abc_xyz OWNER TO gestionfil;
 
 --
+-- Name: v_archive_reception_courante; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_archive_reception_courante AS
+ SELECT id_archive,
+    id_ligne_reception,
+    numero_reception,
+    code_reference,
+    code_fournisseur,
+    date_reception,
+    lot_fournisseur,
+    quantite_pesee_unite,
+    unite_saisie,
+    quantite_stock_kg,
+    prix_kg_devise,
+    code_devise,
+    taux_change,
+    prix_kg_mad,
+    total_mad,
+    code_magasin_dest,
+    statut_qualite,
+    ecart_pct,
+    conformite_specifications,
+    conformite_quantite,
+    conformite_delai,
+    jours_retard,
+    documents_attaches,
+    photos,
+    date_archive,
+    id_utilisateur_archive,
+    version
+   FROM public.archive_reception a
+  WHERE (NOT (EXISTS ( SELECT 1
+           FROM public.archive_reception b
+          WHERE ((b.id_ligne_reception = a.id_ligne_reception) AND (b.version > a.version)))));
+
+
+ALTER VIEW public.v_archive_reception_courante OWNER TO gestionfil;
+
+--
 -- Name: v_besoin_mrp_calcule; Type: VIEW; Schema: public; Owner: gestionfil
 --
 
@@ -7476,6 +7617,26 @@ CREATE VIEW public.v_ctl_c44 AS
 ALTER VIEW public.v_ctl_c44 OWNER TO gestionfil;
 
 --
+-- Name: v_ctl_c45; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ctl_c45 AS
+ SELECT bc.numero_bc,
+    lb.code_reference,
+    lb.id_ligne_bc
+   FROM (public.ligne_bc lb
+     JOIN public.bon_commande bc ON ((bc.id_bc = lb.id_bc)))
+  WHERE ((EXISTS ( SELECT 1
+           FROM public.import_facture_lignes fl
+          WHERE (fl.id_ligne_bc = lb.id_ligne_bc))) AND (EXISTS ( SELECT 1
+           FROM (public.ligne_reception lr
+             JOIN public.reception r ON ((r.id_reception = lr.id_reception)))
+          WHERE ((lr.id_ligne_bc = lb.id_ligne_bc) AND (r.statut <> 'ANNULE'::text)))));
+
+
+ALTER VIEW public.v_ctl_c45 OWNER TO gestionfil;
+
+--
 -- Name: v_controles; Type: VIEW; Schema: public; Owner: gestionfil
 --
 
@@ -7742,7 +7903,13 @@ UNION ALL
     'Plus d''un inventaire en cours sur un magasin'::text AS controle,
     'CRITIQUE'::text AS criticite,
     ( SELECT count(*) AS count
-           FROM public.v_ctl_c44) AS anomalies;
+           FROM public.v_ctl_c44) AS anomalies
+UNION ALL
+ SELECT 'C45'::text AS code,
+    'Ligne de bon recue a la fois en local et a l''import'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c45) AS anomalies;
 
 
 ALTER VIEW public.v_controles OWNER TO gestionfil;
@@ -9018,7 +9185,7 @@ CREATE VIEW public.v_fournisseur_scorecard AS
                     ELSE 0.0
                 END), 2) AS otif_pct,
             round(avg(COALESCE(ar.jours_retard, (0)::bigint)), 1) AS retard_moyen_jours
-           FROM public.archive_reception ar
+           FROM public.v_archive_reception_courante ar
           GROUP BY ar.code_fournisseur
         ), ref_agg AS (
          SELECT reference.code_fournisseur,
@@ -10399,11 +10566,11 @@ ALTER TABLE ONLY public.alerte
 
 
 --
--- Name: archive_reception archive_reception_id_ligne_reception_key; Type: CONSTRAINT; Schema: public; Owner: gestionfil
+-- Name: archive_reception archive_reception_ligne_version_key; Type: CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
 ALTER TABLE ONLY public.archive_reception
-    ADD CONSTRAINT archive_reception_id_ligne_reception_key UNIQUE (id_ligne_reception);
+    ADD CONSTRAINT archive_reception_ligne_version_key UNIQUE (id_ligne_reception, version);
 
 
 --
@@ -12889,6 +13056,13 @@ CREATE TRIGGER trg_import_facture_engagement BEFORE INSERT OR UPDATE OF id_engag
 
 
 --
+-- Name: import_factures trg_import_facture_figee; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_import_facture_figee BEFORE UPDATE ON public.import_factures FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_facture_figee();
+
+
+--
 -- Name: import_factures trg_import_factures_verrou; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
@@ -12900,6 +13074,20 @@ CREATE TRIGGER trg_import_factures_verrou BEFORE INSERT OR DELETE OR UPDATE ON p
 --
 
 CREATE TRIGGER trg_import_frais_verrou BEFORE INSERT OR DELETE OR UPDATE ON public.dossier_lignes_frais FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_verrou();
+
+
+--
+-- Name: import_facture_lignes trg_import_hors_reception_locale; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_import_hors_reception_locale BEFORE INSERT OR UPDATE OF id_ligne_bc ON public.import_facture_lignes FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_hors_reception_locale();
+
+
+--
+-- Name: import_facture_lignes trg_import_ligne_figee; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_import_ligne_figee BEFORE UPDATE ON public.import_facture_lignes FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_ligne_figee();
 
 
 --
@@ -13257,6 +13445,13 @@ CREATE TRIGGER trg_qualite_activer_somme BEFORE UPDATE OF statut ON public.quali
 --
 
 CREATE TRIGGER trg_rec_ajust_immuable BEFORE DELETE OR UPDATE ON public.reception_ajustements_cmup FOR EACH ROW EXECUTE FUNCTION public.fn_refuser('Le journal des ajustements de CMUP d''une reception est immuable.');
+
+
+--
+-- Name: ligne_reception trg_reception_locale_hors_import; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_reception_locale_hors_import BEFORE INSERT OR UPDATE OF id_ligne_bc ON public.ligne_reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_reception_locale_hors_import();
 
 
 --
@@ -15025,5 +15220,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ez97hDpGt6n98GYlL0gebPMHzwVYM8udqM2seJxruHGfgIwhf1DInulb5b0RbOH
+\unrestrict GfoyOBiZzlYDdjbcoBVb7aiFsigGSiCXPdhxRn7aj3lIMFQuYEwc18ucjRMBdNK
 

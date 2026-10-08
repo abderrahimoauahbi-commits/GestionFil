@@ -406,10 +406,79 @@ def scenario_lots_autorisations(c, infra):
     c.refus("Assistante", "PATCH", "/api/magasins/Polyfashions", {"est_quarantaine": 1}, codes=(403,))
 
 
+def scenario_reception_devalidee_revalidee(c, infra):
+    """Une reception validee, devalidee (ses entrees contre-passees), se corrige et se revalide :
+    pas d'impasse sur le numero du mouvement ni sur l'archive (audit v3/v4)."""
+    avant = kg(infra)
+    id_bc, lignes = bon_envoye(c, [(REF, 600, 20)])
+    rid = reception_validee(c, id_bc, lignes, [600])
+    # La procedure : contre-passer l'entree, puis devalider le papier.
+    numero = infra.valeur(f"SELECT numero_reception FROM reception WHERE id_reception = '{rid}'")
+    for (id_mvt,) in infra.sql(f"SELECT id_mouvement FROM mouvement WHERE reference_document = '{numero}' "
+                               "AND code_type_mvt = 'ENTREE_REC'"):
+        c.ok("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer", {"motif": "Pesee a refaire, balance dereglee"})
+    c.ok("Choukri", "POST", f"/api/devalider/receptions/{rid}", {"motif": "Pesee a refaire, balance dereglee"})
+    verifier(abs(kg(infra) - avant) < 1e-6, "la devalidation n'a pas retire l'entree")
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+    verifier(abs(kg(infra) - avant - 600) < 1e-6, "la revalidation n'a pas refait l'entree")
+    verifier(controle(infra, "C11") == 0, "C11 apres devalidation et revalidation")
+
+
+def scenario_import_coherence(c, infra):
+    """Import : une ligne de bon servie par un dossier ne se recoit pas en local ; une facture recue est
+    figee ; avant la DUM, contre-passer l'entree annule la reception et rend facture et bon."""
+    ref = "PP-1500 Dtex-Bleu 6666-Hs"
+    jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    # Un taux du jour pour l'USD : un bon en devise ne se valide pas sur un taux de plus de 7 jours.
+    infra.sql(f"UPDATE taux_change SET date_fin = '{jour}' WHERE code_devise = 'USD' AND date_fin IS NULL")
+    infra.sql("INSERT INTO taux_change (id_taux, code_devise, taux, date_debut, source) "
+              f"VALUES (gen_random_uuid()::text, 'USD', 9.30, '{jour}', 'banc')")
+    id_bc, lignes = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
+    lb = lignes[0]["id_ligne_bc"]
+    cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={jour}")["reference"]
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/27", "code_devise": "USD"})
+    id_dossier = d.get("id_dossier") or d.get("id")
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-2", "date_facture": jour,
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
+    id_facture = f.get("id_facture") or f.get("id")
+    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+        "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000, "poids_net_kg": 1000,
+        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BANC-2", "id_ligne_bc": lb})
+    # Etancheite : la ligne de bon servie par le dossier ne se recoit pas en local.
+    c.refus("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "lignes": [{
+        "code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg", "quantite_pesee_unite": 400,
+        "code_magasin_dest": MAG, "lot_fournisseur": "LOT-BANC-2", "nb_bobines": 154}]}, contient="ETANCHEITE")
+
+    ligne = next(x for x in c.ok("Magasinie", "GET", "/api/import/a-recevoir") if x["numero_dossier"] == "BANC/27")
+    r = c.ok("Magasinie", "POST", "/api/import/receptions", {"date_reception": jour, "lignes": [{
+        "id_ligne": ligne["id_ligne"], "quantite_recue_kg": 400, "code_magasin": MAG,
+        "lot_fournisseur": "LOT-BANC-2", "nb_bobines": 154}]})
+    rid = r["id_reception"]
+    c.ok("Magasinie", "PUT", f"/api/import/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/import/receptions/{rid}/valider")
+    recu = lambda: float(infra.valeur(f"SELECT quantite_recue_kg FROM import_facture_lignes WHERE id_ligne = '{ligne['id_ligne']}'"))
+    recu_bc = lambda: float(infra.valeur(f"SELECT quantite_recue_kg FROM ligne_bc WHERE id_ligne_bc = '{lb}'"))
+    verifier(abs(recu() - 400) < 1e-6 and abs(recu_bc() - 400) < 1e-6, "la reception n'a pas servi facture et bon")
+
+    # La facture recue est figee.
+    c.refus("Choukri", "PATCH", f"/api/import/factures/{id_facture}", {"montant_devise": 2100}, contient="IMPORT-FIGEE")
+
+    # Avant la DUM, contre-passer l'entree annule la reception et rend facture et bon.
+    id_mvt = infra.valeur(f"SELECT id_mouvement FROM import_reception_lignes WHERE id_reception = '{rid}'")
+    c.ok("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer", {"motif": "Erreur de lot, a recevoir de nouveau"})
+    statut = infra.valeur(f"SELECT statut FROM import_receptions WHERE id_reception = '{rid}'")
+    verifier(statut == "ANNULEE", f"la reception d'import reste {statut} apres contre-passation")
+    verifier(abs(recu()) < 1e-6 and abs(recu_bc()) < 1e-6, f"facture {recu()} kg / bon {recu_bc()} kg apres contre-passation")
+    # Plus rien de recu : la facture se corrige de nouveau.
+    c.ok("Choukri", "PATCH", f"/api/import/factures/{id_facture}", {"montant_devise": 2100})
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
     scenario_ecart_pesee,
+    scenario_reception_devalidee_revalidee,
     scenario_saisie_libre,
     scenario_stock_jamais_negatif,
     scenario_contre_passation,
@@ -417,6 +486,7 @@ SCENARIOS = [
     scenario_colisage_signale,
     scenario_colisage_ecran_et_base,
     scenario_import,
+    scenario_import_coherence,
     scenario_lots_autorisations,
     scenario_declencheurs,
     scenario_audit_montants,

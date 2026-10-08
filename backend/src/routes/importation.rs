@@ -910,7 +910,9 @@ pub async fn lignes_bc_ouvertes(
           -- ligne de bon, ils ne pourraient se repartir sur rien.
           WHERE lb.type_ligne = 'MARCHANDISE'
             AND b.code_fournisseur = $1
-            AND b.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
+            -- Envoye au fournisseur, comme en reception locale (audit v4) : un bon
+            -- seulement valide n'a pas encore ete commande.
+            AND b.statut IN ('ENVOYE','LIVRE_PARTIEL')
             AND lb.statut NOT IN ('SOLDE','ANNULE')
           ORDER BY b.date_bc DESC, lb.ligne_numero",
     )

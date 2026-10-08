@@ -294,7 +294,17 @@ pub async fn valider(
 
     for (magasin, lignes_magasin) in &par_magasin {
         let id_mouvement = uuid::Uuid::new_v4().to_string();
-        let numero_mouvement = format!("MVT-REC-{}-{}", entete.numero_reception, magasin);
+        // UNE REVALIDATION PORTE SON PROPRE NUMERO (audit v4) : apres
+        // contre-passation et devalidation, l'entree d'origine reste au grand
+        // livre sous « MVT-REC-…-magasin » ; la suivante devient « …-R2 ».
+        let base = format!("MVT-REC-{}-{}", entete.numero_reception, magasin);
+        let deja: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM mouvement WHERE numero_mouvement = $1 OR numero_mouvement LIKE $1 || '-R%'",
+        )
+        .bind(&base)
+        .fetch_one(&mut *tx)
+        .await?;
+        let numero_mouvement = if deja == 0 { base } else { format!("{base}-R{}", deja + 1) };
 
         sqlx::query(
             "INSERT INTO mouvement
@@ -368,8 +378,10 @@ pub async fn valider(
                   quantite_stock_kg, prix_kg_devise, code_devise, taux_change, prix_kg_mad,
                   total_mad, code_magasin_dest, statut_qualite, ecart_pct,
                   conformite_specifications, conformite_quantite, conformite_delai,
-                  jours_retard, date_archive, id_utilisateur_archive)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)",
+                  jours_retard, date_archive, id_utilisateur_archive, version)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+                     -- Une revalidation ecrit la version suivante (2026-10-08g).
+                     (SELECT COALESCE(max(version), 0) + 1 FROM archive_reception WHERE id_ligne_reception = $1))",
         )
         .bind(&l.id_ligne_reception)
         .bind(&entete.numero_reception)
@@ -403,7 +415,9 @@ pub async fn valider(
                  (id_ligne_reception, code_reference, code_fournisseur, date_achat,
                   prix_kg_devise, code_devise, taux_change, prix_kg_mad,
                   quantite_achetee_kg, total_mad, date_enregistrement)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             -- Revalidee, la ligne garde son entree d'origine (meme prix de bon).
+             ON CONFLICT (id_ligne_reception) DO NOTHING",
         )
         .bind(&l.id_ligne_reception)
         .bind(&l.code_reference)

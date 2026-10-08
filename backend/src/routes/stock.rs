@@ -828,6 +828,101 @@ pub async fn contre_passer(
         }
     }
 
+    // LA RECEPTION D'IMPORT SUIT SON ENTREE (audit v4). Avant la DUM, la
+    // contre-passation retirait les kilos du stock mais laissait la reception
+    // VALIDEE, la facture « 50 kg recus » et le bon servi : le reste a recevoir
+    // mentait, et la ligne ne pouvait plus etre recue. Les quantites recues
+    // redescendent ; la reception s'annule quand plus rien d'elle n'est en stock.
+    let import: Vec<(String, String, f64, Option<String>)> = sqlx::query_as(
+        "SELECT rl.id_reception, rl.id_ligne, rl.quantite_recue_kg::float8, l.id_ligne_bc
+           FROM import_reception_lignes rl
+           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+          WHERE rl.id_mouvement = $1",
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut receptions_import: Vec<String> = Vec::new();
+    for (id_reception, id_ligne, kg, id_ligne_bc) in &import {
+        sqlx::query(
+            "UPDATE import_facture_lignes
+                SET quantite_recue_kg = GREATEST(0, round(quantite_recue_kg - $2::numeric, 4))
+              WHERE id_ligne = $1",
+        )
+        .bind(id_ligne)
+        .bind(kg)
+        .execute(&mut *tx)
+        .await?;
+        if let Some(lb) = id_ligne_bc {
+            sqlx::query(
+                "UPDATE ligne_bc
+                    SET quantite_recue_kg = GREATEST(0, round(quantite_recue_kg - $2::numeric, 4)),
+                        statut = CASE WHEN statut = 'ANNULE' THEN statut
+                                      WHEN round(quantite_recue_kg - $2::numeric, 4) <= 0 THEN 'EN_ATTENTE'
+                                      ELSE 'PARTIEL' END
+                  WHERE id_ligne_bc = $1",
+            )
+            .bind(lb)
+            .bind(kg)
+            .execute(&mut *tx)
+            .await?;
+        }
+        if !receptions_import.contains(id_reception) {
+            receptions_import.push(id_reception.clone());
+        }
+    }
+    // De meme pour une reception LOCALE : le bon retrouve son reste a recevoir.
+    // Sans cela, une reception contre-passee puis devalidee ne se revalidait
+    // plus — le bon la croyait deja recue (impasse relevee aux audits v3 et v4,
+    // reproduite par le banc).
+    let locales: Vec<(String, f64)> = sqlx::query_as(
+        "SELECT lr.id_ligne_bc, lr.quantite_stock_kg::float8
+           FROM ligne_reception lr
+          WHERE lr.id_mouvement_genere = $1 AND lr.id_ligne_bc IS NOT NULL",
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (lb, kg) in &locales {
+        sqlx::query(
+            "UPDATE ligne_bc
+                SET quantite_recue_kg = GREATEST(0, round(quantite_recue_kg - $2::numeric, 4)),
+                    statut = CASE WHEN statut = 'ANNULE' THEN statut
+                                  WHEN round(quantite_recue_kg - $2::numeric, 4) <= 0 THEN 'EN_ATTENTE'
+                                  ELSE 'PARTIEL' END
+              WHERE id_ligne_bc = $1",
+        )
+        .bind(lb)
+        .bind(kg)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for id_reception in &receptions_import {
+        sqlx::query(
+            "UPDATE import_receptions r SET statut = 'ANNULEE'
+              WHERE r.id_reception = $1 AND r.statut = 'VALIDEE'
+                AND NOT EXISTS (SELECT 1 FROM import_reception_lignes rl
+                                 WHERE rl.id_reception = r.id_reception AND rl.id_mouvement IS NOT NULL
+                                   AND NOT EXISTS (SELECT 1 FROM mouvement inv
+                                                    WHERE inv.id_mouvement_contrepasse = rl.id_mouvement))",
+        )
+        .bind(id_reception)
+        .execute(&mut *tx)
+        .await?;
+        let dossiers: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT f.id_dossier FROM import_reception_lignes rl
+               JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+               JOIN import_factures f ON f.id_facture = l.id_facture
+              WHERE rl.id_reception = $1",
+        )
+        .bind(id_reception)
+        .fetch_all(&mut *tx)
+        .await?;
+        for d in &dossiers {
+            crate::domain::importation::statuer_factures(&mut tx, d).await?;
+        }
+    }
+
     tx.commit().await?;
 
     Ok(Json(json!({
@@ -3513,14 +3608,17 @@ pub async fn creer_reception(
         // Le taux est NUMERIC en base : sans `::float8`, le decodage echouait et
         // toute reception rattachee a un bon tombait en erreur. Le prix engage
         // est une colonne calculee qui peut etre nulle : `Option`.
-        let engage: Option<(Option<f64>, String, f64)> = match &id_ligne_bc {
+        // PAS DE REPLI AU TAUX 1 EN DEVISE (audit v4) : sans taux en vigueur, un
+        // bon en dollars entrait au taux du dirham — des USD comptes en MAD.
+        let engage: Option<(Option<f64>, String, Option<f64>)> = match &id_ligne_bc {
             Some(idl) => sqlx::query_as(
                 "SELECT lb.prix_kg_devise::float8, lb.code_devise,
-                        COALESCE((SELECT t.taux FROM taux_change t
-                                   WHERE t.code_devise = lb.code_devise
-                                     AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
-                                     AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
-                                   ORDER BY t.date_debut DESC LIMIT 1), 1.0)::float8
+                        CASE WHEN lb.code_devise = 'MAD' THEN 1.0
+                             ELSE (SELECT t.taux FROM taux_change t
+                                    WHERE t.code_devise = lb.code_devise
+                                      AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                                      AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
+                                    ORDER BY t.date_debut DESC LIMIT 1) END::float8
                    FROM ligne_bc lb WHERE lb.id_ligne_bc = $1",
             )
             .bind(idl)
@@ -3529,7 +3627,12 @@ pub async fn creer_reception(
             None => None,
         };
         let (prix_devise, devise_ligne, taux) = match engage {
-            Some((p, d, t)) => (p, d, t),
+            Some((p, d, Some(t))) => (p, d, t),
+            Some((_, d, None)) => {
+                return Err(AppError::RegleMetier(format!(
+                    "Aucun taux de change en vigueur pour {d} : saisissez le taux du jour (Referentiels → Taux de change)                      avant de recevoir. Sans lui, la marchandise entrerait au taux du dirham."
+                )))
+            }
             None => (l.prix_kg_devise, "MAD".to_string(), 1.0),
         };
         let prix_mad = prix_devise.map(|p| arrondi_mad(p * taux));

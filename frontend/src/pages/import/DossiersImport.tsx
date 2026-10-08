@@ -13,8 +13,7 @@ import { api, ErreurApi } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
 import { DataTable, type ColonneDT } from '../../composants/DataTable'
-import { Badge, Bouton, Champ, Etiq } from '../../composants/ui/base'
-import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
+import { Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Etiq } from '../../composants/ui/base'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import {
@@ -138,6 +137,9 @@ export function DossiersImport() {
         ))}
       </div>
 
+      {/* UN DOCUMENT SE SAISIT SUR LA PAGE, PAS DANS UNE FENETRE (preference de
+          l'entreprise, audit v4) : le formulaire s'ouvre au-dessus de la liste. */}
+      <NouveauDossier ouvert={creation} surFermer={() => setCreation(false)} />
       <DataTable
         module={MODULE}
         colonnes={colonnes}
@@ -152,7 +154,6 @@ export function DossiersImport() {
         videDescription="Un dossier regroupe les factures d'une expédition et ses frais."
       />
 
-      <NouveauDossier ouvert={creation} surFermer={() => setCreation(false)} />
     </div>
   )
 }
@@ -188,13 +189,17 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
   const maj = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF((x) => ({ ...x, [k]: e.target.value }))
 
+  if (!ouvert) return null
   return (
-    <Dialogue open={ouvert} onOpenChange={(o) => !o && surFermer()}>
-      <DialogueContenu
-        titre="Nouveau dossier d'importation"
-        description="Une expédition en groupage : chaque facture portera sa devise, son taux et son engagement."
-      >
-        <div className="grid grid-cols-2 gap-3">
+    <Carte className="mb-3">
+      <CarteEntete>
+        <CarteTitre>Nouveau dossier d’importation</CarteTitre>
+      </CarteEntete>
+      <CarteCorps>
+        <p className="mb-3 mt-0 text-[12.5px] text-attenue-texte">
+          Une expédition en groupage : chaque facture portera sa devise, son taux et son engagement.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <Etiq>Numéro</Etiq>
             <Champ value={f.numero} onChange={maj('numero')} placeholder="Automatique (06/26…)" />
@@ -211,7 +216,7 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
             <Etiq>Conteneur(s)</Etiq>
             <Champ value={f.conteneurs} onChange={maj('conteneurs')} placeholder="CMAU4385688" />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Etiq>N° DUM</Etiq>
             <Champ value={f.numero_dum} onChange={maj('numero_dum')} placeholder="Peut se saisir plus tard" />
           </div>
@@ -226,7 +231,7 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
             Créer le dossier
           </Bouton>
         </div>
-      </DialogueContenu>
-    </Dialogue>
+      </CarteCorps>
+    </Carte>
   )
 }

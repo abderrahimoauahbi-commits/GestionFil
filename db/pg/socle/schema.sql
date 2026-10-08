@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 103 (voir inclus.txt).
+-- Migrations comprises : 104 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict yEItOgJQZvxbnD5W9B3G5XS1DKNI9c2sY9ZZom3LhFU2KAP60D6mFKdhVu12nsi
+\restrict OqBevVLhsJfgyPVV3cje98vTVCh16oPrxoroFaBeBatD3pwsOfIB8dNCZOGxrca
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -3315,6 +3315,19 @@ CREATE TABLE public.cockpit_kpi (
 
 
 ALTER TABLE public.cockpit_kpi OWNER TO gestionfil;
+
+--
+-- Name: compteur_numero; Type: TABLE; Schema: public; Owner: gestionfil
+--
+
+CREATE TABLE public.compteur_numero (
+    cle text NOT NULL,
+    valeur bigint NOT NULL,
+    CONSTRAINT compteur_numero_valeur_check CHECK ((valeur > 0))
+);
+
+
+ALTER TABLE public.compteur_numero OWNER TO gestionfil;
 
 --
 -- Name: conditionnement; Type: TABLE; Schema: public; Owner: gestionfil
@@ -10727,6 +10740,14 @@ ALTER TABLE ONLY public.cockpit_kpi
 
 
 --
+-- Name: compteur_numero compteur_numero_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.compteur_numero
+    ADD CONSTRAINT compteur_numero_pkey PRIMARY KEY (cle);
+
+
+--
 -- Name: conditionnement conditionnement_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
@@ -15292,5 +15313,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict yEItOgJQZvxbnD5W9B3G5XS1DKNI9c2sY9ZZom3LhFU2KAP60D6mFKdhVu12nsi
+\unrestrict OqBevVLhsJfgyPVV3cje98vTVCh16oPrxoroFaBeBatD3pwsOfIB8dNCZOGxrca
 

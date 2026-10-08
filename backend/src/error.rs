@@ -107,6 +107,18 @@ impl From<sqlx::Error> for AppError {
                     )),
                     Some("23514") => AppError::Invalide(format!("Valeur refusée par une règle de la base : {msg}")),
                     Some("23502") => AppError::Invalide(format!("Un champ obligatoire manque : {msg}")),
+                    // LA CONCURRENCE SE DIT (audit v4) : un interblocage, un
+                    // verrou tenu ou un delai depasse tombaient en « erreur
+                    // interne ». Rien n'est ecrit ; on peut recommencer.
+                    Some("40P01") => AppError::Conflit(
+                        "Deux saisies se sont croisées : l'opération a été annulée, rien n'est enregistré. Recommencez.".into(),
+                    ),
+                    Some("55P03") => AppError::Conflit(
+                        "Ce document est en cours de modification par quelqu'un d'autre : réessayez dans un instant.".into(),
+                    ),
+                    Some("57014") => AppError::Conflit(
+                        "L'opération a dépassé le délai autorisé et a été annulée : rien n'est enregistré. Réessayez, ou prévenez l'administrateur si cela se répète.".into(),
+                    ),
                     _ => AppError::Sqlx(e),
                 }
             }

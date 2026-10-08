@@ -75,6 +75,9 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
         .options([
             ("statement_timeout", format!("{}s", delai_env("GESTIONFIL_DELAI_SQL_S", 120)).as_str()),
             ("idle_in_transaction_session_timeout", "300s"),
+            // Un verrou ne s'attend pas indefiniment : au-dela, l'operation
+            // echoue avec un message clair (voir error.rs, 55P03).
+            ("lock_timeout", "10s"),
         ]);
 
     let pool = PgPoolOptions::new()
@@ -183,6 +186,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         // La revalidation d'une reception : archive versionnee, vue courante.
         "2026-10-08g_revalidation_reception.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_archive_reception_courante')",
+    ),
+    (
+        // La numerotation : tout document numerote passe par le compteur.
+        "2026-10-08k_compteur_numero.sql",
+        "SELECT to_regclass('public.compteur_numero') IS NOT NULL",
     ),
     (
         // Sessions : la connexion et chaque requete lisent ces deux colonnes.

@@ -423,17 +423,9 @@ async fn ouvrir_bon(
     .await?
     .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise}.")))?;
 
-    let annee = chrono::Utc::now().format("%Y").to_string();
-    let prefixe = format!("BC-{annee}-");
-    let suivant: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(CAST(substr(numero_bc, length($1) + 1) AS bigint)), 0) + 1
-           FROM bon_commande WHERE numero_bc LIKE $2",
-    )
-    .bind(&prefixe)
-    .bind(format!("{prefixe}%"))
-    .fetch_one(&mut *tx)
-    .await?;
-    let numero = format!("{prefixe}{suivant:04}");
+    // Le meme compteur que la saisie d'un bon (audit v4) : deux conversions
+    // simultanees ne se disputent plus un numero.
+    let numero = crate::routes::stock::numeroter(&mut *tx, "bon_commande", "numero_bc", "BC").await?;
 
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(

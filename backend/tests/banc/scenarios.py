@@ -573,6 +573,20 @@ def scenario_sessions(c, infra):
     c.refus("Magasinie", "GET", "/api/catalogue?tri=prix_catalogue", contient="masque")
 
 
+def scenario_concurrence_numerotation(c, infra):
+    """Huit bons crees en meme temps : huit numeros distincts, aucun conflit (compteur, audit v4 P2-19)."""
+    from concurrent.futures import ThreadPoolExecutor
+    c.ok("Assistante", "GET", "/api/auth/moi")  # jeton pris avant la rafale
+    corps = {"code_fournisseur": FRS, "lignes": [{"code_reference": REF, "unite_commande": "kg",
+                                                  "quantite_commandee_unite": 10, "prix_unitaire_devise": 20}]}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        reponses = list(pool.map(lambda _: c.appel("Assistante", "POST", "/api/bons-commande", corps), range(8)))
+    codes = [code for code, _ in reponses]
+    verifier(all(code == 200 for code in codes), f"creation simultanee : codes {codes} {[r for _, r in reponses if _ != 200][:1]}")
+    numeros = [r["numero_bc"] for _, r in reponses]
+    verifier(len(set(numeros)) == 8, f"numeros en double : {sorted(numeros)}")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -592,5 +606,6 @@ SCENARIOS = [
     scenario_audit_montants,
     scenario_masquage,
     scenario_sessions,
+    scenario_concurrence_numerotation,
     scenario_controles_finaux,
 ]

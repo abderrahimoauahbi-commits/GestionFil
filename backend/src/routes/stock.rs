@@ -30,13 +30,23 @@ pub(crate) async fn numeroter(
     // designe le DERNIER caractere du prefixe — le tiret — et non le premier
     // chiffre. Sans le +1, "BC-2026-0001" donnait "-0001", converti en -1 : le
     // 2e document repartait a 0000 et le 3e retombait sur 0001, deja pris.
+    //
+    // LE COMPTEUR, PAS LE MAXIMUM (audit v4). Deux saisies simultanees lisaient
+    // le meme MAX et la seconde tombait sur l'unicite. La ligne du compteur est
+    // verrouillee par la transaction du document : la seconde attend, puis
+    // prend le suivant. Le MAX reste le plancher (documents venus d'ailleurs).
     let sql = format!(
-        "SELECT COALESCE(MAX(CAST(substr({colonne}, length($1) + 1) AS bigint)), 0) + 1
-           FROM {table} WHERE {colonne} LIKE $2"
+        "INSERT INTO compteur_numero (cle, valeur)
+         SELECT $3, COALESCE(MAX(CAST(substr({colonne}, length($1) + 1) AS bigint)), 0) + 1
+           FROM {table} WHERE {colonne} LIKE $2
+         ON CONFLICT (cle) DO UPDATE
+            SET valeur = GREATEST(compteur_numero.valeur + 1, excluded.valeur)
+         RETURNING valeur"
     );
     let suivant: i64 = sqlx::query_scalar(&sql)
         .bind(format!("{prefixe}-{annee}-"))
         .bind(&motif)
+        .bind(format!("{table}.{colonne}.{prefixe}-{annee}"))
         .fetch_one(&mut *tx)
         .await?;
     Ok(format!("{prefixe}-{annee}-{suivant:04}"))

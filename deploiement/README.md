@@ -219,7 +219,21 @@ sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz                         # 3. 
 > des contrôles. Annuler le doublon (`POST /api/inventaires/{id}/annuler`), puis
 > rejouer la première migration : elle est rejouable.
 
-Témoins après publication : `SELECT code, nb FROM v_controles WHERE code IN
+Puis, **une fois**, le journal des migrations (`2026-10-08c`) et l'inscription de tout ce
+qui a été joué à la main jusque-là. Le SQL du marquage se prépare sur le poste de
+développement (il ne se connecte à rien) et s'envoie comme une migration :
+
+```bash
+# poste : python db\pg\migrer.py --marquer-jusqua 2026-10-08c_journal_migrations.sql --imprimer > marquage.sql
+cat /home/sysadmin/gestionfil/db/migrations/2026-10-08c_journal_migrations.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1
+cat /home/sysadmin/gestionfil/marquage.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1
+```
+
+Ensuite, chaque nouvelle migration s'inscrit après son application :
+`INSERT INTO migration_appliquee (fichier) VALUES ('<fichier>.sql');` — ou par `migrer.py`, là
+où Python et `psql` sont disponibles.
+
+Témoins après publication : `SELECT code, anomalies FROM v_controles WHERE code IN
 ('C43','C44')` répond deux lignes, `/api/cockpit` répond 200, et le journal du
 service ne contient pas « migration(s) manquante(s) ».
 

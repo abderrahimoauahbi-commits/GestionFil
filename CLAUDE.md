@@ -24,15 +24,20 @@ premières (fil pour tapis). Tout le code, les commentaires, les messages et l'i
 ## Commandes
 
 ```powershell
-# Base locale — joue les fichiers PAR PASSES, mais AUCUNE migration de db/pg/migrations/
-# (lots, machines, import récents n'existent qu'en migrations : les rejouer ensuite)
-cd db\pg; python charger.py                       # schéma, vues, contrôles seulement
-python charger.py --seeds                         # + seeds (référentiels, sécurité)
-python charger.py --base gestionfil_essai --seeds # autre base
-python charger.py --production                    # seeds + comptes réels, référentiel à importer ensuite
+# BASE NEUVE ET COMPLÈTE : le socle (schéma exact d'une base migrée + configuration),
+# puis les migrations venues après lui. C'est la seule voie qui donne tout le schéma :
+# l'historique des migrations ne se rejoue pas sur une base vide (données réelles de septembre).
+cd db\pg; python charger.py --base gestionfil_essai --socle --comptes
+python migrer.py --base gestionfil_essai          # migrations postérieures au socle
+python socle.py --depuis <copie migrée>           # régénérer le socle (jamais depuis gestionfil)
 
-# Appliquer une migration (pas de table de suivi : rien ne signale un oubli)
-psql -d gestionfil -v ON_ERROR_STOP=1 -f migrations\<fichier>.sql
+# Fichiers d'origine 001–018 seuls (sans lots, machines, import) — documentation du schéma
+python charger.py --base gestionfil_essai --seeds
+
+# Migrations : journal `migration_appliquee` (depuis 2026-10-08c), tenu par migrer.py
+python migrer.py --base <base> --lister            # ce qui reste à jouer
+python migrer.py --base <base>                     # le jouer, dans l'ordre, arrêt au premier échec
+python migrer.py --base <base> --verifier          # fichier modifié après application
 
 # Backend (lit backend\.env : DATABASE_URL, JWT_SECRET, BIND_ADDR, CORS_ORIGINS, FRONTEND_DIR)
 cd backend

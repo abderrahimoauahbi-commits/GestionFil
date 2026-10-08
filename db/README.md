@@ -17,10 +17,43 @@ python charger.py --production             # comptes réels, référentiel à im
 ```
 
 Le chargeur joue les fichiers PAR PASSES : les vues se citent en avant, et PostgreSQL
-résout à la création. Une migration s'applique ensuite à part :
+résout à la création.
+
+### Une base neuve et complète : le socle
+
+Les fichiers 001 à 018 décrivent le schéma d'origine ; les lots, les machines, l'import et les
+règles d'octobre n'existent qu'en migrations. Et l'historique des migrations **ne se rejoue pas**
+sur une base vide : plusieurs chargent les données réelles de septembre (catalogue du 16/09, stock
+initial du 18/09, parc machine du 20/09), et les suivantes en dépendent — vingt échecs sur
+quatre-vingt-quinze au 08/10/2026.
+
+Le **socle** (`socle/`) est donc **généré** depuis une copie entièrement migrée :
+`schema.sql` (pg_dump du schéma, propriétaires compris), `configuration.sql` (droits, champs,
+paramètres, types et motifs, transitions, devises, catégories, magasins) et `inclus.txt` (les
+migrations comprises, avec leur empreinte).
 
 ```powershell
-psql -d gestionfil -v ON_ERROR_STOP=1 -f migrations\2026-09-17i_tableau_de_bord.sql
+python charger.py --base neuve --socle --comptes   # socle + comptes nominatifs + entreprise
+python migrer.py --base neuve                      # les migrations postérieures au socle
+python socle.py --depuis gestionfil_p1             # régénérer après de nouvelles migrations
+```
+
+Le schéma d'une base bâtie ainsi est identique à celui de la copie dont le socle vient (vérifié le
+08/10/2026 en comparant les `pg_dump --schema-only` : seules diffèrent les étiquettes de colonnes
+que PostgreSQL ajoute en recréant une vue). Le serveur y démarre. Le métier vient du classeur
+(`gestionfil-import`).
+
+### Le journal des migrations
+
+Depuis `2026-10-08c_journal_migrations.sql`, la table `migration_appliquee` inscrit chaque
+migration (fichier, empreinte SHA-256, mode `JOUEE`, `MARQUEE` ou `SOCLE`). `migrer.py` y lit ce qui
+reste à jouer, s'arrête au premier échec, et refuse une base sans journal plutôt que de tout
+rejouer :
+
+```powershell
+python migrer.py --base gestionfil_essai --marquer-jusqua 2026-10-08c_journal_migrations.sql
+python migrer.py --base gestionfil_essai --lister
+python migrer.py --base gestionfil_essai
 ```
 
 ---

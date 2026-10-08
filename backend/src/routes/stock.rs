@@ -3899,6 +3899,7 @@ pub async fn changer_statut_reception(
             ));
         }
         crate::domain::reception::verifier_ecarts_courants(&mut tx, &id).await?;
+        crate::domain::reception::exiger_bobines_comptees(&mut tx, &id).await?;
     }
 
     // Le trigger de transition refuse tout enchainement non prevu.

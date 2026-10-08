@@ -313,8 +313,10 @@ export function ReceptionNouvelle() {
         // Les colis attendus pour ce reste : le cariste sait tout de suite
         // combien de places il doit trouver dans l'allee.
         palettes: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).palettes),
-        bobines: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).bobines),
-        lie: true,
+        // SUIVIE AU LOT, LA BOBINE SE COMPTE (regle 13) : pas de deduction des
+        // kilos, le champ attend le compte du quai.
+        bobines: a.suivi_lot === 1 ? '' : pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).bobines),
+        lie: a.suivi_lot !== 1,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -368,8 +370,8 @@ export function ReceptionNouvelle() {
         unite: 'kg',
         colis: '',
         palettes: pourChamp(depuisKg(qte, ref).palettes),
-        bobines: pourChamp(depuisKg(qte, ref).bobines),
-        lie: true,
+        bobines: ref.suivi_lot === 1 ? '' : pourChamp(depuisKg(qte, ref).bobines),
+        lie: ref.suivi_lot !== 1,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -472,6 +474,10 @@ export function ReceptionNouvelle() {
     (l) => Number(l.qte) > 0 && facteurVersKg(l.unite, condDe(l)) === null,
   )
   const sansLot = retenues.filter((l) => l.suivi_lot === 1 && !l.lot.trim())
+  // Les bobines comptees, exigees a la soumission au controle (regle 13).
+  const sansBobines = retenues.filter(
+    (l) => l.suivi_lot === 1 && Number(condDe(l).poids_bobine_kg) > 0 && !(Number(l.bobines) > 0),
+  )
   // Une substitution sans motif serait acceptee par la base mais illisible dans
   // six mois : c'est l'ecran qui exige l'explication, au moment ou on l'a.
   const sansMotif = retenues.filter(
@@ -1130,6 +1136,11 @@ export function ReceptionNouvelle() {
                 )}
                 {sansQte.length > 0 && (
                   <span className="text-danger"> — quantite manquante sur {sansQte.length}</span>
+                )}
+                {sansBobines.length > 0 && (
+                  <span className="text-alerte">
+                    {' '}— {sansBobines.length} ligne(s) suivies au lot sans bobines comptées : à compter avant la soumission au contrôle
+                  </span>
                 )}
                 {sansLot.length > 0 && (
                   <span className="text-attenue-texte">

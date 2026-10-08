@@ -168,6 +168,8 @@ export interface Apercu {
   capacite: number
   bobines_apres: number
   blocages: string[]
+  /** Les lots bloques qu'une derogation debloquerait (audit v4). */
+  derogations?: import('./Derogation').DerogationPossible[]
 }
 
 export interface LigneConso {

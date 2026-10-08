@@ -748,6 +748,7 @@ pub async fn apercu_fiche(
             }
         }
     }
+    let derogations = dm::derogations_possibles(&mut tx, &f, &calc).await?;
     tx.rollback().await?;
     Ok(Json(json!({
         "lignes": calc.lignes,
@@ -756,6 +757,7 @@ pub async fn apercu_fiche(
         "capacite": calc.capacite,
         "bobines_apres": calc.bobines_apres,
         "blocages": blocages,
+        "derogations": derogations,
     })))
 }
 

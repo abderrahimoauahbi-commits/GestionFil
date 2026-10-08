@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 97 (voir inclus.txt).
+-- Migrations comprises : 98 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict GjhgXZ42U9UjJFg2N90oGz1wdj8c4R9POYq6ZXExc0R2a5prqesgVADfVf8HfwY
+\restrict xS9rbeMiNWjI8ANCBBxb1wBPAuPZ01xOVhMyMAnlmVBU12zWWlkUNON9rcJB4db
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -4402,5 +4402,5 @@ ALTER TABLE public.type_mouvement ENABLE TRIGGER ALL;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict GjhgXZ42U9UjJFg2N90oGz1wdj8c4R9POYq6ZXExc0R2a5prqesgVADfVf8HfwY
+\unrestrict xS9rbeMiNWjI8ANCBBxb1wBPAuPZ01xOVhMyMAnlmVBU12zWWlkUNON9rcJB4db
 

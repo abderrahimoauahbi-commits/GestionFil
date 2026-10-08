@@ -78,6 +78,8 @@ interface ARecevoir {
   bobines_par_palette?: number | null
   /** La tolerance de pesee du fournisseur (audit v4). */
   tolerance_pesee_pct?: number | null
+  /** Suivie au lot : les bobines se comptent (regle 13). */
+  suivi_lot?: number | null
 }
 
 interface ReceptionLue {
@@ -317,7 +319,9 @@ export function ReceptionImport() {
           deja_recu_kg: r.quantite_recue_kg,
           reste_kg: r.reste_kg,
           quantite: String(r.reste_kg),
-          bobines: entiere && r.nb_bobines > 0 ? String(r.nb_bobines) : pourChamp(deduit.bobines),
+          // SUIVIE AU LOT, LA BOBINE SE COMPTE (regle 13) : ni recopiee de la
+          // facture, ni deduite des kilos — sinon la derive est nulle par construction.
+          bobines: r.suivi_lot === 1 ? '' : entiere && r.nb_bobines > 0 ? String(r.nb_bobines) : pourChamp(deduit.bobines),
           palettes: entiere && r.nb_bobines > 0 ? palettesFacture : pourChamp(deduit.palettes),
           lot: r.lot_fournisseur ?? '',
           couleur: r.code_couleur ?? '',
@@ -328,7 +332,7 @@ export function ReceptionImport() {
           // ENTIERE, la ligne reprend les comptes de la facture : ce sont des
           // constats du fournisseur, pas une deduction — on ne les relie pas.
           // PARTIELLE, on part du poids et les comptes se deduisent.
-          lie: !entiere,
+          lie: !entiere && r.suivi_lot !== 1,
           valide: false,
           tolerance: tol(r.tolerance_pesee_pct),
           derogation: false,

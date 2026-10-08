@@ -318,10 +318,14 @@ def scenario_import(c, infra):
                  and x["numero_dossier"] == "BANC/26")
     verifier(ligne.get("tolerance_pesee_pct") is not None, "la tolerance du fournisseur ne descend pas a l'ecran")
     base = {"id_ligne": ligne["id_ligne"], "quantite_recue_kg": 1050, "code_magasin": MAG,
-            "lot_fournisseur": "LOT-BANC-1"}
+            "lot_fournisseur": "LOT-BANC-1", "nb_bobines": 404}
     r = c.ok("Magasinie", "POST", "/api/import/receptions", {"date_reception": aujourdhui, "lignes": [base]})
     rid = r["id_reception"]
     c.refus("Magasinie", "PUT", f"/api/import/receptions/{rid}/statut", {"statut": "A_CONTROLER"}, contient="tolérance")
+    # Suivie au lot, la reference se compte en bobines (regle 13).
+    c.ok("Magasinie", "PUT", f"/api/import/receptions/{rid}",
+         {"lignes": [dict(base, nb_bobines=0, derogation_ecart=1, motif_derogation="Accord du fournisseur, avoir a venir")]})
+    c.refus("Magasinie", "PUT", f"/api/import/receptions/{rid}/statut", {"statut": "A_CONTROLER"}, contient="bobines")
     c.refus("Magasinie", "PUT", f"/api/import/receptions/{rid}",
             {"lignes": [dict(base, derogation_ecart=1, motif_derogation="ok")]})
     motive = dict(base, derogation_ecart=1, motif_derogation="Accord du fournisseur, avoir a venir")
@@ -383,6 +387,25 @@ def scenario_audit_montants(c, infra):
     verifier(qui == "Assistante", f"l'auteur de la modification n'est pas inscrit : {qui}")
 
 
+def scenario_lots_autorisations(c, infra):
+    """Une derogation se demande au droit d'ecrire sur les lots, s'accorde avec un motif, une seule fois ;
+    declarer un magasin « quarantaine » demande VALIDER."""
+    ref, lot = "PP-1500 Dtex-Cream 2951-Hs", "LOT-BANC-AUTO"
+    d = c.ok("Magasinie", "POST", "/api/autorisations", {
+        "type_demande": "LOT_BLOQUE", "code_reference": ref, "lot_fournisseur": lot,
+        "document": "MCH-BANC-0001", "motif": "Commande urgente, lot controle visuellement"})
+    idd = d["id_demande"]
+    c.refus("Magasinie", "POST", f"/api/autorisations/{idd}/decider", {"decision": "ACCORDEE", "motif": "Vu avec la qualite"})
+    c.refus("Choukri", "POST", f"/api/autorisations/{idd}/decider", {"decision": "ACCORDEE"})
+    c.ok("Choukri", "POST", f"/api/autorisations/{idd}/decider", {"decision": "ACCORDEE", "motif": "Vu avec la qualite, une fois"})
+    c.refus("Mohamed", "POST", f"/api/autorisations/{idd}/decider", {"decision": "REFUSEE", "motif": "Trop tard pour refuser"})
+    # Le magasin : renommer reste une ecriture, la quarantaine une decision.
+    # L'assistante ecrit sur le stock sans valider les lots.
+    m = c.ok("Assistante", "GET", "/api/magasins/Polyfashions")
+    c.ok("Assistante", "PATCH", "/api/magasins/Polyfashions", {"nom": m["nom"], "est_quarantaine": m["est_quarantaine"]})
+    c.refus("Assistante", "PATCH", "/api/magasins/Polyfashions", {"est_quarantaine": 1}, codes=(403,))
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -394,6 +417,7 @@ SCENARIOS = [
     scenario_colisage_signale,
     scenario_colisage_ecran_et_base,
     scenario_import,
+    scenario_lots_autorisations,
     scenario_declencheurs,
     scenario_audit_montants,
     scenario_masquage,

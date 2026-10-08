@@ -35,6 +35,7 @@ import {
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
+import { DemandesDerogation } from './Derogation'
 
 interface RefCat {
   code_reference: string
@@ -918,6 +919,7 @@ export function FicheBureau({
                   Prévenez le directeur ou l’administrateur : la correction de stock doit être faite et validée par eux avant ce chargement.
                 </p>
               )}
+              <DemandesDerogation derogations={f.apercu.derogations ?? []} surDemande={() => f.calculer.mutate()} />
             </Alerte>
           )}
         </div>

@@ -100,7 +100,7 @@ pub async fn lister(
     user: Utilisateur,
     Query(f): Query<FiltreLots>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let vue = f.vue.as_deref().unwrap_or("comptable");
     let condition = match vue {
         "comptable" => "TRUE",
@@ -136,7 +136,7 @@ pub async fn lister(
 
 /// `GET /api/lots/compteurs` — ce que chaque vue contient, pour les onglets.
 pub async fn compteurs(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let row = sqlx::query(
         "SELECT count(*) FILTER (WHERE solde_kg > 0)                                              AS comptable,
                 count(*) FILTER (WHERE solde_kg > 0 AND categorie = 'PROJET' AND statut = 'LIBRE' AND NOT dormant) AS projet,
@@ -166,7 +166,7 @@ pub async fn vie(
     user: Utilisateur,
     Query(c): Query<CleLot>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let lot = sqlx::query("SELECT * FROM v_lot WHERE code_reference = $1 AND lot_fournisseur = $2")
         .bind(&c.reference)
         .bind(&c.lot)
@@ -289,7 +289,7 @@ pub async fn basculer(
     user: Utilisateur,
     Json(d): Json<DecisionCategorie>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Ecrire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Ecrire).await?;
     let (evt, motif) = match d.categorie.as_str() {
         "RESTES" => ("BASCULEMENT_RESTES", d.motif.clone().filter(|m| !m.trim().is_empty())
             .unwrap_or_else(|| "Lot passe sous le seuil de l'article".into())),
@@ -709,7 +709,7 @@ pub async fn lister_demandes(
     user: Utilisateur,
     Query(f): Query<FiltreDemandes>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let rows = sqlx::query(
         "SELECT d.*, ud.login AS demandeur, uc.login AS decideur
            FROM demande_autorisation d
@@ -746,7 +746,12 @@ pub async fn creer_demande(
     user: Utilisateur,
     Json(d): Json<NouvelleDemande>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    // Demander engage une decision (audit v4 : le droit de lire suffisait) :
+    // le droit d'ecrire sur les lots, ou celui d'ecrire le mouvement refuse —
+    // c'est le magasinier, au chargement, qui bute sur le lot bloque.
+    if user.exiger(&state.db, module::LOTS, Action::Ecrire).await.is_err() {
+        user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    }
     let motif = texte_requis(&d.motif, "Le motif")?;
     let existante: Option<String> = sqlx::query_scalar(
         "SELECT id_demande FROM demande_autorisation
@@ -828,12 +833,17 @@ pub async fn decider(
         x => return Err(AppError::Invalide(format!("decision inconnue : {x}"))),
     }
     let motif = d.motif.clone().filter(|m| !m.trim().is_empty());
-    if d.decision == "REFUSEE" && motif.is_none() {
-        return Err(AppError::Invalide("Un refus s'explique : le motif est obligatoire.".into()));
+    // UN ACCORD S'EXPLIQUE AUSSI (audit v4) : il engage la qualite du tapis.
+    if matches!(d.decision.as_str(), "ACCORDEE" | "REFUSEE")
+        && motif.as_deref().map(|m| m.trim().chars().count()).unwrap_or(0) < 5
+    {
+        return Err(AppError::Invalide(
+            "Une decision s'explique : le motif est obligatoire (cinq caracteres au moins).".into(),
+        ));
     }
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    sqlx::query(
+    let n = sqlx::query(
         "UPDATE demande_autorisation
             SET statut = $2, id_decideur = $3, date_decision = $4, motif_decision = $5
           WHERE id_demande = $1 AND statut = 'EN_ATTENTE'",
@@ -844,7 +854,15 @@ pub async fn decider(
     .bind(maintenant())
     .bind(&motif)
     .execute(&mut *tx)
-    .await?;
+    .await?
+    .rows_affected();
+    // UNE SEULE REPONSE : deux responsables qui repondent en meme temps, le
+    // second trouve la demande deja tranchee.
+    if n == 0 {
+        return Err(AppError::RegleMetier(
+            "Cette demande vient d'etre tranchee par un autre responsable : rechargez la file.".into(),
+        ));
+    }
     // Une derogation accordee laisse aussi sa trace sur la fiche du lot.
     if d.decision == "ACCORDEE" {
         if let (Some(r), Some(l)) = (reference.as_deref(), lot.as_deref()) {
@@ -867,7 +885,7 @@ pub async fn decider(
 
 /// `GET /api/stats/lots` — tout ce que l'analyse lit sur les lots, en un appel.
 pub async fn statistiques(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let db = &state.db;
     let lire = |sql: &'static str| async move {
         sqlx::query(sql).fetch_all(db).await.map(|r| lignes_en_json(&r))
@@ -906,7 +924,7 @@ pub async fn statistiques(State(state): State<AppState>, user: Utilisateur) -> A
 
 /// `GET /api/cockpit/lots` — les compteurs du poste de travail.
 pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let r = sqlx::query("SELECT * FROM v_cockpit_lots").fetch_all(&state.db).await?;
     Ok(Json(lignes_en_json(&r).get(0).cloned().unwrap_or(Value::Null)))
 }

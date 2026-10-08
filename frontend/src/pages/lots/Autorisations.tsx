@@ -277,14 +277,14 @@ export function Autorisations() {
               </div>
               <div className="mt-2">
                 {geste.decision === 'ACCORDEE'
-                  ? 'Le document en attente pourra passer. La dérogation est inscrite sur la fiche du lot.'
+                  ? 'Le document en attente pourra passer, une fois. La dérogation est inscrite sur la fiche du lot : dites pourquoi, le motif est obligatoire.'
                   : geste.decision === 'REFUSEE'
                     ? 'Le document en attente reste bloqué. Dites au demandeur pourquoi : le motif est obligatoire.'
                     : 'La demande est retirée de la file ; elle reste dans l’historique.'}
               </div>
             </>
           }
-          motifObligatoire={geste.decision === 'REFUSEE'}
+          motifObligatoire={geste.decision !== 'ANNULEE'}
           destructif={geste.decision === 'REFUSEE'}
           libelleBouton={geste.decision === 'ACCORDEE' ? 'Accorder' : geste.decision === 'REFUSEE' ? 'Refuser' : 'Retirer la demande'}
           envoyer={(motif) => envoyer(geste, motif)}

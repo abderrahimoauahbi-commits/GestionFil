@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 97 (voir inclus.txt).
+-- Migrations comprises : 98 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict XDCs7jKcelkUc7guZXSe7UT1v937pOXwtaWdRPMuORhyXwrXjVnNJsQYKyVwzYU
+\restrict ez97hDpGt6n98GYlL0gebPMHzwVYM8udqM2seJxruHGfgIwhf1DInulb5b0RbOH
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -1991,49 +1991,51 @@ ALTER FUNCTION public.fn_trg_lmvt_immuable_u() OWNER TO gestionfil;
 
 CREATE FUNCTION public.fn_trg_lmvt_lot_controle() RETURNS trigger
     LANGUAGE plpgsql
-    AS $$
-DECLARE
-    v_statut text;
-    v_type   text;
-    v_doc    text;
-    v_dest_q bigint;
-BEGIN
-    IF NEW.poids_unitaire_theorique_kg IS NULL AND COALESCE(NEW.nb_bobines, 0) > 0 THEN
-        SELECT NULLIF(poids_bobine_kg, 0) INTO NEW.poids_unitaire_theorique_kg
-          FROM reference WHERE code_reference = NEW.code_reference;
-    END IF;
-    IF NEW.lot_fournisseur IS NOT NULL THEN
-        SELECT statut INTO v_statut FROM lot
-         WHERE code_reference = NEW.code_reference AND lot_fournisseur = NEW.lot_fournisseur;
-        IF v_statut = 'BLOQUE' THEN
-            -- LE BLOCAGE QUALITE ASSOUPLI (regle 11, 08/10/2026). Un lot bloque
-            -- refusait tout mouvement : on ne pouvait ni le retirer d'une
-            -- machine, ni le mettre en quarantaine, ni le rendre au
-            -- fournisseur. Le blocage interdit desormais ce qui l'EMPLOIE —
-            -- production, chargement machine, fusion — et laisse ce qui
-            -- l'ISOLE : retour machine, annulation d'un chargement, transfert
-            -- vers un magasin de quarantaine, retour fournisseur, ajustement
-            -- d'inventaire, reception.
-            SELECT m.code_type_mvt, m.reference_document INTO v_type, v_doc
-              FROM mouvement m WHERE m.id_mouvement = NEW.id_mouvement;
-            IF v_type IN ('RETOUR_MACHINE', 'ANNUL_CHARGE_MACHINE', 'RETOUR_FOURN',
-                          'AJUST_INV_POS', 'AJUST_INV_NEG', 'ENTREE_REC') THEN
-                RETURN NEW;
-            END IF;
-            IF v_type IN ('TRANSFERT_SORTIE', 'TRANSFERT_ENTREE') THEN
-                SELECT mg.est_quarantaine INTO v_dest_q
-                  FROM transfert t JOIN magasin mg ON mg.code_magasin = t.code_magasin_dest
-                 WHERE t.numero_transfert = v_doc;
-                IF v_dest_q = 1 THEN
-                    RETURN NEW;
-                END IF;
-            END IF;
-            RAISE EXCEPTION 'LOT-BLOQUE : le lot % de % est bloque par la qualite : il ne part ni en production, ni sur machine, ni en fusion. Il peut revenir d''une machine, aller en quarantaine ou retourner au fournisseur.',
-                NEW.lot_fournisseur, NEW.code_reference USING ERRCODE = 'check_violation';
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
+    AS $$
+DECLARE
+    v_statut text;
+    v_type   text;
+    v_doc    text;
+    v_dest_q bigint;
+BEGIN
+    IF NEW.poids_unitaire_theorique_kg IS NULL AND COALESCE(NEW.nb_bobines, 0) > 0 THEN
+        SELECT NULLIF(poids_bobine_kg, 0) INTO NEW.poids_unitaire_theorique_kg
+          FROM reference WHERE code_reference = NEW.code_reference;
+    END IF;
+    IF NEW.lot_fournisseur IS NOT NULL THEN
+        SELECT statut INTO v_statut FROM lot
+         WHERE code_reference = NEW.code_reference AND lot_fournisseur = NEW.lot_fournisseur;
+        IF v_statut = 'BLOQUE' THEN
+            -- LE BLOCAGE QUALITE ASSOUPLI (regle 11) : interdit ce qui EMPLOIE
+            -- le lot, laisse ce qui l'ISOLE.
+            SELECT m.code_type_mvt, m.reference_document INTO v_type, v_doc
+              FROM mouvement m WHERE m.id_mouvement = NEW.id_mouvement;
+            IF v_type IN ('RETOUR_MACHINE', 'ANNUL_CHARGE_MACHINE', 'RETOUR_FOURN',
+                          'AJUST_INV_POS', 'AJUST_INV_NEG', 'ENTREE_REC') THEN
+                RETURN NEW;
+            END IF;
+            IF v_type IN ('TRANSFERT_SORTIE', 'TRANSFERT_ENTREE') THEN
+                SELECT mg.est_quarantaine INTO v_dest_q
+                  FROM transfert t JOIN magasin mg ON mg.code_magasin = t.code_magasin_dest
+                 WHERE t.numero_transfert = v_doc;
+                IF v_dest_q = 1 THEN
+                    RETURN NEW;
+                END IF;
+            END IF;
+            -- LA DEROGATION ACCORDEE (audit v4) : ce lot, par cette fiche, une fois.
+            IF v_type = 'CHARGE_MACHINE' AND EXISTS (
+                SELECT 1 FROM demande_autorisation d
+                 WHERE d.type_demande = 'LOT_BLOQUE' AND d.statut = 'ACCORDEE'
+                   AND d.code_reference = NEW.code_reference AND d.lot_fournisseur = NEW.lot_fournisseur
+                   AND d.document = v_doc AND d.date_consommation IS NULL) THEN
+                RETURN NEW;
+            END IF;
+            RAISE EXCEPTION 'LOT-BLOQUE : le lot % de % est bloque par la qualite : il ne part ni en production, ni sur machine, ni en fusion. Il peut revenir d''une machine, aller en quarantaine ou retourner au fournisseur.',
+                NEW.lot_fournisseur, NEW.code_reference USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
 $$;
 
 
@@ -3311,6 +3313,7 @@ CREATE TABLE public.demande_autorisation (
     id_decideur text,
     date_decision text,
     motif_decision text,
+    date_consommation text,
     CONSTRAINT demande_autorisation_check CHECK (((statut = ANY (ARRAY['EN_ATTENTE'::text, 'ANNULEE'::text])) OR ((id_decideur IS NOT NULL) AND (date_decision IS NOT NULL)))),
     CONSTRAINT demande_autorisation_motif_check CHECK ((btrim(motif) <> ''::text)),
     CONSTRAINT demande_autorisation_niveau_check CHECK ((niveau = ANY (ARRAY['ORANGE'::text, 'ROUGE'::text]))),
@@ -8293,7 +8296,9 @@ CREATE VIEW public.v_lot_variation AS
     round(avg(lm.poids_unitaire_theorique_kg), 4) AS poids_catalogue_bobine_kg
    FROM (public.ligne_mouvement lm
      JOIN public.mouvement m ON ((m.id_mouvement = lm.id_mouvement)))
-  WHERE ((lm.lot_fournisseur IS NOT NULL) AND (COALESCE(lm.nb_bobines, (0)::bigint) > 0) AND (lm.poids_unitaire_theorique_kg > (0)::numeric) AND (m.code_type_mvt <> 'TRANSFERT_ENTREE'::text))
+  WHERE ((lm.lot_fournisseur IS NOT NULL) AND (COALESCE(lm.nb_bobines, (0)::bigint) > 0) AND (lm.poids_unitaire_theorique_kg > (0)::numeric) AND (m.code_type_mvt = 'ENTREE_REC'::text) AND (NOT (EXISTS ( SELECT 1
+           FROM public.mouvement inv
+          WHERE (inv.id_mouvement_contrepasse = m.id_mouvement)))))
   GROUP BY lm.code_reference, lm.lot_fournisseur;
 
 
@@ -10463,6 +10468,14 @@ ALTER TABLE ONLY public.categorie_matiere
 
 ALTER TABLE ONLY public.champ_configurable
     ADD CONSTRAINT champ_configurable_pkey PRIMARY KEY (module, champ);
+
+
+--
+-- Name: demande_autorisation ck_demande_decision_motivee; Type: CHECK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE public.demande_autorisation
+    ADD CONSTRAINT ck_demande_decision_motivee CHECK (((statut <> ALL (ARRAY['ACCORDEE'::text, 'REFUSEE'::text])) OR (length(btrim(COALESCE(motif_decision, ''::text))) >= 5))) NOT VALID;
 
 
 --
@@ -15012,5 +15025,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict XDCs7jKcelkUc7guZXSe7UT1v937pOXwtaWdRPMuORhyXwrXjVnNJsQYKyVwzYU
+\unrestrict ez97hDpGt6n98GYlL0gebPMHzwVYM8udqM2seJxruHGfgIwhf1DInulb5b0RbOH
 

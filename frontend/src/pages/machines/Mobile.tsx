@@ -30,6 +30,7 @@ import {
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
+import { DemandesDerogation } from './Derogation'
 
 interface Magasin {
   code_magasin: string
@@ -676,6 +677,7 @@ function FicheMobile({
               <p key={b}>{b.replace(/^(STOCK|LOT)-INSUFFISANT : (chargement bloque — )?/, '').replace(/\. Prevenez le directeur.*$/, '')}</p>
             ))}
             {f.stockCourt && <p className="mt-1 font-medium">Prévenez le directeur ou l’administrateur.</p>}
+            <DemandesDerogation derogations={f.apercu.derogations ?? []} surDemande={() => f.calculer.mutate()} />
           </div>
         )}
         {f.apercuPerime && (

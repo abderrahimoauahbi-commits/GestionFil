@@ -644,12 +644,16 @@ pub async fn controles_complementaires(
         // REGLE 11 (08/10/2026) : un lot bloque ne part pas en production —
         // on ne le CHARGE pas. Le retirer d'une machine vers le magasin est
         // precisement ce que le blocage demande : le dechargement passe.
+        // Sauf DEROGATION ACCORDEE pour ce lot et cette fiche (audit v4).
         if statut.as_deref() == Some("BLOQUE") && f.type_fiche == "CHARGE" {
-            refus.push(format!(
-                "LOT-BLOQUE : le lot {lot} de {reference} est bloque par la qualite : il ne se charge pas. \
-                 Le deblocage revient au droit de valider les lots, ou a la Direction"
-            ));
-            continue;
+            if derogation_accordee(c, &reference, &lot, &f.numero).await?.is_none() {
+                refus.push(format!(
+                    "LOT-BLOQUE : le lot {lot} de {reference} est bloque par la qualite : il ne se charge pas. \
+                     Le deblocage revient au droit de valider les lots, ou a la Direction — ou demandez \
+                     une derogation pour cette fiche"
+                ));
+                continue;
+            }
         }
         if f.type_fiche == "CHARGE" {
             let kg = par_lot[&(reference.clone(), lot.clone())];
@@ -673,6 +677,76 @@ pub async fn controles_complementaires(
         }
     }
     Ok(refus)
+}
+
+/// Une derogation LOT_BLOQUE accordee pour ce lot et cette fiche, pas encore
+/// employee (audit v4). La base fait le meme controle au mouvement.
+async fn derogation_accordee(
+    c: &mut sqlx::PgConnection,
+    reference: &str,
+    lot: &str,
+    numero_fiche: &str,
+) -> AppResult<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT id_demande FROM demande_autorisation
+          WHERE type_demande = 'LOT_BLOQUE' AND statut = 'ACCORDEE'
+            AND code_reference = $1 AND lot_fournisseur = $2 AND document = $3
+            AND date_consommation IS NULL
+          ORDER BY date_decision DESC LIMIT 1",
+    )
+    .bind(reference)
+    .bind(lot)
+    .bind(numero_fiche)
+    .fetch_optional(&mut *c)
+    .await?)
+}
+
+/// LES LOTS BLOQUES QU'UNE DEROGATION DEBLOQUERAIT, pour l'apercu : l'ecran
+/// propose de la demander la ou le refus tombe, avec la demande deja en
+/// attente s'il y en a une.
+pub async fn derogations_possibles(
+    c: &mut sqlx::PgConnection,
+    f: &FicheDecision,
+    calc: &Calcul,
+) -> AppResult<Vec<Value>> {
+    let mut sortie = Vec::new();
+    if f.type_fiche != "CHARGE" {
+        return Ok(sortie);
+    }
+    let mut vus = std::collections::BTreeSet::new();
+    for l in calc.lignes.iter().filter(|l| l.kg_mouvementes > 0.0) {
+        if !vus.insert((l.code_reference.clone(), l.lot_fournisseur.clone())) {
+            continue;
+        }
+        let bloque: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM lot WHERE code_reference = $1 AND lot_fournisseur = $2 AND statut = 'BLOQUE')",
+        )
+        .bind(&l.code_reference)
+        .bind(&l.lot_fournisseur)
+        .fetch_one(&mut *c)
+        .await?;
+        if !bloque || derogation_accordee(c, &l.code_reference, &l.lot_fournisseur, &f.numero).await?.is_some() {
+            continue;
+        }
+        let en_attente: Option<String> = sqlx::query_scalar(
+            "SELECT id_demande FROM demande_autorisation
+              WHERE type_demande = 'LOT_BLOQUE' AND statut = 'EN_ATTENTE'
+                AND code_reference = $1 AND lot_fournisseur = $2 AND document = $3",
+        )
+        .bind(&l.code_reference)
+        .bind(&l.lot_fournisseur)
+        .bind(&f.numero)
+        .fetch_optional(&mut *c)
+        .await?;
+        sortie.push(json!({
+            "type_demande": "LOT_BLOQUE",
+            "code_reference": l.code_reference,
+            "lot_fournisseur": l.lot_fournisseur,
+            "document": f.numero,
+            "id_demande_en_attente": en_attente,
+        }));
+    }
+    Ok(sortie)
 }
 
 async fn cmup(c: &mut sqlx::PgConnection, magasin: &str, reference: &str) -> AppResult<Option<f64>> {
@@ -997,6 +1071,19 @@ pub async fn valider(
             "la fiche {} n'est plus un brouillon : rien n'a ete enregistre",
             f.numero
         )));
+    }
+
+    // La derogation a servi : elle ne sert pas deux fois.
+    if f.type_fiche == "CHARGE" {
+        sqlx::query(
+            "UPDATE demande_autorisation SET date_consommation = $2
+              WHERE type_demande = 'LOT_BLOQUE' AND statut = 'ACCORDEE' AND document = $1
+                AND date_consommation IS NULL",
+        )
+        .bind(&f.numero)
+        .bind(crate::db::maintenant())
+        .execute(&mut *c)
+        .await?;
     }
 
     let consomme: f64 = calc.lignes.iter().filter(|l| l.effet_ecart == "CONSOMMATION").map(|l| l.ecart_kg).sum();

@@ -1104,7 +1104,7 @@ pub async fn a_recevoir(
                 bc.numero_bc,
                 -- LE CONDITIONNEMENT DE LA FICHE : sans lui, l'ecran ne sait pas
                 -- relier une pesee a un compte de palettes et de bobines.
-                r.poids_bobine_kg, r.bobines_par_palette,
+                r.poids_bobine_kg, r.bobines_par_palette, r.suivi_lot,
                 fn_tolerance_fournisseur(f.code_fournisseur)::float8 AS tolerance_pesee_pct
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
@@ -1455,6 +1455,26 @@ pub async fn changer_statut_reception(
     }
     if s.statut == "A_CONTROLER" {
         metier::verifier_ecarts(&mut tx, &id).await?;
+        // Les bobines se comptent (regle 13) : voir reception::exiger_bobines_comptees.
+        let manquantes: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT fl.code_reference
+               FROM import_reception_lignes rl
+               JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+               JOIN reference r ON r.code_reference = fl.code_reference
+              WHERE rl.id_reception = $1 AND r.suivi_lot = 1 AND COALESCE(r.poids_bobine_kg, 0) > 0
+                AND rl.nb_bobines = 0
+              ORDER BY 1",
+        )
+        .bind(&id)
+        .fetch_all(&mut *tx)
+        .await?;
+        if !manquantes.is_empty() {
+            return Err(AppError::RegleMetier(format!(
+                "Comptez les bobines avant le controle : {}. Le poids reel par bobine juge le fournisseur ; \
+                 recopie de la facture ou deduit des kilos, il ne mesure rien.",
+                manquantes.join(", ")
+            )));
+        }
     }
     sqlx::query("UPDATE import_receptions SET statut = $2 WHERE id_reception = $1")
         .bind(&id)

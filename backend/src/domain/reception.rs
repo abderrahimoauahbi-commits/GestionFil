@@ -562,6 +562,33 @@ pub async fn valider(
     })
 }
 
+/// LES BOBINES SE COMPTENT (regle 13, audit v4). La derive d'un fournisseur se
+/// lit sur le poids reel par bobine a la reception initiale : sans bobines,
+/// ou avec des bobines deduites des kilos, elle est nulle par construction
+/// (9 lignes sur 10 a 0,00 % le 08/10). Pour une reference suivie au lot et
+/// vendue en bobines, le compte est exige a la soumission au controle.
+pub async fn exiger_bobines_comptees(c: &mut sqlx::PgConnection, id_reception: &str) -> AppResult<()> {
+    let manquantes: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT lr.code_reference
+           FROM ligne_reception lr
+           JOIN reference r ON r.code_reference = lr.code_reference
+          WHERE lr.id_reception = $1 AND r.suivi_lot = 1 AND COALESCE(r.poids_bobine_kg, 0) > 0
+            AND COALESCE(lr.nb_bobines_saisi, 0) = 0
+          ORDER BY 1",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *c)
+    .await?;
+    if !manquantes.is_empty() {
+        return Err(AppError::RegleMetier(format!(
+            "Comptez les bobines avant le controle : {}. Le poids reel par bobine juge le fournisseur \
+             (derive) ; deduit des kilos, il ne mesure rien.",
+            manquantes.join(", ")
+        )));
+    }
+    Ok(())
+}
+
 /// L'ECART DE PESEE SE JUGE SUR LE RESTE DU BON A L'INSTANT (audit v4).
 ///
 /// L'attendu d'une ligne etait fige a sa saisie. Deux receptions saisies en

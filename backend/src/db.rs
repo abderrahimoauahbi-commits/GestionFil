@@ -65,7 +65,17 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
         // probleme, l'outil d'import lance depuis un poste de developpement si.
         // Un encodage qui depend de la machine qui lance l'outil n'est pas un
         // reglage, c'est un piege.
-        .options([("timezone", "UTC"), ("client_encoding", "UTF8")]);
+        .options([("timezone", "UTC"), ("client_encoding", "UTF8")])
+        // DES DELAIS, POUR QU'UNE REQUETE NE FIGE PAS L'ERP (audit v4). Une
+        // requete emballee ou une transaction oubliee tenaient une connexion et
+        // ses verrous indefiniment : seize connexions, et l'application se
+        // fige. Reglables : GESTIONFIL_DELAI_SQL_S (120 s par defaut, au-dessus
+        // du calcul MRP le plus long mesure) et une transaction inactive coupee
+        // apres 5 minutes.
+        .options([
+            ("statement_timeout", format!("{}s", delai_env("GESTIONFIL_DELAI_SQL_S", 120)).as_str()),
+            ("idle_in_transaction_session_timeout", "300s"),
+        ]);
 
     let pool = PgPoolOptions::new()
         // Seize connexions pour la cible « 50 utilisateurs simultanes » du
@@ -79,6 +89,11 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
 
     verifier_schema(&pool).await.context("base non conforme a ce serveur")?;
     Ok(pool)
+}
+
+/// Un delai en secondes lu dans l'environnement, avec sa valeur par defaut.
+pub fn delai_env(nom: &str, defaut: u64) -> u64 {
+    std::env::var(nom).ok().and_then(|v| v.trim().parse().ok()).filter(|v| *v > 0).unwrap_or(defaut)
 }
 
 /// Verifie au demarrage que la base chargee est bien celle attendue.

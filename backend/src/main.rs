@@ -109,13 +109,29 @@ async fn sauvegarder_a_la_fermeture(pool: &db::Db, database_url: &str) {
     }
 }
 
+/// L'ARRET PROPRE, SUR CTRL+C ET SUR SIGTERM (audit v4). systemd arrete le
+/// service par SIGTERM : seul Ctrl+C etait ecoute, si bien qu'en production le
+/// processus mourait sans finir ses requetes ni ecrire sa sauvegarde de
+/// fermeture.
 async fn arret_gracieux() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
             .expect("impossible d'ecouter Ctrl+C");
     };
-    ctrl_c.await;
+    #[cfg(unix)]
+    let terminer = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("impossible d'ecouter SIGTERM")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminer = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminer => {},
+    }
     tracing::info!("arret demande, fermeture des connexions");
 }
 

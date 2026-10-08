@@ -202,6 +202,20 @@ journal du service. Procédure, service **arrêté** (les migrations posent des
 verrous exclusifs ; `lock_timeout` les fait échouer en 5 s plutôt que de figer
 l'ERP si l'ancien serveur tient encore une table) :
 
+> **Avant tout, le secret JWT.** Le binaire refuse de démarrer sur la valeur d'exemple que portait le
+> modèle de `.env` de l'installateur (même valeur pour toutes les installations, lisible dans le
+> dépôt). Si `journalctl -u gestionfil` dit « JWT_SECRET est le secret d'exemple », tirez-en un au
+> sort (les sessions ouvertes devront se reconnecter) :
+>
+> ```bash
+> sudo sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n/+=')|" /opt/gestionfil/.env
+> ```
+>
+> Depuis le 08/10, `03-publier.sh` sauvegarde lui-même la base **et les pièces jointes**
+> (`<dump>.pieces.tar`) avant de remplacer le binaire, et s'arrête si la sauvegarde échoue. Le
+> service s'arrête proprement sur SIGTERM (fin des requêtes, sauvegarde de fermeture). Délais :
+> `GESTIONFIL_DELAI_SQL_S` (120 s), `GESTIONFIL_DELAI_HTTP_S` (300 s).
+
 ```bash
 sudo systemctl stop gestionfil
 sudo -u gestionfil /opt/gestionfil/gestionfil-admin sauvegarder      # 1. sauvegarde

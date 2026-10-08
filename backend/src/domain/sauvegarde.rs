@@ -37,6 +37,9 @@ pub struct Sauvegarde {
     pub chemin: String,
     pub octets: u64,
     pub horodatage: String,
+    /// L'archive des pieces jointes, a cote du dump (audit v4) : la base ne
+    /// porte que leurs references, les fichiers sont sur le disque.
+    pub pieces: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -134,6 +137,7 @@ pub async fn creer(_db: &Db, database_url: &str) -> AppResult<Sauvegarde> {
         chemin: cible.to_string_lossy().into_owned(),
         octets,
         horodatage: maintenant(),
+        pieces: archiver_pieces(&cible),
     })
 }
 
@@ -196,7 +200,38 @@ pub fn purger(_database_url: &str, garder: usize) -> AppResult<usize> {
     for e in existantes.iter().skip(garder) {
         if std::fs::remove_file(dossier.join(&e.fichier)).is_ok() {
             supprimees += 1;
+            // L'archive des pieces part avec son dump.
+            let _ = std::fs::remove_file(dossier.join(format!("{}.pieces.tar", e.fichier)));
         }
     }
     Ok(supprimees)
+}
+
+/// LES PIECES JOINTES SE SAUVEGARDENT AVEC LA BASE (audit v4). Une restauration
+/// rendait des factures et des DUM dont les fichiers n'existaient plus : la
+/// base ne garde que leur chemin. L'archive `<dump>.pieces.tar` est ecrite a
+/// cote du dump ; son echec ne fait pas echouer la sauvegarde de la base, il
+/// est signale.
+pub fn archiver_pieces(dump: &std::path::Path) -> Option<String> {
+    let pieces = std::path::PathBuf::from(std::env::var("GESTIONFIL_PIECES").unwrap_or_else(|_| "pieces".into()));
+    let vide = std::fs::read_dir(&pieces).map(|mut d| d.next().is_none()).unwrap_or(true);
+    if vide {
+        return None;
+    }
+    let cible = std::path::PathBuf::from(format!("{}.pieces.tar", dump.display()));
+    let parent = pieces.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    let nom = pieces.file_name()?.to_os_string();
+    let sortie = Command::new("tar").arg("-cf").arg(&cible).arg("-C").arg(parent).arg(&nom).output();
+    match sortie {
+        Ok(s) if s.status.success() => Some(cible.file_name()?.to_string_lossy().into_owned()),
+        Ok(s) => {
+            tracing::warn!(erreur = %String::from_utf8_lossy(&s.stderr).trim(), "archive des pieces jointes impossible");
+            let _ = std::fs::remove_file(&cible);
+            None
+        }
+        Err(e) => {
+            tracing::warn!(erreur = %e, "tar introuvable : pieces jointes non sauvegardees");
+            None
+        }
+    }
 }

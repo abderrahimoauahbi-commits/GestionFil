@@ -56,6 +56,19 @@ echo "  $(du -sh "$TEMPO" | cut -f1)"
 dire "Arret du service"
 systemctl stop gestionfil 2>/dev/null || echo "  (n'etait pas demarre)"
 
+# LA SAUVEGARDE AVANT LE REMPLACEMENT (audit v4). Le retour arriere
+# (04-revenir.sh) rend le binaire precedent, pas la base : si la version publiee
+# l'a touchee, seule une sauvegarde prise ICI permet de revenir. Service arrete,
+# elle est coherente avec l'ancien binaire. Elle emporte les pieces jointes.
+# Sans elle, on ne publie pas.
+dire "Sauvegarde de la base et des pieces jointes"
+if [[ -x "$RACINE/gestionfil-admin" ]]; then
+    ( cd "$RACINE" && sudo -u "$UTILISATEUR" ./gestionfil-admin sauvegarder ) \
+        || { echo "SAUVEGARDE IMPOSSIBLE : publication arretee (le service reste arrete, relancez-le : systemctl start gestionfil)"; exit 1; }
+else
+    echo "  (premiere publication : pas encore d'outil d'administration, rien a sauvegarder)"
+fi
+
 dire "Installation"
 install -o "$UTILISATEUR" -g "$UTILISATEUR" -m 0755 "$TEMPO/gestionfil"       "$RACINE/"
 install -o "$UTILISATEUR" -g "$UTILISATEUR" -m 0755 "$TEMPO/gestionfil-admin" "$RACINE/"

@@ -75,13 +75,14 @@ else
 # La base est sur cette machine, sur la boucle locale.
 DATABASE_URL=postgres://gestionfil:MOT_DE_PASSE_A_REMPLACER@127.0.0.1:5432/gestionfil
 
-# 0.0.0.0 : l'API doit etre joignable depuis les postes du reseau. C'est le
-# SEUL service expose — la base, elle, n'ecoute que sur localhost.
-BIND_ADDR=0.0.0.0:8080
+# 127.0.0.1 : nginx, sur la meme machine, expose l'application en HTTPS
+# (https://192.168.1.140) ; le service n'a pas a ecouter le reseau en clair
+# (audit v4). 0.0.0.0:8080 seulement sans nginx devant.
+BIND_ADDR=127.0.0.1:8080
 
-# Au moins 32 caracteres, tire au sort. En generer un :
-#     openssl rand -base64 48
-JWT_SECRET=A_REMPLACER_PAR_UN_SECRET_TIRE_AU_SORT
+# Au moins 32 caracteres, TIRE AU SORT a l'installation (ci-dessous). Le
+# serveur refuse de demarrer sur la valeur d'exemple (audit v4).
+JWT_SECRET=A_GENERER
 
 # Duree de validite d'un jeton, en minutes. 480 = une journee de travail : au
 # dela, une session oubliee sur un poste de magasin reste ouverte la nuit.
@@ -95,7 +96,20 @@ CORS_ORIGINS=tauri://localhost,http://tauri.localhost
 
 # Dossier des sauvegardes.
 GESTIONFIL_SAUVEGARDES=/opt/gestionfil/sauvegardes
+
+# Les pieces jointes (factures, DUM) : un dossier du compte de service,
+# archive avec chaque sauvegarde.
+GESTIONFIL_PIECES=/opt/gestionfil/pieces
+
+# Delais (secondes) : une requete SQL, une requete HTTP.
+GESTIONFIL_DELAI_SQL_S=120
+GESTIONFIL_DELAI_HTTP_S=300
 MODELE
+    # Le secret se tire au sort ICI : jamais de valeur commune a deux installations.
+    SECRET=$(openssl rand -base64 48 | tr -d '\n/+=')
+    sed -i "s|^JWT_SECRET=A_GENERER$|JWT_SECRET=${SECRET}|" "$RACINE/.env"
+    unset SECRET
+    install -d -o "$UTILISATEUR" -g "$UTILISATEUR" -m 0750 "$RACINE/pieces"
     chown "$UTILISATEUR:$UTILISATEUR" "$RACINE/.env"
     chmod 0600 "$RACINE/.env"
     echo "  modele ecrit dans $RACINE/.env"

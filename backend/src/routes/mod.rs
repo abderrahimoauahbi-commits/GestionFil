@@ -452,6 +452,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/{entite}/{id}/retenants", get(entites::retenants))
         .route("/api/{entite}/{id}/activation", post(entites::activation))
         .layer(TraceLayer::new_for_http())
+        // UN DELAI PAR REQUETE (audit v4) : au-dela, le client recoit 408 au
+        // lieu d'attendre une reponse qui ne viendra pas. Cinq minutes par
+        // defaut (GESTIONFIL_DELAI_HTTP_S) : un calcul de plan ou un depot de
+        // piece y tiennent largement.
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            std::time::Duration::from_secs(crate::db::delai_env("GESTIONFIL_DELAI_HTTP_S", 300)),
+        ))
         .layer(cors);
 
     match interface {

@@ -24,7 +24,7 @@ path = "src/bin/import.rs"
 axum = { version = "0.8", features = ["macros", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs", "timeout"] }
 
 # sqlx en mode requetes dynamiques (pas de macros query!) : la couche SQL est
 # verifiee par PREPARE sur une copie de la base, et cela evite d'exiger une base

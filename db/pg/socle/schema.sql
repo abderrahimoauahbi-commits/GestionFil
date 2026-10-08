@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 104 (voir inclus.txt).
+-- Migrations comprises : 106 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict OqBevVLhsJfgyPVV3cje98vTVCh16oPrxoroFaBeBatD3pwsOfIB8dNCZOGxrca
+\restrict PkqcwTtAzx8LxGHN08gIYwXvfeRV2lDsTpDZ65a7SHjH2aRmbCnkfDM5UxrWDBg
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -3127,7 +3127,9 @@ CREATE TABLE public.alerte (
     commentaire text,
     CONSTRAINT alerte_gravite_check CHECK ((gravite = ANY (ARRAY['INFO'::text, 'ATTENTION'::text, 'CRITIQUE'::text, 'BLOQUANT'::text]))),
     CONSTRAINT alerte_statut_check CHECK ((statut = ANY (ARRAY['OUVERTE'::text, 'ACQUITTEE'::text, 'RESOLUE'::text, 'IGNOREE'::text]))),
-    CONSTRAINT alerte_type_alerte_check CHECK ((type_alerte = ANY (ARRAY['RUPTURE'::text, 'STOCK_CRITIQUE'::text, 'BC_RETARD'::text, 'ECART_PESEE'::text, 'RECETTE_INVALIDE'::text, 'STOCK_DORMANT'::text, 'PEREMPTION'::text, 'MONO_SOURCE'::text])))
+    CONSTRAINT alerte_type_alerte_check CHECK ((type_alerte = ANY (ARRAY['RUPTURE'::text, 'STOCK_CRITIQUE'::text, 'BC_RETARD'::text, 'ECART_PESEE'::text, 'RECETTE_INVALIDE'::text, 'STOCK_DORMANT'::text, 'PEREMPTION'::text, 'MONO_SOURCE'::text]))),
+    CONSTRAINT ck_date_alerte_date_acquittement_58540e2a CHECK (((date_acquittement IS NULL) OR (date_acquittement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_alerte_date_detection_d958ccc6 CHECK (((date_detection IS NULL) OR (date_detection ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text)))
 );
 
 
@@ -3169,7 +3171,9 @@ CREATE TABLE public.archive_reception (
     CONSTRAINT archive_reception_conformite_quantite_check CHECK (((conformite_quantite IS NULL) OR (conformite_quantite = ANY (ARRAY[(0)::bigint, (1)::bigint])))),
     CONSTRAINT archive_reception_conformite_specifications_check CHECK (((conformite_specifications IS NULL) OR (conformite_specifications = ANY (ARRAY[(0)::bigint, (1)::bigint])))),
     CONSTRAINT archive_reception_documents_attaches_check CHECK (((documents_attaches IS NULL) OR ((documents_attaches)::jsonb IS NOT NULL))),
-    CONSTRAINT archive_reception_photos_check CHECK (((photos IS NULL) OR ((photos)::jsonb IS NOT NULL)))
+    CONSTRAINT archive_reception_photos_check CHECK (((photos IS NULL) OR ((photos)::jsonb IS NOT NULL))),
+    CONSTRAINT ck_date_archive_reception_date_archive_0b88b1b9 CHECK (((date_archive IS NULL) OR (date_archive ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_archive_reception_date_reception_25a2a6d6 CHECK (((date_reception IS NULL) OR (date_reception ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text)))
 );
 
 
@@ -3192,7 +3196,8 @@ CREATE TABLE public.audit_log (
     session_id text,
     CONSTRAINT audit_log_anciennes_valeurs_check CHECK (((anciennes_valeurs IS NULL) OR ((anciennes_valeurs)::jsonb IS NOT NULL))),
     CONSTRAINT audit_log_nouvelles_valeurs_check CHECK (((nouvelles_valeurs IS NULL) OR ((nouvelles_valeurs)::jsonb IS NOT NULL))),
-    CONSTRAINT audit_log_operation_check CHECK ((operation = ANY (ARRAY['INSERT'::text, 'UPDATE'::text, 'DELETE'::text, 'DEVALIDATION'::text, 'CONTREPASSATION'::text])))
+    CONSTRAINT audit_log_operation_check CHECK ((operation = ANY (ARRAY['INSERT'::text, 'UPDATE'::text, 'DELETE'::text, 'DEVALIDATION'::text, 'CONTREPASSATION'::text]))),
+    CONSTRAINT ck_date_audit_log_date_operation_e867cfea CHECK (((date_operation IS NULL) OR (date_operation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text)))
 );
 
 
@@ -3218,7 +3223,9 @@ CREATE TABLE public.besoin_mrp (
     CONSTRAINT besoin_mrp_quantite_brute_kg_check CHECK ((quantite_brute_kg >= (0)::numeric)),
     CONSTRAINT besoin_mrp_quantite_kg_check CHECK ((quantite_kg >= (0)::numeric)),
     CONSTRAINT besoin_mrp_rang_mois_check CHECK ((rang_mois >= 0)),
-    CONSTRAINT besoin_mrp_taux_perte_applique_check CHECK ((taux_perte_applique >= (0)::numeric))
+    CONSTRAINT besoin_mrp_taux_perte_applique_check CHECK ((taux_perte_applique >= (0)::numeric)),
+    CONSTRAINT ck_date_besoin_mrp_date_calcul_19cc2ebc CHECK (((date_calcul IS NULL) OR (date_calcul ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_besoin_mrp_date_reference_a15c3350 CHECK (((date_reference IS NULL) OR (date_reference ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text)))
 );
 
 
@@ -3256,7 +3263,13 @@ CREATE TABLE public.bon_commande (
     CONSTRAINT bon_commande_motif_creation_check CHECK ((motif_creation = ANY (ARRAY['MRP'::text, 'OPPORTUNITE_PRIX'::text, 'ANTICIPATION_RISQUE'::text, 'MANUEL'::text]))),
     CONSTRAINT bon_commande_nombre_conteneurs_check CHECK (((nombre_conteneurs IS NULL) OR (nombre_conteneurs > 0))),
     CONSTRAINT bon_commande_statut_check CHECK ((statut = ANY (ARRAY['BROUILLON'::text, 'EN_ATTENTE_VALIDATION'::text, 'VALIDE'::text, 'ENVOYE'::text, 'LIVRE_PARTIEL'::text, 'CLOTURE'::text, 'ANNULE'::text]))),
-    CONSTRAINT bon_commande_taux_change_engage_check CHECK ((taux_change_engage > (0)::numeric))
+    CONSTRAINT bon_commande_taux_change_engage_check CHECK ((taux_change_engage > (0)::numeric)),
+    CONSTRAINT ck_date_bon_commande_date_bc_b7d114d5 CHECK (((date_bc IS NULL) OR (date_bc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_bon_commande_date_creation_d937ee38 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_bon_commande_date_envoi_bdfd908b CHECK (((date_envoi IS NULL) OR (date_envoi ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_bon_commande_date_livraison_prevue_cd3a4f56 CHECK (((date_livraison_prevue IS NULL) OR (date_livraison_prevue ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_bon_commande_date_taux_engage_3c6f08c2 CHECK (((date_taux_engage IS NULL) OR (date_taux_engage ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_bon_commande_date_validation_5803f73d CHECK (((date_validation IS NULL) OR (date_validation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text)))
 );
 
 
@@ -3310,6 +3323,7 @@ CREATE TABLE public.cockpit_kpi (
     seuil_alerte numeric(12,4),
     tendance text,
     date_calcul text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_cockpit_kpi_date_calcul_2d8368d6 CHECK (((date_calcul IS NULL) OR (date_calcul ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT cockpit_kpi_tendance_check CHECK (((tendance IS NULL) OR (tendance = ANY (ARRAY['HAUSSE'::text, 'BAISSE'::text, 'STABLE'::text]))))
 );
 
@@ -3425,6 +3439,8 @@ CREATE TABLE public.cours_bam (
     date_cours text NOT NULL,
     cours_mad numeric(12,4) NOT NULL,
     date_lecture text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_cours_bam_date_cours_e3c93c2b CHECK (((date_cours IS NULL) OR (date_cours ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_cours_bam_date_lecture_5a7fff67 CHECK (((date_lecture IS NULL) OR (date_lecture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT cours_bam_cours_mad_check CHECK ((cours_mad > (0)::numeric)),
     CONSTRAINT cours_bam_date_cours_check CHECK ((date_cours ~ '^\d{4}-\d{2}-\d{2}$'::text))
 );
@@ -3452,6 +3468,9 @@ CREATE TABLE public.demande_autorisation (
     date_decision text,
     motif_decision text,
     date_consommation text,
+    CONSTRAINT ck_date_demande_autorisation_date_consommation_5c696ea7 CHECK (((date_consommation IS NULL) OR (date_consommation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_demande_autorisation_date_decision_b08f8b51 CHECK (((date_decision IS NULL) OR (date_decision ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_demande_autorisation_date_demande_016a2222 CHECK (((date_demande IS NULL) OR (date_demande ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT demande_autorisation_check CHECK (((statut = ANY (ARRAY['EN_ATTENTE'::text, 'ANNULEE'::text])) OR ((id_decideur IS NOT NULL) AND (date_decision IS NOT NULL)))),
     CONSTRAINT demande_autorisation_motif_check CHECK ((btrim(motif) <> ''::text)),
     CONSTRAINT demande_autorisation_niveau_check CHECK ((niveau = ANY (ARRAY['ORANGE'::text, 'ROUGE'::text]))),
@@ -3496,6 +3515,7 @@ CREATE TABLE public.dossier_lignes_frais (
     montant_dhs numeric(18,2) GENERATED ALWAYS AS (round((montant_devise * cours_change), 2)) STORED,
     id_utilisateur_creation text NOT NULL,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_dossier_lignes_frais_date_creation_93584c7f CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT dossier_lignes_frais_cours_change_check CHECK ((cours_change > (0)::numeric)),
     CONSTRAINT dossier_lignes_frais_montant_devise_check CHECK ((montant_devise > (0)::numeric))
 );
@@ -3526,6 +3546,7 @@ CREATE TABLE public.droit_champ (
     niveau text NOT NULL,
     date_modification text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_utilisateur_modif text,
+    CONSTRAINT ck_date_droit_champ_date_modification_b334eba8 CHECK (((date_modification IS NULL) OR (date_modification ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT droit_champ_niveau_check CHECK ((niveau = ANY (ARRAY['MASQUE'::text, 'LECTURE'::text, 'ECRITURE'::text])))
 );
 
@@ -3555,6 +3576,7 @@ CREATE TABLE public.entreprise (
     devise_base text DEFAULT 'MAD'::text NOT NULL,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     actif bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT ck_date_entreprise_date_creation_7c9324b8 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT entreprise_actif_check CHECK ((actif = ANY (ARRAY[(0)::bigint, (1)::bigint])))
 );
 
@@ -3606,6 +3628,7 @@ CREATE TABLE public.fournisseur (
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     palettes_par_conteneur bigint,
     couverture_commande_j bigint,
+    CONSTRAINT ck_date_fournisseur_date_creation_8ac9c931 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT fournisseur_actif_check CHECK ((actif = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT fournisseur_delai_livraison_jours_check CHECK (((delai_livraison_jours IS NULL) OR (delai_livraison_jours > 0))),
     CONSTRAINT fournisseur_note_globale_check CHECK (((note_globale IS NULL) OR ((note_globale >= (0)::numeric) AND (note_globale <= (100)::numeric)))),
@@ -3642,6 +3665,8 @@ CREATE TABLE public.frais_approche (
     id_utilisateur text,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     notes text,
+    CONSTRAINT ck_date_frais_approche_date_creation_36620dea CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_frais_approche_date_frais_b68f5c2a CHECK (((date_frais IS NULL) OR (date_frais ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT frais_approche_cle_repartition_check CHECK ((cle_repartition = ANY (ARRAY['POIDS'::text, 'VALEUR'::text, 'LIGNES'::text]))),
     CONSTRAINT frais_approche_montant_devise_check CHECK ((montant_devise >= (0)::numeric)),
     CONSTRAINT frais_approche_taux_change_check CHECK ((taux_change > (0)::numeric)),
@@ -3691,6 +3716,7 @@ CREATE TABLE public.historique_conditionnement (
     poids_applique bigint DEFAULT 0 NOT NULL,
     colisage_applique bigint DEFAULT 0 NOT NULL,
     id_utilisateur text,
+    CONSTRAINT ck_date_historique_conditionnement_date_evenement_4e3d4196 CHECK (((date_evenement IS NULL) OR (date_evenement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT historique_conditionnement_colisage_applique_check CHECK ((colisage_applique = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT historique_conditionnement_poids_applique_check CHECK ((poids_applique = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT historique_conditionnement_source_check CHECK ((source = ANY (ARRAY['RECEPTION'::text, 'IMPORT'::text])))
@@ -3717,6 +3743,8 @@ CREATE TABLE public.historique_prix (
     total_mad numeric(18,2) NOT NULL,
     conditions text,
     date_enregistrement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_historique_prix_date_achat_98d6397b CHECK (((date_achat IS NULL) OR (date_achat ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_historique_prix_date_enregistrement_57e2b34a CHECK (((date_enregistrement IS NULL) OR (date_enregistrement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT historique_prix_check CHECK ((abs((prix_kg_mad - (prix_kg_devise * taux_change))) < 0.01)),
     CONSTRAINT historique_prix_check1 CHECK ((abs((total_mad - (prix_kg_mad * quantite_achetee_kg))) < 0.05)),
     CONSTRAINT historique_prix_prix_kg_devise_check CHECK ((prix_kg_devise > (0)::numeric)),
@@ -3746,6 +3774,7 @@ CREATE TABLE public.import_ajustements_cump (
     montant_dhs numeric(18,2) NOT NULL,
     date_ajustement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_utilisateur text NOT NULL,
+    CONSTRAINT ck_date_import_ajustements_cump_date_ajustement_dc57f3d3 CHECK (((date_ajustement IS NULL) OR (date_ajustement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT import_ajustements_cump_check CHECK ((((nature = 'STOCK'::text) AND (code_magasin IS NOT NULL) AND (cump_apres IS NOT NULL)) OR ((nature = 'CONSOMME'::text) AND (code_magasin IS NULL)))),
     CONSTRAINT import_ajustements_cump_nature_check CHECK ((nature = ANY (ARRAY['STOCK'::text, 'CONSOMME'::text]))),
     CONSTRAINT import_ajustements_cump_quantite_recue_kg_check CHECK ((quantite_recue_kg >= (0)::numeric)),
@@ -3776,6 +3805,10 @@ CREATE TABLE public.import_dossiers (
     numero_dum text,
     regime_douanier text DEFAULT '010'::text NOT NULL,
     date_dum text,
+    CONSTRAINT ck_date_import_dossiers_date_arrivee_12457975 CHECK (((date_arrivee IS NULL) OR (date_arrivee ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_import_dossiers_date_cloture_806d4bc2 CHECK (((date_cloture IS NULL) OR (date_cloture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_import_dossiers_date_creation_894e06a9 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_import_dossiers_date_dum_b99aeb09 CHECK (((date_dum IS NULL) OR (date_dum ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT import_dossiers_check CHECK (((statut <> 'CLOTURE'::text) OR ((id_utilisateur_cloture IS NOT NULL) AND (date_cloture IS NOT NULL)))),
     CONSTRAINT import_dossiers_statut_check CHECK ((statut = ANY (ARRAY['BROUILLON'::text, 'EN_COURS'::text, 'CLOTURE'::text]))),
     CONSTRAINT import_dossiers_taux_change_check CHECK ((taux_change > (0)::numeric))
@@ -3801,6 +3834,8 @@ CREATE TABLE public.import_engagements (
     id_utilisateur_creation text,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     code_fournisseur text,
+    CONSTRAINT ck_date_import_engagements_date_creation_9ef46e9f CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_import_engagements_date_ei_cae572f2 CHECK (((date_ei IS NULL) OR (date_ei ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT import_engagements_montant_devise_check CHECK (((montant_devise IS NULL) OR (montant_devise >= (0)::numeric))),
     CONSTRAINT import_engagements_numero_ei_check CHECK ((btrim(numero_ei) <> ''::text)),
     CONSTRAINT import_engagements_quantite_kg_check CHECK (((quantite_kg IS NULL) OR (quantite_kg >= (0)::numeric)))
@@ -3900,6 +3935,8 @@ CREATE TABLE public.import_factures (
     id_utilisateur_creation text NOT NULL,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_engagement text,
+    CONSTRAINT ck_date_import_factures_date_creation_be6a38cf CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_import_factures_date_facture_1d6a253c CHECK (((date_facture IS NULL) OR (date_facture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT import_factures_montant_devise_check CHECK (((montant_devise IS NULL) OR (montant_devise >= (0)::numeric))),
     CONSTRAINT import_factures_nb_bobines_check CHECK (((nb_bobines IS NULL) OR (nb_bobines >= 0))),
     CONSTRAINT import_factures_nb_palettes_check CHECK (((nb_palettes IS NULL) OR (nb_palettes >= 0))),
@@ -3959,6 +3996,9 @@ CREATE TABLE public.import_receptions (
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_utilisateur_validation text,
     date_validation text,
+    CONSTRAINT ck_date_import_receptions_date_creation_1c2a508a CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_import_receptions_date_reception_16b1a833 CHECK (((date_reception IS NULL) OR (date_reception ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_import_receptions_date_validation_e5626fad CHECK (((date_validation IS NULL) OR (date_validation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT import_receptions_check CHECK (((litige = 0) OR (motif_litige IS NOT NULL))),
     CONSTRAINT import_receptions_check1 CHECK (((statut <> 'VALIDEE'::text) OR ((id_utilisateur_validation IS NOT NULL) AND (date_validation IS NOT NULL)))),
     CONSTRAINT import_receptions_litige_check CHECK ((litige = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
@@ -3985,6 +4025,10 @@ CREATE TABLE public.inventaire (
     motif_annulation text,
     id_utilisateur_annulation text,
     date_annulation text,
+    CONSTRAINT ck_date_inventaire_date_annulation_3b9cd1d4 CHECK (((date_annulation IS NULL) OR (date_annulation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_inventaire_date_cloture_6d4e9bd0 CHECK (((date_cloture IS NULL) OR (date_cloture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_inventaire_date_creation_b03448a6 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_inventaire_date_inventaire_8c22eabd CHECK (((date_inventaire IS NULL) OR (date_inventaire ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT inventaire_check CHECK (((statut <> 'CLOTURE'::text) OR (date_cloture IS NOT NULL))),
     CONSTRAINT inventaire_statut_check CHECK ((statut = ANY (ARRAY['BROUILLON'::text, 'EN_COURS'::text, 'CLOTURE'::text, 'ANNULE'::text]))),
     CONSTRAINT inventaire_type_inventaire_check CHECK ((type_inventaire = ANY (ARRAY['GLOBAL'::text, 'TOURNANT'::text, 'CIBLE'::text])))
@@ -4005,6 +4049,7 @@ CREATE TABLE public.journal_connexion (
     resultat text NOT NULL,
     adresse_ip text,
     agent text,
+    CONSTRAINT ck_date_journal_connexion_horodatage_297f7976 CHECK (((horodatage IS NULL) OR (horodatage ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT journal_connexion_resultat_check CHECK ((resultat = ANY (ARRAY['REUSSITE'::text, 'MOT_DE_PASSE'::text, 'CODE'::text, 'BLOQUE'::text, 'INACTIF'::text, 'INCONNU'::text])))
 );
 
@@ -4042,6 +4087,7 @@ CREATE TABLE public.ligne_bc (
     nb_palettes_saisi numeric(18,2),
     nb_bobines_saisi bigint,
     remise_pct numeric(5,2) DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_date_ligne_bc_date_livraison_prevue_4b3d0f82 CHECK (((date_livraison_prevue IS NULL) OR (date_livraison_prevue ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ligne_bc_arbitree_check CHECK ((arbitree = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT ligne_bc_besoin_kg_origine_check CHECK (((besoin_kg_origine IS NULL) OR (besoin_kg_origine >= (0)::numeric))),
     CONSTRAINT ligne_bc_check1 CHECK ((quantite_recue_kg <= (quantite_commandee_kg + 0.001))),
@@ -4126,6 +4172,7 @@ END) STORED,
     nb_bobines_comptees bigint,
     nb_palettes_comptees numeric(18,2),
     poids_unitaire_theorique_kg numeric(18,4),
+    CONSTRAINT ck_date_ligne_inventaire_date_comptage_8ca367ad CHECK (((date_comptage IS NULL) OR (date_comptage ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ligne_inventaire_check CHECK (((statut_ligne = 'A_TRAITER'::text) OR (quantite_comptee_kg IS NOT NULL))),
     CONSTRAINT ligne_inventaire_nb_bobines_comptees_check CHECK (((nb_bobines_comptees IS NULL) OR (nb_bobines_comptees >= 0))),
     CONSTRAINT ligne_inventaire_nb_bobines_theorique_check CHECK (((nb_bobines_theorique IS NULL) OR (nb_bobines_theorique >= 0))),
@@ -4179,6 +4226,8 @@ END) STORED,
     code_couleur text,
     lot_force bigint DEFAULT 0 NOT NULL,
     motif_lot_force text,
+    CONSTRAINT ck_date_ligne_mouvement_date_fabrication_14419d35 CHECK (((date_fabrication IS NULL) OR (date_fabrication ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_ligne_mouvement_date_peremption_61bc4c6d CHECK (((date_peremption IS NULL) OR (date_peremption ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_lmvt_conversion CHECK (((COALESCE(mode_pesee, ''::text) = ANY (ARRAY['PESEE'::text, 'ESTIMATION'::text])) OR (quantite_saisie IS NULL) OR (facteur_conversion IS NULL) OR (abs((quantite_kg - (quantite_saisie * facteur_conversion))) < 0.001))),
     CONSTRAINT ck_lmvt_mode_pesee CHECK (((mode_pesee IS NULL) OR (mode_pesee = 'THEORIQUE'::text) OR ((mode_pesee = 'PESEE'::text) AND (poids_total_pese_kg IS NOT NULL) AND (pourcentage_restant IS NULL) AND (abs((quantite_kg - poids_total_pese_kg)) < 0.001)) OR ((mode_pesee = 'ESTIMATION'::text) AND (pourcentage_restant IS NOT NULL) AND (poids_total_pese_kg IS NULL) AND (nb_bobines IS NOT NULL) AND (nb_bobines > 0) AND (poids_unitaire_theorique_kg IS NOT NULL) AND (abs((quantite_kg - ((((nb_bobines)::numeric * poids_unitaire_theorique_kg) * pourcentage_restant) / 100.0))) < 0.01)))),
     CONSTRAINT ligne_mouvement_facteur_conversion_check CHECK (((facteur_conversion IS NULL) OR (facteur_conversion > (0)::numeric))),
@@ -4317,6 +4366,8 @@ END) STORED,
     notes text,
     nb_palettes_saisi numeric(18,2),
     nb_bobines_saisi bigint,
+    CONSTRAINT ck_date_ligne_reception_date_fabrication_46d21583 CHECK (((date_fabrication IS NULL) OR (date_fabrication ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_ligne_reception_date_peremption_4d27d767 CHECK (((date_peremption IS NULL) OR (date_peremption ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ligne_reception_check CHECK ((abs((quantite_stock_kg - (quantite_pesee_unite * facteur_kg))) < 0.001)),
     CONSTRAINT ligne_reception_check1 CHECK ((abs((prix_kg_mad - (prix_kg_devise * taux_change))) < 0.01)),
     CONSTRAINT ligne_reception_check2 CHECK (((date_peremption IS NULL) OR (date_fabrication IS NULL) OR (date_peremption > date_fabrication))),
@@ -4422,6 +4473,8 @@ CREATE TABLE public.lot (
     fusionne_dans text,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     date_derniere_activite text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_lot_date_creation_a82a7dfc CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_lot_date_derniere_activite_dffd993c CHECK (((date_derniere_activite IS NULL) OR (date_derniere_activite ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT lot_categorie_check CHECK ((categorie = ANY (ARRAY['PROJET'::text, 'RESTES'::text]))),
     CONSTRAINT lot_lot_fournisseur_check CHECK ((btrim(lot_fournisseur) <> ''::text)),
     CONSTRAINT lot_origine_check CHECK ((origine = ANY (ARRAY['FOURNISSEUR'::text, 'GENERE'::text, 'RETOUR'::text, 'FUSION'::text, 'SANS_LOT'::text]))),
@@ -4444,6 +4497,7 @@ CREATE TABLE public.lot_evenement (
     details jsonb,
     id_utilisateur text,
     date_evenement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_lot_evenement_date_evenement_658baf61 CHECK (((date_evenement IS NULL) OR (date_evenement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT lot_evenement_motif_check CHECK ((btrim(motif) <> ''::text)),
     CONSTRAINT lot_evenement_type_evenement_check CHECK ((type_evenement = ANY (ARRAY['BLOCAGE'::text, 'DEBLOCAGE'::text, 'BASCULEMENT_RESTES'::text, 'RETOUR_PROJET'::text, 'FUSION'::text, 'DECISION_DORMANT'::text, 'DEROGATION'::text, 'SOLDE'::text, 'IDENTIFICATION'::text])))
 );
@@ -4470,6 +4524,7 @@ CASE
 END) STORED,
     motif_etat text,
     date_etat text,
+    CONSTRAINT ck_date_machine_date_etat_5ae6e589 CHECK (((date_etat IS NULL) OR (date_etat ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_machine_etat CHECK ((etat = ANY (ARRAY['ACTIVE'::text, 'PANNE'::text, 'SOMMEIL'::text, 'RETIREE'::text]))),
     CONSTRAINT machine_capacite_bobines_check CHECK ((capacite_bobines > 0)),
     CONSTRAINT machine_nb_etages_check CHECK ((nb_etages >= 0))
@@ -4493,6 +4548,7 @@ CREATE TABLE public.machine_cliche (
     poids_unitaire_kg numeric(18,4),
     pourcentage numeric(6,2),
     kg numeric(18,4) DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_date_machine_cliche_date_cliche_309e153c CHECK (((date_cliche IS NULL) OR (date_cliche ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT machine_cliche_nb_bobines_check CHECK ((nb_bobines >= 0))
 );
 
@@ -4528,6 +4584,9 @@ CREATE TABLE public.machine_consommation (
     notes text,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_fiche text,
+    CONSTRAINT ck_date_machine_consommation_date_constat_7ad7314b CHECK (((date_constat IS NULL) OR (date_constat ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_consommation_date_constat_precedent_88f3a650 CHECK (((date_constat_precedent IS NULL) OR (date_constat_precedent ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_consommation_date_creation_931467ae CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT machine_consommation_bobines_apres_check CHECK ((bobines_apres >= 0)),
     CONSTRAINT machine_consommation_bobines_avant_check CHECK ((bobines_avant >= 0)),
     CONSTRAINT machine_consommation_kg_apres_check CHECK ((kg_apres >= (0)::numeric)),
@@ -4571,6 +4630,8 @@ CREATE TABLE public.machine_decision (
     date_retrait text,
     id_utilisateur_retrait text,
     motif_retrait text,
+    CONSTRAINT ck_date_machine_decision_date_decision_4893aed0 CHECK (((date_decision IS NULL) OR (date_decision ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_decision_date_retrait_354ebddc CHECK (((date_retrait IS NULL) OR (date_retrait ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT machine_decision_check CHECK (((est_tete = 0) OR (statut = 'ACTIVE'::text))),
     CONSTRAINT machine_decision_check1 CHECK (((statut = 'ACTIVE'::text) OR ((date_retrait IS NOT NULL) AND (motif_retrait IS NOT NULL)))),
     CONSTRAINT machine_decision_check2 CHECK (((nature = 'DEPART'::text) = (id_fiche IS NULL))),
@@ -4695,6 +4756,8 @@ CREATE TABLE public.machine_etat (
     id_utilisateur text,
     date_maj text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_fiche text,
+    CONSTRAINT ck_date_machine_etat_date_constat_e4f4ad7d CHECK (((date_constat IS NULL) OR (date_constat ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_etat_date_maj_00c284f7 CHECK (((date_maj IS NULL) OR (date_maj ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_machine_etat_kg CHECK ((kg >= (0)::numeric)),
     CONSTRAINT machine_etat_mode_constat_check CHECK ((mode_constat = ANY (ARRAY['ESTIMATION'::text, 'PESEE'::text]))),
     CONSTRAINT machine_etat_nb_bobines_check CHECK ((nb_bobines >= 0)),
@@ -4732,6 +4795,11 @@ CREATE TABLE public.machine_fiche (
     motif_annulation text,
     date_annulation text,
     nb_validations bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_date_machine_fiche_date_annulation_2f8df31a CHECK (((date_annulation IS NULL) OR (date_annulation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_fiche_date_constat_precedent_aaa5e102 CHECK (((date_constat_precedent IS NULL) OR (date_constat_precedent ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_fiche_date_creation_3da9d857 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_fiche_date_fiche_5df63cb5 CHECK (((date_fiche IS NULL) OR (date_fiche ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_machine_fiche_date_validation_f14d3dba CHECK (((date_validation IS NULL) OR (date_validation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_fiche_magasin CHECK (((type_fiche = ANY (ARRAY['MAJ'::text, 'CONSO'::text])) OR (code_magasin IS NOT NULL))),
     CONSTRAINT ck_fiche_type CHECK ((type_fiche = ANY (ARRAY['CHARGE'::text, 'DECHARGE'::text, 'MAJ'::text, 'CONSO'::text]))),
     CONSTRAINT machine_fiche_check CHECK (((statut <> 'ANNULE'::text) OR (motif_annulation IS NOT NULL))),
@@ -4758,6 +4826,7 @@ CREATE TABLE public.machine_fiche_journal (
     id_utilisateur text,
     horodatage text DEFAULT to_char((clock_timestamp() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     detail jsonb,
+    CONSTRAINT ck_date_machine_fiche_journal_horodatage_c19911af CHECK (((horodatage IS NULL) OR (horodatage ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT machine_fiche_journal_evenement_check CHECK ((evenement = ANY (ARRAY['DEPART'::text, 'VALIDATION'::text, 'DEVALIDATION'::text, 'ANNULATION'::text, 'CHANGEMENT_ETAGE'::text])))
 );
 
@@ -4871,6 +4940,7 @@ CREATE TABLE public.migration_appliquee (
     date_application text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     mode text DEFAULT 'JOUEE'::text NOT NULL,
     par text DEFAULT CURRENT_USER NOT NULL,
+    CONSTRAINT ck_date_migration_appliquee_date_application_856f2f69 CHECK (((date_application IS NULL) OR (date_application ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT migration_appliquee_mode_check CHECK ((mode = ANY (ARRAY['JOUEE'::text, 'MARQUEE'::text, 'SOCLE'::text])))
 );
 
@@ -4945,6 +5015,8 @@ CREATE TABLE public.mouvement (
     id_mouvement_contrepasse text,
     motif_contrepassation text,
     id_decision_machine text,
+    CONSTRAINT ck_date_mouvement_date_creation_e24fb88e CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_mouvement_date_mouvement_21abb9f7 CHECK (((date_mouvement IS NULL) OR (date_mouvement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT mouvement_est_initial_check CHECK ((est_initial = ANY (ARRAY[(0)::bigint, (1)::bigint])))
 );
 
@@ -4976,6 +5048,7 @@ CREATE TABLE public.parametre (
     id_utilisateur_modif text,
     motif_modif text,
     actif bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT ck_date_parametre_date_derniere_modif_12d7e9e3 CHECK (((date_derniere_modif IS NULL) OR (date_derniere_modif ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT parametre_actif_check CHECK ((actif = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT parametre_type_donnee_check CHECK ((type_donnee = ANY (ARRAY['ENTIER'::text, 'DECIMAL'::text, 'TEXTE'::text, 'DATE'::text, 'BOOLEEN'::text]))),
     CONSTRAINT parametre_verrouille_check CHECK ((verrouille = ANY (ARRAY[(0)::bigint, (1)::bigint])))
@@ -4997,6 +5070,7 @@ CREATE TABLE public.parametre_historique (
     id_utilisateur text,
     motif text,
     ip_adresse text,
+    CONSTRAINT ck_date_parametre_historique_date_modification_882f8651 CHECK (((date_modification IS NULL) OR (date_modification ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT parametre_historique_check CHECK ((ancienne_valeur IS DISTINCT FROM nouvelle_valeur))
 );
 
@@ -5068,6 +5142,7 @@ CREATE TABLE public.piece_jointe (
     date_depot text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_utilisateur text NOT NULL,
     notes text,
+    CONSTRAINT ck_date_piece_jointe_date_depot_c569e203 CHECK (((date_depot IS NULL) OR (date_depot ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT piece_jointe_nature_check CHECK ((nature = ANY (ARRAY['FACTURE_FOURNISSEUR'::text, 'DUM'::text, 'QUITTANCE_DOUANE'::text, 'LIQUIDATION'::text, 'FACTURE_FRAIS'::text, 'BL'::text, 'PACKING'::text, 'ENGAGEMENT'::text, 'AUTRE'::text]))),
     CONSTRAINT piece_jointe_nb_pages_check CHECK (((nb_pages IS NULL) OR (nb_pages > 0))),
     CONSTRAINT piece_jointe_taille_octets_check CHECK ((taille_octets > 0))
@@ -5085,7 +5160,8 @@ CREATE TABLE public.piece_lecture (
     resultat jsonb NOT NULL,
     duree_s numeric(8,1),
     date_lecture text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
-    id_utilisateur text NOT NULL
+    id_utilisateur text NOT NULL,
+    CONSTRAINT ck_date_piece_lecture_date_lecture_a5483d97 CHECK (((date_lecture IS NULL) OR (date_lecture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text)))
 );
 
 
@@ -5129,6 +5205,11 @@ CREATE TABLE public.plan_achat (
     taux_devise numeric,
     palettes_a_commander bigint,
     date_ecartee text,
+    CONSTRAINT ck_date_plan_achat_date_besoin_prevue_a28e164a CHECK (((date_besoin_prevue IS NULL) OR (date_besoin_prevue ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_achat_date_ecartee_36900e46 CHECK (((date_ecartee IS NULL) OR (date_ecartee ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_achat_date_figement_9f2c70e5 CHECK (((date_figement IS NULL) OR (date_figement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_achat_date_generation_83015382 CHECK (((date_generation IS NULL) OR (date_generation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_achat_date_validation_db174561 CHECK (((date_validation IS NULL) OR (date_validation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT plan_achat_check CHECK (((code_reference_origine IS NULL) OR (code_reference_origine <> code_reference))),
     CONSTRAINT plan_achat_figee_check CHECK ((figee = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT plan_achat_motif_figement_check CHECK (((motif_figement IS NULL) OR (motif_figement = ANY (ARRAY['PRIX_NEGOCIE'::text, 'QUANTITE_AJUSTEE'::text, 'LIVRAISON_GROUPEE'::text, 'DELAI_FOURNISSEUR'::text, 'AUTRE'::text])))),
@@ -5188,6 +5269,12 @@ END) STORED,
     date_modification text,
     date_validation text,
     date_cloture text,
+    CONSTRAINT ck_date_plan_production_date_cloture_49c7fb8e CHECK (((date_cloture IS NULL) OR (date_cloture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_production_date_creation_1abcec4b CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_production_date_debut_ea6e1461 CHECK (((date_debut IS NULL) OR (date_debut ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_production_date_fin_78305c23 CHECK (((date_fin IS NULL) OR (date_fin ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_production_date_modification_3e06ac5e CHECK (((date_modification IS NULL) OR (date_modification ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_plan_production_date_validation_31db07cd CHECK (((date_validation IS NULL) OR (date_validation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT plan_production_annee_check CHECK (((annee >= 2000) AND (annee <= 2200))),
     CONSTRAINT plan_production_check CHECK ((date_fin > date_debut)),
     CONSTRAINT plan_production_check1 CHECK ((seuil_critique_jours < seuil_alerte_jours)),
@@ -5220,6 +5307,7 @@ CREATE TABLE public.plan_qualite (
     code_qualite text NOT NULL,
     m2_base_mensuel numeric(18,4) DEFAULT 0 NOT NULL,
     date_figee text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_plan_qualite_date_figee_5b3fc337 CHECK (((date_figee IS NULL) OR (date_figee ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT plan_qualite_m2_base_mensuel_check CHECK ((m2_base_mensuel >= (0)::numeric))
 );
 
@@ -5284,6 +5372,9 @@ END) STORED,
     id_utilisateur_creation text,
     id_utilisateur_modification text,
     id_utilisateur_cloture text,
+    CONSTRAINT ck_date_qualite_date_cloture_6d76880e CHECK (((date_cloture IS NULL) OR (date_cloture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_qualite_date_creation_d3a97bc6 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_qualite_date_modification_9065ecf0 CHECK (((date_modification IS NULL) OR (date_modification ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT qualite_check CHECK ((seuil_critique_jours < seuil_alerte_jours)),
     CONSTRAINT qualite_check1 CHECK ((((statut <> 'CLOTURE'::text) AND (date_cloture IS NULL)) OR ((statut = 'CLOTURE'::text) AND (date_cloture IS NOT NULL)))),
     CONSTRAINT qualite_couv_min_mois_check CHECK ((couv_min_mois >= (0)::numeric)),
@@ -5327,6 +5418,10 @@ CREATE TABLE public.reception (
     code_devise_facture text,
     montant_facture_devise numeric(18,2),
     taux_facture numeric(9,4),
+    CONSTRAINT ck_date_reception_date_cloture_625d6d68 CHECK (((date_cloture IS NULL) OR (date_cloture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_reception_date_controle_05308abf CHECK (((date_controle IS NULL) OR (date_controle ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_reception_date_creation_852e0f95 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_reception_date_reception_bcdb8af8 CHECK (((date_reception IS NULL) OR (date_reception ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT reception_check CHECK (((id_utilisateur_controle IS NULL) OR (id_utilisateur_controle <> id_utilisateur_reception))),
     CONSTRAINT reception_check1 CHECK (((statut = ANY (ARRAY['BROUILLON'::text, 'A_CONTROLER'::text, 'ANNULE'::text])) OR ((id_utilisateur_controle IS NOT NULL) AND (date_controle IS NOT NULL) AND (taux_change_reception IS NOT NULL)))),
     CONSTRAINT reception_nombre_colis_check CHECK (((nombre_colis IS NULL) OR (nombre_colis > 0))),
@@ -5359,6 +5454,7 @@ CREATE TABLE public.reception_ajustements_cmup (
     origine text DEFAULT 'CLOTURE'::text NOT NULL,
     numero_piece text,
     motif text,
+    CONSTRAINT ck_date_reception_ajustements_cmup_date_ajustement_a5466eea CHECK (((date_ajustement IS NULL) OR (date_ajustement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_rec_ajust_origine CHECK (((origine = ANY (ARRAY['CLOTURE'::text, 'AVOIR'::text, 'COMPLEMENT'::text])) AND ((origine = 'CLOTURE'::text) OR (length(btrim(COALESCE(motif, ''::text))) >= 5)))),
     CONSTRAINT reception_ajustements_cmup_check CHECK ((((nature = 'STOCK'::text) AND (code_magasin IS NOT NULL) AND (cmup_apres IS NOT NULL)) OR ((nature = 'ECART_PRIX'::text) AND (code_magasin IS NULL)))),
     CONSTRAINT reception_ajustements_cmup_nature_check CHECK ((nature = ANY (ARRAY['STOCK'::text, 'ECART_PRIX'::text]))),
@@ -5457,6 +5553,10 @@ END)) STORED,
     type_lot text DEFAULT 'INDIFFERENT'::text NOT NULL,
     fusion_lot bigint DEFAULT 1 NOT NULL,
     arrondi_palette bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_date_reference_date_creation_b20f692e CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_reference_date_dernier_abc_f9316847 CHECK (((date_dernier_abc IS NULL) OR (date_dernier_abc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_reference_date_dernier_cmup_23269344 CHECK (((date_dernier_cmup IS NULL) OR (date_dernier_cmup ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_reference_date_prix_catalogue_8270034c CHECK (((date_prix_catalogue IS NULL) OR (date_prix_catalogue ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT reference_actif_check CHECK ((actif = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT reference_arrondi_palette_check CHECK ((arrondi_palette = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT reference_bobines_par_lot_check CHECK (((bobines_par_lot IS NULL) OR (bobines_par_lot > 0))),
@@ -5526,6 +5626,8 @@ CREATE TABLE public.reference_groupe_equiv (
     date_debut text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     date_fin text,
     actif bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT ck_date_reference_groupe_equiv_date_debut_11fce7c0 CHECK (((date_debut IS NULL) OR (date_debut ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_reference_groupe_equiv_date_fin_bc6703f3 CHECK (((date_fin IS NULL) OR (date_fin ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT reference_groupe_equiv_actif_check CHECK ((actif = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT reference_groupe_equiv_check CHECK (((date_fin IS NULL) OR (date_fin > date_debut))),
     CONSTRAINT reference_groupe_equiv_est_preferentielle_check CHECK ((est_preferentielle = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
@@ -5584,6 +5686,7 @@ CREATE TABLE public.snapshot_mrp (
     stock_projete_kg numeric(18,4),
     statut_couleur text,
     donnees_json text,
+    CONSTRAINT ck_date_snapshot_mrp_date_snapshot_8ffe0443 CHECK (((date_snapshot IS NULL) OR (date_snapshot ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT snapshot_mrp_donnees_json_check CHECK (((donnees_json IS NULL) OR ((donnees_json)::jsonb IS NOT NULL))),
     CONSTRAINT snapshot_mrp_mois_check CHECK (((mois >= 1) AND (mois <= 12))),
     CONSTRAINT snapshot_mrp_rang_mois_check CHECK ((rang_mois >= 0)),
@@ -5610,6 +5713,10 @@ CREATE TABLE public.stock_lot (
     date_premiere_entree text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     date_maj text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     code_couleur text,
+    CONSTRAINT ck_date_stock_lot_date_fabrication_af562089 CHECK (((date_fabrication IS NULL) OR (date_fabrication ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_stock_lot_date_maj_5f9672af CHECK (((date_maj IS NULL) OR (date_maj ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_stock_lot_date_peremption_6c0004f5 CHECK (((date_peremption IS NULL) OR (date_peremption ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_stock_lot_date_premiere_entree_7681dbde CHECK (((date_premiere_entree IS NULL) OR (date_premiere_entree ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT stock_lot_nb_bobines_check CHECK ((nb_bobines >= 0)),
     CONSTRAINT stock_lot_prix_entree_mad_check CHECK (((prix_entree_mad IS NULL) OR (prix_entree_mad >= (0)::numeric))),
     CONSTRAINT stock_lot_quantite_kg_check CHECK ((quantite_kg >= (0)::numeric))
@@ -5634,6 +5741,10 @@ CREATE TABLE public.stock_magasin (
     date_derniere_sortie text,
     date_dernier_inventaire text,
     date_maj text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_stock_magasin_date_dernier_inventaire_72c62dde CHECK (((date_dernier_inventaire IS NULL) OR (date_dernier_inventaire ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_stock_magasin_date_derniere_entree_b1e73bc1 CHECK (((date_derniere_entree IS NULL) OR (date_derniere_entree ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_stock_magasin_date_derniere_sortie_a1ee9d7f CHECK (((date_derniere_sortie IS NULL) OR (date_derniere_sortie ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_stock_magasin_date_maj_84429b17 CHECK (((date_maj IS NULL) OR (date_maj ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT stock_magasin_cmup_mad_check CHECK (((cmup_mad IS NULL) OR (cmup_mad >= (0)::numeric))),
     CONSTRAINT stock_magasin_nb_bobines_check CHECK ((nb_bobines >= 0)),
     CONSTRAINT stock_magasin_quantite_kg_check CHECK ((quantite_kg >= (0)::numeric))
@@ -5654,6 +5765,9 @@ CREATE TABLE public.taux_change (
     date_fin text,
     source text,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_taux_change_date_creation_845c45e9 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_taux_change_date_debut_bedacfe1 CHECK (((date_debut IS NULL) OR (date_debut ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_taux_change_date_fin_ae7fc277 CHECK (((date_fin IS NULL) OR (date_fin ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT taux_change_check CHECK (((date_fin IS NULL) OR (date_fin > date_debut))),
     CONSTRAINT taux_change_taux_check CHECK ((taux > (0)::numeric))
 );
@@ -5673,7 +5787,8 @@ CREATE TABLE public.telechargement (
     taille_octets bigint,
     id_utilisateur text NOT NULL,
     adresse_ip text,
-    date_telechargement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL
+    date_telechargement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_telechargement_date_telechargement_a5e5938e CHECK (((date_telechargement IS NULL) OR (date_telechargement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text)))
 );
 
 
@@ -5697,6 +5812,9 @@ CREATE TABLE public.transfert (
     responsable text,
     transporteur text,
     observations text,
+    CONSTRAINT ck_date_transfert_date_reception_dest_c3331f03 CHECK (((date_reception_dest IS NULL) OR (date_reception_dest ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_transfert_date_sortie_a8a4bd6f CHECK (((date_sortie IS NULL) OR (date_sortie ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_transfert_date_transfert_bf183b1a CHECK (((date_transfert IS NULL) OR (date_transfert ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT transfert_check CHECK ((code_magasin_source <> code_magasin_dest)),
     CONSTRAINT transfert_statut_check CHECK ((statut = ANY (ARRAY['BROUILLON'::text, 'VALIDE'::text, 'TERMINE'::text, 'ANNULE'::text])))
 );
@@ -5771,6 +5889,9 @@ CREATE TABLE public.utilisateur (
     totp_active_le text,
     mot_de_passe_change_le bigint,
     totp_dernier_pas bigint,
+    CONSTRAINT ck_date_utilisateur_bloque_jusqu_a_6ca467a8 CHECK (((bloque_jusqu_a IS NULL) OR (bloque_jusqu_a ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_utilisateur_date_creation_1021d94d CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_utilisateur_totp_active_le_f39cf340 CHECK (((totp_active_le IS NULL) OR (totp_active_le ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_utilisateur_totp CHECK (((totp_actif = 0) OR (secret_totp IS NOT NULL))),
     CONSTRAINT utilisateur_actif_check CHECK ((actif = ANY (ARRAY[(0)::bigint, (1)::bigint]))),
     CONSTRAINT utilisateur_echecs_consecutifs_check CHECK ((echecs_consecutifs >= 0)),
@@ -10621,6 +10742,8 @@ CREATE TABLE public.valorisation_stock (
     valeur_mad numeric(18,2) NOT NULL,
     methode text DEFAULT 'CMUP'::text NOT NULL,
     date_calcul text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_date_valorisation_stock_date_calcul_3201d4ef CHECK (((date_calcul IS NULL) OR (date_calcul ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_date_valorisation_stock_date_valorisation_9b54bad6 CHECK (((date_valorisation IS NULL) OR (date_valorisation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT valorisation_stock_methode_check CHECK ((methode = 'CMUP'::text))
 );
 
@@ -11892,6 +12015,818 @@ CREATE INDEX ix_fiche_machine ON public.machine_fiche USING btree (code_machine,
 --
 
 CREATE INDEX ix_fiche_statut ON public.machine_fiche USING btree (statut) WHERE (statut = 'BROUILLON'::text);
+
+
+--
+-- Name: ix_fk_alerte_code_role_destinataire_2d0c9372; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_alerte_code_role_destinataire_2d0c9372 ON public.alerte USING btree (code_role_destinataire);
+
+
+--
+-- Name: ix_fk_alerte_id_utilisateur_acquittement_8daf911c; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_alerte_id_utilisateur_acquittement_8daf911c ON public.alerte USING btree (id_utilisateur_acquittement);
+
+
+--
+-- Name: ix_fk_archive_reception_id_utilisateur_archive_2a5efb5f; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_archive_reception_id_utilisateur_archive_2a5efb5f ON public.archive_reception USING btree (id_utilisateur_archive);
+
+
+--
+-- Name: ix_fk_bon_commande_code_devise_e5f3c399; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_bon_commande_code_devise_e5f3c399 ON public.bon_commande USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_bon_commande_id_utilisateur_creation_43ba3e42; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_bon_commande_id_utilisateur_creation_43ba3e42 ON public.bon_commande USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_bon_commande_id_utilisateur_validation_a962972a; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_bon_commande_id_utilisateur_validation_a962972a ON public.bon_commande USING btree (id_utilisateur_validation);
+
+
+--
+-- Name: ix_fk_categorie_matiere_code_role_defaut_8de7f505; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_categorie_matiere_code_role_defaut_8de7f505 ON public.categorie_matiere USING btree (code_role_defaut);
+
+
+--
+-- Name: ix_fk_dossier_lignes_frais_cibles_id_ligne_859bd536; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_dossier_lignes_frais_cibles_id_ligne_859bd536 ON public.dossier_lignes_frais_cibles USING btree (id_ligne);
+
+
+--
+-- Name: ix_fk_dossier_lignes_frais_code_devise_4c99a9b6; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_dossier_lignes_frais_code_devise_4c99a9b6 ON public.dossier_lignes_frais USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_dossier_lignes_frais_id_frais_96316727; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_dossier_lignes_frais_id_frais_96316727 ON public.dossier_lignes_frais USING btree (id_frais);
+
+
+--
+-- Name: ix_fk_dossier_lignes_frais_id_utilisateur_creation_44a8c370; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_dossier_lignes_frais_id_utilisateur_creation_44a8c370 ON public.dossier_lignes_frais USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_droit_champ_id_utilisateur_modif_89e79b8e; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_droit_champ_id_utilisateur_modif_89e79b8e ON public.droit_champ USING btree (id_utilisateur_modif);
+
+
+--
+-- Name: ix_fk_droit_champ_module_champ_6b8fd985; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_droit_champ_module_champ_6b8fd985 ON public.droit_champ USING btree (module, champ);
+
+
+--
+-- Name: ix_fk_famille_code_categorie_87ca3409; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_famille_code_categorie_87ca3409 ON public.famille USING btree (code_categorie);
+
+
+--
+-- Name: ix_fk_fournisseur_code_devise_70de5994; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_fournisseur_code_devise_70de5994 ON public.fournisseur USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_frais_approche_code_devise_23968d2e; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_frais_approche_code_devise_23968d2e ON public.frais_approche USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_frais_approche_id_utilisateur_f7364a00; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_frais_approche_id_utilisateur_f7364a00 ON public.frais_approche USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_historique_prix_code_devise_2ed9a566; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_historique_prix_code_devise_2ed9a566 ON public.historique_prix USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_import_ajustements_cump_code_magasin_abb0e444; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_ajustements_cump_code_magasin_abb0e444 ON public.import_ajustements_cump USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_import_ajustements_cump_id_utilisateur_104c2c9e; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_ajustements_cump_id_utilisateur_104c2c9e ON public.import_ajustements_cump USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_import_dossiers_code_devise_7d3752f1; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_dossiers_code_devise_7d3752f1 ON public.import_dossiers USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_import_dossiers_id_utilisateur_cloture_89e3ff07; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_dossiers_id_utilisateur_cloture_89e3ff07 ON public.import_dossiers USING btree (id_utilisateur_cloture);
+
+
+--
+-- Name: ix_fk_import_dossiers_id_utilisateur_creation_3b692ef2; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_dossiers_id_utilisateur_creation_3b692ef2 ON public.import_dossiers USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_import_engagements_code_fournisseur_df7b9c33; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_engagements_code_fournisseur_df7b9c33 ON public.import_engagements USING btree (code_fournisseur);
+
+
+--
+-- Name: ix_fk_import_factures_code_devise_f457e708; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_factures_code_devise_f457e708 ON public.import_factures USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_import_factures_id_utilisateur_creation_0200d84b; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_factures_id_utilisateur_creation_0200d84b ON public.import_factures USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_import_reception_lignes_code_magasin_c43a25b6; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_reception_lignes_code_magasin_c43a25b6 ON public.import_reception_lignes USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_import_reception_lignes_id_mouvement_97bee063; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_reception_lignes_id_mouvement_97bee063 ON public.import_reception_lignes USING btree (id_mouvement);
+
+
+--
+-- Name: ix_fk_import_reception_lignes_id_utilisateur_derogatio_0738f1d1; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_reception_lignes_id_utilisateur_derogatio_0738f1d1 ON public.import_reception_lignes USING btree (id_utilisateur_derogation);
+
+
+--
+-- Name: ix_fk_import_receptions_id_utilisateur_creation_f28e78f9; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_receptions_id_utilisateur_creation_f28e78f9 ON public.import_receptions USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_import_receptions_id_utilisateur_validation_e4d70e86; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_receptions_id_utilisateur_validation_e4d70e86 ON public.import_receptions USING btree (id_utilisateur_validation);
+
+
+--
+-- Name: ix_fk_inventaire_id_utilisateur_annulation_fce91ae4; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_inventaire_id_utilisateur_annulation_fce91ae4 ON public.inventaire USING btree (id_utilisateur_annulation);
+
+
+--
+-- Name: ix_fk_inventaire_id_utilisateur_responsable_cf467ab2; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_inventaire_id_utilisateur_responsable_cf467ab2 ON public.inventaire USING btree (id_utilisateur_responsable);
+
+
+--
+-- Name: ix_fk_journal_connexion_id_utilisateur_6f3f91d9; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_journal_connexion_id_utilisateur_6f3f91d9 ON public.journal_connexion USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_ligne_bc_code_devise_00f5c276; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_bc_code_devise_00f5c276 ON public.ligne_bc USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_ligne_bc_id_proposition_cfd6ad51; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_bc_id_proposition_cfd6ad51 ON public.ligne_bc USING btree (id_proposition);
+
+
+--
+-- Name: ix_fk_ligne_inventaire_code_magasin_a6bd9562; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_inventaire_code_magasin_a6bd9562 ON public.ligne_inventaire USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_ligne_inventaire_id_utilisateur_comptage_86fdaf6f; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_inventaire_id_utilisateur_comptage_86fdaf6f ON public.ligne_inventaire USING btree (id_utilisateur_comptage);
+
+
+--
+-- Name: ix_fk_ligne_mouvement_code_motif_ligne_f4823038; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_mouvement_code_motif_ligne_f4823038 ON public.ligne_mouvement USING btree (code_motif_ligne);
+
+
+--
+-- Name: ix_fk_ligne_qualite_code_role_32545aa6; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_qualite_code_role_32545aa6 ON public.ligne_qualite USING btree (code_role);
+
+
+--
+-- Name: ix_fk_ligne_reception_code_devise_d8f8f3f6; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_reception_code_devise_d8f8f3f6 ON public.ligne_reception USING btree (code_devise);
+
+
+--
+-- Name: ix_fk_ligne_reception_code_magasin_dest_5367b658; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_reception_code_magasin_dest_5367b658 ON public.ligne_reception USING btree (code_magasin_dest);
+
+
+--
+-- Name: ix_fk_ligne_reception_code_motif_ligne_26705004; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_reception_code_motif_ligne_26705004 ON public.ligne_reception USING btree (code_motif_ligne);
+
+
+--
+-- Name: ix_fk_ligne_reception_id_mouvement_genere_8f8e07e0; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_reception_id_mouvement_genere_8f8e07e0 ON public.ligne_reception USING btree (id_mouvement_genere);
+
+
+--
+-- Name: ix_fk_ligne_reception_id_utilisateur_derogation_0b6d6441; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_reception_id_utilisateur_derogation_0b6d6441 ON public.ligne_reception USING btree (id_utilisateur_derogation);
+
+
+--
+-- Name: ix_fk_ligne_transfert_code_reference_897b868f; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_ligne_transfert_code_reference_897b868f ON public.ligne_transfert USING btree (code_reference);
+
+
+--
+-- Name: ix_fk_lot_code_fournisseur_541001e0; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_lot_code_fournisseur_541001e0 ON public.lot USING btree (code_fournisseur);
+
+
+--
+-- Name: ix_fk_machine_cliche_code_reference_05c9de2f; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_cliche_code_reference_05c9de2f ON public.machine_cliche USING btree (code_reference);
+
+
+--
+-- Name: ix_fk_machine_code_atelier_77326041; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_code_atelier_77326041 ON public.machine USING btree (code_atelier);
+
+
+--
+-- Name: ix_fk_machine_consommation_code_emplacement_d280877a; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_consommation_code_emplacement_d280877a ON public.machine_consommation USING btree (code_emplacement);
+
+
+--
+-- Name: ix_fk_machine_consommation_id_fiche_dec73969; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_consommation_id_fiche_dec73969 ON public.machine_consommation USING btree (id_fiche);
+
+
+--
+-- Name: ix_fk_machine_consommation_id_utilisateur_8e81c55e; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_consommation_id_utilisateur_8e81c55e ON public.machine_consommation USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_machine_decision_code_machine_60091b67; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_code_machine_60091b67 ON public.machine_decision USING btree (code_machine);
+
+
+--
+-- Name: ix_fk_machine_decision_code_magasin_93423102; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_code_magasin_93423102 ON public.machine_decision USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_machine_decision_etat_code_reference_428bb709; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_etat_code_reference_428bb709 ON public.machine_decision_etat USING btree (code_reference);
+
+
+--
+-- Name: ix_fk_machine_decision_id_decision_precedente_9a3f01ad; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_id_decision_precedente_9a3f01ad ON public.machine_decision USING btree (id_decision_precedente);
+
+
+--
+-- Name: ix_fk_machine_decision_id_utilisateur_2b51d826; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_id_utilisateur_2b51d826 ON public.machine_decision USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_machine_decision_id_utilisateur_retrait_176899bd; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_id_utilisateur_retrait_176899bd ON public.machine_decision USING btree (id_utilisateur_retrait);
+
+
+--
+-- Name: ix_fk_machine_decision_ligne_code_motif_78f183e0; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_ligne_code_motif_78f183e0 ON public.machine_decision_ligne USING btree (code_motif);
+
+
+--
+-- Name: ix_fk_machine_decision_ligne_id_mouvement_cdd74398; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_decision_ligne_id_mouvement_cdd74398 ON public.machine_decision_ligne USING btree (id_mouvement);
+
+
+--
+-- Name: ix_fk_machine_etat_id_fiche_49f765fc; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_etat_id_fiche_49f765fc ON public.machine_etat USING btree (id_fiche);
+
+
+--
+-- Name: ix_fk_machine_etat_id_utilisateur_b0caf151; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_etat_id_utilisateur_b0caf151 ON public.machine_etat USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_machine_fiche_code_emplacement_5cdf628f; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_code_emplacement_5cdf628f ON public.machine_fiche USING btree (code_emplacement);
+
+
+--
+-- Name: ix_fk_machine_fiche_code_magasin_f626429c; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_code_magasin_f626429c ON public.machine_fiche USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_machine_fiche_id_utilisateur_5b4ffac9; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_id_utilisateur_5b4ffac9 ON public.machine_fiche USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_machine_fiche_id_utilisateur_validation_230dec84; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_id_utilisateur_validation_230dec84 ON public.machine_fiche USING btree (id_utilisateur_validation);
+
+
+--
+-- Name: ix_fk_machine_fiche_journal_code_emplacement_e805044d; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_journal_code_emplacement_e805044d ON public.machine_fiche_journal USING btree (code_emplacement);
+
+
+--
+-- Name: ix_fk_machine_fiche_journal_id_decision_ff0fbfe3; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_journal_id_decision_ff0fbfe3 ON public.machine_fiche_journal USING btree (id_decision);
+
+
+--
+-- Name: ix_fk_machine_fiche_journal_id_utilisateur_5749383e; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_journal_id_utilisateur_5749383e ON public.machine_fiche_journal USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_machine_fiche_ligne_code_motif_5120cc15; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_machine_fiche_ligne_code_motif_5120cc15 ON public.machine_fiche_ligne USING btree (code_motif);
+
+
+--
+-- Name: ix_fk_modele_droit_champ_module_champ_1e516ffb; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_modele_droit_champ_module_champ_1e516ffb ON public.modele_droit_champ USING btree (module, champ);
+
+
+--
+-- Name: ix_fk_mouvement_code_motif_dab0c20a; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_mouvement_code_motif_dab0c20a ON public.mouvement USING btree (code_motif);
+
+
+--
+-- Name: ix_fk_mouvement_id_utilisateur_ab8552fb; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_mouvement_id_utilisateur_ab8552fb ON public.mouvement USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_piece_jointe_id_facture_20bd2c08; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_piece_jointe_id_facture_20bd2c08 ON public.piece_jointe USING btree (id_facture);
+
+
+--
+-- Name: ix_fk_piece_jointe_id_frais_5418bf21; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_piece_jointe_id_frais_5418bf21 ON public.piece_jointe USING btree (id_frais);
+
+
+--
+-- Name: ix_fk_piece_jointe_id_reception_02de6a56; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_piece_jointe_id_reception_02de6a56 ON public.piece_jointe USING btree (id_reception);
+
+
+--
+-- Name: ix_fk_piece_jointe_id_utilisateur_875ba8b7; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_piece_jointe_id_utilisateur_875ba8b7 ON public.piece_jointe USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_piece_lecture_id_utilisateur_aeb65dee; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_piece_lecture_id_utilisateur_aeb65dee ON public.piece_lecture USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_plan_achat_code_reference_origine_3fe24e14; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_achat_code_reference_origine_3fe24e14 ON public.plan_achat USING btree (code_reference_origine);
+
+
+--
+-- Name: ix_fk_plan_achat_id_bc_genere_acef8e3a; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_achat_id_bc_genere_acef8e3a ON public.plan_achat USING btree (id_bc_genere);
+
+
+--
+-- Name: ix_fk_plan_achat_id_plan_4cba98f1; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_achat_id_plan_4cba98f1 ON public.plan_achat USING btree (id_plan);
+
+
+--
+-- Name: ix_fk_plan_achat_id_utilisateur_figement_09dd20e0; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_achat_id_utilisateur_figement_09dd20e0 ON public.plan_achat USING btree (id_utilisateur_figement);
+
+
+--
+-- Name: ix_fk_plan_achat_id_utilisateur_validation_24580944; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_achat_id_utilisateur_validation_24580944 ON public.plan_achat USING btree (id_utilisateur_validation);
+
+
+--
+-- Name: ix_fk_plan_production_id_utilisateur_cloture_07bf83a3; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_production_id_utilisateur_cloture_07bf83a3 ON public.plan_production USING btree (id_utilisateur_cloture);
+
+
+--
+-- Name: ix_fk_plan_production_id_utilisateur_creation_59f58fb4; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_production_id_utilisateur_creation_59f58fb4 ON public.plan_production USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_plan_production_id_utilisateur_modification_74b561b7; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_production_id_utilisateur_modification_74b561b7 ON public.plan_production USING btree (id_utilisateur_modification);
+
+
+--
+-- Name: ix_fk_plan_production_id_utilisateur_validation_bf285c35; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_production_id_utilisateur_validation_bf285c35 ON public.plan_production USING btree (id_utilisateur_validation);
+
+
+--
+-- Name: ix_fk_plan_saisonnalite_code_qualite_277e2625; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_plan_saisonnalite_code_qualite_277e2625 ON public.plan_saisonnalite USING btree (code_qualite);
+
+
+--
+-- Name: ix_fk_qualite_id_utilisateur_cloture_2ce87f6b; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_qualite_id_utilisateur_cloture_2ce87f6b ON public.qualite USING btree (id_utilisateur_cloture);
+
+
+--
+-- Name: ix_fk_qualite_id_utilisateur_creation_88083c7a; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_qualite_id_utilisateur_creation_88083c7a ON public.qualite USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_qualite_id_utilisateur_modification_beb14142; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_qualite_id_utilisateur_modification_beb14142 ON public.qualite USING btree (id_utilisateur_modification);
+
+
+--
+-- Name: ix_fk_reception_ajustements_cmup_code_magasin_5906b876; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_ajustements_cmup_code_magasin_5906b876 ON public.reception_ajustements_cmup USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_reception_ajustements_cmup_code_reference_60aa865a; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_ajustements_cmup_code_reference_60aa865a ON public.reception_ajustements_cmup USING btree (code_reference);
+
+
+--
+-- Name: ix_fk_reception_ajustements_cmup_id_utilisateur_769c50ca; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_ajustements_cmup_id_utilisateur_769c50ca ON public.reception_ajustements_cmup USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_reception_code_devise_facture_29e85492; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_code_devise_facture_29e85492 ON public.reception USING btree (code_devise_facture);
+
+
+--
+-- Name: ix_fk_reception_code_fournisseur_8e897953; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_code_fournisseur_8e897953 ON public.reception USING btree (code_fournisseur);
+
+
+--
+-- Name: ix_fk_reception_id_utilisateur_cloture_4e93671e; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_id_utilisateur_cloture_4e93671e ON public.reception USING btree (id_utilisateur_cloture);
+
+
+--
+-- Name: ix_fk_reception_id_utilisateur_controle_da89b3ae; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_id_utilisateur_controle_da89b3ae ON public.reception USING btree (id_utilisateur_controle);
+
+
+--
+-- Name: ix_fk_reception_id_utilisateur_reception_04ce6e6e; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_id_utilisateur_reception_04ce6e6e ON public.reception USING btree (id_utilisateur_reception);
+
+
+--
+-- Name: ix_fk_recette_code_fournisseur_prefere_8c8e6bc5; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_recette_code_fournisseur_prefere_8c8e6bc5 ON public.recette USING btree (code_fournisseur_prefere);
+
+
+--
+-- Name: ix_fk_recette_code_groupe_equiv_3514b041; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_recette_code_groupe_equiv_3514b041 ON public.recette USING btree (code_groupe_equiv);
+
+
+--
+-- Name: ix_fk_recette_code_role_cdd667d3; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_recette_code_role_cdd667d3 ON public.recette USING btree (code_role);
+
+
+--
+-- Name: ix_fk_reference_code_conditionnement_2628e066; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reference_code_conditionnement_2628e066 ON public.reference USING btree (code_conditionnement);
+
+
+--
+-- Name: ix_fk_reference_code_couleur_interne_445401db; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reference_code_couleur_interne_445401db ON public.reference USING btree (code_couleur_interne);
+
+
+--
+-- Name: ix_fk_reference_code_devise_catalogue_a01530c4; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reference_code_devise_catalogue_a01530c4 ON public.reference USING btree (code_devise_catalogue);
+
+
+--
+-- Name: ix_fk_reference_id_utilisateur_creation_6937fae9; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reference_id_utilisateur_creation_6937fae9 ON public.reference USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_snapshot_mrp_code_reference_a46a7762; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_snapshot_mrp_code_reference_a46a7762 ON public.snapshot_mrp USING btree (code_reference);
+
+
+--
+-- Name: ix_fk_snapshot_mrp_id_plan_13199f20; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_snapshot_mrp_id_plan_13199f20 ON public.snapshot_mrp USING btree (id_plan);
+
+
+--
+-- Name: ix_fk_stock_lot_code_magasin_22932249; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_stock_lot_code_magasin_22932249 ON public.stock_lot USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_transfert_code_magasin_dest_2574c3b4; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_transfert_code_magasin_dest_2574c3b4 ON public.transfert USING btree (code_magasin_dest);
+
+
+--
+-- Name: ix_fk_transfert_code_magasin_source_05a29545; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_transfert_code_magasin_source_05a29545 ON public.transfert USING btree (code_magasin_source);
+
+
+--
+-- Name: ix_fk_transfert_id_utilisateur_77ba2d09; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_transfert_id_utilisateur_77ba2d09 ON public.transfert USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_transfert_id_utilisateur_reception_aadfb6cd; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_transfert_id_utilisateur_reception_aadfb6cd ON public.transfert USING btree (id_utilisateur_reception);
+
+
+--
+-- Name: ix_fk_utilisateur_magasin_principal_623a7dfd; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_utilisateur_magasin_principal_623a7dfd ON public.utilisateur USING btree (magasin_principal);
+
+
+--
+-- Name: ix_fk_valorisation_stock_code_magasin_47ba9ec3; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_valorisation_stock_code_magasin_47ba9ec3 ON public.valorisation_stock USING btree (code_magasin);
+
+
+--
+-- Name: ix_fk_valorisation_stock_code_reference_90e18214; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_valorisation_stock_code_reference_90e18214 ON public.valorisation_stock USING btree (code_reference);
 
 
 --
@@ -15313,5 +16248,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict OqBevVLhsJfgyPVV3cje98vTVCh16oPrxoroFaBeBatD3pwsOfIB8dNCZOGxrca
+\unrestrict PkqcwTtAzx8LxGHN08gIYwXvfeRV2lDsTpDZ65a7SHjH2aRmbCnkfDM5UxrWDBg
 

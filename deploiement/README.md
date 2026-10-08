@@ -194,10 +194,10 @@ Migrations appliquées :
 > deux migrations du 2 septembre sont donc déjà comprises dans le schéma ; elles
 > restent listées parce qu'une base plus ancienne peut encore en avoir besoin.
 
-### Publier les règles du 08/10/2026 (deux migrations, dans cet ordre)
+### Publier les règles du 08/10/2026 (onze migrations, dans l'ordre des noms)
 
-Le binaire du 08/10 **refuse de démarrer** sur une base qui n'a pas les deux
-migrations (`MIGRATIONS_REQUISES`, `backend/src/db.rs`) et les nomme dans le
+Le binaire du 08/10 **refuse de démarrer** sur une base qui n'a pas les migrations
+dont il dépend (`MIGRATIONS_REQUISES`, `backend/src/db.rs`) et les nomme dans le
 journal du service. Procédure, service **arrêté** (les migrations posent des
 verrous exclusifs ; `lock_timeout` les fait échouer en 5 s plutôt que de figer
 l'ERP si l'ancien serveur tient encore une table) :
@@ -220,10 +220,21 @@ l'ERP si l'ancien serveur tient encore une table) :
 sudo systemctl stop gestionfil
 sudo -u gestionfil /opt/gestionfil/gestionfil-admin sauvegarder      # 1. sauvegarde
 cd /tmp
-cat /home/sysadmin/gestionfil/db/migrations/2026-10-08_regles_p1.sql  | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1 2>&1 | tee /tmp/migr-0810.log
-cat /home/sysadmin/gestionfil/db/migrations/2026-10-08b_audit_v4.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1 2>&1 | tee -a /tmp/migr-0810.log
-grep -i "NOTICE.*NON cree\|ERREUR\|ERROR" /tmp/migr-0810.log               # 2. lire ce qui a été dit
-sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz                         # 3. le binaire
+# 2. les migrations du 08/10, dans l'ordre des noms (08, 08b ... 08k), arret au premier echec
+M=/home/sysadmin/gestionfil/db/migrations
+for m in 2026-10-08_regles_p1 2026-10-08b_audit_v4 2026-10-08c_journal_migrations \
+         2026-10-08d_audit_tables_argent 2026-10-08e_lots_derogation \
+         2026-10-08f_import_coherence 2026-10-08g_revalidation_reception \
+         2026-10-08h_planification_encours 2026-10-08i_machines_conso_date_fiche \
+         2026-10-08j_sessions 2026-10-08k_compteur_numero; do
+    cat "$M/$m.sql" | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1 2>&1 \
+        | tee -a /tmp/migr-0810.log
+    [ "${PIPESTATUS[1]}" -eq 0 ] || { echo "ECHEC $m : on s'arrete"; break; }
+done
+grep -i "NOTICE.*NON cree\|ERREUR\|ERROR" /tmp/migr-0810.log               # lire ce qui a été dit
+# 3. le journal : inscrire tout ce qui a été joué à la main (SQL préparé sur le poste)
+cat /home/sysadmin/gestionfil/marquage.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1
+sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz                         # 4. le binaire
 ```
 
 > **Lire le journal, pas seulement le code retour.** Si la base porte deux
@@ -233,14 +244,12 @@ sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz                         # 3. 
 > des contrôles. Annuler le doublon (`POST /api/inventaires/{id}/annuler`), puis
 > rejouer la première migration : elle est rejouable.
 
-Puis, **une fois**, le journal des migrations (`2026-10-08c`) et l'inscription de tout ce
-qui a été joué à la main jusque-là. Le SQL du marquage se prépare sur le poste de
-développement (il ne se connecte à rien) et s'envoie comme une migration :
+**Le journal des migrations** (`2026-10-08c`, joué dans la boucle) s'inscrit une fois : le SQL du
+marquage se prépare sur le poste de développement (il ne se connecte à rien) et se dépose à côté
+des migrations :
 
 ```bash
-# poste : python db\pg\migrer.py --marquer-jusqua 2026-10-08c_journal_migrations.sql --imprimer > marquage.sql
-cat /home/sysadmin/gestionfil/db/migrations/2026-10-08c_journal_migrations.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1
-cat /home/sysadmin/gestionfil/marquage.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1
+# poste : python db\pg\migrer.py --marquer-jusqua 2026-10-08k_compteur_numero.sql --imprimer > marquage.sql
 ```
 
 Ensuite, chaque nouvelle migration s'inscrit après son application :
@@ -248,13 +257,12 @@ Ensuite, chaque nouvelle migration s'inscrit après son application :
 où Python et `psql` sont disponibles.
 
 Témoins après publication : `SELECT code, anomalies FROM v_controles WHERE code IN
-('C43','C44')` répond deux lignes, `/api/cockpit` répond 200, et le journal du
+('C43','C44','C45')` répond trois lignes, `/api/cockpit` répond 200, et le journal du
 service ne contient pas « migration(s) manquante(s) ».
 
-**Base neuve** (`charger.py --seeds`) : `seed_006_regles_2026_10.sql` y pose ce
-que ces deux migrations ajoutent aux référentiels (paramètres, droits LOTS,
-montants déclarés). Les tables nées en migration (lots, machines, import)
-s'obtiennent toujours en rejouant ensuite `db/pg/migrations/` dans l'ordre.
+**Base neuve** : `charger.py --socle --comptes` puis `migrer.py` (voir `db/README.md`). Le socle
+porte le schéma complet d'une base migrée ; `charger.py --seeds` seul ne donne que le schéma
+d'origine (sans lots, machines ni import).
 
 ---
 

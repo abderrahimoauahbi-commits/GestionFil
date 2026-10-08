@@ -1,0 +1,174 @@
+/* =============================================================================
+   Theme de l'atelier — application de bureau
+   -----------------------------------------------------------------------------
+   Mecanique de la coquille de bureau : proportions, ascenseurs, poignees de
+   redimensionnement, focus. Les couleurs sont dans `palettes.css`.
+
+   Les jetons propres a l'atelier portent le prefixe `--at-` ; les autres sont
+   ceux de `index.css`, simplement redefinis.
+
+   La classe `atelier` est posee sur <html> par le composant Atelier, uniquement
+   dans l'enveloppe Tauri. Le web et la PWA gardent la coquille tactile.
+
+   Ordre du cascade : importe APRES les jetons de index.css, donc `.atelier`
+   (specificite egale a `:root`) l'emporte par ordre de source.
+   ========================================================================== */
+
+/* Les couleurs vivent dans `palettes.css`, importe juste apres : une famille
+   par bloc, declinee en clair et en sombre. Ce fichier ne garde que la
+   mecanique — proportions, ascenseurs, poignees, focus. */
+
+/* =============================================================================
+   Proportions
+   -----------------------------------------------------------------------------
+   L'atelier est plus dense que la coquille web : 13 px de base, 22 px de barre
+   d'etat, 35 px d'onglets. Ce sont les mesures de VS Code, et elles tiennent
+   parce qu'un poste fixe se regarde a 60 cm, pas a bout de bras.
+   ========================================================================== */
+.atelier {
+  --at-h-titre: 35px;
+  --at-h-onglet: 35px;
+  --at-h-etat: 22px;
+  --at-l-activite: 64px;
+
+  font-size: 13px;
+}
+
+/* Pas de rebond elastique : une application de bureau ne se tire pas vers le
+   bas comme une page web. */
+.atelier,
+.atelier body {
+  overscroll-behavior: none;
+}
+
+/* Coins nets. VS Code n'arrondit que les menus flottants. */
+.atelier {
+  --radius: 0.25rem;
+  --radius-sm: 0.125rem;
+  --radius-lg: 0.375rem;
+}
+
+/* =============================================================================
+   Ascenseurs facon editeur : fins, sans piste, apparaissant sur la surface
+   ========================================================================== */
+.atelier ::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+.atelier ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.atelier ::-webkit-scrollbar-thumb {
+  background: hsl(var(--texte) / 0.18);
+  border: 4px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+.atelier ::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--texte) / 0.32);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.atelier ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* =============================================================================
+   Poignees de redimensionnement
+   -----------------------------------------------------------------------------
+   Zone de saisie de 6 px, filet visible de 1 px : on attrape sans viser, mais
+   on ne voit qu'un trait. Le filet ne se colore qu'au survol et pendant le
+   glissement, comme dans l'editeur.
+   ========================================================================== */
+.poignee-v,
+.poignee-h {
+  position: relative;
+  flex: none;
+  z-index: 10;
+  background: transparent;
+  transition: background-color 120ms ease 180ms;
+}
+.poignee-v {
+  width: 6px;
+  margin-inline: -3px;
+  cursor: col-resize;
+}
+.poignee-h {
+  height: 6px;
+  margin-block: -3px;
+  cursor: row-resize;
+}
+.poignee-v:hover,
+.poignee-h:hover,
+.poignee-v[data-actif="oui"],
+.poignee-h[data-actif="oui"] {
+  background: hsl(var(--primaire));
+  transition-delay: 0ms;
+}
+
+/* Pendant un glissement, le curseur ne doit pas changer au survol du contenu et
+   la selection de texte doit etre suspendue. */
+.atelier[data-glisse="col"] * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+.atelier[data-glisse="ligne"] * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+
+/* =============================================================================
+   Barre de titre
+   -----------------------------------------------------------------------------
+   Rien a declarer ici : le glissement de la fenetre passe par l'attribut
+   `data-tauri-drag-region` pose sur l'en-tete, pas par du CSS. La propriete
+   `-webkit-app-region` que l'on trouve dans les projets Electron n'a aucun
+   effet dans WebView2, et les boutons bloquent deja le glissement d'eux-memes.
+   ========================================================================== */
+
+/* =============================================================================
+   Focus visible : anneau net d'un pixel, jamais d'ombre diffuse
+   ========================================================================== */
+.atelier :focus-visible {
+  outline: 1px solid hsl(var(--anneau));
+  outline-offset: -1px;
+}
+
+/* Onglet actif : filet superieur d'accent, comme l'onglet de l'editeur. */
+.onglet-actif {
+  box-shadow: inset 0 1px 0 0 hsl(var(--primaire));
+}
+
+/* Element de liste selectionne dans le panneau lateral. */
+.at-liste-actif {
+  background: hsl(var(--at-liste-selection));
+  color: hsl(var(--at-liste-selection-texte));
+}
+
+/* =============================================================================
+   Paliers de resolution
+   -----------------------------------------------------------------------------
+   Le composant pose `data-palier` sur la racine de l'atelier a partir de la
+   largeur reelle de la fenetre — et non d'une media query, qui mesurerait
+   l'ecran et non la fenetre. Seules les respirations changent : jamais la
+   taille du texte, qui doit rester lisible a toute largeur.
+   ========================================================================== */
+[data-palier="compact"] {
+  --at-l-activite: 52px;
+  --at-h-onglet: 32px;
+}
+[data-palier="compact"] .zone-travail {
+  padding: 0.5rem;
+}
+[data-palier="normal"] .zone-travail {
+  padding: 0.75rem;
+}
+[data-palier="ample"] .zone-travail {
+  padding: 1.25rem 1.5rem;
+}
+
+/* Sur une fenetre etroite, un onglet large chasse tous les autres hors de vue. */
+[data-palier="compact"] [role="tab"] {
+  min-width: 86px;
+  max-width: 150px;
+}

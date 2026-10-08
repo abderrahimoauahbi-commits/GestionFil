@@ -124,8 +124,8 @@ côté client) : même origine en production, pas de CORS. Une route `/api/...` 
 
 **Frontend** : `src/api/client.ts` (jeton en sessionStorage, adresse du serveur réglable par
 poste pour les paquets Tauri), `src/App.tsx` (liste `ECRANS`, chaque écran gardé par
-`<ExigeModule module="…">`, montée dans `composants/Coquille.tsx` ; de l'ancienne enveloppe à
-onglets, seul `composants/atelier/etat.tsx` reste), `hooks/useCrud.ts` pour le CRUD générique, `composants/ui/` pour les
+`<ExigeModule module="…">`, montée dans `composants/Coquille.tsx` ; `composants/atelier/` est
+l'ancienne enveloppe à onglets, plus montée mais gardée au dépôt par décision — seul `etat.tsx` sert), `hooks/useCrud.ts` pour le CRUD générique, `composants/ui/` pour les
 primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figées.
 
 ## Pièges connus

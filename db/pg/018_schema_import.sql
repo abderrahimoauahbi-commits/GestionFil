@@ -229,8 +229,11 @@ CREATE TABLE import_receptions (
     id_reception        text    NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
     numero              text    NOT NULL UNIQUE,
     date_reception      text    NOT NULL,
+    -- A_CONTROLER (08/10/2026) : comme une reception locale, le magasinier
+    -- soumet sa pesee, un autre compte la controle et la fait entrer en stock.
     statut              text    NOT NULL DEFAULT 'BROUILLON'
-                                CHECK (statut IN ('BROUILLON','VALIDEE','ANNULEE')),
+                                CONSTRAINT import_receptions_statut_check
+                                CHECK (statut IN ('BROUILLON','A_CONTROLER','VALIDEE','ANNULEE')),
     litige              bigint  NOT NULL DEFAULT 0 CHECK (litige IN (0,1)),
     motif_litige        text,
     notes               text,
@@ -260,6 +263,10 @@ CREATE TABLE import_reception_lignes (
     code_couleur        text,
     libelle_couleur     text,
     code_magasin        text    NOT NULL REFERENCES magasin(code_magasin),
+    -- Le verdict du controle, ligne a ligne (08/10/2026) : il suit le lot en
+    -- stock, et une ligne non conforme ou en quarantaine va en quarantaine.
+    statut_qualite      text    NOT NULL DEFAULT 'CONFORME'
+                                CHECK (statut_qualite IN ('CONFORME','NON_CONFORME','QUARANTAINE')),
     id_mouvement        text    REFERENCES mouvement(id_mouvement),
     UNIQUE (id_reception, id_ligne)
 );
@@ -449,6 +456,39 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_irl_coherence
 BEFORE INSERT OR UPDATE OF id_ligne, id_reception ON import_reception_lignes
 FOR EACH ROW EXECUTE FUNCTION fn_trg_irl_coherence();
+
+-- Une ligne non conforme ou en quarantaine entre en magasin de quarantaine,
+-- comme a la reception locale (trg_ligne_reception_quarantaine).
+CREATE OR REPLACE FUNCTION fn_trg_irl_quarantaine() RETURNS trigger AS $$
+BEGIN
+    IF NEW.statut_qualite IN ('NON_CONFORME','QUARANTAINE')
+ AND COALESCE((SELECT est_quarantaine FROM magasin WHERE code_magasin = NEW.code_magasin), 0) = 0 THEN
+        RAISE EXCEPTION 'Une ligne non conforme ou en quarantaine doit etre dirigee vers un magasin de quarantaine.';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_irl_quarantaine
+BEFORE INSERT OR UPDATE OF statut_qualite, code_magasin ON import_reception_lignes
+FOR EACH ROW EXECUTE FUNCTION fn_trg_irl_quarantaine();
+
+-- B4 regle 2 a l'import (08/10/2026) : celui qui a saisi la reception ne la
+-- valide pas. Declencheur et non contrainte : les receptions deja validees
+-- ne sont pas rejugees.
+CREATE OR REPLACE FUNCTION fn_trg_import_reception_segregation() RETURNS trigger AS $$
+BEGIN
+    IF NEW.statut = 'VALIDEE' AND OLD.statut IS DISTINCT FROM 'VALIDEE'
+ AND NEW.id_utilisateur_validation = NEW.id_utilisateur_creation THEN
+        RAISE EXCEPTION 'B4 regle 2 : celui qui a saisi la reception ne peut pas la valider.';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_import_reception_segregation
+BEFORE UPDATE OF statut ON import_receptions
+FOR EACH ROW EXECUTE FUNCTION fn_trg_import_reception_segregation();
 
 
 -- Le journal de la cloture est immuable, comme les autres journaux (R03).

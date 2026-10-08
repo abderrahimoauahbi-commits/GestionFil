@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 /// Numerotation sequentielle par prefixe et par annee.
-pub(super) async fn numeroter(
+pub(crate) async fn numeroter(
     tx: &mut sqlx::PgConnection,
     table: &str,
     colonne: &str,
@@ -128,12 +128,45 @@ fn normaliser_date_mouvement(v: &Option<String>) -> Option<String> {
     })
 }
 
+/// LES TYPES QU'ON SAISIT A LA MAIN (06/10/2026). Les autres naissent d'un
+/// document — reception, transfert, fusion de lots, fiche machine,
+/// contre-passation — qui tient leur contrepartie : saisis seuls, ils creaient
+/// du stock sans origine (une « entree de transfert » sans transfert) ou un
+/// mouvement que rien ne savait plus defaire.
+pub(crate) const TYPES_SAISIE_LIBRE: &[&str] = &[
+    "SORTIE_PROD",
+    "RETOUR_PROD",
+    "RETOUR_FOURN",
+    "AJUST_INV_POS",
+    "AJUST_INV_NEG",
+    "STOCK_INIT",
+];
+
+fn document_du_type(t: &str) -> &'static str {
+    match t {
+        "ENTREE_REC" => "d'une reception (Achats → Receptions)",
+        "TRANSFERT_ENTREE" | "TRANSFERT_SORTIE" => "d'un transfert (Stock → Transferts)",
+        "FUSION_ENTREE" | "FUSION_SORTIE" => "d'une fusion de lots (fiche du lot)",
+        "CHARGE_MACHINE" | "RETOUR_MACHINE" | "ANNUL_CHARGE_MACHINE" | "ANNUL_RETOUR_MACHINE" => {
+            "d'une fiche machine (Stock → Machines)"
+        }
+        _ => "de son document",
+    }
+}
+
 pub async fn creer_mouvement(
     State(state): State<AppState>,
     user: Utilisateur,
     Json(m): Json<NouveauMouvement>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    if !TYPES_SAISIE_LIBRE.contains(&m.code_type_mvt.as_str()) {
+        return Err(AppError::RegleMetier(format!(
+            "un mouvement « {} » ne se saisit pas a la main : il nait {}, qui tient sa contrepartie",
+            m.code_type_mvt,
+            document_du_type(&m.code_type_mvt)
+        )));
+    }
     if m.lignes.is_empty() {
         return Err(AppError::Invalide("au moins une ligne est requise".into()));
     }
@@ -423,6 +456,62 @@ pub async fn contre_passer(
                 .into(),
         ));
     }
+    // UN MOUVEMENT DE FICHE MACHINE NE SE DEFAIT QUE PAR SA FICHE (05/10/2026).
+    // Le contre-passer ici recrediterait le magasin alors que l'etage porterait
+    // toujours le fil : il serait compte deux fois. La fiche, elle, ramene
+    // l'etage a son etat precedent dans la meme decision.
+    if matches!(
+        type_origine.as_str(),
+        "CHARGE_MACHINE" | "RETOUR_MACHINE" | "ANNUL_CHARGE_MACHINE" | "ANNUL_RETOUR_MACHINE"
+    ) {
+        let fiche: Option<String> =
+            sqlx::query_scalar("SELECT reference_document FROM mouvement WHERE id_mouvement = $1")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await?;
+        return Err(AppError::RegleMetier(format!(
+            "{numero} vient de la fiche machine {} : il se defait en annulant ou en devalidant \
+             cette fiche, qui ramene aussi l'etage a son etat precedent.",
+            fiche.unwrap_or_else(|| "d'origine".into())
+        )));
+    }
+    // UN TRANSFERT OU UNE FUSION SE DEFONT EN ENTIER (06/10/2026). Contre-passer
+    // la seule sortie d'un transfert en transit, puis le receptionner, doublait
+    // les kilos ; contre-passer la seule entree les perdait.
+    if matches!(
+        type_origine.as_str(),
+        "TRANSFERT_SORTIE" | "TRANSFERT_ENTREE" | "FUSION_SORTIE" | "FUSION_ENTREE"
+    ) {
+        return Err(AppError::RegleMetier(format!(
+            "{numero} est une moitie de {} : la contre-passer seule desequilibrerait les deux magasins (ou les deux lots). Annulez le document, ou corrigez par un inventaire.",
+            if type_origine.starts_with("TRANSFERT") { "transfert" } else { "fusion de lots" }
+        )));
+    }
+    // APRES DEDOUANEMENT, LA RECEPTION D'IMPORT EST FIGEE (regle 8,
+    // 08/10/2026). La DUM fixe la valeur en douane, puis la cloture du dossier
+    // repartit les frais dans le CMUP : contre-passer l'entree ensuite retirait
+    // les kilos mais laissait les frais (environ 12,8 k MAD constates a
+    // l'audit). Toute correction passe alors par un avoir ou un retour
+    // fournisseur. Avant la DUM, la contre-passation reste possible.
+    let dedouanes: Option<String> = sqlx::query_scalar(
+        "SELECT string_agg(DISTINCT d.numero, ', ' ORDER BY d.numero)
+           FROM import_reception_lignes rl
+           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+           JOIN import_factures f ON f.id_facture = l.id_facture
+           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+          WHERE rl.id_mouvement = $1
+            AND (d.statut = 'CLOTURE' OR COALESCE(btrim(d.numero_dum), '') <> '')",
+    )
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if let Some(dossiers) = dedouanes {
+        return Err(AppError::RegleMetier(format!(
+            "{numero} est l'entree d'une reception d'import dont le dossier {dossiers} est dedouane : \
+             elle ne s'annule plus. Corrigez par un avoir ou un retour fournisseur."
+        )));
+    }
+
     let deja: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM mouvement WHERE id_mouvement_contrepasse = $1",
     )
@@ -467,8 +556,9 @@ pub async fn contre_passer(
     // signe des nombres : une quantite negative dans le grand livre rendrait
     // toutes les sommes ambigues. Le lot suit, sinon la tracabilite se perdrait
     // sur la ligne qui corrige.
-    let lignes: Vec<(i64, String, f64, Option<String>)> = sqlx::query_as(
-        "SELECT ligne_numero, code_reference, quantite_kg::float8, lot_fournisseur
+    let lignes: Vec<(i64, String, f64, Option<String>, Option<i64>, Option<f64>)> = sqlx::query_as(
+        "SELECT ligne_numero, code_reference, quantite_kg::float8, lot_fournisseur, nb_bobines,
+                prix_kg_mad::float8
            FROM ligne_mouvement WHERE id_mouvement = $1 ORDER BY ligne_numero",
     )
     .bind(&id)
@@ -485,35 +575,60 @@ pub async fn contre_passer(
     // d'inventaire », c'est-a-dire un ecart constate au magasin — le contraire
     // de ce qu'on fait. La raison veritable, en toutes lettres, est portee par
     // le motif du mouvement ; celui-ci n'est qu'une categorie.
-    for (numero_ligne, code_reference, kg, lot) in &lignes {
+    // Le nombre de bobines suit les kilos (06/10/2026) : sans lui, le stock
+    // gardait des bobines sans poids.
+    for (numero_ligne, code_reference, kg, lot, bobines, _) in &lignes {
         sqlx::query(
             "INSERT INTO ligne_mouvement
                  (id_mouvement, ligne_numero, code_reference, quantite_kg,
-                  lot_fournisseur, mode_pesee, code_motif_ligne)
-             VALUES ($1, $2, $3, $4, $5, 'THEORIQUE', 'R5')",
+                  lot_fournisseur, nb_bobines, mode_pesee, code_motif_ligne)
+             VALUES ($1, $2, $3, $4, $5, $6, 'THEORIQUE', 'R5')",
         )
         .bind(&id_inverse)
         .bind(numero_ligne)
         .bind(code_reference)
         .bind(kg)
         .bind(lot)
+        .bind(bobines)
         .execute(&mut *tx)
         .await?;
     }
 
-    // LE COUT MOYEN SE REFAIT SUR CE QUI TIENT ENCORE, reference par reference.
+    // LE COUT MOYEN, A LA MANIERE SAP (06/10/2026). La ligne inverse n'a pas de
+    // prix : elle n'a pas touche au CMUP. Annuler une SORTIE en reste la.
+    // Annuler une ENTREE valorisee retire sa valeur A SON PRIX, dans son seul
+    // magasin. L'ancien recalcul refaisait la moyenne de tout l'historique, tous
+    // magasins confondus, et effacait les frais d'import ecrits a la cloture.
     let mut refaits: Vec<Value> = Vec::new();
-    let mut vues: Vec<&str> = Vec::new();
-    for (_, code_reference, _, _) in &lignes {
-        if vues.contains(&code_reference.as_str()) {
-            continue;
+    let impacte: i64 = sqlx::query_scalar(
+        "SELECT impacte_cmup FROM type_mouvement WHERE code_type_mvt = $1",
+    )
+    .bind(&type_origine)
+    .fetch_one(&mut *tx)
+    .await?;
+    if signe == 1 && impacte == 1 {
+        let mut par_ref: Vec<(String, f64, f64)> = Vec::new();
+        for (_, code_reference, kg, _, _, prix) in &lignes {
+            let Some(p) = prix else { continue };
+            match par_ref.iter_mut().find(|(r, _, _)| r == code_reference) {
+                Some(x) => {
+                    x.1 += kg;
+                    x.2 += kg * p;
+                }
+                None => par_ref.push((code_reference.clone(), *kg, kg * p)),
+            }
         }
-        vues.push(code_reference);
-        let prix: Option<f64> = sqlx::query_scalar("SELECT fn_recalculer_cmup($1)::float8")
-            .bind(code_reference)
-            .fetch_one(&mut *tx)
-            .await?;
-        refaits.push(json!({ "code_reference": code_reference, "cmup_mad": prix }));
+        for (code_reference, kg, valeur) in par_ref {
+            let prix: Option<f64> =
+                sqlx::query_scalar("SELECT fn_cmup_annuler_entree($1, $2, $3::numeric, $4::numeric)::float8")
+                    .bind(&code_reference)
+                    .bind(&magasin)
+                    .bind(kg)
+                    .bind(valeur / kg)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            refaits.push(json!({ "code_reference": code_reference, "cmup_mad": prix }));
+        }
     }
 
     tx.commit().await?;
@@ -1095,8 +1210,10 @@ pub async fn saisir_comptage(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
+    // FOR SHARE : un comptage ne se glisse pas pendant une cloture, qui tient
+    // la fiche en FOR UPDATE.
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM inventaire WHERE id_inventaire = $1")
+        sqlx::query_scalar("SELECT statut FROM inventaire WHERE id_inventaire = $1 FOR SHARE")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?
@@ -1117,11 +1234,42 @@ pub async fn saisir_comptage(
         }
         // Le lot fait partie de la cle : deux lots de la meme reference sont
         // deux lignes de comptage distinctes.
+        //
+        // LE THEORIQUE A L'HEURE DU COMPTAGE (regle 10, 08/10/2026). La photo
+        // prise a l'ouverture vieillissait avec le magasin : deux inventaires
+        // ouverts depuis des semaines avaient des theoriques perimes de 158 t
+        // et 65,6 t, et la cloture aurait pris pour ecart tout ce qui etait
+        // entre ou sorti depuis. Chaque ligne reprend donc, a l'instant ou on la
+        // compte, le stock que le grand livre porte a cet instant (le cache en
+        // est le reflet, controle C11). L'ecart = compte - theorique de cet
+        // instant ; ce qui bouge ensuite reste acquis. Pas de gel du magasin.
         let res = sqlx::query(
-            "UPDATE ligne_inventaire
+            "UPDATE ligne_inventaire li
                 SET quantite_comptee_kg = $3, motif_ecart = $4, statut_ligne = 'COMPTE',
                     id_utilisateur_comptage = $5, date_comptage = $6,
-                    nb_bobines_comptees = $9, nb_palettes_comptees = $10
+                    nb_bobines_comptees = $9, nb_palettes_comptees = $10,
+                    quantite_theorique_kg = CASE
+                        WHEN li.lot_fournisseur IS NULL THEN
+                            COALESCE((SELECT sm.quantite_kg FROM stock_magasin sm
+                                       WHERE sm.code_reference = li.code_reference
+                                         AND sm.code_magasin = li.code_magasin), 0)
+                        ELSE
+                            COALESCE((SELECT sl.quantite_kg FROM stock_lot sl
+                                       WHERE sl.code_reference = li.code_reference
+                                         AND sl.code_magasin = li.code_magasin
+                                         AND sl.lot_fournisseur = li.lot_fournisseur), 0)
+                        END,
+                    nb_bobines_theorique = CASE
+                        WHEN li.lot_fournisseur IS NULL THEN
+                            (SELECT sm.nb_bobines FROM stock_magasin sm
+                              WHERE sm.code_reference = li.code_reference
+                                AND sm.code_magasin = li.code_magasin)
+                        ELSE
+                            (SELECT sl.nb_bobines FROM stock_lot sl
+                              WHERE sl.code_reference = li.code_reference
+                                AND sl.code_magasin = li.code_magasin
+                                AND sl.lot_fournisseur = li.lot_fournisseur)
+                        END
               WHERE id_inventaire = $1 AND code_reference = $2 AND code_magasin = $7
                 -- `IS $8` etait du SQLite : PostgreSQL le refuse, et chaque saisie
                 -- de comptage tombait en erreur interne.
@@ -1165,7 +1313,15 @@ pub async fn saisir_comptage(
                               quantite_theorique_kg, quantite_comptee_kg, motif_ecart, statut_ligne,
                               id_utilisateur_comptage, date_comptage, nb_bobines_theorique,
                               nb_bobines_comptees, nb_palettes_comptees, poids_unitaire_theorique_kg)
-                         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, 'COMPTE', $8, $9, 0, $10, $11,
+                         VALUES ($1, $2, $3, $4, $5,
+                                 COALESCE((SELECT sl.quantite_kg FROM stock_lot sl
+                                            WHERE sl.code_reference = $3 AND sl.code_magasin = $4
+                                              AND sl.lot_fournisseur = $5), 0),
+                                 $6, $7, 'COMPTE', $8, $9,
+                                 COALESCE((SELECT sl.nb_bobines FROM stock_lot sl
+                                            WHERE sl.code_reference = $3 AND sl.code_magasin = $4
+                                              AND sl.lot_fournisseur = $5), 0),
+                                 $10, $11,
                                  (SELECT NULLIF(poids_bobine_kg, 0) FROM reference WHERE code_reference = $3))",
                     )
                     .bind(uuid::Uuid::new_v4().to_string())
@@ -1916,13 +2072,20 @@ pub async fn changer_statut_bc(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let createur: String = sqlx::query_scalar(
-        "SELECT id_utilisateur_creation FROM bon_commande WHERE id_bc = $1",
+    let (createur, actuel): (String, String) = sqlx::query_as(
+        "SELECT id_utilisateur_creation, statut FROM bon_commande WHERE id_bc = $1 FOR UPDATE",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
+
+    // Regle 15 : annuler un bon valide ou envoye est un acte de validation ;
+    // le remettre en brouillon passe par la devalidation, avec son motif.
+    crate::domain::transitions::exiger_transition(
+        &state.db, &user, module::BONS_COMMANDE, "bon_commande", &actuel, &s.statut,
+    )
+    .await?;
 
     if s.statut == "VALIDE" {
         // B4 regle 4 : la separation des taches. Un declencheur de la base la
@@ -2028,11 +2191,41 @@ pub async fn changer_statut_bc(
             // Le lien passe par les LIGNES : c'est la granularite a laquelle une
             // proposition est engagee. Annuler le bon annule donc chacune de ses
             // lignes, une par une, et non le bon en bloc.
+            //
+            // UNE SEULE PROPOSITION OUVERTE PAR REFERENCE (08/10/2026). Depuis
+            // le 06/10, une reference commandee se repropose : quand le bon
+            // s'annule, une proposition plus recente est souvent deja ouverte
+            // pour elle, calculee en deduisant ce bon. Rouvrir l'ancienne
+            // heurtait l'index ux_plan_achat_ouvert, et l'annulation echouait
+            // en « conflit ». La recente, recalculable, part — le generateur la
+            // refait a chaque passage, sans le bon cette fois ; une proposition
+            // figee ou arbitree, decision humaine, reste, et l'ancienne garde
+            // alors sa trace COMMANDE.
             sqlx::query(
-                "UPDATE plan_achat SET statut = 'PROPOSE', id_bc_genere = NULL
-                  WHERE statut = 'COMMANDE'
-                    AND id_proposition IN (SELECT id_proposition FROM ligne_bc
-                                            WHERE id_bc = $1 AND id_proposition IS NOT NULL)",
+                "DELETE FROM plan_achat
+                  WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
+                    AND figee = 0 AND code_reference_origine IS NULL
+                    AND code_reference IN (
+                        SELECT pa.code_reference FROM plan_achat pa
+                          JOIN ligne_bc l ON l.id_proposition = pa.id_proposition
+                         WHERE l.id_bc = $1 AND pa.statut = 'COMMANDE')",
+            )
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE plan_achat pa SET statut = 'PROPOSE', id_bc_genere = NULL
+                  WHERE pa.statut = 'COMMANDE'
+                    AND pa.id_proposition IN (SELECT id_proposition FROM ligne_bc
+                                               WHERE id_bc = $1 AND id_proposition IS NOT NULL)
+                    AND NOT EXISTS (SELECT 1 FROM plan_achat o
+                                     WHERE o.code_reference = pa.code_reference
+                                       AND o.statut IN ('PROPOSE','EN_REVISION','VALIDE'))
+                    -- Deux lignes du bon sur la meme reference : une seule rouvre.
+                    AND pa.id_proposition = (SELECT min(p2.id_proposition) FROM plan_achat p2
+                                               JOIN ligne_bc l2 ON l2.id_proposition = p2.id_proposition
+                                              WHERE l2.id_bc = $1 AND p2.statut = 'COMMANDE'
+                                                AND p2.code_reference = pa.code_reference)",
             )
             .bind(&id)
             .execute(&mut *tx)
@@ -2433,7 +2626,7 @@ pub async fn modifier_ligne_bc(
         Some(c) if !c.is_empty() && Some(c) != code_reference.as_deref() => {
             if recue > 0.0 {
                 return Err(AppError::RegleMetier(format!(
-                    "Deja {recue:.2} kg receptionnes sur cette ligne : sa reference ne peut                      plus changer. Retirez la ligne et saisissez-en une autre."
+                    "Deja {recue:.2} kg receptionnes sur cette ligne : sa reference ne peut plus changer. Retirez la ligne et saisissez-en une autre."
                 )));
             }
             sqlx::query(
@@ -3410,6 +3603,19 @@ pub async fn changer_statut_reception(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+
+    // Regle 15 : une reception validee ne recule pas par cette route — la
+    // devalidation verifie d'abord que son stock a ete contre-passe.
+    let actuel: String =
+        sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = $1 FOR UPDATE")
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Introuvable(format!("reception {id}")))?;
+    crate::domain::transitions::exiger_transition(
+        &state.db, &user, module::RECEPTIONS, "reception", &actuel, &s.statut,
+    )
+    .await?;
 
     if s.statut == "A_CONTROLER" {
         let lignes: i64 =

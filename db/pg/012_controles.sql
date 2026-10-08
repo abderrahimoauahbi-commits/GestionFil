@@ -105,7 +105,8 @@ FROM ligne_reception lr
 JOIN reception rc ON rc.id_reception = lr.id_reception
 WHERE lr.ecart_pct IS NOT NULL
   AND lr.derogation_ecart = 0
-  AND abs(lr.ecart_pct) > (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_TolerEcartPesee');
+  -- L'excedent seul (08/10/2026) : un manque est une livraison partielle.
+  AND lr.ecart_pct > fn_tolerance_pesee(lr.id_reception);
 
 -- C11 / C15 : DERIVE entre le solde cache (stock_magasin) et le grand livre.
 -- Controle central : stock_magasin est un cache recalculable, ligne_mouvement

@@ -1,132 +1,132 @@
 /**
- * L'etat d'une fiche en cours de saisie.
+ * L'etat d'une fiche en cours de saisie — modele du 05/10/2026.
  *
  * PARTAGE PAR LES DEUX INTERFACES. Le bureau montre une grille, le telephone
- * montre une ligne a la fois — mais la machine a etats est la meme, et c'est
- * elle qui garantit qu'un chargement saisi au telephone donne exactement le
- * meme resultat que le meme chargement saisi au bureau.
+ * une ligne a la fois — mais la machine a etats est la meme.
+ *
+ * DEUX TEMPS, TOUJOURS :
+ *   1. APERCU : la fiche est enregistree en brouillon, et le serveur calcule
+ *      ce que la decision enregistrera — % theorique, % declare, ecart et ce
+ *      qu'il compte, ce qui bloquerait. Rien n'est encore decide.
+ *   2. VALIDATION : seulement sur un apercu a jour et sans blocage. Changer une
+ *      saisie apres l'apercu le perime : il faut le refaire.
+ *
+ * Une fiche DEVALIDEE se reprend : ses lignes reviennent, et son etage peut
+ * changer (le cas de l'erreur d'emplacement).
  */
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { SANS_LOT } from '../../lib/lots'
 import {
-  corpsFiche, depuisEtat, etatKg, machinesApi,
-  type LigneSaisie, type TypeFiche, type Zone,
+  corpsFiche, depuisEtat, destinationsDe, estimer, lignesAEnvoyer, machinesApi,
+  type Apercu, type LigneSaisie, type Motif, type TypeFiche, type Zone,
 } from './noyau'
 
 const aujourdHui = () => new Date().toISOString().slice(0, 10)
+const arrondi2 = (v: number) => Math.round(v * 100) / 100
 
-/**
- * LES BOBINES QUI MONTENT OCCUPENT DES PLACES, CELLES QUI DESCENDENT EN LIBERENT.
- *
- * C'est ce qui manquait. Le magasinier qui etend un etage de 1300 a 1344 places
- * et y monte 100 bobines ne va pas retaper « 1344 » ligne par ligne : il dit ce
- * qu'il a monte, et la zone se remplit toute seule. Le calcul est celui de
- * l'atelier, en deux temps :
- *
- *   1. une bobine chargee prend une place — la ligne vise `avant + chargees` ;
- *   2. si le total depasse l'entete, l'exces n'est pas une faute : ce sont les
- *      places LIBEREES depuis le dernier constat, par des bobines filees
- *      jusqu'au tube et retirees. On les retranche au prorata de ce qui a ete
- *      charge, parce qu'on recharge la ou les places se liberent.
- *
- * L'exemple qui posait probleme : 1300 avant, 1344 a l'entete, 100 chargees. La
- * ligne vise 1400, l'entete n'en permet que 1344 : 44 places etaient neuves, 56
- * s'etaient liberees. La zone affiche 1344 et l'ecart tombe a zero.
- *
- * RIEN N'EST INVENTE ICI. Ce calcul ne dit pas ce qui a ete consomme — il ne
- * fait que remplir des emplacements. La consommation se lit toujours en cumul
- * entre deux cliches, cote serveur. Et l'operateur garde la main : des qu'il
- * ecrit lui-meme dans « Presentes », la ligne est figee et plus rien ne la
- * recalcule.
- */
-function ajusterPlaces(
-  ls: LigneSaisie[],
-  places: number,
-  type: TypeFiche,
-): LigneSaisie[] {
-  if (type !== 'CHARGE' && type !== 'DECHARGE') return ls
-  const sens = type === 'CHARGE' ? 1 : -1
-
-  const vise = ls.map((l) =>
-    l.presentes_forcees
-      ? l.presentes
-      : Math.max(0, l.avant_bobines + sens * Math.max(0, l.mouvementees)),
-  )
-
-  // Le prorata ne porte que sur les lignes reellement chargees et non figees.
-  const ajustable = ls.map((l) =>
-    type === 'CHARGE' && !l.presentes_forcees && l.mouvementees > 0 ? l.mouvementees : 0,
-  )
-  const charge = ajustable.reduce((s, v) => s + v, 0)
-  const surplus = vise.reduce((s, v) => s + v, 0) - places
-
-  if (!places || charge <= 0 || surplus <= 0) {
-    return ls.map((l, i) => (l.presentes === vise[i] ? l : { ...l, presentes: vise[i] }))
-  }
-
-  let reste = Math.min(surplus, charge)
-  let vus = 0
-  return ls.map((l, i) => {
-    if (ajustable[i] <= 0) return l.presentes === vise[i] ? l : { ...l, presentes: vise[i] }
-    vus += ajustable[i]
-    // La derniere ligne chargee absorbe le reliquat : la somme retombe juste.
-    const part = vus >= charge ? reste : Math.round((surplus * ajustable[i]) / charge)
-    const pris = Math.max(0, Math.min(part, reste, ajustable[i]))
-    reste -= pris
-    return { ...l, presentes: vise[i] - pris }
-  })
-}
-
-export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
+export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeFiche, idFiche?: string) {
   const qc = useQueryClient()
+  const [zone, setZone] = useState<Zone | null>(zoneInitiale)
 
   const qEtat = useQuery({
     queryKey: ['machine-etat', machine, zone?.code_emplacement],
     queryFn: () => machinesApi.etat(machine, zone!.code_emplacement),
     enabled: !!zone,
   })
-
-  const [entete, poserEntete] = useState({
-    date: aujourdHui(),
-    magasin: '',
-    responsable: '',
-    of: '',
-    bobinesEtage: 0,
-    observations: '',
+  const qMotifs = useQuery({ queryKey: ['machine-motifs'], queryFn: machinesApi.motifs, staleTime: 300_000 })
+  const qFiche = useQuery({
+    queryKey: ['machine-fiche', idFiche],
+    queryFn: () => machinesApi.fiche(idFiche!),
+    enabled: !!idFiche,
   })
+  const motifs = useMemo(
+    () => (qMotifs.data ?? []).filter((m) => m.type_fiche === type),
+    [qMotifs.data, type],
+  )
+  const motifDe = (code: string): Motif | undefined => motifs.find((m) => m.code_motif === code)
+
+  /* LE BROUILLON DEJA CREE : remplace a chaque apercu, jamais duplique. */
+  const brouillon = useRef<string | null>(idFiche ?? null)
+
+  const [entete, setEntete] = useState({ date: aujourdHui(), magasin: '', responsable: '', of: '', observations: '' })
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
   const [amorcee, setAmorcee] = useState<string | null>(null)
 
-  /* LE CONSTAT COURANT AMORCE LA SAISIE.
-     L'operateur ne repart jamais d'une page blanche : ce que la zone porte
-     s'affiche deja, et il ne touche que ce qui a change. C'est ce qui rend une
-     mise a jour instantanee — il ne corrige que des pourcentages. */
-  const cle = `${zone?.code_emplacement}|${type}`
-  if (zone && qEtat.data && amorcee !== cle) {
-    setAmorcee(cle)
-    setLignes(qEtat.data.map(depuisEtat))
-    poserEntete((e) => ({ ...e, bobinesEtage: zone.capacite_bobines }))
-  }
-
-  /** Changer le nombre d'emplacements rejoue le remplissage. */
-  function setEntete(n: typeof entete) {
-    poserEntete(n)
-    if (n.bobinesEtage !== entete.bobinesEtage) {
-      setLignes((ls) => ajusterPlaces(ls, n.bobinesEtage, type))
+  /* L'ETAT COURANT AMORCE LA SAISIE ; une fiche reprise y ajoute ses lignes. */
+  const cle = `${zone?.code_emplacement}|${type}|${idFiche ?? ''}`
+  useEffect(() => {
+    if (!zone || !qEtat.data || amorcee === cle) return
+    if (idFiche && !qFiche.data) return
+    const base = qEtat.data.map((e) => depuisEtat(e, type))
+    if (idFiche && qFiche.data) {
+      const f = qFiche.data
+      setEntete({
+        date: f.entete.date_fiche?.slice(0, 10) || aujourdHui(),
+        magasin: f.entete.code_magasin ?? '',
+        responsable: f.entete.responsable,
+        of: f.entete.numero_of ?? '',
+        observations: f.entete.observations ?? '',
+      })
+      for (const l of f.lignes) {
+        const i = base.findIndex((b) => b.code_reference === l.code_reference && b.lot_fournisseur === l.lot_fournisseur)
+        const nominal = l.poids_catalogue_kg ?? 0
+        const repris: LigneSaisie = {
+          ...(i >= 0 ? base[i] : {
+            cle: `${l.code_reference}${l.lot_fournisseur}`, code_reference: l.code_reference,
+            designation: l.designation, lot_fournisseur: l.lot_fournisseur, presentes: 0,
+            poids_unitaire: nominal, poids_catalogue: nominal, avant_bobines: 0, avant_pourcentage: null,
+            avant_kg: 0, avant_date: null,
+          } as LigneSaisie),
+          mouvementees: Number(l.nb_bobines_mouvementees ?? 0),
+          presentes: type === 'MAJ' ? Number(l.nb_bobines_presentes ?? 0) : (i >= 0 ? base[i].presentes : 0),
+          poids_retenu: Number(l.poids_retenu_kg ?? nominal),
+          pourcentage: Number(l.pourcentage ?? 0),
+          pourcentage_saisi: true,
+          pct_retirees: Number(l.pct_retirees ?? 0),
+          destination: (l.destination as LigneSaisie['destination']) ?? '',
+          code_motif: l.code_motif ?? '',
+          motif_texte: l.motif_texte ?? '',
+          effet_ecart: l.effet_ecart ?? '',
+        }
+        if (i >= 0) base[i] = repris
+        else base.push(repris)
+      }
+      brouillon.current = idFiche
     }
+    setLignes(base)
+    setAmorcee(cle)
+  }, [zone, qEtat.data, qFiche.data, amorcee, cle, idFiche, type])
+
+  /** CHANGER D'ETAGE (fiche reprise) : les saisies restent, l'etat d'avant suit l'etage. */
+  function changerZone(z: Zone) {
+    setZone(z)
+    setAmorcee(null)
   }
 
-  function majLigne(cleLigne: string, champ: keyof LigneSaisie, v: unknown) {
-    setLignes((ls) => {
-      const maj = ls.map((l) =>
-        l.cle === cleLigne
-          ? { ...l, [champ]: v, ...(champ === 'presentes' ? { presentes_forcees: true } : {}) }
-          : l,
-      )
-      return champ === 'mouvementees' ? ajusterPlaces(maj, entete.bobinesEtage, type) : maj
-    })
+  function majLigne<K extends keyof LigneSaisie>(cleLigne: string, champ: K, v: LigneSaisie[K]) {
+    setLignes((ls) =>
+      ls.map((l) => {
+        if (l.cle !== cleLigne) return l
+        const n: LigneSaisie = { ...l, [champ]: v }
+        if (champ === 'pourcentage') n.pourcentage_saisi = true
+        // UN MOTIF QUI N'ADMET QU'UNE DESTINATION LA POSE ; changer de motif
+        // efface un effet devenu sans objet.
+        if (champ === 'code_motif') {
+          const d = destinationsDe(motifDe(String(v)))
+          n.destination = d.length === 1 ? d[0] : d.includes(l.destination as never) ? l.destination : ''
+          n.effet_ecart = ''
+        }
+        // AU CHARGEMENT, le % de la ligne apres est PROPOSE : le % theorique,
+        // tant que l'operateur ne l'a pas saisi lui-meme.
+        if (type === 'CHARGE' && !n.pourcentage_saisi && (champ === 'mouvementees' || champ === 'poids_retenu')) {
+          const t = estimer('CHARGE', n).theorique
+          if (t != null) n.pourcentage = arrondi2(t)
+        }
+        return n
+      }),
+    )
   }
 
   function retirer(cleLigne: string) {
@@ -137,92 +137,106 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
     setLignes((ls) => [...ls, { ...l, cle: `${l.code_reference}|${l.lot_fournisseur}|${ls.length}` }])
   }
 
+  const envoyees = useMemo(() => lignesAEnvoyer(type, lignes), [type, lignes])
+
   const totaux = useMemo(() => {
-    const presentes = lignes.reduce((s, l) => s + l.presentes, 0)
-    return {
-      presentes,
-      etatKg: lignes.reduce((s, l) => s + etatKg(l), 0),
-      mouvementees: lignes.reduce((s, l) => s + l.mouvementees, 0),
-      /* LES EMPLACEMENTS NE SONT JAMAIS A MOITIE DECLARES.
-         Une zone de 1344 places porte 1344 bobines — pas « au plus 1344 ». Le
-         manque est donc aussi fautif que le depassement : c'est ce qui rattrape
-         une ligne oubliee, et un compte incomplet fausserait la consommation
-         qui en decoule.
-         Le nombre de reference est celui de l'ENTETE, saisi par le magasinier :
-         il constate le physique, le parametrage suivra. */
-      ecart: presentes - (entete.bobinesEtage || 0),
+    let avant = 0
+    let apres = 0
+    let kgApres = 0
+    let kgMouv = 0
+    let ecart = 0
+    const touchees = new Set(envoyees.map((l) => l.cle))
+    for (const l of lignes) {
+      avant += l.avant_bobines
+      if (!touchees.has(l.cle)) {
+        apres += l.avant_bobines
+        kgApres += l.avant_kg
+        continue
+      }
+      const e = estimer(type, l)
+      apres += e.nbApres
+      kgApres += e.kgApres
+      kgMouv += e.kgMouv
+      ecart += e.ecart
     }
-  }, [lignes, entete.bobinesEtage])
+    return { avant, apres, kgApres, kgMouv, ecart, places: zone?.capacite_bobines ?? 0 }
+  }, [lignes, envoyees, type, zone])
 
-  /* LE SOLDE DU LOT EST APPROXIMATIF, ET L'ATELIER LE SAIT.
-     Quand une bobine redescend d'un metier, personne ne sait de quel lot elle
-     venait : le retour est impute au juge, et les soldes par lot derivent. Le
-     magasinier se retrouve alors devant des bobines qu'il a dans les mains,
-     et un ERP qui lui dit qu'elles n'existent pas.
-     On ne supprime pas la verification — elle rattrape les vraies fautes de
-     saisie — mais on PROPOSE de passer outre. Le refus devient une question,
-     et la reponse laisse une trace. */
-  const [lotCourt, setLotCourt] = useState<string | null>(null)
-  /* LE STOCK DU MAGASIN NE COUVRE PAS LE CHARGEMENT (R02-MAG, 01/10/2026).
-     La matiere est la, le stock dit le contraire. Deux questions suivent :
-     charger quand meme, puis creer la correction. Sans correction : bloque. */
-  const [stockCourt, setStockCourt] = useState<string | null>(null)
-  /* LE BROUILLON DEJA CREE. Une validation refusee laissait la fiche en
-     brouillon, et l'essai suivant en creait une seconde — puis une troisieme.
-     On reprend la meme : remplacee si ses lignes changent, revalidee sinon. */
-  const brouillon = useRef<string | null>(null)
+  const corps = useMemo(
+    () => (zone ? corpsFiche(type, machine, zone.code_emplacement, entete, lignes) : null),
+    [type, machine, zone, entete, lignes],
+  )
+  const empreinte = JSON.stringify(corps)
 
+  const [apercu, setApercu] = useState<{ empreinte: string; resultat: Apercu } | null>(null)
+  const apercuAJour = !!apercu && apercu.empreinte === empreinte
+
+  async function enregistrer(c: unknown) {
+    if (brouillon.current) await machinesApi.remplacerFiche(brouillon.current, c)
+    else brouillon.current = (await machinesApi.creerFiche(c)).id_fiche
+    return brouillon.current
+  }
+
+  const calculer = useMutation({
+    mutationFn: async () => {
+      const id = await enregistrer(corps)
+      return machinesApi.apercu(id)
+    },
+    onSuccess: (r) => setApercu({ empreinte, resultat: r }),
+  })
+
+  /* PAS DE FORCAGE DE LOT (06/10/2026) : un lot que le magasin ne couvre pas
+     bloque, comme un stock insuffisant. L'apercu le dit avant la validation ;
+     le magasinier previent le directeur ou l'administrateur, qui corrigent. */
   const envoi = useMutation({
-    mutationFn: async (o?: { forcerLot?: boolean; corriger?: boolean }) => {
-      const forcerLot = o?.forcerLot ?? false
-      const corps = corpsFiche(type, machine, zone!.code_emplacement, entete, lignes)
-      if (forcerLot) {
-        corps.lignes = corps.lignes.map((l) => ({
-          ...l,
-          lot_force: true,
-          motif_lot_force:
-            'Retour de machine impute au juge : le solde du lot ne reflete plus le physique.',
-        }))
-      }
-      if (brouillon.current) {
-        await machinesApi.remplacerFiche(brouillon.current, corps)
-      } else {
-        brouillon.current = (await machinesApi.creerFiche(corps)).id_fiche
-      }
-      return machinesApi.valider(brouillon.current, o?.corriger ?? false)
+    mutationFn: async () => {
+      if (!apercuAJour || !brouillon.current) throw new Error('Faites d’abord l’aperçu : il montre ce qui sera enregistré.')
+      return machinesApi.valider(brouillon.current)
     },
-    onError: (e: unknown) => {
-      // ON NE DEVINE PAS LE REFUS AU TEXTE ENTIER : le serveur prefixe ce cas
-      // precis par « R02-LOT ». Chercher « insuffisant » attraperait aussi le
-      // refus de magasin, qui lui ne doit JAMAIS etre franchissable.
-      const message = e instanceof Error ? e.message : String(e)
-      if (message.includes('R02-LOT')) setLotCourt(message)
-      if (message.includes('R02-MAG')) setStockCourt(message)
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['machine-etat'] })
-      void qc.invalidateQueries({ queryKey: ['machines'] })
-      void qc.invalidateQueries({ queryKey: ['machine-plan'] })
-      void qc.invalidateQueries({ queryKey: ['machine-fiches'] })
-      void qc.invalidateQueries({ queryKey: ['machine-contenu'] })
-      void qc.invalidateQueries({ queryKey: ['machine-conso'] })
-      setLotCourt(null)
-      setStockCourt(null)
+    onSuccess: async () => {
+      for (const k of ['machines', 'machine-plan', 'machine-fiches', 'machine-contenu', 'machine-conso', 'machine-fiche'])
+        void qc.invalidateQueries({ queryKey: [k] })
+      setApercu(null)
       brouillon.current = null
+      /* LA SAISIE SUIVANTE PART DE L'ETAT RESULTANT : on attend la relecture de
+         l'etage, sinon elle se reamorcerait sur l'etat d'avant la decision. */
+      await qc.invalidateQueries({ queryKey: ['machine-etat'] })
       setAmorcee(null)
     },
   })
 
-  const pret =
-    !!zone &&
-    !!entete.responsable.trim() &&
-    lignes.length > 0 &&
-    totaux.ecart === 0 &&
-    (type === 'MAJ' || type === 'CONSO' || !!entete.magasin) &&
-    lignes.every((l) => l.lot_fournisseur.trim().length > 0)
+  /** Le blocage de stock, dit par l'apercu : le chargement ne passera pas. */
+  const stockCourt = apercuAJour
+    ? (apercu!.resultat.blocages.find((b) => b.startsWith('STOCK-INSUFFISANT') || b.startsWith('LOT-INSUFFISANT')) ?? null)
+    : null
 
-  /* LES LOTS DU MAGASIN D'ORIGINE, pour le FIFO : ce qu'on charge doit etre
-     le plus ancien de sa reference. */
+  /** CE QUI MANQUE ENCORE, dit en clair : la premiere chose qui empeche l'apercu. */
+  const manque = ((): string | null => {
+    if (!zone) return 'Choisissez l’étage.'
+    if (!entete.responsable.trim()) return 'Indiquez le responsable.'
+    if (type !== 'MAJ' && !entete.magasin) return 'Choisissez le magasin.'
+    if (envoyees.length === 0)
+      return type === 'MAJ' ? 'Aucune ligne.' : `Indiquez le nombre de bobines ${type === 'CHARGE' ? 'à charger' : 'à retirer'}.`
+    for (const l of envoyees) {
+      const qui = l.designation || l.code_reference
+      if (!l.lot_fournisseur.trim()) return `Indiquez le lot de ${qui}.`
+      if (!l.code_motif) return `Choisissez le motif de ${qui}.`
+      const m = motifDe(l.code_motif)
+      if (m && !m.effet_defaut && !l.effet_ecart) return `Dites comment compte l’écart de ${qui} (${m.libelle}).`
+      if (type === 'CHARGE' && !(l.poids_retenu > 0)) return `Indiquez le poids par bobine de ${qui}.`
+      if (type === 'DECHARGE' && !l.destination && destinationsDe(m).length !== 1)
+        return `Choisissez la destination de ${qui}.`
+      if (type === 'MAJ' && l.presentes < 0) return `Le nombre de bobines présentes de ${qui} est négatif.`
+    }
+    if (totaux.apres > totaux.places) return `L’étage déborde : ${totaux.apres} bobines pour ${totaux.places} places.`
+    return null
+  })()
+
+  const pret = manque === null
+
+  const peutValider = pret && apercuAJour && apercu!.resultat.blocages.length === 0
+
+  /* LES LOTS DU MAGASIN D'ORIGINE, pour le FIFO. */
   const qLots = useQuery({
     queryKey: ['stock-lots-magasin', entete.magasin],
     queryFn: () =>
@@ -233,29 +247,21 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
   })
 
   /**
-   * CE QUI MERITE UNE CONFIRMATION AVANT D'ENVOYER (01/10/2026).
-   *
-   * LE MELANGE DE LOTS : deux lots d'une meme reference sur une meme zone. Deux
-   * productions du fournisseur peuvent differer de nuance, et cela se voit au
-   * tissage. « Sans lot » ne compte pas : on ne sait pas.
-   *
-   * LE FIFO : un lot plus ancien de la meme reference attend au magasin.
-   *
-   * Ce ne sont pas des refus — le metier a parfois ses raisons — mais on ne
-   * passe pas sans l'avoir lu.
+   * CE QUI MERITE UNE CONFIRMATION AVANT DE VALIDER : le melange de lots d'une
+   * meme reference sur l'etage, un lot plus ancien qui attend au magasin.
    */
   const avertissements = useMemo(() => {
     const a: string[] = []
     if (type !== 'CHARGE') return a
     const parRef = new Map<string, Set<string>>()
     for (const l of lignes)
-      if (l.presentes > 0 && l.lot_fournisseur && l.lot_fournisseur !== SANS_LOT)
+      if ((l.avant_bobines > 0 || l.mouvementees > 0) && l.lot_fournisseur && l.lot_fournisseur !== SANS_LOT)
         parRef.set(l.code_reference, new Set([...(parRef.get(l.code_reference) ?? []), l.lot_fournisseur]))
     for (const [ref, lots] of parRef)
       if (lots.size > 1)
-        a.push(`Mélange de lots sur la zone : ${ref} — lots ${[...lots].join(', ')}. La nuance peut différer au tissage.`)
-    for (const l of lignes) {
-      if (!(l.mouvementees > 0) || !l.lot_fournisseur || l.lot_fournisseur === SANS_LOT) continue
+        a.push(`Mélange de lots sur l’étage : ${ref} — lots ${[...lots].join(', ')}. La nuance peut différer au tissage.`)
+    for (const l of envoyees) {
+      if (!l.lot_fournisseur || l.lot_fournisseur === SANS_LOT) continue
       const dispo = (qLots.data ?? []).filter((x) => x.code_reference === l.code_reference && x.lot_fournisseur !== SANS_LOT)
       const choisi = dispo.find((x) => x.lot_fournisseur === l.lot_fournisseur)
       const plusAncien = dispo
@@ -265,16 +271,15 @@ export function useFiche(machine: string, zone: Zone | null, type: TypeFiche) {
         a.push(`FIFO : ${l.code_reference} — le lot ${plusAncien.lot_fournisseur} est plus ancien que ${l.lot_fournisseur} au magasin.`)
     }
     return a
-  }, [type, lignes, qLots.data])
+  }, [type, lignes, envoyees, qLots.data])
 
   return {
-    /** Le refus de solde de lot, quand il y en a un : l'ecran le propose. */
-    lotCourt, oublierLotCourt: () => setLotCourt(null),
-    /** Le refus de stock du magasin : deux questions, puis correction ou blocage. */
-    stockCourt, oublierStockCourt: () => setStockCourt(null),
-    avertissements,
-    etat: qEtat, entete, setEntete, lignes, setLignes,
-    majLigne, retirer, ajouter, totaux, envoi, pret,
+    zone, changerZone, motifs, motifDe,
+    stockCourt, avertissements,
+    etat: qEtat, entete, setEntete, lignes, setLignes, envoyees,
+    majLigne, retirer, ajouter, totaux,
+    calculer, apercu: apercuAJour ? apercu!.resultat : null, apercuPerime: !!apercu && !apercuAJour,
+    envoi, pret, peutValider, manque,
     reamorcer: () => setAmorcee(null),
   }
 }

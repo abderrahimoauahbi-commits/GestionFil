@@ -41,14 +41,20 @@ impl FromRequestParts<AppState> for Utilisateur {
 
         // Un jeton reste valide jusqu'a son expiration : on revalide le compte a
         // chaque requete pour qu'une desactivation prenne effet immediatement.
-        let actif: Option<i64> =
-            sqlx::query_scalar("SELECT actif FROM utilisateur WHERE id_utilisateur = $1")
-                .bind(&claims.sub)
-                .fetch_optional(&state.db)
-                .await?;
-        if actif != Some(1) {
-            return Err(AppError::NonAuthentifie);
-        }
+        // LE ROLE EST RELU AVEC LUI (06/10/2026), pas pris dans le jeton : un
+        // compte retrograde perdait sinon ses droits huit heures plus tard
+        // seulement, avec les permissions de l'ancien role et la grille de
+        // champs du nouveau.
+        let compte: Option<(i64, String)> = sqlx::query_as(
+            "SELECT actif, code_role_user FROM utilisateur WHERE id_utilisateur = $1",
+        )
+        .bind(&claims.sub)
+        .fetch_optional(&state.db)
+        .await?;
+        let role = match compte {
+            Some((1, role)) => role,
+            _ => return Err(AppError::NonAuthentifie),
+        };
 
         let adresse_ip = parts
             .extensions
@@ -58,7 +64,7 @@ impl FromRequestParts<AppState> for Utilisateur {
         Ok(Utilisateur {
             id: claims.sub,
             login: claims.login,
-            role: claims.role,
+            role,
             session_id: claims.sid,
             adresse_ip,
         })
@@ -85,14 +91,18 @@ impl Utilisateur {
         rbac::droits_champ(db, &self.id, module).await
     }
 
-    /// Retire de la reponse les champs masques pour cet utilisateur.
+    /// Retire de la reponse les champs masques pour cet utilisateur : ceux du
+    /// module, et les montants qu'il ne voit dans aucun module.
     pub async fn masquer(
         &self,
         db: &crate::db::Db,
         module: &str,
         valeur: &mut serde_json::Value,
     ) -> AppResult<()> {
-        let droits = self.droits(db, module).await?;
+        let mut droits = self.droits(db, module).await?;
+        for (champ, niveau) in rbac::sensibles_masques(db, &self.id).await? {
+            droits.insert(champ, niveau);
+        }
         rbac::masquer(valeur, &droits);
         Ok(())
     }

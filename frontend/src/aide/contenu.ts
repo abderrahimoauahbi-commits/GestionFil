@@ -547,7 +547,8 @@ export const SUJETS: Sujet[] = [
           'Dans la liste des lignes à recevoir — tous dossiers non clos — cochez ce que le camion apporte.',
           'Saisissez le poids réellement pesé, le nombre de bobines et de palettes, et le magasin.',
           'Enregistrez : la réception reste un brouillon, rien n’entre en stock.',
-          'Faites valider : la marchandise entre en stock à la valeur facture.',
+          'Soumettez au contrôle : la pesée ne se modifie plus que par le contrôleur, ou en la rouvrant.',
+          'Le contrôleur — un autre compte que celui qui a pesé — indique la qualité de chaque ligne et valide : la marchandise entre en stock à la valeur facture.',
         ],
         resultat: 'Le stock monte, le mouvement d’entrée cite les dossiers concernés, et les lignes de facture sont soldées.',
       },
@@ -557,10 +558,12 @@ export const SUJETS: Sujet[] = [
       { nom: 'Quantité reçue (kg)', description: 'Le poids RÉELLEMENT pesé, pas le poids facturé.', obligatoire: true },
       { nom: 'Magasin', description: 'Le magasin où la marchandise est rangée.', obligatoire: true },
       { nom: 'Litige', description: 'À cocher quand la livraison présente un écart ou un dommage à documenter.' },
+      { nom: 'Qualité', description: 'Conforme, quarantaine ou non conforme : le verdict du contrôle. Hors « conforme », la ligne va dans un magasin de quarantaine.' },
     ],
     regles: [
       'Une réception est un document À PART : ses lignes peuvent venir de plusieurs dossiers.',
-      'Enregistrer garde un brouillon ; VALIDER fait entrer en stock et fige la réception.',
+      'Enregistrer garde un brouillon ; SOUMETTRE la passe au contrôle ; VALIDER fait entrer en stock et fige la réception.',
+      'Celui qui a saisi la réception ne la valide pas (séparation des tâches).',
       'Une ligne d’un dossier clôturé ne se reçoit plus.',
     ],
     messages: [
@@ -916,7 +919,13 @@ export const SUJETS: Sujet[] = [
       { nom: 'Lot', description: 'Pour les références suivies au lot, on compte par numéro de bain.' },
       { nom: 'Justification', description: 'La raison de l’écart. Exigée au-delà du seuil paramétré.' },
     ],
-    regles: ['Les références sous suivi de lot se comptent AU LOT, pas en total abstrait.'],
+    regles: [
+      'Les références sous suivi de lot se comptent AU LOT, pas en total abstrait.',
+      'L’écart se lit à l’heure du comptage : chaque ligne reprend le stock du moment où elle est comptée ; ce qui entre ou sort ensuite reste acquis. Le magasin n’est pas gelé.',
+      'Un seul inventaire en cours par magasin.',
+      'Clôturer ou annuler un inventaire demande la validation du module Inventaire : celui qui compte ne clôture pas son propre comptage.',
+      'Un inventaire ouvert par erreur ou devenu périmé s’annule, avec un motif ; aucun ajustement n’est passé.',
+    ],
   },
 
   {
@@ -1061,6 +1070,124 @@ export const SUJETS: Sujet[] = [
   },
 
   /* ============================================================= LOTS ===== */
+  {
+    route: '/machines',
+    titre: 'Machines',
+    chemin: 'Stock → Machines',
+    objectif:
+      'Voir ce que porte chaque étage, et enregistrer les trois gestes du magasin — charger, décharger, constater — comme des décisions : état avant, saisie, aperçu, validation, état résultant. Choisir un étage en tête de la machine filtre son contenu, ses fiches et sa consommation.',
+    prerequis: [
+      'La machine et ses étages déclarés dans « Le parc ».',
+      'Pour un chargement : le fil présent au magasin d’origine, dans le lot chargé.',
+    ],
+    droits: 'Écriture du module Stock pour saisir et valider ; retirer une décision d’un autre jour demande un administrateur ou un directeur.',
+    procedures: [
+      {
+        titre: 'Charger un étage',
+        etapes: [
+          'Ouvrez la machine, choisissez l’étage, puis « Charger » : la fiche s’ouvre sur son propre écran et reprend ce que l’étage porte déjà (bobines, %, kilos).',
+          'Choisissez le magasin d’origine et nommez le responsable.',
+          'Saisissez le nombre de bobines à charger et, si besoin, corrigez le poids par bobine (le poids catalogue est proposé).',
+          'Indiquez le % de TOUTE la ligne après le chargement : l’outil propose le % théorique, laissez-le si vous ne constatez rien d’autre.',
+          'Cliquez « Aperçu » : il montre exactement ce que la validation enregistrera, ligne par ligne.',
+          'Relisez, puis « Valider la décision ».',
+        ],
+        resultat:
+          'Le fil sort du magasin à son coût moyen, l’étage prend l’état résultant, et l’écart éventuel est classé selon le motif.',
+      },
+      {
+        titre: 'Décharger un étage',
+        etapes: [
+          '« Décharger » sur l’étage, puis le magasin de retour et le responsable.',
+          'Pour chaque ligne : les bobines à retirer, leur %, la destination, et le % constaté des bobines qui restent.',
+          'Tout retirer est permis : l’étage passe à zéro dans la même décision, et l’écart restant est classé selon le motif.',
+          'Aperçu, relecture, validation.',
+        ],
+        resultat: 'Seule la destination « Retour au magasin » fait rentrer du fil en stock ; perte, déchet et casse sortent de l’étage sans revenir.',
+      },
+      {
+        titre: 'Constater un étage, ou corriger une erreur',
+        etapes: [
+          '« Constater » sur l’étage : pour chaque ligne Réf + Lot, le nombre de bobines présentes et le % constaté.',
+          'Pour réparer une erreur passée, prenez le motif « Correction » et dites si l’écart est une consommation ou une erreur de saisie.',
+          'Aperçu, relecture, validation.',
+        ],
+      },
+      {
+        titre: 'Défaire la dernière décision d’un étage',
+        etapes: [
+          'Choisissez l’étage, onglet « Fiches de l’étage » : seule la fiche marquée « dernière de l’étage » porte « Dévalider » (elle revient en brouillon, son étage peut changer) et « Annuler » (elle est close). Les mêmes boutons sont en tête de son écran de détail.',
+          'Donnez la raison : elle reste au journal.',
+        ],
+        resultat:
+          'L’étage revient exactement à l’état qui précédait ; les mouvements du magasin reçoivent une annulation administrative à leur valeur d’origine.',
+      },
+    ],
+    champs: [
+      { nom: 'Avant', description: 'Ce que l’étage porte avant la décision : bobines, % et kilos. Il ne se saisit pas.' },
+      { nom: 'À charger', description: 'Le nombre de bobines ajoutées sur la ligne Réf + Lot.', obligatoire: true },
+      {
+        nom: 'Poids/bob.',
+        description: 'Le poids retenu pour une bobine chargée.',
+        valeurs: 'kg',
+        defaut: 'le poids nominal du catalogue',
+      },
+      {
+        nom: '% ligne après',
+        description: 'Le remplissage moyen de toute la ligne après le geste, en % du poids nominal. Les kilos de l’étage en découlent.',
+        defaut: 'le % théorique : (kilos avant + kilos chargés) / (bobines après × poids nominal)',
+      },
+      { nom: 'À retirer', description: 'Le nombre de bobines enlevées de la ligne.', obligatoire: true },
+      { nom: '% retirées', description: 'Le remplissage des bobines enlevées : il donne les kilos qui partent.' },
+      {
+        nom: 'Destination',
+        description: 'Où vont les bobines retirées. Le motif limite les destinations possibles.',
+        valeurs: 'Retour au magasin · Perte · Déchet · Casse',
+      },
+      { nom: '% restantes', description: 'Le remplissage constaté des bobines qui restent sur l’étage.' },
+      { nom: 'Présentes', description: 'Constat : le nombre de bobines réellement sur l’étage pour cette ligne.' },
+      {
+        nom: 'Écart',
+        description:
+          'Kilos avant + chargés − retirés − kilos après. Positif : du fil a disparu de l’étage ; le motif dit s’il compte comme consommation, déchet, perte, casse, erreur de saisie ou écart non qualifié. Négatif : régularisation.',
+      },
+      { nom: 'Motif', description: 'La raison du geste ; il décide du classement de l’écart.', obligatoire: true },
+    ],
+    regles: [
+      'Une validation est une DÉCISION : son état avant et son état résultant sont archivés, et le journal de la fiche ne s’efface pas.',
+      'Le premier poste qui valide prend l’étage : un second qui valide au même moment est refusé et réessaie.',
+      'Le nombre de bobines ne dépasse jamais les places de l’étage.',
+      'Un chargement à 0 bobine est refusé ; un déchargement complet est permis.',
+      'Un chargement plus gros que le stock du magasin est BLOQUÉ : le magasinier prévient le directeur ou l’administrateur, qui fait et valide la correction de stock avant.',
+      'Un chargement d’un lot que le magasin ne porte pas en quantité suffisante est bloqué de la même façon : il n’y a pas de « charger quand même ».',
+      'Le % se saisit au centième : un écart plus petit que ce que l’arrondi produit sur la ligne compte comme « aucun écart », et l’étage garde ses kilos.',
+      'Le poids nominal d’une ligne est celui de l’étage, fixé à son chargement : un poids de bobine qui change au catalogue ne crée pas d’écart sur l’étage.',
+      'On ne retire pas plus de kilos qu’une ligne n’en porte ; seuls l’administrateur et le directeur passent outre, pour corriger un étage faux.',
+      'Valider un chargement ou un déchargement, et retirer une décision validée, demandent le droit VALIDER (ils font bouger le magasin) ; valider un constat demande le droit d’écrire.',
+      'Seule la dernière décision d’un étage se défait, par son auteur le jour même, ou par un administrateur ou un directeur. Si une décision plus récente s’est appuyée sur elle, on passe par un constat « Correction ».',
+      'Les mouvements nés d’une fiche machine ne se contre-passent pas depuis l’écran des mouvements : ils se défont en dévalidant ou en annulant la fiche.',
+    ],
+    messages: [
+      {
+        message: 'Étage … est en cours de modification par une autre fiche',
+        cause: 'Un autre poste valide une décision sur ce même étage. Réessayez dans un moment : vous partirez de son état résultant.',
+      },
+      {
+        message: 'Chargement bloqué : stock insuffisant',
+        cause: 'Le magasin d’origine ne porte pas les kilos à charger. Prévenez le directeur ou l’administrateur.',
+      },
+      {
+        message: 'cette décision a servi de base à la fiche …',
+        cause: 'Ce n’est plus la dernière décision de l’étage. Réparez par un constat avec le motif « Correction ».',
+      },
+    ],
+    liens: [
+      { route: '/parc-machines', libelle: 'Le parc' },
+      { route: '/stock', libelle: 'Stock par magasin' },
+      { route: '/mouvements', libelle: 'Mouvements' },
+    ],
+  },
+
   {
     route: '/lots',
     titre: 'Lots',

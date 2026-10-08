@@ -24,10 +24,12 @@ premières (fil pour tapis). Tout le code, les commentaires, les messages et l'i
 ## Commandes
 
 ```powershell
-# Base locale (schéma, vues, contrôles, seeds) — joue les fichiers PAR PASSES
-cd db\pg; python charger.py                       # base `gestionfil`
-python charger.py --base gestionfil_essai         # autre base
-python charger.py --production                    # comptes réels, référentiel à importer ensuite
+# Base locale — joue les fichiers PAR PASSES, mais AUCUNE migration de db/pg/migrations/
+# (lots, machines, import récents n'existent qu'en migrations : les rejouer ensuite)
+cd db\pg; python charger.py                       # schéma, vues, contrôles seulement
+python charger.py --seeds                         # + seeds (référentiels, sécurité)
+python charger.py --base gestionfil_essai --seeds # autre base
+python charger.py --production                    # seeds + comptes réels, référentiel à importer ensuite
 
 # Appliquer une migration (pas de table de suivi : rien ne signale un oubli)
 psql -d gestionfil -v ON_ERROR_STOP=1 -f migrations\<fichier>.sql
@@ -87,6 +89,14 @@ C11 compare les deux.
   requête est écrite à l'avance, et le résultat est masqué selon les droits. Il ne produit que des
   brouillons, jamais d'écriture.
 
+**Machines : chaque validation de fiche est une décision** (`domain/decision_machine.rs`,
+migration `2026-10-05_decisions_machine.sql`) : état avant → saisie par ligne Réf + Lot →
+aperçu (`POST …/apercu`, même calcul que la validation) → validation → état résultant, archivés
+dans `machine_decision*` (immuables). L'écart (kg avant + chargé − retiré − après) est classé
+par le motif (`machine_motif`). Seule la décision tête d'un étage se retire (dévalider /
+annuler), par mouvements `ANNUL_*` liés ; les mouvements de fiche ne se contre-passent pas.
+Verrou : fiche puis étage en `FOR UPDATE NOWAIT`. Pas de fiche « Consommation ».
+
 **Toute transaction écrivante** commence par `db::poser_contexte` (`SET LOCAL app.id_utilisateur`,
 etc.), sinon le journal d'audit enregistre une action anonyme.
 
@@ -122,6 +132,10 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   Vérifier une requête nouvelle par `PREPARE` sur une **copie** de la base.
 - Devant une « erreur interne » à l'écriture : vérifier d'abord que la base locale a bien les
   migrations récentes (colonnes, déclencheurs) avant de lire le code.
+- Une migration dont le binaire dépend s'ajoute à `MIGRATIONS_REQUISES` (`backend/src/db.rs`) avec
+  un témoin : le serveur refuse alors de démarrer sur une base qui ne l'a pas, en la nommant.
+- Écrire du Rust par un heredoc du shell mange les `\` de fin de ligne : les chaînes continuées
+  gardent alors de longs blancs. Passer par l'outil d'écriture ou un script `.py`.
 - **Ne pas toucher la base `gestionfil` ni le serveur de l'utilisateur sur le port 8080** : essais
   sur une copie (`pg_dump` → base de répétition), serveur d'essai sur un autre port (8099), et
   `CARGO_TARGET_DIR` séparé pour ne pas buter sur `gestionfil.exe` verrouillé.
@@ -135,5 +149,5 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
 - `docs/ADR-001-decisions-fondatrices.md` — décisions d'architecture.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
-- `db/README.md` — invariants, vues, contrôles C01–C37.
+- `db/README.md` — invariants, vues, contrôles C01–C37 (C38–C42, machines, ajoutés par la migration du 05/10/2026).
 - `deploiement/README.md` — serveur, migrations en production, sauvegardes, assistant.

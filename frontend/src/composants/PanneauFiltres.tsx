@@ -158,8 +158,8 @@ export function PanneauFiltres<L>({
   const [ouvert, setOuvert] = useState(false)
 
   return (
-    <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-2.5">
-      <div className="flex items-center justify-between gap-2">
+    <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-2.5 lg:flex-row lg:flex-wrap lg:items-end lg:gap-3 lg:px-3 lg:py-2">
+      <div className="flex items-center justify-between gap-2 lg:mb-1.5">
         <button
           type="button"
           onClick={() => setOuvert((o) => !o)}
@@ -190,7 +190,7 @@ export function PanneauFiltres<L>({
         )}
       </div>
 
-      <div className={cn('flex flex-col gap-2', !ouvert && 'hidden lg:flex')}>
+      <div className={cn('flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-end', !ouvert && 'hidden lg:flex')}>
         {enTete}
 
         {champs.map((c) => (
@@ -200,6 +200,7 @@ export function PanneauFiltres<L>({
             options={options.get(c.cle) ?? []}
             valeurs={valeurs}
             definir={definir}
+            largeur={c.type === 'periode' ? 'lg:min-w-[13rem]' : 'lg:min-w-[9.5rem]'}
           />
         ))}
 

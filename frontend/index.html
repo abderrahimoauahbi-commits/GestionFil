@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" data-charte="classique">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -30,6 +30,9 @@
             (choix === 'systeme' &&
               window.matchMedia('(prefers-color-scheme: dark)').matches)
           if (sombre) document.documentElement.classList.add('sombre')
+          // Le style choisi, pose avant le premier rendu lui aussi.
+          var ap = JSON.parse(localStorage.getItem('gestionfil.apparence') || '{}')
+          if (ap.charte) document.documentElement.setAttribute('data-charte', ap.charte)
         } catch (e) {}
       })()
     </script>

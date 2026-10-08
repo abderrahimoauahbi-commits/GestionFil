@@ -373,6 +373,12 @@ pub async fn enregistrer_qualite(
             .fetch_one(&mut *tx)
             .await?;
 
+    // Regle 15 : une qualite active ou cloturee ne recule pas avec ECRIRE.
+    crate::domain::transitions::exiger_transition(
+        &state.db, &user, module::QUALITES, "qualite", &statut_actuel, &statut_cible,
+    )
+    .await?;
+
     if statut_actuel != statut_cible {
         sqlx::query(
             "UPDATE qualite SET
@@ -1551,7 +1557,35 @@ pub async fn changer_statut_plan(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
+    // Regle 15 : un plan en service ou cloture ne recule pas avec ECRIRE —
+    // ses besoins tomberaient a zero sans que personne ne l'ait decide.
+    let actuel: String =
+        sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1 FOR UPDATE")
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Introuvable(format!("plan {id}")))?;
+    crate::domain::transitions::exiger_transition(
+        &state.db, &user, module::PLANS, "plan_production", &actuel, &t.statut,
+    )
+    .await?;
+
     if t.statut == "EN_COURS" {
+        // UN SEUL PLAN EN SERVICE : l'index unique le garantit, mais son refus
+        // arrivait brut (« Key ((true))=(t) already exists »). On le dit avant.
+        let en_service: Option<String> = sqlx::query_scalar(
+            "SELECT COALESCE(NULLIF(libelle, ''), id_plan) FROM plan_production
+              WHERE statut = 'EN_COURS' AND id_plan <> $1 LIMIT 1",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(autre) = en_service {
+            return Err(AppError::RegleMetier(format!(
+                "Le plan « {autre} » est deja en service : un seul plan alimente le MRP et le \
+                 plan d'achat. Cloturez-le d'abord, puis mettez celui-ci en service."
+            )));
+        }
         // R08 : le trigger refuse la mise en service si une qualite planifiee n'a
         // pas sa recette figee. Le message renvoye guide vers /figer-recettes.
         sqlx::query(

@@ -99,7 +99,10 @@ const REVERSIBLES: &[Reversible] = &[
         depuis: &["CLOTURE"],
         vers: "EN_COURS",
         effacer: &["date_cloture"],
-        document_mouvements: Some("id_inventaire"),
+        // Les ajustements portent le NUMERO de l'inventaire en reference de
+        // document, pas son identifiant : la garde cherchait l'identifiant et ne
+        // voyait jamais les ajustements encore au stock (corrige le 06/10/2026).
+        document_mouvements: Some("numero_inventaire"),
         garde: None,
     },
     Reversible {

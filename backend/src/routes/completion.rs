@@ -462,6 +462,11 @@ pub async fn completion(
         }));
     }
 
+    // Le prix catalogue part avec chaque ligne : il se masque comme ailleurs.
+    let mut lignes = Value::Array(lignes);
+    user.masquer(db, module::CATALOGUE, &mut lignes).await?;
+    let Value::Array(lignes) = lignes else { unreachable!() };
+
     Ok(Json(json!({
         "lignes": lignes,
         "couleurs": couleurs.iter()

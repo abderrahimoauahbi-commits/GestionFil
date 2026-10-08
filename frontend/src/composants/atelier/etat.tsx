@@ -76,6 +76,22 @@ const DYNAMIQUES: {
   decrire: (m: RegExpMatchArray) => Descripteur
 }[] = [
   {
+    motif: /^\/machines\/fiches\/[^/]+$/,
+    decrire: () => ({ titre: 'Fiche machine', detail: 'Machines', Icone: FileText }),
+  },
+  {
+    motif: /^\/machines\/([^/]+)\/fiche\/(CHARGE|DECHARGE|MAJ)\/[^/]+$/,
+    decrire: (m) => ({
+      titre: m[2] === 'CHARGE' ? 'Chargement' : m[2] === 'DECHARGE' ? 'Déchargement' : 'Constat',
+      detail: `Machine ${decodeURIComponent(m[1])}`,
+      Icone: FileText,
+    }),
+  },
+  {
+    motif: /^\/machines\/([^/?]+)/,
+    decrire: (m) => ({ titre: `Machine ${decodeURIComponent(m[1])}`, detail: 'Machines', Icone: FileText }),
+  },
+  {
     motif: /^\/transferts\/([^/]+)\/bon-sortie$/,
     decrire: (m) => ({ titre: `Bon de sortie ${m[1]}`, detail: 'Transfert', Icone: FileText }),
   },

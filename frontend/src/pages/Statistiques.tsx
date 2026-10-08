@@ -193,7 +193,7 @@ function Chiffre({
     danger: 'text-danger',
   }[ton]
   return (
-    <div className="rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2.5 sm:px-4">
+    <div data-ton={ton} className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2.5 sm:px-4">
       <div className="text-[11px] leading-tight text-attenue-texte">{libelle}</div>
       <div className={cn('text-base font-semibold tabular-nums sm:text-lg', teinte)}>{valeur}</div>
       {detail && <div className="text-[11px] leading-tight text-attenue-texte">{detail}</div>}

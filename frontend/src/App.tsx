@@ -9,7 +9,6 @@ import { Coquille } from './composants/Coquille'
 import { Alerte, Chargement } from './composants/ui/base'
 import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
-import { Cockpit } from './pages/Cockpit'
 import { HistoriquePrix } from './pages/HistoriquePrix'
 import { BonCommandeEtat } from './pages/BonCommandeEtat'
 import { BonMouvement } from './pages/BonMouvement'
@@ -39,6 +38,8 @@ import {
   EtatReception,
 } from './pages/EtatsDocuments'
 import { AnalyseAbcXyz } from './pages/AnalyseAbcXyz'
+import { VueEnsemble } from './pages/tableau-de-bord/VueEnsemble'
+import { PageTableauDeBord } from './pages/tableau-de-bord/Page'
 import { CoutRevient } from './pages/CoutRevient'
 import { RapportsFinanciers } from './pages/RapportsFinanciers'
 import { QualiteEtat } from './pages/QualiteEtat'
@@ -55,6 +56,8 @@ import { Fournisseurs } from './pages/Fournisseurs'
 import { Referentiels } from './pages/Referentiels'
 import { Stock } from './pages/Stock'
 import { Machines } from './pages/Machines'
+import { MachineEcran } from './pages/machines/Bureau'
+import { FicheMachine, NouvelleFicheMachine } from './pages/machines/Fiche'
 import { ParcMachines } from './pages/ParcMachines'
 import { Accueil } from './pages/Accueil'
 import { Mouvements } from './pages/Mouvements'
@@ -156,10 +159,13 @@ const ECRANS = (
           derriere une seule porte : chacune se met en signet, se retrouve au
           menu, et s'ouvre dans son propre onglet. C'est l'organisation des
           espaces Fiori et des menus d'application Odoo. */}
+      {/* LA VUE D'ENSEMBLE (06/10/2026) ouvre le tableau de bord ; les autres
+          pages (risques et files, analyse, opportunites, matiere) gardent leur
+          adresse sous /tableau-de-bord/:vue. */}
       <Route path="tableau-de-bord"
-             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+             element={<ExigeModule module="COCKPIT"><VueEnsemble /></ExigeModule>} />
       <Route path="tableau-de-bord/:vue"
-             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+             element={<ExigeModule module="COCKPIT"><PageTableauDeBord /></ExigeModule>} />
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
       <Route path="catalogue/completer" element={<ExigeModule module="CATALOGUE"><CompleterCatalogue /></ExigeModule>} />
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
@@ -171,6 +177,10 @@ const ECRANS = (
           qui n'a que STOCK. Le `Verrou` d'authentification suffit. */}
       <Route path="guide-utilisateur" element={<GuideUtilisateur />} />
       <Route path="machines" element={<ExigeModule module="STOCK"><Machines /></ExigeModule>} />
+      {/* UNE MACHINE, UNE FICHE : chacune son ecran et son adresse, jamais une fenetre surgissante. */}
+      <Route path="machines/fiches/:id" element={<ExigeModule module="STOCK"><FicheMachine /></ExigeModule>} />
+      <Route path="machines/:code" element={<ExigeModule module="STOCK"><MachineEcran /></ExigeModule>} />
+      <Route path="machines/:code/fiche/:type/:zone" element={<ExigeModule module="STOCK"><NouvelleFicheMachine /></ExigeModule>} />
       {/* LE PARC EST DU PARAMETRAGE, pas de l exploitation : module PARAMETRES,
           donc la direction et les super-utilisateurs. */}
       <Route path="parc-machines" element={<ExigeModule module="PARAMETRES"><ParcMachines /></ExigeModule>} />

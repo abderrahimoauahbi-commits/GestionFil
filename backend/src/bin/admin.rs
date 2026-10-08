@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://gestionfil@127.0.0.1/gestionfil".into());
     let pool = db::connect(&url)
         .await
-        .context("connexion a la base impossible")?;
+        .context("base inaccessible ou non conforme")?;
 
     match args.first().map(String::as_str) {
         Some("definir-mot-de-passe") => {

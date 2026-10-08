@@ -20,6 +20,7 @@
 //! portee par la transaction, invisible aux autres sessions, et disparait au
 //! COMMIT. Les declencheurs ont ete portes en consequence (66 lectures).
 
+use anyhow::Context;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
 use std::str::FromStr;
@@ -73,9 +74,10 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
         .max_connections(16)
         .acquire_timeout(Duration::from_secs(10))
         .connect_with(options)
-        .await?;
+        .await
+        .context("connexion a la base impossible : verifier DATABASE_URL et que PostgreSQL ecoute")?;
 
-    verifier_schema(&pool).await?;
+    verifier_schema(&pool).await.context("base non conforme a ce serveur")?;
     Ok(pool)
 }
 
@@ -84,6 +86,49 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
 /// Mieux vaut refuser de demarrer que servir des ecrans vides sur une base
 /// incomplete : l'erreur se lit alors dans le journal du service, pas dans le
 /// support utilisateur trois jours plus tard.
+/// Les migrations dont le code a besoin, chacune avec un temoin qui vaut vrai
+/// une fois jouee (la derniere colonne qu'elle ajoute). A completer a chaque
+/// migration dont le binaire depend.
+const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
+    (
+        "2026-10-03b_multiple_achat_palette.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'arrondi_palette')",
+    ),
+    (
+        "2026-10-03c_suivi_conditionnement.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_suivi_conditionnement')",
+    ),
+    (
+        "2026-10-05_decisions_machine.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'machine_decision_ligne'
+                           AND column_name = 'pourcentage_theorique')",
+    ),
+    (
+        "2026-10-05b_recommandations_audit.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_cmup_annuler_entree')",
+    ),
+    (
+        "2026-10-06_preferences_utilisateur.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables
+                         WHERE table_schema = 'public' AND table_name = 'preference_utilisateur')",
+    ),
+    (
+        // Controle des receptions d'import (statut_qualite), annulation
+        // d'inventaire (motif_annulation), tolerance de pesee, montants du fil.
+        "2026-10-08_regles_p1.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_reception_lignes'
+                           AND column_name = 'statut_qualite')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'inventaire'
+                           AND column_name = 'motif_annulation')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_tolerance_pesee')",
+    ),
+];
+
 async fn verifier_schema(pool: &Db) -> anyhow::Result<()> {
     let tables: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM information_schema.tables
@@ -123,6 +168,25 @@ async fn verifier_schema(pool: &Db) -> anyhow::Result<()> {
         anyhow::bail!(
             "declencheurs manquants ({} sur 76) : les regles metier ne seraient plus appliquees",
             declencheurs
+        );
+    }
+
+    // LES MIGRATIONS SE JOUENT A LA MAIN, SANS TABLE DE SUIVI : un binaire neuf
+    // sur une base qui ne l'a pas suivie demarre sans broncher, puis repond
+    // « erreur interne » a chaque geste touche (05/10/2026, fiches machine).
+    // Mieux vaut refuser de demarrer en nommant TOUS les fichiers a jouer, dans l'ordre.
+    let mut manquantes = Vec::new();
+    for (fichier, temoin) in MIGRATIONS_REQUISES {
+        let presente: bool = sqlx::query_scalar(temoin).fetch_one(pool).await?;
+        if !presente {
+            manquantes.push(format!("db/pg/migrations/{fichier}"));
+        }
+    }
+    if !manquantes.is_empty() {
+        anyhow::bail!(
+            "migration(s) manquante(s), a jouer dans cet ordre sur cette base (apres sauvegarde) \
+             avant de demarrer ce serveur : {}",
+            manquantes.join(", ")
         );
     }
 

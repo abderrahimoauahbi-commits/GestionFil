@@ -166,6 +166,34 @@ pub async fn droits_champ(
         .collect())
 }
 
+/// LES MONTANTS MASQUES LE SONT PARTOUT (regle 16, 08/10/2026).
+///
+/// Le masquage se faisait module par module : une route qui servait un prix
+/// sous un autre module que le sien — la completion du catalogue, le detail
+/// d'un controle, l'analyse du tableau de bord — le laissait passer, parce que
+/// le champ n'etait masque que dans SON module. Un champ SENSIBLE (un montant,
+/// un prix, une devise) masque pour ce compte dans un module l'est desormais
+/// dans toute reponse qui porte le meme nom. Les champs non sensibles gardent
+/// leur portee de module : « statut » ou « numero » masques a l'import ne
+/// doivent pas disparaitre du reste de l'ERP.
+pub async fn sensibles_masques(db: &Db, id_utilisateur: &str) -> AppResult<HashMap<String, Niveau>> {
+    let champs: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT cc.champ
+           FROM champ_configurable cc
+           JOIN utilisateur u ON u.id_utilisateur = $1
+           LEFT JOIN droit_champ dc
+                  ON dc.module = cc.module AND dc.champ = cc.champ
+                 AND dc.id_utilisateur = $1
+          WHERE cc.sensible = 1
+            AND u.code_role_user <> 'ADMIN'
+            AND COALESCE(dc.niveau, cc.niveau_defaut) = 'MASQUE'",
+    )
+    .bind(id_utilisateur)
+    .fetch_all(db)
+    .await?;
+    Ok(champs.into_iter().map(|c| (c, Niveau::Masque)).collect())
+}
+
 /// Retire recursivement d'une reponse JSON les champs de niveau MASQUE.
 ///
 /// Le masquage se fait a la sortie plutot que par une projection SQL differente

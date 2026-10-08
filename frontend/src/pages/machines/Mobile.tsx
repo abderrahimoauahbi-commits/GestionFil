@@ -23,12 +23,12 @@ import { Alerte, Chargement } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
 import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import {
-  CLASSE_ECART, ecartPoidsBobine, etatKg, fmtDate, LIBELLE_TYPE, ligneNeuve, machinesApi, nb,
-  rappelCatalogue, signePct,
-  type Machine, type TypeFiche, type Zone,
+  CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, LIBELLE_DESTINATION, LIBELLE_EFFET,
+  LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue, signePct,
+  type Destination, type Machine, type TypeFiche, type Zone,
 } from './noyau'
 import { useFiche } from './useFiche'
-import { QuestionStock, useValiderFiche } from './Questions'
+import { useValiderFiche } from './Questions'
 
 interface Magasin {
   code_magasin: string
@@ -290,7 +290,7 @@ function ZoneMobile({
                 /* L'ECART AU CATALOGUE, a cote du poids constate : le meme
                    calcul et les memes couleurs que pendant la saisie. */
                 const pct = ecartPoidsBobine({
-                  poids_unitaire: l.poids_unitaire_kg ?? 0,
+                  poids: l.poids_unitaire_kg ?? 0,
                   poids_catalogue: l.poids_catalogue_kg,
                 })
                 const c = couleurEcart(pct, tolerances)
@@ -336,7 +336,7 @@ function ZoneMobile({
             className="min-h-[52px] rounded-[var(--radius-sm)] border border-bordure
                        text-[12px] font-medium text-texte active:bg-attenue"
           >
-            {t === 'CHARGE' ? 'Charger' : t === 'DECHARGE' ? 'Décharger' : 'Mettre à jour'}
+            {t === 'CHARGE' ? 'Charger' : t === 'DECHARGE' ? 'Décharger' : 'Constater'}
           </button>
         ))}
       </div>
@@ -382,9 +382,7 @@ function FicheMobile({
   const toucheMagasin = type === 'CHARGE' || type === 'DECHARGE'
   const [choix, setChoix] = useState(false)
 
-  /* LES LOTS DU MAGASIN D'ORIGINE, LE PLUS ANCIEN D'ABORD (FIFO). Au
-     telephone, on ne tape pas une reference : on la choisit parmi ce que le
-     magasin tient vraiment, lot par lot. */
+  /* LES LOTS DU MAGASIN D'ORIGINE, LE PLUS ANCIEN D'ABORD (FIFO). */
   const qLots = useQuery({
     queryKey: ['stock-lots-magasin', f.entete.magasin],
     queryFn: () =>
@@ -407,18 +405,17 @@ function FicheMobile({
   if (f.envoi.isSuccess) {
     return (
       <div className="flex flex-col gap-3 pb-4">
-        <Fil titre="Fiche validée" sous={zone.libelle} retour={retour} />
-        <Alerte ton="succes" titre="Constat enregistré">
+        <Fil titre="Décision validée" sous={zone.libelle} retour={retour} />
+        <Alerte ton="succes" titre={`Validation n°${f.envoi.data?.numero_validation}`}>
           {f.envoi.data?.mouvement
             ? `Mouvement ${f.envoi.data.mouvement} enregistré au magasin.`
-            : 'Aucun mouvement : cette fiche ne touche aucun magasin.'}
-          {f.envoi.data?.correction && ` Correction de stock ${f.envoi.data.correction} tracée.`}
+            : 'Aucun mouvement de magasin.'}
+          {` Consommation : ${nb(f.envoi.data?.consomme_kg ?? 0, 1)} kg.`}
         </Alerte>
         <button
           type="button"
           onClick={retour}
-          className="min-h-[56px] rounded-[var(--radius-sm)] bg-primaire text-[15px]
-                     font-semibold text-primaire-texte"
+          className="min-h-[56px] rounded-[var(--radius-sm)] bg-primaire text-[15px] font-semibold text-primaire-texte"
         >
           Retour à la zone
         </button>
@@ -440,23 +437,22 @@ function FicheMobile({
     )
   }
 
+  const e = l ? estimer(type, l) : null
+  const motif = l ? f.motifDe(l.code_motif) : undefined
+  const destinations = destinationsDe(motif)
+  const effets = (motif?.effets_permis ?? '').split(',').filter(Boolean)
+  const toutRetire = !!l && type === 'DECHARGE' && l.mouvementees > 0 && l.mouvementees >= l.avant_bobines
+
   return (
-    <div className="flex flex-col gap-3 pb-28 max-md:pb-48">
+    <div className="flex flex-col gap-3 pb-28 max-md:pb-56">
       <Fil titre={LIBELLE_TYPE[type]} sous={zone.libelle} retour={retour} />
 
-      {/* --- L'entete, replie en trois champs -------------------------- */}
+      {/* --- L'entete ------------------------------------------------------ */}
       <div className="grid grid-cols-2 gap-2">
         <ChampM label="Date" type="date" v={f.entete.date}
-                set={(v) => f.setEntete({ ...f.entete, date: v })} />
+                set={(x) => f.setEntete({ ...f.entete, date: x })} />
         <ChampM label="Responsable" v={f.entete.responsable}
-                set={(v) => f.setEntete({ ...f.entete, responsable: v })} />
-        {/* LE NOMBRE D'EMPLACEMENTS FAIT AUTORITE. Le magasinier constate le
-            physique : s'il declare 1300 la ou le parametrage en porte 1344,
-            c'est la zone qui passera a 1300 a la validation. */}
-        {type !== 'MAJ' && (
-          <ChampNum label="Emplacements de la zone" v={f.entete.bobinesEtage}
-                    set={(v) => f.setEntete({ ...f.entete, bobinesEtage: v })} />
-        )}
+                set={(x) => f.setEntete({ ...f.entete, responsable: x })} />
         {toucheMagasin && (
           <label className="col-span-2 flex flex-col gap-1">
             <span className="text-[12px] text-attenue-texte">
@@ -464,23 +460,18 @@ function FicheMobile({
             </span>
             <select
               value={f.entete.magasin}
-              onChange={(e) => f.setEntete({ ...f.entete, magasin: e.target.value })}
+              onChange={(ev) => f.setEntete({ ...f.entete, magasin: ev.target.value })}
               className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
             >
               <option value="">—</option>
               {(qMag.data ?? []).map((m) => (
-                <option key={m.code_magasin} value={m.code_magasin}>
-                  {m.nom}
-                </option>
+                <option key={m.code_magasin} value={m.code_magasin}>{m.nom}</option>
               ))}
             </select>
           </label>
         )}
       </div>
 
-      {/* --- AJOUTER UNE REFERENCE (chargement) ------------------------
-          Le bureau l'avait, le telephone non : une zone vide ne se chargeait
-          donc pas depuis le terrain. */}
       {type === 'CHARGE' && (
         <button
           type="button"
@@ -495,7 +486,7 @@ function FicheMobile({
         </button>
       )}
 
-      {/* --- Le sélecteur de ligne -------------------------------------- */}
+      {/* --- Le selecteur de ligne ------------------------------------------- */}
       {f.lignes.length > 1 && (
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {f.lignes.map((x, i) => (
@@ -506,6 +497,7 @@ function FicheMobile({
               className={cn(
                 'min-h-[40px] shrink-0 rounded-[var(--radius-sm)] px-3 text-[12px] font-medium',
                 i === active ? 'bg-primaire text-primaire-texte' : 'border border-bordure',
+                (type === 'MAJ' || x.mouvementees > 0) && i !== active && 'border-primaire/60',
               )}
             >
               {x.designation.slice(0, 14)}
@@ -514,27 +506,25 @@ function FicheMobile({
         </div>
       )}
 
-      {l && (
+      {l && e && (
         <>
-          {/* --- LE CONSTAT, AU-DESSUS DU CLAVIER ---------------------- */}
+          {/* --- L'ETAT AVANT ET L'ESTIMATION, AU-DESSUS DU CLAVIER ----------- */}
           <div className="rounded-[var(--radius-sm)] border-y-2 border-primaire bg-attenue px-3 py-2">
             <div className="mb-1 truncate text-[13px] font-medium text-texte">{l.designation}</div>
-            <R t="Avant" v={`${l.avant_bobines} bob · ${nb(l.avant_kg)} kg`} />
-            {l.avant_date && <R t="Constaté le" v={fmtDate(l.avant_date)} />}
-            <R t="Constaté maintenant" v={`${nb(etatKg(l))} kg`} fort />
-            {/* PAS DE CONSOMMATION ICI. Elle ne s'attribue pas a un
-                chargement : elle se lit en cumul, dans le journal. Afficher un
-                chiffre par ligne inviterait a le croire. */}
-            <R t="Écart avec l’état d’avant" v={`${nb(etatKg(l) - l.avant_kg)} kg`} />
+            <R t="Avant" v={`${l.avant_bobines} bob · ${l.avant_pourcentage != null ? nb(l.avant_pourcentage, 1) + ' %' : '—'} · ${nb(l.avant_kg, 1)} kg`} />
+            {l.avant_date && <R t="Dernier état le" v={fmtDate(l.avant_date)} />}
+            <R t="Après (estimé)" v={`${e.nbApres} bob · ${nb(e.kgApres, 1)} kg`} fort />
+            {type === 'CHARGE' && e.theorique != null && <R t="% théorique" v={`${nb(e.theorique, 1)} %`} />}
+            <R t="Écart" v={`${nb(e.ecart, 1)} kg`} alerte={e.ecart < -0.0005} />
           </div>
 
-          {/* --- La saisie, un champ par ligne ------------------------- */}
-          {type === 'CHARGE' ? (
+          {/* --- La saisie ------------------------------------------------------ */}
+          {type === 'CHARGE' && l.avant_bobines === 0 ? (
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-attenue-texte">Lot (le plus ancien d’abord)</span>
               <select
                 value={l.lot_fournisseur}
-                onChange={(e) => f.majLigne(l.cle, 'lot_fournisseur', e.target.value)}
+                onChange={(ev) => f.majLigne(l.cle, 'lot_fournisseur', ev.target.value)}
                 className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
               >
                 {!lotsDe(l.code_reference).some((x) => x.lot_fournisseur === l.lot_fournisseur) &&
@@ -548,71 +538,108 @@ function FicheMobile({
                       {x.lot_fournisseur} · {nb(x.quantite_kg, 0)} kg · {fmtDate(x.date_premiere_entree)}
                     </option>
                   ))}
-                {/* TOUJOURS PROPOSE : le fournisseur n'a pas toujours mis de
-                    lot, et certaines references ne se gerent pas par lot. */}
                 <option value={SANS_LOT}>Sans lot</option>
               </select>
             </label>
           ) : (
-            <ChampM label="Lot" v={l.lot_fournisseur}
-                    set={(v) => f.majLigne(l.cle, 'lot_fournisseur', v)} />
-          )}
-          {(type === 'CHARGE' || type === 'DECHARGE') && (
-            <ChampNum
-              label={type === 'DECHARGE' ? 'Bobines retirées' : 'Bobines chargées'}
-              v={l.mouvementees}
-              set={(v) => f.majLigne(l.cle, 'mouvementees', v)}
-            />
-          )}
-          {/* UNE MISE A JOUR NE CHANGE QUE LES POURCENTAGES. Le compte ne
-              baisse que par un dechargement ou une redistribution — les deux
-              passent par une autre fiche. */}
-          {type === 'MAJ' ? (
-            <div className="flex items-baseline justify-between rounded-[var(--radius-sm)]
-                            border border-bordure bg-attenue px-2.5 py-2">
-              <span className="text-[12px] text-attenue-texte">Bobines présentes</span>
-              <span className="text-[16px] font-medium tabular-nums text-texte">{l.presentes}</span>
+            <div className="flex items-baseline justify-between rounded-[var(--radius-sm)] border border-bordure bg-attenue px-2.5 py-2">
+              <span className="text-[12px] text-attenue-texte">Lot</span>
+              <span className="font-mono text-[13px]">{libelleLot(l.lot_fournisseur)}</span>
             </div>
-          ) : (
-            <ChampNum
-              label={`Bobines présentes après (max ${zone.capacite_bobines})`}
-              v={l.presentes}
-              set={(v) => f.majLigne(l.cle, 'presentes', v)}
-            />
           )}
-          {/* LE RAPPEL CATALOGUE SOUS LE CHAMP : la bobine pesee ou lue sur
-              l'etiquette se compare au catalogue sans quitter la saisie. */}
-          <ChampNum label="Poids par bobine (kg)" v={l.poids_unitaire} pas={0.001}
-                    set={(v) => f.majLigne(l.cle, 'poids_unitaire', v)}
-                    aide={(() => {
-                      const rappel = rappelCatalogue(l)
-                      if (!rappel) return 'Pas de poids de bobine au catalogue'
-                      const c = couleurEcart(ecartPoidsBobine(l), tolerances)
-                      return (
-                        <span className={cn('font-medium', c ? CLASSE_ECART[c] : 'text-attenue-texte')}>
-                          {rappel}
-                        </span>
-                      )
-                    })()} />
-          <ChampNum label="Pourcentage restant" v={l.pourcentage} pas={0.1} max={100}
-                    set={(v) => f.majLigne(l.cle, 'pourcentage', v)} grand />
+
+          {type === 'CHARGE' && (
+            <>
+              <ChampNum label="Bobines à charger" v={l.mouvementees} set={(x) => f.majLigne(l.cle, 'mouvementees', x)} />
+              <ChampNum label="Poids par bobine chargée (kg)" v={l.poids_retenu} pas={0.001}
+                        set={(x) => f.majLigne(l.cle, 'poids_retenu', x)}
+                        aide={(() => {
+                          const rappel = rappelCatalogue({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue })
+                          if (!rappel) return 'Pas de poids de bobine au catalogue'
+                          const c = couleurEcart(ecartPoidsBobine({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue }), tolerances)
+                          return <span className={cn('font-medium', c ? CLASSE_ECART[c] : 'text-attenue-texte')}>{rappel}</span>
+                        })()} />
+              <ChampNum label="% de toute la ligne après le chargement" v={l.pourcentage} pas={0.1} max={500}
+                        set={(x) => f.majLigne(l.cle, 'pourcentage', x)} grand />
+            </>
+          )}
+          {type === 'DECHARGE' && (
+            <>
+              <ChampNum label={`Bobines à retirer (sur ${l.avant_bobines})`} v={l.mouvementees} max={l.avant_bobines}
+                        set={(x) => f.majLigne(l.cle, 'mouvementees', x)} />
+              <ChampNum label="% des bobines retirées" v={l.pct_retirees} pas={0.1} max={500}
+                        set={(x) => f.majLigne(l.cle, 'pct_retirees', x)} />
+              {!toutRetire && (
+                <ChampNum label="% des bobines qui restent" v={l.pourcentage} pas={0.1} max={500}
+                          set={(x) => f.majLigne(l.cle, 'pourcentage', x)} grand />
+              )}
+            </>
+          )}
+          {type === 'MAJ' && (
+            <>
+              <ChampNum label="Bobines présentes" v={l.presentes} set={(x) => f.majLigne(l.cle, 'presentes', x)} />
+              <ChampNum label="% constaté" v={l.pourcentage} pas={0.1} max={500}
+                        set={(x) => f.majLigne(l.cle, 'pourcentage', x)} grand />
+            </>
+          )}
+
+          {(type === 'MAJ' || l.mouvementees > 0) && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] text-attenue-texte">Motif</span>
+                <select
+                  value={l.code_motif}
+                  onChange={(ev) => f.majLigne(l.cle, 'code_motif', ev.target.value)}
+                  className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
+                >
+                  <option value="">—</option>
+                  {f.motifs.map((m) => (
+                    <option key={m.code_motif} value={m.code_motif}>{m.libelle}</option>
+                  ))}
+                </select>
+              </label>
+              {type === 'DECHARGE' && destinations.length > 1 && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] text-attenue-texte">Destination des bobines retirées</span>
+                  <select
+                    value={l.destination}
+                    onChange={(ev) => f.majLigne(l.cle, 'destination', ev.target.value as Destination)}
+                    className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
+                  >
+                    <option value="">—</option>
+                    {destinations.map((d) => (
+                      <option key={d} value={d}>{LIBELLE_DESTINATION[d]}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {motif && !motif.effet_defaut && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] text-attenue-texte">L’écart compte comme</span>
+                  <select
+                    value={l.effet_ecart}
+                    onChange={(ev) => f.majLigne(l.cle, 'effet_ecart', ev.target.value)}
+                    className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[14px]"
+                  >
+                    <option value="">—</option>
+                    {effets.map((x) => (
+                      <option key={x} value={x}>{LIBELLE_EFFET[x] ?? x}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <ChampM label="Précision (facultatif)" v={l.motif_texte}
+                      set={(x) => f.majLigne(l.cle, 'motif_texte', x)} />
+            </>
+          )}
         </>
       )}
 
-      {f.totaux.ecart !== 0 && (
-        <Alerte
-          ton="danger"
-          titre={f.totaux.ecart < 0 ? 'Compte incomplet' : 'Trop de bobines'}
-        >
-          {f.totaux.ecart < 0
-            ? `Il manque ${-f.totaux.ecart} bobines sur ${f.entete.bobinesEtage}. Saisissez ce que vous avez monté : les présentes suivront.`
-            : `${f.totaux.ecart} bobines de trop sur ${f.entete.bobinesEtage}.`}
-        </Alerte>
+      {f.calculer.isError && (
+        <Alerte ton="danger" titre="Aperçu impossible">{(f.calculer.error as Error).message}</Alerte>
       )}
       {f.envoi.isError && (
-        <Alerte ton="danger" titre="Validation refusée">
-          {(f.envoi.error as Error).message}
-        </Alerte>
+        <Alerte ton="danger" titre="Validation refusée">{(f.envoi.error as Error).message}</Alerte>
       )}
 
       <div
@@ -621,55 +648,61 @@ function FicheMobile({
         style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}
       >
         <div className="mb-1.5 flex justify-between px-1 text-[12px] tabular-nums">
-          <span className={cn(f.totaux.ecart !== 0 ? 'font-medium text-danger' : 'text-attenue-texte')}>
-            {f.totaux.presentes} / {f.entete.bobinesEtage} bobines
+          <span className={cn(f.totaux.apres > f.totaux.places ? 'font-medium text-danger' : 'text-attenue-texte')}>
+            {f.totaux.apres} / {f.totaux.places} places
           </span>
-          <span className="font-medium text-texte">{nb(f.totaux.etatKg)} kg constatés</span>
+          <span className="font-medium text-texte">écart {nb(f.totaux.ecart, 1)} kg</span>
         </div>
-        {/* MEME QUESTION QU'AU BUREAU, en plus court : sur un telephone tenu
-            d'une main devant un metier, on lit trois lignes, pas dix. */}
-        {f.lotCourt && (
-          <div className="mb-2 rounded-[var(--radius)] border border-l-[3px] border-alerte/30
-                          border-l-alerte bg-alerte/[0.09] px-3 py-2.5 text-[13px]">
-            <p className="leading-relaxed">
-              Le solde connu de ce lot ne couvre pas la sortie. Les retours de machine
-              sont imputes au juge : la matiere est peut-etre bien la.
-            </p>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                disabled={f.envoi.isPending}
-                onClick={() => f.envoi.mutate({ forcerLot: true })}
-                className="min-h-[44px] flex-1 rounded-[var(--radius-sm)] bg-alerte px-3
-                           text-[14px] font-semibold text-surface disabled:opacity-40"
-              >
-                Charger quand meme
-              </button>
-              <button
-                type="button"
-                onClick={f.oublierLotCourt}
-                className="min-h-[44px] rounded-[var(--radius-sm)] border border-bordure px-3
-                           text-[14px] font-medium"
-              >
-                Corriger
-              </button>
-            </div>
+
+        {/* L'APERCU, EN COURT : ce qui bloque, ou le feu vert. */}
+        {f.apercu && f.apercu.blocages.length === 0 && (
+          <div className="mb-2 max-h-[30vh] space-y-1 overflow-auto rounded-[var(--radius)] border border-l-[3px] border-succes/30 border-l-succes bg-succes/[0.06] px-3 py-2 text-[12.5px] tabular-nums">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-attenue-texte">Ce que la validation enregistrera</p>
+            {f.apercu.lignes.map((l) => (
+              <div key={l.ligne_numero}>
+                <span className="font-mono text-[11px]">{l.lot_fournisseur}</span>{' '}
+                {l.nb_avant} · {nb(l.kg_avant, 1)} → <strong>{l.nb_apres} · {nb(l.kg_apres, 1)} kg</strong>
+                <span className="text-attenue-texte">
+                  {' '}· écart {nb(l.ecart_kg, 1)} kg{l.ecart_kg !== 0 && ` (${LIBELLE_EFFET[l.effet_ecart] ?? l.effet_ecart})`}
+                </span>
+              </div>
+            ))}
           </div>
         )}
+        {f.apercu && f.apercu.blocages.length > 0 && (
+          <div className="mb-2 rounded-[var(--radius)] border border-l-[3px] border-danger/30 border-l-danger bg-danger/[0.07] px-3 py-2 text-[13px]">
+            {f.apercu.blocages.map((b) => (
+              <p key={b}>{b.replace(/^(STOCK|LOT)-INSUFFISANT : (chargement bloque — )?/, '').replace(/\. Prevenez le directeur.*$/, '')}</p>
+            ))}
+            {f.stockCourt && <p className="mt-1 font-medium">Prévenez le directeur ou l’administrateur.</p>}
+          </div>
+        )}
+        {f.apercuPerime && (
+          <p className="mb-2 px-1 text-[12px] text-alerte">Saisie modifiée : refaites l’aperçu.</p>
+        )}
 
-        <QuestionStock f={f} grand />
         {v.element}
-        <button
-          type="button"
-          disabled={!f.pret || f.envoi.isPending || !!f.stockCourt}
-          onClick={v.valider}
-          className="inline-flex min-h-[56px] w-full items-center justify-center gap-2
-                     rounded-[var(--radius-sm)] bg-primaire text-[15px] font-semibold
-                     text-primaire-texte disabled:opacity-40"
-        >
-          {f.envoi.isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-          Valider la fiche
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={!f.pret || f.calculer.isPending}
+            onClick={() => f.calculer.mutate()}
+            className="inline-flex min-h-[56px] flex-1 items-center justify-center gap-2 rounded-[var(--radius-sm)] border border-primaire text-[15px] font-semibold text-primaire disabled:opacity-40"
+          >
+            {f.calculer.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+            Aperçu
+          </button>
+          <button
+            type="button"
+            disabled={!f.peutValider || f.envoi.isPending}
+            onClick={v.valider}
+            className="inline-flex min-h-[56px] flex-[2] items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-primaire text-[15px] font-semibold text-primaire-texte disabled:opacity-40"
+          >
+            {f.envoi.isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            Valider
+          </button>
+        </div>
+        {f.manque && <p className="text-center text-[13px] text-attenue-texte">{f.manque}</p>}
       </div>
     </div>
   )

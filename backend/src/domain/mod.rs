@@ -6,6 +6,7 @@
 
 pub mod classification;
 pub mod cours_bam;
+pub mod decision_machine;
 pub mod importation;
 pub mod inventaire;
 pub mod mrp;
@@ -14,4 +15,5 @@ pub mod plan_achat;
 pub mod reception;
 pub mod sauvegarde;
 pub mod transfert;
+pub mod transitions;
 pub mod unites;

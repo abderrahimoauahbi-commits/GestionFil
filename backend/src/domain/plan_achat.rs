@@ -118,10 +118,20 @@ pub async fn generer(
                 pa.devise, pa.prix_devise, pa.montant_devise, pa.taux_devise,
                 pa.palettes_a_commander
            FROM v_plan_achat pa
+          -- UNE REFERENCE COMMANDEE SE REPROPOSE (06/10/2026). Elle etait
+          -- ecartee a vie des sa premiere commande. Or un bon VALIDE, ENVOYE ou
+          -- LIVRE_PARTIEL est deja deduit par l'en-cours de la vue, et un bon
+          -- CLOTURE est en stock : ce qui reste a proposer est un vrai besoin.
+          -- Seul un bon pas encore valide (BROUILLON, EN_ATTENTE_VALIDATION),
+          -- que l'en-cours ne compte pas, ecarte encore la reference.
           WHERE NOT EXISTS (
                 SELECT 1 FROM plan_achat pa2
                  WHERE pa2.code_reference = pa.code_reference
-                   AND pa2.statut IN ('COMMANDE','IGNORE'))
+                   AND (pa2.statut = 'IGNORE'
+                        OR (pa2.statut = 'COMMANDE'
+                            AND EXISTS (SELECT 1 FROM bon_commande bc
+                                         WHERE bc.id_bc = pa2.id_bc_genere
+                                           AND bc.statut IN ('BROUILLON','EN_ATTENTE_VALIDATION')))))
             -- Une proposition ARBITREE couvre deux references a la fois : celle
             -- qu'on achetera, et celle dont le besoin a ete reporte. Les deux
             -- doivent etre ecartees ici. Oublier la seconde recreerait le besoin

@@ -397,8 +397,25 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
   const typeChoisi = qParam.data?.find((p) => p.id_frais === n.id_frais)
   const montantDh = nombre(n.montant_devise) * (n.code_devise === 'MAD' ? 1 : nombre(n.cours_change))
 
+  /* LE COURS DU JOUR EST PROPOSE (06/10/2026), comme sur les factures : un frais
+     en devise laisse au cours 1 entrait au cout de revient au cours du dirham. */
+  const fraisEnDevise = n.code_devise !== 'MAD'
+  const aujourdhui = new Date().toISOString().slice(0, 10)
+  const qTauxFrais = useQuery({
+    queryKey: ['taux-reference', n.code_devise, aujourdhui],
+    queryFn: () =>
+      api.get<{ reference: number | null; source: string | null }>(
+        `/api/import/taux-reference?devise=${encodeURIComponent(n.code_devise)}&date=${aujourdhui}`,
+      ),
+    enabled: ecrire && fraisEnDevise,
+  })
+  const coursPropose = fraisEnDevise ? (qTauxFrais.data?.reference ?? null) : null
+  useEffect(() => {
+    if (coursPropose && n.cours_change === '') setN((x) => ({ ...x, cours_change: String(coursPropose) }))
+  }, [coursPropose, n.cours_change])
+
   const ajouter = useMutation({
-    mutationFn: () =>
+    mutationFn: (confirme?: boolean) =>
       api.post(`/api/import/dossiers/${idDossier}/frais`, {
         id_frais: n.id_frais,
         libelle: n.libelle || null,
@@ -406,6 +423,7 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
         montant_devise: nombre(n.montant_devise),
         code_devise: n.code_devise,
         cours_change: n.code_devise === 'MAD' ? 1 : nombre(n.cours_change),
+        taux_confirme: confirme === true,
       }),
     onSuccess: () => {
       toast.success(
@@ -418,7 +436,19 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
       setN(vide)
       rafraichir()
     },
-    onError: echec,
+    onError: (e: unknown) => {
+      const message = e instanceof Error ? e.message : String(e)
+      if (message.includes('TAUX-ECART')) {
+        confirmation.demander({
+          titre: 'Cours éloigné de celui de Bank Al-Maghrib',
+          description: message.replace(/^TAUX-ECART : /, ''),
+          libelleConfirmer: 'Je confirme ce cours',
+          action: () => ajouter.mutate(true),
+        })
+        return
+      }
+      echec(e)
+    },
   })
   const supprimer = useMutation({
     mutationFn: (idFrais: string) => api.delete(`/api/import/frais/${idFrais}`),
@@ -433,10 +463,15 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
   const hors = d.frais.filter((f) => f.inclus_dans_cout === 0).reduce((t, f) => t + f.montant_dhs, 0)
   const complet = n.id_frais && nombre(n.montant_devise) > 0 && (n.code_devise === 'MAD' || nombre(n.cours_change) > 0)
   const maj = (k: keyof typeof n) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setN((x) => ({ ...x, [k]: e.target.value, ...(k === 'code_devise' && e.target.value === 'MAD' ? { cours_change: '1' } : {}) }))
+    setN((x) => ({
+      ...x,
+      [k]: e.target.value,
+      // Passer a une devise vide le cours : celui du jour vient s'y proposer.
+      ...(k === 'code_devise' ? { cours_change: e.target.value === 'MAD' ? '1' : '' } : {}),
+    }))
   // Le frais en cours de saisie, complet, part avec « Enregistrer tout ».
   useEffect(() => {
-    signaler?.('frais', complet && ecrire ? { libelle: 'nouveau frais', enregistrer: () => ajouter.mutateAsync() } : null)
+    signaler?.('frais', complet && ecrire ? { libelle: 'nouveau frais', enregistrer: () => ajouter.mutateAsync(false) } : null)
   })
   useEffect(() => () => signaler?.('frais', null), [signaler])
 
@@ -550,7 +585,7 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
                   <td className={td}>
                     <Champ className="h-7 text-right" inputMode="decimal" value={n.montant_devise}
                       onChange={maj('montant_devise')} placeholder="0,00"
-                      onKeyDown={(e) => e.key === 'Enter' && complet && ajouter.mutate()} />
+                      onKeyDown={(e) => e.key === 'Enter' && complet && ajouter.mutate(false)} />
                   </td>
                   <td className={cn(td, 'text-right tabular-nums text-attenue-texte')}>
                     {montantDh > 0 ? fmt.nombre(montantDh, 2) : '—'}
@@ -569,7 +604,7 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
                       ))}
                   </td>
                   <td className={td}>
-                    <Bouton taille="sm" disabled={!complet} chargement={ajouter.isPending} onClick={() => ajouter.mutate()}>
+                    <Bouton taille="sm" disabled={!complet} chargement={ajouter.isPending} onClick={() => ajouter.mutate(false)}>
                       <Plus />
                       Ajouter
                     </Bouton>

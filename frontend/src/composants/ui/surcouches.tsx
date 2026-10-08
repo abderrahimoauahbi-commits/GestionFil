@@ -378,7 +378,10 @@ export function OngletsListe({
   return (
     <TabsPrimitive.List
       className={cn(
-        'defilement-x inline-flex h-9 items-center gap-1 rounded-lg bg-attenue p-1',
+        // DES ONGLETS SOULIGNES, PAS DES PILULES : ils se lisent comme les
+        // intercalaires d'un classeur, poses sur le filet qui separe la page
+        // de son contenu.
+        'onglets-liste defilement-x flex h-10 items-end gap-5 border-b border-bordure',
         className,
       )}
       {...props}
@@ -393,10 +396,10 @@ export function Onglet({
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium',
-        'text-attenue-texte transition-all outline-none',
+        'onglet relative -mb-px inline-flex h-10 items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-0.5 text-[13px] font-medium',
+        'text-attenue-texte transition-colors outline-none hover:text-texte',
         'focus-visible:ring-2 focus-visible:ring-anneau',
-        'data-[state=active]:bg-surface data-[state=active]:text-texte data-[state=active]:shadow-sm',
+        'data-[state=active]:border-primaire data-[state=active]:text-texte',
         className,
       )}
       {...props}

@@ -697,24 +697,43 @@ CREATE TRIGGER trg_ligne_reception_substitution
 BEFORE INSERT ON ligne_reception FOR EACH ROW
 EXECUTE FUNCTION fn_trg_ligne_reception_substitution();
 
-CREATE OR REPLACE FUNCTION fn_trg_ligne_reception_ecart() RETURNS trigger AS $$
-BEGIN
-    IF NEW.quantite_commandee_kg IS NOT NULL
- AND NEW.derogation_ecart = 0
- AND abs((NEW.quantite_stock_kg - NEW.quantite_commandee_kg) / NEW.quantite_commandee_kg * 100.0) >
-     COALESCE(
+-- LA TOLERANCE DE PESEE A UNE SEULE SOURCE (regle 14, 08/10/2026) : le reglage
+-- du fournisseur, et a defaut le parametre P_TolerEcartPesee (2 %).
+CREATE OR REPLACE FUNCTION fn_tolerance_pesee(p_id_reception text) RETURNS numeric AS $$
+    SELECT COALESCE(
         (SELECT f.tolerance_pesee_pct FROM reception rc
-         JOIN fournisseur f ON f.code_fournisseur = rc.code_fournisseur
-         WHERE rc.id_reception = NEW.id_reception),
-        (SELECT CAST(valeur_courante AS REAL) FROM parametre WHERE code_parametre = 'P_TolerEcartPesee')) THEN
-        RAISE EXCEPTION 'C10 : ecart de pesee hors tolerance. Une derogation tracee est requise (derogation_ecart = 1).';
+           JOIN fournisseur f ON f.code_fournisseur = rc.code_fournisseur
+          WHERE rc.id_reception = p_id_reception),
+        (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_TolerEcartPesee'),
+        2);
+$$ LANGUAGE sql STABLE;
+
+-- SEUL L'EXCEDENT EXIGE UNE DEROGATION (08/10/2026). Le controle refusait tout
+-- ecart a la quantite attendue, dans les deux sens : 1 000 kg livres sur 8 400
+-- restant a recevoir etaient refuses comme « hors tolerance ». Une livraison
+-- partielle n'est pas une faute de pesee : le bon reste LIVRE_PARTIEL et le
+-- reliquat viendra. Ce qui doit etre justifie, c'est de faire entrer PLUS que
+-- commande au-dela de la tolerance du fournisseur.
+-- A l'insertion ET a la modification : corriger une pesee sur la fiche ne doit
+-- pas contourner le controle.
+CREATE OR REPLACE FUNCTION fn_trg_ligne_reception_ecart() RETURNS trigger AS $$
+DECLARE
+    v_tol numeric;
+BEGIN
+    IF NEW.quantite_commandee_kg IS NOT NULL AND NEW.derogation_ecart = 0 THEN
+        v_tol := fn_tolerance_pesee(NEW.id_reception);
+        IF NEW.quantite_stock_kg > NEW.quantite_commandee_kg * (1 + v_tol / 100.0) + 0.0005 THEN
+            RAISE EXCEPTION 'C10 : % kg peses pour % kg attendus, au-dela de la tolerance de % %%. Une derogation motivee est requise.',
+                round(NEW.quantite_stock_kg, 2), round(NEW.quantite_commandee_kg, 2), round(v_tol, 2);
+        END IF;
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_ligne_reception_ecart
-BEFORE INSERT ON ligne_reception FOR EACH ROW
+BEFORE INSERT OR UPDATE OF quantite_stock_kg, quantite_commandee_kg, derogation_ecart
+ON ligne_reception FOR EACH ROW
 EXECUTE FUNCTION fn_trg_ligne_reception_ecart();
 
 CREATE TRIGGER trg_plan_achat_figement_trace

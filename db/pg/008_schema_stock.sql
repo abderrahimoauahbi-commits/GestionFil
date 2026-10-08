@@ -355,8 +355,16 @@ CREATE TABLE inventaire (
     id_utilisateur_responsable text NOT NULL REFERENCES utilisateur(id_utilisateur),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     date_cloture        text,
+    -- L'annulation d'un inventaire ouvert, motivee (regle 10, 08/10/2026).
+    motif_annulation    text,
+    id_utilisateur_annulation text REFERENCES utilisateur(id_utilisateur),
+    date_annulation     text,
     CHECK (statut <> 'CLOTURE' OR date_cloture IS NOT NULL)
 );
+
+-- UN SEUL INVENTAIRE EN COURS PAR MAGASIN (regle 10) : deux comptages ouverts
+-- appliqueraient deux fois les memes ecarts.
+CREATE UNIQUE INDEX ux_inventaire_en_cours ON inventaire(code_magasin) WHERE statut = 'EN_COURS';
 
 -- -----------------------------------------------------------------------------
 -- ligne_inventaire

@@ -131,6 +131,16 @@ const CHIFFRE: Record<TonStat, string> = {
   danger: 'text-danger',
 }
 
+/** Le filet d'etat en haut de la carte : la couleur sans l'aplat. */
+const FILET: Record<TonStat, string> = {
+  neutre: '',
+  primaire: 'bg-primaire',
+  succes: 'bg-succes',
+  alerte: 'bg-alerte',
+  grave: 'bg-danger/60',
+  danger: 'bg-danger',
+}
+
 export function CarteStat({
   Icone,
   libelle,
@@ -161,55 +171,49 @@ export function CarteStat({
     <Balise
       {...(surClic ? { type: 'button' as const, onClick: surClic } : {})}
       title={aide}
+      data-ton={ton}
       className={cn(
-        // L'AIR EST UN MATERIAU. A douze pixels de marge, le chiffre touchait
-        // le bord de la carte ; a seize, il est POSE dedans. C'est la
-        // difference qu'on percoit entre un ecran fait et un ecran soigne, et
-        // elle ne coute que quatre pixels.
-        'relative flex items-start gap-3.5 overflow-hidden rounded-[var(--radius-lg)]',
-        'border border-bordure bg-surface p-3 text-left shadow-[var(--ombre-pose)] sm:p-4',
-        surClic && 'carte-active cursor-pointer',
+        'carte-stat',
+        // UN INDICATEUR, PAS UNE TUILE DECORATIVE : le libelle en tete avec son
+        // icone, le chiffre dominant dessous, la precision en pied. Un filet de
+        // couleur en haut dit l'etat d'un coup d'oeil, sans fond teinte.
+        'group relative flex min-w-0 flex-col gap-2 overflow-hidden rounded-[var(--radius-lg)]',
+        'border border-bordure bg-surface px-4 pb-3.5 pt-3.5 text-left',
+        surClic && 'carte-active cursor-pointer transition-colors hover:border-champ/60',
       )}
     >
-      <span
-        className={cn(
-          // AU TELEPHONE, DEUX CARTES PAR LIGNE : la pastille y prenait la
-          // place du libelle, tronque en « VALEUR DU ST… ». Le chiffre prime.
-          'hidden size-10 shrink-0 place-items-center rounded-[var(--radius)] sm:grid',
-          PASTILLE[ton],
-        )}
-      >
-        <Icone className="size-[18px]" />
+      {ton !== 'neutre' && (
+        <span aria-hidden className={cn('filet-stat absolute inset-x-0 top-0 h-[2px]', FILET[ton])} />
+      )}
+      <span className="libelle-stat flex min-w-0 items-center gap-2 text-[12px] font-medium text-attenue-texte">
+        <span className={cn('pastille-stat grid size-6 shrink-0 place-items-center rounded-[var(--radius-sm)]', PASTILLE[ton])}>
+          <Icone className="size-3.5" />
+        </span>
+        <span className="truncate">{libelle}</span>
       </span>
 
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="truncate text-[11px] font-medium uppercase tracking-[0.055em] text-attenue-texte">
-          {libelle}
-        </span>
+      <span className="flex min-w-0 items-end justify-between gap-3">
         <span
           className={cn(
-            // UN CHIFFRE PLUS GRAND ET PLUS SERRE. C'est lui qu'on vient
-            // chercher ; il doit se lire de loin, et le resserrement evite
-            // qu'un montant a sept chiffres parte a la ligne.
-            'valeur-arrive whitespace-nowrap text-[22px] font-semibold leading-none tabular-nums tracking-[-0.02em] sm:text-[26px]',
+            'valeur-arrive whitespace-nowrap text-[24px] font-semibold leading-none tabular-nums tracking-[-0.03em] sm:text-[28px]',
             CHIFFRE[ton],
           )}
         >
           {valeur}
           {unite && (
-            <span className="ml-1.5 text-[11.5px] font-medium tracking-normal text-attenue-texte">
+            <span className="ml-1.5 text-[12px] font-medium tracking-normal text-attenue-texte">
               {unite}
             </span>
           )}
         </span>
-        {precision && (
-          <span className="text-[11.5px] leading-tight text-attenue-texte max-sm:line-clamp-2 sm:truncate">
-            {precision}
-          </span>
-        )}
+        {courbe && <Courbe points={courbe} ton={ton} />}
       </span>
 
-      {courbe && <Courbe points={courbe} ton={ton} />}
+      {precision && (
+        <span className="text-[12px] leading-snug text-attenue-texte max-sm:line-clamp-2 sm:truncate">
+          {precision}
+        </span>
+      )}
     </Balise>
   )
 }

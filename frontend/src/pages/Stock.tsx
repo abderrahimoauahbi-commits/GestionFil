@@ -49,6 +49,8 @@ interface LigneProjete {
   fournisseur_nom: string | null
   stock_mrp_kg: number
   encours_kg: number
+  /** Le fil sur les metiers : sorti du magasin, pas encore consomme (06/10/2026). */
+  kg_sur_machine?: number
   besoin_12m_kg: number
   stock_projete_kg: number
   jours_couverture: number | null
@@ -396,7 +398,7 @@ export function Stock() {
     {
       champ: 'code_reference',
       entete: 'Référence',
-      rendu: (l) => <span className="font-medium text-texte">{l.code_reference}</span>,
+      rendu: (l) => <span className="whitespace-nowrap font-medium text-texte">{l.code_reference}</span>,
     },
     {
       champ: 'statut',
@@ -407,13 +409,11 @@ export function Stock() {
       rendu: (l) => {
         const motif = motifAlerte(l)
         return (
-          <div className="space-y-0.5">
-            <div className="flex flex-wrap items-center gap-1">
-              <Etiquette ton={TON[l.statut] ?? 'neutre'}>{l.statut}</Etiquette>
-              {l.sur_stock === 1 && <Etiquette ton="neutre">sur-stock</Etiquette>}
-              {l.ecart_majeur === 1 && <Etiquette ton="ambre">ecart a vérifier</Etiquette>}
-            </div>
-            {motif && <div className="text-[11px] text-attenue-texte">{motif}</div>}
+          <div className="flex items-center gap-1.5 whitespace-nowrap" title={motif ?? undefined}>
+            <Etiquette ton={TON[l.statut] ?? 'neutre'}>{l.statut}</Etiquette>
+            {l.sur_stock === 1 && <Etiquette ton="neutre">sur-stock</Etiquette>}
+            {l.ecart_majeur === 1 && <Etiquette ton="ambre">ecart a vérifier</Etiquette>}
+            {motif && <span className="max-w-[11rem] truncate text-[11px] text-attenue-texte">{motif}</span>}
           </div>
         )
       },
@@ -453,9 +453,18 @@ export function Stock() {
       rendu: (l) => fmt.nombre(l.encours_kg, 1),
     },
     {
+      /* STOCK ENGAGE : affiche a cote du stock, pas deduit des besoins tant
+         que les ordres de fabrication n'existent pas (decision du 05/10/2026). */
+      champ: 'kg_sur_machine',
+      entete: 'Sur machine (kg)',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => (l.kg_sur_machine ? fmt.nombre(l.kg_sur_machine, 1) : '—'),
+    },
+    {
       champ: 'designation',
       entete: 'Fournisseur',
-      rendu: (l) => fmt.texte(l.fournisseur_nom),
+      rendu: (l) => <span className="whitespace-nowrap">{fmt.texte(l.fournisseur_nom)}</span>,
       secondaire: true,
     },
 

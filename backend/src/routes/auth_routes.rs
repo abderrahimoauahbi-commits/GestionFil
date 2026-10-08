@@ -547,3 +547,89 @@ pub async fn deverrouiller(
 
     Ok(Json(json!({ "ok": true })))
 }
+
+// =============================================================================
+// PREFERENCES D'AFFICHAGE (06/10/2026)
+// -----------------------------------------------------------------------------
+// Style, palette, police, taille, fond d'ecran, reglages du verre : rangés par
+// COMPTE, relus a chaque connexion, sur n'importe quel poste. Chacun ne lit et
+// n'ecrit QUE les siennes : l'identifiant vient du jeton, jamais du corps.
+// =============================================================================
+
+/// Taille maximale de l'image de fond, en caracteres de data URL. L'interface
+/// la reduit avant l'envoi ; au-dela, c'est un envoi qui n'est pas passe par
+/// elle.
+const FOND_IMAGE_MAX: usize = 2_000_000;
+
+pub async fn lire_preferences(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    let ligne: Option<(Value, Option<String>)> = sqlx::query_as(
+        "SELECT apparence, fond_image FROM preference_utilisateur WHERE id_utilisateur = $1",
+    )
+    .bind(&user.id)
+    .fetch_optional(&state.db)
+    .await?;
+    Ok(Json(match ligne {
+        Some((apparence, fond_image)) => json!({ "apparence": apparence, "fond_image": fond_image }),
+        None => json!({ "apparence": null, "fond_image": null }),
+    }))
+}
+
+/// Distingue « champ absent » (None) de « champ a null » (Some(None)).
+fn present<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(d).map(Some)
+}
+
+#[derive(Deserialize)]
+pub struct Preferences {
+    pub apparence: Value,
+    /// Absent : l'image ne change pas. `null` : retirer l'image. Texte : la
+    /// nouvelle image (data URL).
+    #[serde(default, deserialize_with = "present")]
+    pub fond_image: Option<Option<String>>,
+}
+
+pub async fn enregistrer_preferences(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(p): Json<Preferences>,
+) -> AppResult<Json<Value>> {
+    if !p.apparence.is_object() {
+        return Err(AppError::Invalide("Les préférences doivent être un objet.".into()));
+    }
+    if let Some(Some(img)) = &p.fond_image {
+        if img.len() > FOND_IMAGE_MAX || !img.starts_with("data:image/") {
+            return Err(AppError::Invalide(
+                "Image de fond refusée : format inattendu ou trop lourde.".into(),
+            ));
+        }
+    }
+
+    let mut tx = state.db.begin().await?;
+    crate::db::poser_contexte(&mut tx, &user.id, None, None).await?;
+    sqlx::query(
+        "INSERT INTO preference_utilisateur (id_utilisateur, apparence, modifie_le)
+              VALUES ($1, $2, now())
+         ON CONFLICT (id_utilisateur)
+         DO UPDATE SET apparence = EXCLUDED.apparence, modifie_le = now()",
+    )
+    .bind(&user.id)
+    .bind(&p.apparence)
+    .execute(&mut *tx)
+    .await?;
+    if let Some(image) = &p.fond_image {
+        sqlx::query("UPDATE preference_utilisateur SET fond_image = $2 WHERE id_utilisateur = $1")
+            .bind(&user.id)
+            .bind(image)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(Json(json!({ "ok": true })))
+}

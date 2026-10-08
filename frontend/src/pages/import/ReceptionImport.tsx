@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Link2, PackageCheck, Pencil, Plus, Save, Search, Trash2, Unlink2 } from 'lucide-react'
+import { ArrowLeft, Check, Link2, PackageCheck, Pencil, Plus, RotateCcw, Save, Search, Send, Trash2, Unlink2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
@@ -79,7 +79,7 @@ interface ReceptionLue {
     id_reception: string
     numero: string
     date_reception: string
-    statut: 'BROUILLON' | 'VALIDEE' | 'ANNULEE'
+    statut: 'BROUILLON' | 'A_CONTROLER' | 'VALIDEE' | 'ANNULEE'
     litige: number
     motif_litige: string | null
     notes: string | null
@@ -97,6 +97,7 @@ interface ReceptionLue {
     code_couleur: string | null
     libelle_couleur: string | null
     code_magasin: string
+    statut_qualite?: Qualite
     numero_dossier: string
     numero_facture?: string | null
     fournisseur_nom: string
@@ -109,6 +110,14 @@ interface ReceptionLue {
     bobines_par_palette?: number | null
   }[]
 }
+
+/** Le verdict du controle, ligne a ligne : il suit le lot en stock. */
+type Qualite = 'CONFORME' | 'QUARANTAINE' | 'NON_CONFORME'
+const QUALITES: { v: Qualite; l: string }[] = [
+  { v: 'CONFORME', l: 'Conforme' },
+  { v: 'QUARANTAINE', l: 'Quarantaine' },
+  { v: 'NON_CONFORME', l: 'Non conforme' },
+]
 
 /** Une ligne en cours de saisie. */
 interface LigneRecue {
@@ -128,6 +137,7 @@ interface LigneRecue {
   couleur: string
   libelleCouleur: string
   magasin: string
+  qualite: Qualite
   cond: Conditionnement
   /**
    * LIE, poids, bobines et palettes se repondent ; DETACHE, chacun se saisit
@@ -146,7 +156,7 @@ const origine = (l: { numero_dossier: string; numero_facture?: string | null; fo
 export function ReceptionImport() {
   const { idReception = 'nouvelle' } = useParams()
   const nouvelle = idReception === 'nouvelle'
-  const { peut } = useAuth()
+  const { peut, moi } = useAuth()
   const ouvrir = useOuvrirVue()
   const naviguer = useNavigate()
   const rafraichir = useRafraichir()
@@ -211,6 +221,7 @@ export function ReceptionImport() {
         couleur: l.code_couleur ?? '',
         libelleCouleur: l.libelle_couleur ?? '',
         magasin: l.code_magasin,
+        qualite: l.statut_qualite ?? 'CONFORME',
         cond: { poids_bobine_kg: l.poids_bobine_kg, bobines_par_palette: l.bobines_par_palette },
         // Des comptes enregistres ont ete CONSTATES : relier les recalculerait.
         lie: !(l.nb_bobines > 0 || l.nb_palettes > 0),
@@ -220,9 +231,15 @@ export function ReceptionImport() {
     setModifie(false)
   }, [nouvelle, qReception.data])
 
+  /* LE CONTROLE AVANT LE STOCK (08/10/2026). Comme une reception locale : le
+     magasinier enregistre et SOUMET sa pesee ; un autre compte, qui a le droit
+     de valider, la controle — qualite ligne a ligne — et la fait entrer en
+     stock. Celui qui a saisi ne valide pas (B4 regle 2, verifie au serveur). */
   const statut = nouvelle ? 'BROUILLON' : qReception.data?.reception.statut
-  const editable = statut === 'BROUILLON' && peut('RECEPTIONS', 'ECRIRE')
-  const peutValider = statut === 'BROUILLON' && peut('RECEPTIONS', 'VALIDER')
+  const editable = (statut === 'BROUILLON' || statut === 'A_CONTROLER') && peut('RECEPTIONS', 'ECRIRE')
+  const peutSoumettre = !nouvelle && statut === 'BROUILLON' && peut('RECEPTIONS', 'ECRIRE')
+  const peutValider = statut === 'A_CONTROLER' && peut('RECEPTIONS', 'VALIDER')
+  const estSaisisseur = !!moi && qReception.data?.reception.cree_par === moi.login
 
   // Ce qu'on peut encore ajouter : ce qui reste, moins ce qui est deja dans la reception.
   const restants = useMemo(
@@ -273,6 +290,7 @@ export function ReceptionImport() {
           couleur: r.code_couleur ?? '',
           libelleCouleur: r.libelle_couleur ?? '',
           magasin: magasinDefaut,
+          qualite: 'CONFORME',
           cond: { poids_bobine_kg: r.poids_bobine_kg, bobines_par_palette: r.bobines_par_palette },
           // ENTIERE, la ligne reprend les comptes de la facture : ce sont des
           // constats du fournisseur, pas une deduction — on ne les relie pas.
@@ -332,6 +350,7 @@ export function ReceptionImport() {
       code_couleur: l.couleur,
       libelle_couleur: l.libelleCouleur,
       code_magasin: l.magasin,
+      statut_qualite: l.qualite,
     })),
   })
 
@@ -347,7 +366,7 @@ export function ReceptionImport() {
   const enregistrer = useMutation({
     mutationFn: sauver,
     onSuccess: (id) => {
-      toast.success('Réception enregistrée en brouillon')
+      toast.success(statut === 'A_CONTROLER' ? 'Réception enregistrée' : 'Réception enregistrée en brouillon')
       rafraichir()
       setModifie(false)
       if (nouvelle) naviguer(`/receptions-import/${id}`, { replace: true })
@@ -371,6 +390,21 @@ export function ReceptionImport() {
       echec(e)
       rafraichir()
     },
+  })
+  const changerStatut = useMutation({
+    mutationFn: async (cible: 'A_CONTROLER' | 'BROUILLON') => {
+      const id = await sauver()
+      await api.put(`/api/import/receptions/${id}/statut`, { statut: cible })
+      return { id, cible }
+    },
+    onSuccess: ({ id, cible }) => {
+      toast.success(cible === 'A_CONTROLER' ? 'Réception soumise au contrôle' : 'Réception rouverte en brouillon')
+      rafraichir()
+      setModifie(false)
+      if (nouvelle) naviguer(`/receptions-import/${id}`, { replace: true })
+      else void qReception.refetch()
+    },
+    onError: echec,
   })
   const supprimer = useMutation({
     mutationFn: () => api.delete(`/api/import/receptions/${idReception}`),
@@ -410,9 +444,33 @@ export function ReceptionImport() {
               <ArrowLeft />
               Toutes les réceptions
             </Bouton>
+            {peutSoumettre && (
+              <Bouton
+                variante="contour"
+                disabled={!complete}
+                chargement={changerStatut.isPending}
+                title={!complete ? 'Validez et complétez chaque ligne d’abord' : 'Le contrôle qualité décidera de l’entrée en stock'}
+                onClick={() => changerStatut.mutate('A_CONTROLER')}
+              >
+                <Send />
+                Soumettre au contrôle
+              </Bouton>
+            )}
+            {statut === 'A_CONTROLER' && peut('RECEPTIONS', 'ECRIRE') && (
+              <Bouton
+                variante="contour"
+                chargement={changerStatut.isPending}
+                title="Repasser en brouillon pour corriger la pesée"
+                onClick={() => changerStatut.mutate('BROUILLON')}
+              >
+                <RotateCcw />
+                Rouvrir la pesée
+              </Bouton>
+            )}
             {peutValider && (
               <Bouton
-                disabled={!complete}
+                disabled={!complete || estSaisisseur}
+                title={estSaisisseur ? 'B4 : celui qui a saisi la réception ne peut pas la valider' : undefined}
                 chargement={valider.isPending}
                 onClick={() => {
                   /* LE LOT INTERNE, ANNONCE AVANT D'ETRE POSE (01/10/2026) :
@@ -428,8 +486,9 @@ export function ReceptionImport() {
                     description: (
                       <>
                         Pour les références suivies par lot, chaque ligne recevra le lot de sa facture
-                        s’il existe, sinon un lot interne : {r ? r.numero : 'le numéro de la réception'}-01,
-                        -02… Cette livraison ne se mélangera pas aux autres.
+                        s’il existe, sinon un lot interne FOURNISSEUR-JJMMAA-NN (fournisseur de la
+                        facture, date de réception, rang du jour). Cette livraison ne se mélangera pas
+                        aux autres.
                         <ul className="mt-2 space-y-0.5 text-[12px]">
                           {sansLot.map((l) => (
                             <li key={l.id_ligne}>
@@ -446,7 +505,7 @@ export function ReceptionImport() {
                 }}
               >
                 <PackageCheck />
-                Valider — entrée en stock
+                Valider le contrôle — entrée en stock
               </Bouton>
             )}
             {confirmation.element}
@@ -460,9 +519,18 @@ export function ReceptionImport() {
           la marchandise est entrée en stock à la valeur facture. La réception ne se modifie plus.
         </Alerte>
       )}
-      {statut === 'BROUILLON' && !nouvelle && editable && !peutValider && (
+      {statut === 'BROUILLON' && !nouvelle && editable && (
         <Alerte ton="info">
-          Brouillon enregistré. La validation — l'entrée en stock — revient à la direction ou à l'administration.
+          Brouillon enregistré. Soumettez-le au contrôle : un autre compte, qui a le droit de valider,
+          portera le verdict qualité et fera entrer la marchandise en stock.
+        </Alerte>
+      )}
+      {statut === 'A_CONTROLER' && (
+        <Alerte ton="alerte">
+          En attente de contrôle{r?.cree_par ? ` — pesée saisie par ${r.cree_par}` : ''}. Le contrôleur
+          indique la qualité de chaque ligne ; une ligne en quarantaine ou non conforme va dans un
+          magasin de quarantaine.
+          {estSaisisseur && ' Vous avez saisi cette réception : un autre compte doit la valider.'}
         </Alerte>
       )}
 
@@ -470,7 +538,11 @@ export function ReceptionImport() {
       <Carte>
         <CarteEntete>
           <CarteTitre>En-tête de la réception</CarteTitre>
-          {statut && <Badge ton={statut === 'VALIDEE' ? 'succes' : 'alerte'}>{statut === 'VALIDEE' ? 'validée' : 'brouillon'}</Badge>}
+          {statut && (
+            <Badge ton={statut === 'VALIDEE' ? 'succes' : statut === 'A_CONTROLER' ? 'info' : 'alerte'}>
+              {statut === 'VALIDEE' ? 'validée' : statut === 'A_CONTROLER' ? 'à contrôler' : statut === 'ANNULEE' ? 'annulée' : 'brouillon'}
+            </Badge>
+          )}
         </CarteEntete>
         <CarteCorps>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -536,6 +608,7 @@ export function ReceptionImport() {
                     <th className={cn(th, 'w-20 text-left')}>Code couleur</th>
                     <th className={cn(th, 'w-24 text-left')}>Libellé couleur</th>
                     <th className={cn(th, 'w-36 text-left')}>Magasin</th>
+                    <th className={cn(th, 'w-32 text-left')}>Qualité</th>
                     {editable && <th className={cn(th, 'w-16')} />}
                   </tr>
                 </thead>
@@ -586,6 +659,14 @@ export function ReceptionImport() {
                             ))}
                           </Selecteur>
                         </td>
+                        <td className={td} inert={verrou}>
+                          <Selecteur className={cn(champ, l.qualite !== 'CONFORME' && 'border-alerte')} value={l.qualite} disabled={!editable}
+                            onChange={(e) => majLigne(l.id_ligne, { qualite: e.target.value as Qualite })}>
+                            {QUALITES.map((q) => (
+                              <option key={q.v} value={q.v}>{q.l}</option>
+                            ))}
+                          </Selecteur>
+                        </td>
                         {editable && (
                           <td className={cn(td, 'whitespace-nowrap pt-1.5')}>
                             <Bouton taille="icone-xs" variante="discret"
@@ -616,7 +697,7 @@ export function ReceptionImport() {
                     <td className={cn(td, 'text-right tabular-nums')}>{statut === 'VALIDEE' ? '—' : fmt.nombre(total(ecartDe), 2)}</td>
                     <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(total((l) => nombre(l.bobines || 0)))}</td>
                     <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(total((l) => nombre(l.palettes || 0)))}</td>
-                    <td className={td} colSpan={editable ? 5 : 4} />
+                    <td className={td} colSpan={editable ? 6 : 5} />
                   </tr>
                 </tfoot>
               </table>

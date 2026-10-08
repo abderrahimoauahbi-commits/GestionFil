@@ -744,7 +744,10 @@ pub async fn controle_detail(
     let rows = sqlx::query(&format!("SELECT * FROM {vue}"))
         .fetch_all(&state.db)
         .await?;
-    Ok(Json(lignes_en_json(&rows)))
+    // C12 et C14 listent des prix et des couts : masques comme ailleurs.
+    let mut sortie = lignes_en_json(&rows);
+    user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
+    Ok(Json(sortie))
 }
 
 // Le catalogue et la liste des fournisseurs sont servis par le module
@@ -838,8 +841,12 @@ pub async fn stock_projete(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT * FROM v_stock_projete
-          WHERE ($1 IS NULL OR statut = $1)
+        // LE FIL SUR MACHINE, A COTE (06/10/2026) : du stock engage, sorti du
+        // magasin et pas encore consomme. Affiche, pas deduit des besoins.
+        "SELECT sp.*, COALESCE(sm.kg_sur_machine, 0) AS kg_sur_machine
+           FROM v_stock_projete sp
+           LEFT JOIN v_stock_machine sm ON sm.code_reference = sp.code_reference
+          WHERE ($1 IS NULL OR sp.statut = $1)
           ORDER BY CASE statut
                      WHEN 'RUPTURE'   THEN 1
                      WHEN 'CRITIQUE'  THEN 2

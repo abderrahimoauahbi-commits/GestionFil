@@ -21,7 +21,7 @@ mod operations;
 pub mod pieces;
 mod production;
 mod referentiels;
-mod stock;
+pub(crate) mod stock;
 mod telechargements;
 
 use crate::state::AppState;
@@ -143,6 +143,7 @@ pub fn router(state: AppState) -> Router {
         // --- Authentification -------------------------------------------------
         .route("/api/auth/connexion", post(auth_routes::connexion))
         .route("/api/auth/moi", get(auth_routes::moi))
+        .route("/api/auth/preferences", get(auth_routes::lire_preferences).put(auth_routes::enregistrer_preferences))
         // Changer SON mot de passe : aucun droit particulier, mais
         // l'ancien mot de passe est exige (voir auth_routes).
         .route("/api/auth/mot-de-passe", post(auth_routes::changer_mot_de_passe))
@@ -253,6 +254,9 @@ pub fn router(state: AppState) -> Router {
                patch(importation::modifier_ligne).delete(importation::supprimer_ligne))
         .route("/api/import/lignes/{id}/solder", post(importation::solder_ligne))
         .route("/api/import/lignes-bc", get(importation::lignes_bc_ouvertes))
+        // Le taux propose a la saisie d'une facture : cours Bank Al-Maghrib du
+        // jour, a defaut le taux de l'ERP (05/10/2026).
+        .route("/api/import/taux-reference", get(importation::taux_reference_facture))
         .route("/api/import/frais/{id}",
                patch(importation::modifier_frais).delete(importation::supprimer_frais))
         // La reception est un document A PART : elle ne passe pas par un
@@ -274,6 +278,7 @@ pub fn router(state: AppState) -> Router {
                get(importation::lire_reception)
                    .put(importation::modifier_reception)
                    .delete(importation::supprimer_reception))
+        .route("/api/import/receptions/{id}/statut", put(importation::changer_statut_reception))
         .route("/api/import/receptions/{id}/valider", post(importation::valider_reception))
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
         .route("/api/machines/consommation", get(machines::journal_consommation))
@@ -285,6 +290,12 @@ pub fn router(state: AppState) -> Router {
                    .delete(machines::supprimer_fiche))
         .route("/api/machines/fiches/{id}/valider", post(machines::valider_fiche))
         .route("/api/machines/fiches/{id}/annuler", post(machines::annuler_fiche))
+        // LES DECISIONS MACHINE (05/10/2026) : l'apercu calcule sans rien
+        // ecrire ; la devalidation ramene l'etage a l'etat precedent et la
+        // fiche en brouillon ; la matrice des motifs nourrit l'ecran.
+        .route("/api/machines/fiches/{id}/apercu", post(machines::apercu_fiche))
+        .route("/api/machines/fiches/{id}/devalider", post(machines::devalider_fiche))
+        .route("/api/machines/motifs", get(machines::lister_motifs))
         // Lire le plan d une machine, ou le corriger. La correction exige
         // PARAMETRES/ECRIRE — la direction et les super-utilisateurs — parce
         // qu une capacite fausse fausse toute la consommation qui en decoule.
@@ -329,6 +340,7 @@ pub fn router(state: AppState) -> Router {
                get(stock::lignes_inventaire).put(stock::saisir_comptage))
         .route("/api/inventaires/{id}/ouvrir", post(operations::ouvrir_inventaire))
         .route("/api/inventaires/{id}/cloturer", post(operations::cloturer_inventaire))
+        .route("/api/inventaires/{id}/annuler", post(operations::annuler_inventaire))
         // --- Achats et receptions ---------------------------------------------
         .route("/api/bons-commande",
                get(stock::lister_bc).post(stock::creer_bc))

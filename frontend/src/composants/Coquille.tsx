@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ArrowLeftRight, BadgeCheck, BarChart3, Bell, BookOpen, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, Tags, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
+  ArrowLeftRight, BadgeCheck, BarChart3, Bell, BookOpen, Bot, Boxes, Calculator, ChevronDown, ChevronRight, ClipboardCheck, PanelLeftClose, PanelLeftOpen, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, Tags, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -26,6 +26,7 @@ import { useEntreprise } from '../lib/entreprise'
 import { cn, sousChemin } from '../lib/utils'
 import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
+import { SynchroPreferences } from './SynchroPreferences'
 import { BoutonRafraichir, useEcranCalcule } from './BoutonRafraichir'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
@@ -397,19 +398,10 @@ export function Coquille() {
     )
   }
 
-  const lienNav = (actif: boolean) =>
-    cn(
-      'flex items-center gap-2 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-[13px]',
-      'whitespace-nowrap transition-colors',
-      actif
-        ? 'bg-attenue font-medium text-texte'
-        : 'text-attenue-texte hover:bg-attenue hover:text-texte',
-    )
-
 
   return (
     <div
-      className="flex h-full bg-fond"
+      className="coquille flex h-full bg-fond"
       /* LA HAUTEUR DE LA BARRE DU BAS, PUBLIEE POUR LES AUTRES.
          Une barre d'action figee en bas d'un tableau se collerait sinon au bord
          de l'ecran — c'est-a-dire DERRIERE la navigation du telephone, ou elle
@@ -429,13 +421,20 @@ export function Coquille() {
           tiennent pas sur une ligne : la barre du haut les repliait en menus
           deroulants, et il fallait deux clics et une memoire du rangement pour
           atteindre un ecran. */}
+      {/* LE FOND CHOISI (Apparence › Fond) : une couche fixe sous toute
+          l'interface, avec ses filtres. Invisible tant qu'on garde le fond du
+          style. */}
+      <div className="fond-perso sans-impression" aria-hidden />
+      {/* Les reglages d'apparence suivent le compte : relus a la connexion,
+          renvoyes au serveur a chaque changement. */}
+      <SynchroPreferences />
       {reglages.disposition !== 'entete' && <BarreLaterale />}
 
       <div className="flex min-w-0 flex-1 flex-col">
       {/* --- Bandeau superieur : marque, navigation, alertes, profil ------- */}
       <header
         className={cn(
-          'sans-impression z-30 flex shrink-0 items-center gap-2 border-b border-bordure bg-surface px-3',
+          'barre-haut sans-impression z-30 flex shrink-0 items-center gap-1.5 border-b border-bordure bg-surface px-3 sm:px-5',
           // LA FENETRE A RETROUVE SA BORDURE : l'entete n'a plus a servir de
           // poignee de deplacement, et rien ne justifie qu'elle soit plus
           // basse au bureau qu'au navigateur.
@@ -467,6 +466,19 @@ export function Coquille() {
           </>
         )}
 
+        {/* LE BOUTON QUI FAIT GLISSER LA BARRE LATERALE (06/10/2026). */}
+        {reglages.disposition !== 'entete' && (
+          <button
+            type="button"
+            onClick={() => reglages.definir({ menuMasque: !reglages.menuMasque })}
+            title={reglages.menuMasque ? 'Afficher le menu' : 'Masquer le menu'}
+            aria-label={reglages.menuMasque ? 'Afficher le menu' : 'Masquer le menu'}
+            className="bouton-menu hidden size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-attenue-texte transition-colors hover:bg-attenue hover:text-texte md:grid"
+          >
+            {reglages.menuMasque ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </button>
+        )}
+
         {/* La navigation vit desormais dans la barre laterale. Il reste ici
             le fil d'Ariane de l'ecran courant, qui dit OU l'on est — la barre
             dit ou l'on peut aller, ce n'est pas la meme question. */}
@@ -474,22 +486,31 @@ export function Coquille() {
           /* La barre laterale porte deja la navigation : l'entete ne dit plus
              que l'ecran courant. Ou l'on peut aller et ou l'on est sont deux
              questions differentes, et les melanger encombre. */
-          <div className="hidden min-w-0 flex-1 items-center gap-1.5 text-[13px] md:flex">
+          <nav aria-label="Emplacement" className="hidden min-w-0 flex-1 items-center gap-2 text-[13px] md:flex">
+            {courante && courante.vers !== '/' && (
+              <>
+                <span className="truncate text-attenue-texte">
+                  {MODULES.find((m) => m.id === courante.section)?.libelle}
+                </span>
+                <ChevronRight className="size-3.5 shrink-0 text-attenue-texte/60" />
+              </>
+            )}
             <span className="truncate font-medium text-texte">
               {courante?.libelle ?? 'Gestion Fil'}
             </span>
-            {courante && (
-              <span className="truncate text-attenue-texte">
-                · {MODULES.find((m) => m.id === courante.section)?.libelle}
-              </span>
-            )}
-          </div>
+          </nav>
         ) : (
           <NavigationEntete accessibles={accessibles} courante={courante} />
         )}
 
-        {/* Navigation repliee en dessous de 1280 px */}
-        <div className="min-w-0 flex-1 xl:hidden">
+        {/* Navigation repliee : sous 768 px quand la barre laterale existe
+            (elle disparait a cette largeur), sous 1280 px sinon. */}
+        <div
+          className={cn(
+            'min-w-0 flex-1',
+            reglages.disposition === 'entete' ? 'xl:hidden' : 'md:hidden',
+          )}
+        >
           <Bouton
             variante="discret"
             taille="sm"
@@ -633,32 +654,48 @@ export function Coquille() {
       {/* --- Tiroir de navigation : sous 1280 px -------------------------- */}
       {tiroir && (
         <div
-          className="sans-impression fixed inset-0 z-40 xl:hidden"
+          className={cn(
+            'sans-impression fixed inset-0 z-40',
+            reglages.disposition === 'entete' ? 'xl:hidden' : 'md:hidden',
+          )}
           onClick={() => setTiroir(false)}
         >
-          <div className="absolute inset-0 bg-black/40" />
+          <div className="absolute inset-0 bg-black/45" />
+          {/* UN TIROIR LATERAL SOMBRE, LE MEME QUE LA BARRE DU BUREAU : on
+              retrouve au telephone la colonne qu'on connait sur l'ecran large,
+              au lieu d'un rideau qui descend du haut. */}
           <div
-            className="absolute inset-x-0 top-0 max-h-[85vh] overflow-y-auto border-b border-bordure bg-surface p-3 shadow-lg"
+            className="absolute bottom-0 left-0 top-0 flex w-[min(288px,86vw)] flex-col bg-barre text-barre-texte shadow-xl [color-scheme:dark]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex h-14 shrink-0 items-center px-4 text-[13.5px] font-semibold">
+              Gestion Fil
+            </div>
+            <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 pb-6">
               {GROUPES.map((section) => {
                 const entrees = accessibles.filter((e) => e.section === section)
                 if (!entrees.length) return null
                 return (
                   <div key={section}>
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
+                    <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-barre-attenue/80">
                       {MODULES.find((m) => m.id === section)?.libelle ?? section}
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-y-px">
                       {entrees.map((e) => (
                         <LienNav
                           key={e.vers}
                           e={e}
                           end={e.vers === '/'}
-                          className={({ isActive }) => lienNav(isActive)}
+                          className={({ isActive }) =>
+                            cn(
+                              'flex h-9 items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 text-[13px] transition-colors',
+                              isActive
+                                ? 'bg-barre-actif font-medium text-barre-texte'
+                                : 'text-barre-attenue hover:bg-barre-actif/70 hover:text-barre-texte',
+                            )
+                          }
                         >
-                          <e.Icone className="size-3.5" />
+                          <e.Icone className="size-4" />
                           {e.libelle}
                         </LienNav>
                       ))}
@@ -666,7 +703,7 @@ export function Coquille() {
                   </div>
                 )
               })}
-            </div>
+            </nav>
           </div>
         </div>
       )}
@@ -677,7 +714,7 @@ export function Coquille() {
           // Pas de largeur maximale : une table de quinze colonnes se lit
           // mieux etalee que centree entre deux marges vides. La densite
           // reste reglable, la largeur suit la fenetre.
-          className="p-3 lg:p-4"
+          className="px-3 pt-3 sm:px-5 sm:pt-4"
           style={{ paddingBottom: 'calc(4rem + var(--marge-sure-bas))' }}
         >
           {/* L'AVIS DE MISE A JOUR VIT ICI, et non plus dans l'atelier.
@@ -804,18 +841,25 @@ export function EnTetePage({
        du papier, au-dessus de l'entete de societe — deux titres pour un seul
        document. L'etat porte le sien. */
     <div
-      className="sans-impression sticky top-0 z-30 mb-3 -mx-3 flex flex-wrap items-center
-                 justify-between gap-3 border-b border-bordure bg-fond px-3 pb-2 pt-1
-                 sm:-mx-4 sm:px-4"
+      className="entete-page sans-impression sticky top-0 z-30 mb-4 -mx-3 flex flex-wrap items-center
+                 justify-between gap-x-4 gap-y-2 border-b border-bordure bg-fond px-3 py-2.5
+                 sm:-mx-5 sm:px-5"
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        {/* 17 PX ET NON 15. A quinze, le titre ne depassait le texte courant que
-            d'un pixel ou deux : la page n'avait pas de point d'entree. */}
-        <h1 className="text-[17px] font-semibold leading-tight tracking-[-0.015em]">{titre}</h1>
-        {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
-            par la route courante : aucun ecran n'a a la declarer, donc aucun ne
-            peut l'oublier. */}
-        <AideEcran description={description} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="truncate text-[19px] font-semibold leading-tight tracking-[-0.02em]">{titre}</h1>
+          {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
+              par la route courante : aucun ecran n'a a la declarer. */}
+          <AideEcran description={description} />
+        </div>
+        {/* LA DESCRIPTION SE LIT SOUS LE TITRE : sur un document, c'est son
+            identite (numero, date, auteur) ; sur une liste, ce qu'on y fait.
+            Une ligne, coupee au besoin — le texte entier reste dans l'aide. */}
+        {description && (
+          <p className="mt-0.5 hidden truncate text-[12.5px] leading-snug text-attenue-texte sm:block">
+            {description}
+          </p>
+        )}
       </div>
       {/* LES ACTIONS PRENNENT LEUR PROPRE LIGNE SUR TELEPHONE.
 

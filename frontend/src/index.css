@@ -1,20 +1,27 @@
 @import "tailwindcss";
 
 /* =============================================================================
-   LE STYLE DE L'OUTIL — un seul, depuis le 02/10/2026
+   LE STYLE DE L'OUTIL — cinq chartes au choix, depuis le 05/10/2026
    -----------------------------------------------------------------------------
-   Les quinze familles de couleurs, la barre laiton et le verre sont retires :
-   l'outil a UNE apparence, claire sans eblouir, sombre sur demande. Le modele
-   est la sobriete des outils d'ingenierie (electric.ax) : des gris froids, une
-   seule encre petrole pour agir, des filets d'un pixel, presque aucune ombre,
-   des etiquettes en petites capitales espacees.
-
-   LA POLICE EST SOURCE SANS 3, servie avec l'application (le reseau de l'usine
-   n'a pas d'acces internet garanti). Plus fine et plus etroite qu'Inter : elle
-   tient davantage de colonnes sans paraitre serree, et ses chiffres a chasse
-   fixe alignent les kilos.
+   Les jetons ci-dessous sont la base ; chaque charte les redefinit et habille
+   les accroches des composants dans `styles/chartes.css` (fichier genere).
+   Choix : Apparence › Style, attribut `data-charte` sur <html>.
    ========================================================================== */
 @import "@fontsource-variable/source-sans-3";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/space-grotesk";
+/* Les polices au choix (Réglages › Texte › Police), fines et lisibles. */
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/lexend";
+@import "@fontsource-variable/ibm-plex-sans";
+/* Les familles de la v1 AVANT les chartes : la palette choisie dans les
+   réglages (dans chartes.css) doit pouvoir les recolorer. */
+@import "./styles/familles-v1.css";
+@import "./styles/chartes.css";
 
 @theme {
   --font-sans: "Source Sans 3 Variable", "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -516,4 +523,51 @@ table.grille td {
   .squelette::after { animation: none; }
   .carte-active:hover { transform: none; }
   .valeur-arrive { animation: none; }
+}
+
+/* =============================================================================
+   LES ASCENSEURS (06/10/2026) — fins, arrondis, discrets
+   -----------------------------------------------------------------------------
+   Plus de barres grises carrées « Windows 95 » : un rail invisible, un curseur
+   arrondi et translucide qui fonce au survol, aux couleurs du style (clair,
+   sombre, verre). Dans le menu sombre, le curseur prend la teinte du menu.
+   Chromium/WebView2 : pseudo-éléments `::-webkit-scrollbar` (ils ne valent que
+   si `scrollbar-width` reste à `auto`) ; Firefox : `scrollbar-color`.
+   ========================================================================== */
+*,
+.defilement-x {
+  scrollbar-width: auto;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: hsl(var(--attenue-texte) / 0.32);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-color: hsl(var(--primaire) / 0.6);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+.barre-laterale ::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--barre-attenue) / 0.35);
+}
+.defilement-x::-webkit-scrollbar {
+  height: 8px;
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--attenue-texte) / 0.35) transparent;
+  }
 }

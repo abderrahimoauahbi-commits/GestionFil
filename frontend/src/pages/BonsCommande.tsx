@@ -289,22 +289,22 @@ export function BonsCommande() {
 
       {lignes.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-3">
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
+          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
             <div className="text-[11px] text-attenue-texte">Engage, bons ouverts</div>
             <div className="text-lg font-semibold tabular-nums">{fmt.mad(totaux.engage)}</div>
           </div>
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
+          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
             <div className="text-[11px] text-attenue-texte">Bons ouverts</div>
             <div className="text-lg font-semibold tabular-nums">{totaux.ouverts}</div>
           </div>
           {totaux.brouillons > 0 && (
-            <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
+            <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
               <div className="text-[11px] text-attenue-texte">En brouillon</div>
               <div className="text-lg font-semibold tabular-nums">{totaux.brouillons}</div>
             </div>
           )}
           {totaux.aValider > 0 && (
-            <div className="rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
+            <div data-ton="alerte" className="carte-stat rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
               <div className="text-[11px] text-attenue-texte">En attente de validation</div>
               <div className="text-lg font-semibold tabular-nums text-alerte">
                 {totaux.aValider}
@@ -354,7 +354,12 @@ export function BonsCommande() {
                 issues : on le complete, ou il disparait. Annuler et le laisser
                 en base ne servirait qu'a encombrer la liste d'un document mort
                 dont le numero n'a jamais rien engage. */}
-            {droits.peutEcrire && !['CLOTURE', 'ANNULE'].includes(b.statut) && (
+            {/* ANNULER UN BON ENGAGE EST UN ACTE DE VALIDATION (regle 15,
+                08/10/2026) : le serveur exige VALIDER des que le bon est
+                valide ou envoye. Le bouton ne se montre qu'a qui peut s'en
+                servir ; supprimer un brouillon reste une ecriture. */}
+            {!['CLOTURE', 'ANNULE'].includes(b.statut) &&
+              (SUPPRIMABLES.includes(b.statut) ? droits.peutEcrire : droits.peutValider) && (
               <Bouton
                 variante="discret"
                 taille="icone-xs"

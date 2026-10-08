@@ -424,7 +424,7 @@ function Tuile({
   Icone?: typeof Cog
 }) {
   return (
-    <div className="rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2">
+    <div data-ton={alerte ? 'danger' : 'neutre'} className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2">
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-attenue-texte">
         {Icone && <Icone className="size-3" />}
         {t}

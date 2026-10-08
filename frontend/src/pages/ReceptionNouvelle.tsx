@@ -55,7 +55,7 @@ import {
 } from '../lib/conditionnement'
 
 const MODULE = 'RECEPTIONS'
-/** Au-dela, le controle qualite exigera une derogation motivee (controle C10). */
+/** Un EXCEDENT au-dela exige une derogation motivee (controle C10) ; un manque, non. */
 const TOLERANCE_PCT = 2
 
 interface LigneAttendue extends Record<string, unknown> {
@@ -488,9 +488,11 @@ export function ReceptionNouvelle() {
       ? ((kg - l.reste_kg) / l.reste_kg) * 100
       : null
   }
+  // L'EXCEDENT SEUL (08/10/2026) : un manque est une livraison partielle, le
+  // bon reste LIVRE_PARTIEL. Seul ce qui depasse la tolerance se justifie.
   const horsTolerance = (l: Ligne) => {
     const e = ecartDe(l)
-    return e != null && Math.abs(e) > TOLERANCE_PCT
+    return e != null && e > TOLERANCE_PCT
   }
   // Hors tolerance, la derogation cochee ET motivee : c'est ce que la base exige.
   const sansDerogation = retenues.filter(
@@ -815,7 +817,7 @@ export function ReceptionNouvelle() {
                       <tbody>
                         {lignes.map((l, i) => {
                           const ecart = ecartDe(l)
-                          const hors = ecart != null && Math.abs(ecart) > TOLERANCE_PCT
+                          const hors = ecart != null && ecart > TOLERANCE_PCT
                           const manqueLot = l.retenue && l.suivi_lot === 1 && !l.lot.trim()
                           const manqueQte = l.retenue && !(Number(l.qte) > 0)
                           return (
@@ -1140,7 +1142,7 @@ export function ReceptionNouvelle() {
                 {sansDerogation.length > 0 && (
                   <span className="text-danger">
                     {' '}
-                    — écart hors tolérance ({TOLERANCE_PCT} %) : cochez « Dérogation » et donnez
+                    — excédent au-delà de la tolérance ({TOLERANCE_PCT} %) : cochez « Dérogation » et donnez
                     le motif sur {sansDerogation.map((l) => l.code_recu).join(', ')}
                   </span>
                 )}

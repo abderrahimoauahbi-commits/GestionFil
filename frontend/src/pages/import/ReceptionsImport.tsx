@@ -21,8 +21,8 @@ import type { ReceptionResume } from './types'
 const MODULE = 'RECEPTIONS'
 type Statut = ReceptionResume['statut']
 
-const LIBELLE: Record<Statut, string> = { BROUILLON: 'Brouillon', VALIDEE: 'Validée', ANNULEE: 'Annulée' }
-const TON: Record<Statut, 'alerte' | 'succes' | 'neutre'> = { BROUILLON: 'alerte', VALIDEE: 'succes', ANNULEE: 'neutre' }
+const LIBELLE: Record<Statut, string> = { BROUILLON: 'Brouillon', A_CONTROLER: 'À contrôler', VALIDEE: 'Validée', ANNULEE: 'Annulée' }
+const TON: Record<Statut, 'alerte' | 'succes' | 'neutre' | 'info'> = { BROUILLON: 'alerte', A_CONTROLER: 'info', VALIDEE: 'succes', ANNULEE: 'neutre' }
 
 export function ReceptionsImport() {
   const droits = useDroits(MODULE)
@@ -89,7 +89,7 @@ export function ReceptionsImport() {
       />
 
       <div className="mb-3 flex flex-wrap gap-1.5">
-        {(['', 'BROUILLON', 'VALIDEE'] as const).map((s) => (
+        {(['', 'BROUILLON', 'A_CONTROLER', 'VALIDEE'] as const).map((s) => (
           <Bouton key={s || 'toutes'} taille="sm" variante={filtre === s ? 'principal' : 'contour'} onClick={() => setFiltre(s)}>
             {s ? LIBELLE[s] : 'Toutes'}
             <span className="tabular-nums opacity-70">{(q.data ?? []).filter((r) => !s || r.statut === s).length}</span>

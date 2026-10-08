@@ -257,6 +257,34 @@ export function FactureImport() {
   })
 
   /**
+   * LE TAUX DE REFERENCE du jour de la facture (05/10/2026) : cours Bank
+   * Al-Maghrib, a defaut le taux de l'ERP. Il preremplit le champ quand il est
+   * vide, et repere le taux qui s'en eloigne trop. Une facture en devise passee
+   * au taux 1 entrait en stock au cours du dirham, sans un mot.
+   */
+  const enDevise = !!entete.code_devise && entete.code_devise !== 'MAD'
+  const qTaux = useQuery({
+    queryKey: ['taux-reference', entete.code_devise, entete.date_facture],
+    queryFn: () =>
+      api.get<{ reference: number | null; source: string | null; ecart_max_pct: number }>(
+        `/api/import/taux-reference?devise=${encodeURIComponent(entete.code_devise)}&date=${entete.date_facture}`,
+      ),
+    enabled: enDevise && !!entete.date_facture,
+  })
+  const reference = enDevise ? (qTaux.data?.reference ?? null) : null
+  useEffect(() => {
+    if (enDevise && reference && entete.taux_change === '')
+      setEntete((x) => ({ ...x, taux_change: String(reference) }))
+  }, [enDevise, reference, entete.taux_change])
+  const tauxSaisi = nombre(entete.taux_change)
+  const tauxDirham = enDevise && Math.abs(tauxSaisi - 1) < 1e-9
+  const ecartTaux = reference && tauxSaisi > 0 ? tauxSaisi / reference - 1 : 0
+  const tauxEloigne = Math.abs(ecartTaux) * 100 > (qTaux.data?.ecart_max_pct ?? 3)
+  // La confirmation vaut pour CE taux : le changer la retire.
+  const [tauxConfirme, setTauxConfirme] = useState<string | null>(null)
+  const tauxConfirmeOk = tauxEloigne && tauxConfirme === entete.taux_change
+
+  /**
    * LES REFERENCES RETENUES SUR CETTE FACTURE, et elles seules.
    *
    * L'ecran chargeait le catalogue entier pour peupler un menu deroulant par
@@ -329,6 +357,7 @@ export function FactureImport() {
   const incompletes = lignes.filter((l) => !l.supprimee && !ligneComplete(l) && (l.id_ligne || l.code_reference || l.libelle || l.prix_unitaire_devise))
   const modifie = nouvelle || enteteModifie || lignesModifiees.length > 0
   const enteteComplet = entete.code_fournisseur && entete.numero_facture.trim() && entete.date_facture && entete.code_devise && nombre(entete.taux_change) > 0
+    && !tauxDirham && (!tauxEloigne || tauxConfirmeOk)
 
   /** L'identifiant d'une facture creee pendant l'enregistrement en cours. */
   const creeeRef = useRef<string | null>(null)
@@ -345,6 +374,7 @@ export function FactureImport() {
         nb_palettes: entete.nb_palettes ? nombre(entete.nb_palettes) : null,
         nb_bobines: entete.nb_bobines ? nombre(entete.nb_bobines) : null,
         id_engagement: entete.id_engagement,
+        taux_confirme: tauxConfirmeOk,
       }
       let id = idFacture
       if (nouvelle) {
@@ -451,8 +481,10 @@ export function FactureImport() {
                   const code = e.target.value
                   const devise = qFournisseurs.data?.find((x) => x.code_fournisseur === code)?.code_devise
                   // Changer de fournisseur change d'engagement ; la devise suit sa fiche.
+                  // UNE AUTRE DEVISE, UN AUTRE TAUX : l'ancien est vide, la
+                  // reference du jour vient le remplacer.
                   setEntete((x) => ({ ...x, code_fournisseur: code, id_engagement: '', code_devise: devise ?? x.code_devise,
-                    taux_change: devise === 'MAD' ? '1' : x.taux_change }))
+                    taux_change: devise === 'MAD' ? '1' : devise && devise !== x.code_devise ? '' : x.taux_change }))
                 }}
                 disabled={!ecrire || lignesServeur.some((l) => l.quantite_recue_kg > 0)}>
                 <option value="">Choisir…</option>
@@ -472,7 +504,8 @@ export function FactureImport() {
             <div>
               <Etiq>Devise</Etiq>
               <Selecteur value={entete.code_devise} disabled={!ecrire}
-                onChange={(e) => setEntete((x) => ({ ...x, code_devise: e.target.value, taux_change: e.target.value === 'MAD' ? '1' : x.taux_change }))}>
+                onChange={(e) => setEntete((x) => ({ ...x, code_devise: e.target.value,
+                  taux_change: e.target.value === 'MAD' ? '1' : e.target.value === x.code_devise ? x.taux_change : '' }))}>
                 <option value="">Choisir…</option>
                 {(qDevises.data ?? (entete.code_devise ? [{ code_devise: entete.code_devise }] : [])).map((x) => (
                   <option key={x.code_devise}>{x.code_devise}</option>
@@ -494,7 +527,16 @@ export function FactureImport() {
             </div>
             <div>
               <Etiq obligatoire>Taux de change</Etiq>
-              <Champ inputMode="decimal" value={entete.taux_change} onChange={maj('taux_change')} disabled={!ecrire} />
+              <Champ inputMode="decimal" value={entete.taux_change} onChange={maj('taux_change')} disabled={!ecrire}
+                className={cn((tauxDirham || (tauxEloigne && !tauxConfirmeOk)) && 'border-alerte')} />
+              {tauxDirham ? (
+                <p className="mt-1 text-[11px] text-danger">Taux 1 : c’est le taux du dirham, pas celui du {entete.code_devise}.</p>
+              ) : reference ? (
+                <p className="mt-1 text-[11px] text-attenue-texte">
+                  {qTaux.data?.source} : {fmt.nombre(reference, 4)}
+                  {tauxSaisi > 0 && Math.abs(ecartTaux) > 0.00005 && ` · écart ${ecartTaux > 0 ? '+' : ''}${fmt.nombre(ecartTaux * 100, 1)} %`}
+                </p>
+              ) : null}
             </div>
             <div>
               <Etiq>Montant imprimé ({entete.code_devise})</Etiq>
@@ -511,6 +553,24 @@ export function FactureImport() {
               </div>
             </div>
           </div>
+          {tauxEloigne && !tauxDirham && reference && (
+            <Alerte ton="alerte" className="mt-3" titre={`Taux éloigné de la référence (${ecartTaux > 0 ? '+' : ''}${fmt.nombre(ecartTaux * 100, 1)} %)`}>
+              <p>
+                Le taux saisi, {fmt.nombre(tauxSaisi, 4)}, s’écarte de plus de {fmt.nombre(qTaux.data?.ecart_max_pct ?? 3, 0)} % du{' '}
+                {qTaux.data?.source} ({fmt.nombre(reference, 4)}). Une facture de{' '}
+                {fmt.nombre(nombre(entete.montant_devise || 0) || 10000, 0)} {entete.code_devise} entrerait en stock pour{' '}
+                {fmt.nombre((nombre(entete.montant_devise || 0) || 10000) * tauxSaisi, 0)} DH au lieu de{' '}
+                {fmt.nombre((nombre(entete.montant_devise || 0) || 10000) * reference, 0)} DH.
+              </p>
+              {ecrire && (
+                <label className="mt-2 flex items-center gap-2 font-medium">
+                  <input type="checkbox" checked={tauxConfirmeOk}
+                    onChange={(e) => setTauxConfirme(e.target.checked ? entete.taux_change : null)} />
+                  Je confirme ce taux : c’est le taux réel appliqué par la banque
+                </label>
+              )}
+            </Alerte>
+          )}
         </CarteCorps>
       </Carte>
 

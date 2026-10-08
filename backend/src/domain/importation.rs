@@ -212,8 +212,8 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let (numero, statut, date_reception): (String, String, String) = sqlx::query_as(
-        "SELECT numero, statut, date_reception FROM import_receptions
+    let (numero, statut, date_reception, createur): (String, String, String, String) = sqlx::query_as(
+        "SELECT numero, statut, date_reception, id_utilisateur_creation FROM import_receptions
           WHERE id_reception = $1 FOR UPDATE",
     )
     .bind(id_reception)
@@ -221,8 +221,22 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("reception {id_reception}")))?;
 
-    if statut != "BROUILLON" {
-        return Err(AppError::RegleMetier(format!("La réception {numero} est déjà {statut}.")));
+    // LE CONTROLE AVANT LE STOCK (08/10/2026). La reception d'import passait du
+    // brouillon au stock d'un clic, sans controle qualite ni second regard :
+    // le magasinier la soumet, un autre compte la controle et la valide.
+    match statut.as_str() {
+        "A_CONTROLER" => {}
+        "BROUILLON" => {
+            return Err(AppError::RegleMetier(format!(
+                "La réception {numero} est en brouillon : soumettez-la d'abord au contrôle."
+            )))
+        }
+        _ => return Err(AppError::RegleMetier(format!("La réception {numero} est déjà {statut}."))),
+    }
+    if createur == user.id {
+        return Err(AppError::RegleMetier(
+            "B4 règle 2 : celui qui a saisi la réception ne peut pas la valider.".into(),
+        ));
     }
 
     // Les dossiers que la reception touche, verrouilles : une cloture ne doit
@@ -310,7 +324,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
     let lignes = sqlx::query(
         "SELECT rl.id_reception_ligne, rl.id_ligne,
                 rl.quantite_recue_kg::float8 AS quantite, rl.nb_bobines, rl.nb_palettes,
-                rl.lot_fournisseur, rl.code_couleur, rl.code_magasin,
+                rl.lot_fournisseur, rl.code_couleur, rl.code_magasin, rl.statut_qualite,
                 l.code_reference, l.reste_kg::float8 AS reste, l.poids_net_kg::float8 AS poids_net,
                 l.id_ligne_bc, l.soldee, l.montant_devise::float8 AS montant_devise,
                 f.code_devise, f.taux_change::float8 AS taux, f.code_fournisseur, f.numero_facture
@@ -339,6 +353,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
         lot: Option<String>,
         couleur: Option<String>,
         magasin: String,
+        statut_qualite: String,
         id_ligne_bc: Option<String>,
         prix_kg_devise: f64,
         prix_kg_mad: f64,
@@ -380,6 +395,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
             lot: l.try_get("lot_fournisseur")?,
             couleur: l.try_get("code_couleur")?,
             magasin: l.try_get("code_magasin")?,
+            statut_qualite: l.try_get("statut_qualite")?,
             id_ligne_bc: l.try_get("id_ligne_bc")?,
             prix_kg_devise,
             prix_kg_mad: arrondi_kg(prix_kg_devise * taux),
@@ -424,7 +440,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
                 "INSERT INTO ligne_mouvement
                         (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                          nb_bobines, nb_palettes, lot_fournisseur, code_couleur, statut_qualite)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'CONFORME')",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)
@@ -435,6 +451,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
             .bind(e.nb_palettes)
             .bind(&e.lot)
             .bind(&e.couleur)
+            .bind(&e.statut_qualite)
             .execute(&mut *tx)
             .await?;
 
@@ -693,7 +710,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
            JOIN import_reception_lignes rl ON rl.id_reception = r.id_reception
            JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
            JOIN import_factures f ON f.id_facture = l.id_facture
-          WHERE f.id_dossier = $1 AND r.statut = 'BROUILLON'",
+          WHERE f.id_dossier = $1 AND r.statut IN ('BROUILLON','A_CONTROLER')",
     )
     .bind(id_dossier)
     .fetch_one(&mut *tx)

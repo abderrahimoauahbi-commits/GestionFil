@@ -354,7 +354,7 @@ pub async fn supprimer_dossier(
         "DELETE FROM import_reception_lignes rl
           USING import_facture_lignes l, import_factures f, import_receptions r
           WHERE rl.id_ligne = l.id_ligne AND l.id_facture = f.id_facture AND f.id_dossier = $1
-            AND r.id_reception = rl.id_reception AND r.statut = 'BROUILLON'
+            AND r.id_reception = rl.id_reception AND r.statut IN ('BROUILLON','A_CONTROLER')
       RETURNING rl.id_reception",
     )
     .bind(&id)
@@ -362,7 +362,7 @@ pub async fn supprimer_dossier(
     .await?;
     sqlx::query(
         "DELETE FROM import_receptions r
-          WHERE r.id_reception = ANY($1) AND r.statut = 'BROUILLON'
+          WHERE r.id_reception = ANY($1) AND r.statut IN ('BROUILLON','A_CONTROLER')
             AND NOT EXISTS (SELECT 1 FROM import_reception_lignes x WHERE x.id_reception = r.id_reception)",
     )
     .bind(&touchees)
@@ -396,10 +396,148 @@ pub struct FactureSaisie {
     nb_bobines: Option<i64>,
     /// L'engagement sur lequel la facture s'impute. Chaine vide = le retirer.
     id_engagement: Option<String>,
+    /// L'operateur confirme un taux qui s'ecarte de la reference : le taux reel
+    /// de sa banque, par exemple.
+    #[serde(default)]
+    taux_confirme: Option<bool>,
 }
 
-/// `POST /api/import/dossiers/{id}/factures` — devise et taux du dossier par
-/// defaut : c'est le cas ordinaire, et l'exception se saisit.
+// =============================================================================
+// LE TAUX D'UNE FACTURE EN DEVISE (05/10/2026)
+// =============================================================================
+//
+// Une facture de 12 000 EUR passee au taux 1 entre en stock pour 12 000 DH au
+// lieu de 130 000 : le CUMP, la repartition des frais et le plan d'achat sont
+// faux d'un facteur dix. Cela arrivait sans bruit — l'ecran gardait le taux 1
+// pose pour une devise MAD quand on passait ensuite en EUR, et le serveur
+// retombait sur le taux du dossier, 1 par defaut.
+
+/// Au-dela de 3 % d'ecart avec la reference, ce n'est plus la difference entre
+/// le cours de la banque et celui de Bank Al-Maghrib : c'est probablement une
+/// erreur de saisie. L'operateur corrige, ou confirme.
+const ECART_TAUX_MAX: f64 = 0.03;
+
+struct TauxReference {
+    valeur: f64,
+    /// Ce que l'on montre : « cours Bank Al-Maghrib du 2026-09-22 ».
+    source: String,
+}
+
+/// Le cours Bank Al-Maghrib du jour de la facture, a defaut le dernier publie
+/// avant, a defaut le taux de l'ERP en vigueur. Rien pour une devise inconnue.
+async fn taux_reference(
+    c: &mut sqlx::PgConnection,
+    devise: &str,
+    date: &str,
+) -> AppResult<Option<TauxReference>> {
+    let bam: Option<(f64, String)> = sqlx::query_as(
+        "SELECT cours_mad::float8, date_cours FROM cours_bam
+          WHERE code_devise = $1 AND date_cours <= substr($2, 1, 10)
+          ORDER BY date_cours DESC LIMIT 1",
+    )
+    .bind(devise)
+    .bind(date)
+    .fetch_optional(&mut *c)
+    .await?;
+    if let Some((valeur, jour)) = bam {
+        return Ok(Some(TauxReference { valeur, source: format!("cours Bank Al-Maghrib du {jour}") }));
+    }
+    let erp: Option<f64> = sqlx::query_scalar(
+        "SELECT taux::float8 FROM taux_change
+          WHERE code_devise = $1 AND substr(date_debut, 1, 10) <= substr($2, 1, 10)
+          ORDER BY date_debut DESC LIMIT 1",
+    )
+    .bind(devise)
+    .bind(date)
+    .fetch_optional(&mut *c)
+    .await?;
+    Ok(erp.map(|valeur| TauxReference { valeur, source: "taux de l'ERP en vigueur".into() }))
+}
+
+/// Le taux a enregistrer, ou le refus qui dit quoi faire.
+///
+/// - MAD : toujours 1.
+/// - Autre devise : un taux est obligatoire, et jamais 1 — c'est le taux du
+///   dirham, pas celui d'une devise.
+/// - Ecart de plus de 3 % avec la reference : refuse tant qu'il n'est pas
+///   confirme. Le message commence par `TAUX-ECART` : l'ecran le reconnait et
+///   propose la confirmation au lieu d'un refus sec.
+async fn controler_taux(
+    c: &mut sqlx::PgConnection,
+    objet: &str,
+    devise: &str,
+    taux: Option<f64>,
+    date: &str,
+    confirme: bool,
+) -> AppResult<f64> {
+    if devise == "MAD" {
+        if taux.is_some_and(|t| (t - 1.0).abs() > 1e-9) {
+            return Err(AppError::RegleMetier(
+                format!("{objet} en MAD : il se passe au taux 1"),
+            ));
+        }
+        return Ok(1.0);
+    }
+    let reference = taux_reference(c, devise, date).await?;
+    let indication = reference
+        .as_ref()
+        .map(|r| format!(" ({} : {:.4})", r.source, r.valeur))
+        .unwrap_or_default();
+    let t = taux.filter(|t| *t > 0.0).ok_or_else(|| {
+        AppError::RegleMetier(format!(
+            "{objet} en {devise} : le taux de change est obligatoire{indication}"
+        ))
+    })?;
+    if (t - 1.0).abs() < 1e-9 {
+        return Err(AppError::RegleMetier(format!(
+            "{objet} en {devise} au taux 1 : c'est le taux du dirham, pas celui du {devise}{indication}"
+        )));
+    }
+    if let Some(r) = reference {
+        let ecart = t / r.valeur - 1.0;
+        if ecart.abs() > ECART_TAUX_MAX && !confirme {
+            return Err(AppError::RegleMetier(format!(
+                "TAUX-ECART : le taux saisi {t:.4} s'ecarte de {:+.1} % du {} ({:.4}). \
+                 Corrigez-le, ou confirmez-le s'il s'agit du taux reel de votre banque.",
+                ecart * 100.0,
+                r.source,
+                r.valeur
+            )));
+        }
+    }
+    Ok(t)
+}
+
+/// `GET /api/import/taux-reference?devise=EUR&date=2026-09-22` — ce que
+/// l'ecran propose dans le champ « Taux de change ».
+pub async fn taux_reference_facture(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(q): Query<HashMap<String, String>>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Lire).await?;
+    let devise = q.get("devise").map(|d| d.trim().to_uppercase()).unwrap_or_default();
+    let date = q.get("date").cloned().unwrap_or_else(|| crate::db::aujourdhui());
+    if devise.is_empty() {
+        return Err(AppError::Invalide("devise obligatoire".into()));
+    }
+    if devise == "MAD" {
+        return Ok(Json(json!({ "devise": devise, "reference": 1.0, "source": "dirham",
+                               "ecart_max_pct": ECART_TAUX_MAX * 100.0 })));
+    }
+    let mut c = state.db.acquire().await?;
+    let r = taux_reference(&mut c, &devise, &date).await?;
+    Ok(Json(json!({
+        "devise": devise,
+        "date": date,
+        "reference": r.as_ref().map(|r| r.valeur),
+        "source": r.map(|r| r.source),
+        "ecart_max_pct": ECART_TAUX_MAX * 100.0,
+    })))
+}
+
+/// `POST /api/import/dossiers/{id}/factures` — la devise de la fiche
+/// fournisseur par defaut ; le taux est controle (voir `controler_taux`).
 pub async fn creer_facture(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -415,15 +553,30 @@ pub async fn creer_facture(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+
+    // La devise de la fiche fournisseur par defaut, celle du dossier en repli.
+    // Le TAUX, lui, ne se replie plus sur celui du dossier : 1 par defaut, il
+    // faisait entrer une facture en devise au cours du dirham.
+    let devise = match f.code_devise.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => d.to_uppercase(),
+        None => sqlx::query_scalar::<_, Option<String>>(
+            "SELECT COALESCE((SELECT code_devise FROM fournisseur WHERE code_fournisseur = $1),
+                             (SELECT code_devise FROM import_dossiers WHERE id_dossier = $2))",
+        )
+        .bind(&fournisseur)
+        .bind(&id_dossier)
+        .fetch_one(&mut *tx)
+        .await?
+        .unwrap_or_else(|| "MAD".into()),
+    };
+    let taux = controler_taux(&mut tx, "facture", &devise, f.taux_change, &date,
+                              f.taux_confirme.unwrap_or(false)).await?;
+
     let id: String = sqlx::query_scalar(
         "INSERT INTO import_factures (id_dossier, code_fournisseur, numero_facture, date_facture,
                                       code_devise, taux_change, montant_devise, nb_palettes,
                                       nb_bobines, id_utilisateur_creation, id_engagement)
-         SELECT d.id_dossier, $2, $3, $4,
-                -- La devise de la fiche fournisseur par defaut, celle du dossier en repli.
-                COALESCE($5, (SELECT fo.code_devise FROM fournisseur fo WHERE fo.code_fournisseur = $2),
-                         d.code_devise),
-                COALESCE($6, d.taux_change), $7, $8, $9, $10, NULLIF($11, '')
+         SELECT d.id_dossier, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, '')
            FROM import_dossiers d WHERE d.id_dossier = $1
          RETURNING id_facture",
     )
@@ -431,8 +584,8 @@ pub async fn creer_facture(
     .bind(&fournisseur)
     .bind(numero.trim())
     .bind(&date)
-    .bind(&f.code_devise)
-    .bind(f.taux_change)
+    .bind(&devise)
+    .bind(taux)
     .bind(f.montant_devise)
     .bind(f.nb_palettes)
     .bind(f.nb_bobines)
@@ -456,6 +609,31 @@ pub async fn modifier_facture(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
     let id_dossier = dossier_de_facture(&mut tx, &id).await?;
+
+    // LE TAUX N'EST CONTROLE QUE S'IL BOUGE : devise, taux ou date. Sans cela, un
+    // taux confirme une fois serait redemande a chaque enregistrement de la
+    // facture, pour un nombre de palettes corrige.
+    let (devise_av, taux_av, date_av): (String, f64, String) = sqlx::query_as(
+        "SELECT code_devise, taux_change::float8, date_facture FROM import_factures
+          WHERE id_facture = $1 FOR UPDATE",
+    )
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let devise = f.code_devise.as_deref().map(str::trim).filter(|d| !d.is_empty())
+        .map(str::to_uppercase).unwrap_or_else(|| devise_av.clone());
+    let date = f.date_facture.clone().unwrap_or_else(|| date_av.clone());
+    // Passer en MAD sans dire le taux, c'est vouloir le taux 1.
+    let taux_saisi = f.taux_change.or(if devise == "MAD" { Some(1.0) } else { Some(taux_av) });
+    let bouge = devise != devise_av
+        || taux_saisi.is_some_and(|t| (t - taux_av).abs() > 1e-9)
+        || date.get(..10) != date_av.get(..10);
+    let taux = if bouge {
+        Some(controler_taux(&mut tx, "facture", &devise, taux_saisi, &date, f.taux_confirme.unwrap_or(false)).await?)
+    } else {
+        f.taux_change
+    };
+
     sqlx::query(
         "UPDATE import_factures
             SET code_fournisseur = COALESCE($2, code_fournisseur),
@@ -470,8 +648,8 @@ pub async fn modifier_facture(
     .bind(&f.code_fournisseur)
     .bind(&f.numero_facture)
     .bind(&f.date_facture)
-    .bind(&f.code_devise)
-    .bind(f.taux_change)
+    .bind(&devise)
+    .bind(taux)
     .bind(f.montant_devise)
     .bind(f.nb_palettes)
     .bind(f.nb_bobines)
@@ -756,6 +934,17 @@ pub struct FraisSaisie {
     cours_change: Option<f64>,
     /// Vide ou absent : tout le dossier.
     cibles: Option<Vec<String>>,
+    /// Le taux s'ecarte de plus de 3 % du cours Bank Al-Maghrib, et l'operateur
+    /// le confirme (c'est celui de sa banque).
+    taux_confirme: Option<bool>,
+}
+
+/// La date du jour a Tanger : la reference du cours d'un frais, qui n'a pas de
+/// date de piece.
+async fn aujourd_hui(c: &mut sqlx::PgConnection) -> AppResult<String> {
+    Ok(sqlx::query_scalar("SELECT to_char(now() AT TIME ZONE 'Africa/Casablanca', 'YYYY-MM-DD')")
+        .fetch_one(&mut *c)
+        .await?)
 }
 
 async fn poser_cibles(tx: &mut sqlx::PgConnection, id_ligne_frais: &str, cibles: &[String]) -> AppResult<()> {
@@ -787,14 +976,15 @@ pub async fn ajouter_frais(
     let id_frais = f.id_frais.ok_or_else(|| AppError::Invalide("Type de frais obligatoire.".into()))?;
     let montant = f.montant_devise.filter(|m| *m > 0.0)
         .ok_or_else(|| AppError::Invalide("Montant du frais obligatoire.".into()))?;
-    let devise = f.code_devise.unwrap_or_else(|| "MAD".into());
-    let cours = if devise == "MAD" { 1.0 } else {
-        f.cours_change.filter(|c| *c > 0.0)
-            .ok_or_else(|| AppError::Invalide("Cours de change obligatoire hors dirham.".into()))?
-    };
+    let devise = f.code_devise.clone().unwrap_or_else(|| "MAD".into());
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE MEME CONTROLE QUE LES FACTURES (06/10/2026) : un fret de 4 000 USD au
+    // cours 1 entrait au cout de revient pour 4 000 DH au lieu de 39 400.
+    let jour = aujourd_hui(&mut tx).await?;
+    let cours = controler_taux(&mut tx, "frais", &devise, f.cours_change, &jour,
+                               f.taux_confirme.unwrap_or(false)).await?;
     let id: String = sqlx::query_scalar(
         "INSERT INTO dossier_lignes_frais (id_dossier, id_frais, libelle, numero_piece,
                                            montant_devise, code_devise, cours_change,
@@ -828,6 +1018,21 @@ pub async fn modifier_frais(
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // Le taux ne se recontrole que si la devise ou le cours changent.
+    if f.code_devise.is_some() || f.cours_change.is_some() {
+        let actuel: Option<(String, f64)> = sqlx::query_as(
+            "SELECT code_devise, cours_change::float8 FROM dossier_lignes_frais WHERE id_ligne_frais = $1",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((devise_actuelle, cours_actuel)) = actuel {
+            let devise = f.code_devise.clone().unwrap_or(devise_actuelle);
+            let cours = if devise == "MAD" { Some(1.0) } else { f.cours_change.or(Some(cours_actuel)) };
+            let jour = aujourd_hui(&mut tx).await?;
+            controler_taux(&mut tx, "frais", &devise, cours, &jour, f.taux_confirme.unwrap_or(false)).await?;
+        }
+    }
     let id_dossier: String = sqlx::query_scalar(
         "UPDATE dossier_lignes_frais
             SET id_frais = COALESCE($2, id_frais), libelle = COALESCE($3, libelle),
@@ -967,6 +1172,8 @@ pub struct LigneRecue {
     code_couleur: Option<String>,
     libelle_couleur: Option<String>,
     code_magasin: String,
+    /// Le verdict du controle : CONFORME par defaut.
+    statut_qualite: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1026,11 +1233,12 @@ async fn inserer_lignes_reception(
             "INSERT INTO import_reception_lignes
                     (id_reception, id_ligne, quantite_recue_kg, quantite_attendue_kg,
                      nb_bobines, nb_palettes, lot_fournisseur, code_couleur, code_magasin,
-                     libelle_couleur)
+                     libelle_couleur, statut_qualite)
              SELECT $1, fl.id_ligne, $3, fl.reste_kg, COALESCE($4, 0), COALESCE($5, 0),
                     COALESCE(NULLIF($6, ''), fl.lot_fournisseur),
                     COALESCE(NULLIF($7, ''), fl.code_couleur), $8,
-                    COALESCE(NULLIF($9, ''), fl.libelle_couleur)
+                    COALESCE(NULLIF($9, ''), fl.libelle_couleur),
+                    COALESCE(NULLIF($10, ''), 'CONFORME')
                FROM import_facture_lignes fl WHERE fl.id_ligne = $2",
         )
         .bind(id_reception)
@@ -1042,6 +1250,7 @@ async fn inserer_lignes_reception(
         .bind(&l.code_couleur)
         .bind(&l.code_magasin)
         .bind(&l.libelle_couleur)
+        .bind(&l.statut_qualite)
         .execute(&mut *tx)
         .await?;
     }
@@ -1073,7 +1282,7 @@ pub async fn lire_reception(
         "SELECT rl.id_reception_ligne, rl.id_ligne, rl.quantite_recue_kg, rl.quantite_attendue_kg,
                 rl.ecart_kg, rl.nb_bobines, rl.nb_palettes, rl.lot_fournisseur, rl.code_couleur,
                 rl.libelle_couleur,
-                rl.code_magasin, rl.id_mouvement,
+                rl.code_magasin, rl.statut_qualite, rl.id_mouvement,
                 d.id_dossier, d.numero AS numero_dossier, d.statut AS statut_dossier,
                 f.numero_facture, fo.nom AS fournisseur_nom, fl.code_reference,
                 ref.designation, fl.poids_net_kg, fl.quantite_recue_kg AS deja_recu_kg,
@@ -1103,7 +1312,8 @@ pub async fn lire_reception(
 }
 
 /// `PUT /api/import/receptions/{id}` — un brouillon se reecrit entier :
-/// l'en-tete, et ses lignes remplacees d'un bloc. Validee, elle est figee.
+/// l'en-tete, et ses lignes remplacees d'un bloc. Au controle aussi : le
+/// controleur y porte son verdict qualite. Validee, elle est figee.
 pub async fn modifier_reception(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1123,7 +1333,7 @@ pub async fn modifier_reception(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("reception {id}")))?;
-    if statut != "BROUILLON" {
+    if statut != "BROUILLON" && statut != "A_CONTROLER" {
         return Err(AppError::RegleMetier(
             "Une réception validée ne se modifie plus : le stock l'a déjà prise en compte.".into(),
         ));
@@ -1148,6 +1358,57 @@ pub async fn modifier_reception(
     inserer_lignes_reception(&mut tx, &id, &r.lignes).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id_reception": id })))
+}
+
+#[derive(Deserialize)]
+pub struct StatutReceptionImport {
+    statut: String,
+}
+
+/// `PUT /api/import/receptions/{id}/statut` — soumettre au controle
+/// (BROUILLON -> A_CONTROLER), ou rouvrir pour corriger la pesee
+/// (A_CONTROLER -> BROUILLON). Rien n'est encore en stock : ce n'est pas un
+/// retour arriere sur un document valide. Le passage a VALIDEE passe par
+/// /valider, qui fait l'entree en stock.
+pub async fn changer_statut_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(s): Json<StatutReceptionImport>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let attendu = match s.statut.as_str() {
+        "A_CONTROLER" => "BROUILLON",
+        "BROUILLON" => "A_CONTROLER",
+        "VALIDEE" => {
+            return Err(AppError::RegleMetier(
+                "La validation passe par /valider : elle fait entrer la marchandise en stock.".into(),
+            ))
+        }
+        autre => return Err(AppError::Invalide(format!("statut inconnu : {autre}"))),
+    };
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let (numero, actuel): (String, String) = sqlx::query_as(
+        "SELECT numero, statut FROM import_receptions WHERE id_reception = $1 FOR UPDATE",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("reception {id}")))?;
+    if actuel != attendu {
+        return Err(AppError::RegleMetier(format!(
+            "La réception {numero} est {actuel} : elle ne peut pas passer à {}.",
+            s.statut
+        )));
+    }
+    sqlx::query("UPDATE import_receptions SET statut = $2 WHERE id_reception = $1")
+        .bind(&id)
+        .bind(&s.statut)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "id_reception": id, "statut": s.statut })))
 }
 
 /// `POST /api/import/receptions/{id}/valider` — l'entree en stock.

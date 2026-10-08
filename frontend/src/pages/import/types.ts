@@ -142,7 +142,7 @@ export interface ReceptionResume extends Record<string, unknown> {
   id_reception: string
   numero_reception: string
   date_reception: string
-  statut: 'BROUILLON' | 'VALIDEE' | 'ANNULEE'
+  statut: 'BROUILLON' | 'A_CONTROLER' | 'VALIDEE' | 'ANNULEE'
   litige: number
   motif_litige: string | null
   date_validation: string | null

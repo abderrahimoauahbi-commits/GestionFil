@@ -574,8 +574,14 @@ export function DataTable<L extends Record<string, unknown>>({
               l'en-tete de societe. Lui donner `zone-impression` posait DEUX
               zones absolues l'une sur l'autre — l'en-tete colle du tableau
               d'ecran venait chevaucher le titre de l'etat. */}
+          {/* LA GRILLE DEFILE DANS SA BOITE (05/10/2026) : c'est ce qui fait tenir
+              l'en-tete colle — `sticky` suit le conteneur qui defile, pas la page.
+              Hauteur par defaut quand l'ecran n'en fixe pas. */}
           <div
-            className="defilement-x hidden rounded-lg border border-bordure bg-surface md:block"
+            className={cn(
+              'cadre-table defilement-x hidden rounded-lg border border-bordure bg-surface md:block',
+              !hauteurMax && 'md:max-h-[calc(100dvh-12rem)] md:overflow-y-auto',
+            )}
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}
           >
             {/* 13 PX, PAS 12. Le tableau est ce qu'on lit le plus longtemps ;
@@ -668,7 +674,9 @@ export function DataTable<L extends Record<string, unknown>>({
                           <td
                             key={cellule.id}
                             className={cn(
-                              'px-2.5 align-middle',
+                              // UNE LIGNE PAR RANGEE, comme un tableur : la grille
+                              // defile en largeur plutot que de doubler en hauteur.
+                              'whitespace-nowrap px-2.5 align-middle',
                               m.numerique && 'text-right tabular-nums',
                               m.secondaire && 'hidden xl:table-cell',
                             )}

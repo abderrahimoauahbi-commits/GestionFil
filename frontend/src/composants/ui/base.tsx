@@ -20,7 +20,7 @@ import { cn } from '../../lib/utils'
 // Un ERP se consulte huit heures par jour — chaque pixel de hauteur en trop est
 // une ligne de moins a l'ecran.
 const varianteBouton = cva(
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius)] ' +
+  'bouton inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius)] ' +
     'text-[13px] font-medium outline-none select-none ' +
     // LA TRANSITION PORTE AUSSI SUR L'OMBRE ET LA POSITION : sans elles,
     // l'enfoncement est un saut, pas un geste.
@@ -42,9 +42,12 @@ const varianteBouton = cva(
         // AU SURVOL, LA TEINTE SEULE CHANGE (02/10/2026) : le bouton ne monte
         // plus. Le style sobre n'a presque pas d'ombre, et un objet qui bouge
         // au passage de la souris distrait d'un tableau qu'on lit.
+        // L'ACTION PRINCIPALE EST EN COBALT (05/10/2026), plus en encre : un
+        // bouton noir sur une page blanche se confondait avec le texte, et
+        // l'interface n'avait plus de couleur pour dire « c'est ici ».
         principal:
-          'bg-accent text-accent-texte shadow-[var(--ombre-pose)] ' +
-          'hover:bg-accent/92 hover:shadow-[var(--ombre-levee)]',
+          'bg-primaire text-primaire-texte shadow-[var(--ombre-pose)] ' +
+          'hover:bg-primaire/90 hover:shadow-[var(--ombre-levee)]',
         primaire:
           'bg-primaire text-primaire-texte shadow-[var(--ombre-pose)] ' +
           'hover:bg-primaire/92 hover:shadow-[var(--ombre-levee)]',
@@ -90,6 +93,9 @@ export const Bouton = React.forwardRef<HTMLButtonElement, BoutonProps>(
       <Composant
         ref={ref}
         className={cn(varianteBouton({ variante, taille }), className)}
+        // L'ACCROCHE DES CHARTES : chaque style habille la variante a sa facon
+        // (degrade, verre, or) sans que les ecrans aient a le savoir.
+        data-variante={variante ?? 'principal'}
         disabled={disabled || chargement}
         {...props}
       >
@@ -121,7 +127,7 @@ Bouton.displayName = 'Bouton'
  * franchement plus claire : la difference se voit d'un coup d'oeil, sans lire.
  */
 const classeChamp =
-  'flex h-8 w-full rounded-[var(--radius)] border border-champ bg-surface px-2.5 py-1 text-[13px] ' +
+  'champ-saisie flex h-8 w-full rounded-[var(--radius)] border border-champ bg-surface px-2.5 py-1 text-[13px] ' +
   'transition-colors placeholder:italic placeholder:text-attenue-texte/55 ' +
   'focus-visible:border-anneau focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau/20 ' +
   'disabled:cursor-not-allowed disabled:bg-attenue disabled:text-attenue-texte ' +
@@ -279,7 +285,7 @@ export function CarteEntete({
         // L'EN-TETE RESPIRE. A 1.5 de padding vertical, le titre touchait le
         // trait du dessous ; l'espace est ce qui distingue une interface qu'on
         // a dessinee d'une interface qu'on a assemblee.
-        'flex min-h-10 items-center justify-between gap-3 border-b border-bordure bg-attenue/60 px-4 py-2',
+        'carte-entete flex min-h-11 items-center justify-between gap-3 border-b border-bordure px-4 py-2',
         className,
       )}
       {...props}
@@ -310,7 +316,7 @@ export function CarteTitre({ className, ...props }: React.HTMLAttributes<HTMLHea
   return (
     <h3
       className={cn(
-        'text-[10px] font-semibold uppercase tracking-wider text-attenue-texte',
+        'carte-titre text-[13px] font-semibold tracking-[-0.01em] text-texte',
         className,
       )}
       {...props}
@@ -323,7 +329,7 @@ export function CarteCorps({ className, ...props }: React.HTMLAttributes<HTMLDiv
   // Demonte plutot que masque : un formulaire replie ne doit pas continuer a
   // recevoir le focus au clavier.
   if (repli?.replie) return null
-  return <div className={cn('p-2.5', className)} {...props} />
+  return <div className={cn('p-3.5', className)} {...props} />
 }
 
 // ============================================================================
@@ -341,7 +347,7 @@ export function CarteCorps({ className, ...props }: React.HTMLAttributes<HTMLDiv
  * ces trois valeurs, pas d'une ombre.
  */
 const varianteBadge = cva(
-  'inline-flex items-center gap-1 rounded-full border px-2 py-[1px] text-[10.5px] font-medium ' +
+  'etiquette inline-flex items-center gap-1 rounded-full border px-2 py-[1px] text-[10.5px] font-medium ' +
     'leading-[1.35] whitespace-nowrap',
   {
     variants: {
@@ -365,7 +371,7 @@ export function Badge({
   ton,
   ...props
 }: React.HTMLAttributes<HTMLSpanElement> & VariantProps<typeof varianteBadge>) {
-  return <span className={cn(varianteBadge({ ton }), className)} {...props} />
+  return <span data-ton={ton ?? 'neutre'} className={cn(varianteBadge({ ton }), className)} {...props} />
 }
 
 // ============================================================================

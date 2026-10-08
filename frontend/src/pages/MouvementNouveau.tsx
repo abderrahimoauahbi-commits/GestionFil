@@ -46,6 +46,9 @@ import { type Conditionnement, depuisKg, facteurVersKg, pourChamp, saisieExacte 
 import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
 
+
+const TYPES_SAISIE_LIBRE = ['SORTIE_PROD', 'RETOUR_PROD', 'RETOUR_FOURN', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT']
+
 interface TypeMvt {
   code_type_mvt: string
   libelle: string
@@ -216,7 +219,10 @@ export function MouvementNouveau() {
     queryFn: async () => {
       // Le registre n'expose pas les types : ils viennent du referentiel.
       const r = await api.get<TypeMvt[]>('/api/types-mouvement')
-      return r
+      /* SEULS LES TYPES QUI SE SAISISSENT A LA MAIN (06/10/2026) : les autres
+         naissent d'un document (reception, transfert, fusion, fiche machine) et
+         le serveur les refuse ici. */
+      return r.filter((t) => TYPES_SAISIE_LIBRE.includes(t.code_type_mvt))
     },
     retry: false,
   })

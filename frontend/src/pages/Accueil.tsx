@@ -276,6 +276,8 @@ interface Evenement {
   detail: string | null
   chemin: string
   par: string | null
+  /** A part du detail depuis le 08/10/2026 : absent quand le compte ne voit pas les montants. */
+  montant_total_mad?: number | null
 }
 
 const TEINTE_CATEGORIE: Record<string, string> = {
@@ -353,8 +355,12 @@ function FilActualite() {
                   {e.categorie}
                 </span>
                 <span className="text-[13.5px] font-medium text-texte">{e.titre}</span>
-                {e.detail && (
-                  <span className="text-[12px] text-attenue-texte">{e.detail}</span>
+                {(e.detail || e.montant_total_mad != null) && (
+                  <span className="text-[12px] text-attenue-texte">
+                    {[e.detail, e.montant_total_mad != null ? `${fmt.entier(e.montant_total_mad)} MAD` : null]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
                 )}
                 {/* L'AUTEUR ET LE MOMENT FERMENT LA LIGNE, a droite : ce sont
                     les deux choses qu'on cherche en second, jamais en premier. */}

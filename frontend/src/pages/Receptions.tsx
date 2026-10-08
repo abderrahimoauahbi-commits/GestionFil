@@ -287,13 +287,13 @@ export function Receptions() {
       {(totaux.enSaisie > 0 || totaux.aControler > 0 || totaux.mesurables > 0) && (
         <div className="mb-4 flex flex-wrap gap-3">
           {totaux.enSaisie > 0 && (
-            <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
+            <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
               <div className="text-[11px] text-attenue-texte">En saisie</div>
               <div className="text-lg font-semibold tabular-nums">{totaux.enSaisie}</div>
             </div>
           )}
           {totaux.aControler > 0 && (
-            <div className="rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
+            <div data-ton="alerte" className="carte-stat rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
               <div className="text-[11px] text-attenue-texte">En attente de contrôle</div>
               <div className="text-lg font-semibold tabular-nums text-alerte">
                 {totaux.aControler}
@@ -302,8 +302,9 @@ export function Receptions() {
           )}
           {totaux.tauxOtif != null && (
             <div
+              data-ton={totaux.tauxOtif >= 95 ? 'succes' : 'alerte'}
               className={cn(
-                'rounded-[var(--radius)] border px-4 py-2.5',
+                'carte-stat rounded-[var(--radius)] border px-4 py-2.5',
                 totaux.tauxOtif >= 95 ? 'border-succes bg-succes/5' : 'border-alerte bg-alerte/5',
               )}
             >

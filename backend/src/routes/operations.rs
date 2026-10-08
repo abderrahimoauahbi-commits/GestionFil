@@ -141,6 +141,25 @@ pub async fn cloturer_inventaire(
     Ok(Json(serde_json::to_value(r)?))
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct MotifAnnulation {
+    pub motif: String,
+}
+
+/// `POST /api/inventaires/{id}/annuler` — un inventaire ouvert par erreur ou
+/// perime s'abandonne, avec un motif. Acte de validation : il ferme un
+/// comptage que d'autres ont commence.
+pub async fn annuler_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(m): Json<MotifAnnulation>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+    let numero = inventaire::annuler(&state.db, &user, &id, &m.motif).await?;
+    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "statut": "ANNULE" })))
+}
+
 pub async fn classifier(
     State(state): State<AppState>,
     user: Utilisateur,

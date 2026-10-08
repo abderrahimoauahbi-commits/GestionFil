@@ -27,12 +27,14 @@ import {
   Printer,
   Save,
   Undo2,
+  XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
+import { ActionMotivee } from '../composants/ActionMotivee'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import {
@@ -69,6 +71,7 @@ interface Inventaire extends Record<string, unknown> {
   nb_lignes: number
   nb_a_compter: number
   responsable: string | null
+  motif_annulation?: string | null
 }
 
 /* Des axes que l'on choisit, pas de comparateur a saisir : les valeurs
@@ -282,6 +285,7 @@ export function Inventaires() {
   const tolMotif = useToleranceMotif()
   const [selection, setSelection] = useState<string | null>(null)
   const [creation, setCreation] = useState(false)
+  const [annulation, setAnnulation] = useState(false)
   const [statut, setStatut] = useState('')
   const filtres = useFiltres(CHAMPS_INVENTAIRE)
   /**
@@ -630,7 +634,9 @@ export function Inventaires() {
 
                   {enCours && droits.peutValider && (
                     <Bouton
-                      disabled={restantes > 0 || injustifiees.length > 0 || modifiees.length > 0}
+                      // Le serveur verrouille la fiche ; l'ecran n'envoie pas deux fois.
+                      chargement={cloturer.isPending}
+                      disabled={cloturer.isPending || restantes > 0 || injustifiees.length > 0 || modifiees.length > 0}
                       title={
                         modifiees.length > 0
                           ? "Enregistrez d'abord le comptage en cours"
@@ -651,6 +657,37 @@ export function Inventaires() {
                       <ClipboardCheck />
                       Cloturer et ajuster
                     </Bouton>
+                  )}
+
+                  {/* ANNULER UN INVENTAIRE OUVERT (regle 10, 08/10/2026) : un
+                      comptage abandonne ou perime n'avait aucune issue. Rien
+                      n'est encore au stock ; le motif reste sur la fiche. */}
+                  {(enCours || inventaire.statut === 'BROUILLON') && droits.peutValider && (
+                    <>
+                      <Bouton variante="contour" onClick={() => setAnnulation(true)}>
+                        <XCircle />
+                        Annuler l'inventaire
+                      </Bouton>
+                      <ActionMotivee
+                        ouvert={annulation}
+                        surFermeture={() => setAnnulation(false)}
+                        titre={`Annuler ${inventaire.numero_inventaire}`}
+                        description="L'inventaire passera à « annulé » ; il ne pourra plus être clos."
+                        libelleBouton="Annuler l'inventaire"
+                        chemin={`/api/inventaires/${inventaire.id_inventaire}/annuler`}
+                        consequence={
+                          <>
+                            Aucun ajustement n'a encore été passé : le stock ne bouge pas. Les lignes déjà
+                            comptées restent consultables. Un autre inventaire pourra ensuite être ouvert sur
+                            ce magasin.
+                          </>
+                        }
+                        surSucces={rafraichir}
+                      />
+                    </>
+                  )}
+                  {inventaire.statut === 'ANNULE' && inventaire.motif_annulation && (
+                    <span className="text-[12px] text-attenue-texte">Annulé : {inventaire.motif_annulation}</span>
                   )}
 
                   {/* ROUVRIR UN INVENTAIRE CLOS. Le serveur refuse tant que ses

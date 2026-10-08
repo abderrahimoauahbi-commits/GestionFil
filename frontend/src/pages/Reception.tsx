@@ -53,7 +53,7 @@ import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'RECEPTIONS'
-/** Au-dela, l'ecart de pesee exige une derogation motivee (controle C10). */
+/** Un EXCEDENT au-dela exige une derogation motivee (controle C10) ; un manque, non. */
 const TOLERANCE_PCT = 2
 
 interface Reception extends Record<string, unknown> {
@@ -720,7 +720,7 @@ export function Reception() {
   const lignesAffichees: LigneRec[] = lignes
 
   const horsTolerance = useMemo(
-    () => lignesAffichees.filter((l) => Math.abs(l.ecart_pct ?? 0) > TOLERANCE_PCT).length,
+    () => lignesAffichees.filter((l) => (l.ecart_pct ?? 0) > TOLERANCE_PCT).length,
     [lignesAffichees],
   )
 
@@ -795,7 +795,7 @@ export function Reception() {
       largeur: '110px',
       rendu: (l) => {
         if (l.ecart_pct == null) return <span className="text-attenue-texte">—</span>
-        const hors = Math.abs(l.ecart_pct) > TOLERANCE_PCT
+        const hors = l.ecart_pct > TOLERANCE_PCT
         return (
           <span className={cn('tabular-nums', hors && 'font-medium text-danger')}>
             {l.ecart_pct > 0 ? '+' : ''}
@@ -932,10 +932,14 @@ export function Reception() {
               <Bouton
                 onClick={() => {
                   /* LE LOT INTERNE, ANNONCE AVANT D'ETRE POSE (01/10/2026).
-                     Une reference suivie sans lot recoit a la validation le
-                     numero de la reception et de sa ligne. On le dit, on fait
-                     confirmer : on peut encore saisir le vrai lot a la place. */
+                     Une reference suivie sans lot recoit a la validation un
+                     lot FOURNISSEUR-JJMMAA-NN (domain/reception.rs) — l'ecran
+                     annoncait a tort le numero de la reception. Le rang NN
+                     n'est connu qu'a la validation. On fait confirmer : on peut
+                     encore saisir le vrai lot a la place. */
                   const aGenerer = lignes.filter((l) => l.suivi_lot === 1 && !(l.lot_fournisseur ?? '').trim())
+                  const [aa, mm, jj] = (rec.date_reception ?? '').slice(0, 10).split('-')
+                  const prefixeLot = `${(rec.fournisseur_nom ?? '').trim().split(' ')[0].replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-${jj ?? ''}${mm ?? ''}${(aa ?? '').slice(2)}`
                   if (aGenerer.length === 0) return valider.mutate()
                   confirmation.demander({
                     titre: `${aGenerer.length} ligne(s) sans lot fournisseur`,
@@ -947,7 +951,7 @@ export function Reception() {
                         <ul className="mt-2 space-y-0.5 font-mono text-[12px]">
                           {aGenerer.map((l) => (
                             <li key={l.id_ligne_reception}>
-                              {l.code_reference} → {rec.numero_reception}-{String(l.ligne_numero).padStart(2, '0')}
+                              {l.code_reference} → {prefixeLot}-NN
                             </li>
                           ))}
                         </ul>
@@ -993,8 +997,8 @@ export function Reception() {
 
       {horsTolerance > 0 && (
         <Alerte ton="alerte" titre="Écart de pesee" className="mb-3">
-          {horsTolerance} ligne(s) s'ecartent de plus de {TOLERANCE_PCT} % de la quantite
-          commandee. Au-dela, le controle qualite exigera une derogation motivee.
+          {horsTolerance} ligne(s) depassent de plus de {TOLERANCE_PCT} % la quantite attendue.
+          Un tel excedent exige une derogation motivee ; une livraison partielle, non.
         </Alerte>
       )}
 

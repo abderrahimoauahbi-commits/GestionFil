@@ -421,8 +421,13 @@ pub async fn valider(
         // ---- 6. Soldes du bon de commande, en kg ---------------------------
         if let Some(id_ligne_bc) = &l.id_ligne_bc {
             sqlx::query(
+                // LA TOLERANCE DE PESEE PASSE (06/10/2026) : 1 015 kg pesés pour
+                // 1 000 commandés, admis a ±2 %, faisaient echouer la validation sur
+                // la contrainte « recu <= commande ». Le stock prend le poids reel ;
+                // le bon, lui, est solde a sa quantite.
                 "UPDATE ligne_bc
-                    SET quantite_recue_kg = ROUND(quantite_recue_kg + $2::numeric, 4)
+                    SET quantite_recue_kg = LEAST(quantite_commandee_kg,
+                                                  ROUND(quantite_recue_kg + $2::numeric, 4))
                   WHERE id_ligne_bc = $1",
             )
             .bind(id_ligne_bc)

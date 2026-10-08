@@ -80,9 +80,9 @@ export function RailLateral({
   const IconeCourante = courante?.Icone
 
   return (
-    <div className="space-y-2 lg:space-y-3">
+    <div className="space-y-2 lg:flex lg:flex-wrap lg:items-center lg:gap-x-4 lg:gap-y-2 lg:space-y-0">
       {recherche && (
-        <div className="flex items-center gap-2 rounded-[var(--radius)] border border-bordure bg-surface px-2">
+        <div className="flex items-center gap-2 rounded-[var(--radius)] border border-bordure bg-surface px-2 lg:w-64 lg:shrink-0">
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
           <input
             value={recherche.valeur}
@@ -120,15 +120,18 @@ export function RailLateral({
         </span>
       </button>
 
-      <div className={cn('space-y-3', !ouvert && 'hidden lg:block')}>
+      {/* AU BUREAU, LES VUES SONT UNE RANGEE DE PUCES au-dessus du tableau
+          (05/10/2026) : la colonne de gauche rend sa largeur aux donnees. Le
+          resume de chaque vue passe en infobulle. */}
+      <div className={cn('space-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-x-4 lg:gap-y-2 lg:space-y-0', !ouvert && 'hidden lg:flex')}>
       {groupes.map((g, i) => (
-        <div key={g.titre ?? i}>
+        <div key={g.titre ?? i} className="lg:flex lg:items-center lg:gap-2">
           {g.titre && (
-            <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
+            <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte lg:mb-0 lg:px-0">
               {g.titre}
             </div>
           )}
-          <nav className="space-y-0.5">
+          <nav className="space-y-0.5 lg:flex lg:flex-wrap lg:items-center lg:gap-1 lg:space-y-0">
             {g.entrees.map((e) => {
               const choisi = e.cle === actif
               return (
@@ -140,18 +143,22 @@ export function RailLateral({
                     setOuvert(false) // choisi, donc referme : on veut voir le resultat
                   }}
                   aria-current={choisi ? 'true' : undefined}
+                  title={e.resume}
                   className={cn(
                     'flex w-full items-start gap-2 rounded-[var(--radius)] px-2.5 py-2 text-left transition-colors',
-                    choisi ? 'bg-primaire/10 text-primaire' : 'text-texte hover:bg-attenue/40',
+                    'lg:w-auto lg:items-center lg:gap-1.5 lg:rounded-full lg:border lg:px-2.5 lg:py-[3px]',
+                    choisi
+                      ? 'bg-primaire/10 text-primaire lg:border-primaire lg:bg-primaire lg:text-primaire-texte'
+                      : 'text-texte hover:bg-attenue/40 lg:border-bordure lg:bg-surface lg:hover:border-champ',
                   )}
                 >
-                  {e.Icone && <e.Icone className="mt-0.5 size-4 shrink-0" />}
-                  <span className="min-w-0 flex-1">
-                    <span className={cn('block text-[13px]', choisi && 'font-medium')}>
+                  {e.Icone && <e.Icone className="mt-0.5 size-4 shrink-0 lg:mt-0 lg:size-3.5" />}
+                  <span className="min-w-0 flex-1 lg:flex-none">
+                    <span className={cn('block text-[13px] lg:whitespace-nowrap lg:text-[12.5px]', choisi && 'font-medium')}>
                       {e.libelle}
                     </span>
                     {e.resume && (
-                      <span className="block text-[11px] leading-tight text-attenue-texte">
+                      <span className="block text-[11px] leading-tight text-attenue-texte lg:hidden">
                         {e.resume}
                       </span>
                     )}
@@ -159,8 +166,9 @@ export function RailLateral({
                   {e.compte != null && (
                     <span
                       className={cn(
-                        'shrink-0 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums',
+                        'shrink-0 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums lg:py-0 lg:text-[10.5px]',
                         TON_COMPTEUR[e.ton ?? 'neutre'],
+                        choisi && 'lg:bg-primaire-texte/20 lg:text-primaire-texte',
                       )}
                     >
                       {e.compte}
@@ -198,15 +206,10 @@ export function PageAvecRail({
   large?: boolean
 }) {
   return (
-    <div
-      className={cn(
-        'grid gap-4',
-        large
-          ? 'lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]'
-          : 'lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]',
-      )}
-    >
-      <div className="min-w-0">{rail}</div>
+    /* LE RAIL PASSE AU-DESSUS DU CONTENU (05/10/2026) : vues et filtres en
+       barre, le tableau sur toute la largeur. `large` n'a plus d'effet. */
+    <div className={cn('flex flex-col gap-3', large && 'gap-3')}>
+      <div className="barre-vues sans-impression min-w-0">{rail}</div>
       <div className="min-w-0">{children}</div>
     </div>
   )

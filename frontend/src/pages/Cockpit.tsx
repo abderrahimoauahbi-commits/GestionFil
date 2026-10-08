@@ -28,6 +28,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { OngletsTableauDeBord } from './tableau-de-bord/Onglets'
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -436,13 +437,10 @@ export function Cockpit() {
      pages d'un espace Fiori ou les entrees « Vue d'ensemble / Analyse » d'une
      application Odoo. */
   const { vue: vueUrl } = useParams<{ vue?: string }>()
-  const naviguer = useNavigate()
   const vue: VueCockpit =
     vueUrl === 'analyse' || vueUrl === 'opportunites' || vueUrl === 'matiere'
       ? vueUrl
       : 'situation'
-  const setVue = (v: VueCockpit) =>
-    naviguer(v === 'situation' ? '/tableau-de-bord' : `/tableau-de-bord/${v}`)
 
   const risques = qRisques.data ?? []
   /** Les mois de l'horizon, pris sur la premiere frise : toutes sont alignees. */
@@ -574,7 +572,7 @@ export function Cockpit() {
           le probleme — une vue qu'on parcourt n'est plus une vue qu'on compare.
           Les quatre onglets reprennent l'ordre du classeur : ce qui brule, ce
           que disent les chiffres, ce qu'on pourrait gagner, ou part la matiere. */}
-      <BarreVues vue={vue} surChoix={setVue} />
+      <OngletsTableauDeBord className="mt-6" />
 
       {vue === 'situation' && <CockpitAnalyse vue="situation" />}
 
@@ -795,52 +793,6 @@ export function Cockpit() {
 }
 
 /**
- * LA BARRE DES VUES.
- *
- * Quatre entrees, dans l'ordre ou l'on decide : ce qui brule, ce que disent les
- * chiffres, ce qu'on pourrait gagner, ou part la matiere. C'est l'ordre du
- * classeur, et c'est aussi celui des cockpits des grands ERP — on n'ouvre pas
- * un tableau de bord pour tout voir, on l'ouvre avec une question.
- *
- * LE CHOIX SE GARDE dans la session : revenir au poste de travail apres avoir
- * ouvert une reference doit ramener la ou l'on etait, pas au debut.
- */
-function BarreVues({
-  vue,
-  surChoix,
-}: {
-  vue: VueCockpit
-  surChoix: (v: VueCockpit) => void
-}) {
-  const vues: { cle: VueCockpit; libelle: string }[] = [
-    { cle: 'situation', libelle: 'Synthèse' },
-    { cle: 'analyse', libelle: 'Analytique' },
-    { cle: 'opportunites', libelle: 'Opportunités' },
-    { cle: 'matiere', libelle: 'Matière' },
-  ]
-  return (
-    <div className="mb-3 mt-6 flex flex-wrap gap-1 border-b border-bordure">
-      {vues.map((v) => (
-        <button
-          key={v.cle}
-          type="button"
-          onClick={() => surChoix(v.cle)}
-          className={cn(
-            '-mb-px border-b-2 px-3 py-1.5 text-[12.5px] transition-colors',
-            v.cle === vue
-              ? 'border-primaire font-medium text-texte'
-              : 'border-transparent text-attenue-texte hover:text-texte',
-          )}
-          aria-current={v.cle === vue ? 'page' : undefined}
-        >
-          {v.libelle}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/**
  * LA PHRASE DU JOUR — ce que le classeur appelle « Insights du jour ».
  *
  * Un tableau de bord qui n'aligne que des nombres laisse a chacun le soin de
@@ -1043,7 +995,7 @@ interface StatRole {
  * Pas de troisieme graphique tant qu'aucune sortie de production n'est saisie :
  * un camembert de consommation sur zero mouvement ne montrerait que du vide.
  */
-function TableauDeBord() {
+export function TableauDeBord() {
   const { peut } = useAuth()
   const q = useQuery({
     queryKey: ['stats', 'qualites'],
@@ -1153,7 +1105,7 @@ interface LigneProjetee {
  * Deux questions de direction, cote a cote : sur quelles references l'argent
  * est-il immobilise, et de qui depend-on pour le racheter.
  */
-function Concentration() {
+export function Concentration() {
   const { peut } = useAuth()
   const client = useQueryClient()
   const [calcul, setCalcul] = useState(false)
@@ -1421,7 +1373,7 @@ function ChiffresCles() {
  * donnerait un total faux et ferait croire le catalogue plus propre qu'il
  * n'est. Cette ligne-la est une invitation a completer le catalogue.
  */
-function BlocFamilles() {
+export function BlocFamilles() {
   const naviguer = useNavigate()
   const droits = useDroits('MOUVEMENTS')
   const q = useQuery({

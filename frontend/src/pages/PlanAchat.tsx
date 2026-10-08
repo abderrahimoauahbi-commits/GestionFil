@@ -939,16 +939,16 @@ export function PlanAchat() {
       )}
       {ouvertes.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-3">
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
+          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
             <div className="text-[11px] text-attenue-texte">Budget a engager</div>
             <div className="text-lg font-semibold tabular-nums">{fmt.mad(budgetOuvert)}</div>
           </div>
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
+          <div data-ton="neutre" className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
             <div className="text-[11px] text-attenue-texte">Propositions ouvertes</div>
             <div className="text-lg font-semibold tabular-nums">{ouvertes.length}</div>
           </div>
           {selection.length > 0 && (
-            <div className="rounded-[var(--radius)] border border-primaire bg-primaire/5 px-4 py-2.5">
+            <div data-ton="primaire" className="carte-stat rounded-[var(--radius)] border border-primaire bg-primaire/5 px-4 py-2.5">
               <div className="text-[11px] text-attenue-texte">
                 Selection · {fournisseursSelection} fournisseur(s)
               </div>

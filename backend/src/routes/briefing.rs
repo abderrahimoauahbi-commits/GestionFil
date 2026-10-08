@@ -120,10 +120,10 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
     }
 
     if peut(module::RECEPTIONS) {
-        let n = compter(db, "SELECT count(*) FROM import_receptions WHERE statut = 'BROUILLON'").await;
+        let n = compter(db, "SELECT count(*) FROM import_receptions WHERE statut IN ('BROUILLON','A_CONTROLER')").await;
         if n > 0 {
-            points.push(point("receptions_import", "réception(s) d'import en brouillon", n,
-                              "alerte", "/receptions-import", "à valider pour entrer en stock"));
+            points.push(point("receptions_import", "réception(s) d'import pas encore en stock", n,
+                              "alerte", "/receptions-import", "à soumettre ou à contrôler"));
         }
         let locales = compter(
             db,
@@ -155,7 +155,7 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
                           JOIN import_reception_lignes rl ON rl.id_reception = r.id_reception
                           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
                           JOIN import_factures f ON f.id_facture = l.id_facture
-                         WHERE f.id_dossier = d.id_dossier AND r.statut = 'BROUILLON')",
+                         WHERE f.id_dossier = d.id_dossier AND r.statut IN ('BROUILLON','A_CONTROLER'))",
             )
             .await;
             points.push(point(

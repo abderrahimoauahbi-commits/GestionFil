@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::connect(&config.database_url)
         .await
-        .context("connexion a la base impossible : verifier DATABASE_URL et que PostgreSQL ecoute")?;
+        .context("demarrage impossible")?;
 
     alerter_si_comptes_non_initialises(&pool).await?;
 

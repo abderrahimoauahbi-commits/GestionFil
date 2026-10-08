@@ -1073,8 +1073,9 @@ export function PlanAchat() {
                         titre: `Ecarter ${p.code_reference} ?`,
                         libelleConfirmer: 'Ecarter',
                         description:
-                          'Elle ne sera plus reproposee par les recalculs suivants, et ' +
-                          'n’entrera dans aucune commande.',
+                          'Elle ne sera plus reproposée pendant 90 jours (réglage P_DureeEcartJours) ' +
+                          'et n’entrera dans aucune commande. Passé ce délai, si le besoin existe ' +
+                          'toujours, le calcul la repropose.',
                         action: () => ignorer.mutate(p.id_proposition),
                       })
                     }

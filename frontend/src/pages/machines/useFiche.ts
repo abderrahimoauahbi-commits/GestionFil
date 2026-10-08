@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
 import { SANS_LOT } from '../../lib/lots'
 import {
   corpsFiche, depuisEtat, destinationsDe, estimer, lignesAEnvoyer, machinesApi,
@@ -234,7 +235,12 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
 
   const pret = manque === null
 
-  const peutValider = pret && apercuAJour && apercu!.resultat.blocages.length === 0
+  /* LE BOUTON SUIT LE DROIT (audit v4) : charger ou decharger fait bouger le
+     magasin et demande VALIDER ; un constat reste au droit d'ecrire. Sans le
+     droit, l'apercu restait propre et la validation repondait 403. */
+  const { peut } = useAuth()
+  const droitValider = type === 'MAJ' ? peut('MOUVEMENTS', 'ECRIRE') : peut('MOUVEMENTS', 'VALIDER')
+  const peutValider = droitValider && pret && apercuAJour && apercu!.resultat.blocages.length === 0
 
   /* LES LOTS DU MAGASIN D'ORIGINE, pour le FIFO. */
   const qLots = useQuery({

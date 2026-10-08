@@ -233,7 +233,8 @@ pub async fn peut_valider_ecart_rouge(c: &mut sqlx::PgConnection, role: &str) ->
     Ok(role == "ADMIN"
         || sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS (SELECT 1 FROM permission
-                             WHERE code_role_user = $1 AND module = 'INVENTAIRE' AND action = 'VALIDER')",
+                             WHERE code_role_user = $1 AND module = 'INVENTAIRE' AND action = 'VALIDER'
+                               AND actif = 1)",
         )
         .bind(role)
         .fetch_one(&mut *c)
@@ -469,27 +470,6 @@ pub async fn calculer(
             calc.ecart_kg = 0.0;
         }
 
-        // LE NIVEAU DE L'ECART (regle 1) : rapporte au poids de la ligne — ce
-        // qu'elle portait, plus ce qu'on y charge.
-        let poids_ligne = if f.type_fiche == "CHARGE" { kg_avant + calc.kg_mouvementes } else { kg_avant };
-        calc.niveau_ecart = niveau_ecart(calc.ecart_kg, poids_ligne, &seuils).to_string();
-        if calc.niveau_ecart == "ROUGE" {
-            let seuil = seuils.rouge_kg.max(poids_ligne.abs() * seuils.rouge_pct / 100.0);
-            if !autorise_rouge {
-                blocages.push(format!(
-                    "{lib} : ecart de {} kg, au-dela du seuil rouge ({} kg) — la validation revient a la Direction (droit de valider l'inventaire)",
-                    calc.ecart_kg,
-                    arrondi_kg(seuil)
-                ));
-            }
-            if calc.motif_texte.is_none() {
-                blocages.push(format!(
-                    "{lib} : ecart rouge de {} kg — ecrivez ce qui l'explique dans le commentaire du motif",
-                    calc.ecart_kg
-                ));
-            }
-        }
-
         // L'EFFET DE L'ECART, selon la matrice.
         calc.effet_ecart = if calc.ecart_kg.abs() < 0.0005 {
             "AUCUN".into()
@@ -511,6 +491,40 @@ pub async fn calculer(
                 }
             }
         };
+        // LE NIVEAU DE L'ECART (regle 1) : rapporte au poids de la ligne — ce
+        // qu'elle portait, plus ce qu'on y charge.
+        let poids_ligne = if f.type_fiche == "CHARGE" { kg_avant + calc.kg_mouvementes } else { kg_avant };
+        // SEULS LES ECARTS NON EXPLIQUES SE JUGENT (decision du 08/10/2026,
+        // audit v4) : une consommation, un dechet, une perte ou une casse
+        // declares au bon motif sont le travail de l'atelier, enregistres en
+        // vert. Juges sur tout l'ecart, 18 constats ordinaires sur 20 seraient
+        // passes au rouge et auraient demande la Direction.
+        let explique = matches!(
+            calc.effet_ecart.as_str(),
+            "AUCUN" | "CONSOMMATION" | "DECHET" | "PERTE" | "CASSE"
+        );
+        calc.niveau_ecart = if explique {
+            (if calc.ecart_kg.abs() < 0.0005 { "AUCUN" } else { "VERT" }).to_string()
+        } else {
+            niveau_ecart(calc.ecart_kg, poids_ligne, &seuils).to_string()
+        };
+        if calc.niveau_ecart == "ROUGE" {
+            let seuil = seuils.rouge_kg.max(poids_ligne.abs() * seuils.rouge_pct / 100.0);
+            if !autorise_rouge {
+                blocages.push(format!(
+                    "{lib} : ecart de {} kg, au-dela du seuil rouge ({} kg) — la validation revient a la Direction (droit de valider l'inventaire)",
+                    calc.ecart_kg,
+                    arrondi_kg(seuil)
+                ));
+            }
+            if calc.motif_texte.is_none() {
+                blocages.push(format!(
+                    "{lib} : ecart rouge de {} kg — ecrivez ce qui l'explique dans le commentaire du motif",
+                    calc.ecart_kg
+                ));
+            }
+        }
+
         lignes.push(calc);
     }
 
@@ -627,9 +641,13 @@ pub async fn controles_complementaires(
         .bind(&lot)
         .fetch_optional(&mut *c)
         .await?;
-        if statut.as_deref() == Some("BLOQUE") {
+        // REGLE 11 (08/10/2026) : un lot bloque ne part pas en production —
+        // on ne le CHARGE pas. Le retirer d'une machine vers le magasin est
+        // precisement ce que le blocage demande : le dechargement passe.
+        if statut.as_deref() == Some("BLOQUE") && f.type_fiche == "CHARGE" {
             refus.push(format!(
-                "LOT-BLOQUE : le lot {lot} de {reference} est bloque par la qualite ; seul le responsable qualite peut le debloquer"
+                "LOT-BLOQUE : le lot {lot} de {reference} est bloque par la qualite : il ne se charge pas. \
+                 Le deblocage revient au droit de valider les lots, ou a la Direction"
             ));
             continue;
         }
@@ -926,9 +944,10 @@ pub async fn valider(
                  (id_decision, ligne_numero, code_reference, lot_fournisseur, poids_nominal_kg,
                   nb_avant, kg_avant, nb_mouvementees, poids_retenu_kg, pct_retirees, kg_mouvementes,
                   destination, nb_apres, pourcentage_apres, kg_apres, ecart_kg, effet_ecart,
-                  code_motif, motif_texte, cmup_mad, id_mouvement, pourcentage_theorique)
+                  code_motif, motif_texte, cmup_mad, id_mouvement, pourcentage_theorique,
+                  niveau_ecart)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-                     round($22::numeric, 2))",
+                     round($22::numeric, 2), $23)",
         )
         .bind(&id_decision)
         .bind(l.ligne_numero)
@@ -952,6 +971,8 @@ pub async fn valider(
         .bind(prix.get(&l.code_reference).cloned().flatten())
         .bind(id_mvt.get(&l.ligne_numero))
         .bind(l.pourcentage_theorique)
+        // Le niveau est archive : il dit ce qui a ete juge, meme si les seuils changent.
+        .bind(&l.niveau_ecart)
         .execute(&mut *c)
         .await?;
     }

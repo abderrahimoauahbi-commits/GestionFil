@@ -641,7 +641,9 @@ pub async fn cloturer_qualite(
     let plans: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM ligne_plan_production lpp
            JOIN plan_production pp ON pp.id_plan = lpp.id_plan
-          WHERE lpp.code_qualite = $1 AND pp.statut = 'VALIDE' AND lpp.m2_prevus > 0",
+          -- EN_COURS : le plan en service. « VALIDE » n'existe pas pour un plan,
+          -- et la garde ne protegeait rien (audit v4).
+          WHERE lpp.code_qualite = $1 AND pp.statut = 'EN_COURS' AND lpp.m2_prevus > 0",
     )
     .bind(&code)
     .fetch_one(&mut *tx)
@@ -1439,13 +1441,14 @@ pub async fn cloturer_plan(
     user: Utilisateur,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::PLANS, Action::Ecrire).await?;
+    // Clore un plan, c'est en arreter les besoins : acte de validation (regle 15).
+    user.exiger(&state.db, module::PLANS, Action::Valider).await?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
     let statut: String =
-        sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
+        sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1 FOR UPDATE")
             .bind(&id)
             .fetch_optional(&mut *tx)
             .await?

@@ -144,7 +144,9 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
         }
         let locales = compter(
             db,
-            "SELECT count(*) FROM reception WHERE statut NOT IN ('VALIDEE','ANNULEE')",
+            // Les statuts locaux sont VALIDE et ANNULE : « NOT IN VALIDEE » comptait
+            // toutes les receptions validees comme « en cours ».
+            "SELECT count(*) FROM reception WHERE statut IN ('BROUILLON','A_CONTROLER')",
         )
         .await;
         if locales > 0 {

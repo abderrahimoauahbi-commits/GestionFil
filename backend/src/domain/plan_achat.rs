@@ -167,7 +167,9 @@ pub async fn generer(
     .await?;
 
     let (budget, tier1): (Option<f64>, i64) = sqlx::query_as(
-        "SELECT SUM(montant_total_mad)::float8, SUM(CASE WHEN urgence = 'TIER 1' THEN 1 ELSE 0 END)
+        // COUNT FILTER et non SUM(CASE) : sans proposition, une somme vaut NULL,
+        // que le decodage en entier refusait — « erreur interne » (audit v3-v4).
+        "SELECT SUM(montant_total_mad)::float8, COUNT(*) FILTER (WHERE urgence = 'TIER 1')
            FROM plan_achat WHERE statut = 'PROPOSE'",
     )
     .fetch_one(&mut *tx)

@@ -402,6 +402,9 @@ const STATUT: Record<string, { libelle: string; ton: 'alerte' | 'succes' | 'neut
  */
 function FichesMachine({ machine, zones, etage }: { machine: Machine; zones: Zone[]; etage: string }) {
   const ouvrir = useOuvrirVue()
+  // Devalider ou annuler une decision validee demande VALIDER (regle 15).
+  const { peut } = useAuth()
+  const peutRetirer = peut('MOUVEMENTS', 'VALIDER')
   const [geste, setGeste] = useState<{ fiche: Fiche; mode: 'devalider' | 'annuler' } | null>(null)
   const q = useQuery({
     queryKey: ['machine-fiches', machine.code_machine, etage],
@@ -454,10 +457,10 @@ function FichesMachine({ machine, zones, etage }: { machine: Machine; zones: Zon
                       ) : (
                         <BoutonFiche titre="Ouvrir" Icone={Eye} onClick={() => ouvrir(`/machines/fiches/${f.id_fiche}`)} />
                       )}
-                      {f.statut === 'VALIDE' && tete && (
+                      {f.statut === 'VALIDE' && tete && peutRetirer && (
                         <BoutonFiche titre="Dévalider" Icone={RotateCcw} onClick={() => setGeste({ fiche: f, mode: 'devalider' })} />
                       )}
-                      {(f.statut === 'BROUILLON' || (f.statut === 'VALIDE' && tete)) && (
+                      {(f.statut === 'BROUILLON' || (f.statut === 'VALIDE' && tete && peutRetirer)) && (
                         <BoutonFiche titre="Annuler" Icone={XCircle} onClick={() => setGeste({ fiche: f, mode: 'annuler' })} />
                       )}
                     </div>

@@ -92,7 +92,15 @@ impl Utilisateur {
     }
 
     /// Retire de la reponse les champs masques pour cet utilisateur : ceux du
-    /// module, et les montants qu'il ne voit dans aucun module.
+    /// module, et — pour les champs que CE module ne declare pas — les montants
+    /// qu'il ne voit dans aucun autre.
+    ///
+    /// LA GRILLE DU MODULE L'EMPORTE (audit v4, 08/10/2026). L'union ecrasait
+    /// tout : l'assistante, a qui la grille des bons ouvre `montant_total_mad`
+    /// en ECRITURE, le perdait parce que la valorisation le lui masque, et son
+    /// bon affichait « 0,00 MAD ». Un champ declare dans le module garde le
+    /// niveau que le module lui donne ; l'union ne couvre que les champs que le
+    /// module ignore (complétion, detail des controles, analyses).
     pub async fn masquer(
         &self,
         db: &crate::db::Db,
@@ -101,7 +109,7 @@ impl Utilisateur {
     ) -> AppResult<()> {
         let mut droits = self.droits(db, module).await?;
         for (champ, niveau) in rbac::sensibles_masques(db, &self.id).await? {
-            droits.insert(champ, niveau);
+            droits.entry(champ).or_insert(niveau);
         }
         rbac::masquer(valeur, &droits);
         Ok(())

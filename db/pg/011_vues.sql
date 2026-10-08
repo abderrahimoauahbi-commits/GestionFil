@@ -977,6 +977,8 @@ SELECT
     (SELECT COUNT(*) FROM reception WHERE statut = 'BROUILLON')
         AS nb_receptions_en_saisie,
     (SELECT COUNT(*) FROM reception WHERE statut = 'A_CONTROLER')
+        -- Les receptions d'import attendent le meme controle (08/10/2026).
+        + (SELECT COUNT(*) FROM import_receptions WHERE statut = 'A_CONTROLER')
         AS nb_receptions_a_controler,
     (SELECT COUNT(*) FROM ligne_reception lr
        JOIN reception rc ON rc.id_reception = lr.id_reception

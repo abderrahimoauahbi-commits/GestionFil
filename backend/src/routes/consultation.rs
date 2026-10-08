@@ -606,17 +606,26 @@ pub async fn substituer_proposition(
 
     let resultat = if let Some((id_cible, qte_cible, _)) = existante {
         let total = arrondi_kg(qte_cible + quantite);
+        // LA CIBLE FUSIONNEE EST FIGEE (audit v4, 08/10/2026). Laissee au
+        // calcul, la generation suivante la supprimait, pendant que l'origine,
+        // ecartee, masquait sa reference : le besoin disparaissait des deux
+        // cotes (PP-1500 D.Bleu 6665-Hs, en rupture, masquee jusqu'a
+        // l'expiration). Figee, elle porte le besoin reporte jusqu'a sa commande.
         sqlx::query(
             "UPDATE plan_achat
                 SET quantite_suggeree_kg = $2,
                     statut = 'EN_REVISION',
                     commentaires = TRIM(COALESCE(commentaires || ' | ', '') ||
-                                        'Fusion du besoin de ' || $3)
+                                        'Fusion du besoin de ' || $3),
+                    figee = 1, id_utilisateur_figement = $4, date_figement = $5,
+                    motif_figement = 'Fusion du besoin de ' || $3
               WHERE id_proposition = $1",
         )
         .bind(&id_cible)
         .bind(total)
         .bind(&code_actuel)
+        .bind(&user.id)
+        .bind(crate::db::maintenant())
         .execute(&mut *tx)
         .await?;
 
@@ -695,7 +704,7 @@ pub async fn supervision(
     State(state): State<AppState>,
     user: Utilisateur,
 ) -> AppResult<Json<Value>> {
-    lister(
+    let Json(mut v) = lister(
         &state,
         &user,
         module::COCKPIT,
@@ -708,7 +717,26 @@ pub async fn supervision(
            LEFT JOIN v_supervision_valeurs v USING (cle)
           ORDER BY s.disponible DESC, s.domaine, s.libelle",
     )
-    .await
+    .await?;
+    // LES INDICATEURS EN DIRHAMS SUIVENT LA VALEUR DU STOCK (regle 16). La
+    // colonne generique `valeur` portait la valeur du stock, le budget
+    // mono-source et les economies a qui ne voit aucun montant.
+    let droits = user.droits(&state.db, module::COCKPIT).await?;
+    if droits.get("valeur_stock_mad") == Some(&rbac::Niveau::Masque) {
+        if let Some(lignes) = v.as_array_mut() {
+            for l in lignes {
+                let en_mad = l.get("unite").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("MAD"));
+                if en_mad {
+                    if let Some(o) = l.as_object_mut() {
+                        for c in ["valeur", "cible", "vigilance"] {
+                            o.remove(c);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(Json(v))
 }
 
 pub async fn controle_detail(
@@ -841,8 +869,8 @@ pub async fn stock_projete(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let rows = sqlx::query(
-        // LE FIL SUR MACHINE, A COTE (06/10/2026) : du stock engage, sorti du
-        // magasin et pas encore consomme. Affiche, pas deduit des besoins.
+        // LE FIL SUR MACHINE, A COTE : sorti du magasin et pas encore consomme.
+        // Hors du stock physique, mais compte dans le stock projete (regle 9).
         "SELECT sp.*, COALESCE(sm.kg_sur_machine, 0) AS kg_sur_machine
            FROM v_stock_projete sp
            LEFT JOIN v_stock_machine sm ON sm.code_reference = sp.code_reference
@@ -956,6 +984,10 @@ pub async fn propositions_achat(
                 -- si la reference qu'il commande a une alternative.
                 rs.classe_abc, rs.classe_xyz, rs.tier, rs.risque_source,
                 rs.nb_sources, rs.action_recommandee, rs.budget_annuel_mad,
+                -- Le fil sur machine que le calcul a compte (regle 9) : l'acheteur
+                -- le voit, au lieu de croire que le besoin l'ignore.
+                (SELECT ph.stock_machine_kg FROM v_stock_physique ph
+                  WHERE ph.code_reference = pa.code_reference)        AS stock_machine_kg,
                 (SELECT COUNT(*) FROM v_equivalence e
                   WHERE e.code_reference = pa.code_reference)         AS nb_equivalents,
                 (SELECT ROUND(COALESCE(MAX(e.equivalent_stock_kg), 0), 3)
@@ -1734,7 +1766,8 @@ pub async fn defiger_proposition(
     Ok(Json(json!({ "id_proposition": id, "figee": false })))
 }
 
-/// Ecarte une proposition : elle n'engage rien et ne sera plus reproposee.
+/// Ecarte une proposition : elle n'engage rien et n'est plus reproposee
+/// pendant P_DureeEcartJours (90 j, regle 17), puis le besoin revient.
 pub async fn ignorer_proposition(
     State(state): State<AppState>,
     user: Utilisateur,

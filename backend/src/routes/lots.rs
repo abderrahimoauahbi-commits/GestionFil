@@ -889,7 +889,7 @@ pub async fn statistiques(State(state): State<AppState>, user: Utilisateur) -> A
     // Le prix en devise du suivi de conditionnement est declare au catalogue :
     // les montants masques ailleurs le sont ici aussi.
     for (champ, niveau) in rbac::sensibles_masques(db, &user.id).await? {
-        droits.insert(champ, niveau);
+        droits.entry(champ).or_insert(niveau);
     }
     if droits.get("valeur_mad") == Some(&rbac::Niveau::Masque) {
         for c in ["projet_mad", "restes_mad", "total_mad"] {

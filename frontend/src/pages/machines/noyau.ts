@@ -295,7 +295,10 @@ export function estimer(type: TypeFiche, l: LigneSaisie) {
 }
 
 function estimerBrut(type: TypeFiche, l: LigneSaisie) {
-  const nom = l.poids_unitaire
+  // REGLE 2 : une ligne qui ARRIVE sur l'etage prend pour nominal le poids
+  // declare au chargement — comme le serveur. Estimer au catalogue proposait
+  // un % faux, et l'apercu levait un ecart rouge qui n'existait pas.
+  const nom = type === 'CHARGE' && l.avant_bobines === 0 && l.poids_retenu > 0 ? l.poids_retenu : l.poids_unitaire
   if (type === 'CHARGE') {
     const kgMouv = l.mouvementees * (l.poids_retenu || nom)
     const nbApres = l.avant_bobines + l.mouvementees

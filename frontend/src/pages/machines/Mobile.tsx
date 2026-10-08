@@ -629,7 +629,7 @@ function FicheMobile({
                   </select>
                 </label>
               )}
-              <ChampM label="Précision (facultatif)" v={l.motif_texte}
+              <ChampM label="Précision (obligatoire si l’écart est rouge)" v={l.motif_texte}
                       set={(x) => f.majLigne(l.cle, 'motif_texte', x)} />
             </>
           )}

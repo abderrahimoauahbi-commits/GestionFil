@@ -1,0 +1,153 @@
+-- =============================================================================
+-- 2026-10-08b — Corrections de l'audit v4 (08/10/2026 au soir)
+-- =============================================================================
+-- A jouer APRES 2026-10-08_regles_p1.sql (le serveur exige les deux).
+-- Rejouable : IF NOT EXISTS, CREATE OR REPLACE, ON CONFLICT.
+-- Les verrous ne s'attendent pas : si l'ancien serveur tient une table, la
+-- migration echoue tout de suite au lieu de figer l'ERP (rejouer apres arret).
+-- =============================================================================
+
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+
+-- -----------------------------------------------------------------------------
+-- 1. MONTANTS NON DECLARES (regle 16)
+-- -----------------------------------------------------------------------------
+-- Facture locale et sa cloture (masquees comme le total de la reception),
+-- prix d'entree par lot (masque comme le CMUP du stock). Un champ non declare
+-- est visible de tous : c'est ainsi qu'ils sortaient.
+CREATE TEMP TABLE champs_neufs (module text, champ text, libelle text, niveau_defaut text,
+                                sensible int, ordre int, modele text) ON COMMIT DROP;
+INSERT INTO champs_neufs VALUES
+ ('RECEPTIONS', 'montant_facture_mad',   'Montant de la facture (MAD)',      'LECTURE', 1, 4300, 'total_mad'),
+ ('RECEPTIONS', 'frais_facture_mad',     'Frais de la facture (MAD)',        'LECTURE', 1, 4310, 'total_mad'),
+ ('RECEPTIONS', 'taux_change_reception', 'Taux de change de la reception',   'LECTURE', 1, 4320, 'total_mad'),
+ ('RECEPTIONS', 'valeur_provisoire_mad', 'Valeur provisoire (MAD)',          'LECTURE', 1, 4330, 'total_mad'),
+ ('RECEPTIONS', 'valeur_definitive_mad', 'Valeur definitive (MAD)',          'LECTURE', 1, 4340, 'total_mad'),
+ ('RECEPTIONS', 'difference_mad',        'Difference de facture (MAD)',      'LECTURE', 1, 4350, 'total_mad'),
+ ('RECEPTIONS', 'au_stock_mad',          'Part portee au stock (MAD)',       'LECTURE', 1, 4360, 'total_mad'),
+ ('RECEPTIONS', 'ecart_prix_mad',        'Ecart de prix (MAD)',              'LECTURE', 1, 4370, 'total_mad'),
+ ('RECEPTIONS', 'cmup_avant',            'CMUP avant cloture',               'LECTURE', 1, 4380, 'total_mad'),
+ ('RECEPTIONS', 'cmup_apres',            'CMUP apres cloture',               'LECTURE', 1, 4390, 'total_mad'),
+ ('STOCK',      'prix_entree_mad',       'Prix d''entree du lot (MAD/kg)',   'LECTURE', 1, 4400, 'cmup_mad');
+
+INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible, ordre)
+SELECT module, champ, libelle, niveau_defaut, sensible, ordre FROM champs_neufs
+ON CONFLICT (module, champ) DO UPDATE SET
+    libelle = excluded.libelle, sensible = excluded.sensible, ordre = excluded.ordre;
+
+INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
+SELECT m.code_role_user, n.module, n.champ,
+       CASE WHEN m.niveau = 'MASQUE' THEN 'MASQUE' ELSE 'LECTURE' END
+  FROM champs_neufs n
+  JOIN modele_droit_champ m ON m.module = n.module AND m.champ = n.modele
+ON CONFLICT (code_role_user, module, champ) DO NOTHING;
+
+INSERT INTO droit_champ (id_utilisateur, module, champ, niveau)
+SELECT d.id_utilisateur, n.module, n.champ,
+       CASE WHEN d.niveau = 'MASQUE' THEN 'MASQUE' ELSE 'LECTURE' END
+  FROM champs_neufs n
+  JOIN droit_champ d ON d.module = n.module AND d.champ = n.modele
+ON CONFLICT (id_utilisateur, module, champ) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 2. LE NIVEAU D'ECART MACHINE EST ARCHIVE (regle 1)
+-- -----------------------------------------------------------------------------
+-- Vert, orange ou rouge, tel que juge a la validation : si les seuils changent,
+-- on sait encore ce qui avait demande la Direction.
+ALTER TABLE machine_decision_ligne ADD COLUMN IF NOT EXISTS niveau_ecart text;
+
+-- -----------------------------------------------------------------------------
+-- 3. LES RECEPTIONS D'IMPORT A CONTROLER COMPTENT AU TABLEAU DE BORD
+-- -----------------------------------------------------------------------------
+-- La file ne lisait que les receptions locales : la Direction, seule a valider,
+-- ne voyait pas les receptions d'import en attente. La definition courante est
+-- reprise et completee une seule fois.
+DO $$
+DECLARE def text;
+BEGIN
+    def := pg_get_viewdef('v_cockpit_files'::regclass);
+    IF position('import_receptions' IN def) = 0 THEN
+        def := replace(def, ') AS nb_receptions_a_controler',
+                       ') + (SELECT count(*) FROM import_receptions WHERE statut = ''A_CONTROLER'') AS nb_receptions_a_controler');
+        EXECUTE 'CREATE OR REPLACE VIEW v_cockpit_files AS ' || rtrim(rtrim(def), ';');
+    END IF;
+END $$;
+
+-- -----------------------------------------------------------------------------
+-- 4. LE FIL SUR MACHINE : COMPTE DANS LES BESOINS, PAS DANS LE MAGASIN (regle 9)
+-- -----------------------------------------------------------------------------
+-- La regle 9 l'ajoutait au stock physique net : C27 (« magasin sous le
+-- minimum »), le statut physique et le stock SUBSTITUABLE le comptaient aussi,
+-- alors qu'un fil charge n'est ni au magasin ni disponible pour une autre
+-- reference. Le stock physique net redevient celui du magasin ; une colonne
+-- `stock_mrp_net_kg` porte ce que le calcul des besoins compte (magasin + fil
+-- sur machine selon P_MrpInclureStockMachine), et la projection la lit.
+-- Seul le fil d'un etage constate depuis moins de P_JoursInventMachine jours
+-- compte (decision du 08/10, audit v4) : une photo plus ancienne a ete
+-- consommee depuis.
+CREATE OR REPLACE VIEW v_stock_physique AS
+ WITH hors_mrp AS (
+         SELECT sl.code_reference,
+            sum(CASE WHEN l.categorie = 'RESTES' AND rr.suivi_lot = 1 AND l.statut <> 'BLOQUE'
+                     THEN sl.quantite_kg ELSE 0 END) AS restes_kg,
+            sum(CASE WHEN l.statut = 'BLOQUE' THEN sl.quantite_kg ELSE 0 END) AS bloque_kg
+           FROM stock_lot sl
+             JOIN lot l ON l.code_reference = sl.code_reference AND l.lot_fournisseur = sl.lot_fournisseur
+             JOIN reference rr ON rr.code_reference = sl.code_reference
+             JOIN magasin mg_1 ON mg_1.code_magasin = sl.code_magasin
+          WHERE mg_1.inclure_mrp = 1 AND mg_1.est_quarantaine = 0
+          GROUP BY sl.code_reference
+        ), machine AS (
+         -- Le fil sur machine, hors lots bloques (il ne partira pas en production),
+         -- et seulement sur un etage constate recemment.
+         SELECT e.code_reference, round(sum(e.kg), 4) AS kg_sur_machine
+           FROM machine_etat e
+           LEFT JOIN lot l ON l.code_reference = e.code_reference AND l.lot_fournisseur = e.lot_fournisseur
+          WHERE COALESCE((SELECT valeur_courante FROM parametre
+                           WHERE code_parametre = 'P_MrpInclureStockMachine'), '1') = '1'
+            AND COALESCE(l.statut, 'LIBRE') <> 'BLOQUE'
+            AND substr(COALESCE(e.date_constat, '1900-01-01'), 1, 10)::date
+                >= current_date - COALESCE((SELECT CAST(valeur_courante AS integer) FROM parametre
+                                             WHERE code_parametre = 'P_JoursInventMachine'), 30)
+          GROUP BY e.code_reference
+        )
+ SELECT r.code_reference,
+    round(COALESCE(sum(CASE WHEN mg.inclure_mrp = 1 AND mg.est_quarantaine = 0 THEN sm.quantite_kg END), 0), 4) AS stock_utilisable_kg,
+    round(COALESCE(sum(CASE WHEN mg.est_quarantaine = 1 THEN sm.quantite_kg END), 0), 4) AS stock_quarantaine_kg,
+    round(COALESCE(max(h.restes_kg), 0) + COALESCE(max(h.bloque_kg), 0), 4) AS stock_reserve_kg,
+    round(COALESCE(sum(CASE WHEN mg.inclure_mrp = 1 AND mg.est_quarantaine = 0 THEN sm.quantite_kg END), 0)
+          - COALESCE(max(h.restes_kg), 0) - COALESCE(max(h.bloque_kg), 0), 4) AS stock_physique_net_kg,
+    round(COALESCE(max(h.restes_kg), 0), 4) AS stock_restes_kg,
+    round(COALESCE(max(h.bloque_kg), 0), 4) AS stock_bloque_kg,
+    round(COALESCE(max(mc.kg_sur_machine), 0), 4) AS stock_machine_kg,
+    round(COALESCE(sum(CASE WHEN mg.inclure_mrp = 1 AND mg.est_quarantaine = 0 THEN sm.quantite_kg END), 0)
+          - COALESCE(max(h.restes_kg), 0) - COALESCE(max(h.bloque_kg), 0)
+          + COALESCE(max(mc.kg_sur_machine), 0), 4) AS stock_mrp_net_kg
+   FROM reference r
+     LEFT JOIN stock_magasin sm ON sm.code_reference = r.code_reference
+     LEFT JOIN magasin mg ON mg.code_magasin = sm.code_magasin
+     LEFT JOIN hors_mrp h ON h.code_reference = r.code_reference
+     LEFT JOIN machine mc ON mc.code_reference = r.code_reference
+  WHERE r.actif = 1
+  GROUP BY r.code_reference;
+
+-- La PROJECTION (stock projete, couverture, statut logique) lit le stock compte
+-- par le MRP ; le statut PHYSIQUE reste celui du magasin. La definition
+-- courante est reprise : seules les sommes « physique + en-cours » changent.
+DO $$
+DECLARE def text;
+BEGIN
+    def := pg_get_viewdef('v_stock_projete'::regclass);
+    IF position('stock_mrp_net_kg' IN def) = 0 THEN
+        def := replace(def, '(ph.stock_physique_net_kg + COALESCE(ef.encours_fiable_kg',
+                            '(ph.stock_mrp_net_kg + COALESCE(ef.encours_fiable_kg');
+        def := rtrim(rtrim(def), ';');
+        -- Le fil sur machine se lit a part, en derniere colonne (le FROM
+        -- principal est le seul indente de trois blancs).
+        def := replace(def, E'\n   FROM (', E',\n    ph.stock_machine_kg\n   FROM (');
+        EXECUTE 'CREATE OR REPLACE VIEW v_stock_projete AS ' || def;
+    END IF;
+END $$;
+
+COMMIT;

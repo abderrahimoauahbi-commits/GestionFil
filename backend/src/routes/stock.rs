@@ -2079,6 +2079,25 @@ pub async fn supprimer_bc(
         .await?
         .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
 
+    // UN BON QUI A ETE VALIDE NE S'EFFACE PAS (audit v4) : devalide, il
+    // redevenait brouillon et se supprimait physiquement, alors qu'il avait
+    // engage l'entreprise (et parfois ete envoye). Il s'annule, la trace reste.
+    let a_engage: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM audit_log
+                         WHERE table_concernee = 'bon_commande' AND id_enregistrement = $1
+                           AND operation = 'DEVALIDATION')",
+    )
+    .bind(&id)
+    .fetch_one(&state.db)
+    .await?;
+    if a_engage {
+        return Err(AppError::RegleMetier(
+            "Ce bon a deja ete valide puis devalide : il a engage l'entreprise et ne se supprime plus. \
+             Annulez-le — la trace restera."
+                .into(),
+        ));
+    }
+
     if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
         return Err(AppError::RegleMetier(format!(
             "ce bon est {} : il a engage l'entreprise et ne se supprime plus.              Annulez-le — la trace restera.",

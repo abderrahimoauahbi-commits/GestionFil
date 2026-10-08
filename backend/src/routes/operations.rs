@@ -161,12 +161,13 @@ pub async fn cloturer_reception(
     Json(f): Json<FactureReception>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
-    Ok(Json(
-        crate::domain::facture_locale::cloturer(
-            &state.db, &user, &id, &f.numero_facture, f.montant_facture_mad, f.frais_mad, f.simuler,
-        )
-        .await?,
-    ))
+    let mut v = crate::domain::facture_locale::cloturer(
+        &state.db, &user, &id, &f.numero_facture, f.montant_facture_mad, f.frais_mad, f.simuler,
+    )
+    .await?;
+    // Les montants de la clôture se masquent comme ceux de la réception.
+    user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
+    Ok(Json(v))
 }
 
 #[derive(Debug, serde::Deserialize)]

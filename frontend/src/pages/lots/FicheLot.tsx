@@ -198,8 +198,8 @@ export function FicheLot() {
         {/* ---- Ce qui demande attention ------------------------------------ */}
         {lot.statut === 'BLOQUE' && (
           <Alerte ton="danger" titre="Lot bloqué par la qualité">
-            Il ne peut ni sortir, ni être transféré, ni chargé sur machine tant qu’un responsable ne l’a pas
-            débloqué.
+            Il ne part plus en production (sortie, chargement machine, fusion) tant qu’il n’est pas
+            débloqué. Il peut revenir d’une machine, aller en quarantaine ou retourner au fournisseur.
             {dernierBlocage?.motif && (
               <>
                 {' '}

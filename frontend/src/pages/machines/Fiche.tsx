@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { ArrowLeft, Check, Eye, Loader2, Plus, RotateCcw, Trash2, XCircle } from 'lucide-react'
 import { api } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
 import { Alerte, Badge, Bouton, Chargement } from '../../composants/ui/base'
 import { EnTetePage } from '../../composants/Coquille'
 import { ActionMotivee } from '../../composants/ActionMotivee'
@@ -229,6 +230,8 @@ const LIBELLE_EVENEMENT: Record<string, string> = {
 }
 
 function DetailFiche({ d, machine, zones }: { d: FicheDetail; machine: Machine; zones: Zone[] }) {
+  // Devalider ou annuler une decision validee demande VALIDER (regle 15).
+  const peutRetirer = useAuth().peut('MOUVEMENTS', 'VALIDER')
   const ouvrir = useOuvrirVue()
   const [geste, setGeste] = useState<'devalider' | 'annuler' | null>(null)
   const e = d.entete
@@ -259,7 +262,7 @@ function DetailFiche({ d, machine, zones }: { d: FicheDetail; machine: Machine; 
               <ArrowLeft />
               {machine.nom}
             </Bouton>
-            {e.statut === 'VALIDE' && tete && (
+            {e.statut === 'VALIDE' && tete && peutRetirer && (
               <>
                 <Bouton variante="contour" onClick={() => setGeste('devalider')}>
                   <RotateCcw />
@@ -610,7 +613,7 @@ export function FicheBureau({
         <input
           value={l.motif_texte}
           onChange={(e) => f.majLigne(l.cle, 'motif_texte', e.target.value)}
-          placeholder="Précision (facultatif)"
+          placeholder="Précision (obligatoire si l’écart est rouge)"
           aria-label="Précision du motif"
           className="min-h-[26px] w-40 rounded-[3px] border border-bordure bg-fond px-1.5 text-[11px]"
         />

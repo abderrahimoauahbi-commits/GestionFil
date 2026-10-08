@@ -453,10 +453,12 @@ export function Stock() {
       rendu: (l) => fmt.nombre(l.encours_kg, 1),
     },
     {
-      /* STOCK ENGAGE : affiche a cote du stock, pas deduit des besoins tant
-         que les ordres de fabrication n'existent pas (decision du 05/10/2026). */
+      /* LE FIL SUR MACHINE (regle 9, 08/10/2026) : hors du magasin — le
+         « Physique » ne le contient pas — mais compte dans les besoins d'achat
+         (stock projete) tant que P_MrpInclureStockMachine vaut 1 et que l'etage
+         a ete constate depuis moins de P_JoursInventMachine jours. */
       champ: 'kg_sur_machine',
-      entete: 'Sur machine (kg)',
+      entete: 'Sur machine (kg, compté aux besoins)',
       numerique: true,
       secondaire: true,
       rendu: (l) => (l.kg_sur_machine ? fmt.nombre(l.kg_sur_machine, 1) : '—'),

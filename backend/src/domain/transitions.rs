@@ -52,8 +52,22 @@ fn seuil_engage(entite: &str) -> u8 {
     }
 }
 
+/// SORTIR DE SERVICE SANS EXECUTION (audit v4) : clore un bon envoye qui n'a
+/// pas tout recu, ou un plan encore en service, abandonne un engagement — les
+/// besoins tombent, la commande s'arrete. C'est un acte de validation, comme
+/// un retour arriere, meme si l'etat « avance ».
+fn est_sortie_de_service(entite: &str, source: &str, cible: &str) -> bool {
+    matches!(
+        (entite, source, cible),
+        ("bon_commande", "ENVOYE" | "LIVRE_PARTIEL", "CLOTURE") | ("plan_production", "EN_COURS", "CLOTURE")
+    )
+}
+
 /// Vrai si passer de `source` a `cible` fait reculer un document engage.
 pub fn est_retour_arriere(entite: &str, source: &str, cible: &str) -> bool {
+    if est_sortie_de_service(entite, source, cible) {
+        return true;
+    }
     let Some(rs) = rang(entite, source) else { return false };
     if rs < seuil_engage(entite) {
         return false;
@@ -140,5 +154,13 @@ mod tests {
         assert!(est_retour_arriere("plan_production", "EN_COURS", "BROUILLON"));
         assert!(est_retour_arriere("qualite", "ACTIF", "BROUILLON"));
         assert!(est_retour_arriere("inventaire", "EN_COURS", "ANNULE"));
+    }
+
+    #[test]
+    fn sortir_de_service_sans_execution_exige_valider() {
+        assert!(est_retour_arriere("bon_commande", "ENVOYE", "CLOTURE"));
+        assert!(est_retour_arriere("bon_commande", "LIVRE_PARTIEL", "CLOTURE"));
+        assert!(est_retour_arriere("plan_production", "EN_COURS", "CLOTURE"));
+        assert!(!est_retour_arriere("plan_production", "SIMULATION", "CLOTURE"));
     }
 }

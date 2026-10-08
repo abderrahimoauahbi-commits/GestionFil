@@ -85,7 +85,10 @@ const REVERSIBLES: &[Reversible] = &[
         table: "reception",
         cle: "id_reception",
         module: "RECEPTIONS",
-        depuis: &["VALIDE", "CLOTURE"],
+        // CLOTUREE, elle ne se devalide plus (audit v4) : sa facture a ajuste
+        // le CMUP, et devalider remettait les montants en jeu une seconde
+        // fois. Sa correction passe par un avoir (/api/receptions/{id}/avoir).
+        depuis: &["VALIDE"],
         vers: "A_CONTROLER",
         effacer: &["id_utilisateur_controle", "date_controle"],
         document_mouvements: Some("numero_reception"),

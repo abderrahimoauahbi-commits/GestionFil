@@ -5,7 +5,7 @@
 //! cette separation que repose toute la segregation des taches du CDC B4.
 
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
-use crate::domain::{classification, inventaire, mrp, plan_achat, reception, transfert};
+use crate::domain::{classification, facture_locale, inventaire, mrp, plan_achat, reception, transfert};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
@@ -144,7 +144,19 @@ pub async fn cloturer_inventaire(
 #[derive(Debug, serde::Deserialize)]
 pub struct FactureReception {
     pub numero_facture: String,
-    pub montant_facture_mad: f64,
+    /// Le montant de la marchandise, DANS LA DEVISE DU BON (decision 4 de
+    /// l'audit v4). `montant_facture_mad` reste accepte pour une reception en
+    /// dirhams.
+    pub montant_facture: Option<f64>,
+    pub montant_facture_mad: Option<f64>,
+    /// Le taux de la facture ; a defaut, le cours Bank Al-Maghrib de sa date.
+    pub taux_change: Option<f64>,
+    #[serde(default)]
+    pub confirmer_taux: bool,
+    pub date_facture: Option<String>,
+    /// Les autres receptions que la facture couvre (meme fournisseur).
+    #[serde(default)]
+    pub autres_receptions: Vec<String>,
     #[serde(default)]
     pub frais_mad: f64,
     #[serde(default)]
@@ -161,11 +173,118 @@ pub async fn cloturer_reception(
     Json(f): Json<FactureReception>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
-    let mut v = crate::domain::facture_locale::cloturer(
-        &state.db, &user, &id, &f.numero_facture, f.montant_facture_mad, f.frais_mad, f.simuler,
+    let montant = f
+        .montant_facture
+        .or(f.montant_facture_mad)
+        .ok_or_else(|| AppError::Invalide("Le montant de la facture est obligatoire.".into()))?;
+    let date = f.date_facture.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(crate::db::aujourdhui);
+    let (devise, taux) = {
+        let mut c = state.db.acquire().await?;
+        let devise = facture_locale::devise_reception(&mut c, &id).await?;
+        // Le taux saisi, sinon le cours Bank Al-Maghrib de la date : meme
+        // controle que les factures d'import (jamais 1 en devise, ecart > 3 %
+        // a confirmer).
+        let saisi = match f.taux_change {
+            Some(t) => Some(t),
+            None if devise == "MAD" => None,
+            None => crate::routes::importation::taux_reference(&mut c, &devise, &date).await?.map(|r| r.valeur),
+        };
+        let objet = format!("La facture {}", f.numero_facture.trim());
+        let taux =
+            crate::routes::importation::controler_taux(&mut c, &objet, &devise, saisi, &date, f.confirmer_taux).await?;
+        (devise, taux)
+    };
+    let mut receptions = vec![id.clone()];
+    receptions.extend(f.autres_receptions.iter().cloned());
+    let facture = facture_locale::FactureLocale {
+        numero_facture: f.numero_facture.clone(),
+        receptions,
+        code_devise: devise,
+        montant_devise: montant,
+        taux,
+        frais_mad: f.frais_mad,
+    };
+    let mut v = facture_locale::cloturer(&state.db, &user, &facture, f.simuler).await?;
+    // Les montants de la clôture se masquent comme ceux de la réception.
+    user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
+    Ok(Json(v))
+}
+
+/// `GET /api/receptions/{id}/facture-contexte` — ce que l'ecran de cloture
+/// doit savoir avant la saisie : la devise du bon, le cours de reference, et
+/// les autres receptions validees du fournisseur qu'une meme facture peut
+/// couvrir.
+pub async fn contexte_facture_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Lire).await?;
+    let date = q.get("date").cloned().filter(|d| !d.is_empty()).unwrap_or_else(crate::db::aujourdhui);
+    let mut c = state.db.acquire().await?;
+    let devise = facture_locale::devise_reception(&mut c, &id).await?;
+    let reference = if devise == "MAD" {
+        None
+    } else {
+        crate::routes::importation::taux_reference(&mut c, &devise, &date).await?
+    };
+    let autres: Vec<(String, String, String, f64)> = sqlx::query_as(
+        "SELECT r.id_reception, r.numero_reception, r.date_reception,
+                COALESCE((SELECT sum(a.total_mad) FROM archive_reception a
+                            JOIN ligne_reception lr ON lr.id_ligne_reception = a.id_ligne_reception
+                           WHERE lr.id_reception = r.id_reception), 0)::float8
+           FROM reception r
+           JOIN reception moi ON moi.id_reception = $1
+           LEFT JOIN bon_commande bc ON bc.id_bc = r.id_bc
+           LEFT JOIN fournisseur fo ON fo.code_fournisseur = r.code_fournisseur
+          WHERE r.statut = 'VALIDE' AND r.id_reception <> $1
+            AND r.code_fournisseur = moi.code_fournisseur
+            AND COALESCE(bc.code_devise, fo.code_devise, 'MAD') = $2
+          ORDER BY r.date_reception DESC, r.numero_reception
+          LIMIT 50",
+    )
+    .bind(&id)
+    .bind(&devise)
+    .fetch_all(&mut *c)
+    .await?;
+    let mut v = json!({
+        "code_devise": devise,
+        "taux_reference": reference.as_ref().map(|r| r.valeur),
+        "source_taux": reference.map(|r| r.source),
+        "receptions": autres.iter().map(|(i, n, d, val)| json!({
+            "id_reception": i, "numero_reception": n, "date_reception": d, "valeur_provisoire_mad": val,
+        })).collect::<Vec<_>>(),
+    });
+    user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CorrectionReception {
+    /// AVOIR (la valeur baisse) ou COMPLEMENT (elle monte).
+    pub nature: String,
+    pub numero_piece: String,
+    pub montant_mad: f64,
+    pub motif: String,
+    #[serde(default)]
+    pub simuler: bool,
+}
+
+/// `POST /api/receptions/{id}/avoir` — corriger la valeur d'une reception
+/// cloturee : avoir du fournisseur ou facture complementaire (regle 8). Acte
+/// de validation, motif obligatoire, journalise.
+pub async fn corriger_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(c): Json<CorrectionReception>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
+    let mut v = facture_locale::corriger(
+        &state.db, &user, &id, &c.nature, &c.numero_piece, c.montant_mad, &c.motif, c.simuler,
     )
     .await?;
-    // Les montants de la clôture se masquent comme ceux de la réception.
     user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
     Ok(Json(v))
 }

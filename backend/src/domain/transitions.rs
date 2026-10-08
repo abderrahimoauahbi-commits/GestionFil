@@ -83,7 +83,7 @@ pub fn est_retour_arriere(entite: &str, source: &str, cible: &str) -> bool {
 /// stock : `(entite, etats de depart, etat retrouve, segment d'URL)`.
 const PAR_DEVALIDATION: &[(&str, &[&str], &str, &str)] = &[
     ("bon_commande", &["VALIDE", "ENVOYE"], "BROUILLON", "bons-commande"),
-    ("reception", &["VALIDE", "CLOTURE"], "A_CONTROLER", "receptions"),
+    ("reception", &["VALIDE"], "A_CONTROLER", "receptions"),
     ("plan_production", &["EN_COURS", "CLOTURE"], "BROUILLON", "plans"),
     ("qualite", &["CLOTURE"], "ACTIF", "qualites"),
     ("inventaire", &["CLOTURE"], "EN_COURS", "inventaires"),
@@ -104,6 +104,13 @@ pub async fn exiger_transition(
 ) -> AppResult<()> {
     if !est_retour_arriere(entite, source, cible) {
         return Ok(());
+    }
+    if entite == "reception" && source == "CLOTURE" {
+        return Err(AppError::RegleMetier(
+            "Une reception cloturee avec sa facture ne revient plus en arriere : sa valeur se corrige \
+             par un avoir ou une facture complementaire (« Avoir » sur la reception)."
+                .into(),
+        ));
     }
     // Une reception validee a fait entrer de la marchandise : aucun statut ne
     // la fait reculer sans passer par la devalidation, qui verifie le stock.

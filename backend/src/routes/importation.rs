@@ -417,15 +417,15 @@ pub struct FactureSaisie {
 /// erreur de saisie. L'operateur corrige, ou confirme.
 const ECART_TAUX_MAX: f64 = 0.03;
 
-struct TauxReference {
-    valeur: f64,
+pub(crate) struct TauxReference {
+    pub(crate) valeur: f64,
     /// Ce que l'on montre : « cours Bank Al-Maghrib du 2026-09-22 ».
-    source: String,
+    pub(crate) source: String,
 }
 
 /// Le cours Bank Al-Maghrib du jour de la facture, a defaut le dernier publie
 /// avant, a defaut le taux de l'ERP en vigueur. Rien pour une devise inconnue.
-async fn taux_reference(
+pub(crate) async fn taux_reference(
     c: &mut sqlx::PgConnection,
     devise: &str,
     date: &str,
@@ -462,7 +462,7 @@ async fn taux_reference(
 /// - Ecart de plus de 3 % avec la reference : refuse tant qu'il n'est pas
 ///   confirme. Le message commence par `TAUX-ECART` : l'ecran le reconnait et
 ///   propose la confirmation au lieu d'un refus sec.
-async fn controler_taux(
+pub(crate) async fn controler_taux(
     c: &mut sqlx::PgConnection,
     objet: &str,
     devise: &str,

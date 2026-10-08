@@ -24,7 +24,7 @@ import { useAuth, useDroits } from '../auth/AuthContext'
 import { useToleranceFournisseur } from '../lib/lots'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
-import { ClotureFacture } from './ReceptionCloture'
+import { ClotureFacture, CorrectionFacture } from './ReceptionCloture'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
   GrilleLignes,
@@ -1002,6 +1002,12 @@ export function Reception() {
       {rec.statut === 'VALIDE' && droits.peutValider && (
         <div className="mb-3">
           <ClotureFacture idReception={id!} numeroFacture={rec.numero_facture} surCloture={rafraichir} />
+        </div>
+      )}
+      {/* Cloturee, elle se corrige par un avoir ou une facture complementaire (regle 8). */}
+      {rec.statut === 'CLOTURE' && droits.peutValider && (
+        <div className="mb-3">
+          <CorrectionFacture idReception={id!} surCorrection={rafraichir} />
         </div>
       )}
 

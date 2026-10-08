@@ -29,6 +29,9 @@ INSERT INTO champs_neufs VALUES
  ('RECEPTIONS', 'ecart_prix_mad',        'Ecart de prix (MAD)',              'LECTURE', 1, 4370, 'total_mad'),
  ('RECEPTIONS', 'cmup_avant',            'CMUP avant cloture',               'LECTURE', 1, 4380, 'total_mad'),
  ('RECEPTIONS', 'cmup_apres',            'CMUP apres cloture',               'LECTURE', 1, 4390, 'total_mad'),
+ ('RECEPTIONS', 'montant_facture_devise','Montant de la facture (devise)',   'LECTURE', 1, 4392, 'total_mad'),
+ ('RECEPTIONS', 'taux_facture',          'Taux de la facture',               'LECTURE', 1, 4394, 'total_mad'),
+ ('RECEPTIONS', 'montant_devise',        'Montant facture saisi (devise)',   'LECTURE', 1, 4396, 'total_mad'),
  ('STOCK',      'prix_entree_mad',       'Prix d''entree du lot (MAD/kg)',   'LECTURE', 1, 4400, 'cmup_mad');
 
 INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible, ordre)
@@ -204,5 +207,34 @@ WHERE rl.quantite_attendue_kg > 0
   AND r.statut <> 'ANNULEE'
   AND (rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg
       > fn_tolerance_fournisseur(f.code_fournisseur);
+
+-- =============================================================================
+-- 6. CLOTURE PAR LA FACTURE : DEVISE, PLUSIEURS RECEPTIONS, AVOIR
+-- =============================================================================
+-- La facture locale se saisit dans la devise du bon, au cours Bank Al-Maghrib ;
+-- le journal distingue la cloture de ses corrections (avoir, complement),
+-- motivees. Un avis se leve au-dela de P_ClotureEcartAvisPct, sans bloquer.
+ALTER TABLE reception ADD COLUMN IF NOT EXISTS code_devise_facture text REFERENCES devise(code_devise);
+ALTER TABLE reception ADD COLUMN IF NOT EXISTS montant_facture_devise numeric(18,2);
+ALTER TABLE reception ADD COLUMN IF NOT EXISTS taux_facture numeric(9,4)
+    CHECK (taux_facture IS NULL OR taux_facture > 0);
+
+ALTER TABLE reception_ajustements_cmup ADD COLUMN IF NOT EXISTS origine text NOT NULL DEFAULT 'CLOTURE';
+ALTER TABLE reception_ajustements_cmup ADD COLUMN IF NOT EXISTS numero_piece text;
+ALTER TABLE reception_ajustements_cmup ADD COLUMN IF NOT EXISTS motif text;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_rec_ajust_origine') THEN
+        ALTER TABLE reception_ajustements_cmup ADD CONSTRAINT ck_rec_ajust_origine
+            CHECK (origine IN ('CLOTURE','AVOIR','COMPLEMENT')
+                   AND (origine = 'CLOTURE' OR length(btrim(COALESCE(motif, ''))) >= 5));
+    END IF;
+END $$;
+
+INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, unite, description, categorie, modifiable_par) VALUES
+  ('P_ClotureEcartAvisPct', 'Cloture facture : avis au-dela de l''ecart', '10', 'DECIMAL', '%',
+   'Au-dela, l''apercu de cloture signale que la facture s''ecarte de la valeur au prix du bon (sans bloquer).',
+   'RECEPT', 'DIRECTION')
+ON CONFLICT (code_parametre) DO NOTHING;
 
 COMMIT;

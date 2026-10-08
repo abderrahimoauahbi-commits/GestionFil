@@ -56,6 +56,10 @@ CREATE TABLE reception (
     -- portes au stock a la cloture (domain/facture_locale.rs).
     montant_facture_mad numeric(18,2),
     frais_facture_mad   numeric(18,2),
+    -- La facture dans la devise du bon, et son taux (decision 4, audit v4).
+    code_devise_facture text REFERENCES devise(code_devise),
+    montant_facture_devise numeric(18,2),
+    taux_facture        numeric(9,4) CHECK (taux_facture IS NULL OR taux_facture > 0),
     date_cloture        text,
     id_utilisateur_cloture text REFERENCES utilisateur(id_utilisateur),
 
@@ -224,7 +228,13 @@ CREATE TABLE reception_ajustements_cmup (
     montant_mad         numeric(18,2) NOT NULL,
     date_ajustement     text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_utilisateur      text    NOT NULL REFERENCES utilisateur(id_utilisateur),
+    -- CLOTURE (la facture), AVOIR ou COMPLEMENT (sa correction, motivee).
+    origine             text    NOT NULL DEFAULT 'CLOTURE',
+    numero_piece        text,
+    motif               text,
     CHECK ((nature = 'STOCK' AND code_magasin IS NOT NULL AND cmup_apres IS NOT NULL)
-        OR (nature = 'ECART_PRIX' AND code_magasin IS NULL))
+        OR (nature = 'ECART_PRIX' AND code_magasin IS NULL)),
+    CONSTRAINT ck_rec_ajust_origine CHECK (origine IN ('CLOTURE','AVOIR','COMPLEMENT')
+        AND (origine = 'CLOTURE' OR length(btrim(COALESCE(motif, ''))) >= 5))
 );
 CREATE INDEX ix_rec_ajust_reception ON reception_ajustements_cmup(id_reception);

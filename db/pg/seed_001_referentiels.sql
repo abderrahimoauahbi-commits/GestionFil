@@ -169,6 +169,7 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
     ('P_ScoreStandard',    'Score fournisseur STANDARD',                '65',    'DECIMAL', '/100',  'ACHAT',   'DIRECTION', 0),
     ('P_ScoreSurveiller',  'Score fournisseur A SURVEILLER',            '45',    'DECIMAL', '/100',  'ACHAT',   'DIRECTION', 0),
     ('P_TolerEcartPesee',  'Tolerance ecart de pesee en reception',     '2',     'DECIMAL', '%',     'RECEPT',  'DIRECTION', 0),
+    ('P_ClotureEcartAvisPct', 'Cloture facture : avis au-dela de l''ecart', '10', 'DECIMAL', '%',     'RECEPT',  'DIRECTION', 0),
     ('P_ColisageTolAlertePct', 'Colisage : alerte sur le poids d''une bobine', '10', 'DECIMAL', '%', 'RECEPT', 'DIRECTION', 0),
     ('P_ColisageTolRefusPct',  'Colisage : refus sur le poids d''une bobine',  '25', 'DECIMAL', '%', 'RECEPT', 'DIRECTION', 0),
     -- MACHINES. Le premier regle l'avertissement visuel du mode Estimation et le

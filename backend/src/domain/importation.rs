@@ -57,6 +57,18 @@ pub fn repartir_centimes(montant: i64, bases: &[i64]) -> Vec<i64> {
     parts
 }
 
+/// Repartit un montant SIGNE (centimes) au prorata de `bases` : une reclôture
+/// a la baisse (frais diminues apres devalidation) retire, au meme prorata, ce
+/// que la premiere cloture avait ajoute. `repartir_centimes` seul rendait zero
+/// pour un montant negatif : la baisse etait ignoree (audit v4).
+pub fn repartir_signe(montant: i64, bases: &[i64]) -> Vec<i64> {
+    if montant >= 0 {
+        repartir_centimes(montant, bases)
+    } else {
+        repartir_centimes(-montant, bases).into_iter().map(|p| -p).collect()
+    }
+}
+
 /// Recalcule toute la repartition d'un dossier.
 ///
 /// Appelee apres chaque modification d'une ligne ou d'un frais : la
@@ -825,17 +837,46 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     let mut total_consomme_c: i64 = 0;
 
     for (code_reference, frais_c, recu) in &references {
-        let stocks: Vec<(String, f64, Option<f64>)> = sqlx::query_as(
-            "SELECT code_magasin, quantite_kg::float8, cmup_mad::float8
-               FROM stock_magasin
-              WHERE code_reference = $1 AND quantite_kg > 0
-              ORDER BY code_magasin
-                FOR UPDATE",
+        // LES FRAIS VONT A LA MARCHANDISE DU DOSSIER (audit v4) : ses lots, la
+        // ou ils sont ; sans lot, les magasins ou ses receptions sont entrees.
+        // Ils allaient a tout le stock de la reference : 5 745 MAD finissaient
+        // dans un magasin qui n'avait rien recu du dossier.
+        let stocks: Vec<(String, f64, Option<f64>, f64)> = sqlx::query_as(
+            "WITH recu AS (
+                 SELECT rl.lot_fournisseur, rl.code_magasin, rl.quantite_recue_kg
+                   FROM import_reception_lignes rl
+                   JOIN import_receptions r ON r.id_reception = rl.id_reception AND r.statut = 'VALIDEE'
+                   JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+                   JOIN import_factures f ON f.id_facture = l.id_facture
+                  WHERE f.id_dossier = $1 AND l.code_reference = $2
+             ), lots AS (
+                 SELECT DISTINCT btrim(lot_fournisseur) AS lot FROM recu
+                  WHERE COALESCE(btrim(lot_fournisseur), '') <> ''
+             ), recu_mag AS (
+                 SELECT code_magasin, sum(quantite_recue_kg) AS kg FROM recu GROUP BY code_magasin
+             ), par_lot AS (
+                 SELECT sl.code_magasin, sum(sl.quantite_kg) AS kg
+                   FROM stock_lot sl JOIN lots ON lots.lot = sl.lot_fournisseur
+                  WHERE sl.code_reference = $2 AND sl.quantite_kg > 0
+                  GROUP BY sl.code_magasin
+             )
+             SELECT sm.code_magasin, sm.quantite_kg::float8, sm.cmup_mad::float8,
+                    LEAST(sm.quantite_kg,
+                          CASE WHEN EXISTS (SELECT 1 FROM lots) THEN COALESCE(pl.kg, 0)
+                               ELSE COALESCE(rm.kg, 0) END)::float8 AS present
+               FROM stock_magasin sm
+               LEFT JOIN par_lot pl ON pl.code_magasin = sm.code_magasin
+               LEFT JOIN recu_mag rm ON rm.code_magasin = sm.code_magasin
+              WHERE sm.code_reference = $2 AND sm.quantite_kg > 0
+                AND (pl.kg > 0 OR (NOT EXISTS (SELECT 1 FROM lots) AND rm.kg > 0))
+              ORDER BY sm.code_magasin
+                FOR UPDATE OF sm",
         )
+        .bind(id_dossier)
         .bind(code_reference)
         .fetch_all(&mut *tx)
         .await?;
-        let q_stock: f64 = stocks.iter().map(|(_, q, _)| q).sum();
+        let q_stock: f64 = stocks.iter().map(|(_, _, _, p)| p).sum();
 
         // La part des frais qui revient au stock present.
         let ecart_stock_c: i64 = if *recu > 0.0 {
@@ -845,15 +886,17 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
         };
         let ecart_consomme_c = frais_c - ecart_stock_c;
 
-        // Entre les magasins, au prorata du stock (en dix-milliemes de kg,
-        // pour rester en entiers).
-        let poids: Vec<i64> = stocks.iter().map(|(_, q, _)| (q * 10_000.0).round() as i64).collect();
-        let parts = repartir_centimes(ecart_stock_c, &poids);
+        // Entre les magasins, au prorata de ce qui y reste du dossier (en
+        // dix-milliemes de kg, pour rester en entiers). Signe : une reclôture
+        // a la baisse retire.
+        let poids: Vec<i64> = stocks.iter().map(|(_, _, _, p)| (p * 10_000.0).round() as i64).collect();
+        let parts = repartir_signe(ecart_stock_c, &poids);
 
         let mut magasins = Vec::new();
-        for ((magasin, q, cump), part_c) in stocks.iter().zip(parts.iter()) {
+        for ((magasin, q, cump, present), part_c) in stocks.iter().zip(parts.iter()) {
             let avant = cump.unwrap_or(0.0);
-            let apres = arrondi_kg(avant + (*part_c as f64 / 100.0) / q);
+            // Le CUMP est celui du MAGASIN : divise par tout ce qu'il porte.
+            let apres = arrondi_kg((avant + (*part_c as f64 / 100.0) / q).max(0.0));
             sqlx::query(
                 "UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4
                   WHERE code_reference = $1 AND code_magasin = $2",
@@ -874,7 +917,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
             .bind(code_reference)
             .bind(magasin)
             .bind(*recu)
-            .bind(*q)
+            .bind(*present)
             .bind(*cump)
             .bind(apres)
             .bind(*part_c)
@@ -882,7 +925,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
             .execute(&mut *tx)
             .await?;
             magasins.push(json!({
-                "code_magasin": magasin, "stock_kg": q,
+                "code_magasin": magasin, "stock_kg": arrondi_kg(*present),
                 "cump_avant": cump, "cump_apres": apres,
                 "montant_dhs": *part_c as f64 / 100.0,
             }));

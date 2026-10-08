@@ -150,5 +150,5 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
 - `db/README.md` — invariants, vues, contrôles C01–C37 (C38–C42, machines, ajoutés par la migration du 05/10/2026 ; C43, colisage incohérent, par celle du 08/10/2026).
-- Règles de gestion validées le 08/10/2026 : migration `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 13, une par règle) ; le colisage incohérent se SIGNALE, il ne bloque jamais.
+- Règles de gestion validées le 08/10/2026 : migrations `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 14) puis `2026-10-08b_audit_v4.sql` (corrections de l'audit v4), les deux exigées au démarrage ; `seed_006_regles_2026_10.sql` en porte les référentiels pour une base neuve. Le colisage incohérent se SIGNALE, il ne bloque jamais.
 - `deploiement/README.md` — serveur, migrations en production, sauvegardes, assistant.

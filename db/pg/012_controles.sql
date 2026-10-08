@@ -124,6 +124,18 @@ WHERE rl.quantite_attendue_kg > 0
   AND (rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg
       > fn_tolerance_fournisseur(f.code_fournisseur);
 
+-- C44 : plus d'un inventaire en cours sur un meme magasin (audit v4). L'index
+-- ux_inventaire_en_cours l'interdit ; une base ou la migration du 08/10 n'a pas
+-- pu le poser (doublon deja present) le montre ici au lieu de le taire.
+DROP VIEW IF EXISTS v_ctl_c44 CASCADE;
+CREATE OR REPLACE VIEW v_ctl_c44 AS
+SELECT code_magasin, count(*) AS nb_en_cours,
+       string_agg(numero_inventaire, ', ' ORDER BY numero_inventaire) AS inventaires
+  FROM inventaire
+ WHERE statut = 'EN_COURS'
+ GROUP BY code_magasin
+HAVING count(*) > 1;
+
 DROP VIEW IF EXISTS v_ctl_c43 CASCADE;
 CREATE OR REPLACE VIEW v_ctl_c43 AS
 -- C43 : colisage incoherent sur un document d'achat encore ouvert — kilos,
@@ -571,4 +583,5 @@ SELECT 'C34', 'Machine au-dela de sa capacite totale',                  'BLOQUAN
 SELECT 'C35', 'Estimation de poids hors tolerance en machine',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c35) UNION ALL
 SELECT 'C36', 'Emplacement de machine sans inventaire recent',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c36) UNION ALL
 SELECT 'C37', 'Bobines sans kilos, ou kilos sans bobines, en machine',  'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c37) UNION ALL
-SELECT 'C43', 'Colisage incoherent sur un document d''achat ouvert',    'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c43);
+SELECT 'C43', 'Colisage incoherent sur un document d''achat ouvert',    'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c43) UNION ALL
+SELECT 'C44', 'Plus d''un inventaire en cours sur un magasin',           'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c44);

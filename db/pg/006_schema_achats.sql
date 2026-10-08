@@ -170,6 +170,10 @@ CREATE TABLE ligne_bc (
     CONSTRAINT ligne_bc_conversion_coherente
         CHECK (type_ligne <> 'MARCHANDISE'
             OR abs(quantite_commandee_kg - quantite_commandee_unite * facteur_kg) < 0.001),
+    -- LE COLISAGE TEL QUE SAISI (migration 2026-09-24) : NULL pour une ligne
+    -- anterieure, on calcule.
+    nb_palettes_saisi   numeric(18,2) CHECK (nb_palettes_saisi IS NULL OR nb_palettes_saisi >= 0),
+    nb_bobines_saisi    bigint CHECK (nb_bobines_saisi IS NULL OR nb_bobines_saisi >= 0),
     -- On ne peut pas recevoir plus que commande sans avenant
     CHECK (quantite_recue_kg <= quantite_commandee_kg + 0.001)
 );

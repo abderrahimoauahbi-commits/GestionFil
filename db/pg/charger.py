@@ -81,6 +81,8 @@ SEEDS = [
     # 5. Les champs declares apres coup, chacun derivant ses propres droits.
     "seed_004_champs_matrice.sql",
     "seed_005_champs_analyse.sql",
+    # 6. Les regles du 08/10/2026 : parametres, droits LOTS, montants declares.
+    "seed_006_regles_2026_10.sql",
 ]
 
 # Ce qui distingue une base de PRODUCTION d'une base de recette : les six

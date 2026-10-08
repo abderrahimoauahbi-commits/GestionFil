@@ -45,7 +45,7 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37
+├── 012_controles.sql             contrôles métier C01–C37, C43, C44
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -115,6 +115,12 @@ C01–C14 traduisent les contrôles du CDC en requêtes exécutables. C15–C37 
 - **C18** qualité planifiée sans densité de rôle
 - **C19** devise catalogue sans taux en vigueur
 - **C20** référence classe A mono-source
+
+C38–C42 (machines) viennent de la migration du 05/10/2026 ; **C43** (colisage incohérent sur un
+document d'achat ouvert, signalé sans bloquer) et **C44** (plus d'un inventaire en cours sur un
+magasin — l'index qui l'interdit n'a pas pu être posé) des migrations du 08/10/2026. **C10** lit
+aussi les réceptions d'import depuis le 08/10 (excédent au-delà de la tolérance du fournisseur sans
+dérogation).
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

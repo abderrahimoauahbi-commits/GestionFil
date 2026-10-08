@@ -237,4 +237,42 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
    'RECEPT', 'DIRECTION')
 ON CONFLICT (code_parametre) DO NOTHING;
 
+-- =============================================================================
+-- 7. EXPLOITATION : PROPRIETAIRES, CONTROLE C44
+-- =============================================================================
+-- Les fonctions du 08/10 avaient ete creees par postgres : la migration
+-- suivante, jouee par gestionfil, n'aurait pas pu les remplacer.
+ALTER FUNCTION fn_controle_colisage(text, numeric, numeric, numeric) OWNER TO gestionfil;
+ALTER FUNCTION fn_trg_irl_quarantaine() OWNER TO gestionfil;
+ALTER FUNCTION fn_trg_import_reception_segregation() OWNER TO gestionfil;
+ALTER FUNCTION fn_trg_plan_achat_date_ecartee() OWNER TO gestionfil;
+ALTER FUNCTION fn_trg_lmvt_lot_controle() OWNER TO gestionfil;
+ALTER VIEW v_stock_physique OWNER TO gestionfil;
+ALTER VIEW v_ctl_c10 OWNER TO gestionfil;
+
+-- C44 : plus d'un inventaire en cours sur un meme magasin (audit v4). L'index
+-- ux_inventaire_en_cours l'interdit ; une base ou la migration du 08/10 n'a pas
+-- pu le poser (doublon deja present) le montre ici au lieu de le taire.
+DROP VIEW IF EXISTS v_ctl_c44 CASCADE;
+CREATE OR REPLACE VIEW v_ctl_c44 AS
+SELECT code_magasin, count(*) AS nb_en_cours,
+       string_agg(numero_inventaire, ', ' ORDER BY numero_inventaire) AS inventaires
+  FROM inventaire
+ WHERE statut = 'EN_COURS'
+ GROUP BY code_magasin
+HAVING count(*) > 1;
+ALTER VIEW v_ctl_c44 OWNER TO gestionfil;
+
+DO $$
+DECLARE def text;
+BEGIN
+    def := pg_get_viewdef('v_controles'::regclass);
+    IF position('C44' IN def) = 0 THEN
+        def := rtrim(rtrim(def), ';');
+        EXECUTE 'CREATE OR REPLACE VIEW v_controles AS ' || def ||
+                ' UNION ALL SELECT ''C44''::text, ''Plus d''''un inventaire en cours sur un magasin''::text,'
+                ' ''CRITIQUE''::text, (SELECT count(*) FROM v_ctl_c44)';
+    END IF;
+END $$;
+
 COMMIT;

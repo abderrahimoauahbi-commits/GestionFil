@@ -125,7 +125,34 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'inventaire'
                            AND column_name = 'motif_annulation')
-            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_tolerance_pesee')",
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_tolerance_pesee')
+            -- Les dernieres sections aussi (audit v4) : sans elles, la cloture
+            -- locale et l'expiration des propositions ecartees tombaient en
+            -- « erreur interne » sur une base a demi migree.
+            AND EXISTS (SELECT 1 FROM information_schema.tables
+                         WHERE table_schema = 'public' AND table_name = 'reception_ajustements_cmup')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'plan_achat'
+                           AND column_name = 'date_ecartee')",
+    ),
+    (
+        // Corrections de l'audit v4 : niveau d'ecart machine archive, stock
+        // machine dans le MRP, derogation d'import, cloture en devise et avoir,
+        // controle C44. Le temoin porte sur la DERNIERE section.
+        "2026-10-08b_audit_v4.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'machine_decision_ligne'
+                           AND column_name = 'niveau_ecart')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'v_stock_physique'
+                           AND column_name = 'stock_mrp_net_kg')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_reception_lignes'
+                           AND column_name = 'derogation_ecart')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reception_ajustements_cmup'
+                           AND column_name = 'origine')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c44')",
     ),
 ];
 

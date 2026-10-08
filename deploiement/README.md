@@ -194,6 +194,40 @@ Migrations appliquées :
 > deux migrations du 2 septembre sont donc déjà comprises dans le schéma ; elles
 > restent listées parce qu'une base plus ancienne peut encore en avoir besoin.
 
+### Publier les règles du 08/10/2026 (deux migrations, dans cet ordre)
+
+Le binaire du 08/10 **refuse de démarrer** sur une base qui n'a pas les deux
+migrations (`MIGRATIONS_REQUISES`, `backend/src/db.rs`) et les nomme dans le
+journal du service. Procédure, service **arrêté** (les migrations posent des
+verrous exclusifs ; `lock_timeout` les fait échouer en 5 s plutôt que de figer
+l'ERP si l'ancien serveur tient encore une table) :
+
+```bash
+sudo systemctl stop gestionfil
+sudo -u gestionfil /opt/gestionfil/gestionfil-admin sauvegarder      # 1. sauvegarde
+cd /tmp
+cat /home/sysadmin/gestionfil/db/migrations/2026-10-08_regles_p1.sql  | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1 2>&1 | tee /tmp/migr-0810.log
+cat /home/sysadmin/gestionfil/db/migrations/2026-10-08b_audit_v4.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1 2>&1 | tee -a /tmp/migr-0810.log
+grep -i "NOTICE.*NON cree\|ERREUR\|ERROR" /tmp/migr-0810.log               # 2. lire ce qui a été dit
+sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz                         # 3. le binaire
+```
+
+> **Lire le journal, pas seulement le code retour.** Si la base porte deux
+> inventaires en cours sur un même magasin, la première migration **ne pose pas**
+> l'index `ux_inventaire_en_cours` et le dit par un `NOTICE` — que `ON_ERROR_STOP`
+> ne transforme pas en échec. Le contrôle **C44** le signale ensuite au tableau
+> des contrôles. Annuler le doublon (`POST /api/inventaires/{id}/annuler`), puis
+> rejouer la première migration : elle est rejouable.
+
+Témoins après publication : `SELECT code, nb FROM v_controles WHERE code IN
+('C43','C44')` répond deux lignes, `/api/cockpit` répond 200, et le journal du
+service ne contient pas « migration(s) manquante(s) ».
+
+**Base neuve** (`charger.py --seeds`) : `seed_006_regles_2026_10.sql` y pose ce
+que ces deux migrations ajoutent aux référentiels (paramètres, droits LOTS,
+montants déclarés). Les tables nées en migration (lots, machines, import)
+s'obtiennent toujours en rejouant ensuite `db/pg/migrations/` dans l'ordre.
+
 ---
 
 ## Reprise depuis le classeur

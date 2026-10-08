@@ -1,0 +1,3 @@
+# Les scripts du serveur Linux gardent leurs fins de ligne Unix, quel que soit
+# le poste qui les extrait : bash refuse un retour chariot en fin de ligne.
+*.sh text eol=lf

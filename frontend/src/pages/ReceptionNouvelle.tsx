@@ -56,8 +56,6 @@ import {
 import { AvisColisage } from '../composants/AvisColisage'
 
 const MODULE = 'RECEPTIONS'
-/** Un EXCEDENT au-dela exige une derogation motivee (controle C10) ; un manque, non. */
-const TOLERANCE_PCT = 2
 
 interface LigneAttendue extends Record<string, unknown> {
   id_ligne_bc: string
@@ -175,9 +173,13 @@ export function ReceptionNouvelle() {
   const qFrs = useQuery({
     queryKey: ['fournisseurs-actifs'],
     queryFn: () =>
-      api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1&limite=500'),
+      api.get<{ code_fournisseur: string; nom: string; tolerance_pesee_pct?: number | null }[]>('/api/fournisseurs?actif=1&limite=500'),
   })
   const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
+  /** Un EXCEDENT au-dela exige une derogation motivee (C10) ; un manque, non. Tolerance du fournisseur (regle 14). */
+  const TOLERANCE_PCT = Number.isFinite(Number(fournisseur?.tolerance_pesee_pct)) && fournisseur?.tolerance_pesee_pct != null
+    ? Number(fournisseur.tolerance_pesee_pct)
+    : 2
 
   const qMag = useQuery({
     queryKey: ['magasins'],

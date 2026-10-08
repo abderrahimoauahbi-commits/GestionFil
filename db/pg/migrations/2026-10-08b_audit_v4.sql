@@ -150,4 +150,59 @@ BEGIN
     END IF;
 END $$;
 
+-- =============================================================================
+-- 5. RECEPTION D'IMPORT : LA TOLERANCE DU FOURNISSEUR, ET LA DEROGATION
+-- =============================================================================
+-- La tolerance etait figee a 2 % dans le code, et l'excedent refuse sec : un
+-- camion de 2,5 % au-dessus ne pouvait entrer qu'en mentant sur la pesee.
+
+-- LA TOLERANCE D'UN FOURNISSEUR (audit v4) : la meme source pour la reception
+-- d'import, qui la figeait a 2 % dans le code.
+CREATE OR REPLACE FUNCTION fn_tolerance_fournisseur(p_code_fournisseur text) RETURNS numeric AS $$
+    SELECT COALESCE(
+        (SELECT f.tolerance_pesee_pct FROM fournisseur f WHERE f.code_fournisseur = p_code_fournisseur),
+        (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_TolerEcartPesee'),
+        2);
+$$ LANGUAGE sql STABLE;
+ALTER FUNCTION fn_tolerance_fournisseur(text) OWNER TO gestionfil;
+
+ALTER TABLE import_reception_lignes ADD COLUMN IF NOT EXISTS derogation_ecart smallint NOT NULL DEFAULT 0;
+ALTER TABLE import_reception_lignes ADD COLUMN IF NOT EXISTS motif_derogation text;
+ALTER TABLE import_reception_lignes ADD COLUMN IF NOT EXISTS id_utilisateur_derogation text
+    REFERENCES utilisateur(id_utilisateur);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_irl_derogation') THEN
+        ALTER TABLE import_reception_lignes ADD CONSTRAINT ck_irl_derogation CHECK (derogation_ecart IN (0,1)
+            AND (derogation_ecart = 0 OR length(btrim(COALESCE(motif_derogation, ''))) >= 5));
+    END IF;
+END $$;
+
+-- C10 lit aussi l'import (memes colonnes : la vue se remplace en place).
+CREATE OR REPLACE VIEW v_ctl_c10 AS
+SELECT lr.id_ligne_reception, rc.numero_reception, lr.code_reference,
+       lr.quantite_commandee_kg, lr.quantite_stock_kg, ROUND(lr.ecart_pct, 2) AS ecart_pct,
+       lr.derogation_ecart::bigint AS derogation_ecart
+FROM ligne_reception lr
+JOIN reception rc ON rc.id_reception = lr.id_reception
+WHERE lr.ecart_pct IS NOT NULL
+  AND lr.derogation_ecart = 0
+  AND lr.ecart_pct > fn_tolerance_pesee(lr.id_reception)
+UNION ALL
+-- L'import aussi (audit v4) : un excedent au-dela de la tolerance du
+-- fournisseur, sans derogation motivee.
+SELECT rl.id_reception_ligne, r.numero, fl.code_reference,
+       rl.quantite_attendue_kg, rl.quantite_recue_kg,
+       ROUND((rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg, 2),
+       rl.derogation_ecart::bigint
+FROM import_reception_lignes rl
+JOIN import_receptions r ON r.id_reception = rl.id_reception
+JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+JOIN import_factures f ON f.id_facture = fl.id_facture
+WHERE rl.quantite_attendue_kg > 0
+  AND rl.derogation_ecart = 0
+  AND r.statut <> 'ANNULEE'
+  AND (rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg
+      > fn_tolerance_fournisseur(f.code_fournisseur);
+
 COMMIT;

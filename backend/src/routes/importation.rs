@@ -1104,7 +1104,8 @@ pub async fn a_recevoir(
                 bc.numero_bc,
                 -- LE CONDITIONNEMENT DE LA FICHE : sans lui, l'ecran ne sait pas
                 -- relier une pesee a un compte de palettes et de bobines.
-                r.poids_bobine_kg, r.bobines_par_palette
+                r.poids_bobine_kg, r.bobines_par_palette,
+                fn_tolerance_fournisseur(f.code_fournisseur)::float8 AS tolerance_pesee_pct
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
            JOIN import_dossiers d ON d.id_dossier = f.id_dossier
@@ -1174,6 +1175,9 @@ pub struct LigneRecue {
     code_magasin: String,
     /// Le verdict du controle : CONFORME par defaut.
     statut_qualite: Option<String>,
+    /// Un excedent au-dela de la tolerance du fournisseur, assume et motive.
+    derogation_ecart: Option<i64>,
+    motif_derogation: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1215,7 +1219,7 @@ pub async fn creer_reception(
     .fetch_one(&mut *tx)
     .await?;
 
-    inserer_lignes_reception(&mut tx, &id, &r.lignes).await?;
+    inserer_lignes_reception(&mut tx, &id, &r.lignes, &user.id).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id_reception": id, "numero": numero })))
 }
@@ -1227,18 +1231,28 @@ async fn inserer_lignes_reception(
     tx: &mut sqlx::PgConnection,
     id_reception: &str,
     lignes: &[LigneRecue],
+    id_utilisateur: &str,
 ) -> AppResult<()> {
     for l in lignes {
+        let derogation = l.derogation_ecart.unwrap_or(0) == 1;
+        let motif = l.motif_derogation.as_deref().map(str::trim).unwrap_or("");
+        if derogation && motif.chars().count() < 5 {
+            return Err(AppError::Invalide(
+                "Une dérogation d'écart se motive : cinq caractères au moins.".into(),
+            ));
+        }
         sqlx::query(
             "INSERT INTO import_reception_lignes
                     (id_reception, id_ligne, quantite_recue_kg, quantite_attendue_kg,
                      nb_bobines, nb_palettes, lot_fournisseur, code_couleur, code_magasin,
-                     libelle_couleur, statut_qualite)
+                     libelle_couleur, statut_qualite,
+                     derogation_ecart, motif_derogation, id_utilisateur_derogation)
              SELECT $1, fl.id_ligne, $3, fl.reste_kg, COALESCE($4, 0), COALESCE($5, 0),
                     COALESCE(NULLIF($6, ''), fl.lot_fournisseur),
                     COALESCE(NULLIF($7, ''), fl.code_couleur), $8,
                     COALESCE(NULLIF($9, ''), fl.libelle_couleur),
-                    COALESCE(NULLIF($10, ''), 'CONFORME')
+                    COALESCE(NULLIF($10, ''), 'CONFORME'),
+                    $11, $12, $13
                FROM import_facture_lignes fl WHERE fl.id_ligne = $2",
         )
         .bind(id_reception)
@@ -1251,6 +1265,9 @@ async fn inserer_lignes_reception(
         .bind(&l.code_magasin)
         .bind(&l.libelle_couleur)
         .bind(&l.statut_qualite)
+        .bind(i16::from(derogation))
+        .bind(derogation.then_some(motif))
+        .bind(derogation.then_some(id_utilisateur))
         .execute(&mut *tx)
         .await?;
     }
@@ -1283,6 +1300,8 @@ pub async fn lire_reception(
                 rl.ecart_kg, rl.nb_bobines, rl.nb_palettes, rl.lot_fournisseur, rl.code_couleur,
                 rl.libelle_couleur,
                 rl.code_magasin, rl.statut_qualite, rl.id_mouvement,
+                rl.derogation_ecart, rl.motif_derogation,
+                fn_tolerance_fournisseur(f.code_fournisseur)::float8 AS tolerance_pesee_pct,
                 d.id_dossier, d.numero AS numero_dossier, d.statut AS statut_dossier,
                 f.numero_facture, fo.nom AS fournisseur_nom, fl.code_reference,
                 ref.designation, fl.poids_net_kg, fl.quantite_recue_kg AS deja_recu_kg,
@@ -1351,11 +1370,43 @@ pub async fn modifier_reception(
     .bind(&r.notes)
     .execute(&mut *tx)
     .await?;
+    // SOUMISE AU CONTROLE, LA PESEE EST FIGEE (audit v4) : le controleur porte
+    // son verdict (qualite, magasin, lot, derogation), il ne repese pas. Un
+    // poids, un compte ou une ligne a changer : retour en brouillon, au
+    // magasinier — sinon le controleur validerait sa propre pesee.
+    if statut == "A_CONTROLER" {
+        let mut avant: Vec<(String, f64, i64, i64)> = sqlx::query_as(
+            "SELECT id_ligne, quantite_recue_kg::float8, nb_bobines, nb_palettes
+               FROM import_reception_lignes WHERE id_reception = $1",
+        )
+        .bind(&id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut apres: Vec<(String, f64, i64, i64)> = r
+            .lignes
+            .iter()
+            .map(|l| (l.id_ligne.clone(), l.quantite_recue_kg, l.nb_bobines.unwrap_or(0), l.nb_palettes.unwrap_or(0)))
+            .collect();
+        avant.sort_by(|a, b| a.0.cmp(&b.0));
+        apres.sort_by(|a, b| a.0.cmp(&b.0));
+        let identiques = avant.len() == apres.len()
+            && avant
+                .iter()
+                .zip(&apres)
+                .all(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() < 0.00005 && a.2 == b.2 && a.3 == b.3);
+        if !identiques {
+            return Err(AppError::RegleMetier(
+                "La pesée est soumise au contrôle : poids, bobines, palettes et lignes sont figés. \
+                 Pour les corriger, remettez la réception en brouillon."
+                    .into(),
+            ));
+        }
+    }
     sqlx::query("DELETE FROM import_reception_lignes WHERE id_reception = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await?;
-    inserer_lignes_reception(&mut tx, &id, &r.lignes).await?;
+    inserer_lignes_reception(&mut tx, &id, &r.lignes, &user.id).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id_reception": id })))
 }
@@ -1401,6 +1452,9 @@ pub async fn changer_statut_reception(
             "La réception {numero} est {actuel} : elle ne peut pas passer à {}.",
             s.statut
         )));
+    }
+    if s.statut == "A_CONTROLER" {
+        metier::verifier_ecarts(&mut tx, &id).await?;
     }
     sqlx::query("UPDATE import_receptions SET statut = $2 WHERE id_reception = $1")
         .bind(&id)

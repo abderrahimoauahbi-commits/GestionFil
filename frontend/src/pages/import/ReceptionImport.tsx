@@ -50,8 +50,9 @@ const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider tex
 const td = 'px-2 py-1'
 const champ = 'h-7 px-1.5 text-[12.5px]'
 
-/** Meme tolerance que le serveur (domain::importation::TOLERANCE_PCT). */
-const TOLERANCE_PCT = 2
+/** A defaut de reglage du fournisseur, comme le serveur (fn_tolerance_fournisseur). */
+const TOLERANCE_DEFAUT = 2
+const tol = (t: number | null | undefined) => (t != null && Number.isFinite(Number(t)) ? Number(t) : TOLERANCE_DEFAUT)
 
 interface ARecevoir {
   id_ligne: string
@@ -75,6 +76,8 @@ interface ARecevoir {
   /** Le conditionnement de la fiche, pour relier poids, bobines et palettes. */
   poids_bobine_kg?: number | null
   bobines_par_palette?: number | null
+  /** La tolerance de pesee du fournisseur (audit v4). */
+  tolerance_pesee_pct?: number | null
 }
 
 interface ReceptionLue {
@@ -111,6 +114,9 @@ interface ReceptionLue {
     numero_bc: string | null
     poids_bobine_kg?: number | null
     bobines_par_palette?: number | null
+    tolerance_pesee_pct?: number | null
+    derogation_ecart?: number | null
+    motif_derogation?: string | null
   }[]
 }
 
@@ -150,6 +156,11 @@ interface LigneRecue {
   lie: boolean
   /** Validee a l'ecran : figee, et prete a partir avec « Enregistrer ». */
   valide: boolean
+  /** La tolerance du fournisseur, en % du reste. */
+  tolerance: number
+  /** Un excedent au-dela, assume et motive (audit v4). */
+  derogation: boolean
+  motifDerogation: string
 }
 
 /** « Dossier 46/26 · IHR2026… · HASIRCI · BC-0012 » : d'ou vient la ligne. */
@@ -229,6 +240,9 @@ export function ReceptionImport() {
         // Des comptes enregistres ont ete CONSTATES : relier les recalculerait.
         lie: !(l.nb_bobines > 0 || l.nb_palettes > 0),
         valide: true,
+        tolerance: tol(l.tolerance_pesee_pct),
+        derogation: l.derogation_ecart === 1,
+        motifDerogation: l.motif_derogation ?? '',
       })),
     )
     setModifie(false)
@@ -240,6 +254,10 @@ export function ReceptionImport() {
      stock. Celui qui a saisi ne valide pas (B4 regle 2, verifie au serveur). */
   const statut = nouvelle ? 'BROUILLON' : qReception.data?.reception.statut
   const editable = (statut === 'BROUILLON' || statut === 'A_CONTROLER') && peut('RECEPTIONS', 'ECRIRE')
+  /* SOUMISE AU CONTROLE, LA PESEE EST FIGEE (audit v4) : le controleur porte
+     son verdict — qualite, magasin, lot, derogation —, il ne repese pas. Pour
+     corriger un poids : « Remettre en brouillon ». Le serveur le refuse aussi. */
+  const peseeOuverte = editable && statut === 'BROUILLON'
   const peutSoumettre = !nouvelle && statut === 'BROUILLON' && peut('RECEPTIONS', 'ECRIRE')
   const peutValider = statut === 'A_CONTROLER' && peut('RECEPTIONS', 'VALIDER')
   const estSaisisseur = !!moi && qReception.data?.reception.cree_par === moi.login
@@ -312,6 +330,9 @@ export function ReceptionImport() {
           // PARTIELLE, on part du poids et les comptes se deduisent.
           lie: !entiere,
           valide: false,
+          tolerance: tol(r.tolerance_pesee_pct),
+          derogation: false,
+          motifDerogation: '',
         }
       })
     setLignes((ls) => [...ls, ...nouvelles])
@@ -348,7 +369,7 @@ export function ReceptionImport() {
   const complete =
     !!entete.date_reception &&
     lignes.length > 0 &&
-    lignes.every((l) => nombre(l.quantite) > 0 && l.magasin && l.valide) &&
+    lignes.every((l) => nombre(l.quantite) > 0 && l.magasin && l.valide && (!l.derogation || l.motifDerogation.trim().length >= 5)) &&
     (!entete.litige || entete.motif_litige.trim())
 
   const corps = () => ({
@@ -366,6 +387,8 @@ export function ReceptionImport() {
       libelle_couleur: l.libelleCouleur,
       code_magasin: l.magasin,
       statut_qualite: l.qualite,
+      derogation_ecart: l.derogation ? 1 : 0,
+      motif_derogation: l.derogation ? l.motifDerogation.trim() : null,
     })),
   })
 
@@ -629,7 +652,7 @@ export function ReceptionImport() {
                 <tbody>
                   {lignes.map((l) => {
                     const ecart = ecartDe(l)
-                    const horsTolerance = nombre(l.quantite) > l.reste_kg * (1 + TOLERANCE_PCT / 100) + 0.001
+                    const horsTolerance = nombre(l.quantite) > Math.max(l.reste_kg, 0) * (1 + l.tolerance / 100) + 0.001
                     const verrou = editable && l.valide
                     const fond = verrou ? 'bg-succes/[0.05]' : undefined
                     return (
@@ -647,11 +670,13 @@ export function ReceptionImport() {
                             </div>
                           </td>
                           <td className={td} inert={verrou}>
-                            <Champ className={cn(champ, 'text-right', horsTolerance && 'border-danger')} inputMode="decimal"
-                              value={l.quantite} disabled={!editable} aria-label="Poids reçu en kg"
+                            <Champ className={cn(champ, 'text-right', horsTolerance && !l.derogation && 'border-danger')} inputMode="decimal"
+                              value={l.quantite} disabled={!peseeOuverte} aria-label="Poids reçu en kg"
                               onChange={(e) => majColis(l.id_ligne, 'quantite', e.target.value)} />
                             {horsTolerance ? (
-                              <div className="text-right text-[10.5px] text-danger">au-delà du reste + {TOLERANCE_PCT} %</div>
+                              <div className={cn('text-right text-[10.5px]', l.derogation ? 'text-alerte' : 'text-danger')}>
+                                au-delà du reste + {fmt.nombre(l.tolerance, 1)} %{l.derogation ? ' · dérogation' : ''}
+                              </div>
                             ) : statut !== 'VALIDEE' && Math.abs(ecart) > 0.5 ? (
                               <div className="text-right text-[10.5px] tabular-nums text-alerte">
                                 écart {ecart > 0 ? '+' : ''}{fmt.nombre(ecart, 2)} kg
@@ -659,14 +684,14 @@ export function ReceptionImport() {
                             ) : null}
                           </td>
                           <td className={td} inert={verrou}>
-                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.bobines} disabled={!editable}
+                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.bobines} disabled={!peseeOuverte}
                               aria-label="Bobines" onChange={(e) => majColis(l.id_ligne, 'bobines', e.target.value)} />
                           </td>
                           <td className={td} inert={verrou}>
                             <div className="flex items-center gap-1">
-                              <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.palettes} disabled={!editable}
+                              <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.palettes} disabled={!peseeOuverte}
                                 aria-label="Palettes" onChange={(e) => majColis(l.id_ligne, 'palettes', e.target.value)} />
-                              {editable && (
+                              {peseeOuverte && (
                                 <button type="button" onClick={() => majLigne(l.id_ligne, { lie: !l.lie })}
                                   title={l.lie ? 'Poids, bobines et palettes se répondent — cliquez pour saisir chacun séparément' : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'}
                                   aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
@@ -703,10 +728,10 @@ export function ReceptionImport() {
                                 onClick={() => majLigne(l.id_ligne, { valide: !l.valide })}>
                                 {verrou ? <Pencil /> : <Check />}
                               </Bouton>
-                              <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
+                              {peseeOuverte && <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
                                 onClick={() => { setLignes((ls) => ls.filter((x) => x.id_ligne !== l.id_ligne)); setModifie(true) }}>
                                 <Trash2 />
-                              </Bouton>
+                              </Bouton>}
                             </td>
                           )}
                         </tr>
@@ -729,6 +754,21 @@ export function ReceptionImport() {
                                   onChange={(e) => majLigne(l.id_ligne, { libelleCouleur: e.target.value })} />
                               </label>
                             </div>
+                            {(horsTolerance || l.derogation) && (
+                              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <label className="flex items-center gap-1.5 text-[11.5px]">
+                                  <input type="checkbox" checked={l.derogation} disabled={!editable}
+                                    onChange={(e) => majLigne(l.id_ligne, { derogation: e.target.checked })} />
+                                  Dérogation : l'excédent est accepté
+                                </label>
+                                {l.derogation && (
+                                  <Champ className={cn(champ, 'w-96', l.motifDerogation.trim().length < 5 && 'border-danger')}
+                                    value={l.motifDerogation} disabled={!editable} aria-label="Motif de la dérogation"
+                                    placeholder="Motif (obligatoire) — accord du fournisseur, avenant…"
+                                    onChange={(e) => majLigne(l.id_ligne, { motifDerogation: e.target.value })} />
+                                )}
+                              </div>
+                            )}
                             <AvisColisage kg={l.quantite} bobines={l.bobines} palettes={l.palettes} cond={l.cond} />
                           </td>
                         </tr>
@@ -796,7 +836,7 @@ export function ReceptionImport() {
       )}
 
       {/* ================= Choix des lignes de facture ======================== */}
-      {editable && (
+      {peseeOuverte && (
         <Carte>
           <CarteEntete>
             <CarteTitre>Lignes de facture à recevoir</CarteTitre>
@@ -862,7 +902,7 @@ export function ReceptionImport() {
                   </thead>
                   <tbody>
                     {disponibles.map((x) => {
-                      const tolere = x.reste_kg <= (x.poids_net_kg * TOLERANCE_PCT) / 100 + 0.001
+                      const tolere = x.reste_kg <= (x.poids_net_kg * tol(x.tolerance_pesee_pct)) / 100 + 0.001
                       return (
                         <tr key={x.id_ligne} className="cursor-pointer border-b border-bordure/60 hover:bg-attenue/30"
                           onClick={() => basculer(x.id_ligne)}>

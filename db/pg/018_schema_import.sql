@@ -268,6 +268,13 @@ CREATE TABLE import_reception_lignes (
     statut_qualite      text    NOT NULL DEFAULT 'CONFORME'
                                 CHECK (statut_qualite IN ('CONFORME','NON_CONFORME','QUARANTAINE')),
     id_mouvement        text    REFERENCES mouvement(id_mouvement),
+    -- L'EXCEDENT AU-DELA DE LA TOLERANCE DU FOURNISSEUR se derogue, motif a
+    -- l'appui, comme en reception locale (audit v4) — il ne se refuse plus sec.
+    derogation_ecart    smallint NOT NULL DEFAULT 0,
+    motif_derogation    text,
+    id_utilisateur_derogation text REFERENCES utilisateur(id_utilisateur),
+    CONSTRAINT ck_irl_derogation CHECK (derogation_ecart IN (0,1)
+        AND (derogation_ecart = 0 OR length(btrim(COALESCE(motif_derogation, ''))) >= 5)),
     UNIQUE (id_reception, id_ligne)
 );
 

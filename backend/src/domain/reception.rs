@@ -241,6 +241,7 @@ pub async fn valider(
             "Une reception sans ligne ne peut pas etre validee.".into(),
         ));
     }
+    verifier_ecarts_courants(&mut tx, id_reception).await?;
 
     // Ponctualite : chaque ligne se juge contre la promesse de SON bon. Deux
     // bons du meme fournisseur n'ont pas la meme date, et archiver un retard
@@ -559,6 +560,55 @@ pub async fn valider(
         montant_total_mad: arrondi_mad(montant_total),
         statut_bc,
     })
+}
+
+/// L'ECART DE PESEE SE JUGE SUR LE RESTE DU BON A L'INSTANT (audit v4).
+///
+/// L'attendu d'une ligne etait fige a sa saisie. Deux receptions saisies en
+/// meme temps sur la meme ligne de bon portaient chacune tout le reste : la
+/// seconde validee faisait entrer un excedent sans derogation (8 500 kg pour
+/// 7 200 restants, +18 %), et le bon, plafonne, effacait la trace. A la
+/// soumission au controle et a la validation, chaque ligne de bon est donc
+/// rejugee contre son reste courant, avec la tolerance du fournisseur ;
+/// l'attendu de la ligne est recale sur ce reste.
+pub async fn verifier_ecarts_courants(c: &mut sqlx::PgConnection, id_reception: &str) -> AppResult<()> {
+    let excedents: Vec<(String, f64, f64, f64)> = sqlx::query_as(
+        "SELECT min(lr.code_reference), sum(lr.quantite_stock_kg)::float8,
+                max(lb.quantite_restante_kg)::float8, max(fn_tolerance_pesee(lr.id_reception))::float8
+           FROM ligne_reception lr
+           JOIN ligne_bc lb ON lb.id_ligne_bc = lr.id_ligne_bc
+          WHERE lr.id_reception = $1
+          GROUP BY lr.id_ligne_bc
+         HAVING bool_and(lr.derogation_ecart = 0)
+            AND sum(lr.quantite_stock_kg)
+                > max(lb.quantite_restante_kg) * (1 + max(fn_tolerance_pesee(lr.id_reception)) / 100.0) + 0.0005",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *c)
+    .await?;
+    if let Some((reference, kg, reste, tol)) = excedents.first() {
+        return Err(AppError::RegleMetier(format!(
+            "C10 : {reference} : {} kg pesés pour {} kg restant à recevoir sur le bon — d'autres \
+             réceptions ont été validées depuis la saisie. Au-delà de la tolérance de {} %, \
+             l'excédent demande une dérogation motivée : corrigez la pesée ou ajoutez la dérogation.",
+            arrondi_kg(*kg),
+            arrondi_kg(*reste),
+            tol
+        )));
+    }
+    // L'attendu affiche et l'OTIF se lisent sur le reste courant.
+    sqlx::query(
+        "UPDATE ligne_reception lr
+            SET quantite_commandee_kg = lb.quantite_restante_kg
+           FROM ligne_bc lb
+          WHERE lb.id_ligne_bc = lr.id_ligne_bc AND lr.id_reception = $1
+            AND lb.quantite_restante_kg > 0
+            AND lr.quantite_commandee_kg IS DISTINCT FROM lb.quantite_restante_kg",
+    )
+    .bind(id_reception)
+    .execute(&mut *c)
+    .await?;
+    Ok(())
 }
 
 /// Un bon de commande touche par la reception — celui de l'en-tete, ou tous ceux

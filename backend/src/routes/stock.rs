@@ -3768,6 +3768,7 @@ pub async fn changer_statut_reception(
                 "Aucune ligne pesee : rien a soumettre au controle qualite.".into(),
             ));
         }
+        crate::domain::reception::verifier_ecarts_courants(&mut tx, &id).await?;
     }
 
     // Le trigger de transition refuse tout enchainement non prevu.

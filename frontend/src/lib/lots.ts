@@ -57,3 +57,21 @@ export function useTolerancesColisage() {
   }
   return { alerte: val('P_ColisageTolAlertePct', 10), refus: val('P_ColisageTolRefusPct', 25) }
 }
+
+/**
+ * LA TOLERANCE DE PESEE DU FOURNISSEUR (regle 14, audit v4). Les ecrans la
+ * figeaient a 2 % alors que le serveur lit le reglage du fournisseur : a 1 %,
+ * la case de derogation ne s'affichait pas et le serveur refusait. A defaut de
+ * reglage, 2 %, comme le serveur.
+ */
+export function useToleranceFournisseur(code: string | null | undefined): number {
+  const q = useQuery({
+    queryKey: ['fournisseurs-tolerance'],
+    queryFn: () =>
+      api.get<{ code_fournisseur: string; tolerance_pesee_pct?: number | null }[]>('/api/fournisseurs?limite=1000'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const t = Number(q.data?.find((f) => f.code_fournisseur === code)?.tolerance_pesee_pct)
+  return Number.isFinite(t) && t >= 0 ? t : 2
+}

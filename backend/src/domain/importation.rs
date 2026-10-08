@@ -22,10 +22,9 @@ use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
 use std::collections::{BTreeMap, HashMap};
 
-/// Tolerance de reception, en % du poids facture : une ligne dont le reste est
-/// sous ce seuil est consideree comme recue. Meme ordre que la tolerance de
-/// pesee (E6) des receptions locales.
-pub const TOLERANCE_PCT: f64 = 2.0;
+// La tolerance de reception est celle du fournisseur (fn_tolerance_fournisseur,
+// a defaut P_TolerEcartPesee, 2 %) : une ligne dont le reste est sous ce seuil
+// est consideree comme recue, et un excedent au-dela demande une derogation.
 
 // ============================================================================
 // 1. La repartition
@@ -341,6 +340,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
     if lignes.is_empty() {
         return Err(AppError::RegleMetier("Aucune ligne : rien à faire entrer en stock.".into()));
     }
+    verifier_ecarts(&mut tx, id_reception).await?;
 
     // ---- Controles, puis prix facture (reel) de chaque ligne --------------------
     struct Entree {
@@ -364,20 +364,12 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
     let mut entrees = Vec::with_capacity(lignes.len());
     for l in &lignes {
         let quantite: f64 = l.try_get("quantite")?;
-        let reste: f64 = l.try_get("reste")?;
         let poids_net: f64 = l.try_get("poids_net")?;
         let code_reference: String = l.try_get("code_reference")?;
         let numero_facture: String = l.try_get("numero_facture")?;
         if l.try_get::<i64, _>("soldee")? == 1 {
             return Err(AppError::RegleMetier(format!(
                 "{code_reference} (facture {numero_facture}) est soldée : elle ne se reçoit plus."
-            )));
-        }
-        let plafond = reste * (1.0 + TOLERANCE_PCT / 100.0) + 0.001;
-        if quantite > plafond {
-            return Err(AppError::RegleMetier(format!(
-                "{code_reference} (facture {numero_facture}) : {quantite} kg reçus pour {reste} kg \
-                 restant à recevoir — au-delà de la tolérance de {TOLERANCE_PCT} %."
             )));
         }
         let montant_devise: f64 = l.try_get("montant_devise")?;
@@ -620,7 +612,7 @@ pub async fn statuer_factures(tx: &mut PgConnection, id_dossier: &str) -> AppRes
            FROM (SELECT f2.id_facture,
                         CASE
                           WHEN bool_and(l.type_ligne <> 'ERP' OR l.soldee = 1
-                                        OR l.reste_kg <= l.poids_net_kg * $2 / 100.0 + 0.001)
+                                        OR l.reste_kg <= l.poids_net_kg * fn_tolerance_fournisseur(f2.code_fournisseur) / 100.0 + 0.001)
                             THEN 'RECUE'
                           WHEN sum(l.quantite_recue_kg) > 0 THEN 'PARTIELLE'
                           ELSE 'NON_RECUE'
@@ -632,9 +624,40 @@ pub async fn statuer_factures(tx: &mut PgConnection, id_dossier: &str) -> AppRes
           WHERE f.id_facture = s.id_facture AND f.statut_reception <> s.statut",
     )
     .bind(id_dossier)
-    .bind(TOLERANCE_PCT)
     .execute(&mut *tx)
     .await?;
+    Ok(())
+}
+
+/// L'EXCEDENT D'IMPORT SE JUGE CONTRE LA TOLERANCE DU FOURNISSEUR (audit v4).
+///
+/// Au-dela du reste de la ligne de facture + la tolerance du fournisseur (a
+/// defaut P_TolerEcartPesee, 2 %), l'excedent exige une derogation motivee.
+/// Le reste est lu a l'instant : une autre reception validee entre-temps sur
+/// la meme ligne compte. Joue a la soumission au controle et a la validation.
+pub async fn verifier_ecarts(c: &mut PgConnection, id_reception: &str) -> AppResult<()> {
+    let excedents: Vec<(String, String, f64, f64, f64)> = sqlx::query_as(
+        "SELECT l.code_reference, f.numero_facture, rl.quantite_recue_kg::float8,
+                l.reste_kg::float8, fn_tolerance_fournisseur(f.code_fournisseur)::float8
+           FROM import_reception_lignes rl
+           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+           JOIN import_factures f ON f.id_facture = l.id_facture
+          WHERE rl.id_reception = $1 AND rl.derogation_ecart = 0
+            AND rl.quantite_recue_kg
+                > GREATEST(l.reste_kg, 0) * (1 + fn_tolerance_fournisseur(f.code_fournisseur) / 100.0) + 0.001
+          ORDER BY f.numero_facture, l.ligne_numero",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *c)
+    .await?;
+    if let Some((reference, facture, kg, reste, tol)) = excedents.first() {
+        return Err(AppError::RegleMetier(format!(
+            "{reference} (facture {facture}) : {kg} kg reçus pour {} kg restant à recevoir — \
+             au-delà de la tolérance de {tol} % du fournisseur. Corrigez la pesée, ou cochez \
+             « Dérogation » sur la ligne avec son motif.",
+            arrondi_kg(reste.max(0.0))
+        )));
+    }
     Ok(())
 }
 
@@ -682,11 +705,10 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
           WHERE f.id_dossier = $1 AND l.type_ligne = 'ERP' AND l.soldee = 0
-            AND l.reste_kg > l.poids_net_kg * $2 / 100.0 + 0.001
+            AND l.reste_kg > l.poids_net_kg * fn_tolerance_fournisseur(f.code_fournisseur) / 100.0 + 0.001
           ORDER BY f.numero_facture, l.ligne_numero",
     )
     .bind(id_dossier)
-    .bind(TOLERANCE_PCT)
     .fetch_all(&mut *tx)
     .await?;
     if !manquants.is_empty() {

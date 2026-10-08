@@ -21,6 +21,7 @@ import { ArrowLeft, Save, Send, ShieldCheck, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
+import { useToleranceFournisseur } from '../lib/lots'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { ClotureFacture } from './ReceptionCloture'
@@ -54,8 +55,6 @@ import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'RECEPTIONS'
-/** Un EXCEDENT au-dela exige une derogation motivee (controle C10) ; un manque, non. */
-const TOLERANCE_PCT = 2
 
 interface Reception extends Record<string, unknown> {
   id_reception: string
@@ -719,6 +718,8 @@ export function Reception() {
    * que ce que le serveur a vraiment enregistre.
    */
   const lignesAffichees: LigneRec[] = lignes
+  /** Un EXCEDENT au-dela exige une derogation motivee (C10) ; un manque, non. Tolerance du fournisseur. */
+  const TOLERANCE_PCT = useToleranceFournisseur(rec?.code_fournisseur)
 
   const horsTolerance = useMemo(
     () => lignesAffichees.filter((l) => (l.ecart_pct ?? 0) > TOLERANCE_PCT).length,

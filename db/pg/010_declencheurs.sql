@@ -708,6 +708,15 @@ CREATE OR REPLACE FUNCTION fn_tolerance_pesee(p_id_reception text) RETURNS numer
         2);
 $$ LANGUAGE sql STABLE;
 
+-- LA TOLERANCE D'UN FOURNISSEUR (audit v4) : la meme source pour la reception
+-- d'import, qui la figeait a 2 % dans le code.
+CREATE OR REPLACE FUNCTION fn_tolerance_fournisseur(p_code_fournisseur text) RETURNS numeric AS $$
+    SELECT COALESCE(
+        (SELECT f.tolerance_pesee_pct FROM fournisseur f WHERE f.code_fournisseur = p_code_fournisseur),
+        (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_TolerEcartPesee'),
+        2);
+$$ LANGUAGE sql STABLE;
+
 -- SEUL L'EXCEDENT EXIGE UNE DEROGATION (08/10/2026). Le controle refusait tout
 -- ecart a la quantite attendue, dans les deux sens : 1 000 kg livres sur 8 400
 -- restant a recevoir etaient refuses comme « hors tolerance ». Une livraison

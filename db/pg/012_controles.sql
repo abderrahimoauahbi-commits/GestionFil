@@ -100,13 +100,29 @@ DROP VIEW IF EXISTS v_ctl_c10 CASCADE;
 CREATE VIEW v_ctl_c10 AS
 SELECT lr.id_ligne_reception, rc.numero_reception, lr.code_reference,
        lr.quantite_commandee_kg, lr.quantite_stock_kg, ROUND(lr.ecart_pct, 2) AS ecart_pct,
-       lr.derogation_ecart
+       lr.derogation_ecart::bigint AS derogation_ecart
 FROM ligne_reception lr
 JOIN reception rc ON rc.id_reception = lr.id_reception
 WHERE lr.ecart_pct IS NOT NULL
   AND lr.derogation_ecart = 0
   -- L'excedent seul (08/10/2026) : un manque est une livraison partielle.
-  AND lr.ecart_pct > fn_tolerance_pesee(lr.id_reception);
+  AND lr.ecart_pct > fn_tolerance_pesee(lr.id_reception)
+UNION ALL
+-- L'import aussi (audit v4) : un excedent au-dela de la tolerance du
+-- fournisseur, sans derogation motivee.
+SELECT rl.id_reception_ligne, r.numero, fl.code_reference,
+       rl.quantite_attendue_kg, rl.quantite_recue_kg,
+       ROUND((rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg, 2),
+       rl.derogation_ecart::bigint
+FROM import_reception_lignes rl
+JOIN import_receptions r ON r.id_reception = rl.id_reception
+JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+JOIN import_factures f ON f.id_facture = fl.id_facture
+WHERE rl.quantite_attendue_kg > 0
+  AND rl.derogation_ecart = 0
+  AND r.statut <> 'ANNULEE'
+  AND (rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg
+      > fn_tolerance_fournisseur(f.code_fournisseur);
 
 DROP VIEW IF EXISTS v_ctl_c43 CASCADE;
 CREATE OR REPLACE VIEW v_ctl_c43 AS

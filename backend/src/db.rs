@@ -286,6 +286,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_stocks_minimums_a_revoir')",
     ),
     (
+        // Le taux engage d'un bon, justifie : le service ecrit ces colonnes.
+        "2026-10-09l_taux_bon_commande.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'bon_commande'
+                           AND column_name = 'source_taux_engage')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

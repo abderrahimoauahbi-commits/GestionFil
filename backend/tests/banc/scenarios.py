@@ -816,6 +816,42 @@ def scenario_retour_cloture_avoirs(c, infra):
     verifier(controle(infra, "C11") == 0, "C11 apres les avoirs")
 
 
+def scenario_taux_bon(c, infra):
+    """Regle 10 (09/10) : le taux d'un bon en devise est propose au cours du jour de la validation,
+    modifiable avec un motif (au-dela de 3 % du cours BAM, a confirmer), puis fige et justifie."""
+    taux_usd_du_jour(infra)
+    ref = "PP-1500 Dtex-L.Beige 44377-Hs"
+
+    def bon_soumis():
+        bc = c.ok("Assistante", "POST", "/api/bons-commande", {
+            "code_fournisseur": "FRS-001",
+            "lignes": [{"code_reference": ref, "unite_commande": "kg", "quantite_commandee_unite": 100,
+                        "prix_unitaire_devise": 2.0}]})
+        c.ok("Assistante", "PUT", f"/api/bons-commande/{bc['id_bc']}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+        return bc["id_bc"]
+
+    # Au cours propose : source REFERENCE, date du cours posee.
+    b1 = bon_soumis()
+    entete = next(b for b in c.ok("Choukri", "GET", "/api/bons-commande") if b["id_bc"] == b1)
+    verifier(abs(float(entete.get("taux_du_jour") or 0) - 9.30) < 1e-6, f"taux du jour non propose : {entete.get('taux_du_jour')}")
+    c.ok("Choukri", "PUT", f"/api/bons-commande/{b1}/statut", {"statut": "VALIDE"})
+    ligne = infra.sql(f"SELECT taux_change_engage, source_taux_engage, date_cours_engage FROM bon_commande WHERE id_bc = '{b1}'")[0]
+    verifier(abs(float(ligne[0]) - 9.30) < 1e-6 and ligne[1] == "REFERENCE" and ligne[2],
+             f"taux engage au cours propose mal justifie : {ligne}")
+
+    # Un autre taux : motif obligatoire ; au-dela de 3 %, a confirmer.
+    b2 = bon_soumis()
+    c.refus("Choukri", "PUT", f"/api/bons-commande/{b2}/statut", {"statut": "VALIDE", "taux_saisi": 9.95},
+            contient="pourquoi")
+    c.refus("Choukri", "PUT", f"/api/bons-commande/{b2}/statut",
+            {"statut": "VALIDE", "taux_saisi": 12.0, "motif_taux": "Cours de la banque"}, contient="TAUX-ECART")
+    c.ok("Choukri", "PUT", f"/api/bons-commande/{b2}/statut",
+         {"statut": "VALIDE", "taux_saisi": 9.95, "motif_taux": "Cours confirme par la banque"})
+    ligne = infra.sql(f"SELECT taux_change_engage, source_taux_engage, motif_taux_engage FROM bon_commande WHERE id_bc = '{b2}'")[0]
+    verifier(abs(float(ligne[0]) - 9.95) < 1e-6 and ligne[1] == "SAISI" and ligne[2],
+             f"taux saisi mal enregistre : {ligne}")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -881,5 +917,6 @@ SCENARIOS = [
     scenario_sortie_hors_machine,
     scenario_controle_reception,
     scenario_retour_cloture_avoirs,
+    scenario_taux_bon,
     scenario_controles_finaux,
 ]

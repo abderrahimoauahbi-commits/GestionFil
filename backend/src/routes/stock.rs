@@ -1790,6 +1790,13 @@ pub async fn lister_bc(
                 -- on les lit, on ne les stocke pas.
                 f.incoterm, f.tolerance_pesee_pct, f.palettes_par_conteneur,
                 uc.login AS createur, uv.login AS valideur,
+                -- LE TAUX DU JOUR (regle 10) : indicatif tant que le bon n'est pas
+                -- valide ; c'est lui qui sera propose a la validation.
+                (SELECT t.taux::float8 FROM taux_change t
+                  WHERE t.code_devise = bc.code_devise
+                    AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                    AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
+                  ORDER BY t.date_debut DESC LIMIT 1) AS taux_du_jour,
                 (SELECT COUNT(*) FROM ligne_bc l WHERE l.id_bc = bc.id_bc) AS nb_lignes,
                 (SELECT COALESCE(SUM(l.quantite_restante_kg), 0) FROM ligne_bc l
                   WHERE l.id_bc = bc.id_bc) AS reste_a_livrer_kg,
@@ -2384,6 +2391,15 @@ pub async fn supprimer_ligne_bc(
 #[derive(Debug, Deserialize)]
 pub struct StatutBc {
     pub statut: String,
+    /// A la validation d'un bon en devise : le taux retenu, s'il differe du
+    /// cours propose (regle 10, 09/10/2026), avec son motif.
+    #[serde(default)]
+    pub taux_saisi: Option<f64>,
+    #[serde(default)]
+    pub motif_taux: Option<String>,
+    /// Le taux saisi s'ecarte de plus de 3 % du cours BAM, et c'est voulu.
+    #[serde(default)]
+    pub confirme_taux: bool,
 }
 
 /// `DELETE /api/bons-commande/{id}` — la vraie suppression d'un bon non engage.
@@ -2559,7 +2575,8 @@ pub async fn changer_statut_bc(
         .bind(&id)
         .fetch_one(&mut *tx)
         .await?;
-        if devise_bc != "MAD" {
+        let taux_saisi = s.taux_saisi.filter(|t| *t > 0.0);
+        if devise_bc != "MAD" && taux_saisi.is_none() {
             let limite: i64 = sqlx::query_scalar(
                 "SELECT COALESCE((SELECT CAST(valeur_courante AS bigint) FROM parametre
                                    WHERE code_parametre = 'P_AncienneteTauxJours'), 7)",
@@ -2599,19 +2616,64 @@ pub async fn changer_statut_bc(
         // creation — un acheteur pouvait donc engager au-dela de son plafond des
         // que la devise montait. Si le controle echoue, la transaction est
         // annulee et le taux revient a sa valeur d'origine.
+        //
+        // LE TAUX PROPOSE, PUIS RETENU (regle 10, 09/10/2026). Propose : le taux de
+        // reference du jour de la validation. Celui qui valide peut en retenir un
+        // autre (le cours confirme par la banque), avec un motif ; au-dela de 3 %
+        // du cours Bank Al-Maghrib, il le confirme. Le bon garde la justification :
+        // le taux, le jour du cours, sa source, le motif.
+        let propose: Option<(f64, String)> = sqlx::query_as(
+            "SELECT t.taux::float8, substr(t.date_debut, 1, 10)
+               FROM taux_change t JOIN bon_commande bc ON bc.code_devise = t.code_devise
+              WHERE bc.id_bc = $1
+                AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
+              ORDER BY t.date_debut DESC LIMIT 1",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let (taux_retenu, date_cours, source, motif_taux, taux_plafond) = if devise_bc == "MAD" {
+            (1.0, None, None, None, 1.0)
+        } else {
+            let (t_prop, jour_prop) = propose.clone().unzip();
+            match taux_saisi.filter(|t| t_prop.is_none_or(|p| (t - p).abs() > 1e-9)) {
+                Some(t) => {
+                    let motif = s.motif_taux.as_deref().map(str::trim).unwrap_or("").to_string();
+                    if motif.chars().count() < 5 {
+                        return Err(AppError::Invalide(
+                            "Le taux retenu differe du cours propose : dites pourquoi (cours confirme par la \
+                             banque, couverture…)."
+                                .into(),
+                        ));
+                    }
+                    let jour = crate::db::aujourdhui();
+                    let t = crate::routes::importation::controler_taux(
+                        &mut tx, "Le taux du bon", &devise_bc, Some(t), &jour, s.confirme_taux,
+                    )
+                    .await?;
+                    (t, Some(jour), Some("SAISI"), Some(motif), t.max(t_prop.unwrap_or(t)))
+                }
+                None => {
+                    let t = t_prop.ok_or_else(|| {
+                        AppError::RegleMetier(format!("Aucun taux {devise_bc} en vigueur : saisissez le taux du jour."))
+                    })?;
+                    (t, jour_prop, Some("REFERENCE"), None, t)
+                }
+            }
+        };
         sqlx::query(
             "UPDATE bon_commande
-                SET taux_change_engage = COALESCE((
-                        SELECT t.taux FROM taux_change t
-                         WHERE t.code_devise = bon_commande.code_devise
-                           AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
-                           AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
-                         ORDER BY t.date_debut DESC LIMIT 1), taux_change_engage),
-                    date_taux_engage = $2
+                SET taux_change_engage = CASE WHEN code_devise = 'MAD' THEN taux_change_engage ELSE $3 END,
+                    date_taux_engage = $2, date_cours_engage = $4, source_taux_engage = $5, motif_taux_engage = $6
               WHERE id_bc = $1",
         )
         .bind(&id)
         .bind(maintenant())
+        .bind(taux_retenu)
+        .bind(&date_cours)
+        .bind(source)
+        .bind(&motif_taux)
         .execute(&mut *tx)
         .await?;
 
@@ -2625,6 +2687,9 @@ pub async fn changer_statut_bc(
                 .bind(&id)
                 .fetch_one(&mut *tx)
                 .await?;
+        // LE PLAFOND SE JUGE SUR LE PLUS HAUT DES DEUX TAUX (regle 10) : baisser le
+        // taux a la main ne doit pas faire passer un bon sous son plafond.
+        let montant = if taux_retenu > 0.0 { montant * taux_plafond / taux_retenu } else { montant };
         if let Some(plafond) =
             crate::auth::rbac::plafond_validation_bc(&state.db, &user.role).await?
         {

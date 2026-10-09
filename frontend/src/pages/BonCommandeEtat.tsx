@@ -169,8 +169,20 @@ export function BonCommandeEtat() {
               <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
                 Order
               </div>
-              <Champ libelle="Date" valeur={fmt.date(bc.date_bc)} />
+              {/* LA DATE DE COMMANDE EST CELLE DE LA VALIDATION (regle 10,
+                  09/10/2026) : le jour ou l'entreprise s'engage. Le brouillon
+                  garde sa date d'etablissement, en second. */}
+              <Champ libelle="Order date" valeur={fmt.date(String(bc.date_validation ?? bc.date_bc))} />
               <Champ libelle="Order N°" valeur={bc.numero_bc} />
+              {bc.date_validation ? (
+                <div className="text-[9px] text-neutral-600">Prepared on {fmt.date(bc.date_bc)}</div>
+              ) : null}
+              {bc.code_devise && bc.code_devise !== 'MAD' && bc.date_validation ? (
+                <div className="text-[9px] text-neutral-600">
+                  Rate {fmt.nombre(Number(bc.taux_change_engage), 4)} MAD/{String(bc.code_devise)}
+                  {bc.date_cours_engage ? ` (${fmt.date(String(bc.date_cours_engage))})` : ''}
+                </div>
+              ) : null}
             </div>
           </div>
         }

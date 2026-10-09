@@ -293,6 +293,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // La colonne « Voir le calcul » du plan d'achat, declaree dans la grille.
+        "2026-10-09za_champ_calcul.sql",
+        "SELECT EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'PLAN_ACHAT' AND champ = 'calcul')",
+    ),
+    (
         // Le type d'un parametre garanti par la base.
         "2026-10-09z_parametres_types.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_00_parametre_type')",

@@ -465,7 +465,9 @@ export function Stock() {
          besoins COMPTE (P_MrpInclureStockMachine, etage constate depuis moins de
          P_JoursInventMachine jours, lot non bloque) ; le reste, s'il y en a, est
          signale a cote (audit v5, F16). */
-      champ: 'stock_machine_kg',
+      // Le champ declare dans la grille (kg_sur_machine) porte la colonne ; la
+      // valeur affichee est celle que le calcul compte.
+      champ: 'kg_sur_machine',
       entete: 'Sur machine compté (kg)',
       numerique: true,
       secondaire: true,

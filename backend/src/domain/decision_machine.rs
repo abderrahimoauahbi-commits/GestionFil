@@ -859,6 +859,14 @@ async fn ecrire_etats(
 }
 
 /// L'etat de l'etage remplace par `etats`, ligne a ligne.
+/// POSE L'ETAT D'UN ETAGE. LA DATE DE CONSTAT EST CELLE DE LA LIGNE (audit
+/// v5, F19) : une ligne que la fiche n'a pas touchee garde son constat d'origine
+/// — sa date, son mode, son responsable, sa fiche. Sans cela, charger une
+/// reference rajeunissait le constat de toutes les autres, et le fil jamais
+/// recompte passait pour frais (calcul des besoins, C36). `touchees` : les
+/// lignes de la fiche ; `None` (retour a l'etat precedent) : seules les lignes
+/// qui changent prennent la date.
+#[allow(clippy::too_many_arguments)]
 async fn poser_etage(
     c: &mut sqlx::PgConnection,
     user: &Utilisateur,
@@ -867,17 +875,45 @@ async fn poser_etage(
     date: &str,
     responsable: &str,
     id_fiche: Option<&str>,
+    touchees: Option<&std::collections::HashSet<String>>,
 ) -> AppResult<()> {
+    type Ancienne = (String, String, i64, f64, Option<String>, String, Option<String>, Option<String>, Option<String>);
+    let anciennes: HashMap<String, Ancienne> = sqlx::query_as::<_, Ancienne>(
+        "SELECT code_reference, lot_fournisseur, nb_bobines, kg::float8, date_constat, mode_constat,
+                responsable, id_utilisateur, id_fiche
+           FROM machine_etat WHERE code_emplacement = $1",
+    )
+    .bind(zone)
+    .fetch_all(&mut *c)
+    .await?
+    .into_iter()
+    .map(|t| (cle(&t.0, &t.1), t))
+    .collect();
     sqlx::query("DELETE FROM machine_etat WHERE code_emplacement = $1")
         .bind(zone)
         .execute(&mut *c)
         .await?;
     for e in etats {
+        let k = cle(&e.code_reference, &e.lot_fournisseur);
+        let garde = anciennes.get(&k).filter(|a| match touchees {
+            Some(t) => !t.contains(&k),
+            None => a.2 == e.nb_bobines && (a.3 - arrondi_kg(e.kg)).abs() < 0.0001,
+        });
+        let (date_l, mode_l, resp_l, util_l, fiche_l) = match garde {
+            Some(a) => (a.4.clone(), a.5.clone(), a.6.clone(), a.7.clone(), a.8.clone()),
+            None => (
+                Some(date.to_string()),
+                "ESTIMATION".to_string(),
+                Some(responsable.to_string()),
+                Some(user.id.clone()),
+                id_fiche.map(str::to_string),
+            ),
+        };
         sqlx::query(
             "INSERT INTO machine_etat
                  (code_emplacement, code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg,
                   pourcentage, kg, mode_constat, date_constat, responsable, id_utilisateur, id_fiche)
-             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,'ESTIMATION',$8,$9,$10,$11)",
+             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,$8,$9,$10,$11,$12)",
         )
         .bind(zone)
         .bind(&e.code_reference)
@@ -886,10 +922,11 @@ async fn poser_etage(
         .bind(e.poids_unitaire_kg)
         .bind(e.pourcentage.map(|p| p.min(500.0)))
         .bind(arrondi_kg(e.kg))
-        .bind(date)
-        .bind(responsable)
-        .bind(&user.id)
-        .bind(id_fiche)
+        .bind(mode_l)
+        .bind(date_l)
+        .bind(resp_l)
+        .bind(util_l)
+        .bind(fiche_l)
         .execute(&mut *c)
         .await?;
     }
@@ -1123,7 +1160,9 @@ pub async fn valider(
         .await?;
     }
 
-    poser_etage(c, user, &f.code_emplacement, &calc.apres, &f.date_fiche, &f.responsable, Some(&f.id_fiche))
+    let touchees: std::collections::HashSet<String> =
+        calc.lignes.iter().map(|l| cle(&l.code_reference, &l.lot_fournisseur)).collect();
+    poser_etage(c, user, &f.code_emplacement, &calc.apres, &f.date_fiche, &f.responsable, Some(&f.id_fiche), Some(&touchees))
         .await?;
 
     let passee = sqlx::query(
@@ -1375,6 +1414,7 @@ pub async fn retirer(
         &avant,
         &crate::db::aujourdhui(),
         &format!("retour avant la fiche {}", f.numero),
+        None,
         None,
     )
     .await?;

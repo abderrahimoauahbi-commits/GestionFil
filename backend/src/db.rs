@@ -293,6 +293,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // C35 et C36 sur l'etat des machines (machine_etat).
+        "2026-10-09r_controles_machine.sql",
+        "SELECT position('machine_etat' IN pg_get_viewdef('v_ctl_c36'::regclass)) > 0",
+    ),
+    (
         // Receptions cloturees dans le cout de revient et C31/C32 ; v_ecart_prix.
         "2026-10-09q_ecart_prix.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ecart_prix')

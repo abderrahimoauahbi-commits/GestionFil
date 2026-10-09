@@ -982,12 +982,12 @@ def scenario_derogation_bornee(c, infra):
     reception_validee(c, id_bc, lignes, [520], lot_fournisseur=lot, nb_bobines=200)
     c.ok("Choukri", "POST", "/api/lots/statut", {"code_reference": ref, "lot_fournisseur": lot,
                                                  "action": "BLOQUER", "motif": "Nuance douteuse, essai du banc"})
-    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANC2", "nom": "Machine des derogations",
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCD", "nom": "Machine des derogations",
                                               "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
 
     def fiche():
         f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
-            "type_fiche": "CHARGE", "code_machine": "BANC2", "code_emplacement": "BANC2-E1", "date_fiche": jour,
+            "type_fiche": "CHARGE", "code_machine": "BANCD", "code_emplacement": "BANCD-E1", "date_fiche": jour,
             "code_magasin": MAG, "responsable": "Banc",
             "lignes": [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
                         "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})
@@ -1022,6 +1022,51 @@ def scenario_derogation_bornee(c, infra):
     ligne = infra.sql(f"SELECT date_consommation IS NOT NULL, kg_consommes FROM demande_autorisation WHERE id_demande = '{d2}'")[0]
     verifier(ligne[0] in (True, "t") and abs(float(ligne[1]) - 260) < 0.01, f"derogation non employee : {ligne}")
     verifier(controle(infra, "C11") == 0, "C11 apres le chargement derogatoire")
+
+
+def scenario_machine_constat(c, infra):
+    """F19 (09/10) : une fiche ne rajeunit que les lignes qu'elle touche ; C36 voit l'etage dont une
+    ligne n'a pas ete constatee depuis P_JoursInventMachine ; C35 l'estimation hors tolerance."""
+    ref = "PP-1500 Dtex-L.Beige 44377-Hs"
+    jour = taux_usd_du_jour(infra)
+    for lot in ("LOT-CST-1", "LOT-CST-2"):
+        id_bc, lignes = bon_envoye(c, [(ref, 260, 2.0)], frs="FRS-001")
+        reception_validee(c, id_bc, lignes, [260], lot_fournisseur=lot, nb_bobines=100)
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANC3", "nom": "Machine des constats",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    zone = "BANC3-E1"
+
+    def valider(type_fiche, lignes):
+        f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANC3", "code_emplacement": zone, "date_fiche": jour,
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes})
+        c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
+
+    def date_de(lot):
+        return infra.valeur(f"SELECT substr(date_constat, 1, 10) FROM machine_etat "
+                            f"WHERE code_emplacement = '{zone}' AND lot_fournisseur = '{lot}'")
+
+    valider("CHARGE", [{"code_reference": ref, "lot_fournisseur": "LOT-CST-1", "nb_bobines_mouvementees": 50,
+                        "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}])
+    c36 = controle(infra, "C36")
+    infra.sql(f"UPDATE machine_etat SET date_constat = '2026-01-05' WHERE code_emplacement = '{zone}'")
+    verifier(controle(infra, "C36") == c36 + 1, "C36 ne voit pas l'etage constate en janvier")
+    # Charger un autre lot ne rajeunit pas le premier.
+    valider("CHARGE", [{"code_reference": ref, "lot_fournisseur": "LOT-CST-2", "nb_bobines_mouvementees": 20,
+                        "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}])
+    verifier(date_de("LOT-CST-1") == "2026-01-05", f"le lot non touche a pris la date de la fiche : {date_de('LOT-CST-1')}")
+    verifier(date_de("LOT-CST-2") == jour, f"le lot charge n'a pas la date de la fiche : {date_de('LOT-CST-2')}")
+    verifier(controle(infra, "C36") == c36 + 1, "C36 a oublie l'etage apres un chargement partiel")
+    # Le constat du premier lot le rajeunit : l'etage sort de C36.
+    valider("MAJ", [{"code_reference": ref, "lot_fournisseur": "LOT-CST-1", "nb_bobines_presentes": 50,
+                     "pourcentage": 100, "code_motif": "MJ_ORDINAIRE"}])
+    verifier(date_de("LOT-CST-1") == jour, "le constat n'a pas rajeuni la ligne constatee")
+    verifier(controle(infra, "C36") == c36, "C36 garde l'etage tout juste constate")
+    # C35 : un poids par bobine a 20 % du catalogue.
+    c35 = controle(infra, "C35")
+    infra.sql(f"UPDATE machine_etat SET poids_unitaire_kg = poids_unitaire_kg * 1.2 "
+              f"WHERE code_emplacement = '{zone}' AND lot_fournisseur = 'LOT-CST-2'")
+    verifier(controle(infra, "C35") == c35 + 1, "C35 ne voit pas une estimation a +20 %")
 
 
 def scenario_gardes_p1(c, infra):
@@ -1092,5 +1137,6 @@ SCENARIOS = [
     scenario_taux_bon,
     scenario_plan_detail,
     scenario_derogation_bornee,
+    scenario_machine_constat,
     scenario_controles_finaux,
 ]

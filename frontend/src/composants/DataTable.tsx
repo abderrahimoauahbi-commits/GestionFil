@@ -110,6 +110,11 @@ interface Props<L> {
   /** Colonne d'actions, toujours rendue en fin de ligne. */
   actions?: (ligne: L) => React.ReactNode
   /**
+   * Un detail deplie SOUS la ligne (null : rien). L'ecran garde l'etat ouvert ;
+   * le tableau ne fait que le poser sur toute la largeur, sans panneau a cote.
+   */
+  detail?: (ligne: L) => React.ReactNode
+  /**
    * Menu au clic droit sur la ligne.
    *
    * Rend des `MenuContextuelElement`. Il DOUBLE des chemins qui existent
@@ -162,6 +167,7 @@ export function DataTable<L extends Record<string, unknown>>({
   cle,
   surClic,
   actions,
+  detail,
   menuContextuel,
   titreCarte,
   recherche = true,
@@ -699,17 +705,35 @@ export function DataTable<L extends Record<string, unknown>>({
                     </tr>
                   )
 
-                  if (!menuContextuel) return <React.Fragment key={cle(rang.original)}>{ligne}</React.Fragment>
+                  const deplie = detail?.(rang.original)
+                  const sous = deplie ? (
+                    <tr className="bg-attenue/30">
+                      <td colSpan={rang.getVisibleCells().length + (actions ? 1 : 0)} className="px-3 py-2.5">
+                        {deplie}
+                      </td>
+                    </tr>
+                  ) : null
+
+                  if (!menuContextuel)
+                    return (
+                      <React.Fragment key={cle(rang.original)}>
+                        {ligne}
+                        {sous}
+                      </React.Fragment>
+                    )
 
                   // `asChild` fait porter le clic droit par le <tr> lui-meme.
                   // Sans lui, Radix inserait un <span> declencheur, que le
                   // navigateur remonterait hors du <tbody> : la ligne se
                   // detacherait du tableau.
                   return (
-                    <MenuContextuel key={cle(rang.original)}>
-                      <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
-                      <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
-                    </MenuContextuel>
+                    <React.Fragment key={cle(rang.original)}>
+                      <MenuContextuel>
+                        <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
+                        <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
+                      </MenuContextuel>
+                      {sous}
+                    </React.Fragment>
                   )
                 })}
               </tbody>
@@ -779,6 +803,10 @@ export function DataTable<L extends Record<string, unknown>>({
                     </div>
                   ))}
                 </dl>
+                {detail && (() => {
+                  const deplie = detail(rang.original)
+                  return deplie ? <div className="mt-3 border-t border-ligne pt-3" onClick={(e) => e.stopPropagation()}>{deplie}</div> : null
+                })()}
               </div>
             ))}
           </div>

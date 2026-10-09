@@ -333,7 +333,7 @@ FROM v_stock_projete sp
 JOIN reference r ON r.code_reference = sp.code_reference
 WHERE sp.ecart_majeur = 1;
 
--- C28 : commande en retard qui ne compte plus dans la couverture.
+-- C28 : commande en retard (comptee ou non dans la couverture selon P_EncoursRetardInclus).
 --
 -- Passe la tolerance, la quantite est retiree du calcul (v_encours_fiable) et la
 -- couverture s'effondre. Le controle nomme la cause, sans quoi l'acheteur verrait
@@ -568,7 +568,9 @@ SELECT 'C24', 'Reception d''une autre reference sans substitution declaree', 'CR
 SELECT 'C25', 'Stock mobilisable face a un equivalent en tension',        'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c25) UNION ALL
 SELECT 'C26', 'Groupe d''equivalence limite a un seul fournisseur',        'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c26) UNION ALL
 SELECT 'C27', 'Ecart majeur : couverture confortable, magasin sous le minimum', 'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c27) UNION ALL
-SELECT 'C28', 'Commande en retard, retiree du calcul de couverture',      'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c28) UNION ALL
+SELECT 'C28', CASE WHEN COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'), '1') = '1'
+                   THEN 'Commande en retard, toujours comptee dans la couverture'
+                   ELSE 'Commande en retard, retiree du calcul de couverture' END, 'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c28) UNION ALL
 SELECT 'C29', 'Besoins plus anciens que le plan : projection perimee',    'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c29) UNION ALL
 -- Les trois derniers viennent de la feuille Tests du classeur (T12, T17, T19).
 -- Leurs vues de detail sont definies dans 016_controles_classeur.sql, charge

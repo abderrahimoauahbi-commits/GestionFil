@@ -384,6 +384,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))
         .route("/api/plan-achat/kpi", get(consultation::kpi_plan_achat))
         .route("/api/plan-achat/stocks-minimums", get(consultation::stocks_minimums))
+        .route("/api/plan-achat/detail", get(consultation::detail_proposition))
         .route("/api/historique-prix", get(consultation::historique_prix))
         .route("/api/matrice-prix", get(consultation::matrice_prix))
         .route("/api/plan-achat/propositions", get(consultation::propositions_achat))

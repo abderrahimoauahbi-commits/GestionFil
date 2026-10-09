@@ -293,6 +293,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Plan d'achat : C28 au libelle du reglage, brouillons d'import hors en-cours.
+        "2026-10-09o_plan_detail.sql",
+        "SELECT position('BROUILLON' IN pg_get_viewdef('v_encours_fiable'::regclass)) > 0",
+    ),
+    (
         // L'avoir d'import : origine du journal du dossier, retours soldes.
         "2026-10-09n_avoir_import.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

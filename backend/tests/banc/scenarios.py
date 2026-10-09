@@ -909,6 +909,48 @@ def scenario_taux_bon(c, infra):
              f"taux saisi mal enregistre : {ligne}")
 
 
+def scenario_plan_detail(c, infra):
+    """F16 et U8 (09/10) : le calcul d'une proposition se lit pas a pas et tombe juste ; un dossier
+    d'import en brouillon n'est pas de l'en-cours ; C28 dit ce que fait le reglage."""
+    ref = "PP-1500 Dtex-Cream 2951-Hs"
+    from urllib.parse import quote
+    d = c.ok("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref)}")
+    k = d["calcul"]
+    projete = k["stock_magasin_net_kg"] + k["stock_machine_compte_kg"] + k["encours_kg"] - k["demande_delai_kg"]
+    verifier(abs(max(0.0, projete) - k["residuel_kg"]) < 0.01,
+             f"le detail ne retombe pas sur le residuel : {projete:.2f} contre {k['residuel_kg']}")
+    besoin = max(0.0, k["sorties_fenetre_kg"] + k["securite_kg"] - k["residuel_kg"],
+                 k["stock_min_catalogue_kg"] - k["residuel_kg"])
+    verifier(besoin <= k["besoin_avant_arrondi_kg"] + 0.01, f"besoin {besoin:.2f} > {k['besoin_avant_arrondi_kg']}")
+    c.refus("Choukri", "GET", "/api/plan-achat/detail?reference=INCONNUE-XYZ", codes=(404,))
+
+    def au_port():
+        return float(infra.valeur(f"SELECT COALESCE((SELECT encours_import_kg FROM v_encours_fiable "
+                                  f"WHERE code_reference = '{ref}'), 0)"))
+
+    avant = au_port()
+    aujourdhui = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={aujourdhui}")["reference"]
+    dossier = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/PORT", "code_devise": "USD"})
+    id_dossier = dossier.get("id_dossier") or dossier.get("id")
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-PORT", "date_facture": aujourdhui,
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 600})
+    c.ok("Choukri", "POST", f"/api/import/factures/{f.get('id_facture') or f.get('id')}/lignes", {
+        "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 300, "poids_net_kg": 300,
+        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-PORT-1"})
+    verifier(abs(au_port() - avant) < 1e-6, "un dossier d'import en brouillon compte dans l'en-cours")
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/valider")
+    verifier(abs(au_port() - avant - 300) < 1e-6, f"le dossier engage ne compte pas au port : {au_port() - avant}")
+
+    infra.sql("UPDATE parametre SET valeur_courante = '1' WHERE code_parametre = 'P_EncoursRetardInclus'")
+    verifier("toujours comptee" in infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'"),
+             "C28 dit « retiree » alors que le retard est compte")
+    infra.sql("UPDATE parametre SET valeur_courante = '0' WHERE code_parametre = 'P_EncoursRetardInclus'")
+    verifier("retiree" in infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'"), "C28 ne suit pas le reglage")
+    infra.sql("UPDATE parametre SET valeur_courante = '1' WHERE code_parametre = 'P_EncoursRetardInclus'")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -975,5 +1017,6 @@ SCENARIOS = [
     scenario_controle_reception,
     scenario_retour_cloture_avoirs,
     scenario_taux_bon,
+    scenario_plan_detail,
     scenario_controles_finaux,
 ]

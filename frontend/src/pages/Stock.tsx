@@ -51,6 +51,8 @@ interface LigneProjete {
   encours_kg: number
   /** Le fil sur les metiers : sorti du magasin, pas encore consomme (06/10/2026). */
   kg_sur_machine?: number
+  /** Ce que le calcul compte du fil sur machine (constat recent, lot non bloque, reglage). */
+  stock_machine_kg?: number
   besoin_12m_kg: number
   stock_projete_kg: number
   jours_couverture: number | null
@@ -368,7 +370,12 @@ export function Stock() {
       entrees: STATUTS.map((s) => ({
         cle: s.cle,
         libelle: s.libelle,
-        resume: s.resume,
+        resume:
+          s.cle === 'CRITIQUE' && toutes[0]?.seuil_critique_jours != null
+            ? `Sous le stock minimum, ou moins de ${toutes[0].seuil_critique_jours} j`
+            : s.cle === 'ATTENTION' && toutes[0]?.seuil_alerte_jours != null
+              ? `Moins de ${toutes[0].seuil_alerte_jours} jours de couverture`
+              : s.resume,
         Icone: s.Icone,
         compte: comptes[s.cle] ?? 0,
         ton: s.ton,
@@ -454,14 +461,25 @@ export function Stock() {
     },
     {
       /* LE FIL SUR MACHINE (regle 9, 08/10/2026) : hors du magasin — le
-         « Physique » ne le contient pas — mais compte dans les besoins d'achat
-         (stock projete) tant que P_MrpInclureStockMachine vaut 1 et que l'etage
-         a ete constate depuis moins de P_JoursInventMachine jours. */
-      champ: 'kg_sur_machine',
-      entete: 'Sur machine (kg, compté aux besoins)',
+         « Physique » ne le contient pas. La colonne montre ce que le calcul des
+         besoins COMPTE (P_MrpInclureStockMachine, etage constate depuis moins de
+         P_JoursInventMachine jours, lot non bloque) ; le reste, s'il y en a, est
+         signale a cote (audit v5, F16). */
+      champ: 'stock_machine_kg',
+      entete: 'Sur machine compté (kg)',
       numerique: true,
       secondaire: true,
-      rendu: (l) => (l.kg_sur_machine ? fmt.nombre(l.kg_sur_machine, 1) : '—'),
+      rendu: (l) => {
+        const compte = l.stock_machine_kg ?? 0
+        const total = l.kg_sur_machine ?? 0
+        if (!total) return '—'
+        return (
+          <span title={total - compte > 0.05 ? `${fmt.nombre(total, 1)} kg sur machine, dont ${fmt.nombre(total - compte, 1)} non comptés (constat ancien ou lot bloqué)` : undefined}>
+            {fmt.nombre(compte, 1)}
+            {total - compte > 0.05 && <span className="text-attenue-texte"> / {fmt.nombre(total, 1)}</span>}
+          </span>
+        )
+      },
     },
     {
       champ: 'designation',

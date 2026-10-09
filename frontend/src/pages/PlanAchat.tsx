@@ -19,7 +19,7 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Ban, FileCheck2, Gauge, ListChecks, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -42,6 +42,8 @@ import {
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { SaisonMinimums } from './SaisonMinimums'
+import { DetailCalcul } from './PlanAchatDetail'
+import { useParametreNombre } from '../lib/parametres'
 
 const MODULE = 'PLAN_ACHAT'
 
@@ -363,6 +365,9 @@ export function PlanAchat() {
 
   // La proposition dont on examine les equivalents. Null : aucun panneau.
   const [arbitrage, setArbitrage] = useState<Proposition | null>(null)
+  // Les propositions dont le calcul est deplie sous la ligne.
+  const [deplies, setDeplies] = useState<Record<string, boolean>>({})
+  const dureeEcart = useParametreNombre('P_DureeEcartJours', 90)
 
   const substituer = useMutation({
     mutationFn: (v: { id: string; cible: string; motif: string }) =>
@@ -386,6 +391,27 @@ export function PlanAchat() {
   })
 
   const colonnes: ColonneDT<Proposition>[] = [
+    {
+      champ: 'calcul',
+      entete: '',
+      largeur: '30px',
+      triable: false,
+      rendu: (p) => (
+        <Bouton
+          variante="discret"
+          taille="icone-xs"
+          className="text-attenue-texte hover:bg-attenue"
+          onClick={(e) => {
+            e.stopPropagation()
+            setDeplies((d) => ({ ...d, [p.id_proposition]: !d[p.id_proposition] }))
+          }}
+          aria-label="Voir le calcul"
+          title="D’où viennent ces kilos : stock, machine, en-cours, demande, sécurité"
+        >
+          {deplies[p.id_proposition] ? <ChevronDown /> : <ChevronRight />}
+        </Bouton>
+      ),
+    },
     {
       champ: 'selection',
       entete: '',
@@ -997,6 +1023,7 @@ export function PlanAchat() {
         chargement={q.isLoading}
         erreur={q.error}
         cle={(p) => p.id_proposition}
+        detail={(p) => (deplies[p.id_proposition] ? <DetailCalcul reference={p.code_reference} /> : null)}
         titreCarte={(p) => p.code_reference}
         placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
@@ -1073,7 +1100,7 @@ export function PlanAchat() {
                         titre: `Ecarter ${p.code_reference} ?`,
                         libelleConfirmer: 'Ecarter',
                         description:
-                          'Elle ne sera plus reproposée pendant 90 jours (réglage P_DureeEcartJours) ' +
+                          `Elle ne sera plus reproposée pendant ${dureeEcart} jours (réglage P_DureeEcartJours) ` +
                           'et n’entrera dans aucune commande. Passé ce délai, si le besoin existe ' +
                           'toujours, le calcul la repropose.',
                         action: () => ignorer.mutate(p.id_proposition),

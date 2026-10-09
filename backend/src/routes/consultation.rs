@@ -974,6 +974,115 @@ pub async fn stocks_minimums(State(state): State<AppState>, user: Utilisateur) -
     .await
 }
 
+#[derive(Deserialize)]
+pub struct DetailProposition {
+    reference: String,
+}
+
+/// `GET /api/plan-achat/detail?reference=…` — LE CALCUL D'UNE PROPOSITION, pas
+/// a pas (audit v5, F16) : l'acheteur voit d'ou viennent les kilos avant de
+/// commander. Stock du magasin, fil sur machine compte, en-cours (bons a
+/// l'heure, en retard, marchandise au port), demande pendant le delai (dont la
+/// part prolongee au-dela du plan), securite, minimum, MOQ, palette. Le calcul
+/// est celui d'aujourd'hui (v_plan_achat), avec les pieces qui le composent.
+pub async fn detail_proposition(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(q): Query<DetailProposition>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
+    let reference = q.reference.trim();
+    let calcul = sqlx::query(
+        "SELECT pa.code_reference, pa.delai_livraison_jours, pa.classe_abc,
+                pa.stock_mrp_kg::float8 AS stock_mrp_kg, pa.encours_kg::float8 AS encours_kg,
+                pa.residuel_kg::float8 AS residuel_kg, pa.securite_kg::float8 AS securite_kg,
+                pa.sorties_fenetre_kg::float8 AS sorties_fenetre_kg,
+                pa.stock_min_catalogue_kg::float8 AS stock_min_catalogue_kg,
+                pa.besoin_avant_arrondi_kg::float8 AS besoin_avant_arrondi_kg,
+                pa.complement_palette_kg::float8 AS complement_palette_kg,
+                pa.qte_a_commander_kg::float8 AS qte_a_commander_kg, pa.palettes_a_commander,
+                sp.stock_physique_net_kg::float8 AS stock_magasin_net_kg,
+                sp.stock_machine_kg::float8 AS stock_machine_compte_kg,
+                COALESCE(sm.kg_sur_machine, 0)::float8 AS stock_machine_total_kg,
+                sp.stock_reserve_kg::float8 AS stock_reserve_kg,
+                sp.stock_quarantaine_kg::float8 AS stock_quarantaine_kg,
+                sp.demande_delai_kg::float8 AS demande_delai_kg,
+                COALESCE(ef.encours_retarde_kg, 0)::float8 AS encours_retarde_kg,
+                COALESCE(ef.encours_import_kg, 0)::float8 AS encours_port_kg,
+                COALESCE(ef.nb_lignes_retardees, 0) AS nb_lignes_retardees,
+                COALESCE(bh.lead_j, 0)::float8 AS delai_j, COALESCE(bh.couv_j, 0)::float8 AS couverture_j,
+                COALESCE(bh.dem_lead_prolonge_kg, 0)::float8 AS demande_delai_prolongee_kg,
+                COALESCE(bh.sorties_prolongees_kg, 0)::float8 AS sorties_prolongees_kg,
+                r.moq_kg::float8 AS moq_kg,
+                COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'), '1') = '1'
+                    AS retard_compte,
+                COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_MrpInclureStockMachine'), '1') = '1'
+                    AS machine_comptee
+           FROM v_plan_achat pa
+           JOIN v_stock_projete sp ON sp.code_reference = pa.code_reference
+           JOIN reference r ON r.code_reference = pa.code_reference
+           LEFT JOIN v_stock_machine sm ON sm.code_reference = pa.code_reference
+           LEFT JOIN v_encours_fiable ef ON ef.code_reference = pa.code_reference
+           LEFT JOIN v_besoin_horizon bh ON bh.code_reference = pa.code_reference
+          WHERE pa.code_reference = $1",
+    )
+    .bind(reference)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("reference {reference} dans le calcul du plan")))?;
+
+    // Les bons ouverts, et s'ils sont en retard au sens du reglage.
+    let bons = sqlx::query(
+        "SELECT bc.numero_bc, bc.id_bc, lb.date_livraison_prevue, lb.quantite_restante_kg::float8 AS reste_kg,
+                substr(lb.date_livraison_prevue, 1, 10) < to_char(current_date - COALESCE(
+                    (SELECT valeur_courante::int FROM parametre WHERE code_parametre = 'P_RetardBCJours'), 5), 'YYYY-MM-DD')
+                    AS en_retard
+           FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
+          WHERE lb.code_reference = $1 AND bc.statut IN ('VALIDE', 'ENVOYE', 'LIVRE_PARTIEL')
+            AND lb.statut NOT IN ('ANNULE', 'SOLDE') AND lb.type_ligne = 'MARCHANDISE' AND lb.quantite_restante_kg > 0
+          ORDER BY lb.date_livraison_prevue NULLS LAST, bc.numero_bc",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+    // La marchandise au port : lignes d'import sans bon, dossier engage et non clos.
+    let port = sqlx::query(
+        "SELECT d.numero AS numero_dossier, d.id_dossier, f.numero_facture, fl.reste_kg::float8 AS reste_kg
+           FROM import_facture_lignes fl
+           JOIN import_factures f ON f.id_facture = fl.id_facture
+           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+          WHERE fl.code_reference = $1 AND d.statut NOT IN ('CLOTURE', 'BROUILLON') AND fl.type_ligne = 'ERP'
+            AND fl.soldee = 0 AND fl.id_ligne_bc IS NULL AND fl.reste_kg > 0
+          ORDER BY d.numero, f.numero_facture",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+    // Le fil sur machine, etage par etage : compte, ou non (lot bloque, constat trop ancien).
+    let machine = sqlx::query(
+        "SELECT e.code_emplacement, e.lot_fournisseur, e.kg::float8 AS kg, substr(e.date_constat, 1, 10) AS date_constat,
+                COALESCE(l.statut, 'LIBRE') = 'BLOQUE' AS lot_bloque,
+                substr(COALESCE(e.date_constat, '1900-01-01'), 1, 10)::date < current_date - COALESCE(
+                    (SELECT valeur_courante::int FROM parametre WHERE code_parametre = 'P_JoursInventMachine'), 30)
+                    AS constat_ancien
+           FROM machine_etat e
+           LEFT JOIN lot l ON l.code_reference = e.code_reference AND l.lot_fournisseur = e.lot_fournisseur
+          WHERE e.code_reference = $1 AND e.kg > 0
+          ORDER BY e.code_emplacement",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = json!({
+        "calcul": lignes_en_json(&[calcul]).get(0).cloned().unwrap_or(Value::Null),
+        "bons": lignes_en_json(&bons),
+        "port": lignes_en_json(&port),
+        "machine": lignes_en_json(&machine),
+    });
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    Ok(Json(v))
+}
+
 /// Les propositions ENREGISTREES, avec leur statut et le bon qu'elles ont produit.
 ///
 /// A ne pas confondre avec `v_plan_achat`, qui est le CALCUL : il se refait a

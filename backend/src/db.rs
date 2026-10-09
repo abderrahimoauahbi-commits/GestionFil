@@ -293,6 +293,12 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // L'historique des prix suit la revalidation (revisions, vue courante).
+        "2026-10-09v_historique_prix_revise.sql",
+        "SELECT to_regclass('public.historique_prix_revision') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_historique_prix_courant')",
+    ),
+    (
         // Le bon recale apres une contre-passation ; C52.
         "2026-10-09u_bon_apres_contrepassation.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_recaler_lignes_bc')

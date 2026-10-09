@@ -1643,7 +1643,7 @@ pub async fn matrice_prix(
                       / NULLIF(SUM(hp.quantite_achetee_kg), 0), 4) AS prix_moyen_mad,
                 ROUND(SUM(hp.quantite_achetee_kg), 4)    AS quantite_kg,
                 COUNT(*)                                 AS nb_achats
-           FROM historique_prix hp
+           FROM v_historique_prix_courant hp
            JOIN reference r        ON r.code_reference   = hp.code_reference
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = hp.code_fournisseur
           WHERE ($1 IS NULL OR hp.code_reference = $1)
@@ -1688,7 +1688,7 @@ pub async fn historique_prix(
                 bc.numero_bc, rec.numero_reception,
                 LAG(hp.prix_kg_mad) OVER (PARTITION BY hp.code_reference
                                               ORDER BY hp.date_achat) AS prix_precedent_mad
-           FROM historique_prix hp
+           FROM v_historique_prix_courant hp
            JOIN reference   r  ON r.code_reference   = hp.code_reference
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = hp.code_fournisseur
            LEFT JOIN ligne_reception lr ON lr.id_ligne_reception = hp.id_ligne_reception

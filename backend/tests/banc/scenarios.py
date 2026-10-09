@@ -547,8 +547,23 @@ def scenario_reception_devalidee_revalidee(c, infra):
     verifier(int(infra.valeur(f"SELECT count(*) FROM v_ctl_c52 WHERE numero = '{numero}'")) == 0,
              "C52 garde la reception devalidee")
     verifier(abs(kg(infra) - avant) < 1e-6, "la devalidation n'a pas retire l'entree")
+    # U3 (09/10) : la pesee refaite (590 kg) passe a l'historique des prix en revision, et
+    # l'archive juge l'ecart sur le reste du bon, a la tolerance du fournisseur.
+    id_ligne = infra.valeur(f"SELECT id_ligne_reception FROM ligne_reception WHERE id_reception = '{rid}'")
+    c.ok("Choukri", "PUT", f"/api/receptions/{rid}/statut", {"statut": "BROUILLON", "motif": "Pesee a refaire au magasin"})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{id_ligne}",
+         {"unite_saisie": "kg", "quantite_pesee_unite": 590})
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
     c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
-    verifier(abs(kg(infra) - avant - 600) < 1e-6, "la revalidation n'a pas refait l'entree")
+    verifier(abs(kg(infra) - avant - 590) < 1e-6, "la revalidation n'a pas refait l'entree a 590 kg")
+    courant = infra.sql(f"SELECT version, quantite_achetee_kg FROM v_historique_prix_courant "
+                        f"WHERE id_ligne_reception = '{id_ligne}'")[0]
+    verifier(courant[0] == "2" and abs(float(courant[1]) - 590) < 1e-6,
+             f"l'historique des prix garde la premiere validation : {courant}")
+    archive = infra.sql(f"SELECT ecart_pct, conformite_quantite FROM archive_reception "
+                        f"WHERE id_ligne_reception = '{id_ligne}' ORDER BY version DESC LIMIT 1")[0]
+    verifier(abs(float(archive[0]) + 1.6667) < 0.01 and archive[1] == "1",
+             f"archive : ecart {archive[0]} (attendu -1,67 % sur 600 kg restants), conforme {archive[1]}")
     verifier(controle(infra, "C11") == 0, "C11 apres devalidation et revalidation")
     verifier(infra.valeur(f"SELECT statut FROM bon_commande WHERE id_bc = '{id_bc}'") == "CLOTURE",
              "le bon n'est pas reclos par la revalidation")

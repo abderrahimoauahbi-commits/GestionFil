@@ -361,14 +361,34 @@ pub async fn valider(
     }
 
     // ---- 5. Archive + historique de prix, ligne a ligne ---------------------
+    // LA CONFORMITE SE JUGE A LA TOLERANCE DU FOURNISSEUR (audit v5, U3) :
+    // l'archive jugeait a 2 % fixes, et la fiche fournisseur en heritait.
+    let tolerance: f64 = sqlx::query_scalar("SELECT fn_tolerance_fournisseur($1)::float8")
+        .bind(&entete.code_fournisseur)
+        .fetch_one(&mut *tx)
+        .await?;
     for l in &lignes {
         let total_mad = arrondi_mad(l.quantite_stock_kg * l.prix_kg_mad);
         quantite_totale += l.quantite_stock_kg;
         montant_total += total_mad;
 
-        let conforme_quantite = l
-            .ecart_pct
-            .map(|e| i64::from(e.abs() <= 0.0001 || e.abs() <= 2.0));
+        // L'ATTENDU EST LE RESTE DU BON AU MOMENT DE VALIDER (U3) : l'ecart
+        // fige a la saisie gardait l'ancien attendu apres une contre-passation
+        // ou une reception intermediaire.
+        let reste: Option<f64> = match &l.id_ligne_bc {
+            Some(lb) => sqlx::query_scalar(
+                "SELECT quantite_restante_kg::float8 FROM ligne_bc WHERE id_ligne_bc = $1",
+            )
+            .bind(lb)
+            .fetch_optional(&mut *tx)
+            .await?,
+            None => None,
+        };
+        let ecart_pct = match reste {
+            Some(r) if r > 0.0 => Some(((l.quantite_stock_kg - r) / r * 100.0 * 10_000.0).round() / 10_000.0),
+            _ => l.ecart_pct,
+        };
+        let conforme_quantite = ecart_pct.map(|e| i64::from(e.abs() <= 0.0001 || e.abs() <= tolerance));
         let jours_retard = retard_de(l);
         let conforme_delai = jours_retard.map(|j| i64::from(j == 0));
 
@@ -402,7 +422,7 @@ pub async fn valider(
         .bind(total_mad)
         .bind(&l.code_magasin_dest)
         .bind(&l.statut_qualite)
-        .bind(l.ecart_pct)
+        .bind(ecart_pct)
         .bind(i64::from(l.statut_qualite == "CONFORME"))
         .bind(conforme_quantite)
         .bind(conforme_delai)
@@ -433,6 +453,28 @@ pub async fn valider(
         .bind(arrondi_kg(l.quantite_stock_kg))
         .bind(total_mad)
         .bind(&horodatage)
+        .execute(&mut *tx)
+        .await?;
+        // REVALIDEE AVEC UN AUTRE PRIX OU UN AUTRE POIDS (U3) : l'historique
+        // immuable garde l'entree d'origine ; la correction s'ecrit en revision,
+        // et les statistiques lisent la derniere (v_historique_prix_courant).
+        sqlx::query(
+            "INSERT INTO historique_prix_revision
+                 (id_ligne_reception, version, prix_kg_devise, code_devise, taux_change, prix_kg_mad,
+                  quantite_achetee_kg, total_mad, id_utilisateur)
+             SELECT c.id_ligne_reception, c.version + 1, $2, $3, $4, $5, $6, $7, $8
+               FROM v_historique_prix_courant c
+              WHERE c.id_ligne_reception = $1
+                AND (c.prix_kg_mad <> round($5::numeric, 4) OR c.quantite_achetee_kg <> round($6::numeric, 4))",
+        )
+        .bind(&l.id_ligne_reception)
+        .bind(l.prix_kg_devise)
+        .bind(&l.code_devise)
+        .bind(l.taux_change)
+        .bind(arrondi_kg(l.prix_kg_mad))
+        .bind(arrondi_kg(l.quantite_stock_kg))
+        .bind(total_mad)
+        .bind(&user.id)
         .execute(&mut *tx)
         .await?;
 

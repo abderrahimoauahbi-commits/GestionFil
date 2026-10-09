@@ -247,6 +247,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/import/engagements/{id}", delete(importation::supprimer_engagement))
         .route("/api/import/dossiers/{id}/cloturer", post(importation::cloturer))
         .route("/api/import/dossiers/{id}/cout-revient-reel", get(importation::cout_revient_reel))
+        .route("/api/import/dossiers/{id}/avoir", post(importation::avoir))
         .route("/api/import/factures/{id}/paiements", post(importation::ajouter_paiement))
         .route("/api/import/paiements/{id}", axum::routing::delete(importation::supprimer_paiement))
         .route("/api/import/dossiers/{id}/frais-post-cloture", post(importation::frais_post_cloture))

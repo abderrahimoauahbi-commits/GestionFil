@@ -293,6 +293,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // L'avoir d'import : origine du journal du dossier, retours soldes.
+        "2026-10-09n_avoir_import.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'import_ajustements_cump' AND column_name = 'origine')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_retours_import')",
+    ),
+    (
         // Les paiements d'import et le cout de revient reel.
         "2026-10-09m_cout_revient_reel.sql",
         "SELECT to_regclass('public.paiement_facture_import') IS NOT NULL

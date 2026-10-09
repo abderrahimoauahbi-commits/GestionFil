@@ -403,6 +403,45 @@ def scenario_import(c, infra):
     attendu = round(100 * bam, 2) - 100 * cours_ded
     verifier(abs(float(ligne["change_annee_ded_mad"]) - attendu) < 0.05,
              f"ecart de change {ligne['change_annee_ded_mad']} au lieu de {attendu:.2f}")
+
+    # Regle 3 (09/10) : l'avoir d'import. De prix : la valeur baisse au CMUP du stock restant.
+    avoir = {"nature": "AVOIR_PRIX", "numero_piece": "AV-BANC-1", "montant_mad": 500,
+             "motif": "Remise pour non-conformite gardee"}
+    c.refus("Magasinie", "POST", f"/api/import/dossiers/{id_dossier}/avoir", avoir, codes=(403,))
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", dict(avoir, motif="non"))
+    cm = cmup_magasin(infra, ref)
+    ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", dict(avoir, simuler=True))
+    verifier(abs(ap["ecart_stock_dhs"] + 500) < 0.01, f"avoir de prix : {ap['ecart_stock_dhs']} au stock au lieu de -500")
+    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "l'apercu de l'avoir a ecrit")
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", avoir)
+    verifier(abs(cmup_magasin(infra, ref) - (cm - 500 / kg(infra, ref))) < 0.0002, "l'avoir de prix n'a pas baisse le CMUP")
+    # Un nouvel avoir ne rejoue pas les frais : la cloture ne lit que les FRAIS.
+    nb_frais = infra.valeur(f"SELECT count(*) FROM import_ajustements_cump WHERE id_dossier = '{id_dossier}' AND origine = 'FRAIS'")
+
+    # Pour retour : solde le retour fournisseur de la reception, l'ecart en consomme, le CMUP intact.
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir",
+            dict(avoir, nature="AVOIR_RETOUR", numero_piece="AV-BANC-2"), contient="retour")
+    rim = infra.valeur(f"SELECT numero FROM import_receptions WHERE id_reception = '{rid}'")
+    code, r = c.appel("Choukri", "POST", "/api/mouvements", {
+        "code_type_mvt": "RETOUR_FOURN", "code_magasin": MAG, "code_motif": "RETOUR_FOUR", "reference_document": rim,
+        "lignes": [{"code_reference": ref, "quantite_saisie": 50, "unite_saisie": "kg", "code_motif_ligne": "R1",
+                    "lot_fournisseur": "LOT-BANC-1"}]})
+    verifier(code == 200, f"retour fournisseur d'import refuse : {r}")
+    cm = cmup_magasin(infra, ref)
+    valeur = 50 * 2.0 * cours_ded
+    retour = {"nature": "AVOIR_RETOUR", "numero_piece": "AV-BANC-2", "montant_mad": round(valeur - 20, 2),
+              "motif": "Avoir pour les 50 kg rendus"}
+    ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", retour)
+    verifier(abs(ap["valeur_retours_dhs"] - valeur) < 0.05 and abs(ap["ecart_consomme_dhs"] - 20) < 0.05,
+             f"avoir pour retour : valeur {ap['valeur_retours_dhs']} / ecart {ap['ecart_consomme_dhs']}")
+    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "l'avoir pour retour a touche le CMUP")
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", dict(retour, numero_piece="AV-BANC-3"),
+            contient="retour")
+    detail = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
+    verifier(all(x["solde"] for x in detail.get("retours", [])) and detail.get("retours"),
+             f"le retour n'est pas solde : {detail.get('retours')}")
+    verifier(infra.valeur(f"SELECT count(*) FROM import_ajustements_cump WHERE id_dossier = '{id_dossier}' AND origine = 'FRAIS'")
+             == nb_frais, "un avoir a ecrit des lignes d'origine FRAIS")
     verifier(controle(infra, "C10") == 0, "C10 leve malgre la derogation")
 
 

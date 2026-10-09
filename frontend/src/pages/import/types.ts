@@ -160,13 +160,31 @@ export interface ReceptionResume extends Record<string, unknown> {
 
 export interface Ajustement {
   code_reference: string
-  nature: 'STOCK' | 'CONSOMME'
+  /** RETOUR : un retour fournisseur solde par un avoir (09/10/2026). */
+  nature: 'STOCK' | 'CONSOMME' | 'RETOUR'
   code_magasin: string | null
   quantite_recue_kg: number
   stock_kg: number
   cump_avant?: number | null
   cump_apres?: number | null
   montant_dhs: number
+  date_ajustement?: string
+  /** FRAIS : la cloture ; AVOIR_PRIX / AVOIR_RETOUR : un avoir du fournisseur. */
+  origine?: 'FRAIS' | 'AVOIR_PRIX' | 'AVOIR_RETOUR'
+  numero_piece?: string | null
+  motif?: string | null
+}
+
+/** Un retour fournisseur d'une reception du dossier (`v_retours_import`). */
+export interface RetourImport {
+  id_mouvement: string
+  numero_mouvement: string
+  numero_reception: string
+  date_mouvement: string
+  code_reference: string
+  kg: number
+  /** Deja solde par un avoir pour retour. */
+  solde: boolean
 }
 
 /** Une piece deposee dans le dossier : scan, PDF, photo. */
@@ -223,6 +241,7 @@ export interface DossierComplet {
   pieces: Piece[]
   attendues: PieceAttendue[]
   ajustements: Ajustement[]
+  retours?: RetourImport[]
   engagements?: Engagement[]
 }
 

@@ -267,9 +267,20 @@ pub async fn lire_dossier(
 
     let ajustements = sqlx::query(
         "SELECT code_reference, nature, code_magasin, quantite_recue_kg, stock_kg,
-                cump_avant, cump_apres, montant_dhs, date_ajustement
+                cump_avant, cump_apres, montant_dhs, date_ajustement, origine, numero_piece, motif
            FROM import_ajustements_cump WHERE id_dossier = $1
-          ORDER BY code_reference, nature DESC, code_magasin",
+          ORDER BY date_ajustement, code_reference, nature DESC, code_magasin",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+
+    // Les retours fournisseur des receptions du dossier, et s'ils sont soldes par un avoir.
+    let retours = sqlx::query(
+        "SELECT id_mouvement, numero_mouvement, numero_reception, date_mouvement, code_reference,
+                kg::float8 AS kg, solde
+           FROM v_retours_import WHERE id_dossier = $1
+          ORDER BY date_mouvement, numero_mouvement, code_reference",
     )
     .bind(&id)
     .fetch_all(db)
@@ -298,6 +309,7 @@ pub async fn lire_dossier(
         "frais": lignes_en_json(&frais),
         "repartition": lignes_en_json(&repartition),
         "ajustements": lignes_en_json(&ajustements),
+        "retours": lignes_en_json(&retours),
         "engagements": lignes_en_json(&engagements),
     });
     user.masquer(db, IMPORT, &mut v).await?;
@@ -1824,6 +1836,48 @@ pub async fn cloturer(
         .unwrap_or(false);
     let simuler = dans_corps || matches!(q.get("simuler").map(String::as_str), Some("1" | "true"));
     let mut v = metier::cloturer(&state.db, &user, &id, simuler).await?;
+    user.masquer(&state.db, IMPORT, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct AvoirImport {
+    /// AVOIR_PRIX (remise, non-conformite gardee) ou AVOIR_RETOUR.
+    nature: String,
+    numero_piece: String,
+    /// En dirhams, au cours de l'avoir.
+    montant_mad: f64,
+    motif: String,
+    /// Un avoir de prix qui ne vise qu'une reference.
+    code_reference: Option<String>,
+    #[serde(default)]
+    simuler: bool,
+}
+
+/// `POST /api/import/dossiers/{id}/avoir` — un avoir du fournisseur sur un
+/// dossier recu (regle 3, 09/10/2026). De prix : la valeur baisse au CMUP de la
+/// marchandise encore en stock, la part sortie en « consomme ». Pour retour :
+/// solde les retours fournisseur du dossier, l'ecart en « consomme ». Avec
+/// `simuler`, l'apercu, sans rien ecrire.
+pub async fn avoir(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(a): Json<AvoirImport>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let mut v = metier::avoir(
+        &state.db,
+        &user,
+        &id,
+        a.nature.trim(),
+        &a.numero_piece,
+        a.montant_mad,
+        &a.motif,
+        a.code_reference.as_deref(),
+        a.simuler,
+    )
+    .await?;
     user.masquer(&state.db, IMPORT, &mut v).await?;
     Ok(Json(v))
 }

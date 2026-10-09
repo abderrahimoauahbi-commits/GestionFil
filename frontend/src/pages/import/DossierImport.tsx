@@ -14,6 +14,7 @@
  * facon ; l'ecran n'offre simplement plus les gestes.
  */
 import { CoutRevientReel } from './CoutRevientReel'
+import { AvoirDossier } from './AvoirDossier'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
@@ -217,6 +218,7 @@ export function DossierImport() {
       </Onglets>
 
       <PiecesDossier d={d} ecrire={ecrire} />
+      {droits.peutValider && dossier.statut !== 'BROUILLON' && <AvoirDossier d={d} />}
       {d.ajustements.length > 0 && <JournalCloture d={d} />}
 
       <Carte>
@@ -820,13 +822,14 @@ function JournalCloture({ d }: { d: DossierComplet }) {
   return (
     <Carte>
       <CarteEntete>
-        <CarteTitre>Ce que la clôture a fait au CUMP</CarteTitre>
+        <CarteTitre>Ce que la clôture et les avoirs ont fait au CUMP</CarteTitre>
       </CarteEntete>
       <CarteCorps className="p-0">
         <div className="defilement-x">
           <table className="w-full min-w-[36rem] text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
+                <th className={cn(th, 'text-left')}>Origine</th>
                 <th className={cn(th, 'text-left')}>Référence</th>
                 <th className={cn(th, 'text-left')}>Magasin</th>
                 <th className={cn(th, 'text-right')}>Stock (kg)</th>
@@ -837,8 +840,26 @@ function JournalCloture({ d }: { d: DossierComplet }) {
             <tbody>
               {d.ajustements.map((a, i) => (
                 <tr key={i} className="border-b border-bordure/60">
+                  <td className={td} title={a.motif ?? undefined}>
+                    {a.origine && a.origine !== 'FRAIS' ? (
+                      <span>
+                        {a.origine === 'AVOIR_PRIX' ? 'Avoir de prix' : 'Avoir pour retour'}{' '}
+                        <span className="text-attenue-texte">{a.numero_piece}</span>
+                      </span>
+                    ) : (
+                      'Frais'
+                    )}
+                  </td>
                   <td className={cn(td, 'font-medium')}>{a.code_reference}</td>
-                  <td className={td}>{a.nature === 'STOCK' ? a.code_magasin : <em className="text-attenue-texte">déjà consommé</em>}</td>
+                  <td className={td}>
+                    {a.nature === 'STOCK' ? (
+                      a.code_magasin
+                    ) : a.nature === 'RETOUR' ? (
+                      <em className="text-attenue-texte">rendu ({fmt.nombre(a.quantite_recue_kg, 2)} kg)</em>
+                    ) : (
+                      <em className="text-attenue-texte">déjà consommé</em>
+                    )}
+                  </td>
                   <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(a.stock_kg, 2)}</td>
                   <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(a.montant_dhs, 2)}</td>
                   <td className={cn(td, 'text-right tabular-nums')}>

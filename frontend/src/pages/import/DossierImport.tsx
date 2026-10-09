@@ -13,6 +13,7 @@
  * CUMP, le modifier ferait mentir le stock. Le serveur le refuserait de toute
  * facon ; l'ecran n'offre simplement plus les gestes.
  */
+import { CoutRevientReel } from './CoutRevientReel'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
@@ -208,6 +209,7 @@ export function DossierImport() {
         </OngletContenu>
         <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
           <FacturesDossier d={d} ecrire={ecrire} />
+          <CoutRevientReel idDossier={d.dossier.id_dossier} />
         </OngletContenu>
         <OngletContenu value="engagements" forceMount className="mt-3 data-[state=inactive]:hidden">
           <EngagementsDossier d={d} ecrire={ecrire} signaler={tout.signaler} />

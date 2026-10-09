@@ -1127,6 +1127,144 @@ pub async fn frais_post_cloture(
     Ok(Json(v))
 }
 
+// ============================================================================
+// LE COUT DE REVIENT REEL (09/10/2026) : paiements et change, sans comptabilite
+// ============================================================================
+
+/// `GET /api/import/dossiers/{id}/cout-revient-reel` — par facture : matiere au
+/// cours du dedouanement, frais, change constate au paiement (coupe au 31/12
+/// pour un dossier a cheval sur deux exercices), cout reel. Le CMUP n'en est pas
+/// touche : il reste au cours du dedouanement, comme la comptabilite.
+pub async fn cout_revient_reel(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id_dossier): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Lire).await?;
+    let factures = sqlx::query(
+        "SELECT id_facture, numero_facture, code_devise, date_ded, annee_ded,
+                montant_devise::float8 AS montant_devise, cours_ded::float8 AS cours_ded,
+                matiere_mad::float8 AS matiere_mad, frais_mad::float8 AS frais_mad,
+                paye_devise::float8 AS paye_devise, paye_mad::float8 AS paye_mad, nb_paiements,
+                reste_devise::float8 AS reste_devise, cours_fin_annee_ded::float8 AS cours_fin_annee_ded,
+                change_annee_ded_mad::float8 AS change_annee_ded_mad,
+                change_annee_suivante_mad::float8 AS change_annee_suivante_mad, latent
+           FROM v_cout_revient_reel WHERE id_dossier = $1 ORDER BY numero_facture",
+    )
+    .bind(&id_dossier)
+    .fetch_all(&state.db)
+    .await?;
+    let paiements = sqlx::query(
+        "SELECT id_paiement, id_facture, numero_facture, date_paiement,
+                montant_devise::float8 AS montant_devise, montant_mad::float8 AS montant_mad,
+                cours_paiement::float8 AS cours_paiement, cours_fin_annee::float8 AS cours_fin_annee,
+                ecart_annee_ded_mad::float8 AS ecart_annee_ded_mad,
+                ecart_annee_suivante_mad::float8 AS ecart_annee_suivante_mad, annee_ded, annee_paiement
+           FROM v_change_paiement WHERE id_dossier = $1 ORDER BY date_paiement, numero_facture",
+    )
+    .bind(&id_dossier)
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = json!({
+        "factures": crate::routes::json::lignes_en_json(&factures),
+        "paiements": crate::routes::json::lignes_en_json(&paiements),
+    });
+    user.masquer(&state.db, IMPORT, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct PaiementSaisie {
+    date_paiement: String,
+    montant_devise: f64,
+    /// Les dirhams reellement debites : le cours est celui de la banque.
+    montant_mad: f64,
+    reference_banque: Option<String>,
+    notes: Option<String>,
+    #[serde(default)]
+    taux_confirme: bool,
+}
+
+/// `POST /api/import/factures/{id}/paiements` — un paiement de la facture, au
+/// cours que la banque a applique (MAD debites / devise payee). Une facture se
+/// paie en plusieurs fois : un ecart par paiement.
+pub async fn ajouter_paiement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id_facture): Path<String>,
+    Json(p): Json<PaiementSaisie>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    if !(p.montant_devise > 0.0) || !(p.montant_mad > 0.0) {
+        return Err(AppError::Invalide("Le montant payé et les dirhams débités doivent être positifs.".into()));
+    }
+    let date = p.date_paiement.trim().get(..10).unwrap_or("").to_string();
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let futur: bool = sqlx::query_scalar("SELECT $1 > to_char(current_date, 'YYYY-MM-DD')")
+        .bind(&date)
+        .fetch_one(&mut *tx)
+        .await?;
+    if futur || date.len() != 10 {
+        return Err(AppError::Invalide("La date du paiement est obligatoire et ne peut pas être future.".into()));
+    }
+    let (numero, devise, montant, deja): (String, String, f64, f64) = sqlx::query_as(
+        "SELECT f.numero_facture, f.code_devise, f.montant_devise::float8,
+                COALESCE((SELECT sum(montant_devise) FROM paiement_facture_import WHERE id_facture = f.id_facture), 0)::float8
+           FROM import_factures f WHERE f.id_facture = $1 FOR UPDATE",
+    )
+    .bind(&id_facture)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("facture {id_facture}")))?;
+    if deja + p.montant_devise > montant + 0.01 {
+        return Err(AppError::RegleMetier(format!(
+            "La facture {numero} est de {montant:.2} {devise} ; {deja:.2} sont déjà payés : ce paiement la dépasserait."
+        )));
+    }
+    // Le cours de la banque, compare au cours BAM du jour du paiement (3 %).
+    let cours = p.montant_mad / p.montant_devise;
+    controler_taux(&mut tx, &format!("Le paiement de {numero}"), &devise, Some(cours), &date, p.taux_confirme).await?;
+    let id: String = sqlx::query_scalar(
+        "INSERT INTO paiement_facture_import (id_facture, date_paiement, montant_devise, montant_mad,
+                                              reference_banque, notes, id_utilisateur)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id_paiement",
+    )
+    .bind(&id_facture)
+    .bind(&date)
+    .bind(p.montant_devise)
+    .bind(p.montant_mad)
+    .bind(p.reference_banque.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(p.notes.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(&user.id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "id_paiement": id })))
+}
+
+/// `DELETE /api/import/paiements/{id}` — un paiement saisi par erreur. Il ne
+/// touche ni le stock ni le CMUP ; sa suppression reste au journal d'audit.
+pub async fn supprimer_paiement(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let n = sqlx::query("DELETE FROM paiement_facture_import WHERE id_paiement = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if n == 0 {
+        return Err(AppError::Introuvable(format!("paiement {id}")));
+    }
+    tx.commit().await?;
+    Ok(Json(json!({ "supprime": true })))
+}
+
 /// `PATCH /api/import/frais/{id}`
 pub async fn modifier_frais(
     State(state): State<AppState>,

@@ -385,6 +385,24 @@ def scenario_import(c, infra):
     verifier(abs(cmup_magasin(infra, ref) - (cm + 1000 / kg(infra, ref))) < 0.0002, "le frais post-cloture n'a pas rejoint le CMUP")
     verifier(infra.valeur(f"SELECT statut FROM import_dossiers WHERE id_dossier = '{id_dossier}'") == "CLOTURE",
              "le frais post-cloture a rouvert le dossier")
+
+    # Le cout de revient reel : un paiement au cours de la banque, son ecart de change,
+    # sans toucher le CMUP (09/10/2026).
+    bam = float(infra.valeur("SELECT cours_mad FROM cours_bam WHERE code_devise = 'USD' ORDER BY date_cours DESC LIMIT 1"))
+    cours_ded = float(infra.valeur(f"SELECT taux_change FROM import_factures WHERE id_facture = '{id_facture}'"))
+    jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    paiement = {"date_paiement": jour, "montant_devise": 100, "montant_mad": round(100 * bam, 2)}
+    c.refus("Magasinie", "POST", f"/api/import/factures/{id_facture}/paiements", paiement, codes=(403,))
+    c.refus("Choukri", "POST", f"/api/import/factures/{id_facture}/paiements",
+            dict(paiement, montant_devise=10_000_000, montant_mad=10_000_000 * bam), contient="passerait")
+    cm = cmup_magasin(infra, ref)
+    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/paiements", paiement)
+    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "le paiement a touche le CMUP")
+    cr = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}/cout-revient-reel")
+    ligne = next(x for x in cr["factures"] if x["id_facture"] == id_facture)
+    attendu = round(100 * bam, 2) - 100 * cours_ded
+    verifier(abs(float(ligne["change_annee_ded_mad"]) - attendu) < 0.05,
+             f"ecart de change {ligne['change_annee_ded_mad']} au lieu de {attendu:.2f}")
     verifier(controle(infra, "C10") == 0, "C10 leve malgre la derogation")
 
 

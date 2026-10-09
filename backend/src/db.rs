@@ -293,6 +293,12 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Les paiements d'import et le cout de revient reel.
+        "2026-10-09m_cout_revient_reel.sql",
+        "SELECT to_regclass('public.paiement_facture_import') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_cout_revient_reel')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

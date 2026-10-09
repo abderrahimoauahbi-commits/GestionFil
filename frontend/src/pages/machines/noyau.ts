@@ -362,6 +362,19 @@ export const machinesApi = {
   },
   fiche: (id: string) => api.get<FicheDetail>(`/api/machines/fiches/${id}`),
   motifs: () => api.get<Motif[]>('/api/machines/motifs'),
+  /** Le journal des mouvements machine : chaque decision ligne par ligne, et son mouvement magasin (F22). */
+  mouvements: (code: string, etage?: string) =>
+    api.get<LigneMouvementMachine[]>(
+      `/api/machines/${encodeURIComponent(code)}/mouvements${etage ? `?etage=${encodeURIComponent(etage)}` : ''}`,
+    ),
+  /** Avant d'annuler : l'etat auquel l'etage reviendra, les mouvements annules (F22). */
+  apercuRetrait: (idFiche: string) =>
+    api.get<{
+      decision: string | null
+      derniere?: boolean
+      etat_avant?: { code_reference: string; lot_fournisseur: string; nb_bobines: number; kg: number }[]
+      mouvements?: { numero_mouvement: string; code_type_mvt: string; code_magasin: string; kg: number }[]
+    }>(`/api/machines/fiches/${idFiche}/retrait-apercu`),
   consommation: (code?: string) =>
     api.get<LigneConso[]>(
       `/api/machines/consommation${code ? `?code_machine=${encodeURIComponent(code)}` : ''}`,
@@ -589,6 +602,37 @@ export const cheminMachine = (code: string, zone?: string) =>
   `/machines/${encodeURIComponent(code)}${zone ? `?etage=${encodeURIComponent(zone)}` : ''}`
 
 /** L'adresse d'une decision neuve sur un etage. */
+/** Une ligne du journal des mouvements machine (F22, 09/10/2026). */
+export interface LigneMouvementMachine {
+  id_decision: string
+  id_fiche: string | null
+  numero_fiche: string | null
+  nature: string
+  code_emplacement: string
+  zone: string | null
+  date_decision: string
+  statut: string
+  est_tete: number
+  valide_par: string | null
+  ligne_numero: number
+  code_reference: string
+  lot_fournisseur: string
+  kg_avant: number
+  nb_mouvementees: number | null
+  kg_mouvementes: number | null
+  destination: string | null
+  kg_apres: number
+  ecart_kg: number
+  effet_ecart: string | null
+  niveau_ecart: string | null
+  code_motif: string | null
+  motif_texte: string | null
+  id_mouvement: string | null
+  numero_mouvement: string | null
+  id_annulation: string | null
+  numero_annulation: string | null
+}
+
 export const cheminNouvelleFiche = (code: string, type: TypeFiche, zone: string) =>
   `/machines/${encodeURIComponent(code)}/fiche/${type}/${encodeURIComponent(zone)}`
 

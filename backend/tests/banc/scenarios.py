@@ -633,6 +633,13 @@ def scenario_machine_surplus(c, infra):
     c.refus("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {}, contient="ORANGE")
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {"confirme_orange": True})
     verifier(controle(infra, "C48") >= 1, "le chargement deja consomme n'est pas au controle C48")
+    # F22 : le journal des mouvements machine porte le mouvement magasin lie ; l'apercu du
+    # retrait dit l'etat auquel l'etage reviendra (vide) et le mouvement annule.
+    journal = c.ok("Magasinie", "GET", "/api/machines/BANC2/mouvements")
+    verifier(any(l.get("numero_mouvement") for l in journal), f"journal machine sans mouvement magasin : {journal[:1]}")
+    ap = c.ok("Magasinie", "GET", f"/api/machines/fiches/{f1}/retrait-apercu")
+    verifier(ap.get("derniere") is True and ap.get("etat_avant") == [] and len(ap.get("mouvements") or []) == 1,
+             f"apercu du retrait inattendu : {ap}")
 
     # Une Correction qui se dit consommation : 104 kg -> 26 kg, 78 kg sur une ligne de 104 : rouge.
     f2 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,

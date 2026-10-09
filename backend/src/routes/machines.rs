@@ -297,6 +297,93 @@ pub async fn contenu_machine(
     Ok(Json(v))
 }
 
+/// `GET /api/machines/{code}/mouvements` — LE JOURNAL DES MOUVEMENTS MACHINE
+/// (F22, 09/10/2026), le cote machine isole du grand livre : chaque decision,
+/// ligne par ligne — avant, charge ou retire, apres, ecart, niveau — avec le
+/// mouvement magasin qui en est l'autre moitie et, s'il a ete annule, son
+/// annulation. Les prix n'y sont pas : ce journal compte des kilos.
+pub async fn mouvements_machine(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let etage = q.get("etage").cloned().unwrap_or_default();
+    let lignes = sqlx::query(
+        "SELECT d.id_decision, d.id_fiche, f.numero_fiche, d.nature, d.code_emplacement, e.libelle AS zone,
+                d.date_decision, d.statut, d.est_tete, u.login AS valide_par,
+                l.ligne_numero, l.code_reference, l.lot_fournisseur,
+                l.kg_avant::float8 AS kg_avant, l.nb_mouvementees, l.kg_mouvementes::float8 AS kg_mouvementes,
+                l.destination, l.kg_apres::float8 AS kg_apres, l.ecart_kg::float8 AS ecart_kg,
+                l.effet_ecart, l.niveau_ecart, l.code_motif, l.motif_texte,
+                l.id_mouvement, m.numero_mouvement,
+                a.id_mouvement AS id_annulation, a.numero_mouvement AS numero_annulation
+           FROM machine_decision d
+           JOIN machine_decision_ligne l ON l.id_decision = d.id_decision
+           LEFT JOIN machine_fiche f ON f.id_fiche = d.id_fiche
+           LEFT JOIN machine_emplacement e ON e.code_emplacement = d.code_emplacement
+           LEFT JOIN utilisateur u ON u.id_utilisateur = d.id_utilisateur
+           LEFT JOIN mouvement m ON m.id_mouvement = l.id_mouvement
+           LEFT JOIN mouvement a ON a.id_mouvement_contrepasse = l.id_mouvement
+          WHERE d.code_machine = $1 AND ($2 = '' OR d.code_emplacement = $2)
+          ORDER BY d.date_decision DESC, l.ligne_numero
+          LIMIT 500",
+    )
+    .bind(&code)
+    .bind(&etage)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(crate::routes::json::lignes_en_json(&lignes)))
+}
+
+/// `GET /api/machines/fiches/{id}/retrait-apercu` — AVANT D'ANNULER (F22) :
+/// l'etat auquel l'etage reviendra, et les mouvements magasin qui recevront une
+/// annulation. Les controles (derniere decision, etage inchange, fil rendu
+/// encore au magasin, lot bloque) restent ceux du retrait lui-meme.
+pub async fn apercu_retrait(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let decision: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id_decision, est_tete FROM machine_decision
+          WHERE id_fiche = $1 AND statut = 'ACTIVE' ORDER BY numero_validation DESC LIMIT 1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((id_decision, est_tete)) = decision else {
+        return Ok(Json(json!({ "decision": null })));
+    };
+    let avant = sqlx::query(
+        "SELECT code_reference, lot_fournisseur, nb_bobines, kg::float8 AS kg
+           FROM machine_decision_etat WHERE id_decision = $1 AND moment = 'AVANT'
+          ORDER BY code_reference, lot_fournisseur",
+    )
+    .bind(&id_decision)
+    .fetch_all(&state.db)
+    .await?;
+    let mouvements = sqlx::query(
+        "SELECT m.numero_mouvement, m.code_type_mvt, m.code_magasin,
+                (SELECT sum(lm.quantite_kg) FROM ligne_mouvement lm WHERE lm.id_mouvement = m.id_mouvement)::float8 AS kg
+           FROM mouvement m
+          WHERE m.id_decision_machine = $1 AND m.code_type_mvt IN ('CHARGE_MACHINE', 'RETOUR_MACHINE')
+            AND NOT EXISTS (SELECT 1 FROM mouvement x WHERE x.id_mouvement_contrepasse = m.id_mouvement)
+          ORDER BY m.numero_mouvement",
+    )
+    .bind(&id_decision)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(json!({
+        "decision": id_decision,
+        "derniere": est_tete == 1,
+        "etat_avant": crate::routes::json::lignes_en_json(&avant),
+        "mouvements": crate::routes::json::lignes_en_json(&mouvements),
+    })))
+}
+
 /// `GET /api/machines/consommation` — le cumul, jamais une repartition.
 ///
 ///     consommation = tout ce qui a ete charge - ce qui est revenu - l'etat actuel

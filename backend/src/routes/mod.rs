@@ -283,6 +283,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/import/receptions/{id}/valider", post(importation::valider_reception))
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
         .route("/api/machines/consommation", get(machines::journal_consommation))
+        .route("/api/machines/{code}/mouvements", get(machines::mouvements_machine))
+        .route("/api/machines/fiches/{id}/retrait-apercu", get(machines::apercu_retrait))
         .route("/api/machines/fiches",
                get(machines::lister_fiches).post(machines::creer_fiche))
         .route("/api/machines/fiches/{id}",

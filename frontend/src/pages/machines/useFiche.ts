@@ -61,6 +61,9 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     if (!zone || !qEtat.data || amorcee === cle) return
     if (idFiche && !qFiche.data) return
     const base = qEtat.data.map((e) => depuisEtat(e, type))
+    /* LE CONSTAT DE CORRECTION, ouvert depuis l'etage (F22) : le motif est deja choisi. */
+    const motifPose = new URLSearchParams(window.location.search).get('motif')
+    if (!idFiche && type === 'MAJ' && motifPose) for (const b of base) b.code_motif = motifPose
     if (idFiche && qFiche.data) {
       const f = qFiche.data
       setEntete({

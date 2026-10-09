@@ -18,11 +18,11 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Cog, Eye, Minus, Pencil, Plus, RefreshCw, RotateCcw, XCircle } from 'lucide-react'
+import { ArrowLeft, Cog, Eye, Minus, Pencil, PencilLine, Plus, RefreshCw, RotateCcw, XCircle } from 'lucide-react'
 import { Alerte, Badge, Bouton, Chargement } from '../../composants/ui/base'
 import { Onglet, OngletContenu, Onglets, OngletsListe } from '../../composants/ui/surcouches'
 import { EnTetePage } from '../../composants/Coquille'
-import { cn } from '../../lib/utils'
+import { cn, fmt } from '../../lib/utils'
 import { useEtatDepuisParam, useOuvrirVue } from '../../lib/navigation'
 import { useAuth } from '../../auth/AuthContext'
 import {
@@ -156,7 +156,7 @@ function Vide({ texte }: { texte: string }) {
 // UNE MACHINE
 // =============================================================================
 
-type Vue = 'etages' | 'fiches' | 'conso'
+type Vue = 'etages' | 'fiches' | 'mouvements' | 'conso'
 
 /**
  * UNE MACHINE, FILTREE PAR L'ETAGE CHOISI. L'etage se choisit en tete (ou en
@@ -219,6 +219,7 @@ export function MachineEcran() {
         <OngletsListe>
           <Onglet value="etages">{zone ? 'Contenu de l’étage' : 'Étages'}</Onglet>
           <Onglet value="fiches">{zone ? 'Fiches de l’étage' : 'Fiches'}</Onglet>
+          <Onglet value="mouvements">Mouvements</Onglet>
           <Onglet value="conso">Consommation</Onglet>
         </OngletsListe>
         <OngletContenu value="etages" className="mt-3">
@@ -226,6 +227,9 @@ export function MachineEcran() {
         </OngletContenu>
         <OngletContenu value="fiches" className="mt-3">
           <FichesMachine machine={machine} zones={zones} etage={etage} />
+        </OngletContenu>
+        <OngletContenu value="mouvements" className="mt-3">
+          <MouvementsMachine machine={machine} etage={etage} />
         </OngletContenu>
         <OngletContenu value="conso" className="mt-3">
           <JournalMachine machine={machine} etage={etage} />
@@ -256,22 +260,26 @@ function Puce({ actif, onClick, children }: { actif: boolean; onClick: () => voi
 /** Les trois gestes du magasin sur un etage : chacun ouvre une fiche sur son ecran. */
 function Gestes({ machine, zone, compact }: { machine: Machine; zone: Zone; compact?: boolean }) {
   const ouvrir = useOuvrirVue()
-  const gestes: [TypeFiche, string, React.ComponentType<{ className?: string }>][] = [
-    ['CHARGE', 'Charger', Plus],
-    ['DECHARGE', 'Décharger', Minus],
-    ['MAJ', 'Constater', RefreshCw],
+  /* LA CORRECTION (F22, 09/10/2026) : quand l'erreur n'est pas sur la derniere
+     fiche de l'etage, on ne remonte pas le temps — on constate l'etat reel avec
+     le motif « Correction », juge par les seuils (regle 2). */
+  const gestes: [TypeFiche, string, React.ComponentType<{ className?: string }>, string][] = [
+    ['CHARGE', 'Charger', Plus, ''],
+    ['DECHARGE', 'Décharger', Minus, ''],
+    ['MAJ', 'Constater', RefreshCw, ''],
+    ['MAJ', 'Corriger', PencilLine, '?motif=MJ_CORRECTION'],
   ]
   return (
     <div className="inline-flex gap-1">
-      {gestes.map(([type, titre, Icone]) => (
+      {gestes.map(([type, titre, Icone, suite]) => (
         <button
-          key={type}
+          key={titre}
           type="button"
           title={`${titre} — ${zone.libelle}`}
           aria-label={titre}
           onClick={(e) => {
             e.stopPropagation()
-            ouvrir(cheminNouvelleFiche(machine.code_machine, type, zone.code_emplacement))
+            ouvrir(cheminNouvelleFiche(machine.code_machine, type, zone.code_emplacement) + suite)
           }}
           className={cn(
             'inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-bordure text-attenue-texte',
@@ -546,6 +554,106 @@ function JournalMachine({ machine, etage }: { machine: Machine; etage: string })
       </div>
       <div className="max-h-[60vh] overflow-auto">
         <TableConso lignes={lignes} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * LES MOUVEMENTS MACHINE (F22, 09/10/2026) : le cote machine, isole du grand
+ * livre. Chaque decision, ligne par ligne, avec le mouvement magasin qui en est
+ * l'autre moitie — et son annulation quand la fiche a ete retiree. Seule la
+ * derniere decision d'un etage se retire ; on remonte ainsi pas a pas.
+ */
+function MouvementsMachine({ machine, etage }: { machine: Machine; etage: string }) {
+  const ouvrir = useOuvrirVue()
+  const q = useQuery({
+    queryKey: ['machine-mouvements', machine.code_machine, etage],
+    queryFn: () => machinesApi.mouvements(machine.code_machine, etage || undefined),
+  })
+  if (q.isLoading) return <Chargement texte="Lecture des mouvements…" />
+  if (q.isError) return <Alerte ton="danger">Les mouvements de la machine n’ont pas pu être lus.</Alerte>
+  const lignes = q.data ?? []
+  if (lignes.length === 0) return <Vide texte="Aucune décision sur cette machine." />
+  const kg = (v: number | null | undefined) => (v == null ? '—' : fmt.nombre(v, 1))
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-pose)]">
+      <div className="max-h-[70vh] overflow-auto">
+        <table className="grille w-full text-[12px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
+              <th className="bg-attenue px-2 py-1.5 text-left">Date</th>
+              <th className="bg-attenue px-2 py-1.5 text-left">Fiche</th>
+              {!etage && <th className="bg-attenue px-2 py-1.5 text-left">Étage</th>}
+              <th className="bg-attenue px-2 py-1.5 text-left">Référence · lot</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Avant</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Chargé / retiré</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Après</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Écart</th>
+              <th className="bg-attenue px-2 py-1.5 text-left">Mouvement magasin</th>
+              <th className="bg-attenue px-2 py-1.5 text-left">Statut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lignes.map((l) => {
+              const retire = l.nature === 'DECHARGE'
+              return (
+                <tr key={`${l.id_decision}-${l.ligne_numero}`} className={cn(l.statut !== 'ACTIVE' && 'text-attenue-texte line-through decoration-attenue-texte/40')}>
+                  <td className="whitespace-nowrap px-2 py-1 tabular-nums">{fmtDate(l.date_decision)}</td>
+                  <td className="px-2 py-1">
+                    {l.id_fiche ? (
+                      <button type="button" className="font-mono text-[11.5px] text-primaire hover:underline"
+                        onClick={() => ouvrir(`/machines/fiches/${l.id_fiche}`)}>
+                        {l.numero_fiche}
+                      </button>
+                    ) : '—'}
+                    <div className="text-[10.5px] text-attenue-texte">{LIBELLE_TYPE[l.nature as TypeFiche] ?? l.nature}</div>
+                  </td>
+                  {!etage && <td className="px-2 py-1">{l.zone ?? l.code_emplacement}</td>}
+                  <td className="px-2 py-1">
+                    {l.code_reference}
+                    <div className="text-[10.5px] text-attenue-texte">{l.lot_fournisseur || '—'}</div>
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">{kg(l.kg_avant)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {l.kg_mouvementes ? `${retire ? '−' : '+'}${kg(l.kg_mouvementes)}` : '—'}
+                    {retire && l.destination && <div className="text-[10.5px] text-attenue-texte">{l.destination.toLowerCase()}</div>}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">{kg(l.kg_apres)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {Math.abs(l.ecart_kg) < 0.0005 ? '—' : kg(l.ecart_kg)}
+                    {l.niveau_ecart && l.niveau_ecart !== 'AUCUN' && (
+                      <div className="text-[10.5px] text-attenue-texte">{(l.effet_ecart ?? '').toLowerCase()} · {l.niveau_ecart.toLowerCase()}</div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1">
+                    {l.id_mouvement ? (
+                      <button type="button" className="font-mono text-[11.5px] text-primaire hover:underline"
+                        onClick={() => ouvrir(`/mouvements/${l.id_mouvement}`)}>
+                        {l.numero_mouvement}
+                      </button>
+                    ) : <span className="text-attenue-texte">aucun (constat)</span>}
+                    {l.id_annulation && (
+                      <div className="text-[10.5px]">
+                        annulé par{' '}
+                        <button type="button" className="font-mono text-primaire hover:underline"
+                          onClick={() => ouvrir(`/mouvements/${l.id_annulation}`)}>
+                          {l.numero_annulation}
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1">
+                    <Badge ton={l.statut === 'ACTIVE' ? 'succes' : 'neutre'}>
+                      {l.statut === 'ACTIVE' ? 'active' : l.statut === 'RETIREE' ? 'dévalidée' : 'annulée'}
+                    </Badge>
+                    {l.est_tete === 1 && l.statut === 'ACTIVE' && <Badge ton="info" className="ml-1">dernière</Badge>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )

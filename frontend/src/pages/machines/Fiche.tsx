@@ -183,6 +183,15 @@ export function GesteRetrait({
   fermer: () => void
 }) {
   const brouillon = fiche.statut === 'BROUILLON'
+  /* L'APERCU AVANT D'ANNULER (F22, 09/10/2026) : on voit l'etat auquel l'etage
+     reviendra et les mouvements magasin qui seront annules, au lieu d'un motif
+     demande a l'aveugle. */
+  const qApercu = useQuery({
+    queryKey: ['machine-retrait-apercu', fiche.id_fiche],
+    queryFn: () => machinesApi.apercuRetrait(fiche.id_fiche),
+    enabled: !brouillon,
+  })
+  const ap = qApercu.data
   return (
     <ActionMotivee
       ouvert
@@ -203,6 +212,42 @@ export function GesteRetrait({
                 ? 'La fiche revient en brouillon : vous pourrez la corriger (son étage aussi) et la revalider.'
                 : 'La fiche est close ; elle reste consultable avec tout son historique.'}
             </p>
+            {ap?.decision && ap.derniere === false && (
+              <p className="text-danger">
+                Ce n’est pas la dernière décision de l’étage : elle ne se retire pas seule. Corrigez par un constat «
+                Correction ».
+              </p>
+            )}
+            {ap?.etat_avant && (
+              <div className="rounded-[var(--radius-sm)] border border-bordure p-2 text-[12px]">
+                <div className="font-medium">L’étage reviendra à :</div>
+                {ap.etat_avant.length === 0 ? (
+                  <div className="text-attenue-texte">vide</div>
+                ) : (
+                  <ul className="m-0 list-none p-0">
+                    {ap.etat_avant.map((e) => (
+                      <li key={`${e.code_reference}-${e.lot_fournisseur}`}>
+                        {e.code_reference} · {e.lot_fournisseur || 'sans lot'} — {e.nb_bobines} bobines,{' '}
+                        {nb(e.kg, 1)} kg
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {(ap.mouvements ?? []).length > 0 && (
+                  <>
+                    <div className="mt-1.5 font-medium">Mouvements magasin annulés :</div>
+                    <ul className="m-0 list-none p-0">
+                      {(ap.mouvements ?? []).map((m) => (
+                        <li key={m.numero_mouvement}>
+                          {m.numero_mouvement} ({m.code_type_mvt === 'CHARGE_MACHINE' ? 'chargement' : 'retour'},{' '}
+                          {m.code_magasin}) — {nb(m.kg, 1)} kg
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )
       }

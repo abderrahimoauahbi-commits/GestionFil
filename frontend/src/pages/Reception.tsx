@@ -113,6 +113,8 @@ interface LigneRec extends Record<string, unknown> {
   lot_fournisseur: string | null
   statut_qualite: string
   code_magasin_dest: string
+  derogation_ecart?: number | null
+  motif_derogation?: string | null
   unite_catalogue?: string
   /* LE CONDITIONNEMENT DE LA FICHE, ajoute a la requete : sans lui, la grille
      ne sait pas convertir une pesee en palettes ni en bobines. */
@@ -213,6 +215,8 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
       lot: l.lot_fournisseur ?? '',
       magasin: l.code_magasin_dest,
       qualite: l.statut_qualite,
+      derog: l.derogation_ecart === 1 ? '1' : '',
+      motif_derog: l.motif_derogation ?? '',
     },
   }
 }
@@ -257,6 +261,10 @@ function corpsReception(l: LigneSaisie) {
     lot_fournisseur: e.lot?.trim() || undefined,
     code_magasin_dest: e.magasin,
     statut_qualite: e.qualite,
+    // LA DEROGATION SUR UNE LIGNE DEJA SAISIE (F11, 09/10/2026) : le refus
+    // « ajoutez la derogation » menait nulle part sur une reception existante.
+    derogation_ecart: e.derog === '1',
+    motif_derogation: e.derog === '1' ? e.motif_derog?.trim() || undefined : undefined,
   }
 }
 /**
@@ -582,6 +590,36 @@ export function Reception() {
       ),
     },
     {
+      cle: 'derog',
+      entete: 'Dérogation',
+      largeur: 'w-44',
+      rendu: (l, poser) => (
+        <label className="flex items-center gap-1.5 text-[12px]" title="Un excédent au-delà de la tolérance du fournisseur exige une dérogation motivée">
+          <input
+            type="checkbox"
+            checked={l.extra?.derog === '1'}
+            onChange={(e) => poser(e.target.checked ? '1' : '')}
+            disabled={rec?.statut !== 'BROUILLON'}
+            aria-label="Dérogation à l’écart de pesée"
+          />
+          {l.extra?.derog === '1' && (
+            <Champ
+              value={l.extra?.motif_derog ?? ''}
+              onChange={(e) =>
+                setNouvelles((ls) =>
+                  ls.map((x) => (x.cle === l.cle ? { ...x, extra: { ...x.extra, motif_derog: e.target.value } } : x)),
+                )
+              }
+              placeholder="Motif"
+              className="h-8 min-w-0"
+              disabled={rec?.statut !== 'BROUILLON'}
+              aria-label="Motif de la dérogation"
+            />
+          )}
+        </label>
+      ),
+    },
+    {
       cle: 'qualite',
       entete: 'Qualité',
       largeur: 'w-36',
@@ -686,13 +724,18 @@ export function Reception() {
   })
 
   const changerStatut = useMutation({
-    mutationFn: (statut: string) => api.put(`/api/receptions/${id}/statut`, { statut }),
-    onSuccess: () => {
-      toast.success('Reception soumise au controle qualite')
+    mutationFn: (c: { statut: string; motif?: string }) => api.put(`/api/receptions/${id}/statut`, c),
+    onSuccess: (_r, c) => {
+      toast.success(c.statut === 'BROUILLON' ? 'Réception renvoyée au magasinier' : 'Reception soumise au controle qualite')
+      setRenvoi(null)
       rafraichir()
     },
     onError: echec,
   })
+  /* LE RENVOI AU MAGASINIER (regle 4, 09/10/2026), saisi sur la page : au
+     controle, la pesee est figee ; une erreur se renvoie avec ce qu'il faut
+     corriger, elle ne se corrige pas par celui qui validera. */
+  const [renvoi, setRenvoi] = useState<string | null>(null)
 
   const confirmation = useConfirmation()
   const valider = useMutation({
@@ -898,7 +941,11 @@ export function Reception() {
     )
   }
 
-  const estPeseur = rec.receptionnaire === moi?.login
+  /* B4 : celui qui a pese EN DERNIER ne valide pas (regle 4) — la base le
+     refuse ; l'ecran le dit avant. */
+  const estPeseur = rec.id_utilisateur_pesee
+    ? rec.id_utilisateur_pesee === moi?.id
+    : rec.receptionnaire === moi?.login
 
   return (
     <div>
@@ -916,7 +963,7 @@ export function Reception() {
             {droits.peutEcrire && rec.statut === 'BROUILLON' && (
               <Bouton
                 variante="contour"
-                onClick={() => changerStatut.mutate('A_CONTROLER')}
+                onClick={() => changerStatut.mutate({ statut: 'A_CONTROLER' })}
                 disabled={lignes.length === 0 || enteteModifie}
                 title={
                   lignes.length === 0
@@ -966,12 +1013,18 @@ export function Reception() {
                 disabled={estPeseur}
                 title={
                   estPeseur
-                    ? 'B4 : le peseur ne peut pas controler sa propre reception'
+                    ? 'B4 : vous avez pesé ou corrigé cette réception — un autre la valide'
                     : 'Entree en stock, CMUP, archive et historique de prix'
                 }
               >
                 <ShieldCheck />
                 Valider le controle
+              </Bouton>
+            )}
+            {droits.peutEcrire && rec.statut === 'A_CONTROLER' && renvoi === null && (
+              <Bouton variante="contour" onClick={() => setRenvoi('')}>
+                <ArrowLeft />
+                Renvoyer au magasinier
               </Bouton>
             )}
             {confirmation.element}
@@ -989,6 +1042,45 @@ export function Reception() {
         }
       />
 
+      {renvoi !== null && (
+        <Carte className="mb-3">
+          <CarteCorps className="flex flex-wrap items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <Etiq obligatoire>Ce que le magasinier doit corriger</Etiq>
+              <Champ
+                autoFocus
+                value={renvoi}
+                onChange={(e) => setRenvoi(e.target.value)}
+                placeholder="Ex. : repeser la ligne 3, le poids ne correspond pas au BL"
+              />
+            </div>
+            <Bouton variante="contour" onClick={() => setRenvoi(null)}>
+              Annuler
+            </Bouton>
+            <Bouton
+              disabled={renvoi.trim().length < 5}
+              chargement={changerStatut.isPending}
+              onClick={() => changerStatut.mutate({ statut: 'BROUILLON', motif: renvoi.trim() })}
+            >
+              Renvoyer
+            </Bouton>
+          </CarteCorps>
+        </Carte>
+      )}
+      {rec.statut === 'BROUILLON' && typeof rec.motif_renvoi === 'string' && rec.motif_renvoi && (
+        <Alerte ton="alerte" titre="Renvoyée au magasinier" className="mb-3">
+          {String(rec.motif_renvoi)}
+          {rec.renvoye_par ? ` — ${String(rec.renvoye_par)}` : ''}
+          {rec.date_renvoi ? `, ${fmt.date(String(rec.date_renvoi))}` : ''}. Corrigez la pesée, puis
+          soumettez de nouveau au contrôle.
+        </Alerte>
+      )}
+      {rec.statut === 'A_CONTROLER' && (
+        <Alerte ton="info" className="mb-3">
+          Au contrôle, la pesée est figée : seuls la qualité, la destination et les notes se modifient. Une
+          erreur de pesée se renvoie au magasinier.
+        </Alerte>
+      )}
       {!modifiable && !['ANNULE'].includes(rec.statut) && (
         <Alerte ton={rec.statut === 'VALIDE' || rec.statut === 'CLOTURE' ? 'succes' : 'info'} className="mb-3">
           {rec.statut === 'CLOTURE'

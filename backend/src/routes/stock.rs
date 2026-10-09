@@ -3267,6 +3267,9 @@ pub async fn lister_receptions(
                 COALESCE(bc.date_bc, p.date_bc)                             AS date_bc,
                 COALESCE(bc.date_livraison_prevue, p.date_livraison_prevue) AS date_livraison_prevue,
                 up.login AS receptionnaire, uc.login AS controleur,
+                -- Le renvoi au magasinier (regle 4) : qui, et le dernier peseur.
+                (SELECT u.login FROM utilisateur u WHERE u.id_utilisateur = rc.id_utilisateur_renvoi) AS renvoye_par,
+                (SELECT u.login FROM utilisateur u WHERE u.id_utilisateur = rc.id_utilisateur_pesee) AS peseur,
                 (SELECT COUNT(*) FROM ligne_reception l WHERE l.id_reception = rc.id_reception) AS nb_lignes,
 
                 CAST(((rc.date_reception)::date - (COALESCE(substr(bc.date_bc, 1, 10), p.date_bc))::date) AS bigint)
@@ -4060,6 +4063,24 @@ pub async fn ajouter_ligne_reception(
 #[derive(Debug, Deserialize)]
 pub struct StatutReception {
     pub statut: String,
+    /// Le motif du renvoi au magasinier (A_CONTROLER -> BROUILLON).
+    #[serde(default)]
+    pub motif: Option<String>,
+}
+
+/// LE RENVOI AU MAGASINIER (regle 4, 09/10/2026) : un controleur qui voit une
+/// erreur de pesee ne la corrige plus lui-meme — il renvoie, avec le motif que
+/// le magasinier lira en ouvrant la reception.
+pub(crate) fn motif_de_renvoi(motif: Option<&str>) -> AppResult<String> {
+    let m = motif.map(str::trim).unwrap_or("");
+    if m.chars().count() < 5 {
+        return Err(AppError::Invalide(
+            "Dites au magasinier ce qu'il doit corriger (5 caracteres au moins) : il le lira en \
+             ouvrant la reception."
+                .into(),
+        ));
+    }
+    Ok(m.to_string())
 }
 
 /// Fait avancer la reception dans son workflow.
@@ -4120,6 +4141,20 @@ pub async fn changer_statut_reception(
         crate::domain::reception::exiger_bobines_comptees(&mut tx, &id).await?;
     }
 
+    if actuel == "A_CONTROLER" && s.statut == "BROUILLON" {
+        let motif = motif_de_renvoi(s.motif.as_deref())?;
+        sqlx::query(
+            "UPDATE reception SET motif_renvoi = $2, id_utilisateur_renvoi = $3,
+                    date_renvoi = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+              WHERE id_reception = $1",
+        )
+        .bind(&id)
+        .bind(&motif)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     // Le trigger de transition refuse tout enchainement non prevu.
     let res = sqlx::query("UPDATE reception SET statut = $2 WHERE id_reception = $1")
         .bind(&id)
@@ -4154,6 +4189,9 @@ pub async fn supprimer_ligne_reception(
             "Une reception validee est figee : ses lignes ont deja alimente le stock.".into(),
         ));
     }
+    if statut == "A_CONTROLER" {
+        return Err(AppError::RegleMetier(PESEE_FIGEE.into()));
+    }
 
     let res = sqlx::query("DELETE FROM ligne_reception WHERE id_ligne_reception = $1")
         .bind(&ligne)
@@ -4166,6 +4204,10 @@ pub async fn supprimer_ligne_reception(
 
     Ok(Json(json!({ "supprime": true })))
 }
+
+/// Le refus commun : au controle, on renvoie, on ne corrige pas.
+const PESEE_FIGEE: &str = "Au controle, la pesee est figee : celui qui valide n'est pas celui qui pese. \
+     Renvoyez la reception au magasinier, avec ce qu'il doit corriger ; il la resoumettra.";
 
 /// Ce qu'une ligne de reception peut encore corriger.
 ///
@@ -4181,6 +4223,12 @@ pub async fn supprimer_ligne_reception(
 /// en retirant la ligne et en la ressaisissant, ce que l'ecran sait faire.
 #[derive(Debug, Deserialize)]
 pub struct ModifLigneReception {
+    /// La derogation a l'ecart de pesee, posee ou retiree sur une ligne existante
+    /// (F11, 09/10/2026) : le message de refus la demandait, rien ne la posait.
+    #[serde(default)]
+    pub derogation_ecart: Option<bool>,
+    #[serde(default)]
+    pub motif_derogation: Option<String>,
     pub unite_saisie: Option<String>,
     pub quantite_pesee_unite: Option<f64>,
     pub quantite_bl_kg: Option<f64>,
@@ -4220,10 +4268,14 @@ pub async fn modifier_ligne_reception(
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
 
     // L'etat AVANT correction, et celui de la reception qui la porte.
-    let (statut, code_reference, unite_actuelle, qte_actuelle): (String, String, String, f64) =
-        sqlx::query_as(
+    #[allow(clippy::type_complexity)]
+    let (statut, code_reference, unite_actuelle, qte_actuelle, bob_act, pal_act, lot_act, bl_act, colis_act, derog_act): (
+        String, String, String, f64, Option<i64>, Option<f64>, Option<String>, Option<f64>, Option<i64>, i64,
+    ) = sqlx::query_as(
             "SELECT rc.statut, lr.code_reference, lr.unite_saisie,
-                    lr.quantite_pesee_unite::float8
+                    lr.quantite_pesee_unite::float8, lr.nb_bobines_saisi::bigint,
+                    lr.nb_palettes_saisi::float8, lr.lot_fournisseur, lr.quantite_bl_kg::float8,
+                    lr.nb_colis_ligne::bigint, COALESCE(lr.derogation_ecart, 0)::bigint
                FROM ligne_reception lr
                JOIN reception rc ON rc.id_reception = lr.id_reception
               WHERE lr.id_ligne_reception = $1 AND lr.id_reception = $2",
@@ -4241,6 +4293,28 @@ pub async fn modifier_ligne_reception(
         return Err(AppError::RegleMetier(
             "Une reception validee est figee : ses lignes ont deja alimente le stock.".into(),
         ));
+    }
+    // AU CONTROLE, LA PESEE EST FIGEE (regle 4, 09/10/2026). Le controleur y
+    // pose la qualite, la destination, une note ; les quantites, les bobines,
+    // le lot et la derogation restent ceux du magasinier. Un formulaire renvoie
+    // toute la ligne : seul un CHANGEMENT est refuse.
+    if statut == "A_CONTROLER" {
+        let change_f = |n: Option<f64>, a: Option<f64>| n.is_some_and(|n| a.is_none_or(|a| (n - a).abs() > 1e-9));
+        let change_i = |n: Option<i64>, a: Option<i64>| n.is_some_and(|n| Some(n) != a);
+        let change_t = |n: &Option<String>, a: &Option<String>| {
+            n.as_deref().map(str::trim).filter(|t| !t.is_empty()).is_some_and(|t| Some(t) != a.as_deref())
+        };
+        if change_f(m.quantite_pesee_unite, Some(qte_actuelle))
+            || m.unite_saisie.as_deref().is_some_and(|u| u != unite_actuelle)
+            || change_i(m.nb_bobines, bob_act)
+            || change_f(m.nb_palettes, pal_act)
+            || change_t(&m.lot_fournisseur, &lot_act)
+            || change_f(m.quantite_bl_kg, bl_act)
+            || change_i(m.nb_colis_ligne, colis_act)
+            || m.derogation_ecart.is_some_and(|d| i64::from(d) != derog_act)
+        {
+            return Err(AppError::RegleMetier(PESEE_FIGEE.into()));
+        }
     }
 
     let unite = m.unite_saisie.clone().unwrap_or(unite_actuelle);
@@ -4271,7 +4345,13 @@ pub async fn modifier_ligne_reception(
              date_peremption    = COALESCE(NULLIF(TRIM($11), ''), date_peremption),
              statut_qualite     = COALESCE(NULLIF(TRIM($12), ''), statut_qualite),
              code_magasin_dest  = COALESCE(NULLIF(TRIM($13), ''), code_magasin_dest),
-             notes              = COALESCE(NULLIF(TRIM($14), ''), notes)
+             notes              = COALESCE(NULLIF(TRIM($14), ''), notes),
+             derogation_ecart   = COALESCE($17::bigint, derogation_ecart),
+             motif_derogation   = CASE WHEN $17::bigint = 0 THEN NULL
+                                       ELSE COALESCE(NULLIF(TRIM($18), ''), motif_derogation) END,
+             id_utilisateur_derogation = CASE WHEN $17::bigint = 1 THEN $19
+                                              WHEN $17::bigint = 0 THEN NULL
+                                              ELSE id_utilisateur_derogation END
           WHERE id_ligne_reception = $1 AND id_reception = $2",
     )
     .bind(&ligne)
@@ -4290,6 +4370,9 @@ pub async fn modifier_ligne_reception(
     .bind(&m.notes)
     .bind(m.nb_palettes)
     .bind(m.nb_bobines)
+    .bind(m.derogation_ecart.map(i64::from))
+    .bind(&m.motif_derogation)
+    .bind(&user.id)
     .execute(&mut *tx)
     .await?;
 

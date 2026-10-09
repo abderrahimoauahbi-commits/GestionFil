@@ -1285,7 +1285,9 @@ pub async fn lire_reception(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Lire).await?;
     let entete = sqlx::query(
-        "SELECT r.*, uc.login AS cree_par, uv.login AS valide_par
+        "SELECT r.*, uc.login AS cree_par, uv.login AS valide_par,
+                (SELECT u.login FROM utilisateur u WHERE u.id_utilisateur = r.id_utilisateur_renvoi) AS renvoye_par,
+                (SELECT u.login FROM utilisateur u WHERE u.id_utilisateur = r.id_utilisateur_pesee) AS peseur
            FROM import_receptions r
            LEFT JOIN utilisateur uc ON uc.id_utilisateur = r.id_utilisateur_creation
            LEFT JOIN utilisateur uv ON uv.id_utilisateur = r.id_utilisateur_validation
@@ -1416,6 +1418,9 @@ pub async fn modifier_reception(
 #[derive(Deserialize)]
 pub struct StatutReceptionImport {
     statut: String,
+    /// Le motif du renvoi au magasinier (A_CONTROLER -> BROUILLON, regle 4).
+    #[serde(default)]
+    motif: Option<String>,
 }
 
 /// `PUT /api/import/receptions/{id}/statut` — soumettre au controle
@@ -1477,6 +1482,22 @@ pub async fn changer_statut_reception(
                 manquantes.join(", ")
             )));
         }
+    }
+    if s.statut == "BROUILLON" {
+        // RENVOYER, PAS REPESER SOI-MEME (regle 4) : le motif dit au magasinier ce
+        // qu'il corrige ; s'il ne le fait pas lui-meme, celui qui repese ne
+        // validera pas (la base le refuse a l'auteur de la derniere pesee).
+        let motif = crate::routes::stock::motif_de_renvoi(s.motif.as_deref())?;
+        sqlx::query(
+            "UPDATE import_receptions SET motif_renvoi = $2, id_utilisateur_renvoi = $3,
+                    date_renvoi = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+              WHERE id_reception = $1",
+        )
+        .bind(&id)
+        .bind(&motif)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
     }
     sqlx::query("UPDATE import_receptions SET statut = $2 WHERE id_reception = $1")
         .bind(&id)

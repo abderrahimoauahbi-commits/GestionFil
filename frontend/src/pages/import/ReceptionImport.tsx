@@ -96,6 +96,11 @@ interface ReceptionLue {
     cree_par: string | null
     valide_par: string | null
     date_validation: string | null
+    /* Le renvoi au magasinier et le dernier peseur (regle 4, 09/10/2026). */
+    motif_renvoi?: string | null
+    renvoye_par?: string | null
+    date_renvoi?: string | null
+    peseur?: string | null
   }
   lignes: {
     id_ligne: string
@@ -266,7 +271,11 @@ export function ReceptionImport() {
   const peseeOuverte = editable && statut === 'BROUILLON'
   const peutSoumettre = !nouvelle && statut === 'BROUILLON' && peut('RECEPTIONS', 'ECRIRE')
   const peutValider = statut === 'A_CONTROLER' && peut('RECEPTIONS', 'VALIDER')
-  const estSaisisseur = !!moi && qReception.data?.reception.cree_par === moi.login
+  /* B4 : celui qui a pese EN DERNIER ne valide pas (regle 4) ; a defaut, le saisisseur. */
+  const estSaisisseur =
+    !!moi && (qReception.data?.reception.peseur ?? qReception.data?.reception.cree_par) === moi.login
+  /* LE RENVOI AU MAGASINIER, saisi sur la page : au controle, la pesee est figee. */
+  const [renvoi, setRenvoi] = useState<string | null>(null)
 
   // Ce qu'on peut encore ajouter : ce qui reste, moins ce qui est deja dans la reception.
   const restants = useMemo(
@@ -440,11 +449,15 @@ export function ReceptionImport() {
   const changerStatut = useMutation({
     mutationFn: async (cible: 'A_CONTROLER' | 'BROUILLON') => {
       const id = await sauver()
-      await api.put(`/api/import/receptions/${id}/statut`, { statut: cible })
+      await api.put(`/api/import/receptions/${id}/statut`, {
+        statut: cible,
+        motif: cible === 'BROUILLON' ? renvoi?.trim() : undefined,
+      })
       return { id, cible }
     },
     onSuccess: ({ id, cible }) => {
-      toast.success(cible === 'A_CONTROLER' ? 'Réception soumise au contrôle' : 'Réception rouverte en brouillon')
+      setRenvoi(null)
+      toast.success(cible === 'A_CONTROLER' ? 'Réception soumise au contrôle' : 'Réception renvoyée au magasinier')
       rafraichir()
       setModifie(false)
       if (nouvelle) naviguer(`/receptions-import/${id}`, { replace: true })
@@ -502,15 +515,14 @@ export function ReceptionImport() {
                 Soumettre au contrôle
               </Bouton>
             )}
-            {statut === 'A_CONTROLER' && peut('RECEPTIONS', 'ECRIRE') && (
+            {statut === 'A_CONTROLER' && peut('RECEPTIONS', 'ECRIRE') && renvoi === null && (
               <Bouton
                 variante="contour"
-                chargement={changerStatut.isPending}
-                title="Repasser en brouillon pour corriger la pesée"
-                onClick={() => changerStatut.mutate('BROUILLON')}
+                title="Renvoyer au magasinier, avec ce qu’il doit corriger"
+                onClick={() => setRenvoi('')}
               >
                 <RotateCcw />
-                Rouvrir la pesée
+                Renvoyer au magasinier
               </Bouton>
             )}
             {peutValider && (
@@ -570,6 +582,39 @@ export function ReceptionImport() {
         <Alerte ton="info">
           Brouillon enregistré. Soumettez-le au contrôle : un autre compte, qui a le droit de valider,
           portera le verdict qualité et fera entrer la marchandise en stock.
+        </Alerte>
+      )}
+      {renvoi !== null && (
+        <Carte>
+          <CarteCorps className="flex flex-wrap items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <Etiq obligatoire>Ce que le magasinier doit corriger</Etiq>
+              <Champ
+                autoFocus
+                value={renvoi}
+                onChange={(e) => setRenvoi(e.target.value)}
+                placeholder="Ex. : recompter les bobines de la facture TRK-0459"
+              />
+            </div>
+            <Bouton variante="contour" onClick={() => setRenvoi(null)}>
+              Annuler
+            </Bouton>
+            <Bouton
+              disabled={renvoi.trim().length < 5}
+              chargement={changerStatut.isPending}
+              onClick={() => changerStatut.mutate('BROUILLON')}
+            >
+              Renvoyer
+            </Bouton>
+          </CarteCorps>
+        </Carte>
+      )}
+      {statut === 'BROUILLON' && r?.motif_renvoi && (
+        <Alerte ton="alerte" titre="Renvoyée au magasinier">
+          {r.motif_renvoi}
+          {r.renvoye_par ? ` — ${r.renvoye_par}` : ''}
+          {r.date_renvoi ? `, ${fmt.date(r.date_renvoi)}` : ''}. Corrigez la pesée, puis soumettez de nouveau au
+          contrôle.
         </Alerte>
       )}
       {statut === 'A_CONTROLER' && (
@@ -944,7 +989,9 @@ export function ReceptionImport() {
         </Carte>
       )}
 
-      {editable && !nouvelle && (
+      {/* UN BROUILLON SEULEMENT (U4, 09/10/2026) : le serveur refuse de supprimer
+          une reception soumise au controle ; le bouton ne la propose plus. */}
+      {editable && !nouvelle && statut === 'BROUILLON' && (
         <div className="flex justify-start">
           <Bouton variante="contour" className="text-danger"
             onClick={() =>

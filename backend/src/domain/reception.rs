@@ -242,6 +242,9 @@ pub async fn valider(
         ));
     }
     verifier_ecarts_courants(&mut tx, id_reception).await?;
+    // LES BOBINES SE REVERIFIENT A LA VALIDATION (regle 4, 09/10/2026) : elles
+    // ne l'etaient qu'a la soumission, et un compte remis a zero passait.
+    exiger_bobines_comptees(&mut tx, id_reception).await?;
 
     // Ponctualite : chaque ligne se juge contre la promesse de SON bon. Deux
     // bons du meme fournisseur n'ont pas la meme date, et archiver un retard

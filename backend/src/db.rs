@@ -248,6 +248,17 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c48')",
     ),
     (
+        // Le controle des receptions : renvoi motive, dernier peseur.
+        "2026-10-09f_controle_reception.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reception'
+                           AND column_name = 'motif_renvoi')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_receptions'
+                           AND column_name = 'motif_renvoi')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_reception_valideur_pas_peseur')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

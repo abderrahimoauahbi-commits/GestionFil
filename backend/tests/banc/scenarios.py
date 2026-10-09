@@ -690,6 +690,42 @@ def scenario_sortie_hors_machine(c, infra):
     verifier(controle(infra, "C11") == 0 and controle(infra, "C47") == 0, "C11 ou C47 apres les sorties hors machine")
 
 
+def scenario_controle_reception(c, infra):
+    """Regle 4 (09/10) : au controle la pesee est figee ; le controleur renvoie au magasinier avec un
+    motif ; celui qui a pese en dernier ne valide pas ; les corrections sont au journal ; la derogation
+    se pose sur une ligne existante."""
+    id_bc, lignes = bon_envoye(c, [(REF, 1000, 20.0)])
+    lb = lignes[0]
+    r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-CTL", "lignes": [
+        {"code_reference": REF, "id_ligne_bc": lb["id_ligne_bc"], "unite_saisie": "kg",
+         "quantite_pesee_unite": 990, "code_magasin_dest": MAG}]})
+    rid = r["id_reception"]
+    ligne = infra.valeur(f"SELECT id_ligne_reception FROM ligne_reception WHERE id_reception = '{rid}'")
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    # Au controle : la pesee est figee, la qualite non.
+    c.refus("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 980},
+            contient="figee")
+    c.ok("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"statut_qualite": "CONFORME"})
+    # Le renvoi exige un motif.
+    c.refus("Choukri", "PUT", f"/api/receptions/{rid}/statut", {"statut": "BROUILLON"}, contient="corriger")
+    c.ok("Choukri", "PUT", f"/api/receptions/{rid}/statut", {"statut": "BROUILLON", "motif": "Repeser : 980 kg au BL"})
+    verifier(infra.valeur(f"SELECT motif_renvoi FROM reception WHERE id_reception = '{rid}'") == "Repeser : 980 kg au BL",
+             "le motif du renvoi n'est pas garde")
+    # Un excedent au-dela de la tolerance se pose avec sa derogation, sur la ligne existante.
+    c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 1100})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}",
+         {"quantite_pesee_unite": 1100, "derogation_ecart": True, "motif_derogation": "Excedent accepte par l'acheteur"})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 980, "derogation_ecart": False})
+    # Choukri corrige lui-meme en brouillon : il devient le dernier peseur et ne valide plus.
+    c.ok("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 981})
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.refus("Choukri", "POST", f"/api/receptions/{rid}/valider", contient="pese")
+    c.ok("Mohamed", "POST", f"/api/receptions/{rid}/valider")
+    verifier(int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'ligne_reception' "
+                              f"AND operation = 'UPDATE' AND id_enregistrement = '{ligne}'")) >= 3,
+             "les corrections de pesee ne sont pas au journal")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -739,5 +775,6 @@ SCENARIOS = [
     scenario_concurrence_numerotation,
     scenario_gardes_p1,
     scenario_sortie_hors_machine,
+    scenario_controle_reception,
     scenario_controles_finaux,
 ]

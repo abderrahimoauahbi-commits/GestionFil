@@ -70,8 +70,10 @@ def main():
     source = option("--depuis")
     if not source:
         sys.exit("--depuis <base> est obligatoire (une copie entierement migree).")
-    if source == "gestionfil":
-        sys.exit("Pas la base vivante : generez le socle depuis une copie (pg_dump -> base de repetition).")
+    # Ni la base vivante, ni celle du serveur de demonstration sur 8080 (audit
+    # v5, T9) : une copie migree, faite pour cela.
+    if source in ("gestionfil", "gestionfil_demo"):
+        sys.exit(f"Pas {source} : generez le socle depuis une copie (pg_dump -> base de repetition).")
     cible = ["-h", option("--hote", "127.0.0.1"), "-U", option("--utilisateur", "postgres"), "-d", source]
     env = dict(os.environ)
     mdp = option("--motdepasse", os.environ.get("PGPASSWORD"))

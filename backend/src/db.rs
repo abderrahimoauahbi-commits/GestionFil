@@ -293,6 +293,12 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Une reception cloturee ne se rouvre plus (transition retiree).
+        "2026-10-09w_reception_cloturee_definitive.sql",
+        "SELECT NOT EXISTS (SELECT 1 FROM transition_statut WHERE entite = 'reception'
+                              AND statut_source = 'CLOTURE' AND statut_cible = 'A_CONTROLER')",
+    ),
+    (
         // L'historique des prix suit la revalidation (revisions, vue courante).
         "2026-10-09v_historique_prix_revise.sql",
         "SELECT to_regclass('public.historique_prix_revision') IS NOT NULL

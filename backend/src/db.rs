@@ -259,6 +259,14 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_reception_valideur_pas_peseur')",
     ),
     (
+        // Avoirs types et retours dans la cloture : le service lit v_retours_reception.
+        "2026-10-09g_avoirs_retours.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_retours_reception')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reception_ajustements_cmup'
+                           AND column_name = 'id_mouvement_retour')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

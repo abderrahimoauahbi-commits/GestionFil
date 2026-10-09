@@ -161,6 +161,9 @@ pub struct FactureReception {
     pub frais_mad: f64,
     #[serde(default)]
     pub simuler: bool,
+    /// Des kilos ont ete rendus : facture nette (kilos gardes) ou brute (regle 3).
+    #[serde(default)]
+    pub facture_nette: Option<bool>,
 }
 
 /// `POST /api/receptions/{id}/cloturer` — la facture du fournisseur arrive :
@@ -197,6 +200,7 @@ pub async fn cloturer_reception(
     let mut receptions = vec![id.clone()];
     receptions.extend(f.autres_receptions.iter().cloned());
     let facture = facture_locale::FactureLocale {
+        nette: f.facture_nette,
         numero_facture: f.numero_facture.clone(),
         receptions,
         code_devise: devise,
@@ -248,7 +252,18 @@ pub async fn contexte_facture_reception(
     .bind(&devise)
     .fetch_all(&mut *c)
     .await?;
+    // LES RETOURS NON SOLDES (regle 3) : l'ecran demande alors si la facture est
+    // nette (kilos gardes) ou brute (un avoir pour retour suivra).
+    let retours: Vec<(String, String, f64)> = sqlx::query_as(
+        "SELECT numero_mouvement, code_reference, kg::float8 FROM v_retours_reception
+          WHERE id_reception = $1 AND NOT solde ORDER BY numero_mouvement, code_reference",
+    )
+    .bind(&id)
+    .fetch_all(&mut *c)
+    .await?;
     let mut v = json!({
+        "retours": retours.iter().map(|(n, r, kg)| json!({"numero_mouvement": n, "code_reference": r, "kg": kg}))
+            .collect::<Vec<_>>(),
         "code_devise": devise,
         "taux_reference": reference.as_ref().map(|r| r.valeur),
         "source_taux": reference.map(|r| r.source),
@@ -262,8 +277,12 @@ pub async fn contexte_facture_reception(
 
 #[derive(Debug, Deserialize)]
 pub struct CorrectionReception {
-    /// AVOIR (la valeur baisse) ou COMPLEMENT (elle monte).
+    /// AVOIR de prix (la valeur du stock baisse), AVOIR_RETOUR (rapproche des
+    /// retours, sans effet sur le CMUP) ou COMPLEMENT (elle monte).
     pub nature: String,
+    /// L'avoir ou le complement peut viser une seule reference.
+    #[serde(default)]
+    pub code_reference: Option<String>,
     pub numero_piece: String,
     pub montant_mad: f64,
     pub motif: String,
@@ -282,7 +301,8 @@ pub async fn corriger_reception(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
     let mut v = facture_locale::corriger(
-        &state.db, &user, &id, &c.nature, &c.numero_piece, c.montant_mad, &c.motif, c.simuler,
+        &state.db, &user, &id, &c.nature, &c.numero_piece, c.montant_mad, &c.motif,
+        c.code_reference.as_deref(), c.simuler,
     )
     .await?;
     user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;

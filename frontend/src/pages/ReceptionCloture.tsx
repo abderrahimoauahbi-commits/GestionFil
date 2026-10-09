@@ -53,6 +53,8 @@ interface Resultat {
 }
 
 interface Contexte {
+  /** Les kilos rendus au fournisseur, pas encore soldes (regle 3). */
+  retours?: { numero_mouvement: string; code_reference: string; kg: number }[]
   code_devise: string
   taux_reference: number | null
   source_taux: string | null
@@ -128,6 +130,8 @@ export function ClotureFacture({
     frais: '',
   })
   const [autres, setAutres] = useState<string[]>([])
+  /* DES KILOS ONT ETE RENDUS (regle 3, 09/10/2026) : la facture les porte-t-elle ? */
+  const [nette, setNette] = useState<'' | 'oui' | 'non'>('')
   const [confirmerTaux, setConfirmerTaux] = useState(false)
   const [apercu, setApercu] = useState<Resultat | null>(null)
 
@@ -154,10 +158,16 @@ export function ClotureFacture({
     confirmer_taux: confirmerTaux,
     autres_receptions: autres,
     frais_mad: f.frais.trim() ? nb(f.frais) : 0,
+    facture_nette: nette === '' ? undefined : nette === 'oui',
     simuler,
   })
+  const retours = qCtx.data?.retours ?? []
   const complet =
-    contexteLu && f.numero.trim() !== '' && nb(f.montant) > 0 && (!enDevise || (tauxEffectif ?? 0) > 0)
+    contexteLu &&
+    f.numero.trim() !== '' &&
+    nb(f.montant) > 0 &&
+    (!enDevise || (tauxEffectif ?? 0) > 0) &&
+    (retours.length === 0 || nette !== '')
   const surEchec = (e: unknown) => {
     // Un taux loin du cours : l'ecran propose la confirmation au lieu d'un refus sec.
     if (e instanceof ErreurApi && e.message.startsWith('TAUX-ECART')) {
@@ -209,6 +219,24 @@ export function ClotureFacture({
       </CarteEntete>
       <CarteCorps className="space-y-3">
         <PanneRequetes requetes={[['La devise et le cours de la réception', qCtx]]} />
+        {retours.length > 0 && (
+          <Alerte ton="alerte" titre="Des kilos ont été rendus au fournisseur">
+            <p className="m-0">
+              {retours.map((r) => `${r.numero_mouvement} : ${r.code_reference} ${fmt.nombre(r.kg, 1)} kg`).join(' · ')}.
+              Leur valeur est déjà sortie du stock. La facture porte-t-elle sur ces kilos ?
+            </p>
+            <div className="mt-2 flex flex-wrap gap-4 text-[13px]">
+              <label className="flex items-center gap-1.5">
+                <input type="radio" name="nette" checked={nette === 'oui'} onChange={() => { setNette('oui'); setApercu(null) }} />
+                Non : facture nette, sur les kilos gardés
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="radio" name="nette" checked={nette === 'non'} onChange={() => { setNette('non'); setApercu(null) }} />
+                Oui : facture brute, un avoir pour retour suivra
+              </label>
+            </div>
+          </Alerte>
+        )}
         <p className="text-[12.5px] text-attenue-texte">
           La marchandise est entrée au prix du bon. La facture et ses frais donnent la valeur définitive : la
           différence va aux lots de la réception encore en stock, là où ils sont ; la part des kilos déjà sortis
@@ -312,14 +340,28 @@ export function ClotureFacture({
 export function CorrectionFacture({ idReception, surCorrection }: { idReception: string; surCorrection: () => void }) {
   const qc = useQueryClient()
   const [ouvert, setOuvert] = useState(false)
-  const [c, setC] = useState({ nature: 'AVOIR', piece: '', montant: '', motif: '' })
-  const [apercu, setApercu] = useState<(Pick<Resultat, 'references' | 'difference_mad' | 'au_stock_mad' | 'ecart_prix_mad'>) | null>(null)
+  const [c, setC] = useState({ nature: 'AVOIR', piece: '', montant: '', motif: '', reference: '' })
+  const [apercu, setApercu] = useState<
+    | (Pick<Resultat, 'references' | 'difference_mad' | 'au_stock_mad' | 'ecart_prix_mad'> & {
+        valeur_retours_mad?: number
+      })
+    | null
+  >(null)
+  /* Les references de la reception : un avoir peut n'en viser qu'une (U6). */
+  const qLignes = useQuery({
+    queryKey: ['reception-lignes-refs', idReception],
+    queryFn: () => api.get<{ code_reference: string }[]>(`/api/receptions/${idReception}/lignes`),
+    enabled: ouvert,
+  })
+  const references = [...new Set((qLignes.data ?? []).map((l) => l.code_reference))]
+  const pourRetour = c.nature === 'AVOIR_RETOUR'
 
   const corps = (simuler: boolean) => ({
     nature: c.nature,
     numero_piece: c.piece.trim(),
     montant_mad: nb(c.montant),
     motif: c.motif.trim(),
+    code_reference: !pourRetour && c.reference ? c.reference : undefined,
     simuler,
   })
   const complet = c.piece.trim() !== '' && nb(c.montant) > 0 && c.motif.trim().length >= 5
@@ -331,12 +373,12 @@ export function CorrectionFacture({ idReception, surCorrection }: { idReception:
   const enregistrer = useMutation({
     mutationFn: () => api.post<Resultat>(`/api/receptions/${idReception}/avoir`, corps(false)),
     onSuccess: (r) => {
-      toast.success(c.nature === 'AVOIR' ? 'Avoir enregistré' : 'Facture complémentaire enregistrée', {
+      toast.success(c.nature === 'COMPLEMENT' ? 'Facture complémentaire enregistrée' : 'Avoir enregistré', {
         description: `${signe(r.difference_mad)} MAD — ${signe(r.au_stock_mad)} au stock, ${signe(r.ecart_prix_mad)} en écart de prix.`,
       })
       setOuvert(false)
       setApercu(null)
-      setC({ nature: 'AVOIR', piece: '', montant: '', motif: '' })
+      setC({ nature: 'AVOIR', piece: '', montant: '', motif: '', reference: '' })
       void qc.invalidateQueries()
       surCorrection()
     },
@@ -362,17 +404,32 @@ export function CorrectionFacture({ idReception, surCorrection }: { idReception:
       </CarteEntete>
       <CarteCorps className="space-y-3">
         <p className="text-[12.5px] text-attenue-texte">
-          Un avoir du fournisseur fait baisser la valeur, une facture complémentaire la fait monter. Le montant va aux
-          lots de la réception encore en stock ; le reste en écart de prix.
+          Un avoir de prix fait baisser la valeur du stock restant, une facture complémentaire la fait monter : le
+          montant va aux lots de la réception encore en stock, le reste en écart de prix. Un avoir pour retour se
+          rapproche de la marchandise rendue, déjà sortie du stock : il ne change pas le coût moyen.
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <div>
             <Etiq obligatoire>Nature</Etiq>
             <Selecteur value={c.nature} onChange={maj('nature')}>
-              <option value="AVOIR">Avoir (baisse)</option>
+              <option value="AVOIR">Avoir de prix (la marchandise reste en stock)</option>
+              <option value="AVOIR_RETOUR">Avoir pour retour (marchandise rendue)</option>
               <option value="COMPLEMENT">Facture complémentaire (hausse)</option>
             </Selecteur>
           </div>
+          {!pourRetour && references.length > 1 && (
+            <div>
+              <Etiq>Référence visée</Etiq>
+              <Selecteur value={c.reference} onChange={maj('reference')}>
+                <option value="">Toute la réception</option>
+                {references.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </Selecteur>
+            </div>
+          )}
           <div>
             <Etiq obligatoire>N° de la pièce</Etiq>
             <Champ value={c.piece} onChange={maj('piece')} />
@@ -386,7 +443,13 @@ export function CorrectionFacture({ idReception, surCorrection }: { idReception:
             <Champ value={c.motif} onChange={maj('motif')} placeholder="Remise accordée, erreur de prix sur la facture…" />
           </div>
         </div>
-        {apercu && <TableApercu r={apercu} plusieurs={false} />}
+        {apercu && pourRetour && (
+          <Alerte ton="info">
+            Retours soldés : {fmt.mad(apercu.valeur_retours_mad ?? 0)} au prix du bon, déjà sortis du stock. Écart de
+            prix : {signe(apercu.ecart_prix_mad)} MAD. Le coût moyen ne change pas.
+          </Alerte>
+        )}
+        {apercu && !pourRetour && <TableApercu r={apercu} plusieurs={false} />}
         <div className="flex flex-wrap items-center gap-2">
           <Bouton variante="contour" disabled={!complet} chargement={simuler.isPending} onClick={() => simuler.mutate()}>
             <Eye />

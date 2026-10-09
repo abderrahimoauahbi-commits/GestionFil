@@ -726,6 +726,58 @@ def scenario_controle_reception(c, infra):
              "les corrections de pesee ne sont pas au journal")
 
 
+def scenario_retour_cloture_avoirs(c, infra):
+    """Regle 3 (09/10) : la cloture tient compte des retours (facture nette ou brute), l'avoir pour
+    retour ne touche pas le CMUP, l'avoir de prix ne fait jamais passer le CMUP sous zero (U6)."""
+    ref, mag = "PLA 140 CHE", "Polyfashions"
+
+    def reception_et_retour(bl):
+        id_bc, lignes = bon_envoye(c, [(ref, 1000, 20.0)])
+        rid = reception_validee(c, id_bc, lignes, [1000], mag=mag)
+        numero = infra.valeur(f"SELECT numero_reception FROM reception WHERE id_reception = '{rid}'")
+        code, r = mouvement(c, "Choukri", "RETOUR_FOURN", [(ref, 200)], mag=mag, motif="RETOUR_FOUR",
+                            motif_ligne="R1", reference_document=numero)
+        verifier(code == 200, f"retour de 200 kg refuse : {r}")
+        return rid
+
+    # 1. Facture NETTE : 800 kg x 20 = 16 000 ; aucun ecart, le CMUP reste a 20.
+    rid = reception_et_retour("BL-NET")
+    cm0 = cmup_magasin(infra, ref, mag)
+    c.refus("Choukri", "POST", f"/api/receptions/{rid}/cloturer",
+            {"numero_facture": "F-NET", "montant_facture": 16000}, contient="RETOURS")
+    ap = c.ok("Choukri", "POST", f"/api/receptions/{rid}/cloturer",
+              {"numero_facture": "F-NET", "montant_facture": 16000, "facture_nette": True})
+    verifier(abs(ap["difference_mad"]) < 0.01, f"facture nette : difference {ap['difference_mad']} au lieu de 0")
+    verifier(abs(cmup_magasin(infra, ref, mag) - cm0) < 0.0002, "facture nette : le CMUP a bouge")
+    c.refus("Choukri", "POST", f"/api/receptions/{rid}/avoir",
+            {"nature": "AVOIR_RETOUR", "numero_piece": "AV-R0", "montant_mad": 4000, "motif": "Retour deja deduit"},
+            contient="retour")
+
+    # 2. Facture BRUTE (20 000), puis avoir pour retour a 21 MAD/kg : rien au CMUP, 200 MAD de gain en ecart.
+    rid = reception_et_retour("BL-BRUT")
+    cm0 = cmup_magasin(infra, ref, mag)
+    ap = c.ok("Choukri", "POST", f"/api/receptions/{rid}/cloturer",
+              {"numero_facture": "F-BRUT", "montant_facture": 20000, "facture_nette": False})
+    verifier(abs(ap["difference_mad"]) < 0.01, f"facture brute : difference {ap['difference_mad']} au lieu de 0")
+    av = c.ok("Choukri", "POST", f"/api/receptions/{rid}/avoir",
+              {"nature": "AVOIR_RETOUR", "numero_piece": "AV-R1", "montant_mad": 4200, "motif": "Avoir du retour R1"})
+    verifier(abs(av["ecart_prix_mad"] + 200) < 0.01, f"avoir pour retour : ecart {av['ecart_prix_mad']} au lieu de -200")
+    verifier(abs(cmup_magasin(infra, ref, mag) - cm0) < 0.0002, "l'avoir pour retour a touche le CMUP")
+    c.refus("Choukri", "POST", f"/api/receptions/{rid}/avoir",
+            {"nature": "AVOIR_RETOUR", "numero_piece": "AV-R2", "montant_mad": 4200, "motif": "Deuxieme fois"},
+            contient="retour")
+
+    # 3. U6 : un avoir de prix plus gros que la valeur du stock restant -> CMUP a zero, reste en ecart.
+    av = c.ok("Choukri", "POST", f"/api/receptions/{rid}/avoir",
+              {"nature": "AVOIR", "numero_piece": "AV-X", "montant_mad": 90000, "motif": "Essai d'avoir enorme",
+               "code_reference": ref})
+    verifier(cmup_magasin(infra, ref, mag) >= 0, "le CMUP est passe sous zero")
+    total = float(infra.valeur(f"SELECT sum(montant_mad) FROM reception_ajustements_cmup WHERE id_reception = '{rid}' "
+                               "AND numero_piece = 'AV-X'"))
+    verifier(abs(total + 90000) < 0.05, f"l'avoir de 90 000 n'est pas entierement journalise : {total}")
+    verifier(controle(infra, "C11") == 0, "C11 apres les avoirs")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -776,5 +828,6 @@ SCENARIOS = [
     scenario_gardes_p1,
     scenario_sortie_hors_machine,
     scenario_controle_reception,
+    scenario_retour_cloture_avoirs,
     scenario_controles_finaux,
 ]

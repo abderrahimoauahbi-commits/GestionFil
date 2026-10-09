@@ -52,6 +52,10 @@ pub async fn devise_reception(c: &mut PgConnection, id_reception: &str) -> AppRe
 /// Une facture de fournisseur, deja convertie en MAD par la route (le taux y
 /// est controle contre le cours Bank Al-Maghrib).
 pub struct FactureLocale {
+    /// Des kilos ont ete rendus au fournisseur : la facture porte-t-elle sur les
+    /// seuls kilos gardes (nette, `Some(true)`) ou sur toute la livraison
+    /// (brute, un avoir pour retour suivra, `Some(false)`) ? Sans retour, `None`.
+    pub nette: Option<bool>,
     pub numero_facture: String,
     /// La reception d'ou la facture est saisie, puis les autres qu'elle couvre.
     pub receptions: Vec<String>,
@@ -75,6 +79,71 @@ async fn provisoire(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(
     .bind(id_reception)
     .fetch_all(&mut *c)
     .await?)
+}
+
+/// LES RETOURS FOURNISSEUR NON ENCORE SOLDES d'une reception (regle 3,
+/// 09/10/2026) : (mouvement, numero, reference, kg). Un retour se solde une
+/// fois, par une facture nette ou par un avoir pour retour.
+async fn retours_non_soldes(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(String, String, String, f64)>> {
+    Ok(sqlx::query_as(
+        "SELECT id_mouvement, numero_mouvement, code_reference, kg::float8
+           FROM v_retours_reception
+          WHERE id_reception = $1 AND NOT solde
+          ORDER BY numero_mouvement, code_reference",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *c)
+    .await?)
+}
+
+/// La valeur au prix du bon des kilos rendus, par retour et par reference
+/// (le prix moyen provisoire de la reference dans la reception).
+fn valeur_retours(refs: &[(String, i64, f64)], retours: &[(String, String, String, f64)]) -> Vec<i64> {
+    retours
+        .iter()
+        .map(|(_, _, reference, kg)| {
+            refs.iter()
+                .find(|(r, _, _)| r == reference)
+                .filter(|(_, _, recu)| *recu > 0.0)
+                .map(|(_, v, recu)| ((*v as f64) * kg / recu).round() as i64)
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// Inscrit au journal les retours soldes (nature RETOUR) : par une facture
+/// nette, ou par un avoir pour retour.
+#[allow(clippy::too_many_arguments)]
+async fn solder_retours(
+    c: &mut PgConnection,
+    user: &Utilisateur,
+    id_reception: &str,
+    retours: &[(String, String, String, f64)],
+    valeurs: &[i64],
+    origine: &str,
+    piece: &str,
+    motif: &str,
+) -> AppResult<()> {
+    for ((id_mvt, _, reference, kg), v) in retours.iter().zip(valeurs.iter()) {
+        sqlx::query(
+            "INSERT INTO reception_ajustements_cmup
+                    (id_reception, code_reference, nature, code_magasin, quantite_recue_kg, stock_kg,
+                     montant_mad, id_utilisateur, origine, numero_piece, motif, id_mouvement_retour)
+             VALUES ($1, $2, 'RETOUR', NULL, $3, 0, $4 / 100.0, $5, $6, $7, $8, $9)",
+        )
+        .bind(id_reception)
+        .bind(reference)
+        .bind(*kg)
+        .bind(*v)
+        .bind(&user.id)
+        .bind(origine)
+        .bind(piece)
+        .bind(motif)
+        .bind(id_mvt)
+        .execute(&mut *c)
+        .await?;
+    }
+    Ok(())
 }
 
 /// Refuse une reception dont une entree en stock a ete contre-passee : il n'y
@@ -168,16 +237,30 @@ async fn appliquer(
         } else {
             0
         };
-        let ecart_c = part_c - stock_c;
+        let mut stock_c = stock_c;
+        let mut ecart_c = part_c - stock_c;
 
         let poids: Vec<i64> = stocks.iter().map(|(_, _, _, p)| (p * 10_000.0).round() as i64).collect();
         let parts_mag = repartir_signe(stock_c, &poids);
         let mut magasins = Vec::new();
         for ((magasin, q, cmup, p), p_c) in stocks.iter().zip(parts_mag.iter()) {
             let avant = cmup.unwrap_or(0.0);
+            // LE CMUP NE PASSE JAMAIS SOUS ZERO (U6, 09/10/2026). Un avoir plus
+            // gros que la valeur du stock restant ramenait le CMUP a zero en
+            // silence, alors que le journal gardait le montant entier. Le stock
+            // porte ce qu'il peut ; le reste va en ecart de prix, journalise.
+            let plancher_c = -((avant * q * 100.0).round() as i64);
+            let p_c = if *p_c < plancher_c {
+                let reste = *p_c - plancher_c;
+                stock_c -= reste;
+                ecart_c += reste;
+                plancher_c
+            } else {
+                *p_c
+            };
             // Le CMUP est celui du MAGASIN : la valeur ajoutee se divise par
             // tout ce qu'il porte de la reference.
-            let apres = arrondi_kg((avant + (*p_c as f64 / 100.0) / q).max(0.0));
+            let apres = arrondi_kg((avant + (p_c as f64 / 100.0) / q).max(0.0));
             sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4 WHERE code_reference = $1 AND code_magasin = $2")
                 .bind(code_reference)
                 .bind(magasin)
@@ -199,7 +282,7 @@ async fn appliquer(
             .bind(*p)
             .bind(*cmup)
             .bind(apres)
-            .bind(*p_c)
+            .bind(p_c)
             .bind(&user.id)
             .bind(origine)
             .bind(piece)
@@ -347,11 +430,42 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
 
     // Les valeurs provisoires, reception par reception.
     let mut valeurs = Vec::new();
+    let mut retours_a_solder = Vec::new();
     for (id, numero, ..) in &entetes {
         exiger_entrees_vivantes(&mut tx, id, numero).await?;
-        let refs = provisoire(&mut tx, id).await?;
+        let mut refs = provisoire(&mut tx, id).await?;
         if refs.is_empty() {
             return Err(AppError::RegleMetier(format!("La reception {numero} n'a fait entrer aucune ligne.")));
+        }
+        // LES KILOS RENDUS AU FOURNISSEUR (regle 3, 09/10/2026) : leur valeur est
+        // deja sortie du stock. Une facture NETTE ne les porte pas : on la compare
+        // a la valeur provisoire diminuee des retours, qui sont alors soldes. Une
+        // facture BRUTE les porte : un avoir pour retour les soldera.
+        let retours = retours_non_soldes(&mut tx, id).await?;
+        if !retours.is_empty() {
+            let liste: Vec<String> =
+                retours.iter().map(|(_, n, r, kg)| format!("{n} {r} {} kg", arrondi_kg(*kg))).collect();
+            match f.nette {
+                None => {
+                    return Err(AppError::RegleMetier(format!(
+                        "RETOURS : des kilos de la reception {numero} ont ete rendus au fournisseur ({}). \
+                         Dites si la facture porte sur les seuls kilos gardes (facture nette) ou sur toute \
+                         la livraison (facture brute : un avoir pour retour suivra).",
+                        liste.join(", ")
+                    )));
+                }
+                Some(true) => {
+                    let vals = valeur_retours(&refs, &retours);
+                    for ((_, _, reference, kg), v) in retours.iter().zip(vals.iter()) {
+                        if let Some(r) = refs.iter_mut().find(|(rf, _, _)| rf == reference) {
+                            r.1 -= v;
+                            r.2 = (r.2 - kg).max(0.0);
+                        }
+                    }
+                    retours_a_solder.push((id.clone(), retours, vals));
+                }
+                Some(false) => {}
+            }
         }
         let total: i64 = refs.iter().map(|(_, v, _)| v).sum();
         valeurs.push((id.clone(), numero.clone(), refs, total));
@@ -426,6 +540,14 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
         ecart_tot += ecart_c;
     }
 
+    for (id, retours, vals) in &retours_a_solder {
+        solder_retours(
+            &mut tx, user, id, retours, vals, "FACTURE_NETTE", numero_facture,
+            "Facture nette : les kilos rendus sont deduits de la valeur provisoire",
+        )
+        .await?;
+    }
+
     let resultat = json!({
         "id_reception": ids[0],
         "numero_reception": valeurs.iter().find(|v| v.0 == ids[0]).map(|v| v.1.clone()),
@@ -455,6 +577,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
 /// facture mal saisie ne se corrigeait plus. Le montant (en MAD, positif) fait
 /// baisser (AVOIR) ou monter (COMPLEMENT) la valeur, par le meme moteur que la
 /// cloture, et se journalise avec son numero de piece et son motif.
+#[allow(clippy::too_many_arguments)]
 pub async fn corriger(
     db: &Db,
     user: &Utilisateur,
@@ -463,12 +586,20 @@ pub async fn corriger(
     numero_piece: &str,
     montant_mad: f64,
     motif: &str,
+    code_reference: Option<&str>,
     simuler: bool,
 ) -> AppResult<Value> {
+    // LE TYPE DE L'AVOIR EST OBLIGATOIRE (regle 3, 09/10/2026) : un avoir de PRIX
+    // (la marchandise reste en stock : son CMUP baisse) n'est pas un avoir POUR
+    // RETOUR (la marchandise est deja sortie : rien ne change au CMUP).
     let signe: i64 = match nature {
-        "AVOIR" => -1,
+        "AVOIR" | "AVOIR_RETOUR" => -1,
         "COMPLEMENT" => 1,
-        autre => return Err(AppError::Invalide(format!("nature inconnue : {autre} (AVOIR ou COMPLEMENT)"))),
+        autre => {
+            return Err(AppError::Invalide(format!(
+                "nature inconnue : {autre} (AVOIR de prix, AVOIR_RETOUR ou COMPLEMENT)"
+            )))
+        }
     };
     let numero_piece = numero_piece.trim();
     let motif = motif.trim();
@@ -497,9 +628,84 @@ pub async fn corriger(
              Avant, c'est la cloture qui porte le montant de la facture."
         )));
     }
-    let refs = provisoire(&mut tx, id_reception).await?;
-    let difference_c = signe * (montant_mad * 100.0).round() as i64;
+    let mut refs = provisoire(&mut tx, id_reception).await?;
     let horodatage = maintenant();
+    if nature == "AVOIR_RETOUR" {
+        // L'AVOIR POUR RETOUR SE RAPPROCHE DES RETOURS NON SOLDES : leur valeur au
+        // prix du bon est deja sortie du stock. Rien ne change au CMUP ; la
+        // difference entre l'avoir et cette valeur est un ecart de prix.
+        let retours = retours_non_soldes(&mut tx, id_reception).await?;
+        if retours.is_empty() {
+            return Err(AppError::RegleMetier(format!(
+                "La reception {numero} n'a aucun retour fournisseur non solde : un avoir pour retour se \
+                 rapproche d'un retour (saisi en « Retour fournisseur » sur cette reception). Pour une \
+                 remise ou une erreur de prix, c'est un avoir de prix."
+            )));
+        }
+        let vals = valeur_retours(&refs, &retours);
+        let couvert_c: i64 = vals.iter().sum();
+        let montant_c = (montant_mad * 100.0).round() as i64;
+        // Signe : le fournisseur credite plus que la valeur rendue -> gain (negatif).
+        let ecart_total_c = couvert_c - montant_c;
+        solder_retours(&mut tx, user, id_reception, &retours, &vals, "AVOIR_RETOUR", numero_piece, motif).await?;
+        let refs_retour: Vec<String> = retours.iter().map(|r| r.2.clone()).collect();
+        let bases: Vec<i64> = refs
+            .iter()
+            .filter(|(r, _, _)| refs_retour.contains(r))
+            .map(|(_, v, _)| (*v).max(1))
+            .collect();
+        let parts = repartir_signe(ecart_total_c, &bases);
+        let mut detail = Vec::new();
+        for ((reference, _, recu), part) in
+            refs.iter().filter(|(r, _, _)| refs_retour.contains(r)).zip(parts.iter())
+        {
+            sqlx::query(
+                "INSERT INTO reception_ajustements_cmup
+                        (id_reception, code_reference, nature, code_magasin, quantite_recue_kg, stock_kg,
+                         montant_mad, id_utilisateur, origine, numero_piece, motif)
+                 VALUES ($1, $2, 'ECART_PRIX', NULL, $3, 0, $4 / 100.0, $5, 'AVOIR_RETOUR', $6, $7)",
+            )
+            .bind(id_reception)
+            .bind(reference)
+            .bind(*recu)
+            .bind(*part)
+            .bind(&user.id)
+            .bind(numero_piece)
+            .bind(motif)
+            .execute(&mut *tx)
+            .await?;
+            detail.push(json!({ "code_reference": reference, "ecart_prix_mad": *part as f64 / 100.0 }));
+        }
+        let resultat = json!({
+            "id_reception": id_reception,
+            "numero_reception": numero,
+            "simulation": simuler,
+            "nature": nature,
+            "numero_piece": numero_piece,
+            "retours": retours.iter().map(|(_, n, r, kg)| json!({"numero_mouvement": n, "code_reference": r, "kg": kg}))
+                .collect::<Vec<_>>(),
+            "valeur_retours_mad": couvert_c as f64 / 100.0,
+            "difference_mad": 0.0,
+            "au_stock_mad": 0.0,
+            "ecart_prix_mad": ecart_total_c as f64 / 100.0,
+            "references": detail,
+        });
+        if simuler {
+            tx.rollback().await?;
+        } else {
+            tx.commit().await?;
+        }
+        return Ok(resultat);
+    }
+    // UN AVOIR PEUT VISER UNE REFERENCE (U6) : il se repartissait sur toutes les
+    // lignes de la reception.
+    if let Some(cible) = code_reference.map(str::trim).filter(|c| !c.is_empty()) {
+        refs.retain(|(r, _, _)| r == cible);
+        if refs.is_empty() {
+            return Err(AppError::Invalide(format!("{cible} n'est pas une reference de la reception {numero}.")));
+        }
+    }
+    let difference_c = signe * (montant_mad * 100.0).round() as i64;
     let (detail, stock_c, ecart_c) =
         appliquer(&mut tx, user, id_reception, &refs, difference_c, nature, numero_piece, Some(motif), &horodatage)
             .await?;

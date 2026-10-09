@@ -293,6 +293,17 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Le bon recale apres une contre-passation ; C52.
+        "2026-10-09u_bon_apres_contrepassation.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_recaler_lignes_bc')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c52')",
+    ),
+    (
+        // Une ligne de facture d'import ne vise qu'un bon envoye.
+        "2026-10-09t_import_bon_envoye.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_import_ligne_bon')",
+    ),
+    (
         // Lots : un lot solde qui recoit se rouvre ; pas de solde avec du fil sur machine ; C51.
         "2026-10-09s_lots_vivants.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lot_pas_solde_sur_machine')

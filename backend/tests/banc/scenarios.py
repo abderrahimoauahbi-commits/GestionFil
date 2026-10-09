@@ -535,11 +535,23 @@ def scenario_reception_devalidee_revalidee(c, infra):
     for (id_mvt,) in infra.sql(f"SELECT id_mouvement FROM mouvement WHERE reference_document = '{numero}' "
                                "AND code_type_mvt = 'ENTREE_REC'"):
         c.ok("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer", {"motif": "Pesee a refaire, balance dereglee"})
+    # U2 (09/10) : le bon revient d'une cloture, son recu se recale ; C52 signale la reception
+    # validee dont l'entree est contre-passee, jusqu'a sa devalidation.
+    bon = infra.sql(f"SELECT b.statut, lb.quantite_recue_kg, lb.statut FROM bon_commande b "
+                    f"JOIN ligne_bc lb ON lb.id_bc = b.id_bc WHERE b.id_bc = '{id_bc}'")[0]
+    verifier(bon[0] == "ENVOYE" and float(bon[1]) == 0 and bon[2] == "EN_ATTENTE",
+             f"le bon n'est pas revenu de sa cloture : {bon}")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM v_ctl_c52 WHERE numero = '{numero}'")) == 1,
+             "C52 ne voit pas la reception contre-passee")
     c.ok("Choukri", "POST", f"/api/devalider/receptions/{rid}", {"motif": "Pesee a refaire, balance dereglee"})
+    verifier(int(infra.valeur(f"SELECT count(*) FROM v_ctl_c52 WHERE numero = '{numero}'")) == 0,
+             "C52 garde la reception devalidee")
     verifier(abs(kg(infra) - avant) < 1e-6, "la devalidation n'a pas retire l'entree")
     c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
     verifier(abs(kg(infra) - avant - 600) < 1e-6, "la revalidation n'a pas refait l'entree")
     verifier(controle(infra, "C11") == 0, "C11 apres devalidation et revalidation")
+    verifier(infra.valeur(f"SELECT statut FROM bon_commande WHERE id_bc = '{id_bc}'") == "CLOTURE",
+             "le bon n'est pas reclos par la revalidation")
 
 
 def scenario_import_coherence(c, infra):
@@ -1131,6 +1143,40 @@ def scenario_lots_vivants(c, infra):
     verifier(d1["id_demande"] == d2["id_demande"] and d2.get("reprise"), f"demande creee deux fois : {d1} {d2}")
 
 
+def scenario_import_bon_envoye(c, infra):
+    """U1 (09/10) : une ligne de facture d'import ne vise qu'un bon envoye, du meme fournisseur et de la
+    meme reference ; la liste des lignes a facturer ne propose pas une ligne deja servie."""
+    ref = "PP-1500 Dtex-Cream 2951-Hs"
+    taux_usd_du_jour(infra)
+    aujourdhui = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={aujourdhui}")["reference"]
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/BON", "code_devise": "USD"})
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{d.get('id_dossier') or d.get('id')}/factures", {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-BON", "date_facture": aujourdhui,
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 200})
+    id_facture = f.get("id_facture") or f.get("id")
+    brouillon = c.ok("Assistante", "POST", "/api/bons-commande", {
+        "code_fournisseur": "FRS-001",
+        "lignes": [{"code_reference": ref, "unite_commande": "kg", "quantite_commandee_unite": 100, "prix_unitaire_devise": 2.0}]})
+    ligne_brouillon = infra.valeur(f"SELECT id_ligne_bc FROM ligne_bc WHERE id_bc = '{brouillon['id_bc']}'")
+    base = {"type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 100, "poids_net_kg": 100,
+            "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BON-1"}
+    c.refus("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", dict(base, id_ligne_bc=ligne_brouillon),
+            contient="IMPORT-BC")
+    id_bc, lignes = bon_envoye(c, [(ref, 100, 2.0)], frs="FRS-001")
+    autre = infra.valeur("SELECT code_reference FROM reference WHERE actif = 1 AND code_reference <> "
+                         f"'{ref}' ORDER BY code_reference LIMIT 1")
+    c.refus("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes",
+            dict(base, code_reference=autre, id_ligne_bc=lignes[0]["id_ligne_bc"]), contient="porte la reference")
+    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", dict(base, id_ligne_bc=lignes[0]["id_ligne_bc"]))
+    # Servie en local, une ligne ne se propose plus a la facturation.
+    id_bc2, lignes2 = bon_envoye(c, [(ref, 100, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc2, lignes2, [100], lot_fournisseur="LOT-BON-2", nb_bobines=38)
+    ouvertes = c.ok("Choukri", "GET", "/api/import/lignes-bc?fournisseur=FRS-001")
+    verifier(all(x["id_ligne_bc"] != lignes2[0]["id_ligne_bc"] for x in ouvertes),
+             "une ligne de bon deja servie en local reste proposee a l'import")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -1201,5 +1247,6 @@ SCENARIOS = [
     scenario_derogation_bornee,
     scenario_machine_constat,
     scenario_lots_vivants,
+    scenario_import_bon_envoye,
     scenario_controles_finaux,
 ]

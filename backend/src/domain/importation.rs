@@ -510,6 +510,21 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
         .await?;
 
         if let Some(id_ligne_bc) = &e.id_ligne_bc {
+            // LE BON DOIT ETRE PARTI (audit v5, U1) : un bon annule, repasse en
+            // brouillon ou en attente depuis la facture ne recoit rien.
+            let (numero_bc, statut_bc): (String, String) = sqlx::query_as(
+                "SELECT b.numero_bc, b.statut FROM ligne_bc lb JOIN bon_commande b ON b.id_bc = lb.id_bc
+                  WHERE lb.id_ligne_bc = $1 FOR UPDATE OF b",
+            )
+            .bind(id_ligne_bc)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !matches!(statut_bc.as_str(), "ENVOYE" | "LIVRE_PARTIEL" | "CLOTURE") {
+                return Err(AppError::RegleMetier(format!(
+                    "IMPORT-BC : le bon {numero_bc} est {}, plus envoye : la reception ne s'y impute pas.                      Detachez la ligne de facture du bon, ou renvoyez le bon.",
+                    statut_bc.to_lowercase()
+                )));
+            }
             // Plafonne a la quantite commandee : la contrainte du bon interdit
             // de recevoir plus sans avenant, et la tolerance d'import ne doit
             // pas la faire sauter.

@@ -973,6 +973,8 @@ pub async fn lignes_bc_ouvertes(
             -- seulement valide n'a pas encore ete commande.
             AND b.statut IN ('ENVOYE','LIVRE_PARTIEL')
             AND lb.statut NOT IN ('SOLDE','ANNULE')
+            -- Deja servie par une reception locale : plus rien a facturer (U1).
+            AND lb.quantite_restante_kg > 0
           ORDER BY b.date_bc DESC, lb.ligne_numero",
     )
     .bind(fournisseur)

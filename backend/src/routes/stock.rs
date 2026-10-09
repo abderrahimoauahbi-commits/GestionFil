@@ -960,6 +960,8 @@ pub async fn contre_passer(
     .fetch_all(&mut *tx)
     .await?;
     let mut receptions_import: Vec<String> = Vec::new();
+    // Les lignes de bon touchees : recalees ensemble a la fin (U2).
+    let mut lignes_bc: Vec<String> = Vec::new();
     for (id_reception, id_ligne, kg, id_ligne_bc) in &import {
         sqlx::query(
             "UPDATE import_facture_lignes
@@ -971,18 +973,7 @@ pub async fn contre_passer(
         .execute(&mut *tx)
         .await?;
         if let Some(lb) = id_ligne_bc {
-            sqlx::query(
-                "UPDATE ligne_bc
-                    SET quantite_recue_kg = GREATEST(0, round(quantite_recue_kg - $2::numeric, 4)),
-                        statut = CASE WHEN statut = 'ANNULE' THEN statut
-                                      WHEN round(quantite_recue_kg - $2::numeric, 4) <= 0 THEN 'EN_ATTENTE'
-                                      ELSE 'PARTIEL' END
-                  WHERE id_ligne_bc = $1",
-            )
-            .bind(lb)
-            .bind(kg)
-            .execute(&mut *tx)
-            .await?;
+            lignes_bc.push(lb.clone());
         }
         if !receptions_import.contains(id_reception) {
             receptions_import.push(id_reception.clone());
@@ -992,27 +983,23 @@ pub async fn contre_passer(
     // Sans cela, une reception contre-passee puis devalidee ne se revalidait
     // plus — le bon la croyait deja recue (impasse relevee aux audits v3 et v4,
     // reproduite par le banc).
-    let locales: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT lr.id_ligne_bc, lr.quantite_stock_kg::float8
-           FROM ligne_reception lr
+    let locales: Vec<String> = sqlx::query_scalar(
+        "SELECT lr.id_ligne_bc FROM ligne_reception lr
           WHERE lr.id_mouvement_genere = $1 AND lr.id_ligne_bc IS NOT NULL",
     )
     .bind(&id)
     .fetch_all(&mut *tx)
     .await?;
-    for (lb, kg) in &locales {
-        sqlx::query(
-            "UPDATE ligne_bc
-                SET quantite_recue_kg = GREATEST(0, round(quantite_recue_kg - $2::numeric, 4)),
-                    statut = CASE WHEN statut = 'ANNULE' THEN statut
-                                  WHEN round(quantite_recue_kg - $2::numeric, 4) <= 0 THEN 'EN_ATTENTE'
-                                  ELSE 'PARTIEL' END
-              WHERE id_ligne_bc = $1",
-        )
-        .bind(lb)
-        .bind(kg)
-        .execute(&mut *tx)
-        .await?;
+    lignes_bc.extend(locales);
+    // LE RECU SE RECALE SUR CE QUI TIENT (audit v5, U2) : retrancher les kilos
+    // contre-passes ignorait le plafond pose a la reception (le recu ne depasse
+    // jamais le commande), et le bon restait cloture. La base recompte chaque
+    // ligne depuis ses receptions encore valables, puis le statut du bon.
+    if !lignes_bc.is_empty() {
+        sqlx::query("SELECT fn_recaler_lignes_bc($1)")
+            .bind(&lignes_bc)
+            .execute(&mut *tx)
+            .await?;
     }
     for id_reception in &receptions_import {
         sqlx::query(
@@ -3570,7 +3557,9 @@ pub async fn lignes_attendues(
             AND lb.statut <> 'ANNULE'
             AND ($1 IS NULL OR lb.id_bc = $1)
             AND ($3 IS NULL OR (bc.code_fournisseur = $3
-                                AND bc.statut IN ('ENVOYE','LIVRE_PARTIEL')))
+                                AND bc.statut IN ('ENVOYE','LIVRE_PARTIEL')
+                                -- Deja servie (par l'import aussi) : plus rien a recevoir (U1).
+                                AND lb.statut <> 'SOLDE' AND lb.quantite_restante_kg > 0))
           ORDER BY bc.date_livraison_prevue, bc.numero_bc, lb.ligne_numero",
     )
     .bind(&id_bc)

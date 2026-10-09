@@ -791,6 +791,14 @@ def scenario_sessions(c, infra):
     c.jetons["Tarik"] = r["jeton"]
     # Le prix catalogue est masque au magasinier : ni tri, ni filtre dessus.
     c.refus("Magasinie", "GET", "/api/catalogue?tri=prix_catalogue", contient="masque")
+    # T8 (09/10) : l'ecran verrouille compte les echecs comme la connexion ; un bon mot de
+    # passe ne passe pas tant que le compte est bloque.
+    for _ in range(2):
+        c.refus("Tarik", "POST", "/api/auth/deverrouiller", {"mot_de_passe": "pas-le-bon-mot"}, codes=(401,))
+    c.refus("Tarik", "POST", "/api/auth/deverrouiller", {"mot_de_passe": "pas-le-bon-mot"}, codes=(429,))
+    c.refus("Tarik", "POST", "/api/auth/deverrouiller", {"mot_de_passe": MOT_DE_PASSE}, codes=(429,))
+    infra.sql("UPDATE utilisateur SET echecs_consecutifs = 0, bloque_jusqu_a = NULL WHERE login = 'Tarik'")
+    c.ok("Tarik", "POST", "/api/auth/deverrouiller", {"mot_de_passe": MOT_DE_PASSE})
 
 
 def scenario_concurrence_numerotation(c, infra):

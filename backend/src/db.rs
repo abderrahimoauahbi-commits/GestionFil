@@ -293,6 +293,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Les montants de l'import declares, masques au magasinier.
+        "2026-10-09x_import_montants_declares.sql",
+        "SELECT EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'IMPORT' AND champ = 'montant_dhs')",
+    ),
+    (
         // Une reception cloturee ne se rouvre plus (transition retiree).
         "2026-10-09w_reception_cloturee_definitive.sql",
         "SELECT NOT EXISTS (SELECT 1 FROM transition_statut WHERE entite = 'reception'

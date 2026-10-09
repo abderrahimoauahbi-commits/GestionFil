@@ -87,6 +87,74 @@ async fn journaliser(
     }
 }
 
+/// LE COMPTE EST-IL BLOQUE ? A verifier AVANT le secret, sinon le blocage
+/// n'arrete rien (audit v4 a la connexion, v5 pour le reste).
+async fn exiger_non_bloque(db: &crate::db::Db, id: &str, login: &str) -> AppResult<()> {
+    let bloque: Option<String> =
+        sqlx::query_scalar("SELECT bloque_jusqu_a FROM utilisateur WHERE id_utilisateur = $1")
+            .bind(id)
+            .fetch_optional(db)
+            .await?
+            .flatten();
+    if let Some(jusqu_a) = bloque.as_deref() {
+        if jusqu_a > maintenant().as_str() {
+            journaliser(db, login, Some(id), "BLOQUE", None, None).await;
+            return Err(AppError::TropDeTentatives(
+                "Trop de tentatives. Le compte se rouvrira dans quelques minutes.".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// UN ECHEC COMPTE, OU QU'IL SOIT : connexion, deverrouillage, changement de
+/// mot de passe, second facteur (audit v5, T8). Un poste laisse ouvert sur
+/// l'ecran verrouille permettait sinon d'essayer des mots de passe sans fin.
+/// Le compteur s'incremente en base (dix essais simultanes comptent dix).
+async fn noter_echec(
+    db: &crate::db::Db,
+    id: &str,
+    login: &str,
+    raison: &'static str,
+    ip: Option<&str>,
+    agent: Option<&str>,
+) -> AppError {
+    let n: i64 = sqlx::query_scalar(
+        "UPDATE utilisateur
+            SET echecs_consecutifs = echecs_consecutifs + 1, dernier_echec = $2
+          WHERE id_utilisateur = $1
+      RETURNING echecs_consecutifs",
+    )
+    .bind(id)
+    .bind(maintenant())
+    .fetch_one(db)
+    .await
+    .unwrap_or(1);
+    let attente = attente_secondes(n);
+    let jusqu_a = (attente > 0).then(|| crate::db::dans_secondes(attente));
+    if jusqu_a.is_some() {
+        let _ = sqlx::query("UPDATE utilisateur SET bloque_jusqu_a = $2 WHERE id_utilisateur = $1")
+            .bind(id)
+            .bind(&jusqu_a)
+            .execute(db)
+            .await;
+    }
+    journaliser(db, login, Some(id), raison, ip, agent).await;
+    match jusqu_a {
+        Some(_) => AppError::TropDeTentatives(format!("Trop de tentatives. Réessayez dans {}.", duree_lisible(attente))),
+        None => AppError::IdentifiantsInvalides,
+    }
+}
+
+/// La reussite remet la serie a zero.
+async fn remettre_compteur(db: &crate::db::Db, id: &str) -> AppResult<()> {
+    sqlx::query("UPDATE utilisateur SET echecs_consecutifs = 0, bloque_jusqu_a = NULL WHERE id_utilisateur = $1")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub async fn connexion(
     State(state): State<AppState>,
     axum::extract::ConnectInfo(direct): axum::extract::ConnectInfo<std::net::SocketAddr>,
@@ -139,38 +207,7 @@ pub async fn connexion(
     let echouer = |raison: &'static str| {
         let db = state.db.clone();
         let (id, login, ip2, agent2) = (id.clone(), login.clone(), ip.clone(), agent.map(String::from));
-        async move {
-            // LE COMPTEUR S'INCREMENTE EN BASE (audit v4) : relu puis recrit,
-            // dix essais simultanes ne comptaient que pour un.
-            let n: i64 = sqlx::query_scalar(
-                "UPDATE utilisateur
-                    SET echecs_consecutifs = echecs_consecutifs + 1, dernier_echec = $2
-                  WHERE id_utilisateur = $1
-              RETURNING echecs_consecutifs",
-            )
-            .bind(&id)
-            .bind(maintenant())
-            .fetch_one(&db)
-            .await
-            .unwrap_or(1);
-            let attente = attente_secondes(n);
-            let jusqu_a = (attente > 0).then(|| crate::db::dans_secondes(attente));
-            if jusqu_a.is_some() {
-                let _ = sqlx::query("UPDATE utilisateur SET bloque_jusqu_a = $2 WHERE id_utilisateur = $1")
-                    .bind(&id)
-                    .bind(&jusqu_a)
-                    .execute(&db)
-                    .await;
-            }
-            journaliser(&db, &login, Some(&id), raison, ip2.as_deref(), agent2.as_deref()).await;
-            match jusqu_a {
-                Some(_) => AppError::TropDeTentatives(format!(
-                    "Trop de tentatives. Réessayez dans {}.",
-                    duree_lisible(attente)
-                )),
-                None => AppError::IdentifiantsInvalides,
-            }
-        }
+        async move { noter_echec(&db, &id, &login, raison, ip2.as_deref(), agent2.as_deref()).await }
     };
 
     if !password::verifier(&demande.mot_de_passe, &hash) {
@@ -188,11 +225,20 @@ pub async fn connexion(
         // posterieur au dernier accepte.
         match crate::auth::totp::verifier_pas(&secret, code, horodatage_unix()) {
             Some(pas) if dernier_pas.is_none_or(|d| pas > d) => {
-                sqlx::query("UPDATE utilisateur SET totp_dernier_pas = $2 WHERE id_utilisateur = $1")
-                    .bind(&id)
-                    .bind(pas)
-                    .execute(&state.db)
-                    .await?;
+                // A CONDITION (audit v5, T8) : relu puis ecrit, le meme code
+                // passait deux fois en deux connexions simultanees.
+                let pris = sqlx::query(
+                    "UPDATE utilisateur SET totp_dernier_pas = $2
+                      WHERE id_utilisateur = $1 AND (totp_dernier_pas IS NULL OR totp_dernier_pas < $2)",
+                )
+                .bind(&id)
+                .bind(pas)
+                .execute(&state.db)
+                .await?
+                .rows_affected();
+                if pris != 1 {
+                    return Err(echouer("CODE").await);
+                }
             }
             _ => return Err(echouer("CODE").await),
         }
@@ -340,11 +386,14 @@ pub async fn activer_2fa(
         ));
     };
 
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
     let Some(pas) = crate::auth::totp::verifier_pas(&secret, &d.code, horodatage_unix()) else {
-        return Err(AppError::Invalide(
-            "Ce code ne correspond pas. Vérifiez l'heure de votre téléphone, puis réessayez."
-                .into(),
-        ));
+        return match noter_echec(&state.db, &user.id, &user.login, "CODE", None, None).await {
+            AppError::IdentifiantsInvalides => Err(AppError::Invalide(
+                "Ce code ne correspond pas. Vérifiez l'heure de votre téléphone, puis réessayez.".into(),
+            )),
+            autre => Err(autre),
+        };
     };
     sqlx::query(
         "UPDATE utilisateur SET totp_actif = 1, totp_active_le = $2, totp_dernier_pas = $3
@@ -373,9 +422,11 @@ pub async fn desactiver_2fa(
             .bind(&user.id)
             .fetch_one(&state.db)
             .await?;
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
     if !password::verifier(&d.mot_de_passe, &hash) {
-        return Err(AppError::IdentifiantsInvalides);
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
     }
+    remettre_compteur(&state.db, &user.id).await?;
 
     sqlx::query(
         "UPDATE utilisateur SET totp_actif = 0, secret_totp = NULL, totp_active_le = NULL
@@ -513,11 +564,13 @@ pub async fn changer_mot_de_passe(
     .fetch_one(&state.db)
     .await?;
 
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
     if !password::verifier(&d.ancien, &hash) {
         // Le meme message que pour un compte inconnu a la connexion : ne rien
-        // apprendre a qui essaie.
-        return Err(AppError::IdentifiantsInvalides);
+        // apprendre a qui essaie. Et l'echec compte (T8).
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
     }
+    remettre_compteur(&state.db, &user.id).await?;
 
     let nouveau_hash = password::hacher(&d.nouveau).map_err(AppError::Interne)?;
 
@@ -589,9 +642,16 @@ pub async fn deverrouiller(
     .await?;
 
     let (hash, actif) = compte.ok_or(AppError::IdentifiantsInvalides)?;
-    if actif != 1 || !password::verifier(&demande.mot_de_passe, &hash) {
+    if actif != 1 {
         return Err(AppError::IdentifiantsInvalides);
     }
+    // L'ECRAN VERROUILLE N'EST PAS UN BANC D'ESSAI (audit v5, T8) : un poste
+    // abandonne permettait d'essayer des mots de passe sans fin.
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
+    if !password::verifier(&demande.mot_de_passe, &hash) {
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
+    }
+    remettre_compteur(&state.db, &user.id).await?;
 
     Ok(Json(json!({ "ok": true })))
 }

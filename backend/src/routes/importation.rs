@@ -980,7 +980,10 @@ pub async fn lignes_bc_ouvertes(
     .bind(fournisseur)
     .fetch_all(&state.db)
     .await?;
-    Ok(Json(lignes_en_json(&lignes)))
+    // Le prix du bon est un montant : masque selon les droits (audit v5, T8).
+    let mut v = lignes_en_json(&lignes);
+    user.masquer(&state.db, IMPORT, &mut v).await?;
+    Ok(Json(v))
 }
 
 // ============================================================================

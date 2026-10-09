@@ -78,14 +78,38 @@ pub async fn generer(
     .fetch_one(&mut *tx)
     .await?;
 
-    sqlx::query(
+    // LA PURGE SE JOURNALISE EN UNE LIGNE (audit v5, T10) : une ligne
+    // d'audit par proposition remplacee noyait le journal a chaque calcul. Le
+    // declencheur se tait sous le drapeau ; le resume dit combien.
+    sqlx::query("SELECT set_config('gestionfil.purge_plan', 'on', true)")
+        .execute(&mut *tx)
+        .await?;
+    let purgees = sqlx::query(
         "DELETE FROM plan_achat
           WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
             AND code_reference_origine IS NULL
             AND figee = 0",
     )
     .execute(&mut *tx)
-    .await?;
+    .await?
+    .rows_affected();
+    sqlx::query("SELECT set_config('gestionfil.purge_plan', '', true)")
+        .execute(&mut *tx)
+        .await?;
+    if purgees > 0 {
+        sqlx::query(
+            "INSERT INTO audit_log (table_concernee, operation, id_enregistrement, anciennes_valeurs,
+                                    id_utilisateur, adresse_ip, session_id)
+             VALUES ('plan_achat', 'DELETE', 'RECALCUL',
+                     jsonb_build_object('propositions_remplacees', $1::bigint)::text,
+                     current_setting('gestionfil.id_utilisateur', true),
+                     current_setting('gestionfil.adresse_ip', true),
+                     current_setting('gestionfil.session_id', true))",
+        )
+        .bind(purgees as i64)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     let horodatage = maintenant();
 

@@ -293,6 +293,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Audit des cours BAM et des comptages ; lot_evenement immuable ; purge du plan resumee.
+        "2026-10-09y_audit_complete.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lot_evenement_immuable')
+            AND EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname = 'trg_audit_modification'
+                          AND t.tgrelid = 'cours_bam'::regclass)",
+    ),
+    (
         // Les montants de l'import declares, masques au magasinier.
         "2026-10-09x_import_montants_declares.sql",
         "SELECT EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'IMPORT' AND champ = 'montant_dhs')",

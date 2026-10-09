@@ -1020,6 +1020,16 @@ def scenario_plan_detail(c, infra):
     verifier("retiree" in infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'"), "C28 ne suit pas le reglage")
     infra.sql("UPDATE parametre SET valeur_courante = '1' WHERE code_parametre = 'P_EncoursRetardInclus'")
 
+    # T10 (09/10) : deux calculs du plan d'achat ; la purge du second se resume en une ligne
+    # d'audit, au lieu d'une par proposition remplacee.
+    c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
+    avant = int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'plan_achat' AND operation = 'DELETE'"))
+    propositions = int(infra.valeur("SELECT count(*) FROM plan_achat WHERE statut = 'PROPOSE' AND figee = 0"))
+    c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
+    apres = int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'plan_achat' AND operation = 'DELETE'"))
+    verifier(apres - avant == (1 if propositions else 0),
+             f"la purge du plan inscrit {apres - avant} lignes d'audit pour {propositions} propositions")
+
 
 def scenario_derogation_bornee(c, infra):
     """F17 (09/10) : la derogation d'un lot bloque couvre les kilos d'une fiche, pas plus ; elle tombe

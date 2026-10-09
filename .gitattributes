@@ -1,3 +1,7 @@
 # Les scripts du serveur Linux gardent leurs fins de ligne Unix, quel que soit
 # le poste qui les extrait : bash refuse un retour chariot en fin de ligne.
 *.sh text eol=lf
+# Lus par systemd, nginx et le python du serveur : un \r final y casse un chemin.
+*.service text eol=lf
+*.conf text eol=lf
+db/pg/migrer.py text eol=lf

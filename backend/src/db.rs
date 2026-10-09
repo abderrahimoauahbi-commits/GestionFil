@@ -235,6 +235,14 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c46')",
     ),
     (
+        // La sortie hors machine et le pret : le service ecrit mouvement.tiers.
+        "2026-10-09d_sortie_hors_machine.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'mouvement'
+                           AND column_name = 'tiers')
+            AND EXISTS (SELECT 1 FROM type_mouvement WHERE code_type_mvt = 'RETOUR_PRET')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

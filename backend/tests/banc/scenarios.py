@@ -613,6 +613,41 @@ def scenario_concurrence_numerotation(c, infra):
     verifier(len(set(numeros)) == 8, f"numeros en double : {sorted(numeros)}")
 
 
+def scenario_sortie_hors_machine(c, infra):
+    """Regle 1 (09/10) : sortie hors machine avec motif par ligne et OF libre, pret a une autre usine
+    rendu en nature, seuil de 50 kg cumule par jour et par reference (dechets compris)."""
+    ref = "PLA 50 CHE"
+    entree_stock(c, ref, 300)
+    hm = lambda login, kg, motif_ligne, **x: mouvement(c, login, "SORTIE_HORS_MACHINE", [(ref, kg)],
+                                                       motif="HORS_MACHINE", motif_ligne=motif_ligne, **x)
+    code, r = hm("Magasinie", 10, None)
+    verifier(code in (400, 422), f"sortie hors machine sans motif acceptee : {code} {r}")
+    code, r = hm("Magasinie", 10, "HM_ECHANTILLON")
+    verifier(code == 200, f"echantillon de 10 kg sans OF refuse : {r}")
+    code, r = hm("Magasinie", 15, "HM_PRET")
+    verifier(code in (400, 422) and "usine" in str(r).lower(), f"pret sans usine accepte : {code} {r}")
+    code, r = hm("Magasinie", 15, "HM_PRET", tiers="Usine du banc")
+    verifier(code == 200, f"pret de 15 kg refuse : {r}")
+    # 10 + 15 deja sortis ce jour : un dechet de 30 kg passe le seuil cumule.
+    code, r = mouvement(c, "Magasinie", "SORTIE_PROD", [(ref, 30)], numero_of="OF-BANC")
+    verifier(code == 422 and "ce jour" in str(r), f"seuil cumule non applique : {code} {r}")
+    code, r = mouvement(c, "Choukri", "SORTIE_PROD", [(ref, 30)], numero_of="OF-BANC")
+    verifier(code == 200, f"la Direction ne passe pas le seuil : {r}")
+    # L'ancienne consommation hors machine renvoie vers la sortie hors machine.
+    code, r = mouvement(c, "Magasinie", "SORTIE_PROD", [(ref, 5)], numero_of="OF-BANC", nature_sortie="CONSOMMATION")
+    verifier(code == 422 and "hors machine" in str(r).lower(), f"ancienne consommation acceptee : {code} {r}")
+    # Le pret revient en nature, pas plus qu'il n'en est parti.
+    verifier(float(infra.valeur(f"SELECT reste_kg FROM v_prets_en_cours WHERE tiers = 'Usine du banc' "
+                                f"AND code_reference = '{ref}'")) == 15, "le pret n'est pas a rendre")
+    code, r = mouvement(c, "Magasinie", "RETOUR_PRET", [(ref, 20)], motif="PRET", tiers="Usine du banc")
+    verifier(code == 422, f"retour au-dela du pret accepte : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "RETOUR_PRET", [(ref, 15)], motif="PRET", tiers="Usine du banc")
+    verifier(code == 200, f"retour du pret refuse : {r}")
+    verifier(infra.valeur("SELECT count(*) FROM v_prets_en_cours WHERE tiers = 'Usine du banc'") == "0",
+             "le pret rendu reste en cours")
+    verifier(controle(infra, "C11") == 0 and controle(infra, "C47") == 0, "C11 ou C47 apres les sorties hors machine")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -660,5 +695,6 @@ SCENARIOS = [
     scenario_sessions,
     scenario_concurrence_numerotation,
     scenario_gardes_p1,
+    scenario_sortie_hors_machine,
     scenario_controles_finaux,
 ]

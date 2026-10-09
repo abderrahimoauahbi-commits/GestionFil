@@ -119,6 +119,9 @@ pub struct NouveauMouvement {
     /// OF (decision 5 de l'audit v4).
     #[serde(default)]
     pub nature_sortie: Option<String>,
+    /// L'usine qui emprunte et rend (pret HM_PRET, RETOUR_PRET ; regle 1, 09/10/2026).
+    #[serde(default)]
+    pub tiers: Option<String>,
     pub lignes: Vec<LigneMouvement>,
 }
 
@@ -153,13 +156,22 @@ fn normaliser_date_mouvement(v: &Option<String>) -> Option<String> {
 // comme DECHET (motif R4 impose) ; le retour de production en sort — un
 // retour d'atelier passe par le dechargement d'une fiche machine. Le retour
 // fournisseur reste : c'est la voie de correction apres dedouanement (regle 8).
+// REGLE 1 (arbitrage du 09/10/2026) : la sortie hors machine — consommation
+// d'atelier, echantillon, essai, reparation, pret a une autre usine — et le
+// retour du pret, en nature.
 pub(crate) const TYPES_SAISIE_LIBRE: &[&str] = &[
     "SORTIE_PROD",
+    "SORTIE_HORS_MACHINE",
+    "RETOUR_PRET",
     "RETOUR_FOURN",
     "AJUST_INV_POS",
     "AJUST_INV_NEG",
     "STOCK_INIT",
 ];
+
+/// Les motifs d'une sortie hors machine (motif_ligne, categorie HORS_MACHINE).
+const MOTIFS_HORS_MACHINE: &[&str] =
+    &["HM_ATELIER", "HM_ECHANTILLON", "HM_ESSAI", "HM_REPARATION", "HM_PRET", "HM_AUTRE"];
 
 fn document_du_type(t: &str) -> &'static str {
     match t {
@@ -172,6 +184,24 @@ fn document_du_type(t: &str) -> &'static str {
         "RETOUR_PROD" => "du dechargement d'une fiche machine (Stock → Machines)",
         _ => "de son document",
     }
+}
+
+/// LE FIL PRETE A D'AUTRES USINES, ce qui reste a rendre (regle 1, 09/10/2026).
+/// Les kilos seulement : la valeur reste a l'etat de stock, masque selon les droits.
+pub async fn prets_en_cours(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT p.tiers, p.code_reference, r.designation, p.reste_kg::float8 AS reste_kg, p.premier_pret,
+                (current_date - substr(p.premier_pret, 1, 10)::date)::bigint AS jours
+           FROM v_prets_en_cours p JOIN reference r ON r.code_reference = p.code_reference
+          ORDER BY p.tiers, p.code_reference",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(crate::routes::json::lignes_en_json(&lignes)))
 }
 
 pub async fn creer_mouvement(
@@ -217,9 +247,45 @@ pub async fn creer_mouvement(
             vers_kg(&state.db, &l.code_reference, l.quantite_saisie, &l.unite_saisie).await?;
         converties.push((l, kg, facteur));
     }
-    let total_kg: f64 = converties.iter().map(|(_, kg, _)| kg).sum();
-    let consommation = m.code_type_mvt == "SORTIE_PROD"
-        && m.nature_sortie.as_deref() == Some("CONSOMMATION");
+    // L'ANCIENNE « CONSOMMATION HORS MACHINE » (decision 5 de l'audit v4) etait
+    // une sortie production sans seuil ni droit, sur un OF jamais verifie : 61 t
+    // de fil pouvaient sortir ainsi. Elle devient la sortie hors machine, avec un
+    // motif par ligne et le meme seuil que le dechet (regle 1, 09/10/2026).
+    if m.code_type_mvt == "SORTIE_PROD" && m.nature_sortie.as_deref() == Some("CONSOMMATION") {
+        return Err(AppError::RegleMetier(
+            "La consommation hors machine se saisit desormais en « Sortie hors machine », avec \
+             un motif par ligne (atelier, echantillon, essai, reparation, pret)."
+                .into(),
+        ));
+    }
+    let tiers = m.tiers.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
+    if m.code_type_mvt == "SORTIE_HORS_MACHINE" {
+        for (l, _, _) in &converties {
+            let motif = l.code_motif_ligne.as_deref().unwrap_or("");
+            if !MOTIFS_HORS_MACHINE.contains(&motif) {
+                return Err(AppError::Invalide(format!(
+                    "{} : choisissez le motif de la sortie (atelier, echantillon, essai, reparation, \
+                     pret, autre).",
+                    l.code_reference
+                )));
+            }
+            if motif == "HM_PRET" && tiers.is_none() {
+                return Err(AppError::Invalide(
+                    "Un pret nomme l'usine qui emprunte : elle rendra le fil en nature.".into(),
+                ));
+            }
+            if motif == "HM_AUTRE"
+                && m.observations_globales.as_deref().map(str::trim).unwrap_or("").chars().count() < 5
+            {
+                return Err(AppError::Invalide(
+                    "Motif « Autre » : dites pourquoi dans les observations.".into(),
+                ));
+            }
+        }
+    }
+    if m.code_type_mvt == "RETOUR_PRET" && tiers.is_none() {
+        return Err(AppError::Invalide("Un retour de pret nomme l'usine qui rend le fil.".into()));
+    }
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -228,33 +294,7 @@ pub async fn creer_mouvement(
     // manquant pouvait sortir par un « dechet » ou un retour fournisseur au
     // seul droit d'ecrire : la sortie la plus discrete du stock.
     match m.code_type_mvt.as_str() {
-        "SORTIE_PROD" if consommation => {
-            // Le fil des machines se consomme par ses fiches ; seule une
-            // matiere qui n'y passe pas se declare ici, sur un OF.
-            if m.numero_of.as_deref().map(str::trim).unwrap_or("").is_empty() {
-                return Err(AppError::RegleMetier(
-                    "Une consommation hors machine se rattache a un ordre de fabrication : saisissez son numero.".into(),
-                ));
-            }
-            let refs: Vec<String> = converties.iter().map(|(l, _, _)| l.code_reference.clone()).collect();
-            let sur_machine: Vec<String> = sqlx::query_scalar(
-                "SELECT DISTINCT lm.code_reference
-                   FROM ligne_mouvement lm JOIN mouvement mv ON mv.id_mouvement = lm.id_mouvement
-                  WHERE mv.code_type_mvt = 'CHARGE_MACHINE' AND lm.code_reference = ANY($1)
-                  ORDER BY 1",
-            )
-            .bind(&refs)
-            .fetch_all(&mut *tx)
-            .await?;
-            if !sur_machine.is_empty() {
-                return Err(AppError::RegleMetier(format!(
-                    "{} se charge sur les machines : sa consommation se lit sur les fiches machine \
-                     (chargement, constat, dechargement), pas en saisie libre.",
-                    sur_machine.join(", ")
-                )));
-            }
-        }
-        "SORTIE_PROD" => {
+        "SORTIE_PROD" | "SORTIE_HORS_MACHINE" => {
             let seuil: f64 = sqlx::query_scalar::<_, Option<f64>>(
                 "SELECT CAST(valeur_courante AS float8) FROM parametre WHERE code_parametre = 'P_DechetSeuilValiderKg'",
             )
@@ -262,16 +302,44 @@ pub async fn creer_mouvement(
             .await?
             .flatten()
             .unwrap_or(50.0);
-            if total_kg > seuil + 1e-9 {
-                // Comme un ajustement negatif : il faut le droit de cloturer un
-                // inventaire, que le magasinier n'a pas.
-                user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await.map_err(|_| {
-                    AppError::RegleMetier(format!(
-                        "Un dechet de {} kg depasse {seuil} kg : il se valide comme un ajustement \
-                         d'inventaire (droit VALIDER sur l'inventaire). Faites-le saisir par la Direction.",
-                        arrondi_kg(total_kg)
-                    ))
-                })?;
+            // LE SEUIL SE JUGE EN CUMUL, PAR JOUR ET PAR REFERENCE (regle 1,
+            // 09/10/2026) : quatre dechets de 49 kg ne font pas quatre petites
+            // sorties. Dechets et sorties hors machine du meme jour comptent
+            // ensemble, ce mouvement compris.
+            let jour = normaliser_date_mouvement(&m.date_mouvement)
+                .map(|d| d.chars().take(10).collect::<String>());
+            let mut par_ref: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+            for (l, kg, _) in &converties {
+                *par_ref.entry(l.code_reference.clone()).or_default() += kg;
+            }
+            for (reference, kg) in &par_ref {
+                let deja: f64 = sqlx::query_scalar(
+                    "SELECT COALESCE(sum(lm.quantite_kg), 0)::float8
+                       FROM ligne_mouvement lm JOIN mouvement mv ON mv.id_mouvement = lm.id_mouvement
+                      WHERE mv.code_type_mvt IN ('SORTIE_PROD', 'SORTIE_HORS_MACHINE')
+                        AND lm.code_reference = $1
+                        AND substr(mv.date_mouvement, 1, 10)
+                            = COALESCE($2, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'))
+                        AND mv.id_mouvement_contrepasse IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM mouvement c WHERE c.id_mouvement_contrepasse = mv.id_mouvement)",
+                )
+                .bind(reference)
+                .bind(&jour)
+                .fetch_one(&mut *tx)
+                .await?;
+                if deja + kg > seuil + 1e-9 {
+                    // Comme un ajustement negatif : il faut le droit de cloturer un
+                    // inventaire, que le magasinier n'a pas.
+                    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await.map_err(|_| {
+                        AppError::RegleMetier(format!(
+                            "{reference} : {} kg sortis ce jour (dechets et sorties hors machine, ce \
+                             mouvement compris) depassent {seuil} kg : au-dela, la sortie se valide comme \
+                             un ajustement d'inventaire (droit VALIDER sur l'inventaire). Faites-la saisir \
+                             par la Direction.",
+                            arrondi_kg(deja + kg)
+                        ))
+                    })?;
+                }
             }
         }
         "RETOUR_FOURN" => {
@@ -338,6 +406,32 @@ pub async fn creer_mouvement(
                 }
             }
         }
+        "RETOUR_PRET" => {
+            // On ne rend pas plus que ce qui a ete prete a cette usine.
+            let usine = tiers.clone().unwrap_or_default();
+            let mut par_ref: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+            for (l, kg, _) in &converties {
+                *par_ref.entry(l.code_reference.clone()).or_default() += kg;
+            }
+            for (reference, kg) in &par_ref {
+                let reste: f64 = sqlx::query_scalar(
+                    "SELECT COALESCE((SELECT reste_kg FROM v_prets_en_cours
+                                       WHERE tiers = $1 AND code_reference = $2), 0)::float8",
+                )
+                .bind(&usine)
+                .bind(reference)
+                .fetch_one(&mut *tx)
+                .await?;
+                if *kg > reste + 0.0005 {
+                    return Err(AppError::RegleMetier(format!(
+                        "{reference} : {} kg rendus par {usine}, mais il ne lui reste que {} kg a rendre. \
+                         Un surplus n'est pas un retour de pret : c'est un ajustement d'inventaire.",
+                        arrondi_kg(*kg),
+                        arrondi_kg(reste)
+                    )));
+                }
+            }
+        }
         _ => {}
     }
 
@@ -351,10 +445,10 @@ pub async fn creer_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
               code_motif, reference_document, numero_of, observations_globales,
-              responsable, id_utilisateur)
+              responsable, id_utilisateur, tiers)
          VALUES ($1,$2,
                  COALESCE($3, to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')),
-                 $4,$5,$6,$7,$8,$9,$10,$11)",
+                 $4,$5,$6,$7,$8,$9,$10,$11,$12)",
     )
     .bind(&id)
     .bind(&numero)
@@ -367,6 +461,7 @@ pub async fn creer_mouvement(
     .bind(&m.observations_globales)
     .bind(m.responsable.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(&user.id)
+    .bind(&tiers)
     .execute(&mut *tx)
     .await?;
 
@@ -378,16 +473,22 @@ pub async fn creer_mouvement(
     // valorisent le stock. Une entree au CMUP le laisse ou il est. Une
     // reference jamais recue n'a pas de CMUP : on n'y fait pas entrer de kilos
     // a la main — sauf le stock d'ouverture, au prix catalogue a defaut.
-    let entree = matches!(m.code_type_mvt.as_str(), "AJUST_INV_POS" | "RETOUR_PROD" | "STOCK_INIT");
+    let entree =
+        matches!(m.code_type_mvt.as_str(), "AJUST_INV_POS" | "RETOUR_PROD" | "STOCK_INIT" | "RETOUR_PRET");
     let mut prix_imposes: Vec<Option<f64>> = Vec::with_capacity(converties.len());
     for (l, _, _) in &converties {
-        let cmup: Option<f64> =
-            sqlx::query_scalar("SELECT cmup_mad::float8 FROM reference WHERE code_reference = $1")
-                .bind(&l.code_reference)
-                .fetch_optional(&mut *tx)
-                .await?
-                .flatten()
-                .filter(|c: &f64| *c > 0.0);
+        // LE CMUP DU MAGASIN, qui fait foi (U7, 09/10/2026) ; celui de la fiche
+        // article n'est qu'une moyenne de tous les magasins, a defaut.
+        let cmup: Option<f64> = sqlx::query_scalar(
+            "SELECT COALESCE(
+                 (SELECT NULLIF(cmup_mad, 0) FROM stock_magasin WHERE code_reference = $1 AND code_magasin = $2),
+                 (SELECT NULLIF(cmup_mad, 0) FROM reference WHERE code_reference = $1))::float8",
+        )
+        .bind(&l.code_reference)
+        .bind(&m.code_magasin)
+        .fetch_one(&mut *tx)
+        .await?;
+        let cmup = cmup.filter(|c: &f64| *c > 0.0);
         let prix = if m.code_type_mvt == "STOCK_INIT" { cmup.or(l.prix_kg_mad) } else { cmup };
         if entree && prix.is_none() && m.code_type_mvt != "STOCK_INIT" {
             return Err(AppError::RegleMetier(format!(
@@ -421,9 +522,9 @@ pub async fn creer_mouvement(
         .bind(&l.lot_fournisseur)
         .bind(&l.date_fabrication)
         .bind(&l.date_peremption)
-        // Une sortie libre est un DECHET (regle 12) : rebut, chute non
-        // reutilisable — sauf la consommation hors machine, sans motif de rebut.
-        .bind(if m.code_type_mvt == "SORTIE_PROD" && !consommation {
+        // Une sortie production libre est un DECHET (regle 12) : rebut, chute
+        // non reutilisable. La sortie hors machine porte son propre motif.
+        .bind(if m.code_type_mvt == "SORTIE_PROD" {
             Some("R4".to_string())
         } else {
             l.code_motif_ligne.clone()

@@ -310,6 +310,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/machines/{code}/contenu", get(machines::contenu_machine))
         .route("/api/machines/{code}/zones/{zone}", get(machines::etat_zone))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
+        .route("/api/prets-en-cours", get(stock::prets_en_cours))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
         // DEFAIRE SANS EFFACER : le grand livre ne se corrige que par son
         // inverse, comme dans tous les ERP depuis trente ans.

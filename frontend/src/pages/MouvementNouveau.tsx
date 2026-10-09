@@ -52,12 +52,20 @@ import { PanneRequetes } from '../composants/PanneRequetes'
 
 /* REGLE 12 : ajustements et dechets. La sortie production n'est plus qu'un
    dechet (motif R4 pose par le serveur) ; le retour de production passe par une
-   fiche machine ; le retour fournisseur reste, voie de correction (regle 8). */
-const TYPES_SAISIE_LIBRE = ['SORTIE_PROD', 'RETOUR_FOURN', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT']
-const LIBELLE_SAISIE: Record<string, string> = { SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)' }
-/** Decision 5 (audit v4) : la sortie production se dit dechet OU consommation
-    d'une matiere hors machine sur un OF. Une seule liste, deux choix. */
-const CONSO_HORS_MACHINE = 'SORTIE_PROD#CONSOMMATION'
+   fiche machine ; le retour fournisseur reste, voie de correction (regle 8).
+   REGLE 1 (09/10/2026) : la sortie hors machine (atelier, echantillon, essai,
+   reparation, pret a une autre usine), avec un motif par ligne et un OF libre,
+   et le retour du pret, en nature. */
+const TYPES_SAISIE_LIBRE = [
+  'SORTIE_PROD', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'RETOUR_FOURN', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT',
+]
+const LIBELLE_SAISIE: Record<string, string> = {
+  SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)',
+  SORTIE_HORS_MACHINE: 'Sortie hors machine (atelier, échantillon, essai, réparation, prêt)',
+  RETOUR_PRET: 'Retour d’un prêt (fil rendu par une autre usine)',
+}
+/** Les motifs de ligne d'une sortie hors machine ; ils ne servent qu'a elle. */
+const estMotifHorsMachine = (code: string) => code.startsWith('HM_')
 
 interface TypeMvt {
   code_type_mvt: string
@@ -212,7 +220,8 @@ export function MouvementNouveau() {
     responsable: '',
     reference_document: '',
     numero_of: '',
-    nature_sortie: 'DECHET' as 'DECHET' | 'CONSOMMATION',
+    /** L'usine du pret et de son retour. */
+    tiers: '',
     observations_globales: '',
   })
   const [lignes, setLignes] = useState<LigneSaisie[]>(() => [ligneVide()])
@@ -271,6 +280,32 @@ export function MouvementNouveau() {
     enabled: exigeMotif,
     retry: false,
   })
+  const horsMachine = typeActif?.code_type_mvt === 'SORTIE_HORS_MACHINE'
+  /* Une sortie hors machine ne propose que ses motifs ; les autres types, jamais eux. */
+  const motifsLigne = (qMotifsLigne.data ?? []).filter((m) =>
+    horsMachine ? estMotifHorsMachine(m.code_motif_ligne) : !estMotifHorsMachine(m.code_motif_ligne),
+  )
+  const pret = entete.code_type_mvt === 'RETOUR_PRET'
+  /* LES PRETS EN COURS : l'usine a qui l'on a prete, ce qu'elle doit rendre. */
+  const qPrets = useQuery({
+    queryKey: ['prets-en-cours'],
+    queryFn: () =>
+      api.get<{ tiers: string; code_reference: string; designation: string; reste_kg: number; jours: number }[]>(
+        '/api/prets-en-cours',
+      ),
+    enabled: pret || horsMachine,
+    retry: false,
+  })
+  const usinesConnues = [...new Set((qPrets.data ?? []).map((p) => p.tiers))]
+  /* LE SEUIL VIENT DU PARAMETRE, comme au serveur (P_DechetSeuilValiderKg). */
+  const qSeuil = useQuery({
+    queryKey: ['parametres'],
+    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const seuilKg =
+    Number(qSeuil.data?.find((p) => p.code_parametre === 'P_DechetSeuilValiderKg')?.valeur_courante) || 50
 
   /*
    * LE STOCK DU MAGASIN CHOISI, et lui seul.
@@ -482,9 +517,9 @@ export function MouvementNouveau() {
                 aria-label="Motif de la ligne"
               >
                 <option value="">—</option>
-                {(qMotifsLigne.data ?? []).map((m) => (
+                {motifsLigne.map((m) => (
                   <option key={m.code_motif_ligne} value={m.code_motif_ligne}>
-                    {m.code_motif_ligne} · {m.libelle}
+                    {horsMachine ? m.libelle : `${m.code_motif_ligne} · ${m.libelle}`}
                   </option>
                 ))}
               </Selecteur>
@@ -545,6 +580,7 @@ export function MouvementNouveau() {
         responsable: entete.responsable.trim() || null,
         reference_document: entete.reference_document.trim() || null,
         numero_of: entete.numero_of || null,
+        tiers: entete.tiers.trim() || null,
         observations_globales: entete.observations_globales.trim() || null,
         lignes: utiles.map((l) => corpsMouvement(pourEnvoi(l))),
       }),
@@ -598,15 +634,8 @@ export function MouvementNouveau() {
             </label>
             <select
               required
-              value={entete.nature_sortie === 'CONSOMMATION' ? CONSO_HORS_MACHINE : entete.code_type_mvt}
-              onChange={(e) => {
-                const conso = e.target.value === CONSO_HORS_MACHINE
-                setEntete({
-                  ...entete,
-                  code_type_mvt: conso ? 'SORTIE_PROD' : e.target.value,
-                  nature_sortie: conso ? 'CONSOMMATION' : 'DECHET',
-                })
-              }}
+              value={entete.code_type_mvt}
+              onChange={(e) => setEntete({ ...entete, code_type_mvt: e.target.value })}
               className={champ}
             >
               <option value="">—</option>
@@ -618,15 +647,12 @@ export function MouvementNouveau() {
                   : t.code_type_mvt.startsWith('AJUST_INV') ? peut('INVENTAIRE', 'VALIDER')
                   // Rendre au fournisseur defait une reception (decision 5).
                   : t.code_type_mvt === 'RETOUR_FOURN' ? peut('RECEPTIONS', 'VALIDER')
-                  : true).flatMap((t) => [
+                  : true).map((t) => (
                 <option key={t.code_type_mvt} value={t.code_type_mvt}>
                   {t.signe > 0 ? '+ ' : '− '}
                   {LIBELLE_SAISIE[t.code_type_mvt] ?? t.libelle}
-                </option>,
-                ...(t.code_type_mvt === 'SORTIE_PROD'
-                  ? [<option key={CONSO_HORS_MACHINE} value={CONSO_HORS_MACHINE}>− Consommation hors machine (colle, jute… sur un OF)</option>]
-                  : []),
-              ])}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -668,17 +694,51 @@ export function MouvementNouveau() {
             </select>
           </div>
 
-          {typeActif?.exige_of === 1 && (
+          {(typeActif?.exige_of === 1 || horsMachine) && (
             <div>
               <label className="mb-1 block text-sm font-medium text-texte">
-                Numero d ordre de fabrication <span className="text-red-500">*</span>
+                Numero d ordre de fabrication {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
               </label>
               <input
-                required
+                required={typeActif?.exige_of === 1}
                 value={entete.numero_of}
                 onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
+                placeholder={horsMachine ? 'Facultatif, texte libre' : undefined}
                 className={champ}
               />
+            </div>
+          )}
+
+          {(horsMachine || pret) && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-texte">
+                Usine {pret ? 'qui rend le fil' : 'qui emprunte (pour un prêt)'}
+                {pret && <span className="text-danger"> *</span>}
+              </label>
+              <input
+                list="usines-pret"
+                required={pret}
+                value={entete.tiers}
+                onChange={(e) => setEntete({ ...entete, tiers: e.target.value })}
+                placeholder="Nom de l’usine"
+                className={champ}
+              />
+              <datalist id="usines-pret">
+                {usinesConnues.map((u) => (
+                  <option key={u} value={u} />
+                ))}
+              </datalist>
+              {pret && entete.tiers.trim() && (
+                <p className="mt-0.5 text-[11px] text-attenue-texte">
+                  {(qPrets.data ?? []).filter((p) => p.tiers === entete.tiers.trim()).length === 0
+                    ? 'Aucun prêt en cours pour cette usine.'
+                    : 'À rendre : ' +
+                      (qPrets.data ?? [])
+                        .filter((p) => p.tiers === entete.tiers.trim())
+                        .map((p) => `${p.code_reference} ${fmt.nombre(p.reste_kg, 1)} kg`)
+                        .join(' · ')}
+                </p>
+              )}
             </div>
           )}
 
@@ -731,9 +791,10 @@ export function MouvementNouveau() {
                 Obligatoire : on ne rend pas plus que cette réception n’a fait entrer.
               </p>
             )}
-            {entete.code_type_mvt === 'SORTIE_PROD' && entete.nature_sortie !== 'CONSOMMATION' && (
+            {(entete.code_type_mvt === 'SORTIE_PROD' || horsMachine) && (
               <p className="mt-0.5 text-[11px] text-attenue-texte">
-                Au-delà de 50 kg, un déchet demande le droit de valider l’inventaire.
+                Au-delà de {fmt.nombre(seuilKg, 0)} kg sortis le même jour pour une référence (déchets et sorties
+                hors machine cumulés), la sortie demande le droit de valider l’inventaire.
               </p>
             )}
           </div>

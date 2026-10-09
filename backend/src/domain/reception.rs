@@ -453,9 +453,15 @@ pub async fn valider(
             .execute(&mut *tx)
             .await?;
 
+            // UN RELIQUAT DANS LA TOLERANCE SOLDE LA LIGNE (regle 6, 09/10/2026) :
+            // 751 kg recus sur 751,362 commandes ne laissent plus 0,362 kg
+            // « en cours » que seule la Direction pouvait abandonner.
             sqlx::query(
                 "UPDATE ligne_bc
-                    SET statut = CASE WHEN quantite_recue_kg >= quantite_commandee_kg - $2
+                    SET statut = CASE WHEN quantite_recue_kg >= quantite_commandee_kg
+                                          * (1 - fn_tolerance_fournisseur(
+                                                   (SELECT b.code_fournisseur FROM bon_commande b
+                                                     WHERE b.id_bc = ligne_bc.id_bc)) / 100.0) - $2
                                       THEN 'SOLDE' ELSE 'PARTIEL' END
                   WHERE id_ligne_bc = $1",
             )

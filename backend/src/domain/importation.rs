@@ -524,8 +524,12 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
             .fetch_one(&mut *tx)
             .await?;
             sqlx::query(
+                // Un reliquat dans la tolerance du fournisseur solde la ligne (regle 6).
                 "UPDATE ligne_bc
-                    SET statut = CASE WHEN quantite_recue_kg >= quantite_commandee_kg - 0.001
+                    SET statut = CASE WHEN quantite_recue_kg >= quantite_commandee_kg
+                                          * (1 - fn_tolerance_fournisseur(
+                                                   (SELECT b.code_fournisseur FROM bon_commande b
+                                                     WHERE b.id_bc = ligne_bc.id_bc)) / 100.0) - 0.001
                                       THEN 'SOLDE' ELSE 'PARTIEL' END
                   WHERE id_ligne_bc = $1 AND statut <> 'ANNULE'",
             )

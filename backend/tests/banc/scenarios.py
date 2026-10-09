@@ -754,6 +754,11 @@ def scenario_controle_reception(c, infra):
     c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
     c.refus("Choukri", "POST", f"/api/receptions/{rid}/valider", contient="pese")
     c.ok("Mohamed", "POST", f"/api/receptions/{rid}/valider")
+    # Regle 6 : 981 kg sur 1 000, dans la tolerance de 2 % -> ligne soldee, bon clos.
+    verifier(infra.valeur(f"SELECT statut FROM ligne_bc WHERE id_ligne_bc = '{lb['id_ligne_bc']}'") == "SOLDE",
+             "le reliquat dans la tolerance n'a pas solde la ligne")
+    verifier(infra.valeur(f"SELECT statut FROM bon_commande WHERE id_bc = '{id_bc}'") == "CLOTURE",
+             "le bon entierement solde n'est pas clos")
     verifier(int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'ligne_reception' "
                               f"AND operation = 'UPDATE' AND id_enregistrement = '{ligne}'")) >= 3,
              "les corrections de pesee ne sont pas au journal")

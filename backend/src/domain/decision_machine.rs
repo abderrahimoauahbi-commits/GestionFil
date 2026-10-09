@@ -47,6 +47,10 @@ pub struct Saisie {
     pub effet_ecart: Option<String>,
 }
 
+/// Les raisons d'une consommation au-dela de ce que portait la ligne, a un
+/// chargement (regle 2, 09/10/2026) : la liste que l'ecran propose.
+pub const RAISONS_SURPLUS: &[&str] = &["Saisie décalée", "Oubli de constat précédent", "Erreur de report"];
+
 /// L'etat d'une ligne de l'etage.
 #[derive(Clone, Serialize)]
 pub struct EtatLigne {
@@ -501,12 +505,37 @@ pub async fn calculer(
         // declares au bon motif sont le travail de l'atelier, enregistres en
         // vert. Juges sur tout l'ecart, 18 constats ordinaires sur 20 seraient
         // passes au rouge et auraient demande la Direction.
-        let explique = matches!(
-            calc.effet_ecart.as_str(),
-            "AUCUN" | "CONSOMMATION" | "DECHET" | "PERTE" | "CASSE"
-        );
+        //
+        // LA CORRECTION N'EST PAS UN PASSE-DROIT (regle 2, 09/10/2026) : une
+        // correction repare une erreur ; qu'elle se dise « consommation » ne
+        // dispense pas son ecart des seuils. 1 500 kg corriges passent au rouge.
+        let correction = s.code_motif.as_deref() == Some("MJ_CORRECTION");
+        let explique = !correction
+            && matches!(calc.effet_ecart.as_str(), "AUCUN" | "CONSOMMATION" | "DECHET" | "PERTE" | "CASSE");
+        // LE FIL CHARGE DEJA CONSOMME (regle 2) : a un chargement, la
+        // consommation ne peut venir que de ce que la ligne portait avant. Au-dela,
+        // le fil qu'on vient de charger serait deja file : possible si la fiche est
+        // saisie en retard, suspect sinon. Orange, avec la raison choisie.
+        let surplus = if f.type_fiche == "CHARGE" && calc.effet_ecart == "CONSOMMATION" {
+            arrondi_kg(calc.ecart_kg - kg_avant)
+        } else {
+            0.0
+        };
         calc.niveau_ecart = if explique {
-            (if calc.ecart_kg.abs() < 0.0005 { "AUCUN" } else { "VERT" }).to_string()
+            if calc.ecart_kg.abs() < 0.0005 {
+                "AUCUN".to_string()
+            } else if surplus > tolerance_arrondi(calc.nb_apres.max(1), nominal).max(0.5) {
+                if !calc.motif_texte.as_deref().map(|t| RAISONS_SURPLUS.contains(&t.trim())).unwrap_or(false) {
+                    blocages.push(format!(
+                        "{lib} : {surplus} kg du fil qu'on charge seraient deja consommes (la ligne ne portait                          que {} kg) — choisissez la raison : {}",
+                        arrondi_kg(kg_avant),
+                        RAISONS_SURPLUS.join(", ")
+                    ));
+                }
+                "ORANGE".to_string()
+            } else {
+                "VERT".to_string()
+            }
         } else {
             niveau_ecart(calc.ecart_kg, poids_ligne, &seuils).to_string()
         };

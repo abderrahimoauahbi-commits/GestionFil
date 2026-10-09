@@ -31,7 +31,7 @@ import {
   LIBELLE_EFFET, LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue,
   type Apercu, type Destination, type Fiche, type FicheDetail, type LigneSaisie, type Machine,
   type TypeFiche, type Zone,
-  TON_ECART,
+  RAISONS_SURPLUS, TON_ECART,
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
@@ -611,13 +611,22 @@ export function FicheBureau({
             ))}
           </select>
         )}
+        {/* LA RAISON D'UN SURPLUS AU CHARGEMENT (regle 2, 09/10/2026) : le serveur
+            attend l'une des trois de la liste ; le champ reste libre pour le
+            commentaire d'un ecart rouge. */}
         <input
+          list="raisons-surplus"
           value={l.motif_texte}
           onChange={(e) => f.majLigne(l.cle, 'motif_texte', e.target.value)}
           placeholder="Précision (obligatoire si l’écart est rouge)"
           aria-label="Précision du motif"
           className="min-h-[26px] w-40 rounded-[3px] border border-bordure bg-fond px-1.5 text-[11px]"
         />
+        <datalist id="raisons-surplus">
+          {RAISONS_SURPLUS.map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
       </div>
     )
   }

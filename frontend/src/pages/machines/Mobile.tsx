@@ -26,7 +26,7 @@ import {
   CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, LIBELLE_DESTINATION, LIBELLE_EFFET,
   LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue, signePct,
   type Destination, type Machine, type TypeFiche, type Zone,
-  TON_ECART,
+  RAISONS_SURPLUS, TON_ECART,
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
@@ -631,7 +631,7 @@ function FicheMobile({
                 </label>
               )}
               <ChampM label="Précision (obligatoire si l’écart est rouge)" v={l.motif_texte}
-                      set={(x) => f.majLigne(l.cle, 'motif_texte', x)} />
+                      set={(x) => f.majLigne(l.cle, 'motif_texte', x)} liste={RAISONS_SURPLUS} />
             </>
           )}
         </>
@@ -729,13 +729,22 @@ function R({ t, v, fort, alerte }: { t: string; v: string; fort?: boolean; alert
 }
 
 function ChampM({
-  label, v, set, type = 'text',
-}: { label: string; v: string; set: (v: string) => void; type?: string }) {
+  label, v, set, type = 'text', liste,
+}: { label: string; v: string; set: (v: string) => void; type?: string; liste?: string[] }) {
+  const idListe = liste ? `liste-${label.length}-${liste.length}` : undefined
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[12px] text-attenue-texte">{label}</span>
+      {liste && (
+        <datalist id={idListe}>
+          {liste.map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
+      )}
       <input
         type={type}
+        list={idListe}
         value={v}
         onChange={(e) => set(e.target.value)}
         className="min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2.5 text-[14px]"

@@ -577,6 +577,48 @@ def scenario_machine(c, infra):
         "code_magasin": MAG, "responsable": "Banc", "lignes": []}, contient="retiree")
 
 
+def scenario_machine_surplus(c, infra):
+    """Regle 2 (09/10) : a un chargement, consommer plus que ce que portait la ligne passe en ORANGE
+    avec une raison choisie ; une Correction est jugee par les seuils (rouge = Direction)."""
+    ref, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-MACH-2"
+    jour = taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 520, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [520], lot_fournisseur=lot, nb_bobines=200)
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANC2", "nom": "Machine du banc 2",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    zone = "BANC2-E1"
+
+    def fiche(type_fiche, lignes):
+        return c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANC2", "code_emplacement": zone, "date_fiche": jour,
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes})["id_fiche"]
+
+    # Ligne vide, 100 bobines de 2,6 kg chargees, 40 % declares : 156 kg « consommes » a l'instant.
+    charge = {"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
+              "poids_retenu_kg": 2.6, "pourcentage": 40, "code_motif": "CH_PRODUCTION"}
+    f1 = fiche("CHARGE", [charge])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/apercu", {})
+    verifier([l.get("niveau_ecart") for l in ap["lignes"]] == ["ORANGE"], f"surplus non orange : {ap['lignes']}")
+    verifier(any("raison" in b for b in ap["blocages"]), f"surplus sans raison exigee : {ap['blocages']}")
+    c.refus("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {"confirme_orange": True}, contient="raison")
+    c.ok("Magasinie", "PUT", f"/api/machines/fiches/{f1}", {
+        "type_fiche": "CHARGE", "code_machine": "BANC2", "code_emplacement": zone, "date_fiche": jour,
+        "code_magasin": MAG, "responsable": "Banc", "lignes": [dict(charge, motif_texte="Saisie décalée")]})
+    c.refus("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {}, contient="ORANGE")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {"confirme_orange": True})
+    verifier(controle(infra, "C48") >= 1, "le chargement deja consomme n'est pas au controle C48")
+
+    # Une Correction qui se dit consommation : 104 kg -> 26 kg, 78 kg sur une ligne de 104 : rouge.
+    f2 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
+                        "pourcentage": 10, "code_motif": "MJ_CORRECTION", "effet_ecart": "CONSOMMATION",
+                        "motif_texte": "essai du banc"}])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f2}/apercu", {})
+    verifier([l.get("niveau_ecart") for l in ap["lignes"]] == ["ROUGE"],
+             f"une correction de 78 kg n'est pas rouge : {ap['lignes']}")
+    c.refus("Magasinie", "POST", f"/api/machines/fiches/{f2}/valider", {"confirme_orange": True}, contient="Direction")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f2}/annuler", {"motif": "Essai du banc"})
+
+
 def scenario_sessions(c, infra):
     """Mot de passe de 12 au serveur ; changer son mot de passe ferme les autres sessions et rend un
     jeton neuf ; on ne trie pas sur un champ masque (audit v4, P2-18)."""
@@ -689,6 +731,7 @@ SCENARIOS = [
     scenario_import_coherence,
     scenario_lots_autorisations,
     scenario_machine,
+    scenario_machine_surplus,
     scenario_declencheurs,
     scenario_audit_montants,
     scenario_masquage,

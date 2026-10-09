@@ -243,6 +243,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM type_mouvement WHERE code_type_mvt = 'RETOUR_PRET')",
     ),
     (
+        // Le fil charge deja consomme, liste par le controle C48.
+        "2026-10-09e_machine_surplus.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c48')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

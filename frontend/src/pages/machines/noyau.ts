@@ -591,3 +591,7 @@ export const cheminMachine = (code: string, zone?: string) =>
 /** L'adresse d'une decision neuve sur un etage. */
 export const cheminNouvelleFiche = (code: string, type: TypeFiche, zone: string) =>
   `/machines/${encodeURIComponent(code)}/fiche/${type}/${encodeURIComponent(zone)}`
+
+/** Les raisons d'une consommation au-dela de ce que portait la ligne, a un
+    chargement (regle 2, 09/10/2026) — la meme liste que le serveur. */
+export const RAISONS_SURPLUS = ['Saisie décalée', 'Oubli de constat précédent', 'Erreur de report']

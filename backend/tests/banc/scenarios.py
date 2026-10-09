@@ -316,7 +316,7 @@ def scenario_masquage(c, infra):
 
 def scenario_controles_finaux(c, infra):
     """Apres tout le banc : cache = grand livre, stock lot = stock magasin, tableau de bord en 200."""
-    for code in ("C11", "C15"):
+    for code in ("C11", "C15", "C45"):
         verifier(controle(infra, code) == 0, f"{code} non nul a la fin du banc")
     c.ok("Choukri", "GET", "/api/cockpit")
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
@@ -391,6 +391,10 @@ def scenario_import(c, infra):
     c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}",
          {"numero_dum": "DUM-BANC-2", "motif_dum": "Faute de frappe sur la serie"})
     refus_sql(infra, f"UPDATE import_dossiers SET numero_dum = NULL WHERE id_dossier = '{id_dossier}'", "IMPORT-DUM")
+    # Regle 8 (T7) : dedouanee, l'entree de la reception d'import ne se contre-passe plus.
+    id_mvt = infra.valeur(f"SELECT id_mouvement FROM import_reception_lignes WHERE id_reception = '{rid}' LIMIT 1")
+    c.refus("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer",
+            {"motif": "Essai : annuler une entree dedouanee"}, contient="dedouane")
 
     # Cloture : les 5 000 MAD de douane vont au lot du dossier, tout encore la.
     ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True})
@@ -978,6 +982,15 @@ def scenario_taux_bon(c, infra):
     verifier(abs(float(ligne[0]) - 9.95) < 1e-6 and ligne[1] == "SAISI" and ligne[2],
              f"taux saisi mal enregistre : {ligne}")
 
+    # Regle 18 (T7) : un taux de reference de plus de 7 jours ne valide pas un bon en devise.
+    infra.sql("UPDATE taux_change SET date_debut = to_char(current_date - 10, 'YYYY-MM-DD') "
+              "WHERE code_devise = 'USD' AND date_fin IS NULL")
+    b3 = bon_soumis()
+    c.refus("Choukri", "PUT", f"/api/bons-commande/{b3}/statut", {"statut": "VALIDE"}, contient="7")
+    infra.sql("UPDATE taux_change SET date_fin = to_char(current_date, 'YYYY-MM-DD') "
+              "WHERE code_devise = 'USD' AND date_fin IS NULL")
+    taux_usd_du_jour(infra)
+
 
 def scenario_plan_detail(c, infra):
     """F16 et U8 (09/10) : le calcul d'une proposition se lit pas a pas et tombe juste ; un dossier
@@ -1030,6 +1043,22 @@ def scenario_plan_detail(c, infra):
     verifier(apres - avant == (1 if propositions else 0),
              f"la purge du plan inscrit {apres - avant} lignes d'audit pour {propositions} propositions")
 
+    # Regle 17 (T7) : ecartee, une reference ne revient pas au calcul suivant ; au-dela de
+    # P_DureeEcartJours, elle revient.
+    prop = infra.sql("SELECT id_proposition, code_reference FROM plan_achat WHERE statut = 'PROPOSE' AND figee = 0 "
+                     "ORDER BY code_reference LIMIT 1")
+    if prop:
+        id_prop, ref_prop = prop[0]
+        c.ok("Choukri", "POST", f"/api/plan-achat/propositions/{id_prop}/ignorer", {})
+        c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
+        verifier(infra.valeur(f"SELECT count(*) FROM plan_achat WHERE code_reference = '{ref_prop}' "
+                              "AND statut = 'PROPOSE'") == "0", "une proposition ecartee revient au calcul suivant")
+        infra.sql(f"UPDATE plan_achat SET date_ecartee = to_char(current_date - 100, 'YYYY-MM-DD') "
+                  f"WHERE id_proposition = '{id_prop}'")
+        c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
+        verifier(infra.valeur(f"SELECT count(*) FROM plan_achat WHERE code_reference = '{ref_prop}' "
+                              "AND statut = 'PROPOSE'") == "1", "l'ecart expire ne rend pas la proposition")
+
 
 def scenario_derogation_bornee(c, infra):
     """F17 (09/10) : la derogation d'un lot bloque couvre les kilos d'une fiche, pas plus ; elle tombe
@@ -1040,6 +1069,11 @@ def scenario_derogation_bornee(c, infra):
     reception_validee(c, id_bc, lignes, [520], lot_fournisseur=lot, nb_bobines=200)
     c.ok("Choukri", "POST", "/api/lots/statut", {"code_reference": ref, "lot_fournisseur": lot,
                                                  "action": "BLOQUER", "motif": "Nuance douteuse, essai du banc"})
+    # Regle 11 (T7) : bloque, le lot ne sort pas en production.
+    code, r = c.appel("Choukri", "POST", "/api/mouvements", {
+        "code_type_mvt": "SORTIE_PROD", "code_magasin": MAG, "code_motif": "PRODUCTION", "numero_of": "OF-BANC-BLOQUE",
+        "lignes": [{"code_reference": ref, "quantite_saisie": 5, "unite_saisie": "kg", "lot_fournisseur": lot}]})
+    verifier(code == 422 and "LOT-BLOQUE" in str(r), f"sortie en production d'un lot bloque : {code} {r}")
     c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCD", "nom": "Machine des derogations",
                                               "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
 
@@ -1227,6 +1261,21 @@ def scenario_import_bon_envoye(c, infra):
              "une ligne de bon deja servie en local reste proposee a l'import")
 
 
+def scenario_migrations_rejouables(c, infra):
+    """T7 (09/10) : chaque migration du 09/10, rejouee a la main sur une base qui l'a deja recue et
+    porte des donnees, passe sans erreur et ne change ni le nombre de controles ni le grand livre."""
+    from pathlib import Path
+    dossier = Path(__file__).resolve().parents[3] / "db" / "pg" / "migrations"
+    avant = (infra.valeur("SELECT count(*) FROM v_controles"), infra.valeur("SELECT count(*) FROM ligne_mouvement"))
+    for f in sorted(dossier.glob("2026-10-09*.sql")):
+        try:
+            infra.psql(infra.base, "-q", "-f", str(f))
+        except RuntimeError as e:
+            raise Echec(f"{f.name} ne se rejoue pas : {str(e)[-300:]}")
+    apres = (infra.valeur("SELECT count(*) FROM v_controles"), infra.valeur("SELECT count(*) FROM ligne_mouvement"))
+    verifier(avant == apres, f"le rejeu a change les controles ou le grand livre : {avant} -> {apres}")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -1298,5 +1347,6 @@ SCENARIOS = [
     scenario_machine_constat,
     scenario_lots_vivants,
     scenario_import_bon_envoye,
+    scenario_migrations_rejouables,
     scenario_controles_finaux,
 ]

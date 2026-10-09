@@ -1306,6 +1306,68 @@ pub async fn cout_revient(
     Ok(Json(valeur))
 }
 
+#[derive(Deserialize)]
+pub struct PeriodeEcart {
+    du: Option<String>,
+    au: Option<String>,
+}
+
+/// `GET /api/ecarts-prix?du=&au=` — CE QUE LE CMUP N'A PAS PU PORTER (audit
+/// v5, F18) : la part des factures, frais, avoirs et retours qui revenait a des
+/// kilos deja sortis, en local et a l'import. Le detail, et les totaux par
+/// reference et par fournisseur. Montants masques selon les droits.
+pub async fn ecarts_prix(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(p): Query<PeriodeEcart>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::VALORISATION, Action::Lire).await?;
+    let du = p.du.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let au = p.au.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let lignes = sqlx::query(
+        "SELECT circuit, id_ajustement, date_ecart, document, id_document, code_fournisseur, fournisseur_nom,
+                code_reference, designation, origine, numero_piece, motif,
+                quantite_recue_kg::float8 AS quantite_recue_kg, montant_mad::float8 AS montant_mad
+           FROM v_ecart_prix
+          WHERE ($1::text IS NULL OR date_ecart >= $1) AND ($2::text IS NULL OR date_ecart <= $2)
+          ORDER BY date_ecart DESC, document, code_reference
+          LIMIT 2000",
+    )
+    .bind(du)
+    .bind(au)
+    .fetch_all(&state.db)
+    .await?;
+    let par_reference = sqlx::query(
+        "SELECT code_reference, max(designation) AS designation, count(*) AS nb,
+                sum(montant_mad)::float8 AS montant_mad
+           FROM v_ecart_prix
+          WHERE ($1::text IS NULL OR date_ecart >= $1) AND ($2::text IS NULL OR date_ecart <= $2)
+          GROUP BY code_reference ORDER BY abs(sum(montant_mad)) DESC",
+    )
+    .bind(du)
+    .bind(au)
+    .fetch_all(&state.db)
+    .await?;
+    let par_fournisseur = sqlx::query(
+        "SELECT code_fournisseur, max(fournisseur_nom) AS fournisseur_nom, count(*) AS nb,
+                sum(montant_mad)::float8 AS montant_mad
+           FROM v_ecart_prix
+          WHERE ($1::text IS NULL OR date_ecart >= $1) AND ($2::text IS NULL OR date_ecart <= $2)
+          GROUP BY code_fournisseur ORDER BY abs(sum(montant_mad)) DESC",
+    )
+    .bind(du)
+    .bind(au)
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = json!({
+        "lignes": lignes_en_json(&lignes),
+        "par_reference": lignes_en_json(&par_reference),
+        "par_fournisseur": lignes_en_json(&par_fournisseur),
+    });
+    user.masquer(&state.db, module::VALORISATION, &mut v).await?;
+    Ok(Json(v))
+}
+
 /// Les frais d'approche saisis, par reception.
 pub async fn frais_approche(
     State(state): State<AppState>,

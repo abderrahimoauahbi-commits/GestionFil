@@ -403,6 +403,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/risques-sourcing", get(consultation::risques_sourcing))
         .route("/api/analyse-abc-xyz", get(consultation::analyse_abc_xyz))
         .route("/api/cout-revient", get(consultation::cout_revient))
+        .route("/api/ecarts-prix", get(consultation::ecarts_prix))
         .route("/api/frais-approche",
              get(consultation::frais_approche).post(operations::creer_frais_approche))
         .route("/api/stats/mouvements", get(consultation::stats_mouvements))

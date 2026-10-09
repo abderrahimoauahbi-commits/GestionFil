@@ -37,7 +37,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { EcartsPrix } from './EcartsPrix'
 import { fmt } from '../components/ui'
 import { cn } from '../lib/utils'
 
@@ -207,6 +207,18 @@ export function CoutRevient() {
         }
       />
 
+      {/* LE FRAIS SE SAISIT SUR LA PAGE (audit v5, F20) : un document, pas une fenetre. */}
+      {saisie && (
+        <FormulaireFrais
+          surFermeture={() => setSaisie(false)}
+          surSucces={() => {
+            setSaisie(false)
+            void qc.invalidateQueries({ queryKey: ['frais-approche'] })
+            void qc.invalidateQueries({ queryKey: ['cout-revient'] })
+          }}
+        />
+      )}
+
       {frais.length === 0 && (
         <Alerte ton="info" titre="Aucun frais d approche saisi" className="mb-3">
           Le cout de revient affiche est donc egal au prix d achat. Ce n est pas que les frais sont
@@ -310,19 +322,10 @@ export function CoutRevient() {
         titreCarte={(l) => `${l.numero_reception} · ${l.code_reference}`}
         exportable="cout-de-revient"
         imprimable="Coût de revient"
-        texteVide="Aucune reception validee."
+        texteVide="Aucune reception validee ou cloturee."
       />
 
-      {saisie && (
-        <FormulaireFrais
-          surFermeture={() => setSaisie(false)}
-          surSucces={() => {
-            setSaisie(false)
-            void qc.invalidateQueries({ queryKey: ['frais-approche'] })
-            void qc.invalidateQueries({ queryKey: ['cout-revient'] })
-          }}
-        />
-      )}
+      <EcartsPrix />
     </div>
   )
 }
@@ -384,11 +387,12 @@ function FormulaireFrais({
   const pret = form.id_reception && Number(form.montant_devise) > 0 && Number(form.taux_change) > 0
 
   return (
-    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
-      <DialogueContenu
-        titre="Saisir un frais d approche"
-        description="Il sera reparti sur les lignes de la réception selon la cle choisie."
-      >
+    <Carte className="mb-3">
+      <CarteEntete>
+        <CarteTitre>Saisir un frais d’approche</CarteTitre>
+        <p className="text-[12px] text-attenue-texte">Il sera réparti sur les lignes de la réception selon la clé choisie.</p>
+      </CarteEntete>
+      <CarteCorps>
         <form
           className="flex flex-col gap-3"
           onSubmit={(e) => {
@@ -522,7 +526,7 @@ function FormulaireFrais({
             </Bouton>
           </div>
         </form>
-      </DialogueContenu>
-    </Dialogue>
+      </CarteCorps>
+    </Carte>
   )
 }

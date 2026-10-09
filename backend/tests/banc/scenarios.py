@@ -149,6 +149,24 @@ def scenario_reception_cloture_avoir(c, infra):
     # Cloturee, elle ne recule plus.
     c.refus("Choukri", "POST", f"/api/devalider/receptions/{rid}", {"motif": "Essai : devalider une cloture"})
     c.refus("Choukri", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    # F18 (09/10) : cloturee, elle reste au cout de revient ; un avoir sur des kilos sortis
+    # va au rapport des ecarts de prix.
+    verifier(int(infra.valeur(f"SELECT count(*) FROM v_cout_revient WHERE numero_reception = "
+                              f"(SELECT numero_reception FROM reception WHERE id_reception = '{rid}')")) >= 1,
+             "la reception cloturee a quitte le cout de revient")
+    # Presque tout sort (le magasin ne garde que 100 kg de la reference) : l'avoir revient
+    # alors surtout a des kilos sortis.
+    sortie = round(float(infra.valeur(f"SELECT quantite_kg FROM stock_magasin WHERE code_reference = '{REF}' "
+                                      f"AND code_magasin = '{MAG}'")) - 100, 4)
+    code, r = mouvement(c, "Choukri", "SORTIE_PROD", [(REF, sortie)], numero_of="OF-BANC-F18")
+    verifier(code == 200, f"sortie de {sortie} kg refusee : {r}")
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/avoir",
+         {"nature": "AVOIR", "numero_piece": "AV-2", "montant_mad": 1000, "motif": "Remise apres consommation"})
+    numero = infra.valeur(f"SELECT numero_reception FROM reception WHERE id_reception = '{rid}'")
+    ecarts = c.ok("Choukri", "GET", "/api/ecarts-prix")
+    miennes = [l for l in ecarts["lignes"] if l["document"] == numero]
+    verifier(miennes and all(l["montant_mad"] < 0 for l in miennes),
+             f"l'avoir sur kilos sortis n'apparait pas en gain au rapport : {miennes}")
 
 
 def scenario_ecart_pesee(c, infra):

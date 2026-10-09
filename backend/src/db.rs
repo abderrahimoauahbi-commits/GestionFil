@@ -293,6 +293,12 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Receptions cloturees dans le cout de revient et C31/C32 ; v_ecart_prix.
+        "2026-10-09q_ecart_prix.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ecart_prix')
+            AND position('CLOTURE' IN pg_get_viewdef('v_ctl_c31'::regclass)) > 0",
+    ),
+    (
         // La derogation de lot bornee en kilos, tombee avec sa fiche.
         "2026-10-09p_derogation_bornee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

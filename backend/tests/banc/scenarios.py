@@ -366,7 +366,16 @@ def scenario_import(c, infra):
     c.refus("Choukri", "PUT", f"/api/import/receptions/{rid}", {"lignes": [dict(motive, quantite_recue_kg=1040)]})
     c.refus("Magasinie", "POST", f"/api/import/receptions/{rid}/valider")
     avant = kg(infra, ref)
-    c.ok("Choukri", "POST", f"/api/import/receptions/{rid}/valider")
+    # U4 (09/10) : le verdict part avec la validation, d'un bloc. Une pesee changee au passage
+    # fait tout echouer ; rien n'est ecrit.
+    c.refus("Choukri", "POST", f"/api/import/receptions/{rid}/valider",
+            {"reception": {"lignes": [dict(motive, quantite_recue_kg=1040)], "notes": "essai"}}, contient="fig")
+    verifier(infra.valeur(f"SELECT COALESCE(notes, '-') FROM import_receptions WHERE id_reception = '{rid}'") == "-",
+             "une validation refusee a laisse sa saisie ecrite")
+    c.ok("Choukri", "POST", f"/api/import/receptions/{rid}/valider",
+         {"reception": {"lignes": [motive], "notes": "Controle visuel fait au quai"}})
+    verifier(infra.valeur(f"SELECT notes FROM import_receptions WHERE id_reception = '{rid}'") == "Controle visuel fait au quai",
+             "le verdict n'est pas parti avec la validation")
     verifier(abs(kg(infra, ref) - avant - 1050) < 1e-6, "l'import n'est pas entre en stock")
     cm = cmup_magasin(infra, ref)
     verifier(abs(cm - 2.0 * cours) < 0.01, f"CMUP d'entree attendu {2.0 * cours:.4f} (prix x cours), obtenu {cm}")

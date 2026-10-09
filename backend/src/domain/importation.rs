@@ -224,10 +224,14 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
 /// Chaque ligne entre en stock A LA VALEUR FACTURE — un cout REEL, pas une estimation : la facture est reglee par la banque sur l'engagement d'importation, au taux qu'elle porte. Elle entre par un
 /// mouvement ENTREE_REC : c'est le declencheur existant qui met a jour le
 /// solde, le lot et le CUMP. Aucun circuit de stock parallele.
-pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) -> AppResult<Value> {
-    let mut tx = db.begin().await?;
-    user.poser_contexte(&mut tx).await?;
-
+///
+/// DANS LA TRANSACTION DE L'APPELANT, qui pose le contexte : la route y ecrit
+/// d'abord le verdict du controleur, d'un bloc (audit v5, U4).
+pub async fn valider_reception_dans(
+    tx: &mut sqlx::PgConnection,
+    user: &Utilisateur,
+    id_reception: &str,
+) -> AppResult<Value> {
     let (numero, statut, date_reception, createur): (String, String, String, String) = sqlx::query_as(
         "SELECT numero, statut, date_reception, id_utilisateur_creation FROM import_receptions
           WHERE id_reception = $1 FOR UPDATE",
@@ -357,7 +361,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
     if lignes.is_empty() {
         return Err(AppError::RegleMetier("Aucune ligne : rien à faire entrer en stock.".into()));
     }
-    verifier_ecarts(&mut tx, id_reception).await?;
+    verifier_ecarts(&mut *tx, id_reception).await?;
 
     // ---- Controles, puis prix facture (reel) de chaque ligne --------------------
     struct Entree {
@@ -579,7 +583,7 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
     }
 
     for (id_dossier, _, _) in &dossiers {
-        statuer_factures(&mut tx, id_dossier).await?;
+        statuer_factures(&mut *tx, id_dossier).await?;
         sqlx::query("UPDATE import_dossiers SET statut = 'EN_COURS' WHERE id_dossier = $1 AND statut = 'BROUILLON'")
             .bind(id_dossier)
             .execute(&mut *tx)
@@ -626,8 +630,6 @@ pub async fn valider_reception(db: &Db, user: &Utilisateur, id_reception: &str) 
         .bind(&user.id)
         .execute(&mut *tx)
         .await?;
-
-    tx.commit().await?;
 
     let quantite_totale: f64 = entrees.iter().map(|e| e.quantite).sum();
     Ok(json!({

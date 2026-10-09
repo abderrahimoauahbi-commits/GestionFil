@@ -1613,15 +1613,30 @@ pub async fn modifier_reception(
     Json(r): Json<ReceptionSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    ecrire_reception(&mut tx, &user, &id, &r).await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "id_reception": id })))
+}
+
+/// L'ECRITURE D'UNE RECEPTION, dans la transaction de l'appelant : la
+/// modification seule, ou avec le changement de statut et la validation qui la
+/// suivent — d'un bloc (audit v5, U4 : enregistrer puis valider en deux appels
+/// laissait une moitie ecrite quand la seconde echouait).
+async fn ecrire_reception(
+    tx: &mut sqlx::PgConnection,
+    user: &Utilisateur,
+    id: &str,
+    r: &ReceptionSaisie,
+) -> AppResult<()> {
     if r.lignes.is_empty() {
         return Err(AppError::Invalide("Une réception porte au moins une ligne.".into()));
     }
-    let mut tx = state.db.begin().await?;
-    user.poser_contexte(&mut tx).await?;
     let statut: String = sqlx::query_scalar(
         "SELECT statut FROM import_receptions WHERE id_reception = $1 FOR UPDATE",
     )
-    .bind(&id)
+    .bind(id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("reception {id}")))?;
@@ -1636,7 +1651,7 @@ pub async fn modifier_reception(
                 motif_litige = $4, notes = $5
           WHERE id_reception = $1",
     )
-    .bind(&id)
+    .bind(id)
     .bind(&r.date_reception)
     .bind(r.litige)
     .bind(&r.motif_litige)
@@ -1652,7 +1667,7 @@ pub async fn modifier_reception(
             "SELECT id_ligne, quantite_recue_kg::float8, nb_bobines, nb_palettes
                FROM import_reception_lignes WHERE id_reception = $1",
         )
-        .bind(&id)
+        .bind(id)
         .fetch_all(&mut *tx)
         .await?;
         let mut apres: Vec<(String, f64, i64, i64)> = r
@@ -1675,13 +1690,53 @@ pub async fn modifier_reception(
             ));
         }
     }
+    // AU CONTROLE, LE VERDICT SE POSE SUR LES LIGNES EN PLACE (audit v5, U4) :
+    // les supprimer puis les reinserer faisait du controleur l'auteur de la
+    // pesee, et la base lui refusait ensuite de valider.
+    if statut == "A_CONTROLER" {
+        for l in &r.lignes {
+            let derogation = l.derogation_ecart.unwrap_or(0) == 1;
+            let motif = l.motif_derogation.as_deref().map(str::trim).unwrap_or("");
+            if derogation && motif.chars().count() < 5 {
+                return Err(AppError::Invalide(
+                    "Une dérogation d'écart se motive : cinq caractères au moins.".into(),
+                ));
+            }
+            sqlx::query(
+                "UPDATE import_reception_lignes
+                    SET lot_fournisseur = COALESCE(NULLIF($3, ''), lot_fournisseur),
+                        code_couleur = COALESCE(NULLIF($4, ''), code_couleur),
+                        code_magasin = $5,
+                        libelle_couleur = COALESCE(NULLIF($6, ''), libelle_couleur),
+                        statut_qualite = COALESCE(NULLIF($7, ''), 'CONFORME'),
+                        id_utilisateur_derogation = CASE
+                            WHEN $8 = 1 AND (derogation_ecart <> 1 OR motif_derogation IS DISTINCT FROM $9) THEN $10
+                            WHEN $8 = 1 THEN id_utilisateur_derogation END,
+                        derogation_ecart = $8,
+                        motif_derogation = $9
+                  WHERE id_reception = $1 AND id_ligne = $2",
+            )
+            .bind(id)
+            .bind(&l.id_ligne)
+            .bind(&l.lot_fournisseur)
+            .bind(&l.code_couleur)
+            .bind(&l.code_magasin)
+            .bind(&l.libelle_couleur)
+            .bind(&l.statut_qualite)
+            .bind(i16::from(derogation))
+            .bind(derogation.then_some(motif))
+            .bind(&user.id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        return Ok(());
+    }
     sqlx::query("DELETE FROM import_reception_lignes WHERE id_reception = $1")
-        .bind(&id)
+        .bind(id)
         .execute(&mut *tx)
         .await?;
-    inserer_lignes_reception(&mut tx, &id, &r.lignes, &user.id).await?;
-    tx.commit().await?;
-    Ok(Json(json!({ "id_reception": id })))
+    inserer_lignes_reception(tx, id, &r.lignes, &user.id).await?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -1690,6 +1745,9 @@ pub struct StatutReceptionImport {
     /// Le motif du renvoi au magasinier (A_CONTROLER -> BROUILLON, regle 4).
     #[serde(default)]
     motif: Option<String>,
+    /// La saisie en cours, ecrite dans la meme transaction que le statut (U4).
+    #[serde(default)]
+    reception: Option<ReceptionSaisie>,
 }
 
 /// `PUT /api/import/receptions/{id}/statut` — soumettre au controle
@@ -1728,6 +1786,9 @@ pub async fn changer_statut_reception(
             "La réception {numero} est {actuel} : elle ne peut pas passer à {}.",
             s.statut
         )));
+    }
+    if let Some(r) = &s.reception {
+        ecrire_reception(&mut tx, &user, &id, r).await?;
     }
     if s.statut == "A_CONTROLER" {
         metier::verifier_ecarts(&mut tx, &id).await?;
@@ -1782,9 +1843,30 @@ pub async fn valider_reception(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    corps: axum::body::Bytes,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
-    Ok(Json(metier::valider_reception(&state.db, &user, &id).await?))
+    // Le verdict du controleur (qualite, derogation), s'il a change, part avec
+    // la validation : tout ou rien (U4).
+    let saisie: Option<ReceptionSaisie> = if corps.is_empty() {
+        None
+    } else {
+        serde_json::from_slice::<Value>(&corps)
+            .ok()
+            .and_then(|v| v.get("reception").cloned())
+            .filter(|v| !v.is_null())
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| AppError::Invalide(format!("réception illisible : {e}")))?
+    };
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    if let Some(r) = &saisie {
+        ecrire_reception(&mut tx, &user, &id, r).await?;
+    }
+    let v = metier::valider_reception_dans(&mut tx, &user, &id).await?;
+    tx.commit().await?;
+    Ok(Json(v))
 }
 
 /// `DELETE /api/import/receptions/{id}` — un brouillon seulement.

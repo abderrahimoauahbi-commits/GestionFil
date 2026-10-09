@@ -435,10 +435,17 @@ export function ReceptionImport() {
     },
     onError: echec,
   })
+  // D'UN BLOC (audit v5, U4) : la saisie modifiee part avec la validation ou
+  // le changement de statut, dans la meme transaction du serveur. Enregistrer
+  // puis valider en deux appels laissait une moitie ecrite quand le second
+  // echouait.
   const valider = useMutation({
     mutationFn: async () => {
-      const id = await sauver()
-      return { id, r: await api.post<{ numero: string; quantite_kg: number }>(`/api/import/receptions/${id}/valider`) }
+      const id = nouvelle ? await sauver() : idReception
+      const r = await api.post<{ numero: string; quantite_kg: number }>(`/api/import/receptions/${id}/valider`, {
+        reception: !nouvelle && modifie ? corps() : null,
+      })
+      return { id, r }
     },
     onSuccess: ({ id, r }) => {
       toast.success(`${r.numero} validée — ${fmt.nombre(r.quantite_kg, 2)} kg entrés en stock`)
@@ -454,10 +461,11 @@ export function ReceptionImport() {
   })
   const changerStatut = useMutation({
     mutationFn: async (cible: 'A_CONTROLER' | 'BROUILLON') => {
-      const id = await sauver()
+      const id = nouvelle ? await sauver() : idReception
       await api.put(`/api/import/receptions/${id}/statut`, {
         statut: cible,
         motif: cible === 'BROUILLON' ? renvoi?.trim() : undefined,
+        reception: !nouvelle && modifie ? corps() : undefined,
       })
       return { id, cible }
     },
@@ -712,7 +720,9 @@ export function ReceptionImport() {
                 <tbody>
                   {lignes.map((l) => {
                     const ecart = ecartDe(l)
-                    const horsTolerance = nombre(l.quantite) > Math.max(l.reste_kg, 0) * (1 + l.tolerance / 100) + 0.001
+                    // Validee, le reste est deja diminue de ce qu'elle a recu : rien a juger (U4).
+                    const horsTolerance =
+                      statut !== 'VALIDEE' && nombre(l.quantite) > Math.max(l.reste_kg, 0) * (1 + l.tolerance / 100) + 0.001
                     const verrou = editable && l.valide
                     const fond = verrou ? 'bg-succes/[0.05]' : undefined
                     return (

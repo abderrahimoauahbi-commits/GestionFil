@@ -1465,7 +1465,7 @@ pub async fn cloturer_plan(
           WHERE id_plan = $1",
     )
     .bind(&id)
-    .bind(&maintenant())
+    .bind(maintenant())
     .bind(&user.id)
     .execute(&mut *tx)
     .await?;

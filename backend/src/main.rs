@@ -1,7 +1,13 @@
-﻿//! ERP Gestion Fil - serveur HTTP.
+//! ERP Gestion Fil - serveur HTTP.
 //!
 //! Polyfashions Carpet Morocco.
 //! Pilotage des achats, stocks et production de matieres premieres.
+
+// DEUX REMARQUES DE CLIPPY ECARTEES EN CONNAISSANCE DE CAUSE (audit v5, T14) :
+// `!(montant > 0.0)` refuse aussi NaN, ce que `montant <= 0.0` laisserait
+// passer ; et les lignes sqlx se lisent en tuples, dont le type est long par
+// nature.
+#![allow(clippy::neg_cmp_op_on_partial_ord, clippy::type_complexity)]
 
 mod assistant;
 mod auth;

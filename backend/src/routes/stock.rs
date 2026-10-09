@@ -2167,6 +2167,7 @@ pub(crate) fn remise_valide(r: Option<f64>) -> AppResult<f64> {
     Ok((r * 100.0).round() / 100.0)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn inserer_ligne_bc(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id_ligne: &str,

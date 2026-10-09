@@ -723,6 +723,10 @@ export function Reception() {
     onError: echec,
   })
 
+  /* LE RENVOI AU MAGASINIER (regle 4, 09/10/2026), saisi sur la page : au
+     controle, la pesee est figee ; une erreur se renvoie avec ce qu'il faut
+     corriger, elle ne se corrige pas par celui qui validera. */
+  const [renvoi, setRenvoi] = useState<string | null>(null)
   const changerStatut = useMutation({
     mutationFn: (c: { statut: string; motif?: string }) => api.put(`/api/receptions/${id}/statut`, c),
     onSuccess: (_r, c) => {
@@ -732,10 +736,6 @@ export function Reception() {
     },
     onError: echec,
   })
-  /* LE RENVOI AU MAGASINIER (regle 4, 09/10/2026), saisi sur la page : au
-     controle, la pesee est figee ; une erreur se renvoie avec ce qu'il faut
-     corriger, elle ne se corrige pas par celui qui validera. */
-  const [renvoi, setRenvoi] = useState<string | null>(null)
 
   const confirmation = useConfirmation()
   const valider = useMutation({

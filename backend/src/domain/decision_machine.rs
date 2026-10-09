@@ -783,7 +783,7 @@ pub async fn derogations_possibles(
         let accordee = derogation_accordee(c, &l.code_reference, &l.lot_fournisseur, &f.numero).await?;
         // Accordee et suffisante : rien a demander. Accordee mais trop courte :
         // une nouvelle demande, pour les kilos de la fiche.
-        if !bloque || matches!(accordee, Some((_, b)) if b.map_or(true, |b| kg_lot <= b + 0.0005)) {
+        if !bloque || matches!(accordee, Some((_, b)) if b.is_none_or(|b| kg_lot <= b + 0.0005)) {
             continue;
         }
         let en_attente: Option<String> = sqlx::query_scalar(
@@ -935,6 +935,7 @@ async fn poser_etage(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn journal(
     c: &mut sqlx::PgConnection,
     user: &Utilisateur,
@@ -1287,7 +1288,7 @@ pub async fn retirer(
         .fetch_optional(&mut *c)
         .await?;
         let qui = suivante
-            .map(|(n, d)| format!("la fiche {} du {}", n.unwrap_or_else(|| "?".into()), d.replace('T', " ").get(..16).unwrap_or("").to_string()))
+            .map(|(n, d)| format!("la fiche {} du {}", n.unwrap_or_else(|| "?".into()), d.replace('T', " ").get(..16).unwrap_or("")))
             .unwrap_or_else(|| "une decision ulterieure".into());
         return Err(AppError::RegleMetier(format!(
             "cette decision a servi de base a {qui} : elle ne se retire pas seule. Procedure : \

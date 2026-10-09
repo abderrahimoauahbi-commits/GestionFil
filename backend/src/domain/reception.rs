@@ -1,9 +1,10 @@
 //! Validation d'une reception : cascade 3-en-1 atomique (CDC G3).
 //!
 //! Une reception validee genere OBLIGATOIREMENT et SIMULTANEMENT :
-//!   1. un mouvement de stock ENTREE_REC (par magasin destinataire) ;
-//!   2. une archive de reception figee ;
-//!   3. une ligne d'historique de prix (base du CMUP).
+//! 1. un mouvement de stock ENTREE_REC (par magasin destinataire) ;
+//! 2. une archive de reception figee ;
+//! 3. une ligne d'historique de prix (base du CMUP).
+//!
 //! Le tout dans une seule transaction : tout ou rien.
 //!
 //! Trois defauts du trigger J4 du CDC sont corriges ici :

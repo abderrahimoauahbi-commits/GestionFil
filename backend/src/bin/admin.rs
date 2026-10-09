@@ -172,7 +172,7 @@ async fn lister_comptes(pool: &db::Db) -> Result<()> {
     .fetch_all(pool)
     .await?;
 
-    println!("{:<12} {:<30} {:<10} {:<8} {}", "LOGIN", "NOM", "ROLE", "ACTIF", "MOT DE PASSE");
+    println!("{:<12} {:<30} {:<10} {:<8} MOT DE PASSE", "LOGIN", "NOM", "ROLE", "ACTIF");
     for (login, nom, role, actif, hash) in comptes {
         let etat = if hash == "!A_DEFINIR!" { "A DEFINIR" } else { "defini" };
         println!(
@@ -194,7 +194,7 @@ async fn verifier(pool: &db::Db) -> Result<()> {
             .await?;
 
     let mut bloquants = 0;
-    println!("{:<6} {:<50} {:<10} {}", "CODE", "CONTROLE", "CRITICITE", "ANOMALIES");
+    println!("{:<6} {:<50} {:<10} ANOMALIES", "CODE", "CONTROLE", "CRITICITE");
     for (code, libelle, criticite, n) in &controles {
         if criticite == "BLOQUANT" && *n > 0 {
             bloquants += n;
@@ -248,7 +248,7 @@ fn lister_sauvegardes() -> Result<()> {
         println!("Aucune sauvegarde. Executer `sauvegarder` pour en creer une.");
         return Ok(());
     }
-    println!("{:<36} {:>12}  {}", "FICHIER", "OCTETS", "DATE");
+    println!("{:<36} {:>12}  DATE", "FICHIER", "OCTETS");
     for s in &liste {
         println!("{:<36} {:>12}  {}", s.fichier, s.octets, s.date);
     }

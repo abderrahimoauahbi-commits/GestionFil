@@ -179,6 +179,7 @@ async fn exiger_entrees_vivantes(c: &mut PgConnection, id_reception: &str, numer
 /// LE MOTEUR : porte `difference_c` (centimes, signe) sur une reception —
 /// au stock encore present de ses lots, le reste en ecart de prix — et le
 /// journalise. Commun a la cloture, a l'avoir et a la facture complementaire.
+#[allow(clippy::too_many_arguments)]
 async fn appliquer(
     c: &mut PgConnection,
     user: &Utilisateur,

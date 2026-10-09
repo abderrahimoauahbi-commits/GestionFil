@@ -576,7 +576,7 @@ pub async fn taux_reference_facture(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Lire).await?;
     let devise = q.get("devise").map(|d| d.trim().to_uppercase()).unwrap_or_default();
-    let date = q.get("date").cloned().unwrap_or_else(|| crate::db::aujourdhui());
+    let date = q.get("date").cloned().unwrap_or_else(crate::db::aujourdhui);
     if devise.is_empty() {
         return Err(AppError::Invalide("devise obligatoire".into()));
     }

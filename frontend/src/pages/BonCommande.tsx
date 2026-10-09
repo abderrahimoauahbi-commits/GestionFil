@@ -291,6 +291,10 @@ export function BonCommande() {
       entete.notes !== (bc.notes ?? '') ||
       entete.code_devise !== bc.code_devise)
 
+  const confirmationTaux = useConfirmation()
+  /* LA VALIDATION D'UN BON EN DEVISE, saisie sur la page (regle 10) : le cours
+     du jour est propose ; un autre taux se retient avec son motif. */
+  const [validation, setValidation] = useState<{ taux: string; motif: string } | null>(null)
   const changerStatut = useMutation({
     mutationFn: (c: string | { statut: string; taux_saisi?: number; motif_taux?: string; confirme_taux?: boolean }) =>
       api.put(`/api/bons-commande/${id}/statut`, typeof c === 'string' ? { statut: c } : c),
@@ -314,10 +318,6 @@ export function BonCommande() {
       echec(e)
     },
   })
-  const confirmationTaux = useConfirmation()
-  /* LA VALIDATION D'UN BON EN DEVISE, saisie sur la page (regle 10) : le cours
-     du jour est propose ; un autre taux se retient avec son motif. */
-  const [validation, setValidation] = useState<{ taux: string; motif: string } | null>(null)
 
   /**
    * SUPPRIMER LE BROUILLON, depuis le bon lui-meme.

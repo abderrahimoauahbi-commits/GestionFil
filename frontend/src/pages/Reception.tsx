@@ -1106,7 +1106,8 @@ export function Reception() {
       {horsTolerance > 0 && (
         <Alerte ton="alerte" titre="Écart de pesee" className="mb-3">
           {horsTolerance} ligne(s) depassent de plus de {TOLERANCE_PCT} % la quantite attendue.
-          Un tel excedent exige une derogation motivee ; une livraison partielle, non.
+          Un tel excédent exige une dérogation motivée. Un manque dans la tolérance solde la ligne du bon ; au-delà,
+          il laisse un reliquat à recevoir.
         </Alerte>
       )}
 

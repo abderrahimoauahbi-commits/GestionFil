@@ -319,7 +319,11 @@ def scenario_controles_finaux(c, infra):
     for code in ("C11", "C15"):
         verifier(controle(infra, code) == 0, f"{code} non nul a la fin du banc")
     c.ok("Choukri", "GET", "/api/cockpit")
-    verifier(int(infra.valeur("SELECT count(*) FROM v_controles")) >= 40, "v_controles incomplet")
+    # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
+    manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
+                             "FROM generate_series(1, 52) g EXCEPT SELECT code FROM v_controles) x")
+    verifier(not manquants, f"controles absents de v_controles : {manquants}")
+    verifier(int(infra.valeur("SELECT count(*) FROM v_controles")) == 52, "v_controles porte des doublons")
 
 
 def scenario_import(c, infra):
@@ -1153,11 +1157,15 @@ def scenario_lots_vivants(c, infra):
                               f"AND lot_fournisseur = '{lot}' AND type_evenement = 'REOUVERTURE'")) == 1,
              "pas d'evenement REOUVERTURE")
 
-    # Le plancher laisse une trace.
+    # Le plancher laisse une trace (ecriture directe, puis le solde reel est remis : C15).
+    solde = infra.valeur(f"SELECT quantite_kg FROM stock_lot WHERE code_reference = '{ref}' "
+                         f"AND lot_fournisseur = '{lot}' AND code_magasin = '{MAG}'")
     infra.sql(f"UPDATE stock_lot SET quantite_kg = -2 WHERE code_reference = '{ref}' AND lot_fournisseur = '{lot}' "
               f"AND code_magasin = '{MAG}'")
     verifier(int(infra.valeur(f"SELECT count(*) FROM lot_evenement WHERE lot_fournisseur = '{lot}' "
                               f"AND type_evenement = 'PLANCHER'")) == 1, "le plancher n'a rien inscrit")
+    infra.sql(f"UPDATE stock_lot SET quantite_kg = {solde} WHERE code_reference = '{ref}' AND lot_fournisseur = '{lot}' "
+              f"AND code_magasin = '{MAG}'")
 
     # Deux demandes identiques : une seule en attente.
     demande = {"type_demande": "LOT_BLOQUE", "code_reference": ref, "lot_fournisseur": lot, "kg": 10,

@@ -365,7 +365,7 @@ export const SUJETS: Sujet[] = [
       {
         nom: 'Tolérance de pesée (%)',
         description:
-          'L’EXCÉDENT admis entre le poids pesé et le reste à recevoir, en local comme à l’import. Au-delà, l’excédent demande une dérogation motivée ; un manque n’est pas un écart, c’est une livraison partielle. À défaut de réglage : le paramètre P_TolerEcartPesee (2 %).',
+          'L’EXCÉDENT admis entre le poids pesé et le reste à recevoir, en local comme à l’import. Au-delà, l’excédent demande une dérogation motivée. Un manque dans la tolérance solde la ligne du bon ; au-delà, il laisse un reliquat à recevoir. À défaut de réglage : le paramètre P_TolerEcartPesee (2 %).',
         valeurs: 'pourcentage',
       },
       {
@@ -866,7 +866,7 @@ export const SUJETS: Sujet[] = [
       { nom: 'Magasin de destination', description: 'Où la marchandise est rangée.', obligatoire: true },
     ],
     regles: [
-      'Seul l’EXCÉDENT au-delà de la tolérance du fournisseur demande une dérogation ; un manque est une livraison partielle.',
+      'Seul l’EXCÉDENT au-delà de la tolérance du fournisseur demande une dérogation. Un manque dans la tolérance solde la ligne ; au-delà, il laisse un reliquat.',
       'Peser et valider sont deux gestes, et deux comptes (séparation des tâches).',
       'Validée, l’entrée est au prix du bon (provisoire) ; clôturée avec la facture, elle est à sa valeur définitive.',
       'Une réception clôturée ne se dévalide plus : avoir ou facture complémentaire, motivés.',

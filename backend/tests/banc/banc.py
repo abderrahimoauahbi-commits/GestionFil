@@ -237,6 +237,19 @@ def main():
     choisis = [a for i, a in enumerate(args)
                if not a.startswith("--") and (i == 0 or args[i - 1] not in valeurs)]
     liste = [s for s in scenarios.SCENARIOS if not choisis or s.__name__.removeprefix("scenario_") in choisis]
+    # UN NOM INCONNU N'EST PAS UN SUCCES (audit v5, U16) : « 0/0 scenarios
+    # passent » se lisait comme un banc vert.
+    connus = {s.__name__.removeprefix("scenario_") for s in scenarios.SCENARIOS}
+    inconnus = [c for c in choisis if c not in connus]
+    if inconnus:
+        sys.exit(f"scenario(s) inconnu(s) : {', '.join(inconnus)}. Connus : {', '.join(sorted(connus))}")
+    # LE PORT DOIT ETRE LIBRE : un serveur deja la (un banc precedent, un essai)
+    # repondrait a la place de celui du banc, sur une autre base.
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sonde:
+        sonde.settimeout(1)
+        if sonde.connect_ex(("127.0.0.1", infra.port)) == 0:
+            sys.exit(f"le port {infra.port} est deja occupe : arretez ce qui l'ecoute, ou passez --port.")
     for nom, chemin in (("serveur", infra.binaire), ("admin", infra.admin)):
         if not chemin.exists():
             sys.exit(f"binaire {nom} introuvable : {chemin} (cargo build --bins, ou --cible)")

@@ -34,10 +34,11 @@ INSERT INTO champs_neufs VALUES
  ('RECEPTIONS', 'montant_devise',        'Montant facture saisi (devise)',   'LECTURE', 1, 4396, 'total_mad'),
  ('STOCK',      'prix_entree_mad',       'Prix d''entree du lot (MAD/kg)',   'LECTURE', 1, 4400, 'cmup_mad');
 
+-- Rejouee, elle ne touche pas un champ deja declare : son reglage a pu etre
+-- change a la main dans la configuration (audit v5, U14, 09/10/2026).
 INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible, ordre)
 SELECT module, champ, libelle, niveau_defaut, sensible, ordre FROM champs_neufs
-ON CONFLICT (module, champ) DO UPDATE SET
-    libelle = excluded.libelle, sensible = excluded.sensible, ordre = excluded.ordre;
+ON CONFLICT (module, champ) DO NOTHING;
 
 INSERT INTO modele_droit_champ (code_role_user, module, champ, niveau)
 SELECT m.code_role_user, n.module, n.champ,

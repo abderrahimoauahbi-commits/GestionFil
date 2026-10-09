@@ -711,7 +711,7 @@ export function Inventaires() {
 
               {inventaire.statut === 'BROUILLON' && (
                 <Alerte ton="info">
-                  Ouvrez l'inventaire pour figer le stock theorique et commencer le comptage.
+                  Ouvrez l'inventaire pour commencer le comptage. Rien n'est gelé : le stock théorique de chaque ligne est pris à l'heure où elle est comptée (règle 10).
                 </Alerte>
               )}
 
@@ -910,7 +910,7 @@ function TableComptage({
     return (
       <EtatVide
         titre="Aucune ligne"
-        description="Ouvrez l'inventaire pour figer le stock theorique."
+        description="Ouvrez l'inventaire pour commencer le comptage : le théorique se prend à l'heure de chaque comptage."
       />
     )
 

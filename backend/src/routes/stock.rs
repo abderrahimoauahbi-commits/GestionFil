@@ -2418,9 +2418,14 @@ pub async fn supprimer_bc(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
 
-    let statut: String = sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = $1")
+    // LU SOUS VERROU, DANS LA TRANSACTION QUI SUPPRIME (audit v5, U13) : lu
+    // avant, le statut pouvait changer entre la lecture et l'effacement — un
+    // bon valide a cet instant aurait ete supprime.
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let statut: String = sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = $1 FOR UPDATE")
         .bind(&id)
-        .fetch_optional(&state.db)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
 
@@ -2433,7 +2438,7 @@ pub async fn supprimer_bc(
                            AND operation = 'DEVALIDATION')",
     )
     .bind(&id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
     if a_engage {
         return Err(AppError::RegleMetier(
@@ -2445,7 +2450,7 @@ pub async fn supprimer_bc(
 
     if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
         return Err(AppError::RegleMetier(format!(
-            "ce bon est {} : il a engage l'entreprise et ne se supprime plus.              Annulez-le — la trace restera.",
+            "ce bon est {} : il a engage l'entreprise et ne se supprime plus. Annulez-le — la trace restera.",
             statut.to_lowercase().replace('_', " ")
         )));
     }
@@ -2453,16 +2458,13 @@ pub async fn supprimer_bc(
     let receptions: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM reception WHERE id_bc = $1")
             .bind(&id)
-            .fetch_one(&state.db)
+            .fetch_one(&mut *tx)
             .await?;
     if receptions > 0 {
         return Err(AppError::RegleMetier(format!(
             "{receptions} reception(s) se rattachent a ce bon : il a servi, il ne se supprime pas."
         )));
     }
-
-    let mut tx = state.db.begin().await?;
-    user.poser_contexte(&mut tx).await?;
 
     sqlx::query(
         "UPDATE plan_achat SET statut = 'PROPOSE', id_bc_genere = NULL

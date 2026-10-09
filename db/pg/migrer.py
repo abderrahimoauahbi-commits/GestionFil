@@ -49,6 +49,17 @@ PSQL = os.environ.get("PSQL", _PSQL_WIN if os.path.exists(_PSQL_WIN) else "psql"
 JOURNAL = "2026-10-08c_journal_migrations.sql"
 
 
+# LES CORRECTIONS DELIBEREES D'UNE MIGRATION DEJA APPLIQUEE. Une migration
+# inscrite ne se rejoue jamais par ce script ; la corriger apres coup ne sert
+# que pour un rejeu a la main ou une base neuve. Son ancienne empreinte reste
+# acceptee par --verifier, nommement, avec la raison :
+#   2026-10-08b : rejouee, elle ecrasait le reglage `sensible` des champs
+#   declares a la main (audit v5, U14, 09/10/2026) — ON CONFLICT DO NOTHING.
+EMPREINTES_REMPLACEES: dict[str, set[str]] = {
+    "2026-10-08b_audit_v4.sql": {"b0d8a8015ece08fbf035c0693945aa8a32d49f934a9adf84bd0a73f8403939cc"},
+}
+
+
 def empreinte(chemin: Path) -> str:
     # Sur le contenu aux fins de ligne Unix : Git les convertit selon le poste,
     # et un fichier identique ne doit pas paraitre modifie.
@@ -186,7 +197,8 @@ def main():
     tous = fichiers()
 
     if "--verifier" in args:
-        modifies = [f.name for f in tous if connues.get(f.name) and connues[f.name] != empreinte(f)]
+        modifies = [f.name for f in tous if connues.get(f.name) and connues[f.name] != empreinte(f)
+                    and connues[f.name] not in EMPREINTES_REMPLACEES.get(f.name, set())]
         manquants = [f.name for f in tous if f.name not in connues]
         for n in modifies:
             print(f"  MODIFIE depuis son application : {n}")

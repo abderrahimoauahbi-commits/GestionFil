@@ -133,8 +133,11 @@ export function Fournisseurs() {
       libelle: 'Tolerance de pesee (%)',
       type: 'nombre',
       min: 0,
-      aide: 'Au-dela, une reception exige une derogation nominative.',
+      aide:
+        'Au-dela, une reception exige une derogation nominative. Ce seuil se fixe avec le ' +
+        'droit de valider : celle qui prepare les receptions ne le regle pas.',
       section: 'Logistique et réception',
+      exigeValider: true,
     },
     /* --- Évaluation -------------------------------------------------- */
     { champ: 'note_globale', libelle: 'Note globale (/100)', type: 'nombre', min: 0, max: 100, section: 'Évaluation' },

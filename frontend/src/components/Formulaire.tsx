@@ -77,6 +77,13 @@ export interface ChampDef {
    * par lot ne vaut que pour une reference suivie par lot.
    */
   actifSi?: { champ: string; raison: string }
+  /**
+   * UN SEUIL SE FIXE AU DROIT DE VALIDER (09/10/2026). La tolerance de pesee
+   * d'un fournisseur dispense de derogation : celle qui prepare la reception ne
+   * la regle pas. Sans le droit, le champ reste visible, grise, et n'est pas
+   * envoye — le serveur le refuserait.
+   */
+  exigeValider?: boolean
 }
 
 /** L'interrupteur dont depend un champ est-il allume ? */
@@ -143,6 +150,7 @@ export function Formulaire({
     // filtre de droits, et c'est la liste `modification` de l'entite, qui ne
     // contient jamais la cle, qui protege reellement du renommage.
     if (c.cleCreation) return creation && droits.peutEcrire
+    if (c.exigeValider && !droits.peutValider) return false
     return droits.modifiable(c.champ)
   }
 
@@ -216,7 +224,11 @@ export function Formulaire({
                     <Lock className="size-3" />
                     {!condition && c.actifSi
                       ? c.actifSi.raison
-                      : c.cleCreation && !creation ? 'non modifiable' : 'lecture seule'}
+                      : c.cleCreation && !creation
+                        ? 'non modifiable'
+                        : c.exigeValider && !droits.peutValider
+                          ? 'fixé par la Direction'
+                          : 'lecture seule'}
                   </span>
                 )}
                 {c.aide && (

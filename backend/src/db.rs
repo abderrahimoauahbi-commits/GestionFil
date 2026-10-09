@@ -200,7 +200,46 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'mot_de_passe_change_le')
             AND EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'utilisateur'
-                           AND column_name = 'totp_dernier_pas')",
+                           AND column_name = 'totp_dernier_pas')
+            -- Le declencheur qui pose la date : sans lui, la revocation des
+            -- autres sessions disparait en silence (audit v5).
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_utilisateur_mdp_change')",
+    ),
+    // LES INVARIANTS SANS LESQUELS LE SERVICE MARCHE QUAND MEME (audit v5, T4) :
+    // le binaire ne lit pas leurs colonnes, mais sans eux il accepterait en
+    // silence ce que la base devait refuser. Ils sont donc exiges aussi.
+    (
+        // L'audit des tables d'argent.
+        "2026-10-08d_audit_tables_argent.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+                         WHERE c.relname = 'ligne_bc' AND t.tgname = 'trg_audit_modification')",
+    ),
+    (
+        // Facture d'import figee et etancheite local / import.
+        "2026-10-08f_import_coherence.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_import_facture_figee')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_import_hors_reception_locale')",
+    ),
+    (
+        // L'en-cours complet et l'horizon prolonge du plan d'achat.
+        "2026-10-08h_planification_encours.sql",
+        "SELECT EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_HorizonProlonge')
+            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus')",
+    ),
+    (
+        // Dates vides, tolerance au droit VALIDER, modele de droits, mouvement
+        // machine annule par sa seule fiche.
+        "2026-10-09a_gardes_p1.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mouvement_machine_annulation')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_00_date_vide')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c46')",
+    ),
+    (
+        // La supervision complete : /api/supervision lit sens, cible, vigilance.
+        "2026-10-09b_supervision_rejouee.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'v_supervision'
+                           AND column_name = 'vigilance')",
     ),
 ];
 

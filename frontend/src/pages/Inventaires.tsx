@@ -242,7 +242,11 @@ function analyser(l: LigneInv, s: Saisie, tolMotif: number): Analyse {
   const ecartKg = kg === null ? null : kg - theoriqueKg
   // Meme formule que la colonne generee `ligne_inventaire.ecart_pct`.
   const ecartPct = ecartKg === null || theoriqueKg === 0 ? null : (ecartKg / theoriqueKg) * 100
-  const motifRequis = ecartPct !== null && Math.abs(ecartPct) > tolMotif
+  // UN THEORIQUE NUL N'A PAS DE POURCENTAGE, mais trouver du stock la ou il n'y en
+  // avait pas est un ecart qui s'explique (regle 10) : meme condition que le
+  // serveur a la cloture, sinon l'ecran ne demande rien et la cloture refuse.
+  const motifRequis =
+    (ecartPct !== null && Math.abs(ecartPct) > tolMotif) || (theoriqueKg === 0 && kg !== null && kg > 0)
 
   const poidsReel = kgSaisi !== null && bobines !== null && bobines > 0 ? kgSaisi / bobines : null
   const poidsPct =
@@ -379,7 +383,9 @@ export function Inventaires() {
   /** Lignes enregistrees hors tolerance sans motif : elles bloqueront la cloture. */
   const injustifiees = (qLignes.data ?? []).filter(
     (l) =>
-      l.ecart_pct != null && Math.abs(Number(l.ecart_pct)) > tolMotif && !l.motif_ecart?.trim(),
+      ((l.ecart_pct != null && Math.abs(Number(l.ecart_pct)) > tolMotif) ||
+        (Number(l.quantite_theorique_kg ?? 0) === 0 && Number(l.quantite_comptee_kg ?? 0) > 0)) &&
+      !l.motif_ecart?.trim(),
   )
   const restantes = (qLignes.data ?? []).filter((l) => l.statut_ligne === 'A_TRAITER').length
 

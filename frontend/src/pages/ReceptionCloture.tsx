@@ -25,6 +25,7 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Etiq, Selecteur } from '../composants/ui/base'
 import { cn, fmt } from '../lib/utils'
+import { PanneRequetes } from '../composants/PanneRequetes'
 
 interface LigneRef {
   code_reference: string
@@ -135,7 +136,12 @@ export function ClotureFacture({
     queryFn: () => api.get<Contexte>(`/api/receptions/${idReception}/facture-contexte?date=${f.date}`),
     enabled: ouvert,
   })
+  // LA DEVISE N'EST JAMAIS SUPPOSEE (09/10/2026). Si le contexte n'a pas pu etre
+  // lu, l'ecran retombait sur « MAD » sans rien dire : sur un bon en USD, on
+  // saisissait des dirhams que le serveur multipliait ensuite par le cours.
+  // Tant que la devise n'est pas connue, rien ne se calcule.
   const devise = qCtx.data?.code_devise ?? 'MAD'
+  const contexteLu = qCtx.isSuccess
   const enDevise = devise !== 'MAD'
   // Le taux propose : le cours de reference, tant que l'operateur n'a rien tape.
   const tauxEffectif = f.taux.trim() ? nb(f.taux) : (qCtx.data?.taux_reference ?? null)
@@ -150,7 +156,8 @@ export function ClotureFacture({
     frais_mad: f.frais.trim() ? nb(f.frais) : 0,
     simuler,
   })
-  const complet = f.numero.trim() !== '' && nb(f.montant) > 0 && (!enDevise || (tauxEffectif ?? 0) > 0)
+  const complet =
+    contexteLu && f.numero.trim() !== '' && nb(f.montant) > 0 && (!enDevise || (tauxEffectif ?? 0) > 0)
   const surEchec = (e: unknown) => {
     // Un taux loin du cours : l'ecran propose la confirmation au lieu d'un refus sec.
     if (e instanceof ErreurApi && e.message.startsWith('TAUX-ECART')) {
@@ -201,6 +208,7 @@ export function ClotureFacture({
         <CarteTitre>Clôturer avec la facture du fournisseur</CarteTitre>
       </CarteEntete>
       <CarteCorps className="space-y-3">
+        <PanneRequetes requetes={[['La devise et le cours de la réception', qCtx]]} />
         <p className="text-[12.5px] text-attenue-texte">
           La marchandise est entrée au prix du bon. La facture et ses frais donnent la valeur définitive : la
           différence va aux lots de la réception encore en stock, là où ils sont ; la part des kilos déjà sortis

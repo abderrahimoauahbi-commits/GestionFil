@@ -33,6 +33,16 @@ def controle(infra, code):
     return int(infra.valeur(f"SELECT anomalies FROM v_controles WHERE code = '{code}'"))
 
 
+def refus_sql(infra, requete, contient):
+    """La base doit refuser la requete, et pour la raison attendue (un refus quelconque ne prouve rien)."""
+    try:
+        infra.sql(requete)
+    except RuntimeError as e:
+        verifier(contient.lower() in str(e).lower(), f"refus sans « {contient} » : {str(e)[:300]}")
+        return
+    raise Echec(f"la base a accepte : {requete[:120]}")
+
+
 def bon_envoye(c, lignes, frs=FRS):
     """Un bon saisi par l'assistante, valide par la Direction, envoye. Rend (id_bc, lignes du bon)."""
     bc = c.ok("Assistante", "POST", "/api/bons-commande", {
@@ -514,6 +524,16 @@ def scenario_machine(c, infra):
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {})
     verifier(abs(kg(infra, ref) - (stock0 - 260)) < 0.01, f"le chargement n'a pas sorti 260 kg : {stock0 - kg(infra, ref)}")
 
+    # 1 bis. Le mouvement magasin du chargement ne se contre-passe pas seul : la
+    #        machine garderait le fil (service ET base, 09/10/2026).
+    id_mvt = infra.valeur("SELECT id_mouvement FROM mouvement WHERE code_type_mvt = 'CHARGE_MACHINE' "
+                          "ORDER BY date_creation DESC LIMIT 1")
+    c.refus("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer",
+            {"motif": "Essai du banc : contre-passer un chargement"}, contient="fiche machine")
+    refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, "
+                     f"id_mouvement_contrepasse) VALUES ('banc-x', 'MVT-BANC-X', 'AJUST_INV_POS', '{MAG}', '{id_mvt}')",
+              "MACHINE-ANNULATION")
+
     # 2. Constat ordinaire : 50 % restent, 130 kg consommes -> vert, au droit d'ecrire.
     f2 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
                         "pourcentage": 50, "code_motif": "MJ_ORDINAIRE"}])
@@ -544,7 +564,13 @@ def scenario_machine(c, infra):
     verifier(abs(kg(infra, ref) - (stock0 - 130)) < 0.01, f"stock apres dechargement : {kg(infra, ref)} au lieu de {stock0 - 130}")
     verifier(controle(infra, "C11") == 0 and controle(infra, "C38") == 0, "C11 ou C38 apres le parcours machine")
 
-    # 5. Retiree, elle ne porte plus de fiche.
+    # 5. Retiree, elle ne porte plus de fiche. Un brouillon en attente empeche
+    #    d'abord le retrait (il se validerait ensuite sur une machine hors parc).
+    f5 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 0,
+                        "pourcentage": 0, "code_motif": "MJ_ORDINAIRE"}])
+    c.refus("Choukri", "PATCH", "/api/machines/BANC1/etat", {"etat": "RETIREE", "motif": "Fin du banc"},
+            contient="brouillon")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f5}/annuler", {"motif": "Essai du banc"})
     c.ok("Choukri", "PATCH", "/api/machines/BANC1/etat", {"etat": "RETIREE", "motif": "Fin du banc"})
     c.refus("Magasinie", "POST", "/api/machines/fiches", {
         "type_fiche": "CHARGE", "code_machine": "BANC1", "code_emplacement": zone, "date_fiche": jour,
@@ -587,6 +613,32 @@ def scenario_concurrence_numerotation(c, infra):
     verifier(len(set(numeros)) == 8, f"numeros en double : {sorted(numeros)}")
 
 
+def scenario_gardes_p1(c, infra):
+    """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
+    fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
+    # Un bon sans date de livraison (regression de la contrainte de format du 08/10).
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {
+        "code_fournisseur": FRS, "date_livraison_prevue": "",
+        "lignes": [{"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 100,
+                    "prix_unitaire_devise": 20}]})
+    verifier(infra.valeur(f"SELECT coalesce(date_livraison_prevue, 'NULL') FROM bon_commande "
+                          f"WHERE id_bc = '{bc['id_bc']}'") == "NULL", "la date vide n'est pas devenue NULL")
+
+    # La tolerance de pesee : l'assistante corrige la fiche, pas le seuil.
+    tol = infra.valeur(f"SELECT tolerance_pesee_pct FROM fournisseur WHERE code_fournisseur = '{FRS}'")
+    c.ok("Assistante", "PATCH", f"/api/fournisseurs/{FRS}", {"telephone": "0539000000", "tolerance_pesee_pct": tol})
+    c.refus("Assistante", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": 10}, contient="valider")
+    c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": 3})
+    verifier(int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'fournisseur' "
+                              "AND nouvelles_valeurs LIKE '%tolerance_pesee_pct%'")) >= 1,
+             "le changement de tolerance n'est pas au journal")
+    c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": tol})
+    verifier(controle(infra, "C46") == 0, "un champ sensible n'a pas de ligne dans le modele de droits")
+    # La supervision complete (2026-09-20d, rejouee par 09b) : plus d'« erreur interne ».
+    sup = c.ok("Choukri", "GET", "/api/supervision")
+    verifier(sup, "la supervision ne rend rien")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -607,5 +659,6 @@ SCENARIOS = [
     scenario_masquage,
     scenario_sessions,
     scenario_concurrence_numerotation,
+    scenario_gardes_p1,
     scenario_controles_finaux,
 ]

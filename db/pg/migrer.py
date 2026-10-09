@@ -19,9 +19,22 @@ Usage (la base est TOUJOURS nommee : pas de defaut qui viserait la production) :
     python migrer.py --marquer-jusqua 2026-10-08c_journal_migrations.sql --imprimer > marquage.sql
         # le meme marquage en SQL, pour le serveur (cat marquage.sql | sudo -u postgres psql -d gestionfil)
 
-Options de connexion : --hote (127.0.0.1), --utilisateur (postgres),
---motdepasse (a defaut PGPASSWORD). En production, les migrations se jouent en
-`postgres` (voir deploiement/README.md).
+Options de connexion : --hote (127.0.0.1 ; '' = socket local, pour
+`sudo -u postgres python3 migrer.py --hote ''` sur le serveur), --utilisateur
+(postgres), --motdepasse (a defaut PGPASSWORD). En production, les migrations se
+jouent en `postgres` (voir deploiement/README.md).
+
+LE MARQUAGE VERIFIE (09/10/2026). Inscrire une migration sans la jouer, c'est
+affirmer qu'elle est deja dans la base. Le 08/10, 2026-09-20d a ete inscrite
+ainsi sans avoir jamais ete jouee : la supervision tombait en « erreur
+interne », et migrer.py ne l'aurait jamais rejouee. Desormais, avant d'inscrire,
+chaque migration est REJOUEE A BLANC (transaction annulee) : si elle change
+encore le schema (une colonne, une vue, une fonction, un declencheur, un index),
+elle n'est pas inscrite, et le rapport dit quoi. Une migration qui ne se rejoue
+pas (elle chargeait des donnees deja presentes) est inscrite avec un
+avertissement. Un objet remplace depuis hors des migrations (fichier source recharge) parait
+aussi « non joue » : apres lecture du rapport, `--accepter <fichier>[,...]`.
+`--sans-essai` retrouve l'ancien comportement, a vos risques.
 """
 import hashlib
 import os
@@ -31,7 +44,8 @@ from pathlib import Path
 
 ICI = Path(__file__).resolve().parent
 MIGRATIONS = ICI / "migrations"
-PSQL = os.environ.get("PSQL", r"C:\Program Files\PostgreSQL\18\bin\psql.exe")
+_PSQL_WIN = r"C:\Program Files\PostgreSQL\18\bin\psql.exe"
+PSQL = os.environ.get("PSQL", _PSQL_WIN if os.path.exists(_PSQL_WIN) else "psql")
 JOURNAL = "2026-10-08c_journal_migrations.sql"
 
 
@@ -43,7 +57,7 @@ def empreinte(chemin: Path) -> str:
 
 class Base:
     def __init__(self, base, hote, utilisateur, motdepasse):
-        self.cible = ["-U", utilisateur, "-h", hote, "-d", base]
+        self.cible = ["-U", utilisateur, "-d", base] + (["-h", hote] if hote else [])
         self.env = dict(os.environ)
         if motdepasse:
             self.env["PGPASSWORD"] = motdepasse
@@ -63,6 +77,66 @@ class Base:
                                stdin=fh, capture_output=True, env=self.env)
         sortie = (p.stderr or b"").decode("utf-8", "replace").strip()
         return p.returncode, sortie
+
+
+# L'empreinte du schema : ce qu'une migration peut changer et qu'on sait relire.
+SCHEMA = """
+SELECT 'col ' || table_name || '.' || column_name || ' ' || data_type
+  FROM information_schema.columns WHERE table_schema = 'public'
+UNION ALL
+SELECT 'vue ' || viewname || ' ' || md5(definition) FROM pg_views WHERE schemaname = 'public'
+UNION ALL
+SELECT 'fn ' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ') '
+       || md5(replace(p.prosrc, chr(13), ''))
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'
+UNION ALL
+SELECT 'trg ' || c.relname || '.' || t.tgname
+  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'public' AND NOT t.tgisinternal
+UNION ALL
+SELECT 'ctr ' || conrelid::regclass::text || '.' || conname
+  FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace WHERE n.nspname = 'public'
+UNION ALL
+SELECT 'idx ' || indexname FROM pg_indexes WHERE schemaname = 'public'
+"""
+
+
+def essai_a_blanc(base, sequence: list[Path]) -> tuple[list[str], int]:
+    """Rejoue la SUITE des migrations, dans l'ordre, dans une transaction annulee,
+    et rend ce qu'elle change encore au schema, avec le nombre d'instructions qui
+    ne se rejouent pas (chargements de donnees deja presentes : sautees une a une,
+    ON_ERROR_ROLLBACK). Toute la suite, et non chaque fichier seul : une vue
+    redefinie plus tard paraitrait sinon « changee » par la migration ancienne."""
+    corps = []
+    for chemin in sequence:
+        corps.append(f"\\echo @@FICHIER {chemin.name}")
+        corps += [l for l in chemin.read_text(encoding="utf-8").splitlines()
+                  if l.strip().upper() not in ("BEGIN;", "COMMIT;", "START TRANSACTION;")]
+    # Les lignes du schema sont marquees : les migrations impriment aussi des resultats.
+    instantane = "SELECT '@@S ' || x FROM (" + SCHEMA + ") s(x);"
+    script = "\n".join(["\\set ON_ERROR_ROLLBACK on", "BEGIN;", "\\echo @@AVANT", instantane,
+                        *corps, "\\echo @@APRES", instantane, "ROLLBACK;", ""])
+    p = subprocess.run([PSQL, *base.cible, "-tA", "-q"], input=script.encode("utf-8"),
+                       capture_output=True, env=base.env)
+    sortie = p.stdout.decode("utf-8", "replace")
+    if "@@APRES" not in sortie:
+        erreur = (p.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        raise RuntimeError("l'essai a blanc n'a pas abouti : " + (erreur[-1] if erreur else "?"))
+    echecs = sum(1 for l in (p.stderr or b"").decode("utf-8", "replace").splitlines()
+                 if l.startswith(("ERREUR", "ERROR", "psql:")))
+    avant_txt, apres_txt = sortie.split("@@AVANT", 1)[1].split("@@APRES", 1)
+    avant = {l[4:] for l in avant_txt.splitlines() if l.startswith("@@S ")}
+    apres = {l[4:] for l in apres_txt.splitlines() if l.startswith("@@S ")}
+    return sorted((apres - avant) | {"(disparait) " + x for x in avant - apres}), echecs
+
+
+def objet_de(ecart: str) -> str:
+    """Le nom de l'objet d'une ligne d'ecart (« col v_x.c numeric » -> v_x)."""
+    nature, mot = ecart.replace("(disparait) ", "").split()[:2]
+    if nature in ("trg", "ctr"):
+        return mot.split(".")[-1]
+    return mot.split("(")[0].split(".")[0]
 
 
 def fichiers() -> list[Path]:
@@ -95,6 +169,8 @@ def main():
         # le SQL du marquage, a envoyer de la meme facon. Aucune connexion ici.
         noms = [f for f in fichiers() if f.name <= limite]
         print("-- Inscription des migrations jouees a la main, jusqu'a " + limite)
+        print("-- ATTENTION : ce SQL inscrit SANS VERIFIER. Preferez, sur le serveur :")
+        print("--   sudo -u postgres python3 migrer.py --base gestionfil --hote '' --marquer-jusqua " + limite)
         print("INSERT INTO migration_appliquee (fichier, empreinte, mode) VALUES")
         print(",\n".join(f"  ('{f.name}', '{empreinte(f)}', 'MARQUEE')" for f in noms))
         print("ON CONFLICT (fichier) DO NOTHING;")
@@ -117,7 +193,8 @@ def main():
         for n in manquants:
             print(f"  A JOUER : {n}")
         print(f"{len(tous) - len(manquants)} inscrite(s), {len(manquants)} a jouer, {len(modifies)} modifiee(s).")
-        sys.exit(1 if manquants else 0)
+        # Un fichier modifie apres coup est une anomalie, pas une information.
+        sys.exit(1 if manquants or modifies else 0)
 
     if limite:
         if limite not in [f.name for f in tous]:
@@ -127,14 +204,49 @@ def main():
             code, sortie = base.jouer(MIGRATIONS / JOURNAL)
             if code != 0:
                 sys.exit(f"{JOURNAL} : {sortie}")
+        candidates = [f for f in tous if f.name <= limite and f.name not in connues]
+        refusees: dict[str, list[str]] = {}
+        if candidates and "--sans-essai" not in args:
+            # La suite rejouee : les candidates, et ce que la base a deja recu apres
+            # la premiere d'entre elles (pour finir sur l'etat qu'elle doit avoir).
+            sequence = [f for f in tous if f.name >= candidates[0].name
+                        and (f.name <= limite or f.name in connues)]
+            print(f"  essai a blanc de {len(sequence)} migration(s) (transaction annulee)...")
+            ecarts, echecs = essai_a_blanc(base, sequence)
+            textes = {f.name: f.read_text(encoding="utf-8") for f in sequence}
+            for e in ecarts:
+                objet = objet_de(e)
+                # La derniere migration de la suite qui nomme l'objet en est l'auteur.
+                auteur = next((f.name for f in reversed(sequence) if objet in textes[f.name]), None)
+                if auteur in [c.name for c in candidates]:
+                    refusees.setdefault(auteur, []).append(e)
+                else:
+                    print(f"  ecart non attribue a une migration a inscrire : {e}")
+            if echecs:
+                print(f"  {echecs} instruction(s) ne se rejouent pas (donnees deja chargees) : "
+                      "sautees, sans incidence sur le schema compare.")
+        # Apres lecture du rapport : une migration dont l'objet a ete remplace hors
+        # des migrations (rechargement d'un fichier source) s'accepte nommement.
+        acceptees = set(filter(None, (option("--accepter") or "").split(",")))
+        for nom in acceptees & set(refusees):
+            print(f"  acceptee apres examen : {nom}")
+            refusees.pop(nom)
         n = 0
-        for f in tous:
-            if f.name > limite:
-                break
-            if f.name not in connues:
-                inscrire(base, f.name, empreinte(f), "MARQUEE")
-                n += 1
-        print(f"{n} migration(s) inscrite(s) sans etre rejouees, jusqu'a {limite}.")
+        for f in candidates:
+            if f.name in refusees:
+                print(f"  PAS INSCRITE {f.name} : elle change encore le schema, elle n'a donc pas "
+                      "ete (entierement) jouee. Ce qu'elle changerait :")
+                for e in refusees[f.name][:12]:
+                    print(f"      {e}")
+                continue
+            inscrire(base, f.name, empreinte(f), "MARQUEE")
+            n += 1
+        print(f"{n} migration(s) inscrite(s) sans etre rejouees, jusqu'a {limite} ; "
+              f"{len(refusees)} refusee(s).")
+        if refusees:
+            sys.exit("Des migrations ne sont pas (telles quelles) dans la base. Pour chacune : si elle n'a "
+                     "jamais ete jouee, jouez-la (psql -f) ; si ses objets ont ete remplaces depuis par un "
+                     "fichier source, relancez avec --accepter <fichier>[,<fichier>].")
         return
 
     if base.requete("SELECT to_regclass('public.migration_appliquee') IS NOT NULL") != ["t"]:
@@ -161,7 +273,8 @@ def main():
         # Le journal existe des que sa propre migration est passee.
         inscrire(base, f.name, empreinte(f), "JOUEE")
         avis = [l for l in sortie.splitlines() if "NOTICE" in l or "AVERTISSEMENT" in l or "WARNING" in l]
-        print(f"  ok {f.name}" + (f"\n      {avis[0]}" if avis else ""))
+        # Tous les avis : le second de 08m (« DATES MAL FORMEES ») etait avale.
+        print(f"  ok {f.name}" + "".join(f"\n      {a}" for a in avis))
     print(f"{len(a_jouer)} migration(s) jouee(s) sur {nom_base}.")
 
 

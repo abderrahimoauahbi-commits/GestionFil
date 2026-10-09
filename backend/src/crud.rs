@@ -52,6 +52,77 @@ pub struct Entite {
     pub tri: &'static str,
 }
 
+/// LES SEUILS SE FIXENT AU DROIT DE VALIDER (U5, 09/10/2026).
+///
+/// La tolerance de pesee d'un fournisseur est le seuil qui dispense une
+/// reception de derogation : celle qui la prepare pourrait l'elargir la veille
+/// et la resserrer le lendemain. Celui qui fixe un seuil n'est pas celui qui en
+/// profite : ces colonnes s'ecrivent avec le droit VALIDER du module ; le reste
+/// de la fiche reste au droit d'ecrire. Chaque changement est journalise par le
+/// declencheur d'audit de la table.
+pub fn champs_au_droit_valider(e: &Entite) -> &'static [&'static str] {
+    match e.chemin {
+        "fournisseurs" => &["tolerance_pesee_pct"],
+        _ => &[],
+    }
+}
+
+/// Refuse l'ecriture d'un champ reserve a VALIDER, sauf s'il ne change pas :
+/// un formulaire renvoie toute la fiche, et corriger un telephone ne doit pas
+/// demander la Direction.
+async fn exiger_valider_si_change(
+    db: &Db,
+    user: &Utilisateur,
+    e: &Entite,
+    id: Option<&str>,
+    champs: &[(String, Value)],
+) -> AppResult<()> {
+    let reserves = champs_au_droit_valider(e);
+    for (nom, valeur) in champs {
+        if !reserves.contains(&nom.as_str()) {
+            continue;
+        }
+        let nouvelle = match valeur {
+            Value::Null => None,
+            Value::String(t) if t.trim().is_empty() => None,
+            v => Some(v.to_string().trim_matches('"').to_string()),
+        };
+        let actuelle: Option<String> = match id {
+            Some(id) => sqlx::query_scalar(&format!(
+                "SELECT {nom}::text FROM {} WHERE {} = $1",
+                e.table, e.cle
+            ))
+            .bind(id)
+            .fetch_optional(db)
+            .await?
+            .flatten(),
+            // A la creation, le seuil par defaut ne demande rien a personne.
+            None if nom == "tolerance_pesee_pct" => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT COALESCE((SELECT valeur_courante FROM parametre
+                                   WHERE code_parametre = 'P_TolerEcartPesee'), '2')",
+            )
+            .fetch_one(db)
+            .await?,
+            None => None,
+        };
+        let egal = match (&nouvelle, &actuelle) {
+            (None, None) => true,
+            (Some(a), Some(b)) => match (a.parse::<f64>(), b.parse::<f64>()) {
+                (Ok(x), Ok(y)) => (x - y).abs() < 1e-9,
+                _ => a == b,
+            },
+            _ => false,
+        };
+        if !egal && !crate::auth::rbac::a_permission(db, &user.role, e.module, Action::Valider).await? {
+            return Err(AppError::RegleMetier(format!(
+                "{nom} est un seuil de controle : il se fixe avec le droit de valider ({}). Demandez-le a la Direction.",
+                e.module
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Registre des entites gerees par le moteur generique.
 pub const ENTITES: &[Entite] = &[
     Entite {
@@ -700,6 +771,7 @@ pub async fn creer(
     };
 
     let champs = valider_charge(db, user, e.module, e.creation, &reste).await?;
+    exiger_valider_si_change(db, user, e, None, &champs).await?;
 
     // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES.
     //
@@ -748,6 +820,7 @@ pub async fn modifier(
 ) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
     let champs = valider_charge(db, user, e.module, e.modification, charge).await?;
+    exiger_valider_si_change(db, user, e, Some(id), &champs).await?;
 
     // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES — voir `charge_jsonb`.
     // Un « 500 » saisi au clavier est du TEXTE ; lie tel quel a une colonne

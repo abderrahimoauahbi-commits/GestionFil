@@ -68,10 +68,25 @@ export function useToleranceFournisseur(code: string | null | undefined): number
   const q = useQuery({
     queryKey: ['fournisseurs-tolerance'],
     queryFn: () =>
-      api.get<{ code_fournisseur: string; tolerance_pesee_pct?: number | null }[]>('/api/fournisseurs?limite=1000'),
+      api.get<{ code_fournisseur: string; tolerance_pesee_pct?: number | string | null }[]>(
+        '/api/fournisseurs?limite=1000',
+      ),
     staleTime: 5 * 60_000,
     retry: false,
   })
-  const t = Number(q.data?.find((f) => f.code_fournisseur === code)?.tolerance_pesee_pct)
-  return Number.isFinite(t) && t >= 0 ? t : 2
+  const parametres = useQuery({
+    queryKey: ['parametres'],
+    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  // A DEFAUT DE REGLAGE, LE PARAMETRE, COMME LE SERVEUR (fn_tolerance_fournisseur).
+  // `Number(null)` vaut 0 : un fournisseur sans reglage affichait 0 % et tout
+  // excedent passait au rouge « exige une derogation » que le serveur ne demandait pas.
+  const p = Number(parametres.data?.find((x) => x.code_parametre === 'P_TolerEcartPesee')?.valeur_courante)
+  const defaut = Number.isFinite(p) && p >= 0 ? p : 2
+  const brut = q.data?.find((f) => f.code_fournisseur === code)?.tolerance_pesee_pct
+  if (brut === null || brut === undefined || String(brut).trim() === '') return defaut
+  const t = Number(brut)
+  return Number.isFinite(t) && t >= 0 ? t : defaut
 }

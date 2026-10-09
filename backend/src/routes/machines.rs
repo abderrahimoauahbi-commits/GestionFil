@@ -779,6 +779,27 @@ pub async fn valider_fiche(
     verrouiller_fiche(&mut tx, &id, &["BROUILLON"]).await?;
     let (f, saisies, capacite, libelle) = charger_decision(&mut tx, &id).await?;
     refuser_conso(&f.type_fiche)?;
+    // LA MACHINE ET LA ZONE SONT RELUES A LA VALIDATION (F15, 09/10/2026).
+    // Le refus a la creation ne suffisait pas : un brouillon saisi la veille se
+    // validait apres le retrait de la machine ou la desactivation de la zone,
+    // et posait du fil sur un metier hors parc, encore compte au MRP. Seul un
+    // dechargement reste permis : il vide.
+    let (etat_machine, zone_active): (String, i64) = sqlx::query_as(
+        "SELECT m.etat, e.actif::bigint
+           FROM machine_emplacement e JOIN machine m ON m.code_machine = e.code_machine
+          WHERE e.code_emplacement = $1
+            FOR SHARE OF m, e",
+    )
+    .bind(&f.code_emplacement)
+    .fetch_one(&mut *tx)
+    .await?;
+    if f.type_fiche != "DECHARGE" && (etat_machine == "RETIREE" || zone_active != 1) {
+        return Err(AppError::RegleMetier(format!(
+            "{} : {} — cette fiche ne se valide plus. Annulez le brouillon, ou remettez la machine ou la zone en service d'abord.",
+            libelle,
+            if etat_machine == "RETIREE" { "la machine est retiree du parc" } else { "la zone est desactivee" }
+        )));
+    }
     // VALIDER UN CHARGEMENT OU UN DECHARGEMENT DEMANDE LE DROIT « VALIDER »
     // (06/10/2026) : il fait bouger le magasin, comme une contre-passation. Un
     // constat, qui ne touche que l'etage, reste au droit d'ecrire.
@@ -1535,7 +1556,32 @@ pub async fn changer_etat(
             .await?;
     let (nom, ancien) = machine.ok_or_else(|| AppError::Introuvable(format!("machine {code}")))?;
 
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    // Sous verrou : une fiche ne doit pas se valider entre le controle et le retrait.
+    sqlx::query("SELECT 1 FROM machine WHERE code_machine = $1 FOR UPDATE")
+        .bind(&code)
+        .execute(&mut *tx)
+        .await?;
     if etat == "RETIREE" {
+        // Les brouillons d'abord (F15) : valides apres le retrait, ils poseraient
+        // du fil sur une machine hors parc.
+        let brouillons: Vec<String> = sqlx::query_scalar(
+            "SELECT f.numero_fiche FROM machine_fiche f
+               JOIN machine_emplacement e ON e.code_emplacement = f.code_emplacement
+              WHERE e.code_machine = $1 AND f.statut = 'BROUILLON'
+              ORDER BY 1",
+        )
+        .bind(&code)
+        .fetch_all(&mut *tx)
+        .await?;
+        if !brouillons.is_empty() {
+            return Err(AppError::RegleMetier(format!(
+                "{nom} a encore {} fiche(s) en brouillon ({}) : annulez-les ou validez-les avant de la retirer du parc",
+                brouillons.len(),
+                brouillons.join(", ")
+            )));
+        }
         let bobines: i64 = sqlx::query_scalar(
             "SELECT COALESCE(sum(s.nb_bobines), 0)::bigint
                FROM machine_emplacement e
@@ -1543,7 +1589,7 @@ pub async fn changer_etat(
               WHERE e.code_machine = $1",
         )
         .bind(&code)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
         if bobines > 0 {
             return Err(AppError::RegleMetier(format!(
@@ -1553,8 +1599,6 @@ pub async fn changer_etat(
         }
     }
 
-    let mut tx = state.db.begin().await?;
-    user.poser_contexte(&mut tx).await?;
     sqlx::query(
         "UPDATE machine
             SET etat = $2, motif_etat = NULLIF($3, ''),

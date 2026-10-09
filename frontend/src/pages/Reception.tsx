@@ -723,7 +723,7 @@ export function Reception() {
 
   const horsTolerance = useMemo(
     () => lignesAffichees.filter((l) => (l.ecart_pct ?? 0) > TOLERANCE_PCT).length,
-    [lignesAffichees],
+    [lignesAffichees, TOLERANCE_PCT],
   )
 
   const colonnes: ColonneDT<LigneRec>[] = [

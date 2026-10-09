@@ -12,8 +12,17 @@
 # encore l'ancienne interface avec la nouvelle base. Trente secondes d'arret
 # valent mieux qu'une incoherence silencieuse.
 #
+# LES MIGRATIONS SONT JOUEES ICI (09/10/2026, audit v5). La procedure du 08/10
+# demandait de coller une boucle de onze `psql -f` puis un marquage du journal :
+# elle oubliait les deux migrations venues apres, ne s'arretait pas vraiment au
+# premier echec (`break` sortait de la boucle, le marquage et la publication
+# suivaient), et inscrivait comme jouees des migrations qui ne l'etaient pas.
+# Desormais l'archive porte `db/` (migrer.py et les migrations) : service
+# arrete et base sauvegardee, migrer.py joue dans l'ordre ce que le journal
+# n'a pas, s'arrete au premier echec, et seulement ensuite le binaire change.
+#
 # Usage :
-#     sudo bash 03-publier.sh /chemin/vers/gestionfil-VERSION.tar.gz
+#     sudo bash 03-publier.sh /chemin/vers/gestionfil-pret.tar.gz
 # =============================================================================
 set -euo pipefail
 
@@ -52,6 +61,14 @@ tar -xzf "$ARCHIVE" -C "$TEMPO"
 [[ -f "$TEMPO/web/index.html" ]] || { echo "archive invalide : interface absente"; exit 1; }
 echo "  $(du -sh "$TEMPO" | cut -f1)"
 
+# UN PAQUET FABRIQUE SANS LES TESTS LE DIT, JUSQU'ICI (audit v5, T14).
+if [[ -f "$TEMPO/TESTS-NON-JOUES.txt" ]]; then
+    echo
+    echo "  !!! CE PAQUET A ETE FABRIQUE SANS LE BANC DE TESTS :"
+    sed 's/^/  !!! /' "$TEMPO/TESTS-NON-JOUES.txt"
+    echo
+fi
+
 # --- 3. Bascule --------------------------------------------------------------
 dire "Arret du service"
 systemctl stop gestionfil 2>/dev/null || echo "  (n'etait pas demarre)"
@@ -67,6 +84,34 @@ if [[ -x "$RACINE/gestionfil-admin" ]]; then
         || { echo "SAUVEGARDE IMPOSSIBLE : publication arretee (le service reste arrete, relancez-le : systemctl start gestionfil)"; exit 1; }
 else
     echo "  (premiere publication : pas encore d'outil d'administration, rien a sauvegarder)"
+fi
+# Le fichier pris ici : `04-revenir.sh --avec-base` le restaure.
+ls -1t "$RACINE"/sauvegardes/gestionfil-*.dump 2>/dev/null | head -1 > "$PRECEDENT/SAUVEGARDE" || true
+[[ -s "$PRECEDENT/SAUVEGARDE" ]] && echo "  $(cat "$PRECEDENT/SAUVEGARDE")"
+
+# LES MIGRATIONS, AVANT LE BINAIRE. Le nouveau binaire exige les siennes au
+# demarrage (MIGRATIONS_REQUISES) ; l'ancien, toujours en place si l'on s'arrete
+# ici, tourne sur une base qui n'a recu que des ajouts rejouables.
+dire "Migrations de la base"
+if [[ -f "$TEMPO/db/migrer.py" ]]; then
+    BASE=$(grep -oP '^DATABASE_URL=.*/\K[^/?[:space:]]+' "$RACINE/.env" | head -1)
+    [[ -n "$BASE" ]] || { echo "nom de base illisible dans $RACINE/.env (DATABASE_URL)"; exit 1; }
+    # Le compte postgres lit les fichiers de l'archive.
+    chmod 0755 "$TEMPO"
+    chmod -R a+rX "$TEMPO/db"
+    migrer() { ( cd "$TEMPO/db" && sudo -u postgres python3 migrer.py --base "$BASE" --hote '' "$@" ); }
+    if ! migrer; then
+        echo
+        echo "MIGRATION EN ECHEC : publication arretee, le service reste ARRETE avec l'ancien binaire."
+        echo "La migration fautive n'a rien ecrit (elle est en transaction) ; celles d'avant elle sont"
+        echo "passees et inscrites au journal. Deux issues :"
+        echo "  - corriger la cause, puis relancer cette meme publication (elle reprend ou elle s'est arretee) ;"
+        echo "  - tout annuler, base comprise : sudo bash 04-revenir.sh --avec-base"
+        exit 1
+    fi
+    migrer --verifier >/dev/null || { echo "JOURNAL INCOHERENT apres migration :"; migrer --verifier; exit 1; }
+else
+    echo "  (archive sans dossier db/ : aucune migration jouee)"
 fi
 
 dire "Installation"
@@ -84,6 +129,21 @@ chown -R "$UTILISATEUR:$UTILISATEUR" "$RACINE/web"
 find "$RACINE/web" -type d -exec chmod 0755 {} +
 find "$RACINE/web" -type f -exec chmod 0644 {} +
 echo "  binaires et interface en place"
+
+# L'unite systemd voyage avec la version (ReadWritePaths des pieces jointes,
+# 09/10/2026) : remplacee si elle a change.
+if [[ -f "$TEMPO/gestionfil.service" ]] && ! cmp -s "$TEMPO/gestionfil.service" /etc/systemd/system/gestionfil.service; then
+    install -m 0644 "$TEMPO/gestionfil.service" /etc/systemd/system/gestionfil.service
+    systemctl daemon-reload
+    echo "  unite systemd mise a jour"
+fi
+install -d -o "$UTILISATEUR" -g "$UTILISATEUR" -m 0750 "$RACINE/pieces"
+
+# Le registre des publications : quand, quoi, avec ou sans tests.
+install -d -o "$UTILISATEUR" -g "$UTILISATEUR" "$RACINE/journaux"
+printf '%s  %s  %s\n' "$(date -Is)" "$(basename "$ARCHIVE")" \
+    "$([[ -f "$TEMPO/TESTS-NON-JOUES.txt" ]] && echo 'SANS TESTS' || echo 'banc passe')" \
+    >> "$RACINE/journaux/publications.log"
 
 # --- 4. Demarrage et verification -------------------------------------------
 dire "Demarrage"

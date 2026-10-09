@@ -72,19 +72,24 @@ sudo -e /opt/gestionfil/.env
 
 ### 3. La base
 
-Depuis le poste de développement :
+Une base neuve se bâtit depuis le **socle** (le schéma exact d'une base migrée
+et sa configuration), puis reçoit les migrations venues après lui :
 
 ```bash
-python deployer_production.py
+cd db/pg
+python charger.py --hote 192.168.1.140 --base gestionfil_neuve --socle --comptes
+python migrer.py  --hote 192.168.1.140 --base gestionfil_neuve
+# vérifiée, elle prend son nom (service arrêté) :
+#   ALTER DATABASE gestionfil_neuve RENAME TO gestionfil;
 ```
 
-Charge le schéma (53 tables, 73 vues, 76 déclencheurs), le référentiel réel
-(124 références, 12 fournisseurs, 18 qualités, 301 lignes de recette) et les six
-comptes nominatifs.
+Le schéma complet : 93 tables, 117 vues, 166 déclencheurs, 46 contrôles
+(C01 à C46), avec les six comptes nominatifs et l'identité de l'entreprise.
 
-> **Une seule fois.** Ce script **supprime et recrée** la base. Il n'a de sens
-> qu'avant le premier mot de passe posé et la première écriture. Ensuite, toute
-> évolution du schéma passe par une migration (voir « Faire évoluer la base »).
+> **Une seule fois.** `--socle` refuse de viser une base nommée `gestionfil` :
+> il bâtit une base neuve à côté, qu'on renomme une fois vérifiée. Ensuite, toute évolution du schéma passe par une migration (voir
+> « Faire évoluer la base ») ; l'historique des migrations ne se rejoue pas sur
+> une base vide.
 
 ### 4. Les mots de passe
 
@@ -92,14 +97,11 @@ Les six comptes portent `!A_DEFINIR!`, qui n'est pas une empreinte Argon2
 valide : **aucune connexion n'est possible** tant qu'un mot de passe réel n'a pas
 été posé. Le serveur le signale au démarrage.
 
-> **Le minimum est de 8 caractères**, abaissé depuis 12 le 3 septembre 2026 à la
-> demande de la direction. Ce que cela coûte, dit franchement : une empreinte
-> volée se casse en quelques heures à 8 caractères, contre des années à 12. Ce
-> qui rend le compromis tenable ici : la base n'est joignable que depuis le
-> réseau local, PostgreSQL n'écoute que sur la boucle locale, et Argon2id rend
-> une attaque par le formulaire de connexion trop lente pour aboutir. Pour les
-> comptes de direction, qui voient les prix et valident les engagements, une
-> phrase longue reste vivement conseillée.
+> **Le minimum est de 12 caractères**, exigé par le serveur depuis le 08/10/2026
+> (il avait été abaissé à 8 le 3 septembre). Une empreinte volée se casse en
+> quelques heures à 8 caractères, contre des années à 12. Pour les comptes de
+> direction, qui voient les prix et valident les engagements, une phrase longue
+> reste vivement conseillée.
 
 ```bash
 cd /opt/gestionfil
@@ -120,7 +122,8 @@ Voir ci-dessous.
 
 ## Publier une version
 
-Sur le poste de développement :
+Sur le poste de développement (le banc de tests doit passer, sinon le paquet
+n'est pas fabriqué ; `-SansTests -Motif "…"` en garde la trace jusqu'au serveur) :
 
 ```powershell
 .\deploiement\fabriquer-paquet.ps1        # produit gestionfil-AAAAMMJJ.tar.gz
@@ -129,23 +132,34 @@ Sur le poste de développement :
 Sur le serveur :
 
 ```bash
-sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz
+mkdir -p ~/gestionfil-build && tar -xzf ~/gestionfil-AAAAMMJJ.tar.gz -C ~/gestionfil-build
+cd ~/gestionfil-build && bash compiler.sh        # produit ~/gestionfil-pret.tar.gz
+sudo bash /chemin/vers/03-publier.sh ~/gestionfil-pret.tar.gz
 ```
 
-Le script met la version en place de côté **avant** de la remplacer, arrête le
-service, installe, redémarre, puis **vérifie que `/api/sante` répond**. Un
-service qui écoute mais ne répond pas est en panne, simplement moins visible.
+`03-publier.sh`, dans l'ordre :
+
+1. met la version en place **de côté** ;
+2. arrête le service, **sauvegarde** la base et les pièces jointes (s'arrête si
+   la sauvegarde échoue) et retient le nom du fichier ;
+3. **joue les migrations** que le journal n'a pas, par `migrer.py`, dans l'ordre
+   des noms, et s'arrête à la première qui échoue — le service reste alors arrêté
+   avec l'ancien binaire, et la migration fautive n'a rien écrit ;
+4. installe binaires, interface et unité systemd (si elle a changé) ;
+5. redémarre et **vérifie que `/api/sante` répond** ;
+6. note la publication dans `journaux/publications.log` (avec ou sans tests).
 
 En cas de problème :
 
 ```bash
-sudo bash 04-revenir.sh
+sudo bash 04-revenir.sh               # binaires et interface précédents
+sudo bash 04-revenir.sh --avec-base   # et la base d'avant la publication
 ```
 
-> **Le retour ne touche pas à la base.** Si la version annulée avait modifié le
-> schéma, revenir au binaire précédent ne suffit pas — il faut aussi restaurer la
-> base, ce qui perd les écritures faites depuis. Le script le rappelle à chaque
-> exécution.
+> **`--avec-base` efface tout ce qui a été saisi depuis la publication.** C'est
+> une décision humaine, confirmée en tapant `RESTAURER` : la prendre quand le
+> problème est vu tout de suite, avant toute saisie. Si des réceptions ou des
+> fiches ont été saisies depuis, corriger en avant plutôt que restaurer.
 
 ---
 
@@ -157,7 +171,9 @@ changement de schéma est un fichier daté dans `db/pg/migrations/`, écrit pour
 être **rejouable sans effet** s'il a déjà été appliqué (`ADD COLUMN IF NOT
 EXISTS`, `CREATE OR REPLACE VIEW`, upsert pour les données).
 
-Sur le serveur, après avoir déposé le fichier dans
+Depuis le 09/10/2026, les migrations **voyagent dans le paquet** et
+`03-publier.sh` les joue par `migrer.py`, journal compris (voir « Publier une
+version »). À la main, en dépannage seulement, après avoir déposé le fichier dans
 `/home/sysadmin/gestionfil/db/migrations/` :
 
 ```bash
@@ -194,75 +210,55 @@ Migrations appliquées :
 > deux migrations du 2 septembre sont donc déjà comprises dans le schéma ; elles
 > restent listées parce qu'une base plus ancienne peut encore en avoir besoin.
 
-### Publier les règles du 08/10/2026 (onze migrations, dans l'ordre des noms)
+### La première publication avec le journal des migrations (règles du 08/10)
 
-Le binaire du 08/10 **refuse de démarrer** sur une base qui n'a pas les migrations
-dont il dépend (`MIGRATIONS_REQUISES`, `backend/src/db.rs`) et les nomme dans le
-journal du service. Procédure, service **arrêté** (les migrations posent des
-verrous exclusifs ; `lock_timeout` les fait échouer en 5 s plutôt que de figer
-l'ERP si l'ancien serveur tient encore une table) :
+Une base migrée à la main avant le 08/10 n'a pas de journal (`migration_appliquee`) :
+`03-publier.sh` le dit et s'arrête. On l'inscrit **une fois**, avec vérification :
 
 > **Avant tout, le secret JWT.** Le binaire refuse de démarrer sur la valeur d'exemple que portait le
-> modèle de `.env` de l'installateur (même valeur pour toutes les installations, lisible dans le
-> dépôt). Si `journalctl -u gestionfil` dit « JWT_SECRET est le secret d'exemple », tirez-en un au
-> sort (les sessions ouvertes devront se reconnecter) :
+> modèle de `.env` de l'installateur. Si `journalctl -u gestionfil` dit « JWT_SECRET est le secret
+> d'exemple », tirez-en un au sort (les sessions ouvertes devront se reconnecter) :
 >
 > ```bash
 > sudo sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n/+=')|" /opt/gestionfil/.env
 > ```
->
-> Depuis le 08/10, `03-publier.sh` sauvegarde lui-même la base **et les pièces jointes**
-> (`<dump>.pieces.tar`) avant de remplacer le binaire, et s'arrête si la sauvegarde échoue. Le
-> service s'arrête proprement sur SIGTERM (fin des requêtes, sauvegarde de fermeture). Délais :
-> `GESTIONFIL_DELAI_SQL_S` (120 s), `GESTIONFIL_DELAI_HTTP_S` (300 s).
 
 ```bash
-sudo systemctl stop gestionfil
-sudo -u gestionfil /opt/gestionfil/gestionfil-admin sauvegarder      # 1. sauvegarde
-cd /tmp
-# 2. les migrations du 08/10, dans l'ordre des noms (08, 08b ... 08k), arret au premier echec
-M=/home/sysadmin/gestionfil/db/migrations
-for m in 2026-10-08_regles_p1 2026-10-08b_audit_v4 2026-10-08c_journal_migrations \
-         2026-10-08d_audit_tables_argent 2026-10-08e_lots_derogation \
-         2026-10-08f_import_coherence 2026-10-08g_revalidation_reception \
-         2026-10-08h_planification_encours 2026-10-08i_machines_conso_date_fiche \
-         2026-10-08j_sessions 2026-10-08k_compteur_numero; do
-    cat "$M/$m.sql" | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1 2>&1 \
-        | tee -a /tmp/migr-0810.log
-    [ "${PIPESTATUS[1]}" -eq 0 ] || { echo "ECHEC $m : on s'arrete"; break; }
-done
-grep -i "NOTICE.*NON cree\|ERREUR\|ERROR" /tmp/migr-0810.log               # lire ce qui a été dit
-# 3. le journal : inscrire tout ce qui a été joué à la main (SQL préparé sur le poste)
-cat /home/sysadmin/gestionfil/marquage.sql | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1
-sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz                         # 4. le binaire
+cd ~/gestionfil-build/db          # migrer.py et les migrations, livrés dans le paquet
+sudo -u postgres python3 migrer.py --base gestionfil --hote '' \
+     --marquer-jusqua 2026-10-06_preferences_utilisateur.sql
 ```
 
-> **Lire le journal, pas seulement le code retour.** Si la base porte deux
-> inventaires en cours sur un même magasin, la première migration **ne pose pas**
-> l'index `ux_inventaire_en_cours` et le dit par un `NOTICE` — que `ON_ERROR_STOP`
-> ne transforme pas en échec. Le contrôle **C44** le signale ensuite au tableau
-> des contrôles. Annuler le doublon (`POST /api/inventaires/{id}/annuler`), puis
-> rejouer la première migration : elle est rejouable.
+Le marquage **rejoue à blanc** (transaction annulée) toute la suite des migrations
+et n'inscrit que celles qui ne changent plus rien au schéma. Il refuse les autres
+et dit ce qu'elles changeraient. Pour chacune :
 
-**Le journal des migrations** (`2026-10-08c`, joué dans la boucle) s'inscrit une fois : le SQL du
-marquage se prépare sur le poste de développement (il ne se connecte à rien) et se dépose à côté
-des migrations :
+- **`2026-09-20d_supervision_complete.sql`** n'a jamais été jouée sur les bases
+  locales ; `2026-10-09b_supervision_rejouee.sql` la rejoue. L'accepter :
+  `--accepter 2026-09-20d_supervision_complete.sql` ;
+- une migration dont les fonctions ou vues ont été **remplacées depuis** par un
+  fichier source rechargé paraît aussi « non jouée » : après lecture du rapport,
+  `--accepter <fichier>` ;
+- une migration **réellement absente** : la jouer
+  (`cat <fichier> | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1`), puis
+  relancer le marquage.
+
+Ensuite, la publication normale joue tout ce qui suit (08 à 09c) :
 
 ```bash
-# poste : python db\pg\migrer.py --marquer-jusqua 2026-10-08k_compteur_numero.sql --imprimer > marquage.sql
+sudo bash /chemin/vers/03-publier.sh ~/gestionfil-pret.tar.gz
 ```
 
-Ensuite, chaque nouvelle migration s'inscrit après son application :
-`INSERT INTO migration_appliquee (fichier) VALUES ('<fichier>.sql');` — ou par `migrer.py`, là
-où Python et `psql` sont disponibles.
+> **Deux inventaires en cours sur un même magasin** arrêtent la publication à
+> `2026-10-09c_index_inventaire.sql`, qui les nomme. Relancer l'ancien service
+> (`sudo systemctl start gestionfil`), annuler le doublon (avec un motif), puis
+> relancer la publication : elle reprend là où elle s'était arrêtée.
 
 Témoins après publication : `SELECT code, anomalies FROM v_controles WHERE code IN
-('C43','C44','C45')` répond trois lignes, `/api/cockpit` répond 200, et le journal du
-service ne contient pas « migration(s) manquante(s) ».
+('C43','C44','C45','C46')` répond quatre lignes, `/api/cockpit` et `/api/supervision`
+répondent 200, et le journal du service ne contient pas « migration(s) manquante(s) ».
 
-**Base neuve** : `charger.py --socle --comptes` puis `migrer.py` (voir `db/README.md`). Le socle
-porte le schéma complet d'une base migrée ; `charger.py --seeds` seul ne donne que le schéma
-d'origine (sans lots, machines ni import).
+**Base neuve** : `charger.py --socle --comptes` puis `migrer.py` (voir `db/README.md`).
 
 ---
 
@@ -354,7 +350,7 @@ sudo systemctl restart gestionfil    # redémarrage
 sudo -u gestionfil /opt/gestionfil/gestionfil-admin diagnostic
 ```
 
-Vérifie la structure, la taille, les contraintes, et déroule les **32 contrôles
+Vérifie la structure, la taille, les contraintes, et déroule les **46 contrôles
 de cohérence métier**. Ne modifie rien.
 
 ### Maintenance

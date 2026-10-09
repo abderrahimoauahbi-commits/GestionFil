@@ -1256,6 +1256,29 @@ pub async fn retirer(
         }
     }
 
+    // 4 bis. UN LOT BLOQUE NE REMONTE PAS SUR LA MACHINE (U9, 09/10/2026).
+    // Retirer un dechargement remet sur l'etage le fil qu'il avait rendu au
+    // magasin. Si ce fil appartient a un lot bloque par la qualite, ce serait
+    // le remettre en production (regle 11) : la base le refuse, avec un message
+    // ecrit pour le cas general. On le dit ici, a la bonne personne, avant.
+    let bloques: Vec<(String, String)> = sqlx::query_as(
+        "SELECT DISTINCT l.code_reference, l.lot_fournisseur
+           FROM machine_decision_ligne l
+           JOIN lot ON lot.code_reference = l.code_reference AND lot.lot_fournisseur = l.lot_fournisseur
+          WHERE l.id_decision = $1 AND l.destination = 'MAGASIN' AND lot.statut = 'BLOQUE'
+          ORDER BY 1, 2",
+    )
+    .bind(&id_decision)
+    .fetch_all(&mut *c)
+    .await?;
+    if !bloques.is_empty() {
+        let liste: Vec<String> = bloques.iter().map(|(r, l)| format!("{r} (lot {l})")).collect();
+        return Err(AppError::RegleMetier(format!(
+            "cette fiche a rendu au magasin du fil d'un lot bloque par la qualite : {}. La retirer le remettrait sur la machine, donc en production, ce que le blocage interdit. Procedure : constat avec le motif « Correction » si l'etage est faux, ou derogation accordee pour ce lot puis nouveau chargement.",
+            liste.join(", ")
+        )));
+    }
+
     // 5. L'ETAGE REVIENT A L'ETAT AVANT.
     let avant: Vec<EtatLigne> = sqlx::query_as::<_, (String, String, i64, Option<f64>, Option<f64>, f64)>(
         "SELECT code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg::float8,

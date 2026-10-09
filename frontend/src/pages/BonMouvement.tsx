@@ -68,8 +68,14 @@ interface EnteteMvt {
   id_mouvement_contrepasse?: string | null
   motif_contrepassation?: string | null
   contrepasse_par?: string | null
+  id_fiche_machine?: string | null
   [k: string]: unknown
 }
+
+/** Les mouvements de fiche machine : ils ne se defont que par leur fiche. */
+const MOUVEMENTS_MACHINE = ['CHARGE_MACHINE', 'RETOUR_MACHINE', 'ANNUL_CHARGE_MACHINE', 'ANNUL_RETOUR_MACHINE']
+/** Les moities d'un document a deux cotes : elles se defont avec leur document. */
+const MOUVEMENTS_DOUBLES = ['TRANSFERT_SORTIE', 'TRANSFERT_ENTREE', 'FUSION_SORTIE', 'FUSION_ENTREE']
 
 interface LigneMvt {
   id_ligne_mouvement: string
@@ -126,9 +132,17 @@ export function BonMouvement() {
   const retard = entete.jours_de_retard_saisie ?? 0
   /* DEFAIRE EST UN ACTE DE DIRECTION, et il ne se propose ni sur une
      contre-passation, ni sur un mouvement deja annule. */
+  /* UNE MOITIE NE SE DEFAIT PAS SEULE (09/10/2026). Un chargement sort du
+     magasin ET entre sur la machine ; un transfert sort d'un magasin et entre
+     dans l'autre ; une fusion vide un lot et en remplit un autre. Contre-passer
+     le seul cote affiche ici desequilibrerait l'autre : le serveur et la base le
+     refusent, l'ecran ne le propose donc pas et renvoie au document d'origine. */
+  const machine = MOUVEMENTS_MACHINE.includes(entete.code_type_mvt)
+  const moitie = machine || MOUVEMENTS_DOUBLES.includes(entete.code_type_mvt)
   const peutDefaire =
     droits.peutValider &&
     (moi?.role === 'ADMIN' || moi?.role === 'DIRECTION') &&
+    !moitie &&
     !entete.id_mouvement_contrepasse &&
     !entete.contrepasse_par
 
@@ -150,6 +164,14 @@ export function BonMouvement() {
           <Bouton variante="contour" onClick={() => setDefaire(true)}>
             <Undo2 />
             Contre-passer
+          </Bouton>
+        )}
+        {machine && entete.id_fiche_machine && !entete.contrepasse_par && (
+          <Bouton variante="contour" asChild>
+            <Link to={`/machines/fiches/${entete.id_fiche_machine}`}>
+              <Undo2 />
+              Annuler par la fiche machine
+            </Link>
           </Bouton>
         )}
       </div>

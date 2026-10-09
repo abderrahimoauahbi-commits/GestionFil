@@ -498,7 +498,11 @@ const ENTETE_MOUVEMENT: &str = "
     -- defait continue de s'imprimer comme s'il valait encore.
     m.id_mouvement_contrepasse, m.motif_contrepassation,
     (SELECT c.numero_mouvement FROM mouvement c
-      WHERE c.id_mouvement_contrepasse = m.id_mouvement) AS contrepasse_par";
+      WHERE c.id_mouvement_contrepasse = m.id_mouvement) AS contrepasse_par,
+    -- LA FICHE MACHINE D'ORIGINE (09/10/2026) : un chargement ou un
+    -- dechargement ne se defait que par elle ; l'ecran y renvoie.
+    (SELECT d.id_fiche FROM machine_decision d
+      WHERE d.id_decision = m.id_decision_machine) AS id_fiche_machine";
 
 const JOINTURES_MOUVEMENT: &str = "
     FROM mouvement m

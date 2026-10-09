@@ -479,7 +479,7 @@ pub async fn creer_frais_approche(
         Some("VALIDE") => {}
         Some(autre) => {
             return Err(AppError::Invalide(format!(
-                "la reception est en statut {autre} : les frais ne se repartissent que sur une                  reception validee, dont les poids ne bougent plus"
+                "la reception est en statut {autre} : les frais ne se repartissent que sur une reception validee, dont les poids ne bougent plus"
             )))
         }
     }

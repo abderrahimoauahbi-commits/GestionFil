@@ -254,7 +254,7 @@ pub async fn activation(
 
     let crud::Suppression::Logique(colonne) = e.suppression else {
         return Err(AppError::RegleMetier(format!(
-            "« {} » n'a pas d'etat actif/inactif : cette ligne s'efface ou se garde,              il n'y a pas d'entre-deux.",
+            "« {} » n'a pas d'etat actif/inactif : cette ligne s'efface ou se garde, il n'y a pas d'entre-deux.",
             e.chemin
         )));
     };

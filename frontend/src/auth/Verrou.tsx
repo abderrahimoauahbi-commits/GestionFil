@@ -13,7 +13,7 @@
  * l'ecran se couvre, le mot de passe le decouvre, et la saisie est intacte.
  *
  * DEVERROUILLER NE PROLONGE PAS LA SESSION. Le serveur verifie le mot de passe
- * sans emettre de nouveau jeton : au bout de quatre heures la session tombe
+ * sans emettre de nouveau jeton : au terme du jeton (huit heures par defaut) la session tombe
  * quoi qu'il arrive. Sinon il suffirait de bouger la souris une fois par heure
  * pour qu'une session vive une semaine.
  *

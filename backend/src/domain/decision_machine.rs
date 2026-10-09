@@ -529,7 +529,7 @@ pub async fn calculer(
             } else if surplus > tolerance_arrondi(calc.nb_apres.max(1), nominal).max(0.5) {
                 if !calc.motif_texte.as_deref().map(|t| RAISONS_SURPLUS.contains(&t.trim())).unwrap_or(false) {
                     blocages.push(format!(
-                        "{lib} : {surplus} kg du fil qu'on charge seraient deja consommes (la ligne ne portait                          que {} kg) — choisissez la raison : {}",
+                        "{lib} : {surplus} kg du fil qu'on charge seraient deja consommes (la ligne ne portait que {} kg) — choisissez la raison : {}",
                         arrondi_kg(kg_avant),
                         RAISONS_SURPLUS.join(", ")
                     ));

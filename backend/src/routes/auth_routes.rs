@@ -623,7 +623,7 @@ pub struct DemandeDeverrouillage {
 /// verrou plutot que de le subir.
 ///
 /// Deverrouiller NE PROLONGE DONC PAS la session. Le jeton garde son echeance
-/// d'origine : au bout des quatre heures, il expire quoi qu'il arrive et il
+/// d'origine (JWT_TTL_MINUTES, huit heures par defaut) : a son terme, il expire quoi qu'il arrive et il
 /// faut se reconnecter pour de bon. Emettre un jeton neuf ici rendrait la
 /// session eternelle — il suffirait de bouger la souris une fois par heure.
 ///

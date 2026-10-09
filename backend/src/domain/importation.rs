@@ -525,7 +525,7 @@ pub async fn valider_reception_dans(
             .await?;
             if !matches!(statut_bc.as_str(), "ENVOYE" | "LIVRE_PARTIEL" | "CLOTURE") {
                 return Err(AppError::RegleMetier(format!(
-                    "IMPORT-BC : le bon {numero_bc} est {}, plus envoye : la reception ne s'y impute pas.                      Detachez la ligne de facture du bon, ou renvoyez le bon.",
+                    "IMPORT-BC : le bon {numero_bc} est {}, plus envoye : la reception ne s'y impute pas. Detachez la ligne de facture du bon, ou renvoyez le bon.",
                     statut_bc.to_lowercase()
                 )));
             }

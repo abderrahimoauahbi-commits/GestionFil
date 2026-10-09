@@ -630,7 +630,7 @@ pub async fn lister(
         // `suivi_lot` ou `priorite` tombait en erreur. Comparer en `::text`
         // aurait rate « 2.5 » contre « 2.5000 ».
         conditions.push(format!(
-            "c.{colonne} IS NOT DISTINCT FROM (jsonb_populate_record(NULL::{table},              jsonb_build_object('{colonne}', ${n}::text))).{colonne}",
+            "c.{colonne} IS NOT DISTINCT FROM (jsonb_populate_record(NULL::{table}, jsonb_build_object('{colonne}', ${n}::text))).{colonne}",
             table = e.table,
             n = valeurs.len()
         ));

@@ -3809,7 +3809,7 @@ pub async fn creer_reception(
             Some((p, d, Some(t))) => (p, d, t),
             Some((_, d, None)) => {
                 return Err(AppError::RegleMetier(format!(
-                    "Aucun taux de change en vigueur pour {d} : saisissez le taux du jour (Referentiels → Taux de change)                      avant de recevoir. Sans lui, la marchandise entrerait au taux du dirham."
+                    "Aucun taux de change en vigueur pour {d} : saisissez le taux du jour (Referentiels → Taux de change) avant de recevoir. Sans lui, la marchandise entrerait au taux du dirham."
                 )))
             }
             None => (l.prix_kg_devise, "MAD".to_string(), 1.0),

@@ -353,7 +353,7 @@ pub async fn decider_dormant(
         .await?;
         if let Some((kg, etages)) = sur_machine {
             return Err(AppError::RegleMetier(format!(
-                "LOT-MACHINE : le lot {} porte encore {} kg sur machine ({etages}) : il ne se solde pas.                  Dechargez-le d'abord, ou gardez-le.",
+                "LOT-MACHINE : le lot {} porte encore {} kg sur machine ({etages}) : il ne se solde pas. Dechargez-le d'abord, ou gardez-le.",
                 d.lot_fournisseur,
                 arrondi_kg(kg)
             )));

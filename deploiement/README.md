@@ -329,6 +329,16 @@ La base actuelle n'est pas détruite : elle est **renommée**
 `gestionfil_remplacee_<horodatage>`. Si la restauration déçoit, elle est encore
 là, entière.
 
+Les **pièces jointes** (scans, PDF des dossiers d'import) suivent la base : la
+sauvegarde les archive à côté du dump (`<dump>.pieces.tar`), et la restauration
+les remet en place après avoir mis de côté le dossier actuel
+(`pieces_remplacees_<horodatage>`). Sans archive à côté du dump, le dossier des
+pièces n'est pas touché, et la commande le dit.
+
+Le mot de passe de la base ne passe jamais en argument de `pg_dump`,
+`pg_restore` ou `psql` (il se lirait dans la liste des processus) : il leur est
+donné par `PGPASSWORD`.
+
 > ⚠️ **Une sauvegarde qui reste sur la même machine ne protège que des erreurs
 > humaines**, pas d'une panne de disque ni d'un vol. Copiez régulièrement
 > `/opt/gestionfil/sauvegardes` vers un support externe.
@@ -540,8 +550,20 @@ recompilation quand l'adresse change.
 | Service systemd | `ProtectSystem=strict`, `NoNewPrivileges`, deux chemins inscriptibles |
 | Mots de passe | Argon2id, 12 caractères minimum |
 | Droits par champ | appliqués **côté serveur**, en sortie et en entrée |
+| nginx | seul service exposé (80 → 443, TLS 1.2/1.3) ; en-têtes `nosniff`, `SAMEORIGIN`, `same-origin` ; délai de 310 s, au-delà de celui de l'application (300 s) |
+| Pare-feu | 22, 80 et 443 ouverts ; **8080 fermé** (l'application écoute sur 127.0.0.1) |
+| Échecs d'authentification | blocage progressif à la connexion, au déverrouillage de l'écran, au changement de mot de passe et au second facteur |
 
-**Ce qui n'est pas fait, et qu'il faut savoir :** le trafic entre les postes et
-le serveur est en **HTTP, non chiffré**. Sur un réseau d'usine fermé c'est un
-risque mesuré ; dès qu'un accès depuis l'extérieur est envisagé, il faut un
-reverse proxy TLS devant le service.
+### À appliquer à la main sur un serveur déjà installé (09/10/2026)
+
+`03-publier.sh` ne touche ni nginx ni le pare-feu. Après la publication :
+
+```bash
+sudo cp deploiement/nginx-gestionfil.conf /etc/nginx/sites-available/gestionfil
+sudo nginx -t && sudo systemctl reload nginx
+sudo ufw delete allow 8080/tcp      # la règle d'une installation précédente
+sudo ufw status
+```
+
+`nginx -t` doit répondre « syntax is ok » avant le rechargement : une erreur de
+syntaxe laisserait l'ancienne configuration en place, sans rien casser.

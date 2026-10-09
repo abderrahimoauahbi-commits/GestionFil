@@ -134,7 +134,12 @@ fi
 dire "Pare-feu"
 if command -v ufw >/dev/null 2>&1; then
     ufw allow 22/tcp  comment 'SSH' >/dev/null 2>&1 || true
-    ufw allow 8080/tcp comment 'Gestion Fil (API et interface)' >/dev/null 2>&1 || true
+    # nginx seul est expose (80, 443) ; l'application ecoute sur 127.0.0.1:8080
+    # et le port 8080 n'a rien a faire ouvert (audit v5, T13). Une regle posee
+    # par une installation precedente est retiree.
+    ufw allow 80/tcp  comment 'Gestion Fil (redirection, certificat)' >/dev/null 2>&1 || true
+    ufw allow 443/tcp comment 'Gestion Fil (HTTPS)' >/dev/null 2>&1 || true
+    ufw delete allow 8080/tcp >/dev/null 2>&1 || true
     echo "  regles posees (ufw reste inactif tant qu'il n'est pas active)"
     ufw status | head -6
 else

@@ -75,6 +75,40 @@ fn nom_fichier() -> String {
 /// reste dans la signature pour que l'appelant continue de prouver qu'il tient
 /// une base ouverte — sauvegarder une base a laquelle on ne sait pas se
 /// connecter n'aurait pas de sens.
+/// L'URL SANS SON MOT DE PASSE, et le mot de passe a part (audit v5, T13).
+///
+/// Passe en argument, le mot de passe se lisait dans la liste des processus
+/// (`ps aux`) le temps de la sauvegarde. Les outils PostgreSQL le prennent dans
+/// PGPASSWORD : l'URL leur arrive sans lui. Le mot de passe d'une URL est
+/// encode (%XX) ; PGPASSWORD l'attend en clair.
+pub fn separer_mot_de_passe(url: &str) -> (String, Option<String>) {
+    let Some(schema_fin) = url.find("://") else { return (url.to_string(), None) };
+    let (schema, reste) = url.split_at(schema_fin + 3);
+    let fin_autorite = reste.find('/').unwrap_or(reste.len());
+    let (autorite, chemin) = reste.split_at(fin_autorite);
+    let Some(arobase) = autorite.rfind('@') else { return (url.to_string(), None) };
+    let (identite, hote) = autorite.split_at(arobase);
+    let Some((utilisateur, mdp)) = identite.split_once(':') else { return (url.to_string(), None) };
+    let mut clair = Vec::with_capacity(mdp.len());
+    let octets = mdp.as_bytes();
+    let mut i = 0;
+    while i < octets.len() {
+        if octets[i] == b'%' && i + 2 < octets.len() {
+            if let Ok(v) = u8::from_str_radix(&mdp[i + 1..i + 3], 16) {
+                clair.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        clair.push(octets[i]);
+        i += 1;
+    }
+    (
+        format!("{schema}{utilisateur}{hote}{chemin}"),
+        Some(String::from_utf8_lossy(&clair).into_owned()),
+    )
+}
+
 pub async fn creer(_db: &Db, database_url: &str) -> AppResult<Sauvegarde> {
     let dossier = dossier();
     std::fs::create_dir_all(&dossier)
@@ -94,14 +128,20 @@ pub async fn creer(_db: &Db, database_url: &str) -> AppResult<Sauvegarde> {
     // `--no-owner` et `--no-privileges` : la restauration doit pouvoir se faire
     // sous un autre role que `gestionfil` — typiquement `postgres` lors d'une
     // reprise sur un serveur neuf, ou le role applicatif n'existe pas encore.
-    let sortie = Command::new("pg_dump")
+    let (url_sans, mot_de_passe) = separer_mot_de_passe(database_url);
+    let mut commande = Command::new("pg_dump");
+    commande
         .arg("--format=custom")
         .arg("--compress=6")
         .arg("--no-owner")
         .arg("--no-privileges")
         .arg("--file")
         .arg(&cible)
-        .arg(database_url)
+        .arg(&url_sans);
+    if let Some(m) = mot_de_passe {
+        commande.env("PGPASSWORD", m);
+    }
+    let sortie = commande
         .output()
         .map_err(|e| {
             AppError::Interne(anyhow::anyhow!(
@@ -233,5 +273,20 @@ pub fn archiver_pieces(dump: &std::path::Path) -> Option<String> {
             tracing::warn!(erreur = %e, "tar introuvable : pieces jointes non sauvegardees");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::separer_mot_de_passe;
+
+    #[test]
+    fn le_mot_de_passe_sort_de_l_url() {
+        let (u, m) = separer_mot_de_passe("postgres://gestionfil:p%40ss%3Aw@127.0.0.1:5432/gestionfil?sslmode=disable");
+        assert_eq!(u, "postgres://gestionfil@127.0.0.1:5432/gestionfil?sslmode=disable");
+        assert_eq!(m.as_deref(), Some("p@ss:w"));
+        let (u, m) = separer_mot_de_passe("postgres://gestionfil@127.0.0.1/gestionfil");
+        assert_eq!(u, "postgres://gestionfil@127.0.0.1/gestionfil");
+        assert!(m.is_none());
     }
 }

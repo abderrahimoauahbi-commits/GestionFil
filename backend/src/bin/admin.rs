@@ -293,6 +293,13 @@ fn restaurer(fichier: &str) -> Result<()> {
     //    elle attrape le cas qui compte — un fichier tronque ou d'un autre
     //    format.
     println!("Verification de la sauvegarde...");
+    let (url_sans, mot_de_passe) = sauvegarde::separer_mot_de_passe(&url);
+    // Le mot de passe passe par l'environnement, jamais en argument (T13).
+    let avec_mdp = |c: &mut std::process::Command| {
+        if let Some(m) = &mot_de_passe {
+            c.env("PGPASSWORD", m);
+        }
+    };
     let liste = std::process::Command::new("pg_restore")
         .arg("--list")
         .arg(&source)
@@ -329,11 +336,10 @@ fn restaurer(fichier: &str) -> Result<()> {
     let sql = format!(
         "ALTER DATABASE {base} RENAME TO {ecartee}; CREATE DATABASE {base};"
     );
-    let r = std::process::Command::new("psql")
-        .arg("--set=ON_ERROR_STOP=1")
-        .arg("-c")
-        .arg(&sql)
-        .arg(url_maintenance(&url))
+    let mut commande = std::process::Command::new("psql");
+    commande.arg("--set=ON_ERROR_STOP=1").arg("-c").arg(&sql).arg(url_maintenance(&url_sans));
+    avec_mdp(&mut commande);
+    let r = commande
         .output()
         .context("psql introuvable : installer postgresql-client")?;
     if !r.status.success() {
@@ -346,13 +352,16 @@ fn restaurer(fichier: &str) -> Result<()> {
 
     // 3. La restauration proprement dite.
     println!("Restauration...");
-    let r = std::process::Command::new("pg_restore")
+    let mut commande = std::process::Command::new("pg_restore");
+    commande
         .arg("--no-owner")
         .arg("--no-privileges")
         .arg("--exit-on-error")
         .arg("--dbname")
-        .arg(&url)
-        .arg(&source)
+        .arg(&url_sans)
+        .arg(&source);
+    avec_mdp(&mut commande);
+    let r = commande
         .output()
         .context("pg_restore introuvable")?;
     if !r.status.success() {
@@ -364,6 +373,41 @@ fn restaurer(fichier: &str) -> Result<()> {
     }
 
     println!("Base restauree depuis {}", source.display());
+
+    // 4. LES PIECES JOINTES SUIVENT LA BASE (audit v5, T13) : la sauvegarde les
+    //    archive a cote du dump ; sans elles, la base restauree citerait des
+    //    factures et des DUM dont les fichiers n'existent plus. Le dossier
+    //    actuel est mis de cote, comme la base.
+    let archive = PathBuf::from(format!("{}.pieces.tar", source.display()));
+    if archive.exists() {
+        let pieces = PathBuf::from(std::env::var("GESTIONFIL_PIECES").unwrap_or_else(|_| "pieces".into()));
+        let parent = pieces.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
+        if pieces.exists() {
+            let ecarte = parent.join(format!(
+                "{}_remplacees_{horodatage}",
+                pieces.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "pieces".into())
+            ));
+            std::fs::rename(&pieces, &ecarte)
+                .with_context(|| format!("impossible de mettre de cote {}", pieces.display()))?;
+            println!("Pieces jointes actuelles mises de cote sous {}", ecarte.display());
+        }
+        let r = std::process::Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&parent)
+            .output()
+            .context("tar introuvable")?;
+        if !r.status.success() {
+            bail!(
+                "la base est restauree, mais pas les pieces jointes : {}",
+                String::from_utf8_lossy(&r.stderr).trim()
+            );
+        }
+        println!("Pieces jointes restaurees depuis {}", archive.display());
+    } else {
+        println!("Pas d'archive de pieces jointes a cote de cette sauvegarde : le dossier des pieces est inchange.");
+    }
     println!();
     println!("Relancez le serveur. Si le resultat ne convient pas, la base precedente");
     println!("est encore la, sous le nom `{ecartee}`.");

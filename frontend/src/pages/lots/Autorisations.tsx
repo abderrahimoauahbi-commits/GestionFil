@@ -191,6 +191,12 @@ export function Autorisations() {
                           ) : (
                             <span className="font-mono text-[11.5px]">{libelleLot(d.lot_fournisseur)}</span>
                           ))}
+                        {d.kg_autorises != null && (
+                          <div className="text-[10.5px] tabular-nums text-attenue-texte">
+                            {fmt.nombre(Number(d.kg_autorises), 1)} kg au plus
+                            {d.kg_consommes != null && ` — ${fmt.nombre(Number(d.kg_consommes), 1)} kg employés`}
+                          </div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-2 py-1.5 font-mono text-[11.5px]">{d.document ?? '—'}</td>
                       <td className="whitespace-nowrap px-2 py-1.5">
@@ -271,6 +277,7 @@ export function Autorisations() {
                 {TYPES_DEMANDE[geste.demande.type_demande] ?? geste.demande.type_demande}
                 {geste.demande.lot_fournisseur && <> — lot {libelleLot(geste.demande.lot_fournisseur)}</>}
                 {geste.demande.code_reference && <> ({geste.demande.code_reference})</>}
+                {geste.demande.kg_autorises != null && <> — {fmt.nombre(Number(geste.demande.kg_autorises), 1)} kg au plus</>}
               </div>
               <div className="mt-1 text-attenue-texte">
                 Demandé par {geste.demande.demandeur ?? '—'} : « {geste.demande.motif} »

@@ -487,8 +487,12 @@ def scenario_lots_autorisations(c, infra):
     """Une derogation se demande au droit d'ecrire sur les lots, s'accorde avec un motif, une seule fois ;
     declarer un magasin « quarantaine » demande VALIDER."""
     ref, lot = "PP-1500 Dtex-Cream 2951-Hs", "LOT-BANC-AUTO"
-    d = c.ok("Magasinie", "POST", "/api/autorisations", {
+    # Une derogation de lot bloque est bornee en kilos (F17, 09/10).
+    c.refus("Magasinie", "POST", "/api/autorisations", {
         "type_demande": "LOT_BLOQUE", "code_reference": ref, "lot_fournisseur": lot,
+        "document": "MCH-BANC-0001", "motif": "Commande urgente, lot controle visuellement"}, contient="kilos")
+    d = c.ok("Magasinie", "POST", "/api/autorisations", {
+        "type_demande": "LOT_BLOQUE", "code_reference": ref, "lot_fournisseur": lot, "kg": 100,
         "document": "MCH-BANC-0001", "motif": "Commande urgente, lot controle visuellement"})
     idd = d["id_demande"]
     c.refus("Magasinie", "POST", f"/api/autorisations/{idd}/decider", {"decision": "ACCORDEE", "motif": "Vu avec la qualite"})
@@ -951,6 +955,57 @@ def scenario_plan_detail(c, infra):
     infra.sql("UPDATE parametre SET valeur_courante = '1' WHERE code_parametre = 'P_EncoursRetardInclus'")
 
 
+def scenario_derogation_bornee(c, infra):
+    """F17 (09/10) : la derogation d'un lot bloque couvre les kilos d'une fiche, pas plus ; elle tombe
+    avec la fiche annulee ; la validation l'emploie lot par lot."""
+    ref, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-DERO-1"
+    jour = taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 520, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [520], lot_fournisseur=lot, nb_bobines=200)
+    c.ok("Choukri", "POST", "/api/lots/statut", {"code_reference": ref, "lot_fournisseur": lot,
+                                                 "action": "BLOQUER", "motif": "Nuance douteuse, essai du banc"})
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANC2", "nom": "Machine des derogations",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+
+    def fiche():
+        f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": "CHARGE", "code_machine": "BANC2", "code_emplacement": "BANC2-E1", "date_fiche": jour,
+            "code_magasin": MAG, "responsable": "Banc",
+            "lignes": [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
+                        "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})
+        return f["id_fiche"], infra.valeur(f"SELECT numero_fiche FROM machine_fiche WHERE id_fiche = '{f['id_fiche']}'")
+
+    def demander(numero, kg):
+        d = c.ok("Magasinie", "POST", "/api/autorisations", {
+            "type_demande": "LOT_BLOQUE", "code_reference": ref, "lot_fournisseur": lot, "kg": kg,
+            "document": numero, "motif": "Commande urgente, nuance acceptee par le client"})
+        c.ok("Choukri", "POST", f"/api/autorisations/{d['id_demande']}/decider",
+             {"decision": "ACCORDEE", "motif": "Vu avec la qualite pour cette fiche"})
+        return d["id_demande"]
+
+    f1, n1 = fiche()
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/apercu", {})
+    verifier(any("LOT-BLOQUE" in b for b in map(str, ap["blocages"])), f"lot bloque non refuse : {ap['blocages']}")
+    verifier([abs(float(x["kg"]) - 260) < 0.01 for x in ap["derogations"]] == [True],
+             f"la derogation proposee ne porte pas les 260 kg de la fiche : {ap['derogations']}")
+    # Accordee pour 200 kg : la fiche en charge 260, refusee ; la base aussi.
+    d1 = demander(n1, 200)
+    c.refus("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {}, contient="DEROGATION-KG")
+    # La fiche remplacee emporte sa derogation.
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/annuler", {"motif": "Fiche refaite, essai du banc"})
+    verifier(infra.valeur(f"SELECT statut FROM demande_autorisation WHERE id_demande = '{d1}'") == "ANNULEE",
+             "la derogation d'une fiche annulee reste accordee")
+    # La nouvelle fiche, sa derogation a la bonne mesure : le chargement passe et l'emploie.
+    f2, n2 = fiche()
+    d2 = demander(n2, 260)
+    avant = kg(infra, ref)
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f2}/valider", {})
+    verifier(abs(avant - kg(infra, ref) - 260) < 0.01, "le chargement derogatoire n'a pas sorti 260 kg")
+    ligne = infra.sql(f"SELECT date_consommation IS NOT NULL, kg_consommes FROM demande_autorisation WHERE id_demande = '{d2}'")[0]
+    verifier(ligne[0] in (True, "t") and abs(float(ligne[1]) - 260) < 0.01, f"derogation non employee : {ligne}")
+    verifier(controle(infra, "C11") == 0, "C11 apres le chargement derogatoire")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -1018,5 +1073,6 @@ SCENARIOS = [
     scenario_retour_cloture_avoirs,
     scenario_taux_bon,
     scenario_plan_detail,
+    scenario_derogation_bornee,
     scenario_controles_finaux,
 ]

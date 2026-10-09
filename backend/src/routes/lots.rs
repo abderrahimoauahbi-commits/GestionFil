@@ -736,6 +736,8 @@ pub struct NouvelleDemande {
     pub document: Option<String>,
     pub motif: String,
     pub details: Option<Value>,
+    /// Les kilos que la derogation couvre (LOT_BLOQUE : obligatoire, F17).
+    pub kg: Option<f64>,
 }
 
 /// `POST /api/autorisations` — une demande ROUGE (ou ORANGE tracee), motif
@@ -753,6 +755,13 @@ pub async fn creer_demande(
         user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
     }
     let motif = texte_requis(&d.motif, "Le motif")?;
+    // UNE DEROGATION DE LOT BLOQUE EST BORNEE (audit v5, F17) : elle couvre
+    // les kilos d'une fiche, pas le lot entier.
+    if d.type_demande == "LOT_BLOQUE" && d.document.is_some() && !d.kg.is_some_and(|k| k > 0.0) {
+        return Err(AppError::Invalide(
+            "Une derogation de lot bloque porte les kilos qu'elle couvre.".into(),
+        ));
+    }
     let existante: Option<String> = sqlx::query_scalar(
         "SELECT id_demande FROM demande_autorisation
           WHERE statut = 'EN_ATTENTE' AND type_demande = $1
@@ -773,8 +782,8 @@ pub async fn creer_demande(
     user.poser_contexte(&mut tx).await?;
     let id: String = sqlx::query_scalar(
         "INSERT INTO demande_autorisation (type_demande, niveau, code_reference, lot_fournisseur, document,
-                                           details, motif, id_demandeur)
-         VALUES ($1, COALESCE($2, 'ROUGE'), $3, $4, $5, $6, $7, $8) RETURNING id_demande",
+                                           details, motif, id_demandeur, kg_autorises)
+         VALUES ($1, COALESCE($2, 'ROUGE'), $3, $4, $5, $6, $7, $8, round($9::numeric, 4)) RETURNING id_demande",
     )
     .bind(&d.type_demande)
     .bind(&d.niveau)
@@ -784,6 +793,7 @@ pub async fn creer_demande(
     .bind(&d.details)
     .bind(&motif)
     .bind(&user.id)
+    .bind(d.kg)
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;

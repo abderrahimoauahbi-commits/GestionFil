@@ -85,6 +85,10 @@ export interface Demande extends Record<string, unknown> {
   motif_decision: string | null
   demandeur: string | null
   decideur: string | null
+  /** Les kilos que couvre une derogation de lot bloque (F17), et ceux employes. */
+  kg_autorises?: number | string | null
+  kg_consommes?: number | string | null
+  date_consommation?: string | null
 }
 
 // ============================================================================

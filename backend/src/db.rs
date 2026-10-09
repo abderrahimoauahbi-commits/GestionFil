@@ -293,6 +293,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // La derogation de lot bornee en kilos, tombee avec sa fiche.
+        "2026-10-09p_derogation_bornee.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'demande_autorisation' AND column_name = 'kg_autorises')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_fiche_derogations')",
+    ),
+    (
         // Plan d'achat : C28 au libelle du reglage, brouillons d'import hors en-cours.
         "2026-10-09o_plan_detail.sql",
         "SELECT position('BROUILLON' IN pg_get_viewdef('v_encours_fiable'::regclass)) > 0",

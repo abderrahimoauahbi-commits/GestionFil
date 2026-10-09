@@ -15,12 +15,15 @@ import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { Bouton, Champ } from '../../composants/ui/base'
+import { fmt } from '../../lib/utils'
 
 export interface DerogationPossible {
   type_demande: string
   code_reference: string
   lot_fournisseur: string
   document: string
+  /** Les kilos de ce lot sur la fiche : la derogation ne couvre que ceux-la. */
+  kg: number
   id_demande_en_attente: string | null
 }
 
@@ -40,6 +43,7 @@ export function DemandesDerogation({ derogations, surDemande }: { derogations: D
         code_reference: d.code_reference,
         lot_fournisseur: d.lot_fournisseur,
         document: d.document,
+        kg: d.kg,
         motif: (motifs[cle(d)] ?? '').trim(),
       })
       toast.success('Dérogation demandée', { description: 'Un responsable la tranchera dans Lots → Autorisations.' })
@@ -53,11 +57,14 @@ export function DemandesDerogation({ derogations, surDemande }: { derogations: D
 
   return (
     <div className="mt-2 space-y-2 rounded-[var(--radius)] border border-alerte/40 bg-alerte/[0.06] p-2.5 text-[12.5px]">
-      <p className="font-medium">Lot bloqué : une dérogation peut autoriser ce chargement, une fois.</p>
+      <p className="font-medium">
+        Lot bloqué : une dérogation peut autoriser ce chargement, une fois, pour les kilos de la fiche.
+      </p>
       {derogations.map((d) => (
         <div key={cle(d)} className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{d.code_reference}</span>
           <span className="text-attenue-texte">lot {d.lot_fournisseur}</span>
+          <span className="tabular-nums">{fmt.nombre(d.kg, 1)} kg</span>
           {d.id_demande_en_attente ? (
             <span className="text-alerte">demande en attente d’un responsable (Lots → Autorisations)</span>
           ) : peut('LOTS', 'ECRIRE') || peut('MOUVEMENTS', 'ECRIRE') ? (

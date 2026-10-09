@@ -677,13 +677,27 @@ pub async fn controles_complementaires(
         // precisement ce que le blocage demande : le dechargement passe.
         // Sauf DEROGATION ACCORDEE pour ce lot et cette fiche (audit v4).
         if statut.as_deref() == Some("BLOQUE") && f.type_fiche == "CHARGE" {
-            if derogation_accordee(c, &reference, &lot, &f.numero).await?.is_none() {
-                refus.push(format!(
-                    "LOT-BLOQUE : le lot {lot} de {reference} est bloque par la qualite : il ne se charge pas. \
-                     Le deblocage revient au droit de valider les lots, ou a la Direction — ou demandez \
-                     une derogation pour cette fiche"
-                ));
-                continue;
+            match derogation_accordee(c, &reference, &lot, &f.numero).await? {
+                None => {
+                    refus.push(format!(
+                        "LOT-BLOQUE : le lot {lot} de {reference} est bloque par la qualite : il ne se charge pas. \
+                         Le deblocage revient au droit de valider les lots, ou a la Direction — ou demandez \
+                         une derogation pour cette fiche"
+                    ));
+                    continue;
+                }
+                // LA DEROGATION EST BORNEE EN KILOS (audit v5, F17) : au-dela,
+                // c'est une autre decision.
+                Some((_, Some(borne))) if par_lot[&(reference.clone(), lot.clone())] > borne + 0.0005 => {
+                    refus.push(format!(
+                        "DEROGATION-KG : le lot {lot} de {reference} est bloque ; la derogation accordee couvre {} kg, \
+                         la fiche en charge {} kg. Ramenez la quantite, ou demandez une nouvelle derogation",
+                        arrondi_kg(borne),
+                        arrondi_kg(par_lot[&(reference.clone(), lot.clone())])
+                    ));
+                    continue;
+                }
+                Some(_) => {}
             }
         }
         if f.type_fiche == "CHARGE" {
@@ -711,15 +725,16 @@ pub async fn controles_complementaires(
 }
 
 /// Une derogation LOT_BLOQUE accordee pour ce lot et cette fiche, pas encore
-/// employee (audit v4). La base fait le meme controle au mouvement.
+/// employee (audit v4), et ses kilos (vide : derogation d'avant la borne). La
+/// base fait le meme controle au mouvement.
 async fn derogation_accordee(
     c: &mut sqlx::PgConnection,
     reference: &str,
     lot: &str,
     numero_fiche: &str,
-) -> AppResult<Option<String>> {
-    Ok(sqlx::query_scalar(
-        "SELECT id_demande FROM demande_autorisation
+) -> AppResult<Option<(String, Option<f64>)>> {
+    Ok(sqlx::query_as(
+        "SELECT id_demande, kg_autorises::float8 FROM demande_autorisation
           WHERE type_demande = 'LOT_BLOQUE' AND statut = 'ACCORDEE'
             AND code_reference = $1 AND lot_fournisseur = $2 AND document = $3
             AND date_consommation IS NULL
@@ -749,6 +764,13 @@ pub async fn derogations_possibles(
         if !vus.insert((l.code_reference.clone(), l.lot_fournisseur.clone())) {
             continue;
         }
+        // Les kilos de ce lot sur la fiche : ce que la derogation couvrira.
+        let kg_lot: f64 = calc
+            .lignes
+            .iter()
+            .filter(|x| x.code_reference == l.code_reference && x.lot_fournisseur == l.lot_fournisseur)
+            .map(|x| x.kg_mouvementes)
+            .sum();
         let bloque: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM lot WHERE code_reference = $1 AND lot_fournisseur = $2 AND statut = 'BLOQUE')",
         )
@@ -756,7 +778,10 @@ pub async fn derogations_possibles(
         .bind(&l.lot_fournisseur)
         .fetch_one(&mut *c)
         .await?;
-        if !bloque || derogation_accordee(c, &l.code_reference, &l.lot_fournisseur, &f.numero).await?.is_some() {
+        let accordee = derogation_accordee(c, &l.code_reference, &l.lot_fournisseur, &f.numero).await?;
+        // Accordee et suffisante : rien a demander. Accordee mais trop courte :
+        // une nouvelle demande, pour les kilos de la fiche.
+        if !bloque || matches!(accordee, Some((_, b)) if b.map_or(true, |b| kg_lot <= b + 0.0005)) {
             continue;
         }
         let en_attente: Option<String> = sqlx::query_scalar(
@@ -774,6 +799,7 @@ pub async fn derogations_possibles(
             "code_reference": l.code_reference,
             "lot_fournisseur": l.lot_fournisseur,
             "document": f.numero,
+            "kg": arrondi_kg(kg_lot),
             "id_demande_en_attente": en_attente,
         }));
     }
@@ -1119,17 +1145,32 @@ pub async fn valider(
         )));
     }
 
-    // La derogation a servi : elle ne sert pas deux fois.
+    // La derogation a servi : elle ne sert pas deux fois. LOT PAR LOT (audit
+    // v5, F17) : seule celle du lot charge est employee, avec ses kilos ; une
+    // derogation d'un lot que la fiche n'a finalement pas charge reste a
+    // employer.
     if f.type_fiche == "CHARGE" {
-        sqlx::query(
-            "UPDATE demande_autorisation SET date_consommation = $2
-              WHERE type_demande = 'LOT_BLOQUE' AND statut = 'ACCORDEE' AND document = $1
-                AND date_consommation IS NULL",
-        )
-        .bind(&f.numero)
-        .bind(crate::db::maintenant())
-        .execute(&mut *c)
-        .await?;
+        let mut par_lot: std::collections::BTreeMap<(String, String), f64> = std::collections::BTreeMap::new();
+        for l in calc.lignes.iter().filter(|l| l.kg_mouvementes > 0.0) {
+            *par_lot.entry((l.code_reference.clone(), l.lot_fournisseur.clone())).or_default() += l.kg_mouvementes;
+        }
+        for ((reference, lot), kg) in &par_lot {
+            sqlx::query(
+                "UPDATE demande_autorisation SET date_consommation = $2, kg_consommes = $5
+                  WHERE id_demande = (SELECT id_demande FROM demande_autorisation
+                                       WHERE type_demande = 'LOT_BLOQUE' AND statut = 'ACCORDEE' AND document = $1
+                                         AND code_reference = $3 AND lot_fournisseur = $4
+                                         AND date_consommation IS NULL
+                                       ORDER BY date_decision DESC LIMIT 1)",
+            )
+            .bind(&f.numero)
+            .bind(crate::db::maintenant())
+            .bind(reference)
+            .bind(lot)
+            .bind(arrondi_kg(*kg))
+            .execute(&mut *c)
+            .await?;
+        }
     }
 
     let consomme: f64 = calc.lignes.iter().filter(|l| l.effet_ecart == "CONSOMMATION").map(|l| l.ecart_kg).sum();

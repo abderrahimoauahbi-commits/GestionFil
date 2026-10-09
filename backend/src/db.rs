@@ -280,6 +280,12 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_dernier_prix_achat_mad')",
     ),
     (
+        // La saison, les alertes C49/C50, les stocks minimums a revoir.
+        "2026-10-09k_saisonnalite.sql",
+        "SELECT to_regclass('public.saison_mois') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_stocks_minimums_a_revoir')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

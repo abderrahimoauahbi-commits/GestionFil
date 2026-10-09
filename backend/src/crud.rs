@@ -89,7 +89,7 @@ async fn exiger_valider_si_change(
         };
         let actuelle: Option<String> = match id {
             Some(id) => sqlx::query_scalar(&format!(
-                "SELECT {nom}::text FROM {} WHERE {} = $1",
+                "SELECT {nom}::text FROM {} WHERE {}::text = $1",
                 e.table, e.cle
             ))
             .bind(id)
@@ -125,6 +125,21 @@ async fn exiger_valider_si_change(
 
 /// Registre des entites gerees par le moteur generique.
 pub const ENTITES: &[Entite] = &[
+    // LA SAISON DU PLAN D'ACHAT (regle 9, 09/10/2026) : un coefficient par mois
+    // multiplie la demande prolongee au-dela du plan. Douze lignes fixes, que la
+    // Direction regle ; elles ne se creent ni ne se suppriment.
+    Entite {
+        chemin: "saisons",
+        table: "saison_mois",
+        module: "PARAMETRES",
+        cle: "mois",
+        cle_generee: false,
+        creation: &[],
+        modification: &["coefficient"],
+        suppression: Suppression::Interdite,
+        selection: "c.*",
+        tri: "c.mois",
+    },
     Entite {
         chemin: "categories",
         table: "categorie_matiere",
@@ -722,7 +737,7 @@ pub async fn lire(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResul
     user.exiger(db, e.module, Action::Lire).await?;
 
     let sql = format!(
-        "SELECT {} FROM {} c {} WHERE c.{} = $1",
+        "SELECT {} FROM {} c {} WHERE c.{}::text = $1",
         e.selection,
         e.table,
         jointures(e.table),
@@ -829,7 +844,7 @@ pub async fn modifier(
     let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
     let sql = format!(
         "UPDATE {} AS c SET {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) AS p
-          WHERE c.{} = $2",
+          WHERE c.{}::text = $2",
         e.table,
         set.join(", "),
         e.table,

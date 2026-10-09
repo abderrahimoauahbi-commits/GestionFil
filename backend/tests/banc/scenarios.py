@@ -838,8 +838,19 @@ def scenario_gardes_p1(c, infra):
     c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": tol})
     verifier(controle(infra, "C46") == 0, "un champ sensible n'a pas de ligne dans le modele de droits")
     # Regle 8 : le prix d'une proposition est d'abord le dernier prix d'achat chez ce fournisseur.
+    bon_envoye(c, [(REF, 100, 20.0)])
     dernier = infra.valeur(f"SELECT fn_dernier_prix_achat_mad('{REF}', '{FRS}')")
     verifier(dernier is not None and abs(float(dernier) - 20) < 0.001, f"dernier prix d'achat : {dernier} au lieu de 20")
+    # Regle 9 : la saison se regle (Direction), les stocks minimums a revoir se listent.
+    c.ok("Choukri", "PATCH", "/api/saisons/1", {"coefficient": 0.7})
+    verifier(abs(float(infra.valeur("SELECT coefficient FROM saison_mois WHERE mois = 1")) - 0.7) < 1e-9,
+             "le coefficient de janvier n'est pas enregistre")
+    c.refus("Magasinie", "PATCH", "/api/saisons/1", {"coefficient": 2})
+    c.refus("Choukri", "PATCH", "/api/saisons/1", {"coefficient": 0})
+    c.ok("Choukri", "PATCH", "/api/saisons/1", {"coefficient": 1})
+    c.ok("Assistante", "GET", "/api/plan-achat/stocks-minimums")
+    verifier(int(infra.valeur("SELECT count(*) FROM v_controles WHERE code IN ('C49', 'C50')")) == 2,
+             "les controles C49 et C50 manquent")
     # La supervision complete (2026-09-20d, rejouee par 09b) : plus d'« erreur interne ».
     sup = c.ok("Choukri", "GET", "/api/supervision")
     verifier(sup, "la supervision ne rend rien")

@@ -960,6 +960,20 @@ pub async fn plan_achat(State(state): State<AppState>, user: Utilisateur) -> App
     Ok(Json(v))
 }
 
+/// `GET /api/plan-achat/stocks-minimums` — LES STOCKS MINIMUMS A REVOIR (regle 9,
+/// 09/10/2026) : ceux qui depassent trois mois du besoin mensuel du plan, avec
+/// une valeur proposee (couverture minimale en mois x besoin mensuel). Les 793 t
+/// de minimums venaient du classeur ; les achats les revoient ici.
+pub async fn stocks_minimums(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    lister(
+        &state,
+        &user,
+        module::PLAN_ACHAT,
+        "SELECT * FROM v_stocks_minimums_a_revoir ORDER BY stock_min_kg - COALESCE(valeur_proposee_kg, 0) DESC",
+    )
+    .await
+}
+
 /// Les propositions ENREGISTREES, avec leur statut et le bon qu'elles ont produit.
 ///
 /// A ne pas confondre avec `v_plan_achat`, qui est le CALCUL : il se refait a

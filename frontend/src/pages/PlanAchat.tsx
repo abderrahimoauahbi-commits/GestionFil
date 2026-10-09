@@ -41,6 +41,7 @@ import {
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { SaisonMinimums } from './SaisonMinimums'
 
 const MODULE = 'PLAN_ACHAT'
 
@@ -1101,6 +1102,8 @@ export function PlanAchat() {
           }
         />
       )}
+
+      <SaisonMinimums />
 
       {confirmation.element}
     </div>

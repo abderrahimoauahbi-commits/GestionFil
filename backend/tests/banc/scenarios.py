@@ -837,6 +837,9 @@ def scenario_gardes_p1(c, infra):
              "le changement de tolerance n'est pas au journal")
     c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": tol})
     verifier(controle(infra, "C46") == 0, "un champ sensible n'a pas de ligne dans le modele de droits")
+    # Regle 8 : le prix d'une proposition est d'abord le dernier prix d'achat chez ce fournisseur.
+    dernier = infra.valeur(f"SELECT fn_dernier_prix_achat_mad('{REF}', '{FRS}')")
+    verifier(dernier is not None and abs(float(dernier) - 20) < 0.001, f"dernier prix d'achat : {dernier} au lieu de 20")
     # La supervision complete (2026-09-20d, rejouee par 09b) : plus d'« erreur interne ».
     sup = c.ok("Choukri", "GET", "/api/supervision")
     verifier(sup, "la supervision ne rend rien")

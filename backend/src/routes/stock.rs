@@ -2991,8 +2991,9 @@ pub async fn references_commandables(
                       -- un mot expliquant pourquoi.
                       / $3::numeric, 6) AS prix_suggere_devise,
                 CASE WHEN pa.prix_estime_mad IS NOT NULL THEN pa.source_prix
+                     WHEN r.prix_catalogue_kg IS NOT NULL THEN 'CATALOGUE'
                      WHEN r.cmup_mad IS NOT NULL THEN 'CMUP'
-                     ELSE 'CATALOGUE' END AS source_prix,
+                     ELSE 'AUCUN' END AS source_prix,
                 -- Deja saisie sur ce bon : on la montre barree plutot que de la
                 -- masquer, sinon on la cherche sans comprendre pourquoi elle
                 -- manque.
@@ -3048,6 +3049,7 @@ pub async fn references_commandables(
 
     let mut valeur = lignes_en_json(&rows);
     user.masquer(&state.db, module::BONS_COMMANDE, &mut valeur).await?;
+    user.masquer_prix_au_cmup(&state.db, &mut valeur).await?;
     Ok(Json(valeur))
 }
 

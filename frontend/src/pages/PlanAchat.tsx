@@ -63,6 +63,8 @@ interface Proposition extends Record<string, unknown> {
   unite_catalogue: string
   prix_estime_mad?: number
   source_prix?: string
+  /** Estime au CMUP, que ce compte ne voit pas : le prix est a saisir (regle 8). */
+  prix_a_saisir?: boolean
   montant_total_mad?: number
   /* CE QU'ON IRA NEGOCIER, dans la devise du fournisseur. Le montant en
      dirhams ne sert qu'au budget : le bon de commande, lui, se libelle en
@@ -571,7 +573,7 @@ export function PlanAchat() {
             }
             affichage={
           <div>
-            <div className="tabular-nums">{fmt.nombre(p.prix_estime_mad, 3)}</div>
+            <div className="tabular-nums">{p.prix_a_saisir ? '—' : fmt.nombre(p.prix_estime_mad, 3)}</div>
             {/* Le meme prix dans l'unite d'achat : au metre, un prix au kg ne
                 se reconnait pas sur la facture. */}
             {p.unite_catalogue !== 'kg' && p.quantite_suggeree_unite ? (
@@ -580,9 +582,18 @@ export function PlanAchat() {
                 {p.unite_catalogue}
               </div>
             ) : null}
-            {p.source_prix === 'CATALOGUE' && (
+            {/* LA SOURCE DU PRIX (regle 8, 09/10/2026) : le dernier prix d'achat
+                chez ce fournisseur, a defaut le catalogue, en dernier recours le
+                CMUP — que l'on ne voit pas toujours : « prix a saisir ». */}
+            {p.prix_a_saisir ? (
+              <div className="text-[11px] text-alerte">prix à saisir</div>
+            ) : p.source_prix === 'DERNIER_ACHAT' ? (
+              <div className="text-[11px] text-attenue-texte">dernier achat</div>
+            ) : p.source_prix === 'CATALOGUE' ? (
               <div className="text-[11px] text-alerte">catalogue</div>
-            )}
+            ) : p.source_prix === 'CMUP' ? (
+              <div className="text-[11px] text-alerte">coût moyen</div>
+            ) : null}
           </div>
             }
           />
@@ -969,9 +980,9 @@ export function PlanAchat() {
       {surCatalogue > 0 && (
         <div className="mb-4">
           <Alerte ton="alerte" titre="Prix estimes au catalogue">
-            {surCatalogue} reference(s) n'ont encore fait l'objet d'aucune reception : leur prix
-            vient du catalogue converti en dirhams, pas d'un cout d'achat reel. Le montant est
-            indicatif tant que la valorisation n'a pas demarre.
+            {surCatalogue} reference(s) n'ont encore jamais ete commandees chez leur fournisseur :
+            leur prix vient du catalogue converti en dirhams, pas d'un bon valide. Le montant est
+            indicatif jusqu'a la premiere commande.
           </Alerte>
         </div>
       )}

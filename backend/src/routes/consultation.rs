@@ -949,13 +949,15 @@ pub async fn substitutions(
 }
 
 pub async fn plan_achat(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    lister(
+    let Json(mut v) = lister(
         &state,
         &user,
         module::PLAN_ACHAT,
         "SELECT * FROM v_plan_achat",
     )
-    .await
+    .await?;
+    user.masquer_prix_au_cmup(&state.db, &mut v).await?;
+    Ok(Json(v))
 }
 
 /// Les propositions ENREGISTREES, avec leur statut et le bon qu'elles ont produit.
@@ -1045,6 +1047,7 @@ pub async fn propositions_achat(
 
     let mut valeur = lignes_en_json(&rows);
     user.masquer(&state.db, module::PLAN_ACHAT, &mut valeur).await?;
+    user.masquer_prix_au_cmup(&state.db, &mut valeur).await?;
     Ok(Json(valeur))
 }
 

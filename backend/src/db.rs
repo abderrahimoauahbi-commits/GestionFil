@@ -275,6 +275,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
             AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_import_dum_permanente')",
     ),
     (
+        // Le prix des propositions : dernier achat, catalogue, puis CMUP.
+        "2026-10-09j_prix_plan_achat.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_dernier_prix_achat_mad')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

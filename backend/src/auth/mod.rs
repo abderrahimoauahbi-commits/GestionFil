@@ -134,6 +134,38 @@ impl Utilisateur {
     }
 
     /// Pose l'identite de l'appelant pour les triggers d'audit.
+    /// LE PRIX D'ACHAT ESTIME AU CMUP SE MASQUE A QUI NE VOIT PAS LE CMUP (regle 8,
+    /// 09/10/2026). Le plan d'achat estime d'abord au dernier prix d'achat, puis au
+    /// catalogue ; le CMUP n'est qu'un dernier recours — et la grille de
+    /// l'assistante le lui masque partout ailleurs. Une telle ligne perd ses
+    /// montants et se marque « prix a saisir ».
+    pub async fn masquer_prix_au_cmup(&self, db: &crate::db::Db, valeur: &mut serde_json::Value) -> AppResult<()> {
+        let stock = rbac::droits_champ(db, &self.id, crate::auth::rbac::module::STOCK).await?;
+        if !matches!(stock.get("cmup_mad"), Some(rbac::Niveau::Masque)) {
+            return Ok(());
+        }
+        let masquer_ligne = |l: &mut serde_json::Value| {
+            if l.get("source_prix").and_then(|v| v.as_str()) == Some("CMUP") {
+                if let Some(o) = l.as_object_mut() {
+                    for champ in [
+                        "prix_estime_mad", "montant_estime_mad", "prix_devise", "montant_devise",
+                        "montant_total_mad", "prix_retenu_mad", "prix_mad_suggere", "prix_suggere_devise",
+                    ] {
+                        if o.contains_key(champ) {
+                            o.insert(champ.into(), serde_json::Value::Null);
+                        }
+                    }
+                    o.insert("prix_a_saisir".into(), serde_json::Value::Bool(true));
+                }
+            }
+        };
+        match valeur {
+            serde_json::Value::Array(a) => a.iter_mut().for_each(masquer_ligne),
+            v => masquer_ligne(v),
+        }
+        Ok(())
+    }
+
     pub async fn poser_contexte(&self, tx: &mut sqlx::PgConnection) -> AppResult<()> {
         crate::db::poser_contexte(
             tx,

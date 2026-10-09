@@ -1261,6 +1261,17 @@ def scenario_import_bon_envoye(c, infra):
              "une ligne de bon deja servie en local reste proposee a l'import")
 
 
+def scenario_parametres_types(c, infra):
+    """T15 (09/10) : un parametre garde son type (entier, nombre au point, date) ; la base refuse le reste."""
+    refus_sql(infra, "UPDATE parametre SET valeur_courante = '2,5' WHERE code_parametre = 'P_TolerEcartPesee'", "PARAMETRE")
+    refus_sql(infra, "UPDATE parametre SET valeur_courante = '10 j' WHERE code_parametre = 'P_RetardBCJours'", "PARAMETRE")
+    refus_sql(infra, "UPDATE parametre SET valeur_courante = '2026-02-30' WHERE code_parametre = 'P_DateRefKPI'", "PARAMETRE")
+    infra.sql("UPDATE parametre SET valeur_courante = ' 2.5 ' WHERE code_parametre = 'P_TolerEcartPesee'")
+    verifier(infra.valeur("SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_TolerEcartPesee'") == "2.5",
+             "la valeur d'un parametre numerique n'est pas nettoyee")
+    infra.sql("UPDATE parametre SET valeur_courante = '2' WHERE code_parametre = 'P_TolerEcartPesee'")
+
+
 def scenario_migrations_rejouables(c, infra):
     """T7 (09/10) : chaque migration du 09/10, rejouee a la main sur une base qui l'a deja recue et
     porte des donnees, passe sans erreur et ne change ni le nombre de controles ni le grand livre."""
@@ -1347,6 +1358,7 @@ SCENARIOS = [
     scenario_machine_constat,
     scenario_lots_vivants,
     scenario_import_bon_envoye,
+    scenario_parametres_types,
     scenario_migrations_rejouables,
     scenario_controles_finaux,
 ]

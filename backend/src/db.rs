@@ -293,6 +293,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Le type d'un parametre garanti par la base.
+        "2026-10-09z_parametres_types.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_00_parametre_type')",
+    ),
+    (
         // Audit des cours BAM et des comptages ; lot_evenement immuable ; purge du plan resumee.
         "2026-10-09y_audit_complete.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lot_evenement_immuable')

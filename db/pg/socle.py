@@ -44,6 +44,12 @@ PSQL = os.environ.get("PSQL", r"C:\Program Files\PostgreSQL\18\bin\psql.exe")
 # l'entreprise (references, fournisseurs, comptes, mouvements).
 CONFIGURATION = [
     "categorie_matiere",
+    # Les couleurs internes, les familles et les coefficients de saison : une
+    # base neuve en a besoin des le premier ecran (audit v5, T15). Les familles
+    # apres les categories, qu'elles referencent.
+    "couleur",
+    "famille",
+    "saison_mois",
     "champ_configurable",
     "devise",
     "machine_motif",

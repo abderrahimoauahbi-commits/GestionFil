@@ -1106,7 +1106,12 @@ pub async fn propositions_achat(
         // si un substitut existe et s'il a du stock. Sans ces deux nombres,
         // l'ecran devrait interroger l'equivalence reference par reference, et
         // l'acheteur ne verrait l'alternative qu'apres l'avoir cherchee.
-        "SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
+        // LE CALCUL, UNE FOIS (audit v5, T15) : chaque ligne interrogeait
+        // v_plan_achat jusqu'a six fois. Il est materialise en tete et joint.
+        "WITH calcul AS MATERIALIZED (
+             SELECT code_reference, qte_a_commander_kg, complement_palette_kg FROM v_plan_achat
+         )
+         SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
                 bc.numero_bc, bc.statut AS statut_bc,
                 ro.designation AS designation_origine,
                 uf.login AS figee_par,
@@ -1132,32 +1137,26 @@ pub async fn propositions_achat(
                 -- (cf. convertir() dans domain/plan_achat.rs) : une alerte
                 -- enregistree serait perimee des le recalcul suivant, alors
                 -- qu'une comparaison faite maintenant ne peut pas mentir.
-                (SELECT ROUND(vpa.qte_a_commander_kg, 3) FROM v_plan_achat vpa
-                  WHERE vpa.code_reference = pa.code_reference)       AS quantite_calculee_kg,
+                ROUND(vpa.qte_a_commander_kg, 3)                       AS quantite_calculee_kg,
                 -- Le complement de palette : ce que l'arrondi a la palette
                 -- pleine ajoute au besoin, pour la seule logistique.
-                (SELECT ROUND(vpa.complement_palette_kg, 3) FROM v_plan_achat vpa
-                  WHERE vpa.code_reference = pa.code_reference)       AS complement_palette_kg,
+                ROUND(vpa.complement_palette_kg, 3)                    AS complement_palette_kg,
                 CASE WHEN pa.figee = 1 THEN ROUND(
                     pa.quantite_suggeree_kg
-                  - COALESCE((SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa
-                               WHERE vpa.code_reference = pa.code_reference), 0), 3)
+                  - COALESCE(vpa.qte_a_commander_kg, 0), 3)
                 END                                                   AS ecart_calcul_kg,
                 CASE
                     WHEN pa.figee = 0 THEN NULL
                     WHEN r.actif = 0 THEN 'REFERENCE_INACTIVE'
-                    WHEN NOT EXISTS (SELECT 1 FROM v_plan_achat vpa
-                                      WHERE vpa.code_reference = pa.code_reference)
+                    WHEN vpa.code_reference IS NULL
                          THEN 'BESOIN_DISPARU'
                     -- 2 % de tolerance : un arrondi a la palette cree toujours un
                     -- petit ecart, et le signaler noierait les vrais.
                     WHEN ABS(pa.quantite_suggeree_kg
-                           - (SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa
-                               WHERE vpa.code_reference = pa.code_reference))
+                           - vpa.qte_a_commander_kg)
                          <= 0.02 * pa.quantite_suggeree_kg THEN 'COHERENTE'
                     WHEN pa.quantite_suggeree_kg
-                       > (SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa
-                           WHERE vpa.code_reference = pa.code_reference)
+                       > vpa.qte_a_commander_kg
                          THEN 'SURDIMENSIONNEE'
                     ELSE 'SOUS_DIMENSIONNEE'
                 END                                                   AS etat_figement
@@ -1168,6 +1167,7 @@ pub async fn propositions_achat(
            LEFT JOIN reference ro    ON ro.code_reference = pa.code_reference_origine
            LEFT JOIN utilisateur uf  ON uf.id_utilisateur = pa.id_utilisateur_figement
            LEFT JOIN bon_commande bc ON bc.id_bc       = pa.id_bc_genere
+           LEFT JOIN calcul vpa       ON vpa.code_reference = pa.code_reference
           ORDER BY CASE pa.urgence WHEN 'TIER 1' THEN 1 WHEN 'TIER 2' THEN 2
                                    WHEN 'TIER 3' THEN 3 ELSE 4 END,
                    pa.code_fournisseur, pa.code_reference",
@@ -1193,6 +1193,13 @@ pub async fn kpi_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
 
+    // LE CALCUL, UNE FOIS (audit v5, T15) : les quatre blocs lisaient
+    // v_plan_achat sept fois. Une table temporaire, le temps de la lecture.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("CREATE TEMP TABLE pa_kpi ON COMMIT DROP AS SELECT * FROM v_plan_achat")
+        .execute(&mut *tx)
+        .await?;
+
     // Bloc « KPI globaux » et bloc « repartition par statut » de la feuille.
     let globaux = sqlx::query(
         "SELECT
@@ -1207,34 +1214,34 @@ pub async fn kpi_plan_achat(
             (SELECT COUNT(*) FROM v_stock_projete WHERE statut = 'OK')         AS ok,
             (SELECT COUNT(*) FROM v_stock_projete
               WHERE statut <> 'OK' AND classe_abc = 'A')                       AS classe_a_en_alerte,
-            (SELECT COALESCE(ROUND(SUM(montant_estime_mad), 2), 0) FROM v_plan_achat) AS budget_mad,
-            (SELECT COALESCE(ROUND(SUM(qte_a_commander_kg), 2), 0) FROM v_plan_achat) AS quantite_kg,
-            (SELECT COUNT(*) FROM v_plan_achat)                                AS refs_a_commander",
+            (SELECT COALESCE(ROUND(SUM(montant_estime_mad), 2), 0) FROM pa_kpi) AS budget_mad,
+            (SELECT COALESCE(ROUND(SUM(qte_a_commander_kg), 2), 0) FROM pa_kpi) AS quantite_kg,
+            (SELECT COUNT(*) FROM pa_kpi)                                AS refs_a_commander",
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
 
     // Bloc « tiering urgence » : combien de references dans chaque palier.
     let tiering = sqlx::query(
         "SELECT tier, COUNT(*) AS nb, ROUND(SUM(montant_estime_mad), 2) AS montant_mad
-           FROM v_plan_achat GROUP BY tier ORDER BY tier",
+           FROM pa_kpi GROUP BY tier ORDER BY tier",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await?;
 
     // Bloc « risques identifies » : mono-source et exposition par devise.
     let risques = sqlx::query(
         "SELECT 'MONO-SOURCE' AS risque, COUNT(*) AS nb,
                 ROUND(COALESCE(SUM(montant_estime_mad), 0), 2) AS montant_mad
-           FROM v_plan_achat WHERE risque_sourcing = 'MONO-SOURCE'
+           FROM pa_kpi WHERE risque_sourcing = 'MONO-SOURCE'
          UNION ALL
          SELECT 'DEVISE ' || f.code_devise, COUNT(*),
                 ROUND(COALESCE(SUM(pa.montant_estime_mad), 0), 2)
-           FROM v_plan_achat pa
+           FROM pa_kpi pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
           GROUP BY f.code_devise",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await?;
 
     // Bloc « repartition par fournisseur », classe par budget decroissant.
@@ -1246,7 +1253,7 @@ pub async fn kpi_plan_achat(
                 ROUND(SUM(pa.montant_estime_mad), 2)           AS montant_mad,
                 SUM(CASE WHEN pa.tier = 'TIER 1' THEN 1 ELSE 0 END) AS nb_tier1,
                 SUM(CASE WHEN pa.statut = 'RUPTURE' THEN 1 ELSE 0 END) AS nb_ruptures
-           FROM v_plan_achat pa
+           FROM pa_kpi pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
           -- REGROUPER SUR LA CLE DU FOURNISSEUR, pas seulement sur le code
           -- porte par le plan : PostgreSQL n'accepte une colonne hors agregat
@@ -1257,7 +1264,7 @@ pub async fn kpi_plan_achat(
           GROUP BY f.code_fournisseur, pa.code_fournisseur
           ORDER BY montant_mad DESC",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await?;
 
     let mut sortie = json!({
@@ -1269,6 +1276,7 @@ pub async fn kpi_plan_achat(
         "risques": lignes_en_json(&risques),
         "fournisseurs": lignes_en_json(&fournisseurs),
     });
+    tx.commit().await?;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut sortie).await?;
     Ok(Json(sortie))
 }

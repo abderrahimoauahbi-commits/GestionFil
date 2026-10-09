@@ -191,8 +191,117 @@ ne trie ni ne filtre sur un champ masqué.
 
 ---
 
+## Arbitrages du 09/10/2026 (audit v5)
+
+Tranchés un par un avec l'utilisateur, règles d'abord, puis fonctionnalités, puis technique. Les
+migrations `2026-10-09a` à `2026-10-09y` les portent ; chacune est exigée au démarrage
+(`MIGRATIONS_REQUISES`) et le banc les vérifie.
+
+### A1 — Sortie hors machine
+
+**Décision** — Le fil peut sortir hors machine, en petites quantités : consommation d'atelier (jute,
+latex, plastique, cuir), échantillon, essai, réparation, prêt à une autre usine, autre. Motif de ligne
+obligatoire ; l'OF est un texte libre, jamais vérifié (l'ERP ne gère pas la production). Au-delà de
+50 kg cumulés par jour et par référence, VALIDER. Le prêt se suit en restes à rendre (`v_prets_en_cours`,
+C47) ; le retour de prêt (RETOUR_PRET) ne rend pas plus que ce qui a été prêté.
+
+**Où** — `SORTIE_HORS_MACHINE`, `RETOUR_PRET` (09d) ; `routes/stock.rs`. **Contrôle** — banc
+`sortie_hors_machine`.
+
+### A2 — Consommation déclarée au chargement
+
+**Décision** — Vert si la consommation ne dépasse pas ce que la ligne portait avant le chargement ; le
+surplus passe ORANGE avec une raison choisie dans une liste (saisie décalée, oubli de constat, erreur de
+report) ; la fiche est listée (C48). La « Correction » n'a plus de passe-droit : son écart est jugé par
+les seuils, rouge = droit de valider l'inventaire.
+
+**Où** — `decision_machine.rs` (RAISONS_SURPLUS). **Contrôle** — banc `machine_surplus`.
+
+### A3 — Avoirs typés, local et import
+
+**Décision** — Le type est obligatoire. Avoir de PRIX : baisse le CMUP du stock restant de la
+réception (ou du dossier), la part sortie au journal des écarts de prix ; ciblable par référence ; la
+part qui ferait passer le CMUP sous zéro va au journal (U6). Avoir pour RETOUR : rattaché aux retours
+fournisseur, plafonné à leur valeur, sans effet sur le CMUP ; la différence au journal. Facture nette
+ou brute : les deux pratiques coexistent, la clôture demande laquelle quand des retours existent.
+
+**Où** — `facture_locale.rs`, `importation.rs::avoir` (09g, 09n). **Contrôle** — bancs
+`retour_cloture_avoirs`, `import`.
+
+### A4 — Pesée au contrôle
+
+**Décision** — Le valideur n'est jamais l'auteur de la dernière pesée (local et import). Au contrôle,
+la pesée est figée ; le contrôleur renvoie au magasinier avec un motif, qui corrige et resoumet. Les
+bobines se revérifient à la validation.
+
+**Où** — `fn_trg_reception_valideur_pas_peseur`, `fn_trg_pesee_auteur` (09f). **Contrôle** — banc
+`controle_reception`.
+
+### A5 — Vie du dossier d'import
+
+**Décision** — Avant clôture, les frais sont libres et journalisés. La DUM se corrige avec VALIDER et un
+motif, ne s'efface jamais ; dès la DUM, plus de contre-passation (R8). Clos, le dossier ne se rouvre
+plus ; une facture tardive passe en frais post-clôture, répartie sur le stock restant.
+
+**Où** — 09h ; `importation.rs::frais_post_cloture`. **Contrôle** — banc `import`.
+
+### A6 — Sous-livraison dans la tolérance
+
+**Décision** — À la validation, une ligne reçue à au moins commandé × (1 − tolérance du fournisseur) est
+soldée ; toutes les lignes soldées, le bon se clôt. Au-delà, le reliquat reste ; l'abandonner relève de
+VALIDER.
+
+**Où** — `reception.rs`, `importation.rs`, migration 09i (rattrapage journalisé).
+
+### A7 — Retrait d'une décision machine rouge
+
+**Décision** — Faux problème : un rouge est validé par qui a le droit de valider l'inventaire, et seul
+l'auteur le jour même, ou ce même droit, la retire. Les noms de rôle écrits en dur sont remplacés par
+la grille (T11).
+
+### A8 — Prix du plan d'achat
+
+**Décision** — Dans l'ordre : dernier prix d'achat (dernier bon validé chez ce fournisseur, au taux du
+jour), prix catalogue, CMUP — dans ce dernier cas seulement, le prix est masqué à qui ne voit pas le
+CMUP et la proposition est marquée « prix à saisir ».
+
+**Où** — `fn_dernier_prix_achat_mad`, `v_plan_achat` (09j) ; `masquer_prix_au_cmup`.
+
+### A9 — Horizon prolongé et saisons
+
+**Décision** — Au-delà du plan, la demande se prolonge à la moyenne du plan × le coefficient du mois
+(table `saison_mois`, réglable, défaut 1). Signalés : part prolongée > 50 % d'une proposition (C49),
+écart plan/réel > 50 % après 6 mois (C50) ; rapport « stocks minimums à revoir » au besoin mensuel du
+plan. Le détail de chaque proposition se lit pas à pas (F16).
+
+**Où** — 09k, 09o ; `PlanAchatDetail.tsx`. **Contrôle** — banc `plan_detail`.
+
+### A10 — Taux d'un bon en devise
+
+**Décision** — Proposé au cours du jour de la validation, modifiable avec un motif ; au-delà de 3 % du
+cours BAM, à confirmer ; le plafond de validation se juge sur le plus grand des deux ; figé à la
+validation avec sa justification (taux, date du cours, source, valideur). Le bon imprimé porte la date
+de validation comme date de commande.
+
+**Où** — 09l ; `routes/stock.rs`. **Contrôle** — banc `taux_bon`.
+
+### A11 — Le change au paiement des importations
+
+**Décision** — Le CMUP reste au cours du dédouanement, comme la comptabilité : le paiement ne le touche
+jamais. Le coût de revient réel se lit à part, par dossier : matière + frais + écart de change constaté
+à chaque paiement (cours de la banque), coupé au cours BAM du 31/12 pour les dossiers dédouanés une
+année et payés la suivante. Pas d'écriture comptable.
+
+**Où** — `paiement_facture_import`, `v_change_paiement`, `v_cout_revient_reel` (09m) ;
+`CoutRevientReel.tsx`.
+
+---
+
 ## Ce qui reste ouvert
 
 - R4 : la contrepartie du retour fournisseur (avoir) n'est pas imposée à sa saisie.
+- A1 : le prêt revient-il toujours en nature, ou est-il parfois refacturé ? (suivi en restes à rendre
+  par défaut).
+- A11 : l'acompte payé avant le dédouanement (IFRIC 22) n'a pas été tranché.
 - Les dates sont du texte ISO garanti par contrainte (08m) ; leur conversion en type `date` reste un
   chantier à part.

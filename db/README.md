@@ -78,7 +78,7 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37, C43, C44
+├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C52 : migrations)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -86,7 +86,9 @@ db/pg/
 └── charger.py                    chargement par passes
 ```
 
-**51 tables · 36 vues · 51 triggers · 54 index**
+**51 tables · 36 vues · 51 triggers · 54 index** dans les fichiers d'origine ; une base migrée au
+09/10/2026 en compte **96 tables · 132 vues · 242 déclencheurs · 368 index** (le socle en est la
+photographie).
 
 ---
 
@@ -154,6 +156,23 @@ document d'achat ouvert, signalé sans bloquer) et **C44** (plus d'un inventaire
 magasin — l'index qui l'interdit n'a pas pu être posé) des migrations du 08/10/2026. **C10** lit
 aussi les réceptions d'import depuis le 08/10 (excédent au-delà de la tolérance du fournisseur sans
 dérogation).
+
+Les migrations du 09/10/2026 (audit v5) ajoutent, tous en **signal** (ATTENTION), jamais en blocage :
+
+| Code | Ce qu'il signale | Migration |
+|---|---|---|
+| C45 | ligne de bon reçue à la fois en local et à l'import | 08f (étanchéité) |
+| C46 | champ sensible sans ligne dans le modèle de droits d'un rôle | 09a |
+| C47 | fil prêté à une autre usine, non rendu dans le délai (`P_PretJoursAlerte`) | 09d |
+| C48 | chargement : fil chargé déjà consommé, à relire | 09e |
+| C49 | proposition d'achat estimée surtout sur la prolongation du plan | 09k |
+| C50 | moyenne du plan éloignée de plus de 50 % de la consommation réelle | 09k |
+| C51 | référence suivie au lot avec du fil sans lot, à identifier | 09s |
+| C52 | réception validée dont une entrée est contre-passée | 09u |
+
+C28 dit désormais ce que fait `P_EncoursRetardInclus` (comptée ou retirée de la couverture) ; C31,
+C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lisent l'état des machines
+(`machine_etat`). Le banc vérifie la liste exacte C01–C52.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

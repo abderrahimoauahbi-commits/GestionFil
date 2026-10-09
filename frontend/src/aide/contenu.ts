@@ -1206,7 +1206,7 @@ export const SUJETS: Sujet[] = [
       'Les mouvements nés d’une fiche machine ne se contre-passent pas depuis l’écran des mouvements : ils se défont en dévalidant ou en annulant la fiche.',
       'VERT, ORANGE, ROUGE (règle 1) ne jugent que les écarts NON EXPLIQUÉS : une consommation, un déchet, une perte ou une casse déclarés restent en vert. Orange : à confirmer avant de valider. Rouge : la Direction (droit de valider l’inventaire) et un commentaire.',
       'Un gain (plus de fil qu’attendu) est une régularisation, jamais une consommation.',
-      'Un lot bloqué ne se charge pas ; il se décharge vers le magasin. Une dérogation se demande depuis la fiche refusée : accordée, elle sert une fois, pour ce lot et cette fiche.',
+      'Un lot bloqué ne se charge pas ; il se décharge vers le magasin. Une dérogation se demande depuis la fiche refusée : accordée, elle sert une fois, pour ce lot, cette fiche et au plus ses kilos ; la fiche annulée l’emporte.',
       'Une machine retirée ne porte plus de fiche ; une zone retirée qui a un passé se désactive.',
       'La consommation se date à la fiche (le fait), pas à sa validation.',
     ],
@@ -1241,7 +1241,7 @@ export const SUJETS: Sujet[] = [
       'Un lot naît tout seul à la première entrée en stock (réception, import, mouvement) : il n’y a rien à créer à la main.',
     ],
     droits:
-      'Lecture du module Lots pour consulter ; écriture pour basculer en Restes ; validation du module Lots (ou la Direction) pour bloquer, débloquer et décider du sort d’un lot dormant. La valeur en MAD n’apparaît que pour un rôle qui a le droit de la voir.',
+      'Lecture du module Lots pour consulter ; écriture pour basculer en Restes ; validation du module Lots (la Direction l’a) pour bloquer, débloquer et décider du sort d’un lot dormant. Un lot qui porte du fil sur machine ne se solde pas. La valeur en MAD n’apparaît que pour un rôle qui a le droit de la voir.',
     procedures: [
       {
         titre: 'Comprendre ce qu’est un lot',
@@ -1260,7 +1260,7 @@ export const SUJETS: Sujet[] = [
           'Les quatre onglets suivants sont des ALERTES : à 0, il n’y a rien à faire.',
           'À basculer — des lots Projet passés sous le seuil : quelqu’un doit confirmer leur passage en Restes.',
           'Dormants — des lots sans aucun mouvement depuis un an : il faut décider de les garder, de les solder ou de les détruire.',
-          'Bloqués — des lots arrêtés par la qualité : on ne peut ni les déplacer ni les charger sur une machine.',
+          'Bloqués — des lots arrêtés par la qualité : ils ne partent ni en production ni sur machine ; ils peuvent aller en quarantaine, revenir d’une machine ou retourner au fournisseur.',
           'Dérive de poids — des lots dont les bobines ne pèsent pas le poids annoncé par le catalogue.',
         ],
       },
@@ -1282,7 +1282,7 @@ export const SUJETS: Sujet[] = [
           'Confirmez.',
         ],
         resultat:
-          'Bloqué, le lot ne peut plus sortir ni être chargé sur une machine, et le plan d’achat ne compte plus dessus.',
+          'Bloqué, le lot ne part plus en production ni sur machine (sauf dérogation, bornée aux kilos d’une fiche), et le plan d’achat ne compte plus dessus. Il peut aller en quarantaine, revenir d’une machine ou retourner au fournisseur.',
       },
       {
         titre: 'Décider du sort d’un lot dormant',
@@ -1431,7 +1431,7 @@ export const SUJETS: Sujet[] = [
       'L’onglet « Historique » garde toutes les demandes tranchées, les plus récentes en premier.',
       'Un accord s’explique comme un refus : le motif est obligatoire.',
       'Une seule réponse : si deux responsables répondent en même temps, le second trouve la demande déjà tranchée.',
-      'Une dérogation de lot bloqué sert une fois, pour le lot et la fiche qu’elle nomme.',
+      'Une dérogation de lot bloqué sert une fois, pour le lot et la fiche qu’elle nomme, et au plus les kilos demandés.',
     ],
     liens: [{ route: '/lots', libelle: 'Lots' }],
   },
@@ -1466,16 +1466,16 @@ export const SUJETS: Sujet[] = [
 
   {
     route: '/',
-    titre: 'Tableau de bord',
-    chemin: 'Général → Tableau de bord',
+    titre: 'Accueil',
+    chemin: 'Accueil',
     objectif:
-      'Répondre à deux questions en arrivant : qu’est-ce qui m’attend, et est-ce que je tiens le plan ?',
-    droits: 'Lecture du module Cockpit. Chaque tuile suit en plus le droit d’agir sur son module.',
+      'Ouvrir l’application sur ce que vous pouvez faire : les écrans auxquels votre compte a droit, et rien d’autre.',
+    droits: 'Aucun : la page s’ouvre pour tout le monde et ne montre que les écrans permis par vos droits.',
     regles: [
-      'Une tuile n’apparaît que si vous pouvez VOIR le champ ET AGIR dessus : afficher « 3 bons à valider » à qui ne peut pas valider n’est pas une information.',
-      'Une file vide disparaît : un écran couvert de zéros apprend à ne plus être lu.',
-      'Le mur de risques trie par le temps qui reste RÉELLEMENT — échéance moins délai fournisseur.',
+      'Les raccourcis viennent de la même liste que le menu : un écran retiré disparaît des deux à la fois.',
+      'Ce qui attend une décision se lit au tableau de bord (droit de lecture du Cockpit).',
     ],
+    liens: [{ route: '/tableau-de-bord', libelle: 'Tableau de bord' }],
   },
 
   {
@@ -1580,7 +1580,64 @@ export const SUJETS: Sujet[] = [
     ],
   },
 
-  /* ============================================ ÉCRANS SANS FICHE (08/10) == */
+  /* ============================================ ÉCRANS SANS FICHE (09/10) == */
+  {
+    route: '/rapports',
+    titre: 'Rapports financiers',
+    chemin: 'Analyse → Rapports',
+    objectif: 'Lire où va l’argent : achats, consommation, valeur du stock et classement ABC, sur une période.',
+    droits: 'Lecture du module Valorisation ; les montants suivent la grille des champs.',
+    regles: ['Les chiffres viennent du grand livre et du CMUP : aucun montant n’est ressaisi ici.'],
+  },
+  {
+    route: '/landed-cost',
+    titre: 'Coût de revient complet',
+    chemin: 'Analyse → Coût de revient',
+    objectif:
+      'Voir ce que coûte vraiment la matière rendue magasin : prix d’achat plus fret, douane, assurance et manutention ; et les écarts de prix que le CMUP n’a pas pu porter.',
+    droits: 'Lecture du module Valorisation ; saisir un frais demande l’écriture.',
+    procedures: [
+      {
+        titre: 'Saisir un frais d’approche',
+        etapes: [
+          'Cliquez « + » : le formulaire s’ouvre sur la page.',
+          'Choisissez la réception, la nature du frais et sa clé de répartition (le fret au poids, la douane à la valeur).',
+          'Enregistrez : le coût de revient de chaque ligne se recalcule.',
+        ],
+      },
+    ],
+    regles: [
+      'Les réceptions clôturées avec leur facture restent au coût de revient.',
+      'Écarts de prix : la part d’une facture, d’un frais ou d’un avoir revenue à des kilos déjà sortis ; elle n’est dans aucun stock (positif = surcoût, négatif = gain).',
+    ],
+  },
+  {
+    route: '/classification',
+    titre: 'Classement ABC / XYZ',
+    chemin: 'Analyse → Classification',
+    objectif: 'Classer chaque référence par son poids dans la valeur (ABC) et la régularité de sa consommation (XYZ), et en déduire une politique de stock.',
+    droits: 'Lecture du module Stock.',
+    regles: ['C’est le croisement des deux lettres qui commande la politique : une AZ ne se gère pas comme une AX.'],
+  },
+  {
+    route: '/audit',
+    titre: 'Journal d’audit',
+    chemin: 'Administration → Audit',
+    objectif: 'Retrouver qui a changé quoi, quand, avec l’ancienne et la nouvelle valeur.',
+    droits: 'Lecture du module Audit.',
+    regles: [
+      'Le journal est immuable : rien ne s’y modifie ni ne s’y efface.',
+      'Une suppression y garde l’enregistrement entier : il peut se reconstituer.',
+      'Le recalcul du plan d’achat s’y résume en une ligne (« RECALCUL »), avec le nombre de propositions remplacées.',
+    ],
+  },
+  {
+    route: '/parametres',
+    titre: 'Paramètres',
+    chemin: 'Administration → Configuration',
+    objectif: 'Les réglages de l’application se trouvent dans Configuration : cette adresse y mène.',
+    liens: [{ route: '/configuration', libelle: 'Configuration' }],
+  },
   {
     route: '/tableau-de-bord',
     titre: 'Tableau de bord',

@@ -75,7 +75,9 @@ export function useFiles(): { files: File[]; chargement: boolean; erreur: boolea
     { champ: 'nb_bc_a_valider', domaine: 'ACHATS', libelle: 'Bons à valider', valeur: nn('nb_bc_a_valider'), detail: droits.visible('montant_bc_a_valider_mad') ? `${compact(nn('montant_bc_a_valider_mad'))} MAD` : undefined, ton: 'alerte', Icone: FileCheck2, vers: '/bons-commande', actionnable: peut('BONS_COMMANDE', 'VALIDER') },
     { champ: 'nb_bc_a_envoyer', domaine: 'ACHATS', libelle: 'Bons à envoyer', valeur: nn('nb_bc_a_envoyer'), detail: 'validés, pas encore partis', ton: 'alerte', Icone: Send, vers: '/bons-commande', actionnable: peut('BONS_COMMANDE', 'ECRIRE') },
     { champ: 'nb_livraisons_en_retard', domaine: 'ACHATS', libelle: 'Livraisons en retard', valeur: nn('nb_livraisons_en_retard'), detail: nn('retard_max_jours') > 0 ? `jusqu'à ${nn('retard_max_jours')} j` : undefined, ton: 'danger', Icone: Clock, vers: '/bons-commande', actionnable: peut('BONS_COMMANDE', 'LIRE') },
-    { champ: 'nb_receptions_a_controler', domaine: 'QUALITE', libelle: 'Réceptions à contrôler', valeur: nn('nb_receptions_a_controler'), ton: 'alerte', Icone: ClipboardCheck, vers: '/receptions', actionnable: peut('RECEPTIONS', 'VALIDER') },
+    // « A controler » compte les deux circuits : une file par liste (audit v5, F20).
+    { champ: 'nb_receptions_a_controler', domaine: 'QUALITE', libelle: 'Réceptions à contrôler', valeur: nn('nb_receptions_a_controler') - nn('nb_receptions_import_a_controler'), ton: 'alerte', Icone: ClipboardCheck, vers: '/receptions', actionnable: peut('RECEPTIONS', 'VALIDER') },
+    { champ: 'nb_receptions_a_controler', domaine: 'QUALITE', libelle: 'Réceptions d’import à contrôler', valeur: nn('nb_receptions_import_a_controler'), ton: 'alerte', Icone: ClipboardCheck, vers: '/receptions-import', actionnable: peut('IMPORT', 'VALIDER') },
     { champ: 'nb_receptions_en_saisie', domaine: 'STOCK', libelle: 'Réceptions en saisie', valeur: nn('nb_receptions_en_saisie'), ton: 'neutre', Icone: Truck, vers: '/receptions', actionnable: peut('RECEPTIONS', 'ECRIRE') },
     { champ: 'nb_receptions_a_regulariser', domaine: 'STOCK', libelle: 'Réceptions à régulariser', valeur: nn('nb_receptions_a_regulariser'), ton: 'danger', Icone: ShieldAlert, vers: '/receptions', actionnable: peut('RECEPTIONS', 'LIRE') },
     { champ: 'nb_lignes_non_conformes', domaine: 'QUALITE', libelle: 'Lignes non conformes', valeur: nn('nb_lignes_non_conformes'), ton: 'danger', Icone: PackageX, vers: '/receptions', actionnable: peut('RECEPTIONS', 'LIRE') },
@@ -93,7 +95,8 @@ export function useFiles(): { files: File[]; chargement: boolean; erreur: boolea
   return {
     files: mesFiles,
     chargement: qKpi.isLoading,
-    erreur: qKpi.isError,
+    // Les files des lots comptent aussi (audit v5, F20) : une panne n'est pas un zero.
+    erreur: qKpi.isError || qLots.isError,
   }
 }
 

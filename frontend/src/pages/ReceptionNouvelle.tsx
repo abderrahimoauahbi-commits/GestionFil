@@ -42,7 +42,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Aide, Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { Aide } from '../composants/ui/surcouches'
 import { ChampReference, chercherCatalogue } from '../composants/ChampReference'
 import { cn, fmt } from '../lib/utils'
 import {
@@ -732,6 +732,19 @@ export function ReceptionNouvelle() {
                   </div>
                 )}
 
+                {/* SUR LA PAGE, PAS EN FENETRE (audit v5, F20) : un article de
+                    plus au document se saisit dans le document. */}
+                {horsCommande && (
+                  <PanneauHorsCommande
+                    voitPrix={voitPrix}
+                    surFermeture={() => setHorsCommande(false)}
+                    surAjout={(refs) => {
+                      ajouterHorsCommande(refs)
+                      setHorsCommande(false)
+                    }}
+                  />
+                )}
+
                 {bonsRepris.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <span className="text-[11px] text-attenue-texte">Bons repris :</span>
@@ -1197,16 +1210,6 @@ export function ReceptionNouvelle() {
         </div>
       )}
 
-      {horsCommande && (
-        <PanneauHorsCommande
-          voitPrix={voitPrix}
-          surFermeture={() => setHorsCommande(false)}
-          surAjout={(refs) => {
-            ajouterHorsCommande(refs)
-            setHorsCommande(false)
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -1602,12 +1605,13 @@ function PanneauHorsCommande({
   const retenues = choisies.filter((c) => Number(c.qte) > 0)
 
   return (
-    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
-      <DialogueContenu
-        cote="droite"
-        titre="Article hors commande"
-        description="La marchandise est au quai sans bon derriere elle. Saisissez-la : le bon manquant sera cree."
-      >
+    <div className="rounded-[var(--radius)] border border-primaire/40 bg-primaire/[0.04] p-3">
+        <div className="mb-2">
+          <div className="text-[13px] font-semibold">Article hors commande</div>
+          <p className="m-0 text-[12px] text-attenue-texte">
+            La marchandise est au quai sans bon derrière elle. Saisissez-la : le bon manquant sera créé.
+          </p>
+        </div>
         <ChampReference
           valeur=""
           surChoix={(r) =>
@@ -1676,7 +1680,7 @@ function PanneauHorsCommande({
           ))}
         </div>
 
-        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-bordure pt-3">
           <span className="text-[11px] text-attenue-texte">
             {retenues.length} référence(s) — ajoutées au document, rien n’est enregistré
           </span>
@@ -1695,7 +1699,6 @@ function PanneauHorsCommande({
             </Bouton>
           </div>
         </div>
-      </DialogueContenu>
-    </Dialogue>
+    </div>
   )
 }

@@ -107,6 +107,7 @@ export function Risques() {
         </Alerte>
       )}
 
+      {qCtl.isError && <EnPanne quoi="Contrôles" />}
       {(qKpi.isError || qRisques.isError) && (
         <Alerte ton="danger" titre="Données indisponibles">
           Le serveur n'a pas répondu : les compteurs ci-dessous ne peuvent pas être affirmés. Réessayez dans un instant.
@@ -140,7 +141,7 @@ export function Risques() {
               ) : (
                 <ul className="divide-y divide-ligne">
                   {fs.map((f) => (
-                    <li key={f.champ}>
+                    <li key={`${f.champ}:${f.vers}`}>
                       <Link to={f.vers ?? '#'} className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-attenue">
                         <span
                           className={cn(

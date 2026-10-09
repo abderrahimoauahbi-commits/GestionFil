@@ -9,7 +9,6 @@ import { Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
 import { Alerte, Bouton, Chargement } from '../../composants/ui/base'
-import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { cn, fmt } from '../../lib/utils'
 import type { Frais, Ligne } from './types'
 
@@ -123,10 +122,38 @@ export function Tuile({
 }
 
 // ============================================================================
+// Un panneau de la page (audit v5, F20) : la repartition d'un frais et la
+// cloture du dossier se saisissent dans le dossier, plus dans une fenetre.
+// ============================================================================
+
+function Panneau({
+  titre,
+  description,
+  children,
+}: {
+  titre: string
+  description?: string
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  // Ouvert depuis un bouton plus haut ou plus bas : on l'amene sous les yeux.
+  useEffect(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), [])
+  return (
+    <div ref={ref} className="rounded-[var(--radius)] border border-primaire/40 bg-surface p-4">
+      <div className="mb-3">
+        <div className="text-[14px] font-semibold">{titre}</div>
+        {description && <p className="m-0 mt-0.5 text-[12.5px] text-attenue-texte">{description}</p>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// ============================================================================
 // Frais cible : sur quelles lignes il se repartit
 // ============================================================================
 
-export function CiblesDialogue({
+export function CiblesPanneau({
   idDossier,
   frais,
   lignes,
@@ -151,10 +178,11 @@ export function CiblesDialogue({
     onError: echec,
   })
 
+  if (!frais) return null
   return (
-    <Dialogue open={!!frais} onOpenChange={(o) => !o && surFermer()}>
-      <DialogueContenu
-        titre={`Répartir « ${frais?.frais_libelle ?? ''} »`}
+    <div className="mt-3">
+      <Panneau
+        titre={`Répartir « ${frais.frais_libelle ?? ''} »`}
         description="Par défaut un frais se répartit sur tout le dossier. Cochez des lignes pour le limiter à elles — les droits de douane d'une pièce en franchise, par exemple."
       >
         <div className="max-h-72 space-y-1 overflow-y-auto rounded-[var(--radius)] border border-bordure p-2">
@@ -187,8 +215,8 @@ export function CiblesDialogue({
             </Bouton>
           </div>
         </div>
-      </DialogueContenu>
-    </Dialogue>
+      </Panneau>
+    </div>
   )
 }
 
@@ -216,7 +244,7 @@ interface ApercuCloture {
  * La cloture montre d'abord ce qu'elle va faire : le calcul est joue a blanc
  * par le serveur (`simuler`), rien n'est ecrit tant qu'on n'a pas confirme.
  */
-export function ClotureDialogue({
+export function CloturePanneau({
   idDossier,
   ouvert,
   surFermer,
@@ -245,13 +273,12 @@ export function ClotureDialogue({
   })
   const a = qApercu.data
 
+  if (!ouvert) return null
   return (
-    <Dialogue open={ouvert} onOpenChange={(o) => !o && surFermer()}>
-      <DialogueContenu
-        titre="Clôturer le dossier"
-        description="Les frais rejoignent le CUMP du stock encore présent. Après clôture, le dossier ne se modifie plus."
-        className="max-w-3xl"
-      >
+    <Panneau
+      titre="Clôturer le dossier"
+      description="Les frais rejoignent le CUMP du stock encore présent. Après clôture, le dossier ne se modifie plus."
+    >
         {qApercu.isLoading && <Chargement texte="Calcul de la clôture…" />}
         {qApercu.error && (
           <Alerte ton="alerte">
@@ -317,7 +344,6 @@ export function ClotureDialogue({
             Clôturer et ajuster le CUMP
           </Bouton>
         </div>
-      </DialogueContenu>
-    </Dialogue>
+    </Panneau>
   )
 }

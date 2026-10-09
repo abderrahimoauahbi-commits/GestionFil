@@ -75,6 +75,20 @@ export function Utilisateurs() {
         }
       />
 
+      {/* SUR LA PAGE (audit v5, F20) : la fenetre faite a la main se fermait
+          au clic a cote et perdait la saisie. */}
+      {creation && (
+        <FormulaireCreation
+          roles={qRoles.data ?? []}
+          surFermeture={() => setCreation(false)}
+          surSucces={(message) => {
+            setCreation(false)
+            setRetour({ ton: 'succes', texte: message })
+            void qc.invalidateQueries({ queryKey: ['utilisateurs'] })
+          }}
+        />
+      )}
+
       {retour && (
         <div className="mb-4">
           <Message ton={retour.ton}>{retour.texte}</Message>
@@ -162,17 +176,6 @@ export function Utilisateurs() {
         />
       )}
 
-      {creation && (
-        <FormulaireCreation
-          roles={qRoles.data ?? []}
-          surFermeture={() => setCreation(false)}
-          surSucces={(message) => {
-            setCreation(false)
-            setRetour({ ton: 'succes', texte: message })
-            void qc.invalidateQueries({ queryKey: ['utilisateurs'] })
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -214,14 +217,8 @@ function FormulaireCreation({
     'w-full rounded-lg border border-champ px-3 py-2 text-sm outline-none focus:border-anneau'
 
   return (
-    <div
-      className="fixed inset-0 z-20 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
-      onClick={surFermeture}
-    >
-      <div
-        className="w-full max-w-md rounded-t-xl bg-surface p-5 sm:rounded-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="mb-4 rounded-xl border border-bordure bg-surface p-5">
+      <div className="max-w-xl">
         <h2 className="mb-4 text-lg font-semibold text-texte">Nouvel utilisateur</h2>
 
         <form

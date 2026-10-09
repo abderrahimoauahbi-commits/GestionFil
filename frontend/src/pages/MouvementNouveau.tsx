@@ -630,7 +630,7 @@ export function MouvementNouveau() {
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium text-texte">
-              Type de mouvement <span className="text-red-500">*</span>
+              Type de mouvement <span className="text-danger">*</span>
             </label>
             <select
               required
@@ -658,7 +658,7 @@ export function MouvementNouveau() {
 
           <div>
             <label className="mb-1 block text-sm font-medium text-texte">
-              Magasin <span className="text-red-500">*</span>
+              Magasin <span className="text-danger">*</span>
             </label>
             <select
               required
@@ -677,7 +677,7 @@ export function MouvementNouveau() {
 
           <div>
             <label className="mb-1 block text-sm font-medium text-texte">
-              Motif <span className="text-red-500">*</span>
+              Motif <span className="text-danger">*</span>
             </label>
             <select
               required
@@ -744,7 +744,7 @@ export function MouvementNouveau() {
 
           <div>
             <label className="mb-1 block text-sm font-medium text-texte">
-              Date du mouvement <span className="text-red-500">*</span>
+              Date du mouvement <span className="text-danger">*</span>
             </label>
             <input
               type="date"
@@ -951,8 +951,8 @@ function EquivalentsDispo({
   )
 
   return (
-    <div className="mt-1 rounded-lg border border-red-300 bg-red-50 p-2 dark:border-red-900 dark:bg-red-950/30">
-      <div className="text-[12px] font-medium text-red-700 dark:text-red-300">
+    <div className="mt-1 rounded-lg border border-danger/40 bg-danger/[0.06] p-2">
+      <div className="text-[12px] font-medium text-danger">
         Stock insuffisant dans le magasin : il manque {fmt.nombre(manque, 0)} kg.
       </div>
 

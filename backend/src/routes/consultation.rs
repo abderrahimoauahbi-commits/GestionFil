@@ -103,6 +103,13 @@ pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppRes
                 objet.insert(cle.clone(), v.clone());
             }
         }
+        // La part de l'import dans « a controler » : la tuile mene aux deux
+        // listes, chacune avec son compte (audit v5, F20).
+        let import: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM import_receptions WHERE statut = 'A_CONTROLER'")
+                .fetch_one(&state.db)
+                .await?;
+        objet.insert("nb_receptions_import_a_controler".into(), json!(import));
     }
 
     user.masquer(&state.db, module::COCKPIT, &mut valeur).await?;

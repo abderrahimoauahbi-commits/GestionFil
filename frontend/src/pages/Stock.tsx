@@ -436,7 +436,7 @@ export function Stock() {
       entete: 'Projeté (kg)',
       numerique: true,
       rendu: (l) => (
-        <span className={l.stock_projete_kg < 0 ? 'font-medium text-red-600' : ''}>
+        <span className={l.stock_projete_kg < 0 ? 'font-medium text-danger' : ''}>
           {fmt.nombre(l.stock_projete_kg, 1)}
         </span>
       ),

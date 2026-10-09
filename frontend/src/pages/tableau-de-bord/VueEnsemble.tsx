@@ -145,7 +145,7 @@ export function VueEnsemble() {
 
   /* --- Ce qui attend : les memes files et les memes regles que le poste de
          travail (voir Cockpit.tsx) --- */
-  const { files: mesFiles } = useFiles()
+  const { files: mesFiles, erreur: erreurFiles } = useFiles()
 
   const anomalies = (qCtl.data ?? []).filter((c) => c.anomalies > 0)
   const chargement = qKpi.isLoading
@@ -263,7 +263,7 @@ export function VueEnsemble() {
         </Bloc>
 
         <Bloc titre="À traiter" sousTitre={mesFiles.length ? `${mesFiles.length} file(s) attendent votre décision` : undefined} corpsSansMarge>
-          {qKpi.isError ? (
+          {qKpi.isError || erreurFiles ? (
             <EnPanne />
           ) : chargement ? (
             <div className="space-y-2 p-4">
@@ -277,7 +277,7 @@ export function VueEnsemble() {
           ) : (
             <ul className="divide-y divide-ligne">
               {mesFiles.map((f) => (
-                <li key={f.champ}>
+                <li key={`${f.champ}:${f.vers}`}>
                   <Link
                     to={f.vers ?? '#'}
                     className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-attenue"

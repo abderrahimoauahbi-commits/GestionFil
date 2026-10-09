@@ -40,7 +40,7 @@ import { Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '.
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { Avancement, PastilleStatut } from './DossiersImport'
-import { CiblesDialogue, ClotureDialogue, echec, nombre, Tuile, useEnregistrerTout, useRafraichir, type Signaler } from './dialogues'
+import { CiblesPanneau, CloturePanneau, echec, nombre, Tuile, useEnregistrerTout, useRafraichir, type Signaler } from './dialogues'
 import { PiecesDossier } from './PiecesDossier'
 import { EngagementsDossier } from './EngagementsDossier'
 import {
@@ -184,6 +184,7 @@ export function DossierImport() {
           DUM en haut ; frais, factures et engagements dans leurs onglets —
           les engagements par fournisseur, chaque facture sur le sien ; le
           recapitulatif et les totaux en bas, dans leur cadre. */}
+      <CloturePanneau idDossier={id} ouvert={cloture} surFermer={() => setCloture(false)} />
       <Informations d={d} ecrire={ecrire} valider={droits.peutValider} signaler={tout.signaler} />
 
       {/* LES TROIS ONGLETS RESTENT MONTES, seulement masques : une saisie
@@ -230,7 +231,6 @@ export function DossierImport() {
         </CarteCorps>
       </Carte>
 
-      <ClotureDialogue idDossier={id} ouvert={cloture} surFermer={() => setCloture(false)} />
       {confirmation.element}
     </div>
   )
@@ -706,7 +706,7 @@ function FraisDossier({
           )}
         </CarteCorps>
       )}
-      <CiblesDialogue idDossier={idDossier} frais={cible} lignes={d.lignes} surFermer={() => setCible(null)} />
+      <CiblesPanneau idDossier={idDossier} frais={cible} lignes={d.lignes} surFermer={() => setCible(null)} />
       {confirmation.element}
     </Carte>
   )

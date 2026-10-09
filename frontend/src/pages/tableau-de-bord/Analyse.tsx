@@ -97,6 +97,10 @@ export function AnalyseTableau() {
     <div className="space-y-4">
       <EnTetePage titre="Tableau de bord" description="Analyse — où va l'argent, comment tourne le stock, ce que coûte la matière." />
       <OngletsTableauDeBord />
+      {/* Les compteurs et les statistiques des lots : une panne se dit (audit v5, F20). */}
+      {(qc.isError || ql.isError) && !q.isError && (
+        <EnPanne quoi={qc.isError ? 'Compteurs du tableau de bord' : 'Statistiques des lots'} />
+      )}
 
       {q.isError ? (
         <EnPanne quoi="Analyse" />

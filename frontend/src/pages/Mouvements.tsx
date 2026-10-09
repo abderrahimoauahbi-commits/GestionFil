@@ -133,7 +133,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
       entete: 'Total (kg)',
       numerique: true,
       rendu: (d) => (
-        <span className={d.signe > 0 ? 'text-emerald-700' : 'text-alerte'}>
+        <span className={d.signe > 0 ? 'text-succes' : 'text-alerte'}>
           {d.signe > 0 ? '+' : '−'}
           {fmt.nombre(d.quantite_totale_kg, 2)}
         </span>
@@ -251,7 +251,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
           </span>
           <span>
             Solde affiche{' '}
-            <strong className={totalKg >= 0 ? 'text-emerald-700' : 'text-alerte'}>
+            <strong className={totalKg >= 0 ? 'text-succes' : 'text-alerte'}>
               {fmt.nombre(totalKg, 2)} kg
             </strong>
           </span>
@@ -328,7 +328,7 @@ export function Mouvements() {
       entete: 'Quantité (kg)',
       numerique: true,
       rendu: (l) => (
-        <span className={l.signe > 0 ? 'text-emerald-700' : 'text-alerte'}>
+        <span className={l.signe > 0 ? 'text-succes' : 'text-alerte'}>
           {l.signe > 0 ? '+' : '−'}
           {fmt.nombre(l.quantite_kg, 2)}
         </span>

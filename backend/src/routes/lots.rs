@@ -229,11 +229,9 @@ pub struct DecisionStatut {
 /// DECIDER D'UN LOT (regle 5, 08/10/2026) : accorder une derogation, bloquer,
 /// debloquer, trancher un dormant. Ces decisions demandaient STOCK / VALIDER,
 /// que seul l'administrateur detenait : la Direction ne pouvait pas repondre.
-/// L'autorite est desormais le droit VALIDER du module LOTS, ou la Direction.
+/// L'autorite est le droit VALIDER du module LOTS — la Direction l'a dans la
+/// grille (seed 006) : plus de nom de role ecrit ici (audit v5, T11).
 async fn exiger_decision_lot(state: &AppState, user: &Utilisateur) -> AppResult<()> {
-    if user.role == "DIRECTION" {
-        return Ok(());
-    }
     user.exiger(&state.db, module::LOTS, Action::Valider).await
 }
 
@@ -863,7 +861,9 @@ pub async fn decider(
         }
         "ACCORDEE" | "REFUSEE" => {
             exiger_decision_lot(&state, &user).await?;
-            if demandeur == user.id && user.role != "ADMIN" {
+            // S'autoriser soi-meme : le seul administrateur des comptes (droit
+            // VALIDER des utilisateurs, dans la grille — T11).
+            if demandeur == user.id && user.exiger(&state.db, module::UTILISATEURS, Action::Valider).await.is_err() {
                 return Err(AppError::RegleMetier("On n'autorise pas sa propre demande : un autre responsable doit repondre.".into()));
             }
         }

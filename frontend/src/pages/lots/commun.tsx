@@ -199,8 +199,8 @@ type Geste = 'bloquer' | 'debloquer' | 'projet' | 'restes' | 'dormant'
  * VALIDER du module LOTS, ou la Direction ; basculer demande ECRIRE.
  */
 export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boolean }) {
-  const { moi, peut } = useAuth()
-  const peutValider = peut(MODULE_DECISION, 'VALIDER') || moi?.role === 'DIRECTION'
+  const { peut } = useAuth()
+  const peutValider = peut(MODULE_DECISION, 'VALIDER')
   const peutEcrire = peut(MODULE, 'ECRIRE')
   const [geste, setGeste] = useState<Geste | null>(null)
   const apres = useApresDecision()

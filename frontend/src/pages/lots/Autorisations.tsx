@@ -43,7 +43,7 @@ function resumeDetails(d: unknown): string {
 export function Autorisations() {
   const { moi, peut } = useAuth()
   // Regle 5 : le droit VALIDER des lots, ou la Direction.
-  const peutDecider = peut(MODULE_DECISION, 'VALIDER') || moi?.role === 'DIRECTION'
+  const peutDecider = peut(MODULE_DECISION, 'VALIDER')
   const apres = useApresDecision()
   const [onglet, setOnglet] = useState('attente')
   const [type, setType] = useState('')
@@ -70,7 +70,7 @@ export function Autorisations() {
   const types = useMemo(() => [...new Set(toutes.map((d) => d.type_demande))].sort(), [toutes])
 
   const estAMoi = (d: Demande) => !!moi && d.id_demandeur === moi.id
-  const peutRepondre = (d: Demande) => peutDecider && (!estAMoi(d) || moi?.role === 'ADMIN')
+  const peutRepondre = (d: Demande) => peutDecider && (!estAMoi(d) || peut('UTILISATEURS', 'VALIDER'))
 
   const envoyer = async (g: Geste, motif: string) => {
     await api.post(`/api/autorisations/${encodeURIComponent(g.demande.id_demande)}/decider`, {
@@ -243,7 +243,7 @@ export function Autorisations() {
                                 Retirer
                               </Bouton>
                             )}
-                            {peutDecider && estAMoi(d) && moi?.role !== 'ADMIN' && (
+                            {peutDecider && estAMoi(d) && !peut('UTILISATEURS', 'VALIDER') && (
                               <span className="w-full text-right text-[10.5px] text-attenue-texte">
                                 Un autre responsable doit répondre.
                               </span>

@@ -58,8 +58,7 @@ export function useFiles(): { files: File[]; chargement: boolean; erreur: boolea
   const droits = useDroits('COCKPIT')
   const { peut } = useAuth()
   const lisStock = peut('STOCK', 'LIRE')
-  const { moi } = useAuth()
-  const decideLots = peut('LOTS', 'VALIDER') || moi?.role === 'DIRECTION'
+  const decideLots = peut('LOTS', 'VALIDER')
   const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Record<string, unknown>>('/api/cockpit') })
   const qLots = useQuery({
     queryKey: ['cockpit-lots'],

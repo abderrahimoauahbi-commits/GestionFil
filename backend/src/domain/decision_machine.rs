@@ -185,8 +185,10 @@ async fn motifs(c: &mut sqlx::PgConnection) -> AppResult<HashMap<String, Motif>>
 
 /// LE CALCUL D'UNE DECISION, sans rien ecrire. Sert a l'apercu ET a la
 /// validation : l'ecran montre exactement ce qui sera enregistre.
-/// `privilegie` : l'administrateur ou le directeur, seuls admis a rendre au
-/// magasin plus de kilos que la ligne n'en portait (correction de leur fait).
+/// `privilegie` : le droit de valider l'inventaire (la Direction, l'administrateur),
+/// seul admis a rendre au magasin plus de kilos que la ligne n'en portait
+/// (correction de son fait). Lu dans la grille des droits, plus dans le nom du
+/// role (audit v5, T11).
 /// LES SEUILS D'ECART MACHINE (regle 1, 08/10/2026) : le plus grand d'un poids
 /// fixe et d'un pourcentage du poids de la ligne. Vert jusqu'a MAX(10 kg, 1 %),
 /// rouge au-dela de MAX(50 kg, 5 %), orange entre les deux.
@@ -1022,8 +1024,8 @@ pub async fn valider(
     capacite: i64,
     confirme_orange: bool,
 ) -> AppResult<Value> {
-    let privilegie = matches!(user.role.as_str(), "ADMIN" | "DIRECTION");
     let autorise_rouge = peut_valider_ecart_rouge(c, &user.role).await?;
+    let privilegie = autorise_rouge;
     let calc = calculer(c, f, saisies, capacite, privilegie, autorise_rouge).await?;
     if !calc.blocages.is_empty() {
         return Err(AppError::RegleMetier(calc.blocages.join(" ; ")));
@@ -1305,7 +1307,8 @@ pub async fn retirer(
     .bind(&date_decision)
     .fetch_one(&mut *c)
     .await?;
-    let responsable = matches!(user.role.as_str(), "ADMIN" | "DIRECTION");
+    // Le responsable : le droit de valider l'inventaire, lu dans la grille (T11).
+    let responsable = peut_valider_ecart_rouge(c, &user.role).await?;
     let auteur_du_jour = auteur.as_deref() == Some(user.id.as_str()) && meme_jour;
     if !responsable && !auteur_du_jour {
         return Err(AppError::RegleMetier(

@@ -817,8 +817,8 @@ pub async fn apercu_fiche(
     let mut tx = state.db.begin().await?;
     let (f, saisies, capacite, _) = charger_decision(&mut tx, &id).await?;
     refuser_conso(&f.type_fiche)?;
-    let privilegie = matches!(user.role.as_str(), "ADMIN" | "DIRECTION");
     let autorise_rouge = dm::peut_valider_ecart_rouge(&mut tx, &user.role).await?;
+    let privilegie = autorise_rouge;
     let calc = dm::calculer(&mut tx, &f, &saisies, capacite, privilegie, autorise_rouge).await?;
     let mut blocages = calc.blocages.clone();
     if calc.blocages.is_empty() {

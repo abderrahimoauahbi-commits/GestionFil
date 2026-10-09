@@ -353,12 +353,38 @@ def scenario_import(c, infra):
     cm = cmup_magasin(infra, ref)
     verifier(abs(cm - 2.0 * cours) < 0.01, f"CMUP d'entree attendu {2.0 * cours:.4f} (prix x cours), obtenu {cm}")
 
+    # Regle 5 : une DUM saisie ne s'efface pas ; elle se corrige avec un motif, au droit de valider.
+    c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"numero_dum": "DUM-BANC-1"})
+    c.refus("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"numero_dum": ""}, contient="efface")
+    c.refus("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"numero_dum": "DUM-BANC-2"}, contient="pourquoi")
+    c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}",
+         {"numero_dum": "DUM-BANC-2", "motif_dum": "Faute de frappe sur la serie"})
+    refus_sql(infra, f"UPDATE import_dossiers SET numero_dum = NULL WHERE id_dossier = '{id_dossier}'", "IMPORT-DUM")
+
     # Cloture : les 5 000 MAD de douane vont au lot du dossier, tout encore la.
     ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True})
     verifier(abs(ap["ecart_stock_dhs"] - 5000) < 0.01 and abs(ap["ecart_consomme_dhs"]) < 0.01,
              f"frais attendus 5 000 au stock, obtenus {ap['ecart_stock_dhs']} / {ap['ecart_consomme_dhs']}")
     c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": False})
     verifier(abs(cmup_magasin(infra, ref) - (cm + 5000 / kg(infra, ref))) < 0.0002, "les frais n'ont pas rejoint le CMUP")
+
+    # Regle 5 : clos, le dossier est fige et ne se rouvre plus ; une facture tardive passe en
+    # frais post-cloture, repartie sur le stock restant sans rouvrir le dossier.
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
+        "id_frais": "DOUANE", "numero_piece": "TARDIF", "montant_devise": 1000, "code_devise": "MAD"})
+    c.refus("Choukri", "POST", f"/api/devalider/dossiers-import/{id_dossier}", {"motif": "Essai de reouverture"})
+    tardif = {"id_frais": "DOUANE", "numero_piece": "TARDIF", "montant_devise": 1000, "code_devise": "MAD"}
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture", dict(tardif))
+    cm = cmup_magasin(infra, ref)
+    ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture",
+              dict(tardif, motif="Facture du transitaire arrivee apres la cloture", simuler=True))
+    verifier(abs(ap["ecart_stock_dhs"] - 1000) < 0.01, f"post-cloture : {ap['ecart_stock_dhs']} au stock au lieu de 1 000")
+    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-6, "l'apercu du frais post-cloture a ecrit")
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture",
+         dict(tardif, motif="Facture du transitaire arrivee apres la cloture"))
+    verifier(abs(cmup_magasin(infra, ref) - (cm + 1000 / kg(infra, ref))) < 0.0002, "le frais post-cloture n'a pas rejoint le CMUP")
+    verifier(infra.valeur(f"SELECT statut FROM import_dossiers WHERE id_dossier = '{id_dossier}'") == "CLOTURE",
+             "le frais post-cloture a rouvert le dossier")
     verifier(controle(infra, "C10") == 0, "C10 leve malgre la derogation")
 
 

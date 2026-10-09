@@ -127,7 +127,14 @@ pub struct DossierSaisie {
     numero_dum: Option<String>,
     regime_douanier: Option<String>,
     date_dum: Option<String>,
+    /// Pourquoi une DUM deja saisie change (regle 5) : obligatoire alors.
+    #[serde(default)]
+    motif_dum: Option<String>,
 }
+
+/// Le refus commun : un dossier clos est fige (regle 5, 09/10/2026).
+const DOSSIER_CLOS: &str = "Le dossier est cloture : il est fige. Une facture tardive (transitaire, \
+     port) s'ajoute en « frais post-cloture » ; il ne se rouvre pas.";
 
 /// Le numero suivant, au format du classeur : « 06/26 ».
 async fn prochain_numero(tx: &mut sqlx::PgConnection) -> AppResult<String> {
@@ -308,6 +315,46 @@ pub async fn modifier_dossier(
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LA VIE DU DOSSIER (regle 5, 09/10/2026). Clos, il est fige (seules les
+    // notes s'ecrivent). Une DUM saisie ne s'efface pas et ne se corrige qu'au
+    // droit de valider, avec un motif : l'effacer rouvrait la contre-passation
+    // apres dedouanement.
+    let (statut, dum_actuelle): (String, Option<String>) =
+        sqlx::query_as("SELECT statut, numero_dum FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Introuvable(format!("dossier {id}")))?;
+    // Clos : seules les notes s'ecrivent ; une DUM changee est refusee, le reste
+    // de l'en-tete garde sa valeur (le formulaire renvoie tout).
+    let clos = statut == "CLOTURE";
+    if clos
+        && d.numero_dum
+            .as_deref()
+            .is_some_and(|n| n.trim() != dum_actuelle.as_deref().unwrap_or("").trim())
+    {
+        return Err(AppError::RegleMetier(DOSSIER_CLOS.into()));
+    }
+    let garde = |v: &Option<String>| if clos { None } else { v.clone() };
+    let actuelle = dum_actuelle.as_deref().map(str::trim).unwrap_or("");
+    if let Some(nouvelle) = d.numero_dum.as_deref().map(str::trim) {
+        if !actuelle.is_empty() && nouvelle != actuelle {
+            if nouvelle.is_empty() {
+                return Err(AppError::RegleMetier(format!(
+                    "La DUM {actuelle} ne s'efface pas : elle prouve le dedouanement. Une faute de frappe se \
+                     corrige (droit de valider, avec un motif)."
+                )));
+            }
+            user.exiger(&state.db, IMPORT, Action::Valider).await.map_err(|_| {
+                AppError::RegleMetier("Corriger une DUM deja saisie demande le droit de valider l'import.".into())
+            })?;
+            if d.motif_dum.as_deref().map(str::trim).unwrap_or("").chars().count() < 5 {
+                return Err(AppError::Invalide(
+                    "Dites pourquoi la DUM change (faute de frappe, DUM rectificative…).".into(),
+                ));
+            }
+        }
+    }
     let n = sqlx::query(
         "UPDATE import_dossiers
             SET numero = COALESCE($2, numero), numero_bl = COALESCE($3, numero_bl),
@@ -318,16 +365,16 @@ pub async fn modifier_dossier(
           WHERE id_dossier = $1",
     )
     .bind(&id)
-    .bind(&d.numero)
-    .bind(&d.numero_bl)
-    .bind(&d.conteneurs)
-    .bind(&d.code_devise)
-    .bind(d.taux_change)
-    .bind(&d.date_arrivee)
+    .bind(garde(&d.numero))
+    .bind(garde(&d.numero_bl))
+    .bind(garde(&d.conteneurs))
+    .bind(garde(&d.code_devise))
+    .bind(if clos { None } else { d.taux_change })
+    .bind(garde(&d.date_arrivee))
     .bind(&d.notes)
-    .bind(&d.numero_dum)
-    .bind(&d.regime_douanier)
-    .bind(&d.date_dum)
+    .bind(garde(&d.numero_dum))
+    .bind(garde(&d.regime_douanier))
+    .bind(garde(&d.date_dum))
     .execute(&mut *tx)
     .await?
     .rows_affected();
@@ -1008,6 +1055,76 @@ pub async fn ajouter_frais(
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id_ligne_frais": id })))
+}
+
+#[derive(Deserialize)]
+pub struct FraisPostCloture {
+    #[serde(flatten)]
+    frais: FraisSaisie,
+    motif: Option<String>,
+    #[serde(default)]
+    simuler: bool,
+}
+
+/// `POST /api/import/dossiers/{id}/frais-post-cloture` — UNE FACTURE TARDIVE
+/// (regle 5, 09/10/2026) : le transitaire ou le port facture apres la cloture.
+/// On ne rouvre pas le dossier : le frais s'ajoute, se repartit, et la seule
+/// difference va au stock restant du dossier, la part consommee en ecart.
+/// Acte de valorisation : droit VALIDER, motif obligatoire.
+pub async fn frais_post_cloture(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id_dossier): Path<String>,
+    Json(p): Json<FraisPostCloture>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let f = p.frais;
+    let motif = p.motif.as_deref().map(str::trim).unwrap_or("").to_string();
+    if motif.chars().count() < 5 {
+        return Err(AppError::Invalide("Dites quelle facture arrive apres la cloture (5 caracteres au moins).".into()));
+    }
+    let id_frais = f.id_frais.ok_or_else(|| AppError::Invalide("Type de frais obligatoire.".into()))?;
+    let montant = f.montant_devise.filter(|m| *m > 0.0)
+        .ok_or_else(|| AppError::Invalide("Montant du frais obligatoire.".into()))?;
+    let devise = f.code_devise.clone().unwrap_or_else(|| "MAD".into());
+
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let jour = aujourd_hui(&mut tx).await?;
+    let cours = controler_taux(&mut tx, "frais", &devise, f.cours_change, &jour,
+                               f.taux_confirme.unwrap_or(false)).await?;
+    // La base n'admet un frais sur un dossier clos que marque ainsi.
+    sqlx::query("SELECT set_config('gestionfil.frais_post_cloture', 'on', true)")
+        .execute(&mut *tx)
+        .await?;
+    let id: String = sqlx::query_scalar(
+        "INSERT INTO dossier_lignes_frais (id_dossier, id_frais, libelle, numero_piece,
+                                           montant_devise, code_devise, cours_change,
+                                           id_utilisateur_creation, post_cloture, motif_post_cloture)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9)
+         RETURNING id_ligne_frais",
+    )
+    .bind(&id_dossier)
+    .bind(&id_frais)
+    .bind(&f.libelle)
+    .bind(&f.numero_piece)
+    .bind(montant)
+    .bind(&devise)
+    .bind(cours)
+    .bind(&user.id)
+    .bind(&motif)
+    .fetch_one(&mut *tx)
+    .await?;
+    poser_cibles(&mut tx, &id, f.cibles.as_deref().unwrap_or(&[])).await?;
+    let mut v = metier::cloturer_dans(&mut tx, &user, &id_dossier, true, p.simuler).await?;
+    if p.simuler {
+        tx.rollback().await?;
+    } else {
+        tx.commit().await?;
+    }
+    v["id_ligne_frais"] = json!(id);
+    user.masquer(&state.db, IMPORT, &mut v).await?;
+    Ok(Json(v))
 }
 
 /// `PATCH /api/import/frais/{id}`

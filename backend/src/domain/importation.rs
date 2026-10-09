@@ -77,6 +77,11 @@ pub fn repartir_signe(montant: i64, bases: &[i64]) -> Vec<i64> {
 /// devise, les parts sont exactement celles du montant en devise ; avec deux,
 /// c'est la seule facon de ne pas poser 1 EUR = 1 USD.
 pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> AppResult<()> {
+    recalculer_repartition_mode(tx, id_dossier, false).await
+}
+
+/// La repartition, et pour un FRAIS POST-CLOTURE (regle 5) sur un dossier clos.
+pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str, post_cloture: bool) -> AppResult<()> {
     let statut: Option<String> =
         sqlx::query_scalar("SELECT statut FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
             .bind(id_dossier)
@@ -84,7 +89,7 @@ pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> 
             .await?;
     match statut.as_deref() {
         None => return Err(AppError::Introuvable(format!("dossier {id_dossier}"))),
-        Some("CLOTURE") => {
+        Some("CLOTURE") if !post_cloture => {
             return Err(AppError::RegleMetier(
                 "Dossier clôturé : la répartition est figée.".into(),
             ))
@@ -692,7 +697,35 @@ pub async fn verifier_ecarts(c: &mut PgConnection, id_reception: &str) -> AppRes
 pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bool) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    let resultat = cloturer_dans(&mut tx, user, id_dossier, false, simuler).await?;
+    if simuler {
+        tx.rollback().await?;
+        return Ok(resultat);
+    }
+    sqlx::query(
+        "UPDATE import_dossiers
+            SET statut = 'CLOTURE', id_utilisateur_cloture = $2, date_cloture = $3
+          WHERE id_dossier = $1",
+    )
+    .bind(id_dossier)
+    .bind(&user.id)
+    .bind(maintenant())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(resultat)
+}
 
+/// LE MOTEUR DE CLOTURE, dans la transaction de l'appelant. `post_cloture` :
+/// un frais tardif sur un dossier deja clos (regle 5, 09/10/2026) — on ne
+/// rouvre pas le dossier, on reporte la seule difference sur le stock restant.
+pub async fn cloturer_dans(
+    tx: &mut PgConnection,
+    user: &Utilisateur,
+    id_dossier: &str,
+    post_cloture: bool,
+    simuler: bool,
+) -> AppResult<Value> {
     let (numero, statut): (String, String) = sqlx::query_as(
         "SELECT numero, statut FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE",
     )
@@ -702,7 +735,14 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     .ok_or_else(|| AppError::Introuvable(format!("dossier {id_dossier}")))?;
 
     match statut.as_str() {
-        "CLOTURE" => return Err(AppError::RegleMetier(format!("Le dossier {numero} est déjà clôturé."))),
+        "CLOTURE" if !post_cloture => {
+            return Err(AppError::RegleMetier(format!("Le dossier {numero} est déjà clôturé.")))
+        }
+        s if post_cloture && s != "CLOTURE" => {
+            return Err(AppError::RegleMetier(format!(
+                "Le dossier {numero} n'est pas clôturé : le frais s'ajoute normalement, la clôture le répartira."
+            )))
+        }
         "BROUILLON" => {
             return Err(AppError::RegleMetier(format!(
                 "Le dossier {numero} n'a encore rien reçu : il n'y a pas de stock à ajuster."
@@ -712,7 +752,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     }
 
     // ---- 1. Tout est recu, ou solde ---------------------------------------------
-    let manquants: Vec<(String, String, f64)> = sqlx::query_as(
+    let manquants: Vec<(String, String, f64)> = if post_cloture { Vec::new() } else { sqlx::query_as(
         "SELECT f.numero_facture, l.code_reference, l.reste_kg::float8
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
@@ -722,7 +762,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     )
     .bind(id_dossier)
     .fetch_all(&mut *tx)
-    .await?;
+    .await? };
     if !manquants.is_empty() {
         let liste: Vec<String> = manquants
             .iter()
@@ -770,7 +810,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
         ));
     }
 
-    recalculer_repartition(&mut tx, id_dossier).await?;
+    recalculer_repartition_mode(tx, id_dossier, post_cloture).await?;
 
     let non_repartis: Vec<(String, f64)> = sqlx::query_as(
         "SELECT p.libelle, d.montant_dhs::float8
@@ -893,8 +933,19 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
         let parts = repartir_signe(ecart_stock_c, &poids);
 
         let mut magasins = Vec::new();
+        let mut ecart_stock_c = ecart_stock_c;
+        let mut ecart_consomme_c = ecart_consomme_c;
         for ((magasin, q, cump, present), part_c) in stocks.iter().zip(parts.iter()) {
             let avant = cump.unwrap_or(0.0);
+            // LE CMUP NE PASSE JAMAIS SOUS ZERO (U6) : le reste va en consomme.
+            let plancher_c = -((avant * q * 100.0).round() as i64);
+            let part_c = &(if *part_c < plancher_c {
+                ecart_stock_c -= *part_c - plancher_c;
+                ecart_consomme_c += *part_c - plancher_c;
+                plancher_c
+            } else {
+                *part_c
+            });
             // Le CUMP est celui du MAGASIN : divise par tout ce qu'il porte.
             let apres = arrondi_kg((avant + (*part_c as f64 / 100.0) / q).max(0.0));
             sqlx::query(
@@ -999,22 +1050,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
         "frais_hors_erp_dhs": hors_erp,
     });
 
-    if simuler {
-        tx.rollback().await?;
-        return Ok(resultat);
-    }
-
-    sqlx::query(
-        "UPDATE import_dossiers
-            SET statut = 'CLOTURE', id_utilisateur_cloture = $2, date_cloture = $3
-          WHERE id_dossier = $1",
-    )
-    .bind(id_dossier)
-    .bind(&user.id)
-    .bind(&horodatage)
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
+    let _ = (simuler, &horodatage);
     Ok(resultat)
 }
 

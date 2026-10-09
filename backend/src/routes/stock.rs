@@ -795,7 +795,9 @@ pub async fn contre_passer(
            JOIN import_factures f ON f.id_facture = l.id_facture
            JOIN import_dossiers d ON d.id_dossier = f.id_dossier
           WHERE rl.id_mouvement = $1
-            AND (d.statut = 'CLOTURE' OR COALESCE(btrim(d.numero_dum), '') <> '')",
+            AND (d.statut = 'CLOTURE' OR COALESCE(btrim(d.numero_dum), '') <> ''
+                 -- Des frais du dossier au CMUP (regle 5) : quel que soit son statut.
+                 OR EXISTS (SELECT 1 FROM import_ajustements_cump a WHERE a.id_dossier = d.id_dossier))",
     )
     .bind(&id)
     .fetch_one(&mut *tx)

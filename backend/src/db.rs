@@ -267,6 +267,14 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'id_mouvement_retour')",
     ),
     (
+        // La vie du dossier d'import : frais post-cloture (colonnes lues et ecrites).
+        "2026-10-09h_dossier_import.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'dossier_lignes_frais'
+                           AND column_name = 'motif_post_cloture')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_import_dum_permanente')",
+    ),
+    (
         // La supervision complete : /api/supervision lit sens, cible, vigilance.
         "2026-10-09b_supervision_rejouee.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

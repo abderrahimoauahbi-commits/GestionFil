@@ -21,7 +21,6 @@ import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
-import { BoutonDevalider } from '../../composants/BoutonDevalider'
 import {
   Alerte,
   Badge,
@@ -159,13 +158,8 @@ export function DossierImport() {
                 Valider
               </Bouton>
             )}
-            <BoutonDevalider
-              document="dossiers-import"
-              id={id}
-              statut={dossier.statut}
-              taille="md"
-              consequence="L’ajustement du CUMP fait à la clôture reste au journal ; la prochaine clôture n’ajoutera que la différence."
-            />
+            {/* PLUS DE REOUVERTURE (regle 5, 09/10/2026) : un dossier clos est fige ;
+                une facture tardive s'ajoute en frais post-cloture, plus bas. */}
             {droits.peutValider && dossier.statut === 'EN_COURS' && (
               <Bouton onClick={() => setCloture(true)}>
                 <Lock />
@@ -188,7 +182,7 @@ export function DossierImport() {
           DUM en haut ; frais, factures et engagements dans leurs onglets —
           les engagements par fournisseur, chaque facture sur le sien ; le
           recapitulatif et les totaux en bas, dans leur cadre. */}
-      <Informations d={d} ecrire={ecrire} signaler={tout.signaler} />
+      <Informations d={d} ecrire={ecrire} valider={droits.peutValider} signaler={tout.signaler} />
 
       {/* LES TROIS ONGLETS RESTENT MONTES, seulement masques : une saisie
           commencee dans l'un (un engagement, un frais) ne doit pas se perdre
@@ -210,7 +204,7 @@ export function DossierImport() {
           </Onglet>
         </OngletsListe>
         <OngletContenu value="frais" forceMount className="mt-3 data-[state=inactive]:hidden">
-          <FraisDossier d={d} ecrire={ecrire} signaler={tout.signaler} />
+          <FraisDossier d={d} ecrire={ecrire} postCloture={clos && droits.peutValider} signaler={tout.signaler} />
         </OngletContenu>
         <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
           <FacturesDossier d={d} ecrire={ecrire} />
@@ -274,7 +268,9 @@ function Synthese({ d }: { d: DossierComplet }) {
 // 1. Informations du dossier
 // ============================================================================
 
-function Informations({ d, ecrire, signaler }: { d: DossierComplet; ecrire: boolean; signaler?: Signaler }) {
+function Informations({
+  d, ecrire, valider, signaler,
+}: { d: DossierComplet; ecrire: boolean; valider: boolean; signaler?: Signaler }) {
   const rafraichir = useRafraichir(d.dossier.id_dossier)
   const { dossier } = d
   const initial = () => ({
@@ -290,12 +286,18 @@ function Informations({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
   const [f, setF] = useState(initial)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => setF(initial()), [dossier])
+  /* UNE DUM SAISIE NE S'EFFACE PAS (regle 5) : elle se corrige au droit de
+     valider, avec un motif. */
+  const dumInitiale = (dossier.numero_dum ?? '').trim()
+  const dumChangee = dumInitiale !== '' && f.numero_dum.trim() !== dumInitiale
+  const [motifDum, setMotifDum] = useState('')
   const modifie = JSON.stringify(f) !== JSON.stringify(initial())
 
   const enregistrer = useMutation({
     mutationFn: () =>
       api.patch(`/api/import/dossiers/${dossier.id_dossier}`, {
         ...f,
+        motif_dum: dumChangee ? motifDum.trim() : undefined,
         date_arrivee: f.date_arrivee || null,
         date_dum: f.date_dum || null,
       }),
@@ -342,7 +344,22 @@ function Informations({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
           </div>
           <div className="md:col-span-2">
             <Etiq>N° DUM</Etiq>
-            <Champ value={f.numero_dum} onChange={maj('numero_dum')} disabled={!ecrire} placeholder="Bureau · régime · année · série" />
+            <Champ
+              value={f.numero_dum}
+              onChange={maj('numero_dum')}
+              disabled={!ecrire || (dumInitiale !== '' && !valider)}
+              title={dumInitiale !== '' && !valider ? 'Une DUM saisie se corrige au droit de valider' : undefined}
+              placeholder="Bureau · régime · année · série"
+            />
+            {dumChangee && (
+              <Champ
+                className="mt-1"
+                value={motifDum}
+                onChange={(e) => setMotifDum(e.target.value)}
+                placeholder="Pourquoi la DUM change (obligatoire)"
+                aria-label="Motif du changement de DUM"
+              />
+            )}
           </div>
           <div>
             <Etiq>Régime</Etiq>
@@ -370,7 +387,15 @@ function Informations({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
 // 2. Frais du dossier — saisis dans le tableau
 // ============================================================================
 
-function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: boolean; signaler?: Signaler }) {
+function FraisDossier({
+  d, ecrire, postCloture, signaler,
+}: { d: DossierComplet; ecrire: boolean; postCloture: boolean; signaler?: Signaler }) {
+  /* LA FACTURE TARDIVE (regle 5, 09/10/2026) : sur un dossier clos, le frais
+     s'ajoute « post-cloture », avec un motif ; il va au stock restant du
+     dossier, la part consommee en ecart, sans rouvrir le dossier. */
+  const [motifPost, setMotifPost] = useState('')
+  const [apercuPost, setApercuPost] = useState<{ ecart_stock_dhs: number; ecart_consomme_dhs: number } | null>(null)
+  const saisie = ecrire || postCloture
   const idDossier = d.dossier.id_dossier
   const rafraichir = useRafraichir(idDossier)
   const confirmation = useConfirmation()
@@ -381,12 +406,12 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
   const qParam = useQuery({
     queryKey: ['parametres-frais'],
     queryFn: () => api.get<ParametreFrais[]>('/api/parametres-frais'),
-    enabled: ecrire,
+    enabled: saisie,
   })
   const qDevises = useQuery({
     queryKey: ['devises'],
     queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
-    enabled: ecrire,
+    enabled: saisie,
   })
   // La liste deroulante groupee par categorie, comme les colonnes du classeur.
   const groupes = useMemo(() => {
@@ -407,25 +432,48 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
       api.get<{ reference: number | null; source: string | null }>(
         `/api/import/taux-reference?devise=${encodeURIComponent(n.code_devise)}&date=${aujourdhui}`,
       ),
-    enabled: ecrire && fraisEnDevise,
+    enabled: saisie && fraisEnDevise,
   })
   const coursPropose = fraisEnDevise ? (qTauxFrais.data?.reference ?? null) : null
   useEffect(() => {
     if (coursPropose && n.cours_change === '') setN((x) => ({ ...x, cours_change: String(coursPropose) }))
   }, [coursPropose, n.cours_change])
 
+  const corpsFrais = (confirme?: boolean) => ({
+    id_frais: n.id_frais,
+    libelle: n.libelle || null,
+    numero_piece: n.numero_piece || null,
+    montant_devise: nombre(n.montant_devise),
+    code_devise: n.code_devise,
+    cours_change: n.code_devise === 'MAD' ? 1 : nombre(n.cours_change),
+    taux_confirme: confirme === true,
+  })
+  const apercuPostCloture = useMutation({
+    mutationFn: () =>
+      api.post<{ ecart_stock_dhs: number; ecart_consomme_dhs: number }>(
+        `/api/import/dossiers/${idDossier}/frais-post-cloture`,
+        { ...corpsFrais(true), motif: motifPost.trim(), simuler: true },
+      ),
+    onSuccess: setApercuPost,
+    onError: echec,
+  })
   const ajouter = useMutation({
     mutationFn: (confirme?: boolean) =>
-      api.post(`/api/import/dossiers/${idDossier}/frais`, {
-        id_frais: n.id_frais,
-        libelle: n.libelle || null,
-        numero_piece: n.numero_piece || null,
-        montant_devise: nombre(n.montant_devise),
-        code_devise: n.code_devise,
-        cours_change: n.code_devise === 'MAD' ? 1 : nombre(n.cours_change),
-        taux_confirme: confirme === true,
-      }),
+      postCloture
+        ? api.post(`/api/import/dossiers/${idDossier}/frais-post-cloture`, {
+            ...corpsFrais(confirme),
+            motif: motifPost.trim(),
+          })
+        : api.post(`/api/import/dossiers/${idDossier}/frais`, corpsFrais(confirme)),
     onSuccess: () => {
+      if (postCloture) {
+        toast.success('Frais post-clôture enregistré — réparti sur le stock restant du dossier')
+        setN(vide)
+        setMotifPost('')
+        setApercuPost(null)
+        rafraichir()
+        return
+      }
       toast.success(
         !typeChoisi?.inclus_dans_cout
           ? 'Frais ajouté — hors coût de revient'
@@ -461,7 +509,11 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
 
   const inclus = d.frais.filter((f) => f.inclus_dans_cout === 1).reduce((t, f) => t + f.montant_dhs, 0)
   const hors = d.frais.filter((f) => f.inclus_dans_cout === 0).reduce((t, f) => t + f.montant_dhs, 0)
-  const complet = n.id_frais && nombre(n.montant_devise) > 0 && (n.code_devise === 'MAD' || nombre(n.cours_change) > 0)
+  const complet =
+    n.id_frais &&
+    nombre(n.montant_devise) > 0 &&
+    (n.code_devise === 'MAD' || nombre(n.cours_change) > 0) &&
+    (!postCloture || motifPost.trim().length >= 5)
   const maj = (k: keyof typeof n) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setN((x) => ({
       ...x,
@@ -549,7 +601,7 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
 
               {/* LA LIGNE DE SAISIE, a la suite des frais deja saisis : on
                   remplit comme une ligne du classeur, et « Ajouter ». */}
-              {ecrire && (
+              {saisie && (
                 <tr className="border-b border-bordure/60 bg-attenue/25">
                   <td className={td}>
                     <Selecteur className="h-7" value={n.id_frais} onChange={maj('id_frais')}>
@@ -624,6 +676,32 @@ function FraisDossier({ d, ecrire, signaler }: { d: DossierComplet; ecrire: bool
           </table>
         </div>
       </CarteCorps>
+      {postCloture && (
+        <CarteCorps className="space-y-2 border-t border-bordure">
+          <Etiq obligatoire>Frais post-clôture : quelle facture arrive après la clôture ?</Etiq>
+          <div className="flex flex-wrap items-center gap-2">
+            <Champ
+              className="min-w-0 flex-1"
+              value={motifPost}
+              onChange={(e) => {
+                setMotifPost(e.target.value)
+                setApercuPost(null)
+              }}
+              placeholder="Ex. : facture du transitaire reçue le 12/10"
+            />
+            <Bouton variante="contour" disabled={!complet} chargement={apercuPostCloture.isPending}
+              onClick={() => apercuPostCloture.mutate()}>
+              Aperçu
+            </Bouton>
+          </div>
+          {apercuPost && (
+            <p className="m-0 text-[12.5px]">
+              {fmt.nombre(apercuPost.ecart_stock_dhs, 2)} DH au stock restant du dossier,{' '}
+              {fmt.nombre(apercuPost.ecart_consomme_dhs, 2)} DH en écart (kilos déjà consommés).
+            </p>
+          )}
+        </CarteCorps>
+      )}
       <CiblesDialogue idDossier={idDossier} frais={cible} lignes={d.lignes} surFermer={() => setCible(null)} />
       {confirmation.element}
     </Carte>

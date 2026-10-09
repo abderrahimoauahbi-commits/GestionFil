@@ -135,17 +135,9 @@ const REVERSIBLES: &[Reversible] = &[
         document_mouvements: None,
         garde: None,
     },
-    Reversible {
-        chemin: "dossiers-import",
-        table: "import_dossiers",
-        cle: "id_dossier",
-        module: "IMPORT",
-        depuis: &["CLOTURE"],
-        vers: "EN_COURS",
-        effacer: &["id_utilisateur_cloture", "date_cloture"],
-        document_mouvements: None,
-        garde: None,
-    },
+    // Le dossier d'import ne se rouvre plus (regle 5, 09/10/2026) : sa reouverture,
+    // sans garde, rouvrait la contre-passation apres que ses frais etaient au
+    // CMUP. Une facture tardive passe par le frais post-cloture.
 ];
 
 fn reversible(chemin: &str) -> AppResult<&'static Reversible> {

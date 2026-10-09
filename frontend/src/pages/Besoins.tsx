@@ -156,7 +156,7 @@ export function Besoins() {
 
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<PlanListe[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<PlanListe[]>('/api/plans', { signal }),
   })
 
   // A l'ouverture, on vise le plan qui alimente reellement les achats.
@@ -169,7 +169,7 @@ export function Besoins() {
 
   const qDossier = useQuery({
     queryKey: ['production-besoins', planVise],
-    queryFn: () => api.get<Dossier>(`/api/plans/${planVise}/production-besoins`),
+    queryFn: ({ signal }) => api.get<Dossier>(`/api/plans/${planVise}/production-besoins`, { signal }),
     enabled: !!planVise,
   })
 

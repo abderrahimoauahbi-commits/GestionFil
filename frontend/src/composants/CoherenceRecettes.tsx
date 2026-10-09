@@ -32,7 +32,7 @@ interface LigneCoherence {
 export function CoherenceRecettes() {
   const q = useQuery({
     queryKey: ['coherence-recettes'],
-    queryFn: () => api.get<LigneCoherence[]>('/api/coherence-recettes'),
+    queryFn: ({ signal }) => api.get<LigneCoherence[]>('/api/coherence-recettes', { signal }),
   })
 
   if (q.isLoading) return <Squelette className="h-40" />

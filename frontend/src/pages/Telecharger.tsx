@@ -53,11 +53,11 @@ export function Telecharger() {
 
   const qPaquets = useQuery({
     queryKey: ['telechargements'],
-    queryFn: () => api.get<Paquet[]>('/api/telechargements'),
+    queryFn: ({ signal }) => api.get<Paquet[]>('/api/telechargements', { signal }),
   })
   const qJournal = useQuery({
     queryKey: ['telechargements-journal'],
-    queryFn: () => api.get<LigneJournal[]>('/api/telechargements/journal'),
+    queryFn: ({ signal }) => api.get<LigneJournal[]>('/api/telechargements/journal', { signal }),
     enabled: peut(MODULE, 'LIRE'),
   })
 

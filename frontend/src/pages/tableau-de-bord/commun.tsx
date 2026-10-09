@@ -59,10 +59,10 @@ export function useFiles(): { files: File[]; chargement: boolean; erreur: boolea
   const { peut } = useAuth()
   const lisStock = peut('STOCK', 'LIRE')
   const decideLots = peut('LOTS', 'VALIDER')
-  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Record<string, unknown>>('/api/cockpit') })
+  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/cockpit', { signal }) })
   const qLots = useQuery({
     queryKey: ['cockpit-lots'],
-    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, number | null>>('/api/cockpit/lots', { signal }),
     enabled: lisStock,
   })
   const k = qKpi.data ?? {}

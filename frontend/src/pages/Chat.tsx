@@ -168,12 +168,12 @@ export function Chat() {
 
   const qEtat = useQuery({
     queryKey: ['chat-etat'],
-    queryFn: () => api.get<Etat>('/api/chat/etat'),
+    queryFn: ({ signal }) => api.get<Etat>('/api/chat/etat', { signal }),
     retry: false,
   })
   const qModeles = useQuery({
     queryKey: ['chat-modeles'],
-    queryFn: () => api.get<Modeles>('/api/chat/modeles'),
+    queryFn: ({ signal }) => api.get<Modeles>('/api/chat/modeles', { signal }),
     retry: false,
   })
 
@@ -192,7 +192,7 @@ export function Chat() {
 
   const qCompetences = useQuery({
     queryKey: ['chat-competences'],
-    queryFn: () => api.get<{ competences: CompetenceDecrite[] }>('/api/chat/competences'),
+    queryFn: ({ signal }) => api.get<{ competences: CompetenceDecrite[] }>('/api/chat/competences', { signal }),
     retry: false,
     enabled: aide,
   })

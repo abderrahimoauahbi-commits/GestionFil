@@ -37,7 +37,7 @@ interface Reversible {
 export function useReversibles() {
   return useQuery({
     queryKey: ['devalider'],
-    queryFn: () => api.get<Reversible[]>('/api/devalider'),
+    queryFn: ({ signal }) => api.get<Reversible[]>('/api/devalider', { signal }),
     staleTime: Infinity,
   })
 }

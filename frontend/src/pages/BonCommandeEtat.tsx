@@ -104,11 +104,11 @@ export function BonCommandeEtat() {
 
   const qBc = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<Bc[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<Bc[]>('/api/bons-commande', { signal }),
   })
   const qLignes = useQuery({
     queryKey: ['lignes-bc', id],
-    queryFn: () => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 

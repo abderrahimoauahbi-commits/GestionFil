@@ -102,11 +102,11 @@ export function RapportsFinanciers() {
 
   const qAnalyse = useQuery({
     queryKey: ['cockpit-analyse'],
-    queryFn: () => api.get<Analyse>('/api/cockpit/analyse'),
+    queryFn: ({ signal }) => api.get<Analyse>('/api/cockpit/analyse', { signal }),
   })
   const qAbc = useQuery({
     queryKey: ['analyse-abc-xyz'],
-    queryFn: () => api.get<LigneAbc[]>('/api/analyse-abc-xyz'),
+    queryFn: ({ signal }) => api.get<LigneAbc[]>('/api/analyse-abc-xyz', { signal }),
   })
 
   const d = qAnalyse.data

@@ -88,7 +88,7 @@ export function Transferts() {
 
   const q = useQuery({
     queryKey: ['transferts'],
-    queryFn: () => api.get<Transfert[]>('/api/transferts'),
+    queryFn: ({ signal }) => api.get<Transfert[]>('/api/transferts', { signal }),
   })
 
   const rafraichir = () => {

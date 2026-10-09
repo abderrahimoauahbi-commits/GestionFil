@@ -61,7 +61,7 @@ export function DossiersImport() {
 
   const q = useQuery({
     queryKey: ['import-dossiers'],
-    queryFn: () => api.get<DossierResume[]>('/api/import/dossiers'),
+    queryFn: ({ signal }) => api.get<DossierResume[]>('/api/import/dossiers', { signal }),
   })
   const lignes = (q.data ?? []).filter((d) => !filtre || d.statut === filtre)
 

@@ -391,13 +391,13 @@ export function Reception() {
 
   const qRec = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<Reception[]>('/api/receptions'),
+    queryFn: ({ signal }) => api.get<Reception[]>('/api/receptions', { signal }),
   })
   const rec = qRec.data?.find((r) => r.id_reception === id) ?? null
 
   const qLignes = useQuery({
     queryKey: ['lignes-reception', id],
-    queryFn: () => api.get<LigneRec[]>(`/api/receptions/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneRec[]>(`/api/receptions/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 

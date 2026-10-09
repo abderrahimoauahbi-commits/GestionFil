@@ -87,7 +87,7 @@ export function EtatReception() {
 
   const qListe = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<Reception[]>('/api/receptions?limite=200'),
+    queryFn: ({ signal }) => api.get<Reception[]>('/api/receptions?limite=200', { signal }),
   })
   const liste = useMemo(() => {
     const d = qListe.data
@@ -100,7 +100,7 @@ export function EtatReception() {
 
   const qLignes = useQuery({
     queryKey: ['lignes-reception', choisi],
-    queryFn: () => api.get<LigneRecept[]>(`/api/receptions/${choisi}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneRecept[]>(`/api/receptions/${choisi}/lignes`, { signal }),
     enabled: !!choisi,
   })
 
@@ -273,7 +273,7 @@ export function EtatInventaire() {
 
   const qListe = useQuery({
     queryKey: ['inventaires'],
-    queryFn: () => api.get<Inventaire[]>('/api/inventaires'),
+    queryFn: ({ signal }) => api.get<Inventaire[]>('/api/inventaires', { signal }),
   })
   const liste = useMemo(() => {
     const d = qListe.data
@@ -286,7 +286,7 @@ export function EtatInventaire() {
 
   const qLignes = useQuery({
     queryKey: ['lignes-inventaire', choisi],
-    queryFn: () => api.get<LigneInv[]>(`/api/inventaires/${choisi}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneInv[]>(`/api/inventaires/${choisi}/lignes`, { signal }),
     enabled: !!choisi,
   })
 
@@ -453,7 +453,7 @@ export function EtatPlanProduction() {
 
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<Plan[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<Plan[]>('/api/plans', { signal }),
   })
   const liste = useMemo(() => {
     const d = qPlans.data
@@ -468,7 +468,7 @@ export function EtatPlanProduction() {
      appel quand on arrive de la. */
   const q = useQuery({
     queryKey: ['plan-dossier', choisi],
-    queryFn: () => api.get<Dossier>(`/api/plans/${choisi}/production-besoins`),
+    queryFn: ({ signal }) => api.get<Dossier>(`/api/plans/${choisi}/production-besoins`, { signal }),
     enabled: !!choisi,
   })
 
@@ -594,7 +594,7 @@ interface Besoin {
 export function EtatBesoins() {
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<Plan[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<Plan[]>('/api/plans', { signal }),
   })
   const liste = useMemo(() => {
     const d = qPlans.data
@@ -606,7 +606,7 @@ export function EtatBesoins() {
 
   const q = useQuery({
     queryKey: ['plan-besoins', choisi],
-    queryFn: () => api.get<Besoin[]>(`/api/plans/${choisi}/besoins`),
+    queryFn: ({ signal }) => api.get<Besoin[]>(`/api/plans/${choisi}/besoins`, { signal }),
     enabled: !!choisi,
   })
 

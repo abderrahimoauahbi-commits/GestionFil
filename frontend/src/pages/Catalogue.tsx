@@ -60,21 +60,21 @@ export function Catalogue() {
   // droits ; la dupliquer ici ferait diverger les deux affichages.
   const qCat = useQuery({
     queryKey: ['categories', ''],
-    queryFn: () => api.get<{ code_categorie: string; libelle: string }[]>('/api/categories?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_categorie: string; libelle: string }[]>('/api/categories?actif=1', { signal }),
   })
   const qFour = useQuery({
     queryKey: ['fournisseurs', ''],
-    queryFn: () => api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1', { signal }),
   })
   const qDev = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string; libelle: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string; libelle: string }[]>('/api/devises', { signal }),
   })
   // La famille et la couleur interne : deux references qui les partagent sont
   // le meme fil chez deux fournisseurs.
   const qFam = useQuery({
     queryKey: ['familles', ''],
-    queryFn: () => api.get<{ code_famille: string; libelle: string }[]>('/api/familles?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_famille: string; libelle: string }[]>('/api/familles?actif=1', { signal }),
   })
   const qCoul = useQuery({
     queryKey: ['couleurs', ''],

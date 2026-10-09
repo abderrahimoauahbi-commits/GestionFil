@@ -26,7 +26,7 @@ interface Fournisseur extends Record<string, unknown> {
 export function Fournisseurs() {
   const qDev = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
   })
 
   const colonnes: Colonne<Fournisseur>[] = [

@@ -316,7 +316,7 @@ export function Stock() {
   // le garder entier permet de compter chaque statut sans quatre requetes.
   const q = useQuery({
     queryKey: ['stock-projete'],
-    queryFn: () => api.get<LigneProjete[]>('/api/stock/projete?limite=2000'),
+    queryFn: ({ signal }) => api.get<LigneProjete[]>('/api/stock/projete?limite=2000', { signal }),
   })
 
   const toutes = useMemo(() => q.data ?? [], [q.data])

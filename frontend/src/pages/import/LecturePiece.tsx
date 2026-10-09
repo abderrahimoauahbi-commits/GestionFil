@@ -171,12 +171,12 @@ export function LecturePiece() {
 
   const qDossier = useQuery({
     queryKey: ['import-dossier', idDossier],
-    queryFn: () => api.get<DossierComplet>(`/api/import/dossiers/${idDossier}`),
+    queryFn: ({ signal }) => api.get<DossierComplet>(`/api/import/dossiers/${idDossier}`, { signal }),
     enabled: !!idDossier,
   })
   const qLecture = useQuery({
     queryKey: ['piece-lecture', idPiece],
-    queryFn: () => api.get<Lecture | null>(`/api/import/pieces/${idPiece}/lecture`),
+    queryFn: ({ signal }) => api.get<Lecture | null>(`/api/import/pieces/${idPiece}/lecture`, { signal }),
     enabled: !!idPiece,
   })
 

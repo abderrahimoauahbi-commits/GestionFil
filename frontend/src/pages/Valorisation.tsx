@@ -58,7 +58,7 @@ export function Valorisation() {
 
   const q = useQuery({
     queryKey: ['valorisation'],
-    queryFn: () => api.get<LigneCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
+    queryFn: ({ signal }) => api.get<LigneCatalogue[]>('/api/catalogue?actif=1&limite=2000', { signal }),
     enabled: peut('VALORISATION', 'LIRE') || peut('CATALOGUE', 'LIRE'),
   })
 

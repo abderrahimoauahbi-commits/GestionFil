@@ -61,7 +61,7 @@ export function RobotConnexion() {
 
   const q = useQuery({
     queryKey: ['briefing'],
-    queryFn: () => api.get<Briefing>('/api/briefing'),
+    queryFn: ({ signal }) => api.get<Briefing>('/api/briefing', { signal }),
     enabled: !!moi,
     staleTime: 5 * 60_000,
   })

@@ -75,7 +75,7 @@ export function Receptions() {
 
   const q = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<Reception[]>('/api/receptions'),
+    queryFn: ({ signal }) => api.get<Reception[]>('/api/receptions', { signal }),
   })
 
   const annuler = useMutation({

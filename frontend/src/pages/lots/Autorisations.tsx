@@ -51,7 +51,7 @@ export function Autorisations() {
 
   const q = useQuery({
     queryKey: ['autorisations'],
-    queryFn: () => api.get<Demande[]>('/api/autorisations'),
+    queryFn: ({ signal }) => api.get<Demande[]>('/api/autorisations', { signal }),
   })
 
   const toutes = useMemo(() => q.data ?? [], [q.data])

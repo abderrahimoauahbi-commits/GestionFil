@@ -165,11 +165,11 @@ export function BonCommandeNouveau() {
 
   const qFrs = useQuery({
     queryKey: ['fournisseurs-actifs'],
-    queryFn: () => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: ({ signal }) => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
   })
   const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
   const devise = entete.code_devise || fournisseur?.code_devise || 'MAD'
-  const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
+  const qDevises = useQuery({ queryKey: ['devises'], queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }) })
 
   /**
    * CE QUE LE PLAN RECLAME CHEZ CE FOURNISSEUR.

@@ -117,7 +117,7 @@ export function BandeauMiseAJour() {
 
   const q = useQuery({
     queryKey: ['mise-a-jour'],
-    queryFn: () => api.get<Disponible>('/api/mise-a-jour'),
+    queryFn: ({ signal }) => api.get<Disponible>('/api/mise-a-jour', { signal }),
     enabled: bureau,
     retry: false,
     // Une fois par session suffit : un paquet n'apparait pas toutes les cinq

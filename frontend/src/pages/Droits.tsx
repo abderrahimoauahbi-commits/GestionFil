@@ -61,12 +61,12 @@ export function Droits() {
 
   const qUtilisateurs = useQuery({
     queryKey: ['utilisateurs'],
-    queryFn: () => api.get<Utilisateur[]>('/api/admin/utilisateurs'),
+    queryFn: ({ signal }) => api.get<Utilisateur[]>('/api/admin/utilisateurs', { signal }),
   })
 
   const qDroits = useQuery({
     queryKey: ['droits', id],
-    queryFn: () => api.get<LigneDroit[]>(`/api/admin/utilisateurs/${id}/droits`),
+    queryFn: ({ signal }) => api.get<LigneDroit[]>(`/api/admin/utilisateurs/${id}/droits`, { signal }),
     enabled: !!id,
   })
 

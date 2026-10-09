@@ -253,7 +253,7 @@ export function TransfertNouveau() {
 
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
 
   // Ce que le magasin source a REELLEMENT en stock : on ne transfere pas ce

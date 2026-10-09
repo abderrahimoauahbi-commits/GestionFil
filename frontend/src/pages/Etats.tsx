@@ -272,12 +272,12 @@ export function Etats() {
      requete evite un second appel quand on arrive depuis le poste de travail. */
   const q = useQuery({
     queryKey: ['cockpit'],
-    queryFn: () => api.get<Record<string, number>>('/api/cockpit'),
+    queryFn: ({ signal }) => api.get<Record<string, number>>('/api/cockpit', { signal }),
   })
   const k = q.data ?? {}
   const qLots = useQuery({
     queryKey: ['cockpit-lots'],
-    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, number | null>>('/api/cockpit/lots', { signal }),
     enabled: peut('STOCK', 'LIRE'),
   })
   const kl = qLots.data ?? {}

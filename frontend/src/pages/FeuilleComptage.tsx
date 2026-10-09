@@ -56,11 +56,11 @@ export function FeuilleComptage() {
 
   const qListe = useQuery({
     queryKey: ['inventaires'],
-    queryFn: () => api.get<Inventaire[]>('/api/inventaires'),
+    queryFn: ({ signal }) => api.get<Inventaire[]>('/api/inventaires', { signal }),
   })
   const qLignes = useQuery({
     queryKey: ['lignes-inventaire', id],
-    queryFn: () => api.get<LigneAComptage[]>(`/api/inventaires/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneAComptage[]>(`/api/inventaires/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 

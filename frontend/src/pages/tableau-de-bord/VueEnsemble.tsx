@@ -94,13 +94,13 @@ export function VueEnsemble() {
   // voit ni la depense par fournisseur ni les devises en MAD (08/10/2026).
   const voit = useDroits('COCKPIT').visible('valeur_stock_mad')
 
-  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Record<string, unknown>>('/api/cockpit') })
-  const qAna = useQuery({ queryKey: ['cockpit-analyse'], queryFn: () => api.get<Analyse>('/api/cockpit/analyse') })
-  const qRisques = useQuery({ queryKey: ['cockpit-risques'], queryFn: () => api.get<Risque[]>('/api/cockpit/risques') })
-  const qCtl = useQuery({ queryKey: ['controles'], queryFn: () => api.get<Controle[]>('/api/controles') })
+  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/cockpit', { signal }) })
+  const qAna = useQuery({ queryKey: ['cockpit-analyse'], queryFn: ({ signal }) => api.get<Analyse>('/api/cockpit/analyse', { signal }) })
+  const qRisques = useQuery({ queryKey: ['cockpit-risques'], queryFn: ({ signal }) => api.get<Risque[]>('/api/cockpit/risques', { signal }) })
+  const qCtl = useQuery({ queryKey: ['controles'], queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }) })
   const qMvt = useQuery({
     queryKey: ['stats', 'mouvements'],
-    queryFn: () => api.get<{ mois: MoisMouvement[] }>('/api/stats/mouvements'),
+    queryFn: ({ signal }) => api.get<{ mois: MoisMouvement[] }>('/api/stats/mouvements', { signal }),
     enabled: lisMvt,
   })
 

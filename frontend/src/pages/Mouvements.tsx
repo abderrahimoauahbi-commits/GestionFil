@@ -100,7 +100,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
 
   const q = useQuery({
     queryKey: ['mouvements-documents', filtreRef],
-    queryFn: () => api.get<DocMouvement[]>(`/api/mouvements/documents?${params}`),
+    queryFn: ({ signal }) => api.get<DocMouvement[]>(`/api/mouvements/documents?${params}`, { signal }),
   })
 
   const colonnes: Colonne<DocMouvement>[] = [
@@ -297,7 +297,7 @@ export function Mouvements() {
 
   const qLivre = useQuery({
     queryKey: ['mouvements', filtreRef],
-    queryFn: () => api.get<LigneLivre[]>(`/api/mouvements?${params}`),
+    queryFn: ({ signal }) => api.get<LigneLivre[]>(`/api/mouvements?${params}`, { signal }),
   })
 
   const colonnes: Colonne<LigneLivre>[] = [

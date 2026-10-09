@@ -73,7 +73,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
 
   const q = useQuery({
     queryKey: ['dossier-transfert', id],
-    queryFn: () => api.get<{ entete: Entete; lignes: Ligne[] }>(`/api/transferts/${id}`),
+    queryFn: ({ signal }) => api.get<{ entete: Entete; lignes: Ligne[] }>(`/api/transferts/${id}`, { signal }),
     enabled: !!id,
   })
 

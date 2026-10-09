@@ -191,11 +191,11 @@ export function ReceptionImport() {
 
   const qReste = useQuery({
     queryKey: ['import-a-recevoir'],
-    queryFn: () => api.get<ARecevoir[]>('/api/import/a-recevoir'),
+    queryFn: ({ signal }) => api.get<ARecevoir[]>('/api/import/a-recevoir', { signal }),
   })
   const qReception = useQuery({
     queryKey: ['import-reception', idReception],
-    queryFn: () => api.get<ReceptionLue>(`/api/import/receptions/${idReception}`),
+    queryFn: ({ signal }) => api.get<ReceptionLue>(`/api/import/receptions/${idReception}`, { signal }),
     enabled: !nouvelle,
   })
   const qMagasins = useQuery({

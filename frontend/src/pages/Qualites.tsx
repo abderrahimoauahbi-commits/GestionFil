@@ -242,30 +242,30 @@ export function Qualites() {
 
   const qQualites = useQuery({
     queryKey: ['qualites'],
-    queryFn: () => api.get<Qualite[]>('/api/qualites'),
+    queryFn: ({ signal }) => api.get<Qualite[]>('/api/qualites', { signal }),
   })
 
   const qRoles = useQuery({
     queryKey: ['roles-bom'],
-    queryFn: () => api.get<RoleBom[]>('/api/roles-bom'),
+    queryFn: ({ signal }) => api.get<RoleBom[]>('/api/roles-bom', { signal }),
     staleTime: 5 * 60_000,
   })
 
   const qParametres = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<Parametre[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<Parametre[]>('/api/parametres', { signal }),
     staleTime: 5 * 60_000,
   })
 
   const qCatalogue = useQuery({
     queryKey: ['catalogue'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue'),
+    queryFn: ({ signal }) => api.get<RefCatalogue[]>('/api/catalogue', { signal }),
     staleTime: 5 * 60_000,
   })
 
   const qCategories = useQuery({
     queryKey: ['categories'],
-    queryFn: () => api.get<Categorie[]>('/api/categories'),
+    queryFn: ({ signal }) => api.get<Categorie[]>('/api/categories', { signal }),
     staleTime: 5 * 60_000,
   })
 
@@ -292,13 +292,13 @@ export function Qualites() {
   // Chargement des lignes existantes a l'ouverture d'une qualite.
   const qDensites = useQuery({
     queryKey: ['densites', edition],
-    queryFn: () => api.get<DensiteApi[]>(`/api/qualites/${edition}/densites`),
+    queryFn: ({ signal }) => api.get<DensiteApi[]>(`/api/qualites/${edition}/densites`, { signal }),
     enabled: !!edition,
   })
 
   const qComposition = useQuery({
     queryKey: ['composition', edition],
-    queryFn: () => api.get<CompositionApi[]>(`/api/qualites/${edition}/composition`),
+    queryFn: ({ signal }) => api.get<CompositionApi[]>(`/api/qualites/${edition}/composition`, { signal }),
     enabled: !!edition,
   })
 

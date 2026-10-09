@@ -107,7 +107,7 @@ function Variation({ ecart, base, suffixe }: { ecart: number; base: number; suff
 function TauxDeChange() {
   const qDev = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string; est_pivot: number }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string; est_pivot: number }[]>('/api/devises', { signal }),
   })
   // Le serveur ne relit la banque qu'au plus une fois par demi-heure : un
   // rafraichissement de l'ecran plus frequent ne lui apprendrait rien.
@@ -309,7 +309,7 @@ function depuis(iso: string): string {
 function FilActualite() {
   const q = useQuery({
     queryKey: ['actualite'],
-    queryFn: () => api.get<Evenement[]>('/api/actualite'),
+    queryFn: ({ signal }) => api.get<Evenement[]>('/api/actualite', { signal }),
     staleTime: 60_000,
   })
   const evenements = q.data ?? []

@@ -186,12 +186,12 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
   const droits = useDroits(MODULE)
   const q = useQuery({
     queryKey: ['cockpit-analyse'],
-    queryFn: () => api.get<Analyse>('/api/cockpit/analyse'),
+    queryFn: ({ signal }) => api.get<Analyse>('/api/cockpit/analyse', { signal }),
   })
   // Les compteurs du poste de travail : meme requete, meme cache que les chiffres cles.
   const qc = useQuery({
     queryKey: ['cockpit'],
-    queryFn: () => api.get<Record<string, number | string | null>>('/api/cockpit'),
+    queryFn: ({ signal }) => api.get<Record<string, number | string | null>>('/api/cockpit', { signal }),
   })
   /* LES LOTS, lus sous le module STOCK. Meme cle que l'onglet « Lots » des
      statistiques : un seul appel quand on passe de l'un a l'autre. */
@@ -199,7 +199,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
   const lisStock = peut('STOCK', 'LIRE')
   const ql = useQuery({
     queryKey: ['stats', 'lots'],
-    queryFn: () => api.get<Record<string, unknown>>('/api/stats/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/stats/lots', { signal }),
     enabled: lisStock && vue === 'analyse',
   })
   const tolerances = useTolerancesLot()

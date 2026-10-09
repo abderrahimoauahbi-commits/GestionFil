@@ -68,7 +68,7 @@ function Ligne({ signe, libelle, valeur, note, fort }: { signe?: string; libelle
 export function DetailCalcul({ reference }: { reference: string }) {
   const q = useQuery({
     queryKey: ['plan-achat-detail', reference],
-    queryFn: () => api.get<Detail>(`/api/plan-achat/detail?reference=${encodeURIComponent(reference)}`),
+    queryFn: ({ signal }) => api.get<Detail>(`/api/plan-achat/detail?reference=${encodeURIComponent(reference)}`, { signal }),
     staleTime: 60_000,
   })
   if (q.isLoading) return <Chargement />

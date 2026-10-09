@@ -107,11 +107,11 @@ export function EtatStock() {
 
   const q = useQuery({
     queryKey: ['etat-stock'],
-    queryFn: () => api.get<LigneStock[]>('/api/etat-stock?limite=5000'),
+    queryFn: ({ signal }) => api.get<LigneStock[]>('/api/etat-stock?limite=5000', { signal }),
   })
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
-    queryFn: () => api.get<Magasin[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<Magasin[]>('/api/magasins?actif=1', { signal }),
   })
 
   const lignes = q.data ?? []

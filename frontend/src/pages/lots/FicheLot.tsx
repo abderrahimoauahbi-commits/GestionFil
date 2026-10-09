@@ -622,7 +622,7 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
   })
   const qLots = useQuery({
     queryKey: ['lots', 'fusion', 'registre', lot.code_reference],
-    queryFn: () => api.get<Lot[]>(`/api/lots?vue=comptable&code_reference=${encodeURIComponent(lot.code_reference)}`),
+    queryFn: ({ signal }) => api.get<Lot[]>(`/api/lots?vue=comptable&code_reference=${encodeURIComponent(lot.code_reference)}`, { signal }),
   })
 
   const couleurCible = magasins.find((m) => m.code_magasin === magasin)?.code_couleur ?? null

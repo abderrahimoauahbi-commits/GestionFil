@@ -145,7 +145,7 @@ export function CompleterCatalogue() {
 
   const q = useQuery({
     queryKey: ['catalogue-completion'],
-    queryFn: () => api.get<Completion>('/api/catalogue/completion'),
+    queryFn: ({ signal }) => api.get<Completion>('/api/catalogue/completion', { signal }),
   })
 
   const lignes = useMemo(() => {

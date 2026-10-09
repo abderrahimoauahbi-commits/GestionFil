@@ -96,7 +96,7 @@ function Pastille({ c }: { c: Controle }) {
 function Detail({ code, libelle }: { code: string; libelle: string }) {
   const q = useQuery({
     queryKey: ['controle-detail', code],
-    queryFn: () => api.get<LigneDetail[]>(`/api/controles/${code}`),
+    queryFn: ({ signal }) => api.get<LigneDetail[]>(`/api/controles/${code}`, { signal }),
   })
 
   if (q.isLoading) return <Squelette className="h-24" />
@@ -187,7 +187,7 @@ export function Controles() {
 
   const q = useQuery({
     queryKey: ['controles'],
-    queryFn: () => api.get<Controle[]>('/api/controles'),
+    queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }),
     refetchInterval: 5 * 60_000,
   })
 

@@ -363,7 +363,7 @@ export function Configuration() {
 
   const q = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<Parametre[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<Parametre[]>('/api/parametres', { signal }),
   })
 
   const parametres = q.data ?? []
@@ -685,11 +685,11 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
 
   const qDev = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<Devise[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<Devise[]>('/api/devises', { signal }),
   })
   const qTaux = useQuery({
     queryKey: ['taux', pointee],
-    queryFn: () => api.get<Taux[]>(`/api/devises/${encodeURIComponent(pointee!)}/taux`),
+    queryFn: ({ signal }) => api.get<Taux[]>(`/api/devises/${encodeURIComponent(pointee!)}/taux`, { signal }),
     enabled: !!pointee,
   })
 
@@ -894,8 +894,8 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
 
   const q = useQuery({
     queryKey: ['sauvegardes'],
-    queryFn: () => api.get<{ fichier: string; octets: number; date: string }[]>(
-      '/api/admin/sauvegardes',
+    queryFn: ({ signal }) => api.get<{ fichier: string; octets: number; date: string }[]>(
+      '/api/admin/sauvegardes', { signal }
     ),
   })
 

@@ -80,7 +80,7 @@ export function AssistantImport() {
 
   const qDevises = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
   })
 
   // Les aperçus tiennent de la mémoire tant que l'onglet vit : on la rend dès

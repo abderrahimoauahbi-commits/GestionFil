@@ -826,7 +826,10 @@ export function DataTable<L extends Record<string, unknown>>({
             className={cn(
               'sticky z-20 -mx-3 flex flex-wrap items-center justify-between gap-3',
               'border-t border-bordure bg-fond px-3 py-2 text-[12px]',
-              'md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0',
+              // Le meme seuil que les cartes (@3xl, la largeur du conteneur) : au
+              // seuil de l'ecran (md), un tableau etroit dans une page large
+              // gardait une barre « de telephone » sous des cartes (audit v5, U18).
+              '@3xl:static @3xl:mx-0 @3xl:border-0 @3xl:bg-transparent @3xl:px-0 @3xl:py-0',
               !avecPagination && 'hidden',
             )}
             style={{ bottom: 'var(--barre-basse, 0px)' }}

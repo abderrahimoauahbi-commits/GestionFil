@@ -65,9 +65,9 @@ export function AnalyseTableau() {
   const droits = useDroits('COCKPIT')
   const { peut } = useAuth()
   const lisStock = peut('STOCK', 'LIRE')
-  const q = useQuery({ queryKey: ['cockpit-analyse'], queryFn: () => api.get<Analyse>('/api/cockpit/analyse') })
-  const qc = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Record<string, unknown>>('/api/cockpit') })
-  const ql = useQuery({ queryKey: ['stats', 'lots'], queryFn: () => api.get<Record<string, unknown>>('/api/stats/lots'), enabled: lisStock })
+  const q = useQuery({ queryKey: ['cockpit-analyse'], queryFn: ({ signal }) => api.get<Analyse>('/api/cockpit/analyse', { signal }) })
+  const qc = useQuery({ queryKey: ['cockpit'], queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/cockpit', { signal }) })
+  const ql = useQuery({ queryKey: ['stats', 'lots'], queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/stats/lots', { signal }), enabled: lisStock })
   const tolerances = useTolerancesLot()
 
   const d = q.data

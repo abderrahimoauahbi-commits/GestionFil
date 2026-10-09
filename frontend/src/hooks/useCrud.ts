@@ -34,7 +34,7 @@ export function useCrud<T>(chemin: string, filtres: Record<string, string> = {})
      tableau, et que `total` soit disponible quand il existe. */
   const brut = useQuery({
     queryKey: cle,
-    queryFn: () => api.get<T[] | Page<T>>(`/api/${chemin}?${params}`),
+    queryFn: ({ signal }) => api.get<T[] | Page<T>>(`/api/${chemin}?${params}`, { signal }),
   })
 
   const paginee = !Array.isArray(brut.data) && brut.data != null

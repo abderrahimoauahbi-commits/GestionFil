@@ -188,7 +188,7 @@ export function ReceptionNouvelle() {
 
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
   const magasinDefaut = qMag.data?.[0]?.code_magasin ?? 'MP-01'
 

@@ -69,7 +69,7 @@ export function MatricePrix() {
 
   const q = useQuery({
     queryKey: ['matrice-prix'],
-    queryFn: () => api.get<Case[]>('/api/matrice-prix?limite=2000'),
+    queryFn: ({ signal }) => api.get<Case[]>('/api/matrice-prix?limite=2000', { signal }),
   })
 
   /* Le serveur rend une liste de cases ; le pivot se fait ici, sur les seules

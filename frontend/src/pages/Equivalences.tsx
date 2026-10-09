@@ -172,7 +172,7 @@ export function Equivalences() {
 
   const qGroupes = useQuery({
     queryKey: ['groupes-equivalence'],
-    queryFn: () => api.get<Groupe[]>('/api/groupes-equivalence'),
+    queryFn: ({ signal }) => api.get<Groupe[]>('/api/groupes-equivalence', { signal }),
   })
 
   const qMembres = useQuery({
@@ -739,7 +739,7 @@ function PanneauRattachement({
 
   const q = useQuery({
     queryKey: ['catalogue-equiv'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
+    queryFn: ({ signal }) => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000', { signal }),
   })
 
   const refs = useMemo(() => {

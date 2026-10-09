@@ -52,7 +52,7 @@ export function EtatStockImprime() {
 
   const q = useQuery({
     queryKey: ['stock-projete'],
-    queryFn: () => api.get<LigneStock[]>('/api/stock/projete'),
+    queryFn: ({ signal }) => api.get<LigneStock[]>('/api/stock/projete', { signal }),
   })
 
   if (q.isLoading) return <Chargement texte="Preparation de l etat…" />
@@ -166,11 +166,11 @@ export function EtatComptage() {
 
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
   const q = useQuery({
     queryKey: ['stock-projete'],
-    queryFn: () => api.get<LigneStock[]>('/api/stock/projete'),
+    queryFn: ({ signal }) => api.get<LigneStock[]>('/api/stock/projete', { signal }),
   })
 
   if (q.isLoading) return <Chargement texte="Preparation de la feuille…" />
@@ -268,7 +268,7 @@ export function EtatPlanAchat() {
   const droits = useDroits('PLAN_ACHAT')
   const q = useQuery({
     queryKey: ['plan-achat-propositions'],
-    queryFn: () => api.get<Proposition[]>('/api/plan-achat/propositions'),
+    queryFn: ({ signal }) => api.get<Proposition[]>('/api/plan-achat/propositions', { signal }),
   })
 
   const parFournisseur = useMemo(() => {
@@ -405,7 +405,7 @@ interface LigneMvt {
 export function EtatMouvements() {
   const q = useQuery({
     queryKey: ['mouvements', ''],
-    queryFn: () => api.get<LigneMvt[]>('/api/mouvements?limite=1000'),
+    queryFn: ({ signal }) => api.get<LigneMvt[]>('/api/mouvements?limite=1000', { signal }),
   })
 
   if (q.isLoading) return <Chargement texte="Preparation du registre…" />
@@ -476,7 +476,7 @@ export function EtatCatalogue() {
   const droits = useDroits('CATALOGUE')
   const q = useQuery({
     queryKey: ['catalogue', 'etat'],
-    queryFn: () => api.get<Ref[]>('/api/catalogue?limite=2000&actif=1'),
+    queryFn: ({ signal }) => api.get<Ref[]>('/api/catalogue?limite=2000&actif=1', { signal }),
   })
 
   if (q.isLoading) return <Chargement texte="Preparation du catalogue…" />
@@ -553,7 +553,7 @@ interface Fourn {
 export function EtatFournisseurs() {
   const q = useQuery({
     queryKey: ['fournisseurs', 'etat'],
-    queryFn: () => api.get<Fourn[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: ({ signal }) => api.get<Fourn[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
   })
 
   if (q.isLoading) return <Chargement texte="Preparation du repertoire…" />
@@ -636,11 +636,11 @@ interface Famille {
 export function EtatCategories() {
   const qCat = useQuery({
     queryKey: ['categories', 'etat'],
-    queryFn: () => api.get<Categorie[]>('/api/categories'),
+    queryFn: ({ signal }) => api.get<Categorie[]>('/api/categories', { signal }),
   })
   const qFam = useQuery({
     queryKey: ['familles', 'etat'],
-    queryFn: () => api.get<Famille[]>('/api/familles'),
+    queryFn: ({ signal }) => api.get<Famille[]>('/api/familles', { signal }),
   })
 
   const arbre = useMemo(() => {
@@ -820,11 +820,11 @@ export function EtatCouleurs() {
   const droits = useDroits('CATALOGUE')
   const qCoul = useQuery({
     queryKey: ['couleurs', 'etat'],
-    queryFn: () => api.get<Couleur[]>('/api/couleurs'),
+    queryFn: ({ signal }) => api.get<Couleur[]>('/api/couleurs', { signal }),
   })
   const qFrs = useQuery({
     queryKey: ['couleurs-fournisseur', 'etat'],
-    queryFn: () => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur'),
+    queryFn: ({ signal }) => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur', { signal }),
   })
 
   const groupes = useMemo(() => {
@@ -972,15 +972,15 @@ export function EtatCouleur() {
 
   const qCoul = useQuery({
     queryKey: ['couleurs', 'etat'],
-    queryFn: () => api.get<Couleur[]>('/api/couleurs'),
+    queryFn: ({ signal }) => api.get<Couleur[]>('/api/couleurs', { signal }),
   })
   const qFrs = useQuery({
     queryKey: ['couleurs-fournisseur', 'etat'],
-    queryFn: () => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur'),
+    queryFn: ({ signal }) => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur', { signal }),
   })
   const qRefs = useQuery({
     queryKey: ['catalogue', 'etat'],
-    queryFn: () => api.get<RefCouleur[]>('/api/catalogue?limite=2000&actif=1'),
+    queryFn: ({ signal }) => api.get<RefCouleur[]>('/api/catalogue?limite=2000&actif=1', { signal }),
   })
 
   const couleurs = useMemo(
@@ -1252,12 +1252,12 @@ export function EtatLots() {
 
   const qLots = useQuery({
     queryKey: ['lots', def.api ?? '', 'etat'],
-    queryFn: () => api.get<LigneLot[]>(`/api/lots?vue=${def.api}&limite=10000`),
+    queryFn: ({ signal }) => api.get<LigneLot[]>(`/api/lots?vue=${def.api}&limite=10000`, { signal }),
     enabled: !!def.api,
   })
   const qStats = useQuery({
     queryKey: ['stats', 'lots'],
-    queryFn: () => api.get<Record<string, unknown>>('/api/stats/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/stats/lots', { signal }),
     enabled: vue === 'ecarts',
   })
 

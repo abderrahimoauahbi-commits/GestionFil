@@ -47,13 +47,13 @@ export function Assistant() {
 
   const qCatalogue = useQuery({
     queryKey: ['assistant-catalogue'],
-    queryFn: () => api.get<{ questions: EntreeCatalogue[] }>('/api/assistant'),
+    queryFn: ({ signal }) => api.get<{ questions: EntreeCatalogue[] }>('/api/assistant', { signal }),
     retry: false,
   })
 
   const qReponse = useQuery({
     queryKey: ['assistant', demande],
-    queryFn: () => api.get<Reponse>(`/api/assistant/${encodeURIComponent(demande as string)}`),
+    queryFn: ({ signal }) => api.get<Reponse>(`/api/assistant/${encodeURIComponent(demande as string)}`, { signal }),
     enabled: demande !== null,
     retry: false,
   })

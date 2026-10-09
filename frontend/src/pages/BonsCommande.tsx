@@ -96,7 +96,7 @@ export function BonsCommande() {
 
   const q = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<Bc[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<Bc[]>('/api/bons-commande', { signal }),
   })
 
   /**

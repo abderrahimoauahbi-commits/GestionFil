@@ -630,7 +630,7 @@ function ReferentielLecture({
 }) {
   const q = useQuery({
     queryKey: ['referentiel-lecture', onglet.cle],
-    queryFn: () => api.get<Ligne[]>(onglet.lectureSeule.url),
+    queryFn: ({ signal }) => api.get<Ligne[]>(onglet.lectureSeule.url, { signal }),
   })
   return (
     <div className="space-y-3">
@@ -779,7 +779,7 @@ function MachineEtats() {
 
   const q = useQuery({
     queryKey: ['transitions'],
-    queryFn: () => api.get<Transition[]>('/api/transitions'),
+    queryFn: ({ signal }) => api.get<Transition[]>('/api/transitions', { signal }),
   })
 
   const entites = useMemo(

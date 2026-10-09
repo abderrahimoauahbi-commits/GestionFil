@@ -58,11 +58,11 @@ export function QualiteEtat() {
 
   const qQualite = useQuery({
     queryKey: ['qualites'],
-    queryFn: () => api.get<Qualite[]>('/api/qualites?limite=500'),
+    queryFn: ({ signal }) => api.get<Qualite[]>('/api/qualites?limite=500', { signal }),
   })
   const qLignes = useQuery({
     queryKey: ['ligne-qualite', code],
-    queryFn: () => api.get<LigneRole[]>(`/api/qualites/${encodeURIComponent(code!)}/densites`),
+    queryFn: ({ signal }) => api.get<LigneRole[]>(`/api/qualites/${encodeURIComponent(code!)}/densites`, { signal }),
     enabled: !!code,
   })
   const qCompo = useQuery({

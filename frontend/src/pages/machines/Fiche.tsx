@@ -614,11 +614,11 @@ export function FicheBureau({
 
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
-    queryFn: () => api.get<Magasin[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<Magasin[]>('/api/magasins?actif=1', { signal }),
   })
   const qCat = useQuery({
     queryKey: ['catalogue-machine'],
-    queryFn: () => api.get<RefCat[]>('/api/catalogue?actif=1&limite=2000'),
+    queryFn: ({ signal }) => api.get<RefCat[]>('/api/catalogue?actif=1&limite=2000', { signal }),
     enabled: ajout,
   })
 

@@ -221,12 +221,12 @@ export function PlanAchat() {
 
   const q = useQuery({
     queryKey: ['plan-achat-propositions'],
-    queryFn: () => api.get<Proposition[]>('/api/plan-achat/propositions'),
+    queryFn: ({ signal }) => api.get<Proposition[]>('/api/plan-achat/propositions', { signal }),
   })
 
   const qKpi = useQuery({
     queryKey: ['plan-achat-kpi'],
-    queryFn: () => api.get<Kpi>('/api/plan-achat/kpi'),
+    queryFn: ({ signal }) => api.get<Kpi>('/api/plan-achat/kpi', { signal }),
   })
 
   const rafraichir = async () => {
@@ -1336,7 +1336,7 @@ function LignesACommander({
   const [cibles, setCibles] = useState<Record<string, string>>({})
   const qBc = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<BcResume[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<BcResume[]>('/api/bons-commande', { signal }),
   })
   const groupes = useMemo(() => {
     const m = new Map<string, Proposition[]>()

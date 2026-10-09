@@ -71,7 +71,7 @@ export function AnalyseAbcXyz() {
 
   const q = useQuery({
     queryKey: ['analyse-abc-xyz'],
-    queryFn: () => api.get<Ligne[]>('/api/analyse-abc-xyz'),
+    queryFn: ({ signal }) => api.get<Ligne[]>('/api/analyse-abc-xyz', { signal }),
   })
 
   const recalculer = useMutation({

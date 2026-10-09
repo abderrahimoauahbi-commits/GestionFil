@@ -40,11 +40,11 @@ export function Utilisateurs() {
 
   const qUsers = useQuery({
     queryKey: ['utilisateurs'],
-    queryFn: () => api.get<Utilisateur[]>('/api/admin/utilisateurs'),
+    queryFn: ({ signal }) => api.get<Utilisateur[]>('/api/admin/utilisateurs', { signal }),
   })
   const qRoles = useQuery({
     queryKey: ['roles'],
-    queryFn: () => api.get<Role[]>('/api/admin/roles'),
+    queryFn: ({ signal }) => api.get<Role[]>('/api/admin/roles', { signal }),
   })
 
   const basculerActif = useMutation({

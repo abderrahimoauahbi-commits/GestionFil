@@ -137,7 +137,7 @@ export function ClotureFacture({
 
   const qCtx = useQuery({
     queryKey: ['reception-facture-contexte', idReception, f.date],
-    queryFn: () => api.get<Contexte>(`/api/receptions/${idReception}/facture-contexte?date=${f.date}`),
+    queryFn: ({ signal }) => api.get<Contexte>(`/api/receptions/${idReception}/facture-contexte?date=${f.date}`, { signal }),
     enabled: ouvert,
   })
   // LA DEVISE N'EST JAMAIS SUPPOSEE (09/10/2026). Si le contexte n'a pas pu etre
@@ -350,7 +350,7 @@ export function CorrectionFacture({ idReception, surCorrection }: { idReception:
   /* Les references de la reception : un avoir peut n'en viser qu'une (U6). */
   const qLignes = useQuery({
     queryKey: ['reception-lignes-refs', idReception],
-    queryFn: () => api.get<{ code_reference: string }[]>(`/api/receptions/${idReception}/lignes`),
+    queryFn: ({ signal }) => api.get<{ code_reference: string }[]>(`/api/receptions/${idReception}/lignes`, { signal }),
     enabled: ouvert,
   })
   const references = [...new Set((qLignes.data ?? []).map((l) => l.code_reference))]

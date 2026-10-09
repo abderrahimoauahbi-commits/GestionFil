@@ -43,10 +43,10 @@ export function SaisonMinimums() {
   const reglerSaison = peut('PARAMETRES', 'ECRIRE')
   const reglerCatalogue = peut('CATALOGUE', 'ECRIRE')
 
-  const qSaison = useQuery({ queryKey: ['saisons'], queryFn: () => api.get<Saison[]>('/api/saisons') })
+  const qSaison = useQuery({ queryKey: ['saisons'], queryFn: ({ signal }) => api.get<Saison[]>('/api/saisons', { signal }) })
   const qMin = useQuery({
     queryKey: ['stocks-minimums'],
-    queryFn: () => api.get<Minimum[]>('/api/plan-achat/stocks-minimums'),
+    queryFn: ({ signal }) => api.get<Minimum[]>('/api/plan-achat/stocks-minimums', { signal }),
   })
   const [brouillon, setBrouillon] = useState<Record<number, string>>({})
 

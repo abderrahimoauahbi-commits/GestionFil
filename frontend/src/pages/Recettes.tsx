@@ -53,7 +53,7 @@ const TON_STATUT: Record<string, 'neutre' | 'succes' | 'contour'> = {
 export function Recettes() {
   const q = useQuery({
     queryKey: ['compositions'],
-    queryFn: () => api.get<Ligne[]>('/api/recettes'),
+    queryFn: ({ signal }) => api.get<Ligne[]>('/api/recettes', { signal }),
   })
 
   const lignes = q.data ?? []

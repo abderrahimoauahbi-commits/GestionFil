@@ -376,7 +376,7 @@ function FicheMobile({
   const tolerances = useTolerancesLot()
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
-    queryFn: () => api.get<Magasin[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<Magasin[]>('/api/magasins?actif=1', { signal }),
     enabled: type === 'CHARGE' || type === 'DECHARGE',
   })
 
@@ -815,7 +815,7 @@ function ChoixLot({
   const [catalogue, setCatalogue] = useState(false)
   const qCat = useQuery({
     queryKey: ['catalogue-machine'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
+    queryFn: ({ signal }) => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000', { signal }),
     enabled: catalogue,
   })
   const mots = motif.toLowerCase().split(/\s+/).filter(Boolean)

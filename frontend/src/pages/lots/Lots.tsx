@@ -113,12 +113,12 @@ export function Lots() {
 
   const qCompteurs = useQuery({
     queryKey: ['lots', 'compteurs'],
-    queryFn: () => api.get<Compteurs>('/api/lots/compteurs'),
+    queryFn: ({ signal }) => api.get<Compteurs>('/api/lots/compteurs', { signal }),
   })
   const avecSoldes = vue === 'comptable' && soldes
   const q = useQuery({
     queryKey: ['lots', 'liste', vue, avecSoldes],
-    queryFn: () => api.get<Lot[]>(`/api/lots?vue=${vue}${avecSoldes ? '&tous=1' : ''}`),
+    queryFn: ({ signal }) => api.get<Lot[]>(`/api/lots?vue=${vue}${avecSoldes ? '&tous=1' : ''}`, { signal }),
   })
 
   const lignes = useMemo(() => q.data ?? [], [q.data])

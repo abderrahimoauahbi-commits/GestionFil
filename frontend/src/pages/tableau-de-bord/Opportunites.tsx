@@ -42,7 +42,7 @@ interface Analyse {
 }
 
 export function Opportunites() {
-  const q = useQuery({ queryKey: ['cockpit-analyse'], queryFn: () => api.get<Analyse>('/api/cockpit/analyse') })
+  const q = useQuery({ queryKey: ['cockpit-analyse'], queryFn: ({ signal }) => api.get<Analyse>('/api/cockpit/analyse', { signal }) })
   // LES MONTANTS SUIVENT LA GRILLE (08/10/2026). La page les affichait a tous,
   // et recalculait meme un total dans le navigateur. Le serveur les retire
   // desormais a qui ne voit pas la valeur du stock ; la page ne les montre ni

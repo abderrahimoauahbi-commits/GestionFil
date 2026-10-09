@@ -9,7 +9,7 @@ import { api } from '../api/client'
 export function useParametreNombre(code: string, defaut: number): number {
   const q = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres', { signal }),
     staleTime: 5 * 60_000,
     retry: false,
   })

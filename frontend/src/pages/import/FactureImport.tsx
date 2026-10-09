@@ -207,7 +207,7 @@ export function FactureImport() {
 
   const q = useQuery({
     queryKey: ['import-dossier', idDossier],
-    queryFn: () => api.get<DossierComplet>(`/api/import/dossiers/${idDossier}`),
+    queryFn: ({ signal }) => api.get<DossierComplet>(`/api/import/dossiers/${idDossier}`, { signal }),
     enabled: !!idDossier,
   })
   const d = q.data
@@ -248,12 +248,12 @@ export function FactureImport() {
 
   const qFournisseurs = useQuery({
     queryKey: ['fournisseurs-actifs'],
-    queryFn: () => api.get<{ code_fournisseur: string; nom: string; code_devise?: string }[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: ({ signal }) => api.get<{ code_fournisseur: string; nom: string; code_devise?: string }[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
   })
-  const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
+  const qDevises = useQuery({ queryKey: ['devises'], queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }) })
   const qBc = useQuery({
     queryKey: ['import-lignes-bc', entete.code_fournisseur],
-    queryFn: () => api.get<LigneBcOuverte[]>(`/api/import/lignes-bc?fournisseur=${encodeURIComponent(entete.code_fournisseur)}`),
+    queryFn: ({ signal }) => api.get<LigneBcOuverte[]>(`/api/import/lignes-bc?fournisseur=${encodeURIComponent(entete.code_fournisseur)}`, { signal }),
     enabled: !!entete.code_fournisseur,
   })
 

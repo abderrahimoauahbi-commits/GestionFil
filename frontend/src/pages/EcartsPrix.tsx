@@ -50,7 +50,7 @@ export function EcartsPrix() {
   const [au, setAu] = useState('')
   const q = useQuery({
     queryKey: ['ecarts-prix', du, au],
-    queryFn: () => api.get<Rapport>(`/api/ecarts-prix?du=${encodeURIComponent(du)}&au=${encodeURIComponent(au)}`),
+    queryFn: ({ signal }) => api.get<Rapport>(`/api/ecarts-prix?du=${encodeURIComponent(du)}&au=${encodeURIComponent(au)}`, { signal }),
   })
   const total = (q.data?.lignes ?? []).reduce((t, l) => t + (l.montant_mad ?? 0), 0)
 

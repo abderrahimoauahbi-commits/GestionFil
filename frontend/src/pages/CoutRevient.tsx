@@ -90,11 +90,11 @@ export function CoutRevient() {
 
   const q = useQuery({
     queryKey: ['cout-revient'],
-    queryFn: () => api.get<LigneCout[]>('/api/cout-revient'),
+    queryFn: ({ signal }) => api.get<LigneCout[]>('/api/cout-revient', { signal }),
   })
   const qFrais = useQuery({
     queryKey: ['frais-approche'],
-    queryFn: () => api.get<Frais[]>('/api/frais-approche?limite=200'),
+    queryFn: ({ signal }) => api.get<Frais[]>('/api/frais-approche?limite=200', { signal }),
   })
 
   const lignes = q.data ?? []
@@ -355,13 +355,13 @@ function FormulaireFrais({
 
   const qRecept = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<{ id_reception: string; numero_reception: string; date_reception: string; fournisseur_nom: string | null; statut: string }[]>(
-      '/api/receptions?limite=200',
+    queryFn: ({ signal }) => api.get<{ id_reception: string; numero_reception: string; date_reception: string; fournisseur_nom: string | null; statut: string }[]>(
+      '/api/receptions?limite=200', { signal }
     ),
   })
   const qDevises = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
   })
 
   const receptions = useMemo(() => {

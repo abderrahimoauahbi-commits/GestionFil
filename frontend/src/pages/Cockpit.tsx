@@ -175,14 +175,14 @@ export function Cockpit() {
   const droits = useDroits(MODULE)
   const { peut } = useAuth()
 
-  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Kpi>('/api/cockpit') })
+  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: ({ signal }) => api.get<Kpi>('/api/cockpit', { signal }) })
   const qCtl = useQuery({
     queryKey: ['controles'],
-    queryFn: () => api.get<Controle[]>('/api/controles'),
+    queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }),
   })
   const qRisques = useQuery({
     queryKey: ['cockpit-risques'],
-    queryFn: () => api.get<Risque[]>('/api/cockpit/risques'),
+    queryFn: ({ signal }) => api.get<Risque[]>('/api/cockpit/risques', { signal }),
   })
 
   const k = qKpi.data ?? {}
@@ -193,7 +193,7 @@ export function Cockpit() {
   const lisStock = peut('STOCK', 'LIRE')
   const qLots = useQuery({
     queryKey: ['cockpit-lots'],
-    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, number | null>>('/api/cockpit/lots', { signal }),
     enabled: lisStock,
   })
   const nl = (champ: string) => Number(qLots.data?.[champ] ?? 0)
@@ -1112,13 +1112,13 @@ export function Concentration() {
 
   const qStock = useQuery({
     queryKey: ['stock-projete-cockpit'],
-    queryFn: () => api.get<LigneProjetee[]>('/api/stock/projete?limite=2000'),
+    queryFn: ({ signal }) => api.get<LigneProjetee[]>('/api/stock/projete?limite=2000', { signal }),
     enabled: peut('STOCK', 'LIRE'),
     staleTime: 60_000,
   })
   const qFour = useQuery({
     queryKey: ['fournisseurs-scorecard'],
-    queryFn: () => api.get<Fournisseur[]>('/api/fournisseurs/scorecard'),
+    queryFn: ({ signal }) => api.get<Fournisseur[]>('/api/fournisseurs/scorecard', { signal }),
     enabled: peut('FOURNISSEURS', 'LIRE'),
     staleTime: 5 * 60_000,
   })
@@ -1195,7 +1195,7 @@ function ChiffresCles() {
 
   const q = useQuery({
     queryKey: ['cockpit'],
-    queryFn: () => api.get<Record<string, number | string | null>>('/api/cockpit'),
+    queryFn: ({ signal }) => api.get<Record<string, number | string | null>>('/api/cockpit', { signal }),
     enabled: peut('COCKPIT', 'LIRE'),
   })
 
@@ -1378,7 +1378,7 @@ export function BlocFamilles() {
   const droits = useDroits('MOUVEMENTS')
   const q = useQuery({
     queryKey: ['stats', 'familles'],
-    queryFn: () => api.get<Record<string, Record<string, unknown>[]>>('/api/stats/familles'),
+    queryFn: ({ signal }) => api.get<Record<string, Record<string, unknown>[]>>('/api/stats/familles', { signal }),
     staleTime: 5 * 60_000,
   })
 

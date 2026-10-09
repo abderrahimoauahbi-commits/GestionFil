@@ -343,7 +343,7 @@ export function Coquille() {
    */
   const qControles = useQuery({
     queryKey: ['controles'],
-    queryFn: () => api.get<Controle[]>('/api/controles'),
+    queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }),
     enabled: peut('COCKPIT', 'LIRE'),
     refetchInterval: 5 * 60_000,
     staleTime: 60_000,

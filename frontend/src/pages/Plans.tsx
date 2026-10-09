@@ -202,14 +202,14 @@ export function Plans() {
 
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<Plan[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<Plan[]>('/api/plans', { signal }),
   })
 
   const courant = enCreation ? undefined : qPlans.data?.find((p) => p.id_plan === edition)
 
   const qEntete = useQuery({
     queryKey: ['plan-entete', edition],
-    queryFn: () => api.get<EnteteApi>(`/api/plans/${edition}/entete`),
+    queryFn: ({ signal }) => api.get<EnteteApi>(`/api/plans/${edition}/entete`, { signal }),
     enabled: !!edition,
   })
 

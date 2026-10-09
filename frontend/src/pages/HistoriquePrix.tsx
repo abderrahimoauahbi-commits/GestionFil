@@ -69,7 +69,7 @@ export function HistoriquePrix() {
 
   const q = useQuery({
     queryKey: ['historique-prix', ref],
-    queryFn: () => api.get<LignePrix[]>(`/api/historique-prix?${params}`),
+    queryFn: ({ signal }) => api.get<LignePrix[]>(`/api/historique-prix?${params}`, { signal }),
   })
 
   const toutes = q.data ?? []

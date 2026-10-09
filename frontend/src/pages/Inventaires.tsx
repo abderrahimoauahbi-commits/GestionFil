@@ -301,13 +301,13 @@ export function Inventaires() {
 
   const qInv = useQuery({
     queryKey: ['inventaires'],
-    queryFn: () => api.get<Inventaire[]>('/api/inventaires'),
+    queryFn: ({ signal }) => api.get<Inventaire[]>('/api/inventaires', { signal }),
   })
   const inventaire = qInv.data?.find((i) => i.id_inventaire === selection) ?? null
 
   const qLignes = useQuery({
     queryKey: ['lignes-inventaire', selection],
-    queryFn: () => api.get<LigneInv[]>(`/api/inventaires/${selection}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneInv[]>(`/api/inventaires/${selection}/lignes`, { signal }),
     enabled: !!selection,
   })
 
@@ -1219,7 +1219,7 @@ function FormulaireInventaire({
 
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
 
   const creer = useMutation({

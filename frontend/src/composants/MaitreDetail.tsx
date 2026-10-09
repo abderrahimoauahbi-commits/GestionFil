@@ -115,11 +115,11 @@ export function MaitreDetail({
 
   const qMaitre = useQuery({
     queryKey: [maitre.route],
-    queryFn: () => api.get<Ligne[]>(`/api/${maitre.route}?actif=1&limite=500`),
+    queryFn: ({ signal }) => api.get<Ligne[]>(`/api/${maitre.route}?actif=1&limite=500`, { signal }),
   })
   const qDetail = useQuery({
     queryKey: [detail.route],
-    queryFn: () => api.get<Ligne[]>(`/api/${detail.route}?limite=1000`),
+    queryFn: ({ signal }) => api.get<Ligne[]>(`/api/${detail.route}?limite=1000`, { signal }),
   })
 
   /*

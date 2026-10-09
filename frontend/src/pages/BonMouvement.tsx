@@ -115,7 +115,7 @@ export function BonMouvement() {
 
   const q = useQuery({
     queryKey: ['mouvement', id],
-    queryFn: () => api.get<{ entete: EnteteMvt; lignes: LigneMvt[] }>(`/api/mouvements/${id}`),
+    queryFn: ({ signal }) => api.get<{ entete: EnteteMvt; lignes: LigneMvt[] }>(`/api/mouvements/${id}`, { signal }),
     enabled: !!id,
   })
 

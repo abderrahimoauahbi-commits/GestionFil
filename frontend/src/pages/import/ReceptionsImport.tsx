@@ -31,13 +31,13 @@ export function ReceptionsImport() {
 
   const q = useQuery({
     queryKey: ['import-receptions'],
-    queryFn: () => api.get<ReceptionResume[]>('/api/import/receptions'),
+    queryFn: ({ signal }) => api.get<ReceptionResume[]>('/api/import/receptions', { signal }),
   })
   // Ce qui attend encore, tous dossiers en cours : le magasin sait d'un coup
   // d'oeil s'il reste des camions a recevoir.
   const qReste = useQuery({
     queryKey: ['import-a-recevoir'],
-    queryFn: () => api.get<{ reste_kg: number }[]>('/api/import/a-recevoir'),
+    queryFn: ({ signal }) => api.get<{ reste_kg: number }[]>('/api/import/a-recevoir', { signal }),
   })
   const lignes = (q.data ?? []).filter((r) => !filtre || r.statut === filtre)
   const reste = qReste.data ?? []

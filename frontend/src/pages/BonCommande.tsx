@@ -200,13 +200,13 @@ export function BonCommande() {
 
   const qBc = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<Bc[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<Bc[]>('/api/bons-commande', { signal }),
   })
   const bc = qBc.data?.find((b) => b.id_bc === id) ?? null
 
   const qLignes = useQuery({
     queryKey: ['lignes-bc', id],
-    queryFn: () => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 
@@ -278,7 +278,7 @@ export function BonCommande() {
       code_devise: bc.code_devise,
     })
   }, [bc?.id_bc, bc?.date_bc, bc?.date_livraison_prevue, bc?.conditions_paiement, bc?.notes, bc?.code_devise])
-  const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
+  const qDevises = useQuery({ queryKey: ['devises'], queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }) })
 
   const enteteModifie =
     !!bc &&

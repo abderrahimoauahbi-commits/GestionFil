@@ -38,12 +38,12 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
 
   const qFrs = useQuery({
     queryKey: ['fournisseurs-actifs'],
-    queryFn: () => api.get<FournisseurActif[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: ({ signal }) => api.get<FournisseurActif[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
     enabled: ecrire,
   })
   const qDevises = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
     enabled: ecrire,
   })
 

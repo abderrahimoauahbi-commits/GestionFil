@@ -248,11 +248,11 @@ export function MouvementNouveau() {
   })
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
   const qMotifs = useQuery({
     queryKey: ['motifs-mouvement'],
-    queryFn: () => api.get<{ code_motif: string; libelle: string }[]>('/api/motifs-mouvement'),
+    queryFn: ({ signal }) => api.get<{ code_motif: string; libelle: string }[]>('/api/motifs-mouvement', { signal }),
     retry: false,
   })
 
@@ -300,7 +300,7 @@ export function MouvementNouveau() {
   /* LE SEUIL VIENT DU PARAMETRE, comme au serveur (P_DechetSeuilValiderKg). */
   const qSeuil = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres', { signal }),
     staleTime: 5 * 60_000,
     retry: false,
   })

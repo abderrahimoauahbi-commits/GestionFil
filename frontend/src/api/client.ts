@@ -115,6 +115,7 @@ async function requete<T>(
   methode: string,
   route: string,
   corps?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const entetes: Record<string, string> = {}
   const t = jeton.lire()
@@ -127,8 +128,13 @@ async function requete<T>(
       method: methode,
       headers: entetes,
       body: corps === undefined ? undefined : JSON.stringify(corps),
+      signal,
     })
-  } catch {
+  } catch (e) {
+    // UNE REQUETE ABANDONNEE N'EST PAS UNE PANNE (audit v5, U18) : l'ecran qui
+    // l'attendait est parti. L'abandon remonte tel quel ; TanStack Query le
+    // reconnait et ne l'affiche pas.
+    if (signal?.aborted) throw e
     // fetch n'echoue que si la requete n'a pas abouti : serveur arrete,
     // port ferme, reseau coupe. Le distinguer d'une erreur applicative evite
     // de chercher un bug la ou il n'y en a pas.
@@ -252,7 +258,8 @@ async function fichier(route: string): Promise<{ url: string; type: string }> {
 export const api = {
   envoyerFichier,
   fichier,
-  get: <T>(route: string) => requete<T>('GET', route),
+  /** `signal` : celui de TanStack Query — la lecture s'annule si plus personne ne l'attend. */
+  get: <T>(route: string, options?: { signal?: AbortSignal }) => requete<T>('GET', route, undefined, options?.signal),
   post: <T>(route: string, corps?: unknown) => requete<T>('POST', route, corps ?? {}),
   put: <T>(route: string, corps: unknown) => requete<T>('PUT', route, corps),
   patch: <T>(route: string, corps: unknown) => requete<T>('PATCH', route, corps),

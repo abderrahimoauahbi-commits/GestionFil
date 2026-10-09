@@ -112,7 +112,7 @@ export function Statistiques() {
 
   const q = useQuery({
     queryKey: ['stats', onglet],
-    queryFn: () => api.get<Record<string, Ligne[]>>(`/api/stats/${onglet}`),
+    queryFn: ({ signal }) => api.get<Record<string, Ligne[]>>(`/api/stats/${onglet}`, { signal }),
     enabled: accessibles.some((o) => o.cle === onglet),
   })
 

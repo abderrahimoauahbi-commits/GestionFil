@@ -25,7 +25,7 @@ export const libelleLot = (lot: string | null | undefined) =>
 export function useTolerancesLot() {
   const q = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres', { signal }),
     staleTime: 5 * 60_000,
   })
   const val = (code: string, defaut: number) => {
@@ -46,7 +46,7 @@ export const couleurEcart = (pct: number | null, t: { orange: number; rouge: num
 export function useTolerancesColisage() {
   const q = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres', { signal }),
     staleTime: 5 * 60_000,
     retry: false,
   })
@@ -76,7 +76,7 @@ export function useToleranceFournisseur(code: string | null | undefined): number
   })
   const parametres = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres', { signal }),
     staleTime: 5 * 60_000,
     retry: false,
   })

@@ -84,7 +84,7 @@ export function BoutonRafraichir() {
   // COCKPIT doit garder son bouton.
   const qEtat = useQuery({
     queryKey: ['cockpit'],
-    queryFn: () => api.get<Record<string, unknown>>('/api/cockpit'),
+    queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/cockpit', { signal }),
     enabled: ECRANS_CALCULES.has(pathname) && peutCalculer,
     retry: false,
     staleTime: 30_000,

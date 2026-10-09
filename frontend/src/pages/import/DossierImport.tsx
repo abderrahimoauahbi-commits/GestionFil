@@ -67,7 +67,7 @@ export function DossierImport() {
 
   const q = useQuery({
     queryKey: ['import-dossier', id],
-    queryFn: () => api.get<DossierComplet>(`/api/import/dossiers/${id}`),
+    queryFn: ({ signal }) => api.get<DossierComplet>(`/api/import/dossiers/${id}`, { signal }),
     enabled: !!id,
   })
 
@@ -409,12 +409,12 @@ function FraisDossier({
 
   const qParam = useQuery({
     queryKey: ['parametres-frais'],
-    queryFn: () => api.get<ParametreFrais[]>('/api/parametres-frais'),
+    queryFn: ({ signal }) => api.get<ParametreFrais[]>('/api/parametres-frais', { signal }),
     enabled: saisie,
   })
   const qDevises = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
     enabled: saisie,
   })
   // La liste deroulante groupee par categorie, comme les colonnes du classeur.

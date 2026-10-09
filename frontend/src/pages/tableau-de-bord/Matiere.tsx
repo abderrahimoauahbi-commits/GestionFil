@@ -35,8 +35,8 @@ export function Matiere() {
   const lisMvt = peut('MOUVEMENTS', 'LIRE')
   // La valeur par categorie suit la grille des mouvements (08/10/2026).
   const voit = useDroits('MOUVEMENTS').visible('valeur_dhs')
-  const q = useQuery({ queryKey: ['stats', 'familles'], queryFn: () => api.get<Familles>('/api/stats/familles'), enabled: lisMvt })
-  const qCtl = useQuery({ queryKey: ['controles'], queryFn: () => api.get<Controle[]>('/api/controles') })
+  const q = useQuery({ queryKey: ['stats', 'familles'], queryFn: ({ signal }) => api.get<Familles>('/api/stats/familles', { signal }), enabled: lisMvt })
+  const qCtl = useQuery({ queryKey: ['controles'], queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }) })
 
   const cats = useMemo(
     () => [...(q.data?.categories ?? [])].sort((a, b) => (b.valeur_dhs ?? 0) - (a.valeur_dhs ?? 0) || b.stock_kg - a.stock_kg),

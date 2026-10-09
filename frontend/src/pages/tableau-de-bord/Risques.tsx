@@ -67,10 +67,10 @@ const DOMAINES: { cle: Domaine; libelle: string }[] = [
 ]
 
 export function Risques() {
-  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Record<string, unknown>>('/api/cockpit') })
-  const qRisques = useQuery({ queryKey: ['cockpit-risques'], queryFn: () => api.get<Risque[]>('/api/cockpit/risques') })
-  const qAna = useQuery({ queryKey: ['cockpit-analyse'], queryFn: () => api.get<{ alertes?: AlerteRef[] }>('/api/cockpit/analyse') })
-  const qCtl = useQuery({ queryKey: ['controles'], queryFn: () => api.get<Controle[]>('/api/controles') })
+  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/cockpit', { signal }) })
+  const qRisques = useQuery({ queryKey: ['cockpit-risques'], queryFn: ({ signal }) => api.get<Risque[]>('/api/cockpit/risques', { signal }) })
+  const qAna = useQuery({ queryKey: ['cockpit-analyse'], queryFn: ({ signal }) => api.get<{ alertes?: AlerteRef[] }>('/api/cockpit/analyse', { signal }) })
+  const qCtl = useQuery({ queryKey: ['controles'], queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }) })
   const { files, chargement, erreur } = useFiles()
 
   const k = qKpi.data ?? {}

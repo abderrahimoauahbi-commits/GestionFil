@@ -43,7 +43,7 @@ export function Audit() {
 
   const q = useQuery({
     queryKey: ['audit'],
-    queryFn: () => api.get<LigneAudit[]>('/api/audit?limite=1000'),
+    queryFn: ({ signal }) => api.get<LigneAudit[]>('/api/audit?limite=1000', { signal }),
     enabled: peut('AUDIT', 'LIRE'),
   })
 

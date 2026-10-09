@@ -209,7 +209,7 @@ const ECRANS = (
       <Route path="equivalences" element={<ExigeModule module="CATALOGUE"><Equivalences /></ExigeModule>} />
       <Route path="etats" element={<ExigeModule module="COCKPIT"><Etats /></ExigeModule>} />
       <Route path="etats/stock" element={<ExigeModule module="STOCK"><EtatStockImprime /></ExigeModule>} />
-      <Route path="etats/lots" element={<ExigeModule module="STOCK"><EtatLots /></ExigeModule>} />
+      <Route path="etats/lots" element={<ExigeModule module="LOTS"><EtatLots /></ExigeModule>} />
       <Route path="etats/comptage" element={<ExigeModule module="INVENTAIRE"><EtatComptage /></ExigeModule>} />
       <Route path="etats/plan-achat" element={<ExigeModule module="PLAN_ACHAT"><EtatPlanAchat /></ExigeModule>} />
       {/* Les etats de DOCUMENT portent l'identifiant de leur objet : ils
@@ -274,9 +274,9 @@ const ECRANS = (
       <Route path="etat-stock" element={<ExigeModule module="STOCK"><EtatStock /></ExigeModule>} />
       {/* Les lots (cahier du 02/10/2026) : trois vues de stock, les alertes,
           la fiche de vie et la file des autorisations. */}
-      <Route path="lots" element={<ExigeModule module="STOCK"><Lots /></ExigeModule>} />
-      <Route path="lots/fiche" element={<ExigeModule module="STOCK"><FicheLot /></ExigeModule>} />
-      <Route path="autorisations" element={<ExigeModule module="STOCK"><Autorisations /></ExigeModule>} />
+      <Route path="lots" element={<ExigeModule module="LOTS"><Lots /></ExigeModule>} />
+      <Route path="lots/fiche" element={<ExigeModule module="LOTS"><FicheLot /></ExigeModule>} />
+      <Route path="autorisations" element={<ExigeModule module="LOTS"><Autorisations /></ExigeModule>} />
       <Route path="rapports" element={<ExigeModule module="VALORISATION"><RapportsFinanciers /></ExigeModule>} />
       <Route path="landed-cost" element={<ExigeModule module="VALORISATION"><CoutRevient /></ExigeModule>} />
       <Route path="classification" element={<ExigeModule module="STOCK"><AnalyseAbcXyz /></ExigeModule>} />

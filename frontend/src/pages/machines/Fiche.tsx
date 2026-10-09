@@ -779,6 +779,7 @@ export function FicheBureau({
                         onChange={(v) => f.majLigne(l.cle, 'lot_fournisseur', v)}
                         invalide={!l.lot_fournisseur}
                         className="min-h-[30px] w-40 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
+                        proposerPlusAncien
                       />
                     ) : l.lot_fournisseur === SANS_LOT ? (
                       <span className="inline-flex min-h-[30px] items-center px-1.5 text-[11px] italic text-attenue-texte">

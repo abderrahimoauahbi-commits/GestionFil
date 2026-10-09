@@ -341,6 +341,26 @@ pub async fn decider_dormant(
     if statut == "BLOQUE" && d.decision != "GARDER" {
         return Err(AppError::RegleMetier("Ce lot est bloque : la qualite doit d'abord le debloquer.".into()));
     }
+    // UN LOT QUI TOURNE ENCORE NE SE SOLDE PAS (audit v5, F21) : son fil sur
+    // machine reviendrait au dechargement dans un lot que plus rien ne montre.
+    if d.decision != "GARDER" {
+        let sur_machine: Option<(f64, String)> = sqlx::query_as(
+            "SELECT sum(kg)::float8, string_agg(DISTINCT code_emplacement, ', ')
+               FROM machine_etat WHERE code_reference = $1 AND lot_fournisseur = $2 AND kg > 0
+             HAVING sum(kg) > 0",
+        )
+        .bind(&d.code_reference)
+        .bind(&d.lot_fournisseur)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((kg, etages)) = sur_machine {
+            return Err(AppError::RegleMetier(format!(
+                "LOT-MACHINE : le lot {} porte encore {} kg sur machine ({etages}) : il ne se solde pas.                  Dechargez-le d'abord, ou gardez-le.",
+                d.lot_fournisseur,
+                arrondi_kg(kg)
+            )));
+        }
+    }
     let mut mouvements = Vec::new();
     if d.decision == "GARDER" {
         sqlx::query("UPDATE lot SET date_derniere_activite = $3 WHERE code_reference = $1 AND lot_fournisseur = $2")
@@ -762,28 +782,19 @@ pub async fn creer_demande(
             "Une derogation de lot bloque porte les kilos qu'elle couvre.".into(),
         ));
     }
-    let existante: Option<String> = sqlx::query_scalar(
-        "SELECT id_demande FROM demande_autorisation
-          WHERE statut = 'EN_ATTENTE' AND type_demande = $1
-            AND document IS NOT DISTINCT FROM $2
-            AND lot_fournisseur IS NOT DISTINCT FROM $3 AND code_reference IS NOT DISTINCT FROM $4",
-    )
-    .bind(&d.type_demande)
-    .bind(&d.document)
-    .bind(&d.lot_fournisseur)
-    .bind(&d.code_reference)
-    .fetch_optional(&state.db)
-    .await?;
-    if let Some(id) = existante {
-        return Ok(Json(json!({ "id_demande": id, "reprise": true })));
-    }
-    // Le contexte pose : la demande entre au journal avec son auteur.
+    // UNE SEULE DEMANDE EN ATTENTE (audit v5, U10) : la lecture puis l'ecriture
+    // laissaient deux clics simultanes creer deux demandes. L'index unique
+    // ux_demande_en_attente tranche ; la seconde reprend la premiere.
     let mut tx = state.db.begin().await?;
+    // Le contexte pose : la demande entre au journal avec son auteur.
     user.poser_contexte(&mut tx).await?;
-    let id: String = sqlx::query_scalar(
+    let cree: Option<String> = sqlx::query_scalar(
         "INSERT INTO demande_autorisation (type_demande, niveau, code_reference, lot_fournisseur, document,
                                            details, motif, id_demandeur, kg_autorises)
-         VALUES ($1, COALESCE($2, 'ROUGE'), $3, $4, $5, $6, $7, $8, round($9::numeric, 4)) RETURNING id_demande",
+         VALUES ($1, COALESCE($2, 'ROUGE'), $3, $4, $5, $6, $7, $8, round($9::numeric, 4))
+         ON CONFLICT (type_demande, COALESCE(document, ''), COALESCE(lot_fournisseur, ''), COALESCE(code_reference, ''))
+            WHERE statut = 'EN_ATTENTE' DO NOTHING
+         RETURNING id_demande",
     )
     .bind(&d.type_demande)
     .bind(&d.niveau)
@@ -794,8 +805,24 @@ pub async fn creer_demande(
     .bind(&motif)
     .bind(&user.id)
     .bind(d.kg)
-    .fetch_one(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await?;
+    let Some(id) = cree else {
+        let existante: String = sqlx::query_scalar(
+            "SELECT id_demande FROM demande_autorisation
+              WHERE statut = 'EN_ATTENTE' AND type_demande = $1
+                AND document IS NOT DISTINCT FROM $2
+                AND lot_fournisseur IS NOT DISTINCT FROM $3 AND code_reference IS NOT DISTINCT FROM $4",
+        )
+        .bind(&d.type_demande)
+        .bind(&d.document)
+        .bind(&d.lot_fournisseur)
+        .bind(&d.code_reference)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.rollback().await?;
+        return Ok(Json(json!({ "id_demande": existante, "reprise": true })));
+    };
     tx.commit().await?;
     Ok(Json(json!({ "id_demande": id, "reprise": false })))
 }

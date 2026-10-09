@@ -100,14 +100,14 @@ const ETATS: EtatDisponible[] = [
 
   /* --- Lots ------------------------------------------------------------- */
   /* Une seule page, quatre vues : le parametre choisit (voir EtatLots). La
-     route `etats/lots` est a declarer dans App.tsx, sous le module STOCK. */
+     route `etats/lots` est a declarer dans App.tsx, sous le module LOTS. */
   {
     cle: 'lots-stock',
     titre: 'Stock par lot',
     description:
       'La vue comptable : chaque lot qui porte du stock, avec sa categorie (Projet ou Restes), son statut, son solde et sa derniere activite.',
     chemin: '/etats/lots?vue=stock',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Tags,
     famille: 'Lots',
   },
@@ -117,7 +117,7 @@ const ETATS: EtatDisponible[] = [
     description:
       'Les lots qui portent du stock sans activite depuis le delai de dormance. La liste a trancher : reprendre, declasser ou detruire.',
     chemin: '/etats/lots?vue=dormants',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Moon,
     famille: 'Lots',
     compte: (d) => (d.lotsDormants ? `${d.lotsDormants} dormant${d.lotsDormants > 1 ? 's' : ''}` : null),
@@ -128,7 +128,7 @@ const ETATS: EtatDisponible[] = [
     description:
       'Les lots libres de categorie Restes : hors plan d achat, a ecouler en priorite. Avec le seuil qui les a fait basculer.',
     chemin: '/etats/lots?vue=restes',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Hourglass,
     famille: 'Lots',
     compte: (d) => (d.lotsABasculer ? `${d.lotsABasculer} a basculer` : null),
@@ -139,7 +139,7 @@ const ETATS: EtatDisponible[] = [
     description:
       'Le poids pese d une bobine face au poids catalogue, par fournisseur : ecart moyen, mini, maxi et kilos, avec le niveau de tolerance.',
     chemin: '/etats/lots?vue=ecarts',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Scale,
     famille: 'Lots',
   },

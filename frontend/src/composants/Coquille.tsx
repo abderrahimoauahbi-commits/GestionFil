@@ -255,8 +255,8 @@ export const NAVIGATION: EntreeNav[] = [
   { vers: '/stock', libelle: 'Stock projeté & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
   // Le stock lot par lot (cahier du 02/10/2026) : vues Projet / Restes, alertes
   // a traiter, fiche de vie ; et la file des demandes d'autorisation.
-  { vers: '/lots', libelle: 'Lots', module: 'STOCK', Icone: Tags, section: 'STOCK', resume: 'Projet, Restes, lots bloqués et dormants' },
-  { vers: '/autorisations', libelle: 'Autorisations', module: 'STOCK', Icone: BadgeCheck, section: 'STOCK' },
+  { vers: '/lots', libelle: 'Lots', module: 'LOTS', Icone: Tags, section: 'STOCK', resume: 'Projet, Restes, lots bloqués et dormants' },
+  { vers: '/autorisations', libelle: 'Autorisations', module: 'LOTS', Icone: BadgeCheck, section: 'STOCK' },
   { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: ArrowLeftRight, section: 'STOCK', resume: 'Entrées, sorties, transferts', principale: true },
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
   // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :

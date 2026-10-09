@@ -54,6 +54,7 @@ import {
   pourChamp,
 } from '../lib/conditionnement'
 import { AvisColisage } from '../composants/AvisColisage'
+import { AvisDerive } from '../composants/AvisDerive'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
 
@@ -995,6 +996,7 @@ export function ReceptionNouvelle() {
                                   />
                                   <button
                                     type="button"
+                                    hidden={l.suivi_lot === 1}
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       maj(l.cle, 'lie', !l.lie)
@@ -1021,6 +1023,9 @@ export function ReceptionNouvelle() {
                                 </div>
                                 <AvisColisage className="max-w-[16rem]" kg={kgDe(l)} bobines={l.bobines}
                                   palettes={l.palettes} cond={condDe(l)} />
+                                {l.suivi_lot === 1 && (
+                                  <AvisDerive className="max-w-[16rem]" kg={kgDe(l)} bobines={l.bobines} cond={condDe(l)} />
+                                )}
                               </td>
                               <td
                                 className={cn(
@@ -1377,6 +1382,7 @@ function PanneauDetail({
                 </div>
                 <button
                   type="button"
+                  hidden={ligne.suivi_lot === 1}
                   onClick={() => maj(ligne.cle, 'lie', !ligne.lie)}
                   aria-label={ligne.lie ? 'Détacher le calcul' : 'Relier le calcul'}
                   className={cn(

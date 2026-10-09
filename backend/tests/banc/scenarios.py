@@ -1069,6 +1069,68 @@ def scenario_machine_constat(c, infra):
     verifier(controle(infra, "C35") == c35 + 1, "C35 ne voit pas une estimation a +20 %")
 
 
+def scenario_lots_vivants(c, infra):
+    """F21 et U10 (09/10) : un lot solde qui recoit se rouvre ; un lot qui tourne sur machine ne se
+    solde pas ; une demande en attente ne se cree qu'une fois ; le plancher du lot laisse une trace ;
+    C51 compte le fil sans lot d'une reference suivie."""
+    ref, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-VIV-1"
+    jour = taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 130, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [130], lot_fournisseur=lot, nb_bobines=50)
+    verifier(infra.valeur("SELECT count(*) FROM v_controles WHERE code = 'C51'") == "1", "C51 absent de v_controles")
+
+    # Sur machine, le lot ne se solde pas.
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCL", "nom": "Machine des lots",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+        "type_fiche": "CHARGE", "code_machine": "BANCL", "code_emplacement": "BANCL-E1", "date_fiche": jour,
+        "code_magasin": MAG, "responsable": "Banc",
+        "lignes": [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 10,
+                    "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
+    decision = {"code_reference": ref, "lot_fournisseur": lot, "decision": "SOLDER", "motif": "Lot dormant, essai du banc"}
+    c.refus("Choukri", "POST", "/api/lots/dormant", decision, contient="LOT-MACHINE")
+    # Meme par une ecriture directe, il garde son statut.
+    infra.sql(f"UPDATE lot SET statut = 'SOLDE' WHERE code_reference = '{ref}' AND lot_fournisseur = '{lot}'")
+    verifier(infra.valeur(f"SELECT statut FROM lot WHERE code_reference = '{ref}' AND lot_fournisseur = '{lot}'") == "LIBRE",
+             "un lot qui tourne sur machine est passe SOLDE")
+
+    # Decharge, puis solde : le lot est vide au magasin et sur machine.
+    f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+        "type_fiche": "DECHARGE", "code_machine": "BANCL", "code_emplacement": "BANCL-E1", "date_fiche": jour,
+        "code_magasin": MAG, "responsable": "Banc",
+        "lignes": [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 10,
+                    "pct_retirees": 100, "destination": "MAGASIN", "code_motif": "DE_CHGT_PROD"}]})
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
+    c.ok("Choukri", "POST", "/api/lots/dormant", decision)
+    verifier(infra.valeur(f"SELECT statut FROM lot WHERE code_reference = '{ref}' AND lot_fournisseur = '{lot}'") == "SOLDE",
+             "le lot vide ne s'est pas solde")
+    # Il recoit : il se rouvre, avec son evenement.
+    code, r = c.appel("Choukri", "POST", "/api/mouvements", {
+        "code_type_mvt": "AJUST_INV_POS", "code_magasin": MAG, "code_motif": "INVENTAIRE",
+        "lignes": [{"code_reference": ref, "quantite_saisie": 5, "unite_saisie": "kg", "lot_fournisseur": lot,
+                    "code_motif_ligne": "R1"}]})
+    verifier(code == 200, f"ajustement sur le lot solde refuse : {r}")
+    verifier(infra.valeur(f"SELECT statut FROM lot WHERE code_reference = '{ref}' AND lot_fournisseur = '{lot}'") == "LIBRE",
+             "le lot solde qui recoit est reste SOLDE")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM lot_evenement WHERE code_reference = '{ref}' "
+                              f"AND lot_fournisseur = '{lot}' AND type_evenement = 'REOUVERTURE'")) == 1,
+             "pas d'evenement REOUVERTURE")
+
+    # Le plancher laisse une trace.
+    infra.sql(f"UPDATE stock_lot SET quantite_kg = -2 WHERE code_reference = '{ref}' AND lot_fournisseur = '{lot}' "
+              f"AND code_magasin = '{MAG}'")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM lot_evenement WHERE lot_fournisseur = '{lot}' "
+                              f"AND type_evenement = 'PLANCHER'")) == 1, "le plancher n'a rien inscrit")
+
+    # Deux demandes identiques : une seule en attente.
+    demande = {"type_demande": "LOT_BLOQUE", "code_reference": ref, "lot_fournisseur": lot, "kg": 10,
+               "document": "MCH-BANC-DOUBLE", "motif": "Essai de double demande"}
+    d1 = c.ok("Magasinie", "POST", "/api/autorisations", demande)
+    d2 = c.ok("Magasinie", "POST", "/api/autorisations", demande)
+    verifier(d1["id_demande"] == d2["id_demande"] and d2.get("reprise"), f"demande creee deux fois : {d1} {d2}")
+
+
 def scenario_gardes_p1(c, infra):
     """Arbitrages du 09/10 : une date vide est une date absente ; la tolerance du fournisseur se
     fixe au droit VALIDER et se journalise ; le modele de droits n'oublie aucun champ sensible."""
@@ -1138,5 +1200,6 @@ SCENARIOS = [
     scenario_plan_detail,
     scenario_derogation_bornee,
     scenario_machine_constat,
+    scenario_lots_vivants,
     scenario_controles_finaux,
 ]

@@ -293,6 +293,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Lots : un lot solde qui recoit se rouvre ; pas de solde avec du fil sur machine ; C51.
+        "2026-10-09s_lots_vivants.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lot_pas_solde_sur_machine')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c51')
+            AND to_regclass('public.ux_demande_en_attente') IS NOT NULL",
+    ),
+    (
         // C35 et C36 sur l'etat des machines (machine_etat).
         "2026-10-09r_controles_machine.sql",
         "SELECT position('machine_etat' IN pg_get_viewdef('v_ctl_c36'::regclass)) > 0",

@@ -1578,7 +1578,7 @@ pub async fn lire_reception(
                 ref.designation, fl.poids_net_kg, fl.quantite_recue_kg AS deja_recu_kg,
                 fl.reste_kg, fl.nb_bobines AS bobines_facturees,
                 fl.nb_palettes AS palettes_facturees, bc.numero_bc,
-                ref.poids_bobine_kg, ref.bobines_par_palette
+                ref.poids_bobine_kg, ref.bobines_par_palette, ref.suivi_lot
            FROM import_reception_lignes rl
            JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
            JOIN import_factures f ON f.id_facture = fl.id_facture

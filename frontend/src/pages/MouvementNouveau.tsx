@@ -444,6 +444,7 @@ export function MouvementNouveau() {
             onChange={poser}
             className={champCellule}
             invalide={!(l.extra?.lot ?? '').trim()}
+            proposerPlusAncien={sortie}
           />
         ) : (
           <span

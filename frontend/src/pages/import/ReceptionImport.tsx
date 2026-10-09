@@ -33,6 +33,7 @@ import {
 } from '../../composants/ui/base'
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { AvisColisage } from '../../composants/AvisColisage'
+import { AvisDerive } from '../../composants/AvisDerive'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import {
@@ -126,6 +127,7 @@ interface ReceptionLue {
     tolerance_pesee_pct?: number | null
     derogation_ecart?: number | null
     motif_derogation?: string | null
+    suivi_lot?: number | null
   }[]
 }
 
@@ -163,6 +165,8 @@ interface LigneRecue {
    * theorie. Meme regle que sur le bon de commande et la reception nationale.
    */
   lie: boolean
+  /** Suivie au lot (regle 13) : le poids se pese, le calcul ne se relie pas. */
+  suiviLot?: boolean
   /** Validee a l'ecran : figee, et prete a partir avec « Enregistrer ». */
   valide: boolean
   /** La tolerance du fournisseur, en % du reste. */
@@ -249,7 +253,8 @@ export function ReceptionImport() {
         qualite: l.statut_qualite ?? 'CONFORME',
         cond: { poids_bobine_kg: l.poids_bobine_kg, bobines_par_palette: l.bobines_par_palette },
         // Des comptes enregistres ont ete CONSTATES : relier les recalculerait.
-        lie: !(l.nb_bobines > 0 || l.nb_palettes > 0),
+        lie: !(l.nb_bobines > 0 || l.nb_palettes > 0) && l.suivi_lot !== 1,
+        suiviLot: l.suivi_lot === 1,
         valide: true,
         tolerance: tol(l.tolerance_pesee_pct),
         derogation: l.derogation_ecart === 1,
@@ -346,6 +351,7 @@ export function ReceptionImport() {
           // constats du fournisseur, pas une deduction — on ne les relie pas.
           // PARTIELLE, on part du poids et les comptes se deduisent.
           lie: !entiere && r.suivi_lot !== 1,
+          suiviLot: r.suivi_lot === 1,
           valide: false,
           tolerance: tol(r.tolerance_pesee_pct),
           derogation: false,
@@ -745,7 +751,8 @@ export function ReceptionImport() {
                             <div className="flex items-center gap-1">
                               <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.palettes} disabled={!peseeOuverte}
                                 aria-label="Palettes" onChange={(e) => majColis(l.id_ligne, 'palettes', e.target.value)} />
-                              {peseeOuverte && (
+                              {/* Suivie au lot : le poids se pese, il ne se deduit pas (audit v5, U10). */}
+                              {peseeOuverte && !l.suiviLot && (
                                 <button type="button" onClick={() => majLigne(l.id_ligne, { lie: !l.lie })}
                                   title={l.lie ? 'Poids, bobines et palettes se répondent — cliquez pour saisir chacun séparément' : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'}
                                   aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
@@ -824,6 +831,7 @@ export function ReceptionImport() {
                               </div>
                             )}
                             <AvisColisage kg={l.quantite} bobines={l.bobines} palettes={l.palettes} cond={l.cond} />
+                            {l.suiviLot && <AvisDerive kg={l.quantite} bobines={l.bobines} cond={l.cond} />}
                           </td>
                         </tr>
                       </Fragment>

@@ -37,6 +37,7 @@ import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { DoubleAuthentification } from './DoubleAuthentification'
 import { BarriereErreur } from './BarriereErreur'
+import { ConfirmationQuitter } from '../hooks/useGardeSaisie'
 import { Chargement } from './ui/base'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
@@ -738,6 +739,8 @@ export function Coquille() {
               <Outlet key={emplacement.pathname} />
             </Suspense>
           </BarriereErreur>
+          {/* La question de la garde de saisie, une pour toute l'application. */}
+          <ConfirmationQuitter />
         </div>
       </main>
 

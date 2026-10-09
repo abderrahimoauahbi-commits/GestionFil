@@ -209,7 +209,7 @@ export function ReceptionImport() {
   const [choix, setChoix] = useState<string[]>([])
   const [modifie, setModifie] = useState(false)
   // Une pesee non enregistree ne se perd pas d'un clic dans le menu (audit v4).
-  useGardeSaisie(modifie)
+  const quitter = useGardeSaisie(modifie)
   const [filtre, setFiltre] = useState({ dossier: '', fournisseur: '', texte: '' })
 
   // Charger la reception existante, ou partir d'une feuille vierge datee du jour.
@@ -499,7 +499,7 @@ export function ReceptionImport() {
         }
         actions={
           <>
-            <Bouton variante="contour" onClick={() => ouvrir('/receptions-import')}>
+            <Bouton variante="contour" onClick={() => quitter(() => ouvrir('/receptions-import'))}>
               <ArrowLeft />
               Toutes les réceptions
             </Bouton>

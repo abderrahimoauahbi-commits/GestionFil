@@ -147,7 +147,7 @@ export function BonCommandeNouveau() {
   const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
   // Un bon en cours de saisie ne se perd pas d'un clic dans le menu (audit v4).
-  useGardeSaisie(lignes.length > 0)
+  const quitter = useGardeSaisie(lignes.length > 0)
   const [erreur, setErreur] = useState<string | null>(null)
   const [aCreer, setACreer] = useState<string | null>(null)
 
@@ -307,7 +307,7 @@ export function BonCommandeNouveau() {
         titre="Nouveau bon de commande"
         description="Choisissez le fournisseur : ce que le plan d'achat lui reclame s'affiche aussitot. Tapez pour ajouter une ligne."
         actions={
-          <Bouton variante="contour" onClick={() => naviguer('/bons-commande')}>
+          <Bouton variante="contour" onClick={() => quitter(() => naviguer('/bons-commande'))}>
             <ArrowLeft />
             Retour
           </Bouton>
@@ -519,7 +519,7 @@ export function BonCommandeNouveau() {
             )}
           </span>
           <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={() => naviguer('/bons-commande')}>
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/bons-commande'))}>
               Annuler
             </Bouton>
             <Bouton

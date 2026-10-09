@@ -232,7 +232,10 @@ export function TransfertNouveau() {
   })
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
   // Un transfert en cours de saisie ne se perd pas d'un clic dans le menu (audit v4).
-  useGardeSaisie(lignes.length > 0)
+  // Un brouillon repris tel quel n'arme pas la garde : seule une modification
+  // l'arme (audit v5, F20).
+  const [lignesReprises, setLignesReprises] = useState<LigneSaisie[] | null>(null)
+  const quitter = useGardeSaisie(lignes.length > 0 && lignes !== lignesReprises)
   const [erreur, setErreur] = useState<string | null>(null)
 
   // --- Reprise d'un brouillon ---------------------------------------------
@@ -304,7 +307,9 @@ export function TransfertNouveau() {
     // Le stock lu doit etre celui de la source du document, pas d'un autre.
     if (entete.code_magasin_source !== d.entete.code_magasin_source || !stockLu) return
     lignesRemplies.current = id ?? null
-    setLignes(d.lignes.map((l) => depuisLigneTransfert(l, parRef.get(l.code_reference))))
+    const reprises = d.lignes.map((l) => depuisLigneTransfert(l, parRef.get(l.code_reference)))
+    setLignesReprises(reprises)
+    setLignes(reprises)
   }, [qDossier.data, id, entete.code_magasin_source, stockLu, parRef])
 
   const statut = qDossier.data?.entete?.statut
@@ -552,7 +557,7 @@ export function TransfertNouveau() {
         <EnTetePage titre="Transfert" description="Introuvable." />
         <Alerte ton="alerte">
           Ce transfert n'existe pas, ou vous n'y avez pas acces.{' '}
-          <button className="underline" onClick={() => naviguer('/transferts')}>
+          <button className="underline" onClick={() => quitter(() => naviguer('/transferts'))}>
             Revenir a la liste
           </button>
         </Alerte>
@@ -595,7 +600,7 @@ export function TransfertNouveau() {
                 Abandonner
               </Bouton>
             )}
-            <Bouton variante="contour" onClick={() => naviguer('/transferts')}>
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/transferts'))}>
               <ArrowLeft />
               Retour
             </Bouton>

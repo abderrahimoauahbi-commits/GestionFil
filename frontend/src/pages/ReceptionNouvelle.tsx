@@ -166,7 +166,7 @@ export function ReceptionNouvelle() {
   })
   const [lignes, setLignes] = useState<Ligne[]>([])
   // Une pesee en cours ne se perd pas d'un clic dans le menu (audit v4).
-  useGardeSaisie(lignes.length > 0)
+  const quitter = useGardeSaisie(lignes.length > 0)
   const [pointee, setPointee] = useState<string | null>(null)
   const [bonAReprendre, setBonAReprendre] = useState('')
   const [horsCommande, setHorsCommande] = useState(false)
@@ -583,7 +583,7 @@ export function ReceptionNouvelle() {
         titre="Nouvelle réception"
         description="Reprenez un ou plusieurs bons du fournisseur, corrigez les pesees, enregistrez l'ensemble en une fois."
         actions={
-          <Bouton variante="contour" onClick={() => naviguer('/receptions')}>
+          <Bouton variante="contour" onClick={() => quitter(() => naviguer('/receptions'))}>
             <ArrowLeft />
             Retour
           </Bouton>
@@ -1179,7 +1179,7 @@ export function ReceptionNouvelle() {
             )}
           </span>
           <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={() => naviguer('/receptions')}>
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/receptions'))}>
               Annuler
             </Bouton>
             <Bouton

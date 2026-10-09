@@ -400,7 +400,7 @@ export function MouvementNouveau() {
   )
   const horsCatalogue = utiles.filter((l) => l.nature !== 'MARCHANDISE')
   // Une saisie en cours ne se perd pas d'un clic dans le menu (audit v4).
-  useGardeSaisie(utiles.length > 0)
+  const quitter = useGardeSaisie(utiles.length > 0)
   const nonValidees = utiles.filter((l) => !l.valide)
   const lotsManquants = utiles.filter(
     (l) => suiviDe(l.code_reference) === 1 && !(l.extra?.lot ?? '').trim(),
@@ -892,7 +892,7 @@ export function MouvementNouveau() {
           )}
         </span>
         <div className="flex items-center gap-2">
-          <Bouton type="button" variante="contour" onClick={surFermeture}>
+          <Bouton type="button" variante="contour" onClick={() => quitter(surFermeture)}>
             Annuler
           </Bouton>
           <Bouton

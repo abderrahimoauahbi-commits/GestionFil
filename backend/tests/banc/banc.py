@@ -166,6 +166,10 @@ class Infra:
             p = subprocess.run(cmd, cwd=DB_PG, capture_output=True, text=True, env=self.env)
             if p.returncode != 0:
                 raise RuntimeError(f"{' '.join(cmd[1:3])} : {p.stdout[-800:]} {p.stderr[-800:]}")
+        # Le socle apporte deja couleurs et familles (configuration d'une base
+        # neuve, 09/10/2026) : le referentiel du banc, qui porte les siennes, les
+        # remplace — les references du banc s'y rattachent.
+        self.psql(self.base, "-q", "-c", "DELETE FROM famille; DELETE FROM couleur;")
         self.psql(self.base, "-q", "-f", str(ICI / "referentiel.sql"))
         for login in COMPTES:
             p = subprocess.run([str(self.admin), "definir-mot-de-passe", login],

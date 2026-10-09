@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 106 (voir inclus.txt).
+-- Migrations comprises : 133 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict iaG6e4Zz4J1zEo7G1h4fOcpEEhaSdze0VOLyE4nMK2b4v22Y1eU5DrJMXHvOWpD
+\restrict E1FjTLIdh4NuCsLru6k3QXdDhOrQlx1cIQs645vmOrJCBcSQStm99X1IhMd01lO
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -639,9 +639,6 @@ PARAMETRES	motif_etat	Motif du changement d etat	ECRITURE	0	2101
 PARAMETRES	date_etat	Date du changement d etat	LECTURE	0	2102
 IMPORT	nb_factures	Nombre de factures	LECTURE	0	2015
 IMPORT	date_arrivee	Date d'arrivee	LECTURE	0	2020
-IMPORT	valeur_dhs	Valeur d'achat (DH)	LECTURE	0	2025
-IMPORT	frais_dhs	Frais inclus (DH)	LECTURE	0	2030
-IMPORT	tva_dhs	Frais hors cout (DH)	LECTURE	0	2035
 IMPORT	poids_kg	Poids facture (kg)	LECTURE	0	2040
 IMPORT	recu_kg	Poids recu (kg)	LECTURE	0	2045
 IMPORT	nb_palettes	Palettes	LECTURE	0	2050
@@ -854,10 +851,71 @@ RECEPTIONS	montant_facture_devise	Montant de la facture (devise)	LECTURE	1	4392
 RECEPTIONS	taux_facture	Taux de la facture	LECTURE	1	4394
 RECEPTIONS	montant_devise	Montant facture saisi (devise)	LECTURE	1	4396
 STOCK	prix_entree_mad	Prix d'entree du lot (MAD/kg)	LECTURE	1	4400
+PARAMETRES	coefficient	Coefficient de saison	ECRITURE	0	900
+IMPORT	matiere_mad	Matiere au cours du dedouanement	LECTURE	1	950
+IMPORT	frais_mad	Frais du dossier	LECTURE	1	950
+IMPORT	paye_mad	Dirhams payes	LECTURE	1	950
+IMPORT	montant_mad	Dirhams debites	LECTURE	1	950
+IMPORT	change_annee_ded_mad	Change, annee du dedouanement	LECTURE	1	950
+IMPORT	change_annee_suivante_mad	Change, annee suivante	LECTURE	1	950
+IMPORT	ecart_annee_ded_mad	Ecart de change, annee du dedouanement	LECTURE	1	950
+IMPORT	ecart_annee_suivante_mad	Ecart de change, annee suivante	LECTURE	1	950
+IMPORT	montant_dhs	Montant (DH)	LECTURE	1	960
+IMPORT	ecart_stock_dhs	Ecart porte au stock (DH)	LECTURE	1	960
+IMPORT	ecart_consomme_dhs	Ecart deja consomme (DH)	LECTURE	1	960
+IMPORT	valeur_retours_dhs	Valeur des kilos rendus (DH)	LECTURE	1	960
+IMPORT	montant_devise	Montant (devise)	LECTURE	1	960
+IMPORT	prix_unitaire_devise	Prix unitaire (devise)	LECTURE	1	960
+IMPORT	prix_kg_devise	Prix au kg (devise)	LECTURE	1	960
+IMPORT	prix_kg_mad	Prix au kg (DH)	LECTURE	1	960
+IMPORT	valeur_dhs	Valeur d'achat (DH)	LECTURE	1	2025
+IMPORT	frais_dhs	Frais inclus (DH)	LECTURE	1	2030
+IMPORT	tva_dhs	Frais hors cout (DH)	LECTURE	1	2035
+PLAN_ACHAT	calcul	Detail du calcul	LECTURE	0	4195
 \.
 
 
 ALTER TABLE public.champ_configurable ENABLE TRIGGER ALL;
+
+--
+-- Data for Name: couleur; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+ALTER TABLE public.couleur DISABLE TRIGGER ALL;
+
+COPY public.couleur (code_couleur_interne, libelle, classe_teinture, description, ordre_affichage, actif) FROM stdin;
+C3	Rouge	RED	RED — classe tarifaire la plus chere	30	1
+C5	Beige	\N	CREAM / BEIGE	50	1
+C7	A preciser	\N	Code present chez Tekstur	70	1
+CG	Gris clair	LIGHT	L.GRAY	90	1
+CV	A preciser	\N	Code present chez Tekstur	100	1
+CM	Marron	DARK	BROWN	110	1
+CVR	Vert fonce	DARK	D.GREEN	140	1
+TAUPE	Taupe	\N	\N	160	1
+C1	Or	LIGHT	GOLD chez les fournisseurs	10	1
+C5N	Beige fonce	DARK	\N	55	1
+C4	BLUE	LIGHT	Code present chez Goral et Ozkaralar	40	1
+C6	Maron	\N	Code present chez Tekstur et Turkan	60	1
+C2	Noir	DARK	BLACK	20	1
+C00	Blanc	\N	Plastiques, colles : matiere non teinte	5	1
+C0	Noir (C0)	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+C5I	Beige clair	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+C5L	Creme	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+C5S	Beige (C5S)	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CB	Brique	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CBM	Camel (marron clair)	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CBR	Bleu fonce	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CGL	Gris clair (CGL)	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CGM	Gris mouchete	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CMG	Taupe (CMG)	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CML	Marron clair	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CR	Rose	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CT	Turquoise	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+CZ	Vison	\N	Cree depuis le classeur Liste ref fil (03/10/2026)	0	1
+\.
+
+
+ALTER TABLE public.couleur ENABLE TRIGGER ALL;
 
 --
 -- Data for Name: devise; Type: TABLE DATA; Schema: public; Owner: -
@@ -873,6 +931,54 @@ USD	Dollar americain	USD	0	1
 
 
 ALTER TABLE public.devise ENABLE TRIGGER ALL;
+
+--
+-- Data for Name: famille; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+ALTER TABLE public.famille DISABLE TRIGGER ALL;
+
+COPY public.famille (code_famille, libelle, code_categorie, type_fil, titrage, description, ordre_affichage, actif) FROM stdin;
+3000-DENIERS	3000-DENIERS	PES	\N	3000 Deniers	Cote chez SUJATA	240	1
+PLA-100	PLA-100	PLA	\N	100	Qualite relevee dans le classeur	400	1
+PLA-140	PLA-140	PLA	\N	140	Qualite relevee dans le classeur	400	1
+PLA-35	PLA-35	PLA	\N	35	Qualite relevee dans le classeur	400	1
+PLA-45	PLA-45	PLA	\N	45	Qualite relevee dans le classeur	400	1
+PLA-50	PLA-50	PLA	\N	50	Qualite relevee dans le classeur	400	1
+PLA-65	PLA-65	PLA	\N	65	Qualite relevee dans le classeur	400	1
+PLA-80	PLA-80	PLA	\N	80	Qualite relevee dans le classeur	400	1
+SBR-821	SBR-821	SBR	\N	821	Qualite relevee dans le classeur	400	1
+1500-FDY	1500-FDY	PES	\N	1500-FDY	\N	0	1
+1800-FDY	1800-FDY	PES	\N	1800-FDY	\N	0	1
+MICRO-PES-3600-DENIERS	MICRO-PES-3600-DENIERS	PES	\N	3600-DENIERS	\N	0	1
+MICRO-PES-7360	MICRO-PES-7360	PES	\N	7360	\N	0	1
+VERONA-1500	VERONA-1500	PES	\N	VERONA-1500	\N	0	1
+1100-POLY	1100-POLY	PES	\N	1100-POLY	\N	0	1
+1200-DENIERS	1200-DENIERS	PES	\N	1200-DENIERS	\N	0	1
+IMITATION-CUIR	IMITATION-CUIR	CUI	\N	\N	\N	0	1
+12/1	12/1	JUT	\N	\N	\N	0	1
+16/2	16/2	JUT	\N	\N	\N	0	1
+20/2	20/2	JUT	\N	\N	\N	0	1
+24/1	24/1	JUT	\N	\N	\N	0	1
+30/1	30/1	JUT	\N	\N	\N	0	1
+9,6/1	9,6/1	JUT	\N	\N	\N	0	1
+10/1	10/1	JUT	\N	\N	\N	0	1
+LAINE	LAINE	LAI	\N	\N	\N	0	1
+12/2	12/2	PES-CH	\N	\N	\N	0	1
+12/4	12/4	PES-CH	\N	\N	\N	0	1
+1500-DENIERS	1500-DENIERS	PES-PO	\N	\N	\N	0	1
+1200-DENIERS-SHRINK	1200-DENIERS-SHRINK	PES-SH	\N	\N	\N	0	1
+1500-DENIERS-SHRINK	1500-DENIERS-SHRINK	PES-SH	\N	\N	\N	0	1
+1500-DTEX	1500-DTEX	PP	\N	\N	\N	0	1
+1750*2 DTEX	1750*2 DTEX	PP	\N	\N	\N	0	1
+1900-DTEX	1900-DTEX	PP	\N	\N	\N	0	1
+2900-DTEX	2900-DTEX	PP	\N	\N	\N	0	1
+1000X2-DTEX	1000X2-DTEX	PP	\N	\N	\N	0	1
+1775*2-DTEX	1775*2-DTEX	PP	\N	\N	\N	0	1
+\.
+
+
+ALTER TABLE public.famille ENABLE TRIGGER ALL;
 
 --
 -- Data for Name: machine_motif; Type: TABLE DATA; Schema: public; Owner: -
@@ -4016,6 +4122,77 @@ ADMIN	RECEPTIONS	montant_devise	LECTURE
 MAGASIN	RECEPTIONS	montant_devise	MASQUE
 DIRECTION	RECEPTIONS	montant_devise	LECTURE
 ASSISTANTE	RECEPTIONS	montant_devise	LECTURE
+MAGASIN	BONS_COMMANDE	total_ligne_mad	MASQUE
+ASSISTANTE	BONS_COMMANDE	total_ligne_mad	ECRITURE
+DIRECTION	BONS_COMMANDE	total_ligne_mad	ECRITURE
+MAGASIN	IMPORT	matiere_mad	MASQUE
+ASSISTANTE	IMPORT	matiere_mad	LECTURE
+ADMIN	IMPORT	matiere_mad	LECTURE
+DIRECTION	IMPORT	matiere_mad	LECTURE
+MAGASIN	IMPORT	frais_mad	MASQUE
+ASSISTANTE	IMPORT	frais_mad	LECTURE
+ADMIN	IMPORT	frais_mad	LECTURE
+DIRECTION	IMPORT	frais_mad	LECTURE
+MAGASIN	IMPORT	paye_mad	MASQUE
+ASSISTANTE	IMPORT	paye_mad	LECTURE
+ADMIN	IMPORT	paye_mad	LECTURE
+DIRECTION	IMPORT	paye_mad	LECTURE
+MAGASIN	IMPORT	montant_mad	MASQUE
+ASSISTANTE	IMPORT	montant_mad	LECTURE
+ADMIN	IMPORT	montant_mad	LECTURE
+DIRECTION	IMPORT	montant_mad	LECTURE
+MAGASIN	IMPORT	change_annee_ded_mad	MASQUE
+ASSISTANTE	IMPORT	change_annee_ded_mad	LECTURE
+ADMIN	IMPORT	change_annee_ded_mad	LECTURE
+DIRECTION	IMPORT	change_annee_ded_mad	LECTURE
+MAGASIN	IMPORT	change_annee_suivante_mad	MASQUE
+ASSISTANTE	IMPORT	change_annee_suivante_mad	LECTURE
+ADMIN	IMPORT	change_annee_suivante_mad	LECTURE
+DIRECTION	IMPORT	change_annee_suivante_mad	LECTURE
+MAGASIN	IMPORT	ecart_annee_ded_mad	MASQUE
+ASSISTANTE	IMPORT	ecart_annee_ded_mad	LECTURE
+ADMIN	IMPORT	ecart_annee_ded_mad	LECTURE
+DIRECTION	IMPORT	ecart_annee_ded_mad	LECTURE
+MAGASIN	IMPORT	ecart_annee_suivante_mad	MASQUE
+ASSISTANTE	IMPORT	ecart_annee_suivante_mad	LECTURE
+ADMIN	IMPORT	ecart_annee_suivante_mad	LECTURE
+DIRECTION	IMPORT	ecart_annee_suivante_mad	LECTURE
+MAGASIN	IMPORT	montant_dhs	MASQUE
+ASSISTANTE	IMPORT	montant_dhs	LECTURE
+ADMIN	IMPORT	montant_dhs	LECTURE
+DIRECTION	IMPORT	montant_dhs	LECTURE
+MAGASIN	IMPORT	ecart_stock_dhs	MASQUE
+ASSISTANTE	IMPORT	ecart_stock_dhs	LECTURE
+ADMIN	IMPORT	ecart_stock_dhs	LECTURE
+DIRECTION	IMPORT	ecart_stock_dhs	LECTURE
+MAGASIN	IMPORT	ecart_consomme_dhs	MASQUE
+ASSISTANTE	IMPORT	ecart_consomme_dhs	LECTURE
+ADMIN	IMPORT	ecart_consomme_dhs	LECTURE
+DIRECTION	IMPORT	ecart_consomme_dhs	LECTURE
+MAGASIN	IMPORT	valeur_retours_dhs	MASQUE
+ASSISTANTE	IMPORT	valeur_retours_dhs	LECTURE
+ADMIN	IMPORT	valeur_retours_dhs	LECTURE
+DIRECTION	IMPORT	valeur_retours_dhs	LECTURE
+MAGASIN	IMPORT	montant_devise	MASQUE
+ASSISTANTE	IMPORT	montant_devise	LECTURE
+ADMIN	IMPORT	montant_devise	LECTURE
+DIRECTION	IMPORT	montant_devise	LECTURE
+MAGASIN	IMPORT	prix_unitaire_devise	MASQUE
+ASSISTANTE	IMPORT	prix_unitaire_devise	LECTURE
+ADMIN	IMPORT	prix_unitaire_devise	LECTURE
+DIRECTION	IMPORT	prix_unitaire_devise	LECTURE
+MAGASIN	IMPORT	prix_kg_devise	MASQUE
+ASSISTANTE	IMPORT	prix_kg_devise	LECTURE
+ADMIN	IMPORT	prix_kg_devise	LECTURE
+DIRECTION	IMPORT	prix_kg_devise	LECTURE
+MAGASIN	IMPORT	prix_kg_mad	MASQUE
+ASSISTANTE	IMPORT	prix_kg_mad	LECTURE
+ADMIN	IMPORT	prix_kg_mad	LECTURE
+DIRECTION	IMPORT	prix_kg_mad	LECTURE
+MAGASIN	PLAN_ACHAT	calcul	LECTURE
+DIRECTION	PLAN_ACHAT	calcul	LECTURE
+ASSISTANTE	PLAN_ACHAT	calcul	LECTURE
+ADMIN	PLAN_ACHAT	calcul	LECTURE
 \.
 
 
@@ -4034,6 +4211,12 @@ R3	Excedent de production	RETOUR	1
 R4	Rebut / chute non reutilisable	RETOUR	1
 R5	Erreur de saisie	CORRECTION	1
 R6	Écart d'inventaire	INVENTAIRE	1
+HM_ATELIER	Consommation atelier (jute, latex, plastique, cuir)	HORS_MACHINE	1
+HM_ECHANTILLON	Echantillon	HORS_MACHINE	1
+HM_ESSAI	Essai	HORS_MACHINE	1
+HM_REPARATION	Reparation	HORS_MACHINE	1
+HM_PRET	Pret a une autre usine (rendu en nature)	HORS_MACHINE	1
+HM_AUTRE	Autre (dites pourquoi)	HORS_MACHINE	1
 \.
 
 
@@ -4057,6 +4240,8 @@ MACHINE	Chargement / retour machine	PRODUCTION	1	1
 CONTREPASSATION	Contre-passation d'un mouvement	CORRECTION	-1	1
 FUSION	Fusion de lots	LOGISTIQUE	1	1
 IDENTIFICATION	Identification du lot	LOGISTIQUE	1	1
+HORS_MACHINE	Sortie hors machine (atelier, echantillon, essai, reparation, pret)	PRODUCTION	-1	1
+PRET	Pret de fil a une autre usine, et son retour	LOGISTIQUE	1	1
 \.
 
 
@@ -4127,6 +4312,7 @@ P_ClotureEcartAvisPct	Cloture facture : avis au-dela de l'ecart	10	DECIMAL	%	Au-
 P_DechetSeuilValiderKg	Dechet : seuil de validation (kg)	50	DECIMAL	kg	Au-dela, un dechet saisi a la main demande le droit de valider l'inventaire, comme un ajustement negatif.	STOCK	DIRECTION	0	2026-10-08T19:37:54.660Z	\N	\N	1
 P_EncoursRetardInclus	Compter les commandes en retard dans l'en-cours	1	ENTIER	\N	1 : une ligne de bon en retard reste comptee dans l'en-cours (le retard se relance) ; 0 : elle en sort et le besoin est repropose.	STOCK	DIRECTION	0	2026-10-08T20:48:18.505Z	\N	\N	1
 P_HorizonProlonge	Prolonger la demande au-dela du plan	1	ENTIER	\N	1 : au-dela du dernier mois du plan en service, la demande se prolonge a la moyenne mensuelle du plan ; 0 : elle est nulle.	STOCK	DIRECTION	0	2026-10-08T20:48:18.505Z	\N	\N	1
+P_PretJoursAlerte	Pret a une autre usine : delai avant alerte	60	ENTIER	jours	Au-dela, le controle C47 signale un pret de fil non rendu (il ne bloque rien).	STOCK	DIRECTION	0	2026-10-09T18:23:57.327Z	\N	\N	1
 \.
 
 
@@ -4314,10 +4500,35 @@ dccb421a-a473-45ac-ae51-de8dd8a11063	ADMIN	LOTS	ECRIRE	1
 15110942-e2ae-4837-81cc-ee0f75912527	ADMIN	LOTS	LIRE	1
 8e5ec73f-818a-4f08-b359-614be523ee6b	DIRECTION	LOTS	VALIDER	1
 d45f8c1b-a2b5-4554-a92d-2f1c6759e386	ADMIN	LOTS	VALIDER	1
+1ffd0cbc-3a84-4698-9ad9-ad7215e5eed1	DIRECTION	FOURNISSEURS	VALIDER	1
 \.
 
 
 ALTER TABLE public.permission ENABLE TRIGGER ALL;
+
+--
+-- Data for Name: saison_mois; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+ALTER TABLE public.saison_mois DISABLE TRIGGER ALL;
+
+COPY public.saison_mois (mois, libelle, coefficient, date_modification, id_utilisateur_modif) FROM stdin;
+1	Janvier	1.000	\N	\N
+2	Fevrier	1.000	\N	\N
+3	Mars	1.000	\N	\N
+4	Avril	1.000	\N	\N
+5	Mai	1.000	\N	\N
+6	Juin	1.000	\N	\N
+7	Juillet	1.000	\N	\N
+8	Aout	1.000	\N	\N
+9	Septembre	1.000	\N	\N
+10	Octobre	1.000	\N	\N
+11	Novembre	1.000	\N	\N
+12	Decembre	1.000	\N	\N
+\.
+
+
+ALTER TABLE public.saison_mois ENABLE TRIGGER ALL;
 
 --
 -- Data for Name: transition_statut; Type: TABLE DATA; Schema: public; Owner: -
@@ -4363,7 +4574,6 @@ inventaire	EN_COURS	ANNULE	DIRECTION	Abandon du comptage
 reception	VALIDE	A_CONTROLER	ADMIN	Devalidation : le controle est a refaire
 bon_commande	ENVOYE	BROUILLON	ADMIN	Le fournisseur refuse le bon : il redevient modifiable
 inventaire	CLOTURE	EN_COURS	ADMIN	Reouverture d'un inventaire : un comptage etait faux
-reception	CLOTURE	A_CONTROLER	ADMIN	Reouverture d'une reception cloturee trop tot
 plan_production	CLOTURE	BROUILLON	ADMIN	Reouverture d'un plan cloture trop tot
 qualite	CLOTURE	ACTIF	ADMIN	Reouverture d'une qualite cloturee trop tot
 bon_commande	VALIDE	BROUILLON	ADMIN	Devalidation d'un bon non encore servi
@@ -4395,6 +4605,8 @@ FUSION_SORTIE	Fusion de lots - sortie	-1	0	0	0	0	#64748b	1	1
 FUSION_ENTREE	Fusion de lots - entree	1	0	0	0	0	#64748b	1	1
 ANNUL_CHARGE_MACHINE	Annulation d'un chargement machine	1	1	1	0	0	#9ca3af	1	1
 ANNUL_RETOUR_MACHINE	Annulation d'un retour machine	-1	0	0	0	0	#9ca3af	1	1
+SORTIE_HORS_MACHINE	Sortie hors machine	-1	0	0	0	1	#d97706	1	0
+RETOUR_PRET	Retour d'un pret	1	0	0	0	0	#0d9488	1	0
 \.
 
 
@@ -4404,5 +4616,5 @@ ALTER TABLE public.type_mouvement ENABLE TRIGGER ALL;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict iaG6e4Zz4J1zEo7G1h4fOcpEEhaSdze0VOLyE4nMK2b4v22Y1eU5DrJMXHvOWpD
+\unrestrict E1FjTLIdh4NuCsLru6k3QXdDhOrQlx1cIQs645vmOrJCBcSQStm99X1IhMd01lO
 

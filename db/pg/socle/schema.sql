@@ -1,12 +1,12 @@
 -- SOCLE genere par db/pg/socle.py depuis une copie entierement migree.
 -- Ne pas editer a la main : regenerer (python socle.py --depuis <copie>).
--- Migrations comprises : 106 (voir inclus.txt).
+-- Migrations comprises : 133 (voir inclus.txt).
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict PkqcwTtAzx8LxGHN08gIYwXvfeRV2lDsTpDZ65a7SHjH2aRmbCnkfDM5UxrWDBg
+\restrict GBYoe2Y0JxSMaS0PJ6cQGYLT3vJUtcU7pkuH51oEeqrnJaE03rBUM7Ww9WEBlTg
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -262,6 +262,47 @@ $$;
 ALTER FUNCTION public.fn_controle_colisage(p_ref text, p_kg numeric, p_bob numeric, p_pal numeric) OWNER TO gestionfil;
 
 --
+-- Name: fn_cours_bam_fin_annee(text, integer); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_cours_bam_fin_annee(p_devise text, p_annee integer) RETURNS numeric
+    LANGUAGE sql STABLE
+    AS $$
+    SELECT cours_mad FROM cours_bam
+     WHERE code_devise = p_devise AND date_cours <= p_annee::text || '-12-31'
+     ORDER BY date_cours DESC LIMIT 1;
+$$;
+
+
+ALTER FUNCTION public.fn_cours_bam_fin_annee(p_devise text, p_annee integer) OWNER TO gestionfil;
+
+--
+-- Name: fn_dernier_prix_achat_mad(text, text); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_dernier_prix_achat_mad(p_reference text, p_fournisseur text) RETURNS numeric
+    LANGUAGE sql STABLE
+    AS $$
+    SELECT round(lb.prix_kg_devise
+                 * CASE WHEN bc.code_devise = 'MAD' THEN 1
+                        ELSE (SELECT t.taux FROM taux_change t
+                               WHERE t.code_devise = bc.code_devise
+                                 AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
+                                 AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
+                               ORDER BY t.date_debut DESC LIMIT 1) END, 4)
+      FROM ligne_bc lb
+      JOIN bon_commande bc ON bc.id_bc = lb.id_bc
+     WHERE lb.code_reference = p_reference AND bc.code_fournisseur = p_fournisseur
+       AND lb.type_ligne = 'MARCHANDISE' AND lb.prix_kg_devise > 0
+       AND bc.statut IN ('VALIDE', 'ENVOYE', 'LIVRE_PARTIEL', 'CLOTURE')
+     ORDER BY COALESCE(bc.date_validation, bc.date_bc) DESC, lb.ligne_numero
+     LIMIT 1;
+$$;
+
+
+ALTER FUNCTION public.fn_dernier_prix_achat_mad(p_reference text, p_fournisseur text) OWNER TO gestionfil;
+
+--
 -- Name: fn_lot_au_seuil(text, numeric, numeric); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -289,6 +330,11 @@ CREATE FUNCTION public.fn_lot_plancher() RETURNS trigger
     AS $$
 BEGIN
     IF NEW.quantite_kg < 0 THEN
+        INSERT INTO lot_evenement (code_reference, lot_fournisseur, type_evenement, motif, details)
+        SELECT NEW.code_reference, NEW.lot_fournisseur, 'PLANCHER',
+               'Solde du lot ramene a zero : la sortie depassait ce que le lot portait au magasin',
+               jsonb_build_object('code_magasin', NEW.code_magasin, 'manque_kg', round(-NEW.quantite_kg, 4))
+          FROM lot WHERE code_reference = NEW.code_reference AND lot_fournisseur = NEW.lot_fournisseur;
         NEW.quantite_kg := 0;
     END IF;
     RETURN NEW;
@@ -416,6 +462,64 @@ ALTER FUNCTION public.fn_recalculer_cmup(p_reference text) OWNER TO gestionfil;
 
 COMMENT ON FUNCTION public.fn_recalculer_cmup(p_reference text) IS 'Refait le CMUP depuis les entrees valorisees qui tiennent encore ; retombe sur le catalogue s''il n''en reste aucune.';
 
+
+--
+-- Name: fn_recaler_lignes_bc(text[]); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_recaler_lignes_bc(p_lignes text[]) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_bc text;
+BEGIN
+    PERFORM set_config('gestionfil.recalcul_bc', 'on', true);
+    UPDATE ligne_bc lb
+       SET quantite_recue_kg = LEAST(lb.quantite_commandee_kg, round(
+               COALESCE((SELECT sum(lr.quantite_stock_kg)
+                           FROM ligne_reception lr JOIN reception r ON r.id_reception = lr.id_reception
+                          WHERE lr.id_ligne_bc = lb.id_ligne_bc AND r.statut IN ('VALIDE', 'CLOTURE')
+                            AND lr.id_mouvement_genere IS NOT NULL
+                            AND NOT EXISTS (SELECT 1 FROM mouvement inv
+                                             WHERE inv.id_mouvement_contrepasse = lr.id_mouvement_genere)), 0)
+             + COALESCE((SELECT sum(rl.quantite_recue_kg)
+                           FROM import_reception_lignes rl
+                           JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+                           JOIN import_receptions ir ON ir.id_reception = rl.id_reception
+                          WHERE fl.id_ligne_bc = lb.id_ligne_bc AND ir.statut = 'VALIDEE'
+                            AND rl.id_mouvement IS NOT NULL
+                            AND NOT EXISTS (SELECT 1 FROM mouvement inv
+                                             WHERE inv.id_mouvement_contrepasse = rl.id_mouvement)), 0), 4))
+     WHERE lb.id_ligne_bc = ANY (p_lignes);
+    UPDATE ligne_bc lb
+       SET statut = CASE
+               WHEN lb.quantite_recue_kg >= lb.quantite_commandee_kg
+                        * (1 - fn_tolerance_fournisseur((SELECT b.code_fournisseur FROM bon_commande b
+                                                          WHERE b.id_bc = lb.id_bc)) / 100.0) - 0.001
+                    AND lb.quantite_recue_kg > 0 THEN 'SOLDE'
+               WHEN lb.quantite_recue_kg > 0 THEN 'PARTIEL'
+               ELSE 'EN_ATTENTE' END
+     WHERE lb.id_ligne_bc = ANY (p_lignes) AND lb.statut <> 'ANNULE';
+    FOR v_bc IN SELECT DISTINCT id_bc FROM ligne_bc WHERE id_ligne_bc = ANY (p_lignes) LOOP
+        UPDATE bon_commande b
+           SET statut = n.nouveau
+          FROM (SELECT CASE
+                         WHEN NOT EXISTS (SELECT 1 FROM ligne_bc l
+                                           WHERE l.id_bc = v_bc AND l.type_ligne = 'MARCHANDISE'
+                                             AND l.statut NOT IN ('SOLDE', 'ANNULE')) THEN 'CLOTURE'
+                         WHEN EXISTS (SELECT 1 FROM ligne_bc l
+                                       WHERE l.id_bc = v_bc AND l.type_ligne = 'MARCHANDISE'
+                                         AND l.quantite_recue_kg > 0) THEN 'LIVRE_PARTIEL'
+                         ELSE 'ENVOYE' END AS nouveau) n
+         WHERE b.id_bc = v_bc AND b.statut IN ('ENVOYE', 'LIVRE_PARTIEL', 'CLOTURE')
+           AND b.statut <> n.nouveau;
+    END LOOP;
+    PERFORM set_config('gestionfil.recalcul_bc', '', true);
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_recaler_lignes_bc(p_lignes text[]) OWNER TO gestionfil;
 
 --
 -- Name: fn_refuser(); Type: FUNCTION; Schema: public; Owner: gestionfil
@@ -1360,6 +1464,34 @@ $$;
 ALTER FUNCTION public.fn_trg_bc_separation_taches() OWNER TO gestionfil;
 
 --
+-- Name: fn_trg_date_vide_null(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_date_vide_null() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    j       jsonb := to_jsonb(NEW);
+    col     text;
+    change  boolean := false;
+BEGIN
+    FOREACH col IN ARRAY TG_ARGV LOOP
+        IF j ? col AND jsonb_typeof(j -> col) = 'string' AND btrim(j ->> col) = '' THEN
+            j := jsonb_set(j, ARRAY[col], 'null'::jsonb);
+            change := true;
+        END IF;
+    END LOOP;
+    IF change THEN
+        NEW := jsonb_populate_record(NEW, j);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_date_vide_null() OWNER TO gestionfil;
+
+--
 -- Name: fn_trg_empl_numero(); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -1386,6 +1518,66 @@ $$;
 
 
 ALTER FUNCTION public.fn_trg_empl_numero() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_fiche_derogations(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_fiche_derogations() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_numero text;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_numero := OLD.numero_fiche;
+    ELSIF NEW.statut = 'ANNULE' AND OLD.statut IS DISTINCT FROM 'ANNULE' THEN
+        v_numero := NEW.numero_fiche;
+    ELSE
+        RETURN NEW;
+    END IF;
+    UPDATE demande_autorisation
+       SET statut = 'ANNULEE',
+           motif_decision = 'Fiche ' || v_numero || ' supprimee ou annulee : derogation non employee retiree'
+     WHERE type_demande = 'LOT_BLOQUE' AND document = v_numero
+       AND statut IN ('EN_ATTENTE', 'ACCORDEE') AND date_consommation IS NULL;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_fiche_derogations() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_frais_dossier_clos(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_frais_dossier_clos() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_statut text;
+    v_numero text;
+BEGIN
+    SELECT statut, numero INTO v_statut, v_numero
+      FROM import_dossiers WHERE id_dossier = COALESCE(NEW.id_dossier, OLD.id_dossier);
+    IF v_statut = 'CLOTURE' THEN
+        IF TG_OP = 'INSERT' AND current_setting('gestionfil.frais_post_cloture', true) = 'on'
+           AND NEW.post_cloture = 1 AND length(btrim(COALESCE(NEW.motif_post_cloture, ''))) >= 5 THEN
+            RETURN NEW;
+        END IF;
+        RAISE EXCEPTION 'IMPORT-CLOS : le dossier % est cloture, ses frais sont figes. Une facture tardive s''ajoute en « frais post-cloture ».',
+            v_numero USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_frais_dossier_clos() OWNER TO gestionfil;
 
 --
 -- Name: fn_trg_histo_prix_immuable_d(); Type: FUNCTION; Schema: public; Owner: gestionfil
@@ -1436,6 +1628,21 @@ $$;
 
 
 ALTER FUNCTION public.fn_trg_histo_prix_immuable_u() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_histo_revision_immuable(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_histo_revision_immuable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'R03 : une revision de l''historique des prix ne se modifie ni ne se supprime.';
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_histo_revision_immuable() OWNER TO gestionfil;
 
 --
 -- Name: fn_trg_iac_immuable(); Type: FUNCTION; Schema: public; Owner: gestionfil
@@ -1513,6 +1720,25 @@ $$;
 
 
 ALTER FUNCTION public.fn_trg_import_dossier_garde() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_import_dum_permanente(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_import_dum_permanente() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF COALESCE(btrim(OLD.numero_dum), '') <> '' AND COALESCE(btrim(NEW.numero_dum), '') = '' THEN
+        RAISE EXCEPTION 'IMPORT-DUM : la DUM % du dossier % ne s''efface pas : elle prouve le dedouanement. Une faute de frappe se corrige (droit de valider, avec un motif).',
+            OLD.numero_dum, OLD.numero USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_import_dum_permanente() OWNER TO gestionfil;
 
 --
 -- Name: fn_trg_import_facture_engagement(); Type: FUNCTION; Schema: public; Owner: gestionfil
@@ -1595,6 +1821,59 @@ $$;
 ALTER FUNCTION public.fn_trg_import_hors_reception_locale() OWNER TO gestionfil;
 
 --
+-- Name: fn_trg_import_ligne_bon(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_import_ligne_bon() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_bc      record;
+    v_frs     text;
+BEGIN
+    IF NEW.id_ligne_bc IS NULL THEN
+        RETURN NEW;
+    END IF;
+    -- Un rattachement deja pose, inchange (le bon a pu avancer depuis) : rien a revoir.
+    IF TG_OP = 'UPDATE' AND NEW.id_ligne_bc IS NOT DISTINCT FROM OLD.id_ligne_bc
+       AND NEW.code_reference IS NOT DISTINCT FROM OLD.code_reference THEN
+        RETURN NEW;
+    END IF;
+    SELECT b.numero_bc, b.statut AS statut_bc, b.code_fournisseur, lb.statut AS statut_ligne,
+           lb.code_reference, lb.type_ligne
+      INTO v_bc
+      FROM ligne_bc lb JOIN bon_commande b ON b.id_bc = lb.id_bc
+     WHERE lb.id_ligne_bc = NEW.id_ligne_bc;
+    SELECT f.code_fournisseur INTO v_frs FROM import_factures f WHERE f.id_facture = NEW.id_facture;
+    IF v_bc.statut_bc NOT IN ('ENVOYE', 'LIVRE_PARTIEL') THEN
+        RAISE EXCEPTION 'IMPORT-BC : le bon % est %, pas envoye au fournisseur : une facture ne s''y rattache pas.',
+            v_bc.numero_bc, lower(v_bc.statut_bc) USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_bc.statut_ligne IN ('SOLDE', 'ANNULE') THEN
+        RAISE EXCEPTION 'IMPORT-BC : la ligne du bon % est % : elle ne recoit plus rien.',
+            v_bc.numero_bc, lower(v_bc.statut_ligne) USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_bc.type_ligne <> 'MARCHANDISE' THEN
+        RAISE EXCEPTION 'IMPORT-BC : la ligne du bon % est un service : une facture d''import se rattache a de la marchandise.',
+            v_bc.numero_bc USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_frs IS DISTINCT FROM v_bc.code_fournisseur THEN
+        RAISE EXCEPTION 'IMPORT-BC : le bon % est d''un autre fournisseur que la facture.',
+            v_bc.numero_bc USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.code_reference IS DISTINCT FROM v_bc.code_reference THEN
+        RAISE EXCEPTION 'IMPORT-BC : la ligne du bon % commande %, pas %.',
+            v_bc.numero_bc, v_bc.code_reference, COALESCE(NEW.code_reference, '(sans reference)')
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_import_ligne_bon() OWNER TO gestionfil;
+
+--
 -- Name: fn_trg_import_ligne_figee(); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -1643,31 +1922,38 @@ ALTER FUNCTION public.fn_trg_import_reception_segregation() OWNER TO gestionfil;
 
 CREATE FUNCTION public.fn_trg_import_verrou() RETURNS trigger
     LANGUAGE plpgsql
-    AS $$
-DECLARE
-    v_row     record;
-    v_dossier text;
-    v_statut  text;
-BEGIN
-    IF TG_OP = 'DELETE' THEN v_row := OLD; ELSE v_row := NEW; END IF;
-
-    IF TG_TABLE_NAME IN ('import_factures', 'dossier_lignes_frais') THEN
-        v_dossier := v_row.id_dossier;
-    ELSIF TG_TABLE_NAME = 'import_facture_lignes' THEN
-        SELECT id_dossier INTO v_dossier FROM import_factures WHERE id_facture = v_row.id_facture;
-    ELSIF TG_TABLE_NAME IN ('dossier_lignes_frais_cibles', 'lignes_frais_repartition') THEN
-        SELECT id_dossier INTO v_dossier FROM dossier_lignes_frais WHERE id_ligne_frais = v_row.id_ligne_frais;
-    END IF;
-
-    SELECT statut INTO v_statut FROM import_dossiers WHERE id_dossier = v_dossier;
-    IF v_statut = 'CLOTURE' THEN
-        RAISE EXCEPTION 'Dossier cloture : ses factures, ses frais et leur repartition sont figes.'
-            USING ERRCODE = 'check_violation';
-    END IF;
-
-    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
-    RETURN NEW;
-END;
+    AS $$
+DECLARE
+    v_row     record;
+    v_dossier text;
+    v_statut  text;
+BEGIN
+    IF TG_OP = 'DELETE' THEN v_row := OLD; ELSE v_row := NEW; END IF;
+
+    IF TG_TABLE_NAME IN ('import_factures', 'dossier_lignes_frais') THEN
+        v_dossier := v_row.id_dossier;
+    ELSIF TG_TABLE_NAME = 'import_facture_lignes' THEN
+        SELECT id_dossier INTO v_dossier FROM import_factures WHERE id_facture = v_row.id_facture;
+    ELSIF TG_TABLE_NAME IN ('dossier_lignes_frais_cibles', 'lignes_frais_repartition') THEN
+        SELECT id_dossier INTO v_dossier FROM dossier_lignes_frais WHERE id_ligne_frais = v_row.id_ligne_frais;
+    END IF;
+
+    SELECT statut INTO v_statut FROM import_dossiers WHERE id_dossier = v_dossier;
+    IF v_statut = 'CLOTURE' THEN
+        IF current_setting('gestionfil.frais_post_cloture', true) = 'on'
+           AND (TG_TABLE_NAME IN ('dossier_lignes_frais_cibles', 'lignes_frais_repartition')
+                OR (TG_TABLE_NAME = 'import_facture_lignes' AND TG_OP = 'UPDATE')
+                OR (TG_TABLE_NAME = 'dossier_lignes_frais' AND TG_OP = 'INSERT')) THEN
+            IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+            RETURN NEW;
+        END IF;
+        RAISE EXCEPTION 'Dossier cloture : ses factures, ses frais et leur repartition sont figes. Une facture tardive s''ajoute en « frais post-cloture ».'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
 $$;
 
 
@@ -2084,7 +2370,7 @@ BEGIN
             -- le lot, laisse ce qui l'ISOLE.
             SELECT m.code_type_mvt, m.reference_document INTO v_type, v_doc
               FROM mouvement m WHERE m.id_mouvement = NEW.id_mouvement;
-            IF v_type IN ('RETOUR_MACHINE', 'ANNUL_CHARGE_MACHINE', 'RETOUR_FOURN',
+            IF v_type IN ('RETOUR_MACHINE', 'ANNUL_CHARGE_MACHINE', 'RETOUR_FOURN', 'RETOUR_PRET',
                           'AJUST_INV_POS', 'AJUST_INV_NEG', 'ENTREE_REC') THEN
                 RETURN NEW;
             END IF;
@@ -2101,7 +2387,15 @@ BEGIN
                 SELECT 1 FROM demande_autorisation d
                  WHERE d.type_demande = 'LOT_BLOQUE' AND d.statut = 'ACCORDEE'
                    AND d.code_reference = NEW.code_reference AND d.lot_fournisseur = NEW.lot_fournisseur
-                   AND d.document = v_doc AND d.date_consommation IS NULL) THEN
+                   AND d.document = v_doc AND d.date_consommation IS NULL
+                   AND (d.kg_autorises IS NULL OR NEW.quantite_kg + COALESCE((
+                        SELECT sum(lm.quantite_kg) FROM ligne_mouvement lm
+                          JOIN mouvement m2 ON m2.id_mouvement = lm.id_mouvement
+                         WHERE m2.code_type_mvt = 'CHARGE_MACHINE' AND m2.reference_document = v_doc
+                           AND lm.code_reference = NEW.code_reference
+                           AND lm.lot_fournisseur = NEW.lot_fournisseur
+                           AND NOT EXISTS (SELECT 1 FROM mouvement inv WHERE inv.id_mouvement_contrepasse = m2.id_mouvement)
+                       ), 0) <= d.kg_autorises + 0.0005)) THEN
                 RETURN NEW;
             END IF;
             RAISE EXCEPTION 'LOT-BLOQUE : le lot % de % est bloque par la qualite : il ne part ni en production, ni sur machine, ni en fusion. Il peut revenir d''une machine, aller en quarantaine ou retourner au fournisseur.',
@@ -2150,8 +2444,17 @@ BEGIN
           FROM reference r WHERE r.code_reference = NEW.code_reference
         ON CONFLICT (code_reference, lot_fournisseur) DO NOTHING;
     ELSE
+        IF v_signe = 1 THEN
+            INSERT INTO lot_evenement (code_reference, lot_fournisseur, type_evenement, motif, details)
+            SELECT NEW.code_reference, NEW.lot_fournisseur, 'REOUVERTURE',
+                   'Lot solde qui recoit du fil : remis en service',
+                   jsonb_build_object('id_mouvement', NEW.id_mouvement, 'quantite_kg', NEW.quantite_kg)
+              FROM lot WHERE code_reference = NEW.code_reference
+               AND lot_fournisseur = NEW.lot_fournisseur AND statut = 'SOLDE';
+        END IF;
         UPDATE lot
            SET date_derniere_activite = to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+               statut = CASE WHEN v_signe = 1 AND statut = 'SOLDE' THEN 'LIBRE' ELSE statut END,
                categorie = CASE WHEN v_signe = 1 AND categorie = 'RESTES' AND v_atteint
                                 THEN 'PROJET' ELSE categorie END
          WHERE code_reference = NEW.code_reference AND lot_fournisseur = NEW.lot_fournisseur;
@@ -2309,6 +2612,41 @@ $$;
 ALTER FUNCTION public.fn_trg_lmvt_stock_suffisant() OWNER TO gestionfil;
 
 --
+-- Name: fn_trg_lot_evenement_immuable(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_lot_evenement_immuable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'lot_evenement est un journal : ni modification, ni suppression.';
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_lot_evenement_immuable() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_lot_pas_solde_sur_machine(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_lot_pas_solde_sur_machine() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.statut = 'SOLDE' AND OLD.statut IS DISTINCT FROM 'SOLDE' AND EXISTS (
+        SELECT 1 FROM machine_etat e
+         WHERE e.code_reference = NEW.code_reference AND e.lot_fournisseur = NEW.lot_fournisseur AND e.kg > 0) THEN
+        NEW.statut := OLD.statut;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_lot_pas_solde_sur_machine() OWNER TO gestionfil;
+
+--
 -- Name: fn_trg_machine_decision_maj(); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -2426,6 +2764,53 @@ $$;
 ALTER FUNCTION public.fn_trg_mouvement_immuable_u() OWNER TO gestionfil;
 
 --
+-- Name: fn_trg_mouvement_machine_annulation(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_mouvement_machine_annulation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    o_type      text;
+    o_numero    text;
+    o_decision  text;
+    o_fiche     text;
+    attendu     text;
+BEGIN
+    IF NEW.code_type_mvt IN ('ANNUL_CHARGE_MACHINE', 'ANNUL_RETOUR_MACHINE')
+       AND NEW.id_mouvement_contrepasse IS NULL THEN
+        RAISE EXCEPTION 'MACHINE-ANNULATION : % annule un mouvement de fiche machine : il doit le designer.',
+            NEW.code_type_mvt USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.id_mouvement_contrepasse IS NULL THEN
+        RETURN NEW;
+    END IF;
+    SELECT code_type_mvt, numero_mouvement, id_decision_machine, reference_document
+      INTO o_type, o_numero, o_decision, o_fiche
+      FROM mouvement WHERE id_mouvement = NEW.id_mouvement_contrepasse;
+    IF o_type IN ('ANNUL_CHARGE_MACHINE', 'ANNUL_RETOUR_MACHINE') THEN
+        RAISE EXCEPTION 'MACHINE-ANNULATION : % est deja une annulation de fiche machine : on n''annule pas une annulation.',
+            o_numero USING ERRCODE = 'check_violation';
+    END IF;
+    IF o_type NOT IN ('CHARGE_MACHINE', 'RETOUR_MACHINE') THEN
+        RETURN NEW;
+    END IF;
+    attendu := CASE o_type WHEN 'CHARGE_MACHINE' THEN 'ANNUL_CHARGE_MACHINE' ELSE 'ANNUL_RETOUR_MACHINE' END;
+    IF NEW.code_type_mvt <> attendu
+       OR NEW.id_decision_machine IS DISTINCT FROM o_decision
+       OR NOT EXISTS (SELECT 1 FROM machine_decision d
+                       WHERE d.id_decision = o_decision AND d.statut = 'ACTIVE' AND d.est_tete = 1) THEN
+        RAISE EXCEPTION 'MACHINE-ANNULATION : % vient de la fiche machine % : il ne se defait qu''en annulant ou en devalidant cette fiche, la derniere de son etage, qui ramene aussi l''etage a son etat precedent.',
+            o_numero, COALESCE(o_fiche, '?') USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_mouvement_machine_annulation() OWNER TO gestionfil;
+
+--
 -- Name: fn_trg_param_histo_immuable_d(); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -2501,6 +2886,95 @@ $$;
 
 
 ALTER FUNCTION public.fn_trg_parametre_historiser() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_parametre_type(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_parametre_type() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $_$
+DECLARE
+    v text := btrim(COALESCE(NEW.valeur_courante, ''));
+BEGIN
+    IF NEW.type_donnee = 'ENTIER' AND v !~ '^[0-9]+$' THEN
+        RAISE EXCEPTION 'PARAMETRE : % attend un entier positif ou nul, pas « % ».',
+            NEW.code_parametre, NEW.valeur_courante USING ERRCODE = 'check_violation';
+    ELSIF NEW.type_donnee = 'DECIMAL' AND v !~ '^[0-9]+([.][0-9]+)?$' THEN
+        RAISE EXCEPTION 'PARAMETRE : % attend un nombre positif ou nul, avec un point (2.5), pas « % ».',
+            NEW.code_parametre, NEW.valeur_courante USING ERRCODE = 'check_violation';
+    ELSIF NEW.type_donnee = 'DATE' THEN
+        IF v !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
+            RAISE EXCEPTION 'PARAMETRE : % attend une date AAAA-MM-JJ, pas « % ».',
+                NEW.code_parametre, NEW.valeur_courante USING ERRCODE = 'check_violation';
+        END IF;
+        BEGIN
+            PERFORM v::date;
+        EXCEPTION WHEN others THEN
+            RAISE EXCEPTION 'PARAMETRE : % : « % » n''est pas une date qui existe.',
+                NEW.code_parametre, NEW.valeur_courante USING ERRCODE = 'check_violation';
+        END;
+    END IF;
+    IF NEW.type_donnee IN ('ENTIER', 'DECIMAL', 'DATE') THEN
+        NEW.valeur_courante := v;
+    END IF;
+    RETURN NEW;
+END;
+$_$;
+
+
+ALTER FUNCTION public.fn_trg_parametre_type() OWNER TO gestionfil;
+
+--
+-- Name: fn_trg_pesee_auteur(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_pesee_auteur() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_qui text := NULLIF(current_setting('gestionfil.id_utilisateur', true), '');
+    v_id  text;
+BEGIN
+    IF v_qui IS NULL THEN
+        RETURN NULL;
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        v_id := OLD.id_reception;
+    ELSE
+        v_id := NEW.id_reception;
+    END IF;
+    -- Une mise a jour qui ne touche pas la pesee (lot genere, attendu recale,
+    -- mouvement rattache, qualite) ne change pas l'auteur de la pesee.
+    IF TG_OP = 'UPDATE' THEN
+        IF TG_TABLE_NAME = 'ligne_reception' THEN
+            IF (NEW.quantite_pesee_unite, NEW.quantite_stock_kg, NEW.unite_saisie, NEW.nb_bobines_saisi,
+                NEW.nb_palettes_saisi, NEW.code_reference)
+               IS NOT DISTINCT FROM
+               (OLD.quantite_pesee_unite, OLD.quantite_stock_kg, OLD.unite_saisie, OLD.nb_bobines_saisi,
+                OLD.nb_palettes_saisi, OLD.code_reference) THEN
+                RETURN NULL;
+            END IF;
+        ELSE
+            IF (NEW.quantite_recue_kg, NEW.nb_bobines, NEW.nb_palettes)
+               IS NOT DISTINCT FROM (OLD.quantite_recue_kg, OLD.nb_bobines, OLD.nb_palettes) THEN
+                RETURN NULL;
+            END IF;
+        END IF;
+    END IF;
+    IF TG_TABLE_NAME = 'ligne_reception' THEN
+        UPDATE reception SET id_utilisateur_pesee = v_qui
+         WHERE id_reception = v_id AND id_utilisateur_pesee IS DISTINCT FROM v_qui;
+    ELSE
+        UPDATE import_receptions SET id_utilisateur_pesee = v_qui
+         WHERE id_reception = v_id AND id_utilisateur_pesee IS DISTINCT FROM v_qui;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_pesee_auteur() OWNER TO gestionfil;
 
 --
 -- Name: fn_trg_pf_coherence(); Type: FUNCTION; Schema: public; Owner: gestionfil
@@ -2810,6 +3284,49 @@ $$;
 ALTER FUNCTION public.fn_trg_reception_sod_acheteur() OWNER TO gestionfil;
 
 --
+-- Name: fn_trg_reception_valideur_pas_peseur(); Type: FUNCTION; Schema: public; Owner: gestionfil
+--
+
+CREATE FUNCTION public.fn_trg_reception_valideur_pas_peseur() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_qui text := NULLIF(current_setting('gestionfil.id_utilisateur', true), '');
+BEGIN
+    IF TG_TABLE_NAME = 'reception' THEN
+        IF NEW.statut = 'VALIDE' AND OLD.statut IS DISTINCT FROM 'VALIDE'
+           AND NEW.id_utilisateur_pesee IS NOT NULL
+           AND NEW.id_utilisateur_pesee = COALESCE(NEW.id_utilisateur_controle, v_qui) THEN
+            RAISE EXCEPTION 'B4 regle 2 : vous avez pese ou corrige la pesee de la reception % : un autre doit la valider. Renvoyez-la au magasinier si elle est fausse.',
+                NEW.numero_reception USING ERRCODE = 'check_violation';
+        END IF;
+    ELSE
+        IF NEW.statut = 'VALIDEE' AND OLD.statut IS DISTINCT FROM 'VALIDEE'
+           AND NEW.id_utilisateur_pesee IS NOT NULL
+           AND NEW.id_utilisateur_pesee = COALESCE(NEW.id_utilisateur_validation, v_qui) THEN
+            RAISE EXCEPTION 'B4 regle 2 : vous avez pese ou corrige la pesee de la reception % : un autre doit la valider. Renvoyez-la au magasinier si elle est fausse.',
+                NEW.numero USING ERRCODE = 'check_violation';
+        END IF;
+        -- 5. Le createur d'un bon servi par cette reception ne la valide pas (U1).
+        IF NEW.statut = 'VALIDEE' AND OLD.statut IS DISTINCT FROM 'VALIDEE' AND EXISTS (
+            SELECT 1 FROM import_reception_lignes rl
+              JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+              JOIN ligne_bc lb ON lb.id_ligne_bc = fl.id_ligne_bc
+              JOIN bon_commande bc ON bc.id_bc = lb.id_bc
+             WHERE rl.id_reception = NEW.id_reception
+               AND bc.id_utilisateur_creation = COALESCE(NEW.id_utilisateur_validation, v_qui)) THEN
+            RAISE EXCEPTION 'B4 regle 2 : le createur du bon de commande ne valide pas la reception % qui le sert.',
+                NEW.numero USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_trg_reception_valideur_pas_peseur() OWNER TO gestionfil;
+
+--
 -- Name: fn_trg_recette_verrou_plan_d(); Type: FUNCTION; Schema: public; Owner: gestionfil
 --
 
@@ -2952,15 +3469,19 @@ ALTER FUNCTION public.fn_trg_taux_pivot() OWNER TO gestionfil;
 
 CREATE FUNCTION public.fn_trg_transition_bc() RETURNS trigger
     LANGUAGE plpgsql
-    AS $$
-BEGIN
-    IF OLD.statut <> NEW.statut
- AND NOT EXISTS (SELECT 1 FROM transition_statut
-                 WHERE entite = 'bon_commande' AND statut_source = OLD.statut AND statut_cible = NEW.statut) THEN
-        RAISE EXCEPTION 'Transition de statut interdite sur le bon de commande.';
-    END IF;
-    RETURN NEW;
-END;
+    AS $$
+BEGIN
+    IF OLD.statut <> NEW.statut
+       AND NOT EXISTS (SELECT 1 FROM transition_statut
+                        WHERE entite = 'bon_commande' AND statut_source = OLD.statut AND statut_cible = NEW.statut)
+       -- Le recalage apres contre-passation (fn_recaler_lignes_bc), et lui seul.
+       AND NOT (COALESCE(current_setting('gestionfil.recalcul_bc', true), '') = 'on'
+                AND OLD.statut IN ('CLOTURE', 'LIVRE_PARTIEL')
+                AND NEW.statut IN ('LIVRE_PARTIEL', 'ENVOYE')) THEN
+        RAISE EXCEPTION 'Transition de statut interdite sur le bon de commande.';
+    END IF;
+    RETURN NEW;
+END;
 $$;
 
 
@@ -3257,6 +3778,9 @@ CREATE TABLE public.bon_commande (
     date_validation text,
     nombre_conteneurs bigint,
     mention_expedition text,
+    date_cours_engage text,
+    source_taux_engage text,
+    motif_taux_engage text,
     CONSTRAINT bon_commande_check1 CHECK (((statut = ANY (ARRAY['BROUILLON'::text, 'EN_ATTENTE_VALIDATION'::text, 'ANNULE'::text])) OR ((id_utilisateur_validation IS NOT NULL) AND (date_validation IS NOT NULL)))),
     CONSTRAINT bon_commande_montant_total_devise_check CHECK (((montant_total_devise IS NULL) OR (montant_total_devise >= (0)::numeric))),
     CONSTRAINT bon_commande_montant_total_mad_check CHECK (((montant_total_mad IS NULL) OR (montant_total_mad >= (0)::numeric))),
@@ -3264,6 +3788,8 @@ CREATE TABLE public.bon_commande (
     CONSTRAINT bon_commande_nombre_conteneurs_check CHECK (((nombre_conteneurs IS NULL) OR (nombre_conteneurs > 0))),
     CONSTRAINT bon_commande_statut_check CHECK ((statut = ANY (ARRAY['BROUILLON'::text, 'EN_ATTENTE_VALIDATION'::text, 'VALIDE'::text, 'ENVOYE'::text, 'LIVRE_PARTIEL'::text, 'CLOTURE'::text, 'ANNULE'::text]))),
     CONSTRAINT bon_commande_taux_change_engage_check CHECK ((taux_change_engage > (0)::numeric)),
+    CONSTRAINT ck_bc_motif_taux_saisi CHECK (((source_taux_engage IS DISTINCT FROM 'SAISI'::text) OR (length(btrim(COALESCE(motif_taux_engage, ''::text))) >= 5))),
+    CONSTRAINT ck_bc_source_taux_engage CHECK (((source_taux_engage IS NULL) OR (source_taux_engage = ANY (ARRAY['REFERENCE'::text, 'SAISI'::text])))),
     CONSTRAINT ck_date_bon_commande_date_bc_b7d114d5 CHECK (((date_bc IS NULL) OR (date_bc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_bon_commande_date_creation_d937ee38 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_bon_commande_date_envoi_bdfd908b CHECK (((date_envoi IS NULL) OR (date_envoi ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
@@ -3274,6 +3800,13 @@ CREATE TABLE public.bon_commande (
 
 
 ALTER TABLE public.bon_commande OWNER TO gestionfil;
+
+--
+-- Name: COLUMN bon_commande.date_cours_engage; Type: COMMENT; Schema: public; Owner: gestionfil
+--
+
+COMMENT ON COLUMN public.bon_commande.date_cours_engage IS 'Le jour du cours qui justifie le taux engage (regle 10) : celui de la reference, ou le jour de la saisie.';
+
 
 --
 -- Name: categorie_matiere; Type: TABLE; Schema: public; Owner: gestionfil
@@ -3468,9 +4001,12 @@ CREATE TABLE public.demande_autorisation (
     date_decision text,
     motif_decision text,
     date_consommation text,
+    kg_autorises numeric(18,4),
+    kg_consommes numeric(18,4),
     CONSTRAINT ck_date_demande_autorisation_date_consommation_5c696ea7 CHECK (((date_consommation IS NULL) OR (date_consommation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_demande_autorisation_date_decision_b08f8b51 CHECK (((date_decision IS NULL) OR (date_decision ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_demande_autorisation_date_demande_016a2222 CHECK (((date_demande IS NULL) OR (date_demande ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
+    CONSTRAINT ck_demande_kg_autorises CHECK (((kg_autorises IS NULL) OR (kg_autorises > (0)::numeric))),
     CONSTRAINT demande_autorisation_check CHECK (((statut = ANY (ARRAY['EN_ATTENTE'::text, 'ANNULEE'::text])) OR ((id_decideur IS NOT NULL) AND (date_decision IS NOT NULL)))),
     CONSTRAINT demande_autorisation_motif_check CHECK ((btrim(motif) <> ''::text)),
     CONSTRAINT demande_autorisation_niveau_check CHECK ((niveau = ANY (ARRAY['ORANGE'::text, 'ROUGE'::text]))),
@@ -3515,6 +4051,8 @@ CREATE TABLE public.dossier_lignes_frais (
     montant_dhs numeric(18,2) GENERATED ALWAYS AS (round((montant_devise * cours_change), 2)) STORED,
     id_utilisateur_creation text NOT NULL,
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    post_cloture smallint DEFAULT 0 NOT NULL,
+    motif_post_cloture text,
     CONSTRAINT ck_date_dossier_lignes_frais_date_creation_93584c7f CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT dossier_lignes_frais_cours_change_check CHECK ((cours_change > (0)::numeric)),
     CONSTRAINT dossier_lignes_frais_montant_devise_check CHECK ((montant_devise > (0)::numeric))
@@ -3758,6 +4296,28 @@ CREATE TABLE public.historique_prix (
 ALTER TABLE public.historique_prix OWNER TO gestionfil;
 
 --
+-- Name: historique_prix_revision; Type: TABLE; Schema: public; Owner: gestionfil
+--
+
+CREATE TABLE public.historique_prix_revision (
+    id_revision text DEFAULT (gen_random_uuid())::text NOT NULL,
+    id_ligne_reception text NOT NULL,
+    version integer NOT NULL,
+    prix_kg_devise numeric(18,4),
+    code_devise text,
+    taux_change numeric(9,4),
+    prix_kg_mad numeric(18,4) NOT NULL,
+    quantite_achetee_kg numeric(18,4) NOT NULL,
+    total_mad numeric(18,2) NOT NULL,
+    date_enregistrement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    id_utilisateur text,
+    CONSTRAINT historique_prix_revision_version_check CHECK ((version >= 2))
+);
+
+
+ALTER TABLE public.historique_prix_revision OWNER TO gestionfil;
+
+--
 -- Name: import_ajustements_cump; Type: TABLE; Schema: public; Owner: gestionfil
 --
 
@@ -3774,9 +4334,15 @@ CREATE TABLE public.import_ajustements_cump (
     montant_dhs numeric(18,2) NOT NULL,
     date_ajustement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_utilisateur text NOT NULL,
+    origine text DEFAULT 'FRAIS'::text NOT NULL,
+    numero_piece text,
+    motif text,
+    id_mouvement_retour text,
     CONSTRAINT ck_date_import_ajustements_cump_date_ajustement_dc57f3d3 CHECK (((date_ajustement IS NULL) OR (date_ajustement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
-    CONSTRAINT import_ajustements_cump_check CHECK ((((nature = 'STOCK'::text) AND (code_magasin IS NOT NULL) AND (cump_apres IS NOT NULL)) OR ((nature = 'CONSOMME'::text) AND (code_magasin IS NULL)))),
-    CONSTRAINT import_ajustements_cump_nature_check CHECK ((nature = ANY (ARRAY['STOCK'::text, 'CONSOMME'::text]))),
+    CONSTRAINT ck_iac_avoir_justifie CHECK (((origine = 'FRAIS'::text) OR ((COALESCE(btrim(numero_piece), ''::text) <> ''::text) AND (char_length(btrim(COALESCE(motif, ''::text))) >= 5)))),
+    CONSTRAINT ck_iac_origine CHECK ((origine = ANY (ARRAY['FRAIS'::text, 'AVOIR_PRIX'::text, 'AVOIR_RETOUR'::text]))),
+    CONSTRAINT import_ajustements_cump_check CHECK ((((nature = 'STOCK'::text) AND (code_magasin IS NOT NULL) AND (cump_apres IS NOT NULL)) OR ((nature = 'CONSOMME'::text) AND (code_magasin IS NULL)) OR ((nature = 'RETOUR'::text) AND (code_magasin IS NULL) AND (id_mouvement_retour IS NOT NULL)))),
+    CONSTRAINT import_ajustements_cump_nature_check CHECK ((nature = ANY (ARRAY['STOCK'::text, 'CONSOMME'::text, 'RETOUR'::text]))),
     CONSTRAINT import_ajustements_cump_quantite_recue_kg_check CHECK ((quantite_recue_kg >= (0)::numeric)),
     CONSTRAINT import_ajustements_cump_stock_kg_check CHECK ((stock_kg >= (0)::numeric))
 );
@@ -3996,6 +4562,10 @@ CREATE TABLE public.import_receptions (
     date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     id_utilisateur_validation text,
     date_validation text,
+    id_utilisateur_pesee text,
+    motif_renvoi text,
+    date_renvoi text,
+    id_utilisateur_renvoi text,
     CONSTRAINT ck_date_import_receptions_date_creation_1c2a508a CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_import_receptions_date_reception_16b1a833 CHECK (((date_reception IS NULL) OR (date_reception ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_import_receptions_date_validation_e5626fad CHECK (((date_validation IS NULL) OR (date_validation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
@@ -4499,7 +5069,7 @@ CREATE TABLE public.lot_evenement (
     date_evenement text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
     CONSTRAINT ck_date_lot_evenement_date_evenement_658baf61 CHECK (((date_evenement IS NULL) OR (date_evenement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT lot_evenement_motif_check CHECK ((btrim(motif) <> ''::text)),
-    CONSTRAINT lot_evenement_type_evenement_check CHECK ((type_evenement = ANY (ARRAY['BLOCAGE'::text, 'DEBLOCAGE'::text, 'BASCULEMENT_RESTES'::text, 'RETOUR_PROJET'::text, 'FUSION'::text, 'DECISION_DORMANT'::text, 'DEROGATION'::text, 'SOLDE'::text, 'IDENTIFICATION'::text])))
+    CONSTRAINT lot_evenement_type_evenement_check CHECK ((type_evenement = ANY (ARRAY['BLOCAGE'::text, 'DEBLOCAGE'::text, 'BASCULEMENT_RESTES'::text, 'RETOUR_PROJET'::text, 'FUSION'::text, 'DECISION_DORMANT'::text, 'DEROGATION'::text, 'SOLDE'::text, 'IDENTIFICATION'::text, 'REOUVERTURE'::text, 'PLANCHER'::text])))
 );
 
 
@@ -5015,6 +5585,7 @@ CREATE TABLE public.mouvement (
     id_mouvement_contrepasse text,
     motif_contrepassation text,
     id_decision_machine text,
+    tiers text,
     CONSTRAINT ck_date_mouvement_date_creation_e24fb88e CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_mouvement_date_mouvement_21abb9f7 CHECK (((date_mouvement IS NULL) OR (date_mouvement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT mouvement_est_initial_check CHECK ((est_initial = ANY (ARRAY[(0)::bigint, (1)::bigint])))
@@ -5029,6 +5600,36 @@ ALTER TABLE public.mouvement OWNER TO gestionfil;
 
 COMMENT ON COLUMN public.mouvement.id_mouvement_contrepasse IS 'Le mouvement que celui-ci annule. Present = cette ligne EST une contre-passation.';
 
+
+--
+-- Name: COLUMN mouvement.tiers; Type: COMMENT; Schema: public; Owner: gestionfil
+--
+
+COMMENT ON COLUMN public.mouvement.tiers IS 'Pour un pret (HM_PRET) et son retour (RETOUR_PRET) : l''usine qui emprunte et rend.';
+
+
+--
+-- Name: paiement_facture_import; Type: TABLE; Schema: public; Owner: gestionfil
+--
+
+CREATE TABLE public.paiement_facture_import (
+    id_paiement text DEFAULT (gen_random_uuid())::text NOT NULL,
+    id_facture text NOT NULL,
+    date_paiement text NOT NULL,
+    montant_devise numeric(14,2) NOT NULL,
+    montant_mad numeric(14,2) NOT NULL,
+    cours_paiement numeric(12,6) GENERATED ALWAYS AS (round((montant_mad / montant_devise), 6)) STORED,
+    reference_banque text,
+    notes text,
+    id_utilisateur text,
+    date_creation text DEFAULT to_char((now() AT TIME ZONE 'UTC'::text), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'::text) NOT NULL,
+    CONSTRAINT ck_paiement_date CHECK ((date_paiement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'::text)),
+    CONSTRAINT paiement_facture_import_montant_devise_check CHECK ((montant_devise > (0)::numeric)),
+    CONSTRAINT paiement_facture_import_montant_mad_check CHECK ((montant_mad > (0)::numeric))
+);
+
+
+ALTER TABLE public.paiement_facture_import OWNER TO gestionfil;
 
 --
 -- Name: parametre; Type: TABLE; Schema: public; Owner: gestionfil
@@ -5216,7 +5817,7 @@ CREATE TABLE public.plan_achat (
     CONSTRAINT plan_achat_prix_estime_mad_check CHECK ((prix_estime_mad > (0)::numeric)),
     CONSTRAINT plan_achat_quantite_mrp_kg_check CHECK (((quantite_mrp_kg IS NULL) OR (quantite_mrp_kg > (0)::numeric))),
     CONSTRAINT plan_achat_quantite_suggeree_kg_check CHECK ((quantite_suggeree_kg > (0)::numeric)),
-    CONSTRAINT plan_achat_source_prix_check CHECK ((source_prix = ANY (ARRAY['CMUP'::text, 'CATALOGUE'::text, 'NEGOCIE'::text]))),
+    CONSTRAINT plan_achat_source_prix_check CHECK ((source_prix = ANY (ARRAY['DERNIER_ACHAT'::text, 'CATALOGUE'::text, 'CMUP'::text, 'NEGOCIE'::text, 'AUCUN'::text]))),
     CONSTRAINT plan_achat_statut_check CHECK ((statut = ANY (ARRAY['PROPOSE'::text, 'EN_REVISION'::text, 'VALIDE'::text, 'COMMANDE'::text, 'IGNORE'::text]))),
     CONSTRAINT plan_achat_unite_saisie_check CHECK (((unite_saisie IS NULL) OR (unite_saisie = ANY (ARRAY['kg'::text, 'Palette'::text, 'Bobine'::text, 'ml'::text, 'Lot'::text])))),
     CONSTRAINT plan_achat_urgence_check CHECK ((urgence = ANY (ARRAY['TIER 1'::text, 'TIER 2'::text, 'TIER 3'::text, 'TIER 4'::text])))
@@ -5418,6 +6019,10 @@ CREATE TABLE public.reception (
     code_devise_facture text,
     montant_facture_devise numeric(18,2),
     taux_facture numeric(9,4),
+    id_utilisateur_pesee text,
+    motif_renvoi text,
+    date_renvoi text,
+    id_utilisateur_renvoi text,
     CONSTRAINT ck_date_reception_date_cloture_625d6d68 CHECK (((date_cloture IS NULL) OR (date_cloture ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_reception_date_controle_05308abf CHECK (((date_controle IS NULL) OR (date_controle ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
     CONSTRAINT ck_date_reception_date_creation_852e0f95 CHECK (((date_creation IS NULL) OR (date_creation ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
@@ -5454,16 +6059,24 @@ CREATE TABLE public.reception_ajustements_cmup (
     origine text DEFAULT 'CLOTURE'::text NOT NULL,
     numero_piece text,
     motif text,
+    id_mouvement_retour text,
     CONSTRAINT ck_date_reception_ajustements_cmup_date_ajustement_a5466eea CHECK (((date_ajustement IS NULL) OR (date_ajustement ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$'::text))),
-    CONSTRAINT ck_rec_ajust_origine CHECK (((origine = ANY (ARRAY['CLOTURE'::text, 'AVOIR'::text, 'COMPLEMENT'::text])) AND ((origine = 'CLOTURE'::text) OR (length(btrim(COALESCE(motif, ''::text))) >= 5)))),
-    CONSTRAINT reception_ajustements_cmup_check CHECK ((((nature = 'STOCK'::text) AND (code_magasin IS NOT NULL) AND (cmup_apres IS NOT NULL)) OR ((nature = 'ECART_PRIX'::text) AND (code_magasin IS NULL)))),
-    CONSTRAINT reception_ajustements_cmup_nature_check CHECK ((nature = ANY (ARRAY['STOCK'::text, 'ECART_PRIX'::text]))),
+    CONSTRAINT ck_rec_ajust_origine CHECK (((origine = ANY (ARRAY['CLOTURE'::text, 'AVOIR'::text, 'COMPLEMENT'::text, 'AVOIR_RETOUR'::text, 'FACTURE_NETTE'::text])) AND ((origine = 'CLOTURE'::text) OR (length(btrim(COALESCE(motif, ''::text))) >= 5)))),
+    CONSTRAINT reception_ajustements_cmup_check CHECK ((((nature = 'STOCK'::text) AND (code_magasin IS NOT NULL) AND (cmup_apres IS NOT NULL)) OR ((nature = 'ECART_PRIX'::text) AND (code_magasin IS NULL)) OR ((nature = 'RETOUR'::text) AND (code_magasin IS NULL) AND (id_mouvement_retour IS NOT NULL)))),
+    CONSTRAINT reception_ajustements_cmup_nature_check CHECK ((nature = ANY (ARRAY['STOCK'::text, 'ECART_PRIX'::text, 'RETOUR'::text]))),
     CONSTRAINT reception_ajustements_cmup_quantite_recue_kg_check CHECK ((quantite_recue_kg >= (0)::numeric)),
     CONSTRAINT reception_ajustements_cmup_stock_kg_check CHECK ((stock_kg >= (0)::numeric))
 );
 
 
 ALTER TABLE public.reception_ajustements_cmup OWNER TO gestionfil;
+
+--
+-- Name: COLUMN reception_ajustements_cmup.id_mouvement_retour; Type: COMMENT; Schema: public; Owner: gestionfil
+--
+
+COMMENT ON COLUMN public.reception_ajustements_cmup.id_mouvement_retour IS 'Nature RETOUR : le retour fournisseur solde par une facture nette ou un avoir pour retour.';
+
 
 --
 -- Name: recette; Type: TABLE; Schema: public; Owner: gestionfil
@@ -5669,6 +6282,23 @@ CREATE TABLE public.role_utilisateur (
 
 
 ALTER TABLE public.role_utilisateur OWNER TO gestionfil;
+
+--
+-- Name: saison_mois; Type: TABLE; Schema: public; Owner: gestionfil
+--
+
+CREATE TABLE public.saison_mois (
+    mois smallint NOT NULL,
+    libelle text NOT NULL,
+    coefficient numeric(6,3) DEFAULT 1 NOT NULL,
+    date_modification text,
+    id_utilisateur_modif text,
+    CONSTRAINT saison_mois_coefficient_check CHECK (((coefficient > (0)::numeric) AND (coefficient <= (3)::numeric))),
+    CONSTRAINT saison_mois_mois_check CHECK (((mois >= 1) AND (mois <= 12)))
+);
+
+
+ALTER TABLE public.saison_mois OWNER TO gestionfil;
 
 --
 -- Name: snapshot_mrp; Type: TABLE; Schema: public; Owner: gestionfil
@@ -6153,12 +6783,16 @@ CREATE VIEW public.v_besoin_horizon AS
         ), besoin AS (
          SELECT besoin_plan.code_reference,
             besoin_plan.annee_mois,
-            besoin_plan.quantite_kg
+            besoin_plan.quantite_kg,
+            false AS prolonge
            FROM besoin_plan
         UNION ALL
          SELECT b.code_reference,
             m_1.annee_mois,
-            (sum(b.quantite_kg) / (NULLIF(e.nb, 0))::numeric)
+            ((sum(b.quantite_kg) / (NULLIF(e.nb, 0))::numeric) * COALESCE(( SELECT s.coefficient
+                   FROM public.saison_mois s
+                  WHERE (s.mois = (substr(m_1.annee_mois, 6, 2))::smallint)), (1)::numeric)),
+            true
            FROM (((besoin_plan b
              CROSS JOIN etendue e)
              CROSS JOIN mois m_1)
@@ -6170,7 +6804,9 @@ CREATE VIEW public.v_besoin_horizon AS
     w.lead_j,
     w.couv_j,
     round(COALESCE(sum(((bm.quantite_kg * GREATEST((0)::numeric, (LEAST(m.fin_j, w.lead_j) - m.debut_j))) / 30.0)), (0)::numeric), 4) AS dem_lead_kg,
-    round(COALESCE(sum(((bm.quantite_kg * GREATEST((0)::numeric, (LEAST(m.fin_j, (w.lead_j + w.couv_j)) - GREATEST(m.debut_j, w.lead_j)))) / 30.0)), (0)::numeric), 4) AS sorties_prevues_kg
+    round(COALESCE(sum(((bm.quantite_kg * GREATEST((0)::numeric, (LEAST(m.fin_j, (w.lead_j + w.couv_j)) - GREATEST(m.debut_j, w.lead_j)))) / 30.0)), (0)::numeric), 4) AS sorties_prevues_kg,
+    round(COALESCE(sum(((bm.quantite_kg * GREATEST((0)::numeric, (LEAST(m.fin_j, w.lead_j) - m.debut_j))) / 30.0)) FILTER (WHERE bm.prolonge), (0)::numeric), 4) AS dem_lead_prolonge_kg,
+    round(COALESCE(sum(((bm.quantite_kg * GREATEST((0)::numeric, (LEAST(m.fin_j, (w.lead_j + w.couv_j)) - GREATEST(m.debut_j, w.lead_j)))) / 30.0)) FILTER (WHERE bm.prolonge), (0)::numeric), 4) AS sorties_prolongees_kg
    FROM ((fenetre w
      CROSS JOIN mois m)
      LEFT JOIN besoin bm ON (((bm.code_reference = w.code_reference) AND (bm.annee_mois = m.annee_mois))))
@@ -6229,7 +6865,7 @@ CREATE VIEW public.v_conso_reelle AS
            FROM ((public.ligne_mouvement lm
              JOIN public.mouvement m ON ((m.id_mouvement = lm.id_mouvement)))
              JOIN public.type_mouvement tm ON ((tm.code_type_mvt = m.code_type_mvt)))
-          WHERE ((tm.signe = '-1'::integer) AND (m.code_type_mvt = 'SORTIE_PROD'::text))
+          WHERE ((tm.signe = '-1'::integer) AND ((m.code_type_mvt = 'SORTIE_PROD'::text) OR ((m.code_type_mvt = 'SORTIE_HORS_MACHINE'::text) AND (COALESCE(lm.code_motif_ligne, ''::text) <> 'HM_PRET'::text))))
         UNION ALL
          SELECT e.code_reference,
             (0)::numeric AS "numeric",
@@ -6302,7 +6938,7 @@ CREATE VIEW public.v_encours_fiable AS
            FROM ((public.import_facture_lignes fl
              JOIN public.import_factures f ON ((f.id_facture = fl.id_facture)))
              JOIN public.import_dossiers d ON ((d.id_dossier = f.id_dossier)))
-          WHERE ((d.statut <> 'CLOTURE'::text) AND (fl.type_ligne = 'ERP'::text) AND (fl.soldee = 0) AND (fl.id_ligne_bc IS NULL) AND (fl.reste_kg > (0)::numeric))
+          WHERE ((d.statut <> ALL (ARRAY['CLOTURE'::text, 'BROUILLON'::text])) AND (fl.type_ligne = 'ERP'::text) AND (fl.soldee = 0) AND (fl.id_ligne_bc IS NULL) AND (fl.reste_kg > (0)::numeric))
           GROUP BY fl.code_reference
         ), refs AS (
          SELECT bons.code_reference
@@ -6708,6 +7344,54 @@ SELECT
 
 
 ALTER VIEW public.v_besoin_mrp_calcule OWNER TO gestionfil;
+
+--
+-- Name: v_change_paiement; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_change_paiement AS
+ WITH f AS (
+         SELECT fa.id_facture,
+            fa.id_dossier,
+            fa.numero_facture,
+            fa.code_devise,
+            fa.taux_change AS cours_ded,
+            substr(COALESCE(NULLIF(btrim(d.date_dum), ''::text), fa.date_facture), 1, 10) AS date_ded
+           FROM (public.import_factures fa
+             JOIN public.import_dossiers d ON ((d.id_dossier = fa.id_dossier)))
+        )
+ SELECT p.id_paiement,
+    f.id_facture,
+    f.id_dossier,
+    f.numero_facture,
+    f.code_devise,
+    f.date_ded,
+    f.cours_ded,
+    p.date_paiement,
+    p.montant_devise,
+    p.montant_mad,
+    p.cours_paiement,
+    (substr(f.date_ded, 1, 4))::integer AS annee_ded,
+    (substr(p.date_paiement, 1, 4))::integer AS annee_paiement,
+        CASE
+            WHEN (substr(p.date_paiement, 1, 4) > substr(f.date_ded, 1, 4)) THEN public.fn_cours_bam_fin_annee(f.code_devise, (substr(f.date_ded, 1, 4))::integer)
+            ELSE NULL::numeric
+        END AS cours_fin_annee,
+    round(
+        CASE
+            WHEN (substr(p.date_paiement, 1, 4) > substr(f.date_ded, 1, 4)) THEN (p.montant_devise * (public.fn_cours_bam_fin_annee(f.code_devise, (substr(f.date_ded, 1, 4))::integer) - f.cours_ded))
+            ELSE (p.montant_mad - (p.montant_devise * f.cours_ded))
+        END, 2) AS ecart_annee_ded_mad,
+    round(
+        CASE
+            WHEN (substr(p.date_paiement, 1, 4) > substr(f.date_ded, 1, 4)) THEN (p.montant_mad - (p.montant_devise * public.fn_cours_bam_fin_annee(f.code_devise, (substr(f.date_ded, 1, 4))::integer)))
+            ELSE (0)::numeric
+        END, 2) AS ecart_annee_suivante_mad
+   FROM (public.paiement_facture_import p
+     JOIN f ON ((f.id_facture = p.id_facture)));
+
+
+ALTER VIEW public.v_change_paiement OWNER TO gestionfil;
 
 --
 -- Name: v_cockpit_cout_mensuel; Type: VIEW; Schema: public; Owner: gestionfil
@@ -7449,7 +8133,7 @@ CREATE VIEW public.v_ctl_c31 AS
     lr.lot_fournisseur
    FROM (public.ligne_reception lr
      JOIN public.reception rc ON ((rc.id_reception = lr.id_reception)))
-  WHERE ((rc.statut = 'VALIDE'::text) AND (COALESCE(lr.quantite_stock_kg, (0)::numeric) > (0)::numeric) AND (NOT (EXISTS ( SELECT 1
+  WHERE ((rc.statut = ANY (ARRAY['VALIDE'::text, 'CLOTURE'::text])) AND (COALESCE(lr.quantite_stock_kg, (0)::numeric) > (0)::numeric) AND (NOT (EXISTS ( SELECT 1
            FROM (public.ligne_mouvement lm
              JOIN public.mouvement m ON ((m.id_mouvement = lm.id_mouvement)))
           WHERE ((lm.code_reference = lr.code_reference) AND (abs((lm.quantite_kg - lr.quantite_stock_kg)) < 0.001) AND ((lr.lot_fournisseur IS NULL) OR (NOT (lm.lot_fournisseur IS DISTINCT FROM lr.lot_fournisseur))))))));
@@ -7469,7 +8153,7 @@ CREATE VIEW public.v_ctl_c32 AS
     lr.quantite_stock_kg
    FROM (public.ligne_reception lr
      JOIN public.reception rc ON ((rc.id_reception = lr.id_reception)))
-  WHERE ((rc.statut = 'VALIDE'::text) AND (lr.prix_kg_mad IS NOT NULL) AND (lr.prix_kg_mad > (0)::numeric) AND (NOT (EXISTS ( SELECT 1
+  WHERE ((rc.statut = ANY (ARRAY['VALIDE'::text, 'CLOTURE'::text])) AND (lr.prix_kg_mad IS NOT NULL) AND (lr.prix_kg_mad > (0)::numeric) AND (NOT (EXISTS ( SELECT 1
            FROM public.historique_prix hp
           WHERE (hp.id_ligne_reception = lr.id_ligne_reception)))));
 
@@ -7517,27 +8201,24 @@ ALTER VIEW public.v_ctl_c34 OWNER TO gestionfil;
 --
 
 CREATE VIEW public.v_ctl_c35 AS
- SELECT lm.id_ligne_mouvement,
-    mv.numero_mouvement,
-    mv.date_mouvement,
-    e.code_machine,
-    e.libelle,
-    lm.code_reference,
-    lm.lot_fournisseur,
-    lm.nb_bobines,
-    lm.quantite_kg,
-    lm.pourcentage_restant,
-    lm.poids_unitaire_theorique_kg,
-    lm.poids_reel_moyen_bobine_kg,
-    round(lm.ecart_theorique_pct, 2) AS ecart_theorique_pct,
-    mv.responsable,
-    mv.id_utilisateur
-   FROM ((public.ligne_mouvement lm
-     JOIN public.mouvement mv ON ((mv.id_mouvement = lm.id_mouvement)))
-     JOIN public.machine_emplacement e ON ((e.code_magasin = mv.code_magasin)))
-  WHERE ((lm.mode_pesee = 'ESTIMATION'::text) AND (lm.ecart_theorique_pct IS NOT NULL) AND (abs(lm.ecart_theorique_pct) > ( SELECT (parametre.valeur_courante)::numeric AS valeur_courante
+ SELECT z.code_machine,
+    z.code_emplacement,
+    z.libelle,
+    e.code_reference,
+    e.lot_fournisseur,
+    e.nb_bobines,
+    round(e.kg, 3) AS kg,
+    e.poids_unitaire_kg,
+    r.poids_bobine_kg AS poids_catalogue_kg,
+    round((((e.poids_unitaire_kg - r.poids_bobine_kg) / r.poids_bobine_kg) * (100)::numeric), 2) AS ecart_pct,
+    substr(e.date_constat, 1, 10) AS date_constat,
+    e.responsable
+   FROM ((public.machine_etat e
+     JOIN public.machine_emplacement z ON ((z.code_emplacement = e.code_emplacement)))
+     JOIN public.reference r ON ((r.code_reference = e.code_reference)))
+  WHERE ((e.kg > (0)::numeric) AND (e.poids_unitaire_kg > (0)::numeric) AND (r.poids_bobine_kg > (0)::numeric) AND (abs((((e.poids_unitaire_kg - r.poids_bobine_kg) / r.poids_bobine_kg) * (100)::numeric)) > COALESCE(( SELECT (parametre.valeur_courante)::numeric AS valeur_courante
            FROM public.parametre
-          WHERE (parametre.code_parametre = 'P_TolerEstimMachine'::text))));
+          WHERE (parametre.code_parametre = 'P_TolerEstimMachine'::text)), (10)::numeric)));
 
 
 ALTER VIEW public.v_ctl_c35 OWNER TO gestionfil;
@@ -7547,18 +8228,19 @@ ALTER VIEW public.v_ctl_c35 OWNER TO gestionfil;
 --
 
 CREATE VIEW public.v_ctl_c36 AS
- SELECT e.code_machine,
-    e.code_emplacement,
-    e.libelle,
-    max(sm.date_dernier_inventaire) AS dernier_inventaire,
-    round(sum(sm.quantite_kg), 3) AS quantite_kg
-   FROM (public.machine_emplacement e
-     JOIN public.stock_magasin sm ON ((sm.code_magasin = e.code_magasin)))
-  WHERE (e.actif = 1)
-  GROUP BY e.code_machine, e.code_emplacement, e.libelle
- HAVING ((sum(sm.quantite_kg) > (0)::numeric) AND ((max(sm.date_dernier_inventaire) IS NULL) OR (max(sm.date_dernier_inventaire) < to_char(((now() AT TIME ZONE 'UTC'::text) - make_interval(days => ( SELECT (parametre.valeur_courante)::integer AS valeur_courante
+ SELECT z.code_machine,
+    z.code_emplacement,
+    z.libelle,
+    min(substr(e.date_constat, 1, 10)) AS constat_le_plus_ancien,
+    count(*) AS nb_lignes,
+    round(sum(e.kg), 3) AS quantite_kg
+   FROM (public.machine_etat e
+     JOIN public.machine_emplacement z ON ((z.code_emplacement = e.code_emplacement)))
+  WHERE (e.kg > (0)::numeric)
+  GROUP BY z.code_machine, z.code_emplacement, z.libelle
+ HAVING (min(substr(e.date_constat, 1, 10)) < to_char(((CURRENT_DATE - COALESCE(( SELECT (parametre.valeur_courante)::integer AS valeur_courante
            FROM public.parametre
-          WHERE (parametre.code_parametre = 'P_JoursInventMachine'::text)))), 'YYYY-MM-DD'::text))));
+          WHERE (parametre.code_parametre = 'P_JoursInventMachine'::text)), 30)))::timestamp with time zone, 'YYYY-MM-DD'::text));
 
 
 ALTER VIEW public.v_ctl_c36 OWNER TO gestionfil;
@@ -7836,308 +8518,100 @@ CREATE VIEW public.v_ctl_c45 AS
 ALTER VIEW public.v_ctl_c45 OWNER TO gestionfil;
 
 --
--- Name: v_controles; Type: VIEW; Schema: public; Owner: gestionfil
+-- Name: v_ctl_c46; Type: VIEW; Schema: public; Owner: gestionfil
 --
 
-CREATE VIEW public.v_controles AS
- SELECT 'C01'::text AS code,
-    'Somme des % <> 100 par role BOM'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c01) AS anomalies
-UNION ALL
- SELECT 'C02'::text AS code,
-    'BC envoyes non soldes depuis plus de 30j'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c02) AS anomalies
-UNION ALL
- SELECT 'C03'::text AS code,
-    'Reference de mouvement absente du catalogue'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c03) AS anomalies
-UNION ALL
- SELECT 'C04'::text AS code,
-    'Fournisseur de reference inexistant'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c04) AS anomalies
-UNION ALL
- SELECT 'C05'::text AS code,
-    'Stock projete negatif sur 12 mois'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c05) AS anomalies
-UNION ALL
- SELECT 'C06'::text AS code,
-    'Mouvement date dans le futur'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c06) AS anomalies
-UNION ALL
- SELECT 'C07'::text AS code,
-    'Sortie production sans numero d''OF'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c07) AS anomalies
-UNION ALL
- SELECT 'C08'::text AS code,
-    'Retour sans motif de ligne'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c08) AS anomalies
-UNION ALL
- SELECT 'C09'::text AS code,
-    'Mouvement sans utilisateur'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c09) AS anomalies
-UNION ALL
- SELECT 'C10'::text AS code,
-    'Ecart de pesee hors tolerance sans derogation'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c10) AS anomalies
-UNION ALL
- SELECT 'C11'::text AS code,
-    'Derive solde de stock vs grand livre'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c11) AS anomalies
-UNION ALL
- SELECT 'C12'::text AS code,
-    'Reference active a prix nul'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c12) AS anomalies
-UNION ALL
- SELECT 'C13'::text AS code,
-    'Reference active sans fournisseur'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c13) AS anomalies
-UNION ALL
- SELECT 'C14'::text AS code,
-    'Composant de recette validee a cout nul'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c14) AS anomalies
-UNION ALL
- SELECT 'C15'::text AS code,
-    'Derive stock par lot vs stock par magasin'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c15) AS anomalies
-UNION ALL
- SELECT 'C16'::text AS code,
-    'Role de recette sans densite sur la qualite'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c16) AS anomalies
-UNION ALL
- SELECT 'C17'::text AS code,
-    'Reference active sans recette (orpheline)'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c17) AS anomalies
-UNION ALL
- SELECT 'C18'::text AS code,
-    'Qualite planifiee sans densite de role'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c18) AS anomalies
-UNION ALL
- SELECT 'C19'::text AS code,
-    'Devise catalogue sans taux de change en vigueur'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c19) AS anomalies
-UNION ALL
- SELECT 'C20'::text AS code,
-    'Reference classe A mono-source'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c20) AS anomalies
-UNION ALL
- SELECT 'C21'::text AS code,
-    'Role avec densite mais sans matiere en recette'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c21) AS anomalies
-UNION ALL
- SELECT 'C22'::text AS code,
-    'Groupe d''equivalence aux references non interchangeables'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c22) AS anomalies
-UNION ALL
- SELECT 'C23'::text AS code,
-    'Groupe d''equivalence sans reference preferentielle'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c23) AS anomalies
-UNION ALL
- SELECT 'C24'::text AS code,
-    'Reception d''une autre reference sans substitution declaree'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c24) AS anomalies
-UNION ALL
- SELECT 'C25'::text AS code,
-    'Stock mobilisable face a un equivalent en tension'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c25) AS anomalies
-UNION ALL
- SELECT 'C26'::text AS code,
-    'Groupe d''equivalence limite a un seul fournisseur'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c26) AS anomalies
-UNION ALL
- SELECT 'C27'::text AS code,
-    'Ecart majeur : couverture confortable, magasin sous le minimum'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c27) AS anomalies
-UNION ALL
- SELECT 'C28'::text AS code,
-    'Commande en retard, retiree du calcul de couverture'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c28) AS anomalies
-UNION ALL
- SELECT 'C29'::text AS code,
-    'Besoins plus anciens que le plan : projection perimee'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c29) AS anomalies
-UNION ALL
- SELECT 'C30'::text AS code,
-    'Delai fournisseur absent, nul ou negatif'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c30) AS anomalies
-UNION ALL
- SELECT 'C31'::text AS code,
-    'Reception validee non repercutee au stock'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c31) AS anomalies
-UNION ALL
- SELECT 'C32'::text AS code,
-    'Reception valorisee absente de l''historique des prix'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c32) AS anomalies
-UNION ALL
- SELECT 'C33'::text AS code,
-    'Emplacement de machine au-dela de sa capacite'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c33) AS anomalies
-UNION ALL
- SELECT 'C34'::text AS code,
-    'Machine au-dela de sa capacite totale'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c34) AS anomalies
-UNION ALL
- SELECT 'C35'::text AS code,
-    'Estimation de poids hors tolerance en machine'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c35) AS anomalies
-UNION ALL
- SELECT 'C36'::text AS code,
-    'Emplacement de machine sans inventaire recent'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c36) AS anomalies
-UNION ALL
- SELECT 'C37'::text AS code,
-    'Bobines sans kilos, ou kilos sans bobines, en machine'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c37) AS anomalies
-UNION ALL
- SELECT 'C38'::text AS code,
-    'Machine : consommation negative'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c38) AS anomalies
-UNION ALL
- SELECT 'C39'::text AS code,
-    'Machine : etage different de sa derniere decision'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c39) AS anomalies
-UNION ALL
- SELECT 'C40'::text AS code,
-    'Machine : ecart non qualifie a revoir'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c40) AS anomalies
-UNION ALL
- SELECT 'C41'::text AS code,
-    'Machine : regularisation (constat superieur a l''attendu)'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c41) AS anomalies
-UNION ALL
- SELECT 'C42'::text AS code,
-    'Machine : annulation sans mouvement d''origine'::text AS controle,
-    'BLOQUANT'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c42) AS anomalies
-UNION ALL
- SELECT 'C43'::text AS code,
-    'Colisage incoherent sur un document d''achat ouvert'::text AS controle,
-    'ATTENTION'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c43) AS anomalies
-UNION ALL
- SELECT 'C44'::text AS code,
-    'Plus d''un inventaire en cours sur un magasin'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c44) AS anomalies
-UNION ALL
- SELECT 'C45'::text AS code,
-    'Ligne de bon recue a la fois en local et a l''import'::text AS controle,
-    'CRITIQUE'::text AS criticite,
-    ( SELECT count(*) AS count
-           FROM public.v_ctl_c45) AS anomalies;
+CREATE VIEW public.v_ctl_c46 AS
+ SELECT r.code_role_user,
+    c.module,
+    c.champ
+   FROM (public.champ_configurable c
+     CROSS JOIN ( SELECT DISTINCT modele_droit_champ.code_role_user
+           FROM public.modele_droit_champ) r)
+  WHERE ((c.sensible = 1) AND (NOT (EXISTS ( SELECT 1
+           FROM public.modele_droit_champ m
+          WHERE ((m.code_role_user = r.code_role_user) AND (m.module = c.module) AND (m.champ = c.champ))))));
 
 
-ALTER VIEW public.v_controles OWNER TO gestionfil;
+ALTER VIEW public.v_ctl_c46 OWNER TO gestionfil;
 
 --
--- Name: v_lot_fefo; Type: VIEW; Schema: public; Owner: gestionfil
+-- Name: v_prets_en_cours; Type: VIEW; Schema: public; Owner: gestionfil
 --
 
-CREATE VIEW public.v_lot_fefo AS
- SELECT sl.code_reference,
-    r.designation,
-    sl.code_magasin,
-    sl.lot_fournisseur,
-    sl.quantite_kg,
-    sl.prix_entree_mad,
-    sl.date_fabrication,
-    sl.date_peremption,
-    sl.date_premiere_entree,
-        CASE
-            WHEN (sl.date_peremption IS NOT NULL) THEN (((sl.date_peremption)::date - CURRENT_DATE))::bigint
-            ELSE NULL::bigint
-        END AS jours_avant_peremption,
-    row_number() OVER (PARTITION BY sl.code_reference, sl.code_magasin ORDER BY COALESCE(sl.date_peremption, '9999-12-31'::text), sl.date_premiere_entree) AS rang_fefo
-   FROM (public.stock_lot sl
-     JOIN public.reference r ON ((r.code_reference = sl.code_reference)))
-  WHERE (sl.quantite_kg > (0)::numeric);
+CREATE VIEW public.v_prets_en_cours AS
+ WITH flux AS (
+         SELECT m.tiers,
+            lm.code_reference,
+                CASE
+                    WHEN (m.code_type_mvt = 'RETOUR_PRET'::text) THEN (- lm.quantite_kg)
+                    ELSE lm.quantite_kg
+                END AS kg,
+                CASE
+                    WHEN (m.code_type_mvt = 'SORTIE_HORS_MACHINE'::text) THEN m.date_mouvement
+                    ELSE NULL::text
+                END AS date_pret,
+                CASE
+                    WHEN (m.code_type_mvt = 'SORTIE_HORS_MACHINE'::text) THEN (lm.quantite_kg * COALESCE(lm.prix_kg_mad, (0)::numeric))
+                    ELSE NULL::numeric
+                END AS valeur_pretee_mad
+           FROM (public.mouvement m
+             JOIN public.ligne_mouvement lm ON ((lm.id_mouvement = m.id_mouvement)))
+          WHERE ((m.tiers IS NOT NULL) AND (((m.code_type_mvt = 'SORTIE_HORS_MACHINE'::text) AND (lm.code_motif_ligne = 'HM_PRET'::text)) OR (m.code_type_mvt = 'RETOUR_PRET'::text)) AND (m.id_mouvement_contrepasse IS NULL) AND (NOT (EXISTS ( SELECT 1
+                   FROM public.mouvement c
+                  WHERE (c.id_mouvement_contrepasse = m.id_mouvement)))))
+        )
+ SELECT tiers,
+    code_reference,
+    round(sum(kg), 4) AS reste_kg,
+    min(date_pret) AS premier_pret,
+    round(sum(COALESCE(valeur_pretee_mad, (0)::numeric)), 2) AS valeur_pretee_mad
+   FROM flux
+  GROUP BY tiers, code_reference
+ HAVING (sum(kg) > 0.0005);
 
 
-ALTER VIEW public.v_lot_fefo OWNER TO gestionfil;
+ALTER VIEW public.v_prets_en_cours OWNER TO gestionfil;
+
+--
+-- Name: v_ctl_c47; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ctl_c47 AS
+ SELECT tiers,
+    code_reference,
+    reste_kg,
+    premier_pret
+   FROM public.v_prets_en_cours p
+  WHERE ((substr(premier_pret, 1, 10))::date < (CURRENT_DATE - COALESCE(( SELECT (parametre.valeur_courante)::integer AS valeur_courante
+           FROM public.parametre
+          WHERE (parametre.code_parametre = 'P_PretJoursAlerte'::text)), 60)));
+
+
+ALTER VIEW public.v_ctl_c47 OWNER TO gestionfil;
+
+--
+-- Name: v_ctl_c48; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ctl_c48 AS
+ SELECT numero_fiche,
+    code_machine,
+    zone,
+    date_decision,
+    code_reference,
+    lot_fournisseur,
+    kg_avant,
+    kg_mouvementes,
+    kg_apres,
+    ecart_kg,
+    round((ecart_kg - kg_avant), 4) AS surplus_kg,
+    motif_texte
+   FROM public.v_machine_ecart e
+  WHERE ((nature = 'CHARGE'::text) AND (effet_ecart = 'CONSOMMATION'::text) AND (ecart_kg > (kg_avant + 0.5)));
+
+
+ALTER VIEW public.v_ctl_c48 OWNER TO gestionfil;
 
 --
 -- Name: v_plan_achat; Type: VIEW; Schema: public; Owner: gestionfil
@@ -8213,10 +8687,12 @@ CREATE VIEW public.v_plan_achat AS
             COALESCE(r.stock_min_kg, (0)::numeric) AS stock_min_catalogue_kg,
             r.code_devise_catalogue AS devise,
             r.prix_catalogue_kg,
-            COALESCE(r.cmup_mad, round((r.prix_catalogue_kg * COALESCE(tc.taux, 1.0)), 4)) AS prix_retenu_mad,
+            COALESCE(public.fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur), round((r.prix_catalogue_kg * tc.taux), 4), r.cmup_mad) AS prix_retenu_mad,
                 CASE
+                    WHEN (public.fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur) IS NOT NULL) THEN 'DERNIER_ACHAT'::text
+                    WHEN ((r.prix_catalogue_kg IS NOT NULL) AND (tc.taux IS NOT NULL)) THEN 'CATALOGUE'::text
                     WHEN (r.cmup_mad IS NOT NULL) THEN 'CMUP'::text
-                    ELSE 'CATALOGUE'::text
+                    ELSE 'AUCUN'::text
                 END AS source_prix,
             COALESCE(tc.taux, 1.0) AS taux,
                 CASE sp.classe_abc
@@ -8550,6 +9026,450 @@ CREATE VIEW public.v_plan_achat AS
 
 
 ALTER VIEW public.v_plan_achat OWNER TO gestionfil;
+
+--
+-- Name: v_ctl_c49; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ctl_c49 AS
+ SELECT h.code_reference,
+    round((h.dem_lead_kg + h.sorties_prevues_kg), 1) AS demande_kg,
+    round((h.dem_lead_prolonge_kg + h.sorties_prolongees_kg), 1) AS part_prolongee_kg,
+    round((((100)::numeric * (h.dem_lead_prolonge_kg + h.sorties_prolongees_kg)) / NULLIF((h.dem_lead_kg + h.sorties_prevues_kg), (0)::numeric)), 1) AS part_pct
+   FROM (public.v_besoin_horizon h
+     JOIN public.v_plan_achat pa ON (((pa.code_reference = h.code_reference) AND (pa.qte_a_commander_kg > (0)::numeric))))
+  WHERE (((h.dem_lead_kg + h.sorties_prevues_kg) > (0)::numeric) AND ((h.dem_lead_prolonge_kg + h.sorties_prolongees_kg) > (0.5 * (h.dem_lead_kg + h.sorties_prevues_kg))));
+
+
+ALTER VIEW public.v_ctl_c49 OWNER TO gestionfil;
+
+--
+-- Name: v_ctl_c50; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ctl_c50 AS
+ WITH plan AS (
+         SELECT bm.code_reference,
+            (sum(bm.quantite_kg) / (NULLIF(count(DISTINCT bm.annee_mois), 0))::numeric) AS moyenne_plan_kg
+           FROM (public.besoin_mrp bm
+             JOIN public.plan_production pp ON ((pp.id_plan = bm.id_plan)))
+          WHERE (pp.statut = 'EN_COURS'::text)
+          GROUP BY bm.code_reference
+        )
+ SELECT c.code_reference,
+    round(p.moyenne_plan_kg, 1) AS moyenne_plan_kg,
+    round(c.conso_mensuelle_kg, 1) AS conso_reelle_kg,
+    c.nb_mois_ecoules
+   FROM (public.v_conso_reelle c
+     JOIN plan p ON ((p.code_reference = c.code_reference)))
+  WHERE ((c.nb_mois_ecoules >= 6) AND (c.conso_mensuelle_kg > (0)::numeric) AND (abs((p.moyenne_plan_kg - c.conso_mensuelle_kg)) > (0.5 * c.conso_mensuelle_kg)));
+
+
+ALTER VIEW public.v_ctl_c50 OWNER TO gestionfil;
+
+--
+-- Name: v_ctl_c51; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ctl_c51 AS
+ SELECT code_reference,
+    designation,
+    round(COALESCE(( SELECT sum(s.quantite_kg) AS sum
+           FROM public.stock_lot s
+          WHERE ((s.code_reference = r.code_reference) AND (s.lot_fournisseur = 'SANS-LOT'::text))), (0)::numeric), 3) AS magasin_kg,
+    round(COALESCE(( SELECT sum(e.kg) AS sum
+           FROM public.machine_etat e
+          WHERE ((e.code_reference = r.code_reference) AND (e.lot_fournisseur = 'SANS-LOT'::text))), (0)::numeric), 3) AS machine_kg
+   FROM public.reference r
+  WHERE ((suivi_lot = 1) AND ((EXISTS ( SELECT 1
+           FROM public.stock_lot s
+          WHERE ((s.code_reference = r.code_reference) AND (s.lot_fournisseur = 'SANS-LOT'::text) AND (s.quantite_kg > 0.0005)))) OR (EXISTS ( SELECT 1
+           FROM public.machine_etat e
+          WHERE ((e.code_reference = r.code_reference) AND (e.lot_fournisseur = 'SANS-LOT'::text) AND (e.kg > 0.0005))))));
+
+
+ALTER VIEW public.v_ctl_c51 OWNER TO gestionfil;
+
+--
+-- Name: v_ctl_c52; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ctl_c52 AS
+ SELECT 'LOCALE'::text AS circuit,
+    r.numero_reception AS numero,
+    r.statut,
+    count(*) AS lignes_contrepassees
+   FROM (public.reception r
+     JOIN public.ligne_reception lr ON ((lr.id_reception = r.id_reception)))
+  WHERE ((r.statut = ANY (ARRAY['VALIDE'::text, 'CLOTURE'::text])) AND (lr.id_mouvement_genere IS NOT NULL) AND (EXISTS ( SELECT 1
+           FROM public.mouvement inv
+          WHERE (inv.id_mouvement_contrepasse = lr.id_mouvement_genere))))
+  GROUP BY r.numero_reception, r.statut
+UNION ALL
+ SELECT 'IMPORT'::text AS circuit,
+    ir.numero,
+    ir.statut,
+    count(*) AS lignes_contrepassees
+   FROM (public.import_receptions ir
+     JOIN public.import_reception_lignes rl ON ((rl.id_reception = ir.id_reception)))
+  WHERE ((ir.statut = 'VALIDEE'::text) AND (rl.id_mouvement IS NOT NULL) AND (EXISTS ( SELECT 1
+           FROM public.mouvement inv
+          WHERE (inv.id_mouvement_contrepasse = rl.id_mouvement))))
+  GROUP BY ir.numero, ir.statut;
+
+
+ALTER VIEW public.v_ctl_c52 OWNER TO gestionfil;
+
+--
+-- Name: v_controles; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_controles AS
+ SELECT 'C01'::text AS code,
+    'Somme des % <> 100 par role BOM'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c01) AS anomalies
+UNION ALL
+ SELECT 'C02'::text AS code,
+    'BC envoyes non soldes depuis plus de 30j'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c02) AS anomalies
+UNION ALL
+ SELECT 'C03'::text AS code,
+    'Reference de mouvement absente du catalogue'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c03) AS anomalies
+UNION ALL
+ SELECT 'C04'::text AS code,
+    'Fournisseur de reference inexistant'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c04) AS anomalies
+UNION ALL
+ SELECT 'C05'::text AS code,
+    'Stock projete negatif sur 12 mois'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c05) AS anomalies
+UNION ALL
+ SELECT 'C06'::text AS code,
+    'Mouvement date dans le futur'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c06) AS anomalies
+UNION ALL
+ SELECT 'C07'::text AS code,
+    'Sortie production sans numero d''OF'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c07) AS anomalies
+UNION ALL
+ SELECT 'C08'::text AS code,
+    'Retour sans motif de ligne'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c08) AS anomalies
+UNION ALL
+ SELECT 'C09'::text AS code,
+    'Mouvement sans utilisateur'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c09) AS anomalies
+UNION ALL
+ SELECT 'C10'::text AS code,
+    'Ecart de pesee hors tolerance sans derogation'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c10) AS anomalies
+UNION ALL
+ SELECT 'C11'::text AS code,
+    'Derive solde de stock vs grand livre'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c11) AS anomalies
+UNION ALL
+ SELECT 'C12'::text AS code,
+    'Reference active a prix nul'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c12) AS anomalies
+UNION ALL
+ SELECT 'C13'::text AS code,
+    'Reference active sans fournisseur'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c13) AS anomalies
+UNION ALL
+ SELECT 'C14'::text AS code,
+    'Composant de recette validee a cout nul'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c14) AS anomalies
+UNION ALL
+ SELECT 'C15'::text AS code,
+    'Derive stock par lot vs stock par magasin'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c15) AS anomalies
+UNION ALL
+ SELECT 'C16'::text AS code,
+    'Role de recette sans densite sur la qualite'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c16) AS anomalies
+UNION ALL
+ SELECT 'C17'::text AS code,
+    'Reference active sans recette (orpheline)'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c17) AS anomalies
+UNION ALL
+ SELECT 'C18'::text AS code,
+    'Qualite planifiee sans densite de role'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c18) AS anomalies
+UNION ALL
+ SELECT 'C19'::text AS code,
+    'Devise catalogue sans taux de change en vigueur'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c19) AS anomalies
+UNION ALL
+ SELECT 'C20'::text AS code,
+    'Reference classe A mono-source'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c20) AS anomalies
+UNION ALL
+ SELECT 'C21'::text AS code,
+    'Role avec densite mais sans matiere en recette'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c21) AS anomalies
+UNION ALL
+ SELECT 'C22'::text AS code,
+    'Groupe d''equivalence aux references non interchangeables'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c22) AS anomalies
+UNION ALL
+ SELECT 'C23'::text AS code,
+    'Groupe d''equivalence sans reference preferentielle'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c23) AS anomalies
+UNION ALL
+ SELECT 'C24'::text AS code,
+    'Reception d''une autre reference sans substitution declaree'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c24) AS anomalies
+UNION ALL
+ SELECT 'C25'::text AS code,
+    'Stock mobilisable face a un equivalent en tension'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c25) AS anomalies
+UNION ALL
+ SELECT 'C26'::text AS code,
+    'Groupe d''equivalence limite a un seul fournisseur'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c26) AS anomalies
+UNION ALL
+ SELECT 'C27'::text AS code,
+    'Ecart majeur : couverture confortable, magasin sous le minimum'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c27) AS anomalies
+UNION ALL
+ SELECT 'C28'::text AS code,
+        CASE
+            WHEN (COALESCE(( SELECT parametre.valeur_courante
+               FROM public.parametre
+              WHERE (parametre.code_parametre = 'P_EncoursRetardInclus'::text)), '1'::text) = '1'::text) THEN 'Commande en retard, toujours comptee dans la couverture'::text
+            ELSE 'Commande en retard, retiree du calcul de couverture'::text
+        END AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c28) AS anomalies
+UNION ALL
+ SELECT 'C29'::text AS code,
+    'Besoins plus anciens que le plan : projection perimee'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c29) AS anomalies
+UNION ALL
+ SELECT 'C30'::text AS code,
+    'Delai fournisseur absent, nul ou negatif'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c30) AS anomalies
+UNION ALL
+ SELECT 'C31'::text AS code,
+    'Reception validee non repercutee au stock'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c31) AS anomalies
+UNION ALL
+ SELECT 'C32'::text AS code,
+    'Reception valorisee absente de l''historique des prix'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c32) AS anomalies
+UNION ALL
+ SELECT 'C33'::text AS code,
+    'Emplacement de machine au-dela de sa capacite'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c33) AS anomalies
+UNION ALL
+ SELECT 'C34'::text AS code,
+    'Machine au-dela de sa capacite totale'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c34) AS anomalies
+UNION ALL
+ SELECT 'C35'::text AS code,
+    'Estimation de poids hors tolerance en machine'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c35) AS anomalies
+UNION ALL
+ SELECT 'C36'::text AS code,
+    'Emplacement de machine sans inventaire recent'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c36) AS anomalies
+UNION ALL
+ SELECT 'C37'::text AS code,
+    'Bobines sans kilos, ou kilos sans bobines, en machine'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c37) AS anomalies
+UNION ALL
+ SELECT 'C38'::text AS code,
+    'Machine : consommation negative'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c38) AS anomalies
+UNION ALL
+ SELECT 'C39'::text AS code,
+    'Machine : etage different de sa derniere decision'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c39) AS anomalies
+UNION ALL
+ SELECT 'C40'::text AS code,
+    'Machine : ecart non qualifie a revoir'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c40) AS anomalies
+UNION ALL
+ SELECT 'C41'::text AS code,
+    'Machine : regularisation (constat superieur a l''attendu)'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c41) AS anomalies
+UNION ALL
+ SELECT 'C42'::text AS code,
+    'Machine : annulation sans mouvement d''origine'::text AS controle,
+    'BLOQUANT'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c42) AS anomalies
+UNION ALL
+ SELECT 'C43'::text AS code,
+    'Colisage incoherent sur un document d''achat ouvert'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c43) AS anomalies
+UNION ALL
+ SELECT 'C44'::text AS code,
+    'Plus d''un inventaire en cours sur un magasin'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c44) AS anomalies
+UNION ALL
+ SELECT 'C45'::text AS code,
+    'Ligne de bon recue a la fois en local et a l''import'::text AS controle,
+    'CRITIQUE'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c45) AS anomalies
+UNION ALL
+ SELECT 'C46'::text AS code,
+    'Champ sensible sans ligne dans le modele de droits d''un role'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c46) AS anomalies
+UNION ALL
+ SELECT 'C47'::text AS code,
+    'Fil prete a une autre usine, non rendu dans le delai'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c47) AS anomalies
+UNION ALL
+ SELECT 'C48'::text AS code,
+    'Chargement : fil charge deja consomme (a relire)'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c48) AS anomalies
+UNION ALL
+ SELECT 'C49'::text AS code,
+    'Proposition estimee surtout sur la prolongation du plan'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c49) AS anomalies
+UNION ALL
+ SELECT 'C50'::text AS code,
+    'Moyenne du plan eloignee de plus de 50 % de la consommation reelle'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c50) AS anomalies
+UNION ALL
+ SELECT 'C51'::text AS code,
+    'Reference suivie au lot avec du fil sans lot, a identifier'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c51) AS anomalies
+UNION ALL
+ SELECT 'C52'::text AS code,
+    'Reception validee dont une entree est contre-passee'::text AS controle,
+    'ATTENTION'::text AS criticite,
+    ( SELECT count(*) AS count
+           FROM public.v_ctl_c52) AS anomalies;
+
+
+ALTER VIEW public.v_controles OWNER TO gestionfil;
+
+--
+-- Name: v_lot_fefo; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_lot_fefo AS
+ SELECT sl.code_reference,
+    r.designation,
+    sl.code_magasin,
+    sl.lot_fournisseur,
+    sl.quantite_kg,
+    sl.prix_entree_mad,
+    sl.date_fabrication,
+    sl.date_peremption,
+    sl.date_premiere_entree,
+        CASE
+            WHEN (sl.date_peremption IS NOT NULL) THEN (((sl.date_peremption)::date - CURRENT_DATE))::bigint
+            ELSE NULL::bigint
+        END AS jours_avant_peremption,
+    row_number() OVER (PARTITION BY sl.code_reference, sl.code_magasin ORDER BY COALESCE(sl.date_peremption, '9999-12-31'::text), sl.date_premiere_entree) AS rang_fefo
+   FROM (public.stock_lot sl
+     JOIN public.reference r ON ((r.code_reference = sl.code_reference)))
+  WHERE (sl.quantite_kg > (0)::numeric);
+
+
+ALTER VIEW public.v_lot_fefo OWNER TO gestionfil;
 
 --
 -- Name: v_stock_dormant; Type: VIEW; Schema: public; Owner: gestionfil
@@ -9024,10 +9944,72 @@ CREATE VIEW public.v_cout_revient AS
      JOIN public.reference r ON ((r.code_reference = lr.code_reference)))
      LEFT JOIN public.fournisseur f ON ((f.code_fournisseur = rc.code_fournisseur)))
      LEFT JOIN quote_part qp ON ((qp.id_ligne_reception = lr.id_ligne_reception)))
-  WHERE (rc.statut = 'VALIDE'::text);
+  WHERE (rc.statut = ANY (ARRAY['VALIDE'::text, 'CLOTURE'::text]));
 
 
 ALTER VIEW public.v_cout_revient OWNER TO gestionfil;
+
+--
+-- Name: v_cout_revient_reel; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_cout_revient_reel AS
+ WITH f AS (
+         SELECT fa.id_facture,
+            fa.id_dossier,
+            d.numero AS numero_dossier,
+            fa.numero_facture,
+            fa.code_devise,
+            fa.montant_devise,
+            fa.taux_change AS cours_ded,
+            substr(COALESCE(NULLIF(btrim(d.date_dum), ''::text), fa.date_facture), 1, 10) AS date_ded
+           FROM (public.import_factures fa
+             JOIN public.import_dossiers d ON ((d.id_dossier = fa.id_dossier)))
+        ), frais AS (
+         SELECT l.id_facture,
+            sum(r.montant_alloue_dhs) AS frais_mad
+           FROM (public.lignes_frais_repartition r
+             JOIN public.import_facture_lignes l ON ((l.id_ligne = r.id_article_dossier)))
+          GROUP BY l.id_facture
+        ), paye AS (
+         SELECT v_change_paiement.id_facture,
+            sum(v_change_paiement.montant_devise) AS paye_devise,
+            sum(v_change_paiement.montant_mad) AS paye_mad,
+            sum(v_change_paiement.ecart_annee_ded_mad) AS ecart_ded,
+            sum(v_change_paiement.ecart_annee_suivante_mad) AS ecart_suiv,
+            count(*) AS nb_paiements
+           FROM public.v_change_paiement
+          GROUP BY v_change_paiement.id_facture
+        )
+ SELECT f.id_facture,
+    f.id_dossier,
+    f.numero_dossier,
+    f.numero_facture,
+    f.code_devise,
+    f.date_ded,
+    (substr(f.date_ded, 1, 4))::integer AS annee_ded,
+    f.montant_devise,
+    f.cours_ded,
+    round((f.montant_devise * f.cours_ded), 2) AS matiere_mad,
+    round(COALESCE(fr.frais_mad, (0)::numeric), 2) AS frais_mad,
+    round(COALESCE(p.paye_devise, (0)::numeric), 2) AS paye_devise,
+    round(COALESCE(p.paye_mad, (0)::numeric), 2) AS paye_mad,
+    COALESCE(p.nb_paiements, (0)::bigint) AS nb_paiements,
+    round((f.montant_devise - COALESCE(p.paye_devise, (0)::numeric)), 2) AS reste_devise,
+    public.fn_cours_bam_fin_annee(f.code_devise, (substr(f.date_ded, 1, 4))::integer) AS cours_fin_annee_ded,
+    round((COALESCE(p.ecart_ded, (0)::numeric) +
+        CASE
+            WHEN (((substr(f.date_ded, 1, 4))::integer < (EXTRACT(year FROM CURRENT_DATE))::integer) AND ((f.montant_devise - COALESCE(p.paye_devise, (0)::numeric)) > 0.005)) THEN ((f.montant_devise - COALESCE(p.paye_devise, (0)::numeric)) * (public.fn_cours_bam_fin_annee(f.code_devise, (substr(f.date_ded, 1, 4))::integer) - f.cours_ded))
+            ELSE (0)::numeric
+        END), 2) AS change_annee_ded_mad,
+    round(COALESCE(p.ecart_suiv, (0)::numeric), 2) AS change_annee_suivante_mad,
+    (((f.montant_devise - COALESCE(p.paye_devise, (0)::numeric)) > 0.005) AND ((substr(f.date_ded, 1, 4))::integer < (EXTRACT(year FROM CURRENT_DATE))::integer)) AS latent
+   FROM ((f
+     LEFT JOIN frais fr ON ((fr.id_facture = f.id_facture)))
+     LEFT JOIN paye p ON ((p.id_facture = f.id_facture)));
+
+
+ALTER VIEW public.v_cout_revient_reel OWNER TO gestionfil;
 
 --
 -- Name: v_document_mouvements_vivants; Type: VIEW; Schema: public; Owner: gestionfil
@@ -9046,6 +10028,54 @@ CREATE VIEW public.v_document_mouvements_vivants AS
 
 
 ALTER VIEW public.v_document_mouvements_vivants OWNER TO gestionfil;
+
+--
+-- Name: v_ecart_prix; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_ecart_prix AS
+ SELECT 'LOCAL'::text AS circuit,
+    a.id_ajustement,
+    substr(a.date_ajustement, 1, 10) AS date_ecart,
+    r.numero_reception AS document,
+    r.id_reception AS id_document,
+    r.code_fournisseur,
+    f.nom AS fournisseur_nom,
+    a.code_reference,
+    ref.designation,
+    a.origine,
+    a.numero_piece,
+    a.motif,
+    a.quantite_recue_kg,
+    round(a.montant_mad, 2) AS montant_mad
+   FROM (((public.reception_ajustements_cmup a
+     JOIN public.reception r ON ((r.id_reception = a.id_reception)))
+     LEFT JOIN public.fournisseur f ON ((f.code_fournisseur = r.code_fournisseur)))
+     LEFT JOIN public.reference ref ON ((ref.code_reference = a.code_reference)))
+  WHERE ((a.nature = 'ECART_PRIX'::text) AND (a.montant_mad <> (0)::numeric))
+UNION ALL
+ SELECT 'IMPORT'::text AS circuit,
+    a.id_ajustement,
+    substr(a.date_ajustement, 1, 10) AS date_ecart,
+    d.numero AS document,
+    d.id_dossier AS id_document,
+    ref.code_fournisseur,
+    f.nom AS fournisseur_nom,
+    a.code_reference,
+    ref.designation,
+    a.origine,
+    a.numero_piece,
+    a.motif,
+    a.quantite_recue_kg,
+    round(a.montant_dhs, 2) AS montant_mad
+   FROM (((public.import_ajustements_cump a
+     JOIN public.import_dossiers d ON ((d.id_dossier = a.id_dossier)))
+     LEFT JOIN public.reference ref ON ((ref.code_reference = a.code_reference)))
+     LEFT JOIN public.fournisseur f ON ((f.code_fournisseur = ref.code_fournisseur)))
+  WHERE ((a.nature = 'CONSOMME'::text) AND (a.montant_dhs <> (0)::numeric));
+
+
+ALTER VIEW public.v_ecart_prix OWNER TO gestionfil;
 
 --
 -- Name: v_encours_bc; Type: VIEW; Schema: public; Owner: gestionfil
@@ -9431,6 +10461,45 @@ CREATE VIEW public.v_fournisseur_scorecard AS
 ALTER VIEW public.v_fournisseur_scorecard OWNER TO gestionfil;
 
 --
+-- Name: v_historique_prix_courant; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_historique_prix_courant AS
+ SELECT h.id_histo_prix,
+    h.id_ligne_reception,
+    h.code_reference,
+    h.code_fournisseur,
+    h.date_achat,
+    COALESCE(r.prix_kg_devise, h.prix_kg_devise) AS prix_kg_devise,
+    COALESCE(r.code_devise, h.code_devise) AS code_devise,
+    COALESCE(r.taux_change, h.taux_change) AS taux_change,
+    COALESCE(r.prix_kg_mad, h.prix_kg_mad) AS prix_kg_mad,
+    COALESCE(r.quantite_achetee_kg, h.quantite_achetee_kg) AS quantite_achetee_kg,
+    COALESCE(r.total_mad, h.total_mad) AS total_mad,
+    h.conditions,
+    COALESCE(r.date_enregistrement, h.date_enregistrement) AS date_enregistrement,
+    COALESCE(r.version, 1) AS version
+   FROM (public.historique_prix h
+     LEFT JOIN LATERAL ( SELECT x.id_revision,
+            x.id_ligne_reception,
+            x.version,
+            x.prix_kg_devise,
+            x.code_devise,
+            x.taux_change,
+            x.prix_kg_mad,
+            x.quantite_achetee_kg,
+            x.total_mad,
+            x.date_enregistrement,
+            x.id_utilisateur
+           FROM public.historique_prix_revision x
+          WHERE (x.id_ligne_reception = h.id_ligne_reception)
+          ORDER BY x.version DESC
+         LIMIT 1) r ON (true));
+
+
+ALTER VIEW public.v_historique_prix_courant OWNER TO gestionfil;
+
+--
 -- Name: v_import_cout_revient; Type: VIEW; Schema: public; Owner: gestionfil
 --
 
@@ -9657,6 +10726,65 @@ CREATE VIEW public.v_recette_calculee AS
 
 
 ALTER VIEW public.v_recette_calculee OWNER TO gestionfil;
+
+--
+-- Name: v_retours_import; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_retours_import AS
+ SELECT d.id_dossier,
+    d.numero AS numero_dossier,
+    r.id_reception,
+    r.numero AS numero_reception,
+    m.id_mouvement,
+    m.numero_mouvement,
+    m.date_mouvement,
+    lm.code_reference,
+    round(sum(lm.quantite_kg), 4) AS kg,
+    (EXISTS ( SELECT 1
+           FROM public.import_ajustements_cump a
+          WHERE ((a.nature = 'RETOUR'::text) AND (a.id_mouvement_retour = m.id_mouvement)))) AS solde
+   FROM (((public.mouvement m
+     JOIN public.ligne_mouvement lm ON ((lm.id_mouvement = m.id_mouvement)))
+     JOIN public.import_receptions r ON ((r.numero = m.reference_document)))
+     JOIN public.import_dossiers d ON ((EXISTS ( SELECT 1
+           FROM ((public.import_reception_lignes rl
+             JOIN public.import_facture_lignes l ON ((l.id_ligne = rl.id_ligne)))
+             JOIN public.import_factures f ON ((f.id_facture = l.id_facture)))
+          WHERE ((rl.id_reception = r.id_reception) AND (f.id_dossier = d.id_dossier) AND (l.code_reference = lm.code_reference))))))
+  WHERE ((m.code_type_mvt = 'RETOUR_FOURN'::text) AND (NOT (EXISTS ( SELECT 1
+           FROM public.mouvement c
+          WHERE (c.id_mouvement_contrepasse = m.id_mouvement)))))
+  GROUP BY d.id_dossier, d.numero, r.id_reception, r.numero, m.id_mouvement, m.numero_mouvement, m.date_mouvement, lm.code_reference;
+
+
+ALTER VIEW public.v_retours_import OWNER TO gestionfil;
+
+--
+-- Name: v_retours_reception; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_retours_reception AS
+ SELECT r.id_reception,
+    r.numero_reception,
+    m.id_mouvement,
+    m.numero_mouvement,
+    m.date_mouvement,
+    lm.code_reference,
+    round(sum(lm.quantite_kg), 4) AS kg,
+    (EXISTS ( SELECT 1
+           FROM public.reception_ajustements_cmup a
+          WHERE ((a.nature = 'RETOUR'::text) AND (a.id_mouvement_retour = m.id_mouvement)))) AS solde
+   FROM ((public.reception r
+     JOIN public.mouvement m ON (((m.reference_document = r.numero_reception) AND (m.code_type_mvt = 'RETOUR_FOURN'::text))))
+     JOIN public.ligne_mouvement lm ON ((lm.id_mouvement = m.id_mouvement)))
+  WHERE (NOT (EXISTS ( SELECT 1
+           FROM public.mouvement c
+          WHERE (c.id_mouvement_contrepasse = m.id_mouvement))))
+  GROUP BY r.id_reception, r.numero_reception, m.id_mouvement, m.numero_mouvement, m.date_mouvement, lm.code_reference;
+
+
+ALTER VIEW public.v_retours_reception OWNER TO gestionfil;
 
 --
 -- Name: v_risque_mensuel; Type: VIEW; Schema: public; Owner: gestionfil
@@ -10364,7 +11492,7 @@ CREATE VIEW public.v_stat_prix_mois AS
     round((sum((hp.taux_change * hp.quantite_achetee_kg)) / sum(hp.quantite_achetee_kg)), 4) AS taux_moyen,
     min(hp.prix_kg_mad) AS prix_min_mad,
     max(hp.prix_kg_mad) AS prix_max_mad
-   FROM (public.historique_prix hp
+   FROM (public.v_historique_prix_courant hp
      JOIN public.reference r ON ((r.code_reference = hp.code_reference)))
   GROUP BY hp.code_reference, r.designation, (substr(hp.date_achat, 1, 7)), hp.code_devise;
 
@@ -10377,11 +11505,11 @@ ALTER VIEW public.v_stat_prix_mois OWNER TO gestionfil;
 
 CREATE VIEW public.v_stat_prix_reference AS
  WITH bornes AS (
-         SELECT historique_prix.code_reference,
-            min(historique_prix.date_achat) AS premier,
-            max(historique_prix.date_achat) AS dernier
-           FROM public.historique_prix
-          GROUP BY historique_prix.code_reference
+         SELECT v_historique_prix_courant.code_reference,
+            min(v_historique_prix_courant.date_achat) AS premier,
+            max(v_historique_prix_courant.date_achat) AS dernier
+           FROM public.v_historique_prix_courant
+          GROUP BY v_historique_prix_courant.code_reference
         ), premier AS (
          SELECT hp.code_reference,
             hp.prix_kg_devise,
@@ -10389,7 +11517,7 @@ CREATE VIEW public.v_stat_prix_reference AS
             hp.taux_change,
             hp.code_devise,
             hp.date_achat
-           FROM (public.historique_prix hp
+           FROM (public.v_historique_prix_courant hp
              JOIN bornes b ON (((b.code_reference = hp.code_reference) AND (b.premier = hp.date_achat))))
           GROUP BY hp.code_reference, hp.prix_kg_devise, hp.prix_kg_mad, hp.taux_change, hp.code_devise, hp.date_achat
         ), dernier AS (
@@ -10399,18 +11527,18 @@ CREATE VIEW public.v_stat_prix_reference AS
             hp.taux_change,
             hp.code_devise,
             hp.date_achat
-           FROM (public.historique_prix hp
+           FROM (public.v_historique_prix_courant hp
              JOIN bornes b ON (((b.code_reference = hp.code_reference) AND (b.dernier = hp.date_achat))))
           GROUP BY hp.code_reference, hp.prix_kg_devise, hp.prix_kg_mad, hp.taux_change, hp.code_devise, hp.date_achat
         ), cumul AS (
-         SELECT historique_prix.code_reference,
+         SELECT v_historique_prix_courant.code_reference,
             count(*) AS nb_achats,
-            count(DISTINCT historique_prix.code_fournisseur) AS nb_fournisseurs,
-            round(sum(historique_prix.quantite_achetee_kg), 3) AS quantite_totale_kg,
-            round(sum(historique_prix.total_mad), 2) AS montant_total_mad,
-            round((sum((historique_prix.prix_kg_mad * historique_prix.quantite_achetee_kg)) / sum(historique_prix.quantite_achetee_kg)), 4) AS prix_moyen_mad
-           FROM public.historique_prix
-          GROUP BY historique_prix.code_reference
+            count(DISTINCT v_historique_prix_courant.code_fournisseur) AS nb_fournisseurs,
+            round(sum(v_historique_prix_courant.quantite_achetee_kg), 3) AS quantite_totale_kg,
+            round(sum(v_historique_prix_courant.total_mad), 2) AS montant_total_mad,
+            round((sum((v_historique_prix_courant.prix_kg_mad * v_historique_prix_courant.quantite_achetee_kg)) / sum(v_historique_prix_courant.quantite_achetee_kg)), 4) AS prix_moyen_mad
+           FROM public.v_historique_prix_courant
+          GROUP BY v_historique_prix_courant.code_reference
         )
  SELECT c.code_reference,
     r.designation,
@@ -10580,6 +11708,34 @@ CREATE VIEW public.v_stock_transit AS
 ALTER VIEW public.v_stock_transit OWNER TO gestionfil;
 
 --
+-- Name: v_stocks_minimums_a_revoir; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_stocks_minimums_a_revoir AS
+ WITH plan AS (
+         SELECT bm.code_reference,
+            (sum(bm.quantite_kg) / (NULLIF(count(DISTINCT bm.annee_mois), 0))::numeric) AS besoin_mensuel_kg
+           FROM (public.besoin_mrp bm
+             JOIN public.plan_production pp ON ((pp.id_plan = bm.id_plan)))
+          WHERE (pp.statut = 'EN_COURS'::text)
+          GROUP BY bm.code_reference
+        )
+ SELECT r.code_reference,
+    r.designation,
+    r.code_fournisseur,
+    round(r.stock_min_kg, 1) AS stock_min_kg,
+    r.couverture_min_mois,
+    round(COALESCE(p.besoin_mensuel_kg, (0)::numeric), 1) AS besoin_mensuel_kg,
+    round((r.stock_min_kg / NULLIF(p.besoin_mensuel_kg, (0)::numeric)), 1) AS mois_couverts,
+    round((r.couverture_min_mois * p.besoin_mensuel_kg), 0) AS valeur_proposee_kg
+   FROM (public.reference r
+     LEFT JOIN plan p ON ((p.code_reference = r.code_reference)))
+  WHERE ((r.actif = 1) AND (COALESCE(r.stock_min_kg, (0)::numeric) > (0)::numeric) AND ((COALESCE(p.besoin_mensuel_kg, (0)::numeric) = (0)::numeric) OR (r.stock_min_kg > ((3)::numeric * p.besoin_mensuel_kg))));
+
+
+ALTER VIEW public.v_stocks_minimums_a_revoir OWNER TO gestionfil;
+
+--
 -- Name: v_substitution_dispo; Type: VIEW; Schema: public; Owner: gestionfil
 --
 
@@ -10613,63 +11769,6 @@ CREATE VIEW public.v_substitution_dispo AS
 ALTER VIEW public.v_substitution_dispo OWNER TO gestionfil;
 
 --
--- Name: v_supervision; Type: VIEW; Schema: public; Owner: gestionfil
---
-
-CREATE VIEW public.v_supervision AS
- WITH socle AS (
-         SELECT ( SELECT count(*) AS count
-                   FROM public.reception) AS nb_receptions,
-            ( SELECT count(*) AS count
-                   FROM public.ligne_reception) AS nb_lignes_rec,
-            ( SELECT count(*) AS count
-                   FROM public.bon_commande) AS nb_bc,
-            ( SELECT count(*) AS count
-                   FROM public.machine) AS nb_machines,
-            ( SELECT count(*) AS count
-                   FROM public.historique_prix) AS nb_prix,
-            ( SELECT count(DISTINCT substr(mouvement.date_mouvement, 1, 7)) AS count
-                   FROM public.mouvement) AS nb_mois
-        ), stock AS (
-         SELECT COALESCE(sum(v_etat_stock.valeur_mad), (0)::numeric) AS valeur_mad,
-            count(*) AS nb_refs,
-            count(*) FILTER (WHERE (v_etat_stock.statut = 'RUPTURE'::text)) AS nb_rupture,
-            count(*) FILTER (WHERE (v_etat_stock.statut = 'CRITIQUE'::text)) AS nb_critique,
-            count(*) FILTER (WHERE (v_etat_stock.statut = 'ATTENTION'::text)) AS nb_attention,
-            count(*) FILTER (WHERE (v_etat_stock.statut = 'OK'::text)) AS nb_ok,
-            percentile_cont((0.5)::double precision) WITHIN GROUP (ORDER BY ((v_etat_stock.jours_couverture)::double precision)) FILTER (WHERE (v_etat_stock.jours_couverture IS NOT NULL)) AS couverture_mediane
-           FROM public.v_etat_stock
-        ), sourcing AS (
-         SELECT count(*) FILTER (WHERE (v_risque_sourcing.nb_sources <= 1)) AS nb_mono_source,
-            COALESCE(sum(v_risque_sourcing.budget_annuel_mad) FILTER (WHERE (v_risque_sourcing.nb_sources <= 1)), (0)::numeric) AS budget_mono_mad
-           FROM public.v_risque_sourcing
-        ), economies AS (
-         SELECT COALESCE(sum(v_cockpit_economies.economie_annuelle_mad), (0)::numeric) AS economies_mad,
-            count(*) AS nb_opportunites
-           FROM public.v_cockpit_economies
-        )
- SELECT domaine,
-    cle,
-    libelle,
-    unite,
-    definition,
-    disponible,
-    condition
-   FROM ( VALUES ('STOCK'::text,'valeur_stock'::text,'Valeur du stock'::text,'MAD'::text,'Au CMUP, tous magasins confondus.'::text,1,NULL::text), ('STOCK'::text,'couverture_mediane'::text,'Couverture mediane'::text,'jours'::text,'La moitie des references tient plus longtemps, l autre moins.'::text,1,NULL::text), ('STOCK'::text,'taux_rupture'::text,'Taux de rupture'::text,'%'::text,'References sans couverture sur leur delai d approvisionnement.'::text,1,NULL::text), ('STOCK'::text,'taux_disponibilite'::text,'Taux de disponibilite'::text,'%'::text,'References au vert sur le total suivi.'::text,1,NULL::text), ('ACHATS'::text,'mono_source'::text,'References mono-source'::text,'refs'::text,'Une seule source connue : un incident fournisseur arrete la production.'::text,1,NULL::text), ('ACHATS'::text,'budget_mono'::text,'Budget expose au mono-source'::text,'MAD/an'::text,'Ce que pese annuellement ce qui n a qu une source.'::text,1,NULL::text), ('ACHATS'::text,'economies'::text,'Economies identifiees'::text,'MAD/an'::text,'A qualite egale, le meme titrage achete moins cher ailleurs.'::text,1,NULL::text), ('LIVRAISON'::text,'otif'::text,'OTIF fournisseur'::text,'%'::text,'Livraisons a l heure ET completes sur le total.'::text,0,'Aucune reception enregistree. L OTIF se calcule des la premiere reception controlee.'::text), ('LIVRAISON'::text,'on_time'::text,'Ponctualite (On-Time)'::text,'%'::text,'Livraisons arrivees au plus tard a la date promise.'::text,0,'Aucune reception enregistree.'::text), ('LIVRAISON'::text,'in_full'::text,'Completude (In-Full)'::text,'%'::text,'Quantite pesee contre quantite commandee, tolerance de 2 %.'::text,0,'Aucun bon de commande, donc aucune quantite promise a comparer.'::text), ('LIVRAISON'::text,'lead_time'::text,'Delai fournisseur reel'::text,'jours'::text,'Entre la date du bon et la date de reception.'::text,0,'Aucun bon de commande suivi d une reception.'::text), ('PREVISION'::text,'forecast_accuracy'::text,'Precision de prevision'::text,'%'::text,'100 moins l erreur ponderee (WAPE) entre besoin calcule et sortie reelle.'::text,0,'Un seul mois de mouvements. Il en faut au moins trois pour comparer une prevision a un realise.'::text), ('PREVISION'::text,'forecast_bias'::text,'Biais de prevision'::text,'%'::text,'Tendance a sur-estimer ou sous-estimer, en cumul.'::text,0,'Un seul mois de mouvements.'::text), ('STOCK'::text,'rotation'::text,'Rotation du stock'::text,'fois/an'::text,'Consommation annuelle rapportee au stock moyen.'::text,0,'Un seul mois de mouvements. La rotation demande une annee, ou au moins un trimestre.'::text), ('STOCK'::text,'stock_dormant'::text,'Stock dormant'::text,'%'::text,'Valeur sans aucun mouvement depuis soixante jours.'::text,0,'Le stock initial date du mois courant : rien ne peut encore etre dormant.'::text), ('PRODUCTION'::text,'wip_machine'::text,'Matiere en machine'::text,'kg'::text,'Bobines montees sur metier, immobilisees hors magasin.'::text,0,'Aucune machine declaree dans le parc.'::text), ('ACHATS'::text,'evolution_prix'::text,'Evolution des prix d achat'::text,'%'::text,'Variation du prix moyen pondere par rapport a la periode precedente.'::text,0,'Aucun releve de prix : ils s enregistrent au controle des receptions.'::text)) t(domaine, cle, libelle, unite, definition, disponible, condition);
-
-
-ALTER VIEW public.v_supervision OWNER TO gestionfil;
-
---
--- Name: VIEW v_supervision; Type: COMMENT; Schema: public; Owner: gestionfil
---
-
-COMMENT ON VIEW public.v_supervision IS 'Le catalogue des indicateurs de supervision : ce qu ils mesurent, et pour ceux
- qui ne peuvent pas encore etre calcules, CE QU IL FAUT ENREGISTRER pour les
- allumer. Les valeurs elles-memes sont servies par `v_supervision_valeurs`.';
-
-
---
 -- Name: v_supervision_valeurs; Type: VIEW; Schema: public; Owner: gestionfil
 --
 
@@ -10688,6 +11787,43 @@ CREATE VIEW public.v_supervision_valeurs AS
         ), economies AS (
          SELECT COALESCE(sum(v_cockpit_economies.economie_annuelle_mad), (0)::numeric) AS economies_mad
            FROM public.v_cockpit_economies
+        ), livraison AS (
+         SELECT count(*) AS nb,
+            count(*) FILTER (WHERE ((substr(r.date_reception, 1, 10))::date <= (substr(b.date_livraison_prevue, 1, 10))::date)) AS nb_a_lheure,
+            avg(((substr(r.date_reception, 1, 10))::date - (substr(b.date_bc, 1, 10))::date)) AS delai_reel
+           FROM (public.reception r
+             JOIN public.bon_commande b ON ((b.id_bc = r.id_bc)))
+          WHERE ((r.statut = ANY (ARRAY['VALIDE'::text, 'CLOTURE'::text])) AND (b.date_livraison_prevue IS NOT NULL))
+        ), completude AS (
+         SELECT count(*) AS nb,
+            count(*) FILTER (WHERE (l.quantite_recue_kg >= (l.quantite_commandee_kg * 0.98))) AS nb_completes
+           FROM (public.ligne_bc l
+             JOIN public.bon_commande b ON ((b.id_bc = l.id_bc)))
+          WHERE ((l.quantite_commandee_kg > (0)::numeric) AND (b.statut = ANY (ARRAY['ENVOYE'::text, 'LIVRE_PARTIEL'::text, 'CLOTURE'::text])))
+        ), rotation AS (
+         SELECT sum((lm.quantite_kg * COALESCE(r.cmup_mad, (0)::numeric))) AS sorties_mad,
+            count(DISTINCT substr(m.date_mouvement, 1, 7)) AS nb_mois
+           FROM (((public.mouvement m
+             JOIN public.type_mouvement t ON ((t.code_type_mvt = m.code_type_mvt)))
+             JOIN public.ligne_mouvement lm ON ((lm.id_mouvement = m.id_mouvement)))
+             JOIN public.reference r ON ((r.code_reference = lm.code_reference)))
+          WHERE ((t.signe = '-1'::integer) AND (m.date_mouvement >= to_char(((now() AT TIME ZONE 'UTC'::text) - '1 year'::interval), 'YYYY-MM-DD'::text)))
+        ), dormant AS (
+         SELECT COALESCE(sum(e.valeur_mad) FILTER (WHERE (NOT (EXISTS ( SELECT 1
+                   FROM (public.ligne_mouvement lm
+                     JOIN public.mouvement m ON ((m.id_mouvement = lm.id_mouvement)))
+                  WHERE ((lm.code_reference = e.code_reference) AND (m.date_mouvement >= to_char(((now() AT TIME ZONE 'UTC'::text) - '60 days'::interval), 'YYYY-MM-DD'::text))))))), (0)::numeric) AS dormant_mad,
+            NULLIF(sum(e.valeur_mad), (0)::numeric) AS total_mad
+           FROM public.v_etat_stock e
+        ), prix AS (
+         SELECT (sum((h.prix_kg_mad * h.quantite_achetee_kg)) FILTER (WHERE (h.date_achat >= to_char(((now() AT TIME ZONE 'UTC'::text) - '6 mons'::interval), 'YYYY-MM-DD'::text))) / NULLIF(sum(h.quantite_achetee_kg) FILTER (WHERE (h.date_achat >= to_char(((now() AT TIME ZONE 'UTC'::text) - '6 mons'::interval), 'YYYY-MM-DD'::text))), (0)::numeric)) AS recent,
+            (sum((h.prix_kg_mad * h.quantite_achetee_kg)) FILTER (WHERE ((h.date_achat < to_char(((now() AT TIME ZONE 'UTC'::text) - '6 mons'::interval), 'YYYY-MM-DD'::text)) AND (h.date_achat >= to_char(((now() AT TIME ZONE 'UTC'::text) - '1 year'::interval), 'YYYY-MM-DD'::text)))) / NULLIF(sum(h.quantite_achetee_kg) FILTER (WHERE ((h.date_achat < to_char(((now() AT TIME ZONE 'UTC'::text) - '6 mons'::interval), 'YYYY-MM-DD'::text)) AND (h.date_achat >= to_char(((now() AT TIME ZONE 'UTC'::text) - '1 year'::interval), 'YYYY-MM-DD'::text)))), (0)::numeric)) AS ancien
+           FROM public.v_historique_prix_courant h
+          WHERE ((h.quantite_achetee_kg > (0)::numeric) AND (h.prix_kg_mad > (0)::numeric))
+        ), machine AS (
+         SELECT COALESCE(sum(machine_etat.kg), (0)::numeric) AS kg,
+            count(*) AS nb
+           FROM public.machine_etat
         )
  SELECT 'valeur_stock'::text AS cle,
     s.valeur_mad AS valeur
@@ -10715,7 +11851,66 @@ UNION ALL
 UNION ALL
  SELECT 'economies'::text AS cle,
     e.economies_mad AS valeur
-   FROM economies e;
+   FROM economies e
+UNION ALL
+ SELECT 'on_time'::text AS cle,
+        CASE
+            WHEN (l.nb > 0) THEN round(((100.0 * (l.nb_a_lheure)::numeric) / (l.nb)::numeric), 1)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM livraison l
+UNION ALL
+ SELECT 'lead_time'::text AS cle,
+        CASE
+            WHEN (l.nb > 0) THEN round(l.delai_reel, 0)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM livraison l
+UNION ALL
+ SELECT 'in_full'::text AS cle,
+        CASE
+            WHEN (c.nb > 0) THEN round(((100.0 * (c.nb_completes)::numeric) / (c.nb)::numeric), 1)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM completude c
+UNION ALL
+ SELECT 'otif'::text AS cle,
+        CASE
+            WHEN ((l.nb > 0) AND (c.nb > 0)) THEN round(((((100.0 * (l.nb_a_lheure)::numeric) / (l.nb)::numeric) * (c.nb_completes)::numeric) / (c.nb)::numeric), 1)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM livraison l,
+    completude c
+UNION ALL
+ SELECT 'rotation'::text AS cle,
+        CASE
+            WHEN ((r.nb_mois >= 6) AND (( SELECT stock.valeur_mad
+               FROM stock) > (0)::numeric)) THEN round((((r.sorties_mad * 12.0) / (r.nb_mois)::numeric) / ( SELECT stock.valeur_mad
+               FROM stock)), 2)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM rotation r
+UNION ALL
+ SELECT 'stock_dormant'::text AS cle,
+        CASE
+            WHEN (d.total_mad IS NOT NULL) THEN round(((100.0 * d.dormant_mad) / d.total_mad), 1)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM dormant d
+UNION ALL
+ SELECT 'evolution_prix'::text AS cle,
+        CASE
+            WHEN ((p.ancien IS NOT NULL) AND (p.ancien > (0)::numeric)) THEN round(((100.0 * (p.recent - p.ancien)) / p.ancien), 1)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM prix p
+UNION ALL
+ SELECT 'wip_machine'::text AS cle,
+        CASE
+            WHEN (m.nb > 0) THEN round(m.kg, 0)
+            ELSE NULL::numeric
+        END AS valeur
+   FROM machine m;
 
 
 ALTER VIEW public.v_supervision_valeurs OWNER TO gestionfil;
@@ -10724,8 +11919,41 @@ ALTER VIEW public.v_supervision_valeurs OWNER TO gestionfil;
 -- Name: VIEW v_supervision_valeurs; Type: COMMENT; Schema: public; Owner: gestionfil
 --
 
-COMMENT ON VIEW public.v_supervision_valeurs IS 'La valeur courante de chaque indicateur calculable. Ceux qui manquent ici sont
- exactement ceux que `v_supervision` declare indisponibles.';
+COMMENT ON VIEW public.v_supervision_valeurs IS 'La valeur courante de chaque indicateur. NULL quand la donnee manque — jamais
+ zero : un zero se lit comme un resultat.';
+
+
+--
+-- Name: v_supervision; Type: VIEW; Schema: public; Owner: gestionfil
+--
+
+CREATE VIEW public.v_supervision AS
+ SELECT d.domaine,
+    d.cle,
+    d.libelle,
+    d.unite,
+    d.definition,
+    ((v.valeur IS NOT NULL))::integer AS disponible,
+        CASE
+            WHEN (v.valeur IS NULL) THEN d.condition
+            ELSE NULL::text
+        END AS condition,
+    d.sens,
+    d.cible,
+    d.vigilance
+   FROM (( VALUES ('STOCK'::text,'valeur_stock'::text,'Valeur du stock'::text,'MAD'::text,'Au CMUP, tous magasins confondus.'::text,'Aucun stock valorise.'::text,'neutre'::text,NULL::numeric,NULL::numeric), ('STOCK'::text,'couverture_mediane'::text,'Couverture mediane'::text,'jours'::text,'La moitie des references tient plus longtemps, l autre moins.'::text,'Aucune couverture calculable : il faut une consommation.'::text,'haut'::text,60,30), ('STOCK'::text,'taux_rupture'::text,'Taux de rupture'::text,'%'::text,'References sans couverture sur leur delai d approvisionnement.'::text,'Aucune reference suivie.'::text,'bas'::text,2,5), ('STOCK'::text,'taux_disponibilite'::text,'Taux de disponibilite'::text,'%'::text,'References au vert sur le total suivi.'::text,'Aucune reference suivie.'::text,'haut'::text,95,90), ('STOCK'::text,'rotation'::text,'Rotation du stock'::text,'fois/an'::text,'Consommation annuelle rapportee au stock moyen.'::text,'Moins de six mois de mouvements : la rotation n aurait aucun sens.'::text,'haut'::text,4,2), ('STOCK'::text,'stock_dormant'::text,'Stock dormant'::text,'%'::text,'Valeur sans aucun mouvement depuis soixante jours.'::text,'Le magasin a moins de soixante jours.'::text,'bas'::text,5,12), ('LIVRAISON'::text,'otif'::text,'OTIF fournisseur'::text,'%'::text,'A l heure ET complet : le produit des deux, jamais leur moyenne.'::text,'Aucune reception rapprochee d un bon de commande.'::text,'haut'::text,95,85), ('LIVRAISON'::text,'on_time'::text,'Ponctualite'::text,'%'::text,'Livraisons arrivees au plus tard a la date promise.'::text,'Aucune reception avec une date promise.'::text,'haut'::text,95,85), ('LIVRAISON'::text,'in_full'::text,'Completude'::text,'%'::text,'Quantite pesee contre quantite commandee, tolerance de 2 %.'::text,'Aucune ligne de commande servie.'::text,'haut'::text,98,92), ('LIVRAISON'::text,'lead_time'::text,'Delai fournisseur reel'::text,'jours'::text,'Entre la date du bon et la date de reception.'::text,'Aucun bon suivi d une reception.'::text,'bas'::text,60,90), ('ACHATS'::text,'mono_source'::text,'References mono-source'::text,'refs'::text,'Une seule source connue : un incident fournisseur arrete la production.'::text,'Aucune reference analysee.'::text,'bas'::text,0,10), ('ACHATS'::text,'budget_mono'::text,'Budget expose au mono-source'::text,'MAD/an'::text,'Ce que pese annuellement ce qui n a qu une source.'::text,'Aucun budget calcule.'::text,'neutre'::text,NULL::numeric,NULL::numeric), ('ACHATS'::text,'economies'::text,'Economies identifiees'::text,'MAD/an'::text,'A qualite egale, le meme titrage achete moins cher ailleurs.'::text,'Aucune equivalence declaree.'::text,'neutre'::text,NULL::numeric,NULL::numeric), ('ACHATS'::text,'evolution_prix'::text,'Evolution des prix'::text,'%'::text,'Prix moyen pondere des six derniers mois contre les six precedents.'::text,'Moins d un an de releves de prix.'::text,'bas'::text,3,8), ('PREVISION'::text,'forecast_accuracy'::text,'Precision de prevision'::text,'%'::text,'100 moins l erreur ponderee entre besoin calcule et sortie reelle.'::text,'Le rapprochement besoin/realise n est pas encore etabli.'::text,'haut'::text,85,70), ('PRODUCTION'::text,'wip_machine'::text,'Matiere en machine'::text,'kg'::text,'Bobines montees sur metier, immobilisees hors magasin.'::text,'Aucun constat de machine.'::text,'neutre'::text,NULL::numeric,NULL::numeric)) d(domaine, cle, libelle, unite, definition, condition, sens, cible, vigilance)
+     LEFT JOIN public.v_supervision_valeurs v USING (cle));
+
+
+ALTER VIEW public.v_supervision OWNER TO gestionfil;
+
+--
+-- Name: VIEW v_supervision; Type: COMMENT; Schema: public; Owner: gestionfil
+--
+
+COMMENT ON VIEW public.v_supervision IS 'Les indicateurs de supervision : ce qu ils mesurent, leur cible, leur seuil,
+ et — pour ceux qui ne peuvent pas encore etre calcules — ce qu il faut
+ enregistrer pour les allumer.';
 
 
 --
@@ -11020,6 +12248,22 @@ ALTER TABLE ONLY public.historique_prix
 
 ALTER TABLE ONLY public.historique_prix
     ADD CONSTRAINT historique_prix_pkey PRIMARY KEY (id_histo_prix);
+
+
+--
+-- Name: historique_prix_revision historique_prix_revision_id_ligne_reception_version_key; Type: CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.historique_prix_revision
+    ADD CONSTRAINT historique_prix_revision_id_ligne_reception_version_key UNIQUE (id_ligne_reception, version);
+
+
+--
+-- Name: historique_prix_revision historique_prix_revision_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.historique_prix_revision
+    ADD CONSTRAINT historique_prix_revision_pkey PRIMARY KEY (id_revision);
 
 
 --
@@ -11479,6 +12723,14 @@ ALTER TABLE ONLY public.mouvement
 
 
 --
+-- Name: paiement_facture_import paiement_facture_import_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.paiement_facture_import
+    ADD CONSTRAINT paiement_facture_import_pkey PRIMARY KEY (id_paiement);
+
+
+--
 -- Name: parametre_historique parametre_historique_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
@@ -11684,6 +12936,14 @@ ALTER TABLE ONLY public.role_bom
 
 ALTER TABLE ONLY public.role_utilisateur
     ADD CONSTRAINT role_utilisateur_pkey PRIMARY KEY (code_role_user);
+
+
+--
+-- Name: saison_mois saison_mois_pkey; Type: CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.saison_mois
+    ADD CONSTRAINT saison_mois_pkey PRIMARY KEY (mois);
 
 
 --
@@ -12144,6 +13404,13 @@ CREATE INDEX ix_fk_historique_prix_code_devise_2ed9a566 ON public.historique_pri
 
 
 --
+-- Name: ix_fk_historique_prix_revision_utilisateur; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_historique_prix_revision_utilisateur ON public.historique_prix_revision USING btree (id_utilisateur);
+
+
+--
 -- Name: ix_fk_import_ajustements_cump_code_magasin_abb0e444; Type: INDEX; Schema: public; Owner: gestionfil
 --
 
@@ -12155,6 +13422,13 @@ CREATE INDEX ix_fk_import_ajustements_cump_code_magasin_abb0e444 ON public.impor
 --
 
 CREATE INDEX ix_fk_import_ajustements_cump_id_utilisateur_104c2c9e ON public.import_ajustements_cump USING btree (id_utilisateur);
+
+
+--
+-- Name: ix_fk_import_ajustements_cump_mouvement_retour; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_ajustements_cump_mouvement_retour ON public.import_ajustements_cump USING btree (id_mouvement_retour);
 
 
 --
@@ -12232,6 +13506,20 @@ CREATE INDEX ix_fk_import_receptions_id_utilisateur_creation_f28e78f9 ON public.
 --
 
 CREATE INDEX ix_fk_import_receptions_id_utilisateur_validation_e4d70e86 ON public.import_receptions USING btree (id_utilisateur_validation);
+
+
+--
+-- Name: ix_fk_import_receptions_pesee; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_receptions_pesee ON public.import_receptions USING btree (id_utilisateur_pesee);
+
+
+--
+-- Name: ix_fk_import_receptions_renvoi; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_import_receptions_renvoi ON public.import_receptions USING btree (id_utilisateur_renvoi);
 
 
 --
@@ -12529,6 +13817,20 @@ CREATE INDEX ix_fk_mouvement_id_utilisateur_ab8552fb ON public.mouvement USING b
 
 
 --
+-- Name: ix_fk_paiement_facture_import_facture; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_paiement_facture_import_facture ON public.paiement_facture_import USING btree (id_facture);
+
+
+--
+-- Name: ix_fk_paiement_facture_import_utilisateur; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_paiement_facture_import_utilisateur ON public.paiement_facture_import USING btree (id_utilisateur);
+
+
+--
 -- Name: ix_fk_piece_jointe_id_facture_20bd2c08; Type: INDEX; Schema: public; Owner: gestionfil
 --
 
@@ -12676,6 +13978,13 @@ CREATE INDEX ix_fk_reception_ajustements_cmup_id_utilisateur_769c50ca ON public.
 
 
 --
+-- Name: ix_fk_reception_ajustements_cmup_retour; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_ajustements_cmup_retour ON public.reception_ajustements_cmup USING btree (id_mouvement_retour);
+
+
+--
 -- Name: ix_fk_reception_code_devise_facture_29e85492; Type: INDEX; Schema: public; Owner: gestionfil
 --
 
@@ -12708,6 +14017,20 @@ CREATE INDEX ix_fk_reception_id_utilisateur_controle_da89b3ae ON public.receptio
 --
 
 CREATE INDEX ix_fk_reception_id_utilisateur_reception_04ce6e6e ON public.reception USING btree (id_utilisateur_reception);
+
+
+--
+-- Name: ix_fk_reception_pesee; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_pesee ON public.reception USING btree (id_utilisateur_pesee);
+
+
+--
+-- Name: ix_fk_reception_renvoi; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_reception_renvoi ON public.reception USING btree (id_utilisateur_renvoi);
 
 
 --
@@ -12757,6 +14080,13 @@ CREATE INDEX ix_fk_reference_code_devise_catalogue_a01530c4 ON public.reference 
 --
 
 CREATE INDEX ix_fk_reference_id_utilisateur_creation_6937fae9 ON public.reference USING btree (id_utilisateur_creation);
+
+
+--
+-- Name: ix_fk_saison_mois_modif; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE INDEX ix_fk_saison_mois_modif ON public.saison_mois USING btree (id_utilisateur_modif);
 
 
 --
@@ -13278,6 +14608,13 @@ CREATE UNIQUE INDEX ux_contact_principal ON public.contact_fournisseur USING btr
 
 
 --
+-- Name: ux_demande_en_attente; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE UNIQUE INDEX ux_demande_en_attente ON public.demande_autorisation USING btree (type_demande, COALESCE(document, ''::text), COALESCE(lot_fournisseur, ''::text), COALESCE(code_reference, ''::text)) WHERE (statut = 'EN_ATTENTE'::text);
+
+
+--
 -- Name: ux_devise_pivot; Type: INDEX; Schema: public; Owner: gestionfil
 --
 
@@ -13303,6 +14640,13 @@ CREATE UNIQUE INDEX ux_grp_equiv_pref ON public.reference_groupe_equiv USING btr
 --
 
 CREATE UNIQUE INDEX ux_grp_equiv_prio ON public.reference_groupe_equiv USING btree (code_groupe_equiv, priorite) WHERE (actif = 1);
+
+
+--
+-- Name: ux_iac_retour_solde; Type: INDEX; Schema: public; Owner: gestionfil
+--
+
+CREATE UNIQUE INDEX ux_iac_retour_solde ON public.import_ajustements_cump USING btree (id_mouvement_retour) WHERE (nature = 'RETOUR'::text);
 
 
 --
@@ -13419,6 +14763,412 @@ CREATE OR REPLACE VIEW public.v_groupe_equiv_detail AS
 
 
 --
+-- Name: alerte trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.alerte FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_detection', 'date_acquittement');
+
+
+--
+-- Name: archive_reception trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.archive_reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_reception', 'date_archive');
+
+
+--
+-- Name: audit_log trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.audit_log FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_operation');
+
+
+--
+-- Name: besoin_mrp trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.besoin_mrp FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_calcul', 'date_reference');
+
+
+--
+-- Name: bon_commande trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.bon_commande FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_bc', 'date_taux_engage', 'date_envoi', 'date_livraison_prevue', 'date_creation', 'date_validation');
+
+
+--
+-- Name: cockpit_kpi trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.cockpit_kpi FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_calcul');
+
+
+--
+-- Name: cours_bam trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.cours_bam FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_cours', 'date_lecture');
+
+
+--
+-- Name: demande_autorisation trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.demande_autorisation FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_demande', 'date_decision', 'date_consommation');
+
+
+--
+-- Name: dossier_lignes_frais trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.dossier_lignes_frais FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_creation');
+
+
+--
+-- Name: droit_champ trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.droit_champ FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_modification');
+
+
+--
+-- Name: entreprise trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.entreprise FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_creation');
+
+
+--
+-- Name: fournisseur trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.fournisseur FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_creation');
+
+
+--
+-- Name: frais_approche trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.frais_approche FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_frais', 'date_creation');
+
+
+--
+-- Name: historique_conditionnement trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.historique_conditionnement FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_evenement');
+
+
+--
+-- Name: historique_prix trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.historique_prix FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_achat', 'date_enregistrement');
+
+
+--
+-- Name: import_ajustements_cump trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.import_ajustements_cump FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_ajustement');
+
+
+--
+-- Name: import_dossiers trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.import_dossiers FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_arrivee', 'date_creation', 'date_cloture', 'date_dum');
+
+
+--
+-- Name: import_engagements trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.import_engagements FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_ei', 'date_creation');
+
+
+--
+-- Name: import_factures trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.import_factures FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_facture', 'date_creation');
+
+
+--
+-- Name: import_receptions trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.import_receptions FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_reception', 'date_creation', 'date_validation');
+
+
+--
+-- Name: inventaire trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.inventaire FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_inventaire', 'date_creation', 'date_cloture', 'date_annulation');
+
+
+--
+-- Name: journal_connexion trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.journal_connexion FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('horodatage');
+
+
+--
+-- Name: ligne_bc trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.ligne_bc FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_livraison_prevue');
+
+
+--
+-- Name: ligne_inventaire trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.ligne_inventaire FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_comptage');
+
+
+--
+-- Name: ligne_mouvement trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.ligne_mouvement FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_fabrication', 'date_peremption');
+
+
+--
+-- Name: ligne_reception trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.ligne_reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_fabrication', 'date_peremption');
+
+
+--
+-- Name: lot trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.lot FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_creation', 'date_derniere_activite');
+
+
+--
+-- Name: lot_evenement trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.lot_evenement FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_evenement');
+
+
+--
+-- Name: machine trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.machine FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_etat');
+
+
+--
+-- Name: machine_cliche trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.machine_cliche FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_cliche');
+
+
+--
+-- Name: machine_consommation trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.machine_consommation FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_constat', 'date_constat_precedent', 'date_creation');
+
+
+--
+-- Name: machine_decision trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.machine_decision FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_decision', 'date_retrait');
+
+
+--
+-- Name: machine_etat trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.machine_etat FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_constat', 'date_maj');
+
+
+--
+-- Name: machine_fiche trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.machine_fiche FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_fiche', 'date_constat_precedent', 'date_creation', 'date_validation', 'date_annulation');
+
+
+--
+-- Name: machine_fiche_journal trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.machine_fiche_journal FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('horodatage');
+
+
+--
+-- Name: migration_appliquee trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.migration_appliquee FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_application');
+
+
+--
+-- Name: mouvement trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.mouvement FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_mouvement', 'date_creation');
+
+
+--
+-- Name: parametre trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.parametre FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_derniere_modif');
+
+
+--
+-- Name: parametre_historique trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.parametre_historique FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_modification');
+
+
+--
+-- Name: piece_jointe trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.piece_jointe FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_depot');
+
+
+--
+-- Name: piece_lecture trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.piece_lecture FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_lecture');
+
+
+--
+-- Name: plan_achat trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.plan_achat FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_generation', 'date_besoin_prevue', 'date_validation', 'date_figement', 'date_ecartee');
+
+
+--
+-- Name: plan_production trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.plan_production FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_debut', 'date_fin', 'date_creation', 'date_modification', 'date_validation', 'date_cloture');
+
+
+--
+-- Name: plan_qualite trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.plan_qualite FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_figee');
+
+
+--
+-- Name: qualite trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.qualite FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_creation', 'date_modification', 'date_cloture');
+
+
+--
+-- Name: reception trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_reception', 'date_controle', 'date_creation', 'date_cloture');
+
+
+--
+-- Name: reception_ajustements_cmup trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.reception_ajustements_cmup FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_ajustement');
+
+
+--
+-- Name: reference trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.reference FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_prix_catalogue', 'date_dernier_abc', 'date_dernier_cmup', 'date_creation');
+
+
+--
+-- Name: reference_groupe_equiv trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.reference_groupe_equiv FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_debut', 'date_fin');
+
+
+--
+-- Name: snapshot_mrp trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.snapshot_mrp FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_snapshot');
+
+
+--
+-- Name: stock_lot trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.stock_lot FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_fabrication', 'date_peremption', 'date_premiere_entree', 'date_maj');
+
+
+--
+-- Name: stock_magasin trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.stock_magasin FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_derniere_entree', 'date_derniere_sortie', 'date_dernier_inventaire', 'date_maj');
+
+
+--
+-- Name: taux_change trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.taux_change FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_debut', 'date_fin', 'date_creation');
+
+
+--
+-- Name: telechargement trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.telechargement FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_telechargement');
+
+
+--
+-- Name: transfert trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.transfert FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_transfert', 'date_sortie', 'date_reception_dest');
+
+
+--
+-- Name: utilisateur trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.utilisateur FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_creation', 'bloque_jusqu_a', 'totp_active_le');
+
+
+--
+-- Name: valorisation_stock trg_00_date_vide; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_date_vide BEFORE INSERT OR UPDATE ON public.valorisation_stock FOR EACH ROW EXECUTE FUNCTION public.fn_trg_date_vide_null('date_valorisation', 'date_calcul');
+
+
+--
+-- Name: parametre trg_00_parametre_type; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_00_parametre_type BEFORE INSERT OR UPDATE OF valeur_courante, type_donnee ON public.parametre FOR EACH ROW EXECUTE FUNCTION public.fn_trg_parametre_type();
+
+
+--
 -- Name: archive_reception trg_archive_immuable_d; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
@@ -13517,6 +15267,13 @@ CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.bon_commande FOR EA
 
 
 --
+-- Name: cours_bam trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR DELETE OR UPDATE ON public.cours_bam FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
 -- Name: demande_autorisation trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
@@ -13528,6 +15285,20 @@ CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.demande_a
 --
 
 CREATE TRIGGER trg_audit_modification AFTER INSERT OR DELETE OR UPDATE ON public.dossier_lignes_frais FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: fournisseur trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.fournisseur FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: frais_approche trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.frais_approche FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
 
 
 --
@@ -13573,10 +15344,31 @@ CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.ligne_bc 
 
 
 --
+-- Name: ligne_inventaire trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.ligne_inventaire FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+
+
+--
+-- Name: ligne_reception trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR UPDATE ON public.ligne_reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification('id_mouvement_genere');
+
+
+--
 -- Name: lot trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
 CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.lot FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification('date_derniere_activite');
+
+
+--
+-- Name: paiement_facture_import trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER INSERT OR DELETE OR UPDATE ON public.paiement_facture_import FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
 
 
 --
@@ -13591,6 +15383,13 @@ CREATE TRIGGER trg_audit_modification AFTER UPDATE OF statut ON public.plan_acha
 --
 
 CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification('statut');
+
+
+--
+-- Name: saison_mois trg_audit_modification; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_audit_modification AFTER UPDATE ON public.saison_mois FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
 
 
 --
@@ -13982,7 +15781,7 @@ CREATE TRIGGER trg_audit_suppression BEFORE DELETE ON public.utilisateur FOR EAC
 -- Name: plan_achat trg_audit_suppression_plan_achat; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
-CREATE TRIGGER trg_audit_suppression_plan_achat AFTER DELETE ON public.plan_achat FOR EACH ROW EXECUTE FUNCTION public.fn_trg_audit_modification();
+CREATE TRIGGER trg_audit_suppression_plan_achat AFTER DELETE ON public.plan_achat FOR EACH ROW WHEN ((COALESCE(current_setting('gestionfil.purge_plan'::text, true), ''::text) <> 'on'::text)) EXECUTE FUNCTION public.fn_trg_audit_modification();
 
 
 --
@@ -14021,6 +15820,20 @@ CREATE TRIGGER trg_empl_numero BEFORE INSERT OR UPDATE ON public.machine_emplace
 
 
 --
+-- Name: machine_fiche trg_fiche_derogations; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_fiche_derogations AFTER DELETE OR UPDATE OF statut ON public.machine_fiche FOR EACH ROW EXECUTE FUNCTION public.fn_trg_fiche_derogations();
+
+
+--
+-- Name: dossier_lignes_frais trg_frais_dossier_clos; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_frais_dossier_clos BEFORE INSERT OR DELETE OR UPDATE ON public.dossier_lignes_frais FOR EACH ROW EXECUTE FUNCTION public.fn_trg_frais_dossier_clos();
+
+
+--
 -- Name: historique_prix trg_histo_prix_immuable_d; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
@@ -14039,6 +15852,13 @@ CREATE TRIGGER trg_histo_prix_immuable_r BEFORE INSERT ON public.historique_prix
 --
 
 CREATE TRIGGER trg_histo_prix_immuable_u BEFORE UPDATE ON public.historique_prix FOR EACH ROW EXECUTE FUNCTION public.fn_trg_histo_prix_immuable_u();
+
+
+--
+-- Name: historique_prix_revision trg_histo_revision_immuable; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_histo_revision_immuable BEFORE DELETE OR UPDATE ON public.historique_prix_revision FOR EACH ROW EXECUTE FUNCTION public.fn_trg_histo_revision_immuable();
 
 
 --
@@ -14067,6 +15887,13 @@ CREATE TRIGGER trg_import_cibles_verrou BEFORE INSERT OR DELETE OR UPDATE ON pub
 --
 
 CREATE TRIGGER trg_import_dossier_garde BEFORE DELETE OR UPDATE ON public.import_dossiers FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_dossier_garde();
+
+
+--
+-- Name: import_dossiers trg_import_dum_permanente; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_import_dum_permanente BEFORE UPDATE OF numero_dum ON public.import_dossiers FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_dum_permanente();
 
 
 --
@@ -14102,6 +15929,13 @@ CREATE TRIGGER trg_import_frais_verrou BEFORE INSERT OR DELETE OR UPDATE ON publ
 --
 
 CREATE TRIGGER trg_import_hors_reception_locale BEFORE INSERT OR UPDATE OF id_ligne_bc ON public.import_facture_lignes FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_hors_reception_locale();
+
+
+--
+-- Name: import_facture_lignes trg_import_ligne_bon; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_import_ligne_bon BEFORE INSERT OR UPDATE OF id_ligne_bc, code_reference ON public.import_facture_lignes FOR EACH ROW EXECUTE FUNCTION public.fn_trg_import_ligne_bon();
 
 
 --
@@ -14259,6 +16093,20 @@ CREATE TRIGGER trg_lmvt_stock_suffisant BEFORE INSERT ON public.ligne_mouvement 
 
 
 --
+-- Name: lot_evenement trg_lot_evenement_immuable; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_lot_evenement_immuable BEFORE DELETE OR UPDATE ON public.lot_evenement FOR EACH ROW EXECUTE FUNCTION public.fn_trg_lot_evenement_immuable();
+
+
+--
+-- Name: lot trg_lot_pas_solde_sur_machine; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_lot_pas_solde_sur_machine BEFORE UPDATE OF statut ON public.lot FOR EACH ROW EXECUTE FUNCTION public.fn_trg_lot_pas_solde_sur_machine();
+
+
+--
 -- Name: stock_lot trg_lot_plancher; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
@@ -14329,6 +16177,13 @@ CREATE TRIGGER trg_mouvement_immuable_u BEFORE UPDATE ON public.mouvement FOR EA
 
 
 --
+-- Name: mouvement trg_mouvement_machine_annulation; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_mouvement_machine_annulation BEFORE INSERT ON public.mouvement FOR EACH ROW EXECUTE FUNCTION public.fn_trg_mouvement_machine_annulation();
+
+
+--
 -- Name: parametre_historique trg_param_histo_immuable_d; Type: TRIGGER; Schema: public; Owner: gestionfil
 --
 
@@ -14361,6 +16216,20 @@ CREATE TRIGGER trg_parametre_historiser BEFORE UPDATE OF valeur_courante ON publ
 --
 
 CREATE TRIGGER trg_parametre_verrouille BEFORE UPDATE OF valeur_courante ON public.parametre FOR EACH ROW WHEN (((old.verrouille = 1) AND (old.valeur_courante IS DISTINCT FROM new.valeur_courante))) EXECUTE FUNCTION public.fn_refuser('Parametre verrouille : sa valeur est figee et ne peut pas etre modifiee.');
+
+
+--
+-- Name: import_reception_lignes trg_pesee_auteur; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_pesee_auteur AFTER INSERT OR DELETE OR UPDATE ON public.import_reception_lignes FOR EACH ROW EXECUTE FUNCTION public.fn_trg_pesee_auteur();
+
+
+--
+-- Name: ligne_reception trg_pesee_auteur; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_pesee_auteur AFTER INSERT OR DELETE OR UPDATE ON public.ligne_reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_pesee_auteur();
 
 
 --
@@ -14480,6 +16349,20 @@ CREATE TRIGGER trg_reception_locale_hors_import BEFORE INSERT OR UPDATE OF id_li
 --
 
 CREATE TRIGGER trg_reception_sod_acheteur BEFORE UPDATE OF statut ON public.reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_reception_sod_acheteur();
+
+
+--
+-- Name: import_receptions trg_reception_valideur_pas_peseur; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_reception_valideur_pas_peseur BEFORE UPDATE OF statut ON public.import_receptions FOR EACH ROW EXECUTE FUNCTION public.fn_trg_reception_valideur_pas_peseur();
+
+
+--
+-- Name: reception trg_reception_valideur_pas_peseur; Type: TRIGGER; Schema: public; Owner: gestionfil
+--
+
+CREATE TRIGGER trg_reception_valideur_pas_peseur BEFORE UPDATE OF statut ON public.reception FOR EACH ROW EXECUTE FUNCTION public.fn_trg_reception_valideur_pas_peseur();
 
 
 --
@@ -14869,6 +16752,22 @@ ALTER TABLE ONLY public.historique_prix
 
 
 --
+-- Name: historique_prix_revision historique_prix_revision_id_ligne_reception_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.historique_prix_revision
+    ADD CONSTRAINT historique_prix_revision_id_ligne_reception_fkey FOREIGN KEY (id_ligne_reception) REFERENCES public.historique_prix(id_ligne_reception);
+
+
+--
+-- Name: historique_prix_revision historique_prix_revision_id_utilisateur_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.historique_prix_revision
+    ADD CONSTRAINT historique_prix_revision_id_utilisateur_fkey FOREIGN KEY (id_utilisateur) REFERENCES public.utilisateur(id_utilisateur);
+
+
+--
 -- Name: import_ajustements_cump import_ajustements_cump_code_magasin_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
@@ -14890,6 +16789,14 @@ ALTER TABLE ONLY public.import_ajustements_cump
 
 ALTER TABLE ONLY public.import_ajustements_cump
     ADD CONSTRAINT import_ajustements_cump_id_dossier_fkey FOREIGN KEY (id_dossier) REFERENCES public.import_dossiers(id_dossier);
+
+
+--
+-- Name: import_ajustements_cump import_ajustements_cump_id_mouvement_retour_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.import_ajustements_cump
+    ADD CONSTRAINT import_ajustements_cump_id_mouvement_retour_fkey FOREIGN KEY (id_mouvement_retour) REFERENCES public.mouvement(id_mouvement);
 
 
 --
@@ -15050,6 +16957,22 @@ ALTER TABLE ONLY public.import_reception_lignes
 
 ALTER TABLE ONLY public.import_receptions
     ADD CONSTRAINT import_receptions_id_utilisateur_creation_fkey FOREIGN KEY (id_utilisateur_creation) REFERENCES public.utilisateur(id_utilisateur);
+
+
+--
+-- Name: import_receptions import_receptions_id_utilisateur_pesee_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.import_receptions
+    ADD CONSTRAINT import_receptions_id_utilisateur_pesee_fkey FOREIGN KEY (id_utilisateur_pesee) REFERENCES public.utilisateur(id_utilisateur);
+
+
+--
+-- Name: import_receptions import_receptions_id_utilisateur_renvoi_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.import_receptions
+    ADD CONSTRAINT import_receptions_id_utilisateur_renvoi_fkey FOREIGN KEY (id_utilisateur_renvoi) REFERENCES public.utilisateur(id_utilisateur);
 
 
 --
@@ -15701,6 +17624,22 @@ ALTER TABLE ONLY public.mouvement
 
 
 --
+-- Name: paiement_facture_import paiement_facture_import_id_facture_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.paiement_facture_import
+    ADD CONSTRAINT paiement_facture_import_id_facture_fkey FOREIGN KEY (id_facture) REFERENCES public.import_factures(id_facture);
+
+
+--
+-- Name: paiement_facture_import paiement_facture_import_id_utilisateur_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.paiement_facture_import
+    ADD CONSTRAINT paiement_facture_import_id_utilisateur_fkey FOREIGN KEY (id_utilisateur) REFERENCES public.utilisateur(id_utilisateur);
+
+
+--
 -- Name: parametre_historique parametre_historique_code_parametre_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
@@ -15941,6 +17880,14 @@ ALTER TABLE ONLY public.reception_ajustements_cmup
 
 
 --
+-- Name: reception_ajustements_cmup reception_ajustements_cmup_id_mouvement_retour_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.reception_ajustements_cmup
+    ADD CONSTRAINT reception_ajustements_cmup_id_mouvement_retour_fkey FOREIGN KEY (id_mouvement_retour) REFERENCES public.mouvement(id_mouvement);
+
+
+--
 -- Name: reception_ajustements_cmup reception_ajustements_cmup_id_reception_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
@@ -15997,11 +17944,27 @@ ALTER TABLE ONLY public.reception
 
 
 --
+-- Name: reception reception_id_utilisateur_pesee_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.reception
+    ADD CONSTRAINT reception_id_utilisateur_pesee_fkey FOREIGN KEY (id_utilisateur_pesee) REFERENCES public.utilisateur(id_utilisateur);
+
+
+--
 -- Name: reception reception_id_utilisateur_reception_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
 --
 
 ALTER TABLE ONLY public.reception
     ADD CONSTRAINT reception_id_utilisateur_reception_fkey FOREIGN KEY (id_utilisateur_reception) REFERENCES public.utilisateur(id_utilisateur);
+
+
+--
+-- Name: reception reception_id_utilisateur_renvoi_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.reception
+    ADD CONSTRAINT reception_id_utilisateur_renvoi_fkey FOREIGN KEY (id_utilisateur_renvoi) REFERENCES public.utilisateur(id_utilisateur);
 
 
 --
@@ -16114,6 +18077,14 @@ ALTER TABLE ONLY public.reference_groupe_equiv
 
 ALTER TABLE ONLY public.reference
     ADD CONSTRAINT reference_id_utilisateur_creation_fkey FOREIGN KEY (id_utilisateur_creation) REFERENCES public.utilisateur(id_utilisateur);
+
+
+--
+-- Name: saison_mois saison_mois_id_utilisateur_modif_fkey; Type: FK CONSTRAINT; Schema: public; Owner: gestionfil
+--
+
+ALTER TABLE ONLY public.saison_mois
+    ADD CONSTRAINT saison_mois_id_utilisateur_modif_fkey FOREIGN KEY (id_utilisateur_modif) REFERENCES public.utilisateur(id_utilisateur);
 
 
 --
@@ -16248,5 +18219,5 @@ ALTER TABLE ONLY public.valorisation_stock
 -- PostgreSQL database dump complete
 --
 
-\unrestrict PkqcwTtAzx8LxGHN08gIYwXvfeRV2lDsTpDZ65a7SHjH2aRmbCnkfDM5UxrWDBg
+\unrestrict GBYoe2Y0JxSMaS0PJ6cQGYLT3vJUtcU7pkuH51oEeqrnJaE03rBUM7Ww9WEBlTg
 

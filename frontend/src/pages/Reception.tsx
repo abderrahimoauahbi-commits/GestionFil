@@ -195,7 +195,11 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
     qte: pourChamp(l.quantite_stock_kg, 3),
     unite: l.unite_saisie,
     palettes: l.nb_palettes != null ? String(l.nb_palettes) : pourChamp(colis.palettes),
-    bobines: l.nb_bobines != null ? String(l.nb_bobines) : pourChamp(colis.bobines),
+    // UNE LIGNE JAMAIS COMPTEE RESTE VIDE (10/10/2026). Le chiffre deduit des kilos
+    // s'affichait comme un compte : retaper le meme nombre ne changeait rien a
+    // l'ecran, rien ne partait, et la soumission restait refusee (« Comptez les
+    // bobines ») sans issue. Le compte du quai se tape, il ne se devine pas.
+    bobines: l.nb_bobines != null ? String(l.nb_bobines) : '',
     // DETACHEE DES QU'UN COLISAGE A ETE CONSTATE. Sur un quai, « 21 palettes
     // ET ce poids-la » est la regle plutot que l'exception : une palette
     // entamee ne se deduit d'aucune pesee. Relier d'office effacerait le

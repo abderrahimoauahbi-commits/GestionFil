@@ -1628,7 +1628,8 @@ def scenario_reception_date_du_fait(c, infra):
     du_jour = float(infra.valeur(f"SELECT taux FROM taux_change WHERE code_devise = 'USD' AND substr(date_debut, 1, 10) = '{jour}'"))
     id_bc, lignes = bon_envoye(c, [(A_USD, 300, 2.0)], frs="FRS-001", date_bc="2025-03-01")
     ligne = [{"code_reference": A_USD, "id_ligne_bc": lignes[0]["id_ligne_bc"], "unite_saisie": "kg",
-              "quantite_pesee_unite": 300, "code_magasin_dest": M, "lot_fournisseur": "LOT-DATE-USD"}]
+              "quantite_pesee_unite": 300, "code_magasin_dest": M, "lot_fournisseur": "LOT-DATE-USD",
+              "nb_bobines": 120}]
     r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "date_reception": "2025-03-05",
                                                      "num_bon_livraison": "BL-DATE-USD", "lignes": ligne})
     rid = r["id_reception"]
@@ -1640,6 +1641,12 @@ def scenario_reception_date_du_fait(c, infra):
     c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"date_reception": "2025-03-20"})
     verifier(abs(taux() - 9.5) < 1e-9 and abs(prix() - 19.0) < 1e-9,
              f"date corrigee au 20/03 : taux {taux()}, prix {prix()} au lieu de 9,50 et 19,00")
+    # Validee, la livraison entre en stock au 20/03/2025, et son lot avec elle : le lot
+    # le plus ancien (propose d'office aux sorties) se juge sur la date du fait.
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+    lot = infra.valeur("SELECT substr(date_premiere_entree, 1, 10) FROM stock_lot WHERE lot_fournisseur = 'LOT-DATE-USD'")
+    verifier(lot == "2025-03-20", f"le lot recu le 20/03/2025 a pour premiere entree {lot}")
     # Le cours du jour, lui, n'a pas bouge.
     encore = float(infra.valeur(f"SELECT taux FROM taux_change WHERE code_devise = 'USD' AND substr(date_debut, 1, 10) = '{jour}'"))
     verifier(encore == du_jour, f"le cours du jour est passe de {du_jour} a {encore}")

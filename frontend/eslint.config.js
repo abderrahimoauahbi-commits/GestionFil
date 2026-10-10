@@ -30,7 +30,7 @@ import tseslint from 'typescript-eslint'
 export default tseslint.config(
   // `target` et `dist` ne sont pas du code ecrit : les analyser couterait des
   // minutes pour ne rien apprendre.
-  { ignores: ['dist', 'src-tauri/target', 'dev-dist', 'rapport-e2e'] },
+  { ignores: ['dist', 'src-tauri/target', 'dev-dist', 'rapport-e2e', 'rapport-simulation'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

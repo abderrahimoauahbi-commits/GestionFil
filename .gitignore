@@ -75,3 +75,4 @@ __pycache__/
 
 # Tests de bout en bout (frontend/e2e) : rapports, captures, traces
 frontend/rapport-e2e/
+frontend/rapport-simulation/

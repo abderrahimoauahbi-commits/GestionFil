@@ -15,7 +15,7 @@
  * RIEN N'EST ÉCRIT SANS UN GESTE. On accepte ligne par ligne, ou toutes les
  * propositions sûres d'un coup — mais jamais en ouvrant l'écran.
  */
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Sparkles, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -154,6 +154,12 @@ export function CompleterCatalogue() {
   }, [q.data, filtre])
 
   const valeur = (l: LigneCompletion): Saisie => saisies[l.code_reference] ?? valeurDepart(l)
+  /** Rien a enregistrer tant que la ligne dit ce que la base dit deja. */
+  const aEnregistrer = (l: LigneCompletion) => {
+    const v = valeur(l)
+    const actuel = l.actuel as Record<string, unknown>
+    return (Object.keys(v) as (keyof Saisie)[]).some((c) => String(actuel[c] ?? '') !== String(v[c] ?? ''))
+  }
   const poser = (code: string, champ: keyof Saisie, v: string) =>
     setSaisies((s) => ({
       ...s,
@@ -301,10 +307,6 @@ export function CompleterCatalogue() {
                   <th className={cn(th, 'text-left')}>Référence</th>
                   <th className={cn(th, 'text-left')}>Famille</th>
                   <th className={cn(th, 'text-left')}>Couleur interne</th>
-                  <th className={cn(th, 'text-left')}>Réf. fournisseur</th>
-                  <th className={cn(th, 'text-left')}>Origine</th>
-                  <th className={cn(th, 'text-left')}>Titrage</th>
-                  <th className={cn(th, 'text-left')}>Code couleur frs</th>
                   <th className={cn(th, 'text-right')}>Prix</th>
                   <th className={cn(th, 'text-right')}>Poids bob.</th>
                   <th className={cn(th, 'text-right')}>Bob./pal.</th>
@@ -326,7 +328,8 @@ export function CompleterCatalogue() {
                     return v[c] === String(suggere)
                   }
                   return (
-                    <tr key={l.code_reference} className="border-b border-bordure/60">
+                    <Fragment key={l.code_reference}>
+                    <tr>
                       <td className={cn(td, 'max-w-[22rem]')}>
                         <div className="truncate font-medium">{l.code_reference}</div>
                         <div className="text-[11px] text-attenue-texte">
@@ -374,46 +377,6 @@ export function CompleterCatalogue() {
                             </option>
                           ))}
                         </Selecteur>
-                      </td>
-                      <td className={td}>
-                        <Champ
-                          aria-label={`Référence fournisseur — ${l.code_reference}`}
-
-                          value={v.reference_fournisseur}
-                          onChange={(e) => poser(l.code_reference, 'reference_fournisseur', e.target.value)}
-                          placeholder="—"
-                          className={cn(champ, 'w-32', propose('reference_fournisseur') && 'border-primaire')}
-                        />
-                      </td>
-                      <td className={td}>
-                        <Champ
-                          aria-label={`Origine — ${l.code_reference}`}
-
-                          value={v.origine}
-                          onChange={(e) => poser(l.code_reference, 'origine', e.target.value)}
-                          placeholder={l.couleur ? '' : 'à la place de la couleur'}
-                          className={cn(champ, 'w-32')}
-                        />
-                      </td>
-                      <td className={td}>
-                        <Champ
-                          aria-label={`Titrage — ${l.code_reference}`}
-
-                          value={v.titrage}
-                          onChange={(e) => poser(l.code_reference, 'titrage', e.target.value)}
-                          placeholder="1500 dtex"
-                          className={cn(champ, 'w-28', propose('titrage') && 'border-primaire')}
-                        />
-                      </td>
-                      <td className={td}>
-                        <Champ
-                          aria-label={`Couleur — ${l.code_reference}`}
-
-                          value={v.code_couleur}
-                          onChange={(e) => poser(l.code_reference, 'code_couleur', e.target.value)}
-                          placeholder="RED 7612"
-                          className={cn(champ, 'w-28', propose('code_couleur') && 'border-primaire')}
-                        />
                       </td>
                       {/* LE PRIX NE SE DEDUIT PAS : il se lit sur une offre ou
                           une facture. Le champ reste vide et se signale en
@@ -476,13 +439,67 @@ export function CompleterCatalogue() {
                             variante="contour"
                             aria-label={`Enregistrer ${l.code_reference}`}
                             onClick={() => enregistrer.mutate([l])}
-                            disabled={enregistrer.isPending}
+                            disabled={enregistrer.isPending || !aEnregistrer(l)}
                           >
                             <Check className="size-3.5" />
                           </Bouton>
                         )}
                       </td>
                     </tr>
+                    {/* LA LIGNE COMPLEMENTAIRE (10/10/2026) : pas de defilement horizontal ;
+                        ce qui ne tient pas sur la ligne passe dessous, avec son titre. */}
+                    <tr className="border-b border-bordure/60">
+                      <td />
+                      <td colSpan={6} className="px-2 pb-2">
+                        <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Réf. fournisseur</span>
+                        <Champ
+                          aria-label={`Référence fournisseur — ${l.code_reference}`}
+
+                          value={v.reference_fournisseur}
+                          onChange={(e) => poser(l.code_reference, 'reference_fournisseur', e.target.value)}
+                          placeholder="—"
+                          className={cn(champ, 'w-32', propose('reference_fournisseur') && 'border-primaire')}
+                        />
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Origine</span>
+                        <Champ
+                          aria-label={`Origine — ${l.code_reference}`}
+
+                          value={v.origine}
+                          onChange={(e) => poser(l.code_reference, 'origine', e.target.value)}
+                          placeholder={l.couleur ? '' : 'à la place de la couleur'}
+                          className={cn(champ, 'w-32')}
+                        />
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Titrage</span>
+                        <Champ
+                          aria-label={`Titrage — ${l.code_reference}`}
+
+                          value={v.titrage}
+                          onChange={(e) => poser(l.code_reference, 'titrage', e.target.value)}
+                          placeholder="1500 dtex"
+                          className={cn(champ, 'w-28', propose('titrage') && 'border-primaire')}
+                        />
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Code couleur frs</span>
+                        <Champ
+                          aria-label={`Couleur — ${l.code_reference}`}
+
+                          value={v.code_couleur}
+                          onChange={(e) => poser(l.code_reference, 'code_couleur', e.target.value)}
+                          placeholder="RED 7612"
+                          className={cn(champ, 'w-28', propose('code_couleur') && 'border-primaire')}
+                        />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    </Fragment>
                   )
                 })}
                 {lignes.length === 0 && (

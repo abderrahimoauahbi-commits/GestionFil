@@ -75,7 +75,8 @@ __pycache__/
 
 # Tests de bout en bout (frontend/e2e) : rapports, captures, traces
 frontend/rapport-e2e/
-frontend/rapport-simulation/
+frontend/rapport-simulation*/
 
 # Skills Higgsfield (npx skills add higgsfield-ai/skills), propres au poste
 .agents/
+frontend/dist-essai/

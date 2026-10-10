@@ -21,7 +21,7 @@
  * Rien ne part au serveur avant le clic final : en-tete, lignes et bon de
  * regularisation partent dans une seule transaction.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, Fragment } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, CheckCheck, Link2, Plus, Save, Trash2, Unlink2, X } from 'lucide-react'
@@ -840,11 +840,11 @@ export function ReceptionNouvelle() {
                     Reprenez un bon de commande, ou ajoutez un article hors commande.
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    {/* La grille a une largeur PLANCHER : comprimee, le selecteur
-                        d'unite rognait « kg » en « kc ». Sous cette largeur, le
-                        conteneur defile plutot que d'ecraser les colonnes. */}
-                    <table className="w-full min-w-[1180px] text-[13px]">
+                  <div>
+                    {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026) : la ligne principale
+                        porte ce qu'on pese ; colis, lot et magasin passent sur la ligne
+                        complementaire, juste dessous. */}
+                    <table className="w-full text-[13px]">
                       <thead>
                         <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
                           <th className="w-10 px-2 py-2" title="Ligne retenue pour cette reception">
@@ -852,20 +852,11 @@ export function ReceptionNouvelle() {
                           </th>
                           <th className="w-10 px-1 py-2 text-right">#</th>
                           <th className="px-2 py-2 text-left">Référence</th>
-                          <th className="w-32 px-2 py-2 text-left">Bon</th>
-                          <th className="w-24 px-2 py-2 text-right">Reste</th>
+                          <th className="w-36 px-2 py-2 text-left">Bon · reste</th>
                           <th className="w-28 px-2 py-2 text-right">Qte BL</th>
                           <th className="w-32 px-2 py-2 text-right">Qte pesee</th>
                           <th className="w-24 px-2 py-2 text-left">Unité</th>
-                          <th
-                            className="w-40 px-2 py-2 text-center"
-                            title="Palettes et bobines comptees : les trois se repondent"
-                          >
-                            Pal. / Bob.
-                          </th>
-                          <th className="w-24 px-2 py-2 text-right">Écart</th>
-                          <th className="w-32 px-2 py-2 text-left">Lot</th>
-                          <th className="w-28 px-2 py-2 text-left">Magasin</th>
+                          <th className="w-28 px-2 py-2 text-right">Écart</th>
                           <th className="w-10 px-1 py-2"></th>
                         </tr>
                       </thead>
@@ -876,11 +867,11 @@ export function ReceptionNouvelle() {
                           const manqueLot = l.retenue && l.suivi_lot === 1 && !l.lot.trim()
                           const manqueQte = l.retenue && !(Number(l.qte) > 0)
                           return (
+                            <Fragment key={l.cle}>
                             <tr
-                              key={l.cle}
                               onClick={() => setPointee(l.cle)}
                               className={cn(
-                                'cursor-pointer border-b border-bordure/60 align-middle',
+                                'cursor-pointer align-middle',
                                 pointee === l.cle && 'bg-primaire/5',
                                 !l.retenue && 'opacity-45',
                               )}
@@ -934,6 +925,9 @@ export function ReceptionNouvelle() {
                                 {l.numero_bc ? (
                                   <div>
                                     <div className="tabular-nums text-[12px]">{l.numero_bc}</div>
+                                    <div className="text-[11px] tabular-nums text-attenue-texte">
+                                      reste {l.reste_kg == null ? '—' : fmt.nombre(l.reste_kg, 0)} kg
+                                    </div>
                                     {(l.retard_jours ?? 0) > 0 && (
                                       <div className="text-[11px] text-danger">
                                         {l.retard_jours} j de retard
@@ -943,9 +937,6 @@ export function ReceptionNouvelle() {
                                 ) : (
                                   <Badge ton="alerte">hors commande</Badge>
                                 )}
-                              </td>
-                              <td className="px-2 py-1 text-right tabular-nums text-attenue-texte">
-                                {l.reste_kg == null ? '—' : fmt.nombre(l.reste_kg, 0)}
                               </td>
                               <td className="px-2 py-1">
                                 <Champ
@@ -999,7 +990,83 @@ export function ReceptionNouvelle() {
                                   ))}
                                 </Selecteur>
                               </td>
-                              <td className="px-2 py-1">
+                              <td
+                                className={cn(
+                                  'px-2 py-1 text-right tabular-nums',
+                                  hors && 'font-medium text-danger',
+                                )}
+                              >
+                                {ecart == null ? (
+                                  '—'
+                                ) : (
+                                  <>
+                                    {ecart > 0 ? '+' : ''}
+                                    {fmt.nombre(ecart, 1)} %
+                                  </>
+                                )}
+                                {/* Au-dela de la tolerance : la derogation, nominative
+                                    et motivee, sans laquelle la base refuse la ligne. */}
+                                {hors && l.retenue && (
+                                  <div
+                                    className="mt-1 space-y-1 text-left font-normal text-texte"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <label className="flex items-center justify-end gap-1 text-[11px]">
+                                      <input
+                                        type="checkbox"
+                                        checked={l.derogation}
+                                        onChange={(e) => maj(l.cle, 'derogation', e.target.checked)}
+                                        className="size-3.5"
+                                      />
+                                      Dérogation
+                                    </label>
+                                    {l.derogation && (
+                                      <Champ
+                                        value={l.motifDerogation}
+                                        onChange={(e) => maj(l.cle, 'motifDerogation', e.target.value)}
+                                        placeholder="Motif (ex. livraison partielle)"
+                                        className={cn(
+                                          'h-7 text-[11.5px]',
+                                          !l.motifDerogation.trim() && 'border-danger',
+                                        )}
+                                        aria-label="Motif de la dérogation"
+                                      />
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-1 py-1">
+                                <Bouton
+                                  variante="discret"
+                                  taille="icone-xs"
+                                  className="text-danger hover:bg-danger/10"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setLignes((x) => x.filter((y) => y.cle !== l.cle))
+                                    if (pointee === l.cle) setPointee(null)
+                                  }}
+                                  aria-label="Supprimer la ligne"
+                                  title="Retirer la ligne de la grille"
+                                >
+                                  <Trash2 />
+                                </Bouton>
+                              </td>
+                            </tr>
+                          {/* LA LIGNE COMPLEMENTAIRE : colis comptes, lot, magasin. */}
+                          <tr
+                            onClick={() => setPointee(l.cle)}
+                            className={cn(
+                              'cursor-pointer border-b border-bordure/60',
+                              pointee === l.cle && 'bg-primaire/5',
+                              !l.retenue && 'opacity-45',
+                            )}
+                          >
+                            <td colSpan={2} />
+                            <td colSpan={6} className="px-2 pb-2">
+                              <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Palettes / bobines</span>
+
                                 <div className="flex items-center gap-1">
                                   <Champ
                                     type="number"
@@ -1053,53 +1120,10 @@ export function ReceptionNouvelle() {
                                 {l.suivi_lot === 1 && (
                                   <AvisDerive className="max-w-[16rem]" kg={kgDe(l)} bobines={l.bobines} cond={condDe(l)} />
                                 )}
-                              </td>
-                              <td
-                                className={cn(
-                                  'px-2 py-1 text-right tabular-nums',
-                                  hors && 'font-medium text-danger',
-                                )}
-                              >
-                                {ecart == null ? (
-                                  '—'
-                                ) : (
-                                  <>
-                                    {ecart > 0 ? '+' : ''}
-                                    {fmt.nombre(ecart, 1)} %
-                                  </>
-                                )}
-                                {/* Au-dela de la tolerance : la derogation, nominative
-                                    et motivee, sans laquelle la base refuse la ligne. */}
-                                {hors && l.retenue && (
-                                  <div
-                                    className="mt-1 space-y-1 text-left font-normal text-texte"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <label className="flex items-center justify-end gap-1 text-[11px]">
-                                      <input
-                                        type="checkbox"
-                                        checked={l.derogation}
-                                        onChange={(e) => maj(l.cle, 'derogation', e.target.checked)}
-                                        className="size-3.5"
-                                      />
-                                      Dérogation
-                                    </label>
-                                    {l.derogation && (
-                                      <Champ
-                                        value={l.motifDerogation}
-                                        onChange={(e) => maj(l.cle, 'motifDerogation', e.target.value)}
-                                        placeholder="Motif (ex. livraison partielle)"
-                                        className={cn(
-                                          'h-7 text-[11.5px]',
-                                          !l.motifDerogation.trim() && 'border-danger',
-                                        )}
-                                        aria-label="Motif de la dérogation"
-                                      />
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-2 py-1">
+                                </div>
+                                <div className="flex w-44 flex-col gap-0.5">
+                                  <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Lot</span>
+
                                 <div className="flex items-center gap-1">
                                   <Champ
                                     value={l.lot}
@@ -1111,8 +1135,10 @@ export function ReceptionNouvelle() {
                                     aria-label="Lot fournisseur"
                                   />
                                 </div>
-                              </td>
-                              <td className="px-2 py-1">
+                                </div>
+                                <div className="flex w-36 flex-col gap-0.5">
+                                  <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Magasin</span>
+
                                 <Selecteur
                                   value={l.magasin}
                                   onChange={(e) => maj(l.cle, 'magasin', e.target.value)}
@@ -1126,24 +1152,12 @@ export function ReceptionNouvelle() {
                                     </option>
                                   ))}
                                 </Selecteur>
-                              </td>
-                              <td className="px-1 py-1">
-                                <Bouton
-                                  variante="discret"
-                                  taille="icone-xs"
-                                  className="text-danger hover:bg-danger/10"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setLignes((x) => x.filter((y) => y.cle !== l.cle))
-                                    if (pointee === l.cle) setPointee(null)
-                                  }}
-                                  aria-label="Supprimer la ligne"
-                                  title="Retirer la ligne de la grille"
-                                >
-                                  <Trash2 />
-                                </Bouton>
-                              </td>
-                            </tr>
+                                </div>
+                              </div>
+                            </td>
+                            <td />
+                          </tr>
+                            </Fragment>
                           )
                         })}
                       </tbody>

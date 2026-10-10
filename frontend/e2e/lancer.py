@@ -74,7 +74,10 @@ def main():
     extra = args[args.index("--") + 1:] if "--" in args else []
     args = args[:args.index("--")] if "--" in args else args
     infra = banc.Infra(args + ["--port", str(PORT)])
-    dist = FRONTEND / "dist"
+    # --dist <dossier> : une interface compilee ailleurs (npx vite build --outDir …),
+    # pour verifier un ecran sans toucher frontend/dist, que sert peut-etre un
+    # autre serveur (la simulation).
+    dist = FRONTEND / (args[args.index("--dist") + 1] if "--dist" in args else "dist")
     if "--construire" in args:
         subprocess.run("npm run build", cwd=FRONTEND, shell=True, check=True)
     if not (dist / "index.html").exists():

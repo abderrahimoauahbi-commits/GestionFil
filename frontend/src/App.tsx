@@ -129,13 +129,20 @@ function ExigeModule({ module, children }: { module: string; children: React.Rea
   return <>{children}</>
 }
 
-/** Les notifications suivent le theme : un toast blanc sur fond sombre eblouit. */
+/** Les notifications suivent le theme : un toast blanc sur fond sombre eblouit.
+ *
+ * EN HAUT A DROITE, SOUS L'EN-TETE (10/10/2026) : en bas a droite, elles
+ * recouvraient les barres d'actions collantes (« Enregistrer », « Creer le
+ * bon »…) au moment meme ou l'on voulait cliquer. Le message rouge sur la page
+ * reste ; la notification ne cache plus rien. */
 function Notifications() {
   const { resolu } = useTheme()
   return (
     <Toaster
       theme={resolu === 'sombre' ? 'dark' : 'light'}
-      position="bottom-right"
+      position="top-right"
+      offset={{ top: 56, right: 16 }}
+      mobileOffset={{ top: 56 }}
       richColors
       closeButton
       toastOptions={{ style: { fontSize: '0.875rem' } }}

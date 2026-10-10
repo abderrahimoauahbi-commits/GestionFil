@@ -46,6 +46,30 @@ export type Evenement =
     }
   | { id: string; date: string; type: 'BC_VALIDER'; bc: string; taux: number; dateBc: string }
   | { id: string; date: string; type: 'RECEPTION'; bc: string; fournisseur: string; lignes: LignePlan[] }
+  // LE CIRCUIT D'IMPORT (fournisseurs etrangers, 10/10/2026) : dossier et facture a
+  // l'expedition, dedouanement (DUM et frais) a l'arrivee, reception d'import, cloture.
+  | {
+      id: string
+      date: string
+      type: 'IMPORT_DOSSIER'
+      bc: string
+      fournisseur: string
+      arrivee: string
+      bl: string
+      conteneur: string
+      facture: string
+      lignes: LignePlan[]
+    }
+  | {
+      id: string
+      date: string
+      type: 'IMPORT_DEDOUANEMENT'
+      dossier: string
+      dum: string
+      frais: { motif: RegExp; libelle: string; montant: number }[]
+    }
+  | { id: string; date: string; type: 'IMPORT_RECEPTION'; dossier: string; fournisseur: string; lignes: LignePlan[] }
+  | { id: string; date: string; type: 'IMPORT_CLOTURE'; dossier: string }
   /** Un retour au fournisseur : une partie d'un lot recu, non conforme, rendue quelques jours apres. */
   | { id: string; date: string; type: 'RETOUR'; reception: string; fournisseur: string; ligne: LignePlan; kg: number }
   | { id: string; date: string; type: 'MACHINE'; machine: string; zone: string; capacite: number }
@@ -168,10 +192,45 @@ export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], a
     ev.push({ id, date: jour, type: 'BC', fournisseur: frs, devise, livraison, taux, lignes })
     const valide = ouvre(ajouter(jour, h.entier(1, 3)))
     ev.push({ id: `${id}-V`, date: valide, type: 'BC_VALIDER', bc: id, taux: devise === 'MAD' ? 1 : coursDu(ev, devise, valide), dateBc: jour })
-    // On ne livre pas un bon qui n'est pas encore valide : au plus tot le lendemain.
-    const arrivee = recue > valide ? recue : ouvre(ajouter(valide, 1))
+    // UN FOURNISSEUR ETRANGER passe par l'import ; un fournisseur local, par la reception.
+    let arrivee: string
+    if (devise !== 'MAD') {
+      const facture = ouvre(ajouter(valide, h.entier(4, 10)))
+      const transit = frs === 'FRS-006' ? h.entier(35, 45) : h.entier(18, 28)
+      const port = ouvre(ajouter(facture, transit))
+      const dum = ouvre(ajouter(port, h.entier(1, 3)))
+      arrivee = ouvre(ajouter(dum, h.entier(1, 2)))
+      const cloture = ouvre(ajouter(arrivee, h.entier(7, 15)))
+      // La facture porte ce qui est expedie, jamais plus que le reste du bon.
+      for (const l of lignes) l.bl = Math.min(l.bl, l.kg)
+      const valeurMad = lignes.reduce((t, l) => t + l.bl * l.prix, 0) * (coursDu(ev, devise, facture) || 10)
+      const dossier = `${id}-D`
+      if (facture <= veille)
+        ev.push({
+          id: dossier, date: facture, type: 'IMPORT_DOSSIER', bc: id, fournisseur: frs, arrivee: port,
+          bl: `BL${rang.toString().padStart(4, '0')}-${facture.replace(/-/g, '').slice(2)}`,
+          conteneur: `MSCU ${String(100000 + rang * 37).slice(0, 6)}-${rang % 10}`,
+          facture: `INV-${frs.slice(-3)}-${facture.slice(0, 4)}-${String(rang).padStart(4, '0')}`,
+          lignes,
+        })
+      if (dum <= veille)
+        ev.push({
+          id: `${id}-DUM`, date: dum, type: 'IMPORT_DEDOUANEMENT', dossier,
+          dum: `${String(200000 + rang * 13)}/${dum.slice(2, 4)}`,
+          frais: [
+            { motif: /transit/i, libelle: 'Honoraires du transitaire', montant: Math.round(h.reel(1500, 3200)) },
+            { motif: /douane|droit/i, libelle: 'Droits de douane', montant: Math.round(valeurMad * 0.025) },
+            { motif: /transport|camion|routier/i, libelle: 'Transport port → usine', montant: Math.round(h.reel(2500, 4800)) },
+          ],
+        })
+      if (arrivee <= veille) ev.push({ id: `${id}-R`, date: arrivee, type: 'IMPORT_RECEPTION', dossier, fournisseur: frs, lignes })
+      if (cloture <= veille) ev.push({ id: `${id}-C`, date: cloture, type: 'IMPORT_CLOTURE', dossier })
+    } else {
+      // On ne livre pas un bon qui n'est pas encore valide : au plus tot le lendemain.
+      arrivee = recue > valide ? recue : ouvre(ajouter(valide, 1))
+      if (arrivee <= veille) ev.push({ id: `${id}-R`, date: arrivee, type: 'RECEPTION', bc: id, fournisseur: frs, lignes })
+    }
     if (arrivee <= veille) {
-      ev.push({ id: `${id}-R`, date: arrivee, type: 'RECEPTION', bc: id, fournisseur: frs, lignes })
       // UNE LIVRAISON SUR HUIT a un defaut constate au deballage : une partie du
       // lot repart chez le fournisseur, en citant la reception.
       if (hr.reel(0, 1) < 0.125) {
@@ -234,6 +293,9 @@ export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], a
 
   // L'ordre du temps ; le meme jour, les cours d'abord, puis les documents dans
   // l'ordre ou ils se font au bureau : livraisons, commandes, production, sorties.
-  const poids: Record<Evenement['type'], number> = { TAUX: 0, RECEPTION: 1, RETOUR: 2, BC_VALIDER: 3, BC: 4, MACHINE: 5, SORTIE: 6, INVENTAIRE: 7 }
+  const poids: Record<Evenement['type'], number> = {
+    TAUX: 0, IMPORT_DEDOUANEMENT: 1, IMPORT_RECEPTION: 2, RECEPTION: 3, RETOUR: 4, IMPORT_CLOTURE: 5,
+    BC_VALIDER: 6, IMPORT_DOSSIER: 7, BC: 8, MACHINE: 9, SORTIE: 10, INVENTAIRE: 11,
+  }
   return ev.sort((a, b) => a.date.localeCompare(b.date) || poids[a.type] - poids[b.type] || a.id.localeCompare(b.id))
 }

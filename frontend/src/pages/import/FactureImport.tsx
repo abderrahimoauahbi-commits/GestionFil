@@ -603,26 +603,18 @@ export function FactureImport() {
             <p className="px-3 pt-2 text-[12px] text-alerte">Choisissez d'abord le fournisseur : il décide des références et des bons proposés.</p>
           )}
           <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-            <table className="w-full min-w-[92rem] text-[12.5px]">
+            {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026) : 92 rem de colonnes a
+                1366 px. La ligne principale porte reference, bon, poids, prix et
+                montant ; le reste passe sur la ligne complementaire, dessous. */}
+            <table className="w-full text-[12.5px]">
               <thead>
                 <tr className="border-b border-bordure">
                   <th className={cn(th, 'w-8 text-right')}>#</th>
                   <th className={cn(th, 'min-w-56 text-left')}>Référence / désignation</th>
-                  <th className={cn(th, 'w-52 text-left')}>Bon de commande</th>
-                  <th className={cn(th, 'w-24 text-left')}>Lot</th>
-                  <th className={cn(th, 'w-20 text-left')}>Code couleur</th>
-                  <th className={cn(th, 'w-24 text-left')}>Libellé couleur</th>
-                  <th className={cn(th, 'w-20 text-left')}>Unité</th>
+                  <th className={cn(th, 'w-72 text-left')}>Bon de commande</th>
                   <th className={cn(th, 'w-28 text-right')}>Poids net kg</th>
-                  <th className={cn(th, 'w-24 text-right')}>Qté</th>
-                  <th className={cn(th, 'w-20 text-right')}>Bobines</th>
-                  <th className={cn(th, 'w-20 text-right')}>Palettes</th>
                   <th className={cn(th, 'w-24 text-right')}>Prix unit.</th>
-                  <th className={cn(th, 'w-20 text-right')}>Remise %</th>
                   <th className={cn(th, 'w-28 text-right')}>Montant</th>
-                  <th className={cn(th, 'w-20 text-right')}>% dossier</th>
-                  {coutVisible && <th className={cn(th, 'w-28 text-right')}>Frais DH</th>}
-                  {coutVisible && <th className={cn(th, 'w-28 text-right')}>Revient /u</th>}
                   {ecrire && <th className={cn(th, 'w-8')} />}
                 </tr>
               </thead>
@@ -637,7 +629,7 @@ export function FactureImport() {
                   const detail = ouverte === l.cle && s && coutVisible
                   return (
                     <Fragment key={l.cle}>
-                      <tr className={cn('border-b border-bordure/60 align-top', !ligneComplete(l) && (l.code_reference || l.libelle) && 'bg-alerte/5')}>
+                      <tr className={cn('align-top', !ligneComplete(l) && (l.code_reference || l.libelle) && 'bg-alerte/5')}>
                         <td className={cn(td, 'pt-2 text-right tabular-nums text-attenue-texte')}>
                           {i + 1}
                           {l.recue && <Lock className="ml-auto mt-1 size-3" aria-label="Déjà reçue" />}
@@ -663,7 +655,7 @@ export function FactureImport() {
                         </td>
                         <td className={td}>
                           {erp ? (
-                            <Selecteur className={champ} value={l.id_ligne_bc} disabled={fige}
+                            <Selecteur className={champ} value={l.id_ligne_bc} disabled={fige} aria-label="Bon de commande de la ligne"
                               onChange={(e) => choisirBc(l, e.target.value)}>
                               <option value="">Libre — sans BC</option>
                               {!bcConnu && <option value={l.id_ligne_bc}>{l.numero_bc || 'bon lié'}</option>}
@@ -677,11 +669,48 @@ export function FactureImport() {
                             <span className="text-[11px] italic text-attenue-texte">porte sa part de frais</span>
                           )}
                         </td>
-                        <td className={td}><Champ className={champ} value={l.lot_fournisseur} disabled={!ecrire} onChange={(e) => majLigne(l.cle, { lot_fournisseur: e.target.value })} /></td>
-                        <td className={td}><Champ className={champ} value={l.code_couleur} disabled={!ecrire || !erp} placeholder="7612" onChange={(e) => majLigne(l.cle, { code_couleur: e.target.value })} /></td>
-                        <td className={td}><Champ className={champ} value={l.libelle_couleur} disabled={!ecrire || !erp} placeholder="RED" onChange={(e) => majLigne(l.cle, { libelle_couleur: e.target.value })} /></td>
                         <td className={td}>
                           {erp ? (
+                            <Champ className={cn(champ, 'text-right')} inputMode="decimal" aria-label="Poids net en kilos" value={l.poids_net_kg} disabled={fige}
+                              onChange={(e) => majColis(l, 'poids', e.target.value)} />
+                          ) : <span className="block text-right text-attenue-texte">—</span>}
+                        </td>
+                        <td className={td}>
+                          <Champ className={cn(champ, 'text-right')} inputMode="decimal" aria-label="Prix unitaire en devise" value={l.prix_unitaire_devise} disabled={fige}
+                            onChange={(e) => majLigne(l.cle, { prix_unitaire_devise: e.target.value })} />
+                        </td>
+                        <td className={cn(td, 'pt-2 text-right font-medium tabular-nums')}>{fmt.nombre(montantLigne(l), 2)}</td>
+                        {ecrire && (
+                          <td className={cn(td, 'pt-1.5')}>
+                            {!l.recue && (
+                              <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
+                                onClick={() => (l.id_ligne ? majLigne(l.cle, { supprimee: true }) : setLignes((ls) => ls.filter((x) => x.cle !== l.cle)))}>
+                                <Trash2 />
+                              </Bouton>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                      {/* LA LIGNE COMPLEMENTAIRE de la ligne de facture. */}
+                      <tr className="border-b border-bordure/60 align-top">
+                        <td />
+                        <td colSpan={4} className={cn(td, 'pb-2')}>
+                          <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+                            <div className="flex w-36 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Lot</span>
+                              <Champ className={champ} aria-label="Lot de la ligne" value={l.lot_fournisseur} disabled={!ecrire} onChange={(e) => majLigne(l.cle, { lot_fournisseur: e.target.value })} />
+                            </div>
+                            <div className="flex w-28 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Code couleur</span>
+                              <Champ className={champ} value={l.code_couleur} disabled={!ecrire || !erp} placeholder="7612" onChange={(e) => majLigne(l.cle, { code_couleur: e.target.value })} />
+                            </div>
+                            <div className="flex w-32 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Libellé couleur</span>
+                              <Champ className={champ} value={l.libelle_couleur} disabled={!ecrire || !erp} placeholder="RED" onChange={(e) => majLigne(l.cle, { libelle_couleur: e.target.value })} />
+                            </div>
+                            <div className="flex w-28 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Unité</span>
+                              {erp ? (
                             <Selecteur className={champ} value={l.unite} disabled={fige}
                               onChange={(e) => majLigne(l.cle, { unite: e.target.value as LigneEdit['unite'] })}>
                               <option value="kg">kg</option>
@@ -691,25 +720,24 @@ export function FactureImport() {
                           ) : (
                             <span className="text-[12px] text-attenue-texte">pièce</span>
                           )}
-                        </td>
-                        <td className={td}>
-                          {erp ? (
-                            <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.poids_net_kg} disabled={fige}
-                              onChange={(e) => majColis(l, 'poids', e.target.value)} />
-                          ) : <span className="block text-right text-attenue-texte">—</span>}
-                        </td>
-                        <td className={td}>
-                          {erp && l.unite === 'kg' ? (
+                            </div>
+                            <div className="flex w-24 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Qté</span>
+                              {erp && l.unite === 'kg' ? (
                             <span className="block pt-1 text-right tabular-nums text-attenue-texte">= poids</span>
                           ) : (
                             <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.quantite} disabled={fige}
                               onChange={(e) => majLigne(l.cle, { quantite: e.target.value })} />
                           )}
-                        </td>
-                        <td className={td}><Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.nb_bobines} disabled={!ecrire} onChange={(e) => majColis(l, 'bobines', e.target.value)} /></td>
-                        <td className={td}>
-                          <div className="flex items-center gap-1">
-                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" value={l.nb_palettes} disabled={!ecrire} onChange={(e) => majColis(l, 'palettes', e.target.value)} />
+                            </div>
+                            <div className="flex w-24 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Bobines</span>
+                              <Champ className={cn(champ, 'text-right')} inputMode="numeric" aria-label="Bobines de la ligne" value={l.nb_bobines} disabled={!ecrire} onChange={(e) => majColis(l, 'bobines', e.target.value)} />
+                            </div>
+                            <div className="flex w-36 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Palettes</span>
+                              <div className="flex items-center gap-1">
+                            <Champ className={cn(champ, 'text-right')} inputMode="numeric" aria-label="Palettes de la ligne" value={l.nb_palettes} disabled={!ecrire} onChange={(e) => majColis(l, 'palettes', e.target.value)} />
                             {ecrire && (
                               <button type="button" onClick={() => majLigne(l.cle, { lie: !l.lie })}
                                 title={l.lie
@@ -724,57 +752,49 @@ export function FactureImport() {
                           </div>
                           <AvisColisage className="max-w-[18rem]" kg={l.poids_net_kg} bobines={l.nb_bobines}
                             palettes={l.nb_palettes} cond={condDe(l.code_reference)} />
-                        </td>
-                        <td className={td}>
-                          <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.prix_unitaire_devise} disabled={fige}
-                            onChange={(e) => majLigne(l.cle, { prix_unitaire_devise: e.target.value })} />
-                        </td>
-                        <td className={td}>
-                          <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.remise} disabled={fige} placeholder="0"
+                            </div>
+                            <div className="flex w-24 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Remise %</span>
+                              <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.remise} disabled={fige} placeholder="0"
                             aria-label="Remise du fournisseur en pourcentage"
                             onChange={(e) => majLigne(l.cle, { remise: e.target.value })} />
-                        </td>
-                        <td className={cn(td, 'pt-2 text-right font-medium tabular-nums')}>{fmt.nombre(montantLigne(l), 2)}</td>
-                        <td className={cn(td, 'pt-2 text-right tabular-nums text-attenue-texte')}>
-                          {s?.pct_dossier == null ? '—' : `${fmt.nombre(s.pct_dossier, 2)} %`}
-                        </td>
-                        {coutVisible && (
-                          <td className={cn(td, 'pt-1.5 text-right tabular-nums')}>
-                            {s ? (
+                            </div>
+                            <div className="flex w-20 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">% dossier</span>
+                              <span className="pt-1 tabular-nums text-attenue-texte">{s?.pct_dossier == null ? '—' : `${fmt.nombre(s.pct_dossier, 2)} %`}</span>
+                            </div>
+                            {coutVisible && (
+                            <div className="flex w-28 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Frais DH</span>
+                              {s ? (
                               <button type="button" className="inline-flex items-center gap-0.5 font-medium text-primaire hover:underline"
                                 onClick={() => setOuverte(ouverte === l.cle ? null : l.cle)} title="Voir la répartition par frais">
                                 {fmt.nombre(s.frais_alloues_dhs ?? 0, 2)}
                                 {detail ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
                               </button>
                             ) : '—'}
-                          </td>
-                        )}
-                        {coutVisible && (
-                          <td className={cn(td, 'pt-2 text-right tabular-nums')}>
-                            {s?.cout_revient_unitaire_dhs == null ? '—' : (
+                            </div>
+                            )}
+                            {coutVisible && (
+                            <div className="flex w-28 flex-col gap-0.5">
+                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Revient /u</span>
+                              <span className="pt-1 tabular-nums">{s?.cout_revient_unitaire_dhs == null ? '—' : (
                               <>
                                 {fmt.nombre(s.cout_revient_unitaire_dhs, 4)}
                                 <span className="text-[10.5px] text-attenue-texte"> /{s.type_ligne === 'HORS_ERP' ? 'pce' : UNITE[s.unite]}</span>
                               </>
+                            )}</span>
+                            </div>
                             )}
-                          </td>
-                        )}
-                        {ecrire && (
-                          <td className={cn(td, 'pt-1.5')}>
-                            {!l.recue && (
-                              <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
-                                onClick={() => (l.id_ligne ? majLigne(l.cle, { supprimee: true }) : setLignes((ls) => ls.filter((x) => x.cle !== l.cle)))}>
-                                <Trash2 />
-                              </Bouton>
-                            )}
-                          </td>
-                        )}
+                          </div>
+                        </td>
+                        <td />
                       </tr>
                       {/* LA REPARTITION DE LA LIGNE : la part de chaque frais. */}
                       {detail && (
                         <tr className="border-b border-bordure/60 bg-attenue/25">
                           <td />
-                          <td colSpan={15 + (coutVisible ? 2 : 0) + (ecrire ? 1 : 0)} className="px-2 py-2">
+                          <td colSpan={4 + (ecrire ? 1 : 0)} className="px-2 py-2">
                             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
                               <span className="text-attenue-texte">
                                 Valeur d'achat <strong className="text-texte tabular-nums">{fmt.nombre(s!.valeur_achat_dhs, 2)} DH</strong>

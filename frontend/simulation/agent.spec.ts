@@ -335,13 +335,14 @@ async function completerBobines(p: Page, rid: string, e: Extract<Evenement, { ty
   const manquent = lues.filter((l) => l.nb_bobines == null && (parCode.get(l.code_reference)?.poids_bobine_kg ?? 0) > 0)
   if (!manquent.length) return
   for (const l of manquent) {
-    const ligne = p.getByRole('row').filter({ hasText: l.code_reference }).filter({ has: p.getByRole('textbox', { name: 'Nombre de bobines' }) }).first()
-    const modifier = ligne.getByRole('button', { name: 'Modifier la ligne' })
+    const principale = p.getByRole('row').filter({ hasText: l.code_reference }).filter({ has: p.getByRole('button', { name: /(Modifier|Valider) la ligne/ }) }).first()
+    const ligne = principale.locator('xpath=self::tr | following-sibling::tr[1]')
+    const modifier = principale.getByRole('button', { name: 'Modifier la ligne' })
     if (await modifier.isVisible().catch(() => false)) await modifier.click()
-    const detacher = ligne.getByRole('button', { name: 'Détacher le calcul' })
+    const detacher = ligne.getByRole('button', { name: 'Détacher le calcul' }).first()
     if (await detacher.isVisible().catch(() => false)) await detacher.click()
-    await taper(champNombre(ligne, 'Nombre de bobines'), String(bobinesComptees(l.code_reference, Number(l.quantite_stock_kg), e.id)))
-    await ligne.getByRole('button', { name: 'Valider la ligne' }).click()
+    await taper(champNombre(ligne, 'Nombre de bobines').first(), String(bobinesComptees(l.code_reference, Number(l.quantite_stock_kg), e.id)))
+    await principale.getByRole('button', { name: 'Valider la ligne' }).click()
   }
   const m = await cliquer(p, p.getByRole('button', { name: 'Enregistrer', exact: true }))
   if (m.refus) throw new Error(`bobines non enregistrées : ${m.texte}`)
@@ -376,15 +377,16 @@ async function receptionner(e: Extract<Evenement, { type: 'RECEPTION' }>) {
     const pesees = champNombre(p, 'Quantité pesée, en kilos')
     await expect(pesees).toHaveCount(e.lignes.length, { timeout: 15_000 })
     for (const [i, l] of e.lignes.entries()) {
-      const ligne = pesees.nth(i).locator('xpath=ancestor::tr[1]')
+      // La ligne et sa ligne complementaire (colis, lot, magasin) depuis le 10/10/2026.
+      const ligne = pesees.nth(i).locator('xpath=ancestor::tr[1] | ancestor::tr[1]/following-sibling::tr[1]')
       // Peser et compter sont deux gestes : on detache le calcul, sinon compter
       // les bobines recalculerait la pesee (ou l'inverse).
-      const detacher = ligne.getByRole('button', { name: 'Détacher le calcul' })
+      const detacher = ligne.getByRole('button', { name: 'Détacher le calcul' }).first()
       if (await detacher.isVisible().catch(() => false)) await detacher.click()
       await taper(champNombre(p, 'Quantité du bon de livraison, en kilos').nth(i), fr(l.bl, 1))
       await taper(pesees.nth(i), fr(l.pese, 2))
       const bob = bobinesComptees(l.ref, l.pese, e.id)
-      if (bob) await taper(champNombre(ligne, 'Nombre de bobines'), String(bob))
+      if (bob) await taper(champNombre(ligne, 'Nombre de bobines').first(), String(bob))
       if (parCode.get(l.ref)?.suivi_lot === 1) await p.getByLabel('Lot fournisseur').nth(i).fill(l.lot)
       await p.getByRole('combobox', { name: 'Magasin destinataire' }).nth(i).selectOption(l.magasin)
     }
@@ -567,12 +569,16 @@ async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
     const deja = await lire<MouvementListe[]>(p, `/api/mouvements/documents?depuis=${e.date}&jusqu_a=${e.date}T23:59:59&limite=500`)
     if (deja.some((m) => (m.numero_of ?? '').startsWith(of))) continue
     const tous = (await lots(p, magasin)).filter((l) => MATIERES_HORS_MACHINE.includes(parCode.get(l.code_reference)?.code_categorie ?? ''))
-    const refs = [...new Set(tous.map((l) => l.code_reference))]
+    // LE STOCK DU MAGASIN fait foi pour une matiere non suivie au lot : une sortie
+    // sans lot ne diminue pas les soldes par lot, qui la surestimeraient.
+    const magasinStock = (await lire<{ code_reference: string; quantite_kg: number }[]>(p, `/api/stock?code_magasin=${magasin}&limite=5000`))
+      .filter((x) => MATIERES_HORS_MACHINE.includes(parCode.get(x.code_reference)?.code_categorie ?? '') && Number(x.quantite_kg) > 0)
+    const refs = [...new Set([...tous.map((l) => l.code_reference), ...magasinStock.map((x) => x.code_reference)])]
     const lignes = refs
       .map((r) => {
         const suivi = parCode.get(r)?.suivi_lot === 1
         const ancien = suivi ? plusAncien(tous, r) : undefined
-        const stock = suivi ? (ancien?.quantite_kg ?? 0) : tous.filter((l) => l.code_reference === r).reduce((s, l) => s + l.quantite_kg, 0)
+        const stock = suivi ? (ancien?.quantite_kg ?? 0) : Number(magasinStock.find((x) => x.code_reference === r)?.quantite_kg ?? 0)
         return { r, lot: ancien?.lot_fournisseur, kg: Math.floor(stock * (0.3 + alea() * 0.4)) }
       })
       .filter((l) => l.kg >= 20)
@@ -603,6 +609,215 @@ async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
   return bilan.join(' ; ') || 'rien à sortir'
 }
 
+// --- L'import (fournisseurs etrangers) ----------------------------------------
+
+interface DossierApi {
+  dossier?: { statut?: string; numero?: string; numero_dum?: string | null }
+  factures?: { id_facture: string; numero_facture: string }[]
+  lignes?: { code_reference: string }[]
+  frais?: { libelle?: string | null; montant_devise?: number }[]
+  statut?: string
+  numero?: string
+  numero_dum?: string | null
+}
+const dossierApi = (p: Page, id: string) => lire<DossierApi>(p, `/api/import/dossiers/${id}`)
+const statutDossier = (d: DossierApi) => d.dossier?.statut ?? d.statut
+const numeroDossier = (d: DossierApi) => d.dossier?.numero ?? d.numero ?? ''
+
+/** Le dossier et la facture du fournisseur, a l'expedition : l'assistante les saisit. */
+async function importDossier(e: Extract<Evenement, { type: 'IMPORT_DOSSIER' }>) {
+  const login = 'Assistante'
+  const p = await session(login)
+  const idBc = journal.ids[e.bc]
+  if (!idBc) throw new Error(`bon ${e.bc} absent du journal`)
+  let id = journal.ids[e.id]
+  if (!id) {
+    await aller(p, '/import', login)
+    await p.getByRole('button', { name: /Nouveau dossier/ }).first().click()
+    await p.locator('#ch-dossiersimport-2').fill(e.arrivee)
+    await p.locator('#ch-dossiersimport-3').fill(e.bl)
+    await p.locator('#ch-dossiersimport-4').fill(e.conteneur)
+    await p.getByRole('button', { name: 'Créer le dossier' }).click()
+    await expect(p).toHaveURL(/\/import\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {
+      throw new Error(`dossier non créé : ${await messageAffiche(p)}`)
+    })
+    id = p.url().split('/').pop()!
+    journal.ids[e.id] = id
+    sauver()
+  }
+  const d = await dossierApi(p, id)
+  if ((d.factures ?? []).length === 0) {
+    const bc = (await bon(p, idBc))!
+    const lignesBc = await lire<{ lignes?: { code_reference: string; ligne_numero: number }[] } | { code_reference: string; ligne_numero: number }[]>(
+      p, `/api/bons-commande/${idBc}/lignes`)
+    const lbc = Array.isArray(lignesBc) ? lignesBc : (lignesBc.lignes ?? [])
+    await aller(p, `/import/${id}/factures/nouvelle`, login)
+    await p.locator('#ch-factureimport-1').selectOption(e.fournisseur)
+    await p.locator('#ch-factureimport-2').fill(e.facture)
+    await p.locator('#ch-factureimport-3').fill(e.date)
+    // Le taux se propose (cours de reference du jour de la facture) ; un ecart se confirme.
+    await expect(p.locator('#ch-factureimport-6')).not.toHaveValue('', { timeout: 15_000 })
+    const confirme = p.getByRole('checkbox', { name: /Je confirme ce taux/ })
+    if (await confirme.isVisible().catch(() => false)) await confirme.check()
+    const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'Poids net kg' }) })
+    // Les lignes principales seulement : la complementaire porte aussi une liste (l'unite).
+    const rangees = grille.locator('tbody > tr').filter({ has: p.locator('[aria-label="Référence de la ligne"]') })
+    for (const [i, l] of e.lignes.entries()) {
+      if ((await rangees.count()) <= i) await p.getByRole('button', { name: 'Ligne', exact: true }).click()
+      const r = rangees.nth(i)
+      const n = lbc.find((x) => x.code_reference === l.ref)?.ligne_numero
+      // Depuis le 10/10/2026, la ligne de facture a ses etiquettes et une ligne
+      // complementaire ; l'ancien ecran se reperait par colonne.
+      const zone = r.locator('xpath=self::tr | following-sibling::tr[1]')
+      const etiquete = (await zone.getByRole('combobox', { name: 'Bon de commande de la ligne' }).count()) > 0
+      await choisirOption(
+        etiquete ? zone.getByRole('combobox', { name: 'Bon de commande de la ligne' }) : r.locator('td').nth(2).locator('select'),
+        new RegExp(`^${bc.numero_bc} · l\\.${n} ·`),
+      )
+      const detacher = zone.getByRole('button', { name: 'Détacher le calcul' }).first()
+      if (await detacher.isVisible().catch(() => false)) await detacher.click()
+      await (etiquete ? zone.getByRole('textbox', { name: 'Lot de la ligne' }) : r.locator('td').nth(3).locator('input')).fill(l.lot)
+      await taper(etiquete ? zone.getByRole('textbox', { name: 'Poids net en kilos' }) : r.locator('td').nth(7).locator('input'), fr(l.bl, 1))
+      const poids = parCode.get(l.ref)?.poids_bobine_kg ?? 0
+      if (poids > 0)
+        await taper(
+          etiquete ? zone.getByRole('textbox', { name: 'Bobines de la ligne' }) : r.locator('td').nth(9).locator('input'),
+          String(Math.round(l.bl / poids)),
+        )
+    }
+    await p.getByRole('button', { name: 'Enregistrer la facture' }).click()
+    await expect(p).toHaveURL(/\/factures\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {
+      throw new Error(`facture non enregistrée : ${await messageAffiche(p)}`)
+    })
+    journal.ids[`${e.id}:facture`] = e.facture
+    sauver()
+    const apres = await dossierApi(p, id)
+    if ((apres.lignes ?? []).length < e.lignes.length)
+      throw new Error(`facture du dossier ${numeroDossier(apres)} : ${(apres.lignes ?? []).length} ligne(s) au lieu de ${e.lignes.length}`)
+  }
+  return `dossier ${numeroDossier(await dossierApi(p, id))} : facture ${e.facture}, ${e.lignes.length} ligne(s), arrivée prévue ${jjmmaaaa(e.arrivee)}`
+}
+
+/** A l'arrivee : la DUM et les frais (transitaire, droits, transport), saisis par l'assistante. */
+async function importDedouanement(e: Extract<Evenement, { type: 'IMPORT_DEDOUANEMENT' }>) {
+  const login = 'Assistante'
+  const p = await session(login)
+  const id = journal.ids[e.dossier]
+  if (!id) throw new Error(`dossier ${e.dossier} absent du journal`)
+  let d = await dossierApi(p, id)
+  await aller(p, `/import/${id}`, login)
+  if (!(d.dossier?.numero_dum ?? d.numero_dum)) {
+    await p.locator('#ch-dossierimport-4').fill(e.dum)
+    await p.locator('#ch-dossierimport-5').fill('010')
+    await p.locator('#ch-dossierimport-6').fill(e.date)
+    await p.getByRole('button', { name: 'Enregistrer', exact: true }).first().click()
+    await attendre(() => dossierApi(p, id), (x) => !!(x.dossier?.numero_dum ?? x.numero_dum), `DUM du dossier : ${await messageAffiche(p)}`)
+  }
+  await p.getByRole('tab', { name: /Frais/ }).first().click()
+  for (const f of e.frais) {
+    d = await dossierApi(p, id)
+    if ((d.frais ?? []).some((x) => x.libelle === f.libelle)) continue
+    const avant = (d.frais ?? []).length
+    const type = p.getByRole('combobox', { name: 'Type de frais' })
+    const options = (await type.locator('option').allTextContents()).filter((o) => !/^Nouveau frais/.test(o))
+    await type.selectOption({ label: options.find((o) => f.motif.test(o)) ?? options[0] })
+    await p.getByRole('textbox', { name: 'Libellé du frais' }).fill(f.libelle)
+    await p.getByRole('textbox', { name: 'N° de pièce' }).fill(`${e.dum}-${avant + 1}`)
+    await p.getByRole('combobox', { name: 'Devise du frais' }).selectOption('MAD')
+    await taper(p.getByRole('textbox', { name: 'Montant en devise' }), fr(f.montant, 2))
+    await p.getByRole('button', { name: 'Ajouter', exact: true }).click()
+    await attendre(() => dossierApi(p, id), (x) => (x.frais ?? []).length > avant, `frais ${f.libelle} : ${await messageAffiche(p)}`)
+  }
+  return `DUM ${e.dum} ; frais ${e.frais.map((f) => `${f.libelle} ${f.montant} MAD`).join(', ')}`
+}
+
+interface ReceptionImportApi {
+  statut?: string
+  numero?: string
+  reception?: { statut?: string; numero?: string }
+}
+const receptionImport = async (p: Page, rid: string) => {
+  const r = await lire<ReceptionImportApi>(p, `/api/import/receptions/${rid}`)
+  return { statut: r.reception?.statut ?? r.statut ?? '', numero: r.reception?.numero ?? r.numero ?? '' }
+}
+
+/** La reception d'import : le magasin pese et compte, la direction valide le controle. */
+async function importReception(e: Extract<Evenement, { type: 'IMPORT_RECEPTION' }>) {
+  const idDossier = journal.ids[e.dossier]
+  if (!idDossier) throw new Error(`dossier ${e.dossier} absent du journal`)
+  const login = 'Magasinie'
+  const p = await session(login)
+  let rid = journal.ids[e.id]
+  if (!rid) {
+    await aller(p, '/receptions-import/nouvelle', login)
+    await p.locator('#ch-receptionimport-2').fill(e.date)
+    await p.getByRole('combobox', { name: 'Dossier' }).selectOption(idDossier)
+    // SEULEMENT LES LIGNES DE SA FACTURE : un autre utilisateur peut avoir ajoute la
+    // sienne au dossier (c'est arrive le 10/10/2026), elle ne se recoit pas ici. Le
+    // numero de facture est masque au magasin : la ligne se reconnait a sa reference
+    // et a son lot.
+    const aRecevoir = p.locator('table').filter({ has: p.getByRole('checkbox', { name: 'Tout sélectionner' }) }).locator('tbody tr')
+    for (const l of e.lignes) await aRecevoir.filter({ hasText: l.ref }).filter({ hasText: l.lot }).first().click()
+    await p.getByRole('button', { name: /Ajouter la sélection/ }).click()
+    const poidsRecus = p.getByRole('textbox', { name: 'Poids reçu en kg' })
+    await expect(poidsRecus).toHaveCount(e.lignes.length, { timeout: 15_000 })
+    for (const l of e.lignes) {
+      const r = p.getByRole('row').filter({ hasText: l.ref }).filter({ has: p.getByRole('textbox', { name: 'Poids reçu en kg' }) }).first()
+      const detacher = r.getByRole('button', { name: 'Détacher le calcul' })
+      if (await detacher.isVisible().catch(() => false)) await detacher.click()
+      await taper(r.getByRole('textbox', { name: 'Poids reçu en kg' }), fr(l.pese, 2))
+      const bob = bobinesComptees(l.ref, l.pese, e.id)
+      if (bob) await taper(r.getByRole('textbox', { name: 'Bobines' }), String(bob))
+      await r.getByRole('combobox', { name: 'Magasin' }).selectOption(l.magasin)
+      const lot = r.getByLabel('Lot')
+      if (await lot.count()) await lot.fill(l.lot)
+      await r.getByRole('button', { name: 'Valider la ligne' }).click()
+    }
+    await p.getByRole('button', { name: 'Enregistrer', exact: true }).last().click()
+    await expect(p).toHaveURL(/\/receptions-import\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {
+      throw new Error(`réception d'import non créée : ${await messageAffiche(p)}`)
+    })
+    rid = p.url().split('/').pop()!
+    journal.ids[e.id] = rid
+    sauver()
+  } else await aller(p, `/receptions-import/${rid}`, login)
+  let r = await receptionImport(p, rid)
+  journal.ids[`${e.id}:numero`] = r.numero
+  sauver()
+  if (r.statut === 'BROUILLON') {
+    const m = await cliquer(p, p.getByRole('button', { name: 'Soumettre au contrôle' }))
+    if (m.refus) throw new Error(`soumission refusée : ${m.texte}`)
+    r = await attendre(() => receptionImport(p, rid), (x) => x.statut !== 'BROUILLON', `soumission (${m.texte})`)
+  }
+  if (r.statut === 'A_CONTROLER') {
+    const d = await session('Choukri')
+    await aller(d, `/receptions-import/${rid}`, 'Choukri')
+    await d.getByRole('button', { name: /Valider le contrôle/ }).click()
+    await confirmerSi(d, 'Générer les lots et valider')
+    r = await attendre(() => receptionImport(d, rid), (x) => x.statut === 'VALIDEE', `validation : ${await messageAffiche(d)}`)
+  }
+  return `${r.numero} ${r.statut}, ${fr(e.lignes.reduce((t, l) => t + l.pese, 0), 1)} kg`
+}
+
+/** La cloture du dossier : les frais entrent dans le CMUP du stock encore present. */
+async function importCloture(e: Extract<Evenement, { type: 'IMPORT_CLOTURE' }>) {
+  const login = 'Choukri'
+  const p = await session(login)
+  const id = journal.ids[e.dossier]
+  if (!id) throw new Error(`dossier ${e.dossier} absent du journal`)
+  const avant = await dossierApi(p, id)
+  if (statutDossier(avant) === 'CLOTURE') return 'déjà clôturé'
+  const facture = journal.ids[`${e.dossier}:facture`]
+  const etrangeres = (avant.factures ?? []).filter((f) => facture && f.numero_facture !== facture)
+  if (etrangeres.length)
+    return `non clôturé : le dossier porte aussi ${etrangeres.map((f) => `la facture ${f.numero_facture}`).join(', ')}, saisie hors simulation`
+  await aller(p, `/import/${id}`, login)
+  await p.getByRole('button', { name: 'Clôturer', exact: true }).click()
+  await p.getByRole('button', { name: /Clôturer et ajuster le CUMP/ }).click()
+  const d = await attendre(() => dossierApi(p, id), (x) => statutDossier(x) === 'CLOTURE', `clôture : ${await messageAffiche(p)}`, 60_000)
+  return `dossier ${numeroDossier(d)} clôturé`
+}
+
 // --- Les retours au fournisseur -------------------------------------------------
 
 interface DocumentMouvement {
@@ -621,7 +836,10 @@ async function retourner(e: Extract<Evenement, { type: 'RETOUR' }>) {
   const p = await session(login)
   const rid = journal.ids[e.reception]
   if (!rid) return 'réception absente du journal : pas de retour'
-  const rec = await reception(p, rid)
+  const numeroImport = journal.ids[`${e.reception}:numero`]
+  const rec = numeroImport
+    ? await receptionImport(p, rid).then((r) => ({ numero_reception: r.numero, statut: r.statut === 'VALIDEE' ? 'VALIDE' : r.statut }))
+    : await reception(p, rid)
   if (!rec || rec.statut !== 'VALIDE') return `réception ${rec?.numero_reception ?? rid} non validée : pas de retour`
   const deja = await lire<DocumentMouvement[]>(p, `/api/mouvements/documents?code_type_mvt=RETOUR_FOURN&limite=2000`)
   if (deja.some((m) => m.reference_document === rec.numero_reception)) return 'déjà saisi'
@@ -765,6 +983,10 @@ test('simulation de janvier 2024 à aujourd’hui', async ({ browser }, info) =>
         : e.type === 'BC_VALIDER' ? await validerBon(e)
         : e.type === 'RECEPTION' ? await receptionner(e)
         : e.type === 'RETOUR' ? await retourner(e)
+        : e.type === 'IMPORT_DOSSIER' ? await importDossier(e)
+        : e.type === 'IMPORT_DEDOUANEMENT' ? await importDedouanement(e)
+        : e.type === 'IMPORT_RECEPTION' ? await importReception(e)
+        : e.type === 'IMPORT_CLOTURE' ? await importCloture(e)
         : e.type === 'MACHINE' ? await machine(e)
         : e.type === 'SORTIE' ? await sortir(e)
         : await inventorier(e)

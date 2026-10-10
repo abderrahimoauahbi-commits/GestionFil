@@ -303,6 +303,39 @@ export function DataTable<L extends Record<string, unknown>>({
   const colonnesFiltrables = serveur ? [] : visibles.filter((c) => c.filtre)
   const nbFiltresActifs = filtresColonne.length
 
+  // PAS DE DEFILEMENT HORIZONTAL (10/10/2026, demande de l'utilisateur) : les
+  // colonnes qui ne tiennent pas dans le cadre passent, avec leur titre, sur une
+  // ligne complementaire sous chaque ligne. Mesure faite a l'ecran reel : les
+  // colonnes secondaires partent d'abord, puis de droite a gauche ; la premiere
+  // ne part jamais. Une autre largeur, d'autres lignes : on repart de toutes.
+  const cadreRef = React.useRef<HTMLDivElement>(null)
+  const tableRef = React.useRef<HTMLTableElement>(null)
+  const [enComplement, setEnComplement] = React.useState<string[]>([])
+  const [largeurCadre, setLargeurCadre] = React.useState(0)
+  React.useEffect(() => {
+    const c = cadreRef.current
+    if (!c || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setLargeurCadre(Math.round(e.contentRect.width)))
+    ro.observe(c)
+    return () => ro.disconnect()
+  }, [chargement, visibles.length])
+  const page = table.getState().pagination?.pageIndex ?? 0
+  React.useLayoutEffect(() => {
+    setEnComplement([])
+  }, [largeurCadre, lignes?.length, visibilite, visibles, page, filtre, filtresColonne])
+  React.useLayoutEffect(() => {
+    const c = cadreRef.current
+    const t = tableRef.current
+    if (!c || !t || c.clientWidth === 0 || t.scrollWidth <= c.clientWidth + 1) return
+    const ids = table.getVisibleLeafColumns().map((col) => col.id).filter((id) => !enComplement.includes(id))
+    if (ids.length <= 2) return
+    const candidats = ids.slice(1)
+    const secondaire = [...candidats].reverse().find(
+      (id) => (table.getColumn(id)?.columnDef.meta as { secondaire?: boolean } | undefined)?.secondaire,
+    )
+    setEnComplement((x) => [...x, secondaire ?? candidats[candidats.length - 1]])
+  }, [enComplement, table])
+
   if (chargement) {
     return (
       <div className="space-y-2">
@@ -590,6 +623,7 @@ export function DataTable<L extends Record<string, unknown>>({
               donnees, le tableau des besoins debordait, et sa zone de defilement n'etait
               pas atteignable sans souris (axe, sur une copie de la production). */}
           <div
+            ref={cadreRef}
             tabIndex={0}
             role="region"
             aria-label="Tableau"
@@ -602,7 +636,7 @@ export function DataTable<L extends Record<string, unknown>>({
           >
             {/* 13 PX, PAS 12. Le tableau est ce qu'on lit le plus longtemps ;
                 il etait pourtant le texte le plus petit de l'ecran. */}
-            <table className="grille w-full text-[13px]">
+            <table ref={tableRef} className="grille w-full text-[13px]">
               {/* L'en-tete se colle SOUS la barre d'outils : `top-12` la laisse
                   passer, sinon les deux se recouvrent au defilement. */}
               {/* CET EN-TETE NE COLLE PAS, ET CE N'EST PAS FAUTE DE `sticky`.
@@ -622,7 +656,7 @@ export function DataTable<L extends Record<string, unknown>>({
               <thead className="sticky top-0 z-10">
                 {table.getHeaderGroups().map((groupe) => (
                   <tr key={groupe.id} className="bg-attenue">
-                    {groupe.headers.map((entete) => {
+                    {groupe.headers.filter((entete) => !enComplement.includes(entete.column.id)).map((entete) => {
                       const m = meta(entete.column.id)
                       const sens = entete.column.getIsSorted()
                       const filtree = entete.column.getFilterValue() != null
@@ -634,7 +668,6 @@ export function DataTable<L extends Record<string, unknown>>({
                             'bg-attenue px-2.5 py-2 text-left',
                             'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap',
                             m.numerique && 'text-right',
-                            m.secondaire && 'hidden xl:table-cell',
                           )}
                         >
                           {entete.column.getCanSort() ? (
@@ -686,7 +719,7 @@ export function DataTable<L extends Record<string, unknown>>({
                         menuContextuel && 'data-[state=open]:bg-primaire/8',
                       )}
                     >
-                      {rang.getVisibleCells().map((cellule) => {
+                      {rang.getVisibleCells().filter((cellule) => !enComplement.includes(cellule.column.id)).map((cellule) => {
                         const m = meta(cellule.column.id)
                         return (
                           <td
@@ -696,7 +729,6 @@ export function DataTable<L extends Record<string, unknown>>({
                               // defile en largeur plutot que de doubler en hauteur.
                               'whitespace-nowrap px-2.5 align-middle',
                               m.numerique && 'text-right tabular-nums',
-                              m.secondaire && 'hidden xl:table-cell',
                             )}
                           >
                             {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
@@ -714,10 +746,29 @@ export function DataTable<L extends Record<string, unknown>>({
                     </tr>
                   )
 
+                  const largeurLigne = rang.getVisibleCells().length - enComplement.length + (actions ? 1 : 0)
+                  const complement = enComplement.length ? (
+                    <tr>
+                      <td colSpan={largeurLigne} className="px-2.5 pb-1.5 pt-0">
+                        <div className="flex flex-wrap gap-x-5 gap-y-0.5 text-[12px]">
+                          {rang.getVisibleCells().filter((cellule) => enComplement.includes(cellule.column.id)).map((cellule) => (
+                            <span key={cellule.id} className="inline-flex items-baseline gap-1.5">
+                              <span className="text-[10.5px] uppercase tracking-[0.05em] text-attenue-texte">
+                                {typeof cellule.column.columnDef.header === 'string' ? cellule.column.columnDef.header : cellule.column.id}
+                              </span>
+                              <span className={cn(meta(cellule.column.id).numerique && 'tabular-nums')}>
+                                {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null
                   const deplie = detail?.(rang.original)
                   const sous = deplie ? (
                     <tr className="bg-attenue/30">
-                      <td colSpan={rang.getVisibleCells().length + (actions ? 1 : 0)} className="px-3 py-2.5">
+                      <td colSpan={largeurLigne} className="px-3 py-2.5">
                         {deplie}
                       </td>
                     </tr>
@@ -727,6 +778,7 @@ export function DataTable<L extends Record<string, unknown>>({
                     return (
                       <React.Fragment key={cle(rang.original)}>
                         {ligne}
+                        {complement}
                         {sous}
                       </React.Fragment>
                     )
@@ -741,6 +793,7 @@ export function DataTable<L extends Record<string, unknown>>({
                         <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
                         <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
                       </MenuContextuel>
+                      {complement}
                       {sous}
                     </React.Fragment>
                   )

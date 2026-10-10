@@ -641,19 +641,15 @@ export function Besoins() {
                   <table className="grille w-full text-[12px]">
                     <thead className="sticky top-0 z-20">
                       <tr className="bg-attenue">
-                        <th className="sticky left-0 z-10 border-b border-bordure bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                          Reference
-                        </th>
-                        <th className="border-b border-bordure bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                          Categorie
-                        </th>
-                        <th className="hidden border-b border-bordure bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte xl:table-cell">
-                          Fournisseur
+                        {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026) : categorie et
+                            fournisseur passent sous la reference, les mois se resserrent. */}
+                        <th className="sticky left-0 z-10 border-b border-bordure bg-attenue px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
+                          Référence
                         </th>
                         {mois.map((m) => (
                           <th
                             key={m.rang_mois}
-                            className="border-b border-bordure bg-attenue px-2.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap"
+                            className="border-b border-bordure bg-attenue px-1.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap"
                           >
                             {libelleMois(m.annee_mois)}
                           </th>
@@ -669,17 +665,11 @@ export function Besoins() {
                           key={b.code_reference}
                           className="hover:bg-attenue/60"
                         >
-                          <td className="sticky left-0 z-10 bg-surface px-2.5 py-1 whitespace-nowrap">
-                            <span className="font-medium">{b.code_reference}</span>
-                            <span className="ml-1.5 text-[11px] text-attenue-texte">
-                              {b.designation}
-                            </span>
-                          </td>
-                          <td className="px-2.5 py-1 text-attenue-texte whitespace-nowrap">
-                            {b.categorie}
-                          </td>
-                          <td className="hidden px-2.5 py-1 text-attenue-texte whitespace-nowrap xl:table-cell">
-                            {b.fournisseur}
+                          <td className="sticky left-0 z-10 max-w-[15rem] bg-surface px-2 py-1">
+                            <div className="font-medium">{b.code_reference}</div>
+                            <div className="text-[11px] text-attenue-texte">
+                              {[b.categorie, b.fournisseur].filter(Boolean).join(' · ')}
+                            </div>
                           </td>
                           {mois.map((m) => {
                             const v = b.par_mois.get(m.rang_mois) ?? 0
@@ -687,7 +677,7 @@ export function Besoins() {
                               <td
                                 key={m.rang_mois}
                                 className={cn(
-                                  'px-2.5 py-1 text-right tabular-nums',
+                                  'px-1.5 py-1 text-right tabular-nums',
                                   v === 0 && 'text-attenue-texte',
                                 )}
                               >
@@ -701,11 +691,9 @@ export function Besoins() {
                         </tr>
                       ))}
                       <tr className="border-t-2 border-bordure bg-attenue/40 font-semibold">
-                        <td className="sticky left-0 z-10 bg-attenue px-2.5 py-1.5">TOTAL kg</td>
-                        <td />
-                        <td className="hidden xl:table-cell" />
+                        <td className="sticky left-0 z-10 bg-attenue px-2 py-1.5">TOTAL kg</td>
                         {mois.map((m) => (
-                          <td key={m.rang_mois} className="px-2.5 py-1.5 text-right tabular-nums">
+                          <td key={m.rang_mois} className="px-1.5 py-1.5 text-right tabular-nums">
                             {fmt.nombre(
                               besoins.reduce((s, b) => s + (b.par_mois.get(m.rang_mois) ?? 0), 0),
                               1,

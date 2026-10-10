@@ -55,10 +55,13 @@ python backend\tests\banc\banc.py --cible <CARGO_TARGET_DIR>          # tout
 python backend\tests\banc\banc.py import inventaire --garder         # quelques scénarios, base gardée
 cd frontend; npm test                              # node --test : colisage, mêmes cas que la base
 # TESTS DE BOUT EN BOUT (Playwright + Edge, vrais écrans) : base jetable remplie par les scénarios
-# du banc, serveur 8097 qui sert frontend/dist (npm run build avant). Échec = écran planté, erreur
-# JS, réponse 5xx ; le reste (champ trop étroit, tableau qui déborde, bouton hors écran, HTML/axe)
-# va dans rapport-e2e/constats.md et rapport-e2e/galerie.html (captures 1366 et 1920).
+# du banc, serveur 8097 qui sert frontend/dist (npm run build avant). ecrans.spec : chaque écran ;
+# saisie.spec : documents TAPÉS au clavier par les vrais rôles (bon → validation → réception →
+# contrôle, fiches, sortie), relus au serveur (« 1 234,5 » doit valoir 1234,5). Échec = écran
+# planté, erreur JS, 5xx, valeur mal enregistrée ; le reste (champ trop étroit, tableau qui
+# déborde, bouton hors écran, HTML/axe) va dans rapport-e2e/constats.md et galerie.html.
 cd frontend; python e2e/lancer.py --cible <CARGO_TARGET_DIR> [-- --grep "écran /stock"]
+python e2e/lancer.py --servir      # base + serveur gardés ouverts pour écrire un test
 # autres sous-commandes admin : definir-mot-de-passe <login>, lister-comptes, sauvegarder,
 # lister-sauvegardes, restaurer, diagnostic, reparer
 

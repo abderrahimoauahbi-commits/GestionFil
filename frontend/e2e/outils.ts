@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
-import { expect, type Page, type TestInfo } from '@playwright/test'
+import { expect, type Browser, type Locator, type Page, type TestInfo } from '@playwright/test'
 
 export const MDP = process.env.E2E_MDP ?? 'Banc-Essai-2026!'
 
@@ -33,7 +33,9 @@ export function surveiller(page: Page) {
   const constats: Constat[] = []
   page.on('pageerror', (e) => erreurs.push(`JavaScript : ${e.message}`))
   page.on('console', (m) => {
-    if (m.type() === 'error') erreurs.push(`console : ${m.text().slice(0, 300)}`)
+    // « Failed to load resource » double une reponse en erreur, deja suivie ci-dessous.
+    if (m.type() === 'error' && !m.text().startsWith('Failed to load resource'))
+      erreurs.push(`console : ${m.text().slice(0, 300)}`)
     else if (m.type() === 'warning')
       constats.push({ type: 'console-avertissement', gravite: 'mineur', detail: m.text().slice(0, 300) })
   })
@@ -256,3 +258,35 @@ export function consigner(info: TestInfo, ecran: string, constats: Constat[], ca
   const nom = `${info.project.name}__${ecran.replace(/[^a-z0-9]+/gi, '_')}.json`
   writeFileSync(join(dossier, nom), JSON.stringify({ ecran, taille: info.project.name, capture, constats }, null, 1))
 }
+
+/** Une session d'utilisateur dans son propre contexte de navigateur, aux reglages du projet. */
+export async function session(browser: Browser, info: TestInfo, login: string) {
+  const { viewport, locale, timezoneId, baseURL } = info.project.use
+  const contexte = await browser.newContext({ viewport, locale, timezoneId, baseURL })
+  const page = await contexte.newPage()
+  const veille = surveiller(page)
+  await connexion(page, login)
+  return { page, veille }
+}
+
+/**
+ * Taper comme un utilisateur : cliquer, tout selectionner, frapper touche par
+ * touche. `fill` contournerait le navigateur ; ici, ce qu'Edge refuse dans un
+ * champ numerique (espace, separateur de milliers) est refuse comme pour lui.
+ */
+export async function saisir(champ: Locator, texte: string) {
+  await champ.click()
+  await champ.press('Control+a')
+  await champ.pressSequentially(texte, { delay: 15 })
+}
+
+/** Lire au serveur, avec le jeton de la session (pour verifier ce qui a ete enregistre). */
+export async function lireApi<T = unknown>(page: Page, chemin: string): Promise<T> {
+  const jeton = await page.evaluate(() => sessionStorage.getItem('gestionfil.jeton'))
+  const r = await page.request.get(chemin, { headers: { Authorization: `Bearer ${jeton}` } })
+  expect(r.ok(), `${chemin} : ${r.status()} ${await r.text()}`).toBeTruthy()
+  return (await r.json()) as T
+}
+
+/** Un nombre a la francaise, tel qu'un utilisateur l'attend : « 1 234,5 » vaut 1234,5. */
+export const attendu = (texte: string) => Number(texte.replace(/[\s\u00a0\u202f]/g, '').replace(',', '.'))

@@ -25,6 +25,7 @@ Usage (depuis frontend/) :
     python e2e/lancer.py --cible <CARGO_TARGET_DIR>              # tout
     python e2e/lancer.py --construire                            # npm run build d'abord
     python e2e/lancer.py --garder -- --grep "Bons de commande"   # apres --, options de Playwright
+    python e2e/lancer.py --servir      # base et serveur gardes ouverts pour ecrire un test
 PGPASSWORD = mot de passe postgres, comme pour le banc.
 """
 import json
@@ -117,6 +118,17 @@ def main():
         (sortie / "exemples.json").write_text(json.dumps(exemples, indent=1), encoding="utf-8")
         env = dict(os.environ, E2E_URL=f"http://127.0.0.1:{PORT}", E2E_MDP=banc.MOT_DE_PASSE,
                    E2E_EXEMPLES=str(sortie / "exemples.json"))
+        if "--servir" in args:
+            # Pour ecrire un test : la base et le serveur restent la, on relance
+            # `npx playwright test ...` a volonte (E2E_URL, E2E_MDP, E2E_EXEMPLES
+            # ci-dessous). Creer rapport-e2e/ARRETER pour tout arreter proprement.
+            arret = sortie / "ARRETER"
+            arret.unlink(missing_ok=True)
+            print(f"  serveur pret : {env['E2E_URL']} ; base {infra.base}. Arret : creer {arret}", flush=True)
+            while not arret.exists():
+                time.sleep(1)
+            arret.unlink(missing_ok=True)
+            return 0
         code = subprocess.run(f"npx playwright test {' '.join(extra)}", cwd=FRONTEND, shell=True,
                               env=env).returncode
         subprocess.run([sys.executable, str(ICI / "constats.py")], cwd=FRONTEND)

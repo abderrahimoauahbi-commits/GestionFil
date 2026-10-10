@@ -548,6 +548,11 @@ export function ReceptionNouvelle() {
           ...quantitePourServeur(l),
           quantite_bl_kg: l.qteBl ? Number(l.qteBl) : undefined,
           nb_colis_ligne: l.colis ? Number(l.colis) : undefined,
+          // LE COLISAGE COMPTE SUR LE QUAI part avec la pesee (10/10/2026). Il
+          // s'affichait, et se perdait a l'enregistrement : la soumission au
+          // controle refusait ensuite une ligne « sans bobines comptees ».
+          nb_palettes: Number(l.palettes) > 0 ? Number(l.palettes) : undefined,
+          nb_bobines: Number(l.bobines) > 0 ? Math.round(Number(l.bobines)) : undefined,
           code_magasin_dest: l.magasin,
           lot_fournisseur: l.lot || undefined,
           date_fabrication: l.fabrication || undefined,

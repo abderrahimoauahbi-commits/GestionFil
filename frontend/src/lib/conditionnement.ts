@@ -191,6 +191,11 @@ export function pourChamp(n: number | null, decimales = 0): string {
  * 2 499,9996 kg — quatre decigrammes perdus a chaque ligne, cumules dans le
  * stock. Une ligne ne part donc dans son unite que si la traduction est
  * exacte ; sinon elle part en kilos, qui sont ce que l'on a pese.
+ *
+ * EXACTE A QUATRE DECIMALES, la precision ou la base GARDE la quantite saisie
+ * (10/10/2026). Jugee a six, 6 kg partaient en 0,012952 palette, la base gardait
+ * 0,0130, qui ne fait plus 6 kg : le retour fournisseur etait refuse par la
+ * contrainte de conversion, sans message comprehensible.
  */
 export function saisieExacte(
   kg: number,
@@ -198,7 +203,7 @@ export function saisieExacte(
   facteur: number | null,
 ): { unite_saisie: string; quantite_saisie: number } {
   if (!facteur) return { unite_saisie: 'kg', quantite_saisie: kg }
-  const q = Number((kg / facteur).toFixed(6))
+  const q = Number((kg / facteur).toFixed(4))
   const refait = Math.round(q * facteur * 10_000) / 10_000
   return Math.abs(refait - kg) < 0.00005
     ? { unite_saisie: unite, quantite_saisie: q }

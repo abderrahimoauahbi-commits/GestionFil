@@ -603,6 +603,66 @@ async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
   return bilan.join(' ; ') || 'rien à sortir'
 }
 
+// --- Les retours au fournisseur -------------------------------------------------
+
+interface DocumentMouvement {
+  code_type_mvt: string
+  reference_document: string | null
+}
+
+/**
+ * UN RETOUR AU FOURNISSEUR : une partie d'un lot recu, non conforme au
+ * deballage, repart en citant la reception. Le droit de valider les receptions
+ * est exige (la direction). Le lot a pu etre consomme depuis : on ne rend que ce
+ * qui reste, ou rien.
+ */
+async function retourner(e: Extract<Evenement, { type: 'RETOUR' }>) {
+  const login = 'Choukri'
+  const p = await session(login)
+  const rid = journal.ids[e.reception]
+  if (!rid) return 'réception absente du journal : pas de retour'
+  const rec = await reception(p, rid)
+  if (!rec || rec.statut !== 'VALIDE') return `réception ${rec?.numero_reception ?? rid} non validée : pas de retour`
+  const deja = await lire<DocumentMouvement[]>(p, `/api/mouvements/documents?code_type_mvt=RETOUR_FOURN&limite=2000`)
+  if (deja.some((m) => m.reference_document === rec.numero_reception)) return 'déjà saisi'
+  const l = e.ligne
+  const suivi = parCode.get(l.ref)?.suivi_lot === 1
+  // Une reference suivie au lot se rend sur son lot ; les autres, sur le stock du
+  // magasin (le serveur refuse s'il ne suffit pas).
+  const stock = (await lots(p, l.magasin)).filter((x) => x.code_reference === l.ref && x.lot_fournisseur === l.lot)
+  const dispo = suivi ? stock.reduce((t, x) => t + x.quantite_kg, 0) : e.kg
+  const kg = Math.min(e.kg, Math.floor(dispo))
+  if (kg < 1) return `${l.ref} lot ${l.lot} déjà consommé : rien à rendre`
+
+  await aller(p, '/mouvements/nouveau', login)
+  await choisirOption(p.getByRole('combobox', { name: /^Type de mouvement/ }), /Retour fournisseur/)
+  await p.getByRole('combobox', { name: /^Magasin/ }).first().selectOption(l.magasin)
+  await p.locator('#mvt-6').fill(e.date)
+  await choisirOption(p.getByRole('combobox', { name: /^Motif/ }).first(), /Retour/i)
+  await p.locator('#mvt-8').fill(rec.numero_reception)
+  await p.locator('#mvt-9').fill(`Non conforme au déballage (simulation ${e.id})`)
+  await choisirReference(p, l.ref)
+  await taper(champNombre(p, 'Quantité en kilos').last(), String(kg))
+  const motifLigne = p.getByRole('combobox', { name: 'Motif de la ligne' }).last()
+  if (await motifLigne.count()) {
+    const options = await motifLigne.locator('option').allTextContents()
+    const choix = options.find((o) => /qualit|conform|d[ée]faut/i.test(o)) ?? options[1]
+    if (choix) await motifLigne.selectOption({ label: choix })
+  }
+  if (suivi) {
+    const lot = p.locator('tbody select').filter({ has: p.locator('option', { hasText: 'Choisir un lot' }) }).last()
+    await choisirOption(lot, new RegExp(l.lot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+  await p.getByRole('button', { name: 'Valider la ligne' }).last().click()
+  const envoi = p.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/mouvements')
+  await p.getByRole('button', { name: 'Enregistrer le mouvement' }).click()
+  const corps = (await envoi).postData() ?? ''
+  await expect(p).toHaveURL(/\/mouvements$/, { timeout: 30_000 }).catch(async () => {
+    throw new Error(`retour non enregistré : ${await messageAffiche(p)} — envoyé : ${corps.slice(corps.indexOf("\"lignes\""), corps.indexOf("\"lignes\"") + 700)}`)
+  })
+  return `${rec.numero_reception} : ${kg} kg ${l.ref} rendus à ${e.fournisseur}`
+}
+
 // --- L'inventaire du jour ---------------------------------------------------
 
 interface Inventaire {
@@ -628,7 +688,11 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
     inv = (await attendre(ouverts, (l) => l.some((i) => i.statut === 'BROUILLON'), 'création de l’inventaire')).find((i) => i.statut === 'BROUILLON')!
   }
   await aller(p, '/inventaires', login)
-  await p.getByRole('row', { name: new RegExp(inv.numero_inventaire) }).getByRole('button', { name: 'Ouvrir' }).click()
+  // Un brouillon s'ouvre par son bouton ; un inventaire en cours, en cliquant sa ligne.
+  const ligneInv = p.getByRole('row', { name: new RegExp(inv.numero_inventaire) })
+  const ouvrir = ligneInv.getByRole('button', { name: 'Ouvrir' })
+  if (await ouvrir.isVisible().catch(() => false)) await ouvrir.click()
+  else await ligneInv.getByRole('cell').first().click()
   const champs = p.getByRole('textbox', { name: /^Kilos comptés, / })
   await expect(champs.first()).toBeVisible({ timeout: 20_000 })
   const lignes = await attendre(
@@ -654,7 +718,10 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
     } else await taper(champ, fr(theorique, 4))
   }
   await p.getByRole('button', { name: 'Enregistrer le comptage' }).click()
-  await p.getByRole('button', { name: 'Cloturer et ajuster' }).click()
+  // Le comptage s'enregistre d'abord (194 lignes : quelques secondes) ; la cloture attend.
+  const cloturer = p.getByRole('button', { name: 'Cloturer et ajuster' })
+  await expect(cloturer).toBeEnabled({ timeout: 120_000 })
+  await cloturer.click()
   await confirmerSi(p, 'Cloturer', 5_000)
   await attendre(async () => (await lire<Inventaire[]>(p, '/api/inventaires')).find((i) => i.id_inventaire === inv!.id_inventaire)?.statut,
     (s) => s === 'CLOTURE', `clôture de l’inventaire : ${await messageAffiche(p)}`, 60_000)
@@ -697,6 +764,7 @@ test('simulation de janvier 2024 à aujourd’hui', async ({ browser }, info) =>
         : e.type === 'BC' ? await creerBon(e)
         : e.type === 'BC_VALIDER' ? await validerBon(e)
         : e.type === 'RECEPTION' ? await receptionner(e)
+        : e.type === 'RETOUR' ? await retourner(e)
         : e.type === 'MACHINE' ? await machine(e)
         : e.type === 'SORTIE' ? await sortir(e)
         : await inventorier(e)

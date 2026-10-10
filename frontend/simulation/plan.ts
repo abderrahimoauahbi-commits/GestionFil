@@ -46,6 +46,8 @@ export type Evenement =
     }
   | { id: string; date: string; type: 'BC_VALIDER'; bc: string; taux: number; dateBc: string }
   | { id: string; date: string; type: 'RECEPTION'; bc: string; fournisseur: string; lignes: LignePlan[] }
+  /** Un retour au fournisseur : une partie d'un lot recu, non conforme, rendue quelques jours apres. */
+  | { id: string; date: string; type: 'RETOUR'; reception: string; fournisseur: string; ligne: LignePlan; kg: number }
   | { id: string; date: string; type: 'MACHINE'; machine: string; zone: string; capacite: number }
   | { id: string; date: string; type: 'SORTIE' }
   | { id: string; date: string; type: 'INVENTAIRE'; magasin: string }
@@ -117,6 +119,9 @@ export interface Machine {
 
 export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], aujourdhui: string): Evenement[] {
   const h = hasard(20240101)
+  // Les retours ont leur propre tirage : ajoutes apres coup (10/10/2026), ils ne
+  // decalent aucun autre evenement du plan deja saisi.
+  const hr = hasard(20240202)
   const ev: Evenement[] = []
   const refs = [...catalogue].sort((a, b) => a.code_reference.localeCompare(b.code_reference))
   const fil = refs.filter((r) => FIL.includes(r.code_categorie) && (r.poids_bobine_kg ?? 0) > 0 && r.suivi_lot === 1)
@@ -165,7 +170,17 @@ export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], a
     ev.push({ id: `${id}-V`, date: valide, type: 'BC_VALIDER', bc: id, taux: devise === 'MAD' ? 1 : coursDu(ev, devise, valide), dateBc: jour })
     // On ne livre pas un bon qui n'est pas encore valide : au plus tot le lendemain.
     const arrivee = recue > valide ? recue : ouvre(ajouter(valide, 1))
-    if (arrivee <= veille) ev.push({ id: `${id}-R`, date: arrivee, type: 'RECEPTION', bc: id, fournisseur: frs, lignes })
+    if (arrivee <= veille) {
+      ev.push({ id: `${id}-R`, date: arrivee, type: 'RECEPTION', bc: id, fournisseur: frs, lignes })
+      // UNE LIVRAISON SUR HUIT a un defaut constate au deballage : une partie du
+      // lot repart chez le fournisseur, en citant la reception.
+      if (hr.reel(0, 1) < 0.125) {
+        const l = hr.parmi(lignes)
+        const retour = ouvre(ajouter(arrivee, hr.entier(2, 6)))
+        const kg = Math.max(10, Math.round(l.pese * hr.reel(0.02, 0.06)))
+        if (retour <= veille) ev.push({ id: `${id}-RF`, date: retour, type: 'RETOUR', reception: `${id}-R`, fournisseur: frs, ligne: l, kg })
+      }
+    }
   }
 
   for (let d = new Date('2024-01-01T00:00:00Z'); iso(d) <= aujourdhui; d.setUTCMonth(d.getUTCMonth() + 1)) {
@@ -219,6 +234,6 @@ export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], a
 
   // L'ordre du temps ; le meme jour, les cours d'abord, puis les documents dans
   // l'ordre ou ils se font au bureau : livraisons, commandes, production, sorties.
-  const poids: Record<Evenement['type'], number> = { TAUX: 0, RECEPTION: 1, BC_VALIDER: 2, BC: 3, MACHINE: 4, SORTIE: 5, INVENTAIRE: 6 }
+  const poids: Record<Evenement['type'], number> = { TAUX: 0, RECEPTION: 1, RETOUR: 2, BC_VALIDER: 3, BC: 4, MACHINE: 5, SORTIE: 6, INVENTAIRE: 7 }
   return ev.sort((a, b) => a.date.localeCompare(b.date) || poids[a.type] - poids[b.type] || a.id.localeCompare(b.id))
 }

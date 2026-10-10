@@ -1760,6 +1760,32 @@ pub async fn saisir_comptage(
 // Bons de commande
 // ============================================================================
 
+/// Le cours d'une devise un jour donne (AAAA-MM-JJ), ou None s'il n'y en a pas.
+///
+/// LA DEVISE PIVOT VAUT 1, TOUJOURS (10/10/2026) : son taux ne se saisit pas (la
+/// base refuse toute autre valeur et l'ecran ne l'offre pas), et une base sans
+/// la ligne du dirham, ou dont la ligne commence apres le jour cherche, refusait
+/// un bon en MAD — « Aucun taux de change en vigueur pour MAD ».
+pub(crate) async fn taux_au(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    devise: &str,
+    jour: &str,
+) -> AppResult<Option<f64>> {
+    Ok(sqlx::query_scalar(
+        "SELECT taux::float8 FROM (
+             SELECT 1.0::numeric AS taux, '9999' AS date_debut FROM devise WHERE code_devise = $1 AND est_pivot = 1
+             UNION ALL
+             SELECT taux, date_debut FROM taux_change
+              WHERE code_devise = $1 AND $2 >= substr(date_debut, 1, 10)
+                AND (date_fin IS NULL OR $2 < substr(date_fin, 1, 10))) t
+          ORDER BY date_debut DESC LIMIT 1",
+    )
+    .bind(devise)
+    .bind(jour)
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
 pub async fn lister_bc(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1873,14 +1899,7 @@ pub async fn creer_bc(
         .unwrap_or(devise_fiche);
 
     // RG-09 : le taux est fige a la creation puis reevalue a la validation.
-    let taux: f64 = sqlx::query_scalar(
-        "SELECT taux::float8 FROM taux_change
-          WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
-            AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
-          ORDER BY date_debut DESC LIMIT 1",
-    )
-    .bind(&devise)
-    .fetch_optional(&mut *tx)
+    let taux: f64 = taux_au(&mut tx, &devise, &crate::db::aujourdhui())
     .await?
     .ok_or_else(|| {
         AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise}."))
@@ -2853,14 +2872,7 @@ pub async fn modifier_bc(
     // convertis : un prix negocie en euros ne devient pas un prix en dollars
     // par un calcul. L'ecran demande de les reverifier.
     if let Some(devise) = b.code_devise.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
-        let taux: f64 = sqlx::query_scalar(
-            "SELECT taux::float8 FROM taux_change
-              WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
-                AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
-              ORDER BY date_debut DESC LIMIT 1",
-        )
-        .bind(devise)
-        .fetch_optional(&mut *tx)
+        let taux: f64 = taux_au(&mut tx, devise, &crate::db::aujourdhui())
         .await?
         .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise}.")))?;
         sqlx::query(
@@ -3713,15 +3725,7 @@ pub async fn creer_reception(
         .await?
         .ok_or_else(|| AppError::Introuvable(format!("fournisseur {fournisseur}")))?;
 
-        let taux_frs: f64 = sqlx::query_scalar(
-            "SELECT taux::float8 FROM taux_change
-              WHERE code_devise = $1 AND $2 >= substr(date_debut, 1, 10)
-                AND (date_fin IS NULL OR $2 < substr(date_fin, 1, 10))
-              ORDER BY date_debut DESC LIMIT 1",
-        )
-        .bind(&devise_frs)
-        .bind(&jour_taux)
-        .fetch_optional(&mut *tx)
+        let taux_frs: f64 = taux_au(&mut tx, &devise_frs, &jour_taux)
         .await?
         .ok_or_else(|| {
             AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise_frs}."))
@@ -4104,16 +4108,12 @@ pub async fn ajouter_ligne_reception(
 
     // RG-09 : taux du jour de la reception, distinct du taux engage du BC. Le
     // jour de la reception est sa date du fait (10/10/2026), pas celui de la saisie.
-    let taux: f64 = sqlx::query_scalar(
-        "SELECT t.taux::float8 FROM taux_change t, reception r
-          WHERE r.id_reception = $2 AND t.code_devise = $1
-            AND substr(r.date_reception, 1, 10) >= substr(t.date_debut, 1, 10)
-            AND (t.date_fin IS NULL OR substr(r.date_reception, 1, 10) < substr(t.date_fin, 1, 10))
-          ORDER BY t.date_debut DESC LIMIT 1",
-    )
-    .bind(&devise)
-    .bind(&id)
-    .fetch_optional(&mut *tx)
+    let jour_reception: String =
+        sqlx::query_scalar("SELECT substr(date_reception, 1, 10) FROM reception WHERE id_reception = $1")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let taux: f64 = taux_au(&mut tx, &devise, &jour_reception)
     .await?
     .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux en vigueur pour {devise}.")))?;
 

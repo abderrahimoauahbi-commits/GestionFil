@@ -127,6 +127,15 @@ $db = Join-Path $sortie 'db'
 New-Item -ItemType Directory -Path (Join-Path $db 'migrations') -Force | Out-Null
 Copy-Item (Join-Path $racine 'db\pg\migrer.py') $db
 Copy-Item (Join-Path $racine 'db\pg\migrations\*.sql') (Join-Path $db 'migrations')
+# FINS DE LIGNE UNIX (10/10/2026) : sous Linux, psql garde le retour chariot ; la
+# migration 2026-10-09j, qui cherche un texte de vue sur deux lignes, ne le
+# trouvait plus et a arrete la publication. On convertit a la copie, quelle que
+# soit la copie de travail du poste.
+$utf8 = New-Object System.Text.UTF8Encoding $false
+foreach ($f in @(Get-ChildItem (Join-Path $db 'migrations') -Filter *.sql) + @(Get-Item (Join-Path $db 'migrer.py'))) {
+    $texte = [IO.File]::ReadAllText($f.FullName)
+    [IO.File]::WriteAllText($f.FullName, ($texte -replace "`r`n", "`n"), $utf8)
+}
 Copy-Item (Join-Path $racine 'deploiement\gestionfil.service') $sortie
 
 # Le script de compilation, joue sur le serveur.

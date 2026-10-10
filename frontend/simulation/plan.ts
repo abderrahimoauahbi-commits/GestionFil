@@ -163,7 +163,9 @@ export function construirePlan(catalogue: RefCatalogue[], machines: Machine[], a
     ev.push({ id, date: jour, type: 'BC', fournisseur: frs, devise, livraison, taux, lignes })
     const valide = ouvre(ajouter(jour, h.entier(1, 3)))
     ev.push({ id: `${id}-V`, date: valide, type: 'BC_VALIDER', bc: id, taux: devise === 'MAD' ? 1 : coursDu(ev, devise, valide), dateBc: jour })
-    if (recue <= veille) ev.push({ id: `${id}-R`, date: recue, type: 'RECEPTION', bc: id, fournisseur: frs, lignes })
+    // On ne livre pas un bon qui n'est pas encore valide : au plus tot le lendemain.
+    const arrivee = recue > valide ? recue : ouvre(ajouter(valide, 1))
+    if (arrivee <= veille) ev.push({ id: `${id}-R`, date: arrivee, type: 'RECEPTION', bc: id, fournisseur: frs, lignes })
   }
 
   for (let d = new Date('2024-01-01T00:00:00Z'); iso(d) <= aujourdhui; d.setUTCMonth(d.getUTCMonth() + 1)) {

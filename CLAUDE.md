@@ -41,6 +41,8 @@ python migrer.py --base <base> --verifier          # fichier modifié après app
 cd backend
 cargo run --bin gestionfil-admin -- init-config   # crée .env
 cargo run --bin gestionfil-import -- --simuler    # import du classeur à blanc
+# Plan de production du classeur (feuille Production_Plan) : enregistré par l'API, passé en cours, MRP calculé
+python ..\db\pg\importer_plan_production.py --url http://127.0.0.1:8099 --classeur "<GESTION FIL.xlsx>" [--a-blanc]
 cargo run                                         # API sur 127.0.0.1:8080
 cargo check
 cargo test                                        # tests unitaires (#[test] dans src/)
@@ -88,6 +90,8 @@ déclencheurs (`R02 : stock insuffisant…`) remontent tels quels au client via 
 assez de tables/vues/déclencheurs.
 
 **Le fil en route compte** (transfert expédié, pas encore reçu) : valeur du stock et calcul des besoins (`v_stock_transit_reference`, `v_stock_physique.stock_transit_kg`) ; chaque sortie porte son coût, le CMUP du moment (`trg_lmvt_cout_sortie`) ; un prix au kilo garde 4 décimales.
+
+**Le plan d'achat a deux origines qui ne se mélangent pas** (10/10/2026, migration `2026-10-10e`) : `PLAN` (ce que réclame le plan de production) et `STOCK_MIN` (ce qui manque encore au minimum une fois le plan servi). `v_plan_achat` expose `qte_plan_kg` et `qte_stock_min_kg` (`qte_a_commander_kg` = leur somme) ; chaque proposition `plan_achat` porte son `origine`, l'écran les montre sur deux onglets, et un bon généré n'en porte qu'une (motif `MRP` ou `STOCK_MIN`).
 
 **Le kilogramme est l'unité canonique.** Bobines, palettes, mètres ne sont que des masques de
 saisie (`domain/unites.rs`, `frontend/src/lib/conditionnement.ts`) ; un facteur manquant fait

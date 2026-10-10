@@ -107,7 +107,37 @@ interface Proposition extends Record<string, unknown> {
   quantite_calculee_kg: number | null
   ecart_calcul_kg: number | null
   etat_figement: string | null
+  /** PLAN : ce que reclame le plan de production ; STOCK_MIN : ce qui manque encore au minimum. */
+  origine?: Origine
 }
+
+/* DEUX ORIGINES QUI NE SE MELANGENT PAS (10/10/2026) : le plan de production
+   d'un cote, le stock minimum de l'autre, chacun dans son onglet et sur ses
+   propres bons de commande (motif MRP ou STOCK_MIN). */
+type Origine = 'PLAN' | 'STOCK_MIN'
+const ORIGINES: { origine: Origine; onglet: string; libelle: string; motif: string; explication: string; vide: string }[] = [
+  {
+    origine: 'PLAN',
+    onglet: 'plan',
+    libelle: 'Plan de production',
+    motif: 'MRP',
+    explication:
+      'Ce que réclame le plan de production en cours : les sorties prévues sur la fenêtre de commande, ' +
+      'sécurité comprise, moins le stock projeté.',
+    vide: 'Le stock projeté couvre ce que le plan de production réclame, ou le MRP n’a pas encore été calculé.',
+  },
+  {
+    origine: 'STOCK_MIN',
+    onglet: 'minimum',
+    libelle: 'Stock minimum',
+    motif: 'STOCK_MIN',
+    explication:
+      'Ce qui manque encore pour remonter au stock minimum du catalogue, une fois livré ce que commande le ' +
+      'plan de production. Jamais compté deux fois.',
+    vide: 'Aucune référence ne reste sous son minimum une fois le plan de production servi.',
+  },
+]
+const origineDe = (p: Proposition): Origine => p.origine ?? 'PLAN'
 
 interface Equivalent extends Record<string, unknown> {
   equivalent_reference: string
@@ -217,7 +247,7 @@ export function PlanAchat() {
   const qc = useQueryClient()
   const confirmation = useConfirmation()
   const [coches, setCoches] = useState<Record<string, boolean>>({})
-  const [onglet, setOnglet] = useState('besoins')
+  const [onglet, setOnglet] = useState('plan')
 
   const q = useQuery({
     queryKey: ['plan-achat-propositions'],
@@ -360,7 +390,6 @@ export function PlanAchat() {
   const fournisseursSelection = new Set(
     ouvertes.filter((p) => coches[p.id_proposition]).map((p) => p.code_fournisseur),
   ).size
-  const surCatalogue = ouvertes.filter((p) => p.source_prix === 'CATALOGUE').length
   const kpi = qKpi.data?.globaux ?? null
 
   // La proposition dont on examine les equivalents. Null : aucun panneau.
@@ -751,7 +780,7 @@ export function PlanAchat() {
     <div>
       <EnTetePage
         titre="Plan d'achat"
-        description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engage avant sa validation."
+        description="Deux propositions qui ne se mélangent pas : ce que réclame le plan de production, et ce qui manque au stock minimum. Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
       />
 
       {/* LES ONGLETS (demandes des 30/09 et 01/10/2026). Le travail se fait en
@@ -761,11 +790,15 @@ export function PlanAchat() {
           restent a cote, pour lire. */}
       <Onglets value={onglet} onValueChange={setOnglet}>
         <OngletsListe className="mb-3">
-          <Onglet value="besoins">
-            <ShoppingCart className="size-3.5" />
-            Besoins
-            <span className="text-[11px] tabular-nums text-attenue-texte">{ouvertes.length}</span>
-          </Onglet>
+          {ORIGINES.map((o) => (
+            <Onglet key={o.origine} value={o.onglet}>
+              <ShoppingCart className="size-3.5" />
+              {o.libelle}
+              <span className="text-[11px] tabular-nums text-attenue-texte">
+                {ouvertes.filter((p) => origineDe(p) === o.origine).length}
+              </span>
+            </Onglet>
+          ))}
           <Onglet value="lignes">
             <ListChecks className="size-3.5" />
             Lignes à commander
@@ -941,10 +974,15 @@ export function PlanAchat() {
             enCours={commander.isPending}
             ecrire={droits.peutEcrire}
             envoyer={(cibles) => commander.mutate({ propositions: selection, cibles })}
-            revenir={() => setOnglet('besoins')}
+            revenir={() => setOnglet('plan')}
           />
         </OngletContenu>
-        <OngletContenu value="besoins">
+        {ORIGINES.map((o) => {
+          const ouvertesO = ouvertes.filter((p) => origineDe(p) === o.origine)
+          const surCatalogueO = ouvertesO.filter((p) => p.source_prix === 'CATALOGUE').length
+          return (
+        <OngletContenu key={o.origine} value={o.onglet}>
+      <p className="mb-3 text-[12.5px] text-attenue-texte">{o.explication}</p>
       {/* LA REGENERATION VIT ICI, avec ce qu'elle produit. */}
       {droits.peutEcrire && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -984,30 +1022,36 @@ export function PlanAchat() {
         </p>
       )}
 
-      {droits.peutEcrire && ouvertes.length > 0 && (
+      {droits.peutEcrire && ouvertesO.length > 0 && (
         <div className="mb-3 flex items-center gap-2">
           <Bouton
             variante="discret"
             taille="xs"
             onClick={() =>
-              setCoches(Object.fromEntries(ouvertes.map((p) => [p.id_proposition, true])))
+              setCoches((c) => ({ ...c, ...Object.fromEntries(ouvertesO.map((p) => [p.id_proposition, true])) }))
             }
           >
-            Tout cocher ({ouvertes.length})
+            Tout cocher ({ouvertesO.length})
           </Bouton>
-          <Bouton variante="discret" taille="xs" onClick={() => setCoches({})}>
+          <Bouton
+            variante="discret"
+            taille="xs"
+            onClick={() =>
+              setCoches((c) => ({ ...c, ...Object.fromEntries(ouvertesO.map((p) => [p.id_proposition, false])) }))
+            }
+          >
             Tout decocher
           </Bouton>
           <span className="text-[11px] text-attenue-texte">
-            Un bon de commande sera cree par fournisseur.
+            Un bon de commande sera créé par fournisseur, distinct de ceux de l’autre onglet.
           </span>
         </div>
       )}
 
-      {surCatalogue > 0 && (
+      {surCatalogueO > 0 && (
         <div className="mb-4">
           <Alerte ton="alerte" titre="Prix estimes au catalogue">
-            {surCatalogue} reference(s) n'ont encore jamais ete commandees chez leur fournisseur :
+            {surCatalogueO} reference(s) n'ont encore jamais ete commandees chez leur fournisseur :
             leur prix vient du catalogue converti en dirhams, pas d'un bon valide. Le montant est
             indicatif jusqu'a la premiere commande.
           </Alerte>
@@ -1015,11 +1059,11 @@ export function PlanAchat() {
       )}
 
       <DataTable<Proposition>
-          exportable="plan-achat"
-          imprimable="Plan achat"
+          exportable={`plan-achat-${o.onglet}`}
+          imprimable={`Plan achat — ${o.libelle}`}
         module={MODULE}
         colonnes={colonnes}
-        lignes={lignes}
+        lignes={lignes.filter((p) => origineDe(p) === o.origine)}
         chargement={q.isLoading}
         erreur={q.error}
         cle={(p) => p.id_proposition}
@@ -1028,7 +1072,7 @@ export function PlanAchat() {
         placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
         videTitre="Aucune proposition"
-        videDescription="Le stock projete couvre les besoins, ou le MRP n'a pas encore ete calcule."
+        videDescription={o.vide}
         videAction={
           droits.peutEcrire && (
             <Bouton variante="contour" onClick={() => generer.mutate()}>
@@ -1117,6 +1161,8 @@ export function PlanAchat() {
         }
       />
         </OngletContenu>
+          )
+        })}
       </Onglets>
 
       {arbitrage && (
@@ -1313,6 +1359,7 @@ interface BcResume {
   statut: string
   date_bc: string
   nb_lignes: number
+  motif_creation?: string
 }
 
 /**
@@ -1338,20 +1385,29 @@ function LignesACommander({
     queryKey: ['bons-commande'],
     queryFn: ({ signal }) => api.get<BcResume[]>('/api/bons-commande', { signal }),
   })
+  // UN GROUPE PAR FOURNISSEUR ET PAR ORIGINE : le plan de production et le stock
+  // minimum partent sur des bons distincts, et un bon ouvert ne recoit que les
+  // lignes de son motif.
   const groupes = useMemo(() => {
     const m = new Map<string, Proposition[]>()
-    for (const p of lignes) m.set(p.code_fournisseur, [...(m.get(p.code_fournisseur) ?? []), p])
+    for (const p of lignes) {
+      const cle = `${p.code_fournisseur}|${origineDe(p)}`
+      m.set(cle, [...(m.get(cle) ?? []), p])
+    }
     return [...m.entries()]
   }, [lignes])
-  const ouverts = (frs: string) =>
+  const ouverts = (frs: string, motif: string) =>
     (qBc.data ?? []).filter(
-      (b) => b.code_fournisseur === frs && (b.statut === 'BROUILLON' || b.statut === 'EN_ATTENTE_VALIDATION'),
+      (b) =>
+        b.code_fournisseur === frs &&
+        (b.motif_creation ?? 'MRP') === motif &&
+        (b.statut === 'BROUILLON' || b.statut === 'EN_ATTENTE_VALIDATION'),
     )
 
   if (lignes.length === 0) {
     return (
       <Alerte ton="info" titre="Aucune ligne à commander">
-        Cochez des besoins dans l’onglet Besoins : ils apparaîtront ici, groupés par fournisseur.{' '}
+        Cochez des besoins dans l’onglet Plan de production ou Stock minimum : ils apparaîtront ici, groupés par fournisseur et par origine.{' '}
         <button type="button" className="underline" onClick={revenir}>Aller aux besoins</button>
       </Alerte>
     )
@@ -1362,24 +1418,29 @@ function LignesACommander({
 
   return (
     <div className="space-y-3">
-      {groupes.map(([frs, ls]) => {
+      {groupes.map(([cle, ls]) => {
+        const frs = ls[0].code_fournisseur
+        const o = ORIGINES.find((x) => x.origine === origineDe(ls[0]))!
         const devise = ls[0].code_devise ?? ''
         const montantDevise = ls.reduce((t, p) => t + (p.montant_devise ?? 0), 0)
         return (
-          <Carte key={frs}>
+          <Carte key={cle}>
             <CarteEntete>
-              <CarteTitre>{ls[0].fournisseur_nom || frs}</CarteTitre>
+              <CarteTitre>
+                {ls[0].fournisseur_nom || frs}
+                <Badge ton={o.origine === 'PLAN' ? 'info' : 'alerte'} className="ml-2">{o.libelle}</Badge>
+              </CarteTitre>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11.5px] text-attenue-texte">Envoyer vers</span>
                 <Selecteur
                   className="h-8 w-80 max-w-full"
-                  value={cibles[frs] ?? ''}
+                  value={cibles[cle] ?? ''}
                   disabled={!ecrire}
-                  onChange={(e) => setCibles((c) => ({ ...c, [frs]: e.target.value }))}
-                  aria-label={`Bon de commande pour ${ls[0].fournisseur_nom || frs}`}
+                  onChange={(e) => setCibles((c) => ({ ...c, [cle]: e.target.value }))}
+                  aria-label={`Bon de commande pour ${ls[0].fournisseur_nom || frs} (${o.libelle})`}
                 >
                   <option value="">Un nouveau bon</option>
-                  {ouverts(frs).map((b) => (
+                  {ouverts(frs, o.motif).map((b) => (
                     <option key={b.id_bc} value={b.id_bc}>
                       {b.numero_bc} · {b.statut === 'BROUILLON' ? 'brouillon' : 'en attente'} · {b.nb_lignes} ligne(s)
                     </option>
@@ -1444,7 +1505,7 @@ function LignesACommander({
         <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-primaire bg-surface px-3 py-2 shadow-sm">
           <span className="text-[13px]">
             <span className="font-medium">{lignes.length} ligne(s)</span>
-            <span className="text-attenue-texte"> · {groupes.length} fournisseur(s) · {fmt.mad(totalMad)}</span>
+            <span className="text-attenue-texte"> · {groupes.length} bon(s) · {fmt.mad(totalMad)}</span>
             <span className="text-attenue-texte"> — les bons restent en brouillon, rien n’est engagé.</span>
           </span>
           <Bouton chargement={enCours} onClick={() => envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)))}>

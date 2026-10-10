@@ -70,7 +70,17 @@ async function session(login: string): Promise<Page> {
     await connecter(page, login)
     sessions.set(login, page)
   }
+  await deverrouiller(page)
   return page
+}
+
+/** L'ecran se verrouille faute d'activite : on retape son mot de passe, comme au bureau. */
+async function deverrouiller(page: Page) {
+  const verrou = page.getByText('Session verrouillée', { exact: false })
+  if (!(await verrou.isVisible().catch(() => false))) return
+  await page.locator('input[type=password]').fill(MDP)
+  await page.getByRole('button', { name: 'Déverrouiller' }).click()
+  await expect(verrou).toBeHidden({ timeout: 15_000 })
 }
 
 /** Aller a un ecran ; une session expiree se reconnecte, comme l'utilisateur. */
@@ -81,6 +91,7 @@ async function aller(page: Page, chemin: string, login: string) {
     await page.goto(chemin)
   }
   await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined)
+  await deverrouiller(page)
 }
 
 /** Relire au serveur, avec le jeton de la session (jamais pour ecrire). */
@@ -472,12 +483,15 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
     const lignes = grille.locator('tbody tr')
     await expect(lignes).toHaveCount(etat.length, { timeout: 15_000 })
     // Une ligne sur l'etage reste entamee (30 a 45 %) ; les autres sont finies.
-    garde = etat.length > 1 ? etat[Math.floor(alea() * etat.length)] : alea() < 0.5 ? etat[0] : undefined
+    // Seule une ligne encore bien pleine (40 % et plus) peut rester entamee ; elle
+    // descend toujours sous son dernier constat, jamais au-dessus.
+    const pleines = etat.filter((l) => (l.pourcentage ?? 100) >= 40)
+    garde = pleines.length && (etat.length > 1 || alea() < 0.5) ? pleines[Math.floor(alea() * pleines.length)] : undefined
     for (let i = 0; i < etat.length; i++) {
       const ligne = lignes.nth(i)
       const lot = ((await ligne.locator('td').nth(1).textContent()) ?? '').trim()
       const cases = ligne.locator('input[inputmode=decimal]')
-      if (garde && lot === garde.lot_fournisseur) await taper(cases.nth(1), fr(30 + alea() * 15, 1))
+      if (garde && lot === garde.lot_fournisseur) await taper(cases.nth(1), fr((garde.pourcentage ?? 100) * (0.35 + alea() * 0.25), 1))
       else await taper(cases.nth(0), '0')
       await ligne.getByLabel('Précision du motif').fill('Constat de production')
     }
@@ -495,15 +509,17 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
     const { m: magasin, lots: dispo } = stocks.sort((a, b) => total(b) - total(a))[0]
     const candidats = [...new Set(dispo.filter(fil).map((l) => l.code_reference))]
       .filter((r) => !surEtage.has(r))
-      .map((r) => ({ r, lot: plusAncien(dispo, r)!, poids: parCode.get(r)!.poids_bobine_kg! }))
-      .filter((c) => c.lot && Math.floor(c.lot.quantite_kg / c.poids) >= 40)
+      .map((r) => ({ r, lot: plusAncien(dispo, r)! }))
+      // Le poids d'une bobine suit les receptions : celui du jour, relu avec les lots.
+      .map((c) => ({ ...c, poids: Number(c.lot?.poids_bobine_kg ?? parCode.get(c.r)!.poids_bobine_kg) }))
+      .filter((c) => c.lot && Math.floor(c.lot.quantite_kg / (c.poids * 1.01)) >= 40)
       .sort((a, b) => b.lot.quantite_kg - a.lot.quantite_kg)
     let places = e.capacite - occupees
     const choix: { r: string; lot: string; bobines: number }[] = []
     for (const c of candidats.slice(0, 8).sort(() => alea() - 0.5)) {
       if (choix.length >= 2 + Math.floor(alea() * 2) || places < 40) break
       const voulu = 150 + Math.floor(alea() * 300)
-      const bobines = Math.min(voulu, Math.floor(c.lot.quantite_kg / c.poids), places)
+      const bobines = Math.min(voulu, Math.floor(c.lot.quantite_kg / (c.poids * 1.01)), places)
       if (bobines < 40) continue
       choix.push({ r: c.r, lot: c.lot.lot_fournisseur, bobines })
       places -= bobines

@@ -1771,6 +1771,15 @@ pub(crate) async fn taux_au(
     devise: &str,
     jour: &str,
 ) -> AppResult<Option<f64>> {
+    taux_au_conn(&mut **tx, devise, jour).await
+}
+
+/// `taux_au` sur une connexion nue (la conversion du plan d'achat en bons).
+pub(crate) async fn taux_au_conn(
+    conn: &mut sqlx::PgConnection,
+    devise: &str,
+    jour: &str,
+) -> AppResult<Option<f64>> {
     Ok(sqlx::query_scalar(
         "SELECT taux::float8 FROM (
              SELECT 1.0::numeric AS taux, '9999' AS date_debut FROM devise WHERE code_devise = $1 AND est_pivot = 1
@@ -1782,7 +1791,7 @@ pub(crate) async fn taux_au(
     )
     .bind(devise)
     .bind(jour)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(conn)
     .await?)
 }
 

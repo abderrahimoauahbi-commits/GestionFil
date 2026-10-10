@@ -43,10 +43,10 @@ def refus_sql(infra, requete, contient):
     raise Echec(f"la base a accepte : {requete[:120]}")
 
 
-def bon_envoye(c, lignes, frs=FRS):
+def bon_envoye(c, lignes, frs=FRS, date_bc=None):
     """Un bon saisi par l'assistante, valide par la Direction, envoye. Rend (id_bc, lignes du bon)."""
     bc = c.ok("Assistante", "POST", "/api/bons-commande", {
-        "code_fournisseur": frs,
+        "code_fournisseur": frs, **({"date_bc": date_bc} if date_bc else {}),
         "lignes": [{"code_reference": r, "unite_commande": "kg", "quantite_commandee_unite": q,
                     "prix_unitaire_devise": p} for r, q, p in lignes],
     })
@@ -1594,6 +1594,7 @@ def scenario_reception_date_du_fait(c, infra):
     """LA DATE DU FAIT D'UNE RECEPTION (10/10/2026) : un BL du 15/03/2025 entre en stock a cette
     date ; une date future est refusee, comme une date anterieure au bon."""
     A, M = "PLA 100 EXT", "Morocco"
+    A_USD = "PP-1500 Dtex-Bleu 6666-Hs"
     bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": "FRS-012", "date_bc": "2025-03-01",
         "lignes": [{"code_reference": A, "unite_commande": "kg", "quantite_commandee_unite": 200, "prix_unitaire_devise": 21}]})
     id_bc = bc["id_bc"]
@@ -1618,6 +1619,30 @@ def scenario_reception_date_du_fait(c, infra):
         "SELECT substr(m.date_mouvement, 1, 10) FROM ligne_reception lr JOIN mouvement m ON m.id_mouvement = lr.id_mouvement_genere "
         f"WHERE lr.id_reception = '{rid}'")
     verifier(date_mvt == "2025-03-15", f"l'entree en stock est datee {date_mvt} au lieu du 2025-03-15")
+
+    # EN DEVISE : le taux est celui du jour de la livraison (RG-09), pas celui de la saisie.
+    # Deux cours de mars 2025 s'inserent dans l'historique, entre des cours deja connus.
+    c.ok("Mohamed", "POST", "/api/devises/USD/taux", {"taux": 9.7, "date_debut": "2025-03-01"})
+    c.ok("Mohamed", "POST", "/api/devises/USD/taux", {"taux": 9.5, "date_debut": "2025-03-12"})
+    jour = taux_usd_du_jour(infra)
+    du_jour = float(infra.valeur(f"SELECT taux FROM taux_change WHERE code_devise = 'USD' AND substr(date_debut, 1, 10) = '{jour}'"))
+    id_bc, lignes = bon_envoye(c, [(A_USD, 300, 2.0)], frs="FRS-001", date_bc="2025-03-01")
+    ligne = [{"code_reference": A_USD, "id_ligne_bc": lignes[0]["id_ligne_bc"], "unite_saisie": "kg",
+              "quantite_pesee_unite": 300, "code_magasin_dest": M, "lot_fournisseur": "LOT-DATE-USD"}]
+    r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "date_reception": "2025-03-05",
+                                                     "num_bon_livraison": "BL-DATE-USD", "lignes": ligne})
+    rid = r["id_reception"]
+    taux = lambda: float(infra.valeur(f"SELECT taux_change FROM ligne_reception WHERE id_reception = '{rid}'"))
+    prix = lambda: float(infra.valeur(f"SELECT prix_kg_mad FROM ligne_reception WHERE id_reception = '{rid}'"))
+    verifier(abs(taux() - 9.7) < 1e-9, f"livraison du 05/03/2025 au taux {taux()} au lieu du cours du 01/03 (9,70)")
+    verifier(abs(prix() - 19.4) < 1e-9, f"prix {prix()} MAD/kg au lieu de 19,40")
+    # La date corrigee au 20/03 : le cours du 12/03 s'applique.
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"date_reception": "2025-03-20"})
+    verifier(abs(taux() - 9.5) < 1e-9 and abs(prix() - 19.0) < 1e-9,
+             f"date corrigee au 20/03 : taux {taux()}, prix {prix()} au lieu de 9,50 et 19,00")
+    # Le cours du jour, lui, n'a pas bouge.
+    encore = float(infra.valeur(f"SELECT taux FROM taux_change WHERE code_devise = 'USD' AND substr(date_debut, 1, 10) = '{jour}'"))
+    verifier(encore == du_jour, f"le cours du jour est passe de {du_jour} a {encore}")
 
 
 def scenario_sauvegarde_restaurable(c, infra):

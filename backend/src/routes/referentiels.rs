@@ -114,9 +114,13 @@ pub async fn creer_taux(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
+    // UN COURS PASSE S'INSERE DANS L'HISTORIQUE (10/10/2026) : la periode qui le
+    // contient se ferme a sa date, et lui court jusqu'au cours suivant deja connu
+    // (ouvert s'il n'y en a pas). Saisir l'historique BAM apres coup butait sur
+    // « periodes chevauchantes ». Les receptions deja valorisees gardent leur taux.
     sqlx::query(
         "UPDATE taux_change SET date_fin = $2
-          WHERE code_devise = $1 AND date_fin IS NULL AND date_debut < $2",
+          WHERE code_devise = $1 AND date_debut < $2 AND (date_fin IS NULL OR date_fin > $2)",
     )
     .bind(&devise)
     .bind(&debut)
@@ -124,8 +128,9 @@ pub async fn creer_taux(
     .await?;
 
     sqlx::query(
-        "INSERT INTO taux_change (code_devise, taux, date_debut, source)
-         VALUES ($1, $2, $3, $4)",
+        "INSERT INTO taux_change (code_devise, taux, date_debut, source, date_fin)
+         VALUES ($1, $2, $3, $4,
+                 (SELECT min(t.date_debut) FROM taux_change t WHERE t.code_devise = $1 AND t.date_debut > $3))",
     )
     .bind(&devise)
     .bind(t.taux)

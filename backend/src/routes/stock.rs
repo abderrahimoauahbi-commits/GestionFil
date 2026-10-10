@@ -3469,6 +3469,47 @@ pub async fn modifier_reception(
     .execute(&mut *tx)
     .await?;
 
+    // LA DATE CORRIGEE CHANGE LE TAUX (RG-09) : les lignes en devise reprennent
+    // le cours du nouveau jour, et leur prix en dirhams avec lui. Rien n'est
+    // encore entre en stock (brouillon ou a controler) : rien d'autre ne bouge.
+    if let Some(jour) = &date {
+        let sans_taux: Option<String> = sqlx::query_scalar(
+            "SELECT string_agg(DISTINCT lr.code_devise, ', ') FROM ligne_reception lr
+              WHERE lr.id_reception = $1 AND lr.code_devise <> 'MAD'
+                AND NOT EXISTS (SELECT 1 FROM taux_change t WHERE t.code_devise = lr.code_devise
+                                   AND $2 >= substr(t.date_debut, 1, 10)
+                                   AND (t.date_fin IS NULL OR $2 < substr(t.date_fin, 1, 10)))",
+        )
+        .bind(&id)
+        .bind(jour)
+        .fetch_one(&mut *tx)
+        .await?;
+        if let Some(d) = sans_taux {
+            return Err(AppError::RegleMetier(format!(
+                "Aucun taux {d} en vigueur le {jour} : saisissez le cours de ce jour avant de dater la reception."
+            )));
+        }
+        sqlx::query(
+            // Taux et prix ensemble : la base exige prix = prix devise x taux a chaque ligne.
+            "UPDATE ligne_reception lr
+                SET taux_change = n.taux,
+                    prix_kg_mad = CASE WHEN lr.prix_kg_devise IS NULL THEN lr.prix_kg_mad
+                                       ELSE ROUND(lr.prix_kg_devise * n.taux, 4) END
+               FROM (SELECT l.id_ligne_reception,
+                            (SELECT t.taux FROM taux_change t
+                              WHERE t.code_devise = l.code_devise
+                                AND $2 >= substr(t.date_debut, 1, 10)
+                                AND (t.date_fin IS NULL OR $2 < substr(t.date_fin, 1, 10))
+                              ORDER BY t.date_debut DESC LIMIT 1) AS taux
+                       FROM ligne_reception l WHERE l.id_reception = $1 AND l.code_devise <> 'MAD') n
+              WHERE lr.id_ligne_reception = n.id_ligne_reception",
+        )
+        .bind(&id)
+        .bind(jour)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     tx.commit().await?;
     Ok(Json(json!({ "id_reception": id, "modifie": true })))
 }
@@ -3609,6 +3650,11 @@ pub async fn creer_reception(
         }
     }
 
+    // LE TAUX DU JOUR DE LA LIVRAISON (RG-09, 10/10/2026) : avec la date du fait,
+    // une livraison de mai saisie en octobre entrait au cours d'octobre. Le taux,
+    // comme le mouvement d'entree, suit la date de la reception.
+    let jour_taux = date.clone().unwrap_or_else(crate::db::aujourdhui);
+
     let numero = numeroter(&mut tx, "reception", "numero_reception", "REC").await?;
     let id = uuid::Uuid::new_v4().to_string();
 
@@ -3669,11 +3715,12 @@ pub async fn creer_reception(
 
         let taux_frs: f64 = sqlx::query_scalar(
             "SELECT taux::float8 FROM taux_change
-              WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
-                AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
+              WHERE code_devise = $1 AND $2 >= substr(date_debut, 1, 10)
+                AND (date_fin IS NULL OR $2 < substr(date_fin, 1, 10))
               ORDER BY date_debut DESC LIMIT 1",
         )
         .bind(&devise_frs)
+        .bind(&jour_taux)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| {
@@ -3804,12 +3851,13 @@ pub async fn creer_reception(
                         CASE WHEN lb.code_devise = 'MAD' THEN 1.0
                              ELSE (SELECT t.taux FROM taux_change t
                                     WHERE t.code_devise = lb.code_devise
-                                      AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
-                                      AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
+                                      AND $2 >= substr(t.date_debut, 1, 10)
+                                      AND (t.date_fin IS NULL OR $2 < substr(t.date_fin, 1, 10))
                                     ORDER BY t.date_debut DESC LIMIT 1) END::float8
                    FROM ligne_bc lb WHERE lb.id_ligne_bc = $1",
             )
             .bind(idl)
+            .bind(&jour_taux)
             .fetch_optional(&mut *tx)
             .await?,
             None => None,
@@ -4054,14 +4102,17 @@ pub async fn ajouter_ligne_reception(
             }
         };
 
-    // RG-09 : taux du jour de la reception, distinct du taux engage du BC.
+    // RG-09 : taux du jour de la reception, distinct du taux engage du BC. Le
+    // jour de la reception est sa date du fait (10/10/2026), pas celui de la saisie.
     let taux: f64 = sqlx::query_scalar(
-        "SELECT taux::float8 FROM taux_change
-          WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
-            AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
-          ORDER BY date_debut DESC LIMIT 1",
+        "SELECT t.taux::float8 FROM taux_change t, reception r
+          WHERE r.id_reception = $2 AND t.code_devise = $1
+            AND substr(r.date_reception, 1, 10) >= substr(t.date_debut, 1, 10)
+            AND (t.date_fin IS NULL OR substr(r.date_reception, 1, 10) < substr(t.date_fin, 1, 10))
+          ORDER BY t.date_debut DESC LIMIT 1",
     )
     .bind(&devise)
+    .bind(&id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux en vigueur pour {devise}.")))?;

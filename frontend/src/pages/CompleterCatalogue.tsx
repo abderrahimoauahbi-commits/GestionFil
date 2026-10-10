@@ -471,7 +471,7 @@ export function CompleterCatalogue() {
                           value={v.origine}
                           onChange={(e) => poser(l.code_reference, 'origine', e.target.value)}
                           placeholder={l.couleur ? '' : 'à la place de la couleur'}
-                          className={cn(champ, 'w-32')}
+                          className={cn(champ, 'w-40')}
                         />
                           </div>
                           <div className="flex flex-col gap-0.5">

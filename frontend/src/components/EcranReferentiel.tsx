@@ -204,7 +204,7 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
         erreur={crud.erreur}
         surAnnuler={fermer}
         surValider={enregistrer}
-        libelleValider={creation ? 'Creer' : 'Enregistrer'}
+        libelleValider={creation ? 'Créer' : 'Enregistrer'}
       />
     )
     // « Nouvelle référence », pas « Nouveau référence » (10/10/2026).
@@ -221,7 +221,7 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
           actions={
             <Bouton variante="contour" onClick={fermer}>
               <ArrowLeft />
-              Retour a la liste
+              Retour à la liste
             </Bouton>
           }
         />

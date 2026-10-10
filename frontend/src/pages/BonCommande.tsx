@@ -1076,7 +1076,7 @@ export function BonCommande() {
                 onChange={(e) => setEntete({ ...entete, conditions_paiement: e.target.value })}
               />
             </div>
-            <div>
+            <div className="lg:col-span-2">
               <Etiq htmlFor="notes">Observations</Etiq>
               <Champ
                 id="notes"

@@ -299,6 +299,9 @@ export function Formulaire({
                   max={c.max}
                   disabled={!actif}
                   aria-invalid={manque}
+                  // DES LARGEURS STANDARD (10/10/2026) : un nombre ou une date n'occupe
+                  // pas toute la colonne — le champ dit la taille de ce qu'on y tape.
+                  className={type === 'date' ? 'max-w-[11rem]' : type === 'texte' ? undefined : 'max-w-[12rem] text-right tabular-nums'}
                   value={(valeur as string | number) ?? ''}
                   onChange={(e) => {
                     const t = e.target.value

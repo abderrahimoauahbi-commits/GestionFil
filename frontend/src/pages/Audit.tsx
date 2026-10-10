@@ -10,7 +10,7 @@
  * modifie un libelle. Le presenter comme une piste d'audit complete serait
  * trompeur, et c'est le genre de promesse qui fait cesser de verifier.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -128,9 +128,11 @@ export function Audit() {
         <span className="text-[11px] text-attenue-texte">{lignes.length} affichees</span>
       </div>
 
-      <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x rounded-[var(--radius)] border border-bordure bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
+      {/* L'EN-TETE FIGE, LE JOURNAL DEFILE DANS SON CADRE (10/10/2026) : mille lignes
+          faisaient trente-huit ecrans de page, sans plus savoir quelle colonne on lisait. */}
+      <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-[var(--radius)] border border-bordure bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
         <table className="grille w-full text-[12px]">
-          <thead className="bg-attenue">
+          <thead className="sticky top-0 z-10 bg-attenue">
             <tr>
               <th className="px-2 py-1.5 text-left font-medium">Date</th>
               <th className="px-2 py-1.5 text-left font-medium">Auteur</th>
@@ -141,9 +143,8 @@ export function Audit() {
           </thead>
           <tbody>
             {lignes.map((l) => (
-              <>
+              <Fragment key={l.id_audit}>
                 <tr
-                  key={l.id_audit}
                   onClick={() => setOuvert(ouvert === l.id_audit ? null : l.id_audit)}
                   className="cursor-pointer hover:bg-attenue/60"
                 >
@@ -174,7 +175,7 @@ export function Audit() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>

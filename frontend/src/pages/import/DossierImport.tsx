@@ -545,14 +545,14 @@ function FraisDossier({
           <table className="w-full min-w-[60rem] text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
-                <th className={cn(th, 'w-56 text-left')}>Type de frais</th>
+                <th className={cn(th, 'w-44 text-left')}>Type de frais</th>
                 <th className={cn(th, 'text-left')}>Précision</th>
                 <th className={cn(th, 'w-28 text-left')}>N° pièce</th>
                 <th className={cn(th, 'w-28 text-left')}>Devise</th>
                 <th className={cn(th, 'w-24 text-right')}>Cours</th>
-                <th className={cn(th, 'w-32 text-right')}>Montant</th>
-                <th className={cn(th, 'w-32 text-right')}>Montant DH</th>
-                <th className={cn(th, 'w-48 text-left')}>Coût / répartition</th>
+                <th className={cn(th, 'w-28 text-right')}>Montant</th>
+                <th className={cn(th, 'w-28 text-right')}>Montant DH</th>
+                <th className={cn(th, 'w-36 text-left')}>Coût / répartition</th>
                 {ecrire && <th className={cn(th, 'w-24')} />}
               </tr>
             </thead>
@@ -609,7 +609,7 @@ function FraisDossier({
               {saisie && (
                 <tr className="border-b border-bordure/60 bg-attenue/25">
                   <td className={td}>
-                    <Selecteur className="h-7" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
+                    <Selecteur className="h-7 w-full min-w-[11rem]" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
                       <option value="">Nouveau frais…</option>
                       {groupes.map(([cat, liste]) => (
                         <optgroup key={cat} label={cat}>
@@ -626,7 +626,7 @@ function FraisDossier({
                       <div className="mt-0.5 text-[11px] text-attenue-texte">{typeChoisi.piece_justificative}</div>
                     )}
                   </td>
-                  <td className={td}><Champ className="h-7" aria-label="Libellé du frais" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
+                  <td className={td}><Champ className="h-7 min-w-[9rem]" aria-label="Libellé du frais" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
                   <td className={td}><Champ className="h-7" aria-label="N° de pièce" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
                   <td className={td}>
                     <Selecteur className="h-7 min-w-[6.5rem] pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>

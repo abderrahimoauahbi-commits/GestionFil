@@ -958,9 +958,9 @@ function TableComptage({
                 <th className="w-28 px-1.5 py-2 text-right">Compté kg</th>
                 <th className="w-20 px-1.5 py-2 text-right">Bobines</th>
                 <th className="w-20 px-1.5 py-2 text-right">Palettes</th>
-                <th className="w-28 px-1.5 py-2 text-right">Poids / bob.</th>
-                <th className="w-24 px-1.5 py-2 text-right">Écart</th>
-                <th className="w-44 px-1.5 py-2 text-left">
+                <th className="w-24 px-1.5 py-2 text-right">Poids / bob.</th>
+                <th className="w-20 px-1.5 py-2 text-right">Écart</th>
+                <th className="w-56 px-1.5 py-2 text-left">
                   Motif
                   <Aide>
                     Obligatoire au-delà de {fmt.nombre(tolMotif, 1)} % d’écart (réglage

@@ -276,7 +276,7 @@ export function Receptions() {
         erreur={q.error}
         cle={(r) => r.id_reception}
         surClic={(r) => naviguer(`/receptions/${r.id_reception}`)}
-        placeholderRecherche="N° de réception, fournisseur, bon de livraison..."
+        placeholderRecherche="N° de réception, fournisseur, BL…"
         titreCarte={(r) => `${r.numero_reception} — ${r.fournisseur_nom}`}
         videTitre="Aucune réception"
         videDescription="Une réception se rattache a un bon de commande envoye, ou se saisit librement."

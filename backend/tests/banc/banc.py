@@ -138,7 +138,10 @@ class Infra:
         self.admin = Path(cible) / "debug" / "gestionfil-admin.exe"
         self.base = f"gestionfil_banc_{os.getpid()}"
         self.serveur = None
-        self.env = dict(os.environ, PGPASSWORD=self.motdepasse)
+        # L'HORLOGE DU SERVEUR (11/10/2026) : ses sessions sont en UTC (db.rs) ; le banc lisait
+        # current_date dans le fuseau de la base (Casablanca) et, entre minuit et une heure,
+        # datait du lendemain le taux du jour et les receptions — « date dans le futur ».
+        self.env = dict(os.environ, PGPASSWORD=self.motdepasse, PGTZ="UTC")
 
     def url(self, base=None):
         from urllib.parse import quote

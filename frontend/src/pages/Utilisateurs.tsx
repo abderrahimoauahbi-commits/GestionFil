@@ -302,7 +302,7 @@ function FormulaireCreation({
               Annuler
             </Bouton>
             <Bouton type="submit" disabled={creer.isPending}>
-              {creer.isPending ? 'Creation...' : 'Creer'}
+              {creer.isPending ? 'Création…' : 'Créer'}
             </Bouton>
           </div>
         </form>

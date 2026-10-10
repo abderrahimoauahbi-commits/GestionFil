@@ -1209,7 +1209,7 @@ export function GrilleLignes({
                             </div>
                           ))}
                         {colonnesSupplementaires.map((c) => (
-                          <div key={c.cle} className={cn('flex flex-col gap-0.5', c.largeur, c.alignement === 'right' && 'text-right')}>
+                          <div key={c.cle} className={cn('flex min-w-[14rem] flex-col gap-0.5 [&_input]:w-full [&_select]:w-full', c.alignement === 'right' && 'text-right')}>
                             <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">{c.entete}</span>
                             {c.rendu(l, (valeur) =>
                               maj(l.cle, { extra: { ...(l.extra ?? {}), [c.cle]: valeur } }),

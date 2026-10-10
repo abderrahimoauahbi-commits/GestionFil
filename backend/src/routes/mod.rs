@@ -521,3 +521,22 @@ pub fn router(state: AppState) -> Router {
         }
     }
 }
+
+/// LA DATE DU FAIT d'un document (10/10/2026) : une vraie date AAAA-MM-JJ,
+/// jamais dans le futur — on ne recoit pas demain ce qui n'est pas arrive.
+/// Vide : None (le document prend la date du jour). Commune aux receptions
+/// locales et d'import, a la creation comme a la modification.
+pub fn date_du_fait(d: Option<&str>, quoi: &str) -> crate::error::AppResult<Option<String>> {
+    match d.map(str::trim) {
+        Some(d) if !d.is_empty() => {
+            let jour = chrono::NaiveDate::parse_from_str(d.get(..10).unwrap_or(d), "%Y-%m-%d").map_err(|_| {
+                crate::error::AppError::Invalide(format!("{quoi} invalide : {d} (attendu AAAA-MM-JJ)"))
+            })?;
+            if jour > chrono::Utc::now().date_naive() {
+                return Err(crate::error::AppError::RegleMetier(format!("La {quoi} ne peut pas etre dans le futur.")));
+            }
+            Ok(Some(jour.format("%Y-%m-%d").to_string()))
+        }
+        _ => Ok(None),
+    }
+}

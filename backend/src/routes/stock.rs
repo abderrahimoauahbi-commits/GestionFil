@@ -3391,6 +3391,10 @@ pub struct NouvelleReception {
     pub transporteur: Option<String>,
     pub nombre_colis: Option<i64>,
     pub poids_total_brut_kg: Option<f64>,
+    /// LA DATE DU FAIT (10/10/2026) : le jour de la livraison, distinct du jour
+    /// de saisie (un BL du samedi saisi le lundi). Jamais dans le futur, jamais
+    /// avant le bon. Vide : aujourd'hui. L'entree en stock prend cette date.
+    pub date_reception: Option<String>,
     /// Pesees saisies avec l'entete. Tout part dans UNE transaction : une
     /// reception ouverte sans ligne, avec un numero deja attribue, serait un
     /// document fantome au milieu de la numerotation.
@@ -3429,20 +3433,7 @@ pub async fn modifier_reception(
     // UNE DATE DE RECEPTION NE PEUT PAS ETRE DANS LE FUTUR : on ne recoit pas
     // demain ce qui n’est pas encore arrive. Et elle doit etre une vraie date —
     // la base la garde en texte, et « 31/02 » y entrerait sans broncher.
-    let date = match m.date_reception.as_deref().map(str::trim) {
-        Some(d) if !d.is_empty() => {
-            let jour = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| {
-                AppError::Invalide(format!("date de reception invalide : {d} (attendu AAAA-MM-JJ)"))
-            })?;
-            if jour > chrono::Utc::now().date_naive() {
-                return Err(AppError::RegleMetier(
-                    "La date de reception ne peut pas etre dans le futur.".into(),
-                ));
-            }
-            Some(jour.format("%Y-%m-%d").to_string())
-        }
-        _ => None,
-    };
+    let date = crate::routes::date_du_fait(m.date_reception.as_deref(), "date de reception")?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
@@ -3602,6 +3593,22 @@ pub async fn creer_reception(
         }
     };
 
+    // La date du fait : jamais dans le futur, jamais avant le bon qu'elle livre.
+    let date = crate::routes::date_du_fait(r.date_reception.as_deref(), "date de reception")?;
+    if let (Some(d), Some(bc)) = (&date, &r.id_bc) {
+        let date_bc: Option<String> =
+            sqlx::query_scalar("SELECT substr(date_bc, 1, 10) FROM bon_commande WHERE id_bc = $1")
+                .bind(bc)
+                .fetch_optional(&mut *tx)
+                .await?
+                .flatten();
+        if let Some(b) = date_bc.filter(|b| d.as_str() < b.as_str()) {
+            return Err(AppError::RegleMetier(format!(
+                "La reception ne peut pas preceder le bon de commande (date du bon : {b})."
+            )));
+        }
+    }
+
     let numero = numeroter(&mut tx, "reception", "numero_reception", "REC").await?;
     let id = uuid::Uuid::new_v4().to_string();
 
@@ -3609,8 +3616,9 @@ pub async fn creer_reception(
         "INSERT INTO reception
              (id_reception, numero_reception, id_bc, code_fournisseur,
               transporteur, num_bon_livraison, numero_facture, nombre_colis,
-              poids_total_brut_kg, id_utilisateur_reception)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+              poids_total_brut_kg, id_utilisateur_reception, date_reception)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                 COALESCE($11, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')))",
     )
     .bind(&id)
     .bind(&numero)
@@ -3622,6 +3630,7 @@ pub async fn creer_reception(
     .bind(r.nombre_colis)
     .bind(r.poids_total_brut_kg)
     .bind(&user.id)
+    .bind(&date)
     .execute(&mut *tx)
     .await?;
 

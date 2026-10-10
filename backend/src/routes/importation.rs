@@ -1492,6 +1492,8 @@ pub async fn creer_reception(
     if r.lignes.is_empty() {
         return Err(AppError::Invalide("Une réception porte au moins une ligne.".into()));
     }
+    // La date du fait : une vraie date, jamais dans le futur (10/10/2026).
+    let date = crate::routes::date_du_fait(r.date_reception.as_deref(), "date de réception")?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
     let numero = numeroter(&mut tx, "import_receptions", "numero", "RIM").await?;
@@ -1502,7 +1504,7 @@ pub async fn creer_reception(
          RETURNING id_reception",
     )
     .bind(&numero)
-    .bind(&r.date_reception)
+    .bind(&date)
     .bind(r.litige)
     .bind(&r.motif_litige)
     .bind(&r.notes)

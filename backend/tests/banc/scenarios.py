@@ -1590,6 +1590,36 @@ def scenario_codes_erreur(c, infra):
     verifier(code == 403 and r.get("code") == "NON_AUTORISE", f"ecriture sans droit : {code} {r}")
 
 
+def scenario_reception_date_du_fait(c, infra):
+    """LA DATE DU FAIT D'UNE RECEPTION (10/10/2026) : un BL du 15/03/2025 entre en stock a cette
+    date ; une date future est refusee, comme une date anterieure au bon."""
+    A, M = "PLA 100 EXT", "Morocco"
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": "FRS-012", "date_bc": "2025-03-01",
+        "lignes": [{"code_reference": A, "unite_commande": "kg", "quantite_commandee_unite": 200, "prix_unitaire_devise": 21}]})
+    id_bc = bc["id_bc"]
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+    c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
+    c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ENVOYE"})
+    lb = c.ok("Choukri", "GET", f"/api/bons-commande/{id_bc}/lignes")
+    lb = lb.get("lignes", lb) if isinstance(lb, dict) else lb
+    ligne = [{"code_reference": A, "id_ligne_bc": lb[0]["id_ligne_bc"], "unite_saisie": "kg",
+              "quantite_pesee_unite": 200, "code_magasin_dest": M}]
+    demain = infra.valeur("SELECT to_char(current_date + 1, 'YYYY-MM-DD')")
+    c.refus("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "date_reception": demain, "lignes": ligne},
+            contient="futur")
+    c.refus("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "date_reception": "2025-02-20", "lignes": ligne},
+            contient="preceder")
+    r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "date_reception": "2025-03-15",
+                                                     "num_bon_livraison": "BL-DATE", "lignes": ligne})
+    rid = r["id_reception"]
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+    date_mvt = infra.valeur(
+        "SELECT substr(m.date_mouvement, 1, 10) FROM ligne_reception lr JOIN mouvement m ON m.id_mouvement = lr.id_mouvement_genere "
+        f"WHERE lr.id_reception = '{rid}'")
+    verifier(date_mvt == "2025-03-15", f"l'entree en stock est datee {date_mvt} au lieu du 2025-03-15")
+
+
 def scenario_sauvegarde_restaurable(c, infra):
     """Une sauvegarde se prouve en la restaurant (10/10/2026) : gestionfil-admin la
     restaure dans une base temporaire, la controle, l'efface ; la base du banc
@@ -1653,6 +1683,7 @@ SCENARIOS = [
     scenario_atomicite,
     scenario_concurrence_stock,
     scenario_contrat_droits,
+    scenario_reception_date_du_fait,
     scenario_codes_erreur,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,

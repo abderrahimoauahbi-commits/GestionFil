@@ -157,8 +157,16 @@ export function ReceptionNouvelle() {
   const qc = useQueryClient()
   const naviguer = useNavigate()
 
+  // Le jour, en heure locale (toISOString donnerait la veille apres minuit UTC).
+  const aujourdhui = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
   const [entete, setEntete] = useState({
     code_fournisseur: '',
+    // LA DATE DU FAIT (10/10/2026) : le jour de la livraison, pas celui de la
+    // saisie ; l'entree en stock la prend. Jamais dans le futur.
+    date_reception: aujourdhui(),
     num_bon_livraison: '',
     numero_facture: '',
     transporteur: '',
@@ -529,6 +537,7 @@ export function ReceptionNouvelle() {
             ? (retenues.find((l) => l.id_bc)?.id_bc ?? undefined)
             : undefined,
         code_fournisseur: entete.code_fournisseur,
+        date_reception: entete.date_reception || undefined,
         num_bon_livraison: entete.num_bon_livraison || undefined,
         numero_facture: entete.numero_facture || undefined,
         transporteur: entete.transporteur || undefined,
@@ -630,6 +639,19 @@ export function ReceptionNouvelle() {
                   </option>
                 ))}
               </Selecteur>
+            </div>
+            <div>
+              <Etiq htmlFor="date-rec" obligatoire>
+                Date de réception
+                <Aide>Le jour où la marchandise est arrivée (un BL du samedi saisi le lundi garde le samedi). Jamais dans le futur, jamais avant le bon de commande.</Aide>
+              </Etiq>
+              <Champ
+                id="date-rec"
+                type="date"
+                max={aujourdhui()}
+                value={entete.date_reception}
+                onChange={(e) => setEntete({ ...entete, date_reception: e.target.value })}
+              />
             </div>
             <div>
               <Etiq htmlFor="bl">Bon de livraison</Etiq>

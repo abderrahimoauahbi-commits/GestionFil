@@ -116,7 +116,7 @@ export function SaisonMinimums() {
             couverture minimale de la fiche × besoin mensuel.
           </p>
           {minimums.length > 0 && (
-            <div className="max-h-[45vh] overflow-auto rounded-[var(--radius)] border border-bordure">
+            <div tabIndex={0} role="region" aria-label="Stocks minimums à revoir" className="max-h-[45vh] overflow-auto rounded-[var(--radius)] border border-bordure focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="w-full text-[12px]">
                 <thead className="sticky top-0 bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
                   <tr>

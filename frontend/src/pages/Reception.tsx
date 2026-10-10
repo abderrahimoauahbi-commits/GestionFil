@@ -1046,8 +1046,8 @@ export function Reception() {
         <Carte className="mb-3">
           <CarteCorps className="flex flex-wrap items-end gap-2">
             <div className="min-w-0 flex-1">
-              <Etiq obligatoire>Ce que le magasinier doit corriger</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-reception-1">Ce que le magasinier doit corriger</Etiq>
+              <Champ id="ch-reception-1"
                 autoFocus
                 value={renvoi}
                 onChange={(e) => setRenvoi(e.target.value)}

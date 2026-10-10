@@ -65,7 +65,7 @@ export function EtatStockImprime() {
     <div>
       <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
         <span className="text-[12px] text-attenue-texte">Restreindre a un statut :</span>
-        <Selecteur value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
+        <Selecteur aria-label="Restreindre à un statut" value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
           <option value="">Toutes les références</option>
           <option value="RUPTURE">Ruptures</option>
           <option value="CRITIQUE">Critiques</option>
@@ -183,7 +183,7 @@ export function EtatComptage() {
     <div>
       <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
         <span className="text-[12px] text-attenue-texte">Magasin a compter :</span>
-        <Selecteur value={magasin} onChange={(e) => setMagasin(e.target.value)} className="w-56">
+        <Selecteur aria-label="Magasin à compter" value={magasin} onChange={(e) => setMagasin(e.target.value)} className="w-56">
           <option value="">— a preciser a la main —</option>
           {(qMag.data ?? []).map((m) => (
             <option key={m.code_magasin} value={m.code_magasin}>
@@ -1014,6 +1014,7 @@ export function EtatCouleur() {
     <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
       <span className="text-[12px] text-attenue-texte">Couleur :</span>
       <Selecteur
+        aria-label="Couleur"
         value={code ?? ''}
         onChange={(e) => naviguer(`/etats/couleur/${encodeURIComponent(e.target.value)}`)}
         className="w-72"
@@ -1264,7 +1265,7 @@ export function EtatLots() {
   const selecteur = (
     <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
       <span className="text-[12px] text-attenue-texte">État :</span>
-      <Selecteur value={vue} onChange={(e) => setVue(e.target.value)} className="w-80">
+      <Selecteur aria-label="État" value={vue} onChange={(e) => setVue(e.target.value)} className="w-80">
         {VUES_ETAT_LOTS.map((v) => (
           <option key={v.cle} value={v.cle}>
             {v.titre}

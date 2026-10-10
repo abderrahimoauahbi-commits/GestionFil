@@ -433,6 +433,10 @@ export function PanneauApparence({ ouvert, surFermeture }: { ouvert: boolean; su
       <aside
         aria-label="Apparence"
         aria-hidden={!ouvert}
+        // FERME, IL N'EST PLUS ATTEIGNABLE (10/10/2026) : `aria-hidden` seul le
+        // cachait aux lecteurs d'ecran mais laissait ses boutons dans l'ordre de
+        // tabulation — on tabulait dans un panneau invisible, sur les 77 ecrans.
+        inert={!ouvert}
         className={cn(
           'sans-impression fixed bottom-3 right-3 top-3 z-50 flex w-[20rem] flex-col overflow-hidden rounded-[14px]',
           'border border-bordure bg-surface shadow-2xl backdrop-blur-xl',

@@ -70,6 +70,11 @@ if ($SansTests) {
     } finally { Pop-Location }
     & python (Join-Path $racine 'backend\tests\banc\banc.py') --cible $cible
     if ($LASTEXITCODE -ne 0) { throw "le banc de tests a echoue : le paquet ne part pas" }
+    # LES VRAIS ECRANS (10/10/2026) : Edge pilote par Playwright ouvre chaque ecran
+    # et saisit les documents ; un ecran qui plante, une erreur JavaScript, un
+    # defaut HTML ou une valeur mal enregistree arretent le paquet.
+    & python (Join-Path $racine 'frontend\e2e\lancer.py') --construire --cible $cible
+    if ($LASTEXITCODE -ne 0) { throw "les tests de bout en bout ont echoue : le paquet ne part pas" }
 }
 
 # --- 1. L'interface ----------------------------------------------------------

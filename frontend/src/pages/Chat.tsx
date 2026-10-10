@@ -512,7 +512,7 @@ export function Chat() {
           autoFocus
           disabled={envoyer.isPending}
         />
-        <Bouton type="submit" disabled={!saisie.trim() || envoyer.isPending}>
+        <Bouton type="submit" aria-label="Envoyer la question" disabled={!saisie.trim() || envoyer.isPending}>
           {envoyer.isPending ? <Loader2 className="animate-spin" /> : <Send />}
         </Bouton>
         {fil.length > 0 && (

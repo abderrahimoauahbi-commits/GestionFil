@@ -688,17 +688,15 @@ function BilanGroupes({
         )}
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
           {ORDRE_QUALIF.map((q) => (
-            <div key={q} className="flex gap-2.5">
-              <span className={cn('mt-[6px] size-2 shrink-0 rounded-full', POINT_QUALIF[q])} />
-              <div className="min-w-0">
-                <dt className="text-[13px] font-medium">
-                  {LIBELLE_QUALIF[q]}{' '}
-                  <span className="font-normal tabular-nums text-attenue-texte">
-                    {parQualif[q]}
-                  </span>
-                </dt>
-                <dd className="text-[12px] leading-snug text-attenue-texte">{EXPLICATION[q]}</dd>
-              </div>
+            <div key={q} className="relative min-w-0 pl-[1.125rem]">
+              <dt className="text-[13px] font-medium">
+                <span aria-hidden className={cn('absolute left-0 top-[6px] size-2 rounded-full', POINT_QUALIF[q])} />
+                {LIBELLE_QUALIF[q]}{' '}
+                <span className="font-normal tabular-nums text-attenue-texte">
+                  {parQualif[q]}
+                </span>
+              </dt>
+              <dd className="text-[12px] leading-snug text-attenue-texte">{EXPLICATION[q]}</dd>
             </div>
           ))}
         </dl>

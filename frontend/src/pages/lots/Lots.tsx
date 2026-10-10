@@ -237,7 +237,7 @@ export function Lots() {
               return (
                 <span key={v.id} className="contents">
                   {i === 3 && <span className="mx-1 h-5 w-px bg-bordure" aria-hidden />}
-                  <Onglet value={v.id}>
+                  <Onglet sansPanneau value={v.id}>
                     {v.libelle}
                     <span
                       className={cn(

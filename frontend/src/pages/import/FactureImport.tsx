@@ -476,8 +476,8 @@ export function FactureImport() {
         <CarteCorps>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="col-span-2">
-              <Etiq obligatoire>Fournisseur</Etiq>
-              <Selecteur value={entete.code_fournisseur}
+              <Etiq obligatoire htmlFor="ch-factureimport-1">Fournisseur</Etiq>
+              <Selecteur id="ch-factureimport-1" value={entete.code_fournisseur}
                 onChange={(e) => {
                   const code = e.target.value
                   const devise = qFournisseurs.data?.find((x) => x.code_fournisseur === code)?.code_devise
@@ -495,16 +495,16 @@ export function FactureImport() {
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire>N° de facture</Etiq>
-              <Champ value={entete.numero_facture} onChange={maj('numero_facture')} disabled={!ecrire} placeholder="IHR2026000000243" />
+              <Etiq obligatoire htmlFor="ch-factureimport-2">N° de facture</Etiq>
+              <Champ id="ch-factureimport-2" value={entete.numero_facture} onChange={maj('numero_facture')} disabled={!ecrire} placeholder="IHR2026000000243" />
             </div>
             <div>
-              <Etiq obligatoire>Date</Etiq>
-              <Champ type="date" value={entete.date_facture} onChange={maj('date_facture')} disabled={!ecrire} />
+              <Etiq obligatoire htmlFor="ch-factureimport-3">Date</Etiq>
+              <Champ id="ch-factureimport-3" type="date" value={entete.date_facture} onChange={maj('date_facture')} disabled={!ecrire} />
             </div>
             <div>
-              <Etiq>Devise</Etiq>
-              <Selecteur value={entete.code_devise} disabled={!ecrire}
+              <Etiq htmlFor="ch-factureimport-4">Devise</Etiq>
+              <Selecteur id="ch-factureimport-4" value={entete.code_devise} disabled={!ecrire}
                 onChange={(e) => setEntete((x) => ({ ...x, code_devise: e.target.value,
                   taux_change: e.target.value === 'MAD' ? '1' : e.target.value === x.code_devise ? x.taux_change : '' }))}>
                 <option value="">Choisir…</option>
@@ -514,8 +514,8 @@ export function FactureImport() {
               </Selecteur>
             </div>
             <div className="col-span-2">
-              <Etiq>Engagement d’importation</Etiq>
-              <Selecteur value={entete.id_engagement} onChange={maj('id_engagement')} disabled={!ecrire || !entete.code_fournisseur}>
+              <Etiq htmlFor="ch-factureimport-5">Engagement d’importation</Etiq>
+              <Selecteur id="ch-factureimport-5" value={entete.id_engagement} onChange={maj('id_engagement')} disabled={!ecrire || !entete.code_fournisseur}>
                 <option value="">Sans engagement</option>
                 {(d.engagements ?? [])
                   .filter((e) => !e.code_fournisseur || e.code_fournisseur === entete.code_fournisseur)
@@ -527,8 +527,8 @@ export function FactureImport() {
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire>Taux de change</Etiq>
-              <Champ inputMode="decimal" value={entete.taux_change} onChange={maj('taux_change')} disabled={!ecrire}
+              <Etiq obligatoire htmlFor="ch-factureimport-6">Taux de change</Etiq>
+              <Champ id="ch-factureimport-6" inputMode="decimal" value={entete.taux_change} onChange={maj('taux_change')} disabled={!ecrire}
                 className={cn((tauxDirham || (tauxEloigne && !tauxConfirmeOk)) && 'border-alerte')} />
               {tauxDirham ? (
                 <p className="mt-1 text-[11px] text-danger">Taux 1 : c’est le taux du dirham, pas celui du {entete.code_devise}.</p>
@@ -540,17 +540,17 @@ export function FactureImport() {
               ) : null}
             </div>
             <div>
-              <Etiq>Montant imprimé ({entete.code_devise})</Etiq>
-              <Champ inputMode="decimal" value={entete.montant_devise} onChange={maj('montant_devise')} disabled={!ecrire} />
+              <Etiq htmlFor="ch-factureimport-7">Montant imprimé ({entete.code_devise})</Etiq>
+              <Champ id="ch-factureimport-7" inputMode="decimal" value={entete.montant_devise} onChange={maj('montant_devise')} disabled={!ecrire} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Etiq>Palettes</Etiq>
-                <Champ inputMode="numeric" value={entete.nb_palettes} onChange={maj('nb_palettes')} disabled={!ecrire} />
+                <Etiq htmlFor="ch-factureimport-8">Palettes</Etiq>
+                <Champ id="ch-factureimport-8" inputMode="numeric" value={entete.nb_palettes} onChange={maj('nb_palettes')} disabled={!ecrire} />
               </div>
               <div>
-                <Etiq>Bobines</Etiq>
-                <Champ inputMode="numeric" value={entete.nb_bobines} onChange={maj('nb_bobines')} disabled={!ecrire} />
+                <Etiq htmlFor="ch-factureimport-9">Bobines</Etiq>
+                <Champ id="ch-factureimport-9" inputMode="numeric" value={entete.nb_bobines} onChange={maj('nb_bobines')} disabled={!ecrire} />
               </div>
             </div>
           </div>

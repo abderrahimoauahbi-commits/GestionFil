@@ -128,7 +128,7 @@ export function MatricePrix() {
         titre="Matrice des prix"
         sous_titre="Prix moyen pondere par mois — la ligne se lit d un trait, la derive se voit sans la chercher"
         actions={
-          <Selecteur value={horizon} onChange={(e) => setHorizon(e.target.value)} className="w-36">
+          <Selecteur aria-label="Période" value={horizon} onChange={(e) => setHorizon(e.target.value)} className="w-44">
             <option value="6">6 derniers mois</option>
             <option value="12">12 derniers mois</option>
             <option value="24">24 derniers mois</option>

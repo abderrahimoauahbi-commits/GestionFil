@@ -201,24 +201,24 @@ function NouveauDossier({ ouvert, surFermer }: { ouvert: boolean; surFermer: () 
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <Etiq>Numéro</Etiq>
-            <Champ value={f.numero} onChange={maj('numero')} placeholder="Automatique (06/26…)" />
+            <Etiq htmlFor="ch-dossiersimport-1">Numéro</Etiq>
+            <Champ id="ch-dossiersimport-1" value={f.numero} onChange={maj('numero')} placeholder="Automatique (06/26…)" />
           </div>
           <div>
-            <Etiq>Arrivée</Etiq>
-            <Champ type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} />
+            <Etiq htmlFor="ch-dossiersimport-2">Arrivée</Etiq>
+            <Champ id="ch-dossiersimport-2" type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} />
           </div>
           <div>
-            <Etiq>N° BL</Etiq>
-            <Champ value={f.numero_bl} onChange={maj('numero_bl')} />
+            <Etiq htmlFor="ch-dossiersimport-3">N° BL</Etiq>
+            <Champ id="ch-dossiersimport-3" value={f.numero_bl} onChange={maj('numero_bl')} />
           </div>
           <div>
-            <Etiq>Conteneur(s)</Etiq>
-            <Champ value={f.conteneurs} onChange={maj('conteneurs')} placeholder="CMAU4385688" />
+            <Etiq htmlFor="ch-dossiersimport-4">Conteneur(s)</Etiq>
+            <Champ id="ch-dossiersimport-4" value={f.conteneurs} onChange={maj('conteneurs')} placeholder="CMAU4385688" />
           </div>
           <div className="sm:col-span-2">
-            <Etiq>N° DUM</Etiq>
-            <Champ value={f.numero_dum} onChange={maj('numero_dum')} placeholder="Peut se saisir plus tard" />
+            <Etiq htmlFor="ch-dossiersimport-5">N° DUM</Etiq>
+            <Champ id="ch-dossiersimport-5" value={f.numero_dum} onChange={maj('numero_dum')} placeholder="Peut se saisir plus tard" />
           </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">

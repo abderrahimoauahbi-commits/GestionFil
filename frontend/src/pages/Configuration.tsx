@@ -656,6 +656,7 @@ function LigneReglage({
       <div className="flex w-44 shrink-0 items-center gap-1.5">
         <Champ
           type={typeChamp}
+          aria-label={p.libelle}
           step={p.type_donnee === 'DECIMAL' ? 'any' : undefined}
           value={valeur}
           disabled={!modifiable}

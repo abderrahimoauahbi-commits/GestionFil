@@ -162,6 +162,7 @@ export function BarreLaterale() {
           menuMasque && (dansAtelier ? '-ml-[232px]' : '-translate-x-full'),
         )}
         aria-hidden={menuMasque || undefined}
+        inert={menuMasque || undefined}
       >
         {/* --- Marque ------------------------------------------------------ */}
         <NavLink

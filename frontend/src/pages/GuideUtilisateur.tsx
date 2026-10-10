@@ -45,8 +45,12 @@ function decouperSections(markdown: string): MarkdownSection[] {
         courante.content = contenu.join('\n')
         sections.push(courante)
       }
+      // Deux titres « Achats » donnaient deux fois id="achats" : le second prend un suffixe.
+      const base = titre[2].toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      let id = base
+      for (let n = 2; sections.some((x) => x.id === id); n++) id = `${base}-${n}`
       courante = {
-        id: titre[2].toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        id,
         title: titre[2],
         content: '',
         level: titre[1].length,
@@ -108,9 +112,12 @@ export function GuideUtilisateur() {
     // Italique
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
 
-    // Listes
-    html = html.replace(/^- (.+)$/gm, '<li class="ml-4">$1</li>')
-    html = html.replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4">$2</li>')
+    // Listes : des <li> DANS une liste (10/10/2026) — 262 elements de liste
+    // orphelins, du HTML invalide que les lecteurs d'ecran ne savent pas annoncer.
+    html = html.replace(/^\s*- (.+)$/gm, '<li data-l="ul">$1</li>')
+    html = html.replace(/^\s*(\d+)\. (.+)$/gm, '<li data-l="ol">$2</li>')
+    html = html.replace(/(?:<li data-l="ul">.*<\/li>\n?)+/g, (m) => `<ul class="my-2 list-disc pl-6">${m.replace(/ data-l="ul"/g, '')}</ul>`)
+    html = html.replace(/(?:<li data-l="ol">.*<\/li>\n?)+/g, (m) => `<ol class="my-2 list-decimal pl-6">${m.replace(/ data-l="ol"/g, '')}</ol>`)
 
     // Paragraphes
     html = html.replace(/\n\n+/g, '</p><p class="my-3">')

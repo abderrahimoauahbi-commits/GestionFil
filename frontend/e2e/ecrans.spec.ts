@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
-import { attendreEcran, connexion, consigner, controlerHtml, ecranPlante, mesurer, surveiller } from './outils'
+import { attendreEcran, connexion, consigner, controlerHtml, ecranPlante, mesurer, surveiller, verifierMasques } from './outils'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf-8')
 const routes = [...new Set([...app.matchAll(/path="([^"]+)"/g)].map((m) => m[1]))].filter(
@@ -61,12 +61,16 @@ for (const route of ['', ...routes]) {
     await expect(page, 'renvoyé à la connexion').not.toHaveURL(/connexion/)
 
     const plante = await ecranPlante(page)
-    const constats = [...veille.constats, ...(await mesurer(page)), ...(await controlerHtml(page))]
+    const constats = [...veille.constats, ...(await verifierMasques(page, await mesurer(page))), ...(await controlerHtml(page))]
     const capture = info.outputPath('ecran.png')
     await page.screenshot({ path: capture, fullPage: false })
     consigner(info, url!, constats, capture)
 
     expect(plante, `l'écran a planté : ${plante}`).toBeNull()
     expect(veille.erreurs, 'erreurs JavaScript ou serveur').toEqual([])
+    // LE HTML RESTE PROPRE (10/10/2026) : ramenes a zero, les defauts axe font
+    // maintenant echouer le test — un nouveau defaut ne repasse pas en silence.
+    const html = constats.filter((x) => x.type.startsWith('html-')).map((x) => `${x.type} ${x.element ?? ''} : ${x.detail}`)
+    expect.soft(html, 'défauts HTML / accessibilité').toEqual([])
   })
 }

@@ -65,12 +65,12 @@ export function EcartsPrix() {
         </div>
         <div className="flex gap-2">
           <label className="space-y-1">
-            <Etiq>Du</Etiq>
-            <Champ type="date" value={du} onChange={(e) => setDu(e.target.value)} />
+            <Etiq htmlFor="ch-ecartsprix-1">Du</Etiq>
+            <Champ id="ch-ecartsprix-1" type="date" value={du} onChange={(e) => setDu(e.target.value)} />
           </label>
           <label className="space-y-1">
-            <Etiq>Au</Etiq>
-            <Champ type="date" value={au} onChange={(e) => setAu(e.target.value)} />
+            <Etiq htmlFor="ch-ecartsprix-2">Au</Etiq>
+            <Champ id="ch-ecartsprix-2" type="date" value={au} onChange={(e) => setAu(e.target.value)} />
           </label>
         </div>
       </CarteEntete>

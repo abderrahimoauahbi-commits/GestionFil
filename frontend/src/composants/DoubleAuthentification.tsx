@@ -153,8 +153,8 @@ export function DoubleAuthentification({
               )}
               {!actif && (
                 <div>
-                  <Etiq>Votre mot de passe</Etiq>
-                  <Champ type="password" autoComplete="current-password" value={motDePasse}
+                  <Etiq htmlFor="ch-doubleauthentification-1">Votre mot de passe</Etiq>
+                  <Champ id="ch-doubleauthentification-1" type="password" autoComplete="current-password" value={motDePasse}
                     onChange={(e) => setMotDePasse(e.target.value)} />
                 </div>
               )}
@@ -201,8 +201,8 @@ export function DoubleAuthentification({
               </div>
 
               <div>
-                <Etiq>Le code affiché par l’application</Etiq>
-                <Champ
+                <Etiq htmlFor="ch-doubleauthentification-2">Le code affiché par l’application</Etiq>
+                <Champ id="ch-doubleauthentification-2"
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   inputMode="numeric"
@@ -232,8 +232,8 @@ export function DoubleAuthentification({
                 Sans ce code, votre mot de passe seul ouvrira de nouveau votre compte.
               </Alerte>
               <div>
-                <Etiq>Votre mot de passe</Etiq>
-                <Champ
+                <Etiq htmlFor="ch-doubleauthentification-3">Votre mot de passe</Etiq>
+                <Champ id="ch-doubleauthentification-3"
                   type="password"
                   value={motDePasse}
                   onChange={(e) => setMotDePasse(e.target.value)}

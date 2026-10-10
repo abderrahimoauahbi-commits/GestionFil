@@ -490,7 +490,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
             {refs.length > 12 && (
               <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
                 Les 12 références qui ont le plus bougé, sur {refs.length} suivies.{' '}
-                <Link to="/etat-stock" className="text-primaire hover:underline">
+                <Link to="/etat-stock" className="text-primaire underline underline-offset-2">
                   L’état des stocks
                 </Link>{' '}
                 porte la liste complète, avec ses filtres et son export.

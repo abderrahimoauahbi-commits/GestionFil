@@ -630,10 +630,10 @@ export function MouvementNouveau() {
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-1">
               Type de mouvement <span className="text-danger">*</span>
             </label>
-            <select
+            <select id="mvt-1"
               required
               value={entete.code_type_mvt}
               onChange={(e) => setEntete({ ...entete, code_type_mvt: e.target.value })}
@@ -658,10 +658,10 @@ export function MouvementNouveau() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-2">
               Magasin <span className="text-danger">*</span>
             </label>
-            <select
+            <select id="mvt-2"
               required
               value={entete.code_magasin}
               onChange={(e) => setEntete({ ...entete, code_magasin: e.target.value })}
@@ -677,10 +677,10 @@ export function MouvementNouveau() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-3">
               Motif <span className="text-danger">*</span>
             </label>
-            <select
+            <select id="mvt-3"
               required
               value={entete.code_motif}
               onChange={(e) => setEntete({ ...entete, code_motif: e.target.value })}
@@ -697,10 +697,10 @@ export function MouvementNouveau() {
 
           {(typeActif?.exige_of === 1 || horsMachine) && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-texte">
+              <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-4">
                 Numero d ordre de fabrication {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
               </label>
-              <input
+              <input id="mvt-4"
                 required={typeActif?.exige_of === 1}
                 value={entete.numero_of}
                 onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
@@ -712,11 +712,11 @@ export function MouvementNouveau() {
 
           {(horsMachine || pret) && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-texte">
+              <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-5">
                 Usine {pret ? 'qui rend le fil' : 'qui emprunte (pour un prêt)'}
                 {pret && <span className="text-danger"> *</span>}
               </label>
-              <input
+              <input id="mvt-5"
                 list="usines-pret"
                 required={pret}
                 value={entete.tiers}
@@ -744,10 +744,10 @@ export function MouvementNouveau() {
           )}
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-6">
               Date du mouvement <span className="text-danger">*</span>
             </label>
-            <input
+            <input id="mvt-6"
               type="date"
               required
               max={aujourdhui()}
@@ -765,10 +765,10 @@ export function MouvementNouveau() {
               souvent pour un chef d'equipe ou un chauffeur, et c'est ce dernier
               qu'on cherche quand un ecart apparait trois jours plus tard. */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-7">
               Responsable de la marchandise
             </label>
-            <input
+            <input id="mvt-7"
               value={entete.responsable}
               onChange={(e) => setEntete({ ...entete, responsable: e.target.value })}
               placeholder="Qui remet ou recoit"
@@ -777,10 +777,10 @@ export function MouvementNouveau() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-8">
               Document de reference
             </label>
-            <input
+            <input id="mvt-8"
               value={entete.reference_document}
               onChange={(e) => setEntete({ ...entete, reference_document: e.target.value })}
               required={entete.code_type_mvt === 'RETOUR_FOURN'}
@@ -802,8 +802,8 @@ export function MouvementNouveau() {
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-texte">Observations</label>
-          <textarea
+          <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-9">Observations</label>
+          <textarea id="mvt-9"
             rows={2}
             value={entete.observations_globales}
             onChange={(e) => setEntete({ ...entete, observations_globales: e.target.value })}

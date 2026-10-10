@@ -372,8 +372,8 @@ function FormulaireMotDePasse({
           {erreur && <Message ton="erreur">{erreur}</Message>}
 
           <div>
-            <Etiq>Nouveau mot de passe</Etiq>
-            <Champ
+            <Etiq htmlFor="ch-utilisateurs-1">Nouveau mot de passe</Etiq>
+            <Champ id="ch-utilisateurs-1"
               type="password"
               autoFocus
               value={mdp}
@@ -390,8 +390,8 @@ function FormulaireMotDePasse({
           </div>
 
           <div>
-            <Etiq>Confirmation</Etiq>
-            <Champ
+            <Etiq htmlFor="ch-utilisateurs-2">Confirmation</Etiq>
+            <Champ id="ch-utilisateurs-2"
               type="password"
               value={confirmation}
               onChange={(e) => setConfirmation(e.target.value)}

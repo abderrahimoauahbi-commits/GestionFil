@@ -16,6 +16,8 @@ export interface Constat {
   gravite: 'bloquant' | 'genant' | 'mineur'
   element?: string
   detail: string
+  /** Pour un bouton recouvert : la marque posee dans la page, a verifier par un clic. */
+  ref?: string
 }
 
 /** Connexion par l'ecran de connexion, comme un utilisateur. */
@@ -60,7 +62,12 @@ export function surveiller(page: Page) {
 /** Attendre que l'ecran ait fini de charger ses donnees (borne : certains ecrans interrogent en continu). */
 export async function attendreEcran(page: Page) {
   await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => undefined)
-  await page.waitForTimeout(300)
+  // LES ANIMATIONS FINIES (10/10/2026) : mesurees pendant l'apparition des lignes,
+  // des boutons parfaitement cliquables passaient pour « recouverts ».
+  await page
+    .waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), undefined, { timeout: 3_000 })
+    .catch(() => undefined)
+  await page.waitForTimeout(150)
 }
 
 /** L'ecran a-t-il plante (barriere d'erreur) ? */
@@ -77,7 +84,7 @@ export async function ecranPlante(page: Page): Promise<string | null> {
  */
 export async function mesurer(page: Page): Promise<Constat[]> {
   return page.evaluate(() => {
-    const out: { type: string; gravite: 'bloquant' | 'genant' | 'mineur'; element?: string; detail: string }[] = []
+    const out: { type: string; gravite: 'bloquant' | 'genant' | 'mineur'; element?: string; detail: string; ref?: string }[] = []
     const vw = window.innerWidth
     const vh = window.innerHeight
     const visible = (el: Element) => {
@@ -206,13 +213,18 @@ export async function mesurer(page: Page): Promise<Constat[]> {
       }
       if (r.top >= 0 && r.bottom <= vh) {
         const dessus = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
-        if (dessus && !b.contains(dessus) && !dessus.contains(b))
+        if (dessus && !b.contains(dessus) && !dessus.contains(b)) {
+          // Candidat seulement : verifie ensuite par un essai de clic (verifierMasques).
+          const ref = String(out.length)
+          b.setAttribute('data-e2e-masque', ref)
           out.push({
             type: 'bouton-masque',
             gravite: 'genant',
             element: nom(b),
             detail: `recouvert par ${dessus.tagName.toLowerCase()}.${String((dessus as HTMLElement).className).split(' ')[0]}`,
+            ref,
           })
+        }
       }
     }
     // Les actions principales sous la ligne de flottaison : il faut defiler pour les trouver.
@@ -238,6 +250,31 @@ export async function mesurer(page: Page): Promise<Constat[]> {
       if (n > 1) out.push({ type: 'html-id-double', gravite: 'mineur', element: `#${id}`, detail: `${n} elements` })
     return out
   })
+}
+
+/**
+ * UN BOUTON « RECOUVERT » SE VERIFIE EN CLIQUANT (10/10/2026). La mesure dans la
+ * page comptait aussi les boutons qu'on atteint en faisant defiler un tableau,
+ * sous une barre fixe : 25 boutons sur 25 etaient en fait cliquables. Playwright
+ * essaie le clic (il fait defiler et attend comme un utilisateur) : seuls restent
+ * les vrais blocages.
+ */
+export async function verifierMasques(page: Page, constats: Constat[]): Promise<Constat[]> {
+  const garde: Constat[] = []
+  for (const c of constats) {
+    if (c.type !== 'bouton-masque' || c.ref === undefined) {
+      garde.push(c)
+      continue
+    }
+    const ok = await page
+      .locator(`[data-e2e-masque="${c.ref}"]`)
+      .first()
+      .click({ trial: true, timeout: 1_500 })
+      .then(() => true)
+      .catch(() => false)
+    if (!ok) garde.push({ ...c, gravite: 'bloquant', detail: `${c.detail} — le clic n'atteint pas le bouton` })
+  }
+  return garde
 }
 
 /** Le controle du HTML par axe-core (regles WCAG A/AA, sauf le contraste : il depend du theme choisi). */

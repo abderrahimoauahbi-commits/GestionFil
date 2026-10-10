@@ -1203,7 +1203,7 @@ export function Qualites() {
               {/* --- Colonne gauche : identite et description ---------------- */}
               <div className="grid content-start gap-2.5 @lg:grid-cols-2 @3xl:grid-cols-[140px_minmax(0,1fr)_130px]">
                 <div>
-                  <Etiq obligatoire>
+                  <Etiq obligatoire htmlFor="ch-qualites-1">
                     Code qualite
                     {!enCreation && (
                       <Aide>
@@ -1212,7 +1212,7 @@ export function Qualites() {
                       </Aide>
                     )}
                   </Etiq>
-                  <Champ
+                  <Champ id="ch-qualites-1"
                     value={entete.code_qualite}
                     onChange={(e) =>
                       setEntete((s) => ({ ...s, code_qualite: e.target.value.toUpperCase() }))
@@ -1224,8 +1224,8 @@ export function Qualites() {
                 </div>
 
                 <div>
-                  <Etiq obligatoire>Nom</Etiq>
-                  <Champ
+                  <Etiq obligatoire htmlFor="ch-qualites-2">Nom</Etiq>
+                  <Champ id="ch-qualites-2"
                     value={entete.nom}
                     onChange={(e) => setEntete((s) => ({ ...s, nom: e.target.value }))}
                     disabled={!champModifiable('nom')}
@@ -1234,8 +1234,8 @@ export function Qualites() {
                 </div>
 
                 <div>
-                  <Etiq>Statut</Etiq>
-                  <Selecteur
+                  <Etiq htmlFor="ch-qualites-3">Statut</Etiq>
+                  <Selecteur id="ch-qualites-3"
                     value={entete.statut}
                     onChange={(e) => setEntete((s) => ({ ...s, statut: e.target.value as Statut }))}
                     disabled={!droits.peutEcrire}
@@ -1247,8 +1247,8 @@ export function Qualites() {
                 </div>
 
                 <div className="sm:col-span-3">
-                  <Etiq>Description</Etiq>
-                  <Zone
+                  <Etiq htmlFor="ch-qualites-4">Description</Etiq>
+                  <Zone id="ch-qualites-4"
                     value={entete.description}
                     onChange={(e) => setEntete((s) => ({ ...s, description: e.target.value }))}
                     disabled={!champModifiable('description')}
@@ -1287,7 +1287,7 @@ export function Qualites() {
                 <div className="grid grid-cols-2 gap-2">
                   {PARAMETRES_GENERAUX.map(({ champ, libelle, code }) => (
                     <div key={champ}>
-                      <Etiq>
+                      <Etiq htmlFor="ch-qualites-5">
                         {libelle}
                         {enCreation && (
                           <Aide>
@@ -1295,7 +1295,7 @@ export function Qualites() {
                           </Aide>
                         )}
                       </Etiq>
-                      <Champ
+                      <Champ id="ch-qualites-5"
                         type="number"
                         step="any"
                         min={0}

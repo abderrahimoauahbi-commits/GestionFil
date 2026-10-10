@@ -232,6 +232,7 @@ export function CompleterCatalogue() {
           </CarteTitre>
           <div className="flex items-center gap-2">
             <Selecteur
+              aria-label="Références à afficher"
               value={filtre}
               onChange={(e) => setFiltre(e.target.value as 'a-completer' | 'tout')}
               className="h-7 text-[12px]"
@@ -343,6 +344,8 @@ export function CompleterCatalogue() {
                       </td>
                       <td className={td}>
                         <Selecteur
+                          aria-label={`Famille — ${l.code_reference}`}
+
                           value={v.code_famille}
                           onChange={(e) => poser(l.code_reference, 'code_famille', e.target.value)}
                           className={cn(champ, 'w-48', propose('code_famille') && 'border-primaire')}
@@ -358,6 +361,8 @@ export function CompleterCatalogue() {
                       </td>
                       <td className={td}>
                         <Selecteur
+                          aria-label={`Couleur interne — ${l.code_reference}`}
+
                           value={v.code_couleur_interne}
                           onChange={(e) => poser(l.code_reference, 'code_couleur_interne', e.target.value)}
                           className={cn(champ, 'w-40', propose('code_couleur_interne') && 'border-primaire')}
@@ -372,6 +377,8 @@ export function CompleterCatalogue() {
                       </td>
                       <td className={td}>
                         <Champ
+                          aria-label={`Référence fournisseur — ${l.code_reference}`}
+
                           value={v.reference_fournisseur}
                           onChange={(e) => poser(l.code_reference, 'reference_fournisseur', e.target.value)}
                           placeholder="—"
@@ -380,6 +387,8 @@ export function CompleterCatalogue() {
                       </td>
                       <td className={td}>
                         <Champ
+                          aria-label={`Origine — ${l.code_reference}`}
+
                           value={v.origine}
                           onChange={(e) => poser(l.code_reference, 'origine', e.target.value)}
                           placeholder={l.couleur ? '' : 'à la place de la couleur'}
@@ -388,6 +397,8 @@ export function CompleterCatalogue() {
                       </td>
                       <td className={td}>
                         <Champ
+                          aria-label={`Titrage — ${l.code_reference}`}
+
                           value={v.titrage}
                           onChange={(e) => poser(l.code_reference, 'titrage', e.target.value)}
                           placeholder="1500 dtex"
@@ -396,6 +407,8 @@ export function CompleterCatalogue() {
                       </td>
                       <td className={td}>
                         <Champ
+                          aria-label={`Couleur — ${l.code_reference}`}
+
                           value={v.code_couleur}
                           onChange={(e) => poser(l.code_reference, 'code_couleur', e.target.value)}
                           placeholder="RED 7612"
@@ -410,6 +423,8 @@ export function CompleterCatalogue() {
                           type="number"
                           step="any"
                           min="0"
+                          aria-label={`Prix catalogue — ${l.code_reference}`}
+
                           value={v.prix_catalogue}
                           onChange={(e) => poser(l.code_reference, 'prix_catalogue', e.target.value)}
                           className={cn(
@@ -424,6 +439,8 @@ export function CompleterCatalogue() {
                           type="number"
                           step="any"
                           min="0"
+                          aria-label={`Poids par bobine — ${l.code_reference}`}
+
                           value={v.poids_bobine_kg}
                           onChange={(e) => poser(l.code_reference, 'poids_bobine_kg', e.target.value)}
                           className={cn(
@@ -438,6 +455,8 @@ export function CompleterCatalogue() {
                         <Champ
                           type="number"
                           min="0"
+                          aria-label={`Bobines par palette — ${l.code_reference}`}
+
                           value={v.bobines_par_palette}
                           onChange={(e) =>
                             poser(l.code_reference, 'bobines_par_palette', e.target.value)
@@ -455,6 +474,7 @@ export function CompleterCatalogue() {
                           <Bouton
                             taille="sm"
                             variante="contour"
+                            aria-label={`Enregistrer ${l.code_reference}`}
                             onClick={() => enregistrer.mutate([l])}
                             disabled={enregistrer.isPending}
                           >

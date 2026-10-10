@@ -391,10 +391,16 @@ export function OngletsListe({
 
 export function Onglet({
   className,
+  sansPanneau,
   ...props
-}: React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>) {
+}: React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger> & {
+  /** Onglet qui filtre une liste sans panneau a lui (10/10/2026) : Radix annoncait
+   *  `aria-controls` vers un panneau inexistant (axe : attribut ARIA invalide). */
+  sansPanneau?: boolean
+}) {
   return (
     <TabsPrimitive.Trigger
+      {...(sansPanneau ? { 'aria-controls': undefined } : {})}
       className={cn(
         'onglet relative -mb-px inline-flex h-10 items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-0.5 text-[13px] font-medium',
         'text-attenue-texte transition-colors outline-none hover:text-texte',
@@ -403,6 +409,7 @@ export function Onglet({
         className,
       )}
       {...props}
+      {...(sansPanneau ? { 'aria-controls': undefined } : {})}
     />
   )
 }

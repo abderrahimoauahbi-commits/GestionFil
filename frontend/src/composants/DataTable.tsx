@@ -633,6 +633,8 @@ export function DataTable<L extends Record<string, unknown>>({
                           {entete.column.getCanSort() ? (
                             <button
                               onClick={entete.column.getToggleSortingHandler()}
+                              // Une colonne sans titre (le depliage) n'avait rien a annoncer (10/10/2026).
+                              aria-label={`Trier par ${typeof entete.column.columnDef.header === 'string' && entete.column.columnDef.header ? entete.column.columnDef.header : entete.column.id}`}
                               className={cn(
                                 'inline-flex items-center gap-1 rounded transition-colors hover:text-texte',
                                 m.numerique && 'flex-row-reverse',

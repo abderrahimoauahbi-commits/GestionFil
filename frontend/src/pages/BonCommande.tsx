@@ -936,8 +936,8 @@ export function BonCommande() {
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div>
-                <Etiq obligatoire>Taux {bc.code_devise}/MAD</Etiq>
-                <Champ
+                <Etiq obligatoire htmlFor="ch-boncommande-1">Taux {bc.code_devise}/MAD</Etiq>
+                <Champ id="ch-boncommande-1"
                   inputMode="decimal"
                   className="text-right tabular-nums"
                   value={validation.taux}
@@ -946,8 +946,8 @@ export function BonCommande() {
               </div>
               {(lireNombre(validation.taux) ?? 0) !== Number(bc.taux_du_jour ?? NaN) && (
                 <div className="sm:col-span-2">
-                  <Etiq obligatoire>Pourquoi ce taux</Etiq>
-                  <Champ
+                  <Etiq obligatoire htmlFor="ch-boncommande-2">Pourquoi ce taux</Etiq>
+                  <Champ id="ch-boncommande-2"
                     value={validation.motif}
                     onChange={(e) => setValidation({ ...validation, motif: e.target.value })}
                     placeholder="Cours confirmé par la banque, couverture…"

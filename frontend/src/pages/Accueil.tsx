@@ -248,7 +248,7 @@ function TauxDeChange() {
       </div>
       <p className="text-[11px] text-attenue-texte">
         Pour information : le cours de Bank Al-Maghrib ne modifie jamais le taux de l’ERP.{' '}
-        <a href={qBam.data?.url} target="_blank" rel="noreferrer" className="text-primaire hover:underline">
+        <a href={qBam.data?.url} target="_blank" rel="noreferrer" className="text-primaire underline underline-offset-2">
           Source : Bank Al-Maghrib
         </a>
         {qBam.data?.erreur && <span className="text-alerte"> · {qBam.data.erreur} — dernier cours connu affiché</span>}

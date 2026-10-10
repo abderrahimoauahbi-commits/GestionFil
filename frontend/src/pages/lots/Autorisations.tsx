@@ -102,7 +102,7 @@ export function Autorisations() {
         <div className="flex flex-wrap items-center gap-2">
           <Onglets value={onglet} onValueChange={setOnglet}>
             <OngletsListe>
-              <Onglet value="attente">
+              <Onglet sansPanneau value="attente">
                 À décider
                 <span
                   className={cn('text-[11px] tabular-nums', enAttente.length ? 'font-semibold text-alerte' : 'text-attenue-texte')}
@@ -110,7 +110,7 @@ export function Autorisations() {
                   {q.data ? enAttente.length : '…'}
                 </span>
               </Onglet>
-              <Onglet value="historique">
+              <Onglet sansPanneau value="historique">
                 Historique
                 <span className="text-[11px] tabular-nums text-attenue-texte">{q.data ? historique.length : '…'}</span>
               </Onglet>

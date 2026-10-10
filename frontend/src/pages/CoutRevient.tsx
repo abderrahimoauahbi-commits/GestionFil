@@ -404,8 +404,8 @@ function FormulaireFrais({
           {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 
           <div>
-            <Etiq obligatoire>Réception</Etiq>
-            <Selecteur
+            <Etiq obligatoire htmlFor="ch-coutrevient-1">Réception</Etiq>
+            <Selecteur id="ch-coutrevient-1"
               value={form.id_reception}
               onChange={(e) => setForm({ ...form, id_reception: e.target.value })}
             >
@@ -421,8 +421,8 @@ function FormulaireFrais({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Etiq obligatoire>Nature</Etiq>
-              <Selecteur
+              <Etiq obligatoire htmlFor="ch-coutrevient-2">Nature</Etiq>
+              <Selecteur id="ch-coutrevient-2"
                 value={form.type_frais}
                 onChange={(e) => {
                   // La cle par defaut suit la nature : le fret au poids, la
@@ -445,8 +445,8 @@ function FormulaireFrais({
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire>Répartition</Etiq>
-              <Selecteur
+              <Etiq obligatoire htmlFor="ch-coutrevient-3">Répartition</Etiq>
+              <Selecteur id="ch-coutrevient-3"
                 value={form.cle_repartition}
                 onChange={(e) => setForm({ ...form, cle_repartition: e.target.value })}
               >
@@ -464,8 +464,8 @@ function FormulaireFrais({
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <Etiq obligatoire>Montant</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-coutrevient-4">Montant</Etiq>
+              <Champ id="ch-coutrevient-4"
                 type="number"
                 step="0.01"
                 min="0"
@@ -474,8 +474,8 @@ function FormulaireFrais({
               />
             </div>
             <div>
-              <Etiq obligatoire>Devise</Etiq>
-              <Selecteur
+              <Etiq obligatoire htmlFor="ch-coutrevient-5">Devise</Etiq>
+              <Selecteur id="ch-coutrevient-5"
                 value={form.code_devise}
                 onChange={(e) => setForm({ ...form, code_devise: e.target.value })}
               >
@@ -487,8 +487,8 @@ function FormulaireFrais({
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire>Taux</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-coutrevient-6">Taux</Etiq>
+              <Champ id="ch-coutrevient-6"
                 type="number"
                 step="0.0001"
                 min="0"
@@ -500,16 +500,16 @@ function FormulaireFrais({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Etiq>Libelle</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-coutrevient-7">Libelle</Etiq>
+              <Champ id="ch-coutrevient-7"
                 value={form.libelle}
                 onChange={(e) => setForm({ ...form, libelle: e.target.value })}
                 placeholder="Conteneur 40 pieds Izmir-Casablanca"
               />
             </div>
             <div>
-              <Etiq>Référence externe</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-coutrevient-8">Référence externe</Etiq>
+              <Champ id="ch-coutrevient-8"
                 value={form.reference_externe}
                 onChange={(e) => setForm({ ...form, reference_externe: e.target.value })}
                 placeholder="Facture transitaire, DUM"

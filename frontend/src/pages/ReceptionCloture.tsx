@@ -245,21 +245,21 @@ export function ClotureFacture({
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
-            <Etiq obligatoire>N° de facture</Etiq>
-            <Champ value={f.numero} onChange={maj('numero')} />
+            <Etiq obligatoire htmlFor="ch-receptioncloture-1">N° de facture</Etiq>
+            <Champ id="ch-receptioncloture-1" value={f.numero} onChange={maj('numero')} />
           </div>
           <div>
-            <Etiq obligatoire>Date de la facture</Etiq>
-            <Champ type="date" value={f.date} onChange={maj('date')} />
+            <Etiq obligatoire htmlFor="ch-receptioncloture-2">Date de la facture</Etiq>
+            <Champ id="ch-receptioncloture-2" type="date" value={f.date} onChange={maj('date')} />
           </div>
           <div>
-            <Etiq obligatoire>Montant HT de la marchandise ({devise})</Etiq>
-            <Champ inputMode="decimal" className="text-right tabular-nums" value={f.montant} onChange={maj('montant')} />
+            <Etiq obligatoire htmlFor="ch-receptioncloture-3">Montant HT de la marchandise ({devise})</Etiq>
+            <Champ id="ch-receptioncloture-3" inputMode="decimal" className="text-right tabular-nums" value={f.montant} onChange={maj('montant')} />
           </div>
           {enDevise && (
             <div>
-              <Etiq obligatoire>Taux {devise} → MAD</Etiq>
-              <Champ inputMode="decimal" className="text-right tabular-nums" value={f.taux} onChange={maj('taux')}
+              <Etiq obligatoire htmlFor="ch-receptioncloture-4">Taux {devise} → MAD</Etiq>
+              <Champ id="ch-receptioncloture-4" inputMode="decimal" className="text-right tabular-nums" value={f.taux} onChange={maj('taux')}
                 placeholder={qCtx.data?.taux_reference ? fmt.nombre(qCtx.data.taux_reference, 4) : 'à saisir'} />
               <p className="mt-0.5 text-[11px] text-attenue-texte">
                 {qCtx.data?.source_taux ? `Proposé : ${qCtx.data.source_taux}` : 'Aucun cours de référence pour cette date'}
@@ -271,8 +271,8 @@ export function ClotureFacture({
             </div>
           )}
           <div>
-            <Etiq>Frais (transport, manutention) en MAD</Etiq>
-            <Champ inputMode="decimal" className="text-right tabular-nums" value={f.frais} onChange={maj('frais')} />
+            <Etiq htmlFor="ch-receptioncloture-5">Frais (transport, manutention) en MAD</Etiq>
+            <Champ id="ch-receptioncloture-5" inputMode="decimal" className="text-right tabular-nums" value={f.frais} onChange={maj('frais')} />
           </div>
           {enDevise && tauxEffectif != null && nb(f.montant) > 0 && (
             <div className="flex items-end pb-1.5 text-[12.5px] tabular-nums text-attenue-texte">
@@ -283,11 +283,11 @@ export function ClotureFacture({
 
         {(qCtx.data?.receptions.length ?? 0) > 0 && (
           <div>
-            <Etiq>La facture couvre aussi (même fournisseur, même devise)</Etiq>
+            <Etiq htmlFor="ch-receptioncloture-6">La facture couvre aussi (même fournisseur, même devise)</Etiq>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               {qCtx.data!.receptions.map((r) => (
                 <label key={r.id_reception} className="flex items-center gap-1.5 text-[12.5px]">
-                  <input type="checkbox" checked={autres.includes(r.id_reception)} onChange={() => basculer(r.id_reception)} />
+                  <input id="ch-receptioncloture-6" type="checkbox" checked={autres.includes(r.id_reception)} onChange={() => basculer(r.id_reception)} />
                   <span className="font-medium">{r.numero_reception}</span>
                   <span className="text-attenue-texte">
                     du {fmt.date(r.date_reception)}
@@ -411,8 +411,8 @@ export function CorrectionFacture({ idReception, surCorrection }: { idReception:
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <div>
-            <Etiq obligatoire>Nature</Etiq>
-            <Selecteur value={c.nature} onChange={maj('nature')}>
+            <Etiq obligatoire htmlFor="ch-receptioncloture-7">Nature</Etiq>
+            <Selecteur id="ch-receptioncloture-7" value={c.nature} onChange={maj('nature')}>
               <option value="AVOIR">Avoir de prix (la marchandise reste en stock)</option>
               <option value="AVOIR_RETOUR">Avoir pour retour (marchandise rendue)</option>
               <option value="COMPLEMENT">Facture complémentaire (hausse)</option>
@@ -420,8 +420,8 @@ export function CorrectionFacture({ idReception, surCorrection }: { idReception:
           </div>
           {!pourRetour && references.length > 1 && (
             <div>
-              <Etiq>Référence visée</Etiq>
-              <Selecteur value={c.reference} onChange={maj('reference')}>
+              <Etiq htmlFor="ch-receptioncloture-8">Référence visée</Etiq>
+              <Selecteur id="ch-receptioncloture-8" value={c.reference} onChange={maj('reference')}>
                 <option value="">Toute la réception</option>
                 {references.map((r) => (
                   <option key={r} value={r}>
@@ -432,16 +432,16 @@ export function CorrectionFacture({ idReception, surCorrection }: { idReception:
             </div>
           )}
           <div>
-            <Etiq obligatoire>N° de la pièce</Etiq>
-            <Champ value={c.piece} onChange={maj('piece')} />
+            <Etiq obligatoire htmlFor="ch-receptioncloture-9">N° de la pièce</Etiq>
+            <Champ id="ch-receptioncloture-9" value={c.piece} onChange={maj('piece')} />
           </div>
           <div>
-            <Etiq obligatoire>Montant (MAD)</Etiq>
-            <Champ inputMode="decimal" className="text-right tabular-nums" value={c.montant} onChange={maj('montant')} />
+            <Etiq obligatoire htmlFor="ch-receptioncloture-10">Montant (MAD)</Etiq>
+            <Champ id="ch-receptioncloture-10" inputMode="decimal" className="text-right tabular-nums" value={c.montant} onChange={maj('montant')} />
           </div>
           <div className="sm:col-span-4">
-            <Etiq obligatoire>Motif</Etiq>
-            <Champ value={c.motif} onChange={maj('motif')} placeholder="Remise accordée, erreur de prix sur la facture…" />
+            <Etiq obligatoire htmlFor="ch-receptioncloture-11">Motif</Etiq>
+            <Champ id="ch-receptioncloture-11" value={c.motif} onChange={maj('motif')} placeholder="Remise accordée, erreur de prix sur la facture…" />
           </div>
         </div>
         {apercu && pourRetour && (

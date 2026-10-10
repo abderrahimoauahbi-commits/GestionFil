@@ -77,24 +77,24 @@ export function AvoirDossier({ d }: { d: DossierComplet }) {
       <CarteCorps className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <label className="space-y-1">
-            <Etiq>Nature</Etiq>
-            <Selecteur value={n.nature} onChange={maj('nature')}>
+            <Etiq htmlFor="ch-avoirdossier-1">Nature</Etiq>
+            <Selecteur id="ch-avoirdossier-1" value={n.nature} onChange={maj('nature')}>
               <option value="AVOIR_PRIX">De prix (remise, marchandise gardée)</option>
               <option value="AVOIR_RETOUR">Pour retour</option>
             </Selecteur>
           </label>
           <label className="space-y-1">
-            <Etiq>N° de l’avoir</Etiq>
-            <Champ value={n.numero_piece} onChange={maj('numero_piece')} />
+            <Etiq htmlFor="ch-avoirdossier-2">N° de l’avoir</Etiq>
+            <Champ id="ch-avoirdossier-2" value={n.numero_piece} onChange={maj('numero_piece')} />
           </label>
           <label className="space-y-1">
-            <Etiq>Montant (DH)</Etiq>
-            <Champ inputMode="decimal" className="text-right tabular-nums" value={n.montant_mad} onChange={maj('montant_mad')} />
+            <Etiq htmlFor="ch-avoirdossier-3">Montant (DH)</Etiq>
+            <Champ id="ch-avoirdossier-3" inputMode="decimal" className="text-right tabular-nums" value={n.montant_mad} onChange={maj('montant_mad')} />
           </label>
           {n.nature === 'AVOIR_PRIX' && (
             <label className="space-y-1">
-              <Etiq>Référence visée</Etiq>
-              <Selecteur value={n.code_reference} onChange={maj('code_reference')}>
+              <Etiq htmlFor="ch-avoirdossier-4">Référence visée</Etiq>
+              <Selecteur id="ch-avoirdossier-4" value={n.code_reference} onChange={maj('code_reference')}>
                 <option value="">Toutes, au prorata de la valeur</option>
                 {references.map((r) => (
                   <option key={r} value={r}>{r}</option>
@@ -103,8 +103,8 @@ export function AvoirDossier({ d }: { d: DossierComplet }) {
             </label>
           )}
           <label className="space-y-1 lg:col-span-1">
-            <Etiq>Motif</Etiq>
-            <Champ value={n.motif} onChange={maj('motif')} placeholder="5 caractères au moins" />
+            <Etiq htmlFor="ch-avoirdossier-5">Motif</Etiq>
+            <Champ id="ch-avoirdossier-5" value={n.motif} onChange={maj('motif')} placeholder="5 caractères au moins" />
           </label>
         </div>
 

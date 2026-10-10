@@ -167,6 +167,14 @@ export function Formulaire({
 
     if (absents.length) {
       setManquants(absents)
+      // LE PREMIER CHAMP MANQUANT SOUS LES YEUX (10/10/2026) : le message tombait
+      // en bas d'une fiche de trente champs, le champ fautif hors de l'ecran,
+      // plus haut. On l'amene et on y place le curseur.
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`ch-${absents[0]}`)
+        el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        el?.focus({ preventScroll: true })
+      })
       return
     }
 
@@ -337,7 +345,11 @@ export function Formulaire({
       {enfants}
 
       {manquants.length > 0 && (
-        <Alerte ton="alerte">Renseignez les champs obligatoires signales.</Alerte>
+        <Alerte ton="alerte">
+          {/* Le message NOMME les champs : « signales » ne disait pas lesquels. */}
+          {manquants.length === 1 ? 'Champ obligatoire à renseigner : ' : 'Champs obligatoires à renseigner : '}
+          {manquants.map((m) => champs.find((c) => c.champ === m)?.libelle ?? m).join(', ')}.
+        </Alerte>
       )}
       {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 

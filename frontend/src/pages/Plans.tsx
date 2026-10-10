@@ -917,8 +917,8 @@ export function Plans() {
 
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="lg:col-span-2">
-              <Etiq obligatoire>Libelle</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-plans-1">Libelle</Etiq>
+              <Champ id="ch-plans-1"
                 value={entete.libelle}
                 onChange={(e) => setEntete((s) => ({ ...s, libelle: e.target.value }))}
                 disabled={!champModifiable('libelle')}
@@ -926,8 +926,8 @@ export function Plans() {
               />
             </div>
             <div>
-              <Etiq>Scenario</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-plans-2">Scenario</Etiq>
+              <Champ id="ch-plans-2"
                 value={entete.scenario_nom}
                 onChange={(e) => setEntete((s) => ({ ...s, scenario_nom: e.target.value }))}
                 disabled={!champModifiable('scenario_nom')}
@@ -935,8 +935,8 @@ export function Plans() {
               />
             </div>
             <div>
-              <Etiq obligatoire>Mois de depart</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-plans-3">Mois de depart</Etiq>
+              <Champ id="ch-plans-3"
                 type="month"
                 value={entete.date_debut}
                 onChange={(e) => setEntete((s) => ({ ...s, date_debut: e.target.value }))}
@@ -944,8 +944,8 @@ export function Plans() {
               />
             </div>
             <div>
-              <Etiq>Horizon</Etiq>
-              <Selecteur
+              <Etiq htmlFor="ch-plans-4">Horizon</Etiq>
+              <Selecteur id="ch-plans-4"
                 value={String(entete.mois_horizon)}
                 onChange={(e) =>
                   setEntete((s) => ({ ...s, mois_horizon: Number(e.target.value) }))
@@ -960,11 +960,11 @@ export function Plans() {
               </Selecteur>
             </div>
             <div>
-              <Etiq>
+              <Etiq htmlFor="ch-plans-5">
                 Croissance annuelle %
                 <Aide>Appliquee au prorata des mois ecoules : (1 + taux)^(rang / 12).</Aide>
               </Etiq>
-              <Champ
+              <Champ id="ch-plans-5"
                 type="number"
                 step="any"
                 value={entete.croissance_annuelle_pct}
@@ -976,7 +976,7 @@ export function Plans() {
               />
             </div>
             <div className="sm:col-span-2 lg:col-span-4">
-              <Etiq>Période couverte</Etiq>
+              <Etiq htmlFor="ch-plans-6">Période couverte</Etiq>
               <div className="flex h-8 items-center gap-2 rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[12px]">
                 {periode.length > 0 ? (
                   <>
@@ -1369,7 +1369,7 @@ export function Plans() {
                     coche ? 'border-primaire bg-primaire/5' : 'border-bordure',
                   )}
                 >
-                  <input
+                  <input id="ch-plans-6"
                     type="checkbox"
                     checked={coche}
                     onChange={() => basculerQualite(q.code_qualite)}

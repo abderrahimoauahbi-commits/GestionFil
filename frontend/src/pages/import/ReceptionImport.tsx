@@ -602,8 +602,8 @@ export function ReceptionImport() {
         <Carte>
           <CarteCorps className="flex flex-wrap items-end gap-2">
             <div className="min-w-0 flex-1">
-              <Etiq obligatoire>Ce que le magasinier doit corriger</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-receptionimport-1">Ce que le magasinier doit corriger</Etiq>
+              <Champ id="ch-receptionimport-1"
                 autoFocus
                 value={renvoi}
                 onChange={(e) => setRenvoi(e.target.value)}
@@ -653,8 +653,8 @@ export function ReceptionImport() {
         <CarteCorps>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div>
-              <Etiq obligatoire>Date de réception</Etiq>
-              <Champ type="date" value={entete.date_reception} onChange={maj('date_reception')} disabled={!editable} />
+              <Etiq obligatoire htmlFor="ch-receptionimport-2">Date de réception</Etiq>
+              <Champ id="ch-receptionimport-2" type="date" value={entete.date_reception} onChange={maj('date_reception')} disabled={!editable} />
             </div>
             <div className="flex items-end pb-1.5">
               <label className="flex items-center gap-2 text-[12.5px]">
@@ -664,8 +664,8 @@ export function ReceptionImport() {
               </label>
             </div>
             <div className="col-span-2">
-              <Etiq obligatoire={entete.litige}>Motif du litige</Etiq>
-              <Champ value={entete.motif_litige} onChange={maj('motif_litige')} disabled={!editable || !entete.litige} />
+              <Etiq obligatoire={entete.litige} htmlFor="ch-receptionimport-3">Motif du litige</Etiq>
+              <Champ id="ch-receptionimport-3" value={entete.motif_litige} onChange={maj('motif_litige')} disabled={!editable || !entete.litige} />
             </div>
             {/* Les dossiers ne se choisissent pas : ils suivent les lignes. */}
             <div className="col-span-2 md:col-span-1">
@@ -679,8 +679,8 @@ export function ReceptionImport() {
               </div>
             </div>
             <div className="col-span-2 md:col-span-3">
-              <Etiq>Notes</Etiq>
-              <Champ value={entete.notes} onChange={maj('notes')} disabled={!editable} />
+              <Etiq htmlFor="ch-receptionimport-4">Notes</Etiq>
+              <Champ id="ch-receptionimport-4" value={entete.notes} onChange={maj('notes')} disabled={!editable} />
             </div>
           </div>
         </CarteCorps>

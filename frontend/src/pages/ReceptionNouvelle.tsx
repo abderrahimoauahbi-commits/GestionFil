@@ -1294,8 +1294,8 @@ function PanneauDetail({
         {onglet === 'quantite' && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq>Quantité annoncée au BL (kg)</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-1">Quantité annoncée au BL (kg)</Etiq>
+              <Champ id="ch-receptionnouvelle-1"
                 type="number"
                 step="any"
                 min="0"
@@ -1311,8 +1311,8 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq obligatoire>Quantité pesée (kg)</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-receptionnouvelle-2">Quantité pesée (kg)</Etiq>
+              <Champ id="ch-receptionnouvelle-2"
                 type="number"
                 step="any"
                 min="0.0001"
@@ -1333,11 +1333,11 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq>
+              <Etiq htmlFor="ch-receptionnouvelle-3">
                 Unité de saisie
                 <Aide>Le poids ne change pas : seule son expression change.</Aide>
               </Etiq>
-              <Selecteur value={ligne.unite} onChange={(e) => majUnite(ligne.cle, e.target.value)}>
+              <Selecteur id="ch-receptionnouvelle-3" value={ligne.unite} onChange={(e) => majUnite(ligne.cle, e.target.value)}>
                 <option value="kg">kg</option>
                 {unites.map((u) => (
                   <option key={u} value={u}>
@@ -1347,8 +1347,8 @@ function PanneauDetail({
               </Selecteur>
             </div>
             <div>
-              <Etiq>Nombre de colis</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-4">Nombre de colis</Etiq>
+              <Champ id="ch-receptionnouvelle-4"
                 type="number"
                 min="1"
                 value={ligne.colis}
@@ -1366,8 +1366,8 @@ function PanneauDetail({
             <div className="sm:col-span-2 lg:col-span-4">
               <div className="flex flex-wrap items-end gap-3 rounded-[var(--radius)] border border-bordure bg-fond/40 p-3">
                 <div className="w-28">
-                  <Etiq>Palettes</Etiq>
-                  <Champ
+                  <Etiq htmlFor="ch-receptionnouvelle-5">Palettes</Etiq>
+                  <Champ id="ch-receptionnouvelle-5"
                     type="number"
                     min="0"
                     value={ligne.palettes}
@@ -1376,8 +1376,8 @@ function PanneauDetail({
                   />
                 </div>
                 <div className="w-28">
-                  <Etiq>Bobines</Etiq>
-                  <Champ
+                  <Etiq htmlFor="ch-receptionnouvelle-6">Bobines</Etiq>
+                  <Champ id="ch-receptionnouvelle-6"
                     type="number"
                     min="0"
                     value={ligne.bobines}
@@ -1413,8 +1413,8 @@ function PanneauDetail({
         {onglet === 'stockage' && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq obligatoire={ligne.suivi_lot === 1}>Lot fournisseur</Etiq>
-              <Champ
+              <Etiq obligatoire={ligne.suivi_lot === 1} htmlFor="ch-receptionnouvelle-7">Lot fournisseur</Etiq>
+              <Champ id="ch-receptionnouvelle-7"
                 value={ligne.lot}
                 onChange={(e) => maj(ligne.cle, 'lot', e.target.value)}
                 className={cn(ligne.suivi_lot === 1 && !ligne.lot.trim() && 'border-danger')}
@@ -1428,8 +1428,8 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq>Magasin destinataire</Etiq>
-              <Selecteur
+              <Etiq htmlFor="ch-receptionnouvelle-8">Magasin destinataire</Etiq>
+              <Selecteur id="ch-receptionnouvelle-8"
                 value={ligne.magasin}
                 onChange={(e) => maj(ligne.cle, 'magasin', e.target.value)}
               >
@@ -1441,16 +1441,16 @@ function PanneauDetail({
               </Selecteur>
             </div>
             <div>
-              <Etiq>Date de fabrication</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-9">Date de fabrication</Etiq>
+              <Champ id="ch-receptionnouvelle-9"
                 type="date"
                 value={ligne.fabrication}
                 onChange={(e) => maj(ligne.cle, 'fabrication', e.target.value)}
               />
             </div>
             <div>
-              <Etiq>Date de peremption</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-10">Date de peremption</Etiq>
+              <Champ id="ch-receptionnouvelle-10"
                 type="date"
                 value={ligne.peremption}
                 onChange={(e) => maj(ligne.cle, 'peremption', e.target.value)}
@@ -1476,7 +1476,7 @@ function PanneauDetail({
             />
             {voitPrix && (
               <div>
-                <Etiq>Prix ({ligne.devise ?? 'devise'}/kg)</Etiq>
+                <Etiq htmlFor="ch-receptionnouvelle-11">Prix ({ligne.devise ?? 'devise'}/kg)</Etiq>
                 {ligne.id_ligne_bc ? (
                   <>
                     <div className="mt-1 text-[15px] font-medium tabular-nums">
@@ -1488,7 +1488,7 @@ function PanneauDetail({
                   </>
                 ) : (
                   <>
-                    <Champ
+                    <Champ id="ch-receptionnouvelle-11"
                       type="number"
                       step="any"
                       min="0"
@@ -1517,8 +1517,8 @@ function PanneauDetail({
         {onglet === 'qualite' && (
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Etiq>Statut qualité</Etiq>
-              <Selecteur
+              <Etiq htmlFor="ch-receptionnouvelle-12">Statut qualité</Etiq>
+              <Selecteur id="ch-receptionnouvelle-12"
                 value={ligne.qualite}
                 onChange={(e) => maj(ligne.cle, 'qualite', e.target.value)}
               >
@@ -1533,8 +1533,8 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq>Observations</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-13">Observations</Etiq>
+              <Champ id="ch-receptionnouvelle-13"
                 value={ligne.notes}
                 onChange={(e) => maj(ligne.cle, 'notes', e.target.value)}
                 placeholder="Emballage abime, couleur douteuse…"
@@ -1548,8 +1548,8 @@ function PanneauDetail({
                   d'equivalence. La ligne de commande sera soldee en kg, et l'ecart restera trace.
                 </Alerte>
                 <div className="mt-2">
-                  <Etiq obligatoire>Motif de la substitution</Etiq>
-                  <Champ
+                  <Etiq obligatoire htmlFor="ch-receptionnouvelle-14">Motif de la substitution</Etiq>
+                  <Champ id="ch-receptionnouvelle-14"
                     value={ligne.motif_substitution}
                     onChange={(e) => maj(ligne.cle, 'motif_substitution', e.target.value)}
                     placeholder="Rupture chez le fournisseur, lot disponible…"

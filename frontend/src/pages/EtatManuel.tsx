@@ -96,6 +96,7 @@ export function EtatManuel() {
               il n'a rien a faire sur la feuille. */}
           <span className="print:hidden">
             <Selecteur
+              aria-label="Chapitre"
               value={chapitre}
               onChange={(e) => setChapitre(e.target.value)}
               className="h-7 text-[12px]"

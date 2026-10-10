@@ -335,20 +335,20 @@ function Informations({
             facture porte la sienne. LA DUM est celle du dossier, une seule. */}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
           <div>
-            <Etiq>Numéro</Etiq>
-            <Champ value={f.numero} onChange={maj('numero')} disabled={!ecrire} />
+            <Etiq htmlFor="ch-dossierimport-1">Numéro</Etiq>
+            <Champ id="ch-dossierimport-1" value={f.numero} onChange={maj('numero')} disabled={!ecrire} />
           </div>
           <div>
-            <Etiq>N° BL</Etiq>
-            <Champ value={f.numero_bl} onChange={maj('numero_bl')} disabled={!ecrire} />
+            <Etiq htmlFor="ch-dossierimport-2">N° BL</Etiq>
+            <Champ id="ch-dossierimport-2" value={f.numero_bl} onChange={maj('numero_bl')} disabled={!ecrire} />
           </div>
           <div>
-            <Etiq>Conteneur(s)</Etiq>
-            <Champ value={f.conteneurs} onChange={maj('conteneurs')} disabled={!ecrire} />
+            <Etiq htmlFor="ch-dossierimport-3">Conteneur(s)</Etiq>
+            <Champ id="ch-dossierimport-3" value={f.conteneurs} onChange={maj('conteneurs')} disabled={!ecrire} />
           </div>
           <div className="md:col-span-2">
-            <Etiq>N° DUM</Etiq>
-            <Champ
+            <Etiq htmlFor="ch-dossierimport-4">N° DUM</Etiq>
+            <Champ id="ch-dossierimport-4"
               value={f.numero_dum}
               onChange={maj('numero_dum')}
               disabled={!ecrire || (dumInitiale !== '' && !valider)}
@@ -366,20 +366,20 @@ function Informations({
             )}
           </div>
           <div>
-            <Etiq>Régime</Etiq>
-            <Champ value={f.regime_douanier} onChange={maj('regime_douanier')} disabled={!ecrire} placeholder="010" />
+            <Etiq htmlFor="ch-dossierimport-5">Régime</Etiq>
+            <Champ id="ch-dossierimport-5" value={f.regime_douanier} onChange={maj('regime_douanier')} disabled={!ecrire} placeholder="010" />
           </div>
           <div>
-            <Etiq>Date DUM</Etiq>
-            <Champ type="date" value={f.date_dum} onChange={maj('date_dum')} disabled={!ecrire} />
+            <Etiq htmlFor="ch-dossierimport-6">Date DUM</Etiq>
+            <Champ id="ch-dossierimport-6" type="date" value={f.date_dum} onChange={maj('date_dum')} disabled={!ecrire} />
           </div>
           <div>
-            <Etiq>Date d'arrivée</Etiq>
-            <Champ type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} disabled={!ecrire} />
+            <Etiq htmlFor="ch-dossierimport-7">Date d'arrivée</Etiq>
+            <Champ id="ch-dossierimport-7" type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} disabled={!ecrire} />
           </div>
           <div className="col-span-2 md:col-span-4 xl:col-span-7">
-            <Etiq>Notes</Etiq>
-            <Champ value={f.notes} onChange={maj('notes')} disabled={!ecrire} />
+            <Etiq htmlFor="ch-dossierimport-8">Notes</Etiq>
+            <Champ id="ch-dossierimport-8" value={f.notes} onChange={maj('notes')} disabled={!ecrire} />
           </div>
         </div>
       </CarteCorps>
@@ -608,7 +608,7 @@ function FraisDossier({
               {saisie && (
                 <tr className="border-b border-bordure/60 bg-attenue/25">
                   <td className={td}>
-                    <Selecteur className="h-7" value={n.id_frais} onChange={maj('id_frais')}>
+                    <Selecteur className="h-7" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
                       <option value="">Nouveau frais…</option>
                       {groupes.map(([cat, liste]) => (
                         <optgroup key={cat} label={cat}>
@@ -625,21 +625,21 @@ function FraisDossier({
                       <div className="mt-0.5 text-[11px] text-attenue-texte">{typeChoisi.piece_justificative}</div>
                     )}
                   </td>
-                  <td className={td}><Champ className="h-7" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
-                  <td className={td}><Champ className="h-7" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
+                  <td className={td}><Champ className="h-7" aria-label="Libellé du frais" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
+                  <td className={td}><Champ className="h-7" aria-label="N° de pièce" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
                   <td className={td}>
-                    <Selecteur className="h-7 pl-2 pr-6" value={n.code_devise} onChange={maj('code_devise')}>
+                    <Selecteur className="h-7 min-w-[4.75rem] pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>
                       {(qDevises.data ?? [{ code_devise: 'MAD' }]).map((x) => (
                         <option key={x.code_devise}>{x.code_devise}</option>
                       ))}
                     </Selecteur>
                   </td>
                   <td className={td}>
-                    <Champ className="h-7 text-right" inputMode="decimal" value={n.cours_change}
+                    <Champ className="h-7 text-right" inputMode="decimal" aria-label="Cours de change" value={n.cours_change}
                       onChange={maj('cours_change')} disabled={n.code_devise === 'MAD'} />
                   </td>
                   <td className={td}>
-                    <Champ className="h-7 text-right" inputMode="decimal" value={n.montant_devise}
+                    <Champ className="h-7 text-right" inputMode="decimal" aria-label="Montant en devise" value={n.montant_devise}
                       onChange={maj('montant_devise')} placeholder="0,00"
                       onKeyDown={(e) => e.key === 'Enter' && complet && ajouter.mutate(false)} />
                   </td>
@@ -682,9 +682,9 @@ function FraisDossier({
       </CarteCorps>
       {postCloture && (
         <CarteCorps className="space-y-2 border-t border-bordure">
-          <Etiq obligatoire>Frais post-clôture : quelle facture arrive après la clôture ?</Etiq>
+          <Etiq obligatoire htmlFor="ch-dossierimport-9">Frais post-clôture : quelle facture arrive après la clôture ?</Etiq>
           <div className="flex flex-wrap items-center gap-2">
-            <Champ
+            <Champ id="ch-dossierimport-9"
               className="min-w-0 flex-1"
               value={motifPost}
               onChange={(e) => {

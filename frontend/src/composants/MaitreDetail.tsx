@@ -516,6 +516,7 @@ export function MaitreDetail({
                         <td className={td}>
                           <Bouton
                             taille="sm"
+                            aria-label="Ajouter la ligne"
                             disabled={!complet}
                             chargement={creer.isPending}
                             onClick={() => creer.mutate()}

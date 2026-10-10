@@ -300,8 +300,9 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   // L'oubli d'un champ obligatoire (l'unite de stock) : le message doit dire
   // lequel, et l'ecran doit l'amener sous les yeux.
   await page.getByRole('button', { name: 'Creer', exact: true }).click()
-  const message = page.getByText('Renseignez les champs obligatoires')
+  const message = page.getByText(/Champs? obligatoires? à renseigner|Renseignez les champs obligatoires/)
   if (await message.isVisible().catch(() => false)) {
+    await page.waitForTimeout(800) // le defilement doux vers le champ
     const unite = page.getByRole('combobox', { name: /^Unité de stock/ })
     const visible = await unite.evaluate((el) => {
       const r = el.getBoundingClientRect()
@@ -339,15 +340,14 @@ test('référence : la direction crée une fiche, poids et prix au format franç
 test('mouvement : le magasin sort 12,5 kg hors machine, avec un motif', async ({ browser }, info) => {
   const { page, veille } = await session(browser, info, 'Magasinie')
   await page.goto('/mouvements/nouveau')
-  // Les listes d'en-tete n'ont pas de nom accessible : on les prend dans l'ordre (consigne par axe).
-  const listes = page.locator('main select')
-  await listes.nth(0).selectOption({ label: '− Sortie hors machine (atelier, échantillon, essai, réparation, prêt)' })
-  await listes.nth(1).selectOption({ label: 'Morocco' })
-  await saisir(page.getByRole('textbox', { name: 'Facultatif, texte libre' }), 'OF-2026-118 échantillon client')
+  // Les listes d'en-tete ont leur etiquette (10/10/2026) : on les prend par leur nom.
+  await page.getByRole('combobox', { name: /^Type de mouvement/ }).selectOption({ label: '− Sortie hors machine (atelier, échantillon, essai, réparation, prêt)' })
+  await page.getByRole('combobox', { name: /^Magasin/ }).first().selectOption({ label: 'Morocco' })
+  await saisir(page.getByRole('textbox', { name: /ordre de fabrication/i }), 'OF-2026-118 échantillon client')
   test.skip(!refRecue, 'pas de référence reçue')
   await choisirReference(page, refRecue)
   await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '12,5')
-  await choisirOption(listes.nth(2), /Sortie hors machine/)
+  await choisirOption(page.getByRole('combobox', { name: /^Motif/ }).first(), /Sortie hors machine/)
   await choisirOption(page.getByRole('combobox', { name: 'Motif de la ligne' }).first(), /chantillon/i)
   const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: 'Choisir un lot' }) }).first()
   if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))

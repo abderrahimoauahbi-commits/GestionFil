@@ -36,6 +36,7 @@ function Choix({
     <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
       <span className="text-[12px] text-attenue-texte">{libelle}</span>
       <Selecteur
+        aria-label={libelle}
         value={valeur}
         onChange={(e) => surChangement(e.target.value)}
         className="w-[26rem] max-w-full"

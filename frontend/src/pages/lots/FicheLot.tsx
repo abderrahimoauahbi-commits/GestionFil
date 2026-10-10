@@ -678,8 +678,8 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
           fournisseur et de la même couleur peuvent être fusionnés.
         </p>
         <div className="max-w-xs">
-          <Etiq obligatoire>Magasin</Etiq>
-          <Selecteur
+          <Etiq obligatoire htmlFor="ch-fichelot-1">Magasin</Etiq>
+          <Selecteur id="ch-fichelot-1"
             value={magasin}
             onChange={(e) => {
               setMagasin(e.target.value)
@@ -748,8 +748,8 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
         {magasin && candidats.some((c) => !c.raison) && (
           <>
             <label className="flex flex-col gap-1">
-              <Etiq obligatoire>Pourquoi fusionner ?</Etiq>
-              <textarea
+              <Etiq obligatoire htmlFor="ch-fichelot-2">Pourquoi fusionner ?</Etiq>
+              <textarea id="ch-fichelot-2"
                 value={motif}
                 onChange={(e) => setMotif(e.target.value)}
                 rows={2}

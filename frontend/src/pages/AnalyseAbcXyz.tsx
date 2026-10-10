@@ -247,7 +247,7 @@ export function AnalyseAbcXyz() {
           </CarteTitre>
         </CarteEntete>
         <CarteCorps>
-          <div className="defilement-x">
+          <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
             <table className="w-full min-w-[520px] text-[12px]">
               <thead>
                 <tr>

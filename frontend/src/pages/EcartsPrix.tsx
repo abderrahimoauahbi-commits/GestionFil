@@ -85,7 +85,7 @@ export function EcartsPrix() {
               <Totaux titre="Par référence" lignes={q.data.par_reference.map((r) => ({ cle: r.code_reference, libelle: r.code_reference, nb: r.nb, montant: r.montant_mad }))} />
               <Totaux titre="Par fournisseur" lignes={q.data.par_fournisseur.map((r) => ({ cle: r.code_fournisseur ?? '—', libelle: r.fournisseur_nom ?? r.code_fournisseur ?? '—', nb: r.nb, montant: r.montant_mad }))} />
             </div>
-            <div className="defilement-x">
+            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="w-full min-w-[44rem] text-[12.5px]">
                 <thead>
                   <tr className="border-b border-bordure text-left">

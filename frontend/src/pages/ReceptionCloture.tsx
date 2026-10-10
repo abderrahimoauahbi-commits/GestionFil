@@ -69,7 +69,7 @@ const echec = (e: unknown) => toast.error(e instanceof ErreurApi ? e.message : '
 /** Le detail par reference : ce que l'apercu montre avant de signer. */
 function TableApercu({ r, plusieurs }: { r: Pick<Resultat, 'references'> & Partial<Resultat>; plusieurs: boolean }) {
   return (
-    <div className="defilement-x">
+    <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
       <table className="w-full min-w-[40rem] text-[12.5px] tabular-nums">
         <thead>
           <tr className="border-b border-bordure text-[10.5px] uppercase tracking-wider text-attenue-texte">

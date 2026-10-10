@@ -107,7 +107,7 @@ export function BullesFournisseurs({
       </ul>
 
       {tableau ? (
-        <div className="defilement-x max-h-64 overflow-y-auto">
+        <div tabIndex={0} role="region" aria-label="Graphique" className="defilement-x max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <table className="w-full text-[11px]">
             <thead className="sticky top-0 bg-surface">
               <tr>

@@ -490,7 +490,7 @@ export function Besoins() {
               </span>
             </CarteEntete>
             <CarteCorps className="p-0">
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full text-[12px]">
                   <thead>
                     <tr className="bg-attenue">
@@ -637,7 +637,7 @@ export function Besoins() {
                   />
                 </div>
               ) : (
-                <div className="defilement-x" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
                   <table className="grille w-full text-[12px]">
                     <thead className="sticky top-0 z-20">
                       <tr className="bg-attenue">

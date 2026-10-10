@@ -703,7 +703,7 @@ export function ReceptionImport() {
                tenaient dans six caracteres. En haut, ce qu'on pese et ou on le
                range ; en dessous, ce qu'on lit sur l'etiquette — lot et
                couleur — avec la place de les lire, et l'avis de colisage. */
-            <div className="defilement-x">
+            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="w-full min-w-[60rem] text-[12.5px]">
                 <thead>
                   <tr className="border-b border-bordure">
@@ -956,7 +956,7 @@ export function ReceptionImport() {
                     : 'Rien à recevoir : toutes les factures des dossiers en cours sont reçues ou soldées.'}
               </p>
             ) : (
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="w-full min-w-[56rem] text-[12.5px]">
                   <thead>
                     <tr className="border-b border-bordure">

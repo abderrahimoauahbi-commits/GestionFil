@@ -215,7 +215,7 @@ function TableauDetail({ lignes }: { lignes: Record<string, unknown>[] }) {
   const estNombre = (v: unknown) => typeof v === 'number'
 
   return (
-    <div className="defilement-x max-h-80 overflow-y-auto rounded-[3px] border border-bordure">
+    <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x max-h-80 overflow-y-auto rounded-[3px] border border-bordure focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
       <table className="grille w-full text-[12px]">
         <thead className="sticky top-0 bg-attenue">
           <tr>

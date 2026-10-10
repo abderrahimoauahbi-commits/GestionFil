@@ -64,7 +64,7 @@ export function CoherenceRecettes() {
         </CarteTitre>
       </CarteEntete>
       <CarteCorps className="p-0">
-        <div className="defilement-x">
+        <div tabIndex={0} role="region" aria-label="Tableau de cohérence des recettes" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <table className="grille w-full text-[12px]">
             <thead>
               <tr className="bg-attenue">

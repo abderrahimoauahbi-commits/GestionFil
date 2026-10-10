@@ -203,7 +203,7 @@ export function Droits() {
       )}
 
       {/* --- Selection du module ------------------------------------------- */}
-      <div className="defilement-x mb-4 -mx-1 flex gap-1 pb-1">
+      <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x mb-4 -mx-1 flex gap-1 pb-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
         {modules.map((m) => {
           const n = Object.keys(modifs).filter((k) => k.startsWith(`${m}.`)).length
           return (

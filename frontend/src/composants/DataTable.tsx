@@ -586,9 +586,16 @@ export function DataTable<L extends Record<string, unknown>>({
           {/* LA GRILLE DEFILE DANS SA BOITE (05/10/2026) : c'est ce qui fait tenir
               l'en-tete colle — `sticky` suit le conteneur qui defile, pas la page.
               Hauteur par defaut quand l'ecran n'en fixe pas. */}
+          {/* UN TABLEAU QUI DEFILE S'ATTEINT AU CLAVIER (10/10/2026) : avec les vraies
+              donnees, le tableau des besoins debordait, et sa zone de defilement n'etait
+              pas atteignable sans souris (axe, sur une copie de la production). */}
           <div
+            tabIndex={0}
+            role="region"
+            aria-label="Tableau"
             className={cn(
               'cadre-table defilement-x hidden rounded-lg border border-bordure bg-surface @3xl:block',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau',
               !hauteurMax && '@3xl:max-h-[calc(100dvh-12rem)] @3xl:overflow-y-auto',
             )}
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}

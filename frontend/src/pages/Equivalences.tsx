@@ -471,7 +471,7 @@ export function Equivalences() {
                       Aucune reference rattachee a ce groupe.
                     </p>
                   ) : (
-                    <div className="defilement-x">
+                    <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                     <table className="grille w-full min-w-[46rem] text-[13px] lg:min-w-0">
                       <thead>
                         <tr className="bg-attenue/50 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte">

@@ -118,7 +118,7 @@ export function Opportunites() {
             {d.economies.length === 0 ? (
               <Vide texte="Rien à afficher." />
             ) : (
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full text-[13px]">
                   <thead>
                     <tr className="text-left text-[11px] text-attenue-texte">
@@ -159,7 +159,7 @@ export function Opportunites() {
             {d.mono_source.length === 0 ? (
               <Vide texte="Aucune dépendance à une seule source." ok />
             ) : (
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full text-[13px]">
                   <thead>
                     <tr className="text-left text-[11px] text-attenue-texte">

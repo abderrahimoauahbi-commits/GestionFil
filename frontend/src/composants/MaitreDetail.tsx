@@ -398,7 +398,7 @@ export function MaitreDetail({
               </CarteCorps>
             )}
             <CarteCorps className="p-0">
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Lignes" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full min-w-[40rem] text-[12.5px]">
                   <thead>
                     <tr className="bg-attenue/50">

@@ -128,7 +128,7 @@ export function Audit() {
         <span className="text-[11px] text-attenue-texte">{lignes.length} affichees</span>
       </div>
 
-      <div className="defilement-x rounded-[var(--radius)] border border-bordure bg-surface">
+      <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x rounded-[var(--radius)] border border-bordure bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
         <table className="grille w-full text-[12px]">
           <thead className="bg-attenue">
             <tr>

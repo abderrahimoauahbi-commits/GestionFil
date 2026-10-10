@@ -542,7 +542,7 @@ export function EtatPlanProduction() {
           </div>
         }
       >
-        <div className="defilement-x">
+        <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <TableEtat<(typeof qualites)[number]>
             colonnes={[
               { entete: 'Qualité', valeur: (p) => p.nom },
@@ -679,7 +679,7 @@ export function EtatBesoins() {
           </div>
         }
       >
-        <div className="defilement-x">
+        <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <TableEtat<(typeof refs)[number]>
             colonnes={[
               {

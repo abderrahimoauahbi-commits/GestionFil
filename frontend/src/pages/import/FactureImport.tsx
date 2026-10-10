@@ -602,7 +602,7 @@ export function FactureImport() {
           {!entete.code_fournisseur && (
             <p className="px-3 pt-2 text-[12px] text-alerte">Choisissez d'abord le fournisseur : il décide des références et des bons proposés.</p>
           )}
-          <div className="defilement-x">
+          <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
             <table className="w-full min-w-[92rem] text-[12.5px]">
               <thead>
                 <tr className="border-b border-bordure">

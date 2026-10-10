@@ -540,7 +540,7 @@ function FraisDossier({
         </span>
       </CarteEntete>
       <CarteCorps className="p-0">
-        <div className="defilement-x">
+        <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <table className="w-full min-w-[60rem] text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
@@ -740,7 +740,7 @@ function FacturesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) 
             Aucune facture. Un dossier peut regrouper les factures de plusieurs fournisseurs.
           </p>
         ) : (
-          <div className="defilement-x">
+          <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
             <table className="w-full min-w-[62rem] text-[12.5px]">
               <thead>
                 <tr className="border-b border-bordure">
@@ -825,7 +825,7 @@ function JournalCloture({ d }: { d: DossierComplet }) {
         <CarteTitre>Ce que la clôture et les avoirs ont fait au CUMP</CarteTitre>
       </CarteEntete>
       <CarteCorps className="p-0">
-        <div className="defilement-x">
+        <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <table className="w-full min-w-[36rem] text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">

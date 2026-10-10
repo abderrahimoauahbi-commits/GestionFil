@@ -39,7 +39,7 @@ function Choix({
         aria-label={libelle}
         value={valeur}
         onChange={(e) => surChangement(e.target.value)}
-        className="w-[26rem] max-w-full"
+        className="w-[32rem] max-w-full"
       >
         {options.map((o) => (
           <option key={o.valeur} value={o.valeur}>

@@ -581,7 +581,7 @@ export function Besoins() {
                 <Champ
                   value={filtre}
                   onChange={(e) => setFiltre(e.target.value)}
-                  placeholder="Référence, désignation, fournisseur..."
+                  placeholder="Référence, fournisseur…"
                   className="h-7 w-56 text-[12px]"
                 />
                 <select

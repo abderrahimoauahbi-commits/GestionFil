@@ -548,7 +548,7 @@ function FraisDossier({
                 <th className={cn(th, 'w-56 text-left')}>Type de frais</th>
                 <th className={cn(th, 'text-left')}>Précision</th>
                 <th className={cn(th, 'w-28 text-left')}>N° pièce</th>
-                <th className={cn(th, 'w-24 text-left')}>Devise</th>
+                <th className={cn(th, 'w-28 text-left')}>Devise</th>
                 <th className={cn(th, 'w-24 text-right')}>Cours</th>
                 <th className={cn(th, 'w-32 text-right')}>Montant</th>
                 <th className={cn(th, 'w-32 text-right')}>Montant DH</th>
@@ -629,7 +629,7 @@ function FraisDossier({
                   <td className={td}><Champ className="h-7" aria-label="Libellé du frais" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
                   <td className={td}><Champ className="h-7" aria-label="N° de pièce" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
                   <td className={td}>
-                    <Selecteur className="h-7 min-w-[4.75rem] pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>
+                    <Selecteur className="h-7 min-w-[6.5rem] pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>
                       {(qDevises.data ?? [{ code_devise: 'MAD' }]).map((x) => (
                         <option key={x.code_devise}>{x.code_devise}</option>
                       ))}

@@ -429,7 +429,7 @@ export function DataTable<L extends Record<string, unknown>>({
                 onChange={(e) => setFiltre(e.target.value)}
                 placeholder={placeholderRecherche}
                 aria-label="Rechercher dans la liste"
-                className="w-full pl-8 sm:w-72"
+                className="w-full pl-8 sm:w-80"
               />
             </div>
           )}

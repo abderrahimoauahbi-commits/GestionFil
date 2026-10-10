@@ -127,27 +127,21 @@ pub async fn generer(
               -- avec elles — sans quoi le montant en MAD deviendrait
               -- irreproductible des que le taux bouge.
               code_devise, prix_devise, montant_devise, taux_devise,
-              palettes_a_commander, origine)
-         SELECT $1, $2, pa.code_reference, o.qte,
-                pa.unite_catalogue,
-                CASE WHEN pa.facteur_kg > 0 THEN ROUND(o.qte / pa.facteur_kg, 4) END,
-                pa.code_fournisseur,
+              palettes_a_commander)
+         SELECT $1, $2, pa.code_reference, pa.qte_a_commander_kg,
+                pa.unite_catalogue, pa.qte_a_commander_unite, pa.code_fournisseur,
                 pa.prix_estime_mad, pa.source_prix, pa.date_besoin_prevue, pa.tier,
                 pa.risque_sourcing,
-                CASE WHEN o.origine = 'STOCK_MIN' THEN 'Remonter au stock minimum'
-                     WHEN pa.statut = 'RUPTURE'   THEN 'Commander immediatement'
-                     WHEN pa.statut = 'CRITIQUE'  THEN 'Commander sous 7 jours'
-                     WHEN pa.statut = 'ATTENTION' THEN 'Planifier la commande'
-                     ELSE 'Reapprovisionnement normal'
+                CASE pa.statut
+                    WHEN 'RUPTURE'   THEN 'Commander immediatement'
+                    WHEN 'CRITIQUE'  THEN 'Commander sous 7 jours'
+                    WHEN 'ATTENTION' THEN 'Planifier la commande'
+                    ELSE 'Reapprovisionnement normal'
                 END,
                 'PROPOSE',
-                pa.devise, pa.prix_devise, ROUND(o.qte * pa.prix_devise, 2), pa.taux_devise,
-                CASE WHEN pa.poids_palette_kg > 0 THEN CEIL(o.qte / pa.poids_palette_kg)::bigint END,
-                o.origine
+                pa.devise, pa.prix_devise, pa.montant_devise, pa.taux_devise,
+                pa.palettes_a_commander
            FROM v_plan_achat pa
-           -- DEUX ORIGINES QUI NE SE MELANGENT PAS (10/10/2026) : ce que le plan de
-           -- production reclame, et ce qui manque encore au stock minimum.
-           CROSS JOIN LATERAL (VALUES ('PLAN', pa.qte_plan_kg), ('STOCK_MIN', pa.qte_stock_min_kg)) o(origine, qte)
           -- UNE REFERENCE COMMANDEE SE REPROPOSE (06/10/2026). Elle etait
           -- ecartee a vie des sa premiere commande. Or un bon VALIDE, ENVOYE ou
           -- LIVRE_PARTIEL est deja deduit par l'en-cours de la vue, et un bon
@@ -159,11 +153,9 @@ pub async fn generer(
           -- masquait la reference A VIE : le besoin ne revenait jamais. Au-dela
           -- de P_DureeEcartJours (90 j), elle cesse de masquer ; elle reste en
           -- base, jamais supprimee, marquee expiree.
-          WHERE o.qte > 0
-            AND NOT EXISTS (
+          WHERE NOT EXISTS (
                 SELECT 1 FROM plan_achat pa2
                  WHERE pa2.code_reference = pa.code_reference
-                   AND pa2.origine = o.origine
                    AND ((pa2.statut = 'IGNORE'
                          AND substr(COALESCE(pa2.date_ecartee, pa2.date_generation), 1, 10)::date
                              > current_date - COALESCE((SELECT CAST(valeur_courante AS integer) FROM parametre
@@ -191,8 +183,7 @@ pub async fn generer(
                 SELECT 1 FROM plan_achat pa4
                  WHERE pa4.statut IN ('PROPOSE','EN_REVISION','VALIDE')
                    AND pa4.figee = 1
-                   AND pa4.code_reference = pa.code_reference
-                   AND pa4.origine = o.origine)",
+                   AND pa4.code_reference = pa.code_reference)",
     )
     .bind(&horodatage)
     .bind(id_plan)
@@ -265,15 +256,15 @@ pub async fn convertir(
     // COMMANDE et IGNORE sont exclues — l'une engage deja, l'autre a ete ecartee.
     // `= ANY($1)` et non des `?` a la SQLite ; quantites et prix en `::float8`,
     // sans quoi le decodage des NUMERIC echouait. « Commander » ne marchait pas.
-    let ouvertes: Vec<(String, String, f64, f64, Option<String>, String)> = match propositions {
+    let ouvertes: Vec<(String, String, f64, f64, Option<String>)> = match propositions {
         Some(ids) if !ids.is_empty() => {
             sqlx::query_as(
                 "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
-                        prix_estime_mad::float8, date_besoin_prevue, origine
+                        prix_estime_mad::float8, date_besoin_prevue
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
                     AND id_proposition = ANY($1)
-                  ORDER BY code_fournisseur, origine, code_reference",
+                  ORDER BY code_fournisseur, code_reference",
             )
             .bind(ids)
             .fetch_all(&mut *tx)
@@ -282,10 +273,10 @@ pub async fn convertir(
         _ => {
             sqlx::query_as(
                 "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
-                        prix_estime_mad::float8, date_besoin_prevue, origine
+                        prix_estime_mad::float8, date_besoin_prevue
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
-                  ORDER BY code_fournisseur, origine, code_reference",
+                  ORDER BY code_fournisseur, code_reference",
             )
             .fetch_all(&mut *tx)
             .await?
@@ -302,31 +293,19 @@ pub async fn convertir(
     // (fournisseur, id_bc) dans l'ordre d'ouverture. On retient l'identifiant
     // rendu par l'insertion plutot que de le rechercher ensuite : deux bons du
     // meme fournisseur ouverts le meme jour seraient indiscernables.
-    // UN BON PAR FOURNISSEUR ET PAR ORIGINE (10/10/2026) : ce qui se commande pour
-    // produire et ce qui se commande pour le stock minimum ne partent pas sur le
-    // meme bon ; chacun porte son motif (MRP, STOCK_MIN).
     let mut ouverts: Vec<(String, String)> = Vec::new();
-    let mut origine_courante: Option<(String, String)> = None;
 
-    for (id_prop, fournisseur, qte_kg, prix_mad, date_besoin, origine) in &ouvertes {
-        // La liste est triee par fournisseur puis origine : on ouvre a chaque rupture.
-        let cle = (fournisseur.clone(), origine.clone());
-        let meme = origine_courante.as_ref() == Some(&cle);
-        origine_courante = Some(cle);
+    for (id_prop, fournisseur, qte_kg, prix_mad, date_besoin) in &ouvertes {
+        // Un bon par fournisseur : la liste est triee, on ouvre a chaque rupture.
         let id_bc = match ouverts.last() {
-            Some((_, id)) if meme => id.clone(),
+            Some((f, id)) if f == fournisseur => id.clone(),
             _ => {
                 // UN BON EXISTANT, si l'acheteur l'a designe : on le complete
                 // au lieu d'en ouvrir un second pour le meme fournisseur.
-                // La cible se designe par « fournisseur|origine » ; l'ancienne forme
-                // (le fournisseur seul) reste comprise.
-                let cible = cibles.and_then(|c| {
-                    c.get(&format!("{fournisseur}|{origine}")).or_else(|| c.get(fournisseur))
-                });
-                let id = match cible {
+                let id = match cibles.and_then(|c| c.get(fournisseur)) {
                     Some(id_bc) => {
-                        let (frs, statut, numero, motif): (String, String, String, String) = sqlx::query_as(
-                            "SELECT code_fournisseur, statut, numero_bc, motif_creation FROM bon_commande
+                        let (frs, statut, numero): (String, String, String) = sqlx::query_as(
+                            "SELECT code_fournisseur, statut, numero_bc FROM bon_commande
                               WHERE id_bc = $1 FOR UPDATE",
                         )
                         .bind(id_bc)
@@ -338,14 +317,6 @@ pub async fn convertir(
                                 "Le bon {numero} est d'un autre fournisseur ({frs}) : il ne recoit pas les lignes de {fournisseur}."
                             )));
                         }
-                        // Le plan de production et le stock minimum ne se melangent pas sur un bon.
-                        let attendu = if origine == "STOCK_MIN" { "STOCK_MIN" } else { "MRP" };
-                        if motif != attendu {
-                            return Err(AppError::RegleMetier(format!(
-                                "Le bon {numero} a pour motif {motif} : il ne recoit pas les lignes {} ({attendu}). Choisissez un bon de ce motif ou un nouveau bon.",
-                                if attendu == "STOCK_MIN" { "du stock minimum" } else { "du plan de production" }
-                            )));
-                        }
                         if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
                             return Err(AppError::RegleMetier(format!(
                                 "Le bon {numero} est {statut} : il ne se complete plus. Choisissez un brouillon ou un nouveau bon."
@@ -353,7 +324,7 @@ pub async fn convertir(
                         }
                         id_bc.clone()
                     }
-                    None => ouvrir_bon(&mut tx, user, fournisseur, date_besoin.as_deref(), origine).await?,
+                    None => ouvrir_bon(&mut tx, user, fournisseur, date_besoin.as_deref()).await?,
                 };
                 ouverts.push((fournisseur.clone(), id.clone()));
                 id
@@ -453,7 +424,6 @@ async fn ouvrir_bon(
     user: &Utilisateur,
     fournisseur: &str,
     date_besoin: Option<&str>,
-    origine: &str,
 ) -> AppResult<String> {
     use crate::error::AppError;
 
@@ -466,7 +436,14 @@ async fn ouvrir_bon(
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("fournisseur {fournisseur}")))?;
 
-    let taux: f64 = crate::routes::stock::taux_au_conn(&mut *tx, &devise, &crate::db::aujourdhui())
+    let taux: f64 = sqlx::query_scalar(
+        "SELECT taux::float8 FROM taux_change
+          WHERE code_devise = $1 AND to_char(current_date, 'YYYY-MM-DD') >= substr(date_debut, 1, 10)
+            AND (date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(date_fin, 1, 10))
+          ORDER BY date_debut DESC LIMIT 1",
+    )
+    .bind(&devise)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise}.")))?;
 
@@ -481,7 +458,7 @@ async fn ouvrir_bon(
               date_taux_engage, date_livraison_prevue, conditions_paiement,
               motif_creation, montant_total_devise, montant_total_mad,
               id_utilisateur_creation)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$10,0,0,$9)",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'MRP',0,0,$9)",
     )
     .bind(&id)
     .bind(&numero)
@@ -492,7 +469,6 @@ async fn ouvrir_bon(
     .bind(date_besoin)
     .bind(&conditions)
     .bind(&user.id)
-    .bind(if origine == "STOCK_MIN" { "STOCK_MIN" } else { "MRP" })
     .execute(&mut *tx)
     .await?;
 

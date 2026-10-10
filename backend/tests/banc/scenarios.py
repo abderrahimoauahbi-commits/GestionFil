@@ -1058,68 +1058,19 @@ def scenario_plan_detail(c, infra):
 
     # Regle 17 (T7) : ecartee, une reference ne revient pas au calcul suivant ; au-dela de
     # P_DureeEcartJours, elle revient.
-    prop = infra.sql("SELECT id_proposition, code_reference, origine FROM plan_achat WHERE statut = 'PROPOSE' AND figee = 0 "
+    prop = infra.sql("SELECT id_proposition, code_reference FROM plan_achat WHERE statut = 'PROPOSE' AND figee = 0 "
                      "ORDER BY code_reference LIMIT 1")
     if prop:
-        id_prop, ref_prop, origine = prop[0]
+        id_prop, ref_prop = prop[0]
         c.ok("Choukri", "POST", f"/api/plan-achat/propositions/{id_prop}/ignorer", {})
         c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
         verifier(infra.valeur(f"SELECT count(*) FROM plan_achat WHERE code_reference = '{ref_prop}' "
-                              f"AND origine = '{origine}' AND statut = 'PROPOSE'") == "0",
-                 "une proposition ecartee revient au calcul suivant")
+                              "AND statut = 'PROPOSE'") == "0", "une proposition ecartee revient au calcul suivant")
         infra.sql(f"UPDATE plan_achat SET date_ecartee = to_char(current_date - 100, 'YYYY-MM-DD') "
                   f"WHERE id_proposition = '{id_prop}'")
         c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
         verifier(infra.valeur(f"SELECT count(*) FROM plan_achat WHERE code_reference = '{ref_prop}' "
-                              f"AND origine = '{origine}' AND statut = 'PROPOSE'") == "1",
-                 "l'ecart expire ne rend pas la proposition")
-
-
-def scenario_plan_achat_deux_origines(c, infra):
-    """Le plan d'achat ne melange pas (10/10/2026) : une proposition par origine — plan de production,
-    stock minimum —, leurs quantites sont celles de la vue, jamais comptees deux fois, et un bon genere
-    ne porte que des lignes d'une seule origine, avec son motif."""
-    # Un minimum haut sur une reference du banc : elle a une proposition « stock minimum ».
-    ref = "PP-1500 Dtex-Bleu 6666-Hs"
-    infra.sql(f"UPDATE reference SET stock_min_kg = 50000 WHERE code_reference = '{ref}'")
-    c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
-    ecarts = infra.valeur(
-        "SELECT count(*) FROM v_plan_achat v "
-        "WHERE (abs(COALESCE((SELECT sum(quantite_suggeree_kg) FROM plan_achat p WHERE p.code_reference = v.code_reference "
-        "  AND p.origine = 'PLAN' AND p.statut = 'PROPOSE' AND p.figee = 0), 0) - v.qte_plan_kg) > 0.001 "
-        "   OR abs(COALESCE((SELECT sum(quantite_suggeree_kg) FROM plan_achat p WHERE p.code_reference = v.code_reference "
-        "  AND p.origine = 'STOCK_MIN' AND p.statut = 'PROPOSE' AND p.figee = 0), 0) - v.qte_stock_min_kg) > 0.001) "
-        # Les references portant une decision humaine (ecartee, commandee, protegee, arbitree) sont
-        # exclues de la generation a juste titre : on ne juge que les autres.
-        "AND NOT EXISTS (SELECT 1 FROM plan_achat x WHERE (x.code_reference = v.code_reference "
-        "  OR x.code_reference_origine = v.code_reference) AND (x.statut IN ('IGNORE', 'COMMANDE') "
-        "  OR x.figee = 1 OR x.code_reference_origine IS NOT NULL))")
-    verifier(ecarts == "0", f"{ecarts} reference(s) dont les propositions ne reprennent pas la vue")
-    verifier(infra.valeur("SELECT count(*) FROM v_plan_achat WHERE abs(qte_a_commander_kg - qte_plan_kg - qte_stock_min_kg) > 0.001") == "0",
-             "la quantite a commander n'est pas la somme des deux origines")
-    mini = infra.sql(f"SELECT id_proposition, code_fournisseur FROM plan_achat WHERE code_reference = '{ref}' "
-                     "AND origine = 'STOCK_MIN' AND statut = 'PROPOSE'")
-    verifier(len(mini) == 1, "pas de proposition « stock minimum » pour une reference sous son minimum")
-    id_min, frs = mini[0]
-    # Un bon du plan de production ne recoit pas une ligne du stock minimum.
-    plan = infra.sql(f"SELECT id_proposition FROM plan_achat WHERE code_fournisseur = '{frs}' AND origine = 'PLAN' "
-                     "AND statut = 'PROPOSE' ORDER BY code_reference LIMIT 1")
-    if plan:
-        r = c.ok("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [plan[0][0]]})
-        bc_plan = r["bons"][0]["id_bc"]
-        verifier(infra.valeur(f"SELECT motif_creation FROM bon_commande WHERE id_bc = '{bc_plan}'") == "MRP",
-                 "le bon du plan de production n'a pas le motif MRP")
-        c.refus("Choukri", "POST", "/api/plan-achat/commander",
-                {"propositions": [id_min], "cibles": {f"{frs}|STOCK_MIN": bc_plan}}, contient="motif")
-    r = c.ok("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [id_min]})
-    bc_min = r["bons"][0]["id_bc"]
-    verifier(infra.valeur(f"SELECT motif_creation FROM bon_commande WHERE id_bc = '{bc_min}'") == "STOCK_MIN",
-             "le bon du stock minimum n'a pas le motif STOCK_MIN")
-    melanges = infra.valeur(
-        "SELECT count(*) FROM (SELECT lb.id_bc FROM ligne_bc lb JOIN plan_achat p ON p.id_proposition = lb.id_proposition "
-        "GROUP BY lb.id_bc HAVING count(DISTINCT p.origine) > 1) x")
-    verifier(melanges == "0", f"{melanges} bon(s) melangent plan de production et stock minimum")
-    infra.sql(f"UPDATE reference SET stock_min_kg = NULL WHERE code_reference = '{ref}'")
+                              "AND statut = 'PROPOSE'") == "1", "l'ecart expire ne rend pas la proposition")
 
 
 def scenario_derogation_bornee(c, infra):
@@ -1765,7 +1716,6 @@ SCENARIOS = [
     scenario_concurrence_stock,
     scenario_contrat_droits,
     scenario_reception_date_du_fait,
-    scenario_plan_achat_deux_origines,
     scenario_codes_erreur,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,

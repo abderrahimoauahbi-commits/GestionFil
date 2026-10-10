@@ -1109,15 +1109,7 @@ pub async fn propositions_achat(
         // LE CALCUL, UNE FOIS (audit v5, T15) : chaque ligne interrogeait
         // v_plan_achat jusqu'a six fois. Il est materialise en tete et joint.
         "WITH calcul AS MATERIALIZED (
-             SELECT code_reference, qte_plan_kg, qte_stock_min_kg, complement_palette_kg FROM v_plan_achat
-         ),
-         -- DEUX ORIGINES (10/10/2026) : une proposition se compare au calcul de
-         -- SON origine, plan de production ou stock minimum, jamais a leur somme.
-         propre AS (
-             SELECT pa.id_proposition,
-                    NULLIF(CASE pa.origine WHEN 'STOCK_MIN' THEN v.qte_stock_min_kg ELSE v.qte_plan_kg END, 0)
-                        AS qte_a_commander_kg
-               FROM plan_achat pa JOIN calcul v ON v.code_reference = pa.code_reference
+             SELECT code_reference, qte_a_commander_kg, complement_palette_kg FROM v_plan_achat
          )
          SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
                 bc.numero_bc, bc.statut AS statut_bc,
@@ -1148,7 +1140,7 @@ pub async fn propositions_achat(
                 ROUND(vpa.qte_a_commander_kg, 3)                       AS quantite_calculee_kg,
                 -- Le complement de palette : ce que l'arrondi a la palette
                 -- pleine ajoute au besoin, pour la seule logistique.
-                ROUND(cal.complement_palette_kg, 3)                    AS complement_palette_kg,
+                ROUND(vpa.complement_palette_kg, 3)                    AS complement_palette_kg,
                 CASE WHEN pa.figee = 1 THEN ROUND(
                     pa.quantite_suggeree_kg
                   - COALESCE(vpa.qte_a_commander_kg, 0), 3)
@@ -1156,7 +1148,7 @@ pub async fn propositions_achat(
                 CASE
                     WHEN pa.figee = 0 THEN NULL
                     WHEN r.actif = 0 THEN 'REFERENCE_INACTIVE'
-                    WHEN vpa.qte_a_commander_kg IS NULL
+                    WHEN vpa.code_reference IS NULL
                          THEN 'BESOIN_DISPARU'
                     -- 2 % de tolerance : un arrondi a la palette cree toujours un
                     -- petit ecart, et le signaler noierait les vrais.
@@ -1175,8 +1167,7 @@ pub async fn propositions_achat(
            LEFT JOIN reference ro    ON ro.code_reference = pa.code_reference_origine
            LEFT JOIN utilisateur uf  ON uf.id_utilisateur = pa.id_utilisateur_figement
            LEFT JOIN bon_commande bc ON bc.id_bc       = pa.id_bc_genere
-           LEFT JOIN calcul cal       ON cal.code_reference = pa.code_reference
-           LEFT JOIN propre vpa       ON vpa.id_proposition = pa.id_proposition
+           LEFT JOIN calcul vpa       ON vpa.code_reference = pa.code_reference
           ORDER BY CASE pa.urgence WHEN 'TIER 1' THEN 1 WHEN 'TIER 2' THEN 2
                                    WHEN 'TIER 3' THEN 3 ELSE 4 END,
                    pa.code_fournisseur, pa.code_reference",

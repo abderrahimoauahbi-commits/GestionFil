@@ -14,6 +14,9 @@ RAPPORT = ICI.parent / "rapport-e2e"
 ORDRE = {"bloquant": 0, "genant": 1, "mineur": 2}
 LIBELLES = {
     "bouton-hors-ecran": "Bouton sorti de l'écran (inaccessible sans défiler à droite)",
+    "action-hors-ecran": "Action nécessaire hors de l'écran (il faut défiler le tableau pour la trouver)",
+    "nombre-mal-lu": "Nombre tapé mal lu",
+    "champ-obligatoire-introuvable": "Champ obligatoire manquant non désigné",
     "bouton-masque": "Bouton recouvert par un autre élément",
     "action-sous-l-ecran": "Action principale sous le bas de l'écran (il faut défiler pour la trouver)",
     "page-defile-horizontalement": "La page entière défile horizontalement",

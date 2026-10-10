@@ -343,7 +343,7 @@ test('mouvement : le magasin sort 12,5 kg hors machine, avec un motif', async ({
   // Les listes d'en-tete ont leur etiquette (10/10/2026) : on les prend par leur nom.
   await page.getByRole('combobox', { name: /^Type de mouvement/ }).selectOption({ label: '− Sortie hors machine (atelier, échantillon, essai, réparation, prêt)' })
   await page.getByRole('combobox', { name: /^Magasin/ }).first().selectOption({ label: 'Morocco' })
-  await saisir(page.getByRole('textbox', { name: /ordre de fabrication/i }), 'OF-2026-118 échantillon client')
+  await saisir(page.getByRole('textbox', { name: /ordre de fabrication/i }), `OF-${PASSAGE} échantillon client`)
   test.skip(!refRecue, 'pas de référence reçue')
   await choisirReference(page, refRecue)
   await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '12,5')
@@ -359,11 +359,194 @@ test('mouvement : le magasin sort 12,5 kg hors machine, avec un motif', async ({
   // L'ecran revient a la liste : on y cherche le mouvement par son ordre de fabrication.
   await expect(page).toHaveURL(/\/mouvements$/)
   const lignes = await lireApi<Record<string, unknown>[]>(page, '/api/mouvements')
-  const m = lignes.find((l) => String(l.numero_of ?? '').startsWith('OF-2026-118') && l.code_reference === refRecue)
+  const m = lignes.find((l) => String(l.numero_of ?? '').startsWith(`OF-${PASSAGE}`) && l.code_reference === refRecue)
   expect(m, 'le mouvement saisi est introuvable').toBeTruthy()
   expect(m!.code_type_mvt).toBe('SORTIE_HORS_MACHINE')
   expect(Number(m!.quantite_kg)).toBeCloseTo(12.5, 4)
   expect(m!.lot_fournisseur).toBe(`LOT-E2E-${PASSAGE}`)
+  expect(veille.erreurs).toEqual([])
+  await page.context().close()
+})
+
+test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis réceptionné', async ({ browser }, info) => {
+  test.skip(!refRecue, 'pas de référence reçue')
+  const { page, veille } = await session(browser, info, 'Magasinie')
+  const stock = async (mag: string) => {
+    const lignes = await lireApi<Record<string, unknown>[]>(page, '/api/catalogue?actif=1&limite=2000')
+    const r = lignes.find((l) => l.code_reference === refRecue)!
+    return { total: Number(r.stock_total_kg), enRoute: Number(r.stock_transit_kg ?? 0), mag }
+  }
+  const avant = await stock('tous')
+  await page.goto('/transferts/nouveau')
+  await page.locator('#src').selectOption('Morocco')
+  await page.locator('#dst').selectOption('Polyfashions')
+  await saisir(page.getByLabel('Transporteur'), 'Camion interne — Mohamed B.')
+  await page.getByRole('button', { name: 'Ajouter une ligne' }).click()
+  await choisirReference(page, refRecue)
+  await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '120,5')
+  const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: /lot/i }) }).first()
+  if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`)).catch(() => undefined)
+  const constats = [...veille.constats, ...(await mesurer(page))]
+  // La ligne se valide par son bouton ✓ ; en 1366, il est hors de l'ecran, a droite
+  // du tableau coupe : on le signale, puis on fait defiler comme l'utilisateur.
+  const valider = page.getByRole('button', { name: 'Valider la ligne' }).first()
+  const dansEcran = await valider.evaluate((b) => {
+    const r = b.getBoundingClientRect()
+    let c = b.parentElement
+    while (c && c !== document.body && !/(auto|scroll|hidden)/.test(getComputedStyle(c).overflowX)) c = c.parentElement
+    const cadre = c && c !== document.body ? c.getBoundingClientRect() : { left: 0, right: innerWidth }
+    return r.left >= cadre.left - 1 && r.right <= Math.min(cadre.right, innerWidth) + 1
+  })
+  if (!dansEcran)
+    constats.push({
+      type: 'action-hors-ecran',
+      gravite: 'bloquant',
+      element: 'Valider la ligne (transfert)',
+      detail: "le bouton qui débloque « Enregistrer » est à droite du tableau coupé : il faut faire défiler pour le trouver",
+    })
+  await page.screenshot({ path: info.outputPath('transfert.png'), fullPage: true })
+  consigner(info, 'saisie : transfert (formulaire rempli)', constats, info.outputPath('transfert.png'))
+  await valider.click()
+  await page.getByRole('button', { name: 'Enregistrer le transfert' }).click()
+  await expect(page).toHaveURL(/\/transferts$/)
+  // NOTRE transfert : le plus recent (la liste en porte d'autres, dont un qu'on ne peut expedier).
+  const transferts = await lireApi<Record<string, unknown>[]>(page, '/api/transferts')
+  const numero = transferts.map((t) => String(t.numero_transfert)).sort().pop()!
+  const ligne = page.getByRole('row', { name: new RegExp(numero) })
+
+  // L'expedition, depuis la liste, avec sa confirmation.
+  await ligne.getByRole('button', { name: 'Expedier', exact: true }).click()
+  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: 'Expedier' }).click()
+  await expect.poll(async () => (await stock('tous')).enRoute).toBeCloseTo(avant.enRoute + 120.5, 4)
+  const enRoute = await stock('tous')
+  expect(enRoute.total, 'le fil en route a quitté les magasins').toBeCloseTo(avant.total - 120.5, 4)
+
+  // La reception a l'arrivee.
+  await ligne.getByRole('button', { name: 'Receptionner', exact: true }).click()
+  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: 'Constater la reception' }).click()
+  await expect.poll(async () => (await stock('tous')).enRoute).toBeCloseTo(avant.enRoute, 4)
+  expect((await stock('tous')).total, 'le fil est arrivé').toBeCloseTo(avant.total, 4)
+  expect(veille.erreurs).toEqual([])
+  await page.context().close()
+})
+
+test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg justifié, clôture', async ({ browser }, info) => {
+  test.skip(!refRecue, 'pas de référence reçue')
+  const { page, veille } = await session(browser, info, 'Choukri')
+  const totalRef = async () =>
+    Number((await lireApi<Record<string, unknown>[]>(page, '/api/catalogue?actif=1&limite=2000')).find((l) => l.code_reference === refRecue)!.stock_total_kg)
+  const avant = await totalRef()
+  await page.goto('/inventaires')
+  await page.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
+  await page.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption('Polyfashions')
+  await page.getByRole('combobox', { name: /^Type/ }).last().selectOption('TOURNANT')
+  await page.getByRole('button', { name: 'Creer', exact: true }).click()
+  await expect
+    .poll(async () => (await lireApi<Record<string, unknown>[]>(page, '/api/inventaires')).some((i) => i.statut === 'BROUILLON' && i.code_magasin === 'Polyfashions'))
+    .toBe(true)
+  const inv = (await lireApi<Record<string, unknown>[]>(page, '/api/inventaires'))
+    .filter((i) => i.statut === 'BROUILLON' && i.code_magasin === 'Polyfashions')
+    .sort((a, b) => String(a.numero_inventaire).localeCompare(String(b.numero_inventaire)))
+    .pop()!
+  await page.getByRole('row', { name: new RegExp(String(inv.numero_inventaire)) }).getByRole('button', { name: 'Ouvrir' }).click()
+
+  // Chaque ligne comptee au clavier : le theorique, sauf notre reference (2,25 kg de moins).
+  // Les lignes naissent a l'ouverture : on attend qu'elles soient a l'ecran ET au serveur.
+  const champs = page.getByRole('textbox', { name: /^Kilos comptés, / })
+  await expect(champs.first()).toBeVisible()
+  let lignes: Record<string, unknown>[] = []
+  await expect
+    .poll(async () => (lignes = await lireApi<Record<string, unknown>[]>(page, `/api/inventaires/${inv.id_inventaire}/lignes`)).length)
+    .toBeGreaterThan(0)
+  const vus = new Map<string, number>()
+  let ecart = false
+  for (let i = 0; i < (await champs.count()); i++) {
+    const champ = champs.nth(i)
+    const ref = (await champ.getAttribute('aria-label'))!.replace('Kilos comptés, ', '')
+    const rang = vus.get(ref) ?? 0
+    vus.set(ref, rang + 1)
+    const ligne = lignes.filter((l) => l.code_reference === ref)[rang]
+    let kg = Number(ligne?.quantite_theorique_kg ?? 0)
+    if (ref === refRecue && !ecart && kg >= 2.25) {
+      kg = Number((kg - 2.25).toFixed(4))
+      ecart = true
+      await saisir(champ, String(kg).replace('.', ','))
+      await saisir(page.getByRole('textbox', { name: `Motif de l'écart, ${ref}` }).nth(rang), 'Bobine abîmée au quai (e2e)')
+      continue
+    }
+    await saisir(champ, String(kg).replace('.', ','))
+  }
+  expect(ecart, `${refRecue} absent du comptage de Polyfashions`).toBe(true)
+  const constats = [...veille.constats, ...(await mesurer(page))]
+  await page.screenshot({ path: info.outputPath('inventaire.png'), fullPage: true })
+  consigner(info, 'saisie : comptage d’inventaire', constats, info.outputPath('inventaire.png'))
+  await page.getByRole('button', { name: 'Enregistrer le comptage' }).click()
+  await page.getByRole('button', { name: 'Cloturer et ajuster' }).click()
+  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: 'Cloturer', exact: true }).click()
+  await expect.poll(totalRef).toBeCloseTo(avant - 2.25, 4)
+  expect(veille.erreurs).toEqual([])
+  await page.context().close()
+})
+
+test('retour fournisseur : la direction rend 10,5 kg de la réception, en la citant', async ({ browser }, info) => {
+  test.skip(!refRecue || !idReception, 'pas de réception validée')
+  const { page, veille } = await session(browser, info, 'Choukri')
+  const totalRef = async () =>
+    Number((await lireApi<Record<string, unknown>[]>(page, '/api/catalogue?actif=1&limite=2000')).find((l) => l.code_reference === refRecue)!.stock_total_kg)
+  const avant = await totalRef()
+  const numeroRec = String((await lireApi<Record<string, unknown>[]>(page, '/api/receptions')).find((r) => r.id_reception === idReception)!.numero_reception)
+  await page.goto('/mouvements/nouveau')
+  await page.getByRole('combobox', { name: /^Type de mouvement/ }).selectOption({ label: '− Retour fournisseur' }).catch(async () => {
+    await choisirOption(page.getByRole('combobox', { name: /^Type de mouvement/ }), /Retour fournisseur/)
+  })
+  await page.getByRole('combobox', { name: /^Magasin/ }).first().selectOption({ label: 'Morocco' })
+  await choisirOption(page.getByRole('combobox', { name: /^Motif/ }).first(), /Retour/i)
+  await saisir(page.getByRole('textbox', { name: /^Document de r/ }), numeroRec)
+  await choisirReference(page, refRecue)
+  await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '10,5')
+  const motifLigne = page.getByRole('combobox', { name: 'Motif de la ligne' }).first()
+  if (await motifLigne.count()) await motifLigne.selectOption({ index: 1 })
+  const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: 'Choisir un lot' }) }).first()
+  if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))
+  consigner(info, 'saisie : retour fournisseur', [...veille.constats, ...(await mesurer(page))])
+  await page.getByRole('button', { name: 'Valider la ligne' }).first().click()
+  await page.getByRole('button', { name: 'Enregistrer le mouvement' }).click()
+  await expect(page).toHaveURL(/\/mouvements$/)
+  await expect.poll(totalRef).toBeCloseTo(avant - 10.5, 4)
+  const m = (await lireApi<Record<string, unknown>[]>(page, '/api/mouvements')).find(
+    (l) => l.code_type_mvt === 'RETOUR_FOURN' && l.code_reference === refRecue && l.reference_document === numeroRec,
+  )
+  expect(m, 'le retour ne cite pas sa réception').toBeTruthy()
+  expect(Number(m!.quantite_kg)).toBeCloseTo(10.5, 4)
+  expect(veille.erreurs).toEqual([])
+  await page.context().close()
+})
+
+test('import : la direction ouvre un dossier et saisit un frais de 1 250,75 MAD', async ({ browser }, info) => {
+  const { page, veille } = await session(browser, info, 'Choukri')
+  await page.goto('/import')
+  await page.getByRole('button', { name: /Nouveau dossier/ }).first().click()
+  await saisir(page.getByLabel('N° BL'), `BL-E2E-${PASSAGE}`)
+  await saisir(page.getByLabel('Conteneur(s)'), 'MSCU 123456-7')
+  await page.getByRole('button', { name: 'Créer le dossier' }).click()
+  await expect(page).toHaveURL(/\/import\/[0-9a-f-]{36}$/)
+  const id = page.url().split('/').pop()!
+
+  await page.getByRole('tab', { name: /Frais/ }).first().click().catch(() => undefined)
+  // Un vrai type de frais, pas l'invite « Nouveau frais… ».
+  await choisirOption(page.getByRole('combobox', { name: 'Type de frais' }), /^(?!Nouveau frais).+/)
+  await saisir(page.getByRole('textbox', { name: 'Libellé du frais' }), 'Transitaire Tanger Med — dossier e2e')
+  await saisir(page.getByRole('textbox', { name: 'N° de pièce' }), `F-${PASSAGE}`)
+  await page.getByRole('combobox', { name: 'Devise du frais' }).selectOption('MAD')
+  await saisir(page.getByRole('textbox', { name: 'Montant en devise' }), '1 250,75')
+  const constats = [...veille.constats, ...(await mesurer(page))]
+  await page.screenshot({ path: info.outputPath('frais.png'), fullPage: true })
+  consigner(info, 'saisie : frais de dossier d’import', constats, info.outputPath('frais.png'))
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click()
+
+  const dossier = async () => JSON.stringify(await lireApi<unknown>(page, `/api/import/dossiers/${id}`))
+  await expect.poll(async () => (await dossier()).includes(`F-${PASSAGE}`)).toBe(true)
+  expect(await dossier(), 'le montant tapé « 1 250,75 » doit valoir 1250.75').toMatch(/1250\.75\b/)
   expect(veille.erreurs).toEqual([])
   await page.context().close()
 })

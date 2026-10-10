@@ -1010,14 +1010,39 @@ def scenario_plan_detail(c, infra):
     d'import en brouillon n'est pas de l'en-cours ; C28 dit ce que fait le reglage."""
     ref = "PP-1500 Dtex-Cream 2951-Hs"
     from urllib.parse import quote
-    d = c.ok("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref)}")
+    # LE PLAN D'ACHAT SUIT LE PLAN DE PRODUCTION, ET LUI SEUL (10/10/2026) : sans plan en
+    # cours, rien n'est propose, pas meme pour une reference sous son minimum.
+    infra.sql(f"UPDATE reference SET stock_min_kg = 50000 WHERE code_reference = '{ref}'")
+    verifier(infra.valeur(f"SELECT count(*) FROM v_plan_achat WHERE code_reference = '{ref}' "
+                          "AND NOT EXISTS (SELECT 1 FROM plan_production WHERE statut = 'EN_COURS')") == "0",
+             "le plan d'achat propose un achat sans plan de production (stock minimum)")
+    infra.sql(f"UPDATE reference SET stock_min_kg = NULL WHERE code_reference = '{ref}'")
+    # Un plan de production saisi, valide, et son MRP : le detail se lit sur ce qu'il reclame.
+    qualite = infra.valeur("SELECT q.code_qualite FROM qualite q WHERE q.statut = 'ACTIF' "
+                           "AND EXISTS (SELECT 1 FROM recette r WHERE r.code_qualite = q.code_qualite AND r.actif = 1) "
+                           "AND NOT EXISTS (SELECT 1 FROM plan_qualite pq JOIN plan_production p USING (id_plan) "
+                           "WHERE pq.code_qualite = q.code_qualite AND p.statut <> 'CLOTURE') ORDER BY 1 LIMIT 1")
+    mois = infra.valeur("SELECT to_char(current_date, 'YYYY-MM')")
+    plan = c.ok("Choukri", "PUT", "/api/plans", {"libelle": "Plan du banc", "date_debut": mois, "mois_horizon": 12,
+                                                 "croissance_annuelle_pct": 0,
+                                                 "saisonnalite": [{"code_qualite": qualite, "mois": m, "coefficient": 1}
+                                                                  for m in range(1, 13)],
+                                                 "qualites": [{"code_qualite": qualite, "m2_base_mensuel": 20000}]})
+    id_plan = plan["id_plan"]
+    c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "SIMULATION"})
+    c.ok("Choukri", "POST", f"/api/plans/{id_plan}/figer-recettes", {})
+    c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "EN_COURS"})
+    c.ok("Choukri", "POST", f"/api/plans/{id_plan}/mrp", {})
+    ref_detail = infra.valeur("SELECT code_reference FROM v_plan_achat ORDER BY qte_a_commander_kg DESC LIMIT 1")
+    verifier(bool(ref_detail), "un plan de production en cours ne produit aucune proposition d'achat")
+    d = c.ok("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref_detail)}")
     k = d["calcul"]
     projete = k["stock_magasin_net_kg"] + k["stock_machine_compte_kg"] + k["encours_kg"] - k["demande_delai_kg"]
     verifier(abs(max(0.0, projete) - k["residuel_kg"]) < 0.01,
              f"le detail ne retombe pas sur le residuel : {projete:.2f} contre {k['residuel_kg']}")
-    besoin = max(0.0, k["sorties_fenetre_kg"] + k["securite_kg"] - k["residuel_kg"],
-                 k["stock_min_catalogue_kg"] - k["residuel_kg"])
-    verifier(besoin <= k["besoin_avant_arrondi_kg"] + 0.01, f"besoin {besoin:.2f} > {k['besoin_avant_arrondi_kg']}")
+    besoin = max(0.0, k["sorties_fenetre_kg"] + k["securite_kg"] - k["residuel_kg"])
+    verifier(abs(besoin - k["besoin_avant_arrondi_kg"]) < 0.01 or (k.get("moq_kg") or 0) >= k["besoin_avant_arrondi_kg"] - 0.01,
+             f"besoin du plan {besoin:.2f} contre {k['besoin_avant_arrondi_kg']}")
     c.refus("Choukri", "GET", "/api/plan-achat/detail?reference=INCONNUE-XYZ", codes=(404,))
 
     def au_port():

@@ -5,7 +5,7 @@
  *   magasin net + machine comptee + en-cours − demande pendant le delai
  *     = stock projete (residuel : jamais sous zero)
  *   besoin = sorties de la couverture + securite − residuel
- *            (ou minimum − residuel, le plus grand)
+ *            (le plan de production seul : pas de stock minimum, 10/10/2026)
  *   puis le MOQ du fournisseur, puis la palette complete.
  *
  * Le calcul est celui d'aujourd'hui : une proposition generee hier peut en
@@ -77,7 +77,6 @@ export function DetailCalcul({ reference }: { reference: string }) {
   const c = q.data.calcul
   const enCoursHeure = c.encours_kg - c.encours_port_kg - (c.retard_compte ? c.encours_retarde_kg : 0)
   const projete = c.stock_magasin_net_kg + c.stock_machine_compte_kg + c.encours_kg - c.demande_delai_kg
-  const parMinimum = c.stock_min_catalogue_kg - c.residuel_kg > c.sorties_fenetre_kg + c.securite_kg - c.residuel_kg
 
   return (
     <div className="grid gap-4 text-[12.5px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -107,10 +106,6 @@ export function DetailCalcul({ reference }: { reference: string }) {
               note={c.sorties_prolongees_kg > 0 ? `dont ${kg(c.sorties_prolongees_kg)} kg prolongés` : undefined} />
             <Ligne signe="+" libelle="Sécurité" valeur={c.securite_kg} />
             <Ligne signe="−" libelle="Stock projeté retenu" valeur={c.residuel_kg} />
-            {c.stock_min_catalogue_kg > 0 && (
-              <Ligne libelle="ou : minimum − projeté" valeur={c.stock_min_catalogue_kg - c.residuel_kg}
-                note={parMinimum ? 'retenu : le plus grand' : undefined} />
-            )}
             {(c.moq_kg ?? 0) > 0 && <Ligne libelle="Minimum de commande (MOQ)" valeur={c.moq_kg ?? 0} />}
             <Ligne libelle="Besoin" valeur={c.besoin_avant_arrondi_kg} fort />
             {c.complement_palette_kg > 0 && (

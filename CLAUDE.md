@@ -63,7 +63,7 @@ cd frontend; npm test                              # node --test : colisage, mê
 cd frontend; python e2e/lancer.py --cible <CARGO_TARGET_DIR> [-- --grep "écran /stock"]
 python e2e/lancer.py --servir      # base + serveur gardés ouverts pour écrire un test
 # autres sous-commandes admin : definir-mot-de-passe <login>, lister-comptes, sauvegarder,
-# lister-sauvegardes, restaurer, diagnostic, reparer
+# lister-sauvegardes, restaurer, verifier-sauvegarde (restaure à côté, contrôle, efface), diagnostic, reparer
 
 # Frontend (Vite relaie /api vers :8080)
 cd frontend

@@ -19,7 +19,7 @@ import {
   Check, ChevronDown, ChevronLeft, ChevronRight, Layers, Loader2, Plus, Search, X,
 } from 'lucide-react'
 import { api } from '../../api/client'
-import { Alerte, Chargement } from '../../composants/ui/base'
+import { Alerte, Chargement, SaisieNombre } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
 import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import {
@@ -768,8 +768,7 @@ function ChampNum({
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[12px] text-attenue-texte">{label}</span>
-      <input
-        type="number"
+      <SaisieNombre
         inputMode="decimal"
         step={pas}
         max={max}

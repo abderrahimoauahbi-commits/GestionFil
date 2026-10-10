@@ -26,6 +26,7 @@ import { useOuvrirVue } from '../../lib/navigation'
 import { cn } from '../../lib/utils'
 import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import { ChampLot } from '../../composants/ChampLot'
+import { SaisieNombre } from '../../composants/ui/base'
 import {
   cheminMachine, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, fmtInstant, LIBELLE_DESTINATION,
   LIBELLE_EFFET, LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue,
@@ -1062,8 +1063,7 @@ function Case({
   v, set, pas = 1, max, zero,
 }: { v: number; set: (v: number) => void; pas?: number; max?: number; zero?: boolean }) {
   return (
-    <input
-      type="number"
+    <SaisieNombre
       inputMode="decimal"
       step={pas}
       min={0}

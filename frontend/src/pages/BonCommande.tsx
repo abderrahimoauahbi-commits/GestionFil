@@ -51,6 +51,7 @@ import {
 import { TotauxCommande } from '../composants/TotauxCommande'
 import { facteurVersKg } from '../lib/conditionnement'
 import { auCentime, cn, fmt } from '../lib/utils'
+import { lireNombre } from '../lib/nombres'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -943,7 +944,7 @@ export function BonCommande() {
                   onChange={(e) => setValidation({ ...validation, taux: e.target.value })}
                 />
               </div>
-              {Number(validation.taux.replace(',', '.')) !== Number(bc.taux_du_jour ?? NaN) && (
+              {(lireNombre(validation.taux) ?? 0) !== Number(bc.taux_du_jour ?? NaN) && (
                 <div className="sm:col-span-2">
                   <Etiq obligatoire>Pourquoi ce taux</Etiq>
                   <Champ
@@ -958,14 +959,14 @@ export function BonCommande() {
               <Bouton
                 chargement={changerStatut.isPending}
                 disabled={
-                  !(Number(validation.taux.replace(',', '.')) > 0) ||
-                  (Number(validation.taux.replace(',', '.')) !== Number(bc.taux_du_jour ?? NaN) &&
+                  !((lireNombre(validation.taux) ?? 0) > 0) ||
+                  ((lireNombre(validation.taux) ?? 0) !== Number(bc.taux_du_jour ?? NaN) &&
                     validation.motif.trim().length < 5)
                 }
                 onClick={() =>
                   changerStatut.mutate({
                     statut: 'VALIDE',
-                    taux_saisi: Number(validation.taux.replace(',', '.')),
+                    taux_saisi: (lireNombre(validation.taux) ?? 0),
                     motif_taux: validation.motif.trim() || undefined,
                   })
                 }

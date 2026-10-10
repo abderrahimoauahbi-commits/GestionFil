@@ -20,6 +20,7 @@ import { useDroits } from '../../auth/AuthContext'
 import { Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Selecteur } from '../../composants/ui/base'
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { cn, fmt } from '../../lib/utils'
+import { lireNombre } from '../../lib/nombres'
 
 interface FactureCout {
   id_facture: string
@@ -55,7 +56,7 @@ interface Paiement {
   annee_paiement: number
 }
 
-const nombre = (v: string) => Number(v.replace(/\s/g, '').replace(',', '.'))
+const nombre = (v: string) => (lireNombre(v) ?? 0)
 const signe = (n: number | null | undefined) => (n == null ? '—' : `${n > 0 ? '+' : ''}${fmt.nombre(n, 2)}`)
 
 export function CoutRevientReel({ idDossier }: { idDossier: string }) {

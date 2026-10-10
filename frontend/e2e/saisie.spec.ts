@@ -21,6 +21,11 @@ let idReception = ''
 /** La reference commandee puis recue (le plan propose d'abord ce qu'il veut). */
 let refRecue = ''
 
+/** Un champ numerique, par son nom : zone de texte au clavier decimal depuis le 10/10/2026. */
+function champNombre(page: Page, options: { name: string | RegExp; exact?: boolean }) {
+  return page.getByRole('textbox', options).or(page.getByRole('spinbutton', options))
+}
+
 /** Le statut d'une reception, lu au serveur (l'ecran affiche le code brut). */
 async function statutReception(page: Page, id: string) {
   const liste = await lireApi<Record<string, unknown>[]>(page, '/api/receptions')
@@ -40,25 +45,48 @@ async function choisirReference(page: Page, motif: string) {
   const ref = page.getByRole('combobox', { name: 'Référence de la ligne' }).last()
   await ref.click()
   await ref.pressSequentially(motif, { delay: 20 })
-  await page.waitForTimeout(600)
-  await ref.press('ArrowDown')
-  await ref.press('Enter')
+  // La liste arrive du serveur : on attend qu'elle soit la, puis on choisit, comme
+  // un utilisateur (un Entree tape trop tot ne retenait rien).
+  const liste = page.getByRole('listbox')
+  // La suggestion qui porte ce qu'on a tape : la liste montre d'abord le stock du
+  // magasin, avant d'appliquer la frappe, et un clic trop rapide prenait sa tete.
+  const premiere = liste.getByRole('option').filter({ hasText: motif }).first()
+  const ailleurs = liste.getByRole('button', { name: 'Chercher dans tout le catalogue' })
+  await expect(premiere.or(ailleurs)).toBeVisible({ timeout: 15_000 })
+  // Le plan ne propose rien qui corresponde : l'utilisateur elargit au catalogue.
+  if (await ailleurs.isVisible()) {
+    await ailleurs.click()
+    await ref.click()
+  }
+  await expect(premiere).toBeVisible({ timeout: 15_000 })
+  await premiere.click()
+  await expect(ref).toBeHidden()
 }
 
 test('les formats de nombre tapés dans une quantité', async ({ browser }, info) => {
-  // Ce qu'un utilisateur marocain tape, et ce qu'il attend. Les deux premiers
-  // DOIVENT passer ; les autres sont consignes s'ils sont mal lus.
-  const formats = ['1234,5', '1 234,5', '1234.5', '12 345,678', '1.234,5']
+  // Ce qu'un utilisateur tape, et ce qu'il attend (src/lib/nombres.ts). Depuis le
+  // 10/10/2026, TOUS doivent etre lus juste : « 1.234,5 » valait 1,2345 avant.
+  const formats: [string, number][] = [
+    ['1234,5', 1234.5],
+    ['1 234,5', 1234.5],
+    ['1234.5', 1234.5],
+    ['12 345,678', 12345.678],
+    ['1.234,5', 1234.5],
+    ['1,234.5', 1234.5],
+    ['12.5', 12.5],
+  ]
   const { page } = await session(browser, info, 'Assistante')
   await page.goto('/bons-commande/nouveau')
   await page.locator('#frs').selectOption('FRS-001')
   await choisirReference(page, 'PP')
-  const qte = page.getByRole('spinbutton', { name: 'Quantité en kilos' }).first()
+  const qte = champNombre(page, { name: 'Quantité en kilos' }).first()
   const constats: Constat[] = []
-  for (const f of formats) {
+  for (const [f, valeur] of formats) {
     await saisir(qte, f)
+    await qte.press('Tab')
+    // En quittant le champ, la saisie se range a la francaise : « 1234,5 ».
     const lu = await qte.inputValue()
-    const bon = lu !== '' && Math.abs(Number(lu) - attendu(f)) < 1e-9
+    const bon = lu !== '' && Math.abs(attendu(lu) - valeur) < 1e-9
     if (!bon)
       constats.push({
         type: 'nombre-mal-lu',
@@ -66,8 +94,11 @@ test('les formats de nombre tapés dans une quantité', async ({ browser }, info
         element: 'Quantité en kilos (bon de commande)',
         detail: `tapé « ${f} », le champ garde « ${lu} »${lu === '' ? ' (saisie perdue sans message)' : ''}`,
       })
-    if (f === '1234,5' || f === '1 234,5') expect.soft(bon, `« ${f} » lu « ${lu} »`).toBe(true)
+    expect.soft(bon, `« ${f} » lu « ${lu} » au lieu de ${valeur}`).toBe(true)
   }
+  // Un nombre illisible se dit (bordure rouge), il ne se devine pas.
+  await saisir(qte, '1,2,3')
+  await expect(qte).toHaveAttribute('aria-invalid', 'true')
   consigner(info, 'saisie : formats de nombre', constats)
   await page.context().close()
 })
@@ -77,11 +108,12 @@ test('bon de commande : l’assistante le crée, au format français', async ({ 
   await page.goto('/bons-commande/nouveau')
   await page.locator('#frs').selectOption('FRS-001')
   await saisir(page.getByLabel('Observations'), 'Commande e2e : livraison en deux palettes, quai 3, avant 10 h.')
-  await choisirReference(page, 'PP')
+  // Une reference que les scenarios du banc ne sortent pas (regle des 50 kg par jour).
+  await choisirReference(page, '6666')
   await page.getByRole('combobox', { name: 'Unité' }).first().selectOption('kg')
-  await saisir(page.getByRole('spinbutton', { name: 'Quantité en kilos' }).first(), '1 234,5')
-  await saisir(page.getByRole('spinbutton', { name: /^Prix .* par kg$/ }).first(), '3,75')
-  await saisir(page.getByRole('spinbutton', { name: 'Remise en pourcentage du prix brut' }).first(), '2,5')
+  await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '1 234,5')
+  await saisir(champNombre(page, { name: /^Prix .* par kg$/ }).first(), '3,75')
+  await saisir(champNombre(page, { name: 'Remise en pourcentage du prix brut' }).first(), '2,5')
 
   const constats = [...veille.constats, ...(await mesurer(page))]
   await page.screenshot({ path: info.outputPath('bc-saisi.png'), fullPage: true })
@@ -143,24 +175,24 @@ test('réception : le magasin reprend le bon, pèse au format français et soume
   await page.getByRole('combobox', { name: 'Fournisseur *' }).selectOption('FRS-001')
   await saisir(page.getByLabel('Bon de livraison'), 'BL-E2E-0001')
   await saisir(page.getByLabel('Transporteur'), 'Transports Atlas Tanger')
-  await saisir(page.getByRole('spinbutton', { name: 'Nombre de colis' }), '3')
-  await saisir(page.getByRole('spinbutton', { name: /^Poids brut/ }), '1 260,8')
+  await saisir(champNombre(page, { name: 'Nombre de colis' }), '3')
+  await saisir(champNombre(page, { name: /^Poids brut/ }), '1 260,8')
   const bons = page.getByRole('combobox', { name: 'Bon de commande' })
   const option = bons.locator('option', { hasText: numeroBc })
   await bons.selectOption({ label: (await option.textContent())!.trim() })
   await page.getByRole('button', { name: 'Reprendre les lignes' }).click()
 
-  const pesee = page.getByRole('spinbutton', { name: 'Quantité pesée, en kilos' }).first()
-  await saisir(page.getByRole('spinbutton', { name: 'Quantité du bon de livraison, en kilos' }).first(), '1 234,5')
+  const pesee = champNombre(page, { name: 'Quantité pesée, en kilos' }).first()
+  await saisir(champNombre(page, { name: 'Quantité du bon de livraison, en kilos' }).first(), '1 234,5')
   await saisir(pesee, '1 230,25')
   await saisir(page.getByLabel('Lot fournisseur').first(), `LOT-E2E-${PASSAGE}`)
   // Les bobines comptees : pesee, palettes et bobines sont liees ; on verifie
   // que compter les bobines n'ecrase pas la pesee tapee juste avant.
-  const bobines = page.getByRole('spinbutton', { name: 'Nombre de bobines' }).first()
+  const bobines = champNombre(page, { name: 'Nombre de bobines' }).first()
   await saisir(bobines, '474')
   const peseeApres = await pesee.inputValue()
   const constats = [...veille.constats, ...(await mesurer(page))]
-  if (Math.abs(Number(peseeApres) - 1230.25) > 1e-6)
+  if (Math.abs(attendu(peseeApres) - 1230.25) > 1e-6)
     constats.push({
       type: 'saisie-ecrasee',
       gravite: 'bloquant',
@@ -171,7 +203,7 @@ test('réception : le magasin reprend le bon, pèse au format français et soume
   consigner(info, 'saisie : réception (formulaire rempli)', constats, info.outputPath('reception-saisie.png'))
 
   // Si les bobines ont recalcule la pesee, l'utilisateur la retape : c'est elle qui fait foi.
-  if (Math.abs(Number(peseeApres) - 1230.25) > 1e-6) await saisir(pesee, '1 230,25')
+  if (Math.abs(attendu(peseeApres) - 1230.25) > 1e-6) await saisir(pesee, '1 230,25')
   await page.getByRole('button', { name: 'Enregistrer la reception' }).click()
   await expect(page).toHaveURL(/\/receptions\/[0-9a-f-]{36}$/)
   idReception = page.url().split('/').pop()!
@@ -220,10 +252,10 @@ test('fournisseur : la direction crée une fiche longue, au format français', a
   await saisir(page.getByRole('textbox', { name: 'Ville' }), 'Tanger')
   await saisir(page.getByRole('textbox', { name: 'Pays *' }), 'Maroc')
   await page.getByRole('combobox', { name: 'Devise de facturation' }).selectOption('EUR')
-  await saisir(page.getByRole('spinbutton', { name: /^Délai de paiement/ }), '90')
-  await saisir(page.getByRole('spinbutton', { name: /^Délai de livraison/ }), '45')
-  await saisir(page.getByRole('spinbutton', { name: /^Tolerance de pesee/ }), '2,5')
-  await saisir(page.getByRole('spinbutton', { name: 'Note globale (/100)' }), '87,5')
+  await saisir(champNombre(page, { name: /^Délai de paiement/ }), '90')
+  await saisir(champNombre(page, { name: /^Délai de livraison/ }), '45')
+  await saisir(champNombre(page, { name: /^Tolerance de pesee/ }), '2,5')
+  await saisir(champNombre(page, { name: 'Note globale (/100)' }), '87,5')
   const constats = [...veille.constats, ...(await mesurer(page))]
   await page.screenshot({ path: info.outputPath('fournisseur.png'), fullPage: true })
   consigner(info, 'saisie : fiche fournisseur', constats, info.outputPath('fournisseur.png'))
@@ -255,13 +287,13 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   await saisir(page.getByRole('textbox', { name: 'Designation *' }), 'Polypropylène 1500 deniers texturé, beige sable, bobine conique 2,6 kg')
   await page.getByRole('combobox', { name: 'Catégorie matiere *' }).selectOption({ index: 1 })
   await page.getByRole('combobox', { name: 'Fournisseur *' }).selectOption('FRS-001')
-  await saisir(page.getByRole('spinbutton', { name: /^Densité/ }), '0,0125')
-  await saisir(page.getByRole('spinbutton', { name: /^Poids par unité/ }), '2,597')
-  await saisir(page.getByRole('spinbutton', { name: /^Unités par palette/ }), '240')
-  await saisir(page.getByRole('spinbutton', { name: /^Stock minimum/ }), '1 500')
-  await saisir(page.getByRole('spinbutton', { name: 'Couverture minimale (mois)' }), '1,5')
-  await saisir(page.getByRole('spinbutton', { name: /^Marge de sécurité/ }), '12,5')
-  await saisir(page.getByRole('spinbutton', { name: 'Prix par unité *' }), '3,85')
+  await saisir(champNombre(page, { name: /^Densité/ }), '0,0125')
+  await saisir(champNombre(page, { name: /^Poids par unité/ }), '2,597')
+  await saisir(champNombre(page, { name: /^Unités par palette/ }), '240')
+  await saisir(champNombre(page, { name: /^Stock minimum/ }), '1 500')
+  await saisir(champNombre(page, { name: 'Couverture minimale (mois)' }), '1,5')
+  await saisir(champNombre(page, { name: /^Marge de sécurité/ }), '12,5')
+  await saisir(champNombre(page, { name: 'Prix par unité *' }), '3,85')
   await page.getByRole('combobox', { name: 'Devise *' }).selectOption('USD')
   const constats = [...veille.constats, ...(await mesurer(page))]
 
@@ -314,7 +346,7 @@ test('mouvement : le magasin sort 12,5 kg hors machine, avec un motif', async ({
   await saisir(page.getByRole('textbox', { name: 'Facultatif, texte libre' }), 'OF-2026-118 échantillon client')
   test.skip(!refRecue, 'pas de référence reçue')
   await choisirReference(page, refRecue)
-  await saisir(page.getByRole('spinbutton', { name: 'Quantité en kilos' }).first(), '12,5')
+  await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '12,5')
   await choisirOption(listes.nth(2), /Sortie hors machine/)
   await choisirOption(page.getByRole('combobox', { name: 'Motif de la ligne' }).first(), /chantillon/i)
   const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: 'Choisir un lot' }) }).first()

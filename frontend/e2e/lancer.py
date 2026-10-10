@@ -48,7 +48,7 @@ import scenarios  # noqa: E402
 PORT = 8097
 # Les scenarios qui remplissent la base. Pas ceux qui verrouillent des comptes
 # ou changent des mots de passe (sessions, gardes), ni ceux qui ne creent rien.
-SANS = {"sessions", "gardes_p1", "migrations_rejouables", "controles_finaux", "masquage"}
+SANS = {"sessions", "gardes_p1", "migrations_rejouables", "controles_finaux", "masquage", "sauvegarde_restaurable"}
 
 # Un exemple par ecran a parametre : le premier document de chaque sorte.
 EXEMPLES = {

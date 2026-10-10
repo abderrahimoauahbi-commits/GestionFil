@@ -46,6 +46,7 @@ import {
 } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
 import { NATURE_PIECE, type Piece } from './types'
+import { lireNombre } from '../../lib/nombres'
 
 /** Un document en attente : le fichier, sa nature, et de quoi l'afficher. */
 interface Document {
@@ -119,7 +120,7 @@ export function AssistantImport() {
           numero_bl: f.numero_bl.trim() || null,
           conteneurs: f.conteneurs.trim() || null,
           code_devise: f.code_devise,
-          taux_change: Number(f.taux_change.replace(',', '.')),
+          taux_change: (lireNombre(f.taux_change) ?? 0),
           date_arrivee: f.date_arrivee || null,
           notes: f.notes.trim() || null,
         },
@@ -156,7 +157,7 @@ export function AssistantImport() {
   const maj = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF((x) => ({ ...x, [k]: e.target.value }))
 
-  const tauxValide = Number(f.taux_change.replace(',', '.')) > 0
+  const tauxValide = (lireNombre(f.taux_change) ?? 0) > 0
   const doc = documents[pointe]
 
   const manquants = useMemo(() => {

@@ -181,9 +181,43 @@ RandomizedDelaySec=300
 WantedBy=timers.target
 TIMER
 
+# LA PREUVE QUE LA SAUVEGARDE SE RESTAURE (10/10/2026) : chaque semaine, la plus
+# recente est restauree dans une base temporaire, controlee (schema, migrations,
+# C11), puis effacee. La base vivante n'est pas touchee. Le resultat se lit par
+# `journalctl -u gestionfil-verif-sauvegarde`. Le role de la base doit pouvoir
+# creer une base (CREATEDB) : `restaurer` en a besoin aussi.
+cat > /etc/systemd/system/gestionfil-verif-sauvegarde.service <<SERVICE
+[Unit]
+Description=Verification hebdomadaire : la derniere sauvegarde Gestion Fil se restaure
+Requires=postgresql.service
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=$UTILISATEUR
+Group=$UTILISATEUR
+WorkingDirectory=$RACINE
+EnvironmentFile=$RACINE/.env
+ExecStart=$RACINE/gestionfil-admin verifier-sauvegarde
+SERVICE
+
+cat > /etc/systemd/system/gestionfil-verif-sauvegarde.timer <<'TIMER'
+[Unit]
+Description=Verification hebdomadaire de la sauvegarde Gestion Fil
+
+[Timer]
+# Le dimanche a 03h30, apres la sauvegarde de 02h30.
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
+
 systemctl daemon-reload
 systemctl enable gestionfil-sauvegarde.timer >/dev/null 2>&1 || true
-echo "  minuterie posee : tous les jours a 02h30"
+systemctl enable gestionfil-verif-sauvegarde.timer >/dev/null 2>&1 || true
+echo "  minuterie posee : tous les jours a 02h30 ; verification de la sauvegarde le dimanche a 03h30"
 
 dire "Termine"
 echo "Etape suivante : 03-publier.sh, depuis le poste de developpement."

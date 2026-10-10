@@ -11,13 +11,14 @@ import { api, ErreurApi } from '../../api/client'
 import { Alerte, Bouton, Chargement } from '../../composants/ui/base'
 import { cn, fmt } from '../../lib/utils'
 import type { Frais, Ligne } from './types'
+import { lireNombre } from '../../lib/nombres'
 
 export const echec = (e: unknown) =>
   toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
 /** « 12 584,50 » ou « 12584.5 » : les deux se saisissent. */
 export const nombre = (s: string | number | null | undefined) =>
-  Number(String(s ?? '').replace(/\s/g, '').replace(',', '.'))
+  (lireNombre(String(s ?? '')) ?? 0)
 
 /**
  * Tout ce qu'un geste d'import peut changer. Sans dossier, tous les dossiers :

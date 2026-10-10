@@ -18,6 +18,7 @@ import { api, ErreurApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ } from '../composants/ui/base'
 import { fmt } from '../lib/utils'
+import { lireNombre } from '../lib/nombres'
 
 interface Saison {
   mois: number
@@ -53,7 +54,7 @@ export function SaisonMinimums() {
   const enregistrerSaison = useMutation({
     mutationFn: async () => {
       for (const [mois, v] of Object.entries(brouillon)) {
-        await api.patch(`/api/saisons/${mois}`, { coefficient: Number(v.replace(',', '.')) })
+        await api.patch(`/api/saisons/${mois}`, { coefficient: (lireNombre(v) ?? 0) })
       }
     },
     onSuccess: () => {

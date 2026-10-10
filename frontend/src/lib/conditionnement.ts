@@ -28,6 +28,8 @@
  * faut le dire, pas inventer un facteur. Un kilo faux se propage en coût de
  * revient faux.
  */
+import { lireNombre } from './nombres.ts'
+
 
 /** Ce que la référence dit de son conditionnement. */
 export interface Conditionnement {
@@ -51,7 +53,7 @@ const VIDE: Colisage = { kg: null, bobines: null, palettes: null }
 /** Un nombre utilisable, ou null. Une chaîne vide n'est pas un zéro. */
 function nombre(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null
-  const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'))
+  const n = typeof v === 'number' ? v : (lireNombre(String(v)) ?? 0)
   return Number.isFinite(n) ? n : null
 }
 

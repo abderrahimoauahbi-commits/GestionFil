@@ -11,6 +11,7 @@ import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { lireNombre, versCanonique, versSaisie } from '../../lib/nombres'
 
 // ============================================================================
 // Bouton
@@ -133,10 +134,78 @@ const classeChamp =
   'disabled:cursor-not-allowed disabled:bg-attenue disabled:text-attenue-texte ' +
   'aria-[invalid=true]:border-danger aria-[invalid=true]:ring-danger/25'
 
+/**
+ * LA SAISIE D'UN NOMBRE, a la francaise (10/10/2026). Le champ numerique du
+ * navigateur lisait « 1.234,5 » comme 1,2345 et effacait sans prevenir ce
+ * qu'il ne comprenait pas. Ici, un champ texte au clavier decimal : on voit ce
+ * qu'on a tape, l'ecran recoit la valeur lue par `lireNombre` (« 1234.5 »), et un
+ * nombre illisible se borde de rouge au lieu d'etre devine. Les ecrans n'ont
+ * rien a changer : ils lisent toujours `e.target.value`.
+ */
+export const SaisieNombre = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ value, defaultValue, onChange, onBlur, onKeyDown, step, min, max, type: _type, ...props }, ref) => {
+    const exterieur = value === undefined ? undefined : String(value ?? '')
+    const [texte, setTexte] = React.useState(() => versSaisie(exterieur ?? (defaultValue as string | undefined)))
+    // La derniere valeur transmise : si l'ecran la renvoie telle quelle, on garde
+    // ce que l'utilisateur a tape (« 1 234,5 ») au lieu de le reecrire.
+    const emise = React.useRef(exterieur)
+    React.useEffect(() => {
+      if (exterieur !== undefined && exterieur !== emise.current) {
+        emise.current = exterieur
+        setTexte(versSaisie(exterieur))
+      }
+    }, [exterieur])
+    const lu = lireNombre(texte)
+    const illisible = lu !== null && Number.isNaN(lu)
+    const emettre = (e: React.SyntheticEvent<HTMLInputElement>, brut: string) => {
+      setTexte(brut)
+      const canon = versCanonique(brut)
+      const transmis = Number.isNaN(lireNombre(brut) ?? 0) ? '' : canon
+      emise.current = transmis
+      // L'evenement d'origine, la valeur remplacee par la valeur lue.
+      onChange?.({ ...e, target: { ...e.currentTarget, value: transmis, name: e.currentTarget.name } } as unknown as React.ChangeEvent<HTMLInputElement>)
+    }
+    const pas = step === undefined || step === 'any' ? 1 : Number(step)
+    return (
+      <input
+        ref={ref}
+        {...props}
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        value={texte}
+        aria-invalid={illisible || props['aria-invalid'] ? true : undefined}
+        title={illisible ? `Nombre illisible : « ${texte} ». Exemples : 1234,5 — 1 234,5 — 1.234,5` : props.title}
+        onChange={(e) => emettre(e, e.currentTarget.value)}
+        onKeyDown={(e) => {
+          // Les fleches gardent leur role de compteur, comme le champ numerique.
+          if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !illisible) {
+            e.preventDefault()
+            let n = (lu ?? 0) + (e.key === 'ArrowUp' ? pas : -pas)
+            if (min !== undefined && n < Number(min)) n = Number(min)
+            if (max !== undefined && n > Number(max)) n = Number(max)
+            emettre(e, versSaisie(Number(n.toFixed(6))))
+          }
+          onKeyDown?.(e)
+        }}
+        onBlur={(e) => {
+          // En quittant le champ, la saisie se range : « 1 234,5 » devient « 1234,5 ».
+          if (!illisible && lu !== null) setTexte(versSaisie(lu))
+          onBlur?.(e)
+        }}
+      />
+    )
+  },
+)
+SaisieNombre.displayName = 'SaisieNombre'
+
 export const Champ = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, ...props }, ref) => (
-    <input ref={ref} className={cn(classeChamp, className)} {...props} />
-  ),
+  ({ className, ...props }, ref) =>
+    props.type === 'number' ? (
+      <SaisieNombre ref={ref} className={cn(classeChamp, 'tabular-nums', className)} {...props} />
+    ) : (
+      <input ref={ref} className={cn(classeChamp, className)} {...props} />
+    ),
 )
 Champ.displayName = 'Champ'
 

@@ -26,6 +26,7 @@ import { api, ErreurApi } from '../api/client'
 import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Etiq, Selecteur } from '../composants/ui/base'
 import { cn, fmt } from '../lib/utils'
 import { PanneRequetes } from '../composants/PanneRequetes'
+import { lireNombre } from '../lib/nombres'
 
 interface LigneRef {
   code_reference: string
@@ -62,7 +63,7 @@ interface Contexte {
 }
 
 const signe = (n: number) => `${n > 0 ? '+' : ''}${fmt.nombre(n, 2)}`
-const nb = (s: string) => Number(s.replace(/\s/g, '').replace(',', '.'))
+const nb = (s: string) => (lireNombre(s) ?? 0)
 const echec = (e: unknown) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
 /** Le detail par reference : ce que l'apercu montre avant de signer. */

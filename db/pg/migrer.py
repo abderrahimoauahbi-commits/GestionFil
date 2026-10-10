@@ -34,6 +34,8 @@ elle n'est pas inscrite, et le rapport dit quoi. Une migration qui ne se rejoue
 pas (elle chargeait des donnees deja presentes) est inscrite avec un
 avertissement. Un objet remplace depuis hors des migrations (fichier source recharge) parait
 aussi « non joue » : apres lecture du rapport, `--accepter <fichier>[,...]`.
+Un ecart qu'aucune migration n'explique (objet change hors des migrations)
+ARRETE l'inscription (10/10/2026) : `--accepter-non-attribues` apres lecture.
 `--sans-essai` retrouve l'ancien comportement, a vos risques.
 """
 import hashlib
@@ -226,14 +228,53 @@ def main():
             print(f"  essai a blanc de {len(sequence)} migration(s) (transaction annulee)...")
             ecarts, echecs = essai_a_blanc(base, sequence)
             textes = {f.name: f.read_text(encoding="utf-8") for f in sequence}
+            non_attribues: list[str] = []
             for e in ecarts:
                 objet = objet_de(e)
                 # La derniere migration de la suite qui nomme l'objet en est l'auteur.
                 auteur = next((f.name for f in reversed(sequence) if objet in textes[f.name]), None)
+                # UN NOM GENERE (10/10/2026) : « ck_date_alerte_date_detection_d958 »
+                # n'apparait nulle part en clair — 08m le fabrique dans un DO. Pour
+                # une contrainte ou un index, et pour eux seuls, on cherche alors son
+                # prefixe (« ck_date_alerte_date », ..., « ck_date »). Une vue ou une
+                # fonction porte son nom en clair : un prefixe y accuserait une voisine.
+                nature = e.replace("(disparait) ", "").split()[0]
+                if auteur is None and nature in ("ctr", "idx"):
+                    morceaux = objet.split("_")
+                    for n in range(len(morceaux) - 1, 1, -1):
+                        prefixe = "_".join(morceaux[:n])
+                        if len(prefixe) < 6:
+                            break
+                        auteur = next((f.name for f in reversed(sequence) if prefixe in textes[f.name]), None)
+                        if auteur:
+                            break
                 if auteur in [c.name for c in candidates]:
                     refusees.setdefault(auteur, []).append(e)
-                else:
-                    print(f"  ecart non attribue a une migration a inscrire : {e}")
+                elif auteur is None:
+                    non_attribues.append(e)
+            # UN ECART SANS AUTEUR (10/10/2026). Il etait affiche puis ignore : 08m a
+            # ete inscrite sur une copie sans que ses contraintes existent. Deux cas :
+            #  - le rejeu AJOUTERAIT ou CHANGERAIT l'objet : la base n'a pas ce que
+            #    les migrations disent. On n'inscrit rien tant qu'un humain n'a pas lu ;
+            #  - l'objet existe dans la base et DISPARAIT seulement du rejeu (une vue
+            #    rechargee depuis son fichier source, que le rejeu emporte en
+            #    cascade) : la base est en avance, pas en retard. Signale, sans bloquer.
+            en_avance = [e for e in non_attribues if e.startswith("(disparait) ")]
+            non_attribues = [e for e in non_attribues if not e.startswith("(disparait) ")]
+            if en_avance:
+                print(f"  {len(en_avance)} objet(s) present(s) dans la base et absent(s) du rejeu "
+                      "(recharges hors des migrations) : sans incidence sur l'inscription.")
+            if non_attribues and "--accepter-non-attribues" not in args:
+                print(f"  {len(non_attribues)} ecart(s) que les migrations n'expliquent pas :")
+                for e in non_attribues[:25]:
+                    print(f"      {e}")
+                if len(non_attribues) > 25:
+                    print(f"      ... et {len(non_attribues) - 25} autre(s)")
+                sys.exit("Rien n'a ete inscrit. Ces objets ont ete changes hors des migrations (fichier source "
+                         "recharge, geste a la main) : lisez-les, puis relancez avec --accepter-non-attribues "
+                         "si la base est bien dans l'etat voulu.")
+            for e in non_attribues:
+                print(f"  ecart non attribue, accepte nommement : {e}")
             if echecs:
                 print(f"  {echecs} instruction(s) ne se rejouent pas (donnees deja chargees) : "
                       "sautees, sans incidence sur le schema compare.")

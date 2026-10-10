@@ -59,6 +59,7 @@ import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { SANS_LOT, couleurEcart, libelleLot, useTolerancesLot } from '../lib/lots'
 import { PanneRequetes } from '../composants/PanneRequetes'
+import { lireNombre } from '../lib/nombres'
 
 const MODULE = 'INVENTAIRE'
 
@@ -152,7 +153,7 @@ type ChampSaisie = keyof Saisie
 function lire(s: string): number | null {
   const t = s.trim()
   if (t === '') return null
-  return Number(t.replace(/\s/g, '').replace(',', '.'))
+  return (lireNombre(t) ?? 0)
 }
 
 const nombre = (v: unknown): number | null => {
@@ -1324,7 +1325,7 @@ function LotTrouve({
   const [ref, setRef] = useState('')
   const [lot, setLot] = useState('')
   const [kg, setKg] = useState('')
-  const pret = !!ref.trim() && !!lot.trim() && Number(kg.replace(',', '.')) >= 0 && kg.trim() !== ''
+  const pret = !!ref.trim() && !!lot.trim() && (lireNombre(kg) ?? 0) >= 0 && kg.trim() !== ''
   const champ = 'h-8 rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[12.5px]'
   return (
     <div className="mb-3 flex flex-wrap items-end gap-2 rounded-[var(--radius)] border border-dashed border-bordure bg-attenue/20 p-2">
@@ -1342,7 +1343,7 @@ function LotTrouve({
         aria-label="Quantité comptée en kilos" className={cn(champ, 'w-32 text-right')} />
       <Bouton taille="sm" className="h-8" disabled={!pret} chargement={enCours}
         onClick={async () => {
-          await ajouter({ code_reference: ref.trim(), lot_fournisseur: lot.trim(), quantite_comptee_kg: Number(kg.replace(',', '.')) })
+          await ajouter({ code_reference: ref.trim(), lot_fournisseur: lot.trim(), quantite_comptee_kg: (lireNombre(kg) ?? 0) })
           setLot('')
           setKg('')
         }}>

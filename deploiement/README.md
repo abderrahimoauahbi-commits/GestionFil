@@ -317,6 +317,25 @@ sudo -u gestionfil /opt/gestionfil/gestionfil-admin lister-sauvegardes
 Les fichiers vont dans `/opt/gestionfil/sauvegardes`, en `0700` : chacun
 contient **toute la base**.
 
+### Prouver qu'une sauvegarde se restaure
+
+Une sauvegarde jamais restaurée n'est pas une sauvegarde. Chaque dimanche à
+03 h 30, `gestionfil-verif-sauvegarde.timer` restaure la plus récente dans une
+base **temporaire**, la contrôle (schéma et migrations exigées, volumes comparés
+à la base vivante, contrôles métier, C11 nul), puis l'efface. La base vivante
+n'est jamais touchée ; le service peut tourner pendant la vérification.
+
+```bash
+sudo -u gestionfil /opt/gestionfil/gestionfil-admin verifier-sauvegarde            # la plus récente
+sudo -u gestionfil /opt/gestionfil/gestionfil-admin verifier-sauvegarde <fichier>  # une autre
+journalctl -u gestionfil-verif-sauvegarde -n 30                                   # le dernier verdict
+```
+
+Le dernier mot doit être `SAUVEGARDE RESTAURABLE`. « impossible de créer la base
+temporaire » signifie que le rôle de la base n'a pas le droit `CREATEDB` :
+`restaurer` échouerait de même le jour venu (`ALTER ROLE gestionfil CREATEDB;`
+en `postgres`).
+
 ### Restaurer
 
 ```bash

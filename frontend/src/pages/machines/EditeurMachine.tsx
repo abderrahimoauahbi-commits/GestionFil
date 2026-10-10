@@ -18,7 +18,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, Loader2, Plus, Trash2, X } from 'lucide-react'
-import { Alerte } from '../../composants/ui/base'
+import { Alerte, SaisieNombre } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
 import {
   LIBELLE_ROLE, machinesApi, nb,
@@ -188,8 +188,7 @@ export function EditeurMachine({
                   {l.role === 'ETAGE' && ` ${l.numero_etage}`}
                 </td>
                 <td className="px-1 py-1">
-                  <input
-                    type="number"
+                  <SaisieNombre
                     min={1}
                     value={l.capacite_bobines || ''}
                     onChange={(e) =>

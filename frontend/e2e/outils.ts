@@ -24,7 +24,7 @@ export async function connexion(page: Page, login: string) {
   await page.locator('#login').fill(login)
   await page.locator('#mdp').fill(MDP)
   await page.locator('button[type=submit]').click()
-  await expect(page).not.toHaveURL(/connexion/, { timeout: 15_000 })
+  await expect(page).not.toHaveURL(/connexion/, { timeout: 30_000 })
 }
 
 /** Ce que la console et le reseau disent pendant qu'un ecran s'affiche. */

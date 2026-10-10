@@ -8,7 +8,7 @@ Comptes (seed_110) : Assistante (ASSISTANTE), Choukri et Mohamed (DIRECTION),
 Magasinie (MAGASIN), admin (ADMIN). Fournisseur FRS-011 (MAD), references
 PLA 100 CHE et PLA 50 CHE (sans suivi de lot), magasins Morocco et Polyfashions.
 """
-from banc import Echec, verifier
+from banc import PSQL, Echec, verifier
 
 FRS = "FRS-011"
 REF = "PLA 100 CHE"
@@ -1340,6 +1340,31 @@ def scenario_gardes_p1(c, infra):
     verifier(sup, "la supervision ne rend rien")
 
 
+def scenario_sauvegarde_restaurable(c, infra):
+    """Une sauvegarde se prouve en la restaurant (10/10/2026) : gestionfil-admin la
+    restaure dans une base temporaire, la controle, l'efface ; la base du banc
+    n'est pas touchee. Une sauvegarde tronquee doit etre refusee."""
+    import os, subprocess, tempfile
+    from pathlib import Path
+    dossier = tempfile.mkdtemp(prefix="banc_sauvegardes_")
+    pg = str(Path(PSQL).parent)
+    env = dict(infra.env, DATABASE_URL=infra.url(), GESTIONFIL_SAUVEGARDES=dossier,
+               PATH=pg + os.pathsep + infra.env.get("PATH", ""))
+    def admin(*args):
+        return subprocess.run([str(infra.admin), *args], cwd=dossier, capture_output=True, text=True, env=env)
+    r = admin("sauvegarder")
+    verifier(r.returncode == 0, f"sauvegarde : {r.stderr[-400:]}")
+    r = admin("verifier-sauvegarde")
+    verifier(r.returncode == 0 and "SAUVEGARDE RESTAURABLE" in r.stdout,
+             f"verification : {r.stdout[-600:]} {r.stderr[-400:]}")
+    dump = next(Path(dossier).glob("*.dump"))
+    (Path(dossier) / "tronquee.dump").write_bytes(dump.read_bytes()[: dump.stat().st_size // 2])
+    r = admin("verifier-sauvegarde", "tronquee.dump")
+    verifier(r.returncode != 0, "une sauvegarde tronquee a ete jugee restaurable")
+    reste = infra.valeur(f"SELECT count(*) FROM pg_database WHERE datname LIKE '{infra.base}_verif_%'")
+    verifier(reste == "0", "une base temporaire de verification n'a pas ete effacee")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -1373,5 +1398,6 @@ SCENARIOS = [
     scenario_import_bon_envoye,
     scenario_parametres_types,
     scenario_migrations_rejouables,
+    scenario_sauvegarde_restaurable,
     scenario_controles_finaux,
 ]

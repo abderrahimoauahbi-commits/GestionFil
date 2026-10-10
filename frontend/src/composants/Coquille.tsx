@@ -82,6 +82,7 @@ export type Section =
   | 'GENERAL'
   | 'CATALOGUE'
   | 'PRODUCTION'
+  | 'AIDE'
   | 'ACHATS'
   | 'STOCK'
   | 'FINANCE'
@@ -93,13 +94,19 @@ export const MODULES: {
   resume: string
   Icone: LucideIcon
 }[] = [
-  { id: 'GENERAL',    libelle: 'Général',    resume: 'Tableau de bord, statistiques, entreprise', Icone: Gauge },
-  { id: 'CATALOGUE',  libelle: 'Catalogue',  resume: 'Références, équivalences, fournisseurs',    Icone: Package },
-  { id: 'PRODUCTION', libelle: 'Production', resume: 'Qualités, recettes, plans, besoins',        Icone: Factory },
-  { id: 'ACHATS',     libelle: 'Achats',     resume: "Plan d'achat, commandes, réceptions",       Icone: ShoppingCart },
-  { id: 'STOCK',      libelle: 'Stock',      resume: 'État, mouvements, transferts, inventaires', Icone: Boxes },
-  { id: 'FINANCE',    libelle: 'Finance',    resume: 'Valorisation, classification, rapports',    Icone: Coins },
-  { id: 'PARAMETRES', libelle: 'Paramètres', resume: 'Apparence, entreprise, droits, sauvegardes', Icone: SlidersHorizontal },
+  // LES MENUS RANGES EN STANDARD (10/10/2026, demande de l'utilisateur) : un
+  // domaine par section, dans l'ordre d'un ERP — pilotage, achats, stock,
+  // production, finance, puis le referentiel, les parametres et l'aide. Le plan
+  // d'achat n'est plus en Production, les fournisseurs plus au Catalogue, les
+  // machines plus au Stock, l'aide plus dans le pilotage.
+  { id: 'GENERAL',    libelle: 'Général',     resume: 'Accueil, tableau de bord, statistiques, contrôles', Icone: Gauge },
+  { id: 'ACHATS',     libelle: 'Achats',      resume: "Plan d'achat, commandes, importation, réceptions",  Icone: ShoppingCart },
+  { id: 'STOCK',      libelle: 'Stock',       resume: 'État, mouvements, transferts, inventaires, lots',   Icone: Boxes },
+  { id: 'PRODUCTION', libelle: 'Production',  resume: 'Plan de production, besoins, machines, recettes',   Icone: Factory },
+  { id: 'FINANCE',    libelle: 'Finance',     resume: 'Valorisation, coût de revient, analyses, rapports', Icone: Coins },
+  { id: 'CATALOGUE',  libelle: 'Référentiel', resume: 'Références, équivalences, catégories, parc',        Icone: Package },
+  { id: 'PARAMETRES', libelle: 'Paramètres',  resume: 'Entreprise, apparence, droits, sauvegardes',        Icone: SlidersHorizontal },
+  { id: 'AIDE',       libelle: 'Aide',        resume: 'Assistant, questions types, guide',                 Icone: BookOpen },
 ]
 
 export interface EntreeNav {
@@ -145,7 +152,23 @@ export function estAccessible(
   return true
 }
 
-export const NAVIGATION: EntreeNav[] = [
+const ORDRE_MENU = [
+  '/', '/tableau-de-bord', '/statistiques', '/controles',
+  '/plan-achat', '/bons-commande', '/import', '/receptions', '/receptions-import', '/retours-fournisseur',
+  '/fournisseurs', '/historique-prix', '/matrice-prix',
+  '/etat-stock', '/stock', '/mouvements', '/transferts', '/inventaires', '/lots', '/autorisations',
+  '/plans', '/besoins', '/machines', '/qualites', '/recettes',
+  '/valorisation', '/landed-cost', '/classification', '/rapports',
+  '/catalogue', '/equivalences', '/categories', '/roles-bom', '/parc-machines',
+  '/configuration', '/telecharger',
+  '/chat', '/assistant', '/guide-utilisateur',
+]
+const rang = (e: { vers: string }) => {
+  const i = ORDRE_MENU.indexOf(e.vers)
+  return i < 0 ? ORDRE_MENU.length : i
+}
+
+export const NAVIGATION: EntreeNav[] = ([
   /* --- 1. General -------------------------------------------------------- */
   { vers: '/', libelle: 'Accueil', module: '', Icone: Home, section: 'GENERAL', principale: true },
   { vers: '/tableau-de-bord', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', resume: 'Indicateurs, alertes et mur de risques', principale: true },
@@ -157,7 +180,7 @@ export const NAVIGATION: EntreeNav[] = [
      Le premier n'expose que les competences que le role de l'appelant autorise
      deja, chacune verifiee module par module ; le second lit des vues
      consolidees sans ce filtre, d'ou sa restriction. */
-  { vers: '/chat', libelle: 'Assistant', module: 'COCKPIT', Icone: Bot, section: 'GENERAL',
+  { vers: '/chat', libelle: 'Assistant', module: 'COCKPIT', Icone: Bot, section: 'AIDE',
     resume: 'Poser une question sur le stock et les achats',
     principale: true },
   {
@@ -165,7 +188,7 @@ export const NAVIGATION: EntreeNav[] = [
     libelle: 'Questions types',
     module: 'COCKPIT',
     Icone: Sparkles,
-    section: 'GENERAL',
+    section: 'AIDE',
     roles: ['DIRECTION'],
   },
   {
@@ -173,7 +196,7 @@ export const NAVIGATION: EntreeNav[] = [
     libelle: 'Guide utilisateur',
     module: '',
     Icone: BookOpen,
-    section: 'GENERAL',
+    section: 'AIDE',
     resume: 'Documentation complète pour utiliser l\'ERP',
   },
 
@@ -181,7 +204,7 @@ export const NAVIGATION: EntreeNav[] = [
   /* --- 2. Catalogue ------------------------------------------------------ */
   { vers: '/catalogue', libelle: 'Références', module: 'CATALOGUE', Icone: Boxes, section: 'CATALOGUE', resume: 'Les références, leurs prix et leur stock', principale: true },
   { vers: '/equivalences', libelle: 'Équivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
-  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'CATALOGUE' },
+  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'ACHATS' },
   // Categories et roles BOM decrivent le PRODUIT : ils quittent l'administration
   // pour rejoindre ce qu'ils qualifient. Chacun ouvre l'ecran des referentiels
   // reduit a son seul onglet — meme code, meme CRUD, pas de doublon.
@@ -193,7 +216,7 @@ export const NAVIGATION: EntreeNav[] = [
   { vers: '/recettes', libelle: 'Recettes (BOM)', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
   { vers: '/plans', libelle: 'Plan de production', module: 'PLANS', Icone: LayoutGrid, section: 'PRODUCTION' },
   { vers: '/besoins', libelle: 'Besoins (MRP)', module: 'MRP', Icone: Calculator, section: 'PRODUCTION', resume: 'Ce qu’il faut acheter, et quand', principale: true },
-  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'PRODUCTION' },
+  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'ACHATS' },
 
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
@@ -261,7 +284,7 @@ export const NAVIGATION: EntreeNav[] = [
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
   // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :
   // chaque etage est un magasin, et rien ici n'est un registre a part.
-  { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'STOCK', resume: 'Charger, décharger, constater les métiers', principale: true },
+  { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'PRODUCTION', resume: 'Charger, décharger, constater les métiers', principale: true },
   { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardCheck, section: 'STOCK' },
 
   /* --- 6. Finance & valorisation ----------------------------------------- */
@@ -295,15 +318,15 @@ export const NAVIGATION: EntreeNav[] = [
      quand quelque chose doit changer. Les ranger avec le pilotage les mettait
      au meme rang que le plan d'achat, ce qu'ils ne sont pas. La barre les
      place donc en pied, separes du reste par un filet. */
-  { vers: '/parc-machines', libelle: 'Parc machines', module: 'PARAMETRES', Icone: Cog, section: 'PARAMETRES' },
+  { vers: '/parc-machines', libelle: 'Parc machines', module: 'PARAMETRES', Icone: Cog, section: 'CATALOGUE' },
   { vers: '/configuration', libelle: 'Paramètres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'PARAMETRES' },
   /* L'ecran de telechargement est ouvert a TOUS les comptes, pas au seul
      administrateur : celui qui doit reinstaller son poste est celui qui s'en
      sert dessus. Il est rattache au module COCKPIT, que tout le monde lit,
      precisement pour cela. Le JOURNAL qu'il affiche, lui, reste reserve a
      PARAMETRES — c'est l'ecran qui le masque, et le serveur qui le refuse. */
-  { vers: '/telecharger', libelle: 'Télécharger l application', module: 'COCKPIT', Icone: Download, section: 'PARAMETRES' },
-]
+  { vers: '/telecharger', libelle: 'Télécharger l’application', module: 'COCKPIT', Icone: Download, section: 'PARAMETRES' },
+] as EntreeNav[]).sort((a, b) => rang(a) - rang(b))
 
 /** Sections dans l'ordre du rail. */
 const GROUPES = MODULES.map((m) => m.id)

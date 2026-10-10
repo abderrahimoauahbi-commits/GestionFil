@@ -18,7 +18,7 @@ import { AvoirDossier } from './AvoirDossier'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { ChevronRight, Lock, Plus, Save, ShieldCheck, Target, Trash2 } from 'lucide-react'
+import { ChevronRight, Lock, Plus, Save, ShieldCheck, Target, Trash2, ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
@@ -114,6 +114,7 @@ export function DossierImport() {
         actions={
           <>
             <Bouton variante="contour" onClick={() => ouvrir('/import')}>
+              <ArrowLeft />
               Tous les dossiers
             </Bouton>
             {ecrire && (

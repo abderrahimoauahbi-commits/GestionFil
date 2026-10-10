@@ -472,8 +472,33 @@ export function TransfertNouveau() {
   const memeMagasin =
     !!entete.code_magasin_source && entete.code_magasin_source === entete.code_magasin_dest
 
+  // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026) : un transfert
+  // repris se compare a ce que le serveur a rendu.
+  const empreinte = (e: typeof entete, ls: LigneSaisie[]) =>
+    JSON.stringify({
+      e: Object.entries(e).map(([k, v]) => [k, String(v ?? '').trim()]).sort(),
+      l: ls.map((l) => [l.code_reference, String(l.qte ?? ''), l.unite, String(l.palettes ?? ''), String(l.bobines ?? ''), JSON.stringify(l.extra ?? {})]),
+    })
+  const dossier = qDossier.data?.entete
+  const inchange =
+    reprise && !!dossier && lignesReprises !== null &&
+    empreinte(entete, lignes) ===
+      empreinte(
+        {
+          ...entete,
+          code_magasin_source: dossier.code_magasin_source ?? '',
+          code_magasin_dest: dossier.code_magasin_dest ?? '',
+          date_transfert: (dossier.date_transfert ?? '').slice(0, 10),
+          responsable: dossier.responsable ?? '',
+          transporteur: dossier.transporteur ?? '',
+          observations: dossier.observations ?? '',
+        },
+        lignesReprises,
+      )
+
   const pret =
     modifiable &&
+    !inchange &&
     !!entete.code_magasin_source &&
     !!entete.code_magasin_dest &&
     !memeMagasin &&

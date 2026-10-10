@@ -27,7 +27,7 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Save } from 'lucide-react'
+import { ArrowLeft, Save } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { api, ErreurApi } from '../api/client'
 import { ChampLot } from '../composants/ChampLot'
@@ -611,6 +611,12 @@ export function MouvementNouveau() {
       <EnTetePage
         titre="Saisir un mouvement"
         sous_titre="La quantité est convertie en kilogrammes avant enregistrement, par les paramètres de la référence."
+        actions={
+          <Bouton variante="contour" onClick={() => quitter(() => naviguer('/mouvements'))}>
+            <ArrowLeft />
+            Retour
+          </Bouton>
+        }
       />
       <PanneRequetes requetes={[['Les types de mouvement', qTypes], ['Les magasins', qMag], ['Les motifs', qMotifs], ['Le stock du magasin', qStock]]} />
       {/* LE FORMULAIRE NE PORTE QUE L'EN-TETE. Les boutons de la grille ne

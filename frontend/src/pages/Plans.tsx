@@ -515,6 +515,34 @@ export function Plans() {
 
   // --- Verifications locales --------------------------------------------------
 
+  // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026) : l'ecran se
+  // compare a ce que le serveur a rendu (ou a un plan vide, a la creation).
+  const empreinte = (e: Entete, ls: LigneEntete[], cs: Record<string, number>) =>
+    JSON.stringify({
+      libelle: e.libelle.trim(), scenario: e.scenario_nom.trim(), debut: e.date_debut,
+      horizon: Number(e.mois_horizon), croissance: Number(e.croissance_annuelle_pct || 0),
+      lignes: ls.map((l) => [l.code_qualite, l.m2_base_mensuel]).sort(),
+      coefs: Object.entries(cs).sort(),
+    })
+  const reference = (() => {
+    if (enCreation || !courant) return empreinte(enteteVide(), [], {})
+    const c: Record<string, number> = {}
+    for (const x of qEntete.data?.saisonnalite ?? []) c[`${x.code_qualite}|${x.mois}`] = x.coefficient
+    return empreinte(
+      {
+        id_plan: courant.id_plan, libelle: courant.libelle, scenario_nom: courant.scenario_nom ?? '',
+        date_debut: (courant.date_debut ?? '').slice(0, 7), mois_horizon: courant.mois_horizon ?? 12,
+        croissance_annuelle_pct: String(courant.croissance_annuelle_pct ?? 0),
+      },
+      (qEntete.data?.qualites ?? []).map((q) => ({
+        code_qualite: q.code_qualite, qualite_nom: q.qualite_nom, qualite_statut: q.qualite_statut,
+        nb_composition: q.nb_composition, m2_base_mensuel: q.m2_base_mensuel,
+      })),
+      c,
+    )
+  })()
+  const sansChangement = empreinte(entete, lignes, coefs) === reference
+
   const problemes: string[] = []
   if (!entete.libelle.trim()) problemes.push('le libelle est obligatoire')
   if (!/^\d{4}-\d{2}$/.test(entete.date_debut)) problemes.push('le mois de depart est obligatoire')
@@ -851,7 +879,8 @@ export function Plans() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
                 Enregistrer entete et grille
@@ -1341,7 +1370,8 @@ export function Plans() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
                 Enregistrer entete et grille

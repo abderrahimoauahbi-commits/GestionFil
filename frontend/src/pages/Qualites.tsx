@@ -606,6 +606,39 @@ export function Qualites() {
 
   // Verifications locales : inutile de solliciter le serveur pour les detecter.
   const codeSaisi = entete.code_qualite.trim()
+  // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026) : l'ecran se
+  // compare a ce que le serveur a rendu (ou a une qualite neuve, a la creation).
+  const empreinte = (
+    e: Entete,
+    ls: { code_role: string; densite: unknown; unite_densite: unknown }[],
+    cs: { code_reference: string; code_role: string; pourcentage_composition: unknown; couleur: unknown }[],
+  ) =>
+    JSON.stringify({
+      e: Object.entries(e).map(([k, v]) => [k, String(v ?? '').trim()]).sort(),
+      l: ls.map((x) => [x.code_role, String(x.densite ?? ''), String(x.unite_densite ?? '')]).sort(),
+      c: cs.map((x) => [x.code_reference, x.code_role, String(x.pourcentage_composition ?? ''), String(x.couleur ?? '')]).sort(),
+    })
+  const reference =
+    enCreation || !courante
+      ? empreinte(enteteNeuve(), [], [])
+      : empreinte(
+          {
+            code_qualite: courante.code_qualite,
+            nom: courante.nom,
+            description: courante.description ?? '',
+            statut: courante.statut,
+            marge_securite_pct: String(courante.marge_securite_pct ?? ''),
+            couv_min_mois: String(courante.couv_min_mois ?? ''),
+            taux_perte_pct: String(courante.taux_perte_pct ?? ''),
+            seuil_alerte_jours: String(courante.seuil_alerte_jours ?? ''),
+            seuil_critique_jours: String(courante.seuil_critique_jours ?? ''),
+            stock_securite_jours: String(courante.stock_securite_jours ?? ''),
+          },
+          qDensites.data ?? [],
+          qComposition.data ?? [],
+        )
+  const sansChangement = empreinte(entete, lignes, composition) === reference
+
   const problemes: string[] = []
   if (!codeSaisi) problemes.push('le code qualite est obligatoire')
   if (!entete.nom.trim()) problemes.push('le nom est obligatoire')
@@ -1100,7 +1133,8 @@ export function Qualites() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
                 Enregistrer la qualite
@@ -1512,7 +1546,8 @@ export function Qualites() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
                 Enregistrer la qualite

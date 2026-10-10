@@ -240,12 +240,14 @@ function UnChamp<L>({
     largeur,
   )
 
+  // LES CHAMPS ALIGNES (10/10/2026) : la periode se pose sur la meme ligne que
+  // les autres filtres — « Période — du » et « au » au lieu de deux listes
+  // empilees sous un titre de plus.
   if (c.type === 'periode') {
     return (
-      <div className={enveloppe}>
-        <span className="text-[10.5px] text-attenue-texte">{c.libelle}</span>
+      <div className="contents">
         <SelecteurPeriode
-          compact
+          libelle={c.libelle}
           mois={options.map((o) => o.valeur)}
           valeur={(valeurs[c.cle] as Periode) ?? { debut: null, fin: null }}
           surChangement={(p) => definir(c.cle, p)}

@@ -121,6 +121,8 @@ export function Formulaire({
   const droits = useDroits(module)
   const [donnees, setDonnees] = useState<Record<string, unknown>>({})
   const [manquants, setManquants] = useState<string[]>([])
+  /** Ce que le formulaire montrait en s'ouvrant : rien a enregistrer tant qu'on n'y a pas touche. */
+  const [initiales, setInitiales] = useState('')
 
   useEffect(() => {
     // A la creation, les valeurs par defaut declarees priment sur le vide ; en
@@ -132,6 +134,7 @@ export function Formulaire({
       }
     }
     setDonnees({ ...defauts, ...valeurs })
+    setInitiales(JSON.stringify({ ...defauts, ...valeurs }))
     setManquants([])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(valeurs), creation])
@@ -372,7 +375,9 @@ export function Formulaire({
             Annuler
           </Bouton>
         )}
-        <Bouton type="submit" chargement={enCours}>
+        {/* ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026). */}
+        <Bouton type="submit" chargement={enCours} disabled={JSON.stringify(donnees) === initiales}
+          title={JSON.stringify(donnees) === initiales ? 'Rien n’a changé' : undefined}>
           {libelleValider}
         </Bouton>
       </div>

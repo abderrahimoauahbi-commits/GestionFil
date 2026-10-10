@@ -1528,6 +1528,68 @@ def scenario_matrice_mouvements(c, infra):
     verifier(not absents, f"la matrice cite des scenarios qui n'existent pas : {absents}")
 
 
+def scenario_contrat_droits(c, infra):
+    """LE CONTRAT DES DROITS, par HTTP direct (etape 2, 10/10/2026) : pour chaque entite du
+    CRUD generique et chaque role, la lecture suit le droit LIRE, l'ecriture est refusee
+    (403, avant toute validation du contenu) sans le droit ECRIRE ; un montant masque ne sort
+    pas ; un droit retire s'applique a la requete suivante, sans reconnexion."""
+    import re
+    from pathlib import Path
+    texte = (Path(__file__).resolve().parents[2] / "src" / "crud.rs").read_text(encoding="utf-8")
+    entites = re.findall(r'chemin: "([^"]+)",\s*table: "[^"]+",\s*module: "([^"]+)"', texte)
+    verifier(len(entites) >= 15, f"registre du CRUD illisible : {len(entites)} entite(s)")
+    perms = {tuple(l) for l in infra.sql("SELECT code_role_user, module, action FROM permission WHERE actif = 1")}
+    comptes = dict(infra.sql("SELECT login, code_role_user FROM utilisateur "
+                             "WHERE login IN ('admin', 'Assistante', 'Choukri', 'Magasinie')"))
+    ecarts = []
+    for chemin, module in entites:
+        for login, role in comptes.items():
+            lire = (role, module, "LIRE") in perms
+            code, _ = c.appel(login, "GET", f"/api/{chemin}")
+            if (lire and code != 200) or (not lire and code != 403):
+                ecarts.append(f"{login} ({role}) GET /api/{chemin} : {code}, droit LIRE {module} {'oui' if lire else 'non'}")
+            if (role, module, "ECRIRE") not in perms:
+                code, _ = c.appel(login, "POST", f"/api/{chemin}", {})
+                if code != 403:
+                    ecarts.append(f"{login} ({role}) POST /api/{chemin} sans ECRIRE {module} : {code} au lieu de 403")
+    verifier(not ecarts, f"{len(ecarts)} ecart(s) au contrat des droits : " + " ; ".join(ecarts[:12]))
+
+    # Un montant masque ne sort pas, quelle que soit la voie (ici, la liste du catalogue).
+    masques = [l[0] for l in infra.sql(
+        "SELECT d.champ FROM droit_champ d JOIN utilisateur u USING (id_utilisateur) "
+        "WHERE u.login = 'Magasinie' AND d.module = 'CATALOGUE' AND d.niveau = 'MASQUE'")]
+    verifier("cmup_mad" in masques and "valeur_transit_mad" in masques,
+             f"le magasinier devrait avoir le CMUP et la valeur en route masques : {masques}")
+    if ("MAGASIN", "CATALOGUE", "LIRE") in perms:
+        lignes = c.ok("Magasinie", "GET", "/api/catalogue?actif=1&limite=50")
+        fuites = sorted({k for l in lignes for k in masques if l.get(k) is not None})
+        verifier(not fuites, f"champs masques livres au magasinier : {fuites}")
+
+    # Un droit retire s'applique tout de suite, avec le meme jeton.
+    role_mag = comptes["Magasinie"]
+    verifier((role_mag, "STOCK", "LIRE") in perms, "le magasin devrait lire le stock")
+    c.ok("Magasinie", "GET", "/api/magasins")
+    infra.sql(f"UPDATE permission SET actif = 0 WHERE code_role_user = '{role_mag}' AND module = 'STOCK' AND action = 'LIRE'")
+    try:
+        code, _ = c.appel("Magasinie", "GET", "/api/magasins")
+        verifier(code == 403, f"un droit retire reste effectif : {code}")
+    finally:
+        infra.sql(f"UPDATE permission SET actif = 1 WHERE code_role_user = '{role_mag}' AND module = 'STOCK' AND action = 'LIRE'")
+    c.ok("Magasinie", "GET", "/api/magasins")
+
+
+def scenario_codes_erreur(c, infra):
+    """DES CODES STABLES (etape 2, 10/10/2026) : une regle metier repond 422 REGLE_METIER avec
+    son code (« regle »), un droit manquant 403 NON_AUTORISE ; l'ecran lit le code, pas le texte."""
+    A, M = "PLA 140 CHE", "Morocco"
+    code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(A, 999999)], mag=M,
+                        motif="HORS_MACHINE", motif_ligne="HM_ESSAI")
+    verifier(code == 422 and r.get("code") == "REGLE_METIER", f"sortie impossible : {code} {r}")
+    verifier(r.get("regle", "").startswith("R02"), f"le code de la regle manque : {r}")
+    code, r = c.appel("Magasinie", "POST", "/api/fournisseurs", {"code_fournisseur": "X", "nom": "X"})
+    verifier(code == 403 and r.get("code") == "NON_AUTORISE", f"ecriture sans droit : {code} {r}")
+
+
 def scenario_sauvegarde_restaurable(c, infra):
     """Une sauvegarde se prouve en la restaurant (10/10/2026) : gestionfil-admin la
     restaure dans une base temporaire, la controle, l'efface ; la base du banc
@@ -1590,6 +1652,8 @@ SCENARIOS = [
     scenario_cmup_chiffre,
     scenario_atomicite,
     scenario_concurrence_stock,
+    scenario_contrat_droits,
+    scenario_codes_erreur,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,
 ]

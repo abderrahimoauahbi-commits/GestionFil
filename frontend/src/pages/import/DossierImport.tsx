@@ -20,7 +20,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { ChevronRight, Lock, Plus, Save, ShieldCheck, Target, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '../../api/client'
+import { api, ErreurApi } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
 import {
@@ -490,10 +490,10 @@ function FraisDossier({
     },
     onError: (e: unknown) => {
       const message = e instanceof Error ? e.message : String(e)
-      if (message.includes('TAUX-ECART')) {
+      if (e instanceof ErreurApi ? e.estRegle('TAUX-ECART') : message.includes('TAUX-ECART')) {
         confirmation.demander({
           titre: 'Cours éloigné de celui de Bank Al-Maghrib',
-          description: message.replace(/^TAUX-ECART : /, ''),
+          description: e instanceof ErreurApi ? e.messageSansCode : message.replace(/^TAUX-ECART : /, ''),
           libelleConfirmer: 'Je confirme ce cours',
           action: () => ajouter.mutate(true),
         })

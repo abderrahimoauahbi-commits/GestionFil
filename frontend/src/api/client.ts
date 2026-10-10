@@ -74,9 +74,23 @@ export class ErreurApi extends Error {
     public readonly statut: number,
     public readonly code: string,
     message: string,
+    /** Le code de la regle (« R02 », « TAUX-ECART ») : stable, a la difference du texte (10/10/2026). */
+    public readonly regle?: string,
+    /** Le numero d'une erreur interne, le meme qu'au journal du serveur. */
+    public readonly incident?: string,
   ) {
     super(message)
     this.name = 'ErreurApi'
+  }
+
+  /** La regle violee est-elle celle-ci ? Par le code, a defaut par le debut du message. */
+  estRegle(code: string) {
+    return this.regle === code || this.message.startsWith(`${code} :`)
+  }
+
+  /** Le message sans son code de tete (« TAUX-ECART : ... » -> « ... »). */
+  get messageSansCode() {
+    return this.regle ? this.message.replace(new RegExp(`^${this.regle}\\s*:\\s*`), '') : this.message
   }
 
   /** Regle metier violee : le message est redige pour l'utilisateur. */
@@ -154,7 +168,7 @@ async function requete<T>(
   // Une reponse non-JSON vient d'un intermediaire (proxy de developpement,
   // page d'erreur), pas de l'API : le signaler tel quel plutot que de laisser
   // remonter une SyntaxError sans rapport.
-  let donnees: { code?: string; message?: string } | null = null
+  let donnees: { code?: string; message?: string; regle?: string; incident?: string } | null = null
   if (texte) {
     try {
       donnees = JSON.parse(texte)
@@ -196,7 +210,7 @@ async function requete<T>(
         location.replace(import.meta.env.BASE_URL + 'connexion')
       }
     }
-    throw new ErreurApi(reponse.status, code, message)
+    throw new ErreurApi(reponse.status, code, message, donnees?.regle, donnees?.incident)
   }
   return donnees as T
 }
@@ -222,14 +236,14 @@ async function envoyerFichier<T>(route: string, donnees: FormData): Promise<T> {
   const texte = await reponse.text()
   // PAS D'INITIALISATION INUTILE : le `catch` leve, donc `corps` est toujours
   // affecte avant d'etre lu. Le `= null` faisait croire a un cas qui n'existe pas.
-  let corps: { code?: string; message?: string } | null
+  let corps: { code?: string; message?: string; regle?: string; incident?: string } | null
   try {
     corps = texte ? JSON.parse(texte) : null
   } catch {
     throw new ErreurApi(reponse.status, 'REPONSE_INVALIDE', `Reponse inattendue (HTTP ${reponse.status}).`)
   }
   if (!reponse.ok) {
-    throw new ErreurApi(reponse.status, corps?.code ?? 'ERREUR', corps?.message ?? `Erreur ${reponse.status}`)
+    throw new ErreurApi(reponse.status, corps?.code ?? 'ERREUR', corps?.message ?? `Erreur ${reponse.status}`, corps?.regle, corps?.incident)
   }
   return corps as T
 }

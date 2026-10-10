@@ -171,8 +171,8 @@ export function ClotureFacture({
     (retours.length === 0 || nette !== '')
   const surEchec = (e: unknown) => {
     // Un taux loin du cours : l'ecran propose la confirmation au lieu d'un refus sec.
-    if (e instanceof ErreurApi && e.message.startsWith('TAUX-ECART')) {
-      toast.warning(e.message.replace(/^TAUX-ECART : /, ''), { description: 'Cochez « Confirmer ce taux » s’il est celui de la banque.' })
+    if (e instanceof ErreurApi && e.estRegle('TAUX-ECART')) {
+      toast.warning(e.messageSansCode, { description: 'Cochez « Confirmer ce taux » s’il est celui de la banque.' })
       return
     }
     echec(e)

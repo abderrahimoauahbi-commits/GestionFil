@@ -307,10 +307,10 @@ export function BonCommande() {
     },
     onError: (e, c) => {
       /* Un taux a plus de 3 % du cours BAM se confirme, il ne se refuse pas sec. */
-      if (e instanceof ErreurApi && e.message.startsWith('TAUX-ECART') && typeof c !== 'string') {
+      if (e instanceof ErreurApi && e.estRegle('TAUX-ECART') && typeof c !== 'string') {
         confirmationTaux.demander({
           titre: 'Taux éloigné du cours Bank Al-Maghrib',
-          description: e.message.replace(/^TAUX-ECART : /, ''),
+          description: e.messageSansCode,
           libelleConfirmer: 'Je confirme ce taux',
           action: () => changerStatut.mutate({ ...c, confirme_taux: true }),
         })

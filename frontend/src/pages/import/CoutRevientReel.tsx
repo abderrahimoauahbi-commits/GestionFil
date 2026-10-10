@@ -89,10 +89,10 @@ export function CoutRevientReel({ idDossier }: { idDossier: string }) {
       rafraichir()
     },
     onError: (e) => {
-      if (e instanceof ErreurApi && e.message.startsWith('TAUX-ECART')) {
+      if (e instanceof ErreurApi && e.estRegle('TAUX-ECART')) {
         confirmation.demander({
           titre: 'Cours éloigné de celui de Bank Al-Maghrib',
-          description: e.message.replace(/^TAUX-ECART : /, ''),
+          description: e.messageSansCode,
           libelleConfirmer: 'C’est le cours de la banque',
           action: () => ajouter.mutate(true),
         })

@@ -54,6 +54,11 @@ cargo run --bin gestionfil-admin -- verifier      # contrôles métier
 python backend\tests\banc\banc.py --cible <CARGO_TARGET_DIR>          # tout
 python backend\tests\banc\banc.py import inventaire --garder         # quelques scénarios, base gardée
 cd frontend; npm test                              # node --test : colisage, mêmes cas que la base
+# TESTS DE BOUT EN BOUT (Playwright + Edge, vrais écrans) : base jetable remplie par les scénarios
+# du banc, serveur 8097 qui sert frontend/dist (npm run build avant). Échec = écran planté, erreur
+# JS, réponse 5xx ; le reste (champ trop étroit, tableau qui déborde, bouton hors écran, HTML/axe)
+# va dans rapport-e2e/constats.md et rapport-e2e/galerie.html (captures 1366 et 1920).
+cd frontend; python e2e/lancer.py --cible <CARGO_TARGET_DIR> [-- --grep "écran /stock"]
 # autres sous-commandes admin : definir-mot-de-passe <login>, lister-comptes, sauvegarder,
 # lister-sauvegardes, restaurer, diagnostic, reparer
 

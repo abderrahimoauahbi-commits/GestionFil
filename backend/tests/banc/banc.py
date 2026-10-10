@@ -179,12 +179,15 @@ class Infra:
             if p.returncode != 0:
                 raise RuntimeError(f"mot de passe de {login} : {p.stderr.strip()[-400:]}")
 
-    def demarrer(self):
+    def demarrer(self, frontend=None):
+        """`frontend` : le dossier de l'interface compilee (frontend/dist) a servir,
+        pour les tests de bout en bout (frontend/e2e) ; a defaut, une page vide."""
         self.vide = tempfile.mkdtemp(prefix="banc_")
         (Path(self.vide) / "index.html").write_text("<!doctype html><title>banc</title>", encoding="utf-8")
         self.journal = open(Path(self.vide) / "serveur.log", "w", encoding="utf-8")
         env = dict(self.env, DATABASE_URL=self.url(), JWT_SECRET=secrets.token_hex(32),
-                   BIND_ADDR=f"127.0.0.1:{self.port}", FRONTEND_DIR=self.vide, RUST_LOG="warn")
+                   BIND_ADDR=f"127.0.0.1:{self.port}", FRONTEND_DIR=str(frontend or self.vide),
+                   RUST_LOG="warn")
         self.serveur = subprocess.Popen([str(self.binaire)], cwd=self.vide, env=env,
                                         stdout=self.journal, stderr=subprocess.STDOUT)
         for _ in range(60):

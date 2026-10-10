@@ -12,7 +12,8 @@
     "tauri": "tauri",
     "bureau:dev": "tauri dev",
     "bureau:build": "tauri build",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "e2e": "python e2e/lancer.py"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
@@ -59,7 +60,9 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.56.1",
     "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.0.0",
@@ -74,5 +77,8 @@
     "typescript-eslint": "^8.61.0",
     "vite": "^6.0.0",
     "vite-plugin-pwa": "^1.3.0"
+  },
+  "overrides": {
+    "playwright-core": "1.56.1"
   }
 }

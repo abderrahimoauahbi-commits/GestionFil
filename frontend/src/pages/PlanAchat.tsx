@@ -13,9 +13,10 @@
  * Regenerer efface celles qui n'engagent rien et refait la photo ; celles qui
  * ont produit un bon de commande, et celles qu'on a ecartees, survivent.
  *
- * La quantite proposee integre le stock minimum dynamique (formule F3), le MOQ,
- * le multiple d'achat et l'en-cours fournisseur — ce dernier terme evite de
- * recommander ce qui est deja en route.
+ * La quantite proposee suit le plan de production, et lui seul (10/10/2026 : pas
+ * de stock minimum) : sorties de la fenetre de commande + securite - stock
+ * projete, puis le MOQ, la palette et l'en-cours fournisseur — ce dernier terme
+ * evite de recommander ce qui est deja en route.
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -41,7 +42,6 @@ import {
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
-import { SaisonMinimums } from './SaisonMinimums'
 import { DetailCalcul } from './PlanAchatDetail'
 import { useParametreNombre } from '../lib/parametres'
 
@@ -1129,8 +1129,6 @@ export function PlanAchat() {
           }
         />
       )}
-
-      <SaisonMinimums />
 
       {confirmation.element}
     </div>

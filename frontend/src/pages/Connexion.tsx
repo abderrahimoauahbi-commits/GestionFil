@@ -133,7 +133,7 @@ export function Connexion() {
           <hr className="cnx__filet" />
 
           <h2 className="cnx__titre">
-            Achats, stocks et production de matieres premieres.
+            Achats, stocks et production de matières premieres.
           </h2>
           <p className="cnx__texte">
             Tout est tenu au kilogramme. Les palettes, bobines et metres lineaires ne sont que

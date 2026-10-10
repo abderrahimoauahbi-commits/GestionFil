@@ -54,9 +54,9 @@ const XYZ = ['X', 'Y', 'Z'] as const
 
 /** Ce que chaque classe veut dire, dit une fois. */
 const SENS_ABC: Record<string, string> = {
-  A: 'Porte l essentiel de la depense — jusqu au seuil parametre, 80 % par defaut',
+  A: 'Porte l essentiel de la depense — jusqu au seuil paramètre, 80 % par defaut',
   B: 'Le palier intermediaire, jusqu a 95 %',
-  C: 'La longue traine : beaucoup de references, peu de valeur',
+  C: 'La longue traine : beaucoup de références, peu de valeur',
 }
 const SENS_XYZ: Record<string, string> = {
   X: 'Demande reguliere : le besoin varie peu d un mois a l autre',
@@ -360,7 +360,7 @@ export function AnalyseAbcXyz() {
         titreCarte={(l) => l.code_reference}
         exportable="analyse-abc-xyz"
         imprimable="Analyse ABC XYZ"
-        texteVide="Aucune reference dans cette case."
+        texteVide="Aucune référence dans cette case."
       />
     </div>
   )

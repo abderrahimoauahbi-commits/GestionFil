@@ -55,7 +55,7 @@ export function EtatStockImprime() {
     queryFn: ({ signal }) => api.get<LigneStock[]>('/api/stock/projete', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation de l etat…" />
+  if (q.isLoading) return <Chargement texte="Preparation de l état…" />
   const toutes = q.data ?? []
   const lignes = filtre ? toutes.filter((l) => l.statut === filtre) : toutes
   const valeurVisible = droits.visible('valeur_totale_mad')
@@ -219,7 +219,7 @@ export function EtatComptage() {
               entete: 'Référence',
               valeur: (l) => <span className="font-mono text-[10px]">{l.code_reference}</span>,
             },
-            { entete: 'Designation', valeur: (l) => l.designation ?? '—' },
+            { entete: 'Désignation', valeur: (l) => l.designation ?? '—' },
             {
               entete: 'Lot / emplacement',
               valeur: () => <span className="inline-block h-3 w-full" />,
@@ -281,7 +281,7 @@ export function EtatPlanAchat() {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [q.data])
 
-  if (q.isLoading) return <Chargement texte="Preparation de l etat…" />
+  if (q.isLoading) return <Chargement texte="Preparation de l état…" />
   const prixVisible = droits.visible('prix_estime_mad')
   const total = (q.data ?? []).reduce(
     (s, p) => s + (p.quantite_suggeree_kg ?? 0) * (p.prix_estime_mad ?? 0),
@@ -503,7 +503,7 @@ export function EtatCatalogue() {
             entete: 'Référence',
             valeur: (r) => <span className="font-mono text-[10px]">{r.code_reference}</span>,
           },
-          { entete: 'Designation', valeur: (r) => r.designation ?? '—' },
+          { entete: 'Désignation', valeur: (r) => r.designation ?? '—' },
           { entete: 'Catégorie', valeur: (r) => r.code_categorie ?? '—' },
           { entete: 'Unité', valeur: (r) => r.unite_catalogue ?? '—' },
           { entete: 'Fournisseur', valeur: (r) => r.code_fournisseur ?? '—' },
@@ -577,7 +577,7 @@ export function EtatFournisseurs() {
           { entete: 'Code', valeur: (f) => <span className="font-mono text-[10px]">{f.code_fournisseur}</span> },
           { entete: 'Nom', valeur: (f) => <span className="font-semibold">{f.nom}</span> },
           { entete: 'Contact', valeur: (f) => f.contact ?? '—' },
-          { entete: 'Telephone', valeur: (f) => f.telephone ?? '—' },
+          { entete: 'Téléphone', valeur: (f) => f.telephone ?? '—' },
           { entete: 'Pays', valeur: (f) => f.pays ?? '—' },
           { entete: 'Devise', valeur: (f) => f.code_devise ?? '—' },
           {
@@ -1137,7 +1137,7 @@ export function EtatCouleur() {
                   entete: 'Référence',
                   valeur: (r) => <span className="font-mono text-[10px]">{r.code_reference}</span>,
                 },
-                { entete: 'Designation', valeur: (r) => r.designation ?? '—' },
+                { entete: 'Désignation', valeur: (r) => r.designation ?? '—' },
                 { entete: 'Famille', valeur: (r) => r.famille_libelle ?? r.code_categorie ?? '—' },
                 { entete: 'Titrage', valeur: (r) => r.titrage ?? '—' },
                 {
@@ -1276,7 +1276,7 @@ export function EtatLots() {
   )
 
   if (vue === 'ecarts') {
-    if (qStats.isLoading) return <Chargement texte="Preparation de l etat…" />
+    if (qStats.isLoading) return <Chargement texte="Preparation de l état…" />
     const brut = qStats.data?.divergence_fournisseur
     const lignes = (Array.isArray(brut) ? brut : []) as LigneEcartFournisseur[]
     // Le niveau s'ecrit en toutes lettres : le papier ne porte pas la couleur.
@@ -1372,7 +1372,7 @@ export function EtatLots() {
     )
   }
 
-  if (qLots.isLoading) return <Chargement texte="Preparation de l etat…" />
+  if (qLots.isLoading) return <Chargement texte="Preparation de l état…" />
   if (qLots.isError) {
     return (
       <div>

@@ -811,7 +811,7 @@ export function ReceptionNouvelle() {
             <Carte repliable="receptionnouvelle.3">
               <CarteEntete>
                 <CarteTitre>
-                  Lignes de la reception
+                  Lignes de la réception
                   {lignes.length > 0 && ` (${retenues.length}/${lignes.length})`}
                 </CarteTitre>
                 {lignes.length > 0 && (
@@ -829,7 +829,7 @@ export function ReceptionNouvelle() {
                       taille="sm"
                       onClick={() => setLignes((l) => l.map((x) => ({ ...x, retenue: false })))}
                     >
-                      Tout decocher
+                      Tout décocher
                     </Bouton>
                   </div>
                 )}
@@ -847,7 +847,7 @@ export function ReceptionNouvelle() {
                     <table className="w-full text-[13px]">
                       <thead>
                         <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                          <th className="w-10 px-2 py-2" title="Ligne retenue pour cette reception">
+                          <th className="w-10 px-2 py-2" title="Ligne retenue pour cette réception">
                             OK
                           </th>
                           <th className="w-10 px-1 py-2 text-right">#</th>
@@ -899,7 +899,7 @@ export function ReceptionNouvelle() {
                                       'h-7',
                                       l.code_recu !== l.code_reference && 'border-alerte',
                                     )}
-                                    aria-label="Référence reellement recue"
+                                    aria-label="Référence reellement reçue"
                                   >
                                     <option value={l.code_reference}>{l.code_reference}</option>
                                     {l.equivalents.map((e) => (
@@ -1250,7 +1250,7 @@ export function ReceptionNouvelle() {
               disabled={!pret || sansDerogation.length > 0 || !droits.peutEcrire}
             >
               <Save />
-              Enregistrer la reception
+              Enregistrer la réception
             </Bouton>
           </div>
         </div>
@@ -1507,7 +1507,7 @@ function PanneauDetail({
               }
             />
             <Info
-              libelle="Reste a livrer"
+              libelle="Reste à livrer"
               valeur={ligne.reste_kg == null ? '—' : `${fmt.nombre(ligne.reste_kg, 0)} kg`}
             />
             {voitPrix && (
@@ -1581,7 +1581,7 @@ function PanneauDetail({
                 <Alerte ton="alerte" titre="Substitution">
                   Le fournisseur livre <strong>{ligne.code_recu}</strong> a la place de{' '}
                   <strong>{ligne.code_reference}</strong>. Les deux appartiennent au meme groupe
-                  d'equivalence. La ligne de commande sera soldee en kg, et l'ecart restera trace.
+                  d'équivalence. La ligne de commande sera soldee en kg, et l'ecart restera trace.
                 </Alerte>
                 <div className="mt-2">
                   <Etiq obligatoire htmlFor="ch-receptionnouvelle-14">Motif de la substitution</Etiq>

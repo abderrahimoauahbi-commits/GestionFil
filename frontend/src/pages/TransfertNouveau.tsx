@@ -600,7 +600,7 @@ export function TransfertNouveau() {
         titre={reprise ? `Transfert ${qDossier.data?.entete.numero_transfert}` : 'Nouveau transfert'}
         description={
           parti
-            ? "Ce transfert est parti : son contenu ne se modifie plus."
+            ? "Ce transfert est parti : son contenu ne se modifié plus."
             : "En-tete et lignes saisis ensemble. Le document ne bouge aucun stock : c'est l'expedition qui sort la marchandise."
         }
         actions={

@@ -315,7 +315,7 @@ export function Plans() {
         },
       ),
     onSuccess: async (r) => {
-      toast.success(r.cree ? 'Plan cree' : 'Plan mis a jour', {
+      toast.success(r.cree ? 'Plan créé' : 'Plan mis à jour', {
         description: `${r.lignes_generees} case(s) deployee(s) · ${fmt.entier(r.m2_total)} m² sur la periode`,
       })
       setErreur(null)
@@ -350,7 +350,7 @@ export function Plans() {
         mrp: `${r.lignes_generees} besoin(s) · ${fmt.nombre(r.total_kg as number, 2)} kg`,
         snapshot: `${r.lignes_figees} ligne(s) archivee(s)`,
       }
-      toast.success(messages[v.chemin] ?? 'Operation effectuee')
+      toast.success(messages[v.chemin] ?? 'Opération effectuee')
       void qc.invalidateQueries({ queryKey: ['plans'] })
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : String(e)),
@@ -379,7 +379,7 @@ export function Plans() {
     mutationFn: (id: string) =>
       api.post<{ qualites_liberees: number }>(`/api/plans/${id}/cloturer`),
     onSuccess: (r) => {
-      toast.success('Plan cloture', {
+      toast.success('Plan clôture', {
         description: `${r.qualites_liberees} qualite(s) liberee(s) · ses besoins sortent du plan d'achat`,
       })
       void qc.invalidateQueries({ queryKey: ['plans'] })
@@ -504,7 +504,7 @@ export function Plans() {
       })
     }
     if (!nouvelles.length) {
-      toast.error('Aucune qualite cochee.')
+      toast.error('Aucune qualité cochee.')
       return
     }
     setLignes((ls) => [...ls, ...nouvelles])
@@ -544,11 +544,11 @@ export function Plans() {
   const sansChangement = empreinte(entete, lignes, coefs) === reference
 
   const problemes: string[] = []
-  if (!entete.libelle.trim()) problemes.push('le libelle est obligatoire')
+  if (!entete.libelle.trim()) problemes.push('le libellé est obligatoire')
   if (!/^\d{4}-\d{2}$/.test(entete.date_debut)) problemes.push('le mois de depart est obligatoire')
-  if (!lignes.length) problemes.push('aucune qualite retenue')
+  if (!lignes.length) problemes.push('aucune qualité retenue')
   if (lignes.some((l) => l.m2_base_mensuel === null))
-    problemes.push('chaque qualite doit porter une base mensuelle')
+    problemes.push('chaque qualité doit porter une base mensuelle')
   const trous = lignes.reduce(
     (n, l) =>
       n +
@@ -623,7 +623,7 @@ export function Plans() {
       },
       {
         champ: 'm2_total',
-        entete: 'm² periode',
+        entete: 'm² période',
         numerique: true,
         largeur: '120px',
         rendu: (p) => fmt.entier(p.m2_total),
@@ -635,7 +635,7 @@ export function Plans() {
         largeur: '90px',
         rendu: (p) =>
           p.statut === 'CLOTURE' ? (
-            <span className="text-attenue-texte" title="Un plan cloture n'alimente plus le plan d'achat">
+            <span className="text-attenue-texte" title="Un plan clôture n'alimente plus le plan d'achat">
               hors calcul
             </span>
           ) : (
@@ -673,7 +673,7 @@ export function Plans() {
           erreur={qPlans.error}
           cle={(p) => p.id_plan}
           surClic={ouvrir}
-          placeholderRecherche="Libelle, scenario, statut..."
+          placeholderRecherche="Libellé, scenario, statut..."
           titreCarte={(p) => `${p.libelle} (v${p.numero_version})`}
           videTitre="Aucun plan"
           videDescription="Un plan valide est la seule source de besoins pour le MRP et le plan d'achat."
@@ -713,14 +713,14 @@ export function Plans() {
                     confirmation.demander({
                       titre: `Cloturer ${p.libelle} ?`,
                       destructif: true,
-                      libelleConfirmer: 'Cloturer',
+                      libelleConfirmer: 'Clôturer',
                       description:
                         "Ses besoins sortiront du plan d'achat et ses recettes redeviendront " +
                         'disponibles pour un autre plan. Le plan reste consultable.',
                       action: () => cloture.mutate(p.id_plan),
                     })
                   }
-                  aria-label="Cloturer"
+                  aria-label="Clôturer"
                   title="Cloturer"
                   className="text-alerte hover:bg-alerte/10"
                 >
@@ -786,7 +786,7 @@ export function Plans() {
     },
     {
       champ: 'm2_total',
-      entete: 'Total periode',
+      entete: 'Total période',
       numerique: true,
       largeur: '140px',
       valeurTri: (l) => periode.reduce((t, p) => t + m2(l, p.rang, p.mois), 0),
@@ -883,7 +883,7 @@ export function Plans() {
                 title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
-                Enregistrer entete et grille
+                Enregistrer en-tête et grille
               </Bouton>
             )}
           </>
@@ -900,7 +900,7 @@ export function Plans() {
         <Alerte ton={statut === 'EN_COURS' ? 'info' : 'alerte'} className="mb-3">
           {statut === 'EN_COURS'
             ? "Plan en service : il alimente le MRP et le plan d'achat, et n'est plus modifiable. Creez une nouvelle version pour le reviser."
-            : "Plan cloture : ses besoins sont sortis du plan d'achat et ses recettes ont ete liberees."}
+            : "Plan clôture : ses besoins sont sortis du plan d'achat et ses recettes ont ete liberees."}
         </Alerte>
       )}
 
@@ -917,7 +917,7 @@ export function Plans() {
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <FileText className="size-3.5" />
-              Entete — periode glissante
+              En-tête — période glissante
             </CarteTitre>
             <div className="flex items-center gap-2 text-[11px] text-attenue-texte">
               {courant && (
@@ -1054,7 +1054,7 @@ export function Plans() {
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <Layers className="size-3.5" />
-              Qualites produites
+              Qualités produites
               <Aide>
                 Seules apparaissent les qualites <strong>actives</strong> qu'aucun autre plan actif
                 ne produit deja. Clore un plan libere les siennes.
@@ -1068,12 +1068,12 @@ export function Plans() {
                 disabled={!qualitesDisponibles.length}
                 title={
                   qualitesDisponibles.length
-                    ? 'Cocher plusieurs qualites et les ajouter en une fois'
-                    : 'Aucune qualite disponible : toutes sont deja au plan ou sans recette validee libre'
+                    ? 'Cocher plusieurs qualités et les ajouter en une fois'
+                    : 'Aucune qualité disponible : toutes sont déjà au plan ou sans recette validee libre'
                 }
               >
                 <Plus />
-                Choisir des qualites
+                Choisir des qualités
                 {qualitesDisponibles.length > 0 && (
                   <span className="rounded bg-attenue px-1 text-[10px]">
                     {qualitesDisponibles.length}
@@ -1096,8 +1096,8 @@ export function Plans() {
                 pagination={false}
                 tailleParDefaut={500}
                 titreCarte={(l) => `${l.code_qualite} — ${l.qualite_nom}`}
-                videTitre="Aucune qualite retenue"
-                videDescription="Un plan produit des qualites actives : choisissez-en au moins une."
+                videTitre="Aucune qualité retenue"
+                videDescription="Un plan produit des qualités actives : choisissez-en au moins une."
                 actions={
                   modifiable
                     ? (l) => (
@@ -1129,8 +1129,8 @@ export function Plans() {
               <CarteTitre className="flex items-center gap-1.5">
                 Saisonnalite — profil annuel
                 <Aide>
-                  Douze coefficients par qualite, un par mois de l'annee : c'est un profil qui se
-                  <strong> repete</strong> d'une annee sur l'autre, independamment de la duree du
+                  Douze coefficients par qualite, un par mois de l'année : c'est un profil qui se
+                  <strong> repete</strong> d'une année sur l'autre, independamment de la duree du
                   plan. Coefficient &gt; 1 = mois haut, &lt; 1 = mois bas, 0 = arret de production.
                   La grille est complete : toute case non saisie est amorcee a 1,00.
                 </Aide>
@@ -1191,7 +1191,7 @@ export function Plans() {
                             {nom}
                             {!couvert && (
                               <span className="ml-1.5 text-[10px] text-attenue-texte">
-                                hors periode
+                                hors période
                               </span>
                             )}
                           </td>
@@ -1249,7 +1249,7 @@ export function Plans() {
                     taille="sm"
                     onClick={() => recalcul.mutate(courant.id_plan)}
                     chargement={recalcul.isPending}
-                    title="Refaire le calcul cote serveur a partir des bases et coefficients enregistres"
+                    title="Refaire le calcul cote serveur à partir des bases et coefficients enregistres"
                   >
                     <RefreshCw />
                     Recalculer
@@ -1263,7 +1263,7 @@ export function Plans() {
                   <thead>
                     <tr className="bg-attenue">
                       <th className="sticky left-0 z-10 bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                        Qualite
+                        Qualité
                       </th>
                       <th className="bg-attenue px-2.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap">
                         Base / mois
@@ -1374,7 +1374,7 @@ export function Plans() {
                 title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
-                Enregistrer entete et grille
+                Enregistrer en-tête et grille
               </Bouton>
             </div>
           </div>
@@ -1432,7 +1432,7 @@ export function Plans() {
                 Tout cocher
               </Bouton>
               <Bouton variante="discret" taille="xs" onClick={() => setChoix({})}>
-                Tout decocher
+                Tout décocher
               </Bouton>
               <span className="text-[11px] text-attenue-texte">{nbCoches} selectionnee(s)</span>
             </div>

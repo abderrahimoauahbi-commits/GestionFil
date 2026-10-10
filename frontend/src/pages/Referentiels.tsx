@@ -185,7 +185,7 @@ const ouiNon = (champ: string, entete: string): Colonne<Ligne> => ({
 const METHODES_FRAIS = [
   { valeur: 'VALEUR', libelle: 'A la valeur' },
   { valeur: 'POIDS', libelle: 'Au poids' },
-  { valeur: 'QUANTITE', libelle: 'A la quantite' },
+  { valeur: 'QUANTITE', libelle: 'A la quantité' },
   { valeur: 'PARTS_EGALES', libelle: 'A parts egales' },
 ]
 
@@ -285,20 +285,20 @@ const ONGLETS: Onglet[] = [
   },
   {
     cle: 'roles-bom',
-    libelle: 'Roles BOM',
+    libelle: 'Rôles BOM',
     module: 'CATALOGUE',
     chemin: 'roles-bom',
     identifiant: 'code_role',
-    unite: 'role',
+    unite: 'rôle',
     colonnes: [
       colonneCode('code_role', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
+      { champ: 'libelle', entete: 'Libellé' },
       { champ: 'description', entete: 'Description', secondaire: true },
       compte('nb_qualites', 'Qualites'),
     ],
     champs: [
       { champ: 'code_role', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      { champ: 'libelle', libelle: 'Libellé', obligatoire: true },
       { champ: 'description', libelle: 'Description', type: 'zone' },
       { champ: 'ordre_affichage', libelle: 'Ordre d affichage', type: 'entier' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
@@ -349,7 +349,7 @@ const ONGLETS: Onglet[] = [
         champ: 'est_quarantaine',
         libelle: 'Zone de quarantaine',
         type: 'booleen',
-        aide: 'Destination imposee des receptions non conformes. Exclut automatiquement du MRP.',
+        aide: 'Destination imposee des réceptions non conformes. Exclut automatiquement du MRP.',
         section: 'Règles de stock',
       },
     ],
@@ -367,13 +367,13 @@ const ONGLETS: Onglet[] = [
     ecranDedie: () => <Equivalences />,
     colonnes: [
       colonneCode('code_groupe_equiv', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
+      { champ: 'libelle', entete: 'Libellé' },
       { champ: 'description', entete: 'Description', secondaire: true },
       compte('nb_references', 'References'),
     ],
     champs: [
       { champ: 'code_groupe_equiv', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      { champ: 'libelle', libelle: 'Libellé', obligatoire: true },
       {
         champ: 'description',
         libelle: 'Description',
@@ -392,7 +392,7 @@ const ONGLETS: Onglet[] = [
     unite: 'type',
     colonnes: [
       colonneCode('code_type_mvt', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
+      { champ: 'libelle', entete: 'Libellé' },
       {
         champ: 'signe',
         entete: 'Sens',
@@ -409,7 +409,7 @@ const ONGLETS: Onglet[] = [
     ],
     champs: [
       { champ: 'code_type_mvt', libelle: 'Code', obligatoire: true, cleCreation: true, section: 'Identification' },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true, section: 'Identification' },
+      { champ: 'libelle', libelle: 'Libellé', obligatoire: true, section: 'Identification' },
       {
         champ: 'signe',
         libelle: 'Sens',
@@ -421,7 +421,7 @@ const ONGLETS: Onglet[] = [
         ],
         cleCreation: true,
         aide:
-          'Fige a la creation : les mouvements deja enregistres ont ete appliques avec ce sens, ' +
+          'Fige a la création : les mouvements déjà enregistres ont ete appliques avec ce sens, ' +
           'le changer les inverserait retroactivement dans le grand livre.',
         section: 'Identification',
       },
@@ -442,12 +442,12 @@ const ONGLETS: Onglet[] = [
     unite: 'motif',
     colonnes: [
       colonneCode('code_motif', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
+      { champ: 'libelle', entete: 'Libellé' },
       { champ: 'categorie', entete: 'Catégorie' },
     ],
     champs: [
       { champ: 'code_motif', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      { champ: 'libelle', libelle: 'Libellé', obligatoire: true },
       { champ: 'categorie', libelle: 'Catégorie', obligatoire: true },
       {
         champ: 'signe_default',
@@ -473,12 +473,12 @@ const ONGLETS: Onglet[] = [
     unite: 'motif',
     colonnes: [
       colonneCode('code_motif_ligne', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
+      { champ: 'libelle', entete: 'Libellé' },
       { champ: 'categorie', entete: 'Catégorie' },
     ],
     champs: [
       { champ: 'code_motif_ligne', libelle: 'Code', obligatoire: true, cleCreation: true },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true },
+      { champ: 'libelle', libelle: 'Libellé', obligatoire: true },
       { champ: 'categorie', libelle: 'Catégorie' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
@@ -500,7 +500,7 @@ const ONGLETS: Onglet[] = [
     unite: 'type de frais',
     colonnes: [
       colonneCode('id_frais', 'Code'),
-      { champ: 'libelle', entete: 'Libelle' },
+      { champ: 'libelle', entete: 'Libellé' },
       {
         champ: 'piece_justificative',
         entete: 'Piece justificative',
@@ -523,10 +523,10 @@ const ONGLETS: Onglet[] = [
     ],
     champs: [
       { champ: 'id_frais', libelle: 'Code', obligatoire: true, cleCreation: true, section: 'Identification' },
-      { champ: 'libelle', libelle: 'Libelle', obligatoire: true, section: 'Identification' },
+      { champ: 'libelle', libelle: 'Libellé', obligatoire: true, section: 'Identification' },
       {
         champ: 'categorie',
-        libelle: 'Categorie',
+        libelle: 'Catégorie',
         type: 'liste',
         obligatoire: true,
         options: [
@@ -575,7 +575,7 @@ const ONGLETS: Onglet[] = [
       },
       {
         champ: 'methode_repartition',
-        libelle: 'Methode de repartition',
+        libelle: 'Méthode de repartition',
         type: 'liste',
         options: METHODES_FRAIS,
         defaut: 'VALEUR',
@@ -587,21 +587,21 @@ const ONGLETS: Onglet[] = [
   },
   {
     cle: 'roles-utilisateur',
-    libelle: 'Roles utilisateur',
+    libelle: 'Rôles utilisateur',
     module: 'PARAMETRES',
     chemin: '',
     identifiant: 'code_role_user',
-    unite: 'role',
+    unite: 'rôle',
     colonnes: [],
     champs: [],
     lectureSeule: {
       url: '/api/roles-utilisateur',
       note:
-        'Les roles sont cites par toutes les permissions et par chaque compte. On les attribue ' +
-        'depuis l ecran Utilisateurs ; on ne les cree ni ne les supprime ici.',
+        'Les rôles sont cites par toutes les permissions et par chaque compte. On les attribue ' +
+        'depuis l ecran Utilisateurs ; on ne les créé ni ne les supprime ici.',
       colonnes: [
         colonneCode('code_role_user', 'Code'),
-        { champ: 'libelle', entete: 'Libelle' },
+        { champ: 'libelle', entete: 'Libellé' },
         { champ: 'description', entete: 'Description', secondaire: true },
         compte('nb_utilisateurs', 'Comptes'),
         compte('nb_modules', 'Modules'),
@@ -611,7 +611,7 @@ const ONGLETS: Onglet[] = [
   },
   {
     cle: 'transitions',
-    libelle: 'Machine a etats',
+    libelle: 'Machine a états',
     module: 'PARAMETRES',
     chemin: '',
     identifiant: 'entite',
@@ -841,7 +841,7 @@ function MachineEtats() {
       </div>
 
       {q.isLoading ? (
-        <Chargement texte="Lecture de la machine a etats…" />
+        <Chargement texte="Lecture de la machine a états…" />
       ) : (
         <DataTable<Transition>
           module="PARAMETRES"
@@ -859,7 +859,7 @@ function MachineEtats() {
             },
             {
               champ: 'role_requis',
-              entete: 'Role requis',
+              entete: 'Rôle requis',
               rendu: (t) =>
                 t.role_requis ?? <span className="text-attenue-texte">tout role</span>,
             },
@@ -971,7 +971,7 @@ function AjoutTransition({
               ))}
             </Selecteur>
             <p className="mt-1 text-[11px] text-attenue-texte">
-              Seules les entites deja gerees par le code peuvent changer d etat.
+              Seules les entites déjà gerees par le code peuvent changer d état.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1004,7 +1004,7 @@ function AjoutTransition({
               id="r"
               value={f.role_requis}
               onChange={(e) => setF({ ...f, role_requis: e.target.value })}
-              placeholder="Vide : tout role autorisé"
+              placeholder="Vide : tout rôle autorisé"
             />
           </div>
           <div>

@@ -278,7 +278,7 @@ export function CloturePanneau({
   return (
     <Panneau
       titre="Clôturer le dossier"
-      description="Les frais rejoignent le CUMP du stock encore présent. Après clôture, le dossier ne se modifie plus."
+      description="Les frais rejoignent le CUMP du stock encore présent. Après clôture, le dossier ne se modifié plus."
     >
         {qApercu.isLoading && <Chargement texte="Calcul de la clôture…" />}
         {qApercu.error && (

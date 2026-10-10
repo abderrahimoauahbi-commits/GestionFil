@@ -173,7 +173,7 @@ export function Droits() {
                 disabled={appliquerModele.isPending}
                 title={`Reinitialise le module ${moduleActif} depuis le modele du role ${utilisateur.code_role_user}`}
               >
-                Appliquer le modele du role
+                Appliquer le modele du rôle
               </Bouton>
             )}
             {peutEcrire && (

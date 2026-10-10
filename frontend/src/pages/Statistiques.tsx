@@ -1185,7 +1185,7 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
           <CarteCorps className="p-0">
             {serie.length === 0 ? (
               <p className="p-4 text-[13px] text-attenue-texte">
-                Aucune reception validee pour ce fournisseur.
+                Aucune réception validee pour ce fournisseur.
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -1272,7 +1272,7 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
       <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <Chiffre libelle="Qualités" valeur={String(qualites.length)} detail={`${actives.length} actives`} />
         <Chiffre
-          libelle="Coût matiere moyen"
+          libelle="Coût matière moyen"
           valeur={
             voitCout && actives.length
               ? `${fmt.nombre(
@@ -1292,13 +1292,13 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
         <Chiffre
           libelle="Recette hors fiche"
           valeur={String(ecartees.length)}
-          detail="ecart de poids > 1 %"
+          detail="écart de poids > 1 %"
           ton={ecartees.length > 0 ? 'alerte' : 'succes'}
         />
       </div>
 
       {sansCmup.length > 0 && (
-        <Alerte ton="alerte" titre="Coût matiere incomplet">
+        <Alerte ton="alerte" titre="Coût matière incomplet">
           {sansCmup.length} qualite(s) contiennent des composants sans CMUP — une matiere jamais
           entree en stock n'a pas de prix moyen. Leur part manque au cout affiche, qui est donc
           <strong> sous-estime</strong>. Le nombre de composants concernes est indique par ligne.

@@ -81,7 +81,7 @@ export function Receptions() {
   const annuler = useMutation({
     mutationFn: (id: string) => api.put(`/api/receptions/${id}/statut`, { statut: 'ANNULE' }),
     onSuccess: () => {
-      toast.success('Reception annulee')
+      toast.success('Réception annulee')
       void qc.invalidateQueries({ queryKey: ['receptions'] })
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Annulation impossible.'),
@@ -91,7 +91,7 @@ export function Receptions() {
   const colonnes: ColonneDT<Reception>[] = [
     {
       champ: 'numero_reception',
-      entete: 'N° reception',
+      entete: 'N° réception',
       largeur: '160px',
       filtre: 'texte',
       rendu: (r) => (
@@ -257,7 +257,7 @@ export function Receptions() {
         description="Ouvrir une réception pour peser, relever les lots et soumettre au contrôle qualité."
         actions={
           droits.peutEcrire && (
-            <Bouton taille="icone" title="Nouvelle reception" aria-label="Nouvelle réception" onClick={() => naviguer('/receptions/nouvelle')}>              <Plus />            </Bouton>
+            <Bouton taille="icone" title="Nouvelle réception" aria-label="Nouvelle réception" onClick={() => naviguer('/receptions/nouvelle')}>              <Plus />            </Bouton>
           )
         }
       />
@@ -276,10 +276,10 @@ export function Receptions() {
         erreur={q.error}
         cle={(r) => r.id_reception}
         surClic={(r) => naviguer(`/receptions/${r.id_reception}`)}
-        placeholderRecherche="N° de reception, fournisseur, bon de livraison..."
+        placeholderRecherche="N° de réception, fournisseur, bon de livraison..."
         titreCarte={(r) => `${r.numero_reception} — ${r.fournisseur_nom}`}
-        videTitre="Aucune reception"
-        videDescription="Une reception se rattache a un bon de commande envoye, ou se saisit librement."
+        videTitre="Aucune réception"
+        videDescription="Une réception se rattache a un bon de commande envoye, ou se saisit librement."
         actions={(r) => (
           <div className="flex justify-end gap-0.5">
             <Bouton
@@ -287,7 +287,7 @@ export function Receptions() {
               taille="icone-xs"
               onClick={() => ouvrirEtat(`/etats/receptions/${r.id_reception}`)}
               aria-label="Imprimer"
-              title="Imprimer le bon de reception"
+              title="Imprimer le bon de réception"
             >
               <Printer />
             </Bouton>
@@ -296,7 +296,7 @@ export function Receptions() {
               taille="icone-xs"
               onClick={() => naviguer(`/receptions/${r.id_reception}`)}
               aria-label="Ouvrir"
-              title="Ouvrir la reception"
+              title="Ouvrir la réception"
             >
               <FileText />
             </Bouton>
@@ -310,7 +310,7 @@ export function Receptions() {
                     titre: `Annuler ${r.numero_reception} ?`,
                     destructif: true,
                     libelleConfirmer: 'Annuler',
-                    description: "Rien n'est encore entre en stock : la reception sera abandonnee.",
+                    description: "Rien n'est encore entre en stock : la réception sera abandonnee.",
                     action: () => annuler.mutate(r.id_reception),
                   })
                 }

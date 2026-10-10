@@ -132,7 +132,7 @@ const DOMAINES: { cle: Domaine; libelle: string }[] = [
   { cle: 'ACHATS', libelle: 'Achats' },
   { cle: 'STOCK', libelle: 'Stock' },
   { cle: 'PRODUCTION', libelle: 'Production' },
-  { cle: 'QUALITE', libelle: 'Qualite' },
+  { cle: 'QUALITE', libelle: 'Qualité' },
 ]
 
 interface Tuile {
@@ -213,7 +213,7 @@ export function Cockpit() {
     {
       champ: 'nb_bc_a_valider',
       domaine: 'ACHATS',
-      libelle: 'Bons a valider',
+      libelle: 'Bons à valider',
       valeur: n('nb_bc_a_valider'),
       detail: droits.visible('montant_bc_a_valider_mad')
         ? `${fmt.compact(n('montant_bc_a_valider_mad'))} MAD engages`
@@ -250,7 +250,7 @@ export function Cockpit() {
       domaine: 'QUALITE',
       libelle: 'Réceptions a controler',
       valeur: n('nb_receptions_a_controler'),
-      detail: 'en attente du controle qualité',
+      detail: 'en attente du contrôle qualité',
       ton: 'alerte',
       Icone: ClipboardCheck,
       vers: '/receptions',
@@ -272,7 +272,7 @@ export function Cockpit() {
       domaine: 'STOCK',
       libelle: 'A regulariser',
       valeur: n('nb_receptions_a_regulariser'),
-      detail: 'bon non envoye : controle bloque',
+      detail: 'bon non envoye : contrôle bloque',
       ton: 'danger',
       Icone: ShieldAlert,
       vers: '/receptions',
@@ -298,7 +298,7 @@ export function Cockpit() {
       domaine: 'QUALITE',
       libelle: 'Lots a moins de 90 j',
       valeur: n('nb_lots_peremption_proche'),
-      detail: 'peremption proche',
+      detail: 'péremption proche',
       ton: 'alerte',
       Icone: Clock,
       vers: '/stock',
@@ -450,7 +450,7 @@ export function Cockpit() {
     <div>
       <EnTetePage
         titre="Poste de travail"
-        description="Ce qui attend une decision, et ce qui menace le plan de production. Tout est recalcule a l'ouverture."
+        description="Ce qui attend une décision, et ce qui menace le plan de production. Tout est recalcule a l'ouverture."
         actions={
           <label className="flex items-center gap-2 text-[12px] text-attenue-texte">
             Domaine
@@ -510,7 +510,7 @@ export function Cockpit() {
           )}
 
           {mesFiles.length === 0 && (
-            <Alerte ton="succes" titre="Rien n'attend de decision">
+            <Alerte ton="succes" titre="Rien n'attend de décision">
               Aucune file en cours pour votre role. Les compteurs reapparaitront des qu'un bon, une
               reception ou une proposition demandera votre intervention.
             </Alerte>
@@ -588,7 +588,7 @@ export function Cockpit() {
 
       {vue === 'matiere' && (
         <>
-          <TitreBande texte="Ou part la matiere" />
+          <TitreBande texte="Ou part la matière" />
           <TableauDeBord />
         </>
       )}
@@ -1058,9 +1058,9 @@ export function TableauDeBord() {
   if (q.isLoading) return <Squelette className="h-56 w-full" />
   if (!couts.length) {
     return (
-      <Alerte ton="info" titre="Pas encore de coût matiere">
+      <Alerte ton="info" titre="Pas encore de coût matière">
         Le cout par metre carre se calcule a partir du CMUP des composants. Il apparaitra des la
-        premiere reception valorisee sur chaque reference de recette.
+        première réception valorisee sur chaque référence de recette.
       </Alerte>
     )
   }
@@ -1068,7 +1068,7 @@ export function TableauDeBord() {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <BarresRangees
-        titre="Coût matiere par qualité"
+        titre="Coût matière par qualité"
         sousTitre="CMUP des composants, rapporte au metre carre"
         unite="MAD/m2"
         donnees={couts}
@@ -1076,7 +1076,7 @@ export function TableauDeBord() {
       {composition.donnees.length > 0 && (
         <BarresEmpilees
           titre="Ou passe le coût"
-          sousTitre="Les trois roles les plus lourds de la gamme"
+          sousTitre="Les trois rôles les plus lourds de la gamme"
           unite="MAD/m2"
           series={composition.series}
           donnees={composition.donnees}
@@ -1293,7 +1293,7 @@ function ChiffresCles() {
           precision={`${ruptures} rupture(s) · ${critiques} critique(s) · ${attention} en attention`}
           ton={ruptures > 0 ? 'danger' : critiques > 0 ? 'alerte' : 'succes'}
           surClic={() => naviguer('/plan-achat')}
-          aide="Stock + commandes fiables - demande pendant le delai d'approvisionnement."
+          aide="Stock + commandes fiables - demande pendant le délai d'approvisionnement."
         />
         <CarteStat
           Icone={Sparkles}
@@ -1303,7 +1303,7 @@ function ChiffresCles() {
           precision={`${eco?.nb_opportunites ?? 0} référence(s) au-dessus du prix du groupe`}
           ton={(eco?.economies_total_mad ?? 0) > 0 ? 'succes' : 'neutre'}
           surClic={() => naviguer('/matrice-prix')}
-          aide="A qualite egale : le meme titrage, achete moins cher ailleurs dans le catalogue."
+          aide="A qualité egale : le meme titrage, achete moins cher ailleurs dans le catalogue."
         />
       </div>
 
@@ -1343,7 +1343,7 @@ function ChiffresCles() {
       {ok + attention + critiques + ruptures > 0 && (
         <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
           <p className="mb-2 text-[11px] uppercase tracking-wide text-attenue-texte">
-            Etat du catalogue suivi
+            État du catalogue suivi
           </p>
           <BarreRepartition
             parts={[

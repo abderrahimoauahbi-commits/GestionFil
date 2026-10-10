@@ -133,12 +133,12 @@ const TON_ALERTE: Record<Groupe['qualification'], 'succes' | 'alerte' | 'danger'
 }
 
 const EXPLICATION: Record<Groupe['qualification'], string> = {
-  ALTERNATIF: 'Vraie alternative : references homogenes chez des fournisseurs distincts.',
-  'MONO-REFERENCE': "Une seule reference : le groupe n'offre aucune alternative.",
+  ALTERNATIF: 'Vraie alternative : références homogenes chez des fournisseurs distincts.',
+  'MONO-REFERENCE': "Une seule référence : le groupe n'offre aucune alternative.",
   'MEME FOURNISSEUR':
-    'Toutes les references viennent du meme fournisseur : elles tombent ensemble, ce n est pas une securite d approvisionnement.',
+    'Toutes les références viennent du meme fournisseur : elles tombent ensemble, ce n est pas une sécurité d approvisionnement.',
   HETEROGENE:
-    'Unite, densite ou categorie differentes : substituer fausserait le calcul kg/m2 de la recette.',
+    'Unite, densité ou catégorie differentes : substituer fausserait le calcul kg/m2 de la recette.',
 }
 
 export function Equivalences() {
@@ -262,8 +262,8 @@ export function Equivalences() {
     mutationFn: (references: string[]) =>
       api.put(`/api/groupes-equivalence/${encodeURIComponent(pointe!)}/ordre`, { references }),
     onSuccess: () => {
-      toast.success('Ordre mis a jour', {
-        description: 'La premiere référence du groupe devient la préférentielle.',
+      toast.success('Ordre mis à jour', {
+        description: 'La première référence du groupe devient la préférentielle.',
       })
       rafraichir()
     },
@@ -282,7 +282,7 @@ export function Equivalences() {
         est_preferentielle: membres.length === 0 ? 1 : 0,
       }),
     onSuccess: () => {
-      toast.success('Reference rattachee au groupe')
+      toast.success('Référence rattachee au groupe')
       setAjout(false)
       rafraichir()
     },
@@ -292,7 +292,7 @@ export function Equivalences() {
   const detacher = useMutation({
     mutationFn: (id: string) => api.delete(`/api/reference-groupes/${id}`),
     onSuccess: () => {
-      toast.success('Reference detachee')
+      toast.success('Référence detachee')
       rafraichir()
     },
     onError: echec,
@@ -457,7 +457,7 @@ export function Equivalences() {
                   {droits.peutEcrire && (
                     <Bouton variante="contour" taille="sm" onClick={() => setAjout(true)}>
                       <Plus />
-                      Rattacher une reference
+                      Rattacher une référence
                     </Bouton>
                   )}
                 </CarteEntete>
@@ -468,7 +468,7 @@ export function Equivalences() {
                     </div>
                   ) : membres.length === 0 ? (
                     <p className="p-4 text-[13px] text-attenue-texte">
-                      Aucune reference rattachee a ce groupe.
+                      Aucune référence rattachee a ce groupe.
                     </p>
                   ) : (
                     <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
@@ -580,7 +580,7 @@ export function Equivalences() {
                                           destructif: true,
                                           libelleConfirmer: 'Detacher',
                                           description:
-                                            "La reference ne sera plus proposee comme substitut des autres membres du groupe. Aucun stock ni mouvement n'est touche.",
+                                            "La référence ne sera plus proposee comme substitut des autres membres du groupe. Aucun stock ni mouvement n'est touche.",
                                           action: () => detacher.mutate(m.id_ref_grp),
                                         })
                                       }
@@ -763,7 +763,7 @@ function PanneauRattachement({
         <div className="mb-2 flex items-center gap-2">
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
           <Champ
-            placeholder="Référence ou designation…"
+            placeholder="Référence ou désignation…"
             value={filtre}
             onChange={(e) => setFiltre(e.target.value)}
             className="h-8"

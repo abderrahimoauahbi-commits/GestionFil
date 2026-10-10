@@ -262,7 +262,7 @@ async function creerBon(e: Extract<Evenement, { type: 'BC' }>) {
       await taper(champNombre(p, 'Quantité en kilos').last(), fr(l.kg))
       await taper(champNombre(p, /^Prix .* par kg$/).last(), fr(l.prix, 4))
     }
-    await p.getByRole('button', { name: 'Creer le bon' }).click()
+    await p.getByRole('button', { name: /^Cr[ée]er le bon$/ }).click()
     await expect(p).toHaveURL(/\/bons-commande\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {
       throw new Error(`bon non créé : ${await messageAffiche(p)}`)
     })
@@ -275,7 +275,7 @@ async function creerBon(e: Extract<Evenement, { type: 'BC' }>) {
   } else await aller(p, `/bons-commande/${id}`, login)
   const b = await bon(p, id)
   if (b?.statut === 'BROUILLON') {
-    await p.getByRole('button', { name: /Soumettre a validation/ }).click()
+    await p.getByRole('button', { name: /Soumettre [aà] validation/ }).click()
     await attendre(async () => (await bon(p, id))?.statut, (s) => s !== 'BROUILLON', 'soumission du bon')
   }
   return `${b?.numero_bc} ${e.fournisseur} ${e.lignes.length} ligne(s), ${fr(e.lignes.reduce((s, l) => s + l.kg, 0), 0)} kg`
@@ -390,7 +390,7 @@ async function receptionner(e: Extract<Evenement, { type: 'RECEPTION' }>) {
       if (parCode.get(l.ref)?.suivi_lot === 1) await p.getByLabel('Lot fournisseur').nth(i).fill(l.lot)
       await p.getByRole('combobox', { name: 'Magasin destinataire' }).nth(i).selectOption(l.magasin)
     }
-    await p.getByRole('button', { name: 'Enregistrer la reception' }).click()
+    await p.getByRole('button', { name: /^Enregistrer la r[ée]ception$/ }).click()
     await expect(p).toHaveURL(/\/receptions\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {
       throw new Error(`réception non créée : ${await messageAffiche(p)}`)
     })
@@ -408,14 +408,14 @@ async function receptionner(e: Extract<Evenement, { type: 'RECEPTION' }>) {
   let r = (await reception(p, rid))!
   if (r.statut === 'BROUILLON') await completerBobines(p, rid, e)
   if (r.statut === 'BROUILLON') {
-    const m = await cliquer(p, p.getByRole('button', { name: /Soumettre au controle/ }))
+    const m = await cliquer(p, p.getByRole('button', { name: /Soumettre au contr[oô]le/ }))
     if (m.refus) throw new Error(`soumission refusée : ${m.texte}`)
     r = await attendre(async () => (await reception(p, rid))!, (x) => x.statut !== 'BROUILLON', `soumission de la réception (${m.texte})`)
   }
   if (r.statut === 'A_CONTROLER') {
     const d = await session('Choukri')
     await aller(d, `/receptions/${rid}`, 'Choukri')
-    await d.getByRole('button', { name: 'Valider le controle' }).click()
+    await d.getByRole('button', { name: /^Valider le contr[oô]le$/ }).click()
     await confirmerSi(d, 'Générer les lots et valider')
     r = await attendre(async () => (await reception(d, rid))!, (x) => x.statut === 'VALIDE', `validation de la réception : ${await messageAffiche(d)}`)
   }
@@ -902,7 +902,7 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
     await p.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
     await p.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption(e.magasin)
     await p.locator('#type').selectOption('TOURNANT')
-    await p.getByRole('button', { name: 'Creer', exact: true }).click()
+    await p.getByRole('button', { name: /^Cr[ée]er$/ }).click()
     inv = (await attendre(ouverts, (l) => l.some((i) => i.statut === 'BROUILLON'), 'création de l’inventaire')).find((i) => i.statut === 'BROUILLON')!
   }
   await aller(p, '/inventaires', login)
@@ -937,10 +937,10 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
   }
   await p.getByRole('button', { name: 'Enregistrer le comptage' }).click()
   // Le comptage s'enregistre d'abord (194 lignes : quelques secondes) ; la cloture attend.
-  const cloturer = p.getByRole('button', { name: 'Cloturer et ajuster' })
+  const cloturer = p.getByRole('button', { name: /^Cl[oô]turer et ajuster$/ })
   await expect(cloturer).toBeEnabled({ timeout: 120_000 })
   await cloturer.click()
-  await confirmerSi(p, 'Cloturer', 5_000)
+  await confirmerSi(p, /^Cl[oô]turer$/, 5_000)
   await attendre(async () => (await lire<Inventaire[]>(p, '/api/inventaires')).find((i) => i.id_inventaire === inv!.id_inventaire)?.statut,
     (s) => s === 'CLOTURE', `clôture de l’inventaire : ${await messageAffiche(p)}`, 60_000)
   return `${inv.numero_inventaire} : ${lignes.length} lignes, ${ecarts} écart(s)`

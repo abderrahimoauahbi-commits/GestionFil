@@ -531,7 +531,7 @@ export function BonCommandeNouveau() {
               disabled={!pret || !droits.peutEcrire}
             >
               <Save />
-              Creer le bon
+              Créer le bon
             </Bouton>
           </div>
         </div>

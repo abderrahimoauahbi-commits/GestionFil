@@ -63,10 +63,10 @@ export function useCrud<T>(chemin: string, filtres: Record<string, string> = {})
       api.post<Record<string, unknown>>(`/api/${chemin}`, donnees),
     onSuccess: () => {
       setErreur(null)
-      setSucces('Enregistrement cree.')
+      setSucces('Enregistrement créé.')
       rafraichir()
     },
-    onError: (e) => setErreur(message(e, 'Creation impossible.')),
+    onError: (e) => setErreur(message(e, 'Création impossible.')),
   })
 
   const modifier = useMutation({

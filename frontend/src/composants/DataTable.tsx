@@ -932,7 +932,7 @@ export function DataTable<L extends Record<string, unknown>>({
                   taille="icone"
                   onClick={() => table.firstPage()}
                   disabled={!table.getCanPreviousPage()}
-                  aria-label="Premiere page"
+                  aria-label="Première page"
                 >
                   <ChevronsLeft />
                 </Bouton>

@@ -734,7 +734,7 @@ export function Reception() {
   const changerStatut = useMutation({
     mutationFn: (c: { statut: string; motif?: string }) => api.put(`/api/receptions/${id}/statut`, c),
     onSuccess: (_r, c) => {
-      toast.success(c.statut === 'BROUILLON' ? 'Réception renvoyée au magasinier' : 'Reception soumise au controle qualite')
+      toast.success(c.statut === 'BROUILLON' ? 'Réception renvoyée au magasinier' : 'Réception soumise au contrôle qualité')
       setRenvoi(null)
       rafraichir()
     },
@@ -745,8 +745,8 @@ export function Reception() {
   const valider = useMutation({
     mutationFn: () => api.post(`/api/receptions/${id}/valider`),
     onSuccess: () => {
-      toast.success('Reception validee', {
-        description: 'Stock, CMUP, archive et historique de prix mis a jour en une transaction.',
+      toast.success('Réception validee', {
+        description: 'Stock, CMUP, archive et historique de prix mis à jour en une transaction.',
       })
       rafraichir()
     },
@@ -978,7 +978,7 @@ export function Reception() {
                 }
               >
                 <Send />
-                Soumettre au controle
+                Soumettre au contrôle
               </Bouton>
             )}
             {droits.peutValider && rec.statut === 'A_CONTROLER' && (
@@ -1022,7 +1022,7 @@ export function Reception() {
                 }
               >
                 <ShieldCheck />
-                Valider le controle
+                Valider le contrôle
               </Bouton>
             )}
             {droits.peutEcrire && rec.statut === 'A_CONTROLER' && renvoi === null && (
@@ -1090,8 +1090,8 @@ export function Reception() {
           {rec.statut === 'CLOTURE'
             ? `Reception cloturee avec la facture${rec.numero_facture ? ` ${rec.numero_facture}` : ''} : la valeur definitive est au stock. Une correction passe par un avoir.`
             : rec.statut === 'VALIDE'
-              ? 'Reception validee au prix du bon (valeur provisoire) : le stock, le CMUP et l’historique de prix ont ete mis a jour. La facture la rendra definitive.'
-              : 'Reception figee.'}
+              ? 'Réception validee au prix du bon (valeur provisoire) : le stock, le CMUP et l’historique de prix ont ete mis à jour. La facture la rendra definitive.'
+              : 'Réception figee.'}
         </Alerte>
       )}
       {/* LA VALEUR DEFINITIVE (regle 6) : la facture, puis la cloture. */}
@@ -1264,7 +1264,7 @@ export function Reception() {
             ) : (
               <DataTable<LigneRec>
                 exportable="lignes-de-reception"
-                imprimable="Lignes de reception"
+                imprimable="Lignes de réception"
                 module={MODULE}
                 colonnes={colonnes}
                 lignes={lignesAffichees}
@@ -1276,7 +1276,7 @@ export function Reception() {
                 tailleParDefaut={500}
                 titreCarte={(l) => l.code_reference}
                 videTitre="Aucune pesee"
-                videDescription="Cette reception ne porte aucune ligne."
+                videDescription="Cette réception ne porte aucune ligne."
               />
             )}
             <TotauxReception

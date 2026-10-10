@@ -74,7 +74,7 @@ export function MiseAJourAuto() {
         // Serveur injoignable, signature refusee, greffon absent d'une
         // version ancienne : dans tous les cas l'ERP s'ouvre normalement, et
         // l'on garde la trace en console pour qui la cherche.
-        console.warn('mise a jour : verification impossible', e)
+        console.warn('mise à jour : verification impossible', e)
       }
     })()
 
@@ -104,7 +104,7 @@ export function MiseAJourAuto() {
               onClick={() => {
                 void trouvee.installer().catch((e) => {
                   setAvancement(null)
-                  toast.error("La mise a jour n'a pas abouti", {
+                  toast.error("La mise à jour n'a pas abouti", {
                     description: String(e),
                   })
                 })

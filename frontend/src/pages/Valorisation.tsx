@@ -112,7 +112,7 @@ export function Valorisation() {
     <div className="flex flex-col gap-3">
       <EnTetePage
         titre="Valorisation du stock"
-        description="CMUP par référence, et ecart au prix catalogue converti"
+        description="CMUP par référence, et écart au prix catalogue converti"
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -162,7 +162,7 @@ export function Valorisation() {
         <CarteEntete>
           <CarteTitre className="flex items-center gap-1.5">
             <Calculator className="size-3.5" />
-            Methode et hypotheses
+            Méthode et hypotheses
           </CarteTitre>
         </CarteEntete>
         <CarteCorps className="grid gap-x-8 gap-y-2 text-[12px] md:grid-cols-2">

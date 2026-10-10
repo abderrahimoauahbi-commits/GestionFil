@@ -152,7 +152,7 @@ export function Telecharger() {
                            transition-[filter] hover:brightness-110"
               >
                 <Download className="size-4" />
-                Telecharger
+                Télécharger
               </a>
             </div>
           ))}
@@ -185,7 +185,7 @@ export function Telecharger() {
                   download={p.fichier}
                   className="text-primaire underline-offset-2 hover:underline"
                 >
-                  Telecharger
+                  Télécharger
                 </a>
               </li>
             ))}

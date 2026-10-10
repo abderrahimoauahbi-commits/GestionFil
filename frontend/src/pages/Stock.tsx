@@ -648,7 +648,7 @@ export function Stock() {
           erreur={q.error}
           cle={(l) => l.code_reference}
           titreCarte={(l) => l.code_reference}
-          texteVide="Aucune reference pour ce filtre."
+          texteVide="Aucune référence pour ce filtre."
         />
       </PageAvecRail>
     </div>

@@ -322,7 +322,7 @@ export function CoutRevient() {
         titreCarte={(l) => `${l.numero_reception} · ${l.code_reference}`}
         exportable="cout-de-revient"
         imprimable="Coût de revient"
-        texteVide="Aucune reception validee ou cloturee."
+        texteVide="Aucune réception validee ou clôturée."
       />
 
       <EcartsPrix />

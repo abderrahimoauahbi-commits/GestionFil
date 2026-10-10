@@ -341,7 +341,7 @@ export function BonsCommande() {
                       : 'Annuler le bon',
                     description: SUPPRIMABLES.includes(b.statut)
                       ? 'Ce bon n’engage rien : il sera EFFACE, sans laisser de trace dans ' +
-                        'la liste ni dans les etats. Ses propositions d’achat reviendront au plan.'
+                        'la liste ni dans les états. Ses propositions d’achat reviendront au plan.'
                       : 'Ses lignes seront annulees et les propositions d’achat qui les ont ' +
                         'produites reviendront au plan. Le bon restera visible, marque annule.',
                     action: () =>

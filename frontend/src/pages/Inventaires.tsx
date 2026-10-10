@@ -519,7 +519,7 @@ export function Inventaires() {
     <div>
       <EnTetePage
         titre="Inventaires"
-        description="La clôture genere automatiquement les mouvements d'ajustement, dans une seule transaction."
+        description="La clôture généré automatiquement les mouvements d'ajustement, dans une seule transaction."
         actions={
           droits.peutEcrire && (
             <Bouton
@@ -623,7 +623,7 @@ export function Inventaires() {
 
           {!inventaire ? (
             <EtatVide
-              titre="Selectionnez un inventaire"
+              titre="Sélectionnez un inventaire"
               description="Le comptage s'affichera ici, saisissable ligne par ligne."
             />
           ) : (
@@ -655,16 +655,16 @@ export function Inventaires() {
                         confirmation.demander({
                           titre: `Cloturer ${inventaire.numero_inventaire} ?`,
                           description:
-                            "Les ecarts seront convertis en mouvements d'ajustement. Le grand livre etant immuable, "
+                            "Les écarts seront convertis en mouvements d'ajustement. Le grand livre etant immuable, "
                             + "ces mouvements ne s'effacent pas : pour revenir dessus il faudra les contre-passer un a un, "
                             + "puis rouvrir l'inventaire.",
-                          libelleConfirmer: 'Cloturer',
+                          libelleConfirmer: 'Clôturer',
                           action: () => cloturer.mutate(),
                         })
                       }
                     >
                       <ClipboardCheck />
-                      Cloturer et ajuster
+                      Clôturer et ajuster
                     </Bouton>
                   )}
 
@@ -705,7 +705,7 @@ export function Inventaires() {
                     document="inventaires"
                     id={inventaire.id_inventaire}
                     statut={inventaire.statut}
-                    consequence="Le comptage redeviendra saisissable a partir des quantites deja relevees."
+                    consequence="Le comptage redeviendra saisissable à partir des quantités déjà relevees."
                   />
                 </CarteCorps>
               </Carte>
@@ -1296,7 +1296,7 @@ function FormulaireInventaire({
                 Annuler
               </Bouton>
               <Bouton type="submit" chargement={creer.isPending}>
-                Creer
+                Créer
               </Bouton>
             </div>
           </div>

@@ -168,7 +168,7 @@ export function BandeauMiseAJour() {
       >
         <a href={paquet.url} download>
           <Download />
-          Telecharger
+          Télécharger
         </a>
       </Bouton>
       <button

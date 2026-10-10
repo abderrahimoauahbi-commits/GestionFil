@@ -44,7 +44,7 @@ export const SUJETS: Sujet[] = [
         description:
           'L’identifiant interne. Il se lit comme une phrase : catégorie - famille - couleur - réf. fournisseur - fournisseur.',
         obligatoire: true,
-        valeurs: 'Ne se modifie plus après création : il est la clé de toutes les références croisées.',
+        valeurs: 'Ne se modifié plus après création : il est la clé de toutes les références croisées.',
       },
       { nom: 'Désignation', description: 'Le libellé lisible, repris sur les documents imprimés.', obligatoire: true },
       { nom: 'Catégorie', description: 'La matière : polypropylène, polyester, jute, colle…', obligatoire: true },
@@ -283,7 +283,7 @@ export const SUJETS: Sujet[] = [
         description:
           'L’identifiant interne de la couleur, court et stable — « C5 », « N1 ». Il apparaît dans le code de chaque référence teinte.',
         obligatoire: true,
-        valeurs: 'Ne se modifie plus après création : les références le citent.',
+        valeurs: 'Ne se modifié plus après création : les références le citent.',
       },
       {
         nom: 'Libellé',
@@ -339,7 +339,7 @@ export const SUJETS: Sujet[] = [
         nom: 'Code',
         description: 'L’identifiant court du fournisseur. Il entre dans le code de chaque référence qu’on lui achète.',
         obligatoire: true,
-        valeurs: 'Ne se modifie plus après création.',
+        valeurs: 'Ne se modifié plus après création.',
       },
       { nom: 'Raison sociale', description: 'Le nom légal, repris sur les bons de commande et les documents d’import.', obligatoire: true },
       {
@@ -551,7 +551,7 @@ export const SUJETS: Sujet[] = [
           'Dans la liste des lignes à recevoir — tous dossiers non clos — cochez ce que le camion apporte.',
           'Saisissez le poids réellement pesé, le nombre de bobines et de palettes, et le magasin.',
           'Enregistrez : la réception reste un brouillon, rien n’entre en stock.',
-          'Soumettez au contrôle : la pesée ne se modifie plus que par le contrôleur, ou en la rouvrant.',
+          'Soumettez au contrôle : la pesée ne se modifié plus que par le contrôleur, ou en la rouvrant.',
           'Le contrôleur — un autre compte que celui qui a pesé — indique la qualité de chaque ligne et valide : la marchandise entre en stock à la valeur facture.',
         ],
         resultat: 'Le stock monte, le mouvement d’entrée cite les dossiers concernés, et les lignes de facture sont soldées.',
@@ -635,7 +635,7 @@ export const SUJETS: Sujet[] = [
     droits: 'Lecture du module Production.',
     champs: [
       { nom: 'Code Ref', description: 'La référence réclamée par les compositions.' },
-      { nom: 'Designation', description: 'Son libellé, repris du catalogue.' },
+      { nom: 'Désignation', description: 'Son libellé, repris du catalogue.' },
       { nom: 'Catégorie', description: 'Le filtre par matière : polypropylène, polyester, jute…' },
       {
         nom: 'Fournisseur',
@@ -1508,7 +1508,7 @@ export const SUJETS: Sujet[] = [
       { nom: 'Formule', description: 'Le détail du calcul appliqué à la ligne. Il est affiché pour que le chiffre soit vérifiable.' },
     ],
     regles: [
-      'La valorisation ne modifie rien : c’est une lecture, jamais une écriture. On peut la rejouer autant de fois qu’on veut.',
+      'La valorisation ne modifié rien : c’est une lecture, jamais une écriture. On peut la rejouer autant de fois qu’on veut.',
       'Un taux de change manquant à la date demandée arrête le calcul au lieu de prendre le dernier connu : une valeur fausse est pire qu’une valeur absente.',
     ],
     liens: [
@@ -1626,7 +1626,7 @@ export const SUJETS: Sujet[] = [
     objectif: 'Retrouver qui a changé quoi, quand, avec l’ancienne et la nouvelle valeur.',
     droits: 'Lecture du module Audit.',
     regles: [
-      'Le journal est immuable : rien ne s’y modifie ni ne s’y efface.',
+      'Le journal est immuable : rien ne s’y modifié ni ne s’y efface.',
       'Une suppression y garde l’enregistrement entier : il peut se reconstituer.',
       'Le recalcul du plan d’achat s’y résume en une ligne (« RECALCUL »), avec le nombre de propositions remplacées.',
     ],

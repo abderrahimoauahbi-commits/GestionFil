@@ -309,7 +309,7 @@ export function Besoins() {
       `besoins-${plan?.libelle ?? 'plan'}`,
       [
         { champ: 'code_reference', entete: 'Code Ref' },
-        { champ: 'designation', entete: 'Designation' },
+        { champ: 'designation', entete: 'Désignation' },
         { champ: 'categorie', entete: 'Catégorie' },
         { champ: 'fournisseur', entete: 'Fournisseur' },
         { champ: 'unite', entete: 'Unité' },
@@ -335,7 +335,7 @@ export function Besoins() {
         <EtatVide
           icone={Factory}
           titre="Aucun plan de production"
-          description="Les besoins matiere se deduisent d'un plan : commencez par en creer un."
+          description="Les besoins matière se deduisent d'un plan : commencez par en créer un."
         />
       </div>
     )
@@ -346,7 +346,7 @@ export function Besoins() {
     <div>
       <EnTetePage
         titre="Production & Besoins"
-        description="m² planifies par qualité, et matiere necessaire par référence, sur les mois de la période."
+        description="m² planifies par qualité, et matière necessaire par référence, sur les mois de la période."
         actions={
           <>
             {/* Le choix du plan remonte ici : c'est le contexte de TOUT l'ecran,
@@ -495,7 +495,7 @@ export function Besoins() {
                   <thead>
                     <tr className="bg-attenue">
                       <th className="sticky left-0 z-10 bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                        Qualite
+                        Qualité
                       </th>
                       <th className="px-2.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap">
                         Poids kg/m²
@@ -562,7 +562,7 @@ export function Besoins() {
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <Package className="size-3.5" />
-                Besoins matiere — kg par reference
+                Besoins matière — kg par référence
                 <Aide>
                   besoin(reference, mois) = (1 + taux de perte) × Σ<sub>qualités</sub> (kg/m² de la
                   composition × m² prevus) — la formule de la feuille Production_Besoins. Le taux de
@@ -581,7 +581,7 @@ export function Besoins() {
                 <Champ
                   value={filtre}
                   onChange={(e) => setFiltre(e.target.value)}
-                  placeholder="Référence, designation, fournisseur..."
+                  placeholder="Référence, désignation, fournisseur..."
                   className="h-7 w-56 text-[12px]"
                 />
                 <select
@@ -628,7 +628,7 @@ export function Besoins() {
                 <div className="p-4">
                   <EtatVide
                     icone={AlertTriangle}
-                    titre={filtre ? 'Aucune reference ne correspond' : 'Aucun besoin calcule'}
+                    titre={filtre ? 'Aucune référence ne correspond' : 'Aucun besoin calcule'}
                     description={
                       filtre
                         ? undefined

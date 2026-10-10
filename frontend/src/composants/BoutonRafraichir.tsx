@@ -112,7 +112,7 @@ export function BoutonRafraichir() {
     // existe precisement pour n'avoir plus rien a oublier.
     onSuccess: async (recalcul) => {
       await qc.invalidateQueries()
-      toast.success(recalcul ? `A jour — ${recalcul}` : 'Ecran a jour')
+      toast.success(recalcul ? `A jour — ${recalcul}` : 'Ecran à jour')
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : String(e)),
   })
@@ -127,7 +127,7 @@ export function BoutonRafraichir() {
       chargement={rafraichir.isPending}
       title={
         perimes
-          ? 'Une recette, une densite ou le plan a change : recalculer les besoins, puis recharger'
+          ? 'Une recette, une densité ou le plan a change : recalculer les besoins, puis recharger'
           : 'Recharger les chiffres de cet ecran depuis la base'
       }
     >

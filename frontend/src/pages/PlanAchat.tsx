@@ -189,7 +189,7 @@ const LIBELLE_FIGEMENT: Record<string, string> = {
   SURDIMENSIONNEE: 'au-dessus du besoin',
   SOUS_DIMENSIONNEE: 'sous le besoin',
   BESOIN_DISPARU: 'besoin disparu',
-  REFERENCE_INACTIVE: 'reference inactive',
+  REFERENCE_INACTIVE: 'référence inactive',
 }
 
 const TON_FIGEMENT: Record<string, 'succes' | 'alerte' | 'danger' | 'info' | 'neutre'> = {
@@ -202,9 +202,9 @@ const TON_FIGEMENT: Record<string, 'succes' | 'alerte' | 'danger' | 'info' | 'ne
 
 const MOTIF_FIGEMENT: Record<string, string> = {
   PRIX_NEGOCIE: 'prix negocie',
-  QUANTITE_AJUSTEE: 'quantite ajustee',
+  QUANTITE_AJUSTEE: 'quantité ajustee',
   LIVRAISON_GROUPEE: 'livraison groupee',
-  DELAI_FOURNISSEUR: 'delai fournisseur',
+  DELAI_FOURNISSEUR: 'délai fournisseur',
   AUTRE: 'arbitrage',
 }
 
@@ -294,7 +294,7 @@ export function PlanAchat() {
     onSuccess: async (r) => {
       toast.success('Proposition ajustee', {
         description: r.figement_nouveau
-          ? 'Elle est desormais protegee : le prochain recalcul ne l ecrasera plus. ' +
+          ? 'Elle est desormais protégée : le prochain recalcul ne l ecrasera plus. ' +
             "L'ecart avec le calcul reste affiche sur la ligne."
           : 'Elle ne sort plus telle quelle du calcul.',
         duration: 8000,
@@ -314,8 +314,8 @@ export function PlanAchat() {
     mutationFn: (v: { id: string; motif: string }) =>
       api.post(`/api/plan-achat/propositions/${v.id}/figer`, { motif_figement: v.motif }),
     onSuccess: async () => {
-      toast.success('Proposition protegee', {
-        description: 'Le recalcul ne la remplacera plus. L ecart avec le calcul reste visible.',
+      toast.success('Proposition protégée', {
+        description: 'Le recalcul ne la remplacera plus. L écart avec le calcul reste visible.',
         duration: 7000,
       })
       await rafraichir()
@@ -376,10 +376,10 @@ export function PlanAchat() {
         { code_reference_cible: v.cible, motif: v.motif },
       ),
     onSuccess: (r) => {
-      toast.success('Besoin reporte sur la reference equivalente', {
+      toast.success('Besoin reporte sur la référence equivalente', {
         description:
           r.message ??
-          "La proposition passe en revision, et la reference d'origine reste tracee.",
+          "La proposition passe en revision, et la référence d'origine reste tracee.",
         duration: 8000,
       })
       setArbitrage(null)
@@ -721,7 +721,7 @@ export function PlanAchat() {
             </div>
             {p.etat_figement === 'BESOIN_DISPARU' ? (
               <div className="text-[11px] text-danger">
-                le calcul ne demande plus rien sur cette reference
+                le calcul ne demande plus rien sur cette référence
               </div>
             ) : p.etat_figement === 'REFERENCE_INACTIVE' ? (
               <div className="text-[11px] text-danger">référence desactivee au catalogue</div>
@@ -868,7 +868,7 @@ export function PlanAchat() {
           <CarteEntete>
             <CarteTitre>Répartition par fournisseur</CarteTitre>
             <span className="text-[11px] text-attenue-texte">
-              classee par budget · un bon de commande sera cree par fournisseur
+              classee par budget · un bon de commande sera créé par fournisseur
             </span>
           </CarteEntete>
           <CarteCorps className="p-0">
@@ -952,18 +952,18 @@ export function PlanAchat() {
             variante="contour"
             onClick={() =>
               confirmation.demander({
-                titre: 'Regenerer les propositions ?',
-                libelleConfirmer: 'Regenerer',
+                titre: 'Régénérer les propositions ?',
+                libelleConfirmer: 'Régénérer',
                 description:
                   'Les propositions ouvertes seront remplacees par un nouveau calcul. Celles ' +
-                  'deja converties en commande, et celles que vous avez ecartees, sont conservees.',
+                  'déjà converties en commande, et celles que vous avez ecartees, sont conservees.',
                 action: () => generer.mutate(),
               })
             }
             chargement={generer.isPending}
           >
             <RefreshCw />
-            Regenerer
+            Régénérer
           </Bouton>
           <Bouton disabled={selection.length === 0} onClick={() => setOnglet('lignes')}>
             Lignes à commander
@@ -996,17 +996,17 @@ export function PlanAchat() {
             Tout cocher ({ouvertes.length})
           </Bouton>
           <Bouton variante="discret" taille="xs" onClick={() => setCoches({})}>
-            Tout decocher
+            Tout décocher
           </Bouton>
           <span className="text-[11px] text-attenue-texte">
-            Un bon de commande sera cree par fournisseur.
+            Un bon de commande sera créé par fournisseur.
           </span>
         </div>
       )}
 
       {surCatalogue > 0 && (
         <div className="mb-4">
-          <Alerte ton="alerte" titre="Prix estimes au catalogue">
+          <Alerte ton="alerte" titre="Prix estimés au catalogue">
             {surCatalogue} reference(s) n'ont encore jamais ete commandees chez leur fournisseur :
             leur prix vient du catalogue converti en dirhams, pas d'un bon valide. Le montant est
             indicatif jusqu'a la premiere commande.
@@ -1033,7 +1033,7 @@ export function PlanAchat() {
           droits.peutEcrire && (
             <Bouton variante="contour" onClick={() => generer.mutate()}>
               <ShoppingCart />
-              Generer les propositions
+              Générer les propositions
             </Bouton>
           )
         }
@@ -1056,7 +1056,7 @@ export function PlanAchat() {
                         title={
                           (p.equivalent_dispo_kg ?? 0) > 0
                             ? `Un equivalent a ${fmt.nombre(p.equivalent_dispo_kg, 0)} kg en stock`
-                            : 'Voir les references equivalentes'
+                            : 'Voir les références equivalentes'
                         }
                       >
                         <Repeat />
@@ -1082,11 +1082,11 @@ export function PlanAchat() {
                           })
                         : figer.mutate({ id: p.id_proposition, motif: 'AUTRE' })
                     }
-                    aria-label={p.figee ? 'Rendre au calcul' : 'Proteger du recalcul'}
+                    aria-label={p.figee ? 'Rendre au calcul' : 'Protéger du recalcul'}
                     title={
                       p.figee
                         ? `Protegee${p.figee_par ? ` par ${p.figee_par}` : ''} — cliquer pour rendre au calcul`
-                        : 'Proteger cette ligne du prochain recalcul'
+                        : 'Protéger cette ligne du prochain recalcul'
                     }
                   >
                     {p.figee ? <Lock /> : <LockOpen />}
@@ -1098,7 +1098,7 @@ export function PlanAchat() {
                     onClick={() =>
                       confirmation.demander({
                         titre: `Ecarter ${p.code_reference} ?`,
-                        libelleConfirmer: 'Ecarter',
+                        libelleConfirmer: 'Écarter',
                         description:
                           `Elle ne sera plus reproposée pendant ${dureeEcart} jours (réglage P_DureeEcartJours) ` +
                           'et n’entrera dans aucune commande. Passé ce délai, si le besoin existe ' +
@@ -1106,8 +1106,8 @@ export function PlanAchat() {
                         action: () => ignorer.mutate(p.id_proposition),
                       })
                     }
-                    aria-label="Ecarter"
-                    title="Ecarter cette proposition"
+                    aria-label="Écarter"
+                    title="Écarter cette proposition"
                   >
                     <Ban />
                   </Bouton>

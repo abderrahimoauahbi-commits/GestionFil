@@ -212,7 +212,7 @@ export function Catalogue() {
       aide: 'Identifiant cité par les recettes et les mouvements : il ne pourra plus être changé.',
       section: 'Général',
     },
-    { champ: 'designation', libelle: 'Designation', obligatoire: true, section: 'Général', etendue: 2 },
+    { champ: 'designation', libelle: 'Désignation', obligatoire: true, section: 'Général', etendue: 2 },
     {
       champ: 'description_commerciale',
       libelle: 'Description commerciale (anglais)',
@@ -225,7 +225,7 @@ export function Catalogue() {
     },
     {
       champ: 'code_categorie',
-      libelle: 'Catégorie matiere',
+      libelle: 'Catégorie matière',
       type: 'liste',
       obligatoire: true,
       options: qCat.data?.map((c) => ({ valeur: c.code_categorie, libelle: c.libelle })),
@@ -236,7 +236,7 @@ export function Catalogue() {
       libelle: 'Famille',
       type: 'liste',
       options: qFam.data?.map((f) => ({ valeur: f.code_famille, libelle: f.libelle })),
-      aide: 'Le produit independamment du vendeur. Deux references de meme famille et de meme '
+      aide: 'Le produit independamment du vendeur. Deux références de meme famille et de meme '
         + 'couleur interne sont le meme fil, chez deux fournisseurs differents.',
       section: 'Général',
     },
@@ -250,8 +250,8 @@ export function Catalogue() {
     },
     {
       champ: 'reference_fournisseur',
-      libelle: 'Reference fournisseur',
-      aide: "La reference telle que le fournisseur l'ecrit sur sa facture : « GOLD 2117 », "
+      libelle: 'Référence fournisseur',
+      aide: "La référence telle que le fournisseur l'ecrit sur sa facture : « GOLD 2117 », "
         + "« OZ 3034 », « SSL2081 ». C'est elle que la saisie assistée lit.",
       section: 'Général',
     },
@@ -274,8 +274,8 @@ export function Catalogue() {
     {
       champ: 'origine',
       libelle: 'Origine',
-      aide: "Quand la matiere n'a pas de couleur — jute, colle, plastique, cuir — c'est la "
-        + "provenance qui prend sa place dans le nom de la reference.",
+      aide: "Quand la matière n'a pas de couleur — jute, colle, plastique, cuir — c'est la "
+        + "provenance qui prend sa place dans le nom de la référence.",
       section: 'Paramètres techniques',
     },
     {
@@ -403,7 +403,7 @@ export function Catalogue() {
       libelle: 'Marge de sécurité (%)',
       type: 'nombre',
       aide:
-        'Majore le stock minimum de cette reference. Vide : la valeur generale des parametres ' +
+        'Majore le stock minimum de cette référence. Vide : la valeur générale des paramètres ' +
         's applique.',
       section: 'Conditionnement et stockage',
     },
@@ -549,7 +549,7 @@ function SupprimerDefinitivement({ reference }: { reference: string }) {
     confirmation.demander({
       titre: `Supprimer definitivement ${reference} ?`,
       description:
-        "Cette reference n'a jamais servi : aucun mouvement, aucune recette, aucune commande, aucun stock. " +
+        "Cette référence n'a jamais servi : aucun mouvement, aucune recette, aucune commande, aucun stock. " +
         "Elle sera effacee du catalogue, sans trace. Cette action est irreversible.",
       destructif: true,
       libelleConfirmer: 'Supprimer definitivement',

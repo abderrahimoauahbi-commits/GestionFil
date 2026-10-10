@@ -133,7 +133,7 @@ export function Pareto({
                   Rang
                 </th>
                 <th className="border-b border-bordure py-1 pr-3 text-left font-medium text-attenue-texte">
-                  Reference
+                  Référence
                 </th>
                 <th className="border-b border-bordure py-1 pr-3 text-right font-medium text-attenue-texte">
                   {unite ?? 'Valeur'}

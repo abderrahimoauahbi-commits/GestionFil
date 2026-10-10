@@ -116,7 +116,7 @@ export function EtatReception() {
     <div>
       {!idUrl && (
       <Choix
-        libelle="Réception a imprimer :"
+        libelle="Réception à imprimer :"
         valeur={choisi}
         surChangement={setId}
         options={liste.map((x) => ({
@@ -153,7 +153,7 @@ export function EtatReception() {
               </div>
               <div className="space-y-1">
                 <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-                  Reception
+                  Réception
                 </div>
                 <div className="text-[10px]">
                   <span className="text-neutral-600">Date : </span>
@@ -220,7 +220,7 @@ export function EtatReception() {
           />
 
           <div className="mt-8 grid grid-cols-2 gap-8">
-            {['Receptionnaire', 'Controle qualite'].map((s) => (
+            {['Receptionnaire', 'Contrôle qualité'].map((s) => (
               <div key={s}>
                 <div className="mb-10 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
                   {s}
@@ -378,7 +378,7 @@ export function EtatInventaire() {
               },
               { entete: 'Lot', valeur: (l) => l.lot_fournisseur ?? '—' },
               {
-                entete: 'Theorique kg',
+                entete: 'Théorique kg',
                 numerique: true,
                 valeur: (l) =>
                   l.quantite_theorique_kg == null ? '—' : fmt.nombre(l.quantite_theorique_kg, 3),
@@ -657,7 +657,7 @@ export function EtatBesoins() {
       )}
 
       <EtatImprimable
-        titre="Besoins matiere"
+        titre="Besoins matière"
         reference={plan?.libelle}
         sousTitre={plan ? `${plan.date_debut} au ${plan.date_fin}` : undefined}
         enTete={
@@ -724,7 +724,7 @@ export function EtatBesoins() {
         </div>
         <p className="mt-2 text-[9px] text-neutral-600">
           Kilos par reference et par mois, issus de l explosion des recettes figees sur le plan.
-          Les references sont triees par besoin total decroissant.
+          Les références sont triees par besoin total decroissant.
         </p>
       </EtatImprimable>
     </div>

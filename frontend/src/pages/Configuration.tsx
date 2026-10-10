@@ -147,8 +147,8 @@ const SECTIONS: Section[] = [
       {
         titre: 'Seuils de couverture',
         intention:
-          "Le statut d'une reference se lit en JOURS DE COUVERTURE, pas en kilos : " +
-          '500 kg sont confortables sur une matiere lente et deja courts sur le fil de chaine.',
+          "Le statut d'une référence se lit en JOURS DE COUVERTURE, pas en kilos : " +
+          '500 kg sont confortables sur une matière lente et déjà courts sur le fil de chaine.',
         codes: ['P_SeuilAlerte', 'P_SeuilCritique', 'P_CouvMinMois', 'P_MargeSecurite'],
       },
       {
@@ -164,14 +164,14 @@ const SECTIONS: Section[] = [
     cle: 'production',
     famille: 'Paramètres de gestion',
     libelle: 'Production',
-    resume: 'Perte matiere, stocks de sécurité, tolerance des recettes',
+    resume: 'Perte matière, stocks de sécurité, tolerance des recettes',
     Icone: Factory,
     blocs: [
       {
         titre: 'Pertes et tolerances',
         intention:
           'Le taux de perte majore chaque besoin calcule par le MRP. La tolerance de recette ' +
-          "dit de combien la somme des pourcentages d'un role peut s'ecarter de 100 %.",
+          "dit de combien la somme des pourcentages d'un rôle peut s'ecarter de 100 %.",
         codes: ['P_TauxPerte', 'P_ToleranceRecette'],
       },
       {
@@ -184,7 +184,7 @@ const SECTIONS: Section[] = [
       {
         titre: 'Photo de stock initiale',
         intention:
-          "Date de la reprise : avant elle, les quantites viennent de l'inventaire d'ouverture " +
+          "Date de la reprise : avant elle, les quantités viennent de l'inventaire d'ouverture " +
           'et non des mouvements.',
         codes: ['P_DateSaisie'],
       },
@@ -200,7 +200,7 @@ const SECTIONS: Section[] = [
       {
         titre: 'Identite',
         intention:
-          "Ces valeurs n'entrent dans aucun calcul : elles figurent sur les etats d'impression " +
+          "Ces valeurs n'entrent dans aucun calcul : elles figurent sur les états d'impression " +
           'et les bons adresses aux fournisseurs.',
         codes: ['P_NomEntreprise', 'P_Secteur', 'P_Pays', 'P_DateCreationERP'],
       },
@@ -208,7 +208,7 @@ const SECTIONS: Section[] = [
         titre: 'Monnaie de référence',
         intention:
           'Toute valorisation est ramenee a cette devise. Elle est verrouillee : la changer ' +
-          'apres coup rendrait faux tout le stock deja valorise.',
+          'apres coup rendrait faux tout le stock déjà valorise.',
         codes: ['P_Devise'],
       },
     ],
@@ -223,15 +223,15 @@ const SECTIONS: Section[] = [
       {
         titre: 'Classement des références',
         intention:
-          'ABC repartit les references par poids financier, XYZ par regularite de consommation. ' +
-          'Les deux servent a doser le stock de securite et la vigilance.',
+          'ABC repartit les références par poids financier, XYZ par regularite de consommation. ' +
+          'Les deux servent a doser le stock de sécurité et la vigilance.',
         codes: ['P_SeuilABCA', 'P_SeuilABCB', 'P_SeuilXYZ_X', 'P_SeuilXYZ_Y'],
       },
       {
         titre: 'Montants et urgence des commandes',
         intention:
           "Le tiering classe l'urgence d'un achat par son montant. Le seuil de validation dit " +
-          'a partir de quand la Direction doit signer.',
+          'à partir de quand la Direction doit signer.',
         codes: [
           'P_SeuilTier1',
           'P_SeuilTier2',
@@ -250,7 +250,7 @@ const SECTIONS: Section[] = [
       {
         titre: 'Immobilisation et tresorerie',
         intention:
-          'Au-dela du seuil de dormance, un stock qui ne bouge plus est signale. Le delai de ' +
+          'Au-dela du seuil de dormance, un stock qui ne bouge plus est signale. Le délai de ' +
           'paiement sert au previsionnel quand le fournisseur n en declare aucun.',
         codes: ['P_SeuilDormant', 'P_DSODefaut', 'P_DateRefKPI'],
       },
@@ -267,7 +267,7 @@ const SECTIONS: Section[] = [
         titre: 'Tolerances au quai',
         intention:
           'Au-dela de la tolerance de pesee, la ligne exige une derogation nominative. ' +
-          'La tolerance In-Full dit a partir de quel manque une livraison cesse d etre complete.',
+          'La tolerance In-Full dit à partir de quel manque une livraison cesse d etre complete.',
         codes: ['P_TolerEcartPesee', 'P_TolerInFull'],
       },
       {
@@ -311,14 +311,14 @@ const SECTIONS: Section[] = [
     cle: 'comptes',
     famille: 'Paramètres utilisateurs',
     libelle: 'Utilisateurs et droits',
-    resume: 'Comptes, roles, et la grille module x champ',
+    resume: 'Comptes, rôles, et la grille module x champ',
     Icone: Users,
   },
   {
     cle: 'utilisateurs',
     famille: 'Paramètres utilisateurs',
-    libelle: 'Roles et transitions',
-    resume: "Roles applicatifs et transitions d'etat autorisees",
+    libelle: 'Rôles et transitions',
+    resume: "Rôles applicatifs et transitions d'etat autorisees",
     Icone: ShieldCheck,
   },
   {
@@ -402,7 +402,7 @@ export function Configuration() {
       toast.success(`${n} parametre(s) enregistre(s)`, {
         description:
           'Chaque changement est historise avec son auteur. Rappel : ces valeurs servent de ' +
-          'defaut a la creation et ne modifient rien de deja enregistre.',
+          'defaut a la création et ne modifient rien de déjà enregistre.',
         duration: 8000,
       })
       setBrouillon({})
@@ -778,7 +778,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
                     <td className="px-2 py-1.5 text-center">{d.symbole ?? '—'}</td>
                     <td className="px-2 py-1.5 text-center">
                       {d.est_pivot === 1 ? (
-                        <Infobulle contenu="Monnaie de reference : son taux vaut 1 par definition">
+                        <Infobulle contenu="Monnaie de référence : son taux vaut 1 par definition">
                           <Badge ton="info">pivot</Badge>
                         </Infobulle>
                       ) : (
@@ -835,7 +835,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
                 </div>
                 <div>
                   <Etiq htmlFor="d">
-                    En vigueur a partir du
+                    En vigueur à partir du
                     <Aide>Laisse vide, le taux s'applique immediatement.</Aide>
                   </Etiq>
                   <Champ
@@ -932,7 +932,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
           </Bouton>
           {!modifiable && (
             <span className="text-[12px] text-attenue-texte">
-              Votre role peut consulter les sauvegardes, pas en declencher.
+              Votre rôle peut consulter les sauvegardes, pas en declencher.
             </span>
           )}
           {retour && <span className="text-[12px] text-texte">{retour}</span>}

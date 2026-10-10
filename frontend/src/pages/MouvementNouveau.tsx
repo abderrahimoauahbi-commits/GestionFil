@@ -784,7 +784,7 @@ export function MouvementNouveau() {
 
           <div>
             <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-8">
-              Document de reference
+              Document de référence
             </label>
             <input id="mvt-8"
               value={entete.reference_document}

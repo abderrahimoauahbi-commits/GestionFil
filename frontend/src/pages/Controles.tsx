@@ -63,11 +63,11 @@ const FOND: Record<string, string> = {
  */
 const SENS: Record<string, string> = {
   BLOQUANT:
-    "Une incoherence qui ne devrait pas pouvoir exister. Si le compteur n'est pas a zero, une regle a ete contournee : la cause se cherche avant de corriger la ligne.",
+    "Une incoherence qui ne devrait pas pouvoir exister. Si le compteur n'est pas a zero, une règle a ete contournee : la cause se cherche avant de corriger la ligne.",
   CRITIQUE:
-    'Une situation metier qui demande une decision, pas une correction technique. Elle ne se resorbe pas seule.',
+    'Une situation metier qui demande une décision, pas une correction technique. Elle ne se resorbe pas seule.',
   ATTENTION:
-    'Un signal a examiner. Il peut etre normal — une reference neuve sans recette le temps de la composer — comme il peut annoncer un oubli.',
+    'Un signal a examiner. Il peut etre normal — une référence neuve sans recette le temps de la composer — comme il peut annoncer un oubli.',
 }
 
 function Pastille({ c }: { c: Controle }) {
@@ -170,7 +170,7 @@ function Detail({ code, libelle }: { code: string; libelle: string }) {
             numerique: typeof lignes[0][c] === 'number',
           })), lignes)}
         >
-          Exporter le detail
+          Exporter le détail
         </Bouton>
       </div>
       <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
@@ -295,7 +295,7 @@ export function Controles() {
                 {parNiveau('BLOQUANT').some((c) => c.anomalies > 0) && (
                   <span className="flex items-center gap-1 text-danger">
                     <ShieldAlert className="size-3.5" />
-                    des controles bloquants sont en anomalie
+                    des contrôles bloquants sont en anomalie
                   </span>
                 )}
               </div>

@@ -85,7 +85,7 @@ export function Fournisseurs() {
     { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identité' },
     /* --- Contact ----------------------------------------------------- */
     { champ: 'contact_principal', libelle: 'Contact', section: 'Contact' },
-    { champ: 'telephone', libelle: 'Telephone', section: 'Contact' },
+    { champ: 'telephone', libelle: 'Téléphone', section: 'Contact' },
     { champ: 'email', libelle: 'Email', section: 'Contact' },
     { champ: 'ville', libelle: 'Ville', section: 'Contact' },
     { champ: 'pays', libelle: 'Pays', obligatoire: true, section: 'Contact' },
@@ -134,8 +134,8 @@ export function Fournisseurs() {
       type: 'nombre',
       min: 0,
       aide:
-        'Au-dela, une reception exige une derogation nominative. Ce seuil se fixe avec le ' +
-        'droit de valider : celle qui prepare les receptions ne le regle pas.',
+        'Au-dela, une réception exige une derogation nominative. Ce seuil se fixe avec le ' +
+        'droit de valider : celle qui prepare les réceptions ne le règle pas.',
       section: 'Logistique et réception',
       exigeValider: true,
     },

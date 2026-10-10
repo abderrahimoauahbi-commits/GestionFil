@@ -186,7 +186,7 @@ export function MatricePrix() {
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-attenue">
                         <th className="sticky left-0 z-20 bg-attenue px-2.5 py-1.5 text-left font-semibold">
-                          Reference
+                          Référence
                         </th>
                         {mois.map((m) => (
                           <th

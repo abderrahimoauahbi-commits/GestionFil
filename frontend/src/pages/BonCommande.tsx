@@ -715,7 +715,7 @@ export function BonCommande() {
     },
     {
       champ: 'quantite_recue_kg',
-      entete: 'Recu / reste',
+      entete: 'Reçu / reste',
       numerique: true,
       largeur: '140px',
       rendu: (l) => (
@@ -859,7 +859,7 @@ export function BonCommande() {
                 title={lignes.length ? undefined : 'Un bon sans ligne ne peut pas etre soumis'}
               >
                 <Send />
-                Soumettre a validation
+                Soumettre à validation
               </Bouton>
             )}
             {droits.peutValider && bc.statut === 'EN_ATTENTE_VALIDATION' && (
@@ -872,7 +872,7 @@ export function BonCommande() {
                 disabled={estCreateur || depassePlafond}
                 title={
                   estCreateur
-                    ? 'B4 : vous ne pouvez pas valider un bon que vous avez cree'
+                    ? 'B4 : vous ne pouvez pas valider un bon que vous avez créé'
                     : depassePlafond
                       ? `Montant superieur a votre plafond de ${fmt.mad(plafond ?? 0)}`
                       : undefined
@@ -896,7 +896,7 @@ export function BonCommande() {
               id={id}
               statut={bc.statut}
               taille="md"
-              consequence="Le fournisseur devra etre prevenu si le bon lui est deja parti."
+              consequence="Le fournisseur devra etre prevenu si le bon lui est déjà parti."
             />
             {droits.peutEcrire && SUPPRIMABLES.includes(bc.statut) && (
               <Bouton
@@ -909,7 +909,7 @@ export function BonCommande() {
                     libelleConfirmer: 'Supprimer definitivement',
                     description:
                       'Ce bon n’engage rien : il sera EFFACE, sans laisser de trace dans la ' +
-                      'liste ni dans les etats. Ses propositions d’achat reviendront au plan.',
+                      'liste ni dans les états. Ses propositions d’achat reviendront au plan.',
                     action: () => supprimerBon.mutate(),
                   })
                 }
@@ -1211,7 +1211,7 @@ export function BonCommande() {
                 tailleParDefaut={500}
                 titreCarte={(l) => l.code_reference}
                 videTitre="Aucune ligne"
-                videDescription="Ajoutez des references : le plan d'achat vous dira quoi commander."
+                videDescription="Ajoutez des références : le plan d'achat vous dira quoi commander."
               />
             )}
             <TotauxCommande

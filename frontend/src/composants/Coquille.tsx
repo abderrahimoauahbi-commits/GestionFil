@@ -247,7 +247,7 @@ export const NAVIGATION: EntreeNav[] = [
     Icone: Undo2,
     section: 'ACHATS',
     aVenir:
-      "Le type de mouvement existe et la sortie fonctionne ; il manque l'ecran qui rattache le retour a sa ligne de reception.",
+      "Le type de mouvement existe et la sortie fonctionne ; il manque l'ecran qui rattache le retour a sa ligne de réception.",
   },
 
   /* --- 5. Stock & mouvements --------------------------------------------- */

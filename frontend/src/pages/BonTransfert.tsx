@@ -101,7 +101,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
       {/* Barre d'actions : elle ne s'imprime pas. */}
       <div className="impression-masquee">
         <EnTetePage
-          titre={sortie ? 'Bon de sortie' : 'Bon de reception'}
+          titre={sortie ? 'Bon de sortie' : 'Bon de réception'}
           description={`${e.numero_transfert} · ${LIBELLE_STATUT[e.statut] ?? e.statut}`}
           actions={
             <>
@@ -119,7 +119,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
 
         {!sortie && e.statut === 'BROUILLON' && (
           <Alerte ton="alerte" className="mb-3">
-            Ce transfert n'a pas encore ete expedie. Le bon de reception s'imprime pour preparer le
+            Ce transfert n'a pas encore ete expédié. Le bon de réception s'imprime pour preparer le
             dechargement, mais rien n'est parti du magasin source.
           </Alerte>
         )}
@@ -144,7 +144,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
           <Champ2 libelle="Date du document" valeur={fmt.date(e.date_transfert)} />
           <Champ2
             libelle="Date de sortie"
-            valeur={e.date_sortie ? fmt.date(e.date_sortie) : '— non expedie —'}
+            valeur={e.date_sortie ? fmt.date(e.date_sortie) : '— non expédié —'}
           />
           <Champ2 libelle="Responsable" valeur={e.responsable ?? '—'} />
           <Champ2
@@ -157,8 +157,8 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
                   : '— a constater —'
             }
           />
-          <Champ2 libelle="Expedie par" valeur={e.expediteur ?? '—'} />
-          <Champ2 libelle="Recu par" valeur={e.receptionnaire ?? '— a constater —'} />
+          <Champ2 libelle="Expédié par" valeur={e.expediteur ?? '—'} />
+          <Champ2 libelle="Reçu par" valeur={e.receptionnaire ?? '— a constater —'} />
         </div>
 
         <table className="mt-5 w-full border-collapse text-[11px]">
@@ -230,7 +230,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
             nom={sortie ? (e.expediteur ?? '') : (e.transporteur ?? '')}
           />
           <Signature
-            titre={sortie ? 'Chauffeur / transporteur' : 'Responsable de la reception'}
+            titre={sortie ? 'Chauffeur / transporteur' : 'Responsable de la réception'}
             nom={sortie ? (e.transporteur ?? '') : (e.receptionnaire ?? '')}
           />
         </div>

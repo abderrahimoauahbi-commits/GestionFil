@@ -119,7 +119,7 @@ test('bon de commande : l’assistante le crée, au format français', async ({ 
   await page.screenshot({ path: info.outputPath('bc-saisi.png'), fullPage: true })
   consigner(info, 'saisie : bon de commande (formulaire rempli)', constats, info.outputPath('bc-saisi.png'))
 
-  await page.getByRole('button', { name: 'Creer le bon' }).click()
+  await page.getByRole('button', { name: /^Cr[ée]er le bon$/ }).click()
   await expect(page).toHaveURL(/\/bons-commande\/[0-9a-f-]{36}$/)
   idBc = page.url().split('/').pop()!
 
@@ -134,7 +134,7 @@ test('bon de commande : l’assistante le crée, au format français', async ({ 
   expect(Number(lignes[0].prix_unitaire_devise)).toBeCloseTo(3.75, 4)
   expect(Number(lignes[0].remise_pct)).toBeCloseTo(2.5, 4)
 
-  await page.getByRole('button', { name: /Soumettre a validation/ }).click()
+  await page.getByRole('button', { name: /Soumettre [aà] validation/ }).click()
   await expect(page.getByText('A valider').or(page.getByText('En attente'))).toBeVisible()
   expect(veille.erreurs).toEqual([])
   await page.context().close()
@@ -204,7 +204,7 @@ test('réception : le magasin reprend le bon, pèse au format français et soume
 
   // Si les bobines ont recalcule la pesee, l'utilisateur la retape : c'est elle qui fait foi.
   if (Math.abs(attendu(peseeApres) - 1230.25) > 1e-6) await saisir(pesee, '1 230,25')
-  await page.getByRole('button', { name: 'Enregistrer la reception' }).click()
+  await page.getByRole('button', { name: /^Enregistrer la r[ée]ception$/ }).click()
   await expect(page).toHaveURL(/\/receptions\/[0-9a-f-]{36}$/)
   idReception = page.url().split('/').pop()!
 
@@ -214,7 +214,7 @@ test('réception : le magasin reprend le bon, pèse au format français et soume
   expect(Number(lignes[0].quantite_bl_kg)).toBeCloseTo(1234.5, 4)
   expect.soft(Number(lignes[0].nb_bobines), 'bobines comptées').toBe(474)
 
-  await page.getByRole('button', { name: /Soumettre au controle/ }).click()
+  await page.getByRole('button', { name: /Soumettre au contr[oô]le/ }).click()
   await expect.poll(() => statutReception(page, idReception)).toBe('A_CONTROLER')
   expect(veille.erreurs).toEqual([])
   await page.context().close()
@@ -224,7 +224,7 @@ test('réception : la direction valide le contrôle, le bon se solde', async ({ 
   test.skip(!idReception, 'pas de réception soumise')
   const { page, veille } = await session(browser, info, 'Choukri')
   await page.goto(`/receptions/${idReception}`)
-  await page.getByRole('button', { name: 'Valider le controle' }).click()
+  await page.getByRole('button', { name: /^Valider le contr[oô]le$/ }).click()
   const confirmer = page.getByRole('button', { name: 'Générer les lots et valider' })
   if (await confirmer.isVisible().catch(() => false)) await confirmer.click()
   await expect.poll(() => statutReception(page, idReception)).toBe('VALIDE')
@@ -247,7 +247,7 @@ test('fournisseur : la direction crée une fiche longue, au format français', a
   await saisir(page.getByRole('textbox', { name: /^Code/ }), `FRS-E2E-${PASSAGE}`)
   await saisir(page.getByRole('textbox', { name: 'Raison sociale *' }), nom)
   await saisir(page.getByRole('textbox', { name: 'Contact' }), 'Mme Khadija El Amrani-Benjelloun')
-  await saisir(page.getByRole('textbox', { name: 'Telephone' }), '+212 5 39 94 12 34')
+  await saisir(page.getByRole('textbox', { name: /^T[ée]l[ée]phone$/ }), '+212 5 39 94 12 34')
   await saisir(page.getByRole('textbox', { name: 'Email' }), 'approvisionnement.fils@societe-marocaine-textiles.ma')
   await saisir(page.getByRole('textbox', { name: 'Ville' }), 'Tanger')
   await saisir(page.getByRole('textbox', { name: 'Pays *' }), 'Maroc')
@@ -259,7 +259,7 @@ test('fournisseur : la direction crée une fiche longue, au format français', a
   const constats = [...veille.constats, ...(await mesurer(page))]
   await page.screenshot({ path: info.outputPath('fournisseur.png'), fullPage: true })
   consigner(info, 'saisie : fiche fournisseur', constats, info.outputPath('fournisseur.png'))
-  await page.getByRole('button', { name: 'Creer', exact: true }).click()
+  await page.getByRole('button', { name: /^Cr[ée]er$/ }).click()
 
   await expect
     .poll(async () => (await lireApi<Record<string, unknown>[]>(page, '/api/fournisseurs')).some((f) => f.code_fournisseur === `FRS-E2E-${PASSAGE}`))
@@ -283,9 +283,9 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   await page.goto('/catalogue')
   await page.getByRole('button', { name: 'Nouveau', exact: true }).click()
   const code = `PP-E2E-${PASSAGE} Dtex-Beige 44377-Hs`
-  await saisir(page.getByRole('textbox', { name: /^Référence/ }), code)
-  await saisir(page.getByRole('textbox', { name: 'Designation *' }), 'Polypropylène 1500 deniers texturé, beige sable, bobine conique 2,6 kg')
-  await page.getByRole('combobox', { name: 'Catégorie matiere *' }).selectOption({ index: 1 })
+  await saisir(page.getByRole('textbox', { name: /^Référence(?! fournisseur)/ }), code)
+  await saisir(page.getByRole('textbox', { name: /^(?:Designation|Désignation) \*$/ }), 'Polypropylène 1500 deniers texturé, beige sable, bobine conique 2,6 kg')
+  await page.getByRole('combobox', { name: /^Catégorie mati[eè]re \*$/ }).selectOption({ index: 1 })
   await page.getByRole('combobox', { name: 'Fournisseur *' }).selectOption('FRS-001')
   await saisir(champNombre(page, { name: /^Densité/ }), '0,0125')
   await saisir(champNombre(page, { name: /^Poids par unité/ }), '2,597')
@@ -299,7 +299,7 @@ test('référence : la direction crée une fiche, poids et prix au format franç
 
   // L'oubli d'un champ obligatoire (l'unite de stock) : le message doit dire
   // lequel, et l'ecran doit l'amener sous les yeux.
-  await page.getByRole('button', { name: 'Creer', exact: true }).click()
+  await page.getByRole('button', { name: /^Cr[ée]er$/ }).click()
   const message = page.getByText(/Champs? obligatoires? à renseigner|Renseignez les champs obligatoires/)
   if (await message.isVisible().catch(() => false)) {
     await page.waitForTimeout(800) // le defilement doux vers le champ
@@ -320,7 +320,7 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   await page.getByRole('combobox', { name: /^Unité de stock/ }).selectOption({ index: 1 })
   await page.screenshot({ path: info.outputPath('reference.png'), fullPage: true })
   consigner(info, 'saisie : fiche référence', constats, info.outputPath('reference.png'))
-  await page.getByRole('button', { name: 'Creer', exact: true }).click()
+  await page.getByRole('button', { name: /^Cr[ée]er$/ }).click()
 
   const lire = async () =>
     (await lireApi<Record<string, unknown>[]>(page, '/api/catalogue')).find((r) => r.code_reference === code)
@@ -415,15 +415,15 @@ test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis récep
   const ligne = page.getByRole('row', { name: new RegExp(numero) })
 
   // L'expedition, depuis la liste, avec sa confirmation.
-  await ligne.getByRole('button', { name: 'Expedier', exact: true }).click()
-  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: 'Expedier' }).click()
+  await ligne.getByRole('button', { name: /^Exp[ée]dier$/ }).click()
+  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: /^Exp[ée]dier$/ }).click()
   await expect.poll(async () => (await stock('tous')).enRoute).toBeCloseTo(avant.enRoute + 120.5, 4)
   const enRoute = await stock('tous')
   expect(enRoute.total, 'le fil en route a quitté les magasins').toBeCloseTo(avant.total - 120.5, 4)
 
   // La reception a l'arrivee.
-  await ligne.getByRole('button', { name: 'Receptionner', exact: true }).click()
-  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: 'Constater la reception' }).click()
+  await ligne.getByRole('button', { name: /^R[ée]ceptionner$/ }).click()
+  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: /^Constater la r[ée]ception$/ }).click()
   await expect.poll(async () => (await stock('tous')).enRoute).toBeCloseTo(avant.enRoute, 4)
   expect((await stock('tous')).total, 'le fil est arrivé').toBeCloseTo(avant.total, 4)
   expect(veille.erreurs).toEqual([])
@@ -440,7 +440,7 @@ test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg jus
   await page.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
   await page.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption('Polyfashions')
   await page.getByRole('combobox', { name: /^Type/ }).last().selectOption('TOURNANT')
-  await page.getByRole('button', { name: 'Creer', exact: true }).click()
+  await page.getByRole('button', { name: /^Cr[ée]er$/ }).click()
   await expect
     .poll(async () => (await lireApi<Record<string, unknown>[]>(page, '/api/inventaires')).some((i) => i.statut === 'BROUILLON' && i.code_magasin === 'Polyfashions'))
     .toBe(true)
@@ -481,8 +481,8 @@ test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg jus
   await page.screenshot({ path: info.outputPath('inventaire.png'), fullPage: true })
   consigner(info, 'saisie : comptage d’inventaire', constats, info.outputPath('inventaire.png'))
   await page.getByRole('button', { name: 'Enregistrer le comptage' }).click()
-  await page.getByRole('button', { name: 'Cloturer et ajuster' }).click()
-  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: 'Cloturer', exact: true }).click()
+  await page.getByRole('button', { name: /^Cl[oô]turer et ajuster$/ }).click()
+  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: /^Cl[oô]turer$/ }).click()
   await expect.poll(totalRef).toBeCloseTo(avant - 2.25, 4)
   expect(veille.erreurs).toEqual([])
   await page.context().close()

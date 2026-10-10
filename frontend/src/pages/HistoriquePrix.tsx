@@ -281,7 +281,7 @@ export function HistoriquePrix() {
           titreCarte={(l) => `${l.code_reference} · ${(l.date_achat ?? '').slice(0, 10)}`}
           texteVide={
             droits.peutLire
-              ? "Aucun achat enregistre. L'historique se remplit a la validation des receptions."
+              ? "Aucun achat enregistre. L'historique se remplit a la validation des réceptions."
               : 'Module non accessible.'
           }
         />

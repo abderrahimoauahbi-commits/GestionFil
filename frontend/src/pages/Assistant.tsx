@@ -91,7 +91,7 @@ export function Assistant() {
     <div className="flex flex-col gap-3">
       <EnTetePage
         titre="Assistant"
-        description="Questions sur l'etat du systeme — reponses calculees sur vos vues, en lecture seule"
+        description="Questions sur l'etat du système — reponses calculees sur vos vues, en lecture seule"
       />
 
       {/* --- Poser une question ------------------------------------------- */}
@@ -107,7 +107,7 @@ export function Assistant() {
           <input
             value={saisie}
             onChange={(e) => setSaisie(e.target.value)}
-            placeholder="Ou en est le stock ? Y a-t-il des anomalies ? Qu'y a-t-il a commander ?"
+            placeholder="Ou en est le stock ? Y a-t-il des anomalies ? Qu'y a-t-il à commander ?"
             className="h-9 w-full rounded-[var(--radius)] border border-champ bg-surface pl-8 pr-3
                        text-[13px] outline-none focus:border-primaire"
           />

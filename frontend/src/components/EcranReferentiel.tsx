@@ -66,6 +66,9 @@ interface Props<L extends Record<string, unknown>> {
   imprimable?: string
 }
 
+/** Les noms feminins des unites de referentiel : l'accord de « Nouveau / Nouvelle ». */
+const FEMININS = ['référence', 'catégorie', 'couleur', 'famille', 'transition', 'qualité', 'devise', 'unité', 'machine']
+
 export function EcranReferentiel<L extends Record<string, unknown>>({
   titre,
   sous_titre,
@@ -204,14 +207,16 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
         libelleValider={creation ? 'Creer' : 'Enregistrer'}
       />
     )
+    // « Nouvelle référence », pas « Nouveau référence » (10/10/2026).
+    const feminin = FEMININS.includes((libelleUnite ?? '').toLowerCase().split(' ')[0])
     return (
       <div>
         <EnTetePage
-          titre={creation ? `Nouveau ${libelleUnite}` : `${String(edition?.[cle])}`}
+          titre={creation ? `${feminin ? 'Nouvelle' : 'Nouveau'} ${libelleUnite}` : `${String(edition?.[cle])}`}
           description={
             creation
-              ? `Creation d'un ${libelleUnite}`
-              : 'Les champs grises sont des identifiants ou des valeurs calculees.'
+              ? `Création d’${feminin ? 'une' : 'un'} ${libelleUnite}`
+              : 'Les champs grisés sont des identifiants ou des valeurs calculées.'
           }
           actions={
             <Bouton variante="contour" onClick={fermer}>
@@ -298,7 +303,7 @@ export function EcranReferentiel<L extends Record<string, unknown>>({
             : undefined
         }
         videTitre={`Aucun ${libelleUnite}`}
-        videDescription={droits.peutEcrire ? 'Commencez par en creer un.' : undefined}
+        videDescription={droits.peutEcrire ? 'Commencez par en créer un.' : undefined}
         videAction={
           droits.peutEcrire && (
             <Bouton variante="contour" onClick={() => setCreation(true)}>

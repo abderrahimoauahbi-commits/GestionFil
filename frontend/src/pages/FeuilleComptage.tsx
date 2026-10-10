@@ -88,7 +88,7 @@ export function FeuilleComptage() {
   // quand on se reprend, pas le code de la reference.
   const groupes: { matiere: string; lignes: (LigneAComptage & { rang: number })[] }[] = []
   lignes.forEach((l, i) => {
-    const m = l.categorie_libelle ?? 'Sans categorie'
+    const m = l.categorie_libelle ?? 'Sans catégorie'
     const dernier = groupes[groupes.length - 1]
     const ligne = { ...l, rang: i + 1 }
     if (dernier && dernier.matiere === m) dernier.lignes.push(ligne)

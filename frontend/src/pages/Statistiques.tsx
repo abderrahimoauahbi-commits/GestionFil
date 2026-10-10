@@ -134,10 +134,10 @@ export function Statistiques() {
         description="Calculees a la lecture, sur les données du jour. Aucun chiffre n'est fige ni recopie."
       />
 
-      <PageAvecRail
+      <PageAvecRail droite
         large
         rail={
-          <RailLateral
+          <RailLateral vertical
             groupes={[
               {
                 titre: 'Familles',

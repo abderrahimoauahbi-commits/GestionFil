@@ -49,7 +49,10 @@ export function RailLateral({
   actif,
   surChoix,
   recherche,
+  vertical = false,
 }: {
+  /** Une colonne a droite (pages a plusieurs sections) plutot qu'une rangee de puces. */
+  vertical?: boolean
   groupes: GroupeRail[]
   actif: string
   surChoix: (cle: string) => void
@@ -80,9 +83,9 @@ export function RailLateral({
   const IconeCourante = courante?.Icone
 
   return (
-    <div className="space-y-2 lg:flex lg:flex-wrap lg:items-center lg:gap-x-4 lg:gap-y-2 lg:space-y-0">
+    <div className={cn('space-y-2', !vertical && 'lg:flex lg:flex-wrap lg:items-center lg:gap-x-4 lg:gap-y-2 lg:space-y-0')}>
       {recherche && (
-        <div className="flex items-center gap-2 rounded-[var(--radius)] border border-bordure bg-surface px-2 lg:w-64 lg:shrink-0">
+        <div className={cn('flex items-center gap-2 rounded-[var(--radius)] border border-bordure bg-surface px-2', vertical ? 'w-full' : 'lg:w-64 lg:shrink-0')}>
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
           <input
             value={recherche.valeur}
@@ -123,15 +126,20 @@ export function RailLateral({
       {/* AU BUREAU, LES VUES SONT UNE RANGEE DE PUCES au-dessus du tableau
           (05/10/2026) : la colonne de gauche rend sa largeur aux donnees. Le
           resume de chaque vue passe en infobulle. */}
-      <div className={cn('space-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-x-4 lg:gap-y-2 lg:space-y-0', !ouvert && 'hidden lg:flex')}>
+      <div className={cn(
+        'space-y-3',
+        vertical
+          ? cn('lg:rounded-[var(--radius)] lg:border lg:border-bordure lg:bg-surface lg:p-2', !ouvert && 'hidden lg:block')
+          : cn('lg:flex lg:flex-wrap lg:items-center lg:gap-x-4 lg:gap-y-2 lg:space-y-0', !ouvert && 'hidden lg:flex'),
+      )}>
       {groupes.map((g, i) => (
-        <div key={g.titre ?? i} className="lg:flex lg:items-center lg:gap-2">
+        <div key={g.titre ?? i} className={cn(!vertical && 'lg:flex lg:items-center lg:gap-2')}>
           {g.titre && (
-            <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte lg:mb-0 lg:px-0">
+            <div className={cn('mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte', !vertical && 'lg:mb-0 lg:px-0')}>
               {g.titre}
             </div>
           )}
-          <nav className="space-y-0.5 lg:flex lg:flex-wrap lg:items-center lg:gap-1 lg:space-y-0">
+          <nav className={cn('space-y-0.5', !vertical && 'lg:flex lg:flex-wrap lg:items-center lg:gap-1 lg:space-y-0')}>
             {g.entrees.map((e) => {
               const choisi = e.cle === actif
               return (
@@ -141,24 +149,28 @@ export function RailLateral({
                   onClick={() => {
                     surChoix(e.cle)
                     setOuvert(false) // choisi, donc referme : on veut voir le resultat
+                    // UNE AUTRE SECTION S'OUVRE EN HAUT DE PAGE (10/10/2026) : on ne
+                    // fait pas remonter l'utilisateur a la main.
+                    document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
+                    window.scrollTo({ top: 0, behavior: 'smooth' })
                   }}
                   aria-current={choisi ? 'true' : undefined}
                   title={e.resume}
                   className={cn(
                     'flex w-full items-start gap-2 rounded-[var(--radius)] px-2.5 py-2 text-left transition-colors',
-                    'lg:w-auto lg:items-center lg:gap-1.5 lg:rounded-full lg:border lg:px-2.5 lg:py-[3px]',
+                    !vertical && 'lg:w-auto lg:items-center lg:gap-1.5 lg:rounded-full lg:border lg:px-2.5 lg:py-[3px]',
                     choisi
-                      ? 'bg-primaire/10 text-primaire lg:border-primaire lg:bg-primaire lg:text-primaire-texte'
-                      : 'text-texte hover:bg-attenue/40 lg:border-bordure lg:bg-surface lg:hover:border-champ',
+                      ? cn('bg-primaire/10 text-primaire', !vertical && 'lg:border-primaire lg:bg-primaire lg:text-primaire-texte')
+                      : cn('text-texte hover:bg-attenue/40', !vertical && 'lg:border-bordure lg:bg-surface lg:hover:border-champ'),
                   )}
                 >
-                  {e.Icone && <e.Icone className="mt-0.5 size-4 shrink-0 lg:mt-0 lg:size-3.5" />}
-                  <span className="min-w-0 flex-1 lg:flex-none">
-                    <span className={cn('block text-[13px] lg:whitespace-nowrap lg:text-[12.5px]', choisi && 'font-medium')}>
+                  {e.Icone && <e.Icone className={cn('mt-0.5 size-4 shrink-0', !vertical && 'lg:mt-0 lg:size-3.5')} />}
+                  <span className={cn('min-w-0 flex-1', !vertical && 'lg:flex-none')}>
+                    <span className={cn('block text-[13px]', !vertical && 'lg:whitespace-nowrap lg:text-[12.5px]', choisi && 'font-medium')}>
                       {e.libelle}
                     </span>
                     {e.resume && (
-                      <span className="block text-[11px] leading-tight text-attenue-texte lg:hidden">
+                      <span className={cn('block text-[11px] leading-tight text-attenue-texte', !vertical && 'lg:hidden')}>
                         {e.resume}
                       </span>
                     )}
@@ -199,12 +211,22 @@ export function PageAvecRail({
   rail,
   children,
   large = false,
+  droite = false,
 }: {
   rail: ReactNode
   children: ReactNode
   /** Rail plus large, quand les libelles portent un resume. */
   large?: boolean
+  /** LA BARRE A DROITE (10/10/2026) : pour les pages a plusieurs sections seulement. */
+  droite?: boolean
 }) {
+  if (droite)
+    return (
+      <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_15rem] lg:items-start">
+        <div className="barre-vues sans-impression min-w-0 lg:sticky lg:top-3 lg:order-2">{rail}</div>
+        <div className="min-w-0 lg:order-1">{children}</div>
+      </div>
+    )
   return (
     /* LE RAIL PASSE AU-DESSUS DU CONTENU (05/10/2026) : vues et filtres en
        barre, le tableau sur toute la largeur. `large` n'a plus d'effet. */

@@ -731,9 +731,9 @@ export function Referentiels({ cles }: { cles?: string[] } = {}) {
           Au telephone il se replie sur une ligne au-dessus du tableau. */}
       {/* Un seul referentiel monte (« /categories ») : rien a choisir, pas de rail. */}
       {visibles.length > 1 ? (
-        <PageAvecRail
+        <PageAvecRail droite
           rail={
-            <RailLateral
+            <RailLateral vertical
               groupes={groupes}
               actif={onglet.cle}
               surChoix={(c) => setOnglet(visibles.find((o) => o.cle === c) ?? visibles[0])}

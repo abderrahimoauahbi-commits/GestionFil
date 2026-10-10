@@ -37,6 +37,8 @@ import {
   Printer,
   Filter,
   Inbox,
+  LayoutGrid,
+  List,
   Search,
   TriangleAlert,
   X,
@@ -201,6 +203,24 @@ export function DataTable<L extends Record<string, unknown>>({
   const [filtre, setFiltre] = React.useState('')
   const [filtresColonne, setFiltresColonne] = React.useState<ColumnFiltersState>([])
   const [filtresOuverts, setFiltresOuverts] = React.useState(false)
+  // LISTE OU CARTES (10/10/2026), comme les ERP recents : le choix se garde par
+  // ecran, dans ce navigateur. Sur un ecran etroit, les cartes s'imposent seules.
+  const cleVue = `gestionfil.vue.${exportable ?? imprimable ?? module ?? 'tableau'}`
+  const [vue, setVueEtat] = React.useState<'liste' | 'cartes'>(() => {
+    try {
+      return localStorage.getItem(cleVue) === 'cartes' ? 'cartes' : 'liste'
+    } catch {
+      return 'liste'
+    }
+  })
+  const setVue = (v: 'liste' | 'cartes') => {
+    setVueEtat(v)
+    try {
+      localStorage.setItem(cleVue, v)
+    } catch {
+      /* stockage indisponible : le choix vaut pour la session */
+    }
+  }
 
   const visibles = React.useMemo(
     () => droits.colonnesVisibles(colonnes),
@@ -473,6 +493,25 @@ export function DataTable<L extends Record<string, unknown>>({
               {total} ligne{total > 1 ? 's' : ''}
             </span>
 
+            <div className="hidden items-center overflow-hidden rounded-[var(--radius-sm)] border border-bordure @3xl:flex" role="group" aria-label="Affichage">
+              {(['liste', 'cartes'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={vue === v}
+                  aria-label={v === 'liste' ? 'Afficher en liste' : 'Afficher en cartes'}
+                  title={v === 'liste' ? 'Liste' : 'Cartes'}
+                  onClick={() => setVue(v)}
+                  className={cn(
+                    'grid size-7 place-items-center transition-colors',
+                    vue === v ? 'bg-primaire/10 text-primaire' : 'text-attenue-texte hover:bg-attenue hover:text-texte',
+                  )}
+                >
+                  {v === 'liste' ? <List className="size-3.5" /> : <LayoutGrid className="size-3.5" />}
+                </button>
+              ))}
+            </div>
+
             <div className="flex items-center overflow-hidden rounded-[var(--radius-sm)] border border-bordure">
               {visibles.length > 4 && (
                 <Menu>
@@ -628,7 +667,8 @@ export function DataTable<L extends Record<string, unknown>>({
             role="region"
             aria-label="Tableau"
             className={cn(
-              'cadre-table defilement-x hidden rounded-lg border border-bordure bg-surface @3xl:block',
+              'cadre-table defilement-x hidden rounded-lg border border-bordure bg-surface',
+              vue === 'liste' && '@3xl:block',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau',
               !hauteurMax && '@3xl:max-h-[calc(100dvh-12rem)] @3xl:overflow-y-auto',
             )}
@@ -827,7 +867,7 @@ export function DataTable<L extends Record<string, unknown>>({
           )}
 
           {/* --- Cartes : telephone et tablette portrait ------------------ */}
-          <div className="space-y-2 @3xl:hidden">
+          <div className={vue === 'cartes' ? 'grid gap-2 sm:grid-cols-2 2xl:grid-cols-3' : 'space-y-2 @3xl:hidden'}>
             {rangs.map((rang) => (
               <div
                 key={rang.id}

@@ -433,10 +433,10 @@ export function Configuration() {
         description="Les réglages qui gouvernent les calculs, et les referentiels sur lesquels ils s appuient."
       />
 
-      <PageAvecRail
+      <PageAvecRail droite
         large
         rail={
-          <RailLateral
+          <RailLateral vertical
             groupes={FAMILLES.map((famille) => ({
               titre: famille,
               entrees: SECTIONS.filter((s) => s.famille === famille).map((s) => ({

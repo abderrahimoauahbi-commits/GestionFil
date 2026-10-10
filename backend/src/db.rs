@@ -293,6 +293,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // C53 : un paiement d'import date avant le dedouanement (A11) ; la saisie le lit.
+        "2026-10-10a_paiement_avant_dedouanement.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c53')",
+    ),
+    (
         // La colonne « Voir le calcul » du plan d'achat, declaree dans la grille.
         "2026-10-09za_champ_calcul.sql",
         "SELECT EXISTS (SELECT 1 FROM champ_configurable WHERE module = 'PLAN_ACHAT' AND champ = 'calcul')",

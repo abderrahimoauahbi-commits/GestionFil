@@ -1256,8 +1256,25 @@ pub async fn ajouter_paiement(
     .bind(&user.id)
     .fetch_one(&mut *tx)
     .await?;
+    // A11 (10/10/2026) : jamais d'acompte avant le dedouanement. Un paiement
+    // date avant est une erreur de date probable : signale (C53), pas refuse.
+    let date_ded: Option<String> =
+        sqlx::query_scalar("SELECT date_ded FROM v_change_paiement WHERE id_paiement = $1")
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let avis: Vec<String> = date_ded
+        .filter(|d| date.as_str() < d.as_str())
+        .map(|d| {
+            format!(
+                "Ce paiement est daté du {date}, avant le dédouanement de la facture {numero} ({d}) : \
+                 vérifiez la date (signalé par le contrôle C53)."
+            )
+        })
+        .into_iter()
+        .collect();
     tx.commit().await?;
-    Ok(Json(json!({ "id_paiement": id })))
+    Ok(Json(json!({ "id_paiement": id, "avis": avis })))
 }
 
 /// `DELETE /api/import/paiements/{id}` — un paiement saisi par erreur. Il ne

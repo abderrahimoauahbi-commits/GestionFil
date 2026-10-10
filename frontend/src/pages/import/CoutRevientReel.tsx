@@ -73,15 +73,17 @@ export function CoutRevientReel({ idDossier }: { idDossier: string }) {
 
   const ajouter = useMutation({
     mutationFn: (confirme?: boolean) =>
-      api.post(`/api/import/factures/${p.id_facture}/paiements`, {
+      api.post<{ id_paiement: string; avis?: string[] }>(`/api/import/factures/${p.id_facture}/paiements`, {
         date_paiement: p.date,
         montant_devise: nombre(p.devise),
         montant_mad: nombre(p.mad),
         reference_banque: p.reference || null,
         taux_confirme: confirme === true,
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       toast.success('Paiement enregistré')
+      // A11 : un paiement daté avant le dédouanement est signalé (C53), pas refusé.
+      for (const a of r.avis ?? []) toast.warning(a)
       setP(vide)
       rafraichir()
     },

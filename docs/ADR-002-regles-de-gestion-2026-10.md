@@ -203,7 +203,9 @@ migrations `2026-10-09a` à `2026-10-09y` les portent ; chacune est exigée au d
 latex, plastique, cuir), échantillon, essai, réparation, prêt à une autre usine, autre. Motif de ligne
 obligatoire ; l'OF est un texte libre, jamais vérifié (l'ERP ne gère pas la production). Au-delà de
 50 kg cumulés par jour et par référence, VALIDER. Le prêt se suit en restes à rendre (`v_prets_en_cours`,
-C47) ; le retour de prêt (RETOUR_PRET) ne rend pas plus que ce qui a été prêté.
+C47) ; le retour de prêt (RETOUR_PRET) ne rend pas plus que ce qui a été prêté. Tranché le
+10/10/2026 : le prêt est **toujours rendu en nature**, jamais refacturé ; il n'y a donc pas de sortie
+« vendue » à prévoir.
 
 **Où** — `SORTIE_HORS_MACHINE`, `RETOUR_PRET` (09d) ; `routes/stock.rs`. **Contrôle** — banc
 `sortie_hors_machine`.
@@ -290,18 +292,17 @@ de validation comme date de commande.
 **Décision** — Le CMUP reste au cours du dédouanement, comme la comptabilité : le paiement ne le touche
 jamais. Le coût de revient réel se lit à part, par dossier : matière + frais + écart de change constaté
 à chaque paiement (cours de la banque), coupé au cours BAM du 31/12 pour les dossiers dédouanés une
-année et payés la suivante. Pas d'écriture comptable.
+année et payés la suivante. Pas d'écriture comptable. Tranché le 10/10/2026 : il n'y a **jamais
+d'acompte avant le dédouanement**. Un paiement daté avant la DUM (à défaut, la facture) est donc une
+erreur de date probable : la saisie l'accepte avec un avis, et C53 le signale.
 
-**Où** — `paiement_facture_import`, `v_change_paiement`, `v_cout_revient_reel` (09m) ;
-`CoutRevientReel.tsx`.
+**Où** — `paiement_facture_import`, `v_change_paiement`, `v_cout_revient_reel` (09m), `v_ctl_c53`
+(10a) ; `CoutRevientReel.tsx`. **Contrôle** — banc `import` (paiement de la veille signalé).
 
 ---
 
 ## Ce qui reste ouvert
 
 - R4 : la contrepartie du retour fournisseur (avoir) n'est pas imposée à sa saisie.
-- A1 : le prêt revient-il toujours en nature, ou est-il parfois refacturé ? (suivi en restes à rendre
-  par défaut).
-- A11 : l'acompte payé avant le dédouanement (IFRIC 22) n'a pas été tranché.
 - Les dates sont du texte ISO garanti par contrainte (08m) ; leur conversion en type `date` reste un
   chantier à part.

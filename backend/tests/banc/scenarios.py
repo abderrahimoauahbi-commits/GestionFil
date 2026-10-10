@@ -321,9 +321,9 @@ def scenario_controles_finaux(c, infra):
     c.ok("Choukri", "GET", "/api/cockpit")
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
-                             "FROM generate_series(1, 52) g EXCEPT SELECT code FROM v_controles) x")
+                             "FROM generate_series(1, 53) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
-    verifier(int(infra.valeur("SELECT count(*) FROM v_controles")) == 52, "v_controles porte des doublons")
+    verifier(int(infra.valeur("SELECT count(*) FROM v_controles")) == 53, "v_controles porte des doublons")
 
 
 def scenario_import(c, infra):
@@ -438,6 +438,16 @@ def scenario_import(c, infra):
     attendu = round(100 * bam, 2) - 100 * cours_ded
     verifier(abs(float(ligne["change_annee_ded_mad"]) - attendu) < 0.05,
              f"ecart de change {ligne['change_annee_ded_mad']} au lieu de {attendu:.2f}")
+    # A11 (10/10) : jamais d'acompte avant le dedouanement. Un paiement date avant est
+    # accepte, mais signale a la saisie et par C53 ; supprime, le signal tombe.
+    veille = infra.valeur("SELECT to_char(current_date - 1, 'YYYY-MM-DD')")
+    r = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/paiements",
+             dict(paiement, date_paiement=veille, taux_confirme=True))
+    verifier(any("C53" in a for a in r.get("avis", [])), f"pas d'avis pour un paiement avant le dedouanement : {r}")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM v_ctl_c53 WHERE id_paiement = '{r['id_paiement']}'")) == 1,
+             "C53 ne voit pas le paiement avant le dedouanement")
+    c.ok("Choukri", "DELETE", f"/api/import/paiements/{r['id_paiement']}")
+    verifier(controle(infra, "C53") == 0, "C53 garde un paiement supprime")
 
     # Regle 3 (09/10) : l'avoir d'import. De prix : la valeur baisse au CMUP du stock restant.
     avoir = {"nature": "AVOIR_PRIX", "numero_piece": "AV-BANC-1", "montant_mad": 500,
@@ -510,6 +520,9 @@ def scenario_audit_montants(c, infra):
         "SELECT a.anciennes_valeurs, a.nouvelles_valeurs, u.login FROM audit_log a "
         "LEFT JOIN utilisateur u ON u.id_utilisateur = a.id_utilisateur "
         f"WHERE a.table_concernee = 'ligne_bc' AND a.operation = 'UPDATE' AND a.id_enregistrement = '{id_ligne}' "
+        # La meme transaction ecrit aussi `arbitree = 1`, a la meme heure : trier ne
+        # departage pas les deux entrees, on prend celle qui porte le prix.
+        "AND a.nouvelles_valeurs::text LIKE '%prix_unitaire_devise%' "
         "ORDER BY a.date_operation DESC LIMIT 1")
     verifier(trace, "la modification du prix n'est pas au journal")
     ancien, nouveau, qui = trace[0]

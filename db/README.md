@@ -78,7 +78,7 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C52 : migrations)
+├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C53 : migrations)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -157,7 +157,7 @@ magasin — l'index qui l'interdit n'a pas pu être posé) des migrations du 08/
 aussi les réceptions d'import depuis le 08/10 (excédent au-delà de la tolérance du fournisseur sans
 dérogation).
 
-Les migrations du 09/10/2026 (audit v5) ajoutent, tous en **signal** (ATTENTION), jamais en blocage :
+Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal** (ATTENTION), jamais en blocage :
 
 | Code | Ce qu'il signale | Migration |
 |---|---|---|
@@ -169,10 +169,11 @@ Les migrations du 09/10/2026 (audit v5) ajoutent, tous en **signal** (ATTENTION)
 | C50 | moyenne du plan éloignée de plus de 50 % de la consommation réelle | 09k |
 | C51 | référence suivie au lot avec du fil sans lot, à identifier | 09s |
 | C52 | réception validée dont une entrée est contre-passée | 09u |
+| C53 | paiement d'import daté avant le dédouanement (jamais d'acompte, A11) | 10a |
 
 C28 dit désormais ce que fait `P_EncoursRetardInclus` (comptée ou retirée de la couverture) ; C31,
 C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lisent l'état des machines
-(`machine_etat`). Le banc vérifie la liste exacte C01–C52.
+(`machine_etat`). Le banc vérifie la liste exacte C01–C53.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

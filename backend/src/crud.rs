@@ -440,7 +440,14 @@ pub const ENTITES: &[Entite] = &[
                     (SELECT COUNT(*) FROM recette lr
                       WHERE lr.code_reference = c.code_reference AND lr.actif = 1) AS nb_recettes,
                     (SELECT COALESCE(SUM(s.quantite_kg), 0) FROM stock_magasin s
-                      WHERE s.code_reference = c.code_reference) AS stock_total_kg",
+                      WHERE s.code_reference = c.code_reference) AS stock_total_kg,
+                    -- LE FIL EN ROUTE (10/10/2026) : expedie, pas encore recu, dans
+                    -- aucun magasin. La Valorisation l'ajoute au total, a son CMUP
+                    -- de depart (il voyage avec la marchandise).
+                    COALESCE((SELECT t.kg_en_route FROM v_stock_transit_reference t
+                               WHERE t.code_reference = c.code_reference), 0) AS stock_transit_kg,
+                    COALESCE((SELECT t.valeur_en_route_mad FROM v_stock_transit_reference t
+                               WHERE t.code_reference = c.code_reference), 0) AS valeur_transit_mad",
         tri: "c.code_reference",
     },
     Entite {

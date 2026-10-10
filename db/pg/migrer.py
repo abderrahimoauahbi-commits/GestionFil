@@ -328,6 +328,8 @@ def main():
         avis = [l for l in sortie.splitlines() if "NOTICE" in l or "AVERTISSEMENT" in l or "WARNING" in l]
         # Tous les avis : le second de 08m (« DATES MAL FORMEES ») etait avale.
         print(f"  ok {f.name}" + "".join(f"\n      {a}" for a in avis))
+    # LES STATISTIQUES (10/10/2026) : une base remplie d'un coup n'en a pas tant que l'autovacuum n'est pas passe ; la supervision y prenait 46 s au lieu de 1,2 s.
+    base.requete("ANALYZE")
     print(f"{len(a_jouer)} migration(s) jouee(s) sur {nom_base}.")
 
 

@@ -248,6 +248,8 @@ def charger_socle(args, base, hote, utilisateur, motdepasse):
                     if "ERREUR" in l or "ERROR" in l:
                         print("      %s" % l.strip())
                 return 1
+    # LES STATISTIQUES (10/10/2026) : une base remplie d'un coup n'en a pas tant que l'autovacuum n'est pas passe ; la supervision y prenait 46 s au lieu de 1,2 s.
+    jouer("ANALYZE;", base, hote, utilisateur, motdepasse)
     print("\nSocle charge. Ensuite : python migrer.py --base %s" % base)
     return 0
 

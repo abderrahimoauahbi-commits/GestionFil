@@ -87,6 +87,9 @@ class Client:
         req.add_header("Content-Type", "application/json")
         if login in self.jetons:
             req.add_header("Authorization", "Bearer " + self.jetons[login])
+        # UNE REQUETE LENTE SE DIT (10/10/2026) : gardes_p1 frolait le delai de 60 s sans
+        # qu'on sache laquelle de ses requetes trainait.
+        debut = time.time()
         try:
             with urllib.request.urlopen(req, timeout=60) as rep:
                 txt = rep.read().decode()
@@ -97,6 +100,10 @@ class Client:
                 return e.code, json.loads(txt)
             except ValueError:
                 return e.code, {"brut": txt}
+        finally:
+            duree = time.time() - debut
+            if duree > 5:
+                print(f"      lent : {login} {methode} {chemin} {duree:.1f} s", flush=True)
 
     # Raccourcis : `ok` exige un 200 et rend le corps ; `refus` exige un refus.
     def ok(self, login, methode, chemin, corps=None):
@@ -270,6 +277,9 @@ def main():
         client = Client(f"http://127.0.0.1:{infra.port}")
         for s in liste:
             t0 = time.time()
+            # Une base vivante a ses statistiques ; celle du banc est remplie en quelques
+            # secondes : sans ANALYZE, la supervision y prenait 46 s (10/10/2026).
+            infra.psql(infra.base, "-q", "-c", "ANALYZE")
             try:
                 s(client, infra)
                 resultats.append((s.__name__, None))

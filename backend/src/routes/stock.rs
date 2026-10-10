@@ -7,7 +7,7 @@
 
 use super::json::lignes_en_json;
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
-use crate::db::{arrondi_kg, arrondi_mad, maintenant, Db};
+use crate::db::{arrondi_kg, maintenant, Db};
 use crate::domain::unites::{self, Unite};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -3814,7 +3814,9 @@ pub async fn creer_reception(
             }
             None => (l.prix_kg_devise, "MAD".to_string(), 1.0),
         };
-        let prix_mad = prix_devise.map(|p| arrondi_mad(p * taux));
+        // UN PRIX AU KILO GARDE 4 DECIMALES, comme le CMUP (10/10/2026) : arrondi
+        // comme un montant, 5,42 USD x 9,30 entrait a 50,41 au lieu de 50,406.
+        let prix_mad = prix_devise.map(|p| arrondi_kg(p * taux));
 
         let qte_commandee: Option<f64> = match &id_ligne_bc {
             Some(idl) => sqlx::query_scalar(
@@ -4092,7 +4094,7 @@ pub async fn ajouter_ligne_reception(
     .bind(prix_devise)
     .bind(&devise)
     .bind(taux)
-    .bind(arrondi_mad(prix_devise * taux))
+    .bind(arrondi_kg(prix_devise * taux))
     .bind(&l.lot_fournisseur)
     .bind(&l.date_fabrication)
     .bind(&l.date_peremption)
@@ -4116,7 +4118,7 @@ pub async fn ajouter_ligne_reception(
 
     Ok(Json(json!({
         "id_ligne_reception": id_ligne, "ligne_numero": numero,
-        "quantite_stock_kg": kg, "prix_kg_mad": arrondi_mad(prix_devise * taux),
+        "quantite_stock_kg": kg, "prix_kg_mad": arrondi_kg(prix_devise * taux),
         "taux_change": taux
     })))
 }

@@ -102,6 +102,8 @@ def main():
                 s(client, infra)
             except Exception as e:  # une donnee en moins n'empeche pas de regarder les ecrans
                 print(f"  (donnees : {nom} en echec, {str(e)[:120]})")
+        # Des statistiques, comme une base vivante : sans elles, la supervision prend 46 s.
+        infra.psql(infra.base, "-q", "-c", "ANALYZE")
         print(f"  donnees creees ({time.time() - debut:.0f} s)")
         exemples = {}
         for route, requete in EXEMPLES.items():

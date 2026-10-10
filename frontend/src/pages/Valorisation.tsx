@@ -45,6 +45,9 @@ interface LigneCatalogue {
   prix_catalogue_mad: number | null
   /** Somme des magasins, chacun a son CMUP. */
   valeur_stock_mad: number | null
+  /** Expedie, pas encore recu : dans aucun magasin, a son CMUP de depart (10/10/2026). */
+  stock_transit_kg?: number | null
+  valeur_transit_mad?: number | null
   source_prix: string | null
   classe_abc: string | null
 }
@@ -75,13 +78,18 @@ export function Valorisation() {
             : null
         return { ...r, kg, cmup, catalogue, valeur, ecart }
       })
-      .filter((r) => r.kg > 0)
+      .filter((r) => r.kg > 0 || (r.stock_transit_kg ?? 0) > 0)
   }, [q.data])
 
   const total = useMemo(
     () => ({
-      valeur: lignes.reduce((s, r) => s + (r.valeur ?? 0), 0),
-      kg: lignes.reduce((s, r) => s + r.kg, 0),
+      // LE FIL EN ROUTE COMPTE (10/10/2026) : sorti d'un magasin, pas encore
+      // entre dans l'autre, il reste a nous. Sans lui, la valeur baissait le
+      // temps du trajet puis remontait a l'arrivee.
+      valeur: lignes.reduce((s, r) => s + (r.valeur ?? 0) + (r.valeur_transit_mad ?? 0), 0),
+      kg: lignes.reduce((s, r) => s + r.kg + (r.stock_transit_kg ?? 0), 0),
+      enRouteKg: lignes.reduce((s, r) => s + (r.stock_transit_kg ?? 0), 0),
+      enRouteValeur: lignes.reduce((s, r) => s + (r.valeur_transit_mad ?? 0), 0),
       sansCmup: lignes.filter((r) => r.cmup === null).length,
       ecarts: lignes.filter((r) => r.ecart !== null && Math.abs(r.ecart) >= ECART_NOTABLE).length,
     }),
@@ -112,8 +120,17 @@ export function Valorisation() {
           Icone={Coins}
           libelle="Valeur totale"
           valeur={`${fmt.nombre(Math.round(total.valeur))} MAD`}
+          aide={
+            total.enRouteKg > 0
+              ? `Dont ${fmt.nombre(Math.round(total.enRouteValeur))} MAD en route (${fmt.nombre(Math.round(total.enRouteKg))} kg expédiés, pas encore reçus).`
+              : undefined
+          }
         />
-        <Chiffre libelle="Quantité" valeur={`${fmt.nombre(Math.round(total.kg))} kg`} />
+        <Chiffre
+          libelle="Quantité"
+          valeur={`${fmt.nombre(Math.round(total.kg))} kg`}
+          aide={total.enRouteKg > 0 ? `Dont ${fmt.nombre(Math.round(total.enRouteKg))} kg en route entre deux magasins.` : undefined}
+        />
         <Chiffre
           libelle="Sans CMUP"
           valeur={String(total.sansCmup)}

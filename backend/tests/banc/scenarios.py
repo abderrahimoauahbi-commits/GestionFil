@@ -321,9 +321,9 @@ def scenario_controles_finaux(c, infra):
     c.ok("Choukri", "GET", "/api/cockpit")
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
-                             "FROM generate_series(1, 53) g EXCEPT SELECT code FROM v_controles) x")
+                             "FROM generate_series(1, 54) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
-    verifier(int(infra.valeur("SELECT count(*) FROM v_controles")) == 53, "v_controles porte des doublons")
+    verifier(int(infra.valeur("SELECT count(*) FROM v_controles")) == 54, "v_controles porte des doublons")
 
 
 def scenario_import(c, infra):
@@ -1339,6 +1339,194 @@ def scenario_gardes_p1(c, infra):
     sup = c.ok("Choukri", "GET", "/api/supervision")
     verifier(sup, "la supervision ne rend rien")
 
+# ---------------------------------------------------------------------------
+# Etape 1 (10/10/2026) : le CMUP calcule a la main, l'atomicite, la concurrence
+# ---------------------------------------------------------------------------
+def r4(x):
+    """L'arrondi de la base : 4 decimales pour les kg et le CMUP (db::arrondi_kg)."""
+    return round(x + 0.0, 4)
+
+
+def inventaire_global(c, infra, mag, comptes, motif="Comptage du banc"):
+    """Un inventaire global de `mag` : `comptes` {reference: kg compte}, le reste compte au theorique."""
+    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": mag, "type_inventaire": "GLOBAL"})
+    iid = inv["id_inventaire"]
+    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/ouvrir")
+    lignes = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}/lignes")
+    comptages = []
+    for l in lignes:
+        ref = l["code_reference"]
+        q = comptes.get(ref, float(l["quantite_theorique_kg"] or 0))
+        comptage = {"code_reference": ref, "code_magasin": mag, "lot_fournisseur": l.get("lot_fournisseur"),
+                    "quantite_comptee_kg": q}
+        if ref in comptes:
+            comptage["motif_ecart"] = motif
+        comptages.append(comptage)
+    c.ok("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": comptages})
+    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/cloturer")
+
+
+def valeur_magasins(infra, ref):
+    return float(infra.valeur(f"SELECT COALESCE(sum(valeur_mad), 0) FROM stock_magasin WHERE code_reference = '{ref}'"))
+
+
+def scenario_cmup_chiffre(c, infra):
+    """LE CMUP CALCULE A LA MAIN, scenario par scenario (etape 1, 10/10/2026) : premiere
+    reception, second prix, sortie (CMUP inchange, cout porte par la ligne), transfert en
+    route avec une reception pendant le trajet (le CMUP de depart voyage avec le fil, la
+    valeur totale ne baisse pas), inventaire - et +, devalidation d'une reception, achat en
+    devise au taux engage du bon."""
+    A, M, P = "PLA 80 CHE", "Morocco", "Polyfashions"
+    verifier(kg(infra, A, M) == 0 and kg(infra, A, P) == 0, "PLA 80 CHE doit partir d'un stock nul")
+    cm = lambda mag: cmup_magasin(infra, A, mag)
+    egal = lambda a, b: a is not None and abs(a - b) <= 0.00011
+
+    # 1. Premiere reception : le CMUP est le prix.
+    entree_stock(c, A, 1000, prix=20.0, mag=M)
+    verifier(egal(cm(M), 20.0), f"1re reception : CMUP {cm(M)} au lieu de 20")
+    # 2. Second prix : moyenne ponderee (1000 x 20 + 500 x 23) / 1500 = 21.
+    entree_stock(c, A, 500, prix=23.0, mag=M)
+    verifier(egal(cm(M), 21.0), f"2e reception : CMUP {cm(M)} au lieu de 21")
+
+    # 3. Une sortie ne touche pas le CMUP, et porte son cout (migration 10c).
+    code, r = mouvement(c, "Magasinie", "SORTIE_HORS_MACHINE", [(A, 40)], mag=M,
+                        motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+    verifier(code == 200, f"sortie de 40 kg refusee : {r}")
+    verifier(egal(cm(M), 21.0) and abs(kg(infra, A, M) - 1460) < 1e-6, f"apres sortie : {kg(infra, A, M)} kg a {cm(M)}")
+    cout = infra.valeur(
+        "SELECT lm.prix_kg_mad FROM ligne_mouvement lm JOIN mouvement m USING (id_mouvement) "
+        f"WHERE m.code_type_mvt = 'SORTIE_HORS_MACHINE' AND lm.code_reference = '{A}' "
+        "ORDER BY m.date_mouvement DESC LIMIT 1")
+    verifier(cout is not None and egal(float(cout), 21.0), f"la sortie ne porte pas son cout au CMUP : {cout}")
+
+    # 4. Transfert de 600 kg vers Polyfashions, une reception pendant le trajet.
+    valeur_avant = valeur_magasins(infra, A)
+    t = c.ok("Magasinie", "POST", "/api/transferts", {
+        "code_magasin_source": M, "code_magasin_dest": P,
+        "lignes": [{"code_reference": A, "quantite_saisie": 600, "unite_saisie": "kg"}]})
+    tid = t["id_transfert"]
+    c.ok("Magasinie", "POST", f"/api/transferts/{tid}/expedier")
+    verifier(abs(kg(infra, A, M) - 860) < 1e-6 and kg(infra, A, P) == 0, "l'expedition n'a pas sorti 600 kg")
+    verifier(egal(cm(M), 21.0), f"l'expedition a touche le CMUP de depart : {cm(M)}")
+    route = infra.sql(f"SELECT kg_en_route, valeur_en_route_mad FROM v_stock_transit_reference WHERE code_reference = '{A}'")
+    verifier(route and abs(float(route[0][0]) - 600) < 1e-6 and abs(float(route[0][1]) - 12600) < 0.01,
+             f"en route : {route} au lieu de 600 kg pour 12 600 MAD")
+    total = valeur_magasins(infra, A) + float(route[0][1])
+    verifier(abs(total - valeur_avant) < 0.05, f"la valeur totale baisse pendant le trajet : {valeur_avant} -> {total}")
+    besoin = float(infra.valeur(f"SELECT stock_transit_kg FROM v_stock_physique WHERE code_reference = '{A}'"))
+    verifier(abs(besoin - 600) < 1e-6, f"le calcul des besoins ne voit pas le fil en route : {besoin}")
+    cat = next(x for x in c.ok("Choukri", "GET", "/api/catalogue?actif=1&limite=2000") if x["code_reference"] == A)
+    verifier(abs(float(cat["valeur_transit_mad"]) - 12600) < 0.01, f"le catalogue ignore la valeur en route : {cat.get('valeur_transit_mad')}")
+    # Pendant le trajet : 400 kg a 26 au depart, 200 kg a 30 a l'arrivee.
+    rid_26 = entree_stock(c, A, 400, prix=26.0, mag=M)
+    cm_m = r4((860 * 21 + 400 * 26) / 1260)
+    verifier(egal(cm(M), cm_m), f"reception pendant le trajet : CMUP depart {cm(M)} au lieu de {cm_m}")
+    entree_stock(c, A, 200, prix=30.0, mag=P)
+    verifier(egal(cm(P), 30.0), f"1re reception a l'arrivee : {cm(P)}")
+    # L'arrivee entre au CMUP FIGE AU DEPART (21), pas a celui du jour (22,59).
+    c.ok("Magasinie", "POST", f"/api/transferts/{tid}/receptionner")
+    cm_p = r4((200 * 30 + 600 * 21) / 800)
+    verifier(egal(cm(P), cm_p), f"arrivee du transfert : CMUP {cm(P)} au lieu de {cm_p}")
+    verifier(egal(cm(M), cm_m), "l'arrivee a touche le CMUP du magasin de depart")
+    verifier(abs(kg(infra, A, P) - 800) < 1e-6, f"arrivee : {kg(infra, A, P)} kg au lieu de 800")
+    verifier(not infra.sql(f"SELECT 1 FROM v_stock_transit_reference WHERE code_reference = '{A}'"), "le transfert reste en route")
+
+    # 5. Inventaire : un ecart - puis + ne change pas le CMUP.
+    inventaire_global(c, infra, P, {A: 790}, "Bobine abimee (banc CMUP)")
+    verifier(abs(kg(infra, A, P) - 790) < 1e-6 and egal(cm(P), cm_p), f"inventaire - : {kg(infra, A, P)} kg a {cm(P)}")
+    inventaire_global(c, infra, P, {A: 800}, "Bobine retrouvee (banc CMUP)")
+    verifier(abs(kg(infra, A, P) - 800) < 1e-6 and egal(cm(P), cm_p), f"inventaire + : {kg(infra, A, P)} kg a {cm(P)}")
+
+    # 6. Defaire la reception a 26 : sa marchandise est en stock, on contre-passe d'abord
+    #    son entree (la valeur sort A SON PRIX, dans son seul magasin), puis le papier recule.
+    id_entree = infra.valeur(f"SELECT id_mouvement_genere FROM ligne_reception WHERE id_reception = '{rid_26}'")
+    c.ok("Choukri", "POST", f"/api/mouvements/{id_entree}/contre-passer", {"motif": "Pesee a refaire (banc CMUP)"})
+    c.ok("Choukri", "POST", f"/api/devalider/receptions/{rid_26}", {"motif": "Pesee a refaire (banc CMUP)"})
+    cm_dev = r4((860 * cm_m + 400 * cm_m - 400 * 26) / 860)
+    verifier(abs(kg(infra, A, M) - 860) < 1e-6, f"devalidation : {kg(infra, A, M)} kg au lieu de 860")
+    verifier(egal(cm(M), cm_dev), f"devalidation : CMUP {cm(M)} au lieu de {cm_dev}")
+
+    # 7. Achat en devise : le prix en dirhams est le prix du bon au taux ENGAGE.
+    taux_usd_du_jour(infra)
+    H = "Hotmelt"
+    verifier(kg(infra, H, M) == 0, "Hotmelt doit partir d'un stock nul")
+    id_bc, lignes = bon_envoye(c, [(H, 100, 5.42)], frs="FRS-002")
+    taux = float(infra.valeur(f"SELECT taux_change_engage FROM bon_commande WHERE id_bc = '{id_bc}'"))
+    reception_validee(c, id_bc, lignes, [100], mag=M)
+    attendu = r4(5.42 * taux)
+    verifier(egal(cmup_magasin(infra, H, M), attendu), f"devise : CMUP {cmup_magasin(infra, H, M)} au lieu de 5,42 x {taux} = {attendu}")
+
+    verifier(controle(infra, "C11") == 0, "C11 : le cache du stock diverge du grand livre")
+
+
+def scenario_atomicite(c, infra):
+    """TOUT OU RIEN (etape 1, 10/10/2026) : une expedition dont la 2e ligne manque de stock
+    n'ecrit rien, pas meme la 1re ; une reception dont une ligne est invalide n'existe pas."""
+    A, B, M, P = "PLA 35 CHE", "PLA 45 CHE", "Morocco", "Polyfashions"
+    entree_stock(c, A, 100, prix=20.0, mag=M)
+    avant = (kg(infra, A, M), kg(infra, B, M), kg(infra, A, P), kg(infra, B, P))
+    mvts = int(infra.valeur("SELECT count(*) FROM mouvement"))
+    t = c.ok("Magasinie", "POST", "/api/transferts", {
+        "code_magasin_source": M, "code_magasin_dest": P,
+        "lignes": [{"code_reference": A, "quantite_saisie": 10, "unite_saisie": "kg"},
+                   {"code_reference": B, "quantite_saisie": 5000, "unite_saisie": "kg"}]})
+    tid = t["id_transfert"]
+    c.refus("Magasinie", "POST", f"/api/transferts/{tid}/expedier")
+    apres = (kg(infra, A, M), kg(infra, B, M), kg(infra, A, P), kg(infra, B, P))
+    verifier(apres == avant, f"une expedition refusee a deplace du stock : {avant} -> {apres}")
+    verifier(int(infra.valeur("SELECT count(*) FROM mouvement")) == mvts, "une expedition refusee a ecrit un mouvement")
+    verifier(infra.valeur(f"SELECT statut FROM transfert WHERE id_transfert = '{tid}'") == "BROUILLON",
+             "le transfert refuse n'est plus en brouillon")
+    receptions = int(infra.valeur("SELECT count(*) FROM reception"))
+    id_bc, lignes = bon_envoye(c, [(A, 50, 20.0)])
+    c.refus("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-ATOME", "lignes": [
+        {"code_reference": A, "id_ligne_bc": lignes[0]["id_ligne_bc"], "unite_saisie": "kg",
+         "quantite_pesee_unite": 50, "code_magasin_dest": M},
+        {"code_reference": A, "unite_saisie": "kg", "quantite_pesee_unite": 5,
+         "code_magasin_dest": "MAGASIN-INEXISTANT"}]}, codes=(400, 404, 409, 422))
+    verifier(int(infra.valeur("SELECT count(*) FROM reception")) == receptions,
+             "une reception refusee a laisse un en-tete")
+
+
+def scenario_concurrence_stock(c, infra):
+    """DEUX SORTIES SIMULTANEES sur le meme stock (etape 1, 10/10/2026) : 2 x 70 kg sur
+    100 kg. Une seule passe, l'autre est refusee ; le stock ne passe jamais sous zero."""
+    from concurrent.futures import ThreadPoolExecutor
+    A, M = "PLA 65 CHE", "Morocco"
+    entree_stock(c, A, 100, prix=20.0, mag=M)
+    depart = kg(infra, A, M)
+    def sortie(_):
+        return mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(A, 70)], mag=M,
+                         motif="HORS_MACHINE", motif_ligne="HM_ESSAI")
+    with ThreadPoolExecutor(2) as ex:
+        resultats = list(ex.map(sortie, range(2)))
+    codes = sorted(r[0] for r in resultats)
+    verifier(codes[0] == 200 and codes[1] in (409, 422, 423, 500) and codes[1] != 200,
+             f"deux sorties de 70 kg sur {depart} kg : {resultats}")
+    verifier(codes[1] != 500, f"le refus concurrent tombe en erreur interne : {resultats}")
+    verifier(abs(kg(infra, A, M) - (depart - 70)) < 1e-6, f"stock final {kg(infra, A, M)} au lieu de {depart - 70}")
+    verifier(controle(infra, "C11") == 0, "C11 apres la concurrence")
+
+
+def scenario_matrice_mouvements(c, infra):
+    """LA MATRICE DES MOUVEMENTS EST CONTROLEE (etape 1, 10/10/2026) : chaque type de la base
+    figure dans matrice_mouvements.json avec le meme signe, le meme effet sur le CMUP et les
+    memes exigences ; les scenarios qu'elle cite comme preuves existent."""
+    import json
+    from pathlib import Path
+    matrice = json.loads((Path(__file__).resolve().parent / "matrice_mouvements.json").read_text(encoding="utf-8"))["types"]
+    colonnes = ["signe", "impacte_cmup", "exige_prix", "exige_of", "exige_motif_ligne", "interne"]
+    base = {l[0]: dict(zip(colonnes, map(int, l[1:])))
+            for l in infra.sql(f"SELECT code_type_mvt, {', '.join(colonnes)} FROM type_mouvement WHERE actif = 1")}
+    verifier(set(base) == set(matrice), f"types absents de la matrice : {sorted(set(base) - set(matrice))} ; "
+                                        f"de la base : {sorted(set(matrice) - set(base))}")
+    ecarts = [f"{code}.{k} : base {base[code][k]}, matrice {matrice[code][k]}"
+              for code in base for k in colonnes if base[code][k] != matrice[code][k]]
+    verifier(not ecarts, "la matrice ne dit pas ce que dit la base : " + " ; ".join(ecarts))
+    connus = {f.__name__.removeprefix("scenario_") for f in SCENARIOS}
+    absents = sorted({s for t in matrice.values() for s in t["banc"]} - connus)
+    verifier(not absents, f"la matrice cite des scenarios qui n'existent pas : {absents}")
+
 
 def scenario_sauvegarde_restaurable(c, infra):
     """Une sauvegarde se prouve en la restaurant (10/10/2026) : gestionfil-admin la
@@ -1398,6 +1586,10 @@ SCENARIOS = [
     scenario_import_bon_envoye,
     scenario_parametres_types,
     scenario_migrations_rejouables,
+    scenario_matrice_mouvements,
+    scenario_cmup_chiffre,
+    scenario_atomicite,
+    scenario_concurrence_stock,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,
 ]

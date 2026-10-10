@@ -87,6 +87,8 @@ déclencheurs (`R02 : stock insuffisant…`) remontent tels quels au client via 
 (`REGLE_METIER` → 422). Au démarrage, `db::verifier_schema` refuse de servir une base qui n'a pas
 assez de tables/vues/déclencheurs.
 
+**Le fil en route compte** (transfert expédié, pas encore reçu) : valeur du stock et calcul des besoins (`v_stock_transit_reference`, `v_stock_physique.stock_transit_kg`) ; chaque sortie porte son coût, le CMUP du moment (`trg_lmvt_cout_sortie`) ; un prix au kilo garde 4 décimales.
+
 **Le kilogramme est l'unité canonique.** Bobines, palettes, mètres ne sont que des masques de
 saisie (`domain/unites.rs`, `frontend/src/lib/conditionnement.ts`) ; un facteur manquant fait
 échouer la saisie, jamais de repli sur ×1. Arrondir à l'écriture : 4 décimales pour kg et CMUP,
@@ -169,7 +171,8 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
 - `docs/ADR-002-regles-de-gestion-2026-10.md` — les 18 règles du 08/10/2026 : décision, lieu de la garantie, contrôle.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
-- `db/README.md` — invariants, vues, contrôles C01–C53 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53 au 10/10, tous des signaux).
+- `db/README.md` — invariants, vues, contrôles C01–C54 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, tous des signaux).
+- `docs/matrice-mouvements.md` — matrice des 17 types de mouvement (sens, CMUP, coût, validation, réversibilité), générée par `python db/pg/matrice.py` depuis `backend/tests/banc/matrice_mouvements.json`, que le banc vérifie contre la base : modifier un type = modifier ce fichier.
 - Règles de gestion validées le 08/10/2026 : migrations `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 14) puis `2026-10-08b_audit_v4.sql` (corrections de l'audit v4), les deux exigées au démarrage ; `seed_006_regles_2026_10.sql` en porte les référentiels pour une base neuve. Le colisage incohérent se SIGNALE, il ne bloque jamais.
 - Arbitrages du 09/10/2026 (audit v5) : `docs/ADR-002` section « Arbitrages du 09/10/2026 » (A1–A11) ; migrations `2026-10-09a` à `2026-10-09za`, puis `2026-10-10a` (A1 et A11 tranchés le 10/10 : prêt toujours rendu, jamais d'acompte avant dédouanement → C53), toutes exigées au démarrage. Une migration déjà appliquée corrigée après coup se déclare dans `EMPREINTES_REMPLACEES` (`db/pg/migrer.py`), sinon `--verifier` arrête la publication.
 - `deploiement/README.md` — serveur, migrations en production, sauvegardes, assistant.

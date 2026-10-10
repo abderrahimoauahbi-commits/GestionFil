@@ -293,6 +293,17 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Chaque sortie porte son cout (CMUP du moment) dans le grand livre.
+        "2026-10-10c_cout_des_sorties.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lmvt_cout_sortie')",
+    ),
+    (
+        // Le fil en route : calcul des besoins, valeur du stock, C54 ; le catalogue le lit.
+        "2026-10-10b_stock_en_route.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_stock_transit_reference')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c54')",
+    ),
+    (
         // C53 : un paiement d'import date avant le dedouanement (A11) ; la saisie le lit.
         "2026-10-10a_paiement_avant_dedouanement.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c53')",

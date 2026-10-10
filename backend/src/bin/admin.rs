@@ -375,6 +375,12 @@ fn restaurer(fichier: &str) -> Result<()> {
         );
     }
 
+    // Une base restauree n'a pas de statistiques : sans ANALYZE, certains ecrans
+    // (supervision) figent pres d'une minute jusqu'au passage de l'autovacuum.
+    let mut analyse = std::process::Command::new("psql");
+    analyse.arg("-q").arg("-c").arg("ANALYZE").arg(&url_sans);
+    avec_mdp(&mut analyse);
+    let _ = analyse.output();
     println!("Base restauree depuis {}", source.display());
 
     // 4. LES PIECES JOINTES SUIVENT LA BASE (audit v5, T13) : la sauvegarde les
@@ -497,6 +503,10 @@ async fn verifier_sauvegarde(fichier: Option<&str>) -> Result<()> {
             bail!("la sauvegarde ne se restaure pas : {}", String::from_utf8_lossy(&r.stderr).trim());
         }
 
+        let mut analyse = std::process::Command::new("psql");
+        analyse.arg("-q").arg("-c").arg("ANALYZE").arg(&url_temp_sans);
+        avec_mdp(&mut analyse);
+        let _ = analyse.output();
         println!("Schema et migrations exigees (controle du demarrage)...");
         let restauree = db::connect(&url_temp).await.context("la base restauree n'est pas servable")?;
         let vivante = db::connect(&url).await.ok();

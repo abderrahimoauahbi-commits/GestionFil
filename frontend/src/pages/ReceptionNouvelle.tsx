@@ -596,7 +596,7 @@ export function ReceptionNouvelle() {
     <div>
       <EnTetePage
         titre="Nouvelle réception"
-        description="Reprenez un ou plusieurs bons du fournisseur, corrigez les pesees, enregistrez l'ensemble en une fois."
+        description="Reprenez un ou plusieurs bons du fournisseur, corrigez les pesées, enregistrez l'ensemble en une fois."
         actions={
           <Bouton variante="contour" onClick={() => quitter(() => naviguer('/receptions'))}>
             <ArrowLeft />
@@ -712,7 +712,7 @@ export function ReceptionNouvelle() {
         {!entete.code_fournisseur ? (
           <Alerte ton="info">
             Choisissez un fournisseur : ses bons en attente de livraison deviendront reprenables,
-            un par un, et leurs lignes s'ajouteront a la grille de saisie.
+            un par un, et leurs lignes s'ajouteront à la grille de saisie.
           </Alerte>
         ) : (
           <>
@@ -1519,7 +1519,7 @@ function PanneauDetail({
                       {ligne.prix ? fmt.nombre(Number(ligne.prix), 4) : '—'}
                     </div>
                     <p className="mt-1 text-[11px] text-attenue-texte">
-                      Prix engage du bon : il fait foi, la reception ne le change pas.
+                      Prix engage du bon : il fait foi, la réception ne le change pas.
                     </p>
                   </>
                 ) : (
@@ -1533,7 +1533,7 @@ function PanneauDetail({
                       className="text-right tabular-nums"
                     />
                     <p className="mt-1 text-[11px] text-attenue-texte">
-                      Portera le bon de regularisation. A defaut, le prix catalogue.
+                      Portera le bon de régularisation. A défaut, le prix catalogue.
                     </p>
                   </>
                 )}
@@ -1543,7 +1543,7 @@ function PanneauDetail({
               <div className="sm:col-span-2 lg:col-span-4">
                 <Alerte ton="alerte">
                   Aucune commande derriere cette ligne. Un bon sera cree en brouillon a
-                  l'enregistrement, et devra etre valide puis envoye avant le controle qualite.
+                  l'enregistrement, et devra être validé puis envoyé avant le controle qualité.
                 </Alerte>
               </div>
             )}
@@ -1564,7 +1564,7 @@ function PanneauDetail({
               </Selecteur>
               {ligne.qualite !== 'CONFORME' && (
                 <p className="mt-1 text-[11px] text-alerte">
-                  Une ligne non conforme doit etre dirigee vers un magasin de quarantaine.
+                  Une ligne non conforme doit être dirigee vers un magasin de quarantaine.
                 </p>
               )}
             </div>

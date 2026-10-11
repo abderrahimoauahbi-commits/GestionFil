@@ -81,7 +81,7 @@ export function Receptions() {
   const annuler = useMutation({
     mutationFn: (id: string) => api.put(`/api/receptions/${id}/statut`, { statut: 'ANNULE' }),
     onSuccess: () => {
-      toast.success('Réception annulee')
+      toast.success('Réception annulée')
       void qc.invalidateQueries({ queryKey: ['receptions'] })
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Annulation impossible.'),
@@ -279,7 +279,7 @@ export function Receptions() {
         placeholderRecherche="N° de réception, fournisseur, BL…"
         titreCarte={(r) => `${r.numero_reception} — ${r.fournisseur_nom}`}
         videTitre="Aucune réception"
-        videDescription="Une réception se rattache a un bon de commande envoye, ou se saisit librement."
+        videDescription="Une réception se rattache a un bon de commande envoyé, ou se saisit librement."
         actions={(r) => (
           <div className="flex justify-end gap-0.5">
             <Bouton

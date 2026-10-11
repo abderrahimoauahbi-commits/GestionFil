@@ -133,11 +133,11 @@ export function Connexion() {
           <hr className="cnx__filet" />
 
           <h2 className="cnx__titre">
-            Achats, stocks et production de matières premieres.
+            Achats, stocks et production de matières premières.
           </h2>
           <p className="cnx__texte">
             Tout est tenu au kilogramme. Les palettes, bobines et metres lineaires ne sont que
-            des masques de saisie : la conversion est faite a l enregistrement, jamais devinee.
+            des masques de saisie : la conversion est faite à l’enregistrement, jamais devinée.
           </p>
         </section>
 

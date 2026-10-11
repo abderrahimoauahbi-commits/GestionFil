@@ -121,7 +121,7 @@ export function BonMouvement() {
 
   const [defaire, setDefaire] = useState(false)
 
-  if (q.isLoading) return <Chargement texte="Preparation du document…" />
+  if (q.isLoading) return <Chargement texte="Préparation du document…" />
   const entete = q.data?.entete
   if (!entete) return <Alerte ton="danger">Mouvement introuvable.</Alerte>
 
@@ -180,7 +180,7 @@ export function BonMouvement() {
           ne le dirait pas continuerait d'etre imprime, envoye et cru. */}
       {entete.id_mouvement_contrepasse && (
         <Alerte ton="info" className="mb-3">
-          Ce document EST une contre-passation : il annule un mouvement precedent.
+          Ce document EST une contre-passation : il annule un mouvement précédent.
           {entete.motif_contrepassation ? ` Motif : ${entete.motif_contrepassation}` : ''}
         </Alerte>
       )}
@@ -195,7 +195,7 @@ export function BonMouvement() {
         ouvert={defaire}
         surFermeture={() => setDefaire(false)}
         titre={`Contre-passer ${entete.numero_mouvement}`}
-        description="Le mouvement n'est pas efface : son inverse est enregistre."
+        description="Le mouvement n'est pas effacé : son inverse est enregistré."
         libelleBouton="Contre-passer"
         chemin={`/api/mouvements/${id}/contre-passer`}
         consequence={

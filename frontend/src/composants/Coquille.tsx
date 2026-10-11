@@ -412,7 +412,7 @@ export function Coquille() {
         >
           {children}
           <Badge ton="contour" className="ml-auto shrink-0 text-[9px]">
-            a venir
+            à venir
           </Badge>
         </span>
       )
@@ -558,7 +558,7 @@ export function Coquille() {
         <button
           onClick={() => setApparence(true)}
           aria-label="Apparence"
-          title="Theme, caracteres, disposition"
+          title="Thème, caractères, disposition"
           className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-attenue-texte transition-colors hover:bg-attenue hover:text-texte"
         >
           <Palette className="size-4" />

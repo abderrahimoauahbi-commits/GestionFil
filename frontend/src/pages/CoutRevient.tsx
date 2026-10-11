@@ -79,7 +79,7 @@ const TYPES = ['FRET', 'DOUANE', 'ASSURANCE', 'MANUTENTION', 'AUTRE'] as const
 /** Ce que chaque cle repartit, et pourquoi elle convient a ce frais. */
 const CLES: { valeur: string; libelle: string; aide: string }[] = [
   { valeur: 'POIDS', libelle: 'Au poids', aide: 'Le fret et la manutention se paient au kilo.' },
-  { valeur: 'VALEUR', libelle: 'A la valeur', aide: 'La douane et l assurance suivent la valeur declaree.' },
+  { valeur: 'VALEUR', libelle: 'À la valeur', aide: 'La douane et l’assurance suivent la valeur déclarée.' },
   { valeur: 'LIGNES', libelle: 'Par ligne', aide: 'Un frais fixe par article : formalites, analyses.' },
 ]
 
@@ -199,7 +199,7 @@ export function CoutRevient() {
     <div>
       <EnTetePage
         titre="Coût de revient complet"
-        sous_titre="Prix d achat plus fret, douane, assurance et manutention, repartis par réception"
+        sous_titre="Prix d’achat plus fret, douane, assurance et manutention, répartis par réception"
         actions={
           droits.peutEcrire && (
             <Bouton taille="icone" title="Saisir un frais" aria-label="Saisir un frais" onClick={() => setSaisie(true)}>              <Plus />            </Bouton>
@@ -220,11 +220,11 @@ export function CoutRevient() {
       )}
 
       {frais.length === 0 && (
-        <Alerte ton="info" titre="Aucun frais d approche saisi" className="mb-3">
+        <Alerte ton="info" titre="Aucun frais d’approche saisi" className="mb-3">
           Le cout de revient affiche est donc egal au prix d achat. Ce n est pas que les frais sont
           nuls — c est qu ils ne sont pas encore enregistres. Ils arrivent en general par la
           facture du transitaire, apres la reception : saisissez-les au fur et a mesure, la
-          repartition se fait toute seule.
+          répartition se fait toute seule.
         </Alerte>
       )}
 
@@ -378,7 +378,7 @@ function FormulaireFrais({
         taux_change: Number(form.taux_change),
       }),
     onSuccess: () => {
-      toast.success('Frais enregistre', { description: 'Le coût de revient est recalcule.' })
+      toast.success('Frais enregistre', { description: 'Le coût de revient est recalculé.' })
       surSucces()
     },
     onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.'),

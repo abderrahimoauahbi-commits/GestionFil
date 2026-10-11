@@ -68,7 +68,7 @@ export function Audit() {
   if (!peut('AUDIT', 'LIRE')) {
     return (
       <Alerte ton="danger" titre="Accès refusé">
-        Le journal d'audit est reserve a la Direction et a la DAF.
+        Le journal d'audit est réservé à la Direction et à la DAF.
       </Alerte>
     )
   }
@@ -170,7 +170,7 @@ export function Audit() {
                     <td colSpan={5} className="bg-attenue/40 px-2 py-2">
                       <div className="grid gap-2 lg:grid-cols-2">
                         <Valeurs titre="Avant" json={l.anciennes_valeurs} />
-                        <Valeurs titre="Apres" json={l.nouvelles_valeurs} />
+                        <Valeurs titre="Après" json={l.nouvelles_valeurs} />
                       </div>
                     </td>
                   </tr>

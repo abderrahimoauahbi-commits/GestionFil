@@ -195,7 +195,7 @@ const STATUTS = [
   {
     cle: 'RUPTURE',
     libelle: 'Rupture',
-    resume: 'Projeté a zero ou negatif',
+    resume: 'Projeté a zéro ou négatif',
     Icone: PackageX,
     ton: 'danger' as const,
   },

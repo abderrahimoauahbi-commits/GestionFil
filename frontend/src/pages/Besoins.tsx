@@ -346,7 +346,7 @@ export function Besoins() {
     <div>
       <EnTetePage
         titre="Production & Besoins"
-        description="m² planifies par qualité, et matière necessaire par référence, sur les mois de la période."
+        description="m² planifies par qualité, et matière nécessaire par référence, sur les mois de la période."
         actions={
           <>
             {/* Le choix du plan remonte ici : c'est le contexte de TOUT l'ecran,
@@ -370,7 +370,7 @@ export function Besoins() {
                 variante="contour"
                 onClick={() => recalcul.mutate(plan.id_plan)}
                 chargement={recalcul.isPending}
-                title="Reexploser le plan par les recettes figees"
+                title="Reexploser le plan par les recettes figées"
               >
                 <Calculator />
                 Recalculer les besoins
@@ -454,7 +454,7 @@ export function Besoins() {
           {plan.nb_besoins === 0 && (
             <Alerte ton="alerte" titre="Aucun besoin calcule">
               La production est planifiee mais le MRP n'a pas encore tourne. Lancez « Recalculer les
-              besoins » — sans cela, aucune matiere ne sera proposee a l'achat.
+              besoins » — sans cela, aucune matière ne sera proposée a l'achat.
             </Alerte>
           )}
 

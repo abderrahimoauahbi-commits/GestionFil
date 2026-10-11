@@ -583,7 +583,7 @@ export function TransfertNouveau() {
         <Alerte ton="alerte">
           Ce transfert n'existe pas, ou vous n'y avez pas acces.{' '}
           <button className="underline" onClick={() => quitter(() => naviguer('/transferts'))}>
-            Revenir a la liste
+            Revenir à la liste
           </button>
         </Alerte>
       </div>
@@ -634,7 +634,7 @@ export function TransfertNouveau() {
       />
 
       {parti && (
-        <Alerte ton="info" titre="Document fige" className="mb-3">
+        <Alerte ton="info" titre="Document figé" className="mb-3">
           La marchandise a quitte le magasin source : ses mouvements sont inscrits au grand livre,
           que R03 rend immuable. Un ecart constate a l'arrivee se regularise par un inventaire, pas
           en retouchant le bon.
@@ -697,7 +697,7 @@ export function TransfertNouveau() {
                 </Selecteur>
                 {memeMagasin && (
                   <p className="mt-1 text-[11px] text-danger">
-                    Source et destination doivent differer.
+                    Source et destination doivent différer.
                   </p>
                 )}
               </div>
@@ -720,7 +720,7 @@ export function TransfertNouveau() {
                   id="resp"
                   value={entete.responsable}
                   onChange={(e) => setEntete({ ...entete, responsable: e.target.value })}
-                  placeholder="Qui repond de la marchandise en route"
+                  placeholder="Qui répond de la marchandise en route"
                 />
               </div>
               <div>
@@ -744,7 +744,7 @@ export function TransfertNouveau() {
 
           {!entete.code_magasin_source ? (
             <Alerte ton="info">
-              Choisissez le magasin source : seules ses references en stock pourront etre chargees.
+              Choisissez le magasin source : seules ses références en stock pourront être chargées.
             </Alerte>
           ) : (
             <Carte repliable="transfertnouveau.2">
@@ -830,7 +830,7 @@ export function TransfertNouveau() {
           <span className="text-[13px]">
             {remplies.length === 0 ? (
               <span className="text-attenue-texte">
-                Aucune ligne chargee. Ajoutez une ligne et tapez une référence du stock.
+                Aucune ligne chargée. Ajoutez une ligne et tapez une référence du stock.
               </span>
             ) : (
               <>

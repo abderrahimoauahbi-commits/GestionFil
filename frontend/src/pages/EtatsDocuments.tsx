@@ -327,7 +327,7 @@ export function EtatInventaire() {
 
       {!inv ? null : (
         <EtatImprimable
-          titre="Proces-verbal d inventaire"
+          titre="Procès-verbal d’inventaire"
           reference={inv.numero_inventaire}
           sousTitre={inv.statut !== 'CLOTURE' ? `Statut : ${inv.statut}` : undefined}
           enTete={
@@ -491,14 +491,14 @@ export function EtatPlanProduction() {
 
   if (qPlans.isLoading) return <Chargement texte="Chargement des plans…" />
   if (!liste.length) return <Alerte ton="info">Aucun plan de production.</Alerte>
-  if (q.isLoading) return <Chargement texte="Preparation du plan…" />
+  if (q.isLoading) return <Chargement texte="Préparation du plan…" />
 
   const plan = q.data?.plan
   if (!plan || !qualites.length) {
     return (
       <Alerte ton="info">
         Ce plan ne porte aucune ligne de production. Ouvrez-le depuis l ecran Plan de production
-        pour completer sa grille.
+        pour compléter sa grille.
       </Alerte>
     )
   }
@@ -572,7 +572,7 @@ export function EtatPlanProduction() {
         </div>
         <p className="mt-2 text-[9px] text-neutral-600">
           Metres carres prevus par qualite et par mois. Le taux de perte figure a l entete : c est
-          celui fige sur le plan, pas le parametre general du jour.
+          celui figé sur le plan, pas le paramètre général du jour.
         </p>
       </EtatImprimable>
     </div>
@@ -635,7 +635,7 @@ export function EtatBesoins() {
   if (!refs.length) {
     return (
       <Alerte ton="info">
-        Ce plan ne porte aucun besoin calcule. Relancez le calcul depuis l ecran Besoins.
+        Ce plan ne porte aucun besoin calcule. Relancez le calcul depuis l’écran Besoins.
       </Alerte>
     )
   }

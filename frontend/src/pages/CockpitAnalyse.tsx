@@ -425,7 +425,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             libelle="Lots en dérive de poids"
             valeur={fmt.nombre(nlot('lots_en_derive'), 0)}
             ton={nlot('lots_en_derive') > 0 ? 'alerte' : 'succes'}
-            aide="Lots dont l'ecart cumule de poids depasse la tolerance orange reglee dans les paramètres."
+            aide="Lots dont l'écart cumule de poids depasse la tolérance orange reglee dans les paramètres."
           />
           <Kpi
             libelle="Écart moyen par bobine"
@@ -436,7 +436,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             }
             unite={ecartBobine == null ? undefined : '%'}
             ton={tonEcart === 'rouge' ? 'danger' : tonEcart === 'orange' ? 'alerte' : tonEcart === 'vert' ? 'succes' : undefined}
-            aide="Poids pese face au poids catalogue d'une bobine, pondere par les bobines pesees. Les couleurs suivent les tolerances des paramètres."
+            aide="Poids pese face au poids catalogue d'une bobine, pondéré par les bobines pesées. Les couleurs suivent les tolérances des paramètres."
           />
         </BlocKpi>
       )}
@@ -444,7 +444,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
       {/* ---- Les cinq graphiques, deux par rangee ------------------------- */}
       <div className="grid gap-3 xl:grid-cols-2">
         <Pareto
-          titre="Concentration de la depense"
+          titre="Concentration de la dépense"
           sousTitre={`Les ${pareto.length} references qui portent le budget, et la part cumulee`}
           unite="MAD de consommation annuelle"
           donnees={pareto}
@@ -512,7 +512,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
 
         {/* ---- Tresorerie : les quatre indicateurs de cycle --------------- */}
         {t && droits.visible('valeur_stock_mad') && (
-          <BlocKpi titre="Cycle de tresorerie" Icone={Landmark}>
+          <BlocKpi titre="Cycle de trésorerie" Icone={Landmark}>
             <Kpi
               libelle="Stock immobilisé"
               valeur={fmt.nombre(t.valeur_stock_mad / 1e6, 2)}
@@ -528,7 +528,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               valeur={fmt.nombre(t.rotation_annuelle, 2)}
               unite="fois / an"
               ton={t.rotation_annuelle < 1 ? 'alerte' : undefined}
-              aide="Coût matière annuel divise par la valeur du stock. Sous 1, le stock represente plus d une année de consommation."
+              aide="Coût matière annuel divise par la valeur du stock. Sous 1, le stock represente plus d’une année de consommation."
             />
             <Kpi
               libelle="Stock en jours (DIO)"
@@ -552,7 +552,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               valeur={fmt.nombre(t.ccc_jours, 0)}
               unite="j"
               ton={t.ccc_jours > 90 ? 'danger' : t.ccc_jours > 0 ? 'alerte' : 'succes'}
-              aide="DIO + DSO - DPO. Negatif, le fournisseur finance le cycle."
+              aide="DIO + DSO - DPO. Négatif, le fournisseur finance le cycle."
             />
           </BlocKpi>
         )}
@@ -619,7 +619,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                 basculer. Les taire ferait passer une piste pour un acquis. */}
             <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
               Ce montant suppose que l equivalent tient la meme qualite, que le fournisseur suit le
-              volume, et que le délai ne se degrade pas. Il se verifie avant de basculer.
+              volume, et que le délai ne se dégrade pas. Il se vérifie avant de basculer.
               {ind && ind.nb_opportunites > 5 && ` ${ind.nb_opportunites - 5} autres références au-delà du top 5.`}
             </p>
           </CarteCorps>
@@ -718,7 +718,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               {d.devises.some((v) => v.code_devise !== 'MAD' && v.part_pct > 60) && (
                 <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
                   Plus de six dixiemes du budget dans une monnaie etrangere : une variation de
-                  change se repercute directement sur le cout matiere.
+                  change se repercute directement sur le coût matière.
                 </p>
               )}
             </CarteCorps>

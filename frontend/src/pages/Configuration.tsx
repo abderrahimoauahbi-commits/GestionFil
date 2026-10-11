@@ -164,11 +164,11 @@ const SECTIONS: Section[] = [
     cle: 'production',
     famille: 'Paramètres de gestion',
     libelle: 'Production',
-    resume: 'Perte matière, stocks de sécurité, tolerance des recettes',
+    resume: 'Perte matière, stocks de sécurité, tolérance des recettes',
     Icone: Factory,
     blocs: [
       {
-        titre: 'Pertes et tolerances',
+        titre: 'Pertes et tolérances',
         intention:
           'Le taux de perte majore chaque besoin calcule par le MRP. La tolerance de recette ' +
           "dit de combien la somme des pourcentages d'un rôle peut s'ecarter de 100 %.",
@@ -194,11 +194,11 @@ const SECTIONS: Section[] = [
     cle: 'entreprise',
     famille: 'Entreprise',
     libelle: 'Entreprise',
-    resume: 'Identite, pays, devise de reporting',
+    resume: 'Identité, pays, devise de reporting',
     Icone: Building2,
     blocs: [
       {
-        titre: 'Identite',
+        titre: 'Identité',
         intention:
           "Ces valeurs n'entrent dans aucun calcul : elles figurent sur les états d'impression " +
           'et les bons adresses aux fournisseurs.',
@@ -248,7 +248,7 @@ const SECTIONS: Section[] = [
         codes: ['P_ScoreStrategique', 'P_ScoreStandard', 'P_ScoreSurveiller'],
       },
       {
-        titre: 'Immobilisation et tresorerie',
+        titre: 'Immobilisation et trésorerie',
         intention:
           'Au-dela du seuil de dormance, un stock qui ne bouge plus est signale. Le délai de ' +
           'paiement sert au previsionnel quand le fournisseur n en declare aucun.',
@@ -260,11 +260,11 @@ const SECTIONS: Section[] = [
     cle: 'reception',
     famille: 'Paramètres de gestion',
     libelle: 'Réceptions et OTIF',
-    resume: 'Tolerance de pesee, cible de performance fournisseur',
+    resume: 'Tolérance de pesée, cible de performance fournisseur',
     Icone: PackageCheck,
     blocs: [
       {
-        titre: 'Tolerances au quai',
+        titre: 'Tolérances au quai',
         intention:
           'Au-dela de la tolerance de pesee, la ligne exige une derogation nominative. ' +
           'La tolerance In-Full dit à partir de quel manque une livraison cesse d etre complete.',
@@ -318,7 +318,7 @@ const SECTIONS: Section[] = [
     cle: 'utilisateurs',
     famille: 'Paramètres utilisateurs',
     libelle: 'Rôles et transitions',
-    resume: "Rôles applicatifs et transitions d'etat autorisees",
+    resume: "Rôles applicatifs et transitions d'état autorisees",
     Icone: ShieldCheck,
   },
   {
@@ -430,7 +430,7 @@ export function Configuration() {
     <div>
       <EnTetePage
         titre="Configuration"
-        description="Les réglages qui gouvernent les calculs, et les referentiels sur lesquels ils s appuient."
+        description="Les réglages qui gouvernent les calculs, et les référentiels sur lesquels ils s’appuient."
       />
 
       <PageAvecRail droite
@@ -490,7 +490,7 @@ export function Configuration() {
                 ))}
                 {resultats.length === 0 && (
                   <p className="p-4 text-[13px] text-attenue-texte">
-                    Aucun reglage ne correspond.
+                    Aucun réglage ne correspond.
                   </p>
                 )}
               </CarteCorps>
@@ -702,7 +702,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
       }),
     onSuccess: () => {
       toast.success('Nouveau taux enregistre', {
-        description: 'Le taux précédent est ferme a cette date. Les achats déjà valorises ne bougent pas.',
+        description: 'Le taux précédent est fermé à cette date. Les achats déjà valorisés ne bougent pas.',
       })
       setNouveau({ taux: '', date_debut: '' })
       void qc.invalidateQueries({ queryKey: ['taux'] })
@@ -740,7 +740,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
       <Alerte ton="info">
         Un taux est <strong>date</strong>. Une reception valorisee hier garde le taux d hier, quoi
         qu il arrive ensuite : c est ce qui rend le CMUP reproductible. Ouvrir un nouveau taux
-        ferme automatiquement le precedent, sans jamais le reecrire.
+        ferme automatiquement le précédent, sans jamais le reecrire.
       </Alerte>
 
       <Carte repliable="configuration.3">
@@ -812,7 +812,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
               recherche={false}
               pagination={false}
               videTitre="Aucun taux"
-              videDescription="Cette devise n a jamais eu de cours enregistre."
+              videDescription="Cette devise n’a jamais eu de cours enregistre."
             />
           </CarteCorps>
 
@@ -922,7 +922,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
           <p className="text-[11px] leading-relaxed text-attenue-texte">
             Ecrit une copie complete et coherente de la base, sans interrompre le travail en
             cours. A faire avant toute operation risquee : import, changement de parametre
-            structurant, reprise de donnees.
+            structurant, reprise de données.
           </p>
         </CarteEntete>
         <CarteCorps className="flex flex-wrap items-center gap-3">
@@ -952,7 +952,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
           <p>
             Les <span className="text-texte">dix dernieres</span> sont conservees ; les plus
             anciennes sont effacees automatiquement. Un echec de sauvegarde n empeche jamais le
-            serveur de s arreter — il est journalise.
+            serveur de s’arreter — il est journalisé.
           </p>
           <p className="text-danger">
             Ces copies vivent sur le meme disque que la base. Elles protegent d une fausse
@@ -992,7 +992,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
                       {s.fichier}
                       {i === 0 && (
                         <span className="ml-2 rounded-[3px] bg-succes/12 px-1.5 py-px text-[10px] font-medium text-succes">
-                          la plus recente
+                          la plus récente
                         </span>
                       )}
                     </td>

@@ -130,7 +130,7 @@ export function Fournisseurs() {
     },
     {
       champ: 'tolerance_pesee_pct',
-      libelle: 'Tolerance de pesee (%)',
+      libelle: 'Tolérance de pesée (%)',
       type: 'nombre',
       min: 0,
       aide:

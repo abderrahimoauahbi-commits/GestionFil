@@ -539,7 +539,7 @@ export function Qualites() {
       references.find((r) => domaine.has(r.code_categorie) && !prises.has(r.code_reference)) ??
       references.find((r) => !prises.has(r.code_reference))
     if (!ref) {
-      toast.error('Toutes les références du catalogue sont déjà employees par cette qualité.')
+      toast.error('Toutes les références du catalogue sont déjà employées par cette qualité.')
       return
     }
     setComposition((cs) => [
@@ -766,7 +766,7 @@ export function Qualites() {
       <div>
         <EnTetePage
           titre="Qualités"
-          description="Densité de matière par rôle BOM, exprimee en kg/m² ou ml/m²."
+          description="Densité de matière par rôle BOM, exprimée en kg/m² ou ml/m²."
           actions={
             droits.peutEcrire && (
               <Bouton taille="icone" title="Nouvelle qualité" aria-label="Nouvelle qualité" onClick={ouvrirCreation}>                <Plus />              </Bouton>
@@ -787,7 +787,7 @@ export function Qualites() {
           placeholderRecherche="Code, nom, description..."
           titreCarte={(q) => `${q.code_qualite} — ${q.nom}`}
           videTitre="Aucune qualité"
-          videDescription="Creez une qualité pour decrire la consommation de matière par m²."
+          videDescription="Créez une qualité pour decrire la consommation de matière par m²."
           videAction={
             droits.peutEcrire && (
               <Bouton onClick={ouvrirCreation}>
@@ -1147,7 +1147,7 @@ export function Qualites() {
               id={entete.code_qualite}
               statut={entete.statut}
               taille="md"
-              consequence="La composition redeviendra modifiable, et les plans qui s'y appuient devront etre recalcules."
+              consequence="La composition redeviendra modifiable, et les plans qui s'y appuient devront être recalculés."
             />
           </>
         }
@@ -1162,7 +1162,7 @@ export function Qualites() {
       {entete.statut === 'CLOTURE' && (
         <Alerte ton="alerte" className="mb-3">
           Qualite cloturee : elle reste consultable et conserve son historique, mais ne peut plus
-          etre modifiee. Repassez son statut a ACTIF pour la rouvrir.
+          être modifiée. Repassez son statut a ACTIF pour la rouvrir.
         </Alerte>
       )}
 
@@ -1406,7 +1406,7 @@ export function Qualites() {
                   tailleParDefaut={500}
                   titreCarte={(l) => libelleRole(l.code_role)}
                   videTitre="Aucune ligne"
-                  videDescription="Une qualité sans ligne consomme zero matière : le MRP ne generera aucun besoin."
+                  videDescription="Une qualité sans ligne consomme zéro matière : le MRP ne generera aucun besoin."
                   videAction={
                     modifiable && (
                       <Bouton variante="contour" onClick={ajouterLigne}>
@@ -1492,7 +1492,7 @@ export function Qualites() {
                 tailleParDefaut={500}
                 titreCarte={(c) => `${libelleRole(c.code_role)} · ${c.code_reference}`}
                 videTitre="Aucune composition"
-                videDescription="Une qualité sans composition ne peut pas etre mise en service : le MRP ne saurait quelle matière consommer."
+                videDescription="Une qualité sans composition ne peut pas être mise en service : le MRP ne saurait quelle matière consommer."
                 videAction={
                   modifiable && (
                     <Bouton variante="contour" onClick={ajouterCompo}>

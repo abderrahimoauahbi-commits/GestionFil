@@ -88,7 +88,7 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'inventaire',
-    titre: 'Proces-verbal d inventaire',
+    titre: 'Procès-verbal d’inventaire',
     description:
       'Comptage, théorique, écart et justification, pour un inventaire clôture. Le document qui fait foi.',
     chemin: '/etats/inventaire',
@@ -147,7 +147,7 @@ const ETATS: EtatDisponible[] = [
   /* --- Achats ------------------------------------------------------------ */
   {
     cle: 'plan-achat',
-    titre: 'Plan d achat a engager',
+    titre: 'Plan d’achat à engager',
     description:
       'Propositions groupees par fournisseur, avec quantités, délais et montants. Le document de la revue d achats.',
     chemin: '/etats/plan-achat',
@@ -244,7 +244,7 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'couleur',
-    titre: 'Fiche d une couleur',
+    titre: 'Fiche d’une couleur',
     description:
       'Une couleur, ses codes fournisseur et toutes les références qui la portent, avec leur stock. La page qu on emporte chez le teinturier.',
     chemin: '/etats/couleur',
@@ -254,7 +254,7 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'manuel',
-    titre: 'Manuel d utilisation',
+    titre: 'Manuel d’utilisation',
     description:
       'Toute la documentation de l outil sur papier : chaque ecran, sa procedure, le rôle de chacun de ses champs et les règles qu il applique. On peut n imprimer qu un chapitre — le stock pour le magasin, les achats pour le bureau.',
     chemin: '/etats/manuel',
@@ -297,7 +297,7 @@ export function Etats() {
     <div>
       <EnTetePage
         titre="États imprimables"
-        sous_titre="Les documents qui portent sur une situation. Ceux qui suivent un objet s impriment depuis sa fiche."
+        sous_titre="Les documents qui portent sur une situation. Ceux qui suivent un objet s’impriment depuis sa fiche."
       />
 
       <div className="flex flex-col gap-5">

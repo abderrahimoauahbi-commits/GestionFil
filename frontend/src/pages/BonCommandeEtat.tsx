@@ -142,13 +142,13 @@ export function BonCommandeEtat() {
       {!valide && (
         <Alerte ton="alerte" className="sans-impression mb-3">
           Ce bon est encore en brouillon. Le document portera la mention « DRAFT » : il se relit,
-          il ne s envoie pas.
+          il ne s’envoie pas.
         </Alerte>
       )}
       {lignes.some((l) => !l.description_commerciale) && (
         <Alerte ton="info" className="sans-impression mb-3">
           Certaines lignes n ont pas de description commerciale : leur designation interne partira
-          a sa place. Renseignez-la au catalogue pour que le fournisseur reconnaisse l article.
+          a sa place. Renseignez-la au catalogue pour que le fournisseur reconnaisse l’article.
         </Alerte>
       )}
 

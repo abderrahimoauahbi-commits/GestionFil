@@ -85,7 +85,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
         <Alerte ton="alerte">
           Ce transfert n'existe pas, ou vous n'y avez pas acces.{' '}
           <button className="underline" onClick={() => naviguer('/transferts')}>
-            Revenir a la liste
+            Revenir à la liste
           </button>
         </Alerte>
       </div>
@@ -120,7 +120,7 @@ export function BonTransfert({ type }: { type: 'sortie' | 'reception' }) {
         {!sortie && e.statut === 'BROUILLON' && (
           <Alerte ton="alerte" className="mb-3">
             Ce transfert n'a pas encore ete expédié. Le bon de réception s'imprime pour preparer le
-            dechargement, mais rien n'est parti du magasin source.
+            déchargement, mais rien n'est parti du magasin source.
           </Alerte>
         )}
       </div>

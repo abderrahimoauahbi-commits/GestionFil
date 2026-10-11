@@ -73,7 +73,7 @@ export function QualiteEtat() {
   })
 
   if (qQualite.isLoading || qLignes.isLoading || qCompo.isLoading) {
-    return <Chargement texte="Preparation de la fiche…" />
+    return <Chargement texte="Préparation de la fiche…" />
   }
 
   const brut = qQualite.data
@@ -154,7 +154,7 @@ export function QualiteEtat() {
     >
       {/* --- Densites par role -------------------------------------------- */}
       <h3 className="mb-1 mt-1 border-b border-neutral-400 pb-0.5 text-[10px] font-bold uppercase tracking-wide">
-        Densites par rôle
+        Densités par rôle
       </h3>
       <TableEtat<LigneRole>
         colonnes={[

@@ -545,7 +545,7 @@ function FraisDossier({
           <table className="w-full min-w-[60rem] text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
-                <th className={cn(th, 'w-44 text-left')}>Type de frais</th>
+                <th className={cn(th, 'w-52 text-left')}>Type de frais</th>
                 <th className={cn(th, 'text-left')}>Précision</th>
                 <th className={cn(th, 'w-28 text-left')}>N° pièce</th>
                 <th className={cn(th, 'w-28 text-left')}>Devise</th>
@@ -609,7 +609,7 @@ function FraisDossier({
               {saisie && (
                 <tr className="border-b border-bordure/60 bg-attenue/25">
                   <td className={td}>
-                    <Selecteur className="h-7 w-full min-w-[11rem]" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
+                    <Selecteur className="h-7 w-full min-w-[13rem]" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
                       <option value="">Nouveau frais…</option>
                       {groupes.map(([cat, liste]) => (
                         <optgroup key={cat} label={cat}>

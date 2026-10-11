@@ -257,7 +257,7 @@ export function EtatStock() {
     </div>
   )
 
-  if (q.isLoading) return <Chargement texte="Lecture de l état des stocks…" />
+  if (q.isLoading) return <Chargement texte="Lecture de l’état des stocks…" />
 
   return (
     <div className="flex flex-col gap-3">
@@ -390,7 +390,7 @@ export function EtatStock() {
 
       {filtrees.length === 0 ? (
         <Alerte ton="info" titre="Aucune référence">
-          Aucune référence ne correspond a ces criteres.
+          Aucune référence ne correspond a ces critères.
         </Alerte>
       ) : (
         <>
@@ -490,7 +490,7 @@ function TableauLarge({
               Comptage
             </th>
             <th className="border-l border-bordure px-2 py-1 text-center" colSpan={3}>
-              Ce qu il annonce
+              Ce qu’il annonce
             </th>
             <th className="border-l border-bordure px-2 py-1 text-center" colSpan={3}>
               Valeur

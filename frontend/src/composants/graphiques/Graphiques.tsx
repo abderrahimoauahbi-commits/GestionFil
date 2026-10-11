@@ -536,7 +536,7 @@ export function Pareto({
       titre={titre}
       sousTitre={sousTitre}
       series={[
-        { cle: 'valeur', libelle: 'Valeur consommee' },
+        { cle: 'valeur', libelle: 'Valeur consommée' },
         { cle: 'cumul', libelle: 'Part cumulée' },
       ]}
       vueTableau={tableau}

@@ -207,7 +207,7 @@ export function AnalyseAbcXyz() {
     <div>
       <EnTetePage
         titre="Analyse ABC / XYZ"
-        sous_titre="Le poids dans la depense croise a la regularite de la demande"
+        sous_titre="Le poids dans la dépense croise à la régularité de la demande"
         actions={
           droits.peutEcrire && (
             <Bouton
@@ -227,7 +227,7 @@ export function AnalyseAbcXyz() {
           {matrice.nonClassees} reference(s) sans consommation ne peuvent pas etre classees en
           XYZ : la regularite se mesure sur un historique, et elles n en ont pas. Elles sont
           rangees en C par convention — zero pour cent de la depense — et regroupees dans la case
-          « non classees ».
+          « non classées ».
         </Alerte>
       )}
 

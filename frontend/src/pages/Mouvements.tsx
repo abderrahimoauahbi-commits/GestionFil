@@ -199,7 +199,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
     {
       titre: 'Par sens',
       entrees: [
-        { cle: 'ENTREE', libelle: 'Entrees', resume: 'Le stock monte',
+        { cle: 'ENTREE', libelle: 'Entrées', resume: 'Le stock monte',
           compte: comptes.ENTREE ?? 0, ton: 'succes' as const },
         { cle: 'SORTIE', libelle: 'Sorties', resume: 'Le stock descend',
           compte: comptes.SORTIE ?? 0, ton: 'alerte' as const },
@@ -376,7 +376,7 @@ export function Mouvements() {
       entrees: [
         {
           cle: 'ENTREE',
-          libelle: 'Entrees',
+          libelle: 'Entrées',
           resume: 'Le stock monte',
           compte: comptesMvt.ENTREE ?? 0,
           ton: 'succes' as const,

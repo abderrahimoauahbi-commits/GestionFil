@@ -74,7 +74,7 @@ export function NavigationEntete({
                       <e.Icone />
                       {e.libelle}
                       <Badge ton="contour" className="ml-auto text-[9px]">
-                        a venir
+                        à venir
                       </Badge>
                     </span>
                   ) : (

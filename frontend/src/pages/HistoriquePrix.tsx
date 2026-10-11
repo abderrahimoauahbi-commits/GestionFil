@@ -210,7 +210,7 @@ export function HistoriquePrix() {
     <div>
       <EnTetePage
         titre="Historique des prix"
-        sous_titre="Prix reellement payes, enregistres a la réception — pas les tarifs annonces"
+        sous_titre="Prix réellement payés, enregistres à la réception — pas les tarifs annonces"
       />
 
       {/* LES FILTRES SONT AU-DESSUS DU TABLEAU, plus a sa gauche. Le rail
@@ -265,7 +265,7 @@ export function HistoriquePrix() {
         {vues.length > 0 && resume.compares === 0 && (
           <p className="mb-2 rounded-[var(--radius)] border border-bordure bg-attenue/40 px-2.5 py-1.5 text-[12px] text-attenue-texte">
             Aucune comparaison possible : chacune de ces references n a ete achetee qu une seule
-            fois. La colonne « Evolution » se remplira au rachat de l une d elles.
+            fois. La colonne « Évolution » se remplira au rachat de l’une d’elles.
           </p>
         )}
 

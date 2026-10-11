@@ -110,7 +110,7 @@ export function Telecharger() {
 
   return (
     <div>
-      <EnTetePage titre="Télécharger l application" />
+      <EnTetePage titre="Télécharger l’application" />
 
       {paquets.length === 0 ? (
         <Alerte ton="info" titre="Aucun paquet publie">

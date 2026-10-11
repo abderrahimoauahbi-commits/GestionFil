@@ -83,7 +83,7 @@ export const SUJETS: Sujet[] = [
         defaut: 'vide : un étage de machine, 1 344 bobines — ou 5 000 kg pour un article sans poids de bobine',
       },
       {
-        nom: 'Supplement de teinture',
+        nom: 'Supplément de teinture',
         description:
           'Ce que le fournisseur facture EN PLUS pour teindre cette couleur, en devise par tonne (100, 150, 530…). Le prix d’une couleur = prix de base de la famille + ce supplément ramené au kilo. Il varie d’un fournisseur à l’autre : il se tient d’abord sur la couleur du fournisseur (Référentiels → Couleurs).',
         valeurs: 'devise du fournisseur par tonne',
@@ -634,7 +634,7 @@ export const SUJETS: Sujet[] = [
     ],
     droits: 'Lecture du module Production.',
     champs: [
-      { nom: 'Code Ref', description: 'La référence réclamée par les compositions.' },
+      { nom: 'Code Réf', description: 'La référence réclamée par les compositions.' },
       { nom: 'Désignation', description: 'Son libellé, repris du catalogue.' },
       { nom: 'Catégorie', description: 'Le filtre par matière : polypropylène, polyester, jute…' },
       {
@@ -926,7 +926,7 @@ export const SUJETS: Sujet[] = [
     ],
     messages: [
       { message: 'R02 : stock insuffisant…', cause: 'Sortir plus que ce qui est là cache toujours autre chose : une entrée oubliée, ou une référence confondue.' },
-      { message: 'Un dechet de … kg depasse 50 kg', cause: 'Un déchet important se valide comme un ajustement d’inventaire : faites-le saisir par la Direction.' },
+      { message: 'Un déchet de … kg depasse 50 kg', cause: 'Un déchet important se valide comme un ajustement d’inventaire : faites-le saisir par la Direction.' },
     ],
   },
 
@@ -1353,7 +1353,7 @@ export const SUJETS: Sujet[] = [
     ],
     messages: [
       {
-        message: 'LOT-BLOQUE',
+        message: 'LOT-BLOQUÉ',
         cause:
           'Le lot est bloqué par la qualité : il ne part ni en production, ni sur machine, ni en fusion. Il peut revenir d’une machine, aller en quarantaine ou retourner au fournisseur. Un chargement exceptionnel se demande en dérogation depuis la fiche machine refusée.',
       },

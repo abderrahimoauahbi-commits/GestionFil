@@ -407,7 +407,7 @@ function FormulaireMotDePasse({
               par un autre canal. Le dire evite de le chercher apres coup. */}
           <p className="text-[11px] text-attenue-texte">
             Le mot de passe n est stocke que sous forme d empreinte Argon2. Il ne sera plus
-            affichable : notez-le avant de valider, et transmettez-le a la personne concernee.
+            affichable : notez-le avant de valider, et transmettez-le à la personne concernee.
           </p>
 
           <div className="flex justify-end gap-2">

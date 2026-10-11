@@ -133,18 +133,18 @@ const CLE_IMAGE = 'gestionfil.fond-image'
 export const DISPOSITIONS: { cle: Disposition; nom: string; resume: string }[] = [
   {
     cle: 'laterale',
-    nom: 'Barre laterale',
-    resume: 'Tout en colonne a gauche. Rend de la hauteur au tableau, prend de la largeur.',
+    nom: 'Barre latérale',
+    resume: 'Tout en colonne à gauche. Rend de la hauteur au tableau, prend de la largeur.',
   },
   {
     cle: 'entete',
     nom: 'Barre du haut',
-    resume: 'Modules en menus deroulants. Rend toute la largeur, coute deux clics par ecran.',
+    resume: 'Modules en menus deroulants. Rend toute la largeur, coûte deux clics par écran.',
   },
   {
     cle: 'mixte',
     nom: 'Les deux',
-    resume: 'Modules en haut, ecrans du module courant a gauche. Un seul clic, mais deux barres.',
+    resume: 'Modules en haut, écrans du module courant à gauche. Un seul clic, mais deux barres.',
   },
 ]
 
@@ -263,8 +263,8 @@ export const TAILLES: { cle: Taille; nom: string }[] = [
 ]
 
 export const DENSITES: { cle: Densite; nom: string; resume: string }[] = [
-  { cle: 'compacte', nom: 'Compacte', resume: 'Le maximum de lignes a l ecran. Poste de bureau.' },
-  { cle: 'normale', nom: 'Normale', resume: 'L equilibre par defaut.' },
+  { cle: 'compacte', nom: 'Compacte', resume: 'Le maximum de lignes à l’écran. Poste de bureau.' },
+  { cle: 'normale', nom: 'Normale', resume: 'L’equilibre par défaut.' },
   { cle: 'aeree', nom: 'Aeree', resume: 'Lignes hautes, visables au doigt. Tablette de magasin.' },
 ]
 

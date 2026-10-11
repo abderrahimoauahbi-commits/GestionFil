@@ -745,7 +745,7 @@ export function Reception() {
   const valider = useMutation({
     mutationFn: () => api.post(`/api/receptions/${id}/valider`),
     onSuccess: () => {
-      toast.success('Réception validee', {
+      toast.success('Réception validée', {
         description: 'Stock, CMUP, archive et historique de prix mis à jour en une transaction.',
       })
       rafraichir()
@@ -938,7 +938,7 @@ export function Reception() {
         <Alerte ton="alerte">
           Cette reception n'existe pas, ou vous n'y avez pas acces.{' '}
           <button className="underline" onClick={() => naviguer('/receptions')}>
-            Revenir a la liste
+            Revenir à la liste
           </button>
         </Alerte>
       </div>
@@ -1040,7 +1040,7 @@ export function Reception() {
               id={id}
               statut={rec.statut}
               taille="md"
-              consequence="Les lignes redeviendront modifiables et devront etre controlees a nouveau."
+              consequence="Les lignes redeviendront modifiables et devront être controlees a nouveau."
             />
           </>
         }
@@ -1108,7 +1108,7 @@ export function Reception() {
       )}
 
       {horsTolerance > 0 && (
-        <Alerte ton="alerte" titre="Écart de pesee" className="mb-3">
+        <Alerte ton="alerte" titre="Écart de pesée" className="mb-3">
           {horsTolerance} ligne(s) depassent de plus de {TOLERANCE_PCT} % la quantite attendue.
           Un tel excédent exige une dérogation motivée. Un manque dans la tolérance solde la ligne du bon ; au-delà,
           il laisse un reliquat à recevoir.
@@ -1130,7 +1130,7 @@ export function Reception() {
             </Badge>
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <Indicateur libelle="Délai reel" valeur={rec.delai_reel_jours} suffixe=" j" />
+            <Indicateur libelle="Délai réel" valeur={rec.delai_reel_jours} suffixe=" j" />
             <Indicateur libelle="Délai promis" valeur={rec.delai_prevu_jours} suffixe=" j" />
             <Indicateur
               libelle="Retard"
@@ -1275,7 +1275,7 @@ export function Reception() {
                 pagination={false}
                 tailleParDefaut={500}
                 titreCarte={(l) => l.code_reference}
-                videTitre="Aucune pesee"
+                videTitre="Aucune pesée"
                 videDescription="Cette réception ne porte aucune ligne."
               />
             )}

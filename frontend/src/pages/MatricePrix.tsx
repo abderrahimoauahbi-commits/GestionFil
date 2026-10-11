@@ -126,7 +126,7 @@ export function MatricePrix() {
     <div>
       <EnTetePage
         titre="Matrice des prix"
-        sous_titre="Prix moyen pondere par mois — la ligne se lit d un trait, la derive se voit sans la chercher"
+        sous_titre="Prix moyen pondéré par mois — la ligne se lit d’un trait, la dérive se voit sans la chercher"
         actions={
           <Selecteur aria-label="Période" value={horizon} onChange={(e) => setHorizon(e.target.value)} className="w-44">
             <option value="6">6 derniers mois</option>
@@ -158,7 +158,7 @@ export function MatricePrix() {
           <EtatVide
             icone={Minus}
             titre="Aucun achat sur la période"
-            description="La matrice se remplit a la validation des réceptions."
+            description="La matrice se remplit à la validation des réceptions."
           />
         ) : (
           <>

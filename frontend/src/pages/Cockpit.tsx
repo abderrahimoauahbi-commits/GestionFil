@@ -248,7 +248,7 @@ export function Cockpit() {
     {
       champ: 'nb_receptions_a_controler',
       domaine: 'QUALITE',
-      libelle: 'Réceptions a controler',
+      libelle: 'Réceptions à contrôler',
       valeur: n('nb_receptions_a_controler'),
       detail: 'en attente du contrôle qualité',
       ton: 'alerte',
@@ -270,7 +270,7 @@ export function Cockpit() {
     {
       champ: 'nb_receptions_a_regulariser',
       domaine: 'STOCK',
-      libelle: 'A regulariser',
+      libelle: 'À régulariser',
       valeur: n('nb_receptions_a_regulariser'),
       detail: 'bon non envoye : contrôle bloque',
       ton: 'danger',
@@ -450,7 +450,7 @@ export function Cockpit() {
     <div>
       <EnTetePage
         titre="Poste de travail"
-        description="Ce qui attend une décision, et ce qui menace le plan de production. Tout est recalcule a l'ouverture."
+        description="Ce qui attend une décision, et ce qui menace le plan de production. Tout est recalculé a l'ouverture."
         actions={
           <label className="flex items-center gap-2 text-[12px] text-attenue-texte">
             Domaine
@@ -489,7 +489,7 @@ export function Cockpit() {
         <>
           {mesFiles.length > 0 && (
             <>
-              <TitreBande texte="A traiter" />
+              <TitreBande texte="À traiter" />
               {/* UNE BARRE, PAS DES TUILES.
                   Ni la grille ni la rangee souple ne tenaient. En grille, une
                   file unique s'etirait sur mille quatre cents pixels pour trois
@@ -512,7 +512,7 @@ export function Cockpit() {
           {mesFiles.length === 0 && (
             <Alerte ton="succes" titre="Rien n'attend de décision">
               Aucune file en cours pour votre role. Les compteurs reapparaitront des qu'un bon, une
-              reception ou une proposition demandera votre intervention.
+              réception ou une proposition demandera votre intervention.
             </Alerte>
           )}
 
@@ -550,7 +550,7 @@ export function Cockpit() {
           va toujours dans le sens rassurant : un plan revu a la hausse laisse
           les besoins bas, donc la projection haute, donc l'alerte verte. */}
       {n('besoins_perimes') > 0 ? (
-        <Alerte ton="danger" titre="Les alertes reposent sur des besoins perimes">
+        <Alerte ton="danger" titre="Les alertes reposent sur des besoins périmés">
           Le plan, une recette ou une densité a changé depuis le dernier calcul MRP
           {k.besoins_calcules_le
             ? ` du ${fmt.dateHeure(k.besoins_calcules_le as string)}`
@@ -579,7 +579,7 @@ export function Cockpit() {
       {vue === 'analyse' && (
         <>
           <CockpitAnalyse vue="analyse" />
-          <TitreBande texte="Concentration et dependances" />
+          <TitreBande texte="Concentration et dépendances" />
           <Concentration />
         </>
       )}
@@ -742,7 +742,7 @@ export function Cockpit() {
            « nos donnees disent-elles vrai ? », pas a « que faire aujourd'hui ». */}
       {vue === 'matiere' && (
       <>
-      <TitreBande texte="Sante du referentiel" />
+      <TitreBande texte="Santé du référentiel" />
       <Carte repliable="cockpit.2">
         <CarteEntete>
           <CarteTitre>Contrôles métier</CarteTitre>
@@ -759,7 +759,7 @@ export function Cockpit() {
           ) : autres.length === 0 ? (
             <div className="flex items-center gap-2 p-4 text-sm text-succes">
               <CheckCircle2 className="size-4" />
-              Aucune anomalie detectee.
+              Aucune anomalie détectée.
             </div>
           ) : (
             <ul className="divide-y divide-bordure">
@@ -1060,7 +1060,7 @@ export function TableauDeBord() {
     return (
       <Alerte ton="info" titre="Pas encore de coût matière">
         Le cout par metre carre se calcule a partir du CMUP des composants. Il apparaitra des la
-        première réception valorisee sur chaque référence de recette.
+        première réception valorisée sur chaque référence de recette.
       </Alerte>
     )
   }
@@ -1131,9 +1131,9 @@ export function Concentration() {
     try {
       await api.post('/api/classification', {})
       await client.invalidateQueries()
-      toast.success('Classification ABC / XYZ calculee')
+      toast.success('Classification ABC / XYZ calculée')
     } catch (e) {
-      toast.error('Classification refusee', { description: String(e) })
+      toast.error('Classification refusée', { description: String(e) })
     } finally {
       setCalcul(false)
     }
@@ -1156,7 +1156,7 @@ export function Concentration() {
           classeCalculee ? undefined : (
             <div className="border-t border-ligne pt-2 text-[11px] text-attenue-texte">
               Les classes A, B et C ne sont pas encore attribuees : la courbe montre la
-              concentration reelle, mais aucune reference ne porte sa classe.
+              concentration réelle, mais aucune référence ne porte sa classe.
               {peut('CATALOGUE', 'ECRIRE') && (
                 <button
                   type="button"
@@ -1274,7 +1274,7 @@ function ChiffresCles() {
         />
         <CarteStat
           Icone={ShoppingCart}
-          libelle="A engager"
+          libelle="À engager"
           valeur={fmt.compact(n('budget_a_engager_mad'))}
           unite="MAD"
           precision={`${n('nb_propositions_a_traiter')} proposition(s) · ${fmt.compact(
@@ -1297,13 +1297,13 @@ function ChiffresCles() {
         />
         <CarteStat
           Icone={Sparkles}
-          libelle="Economies identifiees"
+          libelle="Économies identifiées"
           valeur={fmt.compact(eco?.economies_total_mad ?? 0)}
           unite="MAD/an"
           precision={`${eco?.nb_opportunites ?? 0} référence(s) au-dessus du prix du groupe`}
           ton={(eco?.economies_total_mad ?? 0) > 0 ? 'succes' : 'neutre'}
           surClic={() => naviguer('/matrice-prix')}
-          aide="A qualité egale : le meme titrage, achete moins cher ailleurs dans le catalogue."
+          aide="A qualité égale : le même titrage, achete moins cher ailleurs dans le catalogue."
         />
       </div>
 

@@ -45,7 +45,7 @@ interface Utilisateur {
 const NIVEAUX: { valeur: Niveau; libelle: string; classe: string }[] = [
   { valeur: 'MASQUE', libelle: 'Masque', classe: 'bg-danger text-danger-texte' },
   { valeur: 'LECTURE', libelle: 'Lecture', classe: 'bg-alerte text-white' },
-  { valeur: 'ECRITURE', libelle: 'Ecriture', classe: 'bg-succes text-white' },
+  { valeur: 'ECRITURE', libelle: 'Écriture', classe: 'bg-succes text-white' },
 ]
 
 export function Droits() {
@@ -173,7 +173,7 @@ export function Droits() {
                 disabled={appliquerModele.isPending}
                 title={`Reinitialise le module ${moduleActif} depuis le modele du role ${utilisateur.code_role_user}`}
               >
-                Appliquer le modele du rôle
+                Appliquer le modèle du rôle
               </Bouton>
             )}
             {peutEcrire && (

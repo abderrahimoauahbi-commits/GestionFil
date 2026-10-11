@@ -282,7 +282,7 @@ export function Equivalences() {
         est_preferentielle: membres.length === 0 ? 1 : 0,
       }),
     onSuccess: () => {
-      toast.success('Référence rattachee au groupe')
+      toast.success('Référence rattachée au groupe')
       setAjout(false)
       rafraichir()
     },
@@ -468,7 +468,7 @@ export function Equivalences() {
                     </div>
                   ) : membres.length === 0 ? (
                     <p className="p-4 text-[13px] text-attenue-texte">
-                      Aucune référence rattachee a ce groupe.
+                      Aucune référence rattachée à ce groupe.
                     </p>
                   ) : (
                     <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
@@ -546,7 +546,7 @@ export function Equivalences() {
                                       onClick={() => deplacer(i, -1)}
                                       disabled={i === 0 || reordonner.isPending}
                                       aria-label="Monter"
-                                      title="Monter dans l ordre de preference"
+                                      title="Monter dans l’ordre de préférence"
                                     >
                                       <ArrowUp />
                                     </Bouton>
@@ -556,7 +556,7 @@ export function Equivalences() {
                                       onClick={() => deplacer(i, 1)}
                                       disabled={i === membres.length - 1 || reordonner.isPending}
                                       aria-label="Descendre"
-                                      title="Descendre dans l ordre de preference"
+                                      title="Descendre dans l’ordre de préférence"
                                     >
                                       <ArrowDown />
                                     </Bouton>
@@ -566,7 +566,7 @@ export function Equivalences() {
                                       onClick={() => promouvoir(m.code_reference)}
                                       disabled={m.est_preferentielle === 1 || reordonner.isPending}
                                       aria-label="Rendre préférentielle"
-                                      title="Rendre preferentielle"
+                                      title="Rendre préférentielle"
                                     >
                                       <Star />
                                     </Bouton>

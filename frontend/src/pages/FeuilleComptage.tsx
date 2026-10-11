@@ -65,7 +65,7 @@ export function FeuilleComptage() {
   })
 
   if (qListe.isLoading || qLignes.isLoading) {
-    return <Chargement texte="Preparation de la feuille de comptage…" />
+    return <Chargement texte="Préparation de la feuille de comptage…" />
   }
   const d = qListe.data
   const liste = Array.isArray(d) ? d : ((d as unknown as { lignes?: Inventaire[] })?.lignes ?? [])

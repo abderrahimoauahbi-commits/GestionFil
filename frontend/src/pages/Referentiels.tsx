@@ -183,10 +183,10 @@ const ouiNon = (champ: string, entete: string): Colonne<Ligne> => ({
 })
 
 const METHODES_FRAIS = [
-  { valeur: 'VALEUR', libelle: 'A la valeur' },
+  { valeur: 'VALEUR', libelle: 'À la valeur' },
   { valeur: 'POIDS', libelle: 'Au poids' },
-  { valeur: 'QUANTITE', libelle: 'A la quantité' },
-  { valeur: 'PARTS_EGALES', libelle: 'A parts egales' },
+  { valeur: 'QUANTITE', libelle: 'À la quantité' },
+  { valeur: 'PARTS_EGALES', libelle: 'A parts égales' },
 ]
 
 const colonneCode = (champ: string, entete: string): Colonne<Ligne> => ({
@@ -300,7 +300,7 @@ const ONGLETS: Onglet[] = [
       { champ: 'code_role', libelle: 'Code', obligatoire: true, cleCreation: true },
       { champ: 'libelle', libelle: 'Libellé', obligatoire: true },
       { champ: 'description', libelle: 'Description', type: 'zone' },
-      { champ: 'ordre_affichage', libelle: 'Ordre d affichage', type: 'entier' },
+      { champ: 'ordre_affichage', libelle: 'Ordre d’affichage', type: 'entier' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
   },
@@ -342,21 +342,21 @@ const ONGLETS: Onglet[] = [
         champ: 'inclure_mrp',
         libelle: 'Compte dans le stock disponible',
         type: 'booleen',
-        aide: 'Decoche pour exclure ce magasin du calcul de couverture et du plan d achat.',
+        aide: 'Decoche pour exclure ce magasin du calcul de couverture et du plan d’achat.',
         section: 'Règles de stock',
       },
       {
         champ: 'est_quarantaine',
         libelle: 'Zone de quarantaine',
         type: 'booleen',
-        aide: 'Destination imposee des réceptions non conformes. Exclut automatiquement du MRP.',
+        aide: 'Destination imposée des réceptions non conformes. Exclut automatiquement du MRP.',
         section: 'Règles de stock',
       },
     ],
   },
   {
     cle: 'groupes-equiv',
-    libelle: 'Groupes d équivalence',
+    libelle: 'Groupes d’équivalence',
     module: 'CATALOGUE',
     chemin: 'groupes-equiv',
     identifiant: 'code_groupe_equiv',
@@ -378,7 +378,7 @@ const ONGLETS: Onglet[] = [
         champ: 'description',
         libelle: 'Description',
         type: 'zone',
-        aide: 'Les références d un meme groupe sont substituables en cas de rupture.',
+        aide: 'Les références d’un même groupe sont substituables en cas de rupture.',
       },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
@@ -416,7 +416,7 @@ const ONGLETS: Onglet[] = [
         type: 'liste',
         obligatoire: true,
         options: [
-          { valeur: '1', libelle: 'Entree (+)' },
+          { valeur: '1', libelle: 'Entrée (+)' },
           { valeur: '-1', libelle: 'Sortie (−)' },
         ],
         cleCreation: true,
@@ -429,7 +429,7 @@ const ONGLETS: Onglet[] = [
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identification' },
       { champ: 'exige_prix', libelle: 'Exige un prix', type: 'booleen', section: 'Règles de saisie' },
       { champ: 'impacte_cmup', libelle: 'Impacte le CMUP', type: 'booleen', cleCreation: true, section: 'Règles de saisie' },
-      { champ: 'exige_of', libelle: 'Exige un numéro d OF', type: 'booleen', section: 'Règles de saisie' },
+      { champ: 'exige_of', libelle: 'Exige un numéro d’OF', type: 'booleen', section: 'Règles de saisie' },
       { champ: 'exige_motif_ligne', libelle: 'Exige un motif de ligne', type: 'booleen', section: 'Règles de saisie' },
     ],
   },
@@ -455,11 +455,11 @@ const ONGLETS: Onglet[] = [
         type: 'liste',
         obligatoire: true,
         options: [
-          { valeur: '1', libelle: 'Entree (+)' },
+          { valeur: '1', libelle: 'Entrée (+)' },
           { valeur: '-1', libelle: 'Sortie (−)' },
         ],
         cleCreation: true,
-        aide: "Sens propose a la saisie. Il n'impose rien : le type de mouvement fait foi.",
+        aide: "Sens propose à la saisie. Il n'impose rien : le type de mouvement fait foi.",
       },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true },
     ],
@@ -541,12 +541,12 @@ const ONGLETS: Onglet[] = [
       },
       {
         champ: 'piece_justificative',
-        libelle: 'Piece justificative',
+        libelle: 'Pièce justificative',
         aide: "Le document qui porte ce frais : quittance de la douane, facture du transitaire… "
           + "C'est ce qu'on cherche dans le dossier, et ce que la saisie assistee reconnaitra.",
         section: 'Identification',
       },
-      { champ: 'ordre', libelle: 'Ordre d affichage', type: 'entier', section: 'Identification' },
+      { champ: 'ordre', libelle: 'Ordre d’affichage', type: 'entier', section: 'Identification' },
       { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identification' },
       {
         champ: 'recuperable',
@@ -558,10 +558,10 @@ const ONGLETS: Onglet[] = [
       },
       {
         champ: 'inclus_dans_cout',
-        libelle: 'Entre dans le cout de revient',
+        libelle: 'Entre dans le coût de revient',
         type: 'booleen',
         defaut: true,
-        aide: 'Un frais recuperable ne peut pas y entrer : la marchandise le paierait deux fois.',
+        aide: 'Un frais récupérable ne peut pas y entrer : la marchandise le paierait deux fois.',
         section: 'Coût de revient',
       },
       {
@@ -569,17 +569,17 @@ const ONGLETS: Onglet[] = [
         libelle: 'Commun au dossier',
         type: 'booleen',
         defaut: true,
-        aide: "Commun : reparti sur toutes les lignes. Sinon, la saisie demande sur quelles "
+        aide: "Commun : réparti sur toutes les lignes. Sinon, la saisie demande sur quelles "
           + 'lignes il porte — une analyse, une redevance sur une seule marchandise.',
         section: 'Coût de revient',
       },
       {
         champ: 'methode_repartition',
-        libelle: 'Méthode de repartition',
+        libelle: 'Méthode de répartition',
         type: 'liste',
         options: METHODES_FRAIS,
         defaut: 'VALEUR',
-        aide: 'Le classeur repartit tout a la valeur. Le poids sert pour un fret facture au kilo, '
+        aide: 'Le classeur répartit tout à la valeur. Le poids sert pour un fret facture au kilo, '
           + 'les parts egales pour une formalite qui ne depend ni du prix ni du poids.',
         section: 'Coût de revient',
       },
@@ -649,7 +649,7 @@ function ReferentielLecture({
             .join('|')
         }
         videTitre="Aucune ligne"
-        videDescription="Ce referentiel est vide."
+        videDescription="Ce référentiel est vide."
       />
     </div>
   )
@@ -799,7 +799,7 @@ function MachineEtats() {
           }),
       ),
     onSuccess: (r) => {
-      toast.success('Transition retiree', {
+      toast.success('Transition retirée', {
         description: r.statut_sans_issue
           ? `Attention : ${r.statut_source} n'a plus aucune sortie. Les enregistrements qui s'y ` +
             'trouvent ne pourront plus en bouger.'
@@ -871,7 +871,7 @@ function MachineEtats() {
           pagination={false}
           tailleParDefaut={200}
           videTitre="Aucune transition"
-          videDescription="Aucun changement de statut n est autorise pour ce filtre."
+          videDescription="Aucun changement de statut n’est autorisé pour ce filtre."
           actions={
             droits.peutEcrire
               ? (t) => (
@@ -956,7 +956,7 @@ function AjoutTransition({
     <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
       <DialogueContenu
         titre="Ouvrir une transition"
-        description="Elle autorisera un nouveau passage d un statut a un autre."
+        description="Elle autorisera un nouveau passage d’un statut a un autre."
       >
         <div className="space-y-3">
           <div>
@@ -971,13 +971,13 @@ function AjoutTransition({
               ))}
             </Selecteur>
             <p className="mt-1 text-[11px] text-attenue-texte">
-              Seules les entites déjà gerees par le code peuvent changer d état.
+              Seules les entites déjà gerees par le code peuvent changer d’état.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Etiq htmlFor="src" obligatoire>
-                Statut de depart
+                Statut de départ
               </Etiq>
               <Champ
                 id="src"
@@ -988,7 +988,7 @@ function AjoutTransition({
             </div>
             <div>
               <Etiq htmlFor="cib" obligatoire>
-                Statut d arrivee
+                Statut d’arrivée
               </Etiq>
               <Champ
                 id="cib"

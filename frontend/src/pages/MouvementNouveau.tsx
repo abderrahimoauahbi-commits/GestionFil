@@ -762,7 +762,7 @@ export function MouvementNouveau() {
               className={champ}
             />
             <p className="mt-0.5 text-[11px] text-attenue-texte">
-              La date du fait, qui peut differer du jour de saisie. Jamais dans le futur.
+              La date du fait, qui peut différer du jour de saisie. Jamais dans le futur.
             </p>
           </div>
 
@@ -777,7 +777,7 @@ export function MouvementNouveau() {
             <input id="mvt-7"
               value={entete.responsable}
               onChange={(e) => setEntete({ ...entete, responsable: e.target.value })}
-              placeholder="Qui remet ou recoit"
+              placeholder="Qui remet ou reçoit"
               className={champ}
             />
           </div>
@@ -966,13 +966,13 @@ function EquivalentsDispo({
       {utiles.length === 0 ? (
         <div className="mt-1 text-[11px] text-attenue-texte">
           Aucune reference equivalente ne dispose de stock. La sortie sera refusee (R02) :
-          reduisez la quantite, ou approvisionnez d'abord.
+          reduisez la quantité, ou approvisionnez d'abord.
         </div>
       ) : (
         <>
           <div className="mt-1 text-[11px] text-attenue-texte">
             Ces references sont declarees interchangeables avec celle-ci et ont du stock. Le total
-            est toutes zones confondues : verifiez qu'il est bien dans votre magasin.
+            est toutes zones confondues : vérifiez qu'il est bien dans votre magasin.
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {utiles.map((e) => (

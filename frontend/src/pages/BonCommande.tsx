@@ -817,7 +817,7 @@ export function BonCommande() {
         <Alerte ton="alerte">
           Ce bon n'existe pas, ou vous n'y avez pas acces.{' '}
           <button className="underline" onClick={() => naviguer('/bons-commande')}>
-            Revenir a la liste
+            Revenir à la liste
           </button>
         </Alerte>
       </div>
@@ -896,7 +896,7 @@ export function BonCommande() {
               id={id}
               statut={bc.statut}
               taille="md"
-              consequence="Le fournisseur devra etre prevenu si le bon lui est déjà parti."
+              consequence="Le fournisseur devra être prevenu si le bon lui est déjà parti."
             />
             {droits.peutEcrire && SUPPRIMABLES.includes(bc.statut) && (
               <Bouton

@@ -164,7 +164,7 @@ export function Recettes() {
     <div>
       <EnTetePage
         titre="Compositions"
-        description="Toutes les lignes de composition, tous articles confondus : ou telle matière est-elle employee ?"
+        description="Toutes les lignes de composition, tous articles confondus : ou telle matière est-elle employée ?"
         actions={
           <Bouton variante="contour" asChild>
             <Link to="/qualites">

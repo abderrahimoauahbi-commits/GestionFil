@@ -305,7 +305,7 @@ export function BonCommandeNouveau() {
     <div>
       <EnTetePage
         titre="Nouveau bon de commande"
-        description="Choisissez le fournisseur : ce que le plan d'achat lui reclame s'affiche aussitot. Tapez pour ajouter une ligne."
+        description="Choisissez le fournisseur : ce que le plan d'achat lui réclame s'affiche aussitôt. Tapez pour ajouter une ligne."
         actions={
           <Bouton variante="contour" onClick={() => quitter(() => naviguer('/bons-commande'))}>
             <ArrowLeft />
@@ -315,7 +315,7 @@ export function BonCommandeNouveau() {
       />
 
       {erreur && (
-        <Alerte ton="danger" titre="Création refusee" className="mb-3">
+        <Alerte ton="danger" titre="Création refusée" className="mb-3">
           {erreur}
         </Alerte>
       )}
@@ -339,7 +339,7 @@ export function BonCommandeNouveau() {
                 Fournisseur
                 <Aide>
                   Changer de fournisseur remet la saisie a zero : la devise, les prix et les
-                  propositions du plan en dependent tous.
+                  propositions du plan en dépendent tous.
                 </Aide>
               </Etiq>
               <Selecteur
@@ -426,7 +426,7 @@ export function BonCommandeNouveau() {
         {!entete.code_fournisseur && (
           <Alerte ton="info">
             Choisissez un fournisseur : ce que le plan d'achat lui reclame s'affichera ici, avec la
-            quantite proposee et le prix.
+            quantité proposée et le prix.
           </Alerte>
         )}
 

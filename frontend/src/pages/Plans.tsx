@@ -365,7 +365,7 @@ export function Plans() {
     mutationFn: (id: string) =>
       api.post<{ lignes_generees: number; m2_total: number }>(`/api/plans/${id}/recalculer`),
     onSuccess: async (r) => {
-      toast.success('Grille recalculee', {
+      toast.success('Grille recalculée', {
         description: `${r.lignes_generees} case(s) · ${fmt.entier(r.m2_total)} m² sur la periode`,
       })
       await qc.invalidateQueries({ queryKey: ['plans'] })
@@ -655,7 +655,7 @@ export function Plans() {
       <div>
         <EnTetePage
           titre="Plans de production"
-          description="Période glissante : base mensuelle par recette, saisonnalite par mois, croissance au prorata."
+          description="Période glissante : base mensuelle par recette, saisonnalité par mois, croissance au prorata."
           actions={
             droits.peutEcrire && (
               <Bouton taille="icone" title="Nouveau plan" aria-label="Nouveau plan" onClick={ouvrirCreation}>                <Plus />              </Bouton>
@@ -721,7 +721,7 @@ export function Plans() {
                     })
                   }
                   aria-label="Clôturer"
-                  title="Cloturer"
+                  title="Clôturer"
                   className="text-alerte hover:bg-alerte/10"
                 >
                   <Undo2 />
@@ -735,7 +735,7 @@ export function Plans() {
                     confirmation.demander({
                       titre: `Supprimer ${p.libelle} ?`,
                       destructif: true,
-                      description: "Ce plan n'a jamais ete valide : il sera efface.",
+                      description: "Ce plan n'a jamais été valide : il sera effacé.",
                       action: () => suppression.mutate(p.id_plan),
                     })
                   }
@@ -853,7 +853,7 @@ export function Plans() {
                   id={courant.id_plan}
                   statut={statut}
                   taille="md"
-                  consequence="Les besoins calcules restent, mais devront etre recalcules apres correction."
+                  consequence="Les besoins calcules restent, mais devront être recalculés après correction."
                 />
                 {statut === 'EN_COURS' && (
                   <>
@@ -1127,9 +1127,9 @@ export function Plans() {
           <Carte repliable="plans.3">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
-                Saisonnalite — profil annuel
+                Saisonnalité — profil annuel
                 <Aide>
-                  Douze coefficients par qualite, un par mois de l'année : c'est un profil qui se
+                  Douze coefficients par qualité, un par mois de l'année : c'est un profil qui se
                   <strong> repete</strong> d'une année sur l'autre, independamment de la duree du
                   plan. Coefficient &gt; 1 = mois haut, &lt; 1 = mois bas, 0 = arret de production.
                   La grille est complete : toute case non saisie est amorcee a 1,00.
@@ -1165,7 +1165,7 @@ export function Plans() {
                   <thead>
                     <tr className="bg-attenue">
                       <th className="px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                        Mois de l'annee
+                        Mois de l'année
                       </th>
                       {lignes.map((l) => (
                         <th

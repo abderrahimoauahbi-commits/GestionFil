@@ -74,7 +74,7 @@ export function EtatImprimable({
       {!sansBarre && (
       <div className="sans-impression mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-attenue-texte">
-          Apercu avant impression — format A4, marges de 12 mm.
+          Aperçu avant impression — format A4, marges de 12 mm.
         </p>
         <div className="flex items-center gap-2">
           {/* LE RETOUR A L'ECRAN D'OU L'ON VIENT (10/10/2026) : un etat s'ouvre

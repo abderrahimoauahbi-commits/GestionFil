@@ -146,10 +146,10 @@ export function Valorisation() {
       </div>
 
       {total.sansCmup > 0 && (
-        <Alerte ton="alerte" titre="Une partie du stock n'est pas valorisee">
+        <Alerte ton="alerte" titre="Une partie du stock n'est pas valorisée">
           {total.sansCmup} reference{total.sansCmup > 1 ? 's portent' : ' porte'} du stock sans
           CMUP : ni achat, ni prix catalogue convertible — sa devise n'a pas de taux en vigueur.
-          Leur valeur est comptee pour zero dans le total ci-dessus, qui est donc un plancher.
+          Leur valeur est comptée pour zéro dans le total ci-dessus, qui est donc un plancher.
         </Alerte>
       )}
 
@@ -173,7 +173,7 @@ export function Valorisation() {
           <div>
             <div className="text-[11px] text-attenue-texte">Formule</div>
             <div className="font-mono text-[11px]">
-              (qte x CMUP + entree x prix) / (qte + entree)
+              (qte x CMUP + entrée x prix) / (qte + entrée)
             </div>
           </div>
           <div>

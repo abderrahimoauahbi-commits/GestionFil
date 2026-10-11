@@ -332,7 +332,7 @@ function FilActualite() {
         <p className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-3 py-4
                       text-[13px] text-attenue-texte">
           Rien n'a encore ete enregistre. Le fil se remplira des la premiere
-          reception, le premier mouvement ou le premier bon de commande.
+          réception, le premier mouvement ou le premier bon de commande.
         </p>
       ) : (
         <ol className="flex flex-col gap-1.5">

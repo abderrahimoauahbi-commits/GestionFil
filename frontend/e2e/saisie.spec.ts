@@ -254,7 +254,7 @@ test('fournisseur : la direction crée une fiche longue, au format français', a
   await page.getByRole('combobox', { name: 'Devise de facturation' }).selectOption('EUR')
   await saisir(champNombre(page, { name: /^Délai de paiement/ }), '90')
   await saisir(champNombre(page, { name: /^Délai de livraison/ }), '45')
-  await saisir(champNombre(page, { name: /^Tolerance de pesee/ }), '2,5')
+  await saisir(champNombre(page, { name: /^Tol[eé]rance de pes[eé]e/ }), '2,5')
   await saisir(champNombre(page, { name: 'Note globale (/100)' }), '87,5')
   const constats = [...veille.constats, ...(await mesurer(page))]
   await page.screenshot({ path: info.outputPath('fournisseur.png'), fullPage: true })

@@ -133,16 +133,17 @@ function ExigeModule({ module, children }: { module: string; children: React.Rea
  *
  * EN BAS A DROITE, AU-DESSUS DES BARRES D'ACTIONS (10/10/2026) : posees au ras
  * du bas, elles recouvraient « Enregistrer », « Creer le bon »… ; en haut a
- * droite, les boutons d'en-tete (Retour, Devalider). 76 px laissent la barre
- * collante du bas libre. Le message rouge sur la page reste. */
+ * droite, les boutons d'en-tete (Retour, Devalider). 120 px : sur une page
+ * courte, la barre ne colle pas au bas mais reste a sa place, marge de page
+ * comprise (~95 px, comptage d'inventaire du 11/10). Le message rouge reste. */
 function Notifications() {
   const { resolu } = useTheme()
   return (
     <Toaster
       theme={resolu === 'sombre' ? 'dark' : 'light'}
       position="bottom-right"
-      offset={{ bottom: 76, right: 16 }}
-      mobileOffset={{ bottom: 76 }}
+      offset={{ bottom: 120, right: 16 }}
+      mobileOffset={{ bottom: 120 }}
       richColors
       closeButton
       toastOptions={{ style: { fontSize: '0.875rem' } }}

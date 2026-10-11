@@ -55,7 +55,7 @@ export function EtatStockImprime() {
     queryFn: ({ signal }) => api.get<LigneStock[]>('/api/stock/projete', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation de l état…" />
+  if (q.isLoading) return <Chargement texte="Préparation de l’état…" />
   const toutes = q.data ?? []
   const lignes = filtre ? toutes.filter((l) => l.statut === filtre) : toutes
   const valeurVisible = droits.visible('valeur_totale_mad')
@@ -173,7 +173,7 @@ export function EtatComptage() {
     queryFn: ({ signal }) => api.get<LigneStock[]>('/api/stock/projete', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation de la feuille…" />
+  if (q.isLoading) return <Chargement texte="Préparation de la feuille…" />
   const lignes = [...(q.data ?? [])].sort((a, b) =>
     a.code_reference.localeCompare(b.code_reference),
   )
@@ -281,7 +281,7 @@ export function EtatPlanAchat() {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [q.data])
 
-  if (q.isLoading) return <Chargement texte="Preparation de l état…" />
+  if (q.isLoading) return <Chargement texte="Préparation de l’état…" />
   const prixVisible = droits.visible('prix_estime_mad')
   const total = (q.data ?? []).reduce(
     (s, p) => s + (p.quantite_suggeree_kg ?? 0) * (p.prix_estime_mad ?? 0),
@@ -291,14 +291,14 @@ export function EtatPlanAchat() {
   if (!parFournisseur.length) {
     return (
       <Alerte ton="info">
-        Aucune proposition d achat en cours. Relancez le calcul depuis l ecran Plan d achat.
+        Aucune proposition d’achat en cours. Relancez le calcul depuis l’écran Plan d’achat.
       </Alerte>
     )
   }
 
   return (
     <EtatImprimable
-      titre="Plan d achat a engager"
+      titre="Plan d’achat à engager"
       enTete={
         <div className="flex flex-wrap gap-x-8 gap-y-1">
           <span>
@@ -408,7 +408,7 @@ export function EtatMouvements() {
     queryFn: ({ signal }) => api.get<LigneMvt[]>('/api/mouvements?limite=1000', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation du registre…" />
+  if (q.isLoading) return <Chargement texte="Préparation du registre…" />
   const lignes = q.data ?? []
   const periode = lignes.length
     ? `${(lignes[lignes.length - 1].date_mouvement ?? '').slice(0, 10)} au ${(lignes[0].date_mouvement ?? '').slice(0, 10)}`
@@ -479,7 +479,7 @@ export function EtatCatalogue() {
     queryFn: ({ signal }) => api.get<Ref[]>('/api/catalogue?limite=2000&actif=1', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation du catalogue…" />
+  if (q.isLoading) return <Chargement texte="Préparation du catalogue…" />
   const brut: unknown = q.data ?? []
   const lignes = (Array.isArray(brut) ? brut : ((brut as { lignes?: Ref[] }).lignes ?? [])).sort(
     (a: Ref, b: Ref) => a.code_reference.localeCompare(b.code_reference),
@@ -556,7 +556,7 @@ export function EtatFournisseurs() {
     queryFn: ({ signal }) => api.get<Fourn[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation du repertoire…" />
+  if (q.isLoading) return <Chargement texte="Préparation du repertoire…" />
   const brut: unknown = q.data ?? []
   const lignes = (
     Array.isArray(brut) ? brut : ((brut as { lignes?: Fourn[] }).lignes ?? [])
@@ -664,7 +664,7 @@ export function EtatCategories() {
       }))
   }, [qCat.data, qFam.data])
 
-  if (qCat.isLoading || qFam.isLoading) return <Chargement texte="Preparation de la nomenclature…" />
+  if (qCat.isLoading || qFam.isLoading) return <Chargement texte="Préparation de la nomenclature…" />
 
   const nbFamilles = (qFam.data ?? []).length
   const nbRefs = (qCat.data ?? []).reduce((s, c) => s + (c.nb_references ?? 0), 0)
@@ -844,7 +844,7 @@ export function EtatCouleurs() {
       }))
   }, [qCoul.data, qFrs.data])
 
-  if (qCoul.isLoading || qFrs.isLoading) return <Chargement texte="Preparation du nuancier…" />
+  if (qCoul.isLoading || qFrs.isLoading) return <Chargement texte="Préparation du nuancier…" />
 
   // Le supplement de teinture est un PRIX : il suit les droits comme les autres.
   const supplementVisible = droits.visible('supplement_teinture')
@@ -996,7 +996,7 @@ export function EtatCouleur() {
   )
 
   if (qCoul.isLoading || qFrs.isLoading || qRefs.isLoading)
-    return <Chargement texte="Preparation de la fiche…" />
+    return <Chargement texte="Préparation de la fiche…" />
 
   const couleur = couleurs.find((c) => c.code_couleur_interne === code)
   const codes = (qFrs.data ?? [])
@@ -1276,7 +1276,7 @@ export function EtatLots() {
   )
 
   if (vue === 'ecarts') {
-    if (qStats.isLoading) return <Chargement texte="Preparation de l état…" />
+    if (qStats.isLoading) return <Chargement texte="Préparation de l’état…" />
     const brut = qStats.data?.divergence_fournisseur
     const lignes = (Array.isArray(brut) ? brut : []) as LigneEcartFournisseur[]
     // Le niveau s'ecrit en toutes lettres : le papier ne porte pas la couleur.
@@ -1372,7 +1372,7 @@ export function EtatLots() {
     )
   }
 
-  if (qLots.isLoading) return <Chargement texte="Preparation de l état…" />
+  if (qLots.isLoading) return <Chargement texte="Préparation de l’état…" />
   if (qLots.isError) {
     return (
       <div>

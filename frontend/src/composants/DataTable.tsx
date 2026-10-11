@@ -382,7 +382,7 @@ export function DataTable<L extends Record<string, unknown>>({
       <EtatVide
         icone={Inbox}
         titre="Aucune colonne visible"
-        description="Vos droits masquent tous les champs de cet ecran."
+        description="Vos droits masquent tous les champs de cet écran."
       />
     )
   }
@@ -518,7 +518,7 @@ export function DataTable<L extends Record<string, unknown>>({
                   <MenuDeclencheur asChild>
                     <button
                       type="button"
-                      title="Choisir les colonnes affichees"
+                      title="Choisir les colonnes affichées"
                       aria-label="Colonnes"
                       className="grid size-7 place-items-center text-attenue-texte
                                  transition-colors hover:bg-attenue hover:text-texte"
@@ -554,7 +554,7 @@ export function DataTable<L extends Record<string, unknown>>({
                   type="button"
                   disabled={!rangs.length}
                   onClick={() => window.print()}
-                  title="Imprimer la liste telle qu elle est affichee"
+                  title="Imprimer la liste telle qu’elle est affichée"
                   aria-label="Imprimer la liste"
                   className="grid size-7 place-items-center border-l border-bordure
                              text-attenue-texte transition-colors hover:bg-attenue

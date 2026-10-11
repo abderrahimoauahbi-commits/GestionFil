@@ -235,7 +235,7 @@ export function SelecteurReference({
             })}
             {tropNombreux && (
               <p className="pt-1 text-center text-[11px] text-attenue-texte">
-                300 premieres matières affichees — affinez la recherche pour voir les suivantes.
+                300 premières matières affichées — affinez la recherche pour voir les suivantes.
               </p>
             )}
           </div>

@@ -83,9 +83,9 @@ export function BoutonDevalider({
       <ActionMotivee
         ouvert={ouvert}
         surFermeture={() => setOuvert(false)}
-        titre="Revenir en arriere sur ce document"
+        titre="Revenir en arrière sur ce document"
         description={`Il repassera de « ${statut} » a « ${r.vers} ».`}
-        libelleBouton="Devalider"
+        libelleBouton="Dévalider"
         chemin={`/api/devalider/${document}/${id}`}
         consequence={
           <>

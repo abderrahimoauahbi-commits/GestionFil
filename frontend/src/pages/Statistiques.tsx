@@ -76,7 +76,7 @@ const ONGLETS: {
   },
   {
     cle: 'prix',
-    nom: 'Prix d achat',
+    nom: 'Prix d’achat',
     resume: 'La hausse vient-elle du fournisseur ou du change',
     module: 'VALORISATION',
     Icone: TrendingUp,
@@ -91,7 +91,7 @@ const ONGLETS: {
   {
     cle: 'qualites',
     nom: 'Qualités',
-    resume: 'Ce que coute le metre carre',
+    resume: 'Ce que coûte le mètre carré',
     module: 'QUALITES',
     Icone: Factory,
   },
@@ -99,7 +99,7 @@ const ONGLETS: {
     // Lu sous STOCK, comme le registre des lots : `/api/stats/lots` l'exige.
     cle: 'lots',
     nom: 'Lots',
-    resume: 'Projet, Restes, age et poids des bobines',
+    resume: 'Projet, Restes, âge et poids des bobines',
     module: 'STOCK',
     Icone: Tags,
   },
@@ -131,7 +131,7 @@ export function Statistiques() {
     <div>
       <EnTetePage
         titre="Statistiques"
-        description="Calculees a la lecture, sur les données du jour. Aucun chiffre n'est fige ni recopie."
+        description="Calculées à la lecture, sur les données du jour. Aucun chiffre n'est figé ni recopié."
       />
 
       <PageAvecRail droite
@@ -305,8 +305,8 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
-        <Chiffre libelle="Entrees cumulees" valeur={`${fmt.compact(totaux.e)} kg`} ton="succes" />
-        <Chiffre libelle="Sorties cumulees" valeur={`${fmt.compact(totaux.so)} kg`} ton="alerte" />
+        <Chiffre libelle="Entrées cumulées" valeur={`${fmt.compact(totaux.e)} kg`} ton="succes" />
+        <Chiffre libelle="Sorties cumulées" valeur={`${fmt.compact(totaux.so)} kg`} ton="alerte" />
         <Chiffre
           libelle="Sans mouvement depuis 6 mois"
           valeur={String(totaux.dormantes)}
@@ -314,7 +314,7 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
           ton={totaux.dormantes > 0 ? 'alerte' : 'succes'}
         />
         <Chiffre
-          libelle="Jamais mouvementees"
+          libelle="Jamais mouvementées"
           valeur={String(totaux.jamais)}
           detail="références du catalogue"
           ton={totaux.jamais > 0 ? 'alerte' : 'succes'}
@@ -444,8 +444,8 @@ function VoletMouvements({ d }: { d: Record<string, Ligne[]> }) {
                   return (
                     <tr key={i} className="border-b border-bordure/60">
                       <td className="max-w-64 px-3 py-1.5">
-                        <div className="truncate font-medium">{txt(r, 'code_reference')}</div>
-                        <div className="truncate text-[11px] text-attenue-texte">
+                        <div className="[overflow-wrap:anywhere] font-medium">{txt(r, 'code_reference')}</div>
+                        <div className="[overflow-wrap:anywhere] text-[11px] text-attenue-texte">
                           {txt(r, 'designation')}
                         </div>
                       </td>
@@ -671,7 +671,7 @@ function VoletFamilles({ d }: { d: Record<string, Ligne[]> }) {
                 <tbody>
                   {matrice.rangs.map(([cf, ligne]) => (
                     <tr key={cf} className="border-b border-bordure/60">
-                      <td className="sticky left-0 max-w-56 truncate bg-surface px-3 py-1.5 font-medium">
+                      <td className="sticky left-0 min-w-40 max-w-56 [overflow-wrap:anywhere] bg-surface px-3 py-1.5 font-medium">
                         {ligne.libelle}
                       </td>
                       {matrice.colonnes.map(([cc]) => {
@@ -742,8 +742,8 @@ function VoletFamilles({ d }: { d: Record<string, Ligne[]> }) {
                   return (
                     <tr key={i} className="border-b border-bordure/60">
                       <td className="max-w-64 px-3 py-1.5">
-                        <div className="truncate font-medium">{txt(f, 'famille_libelle')}</div>
-                        <div className="truncate text-[11px] text-attenue-texte">
+                        <div className="[overflow-wrap:anywhere] font-medium">{txt(f, 'famille_libelle')}</div>
+                        <div className="[overflow-wrap:anywhere] text-[11px] text-attenue-texte">
                           {txt(f, 'categorie_libelle')}
                         </div>
                       </td>
@@ -844,7 +844,7 @@ function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
     return (
       <Alerte ton="alerte">
         Les prix d'achat ne sont pas ouverts a votre role. Les statistiques de prix restent donc
-        vides — ce n'est pas une absence de donnees.
+        vides — ce n'est pas une absence de données.
       </Alerte>
     )
   }
@@ -918,8 +918,8 @@ function VoletPrix({ d }: { d: Record<string, Ligne[]> }) {
                       )}
                     >
                       <td className="max-w-64 px-3 py-1.5">
-                        <div className="truncate font-medium">{code}</div>
-                        <div className="truncate text-[11px] text-attenue-texte">
+                        <div className="[overflow-wrap:anywhere] font-medium">{code}</div>
+                        <div className="[overflow-wrap:anywhere] text-[11px] text-attenue-texte">
                           {txt(r, 'designation')}
                         </div>
                       </td>
@@ -1104,8 +1104,8 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
                       )}
                     >
                       <td className="max-w-56 px-3 py-1.5">
-                        <div className="truncate font-medium">{txt(s, 'nom')}</div>
-                        <div className="truncate text-[11px] text-attenue-texte">{code}</div>
+                        <div className="[overflow-wrap:anywhere] font-medium">{txt(s, 'nom')}</div>
+                        <div className="[overflow-wrap:anywhere] text-[11px] text-attenue-texte">{code}</div>
                       </td>
                       <td className="px-2 py-1.5 text-center text-[11px]">{txt(s, 'pays')}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">
@@ -1185,7 +1185,7 @@ function VoletFournisseurs({ d }: { d: Record<string, Ligne[]> }) {
           <CarteCorps className="p-0">
             {serie.length === 0 ? (
               <p className="p-4 text-[13px] text-attenue-texte">
-                Aucune réception validee pour ce fournisseur.
+                Aucune réception validée pour ce fournisseur.
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -1341,8 +1341,8 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
                       )}
                     >
                       <td className="max-w-56 px-3 py-1.5">
-                        <div className="truncate font-medium">{code}</div>
-                        <div className="truncate text-[11px] text-attenue-texte">
+                        <div className="[overflow-wrap:anywhere] font-medium">{code}</div>
+                        <div className="[overflow-wrap:anywhere] text-[11px] text-attenue-texte">
                           {txt(q, 'qualite_nom')}
                         </div>
                       </td>
@@ -1415,7 +1415,7 @@ function VoletQualites({ d }: { d: Record<string, Ligne[]> }) {
             <CarteTitre>Ventilation par role — {choisie}</CarteTitre>
             <span className="text-[11px] text-attenue-texte">
               c'est ici qu'une decision se prend : on ne change pas « la recette », on change le
-              melange d'un role
+              mélange d'un role
             </span>
           </CarteEntete>
           <CarteCorps className="p-0">

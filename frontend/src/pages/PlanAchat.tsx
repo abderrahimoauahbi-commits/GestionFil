@@ -315,7 +315,7 @@ export function PlanAchat() {
       api.post(`/api/plan-achat/propositions/${v.id}/figer`, { motif_figement: v.motif }),
     onSuccess: async () => {
       toast.success('Proposition protégée', {
-        description: 'Le recalcul ne la remplacera plus. L écart avec le calcul reste visible.',
+        description: 'Le recalcul ne la remplacera plus. L’écart avec le calcul reste visible.',
         duration: 7000,
       })
       await rafraichir()
@@ -338,7 +338,7 @@ export function PlanAchat() {
   const ignorer = useMutation({
     mutationFn: (id: string) => api.post(`/api/plan-achat/propositions/${id}/ignorer`),
     onSuccess: async () => {
-      toast.success('Proposition ecartee')
+      toast.success('Proposition écartée')
       await rafraichir()
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Impossible d’ecarter.'),
@@ -376,7 +376,7 @@ export function PlanAchat() {
         { code_reference_cible: v.cible, motif: v.motif },
       ),
     onSuccess: (r) => {
-      toast.success('Besoin reporte sur la référence equivalente', {
+      toast.success('Besoin reporte sur la référence équivalente', {
         description:
           r.message ??
           "La proposition passe en revision, et la référence d'origine reste tracee.",
@@ -751,7 +751,7 @@ export function PlanAchat() {
     <div>
       <EnTetePage
         titre="Plan d'achat"
-        description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engage avant sa validation."
+        description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
       />
 
       {/* LES ONGLETS (demandes des 30/09 et 01/10/2026). Le travail se fait en
@@ -811,7 +811,7 @@ export function PlanAchat() {
 
           <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-              A commander
+              À commander
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
               <span className="text-attenue-texte">Budget total</span>
@@ -1009,7 +1009,7 @@ export function PlanAchat() {
           <Alerte ton="alerte" titre="Prix estimés au catalogue">
             {surCatalogue} reference(s) n'ont encore jamais ete commandees chez leur fournisseur :
             leur prix vient du catalogue converti en dirhams, pas d'un bon valide. Le montant est
-            indicatif jusqu'a la premiere commande.
+            indicatif jusqu'à la première commande.
           </Alerte>
         </div>
       )}
@@ -1028,7 +1028,7 @@ export function PlanAchat() {
         placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
         videTitre="Aucune proposition"
-        videDescription="Le stock projete couvre les besoins, ou le MRP n'a pas encore ete calcule."
+        videDescription="Le stock projete couvre les besoins, ou le MRP n'a pas encore ete calculé."
         videAction={
           droits.peutEcrire && (
             <Bouton variante="contour" onClick={() => generer.mutate()}>
@@ -1178,12 +1178,12 @@ function PanneauEquivalent({
         titre={`Equivalents de ${proposition.code_reference}`}
         description={`Besoin a couvrir : ${fmt.nombre(proposition.quantite_suggeree_kg, 0)} kg`}
       >
-        {q.isLoading && <Chargement texte="Lecture du groupe d équivalence…" />}
+        {q.isLoading && <Chargement texte="Lecture du groupe d’équivalence…" />}
 
         {!q.isLoading && equivalents.length === 0 && (
           <Alerte ton="info">
             Cette reference n'appartient a aucun groupe d'equivalence actif. Rattachez-la depuis
-            l'ecran Equivalences si un substitut existe.
+            l'écran Équivalences si un substitut existe.
           </Alerte>
         )}
 
@@ -1252,7 +1252,7 @@ function PanneauEquivalent({
                     {e.interchangeable === 0 && (
                       <p className="mt-1 text-[11px] text-danger">
                         Unite, densite ou categorie differentes : substituer fausserait le kg/m2
-                        des recettes. Bascule refusee par le serveur.
+                        des recettes. Bascule refusée par le serveur.
                       </p>
                     )}
                   </div>
@@ -1283,7 +1283,7 @@ function PanneauEquivalent({
 
         <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
           <span className="text-[11px] text-attenue-texte">
-            Le calcul du MRP n'est pas modifie : seule la proposition change de reference.
+            Le calcul du MRP n'est pas modifié : seule la proposition change de référence.
           </span>
           <div className="flex items-center gap-2">
             <Bouton variante="contour" onClick={surFermeture}>

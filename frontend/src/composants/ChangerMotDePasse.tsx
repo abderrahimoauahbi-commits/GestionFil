@@ -82,14 +82,14 @@ export function ChangerMotDePasse({
     <Dialogue open={ouvert} onOpenChange={(o) => !o && fermer()}>
       <DialogueContenu
         titre="Changer mon mot de passe"
-        description="L ancien mot de passe est demande : un jeton prouve qu une session est ouverte, pas qui est devant l ecran."
+        description="L’ancien mot de passe est demandé : un jeton prouve qu’une session est ouverte, pas qui est devant l’écran."
         className="max-w-sm"
       >
 
         {fait ? (
           <div className="space-y-4">
             <Alerte ton="succes">
-              Mot de passe change. Il sera demande a votre prochaine connexion.
+              Mot de passe change. Il sera demandé a votre prochaine connexion.
             </Alerte>
             <Bouton className="w-full" onClick={fermer}>
               Fermer
@@ -127,7 +127,7 @@ export function ChangerMotDePasse({
               <p className="mt-1 text-[11px] leading-relaxed text-attenue-texte">
                 {LONGUEUR_MINIMALE} caracteres minimum, mais{' '}
                 <span className="text-texte">
-                  une phrase longue est bien plus sure et plus facile a retenir
+                  une phrase longue est bien plus sûre et plus facile à retenir
                 </span>{' '}
                 qu un mot court et complique : la longueur compte davantage que les majuscules
                 et les chiffres.
@@ -160,7 +160,7 @@ export function ChangerMotDePasse({
             )}
             {!different && (
               <p className="text-[11px] text-danger">
-                Le nouveau mot de passe doit differer de l actuel.
+                Le nouveau mot de passe doit différer de l’actuel.
               </p>
             )}
 

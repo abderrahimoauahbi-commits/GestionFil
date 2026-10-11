@@ -253,7 +253,7 @@ export function Chat() {
     <div className="mx-auto flex min-h-[calc(100vh-9rem)] max-w-4xl flex-col">
       <EnTetePage
         titre="Assistant"
-        description="Posez votre question dans vos mots. Les chiffres viennent des memes vues que les ecrans."
+        description="Posez votre question dans vos mots. Les chiffres viennent des mêmes vues que les écrans."
         actions={
           <div className="flex items-center gap-2">
             {etat && (
@@ -317,11 +317,11 @@ export function Chat() {
             <div>
               <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-texte">
                 <Cpu className="size-3.5" />
-                Sur le serveur — aucune donnee ne sort
+                Sur le serveur — aucune donnée ne sort
               </div>
               {qModeles.data.locaux.length === 0 && (
                 <p className="text-[12px] text-attenue-texte">
-                  Aucun modele installe, ou le service ollama est arrete.
+                  Aucun modèle installé, ou le service ollama est arrêté.
                 </p>
               )}
               {qModeles.data.locaux.map((m) => (
@@ -338,7 +338,7 @@ export function Chat() {
             <div className="border-t border-bordure pt-2">
               <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-texte">
                 <Cloud className="size-3.5" />
-                Par l API — la question et les chiffres partent chez Anthropic
+                Par l’API — la question et les chiffres partent chez Anthropic
               </div>
               {!qModeles.data.cle_claude_presente && (
                 <p className="mb-1 text-[12px] text-alerte">
@@ -365,7 +365,7 @@ export function Chat() {
           pose la cle d'API laisse le moteur local repondre : sans ce bandeau,
           on cherche pendant une heure pourquoi c'est toujours aussi lent. */}
       {etat?.manque_cle && (
-        <Alerte ton="alerte" className="mb-3" titre="Claude est demande mais la cle manque">
+        <Alerte ton="alerte" className="mb-3" titre="Claude est demandé mais la clé manque">
           Le parametre demande Claude, mais aucune cle d API n est posee sur le serveur : c est
           donc le modele local qui repond. Ajoutez <code>ANTHROPIC_API_KEY</code> dans
           <code> /opt/gestionfil/.env</code>, puis redemarrez le service.
@@ -378,7 +378,7 @@ export function Chat() {
       {local && !etat?.manque_cle && fil.length === 0 && (
         <Alerte ton="info" className="mb-3">
           Le modele tourne sur le serveur : aucune donnee ne sort de l entreprise. Sans carte
-          graphique, comptez plusieurs dizaines de secondes par reponse.
+          graphique, comptez plusieurs dizaines de secondes par réponse.
         </Alerte>
       )}
 
@@ -387,7 +387,7 @@ export function Chat() {
           <CarteCorps className="space-y-1.5">
             <p className="text-[12px] text-attenue-texte">
               L assistant ne devine pas : il emploie ces competences, et rien d autre. Celles que
-              votre role n autorise pas sont grisees.
+              votre role n’autorise pas sont grisees.
             </p>
             {(qCompetences.data?.competences ?? []).map((c) => (
               <div
@@ -466,7 +466,7 @@ export function Chat() {
                 <div className="mt-2 rounded-lg border border-alerte/40 bg-alerte/10 p-2">
                   <div className="flex items-center gap-1.5 text-[12px] font-medium">
                     <FileText className="size-3.5" />
-                    Brouillon — rien n est enregistre
+                    Brouillon — rien n’est enregistré
                   </div>
                   <p className="mt-0.5 text-[12px]">{e.brouillon.resume}</p>
                   <Bouton

@@ -226,14 +226,14 @@ export function Transferts() {
         {
           cle: 'BROUILLON',
           libelle: 'En preparation',
-          resume: 'Rien n a bouge',
+          resume: 'Rien n’a bouge',
           compte: comptes.BROUILLON ?? 0,
           ton: 'neutre' as const,
         },
         {
           cle: 'VALIDE',
           libelle: 'En transit',
-          resume: 'Parti, arrivee non constatee',
+          resume: 'Parti, arrivée non constatée',
           compte: comptes.VALIDE ?? 0,
           ton: 'alerte' as const,
         },
@@ -260,7 +260,7 @@ export function Transferts() {
     <div>
       <EnTetePage
         titre="Transferts"
-        description="Un transfert valide généré deux mouvements : sortie du magasin source, entree au destinataire."
+        description="Un transfert valide généré deux mouvements : sortie du magasin source, entrée au destinataire."
         actions={
           droits.peutEcrire && (
             <Bouton taille="icone" title="Nouveau transfert" aria-label="Nouveau transfert" onClick={() => naviguer('/transferts/nouveau')}>              <Plus />            </Bouton>
@@ -356,7 +356,7 @@ export function Transferts() {
                 variante="contour"
                 taille="sm"
                 onClick={() => naviguer(`/transferts/${t.id_transfert}/bon-reception`)}
-                title="Bon de réception, a remplir au dechargement"
+                title="Bon de réception, a remplir au déchargement"
               >
                 <Printer />
                 Bon de réception

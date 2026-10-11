@@ -236,7 +236,7 @@ export function Catalogue() {
       libelle: 'Famille',
       type: 'liste',
       options: qFam.data?.map((f) => ({ valeur: f.code_famille, libelle: f.libelle })),
-      aide: 'Le produit independamment du vendeur. Deux références de meme famille et de meme '
+      aide: 'Le produit independamment du vendeur. Deux références de même famille et de même '
         + 'couleur interne sont le meme fil, chez deux fournisseurs differents.',
       section: 'Général',
     },
@@ -251,7 +251,7 @@ export function Catalogue() {
     {
       champ: 'reference_fournisseur',
       libelle: 'Référence fournisseur',
-      aide: "La référence telle que le fournisseur l'ecrit sur sa facture : « GOLD 2117 », "
+      aide: "La référence telle que le fournisseur l'écrit sur sa facture : « GOLD 2117 », "
         + "« OZ 3034 », « SSL2081 ». C'est elle que la saisie assistée lit.",
       section: 'Général',
     },
@@ -282,7 +282,7 @@ export function Catalogue() {
       champ: 'densite_kg_ml',
       libelle: 'Densité (kg/ml)',
       type: 'nombre',
-      aide: 'Obligatoire pour une unité ml : sans elle, la conversion est refusee.',
+      aide: 'Obligatoire pour une unité ml : sans elle, la conversion est refusée.',
       section: 'Paramètres techniques',
     },
     /* --- Conditionnement et stockage --------------------------------- */
@@ -296,7 +296,7 @@ export function Catalogue() {
         { valeur: 'Bobine', libelle: 'Bobine' },
         { valeur: 'Palette', libelle: 'Palette' },
         { valeur: 'Lot', libelle: 'Lot (bain de production)' },
-        { valeur: 'ml', libelle: 'Metre lineaire' },
+        { valeur: 'ml', libelle: 'Metre linéaire' },
       ],
       aide:
         'Le stock reste tenu en kg ; les autres unités sont des masques de saisie. ' +
@@ -428,7 +428,7 @@ export function Catalogue() {
     },
     {
       champ: 'supplement_teinture',
-      libelle: 'Supplement de teinture',
+      libelle: 'Supplément de teinture',
       type: 'nombre',
       aide: 'En devise par tonne (100, 150, 530…). Le prix de la couleur est le prix de base de '
         + 'la famille plus ce supplement ramene au kilo.',
@@ -533,7 +533,7 @@ function SupprimerDefinitivement({ reference }: { reference: string }) {
         `/api/catalogue/${encodeURIComponent(reference)}/usages`,
       )
     } catch (e) {
-      toast.error("Impossible de verifier les usages", {
+      toast.error("Impossible de vérifier les usages", {
         description: e instanceof Error ? e.message : String(e),
       })
       return
@@ -559,7 +559,7 @@ function SupprimerDefinitivement({ reference }: { reference: string }) {
           await client.invalidateQueries()
           toast.success(`${reference} supprimee.`)
         } catch (e) {
-          toast.error('Suppression refusee', {
+          toast.error('Suppression refusée', {
             description: e instanceof Error ? e.message : String(e),
           })
         }
@@ -570,7 +570,7 @@ function SupprimerDefinitivement({ reference }: { reference: string }) {
   return (
     <MenuElement destructif onSelect={() => void demander()}>
       <Trash2 />
-      Supprimer definitivement
+      Supprimer définitivement
     </MenuElement>
   )
 }

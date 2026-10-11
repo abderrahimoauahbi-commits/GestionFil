@@ -293,7 +293,7 @@ export function BonsCommande() {
         placeholderRecherche="N° de bon, fournisseur, statut..."
         titreCarte={(b) => `${b.numero_bc} — ${b.fournisseur_nom}`}
         videTitre="Aucun bon de commande"
-        videDescription="Les bons naissent du plan d'achat, ou se creent a la main."
+        videDescription="Les bons naissent du plan d'achat, ou se creent à la main."
         actions={(b) => (
           <div className="flex justify-end gap-0.5">
             <Bouton

@@ -238,7 +238,7 @@ export function Controles() {
     <div>
       <EnTetePage
         titre="Contrôles de cohérence"
-        sous_titre="Ce que la base verifie sur elle-meme, et ce qu elle trouve"
+        sous_titre="Ce que la base vérifie sur elle-même, et ce qu’elle trouve"
         actions={
           <>
             <Bouton

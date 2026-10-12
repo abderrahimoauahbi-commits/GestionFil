@@ -298,14 +298,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_retour_fournisseur_garde')",
     ),
     (
-        // Les fiches de frais d'approche : allocation figee, application tracee,
-        // gardes en base ; le moteur d'import et les vues de cout en dependent.
-        "2026-10-12a_fiches_frais.sql",
-        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_fiche_frais_garde')
-            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_frais_allocation_en_vigueur')
-            AND EXISTS (SELECT 1 FROM information_schema.columns
-                         WHERE table_schema = 'public' AND table_name = 'import_facture_lignes'
-                           AND column_name = 'traitement_reste_frais')",
+        // La repartition choisie sur la ligne de frais (manuelle possible).
+        "2026-10-12a_repartition_frais.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'dossier_lignes_frais'
+                           AND column_name = 'methode_repartition')",
     ),
     (
         // Chaque sortie porte son cout (CMUP du moment) dans le grand livre.

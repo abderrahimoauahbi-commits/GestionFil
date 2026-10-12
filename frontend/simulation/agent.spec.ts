@@ -820,65 +820,48 @@ async function importCloture(e: Extract<Evenement, { type: 'IMPORT_CLOTURE' }>) 
 
 // --- Les retours au fournisseur -------------------------------------------------
 
-interface DocumentMouvement {
-  code_type_mvt: string
-  reference_document: string | null
-}
-
 /**
- * UN RETOUR AU FOURNISSEUR : une partie d'un lot recu, non conforme au
- * deballage, repart en citant la reception. Le droit de valider les receptions
- * est exige (la direction). Le lot a pu etre consomme depuis : on ne rend que ce
- * qui reste, ou rien.
+ * UN RETOUR AU FOURNISSEUR (12/10/2026) : un document libre — le fournisseur,
+ * la reference rendue, son lot, la quantite ; le prix propose au CMUP. Saisi
+ * par la direction, valide par un autre compte. Le lot a pu etre consomme
+ * depuis : on ne rend que ce qui reste, ou rien.
  */
 async function retourner(e: Extract<Evenement, { type: 'RETOUR' }>) {
   const login = 'Choukri'
   const p = await session(login)
-  const rid = journal.ids[e.reception]
-  if (!rid) return 'réception absente du journal : pas de retour'
-  const numeroImport = journal.ids[`${e.reception}:numero`]
-  const rec = numeroImport
-    ? await receptionImport(p, rid).then((r) => ({ numero_reception: r.numero, statut: r.statut === 'VALIDEE' ? 'VALIDE' : r.statut }))
-    : await reception(p, rid)
-  if (!rec || rec.statut !== 'VALIDE') return `réception ${rec?.numero_reception ?? rid} non validée : pas de retour`
-  const deja = await lire<DocumentMouvement[]>(p, `/api/mouvements/documents?code_type_mvt=RETOUR_FOURN&limite=2000`)
-  if (deja.some((m) => m.reference_document === rec.numero_reception)) return 'déjà saisi'
+  const marque = `(simulation ${e.id})`
+  const deja = await lire<{ observations?: string | null; motif?: string }[]>(p, '/api/retours-fournisseur')
+  if (deja.some((r) => (r.motif ?? '').includes(marque))) return 'déjà saisi'
   const l = e.ligne
-  const suivi = parCode.get(l.ref)?.suivi_lot === 1
-  // Une reference suivie au lot se rend sur son lot ; les autres, sur le stock du
-  // magasin (le serveur refuse s'il ne suffit pas).
-  const stock = (await lots(p, l.magasin)).filter((x) => x.code_reference === l.ref && x.lot_fournisseur === l.lot)
-  const dispo = suivi ? stock.reduce((t, x) => t + x.quantite_kg, 0) : e.kg
-  const kg = Math.min(e.kg, Math.floor(dispo))
-  if (kg < 1) return `${l.ref} lot ${l.lot} déjà consommé : rien à rendre`
+  const dispo = (await lire<{ code_reference: string; code_magasin: string; lot_fournisseur: string | null; quantite_kg: number }[]>(
+    p, '/api/retours-fournisseur/disponible'))
+    .filter((x) => x.code_reference === l.ref && x.code_magasin === l.magasin)
+  const ligne = dispo.find((x) => x.lot_fournisseur === l.lot) ?? dispo.find((x) => x.lot_fournisseur === null)
+  const kg = Math.min(e.kg, Math.floor(ligne?.quantite_kg ?? 0))
+  if (!ligne || kg < 1) return `${l.ref} lot ${l.lot} déjà consommé : rien à rendre`
 
-  await aller(p, '/mouvements/nouveau', login)
-  await choisirOption(p.getByRole('combobox', { name: /^Type de mouvement/ }), /Retour fournisseur/)
-  await p.getByRole('combobox', { name: /^Magasin/ }).first().selectOption(l.magasin)
-  await p.locator('#mvt-6').fill(e.date)
-  await choisirOption(p.getByRole('combobox', { name: /^Motif/ }).first(), /Retour/i)
-  await p.locator('#mvt-8').fill(rec.numero_reception)
-  await p.locator('#mvt-9').fill(`Non conforme au déballage (simulation ${e.id})`)
-  await choisirReference(p, l.ref)
-  await taper(champNombre(p, 'Quantité en kilos').last(), String(kg))
-  const motifLigne = p.getByRole('combobox', { name: 'Motif de la ligne' }).last()
-  if (await motifLigne.count()) {
-    const options = await motifLigne.locator('option').allTextContents()
-    const choix = options.find((o) => /qualit|conform|d[ée]faut/i.test(o)) ?? options[1]
-    if (choix) await motifLigne.selectOption({ label: choix })
-  }
-  if (suivi) {
-    const lot = p.locator('tbody select').filter({ has: p.locator('option', { hasText: 'Choisir un lot' }) }).last()
-    await choisirOption(lot, new RegExp(l.lot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-  }
-  await p.getByRole('button', { name: 'Valider la ligne' }).last().click()
-  const envoi = p.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/mouvements')
-  await p.getByRole('button', { name: 'Enregistrer le mouvement' }).click()
-  const corps = (await envoi).postData() ?? ''
-  await expect(p).toHaveURL(/\/mouvements$/, { timeout: 30_000 }).catch(async () => {
-    throw new Error(`retour non enregistré : ${await messageAffiche(p)} — envoyé : ${corps.slice(corps.indexOf("\"lignes\""), corps.indexOf("\"lignes\"") + 700)}`)
+  await aller(p, '/retours-fournisseur/nouveau', login)
+  await p.locator('#rfo-fournisseur').selectOption(e.fournisseur)
+  await p.locator('#rfo-date').fill(e.date)
+  await p.locator('#rfo-motif').fill(`Non conforme au déballage ${marque}`)
+  await p.getByRole('combobox', { name: 'Magasin' }).first().selectOption(l.magasin)
+  await p.getByRole('combobox', { name: 'Référence' }).first().selectOption(l.ref)
+  await p.getByRole('combobox', { name: 'Lot' }).first().selectOption(ligne.lot_fournisseur ?? '')
+  await taper(p.getByRole('textbox', { name: 'Quantité kg' }).first(), String(kg))
+  await p.getByRole('combobox', { name: 'Motif de la ligne' }).first().selectOption('R1')
+  await p.getByRole('button', { name: 'Enregistrer', exact: true }).click()
+  await expect(p).toHaveURL(/retours-fournisseur\/[0-9a-f-]{36}/,{ timeout: 30_000 }).catch(async () => {
+    throw new Error(`retour non enregistré : ${await messageAffiche(p)}`)
   })
-  return `${rec.numero_reception} : ${kg} kg ${l.ref} rendus à ${e.fournisseur}`
+  // Un autre compte le valide.
+  const v = await session('Mohamed')
+  await aller(v, new URL(p.url()).pathname, 'Mohamed')
+  await v.getByRole('button', { name: 'Valider', exact: true }).click()
+  await v.getByRole('button', { name: 'Valider le retour' }).click()
+  await expect(v.getByText('Validé', { exact: true }).first()).toBeVisible({ timeout: 30_000 }).catch(async () => {
+    throw new Error(`retour non validé : ${await messageAffiche(v)}`)
+  })
+  return `${kg} kg ${l.ref} rendus à ${e.fournisseur}`
 }
 
 // --- L'inventaire du jour ---------------------------------------------------

@@ -488,37 +488,42 @@ test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg jus
   await page.context().close()
 })
 
-test('retour fournisseur : la direction rend 10,5 kg de la réception, en la citant', async ({ browser }, info) => {
+test('retour fournisseur : la direction rend 10,5 kg, un autre compte valide', async ({ browser }, info) => {
   test.skip(!refRecue || !idReception, 'pas de réception validée')
   const { page, veille } = await session(browser, info, 'Choukri')
   const totalRef = async () =>
     Number((await lireApi<Record<string, unknown>[]>(page, '/api/catalogue?actif=1&limite=2000')).find((l) => l.code_reference === refRecue)!.stock_total_kg)
   const avant = await totalRef()
-  const numeroRec = String((await lireApi<Record<string, unknown>[]>(page, '/api/receptions')).find((r) => r.id_reception === idReception)!.numero_reception)
-  await page.goto('/mouvements/nouveau')
-  await page.getByRole('combobox', { name: /^Type de mouvement/ }).selectOption({ label: '− Retour fournisseur' }).catch(async () => {
-    await choisirOption(page.getByRole('combobox', { name: /^Type de mouvement/ }), /Retour fournisseur/)
-  })
-  await page.getByRole('combobox', { name: /^Magasin/ }).first().selectOption({ label: 'Morocco' })
-  await choisirOption(page.getByRole('combobox', { name: /^Motif/ }).first(), /Retour/i)
-  await saisir(page.getByRole('textbox', { name: /^Document de r/ }), numeroRec)
-  await choisirReference(page, refRecue)
-  await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '10,5')
-  const motifLigne = page.getByRole('combobox', { name: 'Motif de la ligne' }).first()
-  if (await motifLigne.count()) await motifLigne.selectOption({ index: 1 })
-  const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: 'Choisir un lot' }) }).first()
-  if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))
+  await page.goto('/retours-fournisseur/nouveau')
+  await page.locator('#rfo-fournisseur').selectOption({ index: 1 })
+  await saisir(page.locator('#rfo-motif'), 'Bobines tachées — e2e')
+  await page.getByRole('combobox', { name: 'Magasin' }).first().selectOption('Morocco')
+  await page.getByRole('combobox', { name: 'Référence' }).first().selectOption(refRecue)
+  const lot = page.getByRole('combobox', { name: 'Lot' }).first()
+  if (await lot.locator('option', { hasText: `LOT-E2E-${PASSAGE}` }).count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))
+  await saisir(page.getByRole('textbox', { name: 'Quantité kg' }).first(), '10,5')
+  await page.getByRole('combobox', { name: 'Motif de la ligne' }).first().selectOption('R1')
   consigner(info, 'saisie : retour fournisseur', [...veille.constats, ...(await mesurer(page))])
-  await page.getByRole('button', { name: 'Valider la ligne' }).first().click()
-  await page.getByRole('button', { name: 'Enregistrer le mouvement' }).click()
-  await expect(page).toHaveURL(/\/mouvements$/)
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click()
+  await expect(page).toHaveURL(/\/retours-fournisseur\/[0-9a-f-]{36}$/)
+  const id = page.url().split('/').pop()!
+  // Celui qui saisit ne valide pas : un autre compte.
+  const autre = await session(browser, info, 'Mohamed')
+  await autre.page.goto(`/retours-fournisseur/${id}`)
+  await autre.page.getByRole('button', { name: 'Valider', exact: true }).click()
+  await autre.page.getByRole('button', { name: 'Valider le retour' }).click()
   await expect.poll(totalRef).toBeCloseTo(avant - 10.5, 4)
+  const doc = await lireApi<{ retour: { numero_retour: string; statut_retour: string }; lignes: { quantite_kg: number }[] }>(
+    page, `/api/retours-fournisseur/${id}`)
+  expect(doc.retour.statut_retour).toBe('VALIDE')
+  expect(Number(doc.lignes[0].quantite_kg), 'le montant tapé « 10,5 » doit valoir 10.5').toBeCloseTo(10.5, 4)
   const m = (await lireApi<Record<string, unknown>[]>(page, '/api/mouvements')).find(
-    (l) => l.code_type_mvt === 'RETOUR_FOURN' && l.code_reference === refRecue && l.reference_document === numeroRec,
+    (l) => l.code_type_mvt === 'RETOUR_FOURN' && l.reference_document === doc.retour.numero_retour,
   )
-  expect(m, 'le retour ne cite pas sa réception').toBeTruthy()
-  expect(Number(m!.quantite_kg)).toBeCloseTo(10.5, 4)
+  expect(m, 'le mouvement ne cite pas son retour').toBeTruthy()
   expect(veille.erreurs).toEqual([])
+  expect(autre.veille.erreurs).toEqual([])
+  await autre.page.context().close()
   await page.context().close()
 })
 

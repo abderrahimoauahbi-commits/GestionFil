@@ -33,14 +33,12 @@ ALTER TABLE import_ajustements_cump ADD CONSTRAINT import_ajustements_cump_check
         OR (nature = 'CONSOMME' AND code_magasin IS NULL)
         OR (nature = 'RETOUR' AND code_magasin IS NULL AND id_mouvement_retour IS NOT NULL));
 ALTER TABLE import_ajustements_cump DROP CONSTRAINT IF EXISTS ck_iac_origine;
--- 'FICHE' (2026-10-12a) y figure pour que ce fichier se REJOUE sur une base
--- qui porte deja des applications de fiches de frais.
 ALTER TABLE import_ajustements_cump ADD CONSTRAINT ck_iac_origine
-    CHECK (origine IN ('FRAIS', 'AVOIR_PRIX', 'AVOIR_RETOUR', 'FICHE'));
+    CHECK (origine IN ('FRAIS', 'AVOIR_PRIX', 'AVOIR_RETOUR'));
 -- Un avoir porte sa piece et son motif.
 ALTER TABLE import_ajustements_cump DROP CONSTRAINT IF EXISTS ck_iac_avoir_justifie;
 ALTER TABLE import_ajustements_cump ADD CONSTRAINT ck_iac_avoir_justifie
-    CHECK (origine IN ('FRAIS', 'FICHE')
+    CHECK (origine = 'FRAIS'
         OR (COALESCE(btrim(numero_piece), '') <> '' AND char_length(btrim(COALESCE(motif, ''))) >= 5));
 -- Un retour ne se solde qu'une fois.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_iac_retour_solde

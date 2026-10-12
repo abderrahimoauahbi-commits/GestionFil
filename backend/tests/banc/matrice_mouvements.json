@@ -15,8 +15,8 @@
       "origine": "Validation d'un retour fournisseur libre (Achats → Retours fournisseur), par un autre compte que l'auteur",
       "cmup": "Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts",
       "cout": "CMUP du magasin au moment de la sortie, corrigé au prix du retour",
-      "validation": "Droit ECRIRE des réceptions pour saisir le retour, VALIDER pour le valider",
-      "reversibilite": "Contre-passation (ajustement + au CMUP courant)",
+      "validation": "Droit ECRIRE des réceptions pour saisir le retour, VALIDER pour le valider (un autre compte)",
+      "reversibilite": "Aucune : le retour validé est définitif, son mouvement ne se contre-passe pas (RFO-DEFINITIF)",
       "banc": ["saisie_libre", "retour_cloture_avoirs"]
     },
     "STOCK_INIT": {

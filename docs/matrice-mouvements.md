@@ -13,7 +13,7 @@ des besoins, pour son magasin de destination.
 | Type | Sens | CMUP | Coût porté par la ligne | Exige | Réversibilité |
 |---|---|---|---|---|---|
 | `ENTREE_REC` | + | Moyenne pondérée : (stock × CMUP + kg × prix) ÷ (stock + kg), dans le magasin de destination | Prix d'achat en devise × taux ENGAGÉ du bon, 4 décimales (frais d'import ajoutés à la clôture du dossier) | prix | Contre-passation (la valeur sort À SON PRIX, dans son seul magasin) tant que la réception n'est pas clôturée et que le dossier d'import n'est pas dédouané ; ensuite avoir ou retour fournisseur. La réception ne se dévalide qu'après |
-| `RETOUR_FOURN` | − | Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts | CMUP du magasin au moment de la sortie, corrigé au prix du retour | motif de ligne | Contre-passation (ajustement + au CMUP courant) |
+| `RETOUR_FOURN` | − | Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts | CMUP du magasin au moment de la sortie, corrigé au prix du retour | motif de ligne | Aucune : le retour validé est définitif, son mouvement ne se contre-passe pas (RFO-DEFINITIF) |
 | `STOCK_INIT` | + | Moyenne pondérée au prix saisi ; sans prix, prix catalogue converti si le magasin n'a pas encore de CMUP | Prix saisi (ou catalogue converti) | — | Contre-passation |
 | `SORTIE_PROD` | − | Inchangé | CMUP du magasin au moment de la sortie | OF | Contre-passation |
 | `RETOUR_PROD` | + | Inchangé (le fil revient au CMUP courant) | Sans prix : valorisé au CMUP du magasin | motif de ligne | Contre-passation |
@@ -48,8 +48,8 @@ des besoins, pour son magasin de destination.
 - **Sens** : sortie (−) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts
 - **Coût de la ligne** : CMUP du magasin au moment de la sortie, corrigé au prix du retour
-- **Validation** : Droit ECRIRE des réceptions pour saisir le retour, VALIDER pour le valider
-- **Réversibilité** : Contre-passation (ajustement + au CMUP courant)
+- **Validation** : Droit ECRIRE des réceptions pour saisir le retour, VALIDER pour le valider (un autre compte)
+- **Réversibilité** : Aucune : le retour validé est définitif, son mouvement ne se contre-passe pas (RFO-DEFINITIF)
 - **Prouvé par le banc** : `saisie_libre`, `retour_cloture_avoirs`
 
 ### `STOCK_INIT`

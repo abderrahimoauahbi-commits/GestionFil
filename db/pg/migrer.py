@@ -59,9 +59,6 @@ JOURNAL = "2026-10-08c_journal_migrations.sql"
 #   declares a la main (audit v5, U14, 09/10/2026) — ON CONFLICT DO NOTHING.
 EMPREINTES_REMPLACEES: dict[str, set[str]] = {
     "2026-10-08b_audit_v4.sql": {"b0d8a8015ece08fbf035c0693945aa8a32d49f934a9adf84bd0a73f8403939cc"},
-    # 12/10/2026 : ses contraintes du journal admettent l'origine FICHE (2026-10-12a),
-    # sans quoi le fichier ne se rejoue plus sur une base qui en porte.
-    "2026-10-09n_avoir_import.sql": {"f4e6f92309aab941e9d2798e3343aacd28ae265ffa1750b0adf32e8d0df8e681"},
 }
 
 

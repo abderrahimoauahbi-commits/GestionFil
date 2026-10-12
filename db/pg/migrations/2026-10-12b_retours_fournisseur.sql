@@ -13,7 +13,8 @@
 --     du stock restant est recalcule — jamais sous zero, la part qu'il ne peut
 --     pas porter va au journal des ecarts (v_ecart_prix, circuit RETOUR) ;
 --   * il ne rouvre pas le reste a livrer du bon de commande.
--- Valide, il ne se modifie plus. Rejouable. Enregistree par migrer.py.
+-- Valide, il ne se modifie plus et son mouvement ne se contre-passe pas.
+-- Rejouable. Enregistree par migrer.py.
 -- =============================================================================
 
 BEGIN;
@@ -133,6 +134,31 @@ ALTER FUNCTION fn_trg_ligne_retour_garde() OWNER TO gestionfil;
 DROP TRIGGER IF EXISTS trg_ligne_retour_garde ON ligne_retour_fournisseur;
 CREATE TRIGGER trg_ligne_retour_garde BEFORE INSERT OR UPDATE OR DELETE ON ligne_retour_fournisseur
     FOR EACH ROW EXECUTE FUNCTION fn_trg_ligne_retour_garde();
+
+-- Valide, un retour est definitif : le mouvement qu'il a produit ne se
+-- contre-passe pas (la correction du CMUP au prix du retour resterait seule).
+CREATE OR REPLACE FUNCTION fn_trg_retour_non_contrepasse() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+DECLARE
+    v_numero text;
+BEGIN
+    IF NEW.id_mouvement_contrepasse IS NOT NULL THEN
+        SELECT r.numero INTO v_numero
+          FROM ligne_retour_fournisseur l JOIN retour_fournisseur r ON r.id_retour = l.id_retour
+         WHERE l.id_mouvement = NEW.id_mouvement_contrepasse
+         LIMIT 1;
+        IF v_numero IS NOT NULL THEN
+            RAISE EXCEPTION 'RFO-DEFINITIF : ce mouvement vient du retour fournisseur % valide ; il ne se contre-passe pas.',
+                v_numero USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+ALTER FUNCTION fn_trg_retour_non_contrepasse() OWNER TO gestionfil;
+DROP TRIGGER IF EXISTS trg_retour_non_contrepasse ON mouvement;
+CREATE TRIGGER trg_retour_non_contrepasse BEFORE INSERT ON mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_retour_non_contrepasse();
 
 -- -----------------------------------------------------------------------------
 -- L'audit

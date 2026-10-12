@@ -52,6 +52,8 @@ SANS = {"sessions", "gardes_p1", "migrations_rejouables", "controles_finaux", "m
 
 # Un exemple par ecran a parametre : le premier document de chaque sorte.
 EXEMPLES = {
+    # Les pages du tableau de bord : une seule suffit a ouvrir le gabarit commun.
+    "tableau-de-bord/:vue": "SELECT 'analyse'",
     "bons-commande/:id": "SELECT id_bc FROM bon_commande ORDER BY date_creation DESC LIMIT 1",
     "bons-commande/:id/etat": "SELECT id_bc FROM bon_commande ORDER BY date_creation DESC LIMIT 1",
     "receptions/:id": "SELECT id_reception FROM reception ORDER BY date_creation DESC LIMIT 1",

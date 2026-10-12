@@ -78,7 +78,7 @@ export function Matiere() {
               <CarteStat Icone={Warehouse} libelle="Stock en kg" valeur={compact(totalKg)} unite="kg" precision={`${cats.length} catégories`} ton="primaire" />
               <CarteStat Icone={Boxes} libelle="Valeur du stock" valeur={voit ? compact(totalMad) : '—'} unite="MAD" precision="au CMUP" ton="neutre" />
               <CarteStat Icone={Layers} libelle="Familles" valeur={String(cats.reduce((s, c) => s + c.nb_familles, 0))} precision={`${cats.reduce((s, c) => s + c.nb_references, 0)} références`} ton="neutre" />
-              <CarteStat Icone={Shapes} libelle="Catégorie la plus lourde" valeur={cats[0] && voit ? `${fmt.nombre(totalMad ? ((cats[0].valeur_dhs ?? 0) / totalMad) * 100 : 0, 0)} %` : cats[0] ? `${compact(cats[0].stock_kg)} kg` : '—'} precision={cats[0]?.categorie_libelle ?? '—'} ton="alerte" />
+              <CarteStat Icone={Shapes} libelle="Catégorie la plus lourde" valeur={cats[0] && voit ? `${fmt.nombre(totalMad ? ((cats[0].valeur_dhs ?? 0) / totalMad) * 100 : 0, 0)} %` : cats[0] ? `${compact(cats[0].stock_kg)} kg` : '—'} precision={cats[0]?.categorie_libelle ?? '—'} ton="alerte" jauge={!cats[0] ? undefined : voit ? (totalMad ? ((cats[0].valeur_dhs ?? 0) / totalMad) * 100 : undefined) : totalKg ? (cats[0].stock_kg / totalKg) * 100 : undefined} />
             </div>
           )}
 

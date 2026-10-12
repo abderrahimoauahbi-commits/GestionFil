@@ -14,6 +14,7 @@
  * La teinte porte un etat, pas une decoration : elle vient de la palette
  * semantique, et une carte neutre reste neutre.
  */
+import { useId } from 'react'
 import { cn } from '../lib/utils'
 
 /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
@@ -48,6 +49,9 @@ const TRAIT: Record<TonStat, string> = {
  * passant par les memes points donne la forme sans le bruit.
  */
 function Courbe({ points, ton }: { points: number[]; ton: TonStat }) {
+  // UN DEGRADE PAR CARTE : un id tire du ton seul se repetait d'une carte a
+  // l'autre, et le navigateur prenait le premier de la page pour toutes.
+  const cle = `sp-${useId().replace(/:/g, '')}`
   if (points.length < 3) return null
 
   const L = 96
@@ -70,13 +74,12 @@ function Courbe({ points, ton }: { points: number[]; ton: TonStat }) {
     d += ` C ${mx.toFixed(1)} ${y0.toFixed(1)}, ${mx.toFixed(1)} ${y1.toFixed(1)}, ${x1.toFixed(1)} ${y1.toFixed(1)}`
   }
 
-  const cle = `sp-${ton}`
   const [dernierX, dernierY] = xy[xy.length - 1]
 
   return (
     <svg
       viewBox={`0 0 ${L} ${H}`}
-      className={cn('h-[30px] w-24 shrink-0 overflow-visible', TRAIT[ton])}
+      className={cn('spark h-[30px] w-24 shrink-0 overflow-visible', TRAIT[ton])}
       aria-hidden
       preserveAspectRatio="none"
     >
@@ -88,8 +91,13 @@ function Courbe({ points, ton }: { points: number[]; ton: TonStat }) {
       </defs>
       {/* L'aire sous la courbe donne du poids a la tendance ; seule, la ligne
           se perd sur un fond blanc a cette taille. */}
-      <path d={`${d} L ${L} ${H} L 0 ${H} Z`} fill={`url(#${cle})`} stroke="none" />
+      <path className="spark-aire" d={`${d} L ${L} ${H} L 0 ${H} Z`} fill={`url(#${cle})`} stroke="none" />
+      {/* LA COURBE SE TRACE A L'APPARITION (12/10/2026) : `pathLength` ramene
+          sa longueur a 1, et l'animation du pointille la deroule de gauche a
+          droite — une fois, au montage ; un rechargement ne la rejoue pas. */}
       <path
+        className="spark-trait"
+        pathLength={1}
         d={d}
         fill="none"
         stroke="currentColor"
@@ -100,7 +108,74 @@ function Courbe({ points, ton }: { points: number[]; ton: TonStat }) {
       />
       {/* LE DERNIER POINT EST MARQUE : c'est la valeur du gros chiffre, et
           l'oeil doit pouvoir relier les deux. */}
-      <circle cx={dernierX} cy={dernierY} r="2" fill="currentColor" />
+      <circle className="spark-point" cx={dernierX} cy={dernierY} r="2" fill="currentColor" />
+    </svg>
+  )
+}
+
+/**
+ * LES BARRES D'ECART : une valeur par periode, de part et d'autre de zero.
+ *
+ * Pour ce qui se compte (references en rupture par mois) ou ce qui s'ecarte
+ * (ecart de pesee) : la hauteur dit l'ampleur, le cote de la ligne dit le sens.
+ * Une barre negative descend sous la ligne et prend le rouge. Chaque barre
+ * pousse depuis la ligne zero, l'une apres l'autre.
+ */
+function Barres({ valeurs, ton }: { valeurs: number[]; ton: TonStat }) {
+  if (valeurs.length < 3 || valeurs.every((v) => v === 0)) return null
+  const L = 96
+  const H = 30
+  const max = Math.max(...valeurs, 0)
+  const min = Math.min(...valeurs, 0)
+  const etendue = max - min || 1
+  const zero = 1 + (max / etendue) * (H - 2)
+  const pas = L / valeurs.length
+  const largeur = Math.max(2, pas * 0.62)
+  return (
+    <svg viewBox={`0 0 ${L} ${H}`} className={cn('spark h-[30px] w-24 shrink-0 overflow-visible', TRAIT[ton])} aria-hidden preserveAspectRatio="none">
+      <line x1="0" x2={L} y1={zero} y2={zero} stroke="currentColor" strokeOpacity="0.25" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      {valeurs.map((v, i) => {
+        const h = (Math.abs(v) / etendue) * (H - 2)
+        return (
+          <rect
+            key={i}
+            className={cn('spark-barre', v < 0 && 'spark-barre-bas text-danger')}
+            style={{ '--i': i } as React.CSSProperties}
+            x={i * pas + (pas - largeur) / 2}
+            y={v >= 0 ? zero - h : zero}
+            width={largeur}
+            height={Math.max(h, v === 0 ? 0 : 0.8)}
+            rx="1"
+            fill="currentColor"
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
+/**
+ * LA JAUGE : une part sur cent (stock dormant, achats en devises). Un arc qui
+ * se remplit jusqu'a la valeur ; le fond de l'arc rappelle ou serait le tout.
+ */
+function Jauge({ pct, ton }: { pct: number; ton: TonStat }) {
+  const v = Math.max(0, Math.min(100, pct))
+  const arc = 'M 4 30 A 22 22 0 0 1 48 30'
+  return (
+    <svg viewBox="0 0 52 32" className={cn('spark h-[30px] w-12 shrink-0 overflow-visible', TRAIT[ton])} aria-hidden>
+      <path d={arc} fill="none" stroke="currentColor" strokeOpacity="0.18" strokeWidth="5" strokeLinecap="round" pathLength={100} />
+      <path
+        className="spark-jauge"
+        style={{ '--v': v } as React.CSSProperties}
+        d={arc}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="5"
+        strokeLinecap="round"
+        pathLength={100}
+        strokeDasharray="100"
+        strokeDashoffset={100 - v}
+      />
     </svg>
   )
 }
@@ -151,6 +226,8 @@ export function CarteStat({
   surClic,
   aide,
   courbe,
+  barres,
+  jauge,
 }: {
   Icone: React.ComponentType<{ className?: string }>
   libelle: string
@@ -164,6 +241,10 @@ export function CarteStat({
   aide?: string
   /** Les derniers mois, pour donner le SENS a cote de la valeur. */
   courbe?: number[]
+  /** Une valeur par periode, signee : ecarts, comptes par mois. */
+  barres?: number[]
+  /** Une part sur 100, dessinee en jauge. */
+  jauge?: number
 }) {
   const Balise = surClic ? 'button' : 'div'
 
@@ -206,7 +287,14 @@ export function CarteStat({
             </span>
           )}
         </span>
-        {courbe && <Courbe points={courbe} ton={ton} />}
+        {/* UN SEUL DESSIN PAR CARTE, et seulement d'une serie reelle. */}
+        {courbe ? (
+          <Courbe points={courbe} ton={ton} />
+        ) : barres ? (
+          <Barres valeurs={barres} ton={ton} />
+        ) : jauge != null && Number.isFinite(jauge) ? (
+          <Jauge pct={jauge} ton={ton} />
+        ) : null}
       </span>
 
       {precision && (

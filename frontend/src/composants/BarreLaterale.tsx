@@ -14,7 +14,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useOuvrirVue } from '../lib/navigation'
 import { useApparence } from './Apparence'
-import { estAccessible, MODULES, NAVIGATION, type EntreeNav } from './Coquille'
+import { entreeCourante, estAccessible, MODULES, NAVIGATION, type EntreeNav } from './Coquille'
 import { useAuth } from '../auth/AuthContext'
 import { useOngletsFacultatif } from './atelier/etat'
 import { MarqueCarree } from './Marque'
@@ -79,11 +79,7 @@ export function BarreLaterale() {
 
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
 
-  const courante = accessibles.find(
-    (e) =>
-      e.vers === emplacement.pathname ||
-      (e.vers !== '/' && sousChemin(emplacement.pathname, e.vers.split('?')[0])),
-  )
+  const courante = entreeCourante(accessibles, emplacement.pathname)
 
   const tous = MODULES.filter((m) => accessibles.some((e) => e.section === m.id))
   // Les reglages descendent en pied : on n'y va pas dans le fil du travail.
@@ -180,11 +176,17 @@ export function BarreLaterale() {
         </NavLink>
 
         {/* --- Les modules, tous ouverts ----------------------------------- */}
-        <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-3 pb-4 pt-2 [scrollbar-width:thin]">
-          {modules.map((m) => {
+        <nav className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-3 pb-4 pt-2 [scrollbar-width:thin]">
+          {modules.map((m, i) => {
             const ecrans = accessibles.filter((e) => e.section === m.id)
             return (
-              <section key={m.id} aria-label={m.libelle}>
+              /* UN FILET ENTRE LES GROUPES (12/10/2026) : le titre dit le
+                 groupe, le filet dit ou il s'arrete. */
+              <section
+                key={m.id}
+                aria-label={m.libelle}
+                className={cn(i > 0 && 'border-t border-white/[0.06] pt-3')}
+              >
                 <h2
                   title={m.resume}
                   className="titre-nav mb-1 flex items-center gap-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-barre-attenue/80"

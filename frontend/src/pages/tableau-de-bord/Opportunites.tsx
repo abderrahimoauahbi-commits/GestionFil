@@ -76,7 +76,7 @@ export function Opportunites() {
             <CarteStat Icone={TrendingDown} libelle="La plus forte" valeur={voit ? compact(meilleure) : '—'} unite="MAD/an" precision={d.economies[0]?.code_reference ?? '—'} ton="succes" />
             <CarteStat Icone={Link2} libelle="Mono-source" valeur={String(d.mono_source.length)} unite="réf." precision="un seul fournisseur possible" ton={d.mono_source.length ? 'alerte' : 'succes'} />
             <CarteStat Icone={Coins} libelle="Budget mono-source" valeur={voit ? compact(budgetMono) : '—'} unite="MAD/an" precision="exposé à une seule source" ton="alerte" />
-            <CarteStat Icone={Globe2} libelle="Achats en devises" valeur={voitParts ? fmt.nombre(partEtrangere, 0) : '—'} unite="%" precision="exposés au cours de change" ton={partEtrangere > 50 ? 'alerte' : 'neutre'} />
+            <CarteStat Icone={Globe2} libelle="Achats en devises" valeur={voitParts ? fmt.nombre(partEtrangere, 0) : '—'} unite="%" precision="exposés au cours de change" ton={partEtrangere > 50 ? 'alerte' : 'neutre'} jauge={voitParts ? partEtrangere : undefined} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-3">

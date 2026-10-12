@@ -116,12 +116,12 @@ export function Risques() {
 
       {/* ---- Chiffres clés ---------------------------------------------------- */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <CarteStat Icone={PackageX} libelle="En rupture" valeur={n('nb_ruptures') == null ? '—' : String(nn('nb_ruptures'))} unite={`/ ${nn('nb_references')}`} precision="références sous zéro jour de couverture" ton="danger" />
+        <CarteStat Icone={PackageX} libelle="En rupture" valeur={n('nb_ruptures') == null ? '—' : String(nn('nb_ruptures'))} unite={`/ ${nn('nb_references')}`} precision="références sous zéro jour de couverture" ton="danger" barres={parMois.rupture.length >= 3 ? parMois.rupture : undefined} aide="Les barres : les références en rupture prévues, mois par mois, sur l'horizon du plan." />
         <CarteStat Icone={Flame} libelle="Critiques" valeur={String(nn('nb_critiques'))} precision={`${nn('nb_attention')} autres en attention`} ton="grave" />
         <CarteStat Icone={ShoppingCart} libelle="À commander" valeur={String(nn('nb_refs_a_commander'))} unite="réf." precision={`${nn('nb_propositions_a_traiter')} propositions à arbitrer`} ton="alerte" />
         <CarteStat Icone={CircleDollarSign} libelle="Budget à engager" valeur={n('budget_a_engager_mad') == null ? '—' : compact(nn('budget_a_engager_mad'))} unite="MAD" precision="pour couvrir le plan" ton="primaire" />
         <CarteStat Icone={Timer} libelle="Trop tard pour commander" valeur={String(tropTard)} unite="réf." precision="marge de décision déjà négative" ton={tropTard > 0 ? 'danger' : 'succes'} />
-        <CarteStat Icone={TriangleAlert} libelle="Mono-source à risque" valeur={String(monoSource)} unite="réf." precision={`sur ${risques.length} références en risque`} ton={monoSource > 0 ? 'alerte' : 'succes'} />
+        <CarteStat Icone={TriangleAlert} libelle="Mono-source à risque" valeur={String(monoSource)} unite="réf." precision={`sur ${risques.length} références en risque`} ton={monoSource > 0 ? 'alerte' : 'succes'} jauge={risques.length ? (monoSource / risques.length) * 100 : undefined} />
       </div>
 
       {/* ---- À traiter, par domaine -------------------------------------------- */}

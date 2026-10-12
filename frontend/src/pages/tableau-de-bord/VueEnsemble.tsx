@@ -222,6 +222,8 @@ export function VueEnsemble() {
             unite={`/ ${nn('nb_references')}`}
             precision={`${nn('nb_critiques')} critiques · ${nn('nb_attention')} en attention`}
             ton={nn('nb_ruptures') > 0 ? 'danger' : 'succes'}
+            barres={horizon.rupture.length >= 3 ? horizon.rupture : undefined}
+            aide="Les barres : les références en rupture prévues, mois par mois, sur l'horizon du plan."
           />
           <CarteStat
             Icone={PiggyBank}

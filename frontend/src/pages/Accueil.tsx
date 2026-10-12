@@ -54,8 +54,10 @@ const TEINTE: Record<string, { fond: string; trait: string }> = {
   GENERAL:    { fond: 'rgb(37 99 235 / .12)',  trait: 'rgb(37 99 235)' },   // bleu
   CATALOGUE:  { fond: 'rgb(124 58 237 / .12)', trait: 'rgb(124 58 237)' },  // violet
   PRODUCTION: { fond: 'rgb(196 161 90 / .18)', trait: 'rgb(163 128 58)' },  // l'or de la marque
+  PLANIFICATION: { fond: 'rgb(217 119 6 / .12)', trait: 'rgb(180 83 9)' },   // ambre
   ACHATS:     { fond: 'rgb(5 150 105 / .12)',  trait: 'rgb(5 150 105)' },   // vert
   STOCK:      { fond: 'rgb(13 148 136 / .12)', trait: 'rgb(13 148 136)' },  // sarcelle
+  ANALYSES:   { fond: 'rgb(79 70 229 / .12)',  trait: 'rgb(67 56 202)' },   // indigo
   FINANCE:    { fond: 'rgb(225 29 72 / .10)',  trait: 'rgb(190 24 62)' },   // grenat
   PARAMETRES: { fond: 'rgb(100 116 139 / .14)', trait: 'rgb(71 85 105)' },  // ardoise
 }

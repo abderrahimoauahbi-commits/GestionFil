@@ -25,8 +25,15 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
-  projects: [
-    { name: 'portable-1366', use: { viewport: { width: 1366, height: 768 } } },
-    { name: 'ecran-1920', use: { viewport: { width: 1920, height: 1080 } } },
-  ],
+  // E2E_LARGEURS=1280,1024 : d'autres largeurs a la place des deux habituelles
+  // (portable a 125 %, fenetre non agrandie), pour chercher ce qui deborde.
+  projects: process.env.E2E_LARGEURS
+    ? process.env.E2E_LARGEURS.split(',').map((l) => ({
+        name: `largeur-${l}`,
+        use: { viewport: { width: Number(l), height: 768 } },
+      }))
+    : [
+        { name: 'portable-1366', use: { viewport: { width: 1366, height: 768 } } },
+        { name: 'ecran-1920', use: { viewport: { width: 1920, height: 1080 } } },
+      ],
 })

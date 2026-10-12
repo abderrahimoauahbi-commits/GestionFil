@@ -515,6 +515,61 @@ table.grille td {
   animation: valeur-arrive 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
+/* LES MINI-GRAPHIQUES DES CARTES (12/10/2026) : la courbe se trace, l'aire
+   suit, le dernier point s'allume ; les barres poussent depuis la ligne zero,
+   l'une apres l'autre ; la jauge se remplit jusqu'a sa valeur. Une fois, au
+   montage. */
+@keyframes spark-trace { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes spark-fondu { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spark-pousse { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes spark-jauge { from { stroke-dashoffset: 100; } to { stroke-dashoffset: calc(100 - var(--v)); } }
+.spark-trait { stroke-dasharray: 1; animation: spark-trace 700ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+.spark-aire { animation: spark-fondu 500ms ease-out 350ms both; }
+.spark-point { transform-box: fill-box; transform-origin: center; animation: valeur-arrive 200ms ease-out 650ms both; }
+.spark-barre {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: spark-pousse 420ms cubic-bezier(0.4, 0, 0.2, 1) calc(var(--i, 0) * 35ms) both;
+}
+.spark-barre-bas { transform-origin: top; }
+.spark-jauge { animation: spark-jauge 800ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+
+/* LES TABLEAUX FAITS A LA MAIN SE RESSERRENT AU LIEU DE DEFILER (12/10/2026).
+   Le cran est pose par composants/TablesSouples.tsx, seulement quand le
+   tableau deborde de son cadre. Hors couche : ces regles l'emportent sur les
+   utilitaires (`whitespace-nowrap`, `truncate`) des ecrans. */
+/* Une largeur minimale figee (min-w-[60rem]) forcait le debordement : elle tombe des le premier cran. */
+table[data-souple] { min-width: 0; }
+table[data-souple] th { white-space: normal; }
+table[data-souple] th > button { white-space: normal; text-align: inherit; }
+table[data-souple='2'] td,
+table[data-souple='3'] td { white-space: normal; overflow-wrap: break-word; }
+table[data-souple='2'] td .truncate,
+table[data-souple='3'] td .truncate,
+table[data-souple='4'] td .truncate,
+table[data-souple='2'] td.truncate,
+table[data-souple='3'] td.truncate,
+table[data-souple='4'] td.truncate { white-space: normal; overflow: visible; text-overflow: clip; }
+/* Un nombre, un montant, une date, un code ou un numero de lot restent d'un
+   tenant : coupes, ils se lisent mal. Le texte, lui, ne passe a la ligne
+   qu'entre deux mots. */
+table[data-souple] td.text-right,
+table[data-souple] td.tabular-nums,
+table[data-souple] td .tabular-nums,
+table[data-souple] td.font-mono,
+table[data-souple] td .font-mono { white-space: nowrap; overflow-wrap: normal; }
+table[data-souple='3'] th,
+table[data-souple='3'] td { padding-left: 4px; padding-right: 4px; }
+table[data-souple='3'] { font-size: 0.94em; }
+/* Dernier cran, pour les grilles de nombres (besoins mois par mois) a 1024 px. */
+table[data-souple='4'] td { white-space: normal; overflow-wrap: break-word; }
+table[data-souple='4'] th,
+table[data-souple='4'] td { padding-left: 2px; padding-right: 2px; }
+table[data-souple='4'] { font-size: 0.86em; }
+/* Au dernier cran, un code ou un numero de lot se coupe a ses tirets, jamais ailleurs. */
+table[data-souple='4'] td.font-mono,
+table[data-souple='4'] td .font-mono { white-space: normal; }
+
 /* RIEN DE TOUT CELA POUR QUI A DEMANDE LE CALME.
    Un systeme regle sur « animations reduites » le demande pour une raison —
    vertiges, migraines, fatigue visuelle. On respecte, sans rien perdre du
@@ -523,6 +578,8 @@ table.grille td {
   .squelette::after { animation: none; }
   .carte-active:hover { transform: none; }
   .valeur-arrive { animation: none; }
+  .spark * { animation: none !important; }
+  .spark-trait { stroke-dasharray: none; }
 }
 
 /* =============================================================================

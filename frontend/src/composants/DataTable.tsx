@@ -32,6 +32,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronsUpDown,
+  CornerDownRight,
   Columns3,
   Download,
   Printer,
@@ -790,7 +791,12 @@ export function DataTable<L extends Record<string, unknown>>({
                   const complement = enComplement.length ? (
                     <tr>
                       <td colSpan={largeurLigne} className="px-2.5 pb-1.5 pt-0">
-                        <div className="flex flex-wrap gap-x-5 gap-y-0.5 text-[12px]">
+                        {/* LA FLECHE DE RETOUR A LA LIGNE (12/10/2026) : elle dit que
+                            cette ligne CONTINUE celle du dessus, et n'en est pas une
+                            autre. */}
+                        <div className="flex items-baseline gap-2 text-[12px]">
+                          <CornerDownRight aria-label="suite de la ligne" className="size-3.5 shrink-0 translate-y-0.5 text-attenue-texte" />
+                          <div className="flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-0.5">
                           {rang.getVisibleCells().filter((cellule) => enComplement.includes(cellule.column.id)).map((cellule) => (
                             <span key={cellule.id} className="inline-flex items-baseline gap-1.5">
                               <span className="text-[10.5px] uppercase tracking-[0.05em] text-attenue-texte">
@@ -801,6 +807,7 @@ export function DataTable<L extends Record<string, unknown>>({
                               </span>
                             </span>
                           ))}
+                          </div>
                         </div>
                       </td>
                     </tr>

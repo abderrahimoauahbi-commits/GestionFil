@@ -119,7 +119,7 @@ export function AnalyseTableau() {
             <CarteStat Icone={RefreshCcw} libelle="Rotation du stock" valeur={t ? fmt.nombre(t.rotation_annuelle, 1) : '—'} unite="× / an" precision={t ? `DIO ${fmt.nombre(t.dio_jours, 0)} jours` : undefined} ton={t && t.rotation_annuelle < 1 ? 'alerte' : 'neutre'} />
             <CarteStat Icone={Scale} libelle="Écart de pesée moyen" valeur={ind?.ecart_pesee_moyen_pct == null ? '—' : fmt.nombre(ind.ecart_pesee_moyen_pct, 2)} unite="%" precision="facturé face au pesé" ton="neutre" />
             <CarteStat Icone={Truck} libelle="Fournisseurs actifs" valeur={String(n('nb_fournisseurs_actifs'))} precision={`${n('nb_bc_ouverts')} bons ouverts`} ton="neutre" />
-            <CarteStat Icone={Coins} libelle="Stock dormant" valeur={voitMontants && ind?.valeur_dormante_mad != null ? compact(ind.valeur_dormante_mad) : '—'} unite="MAD" precision={ind?.pct_valeur_dormante == null ? `${n('nb_refs_dormantes')} références` : `${fmt.nombre(ind.pct_valeur_dormante, 1)} % du stock`} ton={(ind?.pct_valeur_dormante ?? 0) > 5 ? 'alerte' : 'succes'} />
+            <CarteStat Icone={Coins} libelle="Stock dormant" valeur={voitMontants && ind?.valeur_dormante_mad != null ? compact(ind.valeur_dormante_mad) : '—'} unite="MAD" precision={ind?.pct_valeur_dormante == null ? `${n('nb_refs_dormantes')} références` : `${fmt.nombre(ind.pct_valeur_dormante, 1)} % du stock`} ton={(ind?.pct_valeur_dormante ?? 0) > 5 ? 'alerte' : 'succes'} jauge={ind?.pct_valeur_dormante ?? undefined} />
           </div>
 
           {/* ---- Pareto | Fournisseurs ------------------------------------------- */}

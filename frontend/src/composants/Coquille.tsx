@@ -37,6 +37,7 @@ import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { DoubleAuthentification } from './DoubleAuthentification'
 import { BarriereErreur } from './BarriereErreur'
+import { TablesSouples } from './TablesSouples'
 import { ConfirmationQuitter } from '../hooks/useGardeSaisie'
 import { Chargement } from './ui/base'
 import { useApparence } from './Apparence'
@@ -82,10 +83,12 @@ export type Section =
   | 'GENERAL'
   | 'CATALOGUE'
   | 'PRODUCTION'
-  | 'AIDE'
+  | 'PLANIFICATION'
   | 'ACHATS'
   | 'STOCK'
+  | 'ANALYSES'
   | 'FINANCE'
+  | 'AIDE'
   | 'PARAMETRES'
 
 export const MODULES: {
@@ -94,19 +97,21 @@ export const MODULES: {
   resume: string
   Icone: LucideIcon
 }[] = [
-  // LES MENUS RANGES EN STANDARD (10/10/2026, demande de l'utilisateur) : un
-  // domaine par section, dans l'ordre d'un ERP — pilotage, achats, stock,
-  // production, finance, puis le referentiel, les parametres et l'aide. Le plan
-  // d'achat n'est plus en Production, les fournisseurs plus au Catalogue, les
-  // machines plus au Stock, l'aide plus dans le pilotage.
-  { id: 'GENERAL',    libelle: 'Général',     resume: 'Accueil, tableau de bord, statistiques, contrôles', Icone: Gauge },
-  { id: 'ACHATS',     libelle: 'Achats',      resume: "Plan d'achat, commandes, importation, réceptions",  Icone: ShoppingCart },
-  { id: 'STOCK',      libelle: 'Stock',       resume: 'État, mouvements, transferts, inventaires, lots',   Icone: Boxes },
-  { id: 'PRODUCTION', libelle: 'Production',  resume: 'Plan de production, besoins, machines, recettes',   Icone: Factory },
-  { id: 'FINANCE',    libelle: 'Finance',     resume: 'Valorisation, coût de revient, analyses, rapports', Icone: Coins },
-  { id: 'CATALOGUE',  libelle: 'Référentiel', resume: 'Références, équivalences, catégories, parc',        Icone: Package },
-  { id: 'PARAMETRES', libelle: 'Paramètres',  resume: 'Entreprise, apparence, droits, sauvegardes',        Icone: SlidersHorizontal },
-  { id: 'AIDE',       libelle: 'Aide',        resume: 'Assistant, questions types, guide',                 Icone: BookOpen },
+  // L'ORDRE DU MENU (12/10/2026, demande de l'utilisateur) : d'abord les
+  // tableaux de bord, puis les fiches de base, la production, la
+  // planification, les achats, le stock — chaque groupe sous un titre court et
+  // separe du suivant par un filet — et ensuite le reste. Il remplace le
+  // rangement par domaine du 10/10.
+  { id: 'GENERAL',       libelle: 'Tableaux de bord', resume: 'Accueil, tableau de bord et ses pages',                    Icone: Gauge },
+  { id: 'CATALOGUE',     libelle: 'Fiches de base',   resume: 'Références, catégories, équivalences, fournisseurs',       Icone: Package },
+  { id: 'PRODUCTION',    libelle: 'Production',       resume: 'Qualités, recettes, besoins',                              Icone: Factory },
+  { id: 'PLANIFICATION', libelle: 'Planification',    resume: "Plans de production, plans d'achat, stock projeté",       Icone: LayoutGrid },
+  { id: 'ACHATS',        libelle: 'Achats',           resume: 'Commandes, réceptions, importation, retours',              Icone: ShoppingCart },
+  { id: 'STOCK',         libelle: 'Stock',            resume: 'État, mouvements, transferts, machines, inventaires',      Icone: Boxes },
+  { id: 'ANALYSES',      libelle: 'Analyses',         resume: 'Statistiques, contrôles, prix',                            Icone: BarChart3 },
+  { id: 'FINANCE',       libelle: 'Finance',          resume: 'Valorisation, coût de revient, analyses, rapports',        Icone: Coins },
+  { id: 'AIDE',          libelle: 'Aide',             resume: 'Assistant, questions types, guide',                        Icone: BookOpen },
+  { id: 'PARAMETRES',    libelle: 'Paramètres',       resume: 'Entreprise, apparence, droits, sauvegardes',               Icone: SlidersHorizontal },
 ]
 
 export interface EntreeNav {
@@ -152,16 +157,32 @@ export function estAccessible(
   return true
 }
 
+/**
+ * L'entree du menu ou l'on se trouve : l'adresse exacte d'abord, sinon la plus
+ * longue qui la contient. « /tableau-de-bord/analyse » est sous
+ * « /tableau-de-bord » ET a sa propre entree : la premiere trouvee ne suffit
+ * plus depuis que les pages du tableau de bord sont au menu.
+ */
+export function entreeCourante(entrees: EntreeNav[], chemin: string): EntreeNav | undefined {
+  return (
+    entrees.find((e) => e.vers === chemin) ??
+    entrees
+      .filter((e) => e.vers !== '/' && sousChemin(chemin, e.vers.split('?')[0]))
+      .sort((a, b) => b.vers.length - a.vers.length)[0]
+  )
+}
+
 const ORDRE_MENU = [
-  '/', '/tableau-de-bord', '/statistiques', '/controles',
-  '/plan-achat', '/bons-commande', '/import', '/receptions', '/receptions-import', '/retours-fournisseur',
-  '/fournisseurs', '/historique-prix', '/matrice-prix',
-  '/etat-stock', '/stock', '/mouvements', '/transferts', '/inventaires', '/lots', '/autorisations',
-  '/plans', '/besoins', '/machines', '/qualites', '/recettes',
+  '/', '/tableau-de-bord', '/tableau-de-bord/situation', '/tableau-de-bord/analyse', '/tableau-de-bord/opportunites', '/tableau-de-bord/matiere',
+  '/catalogue', '/categories', '/equivalences', '/fournisseurs', '/roles-bom',
+  '/qualites', '/recettes', '/besoins',
+  '/plans', '/plan-achat', '/stock',
+  '/bons-commande', '/receptions', '/import', '/receptions-import', '/retours-fournisseur',
+  '/etat-stock', '/mouvements', '/transferts', '/machines', '/inventaires', '/lots', '/autorisations',
+  '/statistiques', '/controles', '/historique-prix', '/matrice-prix',
   '/valorisation', '/landed-cost', '/classification', '/rapports',
-  '/catalogue', '/equivalences', '/categories', '/roles-bom', '/parc-machines',
-  '/configuration', '/telecharger',
   '/chat', '/assistant', '/guide-utilisateur',
+  '/parc-machines', '/configuration', '/telecharger',
 ]
 const rang = (e: { vers: string }) => {
   const i = ORDRE_MENU.indexOf(e.vers)
@@ -172,10 +193,16 @@ export const NAVIGATION: EntreeNav[] = ([
   /* --- 1. General -------------------------------------------------------- */
   { vers: '/', libelle: 'Accueil', module: '', Icone: Home, section: 'GENERAL', principale: true },
   { vers: '/tableau-de-bord', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', resume: 'Indicateurs, alertes et mur de risques', principale: true },
-  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'GENERAL' },
+  // Les pages du tableau de bord ont chacune leur entree : on y va d'un clic,
+  // sans passer par la vue d'ensemble puis l'onglet.
+  { vers: '/tableau-de-bord/situation', libelle: 'Risques et files', module: 'COCKPIT', Icone: ShieldAlert, section: 'GENERAL' },
+  { vers: '/tableau-de-bord/analyse', libelle: 'Analyse', module: 'COCKPIT', Icone: TrendingUp, section: 'GENERAL' },
+  { vers: '/tableau-de-bord/opportunites', libelle: 'Opportunités', module: 'COCKPIT', Icone: Sparkles, section: 'GENERAL' },
+  { vers: '/tableau-de-bord/matiere', libelle: 'Matière', module: 'COCKPIT', Icone: Layers, section: 'GENERAL' },
+  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'ANALYSES' },
   // La coherence est un ecran de pilotage, pas d'administration : c'est la
   // direction et l'assistante qui corrigent les anomalies, pas l'informaticien.
-  { vers: '/controles', libelle: 'Contrôles de cohérence', module: 'COCKPIT', Icone: ShieldCheck, section: 'GENERAL' },
+  { vers: '/controles', libelle: 'Contrôles de cohérence', module: 'COCKPIT', Icone: ShieldCheck, section: 'ANALYSES' },
   /* LE CHATBOT EST OUVERT A TOUS, l'ancien assistant reste a la Direction.
      Le premier n'expose que les competences que le role de l'appelant autorise
      deja, chacune verifiee module par module ; le second lit des vues
@@ -204,19 +231,19 @@ export const NAVIGATION: EntreeNav[] = ([
   /* --- 2. Catalogue ------------------------------------------------------ */
   { vers: '/catalogue', libelle: 'Références', module: 'CATALOGUE', Icone: Boxes, section: 'CATALOGUE', resume: 'Les références, leurs prix et leur stock', principale: true },
   { vers: '/equivalences', libelle: 'Équivalences', module: 'CATALOGUE', Icone: Link2, section: 'CATALOGUE' },
-  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'ACHATS' },
+  { vers: '/fournisseurs', libelle: 'Fournisseurs', module: 'FOURNISSEURS', Icone: Truck, section: 'CATALOGUE' },
   // Categories et roles BOM decrivent le PRODUIT : ils quittent l'administration
   // pour rejoindre ce qu'ils qualifient. Chacun ouvre l'ecran des referentiels
   // reduit a son seul onglet — meme code, meme CRUD, pas de doublon.
-  { vers: '/categories', libelle: 'Catégories matière', module: 'CATALOGUE', Icone: Shapes, section: 'CATALOGUE' },
+  { vers: '/categories', libelle: 'Catégories et familles', module: 'CATALOGUE', Icone: Shapes, section: 'CATALOGUE' },
   { vers: '/roles-bom', libelle: 'Rôles BOM', module: 'CATALOGUE', Icone: Layers, section: 'CATALOGUE' },
 
   /* --- 3. Production & MRP ----------------------------------------------- */
   { vers: '/qualites', libelle: 'Qualités', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
   { vers: '/recettes', libelle: 'Recettes (BOM)', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
-  { vers: '/plans', libelle: 'Plan de production', module: 'PLANS', Icone: LayoutGrid, section: 'PRODUCTION' },
+  { vers: '/plans', libelle: 'Plans de production', module: 'PLANS', Icone: LayoutGrid, section: 'PLANIFICATION' },
   { vers: '/besoins', libelle: 'Besoins (MRP)', module: 'MRP', Icone: Calculator, section: 'PRODUCTION', resume: 'Ce qu’il faut acheter, et quand', principale: true },
-  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'ACHATS' },
+  { vers: '/plan-achat', libelle: "Plans d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'PLANIFICATION' },
 
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
@@ -251,7 +278,7 @@ export const NAVIGATION: EntreeNav[] = ([
     libelle: 'Historique des prix',
     module: 'CATALOGUE',
     Icone: TrendingUp,
-    section: 'ACHATS',
+    section: 'ANALYSES',
   },
   // La matrice et l'historique montrent les MEMES achats : l'un en liste
   // chronologique, l'autre croise par mois. Ce n'est pas un doublon — c'est la
@@ -261,7 +288,7 @@ export const NAVIGATION: EntreeNav[] = ([
     libelle: 'Matrice des prix',
     module: 'CATALOGUE',
     Icone: Grid3x3,
-    section: 'ACHATS',
+    section: 'ANALYSES',
   },
   {
     vers: '/retours-fournisseur',
@@ -275,7 +302,7 @@ export const NAVIGATION: EntreeNav[] = ([
 
   /* --- 5. Stock & mouvements --------------------------------------------- */
   { vers: '/etat-stock', libelle: 'État des stocks', module: 'STOCK', Icone: Warehouse, section: 'STOCK', resume: 'Ce que chaque magasin porte, en kilos', principale: true },
-  { vers: '/stock', libelle: 'Stock projeté & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
+  { vers: '/stock', libelle: 'Stock projeté et alertes', module: 'STOCK', Icone: PackageSearch, section: 'PLANIFICATION' },
   // Le stock lot par lot (cahier du 02/10/2026) : vues Projet / Restes, alertes
   // a traiter, fiche de vie ; et la file des demandes d'autorisation.
   { vers: '/lots', libelle: 'Lots', module: 'LOTS', Icone: Tags, section: 'STOCK', resume: 'Projet, Restes, lots bloqués et dormants' },
@@ -284,7 +311,7 @@ export const NAVIGATION: EntreeNav[] = ([
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
   // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :
   // chaque etage est un magasin, et rien ici n'est un registre a part.
-  { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'PRODUCTION', resume: 'Charger, décharger, constater les métiers', principale: true },
+  { vers: '/machines', libelle: 'Machines', module: 'STOCK', Icone: Cog, section: 'STOCK', resume: 'Charger, décharger, constater les métiers', principale: true },
   { vers: '/inventaires', libelle: 'Inventaires', module: 'INVENTAIRE', Icone: ClipboardCheck, section: 'STOCK' },
 
   /* --- 6. Finance & valorisation ----------------------------------------- */
@@ -318,7 +345,7 @@ export const NAVIGATION: EntreeNav[] = ([
      quand quelque chose doit changer. Les ranger avec le pilotage les mettait
      au meme rang que le plan d'achat, ce qu'ils ne sont pas. La barre les
      place donc en pied, separes du reste par un filet. */
-  { vers: '/parc-machines', libelle: 'Parc machines', module: 'PARAMETRES', Icone: Cog, section: 'CATALOGUE' },
+  { vers: '/parc-machines', libelle: 'Parc machines', module: 'PARAMETRES', Icone: Cog, section: 'PARAMETRES' },
   { vers: '/configuration', libelle: 'Paramètres', module: 'PARAMETRES', Icone: SlidersHorizontal, section: 'PARAMETRES' },
   /* L'ecran de telechargement est ouvert a TOUS les comptes, pas au seul
      administrateur : celui qui doit reinstaller son poste est celui qui s'en
@@ -351,11 +378,7 @@ export function Coquille() {
 
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
   const principales = accessibles.filter((e) => e.principale).slice(0, 4)
-  const courante = accessibles.find(
-    (e) =>
-      e.vers === emplacement.pathname ||
-      (e.vers !== '/' && sousChemin(emplacement.pathname, e.vers)),
-  )
+  const courante = entreeCourante(accessibles, emplacement.pathname)
 
   useEffect(() => setTiroir(false), [emplacement.pathname])
 
@@ -454,6 +477,8 @@ export function Coquille() {
       {/* Les reglages d'apparence suivent le compte : relus a la connexion,
           renvoyes au serveur a chaque changement. */}
       <SynchroPreferences />
+      {/* Les tableaux faits a la main se resserrent au lieu de defiler. */}
+      <TablesSouples />
       {reglages.disposition !== 'entete' && <BarreLaterale />}
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -698,11 +723,10 @@ export function Coquille() {
               Gestion Fil
             </div>
             <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 pb-6">
-              {GROUPES.map((section) => {
+              {GROUPES.filter((section) => accessibles.some((e) => e.section === section)).map((section, i) => {
                 const entrees = accessibles.filter((e) => e.section === section)
-                if (!entrees.length) return null
                 return (
-                  <div key={section}>
+                  <div key={section} className={cn(i > 0 && 'border-t border-white/[0.06] pt-3')}>
                     <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-barre-attenue/80">
                       {MODULES.find((m) => m.id === section)?.libelle ?? section}
                     </div>

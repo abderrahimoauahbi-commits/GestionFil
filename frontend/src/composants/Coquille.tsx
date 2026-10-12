@@ -293,11 +293,10 @@ export const NAVIGATION: EntreeNav[] = ([
   {
     vers: '/retours-fournisseur',
     libelle: 'Retours fournisseur',
-    module: 'MOUVEMENTS',
+    module: 'RECEPTIONS',
     Icone: Undo2,
     section: 'ACHATS',
-    aVenir:
-      "Le type de mouvement existe et la sortie fonctionne ; il manque l'ecran qui rattache le retour a sa ligne de réception.",
+    resume: 'La marchandise rendue, rattachée à sa réception',
   },
 
   /* --- 5. Stock & mouvements --------------------------------------------- */

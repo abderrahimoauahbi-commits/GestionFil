@@ -21,6 +21,7 @@ mod operations;
 pub mod pieces;
 mod production;
 mod referentiels;
+mod retours;
 pub(crate) mod stock;
 mod telechargements;
 
@@ -223,6 +224,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plans/{id}/snapshot", post(operations::snapshot_mrp))
         .route("/api/plans/{id}/besoins", get(consultation::besoins_mrp))
         // --- Stock et mouvements ----------------------------------------------
+        // Les retours fournisseur, document libre (12/10/2026).
+        .route("/api/retours-fournisseur", get(retours::lister).post(retours::creer))
+        .route("/api/retours-fournisseur/disponible", get(retours::disponible))
+        .route("/api/retours-fournisseur/{id}",
+               get(retours::lire).put(retours::modifier).delete(retours::supprimer))
+        .route("/api/retours-fournisseur/{id}/valider", post(retours::valider))
         .route("/api/mouvements",
                get(consultation::mouvements).post(stock::creer_mouvement))
         // LE DOCUMENT A COTE DU GRAND LIVRE, pas a sa place. `/api/mouvements`

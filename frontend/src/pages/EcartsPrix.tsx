@@ -13,7 +13,7 @@ import { Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Chargement, Etiq } f
 import { cn, fmt } from '../lib/utils'
 
 interface LigneEcart {
-  circuit: 'LOCAL' | 'IMPORT'
+  circuit: 'LOCAL' | 'IMPORT' | 'RETOUR'
   id_ajustement: string
   date_ecart: string
   document: string
@@ -39,6 +39,7 @@ const ORIGINE: Record<string, string> = {
   AVOIR_PRIX: 'Avoir de prix',
   AVOIR_RETOUR: 'Avoir pour retour',
   FACTURE_NETTE: 'Facture nette',
+  RETOUR: 'Retour au prix saisi',
 }
 
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
@@ -103,7 +104,7 @@ export function EcartsPrix() {
                       <td className="px-2 py-1 tabular-nums">{fmt.date(l.date_ecart)}</td>
                       <td className="px-2 py-1">
                         <span className="font-medium">{l.document}</span>{' '}
-                        <span className="text-[11px] text-attenue-texte">{l.circuit === 'IMPORT' ? 'import' : 'local'}</span>
+                        <span className="text-[11px] text-attenue-texte">{l.circuit === 'IMPORT' ? 'import' : l.circuit === 'RETOUR' ? 'retour fournisseur' : 'local'}</span>
                       </td>
                       <td className="px-2 py-1">{l.code_reference}</td>
                       <td className="px-2 py-1">{ORIGINE[l.origine ?? ''] ?? l.origine ?? '—'}</td>

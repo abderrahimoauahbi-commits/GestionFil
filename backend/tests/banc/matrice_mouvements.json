@@ -12,12 +12,12 @@
     },
     "RETOUR_FOURN": {
       "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,
-      "origine": "Retour de marchandise au fournisseur (après réception)",
-      "cmup": "Inchangé",
-      "cout": "CMUP du magasin au moment de la sortie",
-      "validation": "Droit ECRIRE du stock ; l'avoir pour retour est plafonné à la valeur retournée",
+      "origine": "Validation d'un retour fournisseur libre (Achats → Retours fournisseur), par un autre compte que l'auteur",
+      "cmup": "Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts",
+      "cout": "CMUP du magasin au moment de la sortie, corrigé au prix du retour",
+      "validation": "Droit ECRIRE des réceptions pour saisir le retour, VALIDER pour le valider",
       "reversibilite": "Contre-passation (ajustement + au CMUP courant)",
-      "banc": ["retour_cloture_avoirs"]
+      "banc": ["saisie_libre", "retour_cloture_avoirs"]
     },
     "STOCK_INIT": {
       "signe": 1, "impacte_cmup": 1, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,

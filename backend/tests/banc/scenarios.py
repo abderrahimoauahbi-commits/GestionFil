@@ -87,6 +87,25 @@ def mouvement(c, login, type_mvt, lignes, mag=MAG, motif="PRODUCTION", motif_lig
     return c.appel(login, "POST", "/api/mouvements", corps)
 
 
+def retour_fournisseur(c, lignes, fournisseur="FRS-001", saisie="Magasinie", valideur="Choukri", motif_ligne="R1"):
+    """Un retour fournisseur LIBRE (12/10/2026) : brouillon par un compte, validation par un autre.
+    `lignes` : [(reference, kg, magasin, prix)] ; le lot est le premier que le magasin porte (sinon sans
+    lot). Rend (code, corps) de la validation, ou de la creation si elle echoue."""
+    dispo = c.ok(saisie, "GET", "/api/retours-fournisseur/disponible")
+    corps = {"code_fournisseur": fournisseur, "motif": "Retour au fournisseur (banc)", "lignes": []}
+    for ref, q, mag, prix in lignes:
+        # La ligne de stock qui porte la quantite (le plus gros lot d'abord).
+        p = max((x for x in dispo if x["code_reference"] == ref and x["code_magasin"] == mag),
+                key=lambda x: x["quantite_kg"], default=None)
+        corps["lignes"].append({"code_reference": ref, "code_magasin": mag,
+                                "lot_fournisseur": p["lot_fournisseur"] if p else None,
+                                "quantite_kg": q, "prix_kg_mad": prix, "code_motif_ligne": motif_ligne})
+    code, r = c.appel(saisie, "POST", "/api/retours-fournisseur", corps)
+    if code != 200:
+        return code, r
+    return c.appel(valideur, "POST", f"/api/retours-fournisseur/{r['id_retour']}/valider")
+
+
 # ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
@@ -203,16 +222,44 @@ def scenario_saisie_libre(c, infra):
     verifier(code == 422, f"dechet de 60 kg accepte au magasinier : {code} {r}")
     code, r = mouvement(c, "Magasinie", "AJUST_INV_NEG", [(REF2, 5)], motif="INVENTAIRE")
     verifier(code == 403, f"ajustement accepte au magasinier : {code} {r}")
-    # Le retour fournisseur : VALIDER des receptions, rattache, plafonne.
-    code, r = mouvement(c, "Magasinie", "RETOUR_FOURN", [(REF2, 10)], motif="RETOUR_FOUR", reference_document=numero)
-    verifier(code == 403, f"retour fournisseur accepte au magasinier : {code}")
-    code, r = mouvement(c, "Choukri", "RETOUR_FOURN", [(REF2, 10)], motif="RETOUR_FOUR")
-    verifier(code == 422, f"retour sans reception accepte : {code} {r}")
-    code, r = mouvement(c, "Choukri", "RETOUR_FOURN", [(REF2, 500)], motif="RETOUR_FOUR", reference_document=numero)
-    verifier(code == 422, f"retour au-dela du recu accepte : {code} {r}")
-    code, r = mouvement(c, "Choukri", "RETOUR_FOURN", [(REF2, 30)], motif="RETOUR_FOUR", motif_ligne="R1",
-                        reference_document=numero)
-    verifier(code == 200, f"retour de 30 kg refuse : {r}")
+    # LE RETOUR FOURNISSEUR N'EST PLUS UNE SAISIE LIBRE (12/10/2026) : c'est un document LIBRE, sur
+    # sa page — fournisseur, references en stock, prix ; brouillon puis validation par un AUTRE compte.
+    code, r = mouvement(c, "Choukri", "RETOUR_FOURN", [(REF2, 10)], motif="RETOUR_FOUR", reference_document=numero)
+    verifier(code == 422 and "retour fournisseur" in str(r).lower(), f"retour en saisie libre accepte : {code} {r}")
+    stock = kg(infra, REF2)
+    code, r = retour_fournisseur(c, [(REF2, stock + 1, MAG, 10.0)])
+    verifier(code == 422, f"retour au-dela du stock accepte : {code} {r}")
+    dispo = c.ok("Magasinie", "GET", "/api/retours-fournisseur/disponible")
+    lot = next(x for x in dispo if x["code_reference"] == REF2 and x["code_magasin"] == MAG)["lot_fournisseur"]
+    # Le magasinier ne voit pas les prix : sans prix saisi, le retour est propose au CMUP.
+    b = c.ok("Magasinie", "POST", "/api/retours-fournisseur", {"code_fournisseur": "FRS-001", "motif": "Defaut de teinte",
+             "lignes": [{"code_reference": REF2, "lot_fournisseur": lot, "code_magasin": MAG, "quantite_kg": 30,
+                         "code_motif_ligne": "R1"}]})
+    cm = cmup_magasin(infra, REF2)
+    prix = float(infra.valeur(f"SELECT prix_kg_mad FROM ligne_retour_fournisseur WHERE id_retour = '{b['id_retour']}'"))
+    verifier(abs(prix - cm) < 0.0001, f"prix propose {prix} au lieu du CMUP {cm}")
+    # Les achats le corrigent : 30 kg rendus a 5 DH de moins que le CMUP.
+    c.ok("Choukri", "PUT", f"/api/retours-fournisseur/{b['id_retour']}", {"code_fournisseur": "FRS-001",
+         "motif": "Defaut de teinte", "lignes": [{"code_reference": REF2, "lot_fournisseur": lot, "code_magasin": MAG,
+                                                  "quantite_kg": 30, "prix_kg_mad": round(cm - 5, 4),
+                                                  "code_motif_ligne": "R1"}]})
+    avant = kg(infra, REF2)
+    c.refus("Magasinie", "POST", f"/api/retours-fournisseur/{b['id_retour']}/valider", codes=(403, 422))
+    v = c.ok("Mohamed", "POST", f"/api/retours-fournisseur/{b['id_retour']}/valider")
+    verifier(abs(avant - kg(infra, REF2) - 30) < 1e-6 and v["mouvements"], f"retour de 30 kg : {v}")
+    attendu = round(cm + 30 * 5 / (avant - 30), 4)
+    verifier(abs(cmup_magasin(infra, REF2) - attendu) < 0.0002,
+             f"retour a {round(cm - 5, 4)} : CMUP {cmup_magasin(infra, REF2)} au lieu de {attendu}")
+    verifier(abs(v["montant_avoir_mad"] - round(30 * round(cm - 5, 4), 2)) < 0.01, f"montant de l'avoir : {v}")
+    c.refus("Choukri", "POST", f"/api/retours-fournisseur/{b['id_retour']}/valider")
+    c.refus("Choukri", "DELETE", f"/api/retours-fournisseur/{b['id_retour']}")
+    # Celui qui saisit ne valide pas, quel que soit son droit.
+    b2 = c.ok("Choukri", "POST", "/api/retours-fournisseur", {"code_fournisseur": "FRS-001", "motif": "Defaut de teinte",
+              "lignes": [{"code_reference": REF2, "lot_fournisseur": lot, "code_magasin": MAG, "quantite_kg": 5,
+                          "prix_kg_mad": 10, "code_motif_ligne": "R2"}]})
+    verifier(abs(kg(infra, REF2) - avant + 30) < 1e-6, "un brouillon de retour a sorti du stock")
+    c.refus("Choukri", "POST", f"/api/retours-fournisseur/{b2['id_retour']}/valider", contient="saisi")
+    c.ok("Choukri", "DELETE", f"/api/retours-fournisseur/{b2['id_retour']}")
     # Le prix d'une sortie ou d'une entree libre est le CMUP, jamais une saisie.
     verifier(controle(infra, "C11") == 0, "C11 apres la saisie libre")
 
@@ -491,28 +538,6 @@ def scenario_import(c, infra):
     # Un nouvel avoir ne rejoue pas les frais : la cloture ne lit que les FRAIS.
     nb_frais = infra.valeur(f"SELECT count(*) FROM import_ajustements_cump WHERE id_dossier = '{id_dossier}' AND origine = 'FRAIS'")
 
-    # Pour retour : solde le retour fournisseur de la reception, l'ecart en consomme, le CMUP intact.
-    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir",
-            dict(avoir, nature="AVOIR_RETOUR", numero_piece="AV-BANC-2"), contient="retour")
-    rim = infra.valeur(f"SELECT numero FROM import_receptions WHERE id_reception = '{rid}'")
-    code, r = c.appel("Choukri", "POST", "/api/mouvements", {
-        "code_type_mvt": "RETOUR_FOURN", "code_magasin": MAG, "code_motif": "RETOUR_FOUR", "reference_document": rim,
-        "lignes": [{"code_reference": ref, "quantite_saisie": 50, "unite_saisie": "kg", "code_motif_ligne": "R1",
-                    "lot_fournisseur": "LOT-BANC-1"}]})
-    verifier(code == 200, f"retour fournisseur d'import refuse : {r}")
-    cm = cmup_magasin(infra, ref)
-    valeur = 50 * 2.0 * cours_ded
-    retour = {"nature": "AVOIR_RETOUR", "numero_piece": "AV-BANC-2", "montant_mad": round(valeur - 20, 2),
-              "motif": "Avoir pour les 50 kg rendus"}
-    ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", retour)
-    verifier(abs(ap["valeur_retours_dhs"] - valeur) < 0.05 and abs(ap["ecart_consomme_dhs"] - 20) < 0.05,
-             f"avoir pour retour : valeur {ap['valeur_retours_dhs']} / ecart {ap['ecart_consomme_dhs']}")
-    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "l'avoir pour retour a touche le CMUP")
-    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", dict(retour, numero_piece="AV-BANC-3"),
-            contient="retour")
-    detail = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
-    verifier(all(x["solde"] for x in detail.get("retours", [])) and detail.get("retours"),
-             f"le retour n'est pas solde : {detail.get('retours')}")
     verifier(infra.valeur(f"SELECT count(*) FROM import_ajustements_cump WHERE id_dossier = '{id_dossier}' AND origine = 'FRAIS'")
              == nb_frais, "un avoir a ecrit des lignes d'origine FRAIS")
     verifier(controle(infra, "C10") == 0, "C10 leve malgre la derogation")
@@ -937,55 +962,42 @@ def scenario_controle_reception(c, infra):
 
 
 def scenario_retour_cloture_avoirs(c, infra):
-    """Regle 3 (09/10) : la cloture tient compte des retours (facture nette ou brute), l'avoir pour
-    retour ne touche pas le CMUP, l'avoir de prix ne fait jamais passer le CMUP sous zero (U6)."""
+    """Le retour LIBRE (12/10) sort au prix du retour : la difference va au CMUP du stock restant, jamais
+    sous zero, le reste au journal des ecarts. L'avoir de prix d'une reception ne fait jamais passer le
+    CMUP sous zero (U6)."""
     ref, mag = "PLA 140 CHE", "Polyfashions"
+    id_bc, lignes = bon_envoye(c, [(ref, 1000, 20.0)])
+    rid = reception_validee(c, id_bc, lignes, [1000], mag=mag)
 
-    def reception_et_retour(bl):
-        id_bc, lignes = bon_envoye(c, [(ref, 1000, 20.0)])
-        rid = reception_validee(c, id_bc, lignes, [1000], mag=mag)
-        numero = infra.valeur(f"SELECT numero_reception FROM reception WHERE id_reception = '{rid}'")
-        code, r = mouvement(c, "Choukri", "RETOUR_FOURN", [(ref, 200)], mag=mag, motif="RETOUR_FOUR",
-                            motif_ligne="R1", reference_document=numero)
-        verifier(code == 200, f"retour de 200 kg refuse : {r}")
-        return rid
+    # 1. Rendu PLUS CHER que le stock ne vaut : le CMUP descend sans passer sous zero ; le reste en ecart.
+    q, cm = kg(infra, ref, mag), cmup_magasin(infra, ref, mag)
+    plus_gros = max(x["quantite_kg"] for x in c.ok("Choukri", "GET", "/api/retours-fournisseur/disponible")
+                    if x["code_reference"] == ref and x["code_magasin"] == mag)
+    rendu, prix = round(min(plus_gros, q - 10), 4), round(cm * 3, 4)
+    code, r = retour_fournisseur(c, [(ref, rendu, mag, prix)])
+    verifier(code == 200, f"retour de {rendu} kg refuse : {r}")
+    apres = cmup_magasin(infra, ref, mag)
+    verifier(apres >= 0, "le CMUP est passe sous zero")
+    ecart = float(infra.valeur(f"SELECT COALESCE(sum(montant_mad), 0) FROM v_ecart_prix WHERE circuit = 'RETOUR' "
+                               f"AND document = '{r['numero']}'"))
+    verifier(abs(ecart - r["ecart_mad"]) < 0.01 and ecart < 0, f"ecart du retour au journal : {ecart} / {r}")
+    # Ce que le stock restant a porte, plus l'ecart, font la difference entiere (CMUP - prix) x rendu.
+    difference = rendu * (cm - prix)
+    porte = (q - rendu) * (apres - cm)
+    verifier(abs(porte + ecart - difference) < 0.05, f"stock {porte} + ecart {ecart} != difference {difference}")
 
-    # 1. Facture NETTE : 800 kg x 20 = 16 000 ; aucun ecart, le CMUP reste a 20.
-    rid = reception_et_retour("BL-NET")
-    cm0 = cmup_magasin(infra, ref, mag)
-    c.refus("Choukri", "POST", f"/api/receptions/{rid}/cloturer",
-            {"numero_facture": "F-NET", "montant_facture": 16000}, contient="RETOURS")
+    # 2. U6 : un avoir de prix plus gros que la valeur du stock restant -> CMUP a zero, reste en ecart.
     ap = c.ok("Choukri", "POST", f"/api/receptions/{rid}/cloturer",
-              {"numero_facture": "F-NET", "montant_facture": 16000, "facture_nette": True})
-    verifier(abs(ap["difference_mad"]) < 0.01, f"facture nette : difference {ap['difference_mad']} au lieu de 0")
-    verifier(abs(cmup_magasin(infra, ref, mag) - cm0) < 0.0002, "facture nette : le CMUP a bouge")
-    c.refus("Choukri", "POST", f"/api/receptions/{rid}/avoir",
-            {"nature": "AVOIR_RETOUR", "numero_piece": "AV-R0", "montant_mad": 4000, "motif": "Retour deja deduit"},
-            contient="retour")
-
-    # 2. Facture BRUTE (20 000), puis avoir pour retour a 21 MAD/kg : rien au CMUP, 200 MAD de gain en ecart.
-    rid = reception_et_retour("BL-BRUT")
-    cm0 = cmup_magasin(infra, ref, mag)
-    ap = c.ok("Choukri", "POST", f"/api/receptions/{rid}/cloturer",
-              {"numero_facture": "F-BRUT", "montant_facture": 20000, "facture_nette": False})
-    verifier(abs(ap["difference_mad"]) < 0.01, f"facture brute : difference {ap['difference_mad']} au lieu de 0")
-    av = c.ok("Choukri", "POST", f"/api/receptions/{rid}/avoir",
-              {"nature": "AVOIR_RETOUR", "numero_piece": "AV-R1", "montant_mad": 4200, "motif": "Avoir du retour R1"})
-    verifier(abs(av["ecart_prix_mad"] + 200) < 0.01, f"avoir pour retour : ecart {av['ecart_prix_mad']} au lieu de -200")
-    verifier(abs(cmup_magasin(infra, ref, mag) - cm0) < 0.0002, "l'avoir pour retour a touche le CMUP")
-    c.refus("Choukri", "POST", f"/api/receptions/{rid}/avoir",
-            {"nature": "AVOIR_RETOUR", "numero_piece": "AV-R2", "montant_mad": 4200, "motif": "Deuxieme fois"},
-            contient="retour")
-
-    # 3. U6 : un avoir de prix plus gros que la valeur du stock restant -> CMUP a zero, reste en ecart.
-    av = c.ok("Choukri", "POST", f"/api/receptions/{rid}/avoir",
-              {"nature": "AVOIR", "numero_piece": "AV-X", "montant_mad": 90000, "motif": "Essai d'avoir enorme",
-               "code_reference": ref})
+              {"numero_facture": "F-U6", "montant_facture": 20000, "facture_nette": False})
+    verifier(abs(ap["difference_mad"]) < 0.01, f"cloture : difference {ap['difference_mad']} au lieu de 0")
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/avoir",
+         {"nature": "AVOIR", "numero_piece": "AV-X", "montant_mad": 90000, "motif": "Essai d'avoir enorme",
+          "code_reference": ref})
     verifier(cmup_magasin(infra, ref, mag) >= 0, "le CMUP est passe sous zero")
     total = float(infra.valeur(f"SELECT sum(montant_mad) FROM reception_ajustements_cmup WHERE id_reception = '{rid}' "
                                "AND numero_piece = 'AV-X'"))
     verifier(abs(total + 90000) < 0.05, f"l'avoir de 90 000 n'est pas entierement journalise : {total}")
-    verifier(controle(infra, "C11") == 0, "C11 apres les avoirs")
+    verifier(controle(infra, "C11") == 0, "C11 apres le retour et les avoirs")
 
 
 def scenario_taux_bon(c, infra):

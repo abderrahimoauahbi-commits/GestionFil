@@ -14,6 +14,7 @@ pub mod mrp;
 pub mod plan;
 pub mod plan_achat;
 pub mod reception;
+pub mod retour_fournisseur;
 pub mod sauvegarde;
 pub mod transfert;
 pub mod transitions;

@@ -14,10 +14,9 @@
  * facon ; l'ecran n'offre simplement plus les gestes.
  */
 import { CoutRevientReel } from './CoutRevientReel'
-import { AvoirDossier } from './AvoirDossier'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { ChevronRight, History, Lock, Plus, Save, ShieldCheck, Target, Trash2, ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
@@ -62,6 +61,11 @@ const td = 'px-2 py-1.5'
 
 export function DossierImport() {
   const { id = '' } = useParams()
+  // LE RETOUR D'UNE FACTURE ROUVRE LA LISTE DES FACTURES (12/10/2026), pas
+  // l'onglet des frais : ?onglet=factures.
+  const [parametres] = useSearchParams()
+  const ongletDemande = parametres.get('onglet')
+  const ongletInitial = ongletDemande === 'factures' || ongletDemande === 'engagements' ? ongletDemande : 'frais'
   const droits = useDroits(MODULE)
   const ouvrir = useOuvrirVue()
   const rafraichir = useRafraichir(id)
@@ -195,7 +199,7 @@ export function DossierImport() {
       {/* LES TROIS ONGLETS RESTENT MONTES, seulement masques : une saisie
           commencee dans l'un (un engagement, un frais) ne doit pas se perdre
           quand on passe a l'autre avant « Enregistrer tout ». */}
-      <Onglets defaultValue="frais">
+      <Onglets defaultValue={ongletInitial}>
         <OngletsListe>
           <Onglet value="frais">
             Frais
@@ -224,7 +228,6 @@ export function DossierImport() {
       </Onglets>
 
       <PiecesDossier d={d} ecrire={ecrire} />
-      {droits.peutValider && dossier.statut !== 'BROUILLON' && <AvoirDossier d={d} />}
       {d.ajustements.length > 0 && <JournalCloture d={d} />}
 
       <Carte>

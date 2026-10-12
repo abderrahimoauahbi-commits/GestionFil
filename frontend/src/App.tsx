@@ -74,6 +74,8 @@ const DossierImport = lazy(() => import('./pages/import/DossierImport').then((m)
 const FactureImport = lazy(() => import('./pages/import/FactureImport').then((m) => ({ default: m.FactureImport })))
 const ReceptionImport = lazy(() => import('./pages/import/ReceptionImport').then((m) => ({ default: m.ReceptionImport })))
 const ReceptionsImport = lazy(() => import('./pages/import/ReceptionsImport').then((m) => ({ default: m.ReceptionsImport })))
+const Retours = lazy(() => import('./pages/retours/Retours').then((m) => ({ default: m.Retours })))
+const Retour = lazy(() => import('./pages/retours/Retour').then((m) => ({ default: m.Retour })))
 const BonCommandeNouveau = lazy(() => import('./pages/BonCommandeNouveau').then((m) => ({ default: m.BonCommandeNouveau })))
 const Receptions = lazy(() => import('./pages/Receptions').then((m) => ({ default: m.Receptions })))
 const Reception = lazy(() => import('./pages/Reception').then((m) => ({ default: m.Reception })))
@@ -209,6 +211,9 @@ const ECRANS = (
           le module RECEPTIONS — le magasinier y a ses droits, sans voir les prix. */}
       <Route path="receptions-import" element={<ExigeModule module="RECEPTIONS"><ReceptionsImport /></ExigeModule>} />
       <Route path="receptions-import/:idReception" element={<ExigeModule module="RECEPTIONS"><ReceptionImport /></ExigeModule>} />
+      <Route path="retours-fournisseur" element={<ExigeModule module="RECEPTIONS"><Retours /></ExigeModule>} />
+      <Route path="retours-fournisseur/nouveau" element={<ExigeModule module="RECEPTIONS"><Retour /></ExigeModule>} />
+      <Route path="retours-fournisseur/:id" element={<ExigeModule module="RECEPTIONS"><Retour /></ExigeModule>} />
       <Route path="transferts/nouveau" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/modifier" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/bon-sortie" element={<ExigeModule module="MOUVEMENTS"><BonTransfert type="sortie" /></ExigeModule>} />

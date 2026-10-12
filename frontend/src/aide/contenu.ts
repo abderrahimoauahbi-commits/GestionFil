@@ -592,6 +592,44 @@ export const SUJETS: Sujet[] = [
     ],
     liens: [{ route: '/import', libelle: 'Dossiers d’import' }],
   },
+  {
+    route: '/retours-fournisseur',
+    titre: 'Retours fournisseur',
+    chemin: 'Achats → Retours fournisseur',
+    objectif: 'Rendre au fournisseur une marchandise qui est en stock — locale ou importée — avec son avoir, comme dans une gestion commerciale.',
+    droits: 'Écriture du module Réceptions pour préparer le retour ; validation des réceptions pour le valider. Les prix sont masqués au magasinier.',
+    procedures: [
+      {
+        titre: 'Préparer et valider un retour',
+        etapes: [
+          'Nouveau retour : choisissez le fournisseur, la date, et dites pourquoi la marchandise repart.',
+          'Pour chaque ligne : le magasin, la référence en stock, le lot s’il y en a, la quantité, le motif.',
+          'Le prix est proposé au CMUP du magasin : les achats le corrigent au prix convenu avec le fournisseur. Le montant de l’avoir se calcule.',
+          'Enregistrez : le retour reste un brouillon, rien ne sort du stock.',
+          'Un AUTRE compte, qui a le droit de valider les réceptions, relit et valide.',
+        ],
+        resultat: 'La marchandise sort du stock et des lots au prix du retour ; le retour se fige.',
+      },
+    ],
+    champs: [
+      { nom: 'Fournisseur', description: 'Celui à qui la marchandise repart.', obligatoire: true },
+      { nom: 'Motif du retour', description: 'Pourquoi la marchandise repart, en clair.', obligatoire: true },
+      { nom: 'Quantité kg', description: 'Les kilos qui repartent ; pas plus que le magasin (ou le lot) n’en porte.', obligatoire: true },
+      { nom: 'Prix DH/kg', description: 'Le prix de l’avoir, saisi par les achats. Proposé au CMUP du magasin.' },
+      { nom: 'Motif de ligne', description: 'Défaut qualité matière ou erreur de référence.', obligatoire: true },
+    ],
+    regles: [
+      'Un retour est libre : il ne se rattache à aucune réception ni à aucun dossier d’import.',
+      'La sortie se fait au prix du retour : la différence avec le CMUP va au stock restant du magasin, sans jamais le faire passer sous zéro ; ce qu’il ne peut pas porter va au journal des écarts de prix.',
+      'Celui qui a saisi le retour ne le valide pas (séparation des tâches).',
+      'Le retour ne rouvre pas le reste à livrer du bon de commande : une nouvelle livraison se commande.',
+      'Un brouillon se modifie et se supprime ; un retour validé ne change plus.',
+    ],
+    liens: [
+      { route: '/etat-stock', libelle: 'État des stocks' },
+      { route: '/landed-cost', libelle: 'Coût de revient et écarts de prix' },
+    ],
+  },
 
   /* =========================================================== ACHATS ===== */
   {
@@ -897,14 +935,14 @@ export const SUJETS: Sujet[] = [
     route: '/mouvements',
     titre: 'Mouvements',
     chemin: 'Stock → Mouvements',
-    objectif: 'Consulter le grand livre des mouvements, et saisir à la main ce qui n’a pas de document : ajustements, déchets, consommation hors machine, retours fournisseur.',
-    droits: 'Écriture du module Mouvements. Ajustement et déchet de plus de 50 kg : validation de l’inventaire. Retour fournisseur : validation des réceptions. Contre-passer : la Direction.',
+    objectif: 'Consulter le grand livre des mouvements, et saisir à la main ce qui n’a pas de document : ajustements, déchets, consommation hors machine.',
+    droits: 'Écriture du module Mouvements. Ajustement et déchet de plus de 50 kg : validation de l’inventaire. Contre-passer : la Direction.',
     procedures: [
       {
         titre: 'Saisir un mouvement libre',
         etapes: [
-          'Choisissez le type : ajustement, déchet, consommation hors machine (sur un OF), retour fournisseur.',
-          'Indiquez le magasin, la date du fait et, pour un retour, le numéro de la réception d’origine.',
+          'Choisissez le type : ajustement, déchet, consommation hors machine (sur un OF).',
+          'Indiquez le magasin et la date du fait.',
           'Saisissez la référence et la quantité ; la conversion en kilos s’affiche avant validation.',
           'Nommez le responsable — celui qui remet ou reçoit la marchandise, pas vous.',
           'Enregistrez, puis imprimez le bon pour le faire contresigner.',
@@ -920,15 +958,15 @@ export const SUJETS: Sujet[] = [
     champs: [
       { nom: 'Type de mouvement', description: 'Il porte le sens : entrée ou sortie. Ce n’est pas au signe de la quantité de le dire.', obligatoire: true },
       { nom: 'Date du mouvement', description: 'La date du FAIT. Elle peut être dans le passé, jamais dans le futur.', obligatoire: true },
-      { nom: 'Document de référence', description: 'Pour un retour fournisseur : la réception d’origine (REC-… ou RIM-…), obligatoire.' },
+      { nom: 'Document de référence', description: 'Le bon, l’OF ou la pièce qui justifie le mouvement.' },
       { nom: 'Quantité', description: 'Saisie dans l’unité de manutention ; la conversion en kilos s’affiche avant validation.', obligatoire: true, valeurs: 'kg, Bobine, Palette, ml' },
       { nom: 'Responsable', description: 'La personne qui remet ou reçoit physiquement la marchandise. À ne pas confondre avec le compte qui saisit.' },
     ],
     regles: [
-      'La saisie libre se limite aux ajustements, aux déchets, à la consommation hors machine et aux retours fournisseur : réceptions, transferts, fusions et fiches machine naissent de leur document.',
+      'La saisie libre se limite aux ajustements, aux déchets et à la consommation hors machine : réceptions, retours fournisseur, transferts, fusions et fiches machine naissent de leur document.',
       'Le prix d’une entrée ou d’une sortie libre est le coût moyen en cours, jamais une saisie.',
       'Un déchet au-delà de 50 kg (P_DechetSeuilValiderKg) se valide comme un ajustement : droit de valider l’inventaire.',
-      'Un retour fournisseur se rattache à sa réception et ne rend pas plus qu’elle n’a fait entrer.',
+      'Un retour fournisseur se saisit sur son propre document (Achats → Retours fournisseur), plus ici.',
       'La consommation hors machine (colle, jute…) se déclare sur un OF ; un fil qui se charge sur machine se consomme par ses fiches.',
       'Un mouvement validé est IMMUABLE : on le compense par une contre-passation, on ne le corrige pas.',
       'Le stock ne peut pas devenir négatif.',
@@ -1766,13 +1804,13 @@ export const SUJETS: Sujet[] = [
     route: '/mouvements/nouveau',
     titre: 'Saisie libre',
     chemin: 'Stock → Mouvements → Nouveau',
-    objectif: 'Saisir un ajustement, un déchet, une consommation hors machine ou un retour fournisseur.',
+    objectif: 'Saisir un ajustement, un déchet ou une consommation hors machine.',
     droits: 'Voir la fiche « Mouvements » : chaque type a son droit.',
     regles: [
       'Le type « Consommation hors machine » demande un OF et refuse un fil qui se charge sur machine.',
-      'Le retour fournisseur demande la réception d’origine.',
+      'Le retour fournisseur n’est plus un mouvement libre : il a son document, rattaché à la réception.',
     ],
-    liens: [{ route: '/mouvements', libelle: 'Mouvements' }],
+    liens: [{ route: '/mouvements', libelle: 'Mouvements' }, { route: '/retours-fournisseur', libelle: 'Retours fournisseur' }],
   },
   {
     route: '/telecharger',

@@ -155,7 +155,8 @@ fn normaliser_date_mouvement(v: &Option<String>) -> Option<String> {
 // limite aux ajustements et aux dechets. La sortie production n'y reste que
 // comme DECHET (motif R4 impose) ; le retour de production en sort — un
 // retour d'atelier passe par le dechargement d'une fiche machine. Le retour
-// fournisseur reste : c'est la voie de correction apres dedouanement (regle 8).
+// fournisseur en sort aussi (12/10/2026) : il devient un document a part, sur
+// sa page (brouillon, puis validation par un autre compte).
 // REGLE 1 (arbitrage du 09/10/2026) : la sortie hors machine — consommation
 // d'atelier, echantillon, essai, reparation, pret a une autre usine — et le
 // retour du pret, en nature.
@@ -163,7 +164,6 @@ pub(crate) const TYPES_SAISIE_LIBRE: &[&str] = &[
     "SORTIE_PROD",
     "SORTIE_HORS_MACHINE",
     "RETOUR_PRET",
-    "RETOUR_FOURN",
     "AJUST_INV_POS",
     "AJUST_INV_NEG",
     "STOCK_INIT",
@@ -182,6 +182,7 @@ fn document_du_type(t: &str) -> &'static str {
             "d'une fiche machine (Stock → Machines)"
         }
         "RETOUR_PROD" => "du dechargement d'une fiche machine (Stock → Machines)",
+        "RETOUR_FOURN" => "d'un retour fournisseur (Achats → Retours fournisseur)",
         _ => "de son document",
     }
 }
@@ -339,70 +340,6 @@ pub async fn creer_mouvement(
                             arrondi_kg(deja + kg)
                         ))
                     })?;
-                }
-            }
-        }
-        "RETOUR_FOURN" => {
-            // Rendre au fournisseur defait une reception : le droit de la
-            // valider, et la reception d'origine, dont on ne rend pas plus
-            // qu'elle n'a fait entrer.
-            user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
-            let doc = m.reference_document.as_deref().map(str::trim).unwrap_or("");
-            if doc.is_empty() {
-                return Err(AppError::RegleMetier(
-                    "Un retour fournisseur se rattache a sa reception : saisissez son numero \
-                     (REC-… ou RIM-…) dans « Document de reference »."
-                        .into(),
-                ));
-            }
-            let mut par_ref: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
-            for (l, kg, _) in &converties {
-                *par_ref.entry(l.code_reference.clone()).or_default() += kg;
-            }
-            let connue: bool = sqlx::query_scalar(
-                "SELECT EXISTS (SELECT 1 FROM reception WHERE numero_reception = $1 AND statut IN ('VALIDE','CLOTURE'))
-                     OR EXISTS (SELECT 1 FROM import_receptions WHERE numero = $1 AND statut = 'VALIDEE')",
-            )
-            .bind(doc)
-            .fetch_one(&mut *tx)
-            .await?;
-            if !connue {
-                return Err(AppError::RegleMetier(format!(
-                    "« {doc} » n'est pas une reception validee : un retour fournisseur se rattache a la reception \
-                     qui a fait entrer la marchandise."
-                )));
-            }
-            for (reference, kg) in &par_ref {
-                let (recu, deja): (f64, f64) = sqlx::query_as(
-                    "SELECT
-                       COALESCE((SELECT sum(lr.quantite_stock_kg) FROM ligne_reception lr
-                                   JOIN reception r ON r.id_reception = lr.id_reception
-                                  WHERE r.numero_reception = $1 AND r.statut IN ('VALIDE','CLOTURE')
-                                    AND lr.code_reference = $2), 0)::float8
-                     + COALESCE((SELECT sum(rl.quantite_recue_kg) FROM import_reception_lignes rl
-                                   JOIN import_receptions r ON r.id_reception = rl.id_reception
-                                   JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
-                                  WHERE r.numero = $1 AND r.statut = 'VALIDEE'
-                                    AND fl.code_reference = $2), 0)::float8,
-                       COALESCE((SELECT sum(lm.quantite_kg) FROM ligne_mouvement lm
-                                   JOIN mouvement mv ON mv.id_mouvement = lm.id_mouvement
-                                  WHERE mv.code_type_mvt = 'RETOUR_FOURN' AND mv.reference_document = $1
-                                    AND lm.code_reference = $2
-                                    AND NOT EXISTS (SELECT 1 FROM mouvement inv
-                                                     WHERE inv.id_mouvement_contrepasse = mv.id_mouvement)), 0)::float8",
-                )
-                .bind(doc)
-                .bind(reference)
-                .fetch_one(&mut *tx)
-                .await?;
-                if *kg > recu - deja + 0.0005 {
-                    return Err(AppError::RegleMetier(format!(
-                        "{reference} : {} kg rendus, mais la reception {doc} n'en a fait entrer que {} kg \
-                         ({} kg deja rendus).",
-                        arrondi_kg(*kg),
-                        arrondi_kg(recu),
-                        arrondi_kg(deja)
-                    )));
                 }
             }
         }

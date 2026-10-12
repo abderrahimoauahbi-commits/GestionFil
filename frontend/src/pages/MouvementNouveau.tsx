@@ -52,12 +52,13 @@ import { PanneRequetes } from '../composants/PanneRequetes'
 
 /* REGLE 12 : ajustements et dechets. La sortie production n'est plus qu'un
    dechet (motif R4 pose par le serveur) ; le retour de production passe par une
-   fiche machine ; le retour fournisseur reste, voie de correction (regle 8).
+   fiche machine ; le retour fournisseur est un document a part, rattache a sa
+   reception (Achats -> Retours fournisseur, 12/10/2026).
    REGLE 1 (09/10/2026) : la sortie hors machine (atelier, echantillon, essai,
    reparation, pret a une autre usine), avec un motif par ligne et un OF libre,
    et le retour du pret, en nature. */
 const TYPES_SAISIE_LIBRE = [
-  'SORTIE_PROD', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'RETOUR_FOURN', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT',
+  'SORTIE_PROD', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT',
 ]
 const LIBELLE_SAISIE: Record<string, string> = {
   SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)',
@@ -652,8 +653,6 @@ export function MouvementNouveau() {
               {qTypes.data?.filter((t) =>
                 t.code_type_mvt === 'STOCK_INIT' ? moi?.role === 'ADMIN'
                   : t.code_type_mvt.startsWith('AJUST_INV') ? peut('INVENTAIRE', 'VALIDER')
-                  // Rendre au fournisseur defait une reception (decision 5).
-                  : t.code_type_mvt === 'RETOUR_FOURN' ? peut('RECEPTIONS', 'VALIDER')
                   : true).map((t) => (
                 <option key={t.code_type_mvt} value={t.code_type_mvt}>
                   {t.signe > 0 ? '+ ' : '− '}
@@ -789,15 +788,9 @@ export function MouvementNouveau() {
             <input id="mvt-8"
               value={entete.reference_document}
               onChange={(e) => setEntete({ ...entete, reference_document: e.target.value })}
-              required={entete.code_type_mvt === 'RETOUR_FOURN'}
-              placeholder={entete.code_type_mvt === 'RETOUR_FOURN' ? 'N° de la réception d’origine (REC-… ou RIM-…)' : 'N BL, bon de commande, OF...'}
+              placeholder="N BL, bon de commande, OF..."
               className={champ}
             />
-            {entete.code_type_mvt === 'RETOUR_FOURN' && (
-              <p className="mt-0.5 text-[11px] text-attenue-texte">
-                Obligatoire : on ne rend pas plus que cette réception n’a fait entrer.
-              </p>
-            )}
             {(entete.code_type_mvt === 'SORTIE_PROD' || horsMachine) && (
               <p className="mt-0.5 text-[11px] text-attenue-texte">
                 Au-delà de {fmt.nombre(seuilKg, 0)} kg sortis le même jour pour une référence (déchets et sorties

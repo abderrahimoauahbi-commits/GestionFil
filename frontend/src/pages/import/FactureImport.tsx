@@ -414,7 +414,7 @@ export function FactureImport() {
     onSuccess: () => {
       toast.success('Facture supprimée')
       rafraichir()
-      ouvrir(`/import/${idDossier}`)
+      ouvrir(`/import/${idDossier}?onglet=factures`)
     },
     onError: echec,
   })
@@ -449,9 +449,9 @@ export function FactureImport() {
         description={`Dossier ${d.dossier.numero}${facture ? ` · ${facture.fournisseur_nom}` : ''}`}
         actions={
           <>
-            <Bouton variante="contour" onClick={() => ouvrir(`/import/${idDossier}`)}>
+            <Bouton variante="contour" onClick={() => ouvrir(`/import/${idDossier}?onglet=factures`)}>
               <ArrowLeft />
-              Dossier {d.dossier.numero}
+              Factures du dossier {d.dossier.numero}
             </Bouton>
             {ecrire && (
               <Bouton disabled={!modifie || !enteteComplet || incompletes.length > 0} chargement={enregistrer.isPending}
@@ -889,7 +889,7 @@ export function FactureImport() {
           </Bouton>
         ) : <span />}
         <div className="flex gap-2">
-          <Bouton variante="contour" onClick={() => ouvrir(`/import/${idDossier}`)}>Retour au dossier</Bouton>
+          <Bouton variante="contour" onClick={() => ouvrir(`/import/${idDossier}?onglet=factures`)}>Retour aux factures</Bouton>
           {ecrire && (
             <Bouton disabled={!modifie || !enteteComplet || incompletes.length > 0} chargement={enregistrer.isPending}
               onClick={() => enregistrer.mutate()}>

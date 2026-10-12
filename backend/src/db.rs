@@ -293,6 +293,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Le retour fournisseur, document a part ; ses routes en dependent.
+        "2026-10-12b_retours_fournisseur.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_retour_fournisseur_garde')",
+    ),
+    (
         // Les fiches de frais d'approche : allocation figee, application tracee,
         // gardes en base ; le moteur d'import et les vues de cout en dependent.
         "2026-10-12a_fiches_frais.sql",

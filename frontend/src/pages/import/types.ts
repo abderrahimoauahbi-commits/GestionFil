@@ -124,6 +124,79 @@ export interface Frais {
   cours_change: number
   montant_dhs: number
   cibles: string[]
+  /** La fiche (12/10/2026). NULL : frais d'un dossier de l'ancien moteur. */
+  statut_fiche: StatutFiche | null
+  /** La cle CHOISIE ; `cle_proposee` est celle du type, `cles_autorisees` les permises. */
+  cle_repartition: CleRepartition | null
+  cle_proposee: CleRepartition
+  cles_autorisees: CleRepartition[]
+  motif_cle: string | null
+  version: number
+  /** Cle MANUEL : le montant decide par ligne visee. */
+  montants_saisis: Record<string, number>
+  montant_alloue_dhs?: number
+  montant_applique_dhs?: number
+  reste_a_appliquer_dhs?: number
+  id_ligne_frais_origine: string | null
+  motif_rectification: string | null
+  post_cloture: number
+  motif_post_cloture: string | null
+  date_validation: string | null
+  valide_par: string | null
+  date_application: string | null
+  motif_brouillon: string | null
+}
+
+export type StatutFiche = 'BROUILLON' | 'VALIDE' | 'APPLIQUE'
+export type CleRepartition = 'VALEUR' | 'POIDS' | 'MANUEL'
+
+export const LIBELLE_CLE: Record<CleRepartition, string> = {
+  VALEUR: 'À la valeur',
+  POIDS: 'Au poids net',
+  MANUEL: 'Montants saisis',
+}
+
+export const LIBELLE_FICHE: Record<StatutFiche, string> = {
+  BROUILLON: 'Brouillon',
+  VALIDE: 'Validée',
+  APPLIQUE: 'Appliquée',
+}
+
+/** L'apercu (ou le resultat) d'une validation : le meme calcul, cote serveur. */
+export interface ApercuFiche {
+  id_ligne_frais: string
+  statut_fiche: StatutFiche
+  cle_repartition: CleRepartition
+  capitalisable: boolean
+  montant_dhs: number
+  lignes: {
+    id_ligne: string
+    code_reference: string | null
+    designation: string | null
+    type_ligne: string
+    quantite: number
+    poids_net_kg: number | null
+    valeur_dhs?: number
+    base_repartition?: number
+    pourcentage: number
+    montant_theorique?: number
+    montant_alloue_dhs?: number
+  }[]
+  total_reparti_dhs?: number
+  equilibre: boolean
+  applications: {
+    code_reference: string
+    reception: string | null
+    montant_dhs?: number
+    kg_concernes: number
+    kg_presents: number
+    kg_sortis: number
+    au_stock_dhs?: number
+    consomme_dhs?: number
+  }[]
+  montant_applique_dhs?: number
+  reste_a_appliquer_dhs?: number
+  avis: string[]
 }
 
 export interface Allocation {
@@ -131,6 +204,8 @@ export interface Allocation {
   id_article_dossier: string
   pourcentage: number
   montant_alloue_dhs?: number
+  base_repartition?: number | null
+  montant_theorique?: number | null
 }
 
 /**
@@ -169,10 +244,16 @@ export interface Ajustement {
   cump_apres?: number | null
   montant_dhs: number
   date_ajustement?: string
-  /** FRAIS : la cloture ; AVOIR_PRIX / AVOIR_RETOUR : un avoir du fournisseur. */
-  origine?: 'FRAIS' | 'AVOIR_PRIX' | 'AVOIR_RETOUR'
+  /** FRAIS : la cloture de l'ancien moteur ; FICHE : une fiche de frais (12/10/2026) ;
+      AVOIR_PRIX / AVOIR_RETOUR : un avoir du fournisseur. */
+  origine?: 'FRAIS' | 'FICHE' | 'AVOIR_PRIX' | 'AVOIR_RETOUR'
   numero_piece?: string | null
   motif?: string | null
+  type_operation?: 'APPLICATION' | 'CONTRE_PASSATION' | null
+  id_ligne_frais?: string | null
+  id_ligne?: string | null
+  id_reception?: string | null
+  quantite_kg?: number | null
 }
 
 /** Un retour fournisseur d'une reception du dossier (`v_retours_import`). */
@@ -273,16 +354,12 @@ export interface ParametreFrais {
   piece_justificative: string | null
   recuperable: number
   commun: number
-  methode_repartition: 'VALEUR' | 'POIDS' | 'QUANTITE' | 'PARTS_EGALES'
+  /** La cle PROPOSEE a la saisie d'une fiche. */
+  methode_repartition: CleRepartition
+  /** Les cles que l'utilisateur peut choisir. */
+  cles_autorisees: CleRepartition[]
   inclus_dans_cout: number
   actif: number
-}
-
-export const METHODE_REPARTITION: Record<ParametreFrais['methode_repartition'], string> = {
-  VALEUR: 'À la valeur',
-  POIDS: 'Au poids',
-  QUANTITE: 'À la quantité',
-  PARTS_EGALES: 'À parts égales',
 }
 
 export const LIBELLE_STATUT: Record<StatutDossier, string> = {

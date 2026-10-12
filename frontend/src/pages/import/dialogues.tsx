@@ -225,26 +225,14 @@ export function CiblesPanneau({
 // Cloture
 // ============================================================================
 
+/** La cloture (12/10/2026) ne calcule plus : elle dit ce qui l'empeche. */
 interface ApercuCloture {
   numero: string
-  references: {
-    code_reference: string
-    frais_dhs: number
-    recu_kg: number
-    stock_kg: number
-    ecart_stock_dhs: number
-    ecart_consomme_dhs: number
-    magasins: { code_magasin: string; stock_kg: number; cump_avant?: number | null; cump_apres?: number | null }[]
-  }[]
-  ecart_stock_dhs: number
-  ecart_consomme_dhs: number
-  frais_hors_erp_dhs: number
+  fiches: number
+  frais_appliques_dhs?: number
+  refus: string[]
 }
 
-/**
- * La cloture montre d'abord ce qu'elle va faire : le calcul est joue a blanc
- * par le serveur (`simuler`), rien n'est ecrit tant qu'on n'a pas confirme.
- */
 export function CloturePanneau({
   idDossier,
   ouvert,
@@ -266,7 +254,7 @@ export function CloturePanneau({
   const cloturer = useMutation({
     mutationFn: () => api.post<ApercuCloture>(`/api/import/dossiers/${idDossier}/cloturer`),
     onSuccess: (r) => {
-      toast.success(`Dossier ${r.numero} clôturé — CUMP ajusté`)
+      toast.success(`Dossier ${r.numero} clôturé`)
       rafraichir()
       surFermer()
     },
@@ -278,9 +266,9 @@ export function CloturePanneau({
   return (
     <Panneau
       titre="Clôturer le dossier"
-      description="Les frais rejoignent le CUMP du stock encore présent. Après clôture, le dossier ne se modifié plus."
+      description="La clôture contrôle que chaque fiche de frais est décidée et appliquée, puis fige le dossier. Elle n’écrit rien au coût."
     >
-        {qApercu.isLoading && <Chargement texte="Calcul de la clôture…" />}
+        {qApercu.isLoading && <Chargement texte="Contrôle de la clôture…" />}
         {qApercu.error && (
           <Alerte ton="alerte">
             {qApercu.error instanceof ErreurApi ? qApercu.error.message : 'Clôture impossible.'}
@@ -288,61 +276,26 @@ export function CloturePanneau({
         )}
         {a && (
           <>
-            <div className="mb-3 grid grid-cols-3 gap-2">
-              <Tuile titre="Au stock présent" valeur={`${fmt.nombre(a.ecart_stock_dhs, 2)} DH`} ton="succes" />
-              <Tuile titre="Déjà consommé" valeur={`${fmt.nombre(a.ecart_consomme_dhs, 2)} DH`} />
-              <Tuile titre="Lignes hors ERP" valeur={`${fmt.nombre(a.frais_hors_erp_dhs, 2)} DH`} />
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <Tuile titre="Fiches de frais" valeur={String(a.fiches)} />
+              <Tuile titre="Frais appliqués au coût" valeur={a.frais_appliques_dhs === undefined ? '—' : `${fmt.nombre(a.frais_appliques_dhs, 2)} DH`} ton="succes" />
             </div>
-            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x rounded-[var(--radius)] border border-bordure focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-              <table className="w-full min-w-[40rem] text-[12.5px]">
-                <thead>
-                  <tr className="border-b border-bordure bg-attenue/40 text-[10.5px] uppercase tracking-wider text-attenue-texte">
-                    <th className="px-2 py-1.5 text-left">Référence</th>
-                    <th className="px-2 py-1.5 text-right">Frais</th>
-                    <th className="px-2 py-1.5 text-right">Reçu / en stock (kg)</th>
-                    <th className="px-2 py-1.5 text-right">Au stock</th>
-                    <th className="px-2 py-1.5 text-right">Consommé</th>
-                    <th className="px-2 py-1.5 text-left">CUMP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {a.references.map((r) => (
-                    <tr key={r.code_reference} className="border-b border-bordure/60 align-top">
-                      <td className="px-2 py-1.5 font-medium">{r.code_reference}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{fmt.nombre(r.frais_dhs, 2)}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {fmt.nombre(r.recu_kg, 0)} / {fmt.nombre(r.stock_kg, 0)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums text-succes">{fmt.nombre(r.ecart_stock_dhs, 2)}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums text-attenue-texte">{fmt.nombre(r.ecart_consomme_dhs, 2)}</td>
-                      <td className="px-2 py-1.5">
-                        {r.magasins.length === 0 ? (
-                          <span className="text-attenue-texte">plus de stock</span>
-                        ) : (
-                          r.magasins.map((m) => (
-                            <div key={m.code_magasin} className="whitespace-nowrap text-[11.5px] tabular-nums">
-                              {m.code_magasin} : {m.cump_avant == null ? '—' : fmt.nombre(m.cump_avant, 4)} →{' '}
-                              <strong>{m.cump_apres == null ? '—' : fmt.nombre(m.cump_apres, 4)}</strong>
-                            </div>
-                          ))
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-2 text-[11.5px] text-attenue-texte">
-              La part « déjà consommé » revenait à du fil sorti avant la clôture : elle est tracée dans le
-              journal du dossier, pas réinjectée dans le stock.
-            </p>
+            {a.refus.length > 0 ? (
+              <Alerte ton="alerte">
+                <div className="space-y-1">
+                  {a.refus.map((r) => <div key={r}>{r}</div>)}
+                </div>
+              </Alerte>
+            ) : (
+              <p className="m-0 text-[12.5px]">Tout est reçu ou soldé, chaque fiche est validée et appliquée : le dossier peut se figer.</p>
+            )}
           </>
         )}
         <div className="mt-4 flex justify-end gap-2">
           <Bouton variante="contour" onClick={surFermer}>Annuler</Bouton>
-          <Bouton chargement={cloturer.isPending} disabled={!a} onClick={() => cloturer.mutate()}>
+          <Bouton chargement={cloturer.isPending} disabled={!a || a.refus.length > 0} onClick={() => cloturer.mutate()}>
             <Lock />
-            Clôturer et ajuster le CUMP
+            Clôturer le dossier
           </Bouton>
         </div>
     </Panneau>

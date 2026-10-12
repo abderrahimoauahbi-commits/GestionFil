@@ -293,6 +293,16 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                            AND column_name = 'source_taux_engage')",
     ),
     (
+        // Les fiches de frais d'approche : allocation figee, application tracee,
+        // gardes en base ; le moteur d'import et les vues de cout en dependent.
+        "2026-10-12a_fiches_frais.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_fiche_frais_garde')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_frais_allocation_en_vigueur')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_facture_lignes'
+                           AND column_name = 'traitement_reste_frais')",
+    ),
+    (
         // Chaque sortie porte son cout (CMUP du moment) dans le grand livre.
         "2026-10-10c_cout_des_sorties.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lmvt_cout_sortie')",

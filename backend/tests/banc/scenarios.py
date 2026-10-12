@@ -396,30 +396,58 @@ def scenario_import(c, infra):
     c.refus("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer",
             {"motif": "Essai : annuler une entree dedouanee"}, contient="dedouane")
 
-    # Cloture : les 5 000 MAD de douane vont au lot du dossier, tout encore la.
-    ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True})
-    verifier(abs(ap["ecart_stock_dhs"] - 5000) < 0.01 and abs(ap["ecart_consomme_dhs"]) < 0.01,
-             f"frais attendus 5 000 au stock, obtenus {ap['ecart_stock_dhs']} / {ap['ecart_consomme_dhs']}")
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": False})
+    # LES FICHES DE FRAIS (12/10/2026) : la douane, saisie avant la reception, est restee en
+    # brouillon — rien au CMUP. L'apercu montre l'allocation sans rien ecrire ; la validation
+    # la fige et porte les 5 000 MAD au lot du dossier, tout encore la.
+    fiche = infra.valeur(f"SELECT id_ligne_frais FROM dossier_lignes_frais WHERE id_dossier = '{id_dossier}'")
+    verifier(infra.valeur(f"SELECT statut FROM dossier_lignes_frais WHERE id_ligne_frais = '{fiche}'") == "BROUILLON",
+             "la fiche de douane n'est pas nee en brouillon")
+    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "un frais en brouillon a touche le CMUP")
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": False}, contient="brouillon")
+    ap = c.ok("Choukri", "POST", f"/api/import/frais/{fiche}/apercu", {})
+    verifier(abs(sum(x["montant_alloue_dhs"] for x in ap["lignes"]) - 5000) < 0.005 and ap["equilibre"],
+             f"apercu : allocation {ap['lignes']}")
+    verifier(abs(ap["montant_applique_dhs"] - 5000) < 0.01 and abs(cmup_magasin(infra, ref) - cm) < 1e-9,
+             f"apercu : {ap['montant_applique_dhs']} applique, ou l'apercu a ecrit")
+    c.refus("Magasinie", "POST", f"/api/import/frais/{fiche}/valider", {}, codes=(403,))
+    v = c.ok("Choukri", "POST", f"/api/import/frais/{fiche}/valider", {})
+    verifier(v["statut_fiche"] == "APPLIQUE" and abs(v["reste_a_appliquer_dhs"]) < 0.005,
+             f"fiche de douane : {v['statut_fiche']}, reste {v['reste_a_appliquer_dhs']}")
     verifier(abs(cmup_magasin(infra, ref) - (cm + 5000 / kg(infra, ref))) < 0.0002, "les frais n'ont pas rejoint le CMUP")
+    c.refus("Choukri", "POST", f"/api/import/frais/{fiche}/valider", {})
+    c.refus("Choukri", "PATCH", f"/api/import/frais/{fiche}", {"montant_devise": 6000}, contient="FRAIS-FIGE")
+    # La cloture controle et fige ; elle n'ecrit plus rien au journal.
+    nb_journal = infra.valeur(f"SELECT count(*) FROM import_ajustements_cump WHERE id_dossier = '{id_dossier}'")
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": False})
+    verifier(infra.valeur(f"SELECT count(*) FROM import_ajustements_cump WHERE id_dossier = '{id_dossier}'") == nb_journal,
+             "la cloture a ecrit au journal")
 
-    # Regle 5 : clos, le dossier est fige et ne se rouvre plus ; une facture tardive passe en
-    # frais post-cloture, repartie sur le stock restant sans rouvrir le dossier.
+    # Regle 5 : clos, le dossier est fige et ne se rouvre plus ; un frais tardif devient une
+    # fiche nouvelle (motif), validee et appliquee au stock restant sans rouvrir le dossier.
     c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
         "id_frais": "DOUANE", "numero_piece": "TARDIF", "montant_devise": 1000, "code_devise": "MAD"})
     c.refus("Choukri", "POST", f"/api/devalider/dossiers-import/{id_dossier}", {"motif": "Essai de reouverture"})
     tardif = {"id_frais": "DOUANE", "numero_piece": "TARDIF", "montant_devise": 1000, "code_devise": "MAD"}
     c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture", dict(tardif))
     cm = cmup_magasin(infra, ref)
-    ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture",
-              dict(tardif, motif="Facture du transitaire arrivee apres la cloture", simuler=True))
-    verifier(abs(ap["ecart_stock_dhs"] - 1000) < 0.01, f"post-cloture : {ap['ecart_stock_dhs']} au stock au lieu de 1 000")
-    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-6, "l'apercu du frais post-cloture a ecrit")
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture",
-         dict(tardif, motif="Facture du transitaire arrivee apres la cloture"))
-    verifier(abs(cmup_magasin(infra, ref) - (cm + 1000 / kg(infra, ref))) < 0.0002, "le frais post-cloture n'a pas rejoint le CMUP")
+    t = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture",
+             dict(tardif, motif="Facture du transitaire arrivee apres la cloture"))
+    verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "le frais tardif en brouillon a touche le CMUP")
+    v = c.ok("Choukri", "POST", f"/api/import/frais/{t['id_ligne_frais']}/valider", {})
+    verifier(abs(v["montant_applique_dhs"] - 1000) < 0.01, f"frais tardif : {v['montant_applique_dhs']} applique au lieu de 1 000")
+    verifier(abs(cmup_magasin(infra, ref) - (cm + 1000 / kg(infra, ref))) < 0.0002, "le frais tardif n'a pas rejoint le CMUP")
     verifier(infra.valeur(f"SELECT statut FROM import_dossiers WHERE id_dossier = '{id_dossier}'") == "CLOTURE",
-             "le frais post-cloture a rouvert le dossier")
+             "le frais tardif a rouvert le dossier")
+    # Une rectificative (avoir du transitaire) : l'originale intacte, la correction liee.
+    c.refus("Choukri", "POST", f"/api/import/frais/{t['id_ligne_frais']}/rectifier",
+            {"montant_devise": -100, "motif": "Avoir du transitaire"})
+    r = c.ok("Choukri", "POST", f"/api/import/frais/{t['id_ligne_frais']}/rectifier",
+             {"montant_devise": -100, "motif": "Avoir du transitaire", "numero_piece": "AV-TRANSIT-1"})
+    cm = cmup_magasin(infra, ref)
+    c.ok("Choukri", "POST", f"/api/import/frais/{r['id_ligne_frais']}/valider", {})
+    verifier(abs(cmup_magasin(infra, ref) - (cm - 100 / kg(infra, ref))) < 0.0002, "la rectificative n'a pas baisse le CMUP")
+    verifier(infra.valeur(f"SELECT montant_dhs FROM dossier_lignes_frais WHERE id_ligne_frais = '{t['id_ligne_frais']}'") == "1000.00",
+             "la rectificative a reecrit la fiche d'origine")
 
     # Le cout de revient reel : un paiement au cours de la banque, son ecart de change,
     # sans toucher le CMUP (09/10/2026).

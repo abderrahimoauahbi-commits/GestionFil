@@ -55,7 +55,9 @@ pub async fn lister_parametres_frais(State(state): State<AppState>, user: Utilis
     user.exiger(&state.db, IMPORT, Action::Lire).await?;
     let lignes = sqlx::query(
         "SELECT id_frais, libelle, categorie, piece_justificative, recuperable, commun,
-                methode_repartition, inclus_dans_cout, ordre, actif
+                methode_repartition, inclus_dans_cout, ordre, actif,
+                -- En jsonb : un tableau PostgreSQL ressortirait a null.
+                to_jsonb(cles_autorisees) AS cles_autorisees
            FROM parametres_frais WHERE actif = 1 ORDER BY ordre, libelle",
     )
     .fetch_all(&state.db)
@@ -242,12 +244,32 @@ pub async fn lire_dossier(
         "SELECT x.id_ligne_frais, x.id_frais, p.libelle AS frais_libelle, p.categorie,
                 p.inclus_dans_cout, x.libelle, x.numero_piece, x.montant_devise, x.code_devise,
                 x.cours_change, x.montant_dhs, x.date_creation,
+                -- La fiche (12/10/2026) : son etat, la cle proposee et la cle
+                -- choisie, le motif, la validation, ce qui est applique.
+                x.statut AS statut_fiche, x.cle_repartition, x.motif_cle, x.version,
+                p.methode_repartition AS cle_proposee, to_jsonb(p.cles_autorisees) AS cles_autorisees,
+                x.id_ligne_frais_origine, x.motif_rectification, x.post_cloture, x.motif_post_cloture,
+                x.date_validation, uv.login AS valide_par, x.date_application, x.motif_brouillon,
+                al.alloue AS montant_alloue_dhs, ap.applique AS montant_applique_dhs,
+                al.alloue - ap.applique AS reste_a_appliquer_dhs,
                 -- En jsonb : le convertisseur de lignes lit le json, pas les
                 -- tableaux PostgreSQL, qui ressortiraient a null.
                 COALESCE((SELECT jsonb_agg(c.id_ligne) FROM dossier_lignes_frais_cibles c
-                           WHERE c.id_ligne_frais = x.id_ligne_frais), '[]'::jsonb) AS cibles
+                           WHERE c.id_ligne_frais = x.id_ligne_frais), '[]'::jsonb) AS cibles,
+                COALESCE((SELECT jsonb_object_agg(c.id_ligne, c.montant_saisi) FROM dossier_lignes_frais_cibles c
+                           WHERE c.id_ligne_frais = x.id_ligne_frais AND c.montant_saisi IS NOT NULL),
+                         '{}'::jsonb) AS montants_saisis
            FROM dossier_lignes_frais x
            JOIN parametres_frais p ON p.id_frais = x.id_frais
+           LEFT JOIN utilisateur uv ON uv.id_utilisateur = x.id_utilisateur_validation
+           CROSS JOIN LATERAL (
+                SELECT COALESCE(sum(a.montant_alloue_dhs), 0) AS alloue
+                  FROM v_frais_allocation_en_vigueur a
+                  JOIN import_facture_lignes l ON l.id_ligne = a.id_article_dossier AND l.type_ligne = 'ERP'
+                 WHERE a.id_ligne_frais = x.id_ligne_frais) al
+           CROSS JOIN LATERAL (
+                SELECT COALESCE(sum(j.montant_dhs), 0) AS applique
+                  FROM import_ajustements_cump j WHERE j.id_ligne_frais = x.id_ligne_frais) ap
           WHERE x.id_dossier = $1
           ORDER BY p.ordre, x.date_creation",
     )
@@ -256,8 +278,9 @@ pub async fn lire_dossier(
     .await?;
 
     let repartition = sqlx::query(
-        "SELECT r.id_ligne_frais, r.id_article_dossier, r.pourcentage, r.montant_alloue_dhs
-           FROM lignes_frais_repartition r
+        "SELECT r.id_ligne_frais, r.id_article_dossier, r.pourcentage, r.montant_alloue_dhs,
+                r.base_repartition, r.montant_theorique
+           FROM v_frais_allocation_en_vigueur r
            JOIN dossier_lignes_frais x ON x.id_ligne_frais = r.id_ligne_frais
           WHERE x.id_dossier = $1",
     )
@@ -267,7 +290,8 @@ pub async fn lire_dossier(
 
     let ajustements = sqlx::query(
         "SELECT code_reference, nature, code_magasin, quantite_recue_kg, stock_kg,
-                cump_avant, cump_apres, montant_dhs, date_ajustement, origine, numero_piece, motif
+                cump_avant, cump_apres, montant_dhs, date_ajustement, origine, numero_piece, motif,
+                type_operation, id_ligne_frais, id_ligne, id_reception, quantite_kg
            FROM import_ajustements_cump WHERE id_dossier = $1
           ORDER BY date_ajustement, code_reference, nature DESC, code_magasin",
     )
@@ -1000,6 +1024,13 @@ pub struct FraisSaisie {
     cours_change: Option<f64>,
     /// Vide ou absent : tout le dossier.
     cibles: Option<Vec<String>>,
+    /// Cle MANUEL : le montant decide pour chaque ligne visee (les lignes
+    /// visees sont alors celles-ci).
+    montants: Option<Vec<MontantLigne>>,
+    /// La cle choisie (proposee par le type, modifiable dans ses cles
+    /// autorisees) et son motif quand elle s'ecarte de la proposition.
+    cle_repartition: Option<String>,
+    motif_cle: Option<String>,
     /// Le taux s'ecarte de plus de 3 % du cours Bank Al-Maghrib, et l'operateur
     /// le confirme (c'est celui de sa banque).
     taux_confirme: Option<bool>,
@@ -1011,6 +1042,12 @@ async fn aujourd_hui(c: &mut sqlx::PgConnection) -> AppResult<String> {
     Ok(sqlx::query_scalar("SELECT to_char(now() AT TIME ZONE 'Africa/Casablanca', 'YYYY-MM-DD')")
         .fetch_one(&mut *c)
         .await?)
+}
+
+#[derive(Deserialize)]
+pub struct MontantLigne {
+    id_ligne: String,
+    montant: f64,
 }
 
 async fn poser_cibles(tx: &mut sqlx::PgConnection, id_ligne_frais: &str, cibles: &[String]) -> AppResult<()> {
@@ -1031,6 +1068,37 @@ async fn poser_cibles(tx: &mut sqlx::PgConnection, id_ligne_frais: &str, cibles:
     Ok(())
 }
 
+/// Cle MANUEL : les lignes visees ET leur montant, poses ensemble.
+async fn poser_montants(tx: &mut sqlx::PgConnection, id_ligne_frais: &str, montants: &[MontantLigne]) -> AppResult<()> {
+    sqlx::query("DELETE FROM dossier_lignes_frais_cibles WHERE id_ligne_frais = $1")
+        .bind(id_ligne_frais)
+        .execute(&mut *tx)
+        .await?;
+    let ids: Vec<String> = montants.iter().map(|m| m.id_ligne.clone()).collect();
+    let valeurs: Vec<f64> = montants.iter().map(|m| m.montant).collect();
+    sqlx::query(
+        "INSERT INTO dossier_lignes_frais_cibles (id_ligne_frais, id_ligne, montant_saisi)
+         SELECT $1, v.id, round(v.m::numeric, 2) FROM unnest($2::text[], $3::float8[]) AS v(id, m)",
+    )
+    .bind(id_ligne_frais)
+    .bind(&ids)
+    .bind(&valeurs)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
+/// Les lignes visees d'une fiche : montants saisis (MANUEL) ou simple liste.
+async fn poser_lignes(tx: &mut sqlx::PgConnection, id_ligne_frais: &str, f: &FraisSaisie) -> AppResult<()> {
+    if let Some(m) = &f.montants {
+        poser_montants(tx, id_ligne_frais, m).await
+    } else if let Some(c) = &f.cibles {
+        poser_cibles(tx, id_ligne_frais, c).await
+    } else {
+        Ok(())
+    }
+}
+
 /// `POST /api/import/dossiers/{id}/frais` — en dirhams par defaut, cours 1.
 pub async fn ajouter_frais(
     State(state): State<AppState>,
@@ -1039,7 +1107,7 @@ pub async fn ajouter_frais(
     Json(f): Json<FraisSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
-    let id_frais = f.id_frais.ok_or_else(|| AppError::Invalide("Type de frais obligatoire.".into()))?;
+    let id_frais = f.id_frais.clone().ok_or_else(|| AppError::Invalide("Type de frais obligatoire.".into()))?;
     let montant = f.montant_devise.filter(|m| *m > 0.0)
         .ok_or_else(|| AppError::Invalide("Montant du frais obligatoire.".into()))?;
     let devise = f.code_devise.clone().unwrap_or_else(|| "MAD".into());
@@ -1051,11 +1119,15 @@ pub async fn ajouter_frais(
     let jour = aujourd_hui(&mut tx).await?;
     let cours = controler_taux(&mut tx, "frais", &devise, f.cours_change, &jour,
                                f.taux_confirme.unwrap_or(false)).await?;
+    // UNE FICHE NAIT EN BROUILLON, avec la cle PROPOSEE par son type si
+    // l'utilisateur n'en a pas choisi : elle ne s'alloue qu'a sa validation.
     let id: String = sqlx::query_scalar(
         "INSERT INTO dossier_lignes_frais (id_dossier, id_frais, libelle, numero_piece,
                                            montant_devise, code_devise, cours_change,
-                                           id_utilisateur_creation)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                           id_utilisateur_creation, statut, cle_repartition, motif_cle)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, 'BROUILLON',
+                COALESCE($9, p.methode_repartition), NULLIF(btrim($10), '')
+           FROM parametres_frais p WHERE p.id_frais = $2
          RETURNING id_ligne_frais",
     )
     .bind(&id_dossier)
@@ -1066,12 +1138,14 @@ pub async fn ajouter_frais(
     .bind(&devise)
     .bind(cours)
     .bind(&user.id)
-    .fetch_one(&mut *tx)
-    .await?;
-    poser_cibles(&mut tx, &id, f.cibles.as_deref().unwrap_or(&[])).await?;
-    metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    .bind(&f.cle_repartition)
+    .bind(&f.motif_cle)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Invalide(format!("Type de frais inconnu : {id_frais}.")))?;
+    poser_lignes(&mut tx, &id, &f).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_ligne_frais": id })))
+    Ok(Json(json!({ "id_ligne_frais": id, "statut_fiche": "BROUILLON" })))
 }
 
 #[derive(Deserialize)]
@@ -1083,11 +1157,12 @@ pub struct FraisPostCloture {
     simuler: bool,
 }
 
-/// `POST /api/import/dossiers/{id}/frais-post-cloture` — UNE FACTURE TARDIVE
+/// `POST /api/import/dossiers/{id}/frais-post-cloture` — UN FRAIS TARDIF
 /// (regle 5, 09/10/2026) : le transitaire ou le port facture apres la cloture.
-/// On ne rouvre pas le dossier : le frais s'ajoute, se repartit, et la seule
-/// difference va au stock restant du dossier, la part consommee en ecart.
-/// Acte de valorisation : droit VALIDER, motif obligatoire.
+/// On ne rouvre pas le dossier : une FICHE NOUVELLE s'ajoute, en brouillon, et
+/// suit le cycle de toutes les fiches (apercu, validation, application au stock
+/// restant, la part consommee au journal). Rien d'ancien n'est recalcule.
+/// Droit VALIDER, motif obligatoire.
 pub async fn frais_post_cloture(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1100,7 +1175,7 @@ pub async fn frais_post_cloture(
     if motif.chars().count() < 5 {
         return Err(AppError::Invalide("Dites quelle facture arrive apres la cloture (5 caracteres au moins).".into()));
     }
-    let id_frais = f.id_frais.ok_or_else(|| AppError::Invalide("Type de frais obligatoire.".into()))?;
+    let id_frais = f.id_frais.clone().ok_or_else(|| AppError::Invalide("Type de frais obligatoire.".into()))?;
     let montant = f.montant_devise.filter(|m| *m > 0.0)
         .ok_or_else(|| AppError::Invalide("Montant du frais obligatoire.".into()))?;
     let devise = f.code_devise.clone().unwrap_or_else(|| "MAD".into());
@@ -1117,8 +1192,11 @@ pub async fn frais_post_cloture(
     let id: String = sqlx::query_scalar(
         "INSERT INTO dossier_lignes_frais (id_dossier, id_frais, libelle, numero_piece,
                                            montant_devise, code_devise, cours_change,
-                                           id_utilisateur_creation, post_cloture, motif_post_cloture)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9)
+                                           id_utilisateur_creation, post_cloture, motif_post_cloture,
+                                           statut, cle_repartition, motif_cle)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, 1, $9, 'BROUILLON',
+                COALESCE($10, p.methode_repartition), NULLIF(btrim($11), '')
+           FROM parametres_frais p WHERE p.id_frais = $2
          RETURNING id_ligne_frais",
     )
     .bind(&id_dossier)
@@ -1130,18 +1208,18 @@ pub async fn frais_post_cloture(
     .bind(cours)
     .bind(&user.id)
     .bind(&motif)
-    .fetch_one(&mut *tx)
-    .await?;
-    poser_cibles(&mut tx, &id, f.cibles.as_deref().unwrap_or(&[])).await?;
-    let mut v = metier::cloturer_dans(&mut tx, &user, &id_dossier, true, p.simuler).await?;
+    .bind(&f.cle_repartition)
+    .bind(&f.motif_cle)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Invalide(format!("Type de frais inconnu : {id_frais}.")))?;
+    poser_lignes(&mut tx, &id, &f).await?;
     if p.simuler {
         tx.rollback().await?;
     } else {
         tx.commit().await?;
     }
-    v["id_ligne_frais"] = json!(id);
-    user.masquer(&state.db, IMPORT, &mut v).await?;
-    Ok(Json(v))
+    Ok(Json(json!({ "id_ligne_frais": id, "statut_fiche": "BROUILLON", "simulation": p.simuler })))
 }
 
 // ============================================================================
@@ -1324,14 +1402,18 @@ pub async fn modifier_frais(
             controler_taux(&mut tx, "frais", &devise, cours, &jour, f.taux_confirme.unwrap_or(false)).await?;
         }
     }
-    let id_dossier: String = sqlx::query_scalar(
+    // Seul un brouillon se modifie : la base refuse le reste (FRAIS-FIGE), et
+    // une fiche validee se corrige par une rectificative.
+    let trouve: Option<String> = sqlx::query_scalar(
         "UPDATE dossier_lignes_frais
             SET id_frais = COALESCE($2, id_frais), libelle = COALESCE($3, libelle),
                 numero_piece = COALESCE($4, numero_piece),
                 montant_devise = COALESCE($5, montant_devise),
                 code_devise = COALESCE($6, code_devise),
                 cours_change = CASE WHEN COALESCE($6, code_devise) = 'MAD' THEN 1
-                                    ELSE COALESCE($7, cours_change) END
+                                    ELSE COALESCE($7, cours_change) END,
+                cle_repartition = COALESCE($8, cle_repartition),
+                motif_cle = CASE WHEN $9::text IS NULL THEN motif_cle ELSE NULLIF(btrim($9), '') END
           WHERE id_ligne_frais = $1
       RETURNING id_dossier",
     )
@@ -1342,13 +1424,12 @@ pub async fn modifier_frais(
     .bind(f.montant_devise)
     .bind(&f.code_devise)
     .bind(f.cours_change)
+    .bind(&f.cle_repartition)
+    .bind(&f.motif_cle)
     .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| AppError::Introuvable(format!("frais {id}")))?;
-    if let Some(c) = &f.cibles {
-        poser_cibles(&mut tx, &id, c).await?;
-    }
-    metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    .await?;
+    trouve.ok_or_else(|| AppError::Introuvable(format!("frais {id}")))?;
+    poser_lignes(&mut tx, &id, &f).await?;
     tx.commit().await?;
     Ok(Json(json!({ "id_ligne_frais": id })))
 }
@@ -1362,16 +1443,197 @@ pub async fn supprimer_frais(
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let id_dossier: String = sqlx::query_scalar(
+    // Un brouillon neuf seulement : une fiche validee, ou qui porte une
+    // allocation archivee (issue de la migration), garde sa trace (la base).
+    let supprime: Option<String> = sqlx::query_scalar(
         "DELETE FROM dossier_lignes_frais WHERE id_ligne_frais = $1 RETURNING id_dossier",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| AppError::Introuvable(format!("frais {id}")))?;
-    metier::recalculer_repartition(&mut tx, &id_dossier).await?;
+    .await?;
+    supprime.ok_or_else(|| AppError::Introuvable(format!("frais {id}")))?;
     tx.commit().await?;
     Ok(Json(json!({ "supprime": id })))
+}
+
+// ============================================================================
+// Les fiches de frais (12/10/2026) : apercu, validation, correction
+// ============================================================================
+
+/// `POST /api/import/frais/{id}/apercu` — LE MEME CALCUL QUE LA VALIDATION,
+/// annule ensuite : l'allocation ligne par ligne (base, %, theorique, final),
+/// ce qui s'appliquerait au stock present et au consomme, et les blocages.
+/// Rien n'est ecrit. Droit ECRIRE : celui qui prepare la fiche la verifie.
+pub async fn apercu_fiche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    corps: Option<Json<metier::DecisionFiche>>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
+    let decision = corps.map(|Json(d)| d).unwrap_or_default();
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let mut v = metier::valider_fiche(&mut tx, &user, &id, &decision).await?;
+    tx.rollback().await?;
+    v["apercu"] = json!(true);
+    user.masquer(&state.db, IMPORT, &mut v).await?;
+    Ok(Json(v))
+}
+
+/// `POST /api/import/frais/{id}/valider` — la decision devient effective :
+/// allocation figee, application a ce qui est deja recu. Droit VALIDER.
+pub async fn valider_fiche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    corps: Option<Json<metier::DecisionFiche>>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let decision = corps.map(|Json(d)| d).unwrap_or_default();
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let mut v = metier::valider_fiche(&mut tx, &user, &id, &decision).await?;
+    tx.commit().await?;
+    user.masquer(&state.db, IMPORT, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct MotifSaisie {
+    motif: String,
+}
+
+/// `POST /api/import/frais/{id}/brouillon` — une fiche validee dont RIEN n'est
+/// applique revient en brouillon (nouvelle version, l'ancienne archivee).
+/// Droit VALIDER, motif obligatoire.
+pub async fn remettre_fiche_en_brouillon(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(m): Json<MotifSaisie>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let v = metier::remettre_en_brouillon(&mut tx, &user, &id, &m.motif).await?;
+    tx.commit().await?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct RectificationSaisie {
+    montant_devise: f64,
+    motif: Option<String>,
+    numero_piece: Option<String>,
+}
+
+/// `POST /api/import/frais/{id}/rectifier` — une fiche RECTIFICATIVE, en
+/// brouillon, liee a l'originale : l'originale n'est jamais reecrite.
+/// Droit VALIDER (un retour sur une valorisation), motif et piece obligatoires.
+pub async fn rectifier_fiche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(r): Json<RectificationSaisie>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let v = metier::rectifier_fiche(
+        &mut tx, &user, &id, r.montant_devise,
+        r.motif.as_deref().unwrap_or(""), r.numero_piece.as_deref().unwrap_or(""),
+    ).await?;
+    tx.commit().await?;
+    Ok(Json(v))
+}
+
+/// `GET /api/import/frais/{id}/historique` — toute la vie d'une fiche : ses
+/// versions d'allocation (archivees comprises), ses applications au journal,
+/// ses rectificatives, et l'audit de ses decisions.
+pub async fn historique_fiche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Lire).await?;
+    let db = &state.db;
+    let allocations = sqlx::query(
+        "SELECT r.version, r.id_article_dossier, l.code_reference, r.base_repartition, r.pourcentage,
+                r.montant_theorique, r.montant_alloue_dhs,
+                (r.version = x.version AND (x.statut IS NULL OR x.statut IN ('VALIDE', 'APPLIQUE'))) AS en_vigueur
+           FROM lignes_frais_repartition r
+           JOIN dossier_lignes_frais x ON x.id_ligne_frais = r.id_ligne_frais
+           LEFT JOIN import_facture_lignes l ON l.id_ligne = r.id_article_dossier
+          WHERE r.id_ligne_frais = $1
+          ORDER BY r.version DESC, l.code_reference",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+    let journal = sqlx::query(
+        "SELECT j.date_ajustement, j.type_operation, j.nature, j.code_reference, j.code_magasin,
+                j.quantite_kg, j.cump_avant, j.cump_apres, j.montant_dhs, j.motif,
+                r.numero AS numero_reception, u.login AS par
+           FROM import_ajustements_cump j
+           LEFT JOIN import_receptions r ON r.id_reception = j.id_reception
+           LEFT JOIN utilisateur u ON u.id_utilisateur = j.id_utilisateur
+          WHERE j.id_ligne_frais = $1
+          ORDER BY j.date_ajustement, j.code_reference, j.nature DESC, j.code_magasin",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+    let rectificatives = sqlx::query(
+        "SELECT id_ligne_frais, montant_dhs, statut AS statut_fiche, motif_rectification, numero_piece, date_creation
+           FROM dossier_lignes_frais WHERE id_ligne_frais_origine = $1 ORDER BY date_creation",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+    let decisions = sqlx::query(
+        "SELECT a.date_operation, a.operation, a.anciennes_valeurs, a.nouvelles_valeurs,
+                COALESCE(u.login, a.id_utilisateur) AS par
+           FROM audit_log a LEFT JOIN utilisateur u ON u.id_utilisateur = a.id_utilisateur
+          WHERE a.table_concernee = 'dossier_lignes_frais' AND a.id_enregistrement = $1
+          ORDER BY a.date_operation",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+    let mut v = json!({
+        "id_ligne_frais": id,
+        "allocations": lignes_en_json(&allocations),
+        "journal": lignes_en_json(&journal),
+        "rectificatives": lignes_en_json(&rectificatives),
+        "decisions": lignes_en_json(&decisions),
+    });
+    user.masquer(db, IMPORT, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct ResteSaisie {
+    choix: String,
+    motif: String,
+}
+
+/// `POST /api/import/lignes/{id}/reste-frais` — LA DECISION AU SOLDE d'une
+/// ligne : son reste de frais va aux kilos recus, ou au journal des ecarts.
+/// Droit VALIDER, motif obligatoire.
+pub async fn decider_reste_frais(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id_ligne): Path<String>,
+    Json(r): Json<ResteSaisie>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, IMPORT, Action::Valider).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let mut v = metier::decider_reste(&mut tx, &user, &id_ligne, &r.choix, &r.motif).await?;
+    tx.commit().await?;
+    user.masquer(&state.db, IMPORT, &mut v).await?;
+    Ok(Json(v))
 }
 
 // ============================================================================

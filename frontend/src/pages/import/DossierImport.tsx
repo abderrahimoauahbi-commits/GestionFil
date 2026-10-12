@@ -15,10 +15,10 @@
  */
 import { CoutRevientReel } from './CoutRevientReel'
 import { AvoirDossier } from './AvoirDossier'
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { ChevronRight, Lock, Plus, Save, ShieldCheck, Target, Trash2, ArrowLeft } from 'lucide-react'
+import { ChevronRight, History, Lock, Plus, Save, ShieldCheck, Target, Trash2, ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
@@ -44,12 +44,16 @@ import { CiblesPanneau, CloturePanneau, echec, nombre, Tuile, useEnregistrerTout
 import { PiecesDossier } from './PiecesDossier'
 import { EngagementsDossier } from './EngagementsDossier'
 import {
+  LIBELLE_CLE,
+  LIBELLE_FICHE,
   LIBELLE_RECEPTION,
-  METHODE_REPARTITION,
   TON_RECEPTION,
+  type ApercuFiche,
+  type CleRepartition,
   type DossierComplet,
   type Frais,
   type ParametreFrais,
+  type StatutFiche,
 } from './types'
 
 const MODULE = 'IMPORT'
@@ -176,8 +180,8 @@ export function DossierImport() {
       {clos && (
         <Alerte ton="succes">
           Clôturé le {fmt.date(dossier.date_cloture)}
-          {dossier.cloture_par && ` par ${dossier.cloture_par}`} : les frais ont rejoint le CUMP, le
-          dossier est en lecture seule.
+          {dossier.cloture_par && ` par ${dossier.cloture_par}`} : le dossier est figé. Un frais tardif s’ajoute
+          en fiche, avec motif, et s’applique au stock restant.
         </Alerte>
       )}
 
@@ -208,7 +212,7 @@ export function DossierImport() {
           </Onglet>
         </OngletsListe>
         <OngletContenu value="frais" forceMount className="mt-3 data-[state=inactive]:hidden">
-          <FraisDossier d={d} ecrire={ecrire} postCloture={clos && droits.peutValider} signaler={tout.signaler} />
+          <FraisDossier d={d} ecrire={ecrire} valider={droits.peutValider} postCloture={clos && droits.peutValider} signaler={tout.signaler} />
         </OngletContenu>
         <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
           <FacturesDossier d={d} ecrire={ecrire} />
@@ -389,23 +393,42 @@ function Informations({
 }
 
 // ============================================================================
-// 2. Frais du dossier — saisis dans le tableau
+// 2. Frais du dossier — des FICHES saisies dans le tableau (12/10/2026)
 // ============================================================================
+//
+// TROIS NIVEAUX. Le type de frais PROPOSE une cle et dit celles qui sont
+// permises ; l'utilisateur DECIDE (cle, lignes, montants, motif) ; le serveur
+// calcule, controle et applique. L'ecran ne calcule rien de definitif : chaque
+// chiffre de l'apercu vient du serveur, le meme calcul que la validation.
+//
+// Une fiche vit en trois etats : BROUILLON (libre), VALIDEE (allocation figee,
+// appliquee a ce qui est recu), APPLIQUEE (rien ne reste). Une fiche validee
+// ne se modifie plus : on la corrige par une rectificative.
+
+type VueFiche = 'apercu' | 'brouillon' | 'rectifier' | 'historique'
+
+const TON_FICHE: Record<StatutFiche, 'neutre' | 'alerte' | 'succes'> = {
+  BROUILLON: 'neutre',
+  VALIDE: 'alerte',
+  APPLIQUE: 'succes',
+}
+
+const dh = (v: number | null | undefined) => (v === undefined || v === null ? '—' : fmt.nombre(v, 2))
 
 function FraisDossier({
-  d, ecrire, postCloture, signaler,
-}: { d: DossierComplet; ecrire: boolean; postCloture: boolean; signaler?: Signaler }) {
-  /* LA FACTURE TARDIVE (regle 5, 09/10/2026) : sur un dossier clos, le frais
-     s'ajoute « post-cloture », avec un motif ; il va au stock restant du
-     dossier, la part consommee en ecart, sans rouvrir le dossier. */
+  d, ecrire, valider, postCloture, signaler,
+}: { d: DossierComplet; ecrire: boolean; valider: boolean; postCloture: boolean; signaler?: Signaler }) {
+  /* LE FRAIS TARDIF (regle 5, 09/10/2026) : sur un dossier clos, une fiche
+     nouvelle s'ajoute avec un motif ; elle se valide et s'applique comme les
+     autres, sans rouvrir le dossier ni rien recalculer d'ancien. */
   const [motifPost, setMotifPost] = useState('')
-  const [apercuPost, setApercuPost] = useState<{ ecart_stock_dhs: number; ecart_consomme_dhs: number } | null>(null)
   const saisie = ecrire || postCloture
   const idDossier = d.dossier.id_dossier
   const rafraichir = useRafraichir(idDossier)
   const confirmation = useConfirmation()
   const [cible, setCible] = useState<Frais | null>(null)
-  const vide = { id_frais: '', libelle: '', numero_piece: '', code_devise: 'MAD', cours_change: '1', montant_devise: '' }
+  const [ouverte, setOuverte] = useState<{ id: string; vue: VueFiche } | null>(null)
+  const vide = { id_frais: '', libelle: '', numero_piece: '', code_devise: 'MAD', cours_change: '1', montant_devise: '', cle: '', motif_cle: '' }
   const [n, setN] = useState(vide)
 
   const qParam = useQuery({
@@ -425,6 +448,9 @@ function FraisDossier({
     return [...m.entries()]
   }, [qParam.data])
   const typeChoisi = qParam.data?.find((p) => p.id_frais === n.id_frais)
+  // La cle PROPOSEE par le type, tant que l'utilisateur n'en a pas choisi une autre.
+  const cleNouvelle = (n.cle || typeChoisi?.methode_repartition || '') as CleRepartition | ''
+  const cleEcartee = !!typeChoisi && !!cleNouvelle && cleNouvelle !== typeChoisi.methode_repartition
   const montantDh = nombre(n.montant_devise) * (n.code_devise === 'MAD' ? 1 : nombre(n.cours_change))
 
   /* LE COURS DU JOUR EST PROPOSE (06/10/2026), comme sur les factures : un frais
@@ -451,42 +477,23 @@ function FraisDossier({
     montant_devise: nombre(n.montant_devise),
     code_devise: n.code_devise,
     cours_change: n.code_devise === 'MAD' ? 1 : nombre(n.cours_change),
+    cle_repartition: cleNouvelle || null,
+    motif_cle: cleEcartee ? n.motif_cle.trim() : null,
     taux_confirme: confirme === true,
-  })
-  const apercuPostCloture = useMutation({
-    mutationFn: () =>
-      api.post<{ ecart_stock_dhs: number; ecart_consomme_dhs: number }>(
-        `/api/import/dossiers/${idDossier}/frais-post-cloture`,
-        { ...corpsFrais(true), motif: motifPost.trim(), simuler: true },
-      ),
-    onSuccess: setApercuPost,
-    onError: echec,
   })
   const ajouter = useMutation({
     mutationFn: (confirme?: boolean) =>
       postCloture
-        ? api.post(`/api/import/dossiers/${idDossier}/frais-post-cloture`, {
-            ...corpsFrais(confirme),
-            motif: motifPost.trim(),
-          })
+        ? api.post(`/api/import/dossiers/${idDossier}/frais-post-cloture`, { ...corpsFrais(confirme), motif: motifPost.trim() })
         : api.post(`/api/import/dossiers/${idDossier}/frais`, corpsFrais(confirme)),
     onSuccess: () => {
-      if (postCloture) {
-        toast.success('Frais post-clôture enregistré — réparti sur le stock restant du dossier')
-        setN(vide)
-        setMotifPost('')
-        setApercuPost(null)
-        rafraichir()
-        return
-      }
       toast.success(
         !typeChoisi?.inclus_dans_cout
-          ? 'Frais ajouté — hors coût de revient'
-          : typeChoisi.commun
-            ? `Frais ajouté — réparti ${METHODE_REPARTITION[typeChoisi.methode_repartition].toLowerCase()}`
-            : 'Frais ajouté — désignez les lignes qu’il concerne (icône cible)',
+          ? 'Fiche ajoutée en brouillon — hors coût de revient'
+          : 'Fiche ajoutée en brouillon — vérifiez l’aperçu de sa répartition, puis validez',
       )
       setN(vide)
+      setMotifPost('')
       rafraichir()
     },
     onError: (e: unknown) => {
@@ -506,7 +513,7 @@ function FraisDossier({
   const supprimer = useMutation({
     mutationFn: (idFrais: string) => api.delete(`/api/import/frais/${idFrais}`),
     onSuccess: () => {
-      toast.success('Frais supprimé — répartition recalculée')
+      toast.success('Fiche supprimée')
       rafraichir()
     },
     onError: echec,
@@ -514,10 +521,12 @@ function FraisDossier({
 
   const inclus = d.frais.filter((f) => f.inclus_dans_cout === 1).reduce((t, f) => t + f.montant_dhs, 0)
   const hors = d.frais.filter((f) => f.inclus_dans_cout === 0).reduce((t, f) => t + f.montant_dhs, 0)
+  const applique = d.frais.reduce((t, f) => t + (f.montant_applique_dhs ?? 0), 0)
   const complet =
     n.id_frais &&
     nombre(n.montant_devise) > 0 &&
     (n.code_devise === 'MAD' || nombre(n.cours_change) > 0) &&
+    (!cleEcartee || n.motif_cle.trim().length >= 5) &&
     (!postCloture || motifPost.trim().length >= 5)
   const maj = (k: keyof typeof n) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setN((x) => ({
@@ -525,91 +534,177 @@ function FraisDossier({
       [k]: e.target.value,
       // Passer a une devise vide le cours : celui du jour vient s'y proposer.
       ...(k === 'code_devise' ? { cours_change: e.target.value === 'MAD' ? '1' : '' } : {}),
+      // Un autre type : sa cle proposee reprend la main.
+      ...(k === 'id_frais' ? { cle: '', motif_cle: '' } : {}),
     }))
-  // Le frais en cours de saisie, complet, part avec « Enregistrer tout ».
+  // La fiche en cours de saisie, complete, part avec « Enregistrer tout ».
   useEffect(() => {
-    signaler?.('frais', complet && ecrire ? { libelle: 'nouveau frais', enregistrer: () => ajouter.mutateAsync(false) } : null)
+    signaler?.('frais', complet && ecrire ? { libelle: 'nouvelle fiche de frais', enregistrer: () => ajouter.mutateAsync(false) } : null)
   })
   useEffect(() => () => signaler?.('frais', null), [signaler])
+
+  const basculer = (id: string, vue: VueFiche) =>
+    setOuverte((o) => (o && o.id === id && o.vue === vue ? null : { id, vue }))
+  const colonnes = saisie || valider ? 8 : 7
 
   return (
     <Carte>
       <CarteEntete>
         <CarteTitre>Frais du dossier</CarteTitre>
         <span className="text-[11.5px] text-attenue-texte">
-          Chaque type de frais dit sa pièce justificative et sa méthode de répartition.
+          Montant HT. Le type propose une clé ; vous la confirmez ou en choisissez une autre permise, avec un motif.
         </span>
       </CarteEntete>
       <CarteCorps className="p-0">
         <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-          <table className="w-full min-w-[60rem] text-[12.5px]">
+          <table className="w-full text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
-                <th className={cn(th, 'w-52 text-left')}>Type de frais</th>
+                <th className={cn(th, 'text-left')}>Type de frais</th>
                 <th className={cn(th, 'text-left')}>Précision</th>
-                <th className={cn(th, 'w-28 text-left')}>N° pièce</th>
-                <th className={cn(th, 'w-28 text-left')}>Devise</th>
-                <th className={cn(th, 'w-24 text-right')}>Cours</th>
-                <th className={cn(th, 'w-28 text-right')}>Montant</th>
-                <th className={cn(th, 'w-28 text-right')}>Montant DH</th>
-                <th className={cn(th, 'w-36 text-left')}>Coût / répartition</th>
-                {ecrire && <th className={cn(th, 'w-24')} />}
+                <th className={cn(th, 'text-left')}>N° pièce</th>
+                <th className={cn(th, 'text-right')}>Montant</th>
+                <th className={cn(th, 'text-right')}>Montant DH</th>
+                <th className={cn(th, 'text-left')}>Fiche · clé</th>
+                <th className={cn(th, 'text-right')}>Appliqué · reste</th>
+                {(saisie || valider) && <th className={th} />}
               </tr>
             </thead>
             <tbody>
-              {d.frais.map((f) => (
-                <tr key={f.id_ligne_frais} className={cn('border-b border-bordure/60', !f.inclus_dans_cout && 'text-attenue-texte')}>
-                  <td className={cn(td, 'font-medium')}>{f.frais_libelle}</td>
-                  <td className={td}>{f.libelle ?? '—'}</td>
-                  <td className={cn(td, 'tabular-nums')}>{f.numero_piece ?? '—'}</td>
-                  <td className={td}>{f.code_devise}</td>
-                  <td className={cn(td, 'text-right tabular-nums')}>{f.code_devise === 'MAD' ? '—' : fmt.nombre(f.cours_change, 4)}</td>
-                  <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(f.montant_devise, 2)}</td>
-                  <td className={cn(td, 'text-right font-medium tabular-nums')}>{fmt.nombre(f.montant_dhs, 2)}</td>
-                  <td className={td}>
-                    {f.inclus_dans_cout ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Badge ton="succes">inclus</Badge>
-                        <span className="whitespace-nowrap text-[11.5px]">{f.cibles.length === 0 ? 'tout le dossier' : `${f.cibles.length} ligne(s)`}</span>
-                      </span>
-                    ) : (
-                      <Badge ton="neutre">hors coût</Badge>
-                    )}
-                  </td>
-                  {ecrire && (
-                    <td className={td}>
-                      <div className="flex justify-end gap-0.5">
-                        {f.inclus_dans_cout === 1 && (
-                          <Bouton taille="icone-xs" variante="discret" title="Choisir les lignes qui portent ce frais"
-                            aria-label="Cibler des lignes" onClick={() => setCible(f)}>
-                            <Target />
-                          </Bouton>
+              {d.frais.map((f) => {
+                const brouillon = f.statut_fiche === 'BROUILLON'
+                const validee = f.statut_fiche === 'VALIDE' || f.statut_fiche === 'APPLIQUE'
+                const rienApplique = Math.abs(f.montant_applique_dhs ?? 0) < 0.005
+                const vue = ouverte?.id === f.id_ligne_frais ? ouverte.vue : null
+                return (
+                  <Fragment key={f.id_ligne_frais}>
+                    <tr className={cn('border-b border-bordure/60', !f.inclus_dans_cout && 'text-attenue-texte', vue && 'bg-attenue/30')}>
+                      <td className={cn(td, 'font-medium')}>
+                        {f.frais_libelle}
+                        {f.id_ligne_frais_origine && <div className="text-[11px] font-normal text-attenue-texte">Rectificative — {f.motif_rectification}</div>}
+                        {f.post_cloture === 1 && <div className="text-[11px] font-normal text-attenue-texte">Frais tardif — {f.motif_post_cloture}</div>}
+                      </td>
+                      <td className={td}>{f.libelle ?? '—'}</td>
+                      <td className={cn(td, 'tabular-nums')}>{f.numero_piece ?? '—'}</td>
+                      <td className={cn(td, 'text-right tabular-nums')}>
+                        {fmt.nombre(f.montant_devise, 2)} {f.code_devise}
+                        {f.code_devise !== 'MAD' && <div className="text-[11px] text-attenue-texte">× {fmt.nombre(f.cours_change, 4)}</div>}
+                      </td>
+                      <td className={cn(td, 'text-right font-medium tabular-nums')}>{fmt.nombre(f.montant_dhs, 2)}</td>
+                      <td className={td}>
+                        {f.statut_fiche ? (
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            <Badge ton={TON_FICHE[f.statut_fiche]}>{LIBELLE_FICHE[f.statut_fiche]}</Badge>
+                            {f.inclus_dans_cout ? (
+                              <span className="text-[11.5px]" title={f.motif_cle ?? undefined}>
+                                {f.cle_repartition ? LIBELLE_CLE[f.cle_repartition] : '—'}
+                                {f.cle_repartition && f.cle_repartition !== f.cle_proposee && ' *'}
+                                {' · '}
+                                {f.cibles.length === 0 ? 'tout le dossier' : `${f.cibles.length} ligne(s)`}
+                              </span>
+                            ) : (
+                              <Badge ton="neutre">hors coût</Badge>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-[11.5px] text-attenue-texte" title="Porté à la clôture par l'ancien moteur ; conservé tel quel">
+                            Historique (clé non conservée)
+                          </span>
                         )}
-                        <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10"
-                          aria-label="Supprimer le frais"
-                          onClick={() =>
-                            confirmation.demander({
-                              titre: `Supprimer « ${f.frais_libelle} » ?`,
-                              destructif: true,
-                              libelleConfirmer: 'Supprimer',
-                              description: 'La répartition du dossier sera recalculée.',
-                              action: () => supprimer.mutate(f.id_ligne_frais),
-                            })
-                          }>
-                          <Trash2 />
-                        </Bouton>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
+                      </td>
+                      <td className={cn(td, 'text-right tabular-nums')}>
+                        {f.statut_fiche && f.inclus_dans_cout ? (
+                          <>
+                            {dh(f.montant_applique_dhs)}
+                            {Math.abs(f.reste_a_appliquer_dhs ?? 0) >= 0.005 && (
+                              <div className="text-[11px] text-alerte">reste {dh(f.reste_a_appliquer_dhs)}</div>
+                            )}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      {(saisie || valider) && (
+                        <td className={td}>
+                          <div className="flex flex-wrap justify-end gap-0.5">
+                            {f.statut_fiche && f.inclus_dans_cout === 1 && (brouillon || f.statut_fiche) && (
+                              <Bouton taille="sm" variante={vue === 'apercu' ? 'primaire' : 'contour'}
+                                onClick={() => basculer(f.id_ligne_frais, 'apercu')}>
+                                {brouillon ? 'Répartir' : 'Répartition'}
+                              </Bouton>
+                            )}
+                            {brouillon && f.inclus_dans_cout === 0 && valider && (
+                              <Bouton taille="sm" variante="contour" onClick={() => basculer(f.id_ligne_frais, 'apercu')}>
+                                Valider…
+                              </Bouton>
+                            )}
+                            {brouillon && saisie && f.inclus_dans_cout === 1 && (
+                              <Bouton taille="icone-xs" variante="discret" title="Choisir les lignes qui portent ce frais"
+                                aria-label="Cibler des lignes" onClick={() => setCible(f)}>
+                                <Target />
+                              </Bouton>
+                            )}
+                            {validee && valider && rienApplique && f.statut_fiche === 'VALIDE' && (
+                              <Bouton taille="sm" variante="discret" onClick={() => basculer(f.id_ligne_frais, 'brouillon')}>
+                                En brouillon…
+                              </Bouton>
+                            )}
+                            {validee && valider && !f.id_ligne_frais_origine && (
+                              <Bouton taille="sm" variante="discret" onClick={() => basculer(f.id_ligne_frais, 'rectifier')}>
+                                Rectifier…
+                              </Bouton>
+                            )}
+                            {f.statut_fiche && (
+                              <Bouton taille="icone-xs" variante="discret" title="Historique de la fiche" aria-label="Historique de la fiche"
+                                onClick={() => basculer(f.id_ligne_frais, 'historique')}>
+                                <History />
+                              </Bouton>
+                            )}
+                            {brouillon && saisie && (
+                              <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10"
+                                aria-label="Supprimer la fiche"
+                                onClick={() =>
+                                  confirmation.demander({
+                                    titre: `Supprimer « ${f.frais_libelle} » ?`,
+                                    destructif: true,
+                                    libelleConfirmer: 'Supprimer',
+                                    description: 'Une fiche en brouillon n’a rien alloué ni appliqué.',
+                                    action: () => supprimer.mutate(f.id_ligne_frais),
+                                  })
+                                }>
+                                <Trash2 />
+                              </Bouton>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                    {vue && (
+                      <tr className="border-b border-bordure bg-attenue/20">
+                        <td colSpan={colonnes} className="px-3 py-3">
+                          {vue === 'apercu' && (
+                            <ApercuFicheVue f={f} d={d} saisie={saisie} valider={valider} surFin={() => { setOuverte(null); rafraichir() }} />
+                          )}
+                          {vue === 'brouillon' && (
+                            <RetourBrouillon f={f} surFin={() => { setOuverte(null); rafraichir() }} />
+                          )}
+                          {vue === 'rectifier' && (
+                            <Rectification f={f} surFin={() => { setOuverte(null); rafraichir() }} />
+                          )}
+                          {vue === 'historique' && <HistoriqueFiche f={f} />}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
 
-              {/* LA LIGNE DE SAISIE, a la suite des frais deja saisis : on
-                  remplit comme une ligne du classeur, et « Ajouter ». */}
+              {/* LA LIGNE DE SAISIE, a la suite des fiches : on remplit comme une
+                  ligne du classeur, et « Ajouter ». La fiche nait en brouillon. */}
               {saisie && (
-                <tr className="border-b border-bordure/60 bg-attenue/25">
+                <tr className="border-b border-bordure/60 bg-attenue/25 align-top">
                   <td className={td}>
-                    <Selecteur className="h-7 w-full min-w-[13rem]" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
+                    <Selecteur className="h-7 w-full min-w-[12rem]" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
                       <option value="">Nouveau frais…</option>
                       {groupes.map(([cat, liste]) => (
                         <optgroup key={cat} label={cat}>
@@ -626,23 +721,23 @@ function FraisDossier({
                       <div className="mt-0.5 text-[11px] text-attenue-texte">{typeChoisi.piece_justificative}</div>
                     )}
                   </td>
-                  <td className={td}><Champ className="h-7 min-w-[9rem]" aria-label="Libellé du frais" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
-                  <td className={td}><Champ className="h-7" aria-label="N° de pièce" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
+                  <td className={td}><Champ className="h-7 min-w-[8rem]" aria-label="Libellé du frais" value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
+                  <td className={td}><Champ className="h-7 min-w-[6rem]" aria-label="N° de pièce" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
                   <td className={td}>
-                    <Selecteur className="h-7 min-w-[6.5rem] pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>
-                      {(qDevises.data ?? [{ code_devise: 'MAD' }]).map((x) => (
-                        <option key={x.code_devise}>{x.code_devise}</option>
-                      ))}
-                    </Selecteur>
-                  </td>
-                  <td className={td}>
-                    <Champ className="h-7 text-right" inputMode="decimal" aria-label="Cours de change" value={n.cours_change}
-                      onChange={maj('cours_change')} disabled={n.code_devise === 'MAD'} />
-                  </td>
-                  <td className={td}>
-                    <Champ className="h-7 text-right" inputMode="decimal" aria-label="Montant en devise" value={n.montant_devise}
-                      onChange={maj('montant_devise')} placeholder="0,00"
-                      onKeyDown={(e) => e.key === 'Enter' && complet && ajouter.mutate(false)} />
+                    <div className="flex gap-1">
+                      <Champ className="h-7 w-24 text-right" inputMode="decimal" aria-label="Montant HT" value={n.montant_devise}
+                        onChange={maj('montant_devise')} placeholder="0,00"
+                        onKeyDown={(e) => e.key === 'Enter' && complet && ajouter.mutate(false)} />
+                      <Selecteur className="h-7 w-[5.5rem] pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>
+                        {(qDevises.data ?? [{ code_devise: 'MAD' }]).map((x) => (
+                          <option key={x.code_devise}>{x.code_devise}</option>
+                        ))}
+                      </Selecteur>
+                    </div>
+                    {fraisEnDevise && (
+                      <Champ className="mt-1 h-7 w-full text-right" inputMode="decimal" aria-label="Cours de change" value={n.cours_change}
+                        onChange={maj('cours_change')} placeholder="Cours" />
+                    )}
                   </td>
                   <td className={cn(td, 'text-right tabular-nums text-attenue-texte')}>
                     {montantDh > 0 ? fmt.nombre(montantDh, 2) : '—'}
@@ -651,8 +746,18 @@ function FraisDossier({
                     {typeChoisi &&
                       (typeChoisi.inclus_dans_cout ? (
                         <>
-                          {METHODE_REPARTITION[typeChoisi.methode_repartition].toLowerCase()} ·{' '}
-                          {typeChoisi.commun ? 'tout le dossier' : 'lignes à désigner'}
+                          <Selecteur className="h-7 w-full min-w-[9rem]" aria-label="Clé de répartition" value={cleNouvelle}
+                            onChange={maj('cle')}>
+                            {(typeChoisi.cles_autorisees ?? [typeChoisi.methode_repartition]).map((c) => (
+                              <option key={c} value={c}>
+                                {LIBELLE_CLE[c]}{c === typeChoisi.methode_repartition ? ' (proposée)' : ''}
+                              </option>
+                            ))}
+                          </Selecteur>
+                          {cleEcartee && (
+                            <Champ className="mt-1 h-7 w-full" aria-label="Motif de la clé" value={n.motif_cle}
+                              onChange={maj('motif_cle')} placeholder="Pourquoi cette clé (obligatoire)" />
+                          )}
                         </>
                       ) : (
                         <span className="text-alerte">
@@ -660,6 +765,7 @@ function FraisDossier({
                         </span>
                       ))}
                   </td>
+                  <td className={td} />
                   <td className={td}>
                     <Bouton taille="sm" disabled={!complet} chargement={ajouter.isPending} onClick={() => ajouter.mutate(false)}>
                       <Plus />
@@ -671,45 +777,459 @@ function FraisDossier({
             </tbody>
             <tfoot>
               <tr className="bg-attenue/40 font-semibold">
-                <td className={td} colSpan={6}>Frais inclus dans le coût</td>
+                <td className={td} colSpan={4}>Frais inclus dans le coût</td>
                 <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(inclus, 2)}</td>
-                <td className={cn(td, 'text-[11.5px] font-normal text-attenue-texte')} colSpan={ecrire ? 2 : 1}>
+                <td className={cn(td, 'text-[11.5px] font-normal text-attenue-texte')}>
                   + {fmt.nombre(hors, 2)} DH hors coût (TVA)
                 </td>
+                <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(applique, 2)}</td>
+                {(saisie || valider) && <td className={td} />}
               </tr>
             </tfoot>
           </table>
         </div>
       </CarteCorps>
       {postCloture && (
-        <CarteCorps className="space-y-2 border-t border-bordure">
-          <Etiq obligatoire htmlFor="ch-dossierimport-9">Frais post-clôture : quelle facture arrive après la clôture ?</Etiq>
-          <div className="flex flex-wrap items-center gap-2">
-            <Champ id="ch-dossierimport-9"
-              className="min-w-0 flex-1"
-              value={motifPost}
-              onChange={(e) => {
-                setMotifPost(e.target.value)
-                setApercuPost(null)
-              }}
-              placeholder="Ex. : facture du transitaire reçue le 12/10"
-            />
-            <Bouton variante="contour" disabled={!complet} chargement={apercuPostCloture.isPending}
-              onClick={() => apercuPostCloture.mutate()}>
-              Aperçu
-            </Bouton>
-          </div>
-          {apercuPost && (
-            <p className="m-0 text-[12.5px]">
-              {fmt.nombre(apercuPost.ecart_stock_dhs, 2)} DH au stock restant du dossier,{' '}
-              {fmt.nombre(apercuPost.ecart_consomme_dhs, 2)} DH en écart (kilos déjà consommés).
-            </p>
-          )}
+        <CarteCorps className="space-y-1 border-t border-bordure">
+          <Etiq obligatoire htmlFor="ch-dossierimport-9">Frais tardif : quelle facture arrive après la clôture ?</Etiq>
+          <Champ id="ch-dossierimport-9"
+            value={motifPost}
+            onChange={(e) => setMotifPost(e.target.value)}
+            placeholder="Ex. : facture du transitaire reçue le 12/10"
+          />
+          <p className="m-0 text-[11.5px] text-attenue-texte">
+            La fiche s’ajoute en brouillon ; son aperçu montre ce qui ira au stock restant et au journal des écarts.
+          </p>
         </CarteCorps>
       )}
+      <RestesAuSolde d={d} valider={valider} surFin={rafraichir} />
       <CiblesPanneau idDossier={idDossier} frais={cible} lignes={d.lignes} surFermer={() => setCible(null)} />
       {confirmation.element}
     </Carte>
+  )
+}
+
+/** L'APERCU — le meme calcul que la validation, cote serveur, annule. La cle
+    et son motif se decident ici ; en MANUEL, les montants ligne par ligne. */
+function ApercuFicheVue({
+  f, d, saisie, valider, surFin,
+}: { f: Frais; d: DossierComplet; saisie: boolean; valider: boolean; surFin: () => void }) {
+  const brouillon = f.statut_fiche === 'BROUILLON'
+  const [cle, setCle] = useState<CleRepartition>(f.cle_repartition ?? f.cle_proposee)
+  const [motif, setMotif] = useState(f.motif_cle ?? '')
+  const ecartee = cle !== f.cle_proposee
+  const lignesVisees = d.lignes.filter((l) => f.cibles.length === 0 || f.cibles.includes(l.id_ligne))
+  const [montants, setMontants] = useState<Record<string, string>>(() =>
+    Object.fromEntries(d.lignes.map((l) => [l.id_ligne, f.montants_saisis[l.id_ligne] !== undefined ? String(f.montants_saisis[l.id_ligne]) : ''])),
+  )
+  const decision = { cle_repartition: cle, motif_cle: ecartee ? motif.trim() : null }
+
+  const apercu = useMutation({
+    mutationFn: () =>
+      brouillon
+        ? api.post<ApercuFiche>(`/api/import/frais/${f.id_ligne_frais}/apercu`, decision)
+        : Promise.resolve(null),
+    onError: echec,
+  })
+  const enregistrerMontants = useMutation({
+    mutationFn: () =>
+      api.patch(`/api/import/frais/${f.id_ligne_frais}`, {
+        cle_repartition: 'MANUEL',
+        motif_cle: ecartee ? motif.trim() : '',
+        montants: Object.entries(montants)
+          .filter(([, v]) => v.trim() !== '')
+          .map(([id_ligne, v]) => ({ id_ligne, montant: nombre(v) })),
+      }),
+    onSuccess: () => {
+      toast.success('Montants enregistrés')
+      apercu.mutate()
+    },
+    onError: echec,
+  })
+  const validerFiche = useMutation({
+    mutationFn: () => api.post<ApercuFiche>(`/api/import/frais/${f.id_ligne_frais}/valider`, decision),
+    onSuccess: (r) => {
+      toast.success(
+        r.statut_fiche === 'APPLIQUE'
+          ? 'Fiche validée et entièrement appliquée'
+          : `Fiche validée — ${fmt.nombre(r.montant_applique_dhs ?? 0, 2)} DH appliqués, le reste suivra les réceptions`,
+      )
+      for (const a of r.avis) toast.warning(a)
+      surFin()
+    },
+    onError: echec,
+  })
+  // L'apercu se calcule a l'ouverture, puis a chaque changement de cle.
+  useEffect(() => {
+    if (brouillon && f.inclus_dans_cout === 1) apercu.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cle])
+
+  const a = apercu.data
+  const motifManquant = ecartee && motif.trim().length < 5
+  const sommeSaisie = Object.values(montants).reduce((t, v) => t + nombre(v), 0)
+
+  if (!brouillon) {
+    // Une fiche validee : son allocation figee, lue telle qu'enregistree.
+    const allocation = d.repartition.filter((r) => r.id_ligne_frais === f.id_ligne_frais)
+    return (
+      <div className="space-y-2">
+        <div className="text-[12px] text-attenue-texte">
+          Allocation figée le {fmt.date(f.date_validation)}{f.valide_par && ` par ${f.valide_par}`} —{' '}
+          {f.cle_repartition ? LIBELLE_CLE[f.cle_repartition] : '—'}
+          {f.motif_cle && ` (motif : ${f.motif_cle})`}
+        </div>
+        <TableAllocation
+          lignes={allocation.map((r) => {
+            const l = d.lignes.find((x) => x.id_ligne === r.id_article_dossier)
+            return {
+              id_ligne: r.id_article_dossier,
+              code_reference: l?.code_reference ?? null,
+              designation: l?.designation ?? null,
+              type_ligne: l?.type_ligne ?? 'ERP',
+              quantite: l?.quantite ?? 0,
+              valeur_dhs: l?.valeur_achat_dhs,
+              poids_net_kg: l?.poids_net_kg ?? null,
+              base_repartition: r.base_repartition ?? undefined,
+              pourcentage: r.pourcentage,
+              montant_theorique: r.montant_theorique ?? undefined,
+              montant_alloue_dhs: r.montant_alloue_dhs,
+            }
+          })}
+          montant={f.montant_dhs}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {f.inclus_dans_cout === 1 && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <Etiq htmlFor={`cle-${f.id_ligne_frais}`}>Clé de répartition</Etiq>
+            <Selecteur id={`cle-${f.id_ligne_frais}`} className="h-8 min-w-[12rem]" value={cle} disabled={!saisie}
+              onChange={(e) => setCle(e.target.value as CleRepartition)}>
+              {f.cles_autorisees.map((c) => (
+                <option key={c} value={c}>{LIBELLE_CLE[c]}{c === f.cle_proposee ? ' (proposée)' : ''}</option>
+              ))}
+            </Selecteur>
+          </div>
+          {ecartee && (
+            <div className="min-w-[16rem] flex-1">
+              <Etiq obligatoire htmlFor={`motif-${f.id_ligne_frais}`}>Pourquoi pas la clé proposée ({LIBELLE_CLE[f.cle_proposee]}) ?</Etiq>
+              <Champ id={`motif-${f.id_ligne_frais}`} value={motif} onChange={(e) => setMotif(e.target.value)}
+                placeholder="Ex. : le fret facturé suit le poids, pas la valeur" />
+            </div>
+          )}
+          <Bouton variante="contour" chargement={apercu.isPending} onClick={() => apercu.mutate()}>Recalculer l’aperçu</Bouton>
+        </div>
+      )}
+
+      {cle === 'MANUEL' && f.inclus_dans_cout === 1 && (
+        <div className="space-y-1">
+          <div className="text-[12px] font-medium">Montant affecté à chaque ligne (la somme doit faire {fmt.nombre(f.montant_dhs, 2)} DH)</div>
+          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3">
+            {lignesVisees.map((l) => (
+              <label key={l.id_ligne} className="flex items-center gap-2 text-[12px]">
+                <span className="min-w-0 flex-1 truncate">{l.code_reference ?? l.designation}</span>
+                <Champ className="h-7 w-28 text-right" inputMode="decimal" aria-label={`Montant pour ${l.code_reference ?? l.designation}`}
+                  value={montants[l.id_ligne] ?? ''} disabled={!saisie}
+                  onChange={(e) => setMontants((m) => ({ ...m, [l.id_ligne]: e.target.value }))} />
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 text-[12px]">
+            <span className={cn('tabular-nums', Math.abs(sommeSaisie - f.montant_dhs) < 0.005 ? 'text-succes' : 'text-alerte')}>
+              Saisi : {fmt.nombre(sommeSaisie, 2)} / {fmt.nombre(f.montant_dhs, 2)} DH
+            </span>
+            {saisie && (
+              <Bouton taille="sm" variante="contour" disabled={motifManquant} chargement={enregistrerMontants.isPending}
+                onClick={() => enregistrerMontants.mutate()}>
+                Enregistrer les montants
+              </Bouton>
+            )}
+          </div>
+        </div>
+      )}
+
+      {a && a.capitalisable && <TableAllocation lignes={a.lignes} montant={a.montant_dhs} />}
+      {a && a.capitalisable && (
+        <div className="space-y-1 text-[12px]">
+          <div className={cn('font-medium', a.equilibre ? 'text-succes' : 'text-danger')}>
+            {a.equilibre ? '✓ Répartition équilibrée — total réparti = montant de la fiche' : 'Répartition déséquilibrée'}
+          </div>
+          {a.applications.length > 0 ? (
+            <div>
+              À la validation : {dh(a.montant_applique_dhs)} DH s’appliquent aux kilos déjà reçus
+              {' '}({a.applications.map((x) => `${x.code_reference}${x.reception ? ` — ${x.reception}` : ''} : ${dh(x.au_stock_dhs)} au stock, ${dh(x.consomme_dhs)} au consommé`).join(' ; ')}).
+              {Math.abs(a.reste_a_appliquer_dhs ?? 0) >= 0.005 && ` ${dh(a.reste_a_appliquer_dhs)} DH suivront les réceptions.`}
+            </div>
+          ) : (
+            <div className="text-attenue-texte">Rien n’est encore reçu : tout s’appliquera à mesure des réceptions.</div>
+          )}
+          {a.avis.map((x) => <div key={x} className="text-alerte">{x}</div>)}
+        </div>
+      )}
+      {f.inclus_dans_cout === 0 && (
+        <p className="m-0 text-[12px] text-attenue-texte">Frais hors coût : sa validation n’alloue ni n’applique rien au stock.</p>
+      )}
+
+      {valider && (
+        <div className="flex justify-end">
+          <Bouton disabled={motifManquant || (f.inclus_dans_cout === 1 && (!a || !a.equilibre))} chargement={validerFiche.isPending}
+            onClick={() => validerFiche.mutate()}>
+            <ShieldCheck />
+            Valider la fiche
+          </Bouton>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** La grille de l'allocation : on lit pourquoi chaque ligne recoit son montant. */
+function TableAllocation({ lignes, montant }: { lignes: ApercuFiche['lignes']; montant: number }) {
+  const total = lignes.reduce((t, l) => t + (l.montant_alloue_dhs ?? 0), 0)
+  const totalBase = lignes.reduce((t, l) => t + (l.base_repartition ?? 0), 0)
+  return (
+    <table className="w-full text-[12px]">
+      <thead>
+        <tr className="border-b border-bordure">
+          <th className={cn(th, 'text-left')}>Article</th>
+          <th className={cn(th, 'text-right')}>Valeur DH</th>
+          <th className={cn(th, 'text-right')}>Poids net kg</th>
+          <th className={cn(th, 'text-right')}>Base</th>
+          <th className={cn(th, 'text-right')}>%</th>
+          <th className={cn(th, 'text-right')}>Théorique</th>
+          <th className={cn(th, 'text-right')}>Final DH</th>
+        </tr>
+      </thead>
+      <tbody>
+        {lignes.map((l) => (
+          <tr key={l.id_ligne} className="border-b border-bordure/50">
+            <td className={td}>{l.code_reference ?? l.designation ?? '—'}</td>
+            <td className={cn(td, 'text-right tabular-nums')}>{dh(l.valeur_dhs)}</td>
+            <td className={cn(td, 'text-right tabular-nums')}>{l.poids_net_kg === null ? '—' : fmt.nombre(l.poids_net_kg, 2)}</td>
+            <td className={cn(td, 'text-right tabular-nums')}>{l.base_repartition === undefined ? '—' : fmt.nombre(l.base_repartition, 2)}</td>
+            <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(l.pourcentage, 2)} %</td>
+            <td className={cn(td, 'text-right tabular-nums text-attenue-texte')}>
+              {l.montant_theorique === undefined ? '—' : fmt.nombre(l.montant_theorique, 4)}
+            </td>
+            <td className={cn(td, 'text-right font-medium tabular-nums')}>{dh(l.montant_alloue_dhs)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr className="font-semibold">
+          <td className={td}>TOTAL</td>
+          <td className={td} />
+          <td className={td} />
+          <td className={cn(td, 'text-right tabular-nums')}>{totalBase ? fmt.nombre(totalBase, 2) : '—'}</td>
+          <td className={cn(td, 'text-right tabular-nums')}>100 %</td>
+          <td className={td} />
+          <td className={cn(td, 'text-right tabular-nums', Math.abs(total - montant) < 0.005 ? 'text-succes' : 'text-danger')}>
+            {fmt.nombre(total, 2)} / {fmt.nombre(montant, 2)}
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  )
+}
+
+/** VALIDEE, RIEN D'APPLIQUE : retour en brouillon, avec son motif. */
+function RetourBrouillon({ f, surFin }: { f: Frais; surFin: () => void }) {
+  const [motif, setMotif] = useState('')
+  const m = useMutation({
+    mutationFn: () => api.post(`/api/import/frais/${f.id_ligne_frais}/brouillon`, { motif: motif.trim() }),
+    onSuccess: () => {
+      toast.success('Fiche revenue en brouillon — son allocation reste archivée')
+      surFin()
+    },
+    onError: echec,
+  })
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <div className="min-w-[18rem] flex-1">
+        <Etiq obligatoire htmlFor={`brouillon-${f.id_ligne_frais}`}>Pourquoi revenir en brouillon ?</Etiq>
+        <Champ id={`brouillon-${f.id_ligne_frais}`} value={motif} onChange={(e) => setMotif(e.target.value)}
+          placeholder="Ex. : mauvaise clé choisie, rien n’est encore reçu" />
+      </div>
+      <Bouton variante="contour" disabled={motif.trim().length < 5} chargement={m.isPending} onClick={() => m.mutate()}>
+        Remettre en brouillon
+      </Bouton>
+    </div>
+  )
+}
+
+/** UNE RECTIFICATIVE : une fiche nouvelle, liee ; l'originale ne change pas. */
+function Rectification({ f, surFin }: { f: Frais; surFin: () => void }) {
+  const [montant, setMontant] = useState('')
+  const [motif, setMotif] = useState('')
+  const [piece, setPiece] = useState('')
+  const m = useMutation({
+    mutationFn: () =>
+      api.post(`/api/import/frais/${f.id_ligne_frais}/rectifier`, {
+        montant_devise: nombre(montant), motif: motif.trim(), numero_piece: piece.trim(),
+      }),
+    onSuccess: () => {
+      toast.success('Rectificative créée en brouillon — vérifiez sa répartition, puis validez-la')
+      surFin()
+    },
+    onError: echec,
+  })
+  const complet = nombre(montant) !== 0 && motif.trim().length >= 5 && piece.trim() !== ''
+  return (
+    <div className="space-y-2">
+      <p className="m-0 text-[12px] text-attenue-texte">
+        La fiche d’origine reste telle quelle. La rectificative porte la différence (négative pour un avoir), en {f.code_devise},
+        et propose l’allocation de l’originale au prorata.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <Etiq obligatoire htmlFor={`rect-m-${f.id_ligne_frais}`}>Différence ({f.code_devise})</Etiq>
+          <Champ id={`rect-m-${f.id_ligne_frais}`} className="w-32 text-right" inputMode="decimal" value={montant}
+            onChange={(e) => setMontant(e.target.value)} placeholder="-19,00" />
+        </div>
+        <div className="min-w-[14rem] flex-1">
+          <Etiq obligatoire htmlFor={`rect-motif-${f.id_ligne_frais}`}>Motif</Etiq>
+          <Champ id={`rect-motif-${f.id_ligne_frais}`} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Avoir du transitaire" />
+        </div>
+        <div>
+          <Etiq obligatoire htmlFor={`rect-piece-${f.id_ligne_frais}`}>Pièce</Etiq>
+          <Champ id={`rect-piece-${f.id_ligne_frais}`} className="w-36" value={piece} onChange={(e) => setPiece(e.target.value)} placeholder="AV-0042" />
+        </div>
+        <Bouton disabled={!complet} chargement={m.isPending} onClick={() => m.mutate()}>Créer la rectificative</Bouton>
+      </div>
+    </div>
+  )
+}
+
+/** L'HISTORIQUE : versions d'allocation (archivees comprises), applications,
+    rectificatives, decisions. */
+function HistoriqueFiche({ f }: { f: Frais }) {
+  const q = useQuery({
+    queryKey: ['import-frais-historique', f.id_ligne_frais],
+    queryFn: ({ signal }) =>
+      api.get<{
+        allocations: { version: number; code_reference: string | null; pourcentage: number; montant_alloue_dhs?: number; en_vigueur: boolean }[]
+        journal: { date_ajustement: string; type_operation: string | null; nature: string; code_reference: string; code_magasin: string | null; quantite_kg: number | null; montant_dhs?: number; numero_reception: string | null; motif: string | null; par: string | null }[]
+        rectificatives: { id_ligne_frais: string; montant_dhs?: number; statut_fiche: string; motif_rectification: string; numero_piece: string }[]
+      }>(`/api/import/frais/${f.id_ligne_frais}/historique`, { signal }),
+  })
+  if (q.isLoading) return <Chargement texte="Lecture de l’historique…" />
+  if (!q.data) return null
+  const versions = [...new Set(q.data.allocations.map((a) => a.version))]
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      <div>
+        <div className="mb-1 text-[12px] font-semibold">Allocations</div>
+        {versions.length === 0 && <div className="text-[12px] text-attenue-texte">Aucune allocation enregistrée.</div>}
+        {versions.map((v) => {
+          const lignes = q.data.allocations.filter((a) => a.version === v)
+          return (
+            <div key={v} className="mb-2 text-[12px]">
+              <div className="font-medium">
+                Version {v} {lignes[0]?.en_vigueur ? <Badge ton="succes">en vigueur</Badge> : <Badge ton="neutre">archivée</Badge>}
+              </div>
+              {lignes.map((a, i) => (
+                <div key={i} className="flex justify-between gap-2 tabular-nums">
+                  <span>{a.code_reference ?? '—'}</span>
+                  <span>{fmt.nombre(a.pourcentage, 2)} % · {dh(a.montant_alloue_dhs)} DH</span>
+                </div>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+      <div>
+        <div className="mb-1 text-[12px] font-semibold">Applications au coût</div>
+        {q.data.journal.length === 0 && <div className="text-[12px] text-attenue-texte">Rien n’est encore appliqué.</div>}
+        {q.data.journal.map((j, i) => (
+          <div key={i} className="flex justify-between gap-2 text-[12px] tabular-nums">
+            <span>
+              {fmt.date(j.date_ajustement)} · {j.code_reference} · {j.nature === 'STOCK' ? `stock ${j.code_magasin}` : 'consommé'}
+              {j.numero_reception && ` · ${j.numero_reception}`}
+              {j.type_operation === 'CONTRE_PASSATION' && ' · contre-passation'}
+            </span>
+            <span>{dh(j.montant_dhs)} DH</span>
+          </div>
+        ))}
+        {q.data.rectificatives.length > 0 && (
+          <>
+            <div className="mb-1 mt-2 text-[12px] font-semibold">Rectificatives</div>
+            {q.data.rectificatives.map((r) => (
+              <div key={r.id_ligne_frais} className="flex justify-between gap-2 text-[12px]">
+                <span>{r.numero_piece} — {r.motif_rectification}</span>
+                <span className="tabular-nums">{dh(r.montant_dhs)} DH · {r.statut_fiche.toLowerCase()}</span>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** LES RESTES DES LIGNES SOLDEES : ce qui depasse les kilos recus attend une
+    decision explicite — aux kilos recus, ou au journal des ecarts. */
+function RestesAuSolde({ d, valider, surFin }: { d: DossierComplet; valider: boolean; surFin: () => void }) {
+  const [choix, setChoix] = useState<Record<string, { choix: string; motif: string }>>({})
+  const restes = useMemo(() => {
+    const fiches = new Set(d.frais.filter((f) => f.statut_fiche && f.statut_fiche !== 'BROUILLON' && f.inclus_dans_cout === 1).map((f) => f.id_ligne_frais))
+    return d.lignes
+      .filter((l) => l.soldee === 1 && l.type_ligne === 'ERP')
+      .map((l) => {
+        const alloue = d.repartition
+          .filter((r) => r.id_article_dossier === l.id_ligne && fiches.has(r.id_ligne_frais))
+          .reduce((t, r) => t + (r.montant_alloue_dhs ?? 0), 0)
+        const applique = d.ajustements
+          .filter((j) => j.id_ligne === l.id_ligne && j.origine === 'FICHE')
+          .reduce((t, j) => t + (j.montant_dhs ?? 0), 0)
+        return { l, reste: alloue - applique }
+      })
+      .filter((x) => Math.abs(x.reste) >= 0.005)
+  }, [d])
+  const m = useMutation({
+    mutationFn: (id: string) => api.post(`/api/import/lignes/${id}/reste-frais`, choix[id]),
+    onSuccess: () => {
+      toast.success('Décision enregistrée et appliquée')
+      surFin()
+    },
+    onError: echec,
+  })
+  if (restes.length === 0) return null
+  return (
+    <CarteCorps className="space-y-2 border-t border-bordure">
+      <div className="text-[12.5px] font-semibold">Restes de frais sur des lignes soldées — à décider</div>
+      {restes.map(({ l, reste }) => {
+        const c = choix[l.id_ligne] ?? { choix: '', motif: '' }
+        const maj = (v: Partial<typeof c>) => setChoix((x) => ({ ...x, [l.id_ligne]: { ...c, ...v } }))
+        return (
+          <div key={l.id_ligne} className="flex flex-wrap items-center gap-2 text-[12px]">
+            <span className="min-w-[12rem] flex-1">
+              {l.code_reference} — <span className="tabular-nums">{fmt.nombre(reste, 2)} DH</span> au-delà des kilos reçus
+            </span>
+            {valider && (
+              <>
+                <Selecteur className="h-7 min-w-[13rem]" aria-label="Décision sur le reste" value={c.choix}
+                  onChange={(e) => maj({ choix: e.target.value })}>
+                  <option value="">Choisir…</option>
+                  <option value="APPLIQUER_RECU">Appliquer aux kilos reçus</option>
+                  <option value="JOURNAL_ECART">Journal des écarts</option>
+                </Selecteur>
+                <Champ className="h-7 min-w-[12rem]" aria-label="Motif de la décision" value={c.motif}
+                  onChange={(e) => maj({ motif: e.target.value })} placeholder="Motif (obligatoire)" />
+                <Bouton taille="sm" disabled={!c.choix || c.motif.trim().length < 5} chargement={m.isPending}
+                  onClick={() => m.mutate(l.id_ligne)}>
+                  Décider
+                </Bouton>
+              </>
+            )}
+          </div>
+        )
+      })}
+    </CarteCorps>
   )
 }
 
@@ -823,7 +1343,7 @@ function JournalCloture({ d }: { d: DossierComplet }) {
   return (
     <Carte>
       <CarteEntete>
-        <CarteTitre>Ce que la clôture et les avoirs ont fait au CUMP</CarteTitre>
+        <CarteTitre>Ce que les frais et les avoirs ont fait au CUMP</CarteTitre>
       </CarteEntete>
       <CarteCorps className="p-0">
         <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
@@ -842,13 +1362,18 @@ function JournalCloture({ d }: { d: DossierComplet }) {
               {d.ajustements.map((a, i) => (
                 <tr key={i} className="border-b border-bordure/60">
                   <td className={td} title={a.motif ?? undefined}>
-                    {a.origine && a.origine !== 'FRAIS' ? (
+                    {a.origine === 'FICHE' ? (
+                      <span>
+                        {d.frais.find((f) => f.id_ligne_frais === a.id_ligne_frais)?.frais_libelle ?? 'Fiche de frais'}
+                        {a.type_operation === 'CONTRE_PASSATION' && <span className="text-attenue-texte"> — contre-passation</span>}
+                      </span>
+                    ) : a.origine && a.origine !== 'FRAIS' ? (
                       <span>
                         {a.origine === 'AVOIR_PRIX' ? 'Avoir de prix' : 'Avoir pour retour'}{' '}
                         <span className="text-attenue-texte">{a.numero_piece}</span>
                       </span>
                     ) : (
-                      'Frais'
+                      'Frais (clôture, ancien moteur)'
                     )}
                   </td>
                   <td className={cn(td, 'font-medium')}>{a.code_reference}</td>

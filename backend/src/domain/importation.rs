@@ -1,15 +1,15 @@
-//! Dossiers d'importation : repartition des frais, entree en stock, cloture.
+//! Dossiers d'importation : factures, entree en stock, fiches de frais, cloture.
 //!
 //! PERIMETRE : MRP, stock, CUMP. Pas de comptabilite, pas de paiement.
 //!
-//! Trois operations, chacune dans UNE transaction :
-//!
-//!   * `recalculer_repartition` — les frais inclus dans le cout sont repartis
-//!     sur les lignes AU PRORATA DE LA VALEUR, au centime pres ;
-//!   * `valider_reception` — une facture, plusieurs ou une partie entrent en
-//!     stock A LA VALEUR FACTURE (cout reel : reglee par la banque sur l'engagement d'importation, au taux de la facture), par le journal existant ;
-//!   * `cloturer` — les frais s'ajoutent au CUMP du stock encore present ;
-//!     la part de ce qui est deja sorti est tracee, pas reinjectee.
+//!   * `valider_reception_dans` — une facture, plusieurs ou une partie entrent en
+//!     stock A LA VALEUR FACTURE (cout reel : reglee par la banque sur l'engagement
+//!     d'importation, au taux de la facture), par le journal existant ; puis les
+//!     fiches de frais validees s'appliquent a ces kilos ;
+//!   * `valider_fiche` — une fiche de frais (12/10/2026) : l'allocation decidee est
+//!     calculee par le serveur, FIGEE, puis appliquee au stock present et au
+//!     consomme, a mesure des receptions, sans jamais etre recalculee ;
+//!   * `cloturer` — CONTROLE que tout est decide et applique, puis fige le dossier.
 //!
 //! LES MONTANTS SE CALCULENT EN CENTIMES ENTIERS. Un frais de 13 951,00 DH
 //! reparti sur deux lignes doit donner deux montants dont la somme fait
@@ -20,7 +20,7 @@ use crate::db::{arrondi_kg, maintenant, Db};
 use crate::error::{AppError, AppResult};
 use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 // La tolerance de reception est celle du fournisseur (fn_tolerance_fournisseur,
 // a defaut P_TolerEcartPesee, 2 %) : une ligne dont le reste est sous ce seuil
@@ -69,19 +69,15 @@ pub fn repartir_signe(montant: i64, bases: &[i64]) -> Vec<i64> {
     }
 }
 
-/// Recalcule toute la repartition d'un dossier.
+/// La part de chaque ligne dans la valeur du dossier — la colonne « % » du
+/// classeur.
 ///
-/// Appelee apres chaque modification d'une ligne ou d'un frais : la
-/// repartition n'est jamais saisie, elle se DEDUIT. La base d'une ligne est sa
-/// valeur en dirhams (montant devise x taux de sa facture) : avec une seule
-/// devise, les parts sont exactement celles du montant en devise ; avec deux,
-/// c'est la seule facon de ne pas poser 1 EUR = 1 USD.
+/// Appelee apres chaque modification d'une facture ou d'une ligne. ELLE NE
+/// REPARTIT PLUS AUCUN FRAIS (12/10/2026) : l'allocation d'un frais est une
+/// decision, prise et figee a la validation de sa fiche (`valider_fiche`). Le
+/// recalcul d'avant effacait et reecrivait toute la repartition du dossier a
+/// chaque saisie, avec la cle imposee par le type.
 pub async fn recalculer_repartition(tx: &mut PgConnection, id_dossier: &str) -> AppResult<()> {
-    recalculer_repartition_mode(tx, id_dossier, false).await
-}
-
-/// La repartition, et pour un FRAIS POST-CLOTURE (regle 5) sur un dossier clos.
-pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str, post_cloture: bool) -> AppResult<()> {
     let statut: Option<String> =
         sqlx::query_scalar("SELECT statut FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
             .bind(id_dossier)
@@ -89,25 +85,19 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
             .await?;
     match statut.as_deref() {
         None => return Err(AppError::Introuvable(format!("dossier {id_dossier}"))),
-        Some("CLOTURE") if !post_cloture => {
+        Some("CLOTURE") => {
             return Err(AppError::RegleMetier(
-                "Dossier clôturé : la répartition est figée.".into(),
+                "Dossier clôturé : ses factures sont figées.".into(),
             ))
         }
         _ => {}
     }
 
-    // Toutes les lignes, ERP comme hors ERP : chacune porte sa part de frais.
-    //
-    // Trois bases sont lues d'un coup — la valeur en centimes, le poids et la
-    // quantite au millieme — parce que le type de frais choisit LAQUELLE le
-    // repartit. En entiers : la repartition au centime ne supporte pas le
-    // flottant.
-    let lignes: Vec<(String, i64, i64, i64)> = sqlx::query_as(
-        "SELECT l.id_ligne,
-                (round(l.montant_devise * f.taux_change, 2) * 100)::bigint,
-                (round(COALESCE(l.poids_net_kg, 0), 3) * 1000)::bigint,
-                (round(COALESCE(l.quantite, 0), 3) * 1000)::bigint
+    // La base d'une ligne est sa valeur en dirhams (montant devise x taux de sa
+    // facture), en centimes : avec deux devises, c'est la seule facon de ne pas
+    // poser 1 EUR = 1 USD.
+    let lignes: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT l.id_ligne, (round(l.montant_devise * f.taux_change, 2) * 100)::bigint
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
           WHERE f.id_dossier = $1
@@ -116,95 +106,15 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
     .bind(id_dossier)
     .fetch_all(&mut *tx)
     .await?;
-
-    /// La base d'une ligne pour une methode donnee.
-    ///
-    /// PARTS_EGALES vaut 1 par ligne : chaque ligne pese autant, et les restes
-    /// tombent alors dans l'ordre des lignes, sans hasard.
-    fn base(l: &(String, i64, i64, i64), methode: &str) -> i64 {
-        match methode {
-            "POIDS" => l.2,
-            "QUANTITE" => l.3,
-            "PARTS_EGALES" => 1,
-            _ => l.1,
-        }
-    }
-
-    sqlx::query(
-        "DELETE FROM lignes_frais_repartition
-          WHERE id_ligne_frais IN (SELECT id_ligne_frais FROM dossier_lignes_frais
-                                    WHERE id_dossier = $1)",
-    )
-    .bind(id_dossier)
-    .execute(&mut *tx)
-    .await?;
-
-    // Seuls les frais INCLUS dans le cout : la TVA a l'importation n'est
-    // jamais repartie, c'est le catalogue qui le dit.
-    let frais: Vec<(String, i64, String)> = sqlx::query_as(
-        "SELECT d.id_ligne_frais, (d.montant_dhs * 100)::bigint, p.methode_repartition
-           FROM dossier_lignes_frais d
-           JOIN parametres_frais p ON p.id_frais = d.id_frais
-          WHERE d.id_dossier = $1 AND p.inclus_dans_cout = 1
-          ORDER BY d.date_creation, d.id_ligne_frais",
-    )
-    .bind(id_dossier)
-    .fetch_all(&mut *tx)
-    .await?;
-
-    for (id_frais, montant, methode) in &frais {
-        let cibles: Vec<String> = sqlx::query_scalar(
-            "SELECT id_ligne FROM dossier_lignes_frais_cibles WHERE id_ligne_frais = $1",
-        )
-        .bind(id_frais)
-        .fetch_all(&mut *tx)
-        .await?;
-
-        // Pas de cible : tout le dossier. Des cibles : elles seules.
-        let perimetre: Vec<&(String, i64, i64, i64)> = lignes
-            .iter()
-            .filter(|(id, ..)| cibles.is_empty() || cibles.contains(id))
-            .collect();
-        let bases: Vec<i64> = perimetre.iter().map(|l| base(l, methode)).collect();
-        let total: i64 = bases.iter().sum();
-        if total <= 0 {
-            // Rien pour le porter encore (aucune ligne saisie) : la cloture le
-            // verra et refusera, ce n'est pas une erreur de saisie.
-            continue;
-        }
-
-        let parts = repartir_centimes(*montant, &bases);
-        let ids: Vec<String> = perimetre.iter().map(|(id, ..)| id.clone()).collect();
-        let pcts: Vec<f64> = bases.iter().map(|&b| b as f64 * 100.0 / total as f64).collect();
-
-        sqlx::query(
-            "INSERT INTO lignes_frais_repartition
-                    (id_ligne_frais, id_article_dossier, pourcentage, montant_alloue_dhs)
-             SELECT $1, v.id, round(v.pct::numeric, 10), v.centimes / 100.0
-               FROM unnest($2::text[], $3::float8[], $4::bigint[]) AS v(id, pct, centimes)",
-        )
-        .bind(id_frais)
-        .bind(&ids)
-        .bind(&pcts)
-        .bind(&parts)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    // La part de chaque ligne dans la valeur du dossier — la colonne « % » du
-    // classeur.
-    let total: i64 = lignes.iter().map(|(_, valeur, _, _)| valeur).sum();
+    let total: i64 = lignes.iter().map(|(_, valeur)| valeur).sum();
     if total > 0 {
-        let ids: Vec<String> = lignes.iter().map(|(id, ..)| id.clone()).collect();
-        let pcts: Vec<f64> = lignes
-            .iter()
-            .map(|(_, valeur, _, _)| *valeur as f64 * 100.0 / total as f64)
-            .collect();
+        let ids: Vec<String> = lignes.iter().map(|(id, _)| id.clone()).collect();
+        let pcts: Vec<f64> = lignes.iter().map(|(_, valeur)| *valeur as f64 * 100.0 / total as f64).collect();
         sqlx::query(
             "UPDATE import_facture_lignes l
                 SET pct_dossier = round(v.pct::numeric, 10)
                FROM unnest($1::text[], $2::float8[]) AS v(id, pct)
-              WHERE l.id_ligne = v.id",
+              WHERE l.id_ligne = v.id AND l.pct_dossier IS DISTINCT FROM round(v.pct::numeric, 10)",
         )
         .bind(&ids)
         .bind(&pcts)
@@ -631,6 +541,11 @@ pub async fn valider_reception_dans(
         .execute(&mut *tx)
         .await?;
 
+    // LES FICHES DE FRAIS VALIDEES s'appliquent aux kilos qui viennent
+    // d'entrer, sur leur allocation figee (12/10/2026). Une application que la
+    // tracabilite ne permet pas est signalee, elle ne bloque pas la reception.
+    let avis_frais = appliquer_reception(&mut *tx, user, id_reception).await?;
+
     let quantite_totale: f64 = entrees.iter().map(|e| e.quantite).sum();
     Ok(json!({
         "id_reception": id_reception,
@@ -638,6 +553,7 @@ pub async fn valider_reception_dans(
         "mouvements": mouvements,
         "lignes": entrees.len(),
         "quantite_kg": arrondi_kg(quantite_totale),
+        "avis_frais": avis_frais,
     }))
 }
 
@@ -718,7 +634,7 @@ pub async fn verifier_ecarts(c: &mut PgConnection, id_reception: &str) -> AppRes
 pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bool) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let resultat = cloturer_dans(&mut tx, user, id_dossier, false, simuler).await?;
+    let resultat = cloturer_dans(&mut tx, user, id_dossier, simuler).await?;
     if simuler {
         tx.rollback().await?;
         return Ok(resultat);
@@ -919,18 +835,18 @@ async fn porter(
     Ok((detail, total_stock_c, total_consomme_c))
 }
 
-/// LE MOTEUR DE CLOTURE, dans la transaction de l'appelant. `post_cloture` :
-/// un frais tardif sur un dossier deja clos (regle 5, 09/10/2026) — on ne
-/// rouvre pas le dossier, on reporte la seule difference sur le stock restant.
+/// LA CLOTURE, dans la transaction de l'appelant. ELLE NE CALCULE PLUS RIEN
+/// (12/10/2026) : chaque fiche de frais s'est appliquee a sa validation et a
+/// chaque reception. La cloture CONTROLE que tout est decide et applique, puis
+/// le dossier se fige.
 pub async fn cloturer_dans(
     tx: &mut PgConnection,
-    user: &Utilisateur,
+    _user: &Utilisateur,
     id_dossier: &str,
-    post_cloture: bool,
     simuler: bool,
 ) -> AppResult<Value> {
-    let (numero, statut): (String, String) = sqlx::query_as(
-        "SELECT numero, statut FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE",
+    let (numero, statut, moteur): (String, String, String) = sqlx::query_as(
+        "SELECT numero, statut, moteur_frais FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE",
     )
     .bind(id_dossier)
     .fetch_optional(&mut *tx)
@@ -938,24 +854,26 @@ pub async fn cloturer_dans(
     .ok_or_else(|| AppError::Introuvable(format!("dossier {id_dossier}")))?;
 
     match statut.as_str() {
-        "CLOTURE" if !post_cloture => {
-            return Err(AppError::RegleMetier(format!("Le dossier {numero} est déjà clôturé.")))
-        }
-        s if post_cloture && s != "CLOTURE" => {
-            return Err(AppError::RegleMetier(format!(
-                "Le dossier {numero} n'est pas clôturé : le frais s'ajoute normalement, la clôture le répartira."
-            )))
-        }
+        "CLOTURE" => return Err(AppError::RegleMetier(format!("Le dossier {numero} est déjà clôturé."))),
         "BROUILLON" => {
             return Err(AppError::RegleMetier(format!(
-                "Le dossier {numero} n'a encore rien reçu : il n'y a pas de stock à ajuster."
+                "Le dossier {numero} n'a encore rien reçu : il n'y a rien à clôturer."
             )))
         }
         _ => {}
     }
+    if moteur != "FICHES" {
+        // Les dossiers de l'ancien moteur ont tous ete clos avant la migration
+        // 2026-10-12a : celui-ci ne devrait pas exister.
+        return Err(AppError::RegleMetier(format!(
+            "Le dossier {numero} relève de l'ancien moteur de frais : il ne se clôture plus par l'ERP."
+        )));
+    }
 
-    // ---- 1. Tout est recu, ou solde ---------------------------------------------
-    let manquants: Vec<(String, String, f64)> = if post_cloture { Vec::new() } else { sqlx::query_as(
+    let mut refus: Vec<String> = Vec::new();
+
+    // ---- 1. Tout est recu, ou solde -------------------------------------------
+    let manquants: Vec<(String, String, f64)> = sqlx::query_as(
         "SELECT f.numero_facture, l.code_reference, l.reste_kg::float8
            FROM import_facture_lignes l
            JOIN import_factures f ON f.id_facture = l.id_facture
@@ -965,22 +883,18 @@ pub async fn cloturer_dans(
     )
     .bind(id_dossier)
     .fetch_all(&mut *tx)
-    .await? };
+    .await?;
     if !manquants.is_empty() {
-        let liste: Vec<String> = manquants
-            .iter()
-            .take(5)
-            .map(|(f, r, q)| format!("{r} (facture {f}) : {q} kg"))
-            .collect();
-        return Err(AppError::RegleMetier(format!(
+        let liste: Vec<String> = manquants.iter().take(5)
+            .map(|(f, r, q)| format!("{r} (facture {f}) : {q} kg")).collect();
+        refus.push(format!(
             "Reste à recevoir — recevez ou soldez d'abord : {}{}",
             liste.join(" ; "),
             if manquants.len() > 5 { " …" } else { "" }
-        )));
+        ));
     }
 
-    // Une reception en brouillon qui porte une ligne du dossier : elle ferait
-    // entrer du stock APRES la repartition des frais.
+    // Une reception en brouillon ferait entrer du stock apres la cloture.
     let brouillons: i64 = sqlx::query_scalar(
         "SELECT count(DISTINCT r.id_reception)
            FROM import_receptions r
@@ -993,114 +907,60 @@ pub async fn cloturer_dans(
     .fetch_one(&mut *tx)
     .await?;
     if brouillons > 0 {
-        return Err(AppError::RegleMetier(format!(
-            "{brouillons} réception(s) en brouillon : validez-les ou supprimez-les d'abord."
-        )));
+        refus.push(format!("{brouillons} réception(s) en brouillon : validez-les ou supprimez-les d'abord."));
     }
 
-    // ---- 2. Des frais, entierement repartis -------------------------------------
-    let nb_frais: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM dossier_lignes_frais d
-           JOIN parametres_frais p ON p.id_frais = d.id_frais
-          WHERE d.id_dossier = $1 AND p.inclus_dans_cout = 1",
+    // ---- 2. Les fiches : decidees, et appliquees -----------------------------
+    let fiches: Vec<(String, String, String, Option<i16>, i64, i64)> = sqlx::query_as(
+        "SELECT x.id_ligne_frais, p.libelle, x.statut, x.capitalisable,
+                COALESCE((SELECT round(sum(a.montant_alloue_dhs) * 100)
+                            FROM v_frais_allocation_en_vigueur a
+                            JOIN import_facture_lignes l ON l.id_ligne = a.id_article_dossier AND l.type_ligne = 'ERP'
+                           WHERE a.id_ligne_frais = x.id_ligne_frais), 0)::bigint,
+                COALESCE((SELECT round(sum(j.montant_dhs) * 100) FROM import_ajustements_cump j
+                           WHERE j.id_ligne_frais = x.id_ligne_frais), 0)::bigint
+           FROM dossier_lignes_frais x
+           JOIN parametres_frais p ON p.id_frais = x.id_frais
+          WHERE x.id_dossier = $1
+          ORDER BY p.ordre, x.date_creation",
     )
     .bind(id_dossier)
-    .fetch_one(&mut *tx)
+    .fetch_all(&mut *tx)
     .await?;
-    if nb_frais == 0 {
-        return Err(AppError::RegleMetier(
-            "Aucun frais inclus dans le coût n'est saisi : la clôture n'aurait rien à ajouter.".into(),
+
+    let en_brouillon: Vec<&str> = fiches.iter().filter(|f| f.2 == "BROUILLON").map(|f| f.1.as_str()).collect();
+    if !en_brouillon.is_empty() {
+        refus.push(format!("Fiche(s) de frais en brouillon : {} — validez-les ou supprimez-les.", en_brouillon.join(", ")));
+    }
+    let restes: Vec<String> = fiches
+        .iter()
+        .filter(|f| f.2 != "BROUILLON" && f.3 == Some(1) && f.4 != f.5)
+        .map(|f| format!("{} : {:.2} MAD à appliquer", f.1, (f.4 - f.5) as f64 / 100.0))
+        .collect();
+    if !restes.is_empty() {
+        refus.push(format!(
+            "Fiche(s) pas entièrement appliquée(s) — {}. Une ligne soldée demande une décision sur son reste ; \
+             une application bloquée (traçabilité) doit être résolue.",
+            restes.join(" ; ")
         ));
     }
-
-    recalculer_repartition_mode(tx, id_dossier, post_cloture).await?;
-
-    let non_repartis: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT p.libelle, d.montant_dhs::float8
-           FROM dossier_lignes_frais d
-           JOIN parametres_frais p ON p.id_frais = d.id_frais
-           LEFT JOIN lignes_frais_repartition r ON r.id_ligne_frais = d.id_ligne_frais
-          WHERE d.id_dossier = $1 AND p.inclus_dans_cout = 1
-          GROUP BY d.id_ligne_frais, p.libelle, d.montant_dhs
-         HAVING abs(d.montant_dhs - COALESCE(sum(r.montant_alloue_dhs), 0)) > 0.001",
-    )
-    .bind(id_dossier)
-    .fetch_all(&mut *tx)
-    .await?;
-    if !non_repartis.is_empty() {
-        let liste: Vec<String> = non_repartis.iter().map(|(l, m)| format!("{l} ({m} DH)")).collect();
-        return Err(AppError::RegleMetier(format!(
-            "Frais sans ligne pour les porter : {}. Vérifiez leurs lignes ciblées.",
-            liste.join(", ")
-        )));
+    let capitalisees = fiches.iter().filter(|f| f.2 != "BROUILLON" && f.3 == Some(1)).count();
+    if capitalisees == 0 {
+        refus.push("Aucune fiche de frais capitalisable validée : la clôture n'aurait rien à figer.".into());
     }
 
-    // ---- 3. Par reference : stock present, puis consomme -------------------------
-    let references: Vec<(String, i64, f64)> = sqlx::query_as(
-        "SELECT l.code_reference,
-                (COALESCE(sum(fr.frais), 0) * 100)::bigint,
-                sum(l.quantite_recue_kg)::float8
-           FROM import_facture_lignes l
-           JOIN import_factures f ON f.id_facture = l.id_facture
-           LEFT JOIN (SELECT id_article_dossier, sum(montant_alloue_dhs) AS frais
-                        FROM lignes_frais_repartition GROUP BY id_article_dossier) fr
-                  ON fr.id_article_dossier = l.id_ligne
-          WHERE f.id_dossier = $1 AND l.type_ligne = 'ERP'
-          GROUP BY l.code_reference
-          ORDER BY l.code_reference",
-    )
-    .bind(id_dossier)
-    .fetch_all(&mut *tx)
-    .await?;
-
-    // UNE CLOTURE QUI SUIT UNE DEVALIDATION n'ajoute que la DIFFERENCE. Le
-    // journal garde ce que les clotures precedentes ont deja porte au CUMP ;
-    // reprendre le total ajouterait les memes frais une seconde fois.
-    let deja: HashMap<String, i64> = sqlx::query_as::<_, (String, i64)>(
-        "SELECT code_reference, (sum(montant_dhs) * 100)::bigint
-           FROM import_ajustements_cump WHERE id_dossier = $1 AND origine = 'FRAIS'
-          GROUP BY code_reference",
-    )
-    .bind(id_dossier)
-    .fetch_all(&mut *tx)
-    .await?
-    .into_iter()
-    .collect();
-    let references: Vec<(String, i64, f64)> = references
-        .into_iter()
-        .map(|(r, f, q)| {
-            let d = deja.get(&r).copied().unwrap_or(0);
-            (r, f - d, q)
-        })
-        .collect();
-
-    let horodatage = maintenant();
-    let (detail, total_stock_c, total_consomme_c) =
-        porter(tx, user, id_dossier, &references, "FRAIS", None, None, &horodatage).await?;
-
-    // La part des lignes hors ERP : leur cout, et rien d'autre.
-    let hors_erp: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(sum(r.montant_alloue_dhs), 0)::float8
-           FROM lignes_frais_repartition r
-           JOIN import_facture_lignes l ON l.id_ligne = r.id_article_dossier
-           JOIN import_factures f ON f.id_facture = l.id_facture
-          WHERE f.id_dossier = $1 AND l.type_ligne = 'HORS_ERP'",
-    )
-    .bind(id_dossier)
-    .fetch_one(&mut *tx)
-    .await?;
-
+    let applique_c: i64 = fiches.iter().map(|f| f.5).sum();
     let resultat = json!({
         "id_dossier": id_dossier,
         "numero": numero,
         "simulation": simuler,
-        "references": detail,
-        "ecart_stock_dhs": total_stock_c as f64 / 100.0,
-        "ecart_consomme_dhs": total_consomme_c as f64 / 100.0,
-        "frais_hors_erp_dhs": hors_erp,
+        "fiches": fiches.len(),
+        "frais_appliques_dhs": applique_c as f64 / 100.0,
+        "refus": refus,
     });
-
-    let _ = (simuler, &horodatage);
+    if !refus.is_empty() && !simuler {
+        return Err(AppError::RegleMetier(format!("Clôture impossible : {}", refus.join(" — "))));
+    }
     Ok(resultat)
 }
 
@@ -1259,12 +1119,1083 @@ pub async fn avoir(
 }
 
 // ============================================================================
+// 4. Les fiches de frais (12/10/2026)
+// ============================================================================
+//
+// TROIS NIVEAUX. Le PARAMETRAGE (le type de frais) dit les cles autorisees et
+// propose une cle ; il ne decide rien. La DECISION (la fiche) porte la cle
+// choisie, son motif si elle s'ecarte de la proposition, les lignes visees et,
+// en MANUEL, les montants saisis. Le MOTEUR (ici) calcule l'allocation UNE
+// FOIS, a la validation, puis l'APPLIQUE a mesure des receptions, toujours sur
+// cette allocation figee — jamais sur une cle ou une base recalculee.
+//
+// La base garde les invariants (migration 2026-10-12a) : allocation au
+// centime, cle autorisee, decision figee, rectificative liee a l'originale,
+// application unique par reception, contre-passation inverse exacte.
+//
+// LA PART STOCK / CONSOMME se lit dans le grand livre, lot par lot : les kilos
+// d'une reception encore presents (stock_lot, par magasin) et ceux deja sortis.
+// Sans tracabilite certaine — reference sans lot, lot partage avec une autre
+// entree, kilos en transit — RIEN n'est suppose : l'application est bloquee,
+// la part reste « a appliquer », et la cloture le refuse.
+
+/// Les mouvements qui font ENTRER des kilos dans un lot (les transferts, retours
+/// machine et contre-passations n'en creent pas : ils les deplacent ou les
+/// annulent).
+const ENTREES_D_ORIGINE: [&str; 6] =
+    ["ENTREE_REC", "STOCK_INIT", "AJUST_INV_POS", "RETOUR_PRET", "RETOUR_PROD", "FUSION_ENTREE"];
+
+/// Le kilogramme en dix-milliemes, pour compter en entiers.
+fn dmg(kg: f64) -> i64 {
+    (kg * 10_000.0).round() as i64
+}
+
+/// La part d'une allocation acquise pour `recu` sur `facture` (memes unites),
+/// au centime le plus proche, la moitie loin de zero. Plafonnee : un excedent
+/// recu n'applique jamais plus que l'allocation.
+pub fn part_cumulee(alloc_c: i64, recu: i64, facture: i64) -> i64 {
+    if facture <= 0 {
+        return alloc_c;
+    }
+    let r = recu.clamp(0, facture) as i128;
+    let num = alloc_c as i128 * r;
+    let f = facture as i128;
+    let mut q = num / f;
+    let reste = num % f;
+    if 2 * reste.abs() >= f {
+        q += num.signum();
+    }
+    q as i64
+}
+
+/// Une allocation : pour chaque base, le pourcentage, le montant theorique
+/// exact et l'arrondi au centime (plus fort reste — la somme egale le montant).
+pub fn allouer(montant_c: i64, bases: &[i64]) -> Vec<(f64, f64, i64)> {
+    let total: i128 = bases.iter().map(|&b| b.max(0) as i128).sum();
+    let parts = repartir_signe(montant_c, bases);
+    bases
+        .iter()
+        .zip(parts)
+        .map(|(&b, p)| {
+            if total == 0 {
+                return (0.0, 0.0, p);
+            }
+            let poids = b.max(0) as f64 / total as f64;
+            (poids * 100.0, montant_c as f64 / 100.0 * poids, p)
+        })
+        .collect()
+}
+
+/// Une fiche, relue sous verrou.
+struct Fiche {
+    id: String,
+    id_dossier: String,
+    statut_dossier: String,
+    id_frais: String,
+    libelle_type: String,
+    statut: Option<String>,
+    cle: Option<String>,
+    motif_cle: Option<String>,
+    version: i32,
+    montant_c: i64,
+    inclus: i64,
+    cle_proposee: String,
+    cles_autorisees: Vec<String>,
+}
+
+/// Verrouille le dossier, PUIS la fiche — l'ordre de la reception et de la
+/// cloture (reception, dossier, fiche), qui ne s'interbloquent donc pas.
+async fn verrouiller_fiche(tx: &mut PgConnection, id: &str) -> AppResult<Fiche> {
+    let id_dossier: String = sqlx::query_scalar("SELECT id_dossier FROM dossier_lignes_frais WHERE id_ligne_frais = $1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("fiche de frais {id}")))?;
+    let statut_dossier: String =
+        sqlx::query_scalar("SELECT statut FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
+            .bind(&id_dossier)
+            .fetch_one(&mut *tx)
+            .await?;
+    let r = sqlx::query(
+        "SELECT x.id_frais, p.libelle, x.statut, x.cle_repartition, x.motif_cle, x.version,
+                (round(x.montant_devise * x.cours_change, 2) * 100)::bigint AS montant_c,
+                p.inclus_dans_cout, p.methode_repartition, p.cles_autorisees
+           FROM dossier_lignes_frais x
+           JOIN parametres_frais p ON p.id_frais = x.id_frais
+          WHERE x.id_ligne_frais = $1
+            FOR UPDATE OF x",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    Ok(Fiche {
+        id: id.to_string(),
+        id_dossier,
+        statut_dossier,
+        id_frais: r.try_get("id_frais")?,
+        libelle_type: r.try_get("libelle")?,
+        statut: r.try_get("statut")?,
+        cle: r.try_get("cle_repartition")?,
+        motif_cle: r.try_get("motif_cle")?,
+        version: r.try_get("version")?,
+        montant_c: r.try_get("montant_c")?,
+        inclus: r.try_get("inclus_dans_cout")?,
+        cle_proposee: r.try_get("methode_repartition")?,
+        cles_autorisees: r.try_get("cles_autorisees")?,
+    })
+}
+
+/// Une ligne de l'allocation, telle que l'apercu la montre.
+struct LigneAlloc {
+    id_ligne: String,
+    code_reference: Option<String>,
+    designation: Option<String>,
+    type_ligne: String,
+    quantite: f64,
+    poids_net_kg: Option<f64>,
+    valeur_c: i64,
+    base: f64,
+    pourcentage: f64,
+    theorique: f64,
+    montant_c: i64,
+}
+
+impl LigneAlloc {
+    fn json(&self) -> Value {
+        json!({
+            "id_ligne": self.id_ligne, "code_reference": self.code_reference,
+            "designation": self.designation, "type_ligne": self.type_ligne,
+            "quantite": self.quantite, "poids_net_kg": self.poids_net_kg,
+            "valeur_dhs": self.valeur_c as f64 / 100.0,
+            "base_repartition": self.base, "pourcentage": self.pourcentage,
+            "montant_theorique": self.theorique, "montant_alloue_dhs": self.montant_c as f64 / 100.0,
+        })
+    }
+}
+
+/// L'allocation d'une fiche pour la cle donnee, calculee par le serveur.
+async fn calculer_allocation(tx: &mut PgConnection, f: &Fiche, cle: &str) -> AppResult<Vec<LigneAlloc>> {
+    let lignes: Vec<(String, Option<String>, Option<String>, String, f64, Option<f64>, i64, Option<f64>)> =
+        sqlx::query_as(
+            "WITH c AS (SELECT id_ligne, montant_saisi FROM dossier_lignes_frais_cibles WHERE id_ligne_frais = $2)
+             SELECT l.id_ligne, l.code_reference, COALESCE(r.designation, l.libelle), l.type_ligne,
+                    l.quantite::float8, l.poids_net_kg::float8,
+                    (round(l.montant_devise * f.taux_change, 2) * 100)::bigint,
+                    c.montant_saisi::float8
+               FROM import_facture_lignes l
+               JOIN import_factures f ON f.id_facture = l.id_facture
+               LEFT JOIN reference r ON r.code_reference = l.code_reference
+               LEFT JOIN c ON c.id_ligne = l.id_ligne
+              WHERE f.id_dossier = $1
+                AND (NOT EXISTS (SELECT 1 FROM c) OR c.id_ligne IS NOT NULL)
+              ORDER BY f.date_creation, f.id_facture, l.ligne_numero",
+        )
+        .bind(&f.id_dossier)
+        .bind(&f.id)
+        .fetch_all(&mut *tx)
+        .await?;
+    if lignes.is_empty() {
+        return Err(AppError::RegleMetier(
+            "Aucune ligne de facture à qui répartir ce frais : saisissez les factures du dossier d'abord.".into(),
+        ));
+    }
+
+    // La base de chaque ligne, en entiers : centimes (valeur, montant saisi)
+    // ou dix-milliemes de kilo (poids net). Jamais de poids brut par ligne :
+    // aucun document ne le donne.
+    let bases: Vec<i64> = match cle {
+        "VALEUR" => lignes.iter().map(|l| l.6).collect(),
+        "POIDS" => {
+            if let Some(l) = lignes.iter().find(|l| l.5.is_none()) {
+                return Err(AppError::RegleMetier(format!(
+                    "La ligne {} n'a pas de poids net : la clé POIDS ne peut pas la porter. \
+                     Choisissez une autre clé, ou visez d'autres lignes.",
+                    l.1.clone().or_else(|| l.2.clone()).unwrap_or_default()
+                )));
+            }
+            lignes.iter().map(|l| dmg(l.5.unwrap_or(0.0))).collect()
+        }
+        "MANUEL" => {
+            if let Some(l) = lignes.iter().find(|l| l.7.is_none()) {
+                return Err(AppError::RegleMetier(format!(
+                    "Clé MANUEL : saisissez le montant de la ligne {}.",
+                    l.1.clone().or_else(|| l.2.clone()).unwrap_or_default()
+                )));
+            }
+            let saisis: Vec<i64> = lignes.iter().map(|l| (l.7.unwrap_or(0.0) * 100.0).round() as i64).collect();
+            let somme: i64 = saisis.iter().sum();
+            if somme != f.montant_c {
+                return Err(AppError::RegleMetier(format!(
+                    "FRAIS-MANUEL : les montants saisis font {:.2} MAD pour une fiche de {:.2} MAD.",
+                    somme as f64 / 100.0,
+                    f.montant_c as f64 / 100.0
+                )));
+            }
+            saisis
+        }
+        autre => return Err(AppError::Invalide(format!("Clé de répartition inconnue : {autre}."))),
+    };
+
+    let parts: Vec<(f64, f64, i64)> = if cle == "MANUEL" {
+        // MANUEL : l'utilisateur a decide de chaque montant ; on les reprend tels quels.
+        let total: i64 = bases.iter().map(|b| b.abs()).sum();
+        bases
+            .iter()
+            .map(|&b| {
+                let pct = if total > 0 { b.abs() as f64 * 100.0 / total as f64 } else { 0.0 };
+                (pct, b as f64 / 100.0, b)
+            })
+            .collect()
+    } else {
+        if bases.iter().map(|&b| b.max(0)).sum::<i64>() <= 0 {
+            return Err(AppError::RegleMetier(format!(
+                "La base totale de répartition ({cle}) est nulle : rien ne peut porter ce frais."
+            )));
+        }
+        allouer(f.montant_c, &bases)
+    };
+
+    Ok(lignes
+        .into_iter()
+        .zip(bases)
+        .zip(parts)
+        .map(|((l, b), (pct, theo, c))| LigneAlloc {
+            id_ligne: l.0,
+            code_reference: l.1,
+            designation: l.2,
+            type_ligne: l.3,
+            quantite: l.4,
+            poids_net_kg: l.5,
+            valeur_c: l.6,
+            base: if cle == "POIDS" { b as f64 / 10_000.0 } else { b as f64 / 100.0 },
+            pourcentage: pct,
+            theorique: theo,
+            montant_c: c,
+        })
+        .collect())
+}
+
+/// Le reste a appliquer d'une fiche : l'allocation de ses lignes ERP (les
+/// lignes hors ERP ne portent aucun stock) moins ce que le journal a applique.
+async fn reste_fiche(tx: &mut PgConnection, id: &str) -> AppResult<(i64, i64)> {
+    Ok(sqlx::query_as(
+        "SELECT COALESCE((SELECT round(sum(a.montant_alloue_dhs) * 100)
+                            FROM v_frais_allocation_en_vigueur a
+                            JOIN import_facture_lignes l ON l.id_ligne = a.id_article_dossier AND l.type_ligne = 'ERP'
+                           WHERE a.id_ligne_frais = $1), 0)::bigint,
+                COALESCE((SELECT round(sum(j.montant_dhs) * 100) FROM import_ajustements_cump j
+                           WHERE j.id_ligne_frais = $1), 0)::bigint",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?)
+}
+
+/// VALIDE <-> APPLIQUE suit le reste a appliquer.
+async fn statuer_fiche(tx: &mut PgConnection, id: &str) -> AppResult<(i64, i64)> {
+    let (alloue, applique) = reste_fiche(tx, id).await?;
+    let (statut, capitalisable): (Option<String>, Option<i16>) =
+        sqlx::query_as("SELECT statut, capitalisable FROM dossier_lignes_frais WHERE id_ligne_frais = $1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if capitalisable == Some(1) {
+        let nouveau = if alloue == applique { "APPLIQUE" } else { "VALIDE" };
+        if statut.as_deref() != Some(nouveau) {
+            sqlx::query(
+                "UPDATE dossier_lignes_frais
+                    SET statut = $2, date_application = CASE WHEN $2 = 'APPLIQUE' THEN $3 ELSE date_application END
+                  WHERE id_ligne_frais = $1",
+            )
+            .bind(id)
+            .bind(nouveau)
+            .bind(maintenant())
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    Ok((alloue, applique))
+}
+
+/// Applique `montant_c` d'une fiche a une ligne, pour une reception (ou toutes,
+/// a la decision de solde) : la part des kilos encore presents au CMUP de leur
+/// magasin, la part des kilos sortis au journal des ecarts. `Ok(None)` : la
+/// tracabilite ne permet pas de savoir ; rien n'est ecrit, la raison va dans
+/// `avis`.
+#[allow(clippy::too_many_arguments)]
+async fn appliquer_part(
+    tx: &mut PgConnection,
+    user: &Utilisateur,
+    f: &Fiche,
+    id_ligne: &str,
+    reception: Option<(&str, &str)>,
+    montant_c: i64,
+    motif: Option<&str>,
+    avis: &mut Vec<String>,
+) -> AppResult<Option<Value>> {
+    if montant_c == 0 {
+        return Ok(None);
+    }
+    let (code_reference, suivi_lot): (String, i64) = sqlx::query_as(
+        "SELECT l.code_reference, r.suivi_lot
+           FROM import_facture_lignes l JOIN reference r ON r.code_reference = l.code_reference
+          WHERE l.id_ligne = $1",
+    )
+    .bind(id_ligne)
+    .fetch_one(&mut *tx)
+    .await?;
+    let ou = reception.map(|(_, n)| format!(" (réception {n})")).unwrap_or_default();
+    let bloquer = |avis: &mut Vec<String>, raison: String| {
+        avis.push(format!(
+            "{} — {code_reference}{ou} : {raison} La part de {:.2} MAD reste à appliquer.",
+            f.libelle_type,
+            montant_c as f64 / 100.0
+        ));
+    };
+
+    // Les kilos recus de la ligne, lot par lot et magasin par magasin.
+    let recus: Vec<(Option<String>, String, f64)> = sqlx::query_as(
+        "SELECT NULLIF(btrim(rl.lot_fournisseur), ''), rl.code_magasin, sum(rl.quantite_recue_kg)::float8
+           FROM import_reception_lignes rl
+           JOIN import_receptions r ON r.id_reception = rl.id_reception AND r.statut = 'VALIDEE'
+          WHERE rl.id_ligne = $1 AND ($2::text IS NULL OR rl.id_reception = $2)
+          GROUP BY 1, 2 ORDER BY 1, 2",
+    )
+    .bind(id_ligne)
+    .bind(reception.map(|(id, _)| id))
+    .fetch_all(&mut *tx)
+    .await?;
+    let q_total: f64 = recus.iter().map(|r| r.2).sum();
+    if recus.is_empty() || q_total <= 0.0 {
+        return Ok(None);
+    }
+    if suivi_lot != 1 {
+        bloquer(avis, "la référence n'est pas suivie par lot : ses sorties ne disent pas quels kilos du dossier sont partis.".into());
+        return Ok(None);
+    }
+    if recus.iter().any(|r| r.0.is_none()) {
+        bloquer(avis, "une réception sans numéro de lot ne se trace pas.".into());
+        return Ok(None);
+    }
+
+    // Lot par lot : exclusif a cette reception, rien en transit ; puis les
+    // kilos presents par magasin.
+    let mut presents: BTreeMap<String, i64> = BTreeMap::new();
+    let mut presents_total: i64 = 0;
+    let mut lots: Vec<String> = recus.iter().filter_map(|r| r.0.clone()).collect();
+    lots.dedup();
+    for lot in &lots {
+        let kg_recus: f64 = recus.iter().filter(|r| r.0.as_deref() == Some(lot.as_str())).map(|r| r.2).sum();
+        let (origine, transit): (f64, f64) = sqlx::query_as(
+            "SELECT COALESCE(sum(lm.quantite_kg) FILTER (WHERE m.code_type_mvt = ANY ($3)), 0)::float8,
+                    COALESCE(sum(CASE WHEN m.code_type_mvt = 'TRANSFERT_SORTIE' THEN lm.quantite_kg
+                                      WHEN m.code_type_mvt = 'TRANSFERT_ENTREE' THEN -lm.quantite_kg END), 0)::float8
+               FROM ligne_mouvement lm
+               JOIN mouvement m ON m.id_mouvement = lm.id_mouvement
+              WHERE lm.code_reference = $1 AND lm.lot_fournisseur = $2
+                AND m.id_mouvement_contrepasse IS NULL
+                AND NOT EXISTS (SELECT 1 FROM mouvement inv WHERE inv.id_mouvement_contrepasse = m.id_mouvement)",
+        )
+        .bind(&code_reference)
+        .bind(lot)
+        .bind(&ENTREES_D_ORIGINE[..])
+        .fetch_one(&mut *tx)
+        .await?;
+        // Toutes les entrees du lot doivent etre CES kilos : sinon le lot
+        // melange plusieurs arrivees, et ses kilos presents ne disent plus
+        // lesquels sont ceux du dossier.
+        // (A la decision de solde, `recus` couvre toutes les receptions de la ligne.)
+        let attendus = kg_recus;
+        if (dmg(origine) - dmg(attendus)).abs() > 1 {
+            bloquer(avis, format!(
+                "le lot {lot} a reçu {origine:.4} kg en tout, dont {attendus:.4} kg de cette ligne : il est partagé, ses kilos présents ne se rattachent pas au dossier."
+            ));
+            return Ok(None);
+        }
+        if transit > 0.0001 {
+            bloquer(avis, format!("{transit:.4} kg du lot {lot} sont en transit entre deux magasins."));
+            return Ok(None);
+        }
+        let stock: Vec<(String, f64)> = sqlx::query_as(
+            "SELECT code_magasin, quantite_kg::float8 FROM stock_lot
+              WHERE code_reference = $1 AND lot_fournisseur = $2 AND quantite_kg > 0
+              ORDER BY code_magasin",
+        )
+        .bind(&code_reference)
+        .bind(lot)
+        .fetch_all(&mut *tx)
+        .await?;
+        for (magasin, kg) in stock {
+            *presents.entry(magasin).or_default() += dmg(kg);
+            presents_total += dmg(kg);
+        }
+    }
+    let sortis = dmg(q_total) - presents_total;
+    if sortis < 0 {
+        bloquer(avis, "le lot porte plus de kilos que la réception n'en a fait entrer.".into());
+        return Ok(None);
+    }
+
+    // Le montant entre les « seaux » — chaque magasin present, puis les kilos
+    // sortis — au prorata des kilos, au centime (plus fort reste).
+    let magasins: Vec<(String, i64)> = presents.into_iter().filter(|(_, kg)| *kg > 0).collect();
+    let mut poids: Vec<i64> = magasins.iter().map(|(_, kg)| *kg).collect();
+    poids.push(sortis);
+    let parts = repartir_signe(montant_c, &poids);
+    let mut consomme_c = *parts.last().unwrap_or(&0);
+    let horodatage = maintenant();
+    let mut detail_magasins = Vec::new();
+
+    for ((magasin, kg), part_c) in magasins.iter().zip(parts.iter()) {
+        let (q, cump): (f64, Option<f64>) = sqlx::query_as(
+            "SELECT quantite_kg::float8, cmup_mad::float8 FROM stock_magasin
+              WHERE code_reference = $1 AND code_magasin = $2 FOR UPDATE",
+        )
+        .bind(&code_reference)
+        .bind(magasin)
+        .fetch_one(&mut *tx)
+        .await?;
+        let avant = cump.unwrap_or(0.0);
+        // LE CMUP NE PASSE JAMAIS SOUS ZERO (U6) : l'excedent va au journal.
+        let plancher_c = -((avant * q * 100.0).round() as i64);
+        let part_c = if *part_c < plancher_c {
+            consomme_c += *part_c - plancher_c;
+            plancher_c
+        } else {
+            *part_c
+        };
+        // Le CMUP est celui du MAGASIN : la valeur ajoutee se divise par tout ce
+        // qu'il porte, comme le fait porter() a la cloture de l'ancien moteur.
+        let apres = arrondi_kg((avant + (part_c as f64 / 100.0) / q).max(0.0));
+        sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4 WHERE code_reference = $1 AND code_magasin = $2")
+            .bind(&code_reference)
+            .bind(magasin)
+            .bind(apres)
+            .bind(&horodatage)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO import_ajustements_cump
+                    (id_dossier, code_reference, nature, code_magasin, quantite_recue_kg, stock_kg,
+                     cump_avant, cump_apres, montant_dhs, id_utilisateur, origine, motif,
+                     type_operation, id_ligne_frais, id_ligne, id_reception, quantite_kg)
+             VALUES ($1, $2, 'STOCK', $3, $4, $5, $6, $7, $8 / 100.0, $9, 'FICHE', $10,
+                     'APPLICATION', $11, $12, $13, $5)",
+        )
+        .bind(&f.id_dossier)
+        .bind(&code_reference)
+        .bind(magasin)
+        .bind(q_total)
+        .bind(*kg as f64 / 10_000.0)
+        .bind(cump)
+        .bind(apres)
+        .bind(part_c)
+        .bind(&user.id)
+        .bind(motif)
+        .bind(&f.id)
+        .bind(id_ligne)
+        .bind(reception.map(|(id, _)| id))
+        .execute(&mut *tx)
+        .await?;
+        detail_magasins.push(json!({
+            "code_magasin": magasin, "stock_kg": *kg as f64 / 10_000.0,
+            "cump_avant": cump, "cump_apres": apres, "montant_dhs": part_c as f64 / 100.0,
+        }));
+    }
+    if sortis > 0 || consomme_c != 0 {
+        sqlx::query(
+            "INSERT INTO import_ajustements_cump
+                    (id_dossier, code_reference, nature, code_magasin, quantite_recue_kg, stock_kg,
+                     montant_dhs, id_utilisateur, origine, motif,
+                     type_operation, id_ligne_frais, id_ligne, id_reception, quantite_kg)
+             VALUES ($1, $2, 'CONSOMME', NULL, $3, $4, $5 / 100.0, $6, 'FICHE', $7,
+                     'APPLICATION', $8, $9, $10, $11)",
+        )
+        .bind(&f.id_dossier)
+        .bind(&code_reference)
+        .bind(q_total)
+        .bind(presents_total as f64 / 10_000.0)
+        .bind(consomme_c)
+        .bind(&user.id)
+        .bind(motif)
+        .bind(&f.id)
+        .bind(id_ligne)
+        .bind(reception.map(|(id, _)| id))
+        .bind(sortis as f64 / 10_000.0)
+        .execute(&mut *tx)
+        .await?;
+    }
+    // Le CMUP consolide de la fiche article (meme formule que trg_lmvt_appliquer).
+    sqlx::query(
+        "UPDATE reference
+            SET cmup_mad = (SELECT round(SUM(sm.quantite_kg * sm.cmup_mad) / NULLIF(SUM(sm.quantite_kg), 0), 4)
+                              FROM stock_magasin sm
+                             WHERE sm.code_reference = $1 AND sm.quantite_kg > 0 AND sm.cmup_mad IS NOT NULL),
+                date_dernier_cmup = $2
+          WHERE code_reference = $1
+            AND EXISTS (SELECT 1 FROM stock_magasin sm WHERE sm.code_reference = $1 AND sm.quantite_kg > 0)",
+    )
+    .bind(&code_reference)
+    .bind(&horodatage)
+    .execute(&mut *tx)
+    .await?;
+
+    Ok(Some(json!({
+        "code_reference": code_reference,
+        "id_ligne": id_ligne,
+        "reception": reception.map(|(_, n)| n),
+        "montant_dhs": montant_c as f64 / 100.0,
+        "kg_concernes": q_total,
+        "kg_presents": presents_total as f64 / 10_000.0,
+        "kg_sortis": sortis as f64 / 10_000.0,
+        "au_stock_dhs": (montant_c - consomme_c) as f64 / 100.0,
+        "consomme_dhs": consomme_c as f64 / 100.0,
+        "magasins": detail_magasins,
+    })))
+}
+
+/// Applique a une ligne ce que ses receptions validees rendent applicable :
+/// la part cumulee de l'allocation FIGEE (allocation x recu / facture), moins
+/// ce que le journal porte deja. Deux appels de suite n'appliquent rien de plus.
+async fn appliquer_ligne(
+    tx: &mut PgConnection,
+    user: &Utilisateur,
+    f: &Fiche,
+    id_ligne: &str,
+    alloc_c: i64,
+    avis: &mut Vec<String>,
+) -> AppResult<Vec<Value>> {
+    let (type_ligne, poids_net): (String, Option<f64>) =
+        sqlx::query_as("SELECT type_ligne, poids_net_kg::float8 FROM import_facture_lignes WHERE id_ligne = $1")
+            .bind(id_ligne)
+            .fetch_one(&mut *tx)
+            .await?;
+    if type_ligne != "ERP" {
+        return Ok(Vec::new()); // une ligne hors ERP n'entre dans aucun stock
+    }
+    let receptions: Vec<(String, String, f64)> = sqlx::query_as(
+        "SELECT r.id_reception, r.numero, sum(rl.quantite_recue_kg)::float8
+           FROM import_reception_lignes rl
+           JOIN import_receptions r ON r.id_reception = rl.id_reception AND r.statut = 'VALIDEE'
+          WHERE rl.id_ligne = $1
+          GROUP BY r.id_reception, r.numero
+          ORDER BY min(r.date_validation), r.id_reception",
+    )
+    .bind(id_ligne)
+    .fetch_all(&mut *tx)
+    .await?;
+    let recu: f64 = receptions.iter().map(|r| r.2).sum();
+    let cible = part_cumulee(alloc_c, dmg(recu), dmg(poids_net.unwrap_or(0.0)));
+    // UNE LIGNE SOLDEE ne recevra plus rien : ce qui depasse les kilos recus
+    // attend une decision explicite (reste-frais), jamais prise ici.
+    let soldee: i64 = sqlx::query_scalar("SELECT soldee FROM import_facture_lignes WHERE id_ligne = $1")
+        .bind(id_ligne)
+        .fetch_one(&mut *tx)
+        .await?;
+    if soldee == 1 && cible != alloc_c {
+        avis.push(format!(
+            "{} : la ligne est soldée ; {:.2} MAD dépassent les kilos reçus et attendent votre décision \
+             (appliquer aux kilos reçus, ou journal des écarts).",
+            f.libelle_type,
+            (alloc_c - cible) as f64 / 100.0
+        ));
+    }
+    let (deja, appliquees): (i64, Vec<String>) = {
+        let d: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(round(sum(montant_dhs) * 100), 0)::bigint FROM import_ajustements_cump
+              WHERE id_ligne_frais = $1 AND id_ligne = $2",
+        )
+        .bind(&f.id)
+        .bind(id_ligne)
+        .fetch_one(&mut *tx)
+        .await?;
+        let a: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT id_reception FROM import_ajustements_cump
+              WHERE id_ligne_frais = $1 AND id_ligne = $2 AND type_operation = 'APPLICATION' AND id_reception IS NOT NULL",
+        )
+        .bind(&f.id)
+        .bind(id_ligne)
+        .fetch_all(&mut *tx)
+        .await?;
+        (d, a)
+    };
+    let a_appliquer = cible - deja;
+    if a_appliquer == 0 {
+        return Ok(Vec::new());
+    }
+    let nouvelles: Vec<&(String, String, f64)> =
+        receptions.iter().filter(|r| !appliquees.contains(&r.0)).collect();
+    if nouvelles.is_empty() {
+        avis.push(format!(
+            "{} : {:.2} MAD restent à appliquer sur une ligne sans réception nouvelle — à traiter au solde.",
+            f.libelle_type,
+            a_appliquer as f64 / 100.0
+        ));
+        return Ok(Vec::new());
+    }
+    // Plusieurs receptions nouvelles d'un coup (fiche validee apres elles) :
+    // la part se partage au prorata de leurs kilos.
+    let kgs: Vec<i64> = nouvelles.iter().map(|r| dmg(r.2)).collect();
+    let parts = repartir_signe(a_appliquer, &kgs);
+    let mut faites = Vec::new();
+    for (r, part) in nouvelles.iter().zip(parts) {
+        if let Some(v) = appliquer_part(tx, user, f, id_ligne, Some((&r.0, &r.1)), part, None, avis).await? {
+            faites.push(v);
+        }
+    }
+    Ok(faites)
+}
+
+/// Applique tout ce qui est applicable d'une fiche validee, ligne par ligne.
+async fn appliquer_fiche(
+    tx: &mut PgConnection,
+    user: &Utilisateur,
+    f: &Fiche,
+    avis: &mut Vec<String>,
+) -> AppResult<Vec<Value>> {
+    let allocations: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT id_article_dossier, round(montant_alloue_dhs * 100)::bigint
+           FROM lignes_frais_repartition
+          WHERE id_ligne_frais = $1 AND version = $2
+          ORDER BY id_article_dossier",
+    )
+    .bind(&f.id)
+    .bind(f.version)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut faites = Vec::new();
+    for (id_ligne, alloc_c) in allocations {
+        faites.extend(appliquer_ligne(tx, user, f, &id_ligne, alloc_c, avis).await?);
+    }
+    statuer_fiche(tx, &f.id).await?;
+    Ok(faites)
+}
+
+/// La decision de l'utilisateur au moment de valider.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct DecisionFiche {
+    pub cle_repartition: Option<String>,
+    pub motif_cle: Option<String>,
+}
+
+/// VALIDER UNE FICHE — un seul geste : l'allocation calculee par le serveur
+/// est figee, puis appliquee a ce qui est deja recu. Dans la transaction de
+/// l'appelant ; l'apercu est le meme appel, annule ensuite.
+pub async fn valider_fiche(
+    tx: &mut PgConnection,
+    user: &Utilisateur,
+    id: &str,
+    decision: &DecisionFiche,
+) -> AppResult<Value> {
+    let f = verrouiller_fiche(tx, id).await?;
+    if f.statut.as_deref() != Some("BROUILLON") {
+        return Err(AppError::RegleMetier(format!(
+            "Cette fiche est {} : seule une fiche en brouillon se valide.",
+            f.statut.as_deref().map(str::to_lowercase).unwrap_or_else(|| "de l'ancien moteur".into())
+        )));
+    }
+    let cle = decision
+        .cle_repartition
+        .clone()
+        .or_else(|| f.cle.clone())
+        .unwrap_or_else(|| f.cle_proposee.clone());
+    let motif = decision
+        .motif_cle
+        .clone()
+        .or_else(|| f.motif_cle.clone())
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    if !f.cles_autorisees.contains(&cle) {
+        return Err(AppError::RegleMetier(format!(
+            "La clé {cle} n'est pas autorisée pour « {} » (autorisées : {}).",
+            f.libelle_type,
+            f.cles_autorisees.join(", ")
+        )));
+    }
+    if cle != f.cle_proposee && motif.as_deref().map(|m| m.chars().count()).unwrap_or(0) < 5 {
+        return Err(AppError::Invalide(format!(
+            "La clé proposée est {}, vous avez choisi {cle} : dites pourquoi (motif, 5 caractères au moins).",
+            f.cle_proposee
+        )));
+    }
+
+    let lignes = if f.inclus == 1 { calculer_allocation(tx, &f, &cle).await? } else { Vec::new() };
+    if f.inclus == 1 {
+        // La version en vigueur, ecrite une fois. Ses lignes sont celles d'un
+        // brouillon jusqu'au passage a VALIDE juste apres ; la base les fige.
+        sqlx::query("DELETE FROM lignes_frais_repartition WHERE id_ligne_frais = $1 AND version = $2")
+            .bind(&f.id)
+            .bind(f.version)
+            .execute(&mut *tx)
+            .await?;
+        let ids: Vec<String> = lignes.iter().map(|l| l.id_ligne.clone()).collect();
+        let pcts: Vec<f64> = lignes.iter().map(|l| l.pourcentage).collect();
+        let montants: Vec<i64> = lignes.iter().map(|l| l.montant_c).collect();
+        let bases: Vec<f64> = lignes.iter().map(|l| l.base).collect();
+        let theos: Vec<f64> = lignes.iter().map(|l| l.theorique).collect();
+        sqlx::query(
+            "INSERT INTO lignes_frais_repartition
+                    (id_ligne_frais, version, id_article_dossier, pourcentage, montant_alloue_dhs,
+                     base_repartition, montant_theorique)
+             SELECT $1, $2, v.id, round(v.pct::numeric, 10), v.c / 100.0,
+                    round(v.base::numeric, 6), round(v.theo::numeric, 6)
+               FROM unnest($3::text[], $4::float8[], $5::bigint[], $6::float8[], $7::float8[])
+                    AS v(id, pct, c, base, theo)",
+        )
+        .bind(&f.id)
+        .bind(f.version)
+        .bind(&ids)
+        .bind(&pcts)
+        .bind(&montants)
+        .bind(&bases)
+        .bind(&theos)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "UPDATE dossier_lignes_frais
+            SET cle_repartition = $2, motif_cle = $3, statut = 'VALIDE', capitalisable = $4,
+                id_utilisateur_validation = $5, date_validation = $6
+          WHERE id_ligne_frais = $1 AND statut = 'BROUILLON'",
+    )
+    .bind(&f.id)
+    .bind(&cle)
+    .bind(&motif)
+    .bind(f.inclus as i16)
+    .bind(&user.id)
+    .bind(maintenant())
+    .execute(&mut *tx)
+    .await?;
+
+    let mut avis = Vec::new();
+    let applications = if f.inclus == 1 {
+        appliquer_fiche(tx, user, &f, &mut avis).await?
+    } else {
+        Vec::new()
+    };
+    let (alloue, applique) = reste_fiche(tx, id).await?;
+    let statut: String = sqlx::query_scalar("SELECT statut FROM dossier_lignes_frais WHERE id_ligne_frais = $1")
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let total_c: i64 = lignes.iter().map(|l| l.montant_c).sum();
+    Ok(json!({
+        "id_ligne_frais": id,
+        "statut_fiche": statut,
+        "cle_repartition": cle,
+        "capitalisable": f.inclus == 1,
+        "montant_dhs": f.montant_c as f64 / 100.0,
+        "lignes": lignes.iter().map(LigneAlloc::json).collect::<Vec<_>>(),
+        "total_reparti_dhs": total_c as f64 / 100.0,
+        "equilibre": f.inclus != 1 || total_c == f.montant_c,
+        "applications": applications,
+        "montant_applique_dhs": applique as f64 / 100.0,
+        "reste_a_appliquer_dhs": (alloue - applique) as f64 / 100.0,
+        "avis": avis,
+    }))
+}
+
+/// VALIDE -> BROUILLON, seulement si rien n'a ete applique (la base le
+/// garantit) : une nouvelle version s'ouvre, l'allocation validee reste
+/// archivee.
+pub async fn remettre_en_brouillon(tx: &mut PgConnection, user: &Utilisateur, id: &str, motif: &str) -> AppResult<Value> {
+    let motif = motif.trim();
+    if motif.chars().count() < 5 {
+        return Err(AppError::Invalide("Dites pourquoi la fiche revient en brouillon (5 caractères au moins).".into()));
+    }
+    let f = verrouiller_fiche(tx, id).await?;
+    if f.statut.as_deref() != Some("VALIDE") {
+        return Err(AppError::RegleMetier(
+            "Seule une fiche validée, dont rien n'est encore appliqué, revient en brouillon. \
+             Une fiche appliquée se corrige par une rectificative."
+                .into(),
+        ));
+    }
+    sqlx::query(
+        "UPDATE dossier_lignes_frais
+            SET statut = 'BROUILLON', version = version + 1, motif_brouillon = $2,
+                id_utilisateur_brouillon = $3, date_brouillon = $4,
+                id_utilisateur_validation = NULL, date_validation = NULL, capitalisable = NULL
+          WHERE id_ligne_frais = $1",
+    )
+    .bind(id)
+    .bind(motif)
+    .bind(&user.id)
+    .bind(maintenant())
+    .execute(&mut *tx)
+    .await?;
+    Ok(json!({ "id_ligne_frais": id, "statut_fiche": "BROUILLON", "version": f.version + 1 }))
+}
+
+/// UNE RECTIFICATIVE : une fiche nouvelle, en brouillon, liee a l'ORIGINALE
+/// (jamais a une autre rectificative), avec son motif et sa piece. Elle propose
+/// l'allocation de l'originale, au prorata ; l'utilisateur la confirme ou en
+/// choisit une autre en la validant.
+pub async fn rectifier_fiche(
+    tx: &mut PgConnection,
+    user: &Utilisateur,
+    id_origine: &str,
+    montant_devise: f64,
+    motif: &str,
+    numero_piece: &str,
+) -> AppResult<Value> {
+    let motif = motif.trim();
+    let numero_piece = numero_piece.trim();
+    if motif.chars().count() < 5 || numero_piece.is_empty() || montant_devise == 0.0 || !montant_devise.is_finite() {
+        return Err(AppError::Invalide(
+            "Une rectificative demande un montant (signé, non nul), un motif (5 caractères au moins) et la pièce \
+             qui la justifie (avoir, facture corrigée)."
+                .into(),
+        ));
+    }
+    let f = verrouiller_fiche(tx, id_origine).await?;
+    if !matches!(f.statut.as_deref(), Some("VALIDE") | Some("APPLIQUE")) {
+        return Err(AppError::RegleMetier("Seule une fiche validée se rectifie ; un brouillon se modifie.".into()));
+    }
+    let (devise, cours): (String, f64) =
+        sqlx::query_as("SELECT code_devise, cours_change::float8 FROM dossier_lignes_frais WHERE id_ligne_frais = $1")
+            .bind(id_origine)
+            .fetch_one(&mut *tx)
+            .await?;
+    let clos = f.statut_dossier == "CLOTURE";
+    if clos {
+        sqlx::query("SELECT set_config('gestionfil.frais_post_cloture', 'on', true)")
+            .execute(&mut *tx)
+            .await?;
+    }
+    let rect_c = (montant_devise * cours * 100.0).round() as i64;
+    let origine: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT id_article_dossier, round(montant_alloue_dhs * 100)::bigint
+           FROM v_frais_allocation_en_vigueur WHERE id_ligne_frais = $1 ORDER BY id_article_dossier",
+    )
+    .bind(id_origine)
+    .fetch_all(&mut *tx)
+    .await?;
+    let proposer_manuel = f.inclus == 1 && !origine.is_empty() && f.cles_autorisees.iter().any(|c| c == "MANUEL");
+    let (cle, motif_cle) = if proposer_manuel {
+        (Some("MANUEL".to_string()), Some("Proposée : l'allocation de la fiche d'origine, au prorata".to_string()))
+    } else {
+        (f.cle.clone(), f.motif_cle.clone())
+    };
+    let id: String = sqlx::query_scalar(
+        "INSERT INTO dossier_lignes_frais
+                (id_dossier, id_frais, libelle, numero_piece, montant_devise, code_devise, cours_change,
+                 id_utilisateur_creation, statut, cle_repartition, motif_cle,
+                 id_ligne_frais_origine, motif_rectification, post_cloture, motif_post_cloture)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'BROUILLON', $9, $10, $11, $12, $13, $14)
+         RETURNING id_ligne_frais",
+    )
+    .bind(&f.id_dossier)
+    .bind(&f.id_frais)
+    .bind(format!("Rectification — {motif}"))
+    .bind(numero_piece)
+    .bind(montant_devise)
+    .bind(&devise)
+    .bind(cours)
+    .bind(&user.id)
+    .bind(&cle)
+    .bind(&motif_cle)
+    .bind(id_origine)
+    .bind(motif)
+    .bind(if clos { 1i16 } else { 0 })
+    .bind(if clos { Some(motif) } else { None })
+    .fetch_one(&mut *tx)
+    .await?;
+    if proposer_manuel {
+        let bases: Vec<i64> = origine.iter().map(|(_, c)| c.abs()).collect();
+        let parts = repartir_signe(rect_c, &bases);
+        let ids: Vec<String> = origine.iter().map(|(l, _)| l.clone()).collect();
+        sqlx::query(
+            "INSERT INTO dossier_lignes_frais_cibles (id_ligne_frais, id_ligne, montant_saisi)
+             SELECT $1, v.id, v.c / 100.0 FROM unnest($2::text[], $3::bigint[]) AS v(id, c)",
+        )
+        .bind(&id)
+        .bind(&ids)
+        .bind(&parts)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query(
+            "INSERT INTO dossier_lignes_frais_cibles (id_ligne_frais, id_ligne)
+             SELECT $1, id_ligne FROM dossier_lignes_frais_cibles WHERE id_ligne_frais = $2",
+        )
+        .bind(&id)
+        .bind(id_origine)
+        .execute(&mut *tx)
+        .await?;
+    }
+    Ok(json!({ "id_ligne_frais": id, "statut_fiche": "BROUILLON", "id_ligne_frais_origine": id_origine }))
+}
+
+/// LA DECISION AU SOLDE d'une ligne : son reste de frais est applique aux kilos
+/// reellement recus (APPLIQUER_RECU), ou porte au journal des ecarts
+/// (JOURNAL_ECART). Le moteur ne choisit jamais a la place de l'utilisateur.
+pub async fn decider_reste(
+    tx: &mut PgConnection,
+    user: &Utilisateur,
+    id_ligne: &str,
+    choix: &str,
+    motif: &str,
+) -> AppResult<Value> {
+    let motif = motif.trim();
+    if !matches!(choix, "APPLIQUER_RECU" | "JOURNAL_ECART") {
+        return Err(AppError::Invalide("Choix inconnu : APPLIQUER_RECU ou JOURNAL_ECART.".into()));
+    }
+    if motif.chars().count() < 5 {
+        return Err(AppError::Invalide("Dites pourquoi (5 caractères au moins).".into()));
+    }
+    let id_dossier: String = sqlx::query_scalar(
+        "SELECT f.id_dossier FROM import_facture_lignes l JOIN import_factures f ON f.id_facture = l.id_facture
+          WHERE l.id_ligne = $1",
+    )
+    .bind(id_ligne)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("ligne {id_ligne}")))?;
+    sqlx::query("SELECT 1 FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
+        .bind(&id_dossier)
+        .execute(&mut *tx)
+        .await?;
+    let (soldee, deja, code_reference, recu): (i64, Option<String>, Option<String>, f64) = sqlx::query_as(
+        "SELECT soldee, traitement_reste_frais, code_reference, quantite_recue_kg::float8
+           FROM import_facture_lignes WHERE id_ligne = $1 FOR UPDATE",
+    )
+    .bind(id_ligne)
+    .fetch_one(&mut *tx)
+    .await?;
+    if soldee != 1 {
+        return Err(AppError::RegleMetier(
+            "La ligne n'est pas soldée : son reste de frais s'appliquera à mesure des réceptions.".into(),
+        ));
+    }
+    // UNE DECISION PAR RESTE : deja decidee, la ligne n'en reprend une que si
+    // une fiche (un frais tardif, une rectificative) y laisse un reste nouveau.
+    if let Some(d) = &deja {
+        let restant: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1 FROM v_frais_allocation_en_vigueur a
+                  JOIN dossier_lignes_frais x ON x.id_ligne_frais = a.id_ligne_frais
+                 WHERE a.id_article_dossier = $1 AND x.statut IN ('VALIDE', 'APPLIQUE') AND x.capitalisable = 1
+                   AND a.montant_alloue_dhs <> COALESCE((SELECT sum(j.montant_dhs) FROM import_ajustements_cump j
+                                                          WHERE j.id_ligne_frais = a.id_ligne_frais
+                                                            AND j.id_ligne = a.id_article_dossier), 0))",
+        )
+        .bind(id_ligne)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !restant {
+            return Err(AppError::RegleMetier(format!(
+                "Le reste de cette ligne est déjà décidé ({d}) et aucune fiche n'y laisse de reste."
+            )));
+        }
+    }
+    sqlx::query(
+        "UPDATE import_facture_lignes
+            SET traitement_reste_frais = $2, motif_traitement_reste = $3,
+                id_utilisateur_traitement_reste = $4, date_traitement_reste = $5
+          WHERE id_ligne = $1",
+    )
+    .bind(id_ligne)
+    .bind(choix)
+    .bind(motif)
+    .bind(&user.id)
+    .bind(maintenant())
+    .execute(&mut *tx)
+    .await?;
+
+    let fiches: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT a.id_ligne_frais, round(a.montant_alloue_dhs * 100)::bigint
+           FROM v_frais_allocation_en_vigueur a
+           JOIN dossier_lignes_frais x ON x.id_ligne_frais = a.id_ligne_frais
+          WHERE a.id_article_dossier = $1 AND x.statut IN ('VALIDE', 'APPLIQUE') AND x.capitalisable = 1
+          ORDER BY a.id_ligne_frais",
+    )
+    .bind(id_ligne)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut faites = Vec::new();
+    for (id_fiche, alloc_c) in fiches {
+        let f = verrouiller_fiche(tx, &id_fiche).await?;
+        let applique_c: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(round(sum(montant_dhs) * 100), 0)::bigint FROM import_ajustements_cump
+              WHERE id_ligne_frais = $1 AND id_ligne = $2",
+        )
+        .bind(&id_fiche)
+        .bind(id_ligne)
+        .fetch_one(&mut *tx)
+        .await?;
+        let reste_c = alloc_c - applique_c;
+        if reste_c == 0 {
+            continue;
+        }
+        if choix == "APPLIQUER_RECU" {
+            let mut avis = Vec::new();
+            match appliquer_part(tx, user, &f, id_ligne, None, reste_c, Some(motif), &mut avis).await? {
+                Some(v) => faites.push(v),
+                None => {
+                    return Err(AppError::RegleMetier(format!(
+                        "Le reste ne peut pas s'appliquer aux kilos reçus : {} Choisissez le journal des écarts, \
+                         ou résolvez d'abord la traçabilité.",
+                        avis.join(" ")
+                    )))
+                }
+            }
+        } else {
+            sqlx::query(
+                "INSERT INTO import_ajustements_cump
+                        (id_dossier, code_reference, nature, code_magasin, quantite_recue_kg, stock_kg,
+                         montant_dhs, id_utilisateur, origine, motif,
+                         type_operation, id_ligne_frais, id_ligne, id_reception, quantite_kg)
+                 VALUES ($1, $2, 'CONSOMME', NULL, $3, 0, $4 / 100.0, $5, 'FICHE', $6,
+                         'APPLICATION', $7, $8, NULL, 0)",
+            )
+            .bind(&f.id_dossier)
+            .bind(&code_reference)
+            .bind(recu)
+            .bind(reste_c)
+            .bind(&user.id)
+            .bind(motif)
+            .bind(&f.id)
+            .bind(id_ligne)
+            .execute(&mut *tx)
+            .await?;
+            faites.push(json!({ "id_ligne_frais": f.id, "journal_ecart_dhs": reste_c as f64 / 100.0 }));
+        }
+        statuer_fiche(tx, &f.id).await?;
+    }
+    Ok(json!({ "id_ligne": id_ligne, "traitement_reste_frais": choix, "applications": faites }))
+}
+
+/// A LA VALIDATION D'UNE RECEPTION : chaque fiche validee qui vise ses lignes
+/// applique la part que ces kilos rendent applicable. Une application bloquee
+/// (tracabilite) ne bloque pas la reception : elle est signalee.
+pub async fn appliquer_reception(tx: &mut PgConnection, user: &Utilisateur, id_reception: &str) -> AppResult<Vec<String>> {
+    let fiches: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT a.id_ligne_frais
+           FROM import_reception_lignes rl
+           JOIN v_frais_allocation_en_vigueur a ON a.id_article_dossier = rl.id_ligne
+           JOIN dossier_lignes_frais x ON x.id_ligne_frais = a.id_ligne_frais
+          WHERE rl.id_reception = $1 AND x.statut IN ('VALIDE', 'APPLIQUE') AND x.capitalisable = 1
+          ORDER BY 1",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut avis = Vec::new();
+    for id in fiches {
+        let f = verrouiller_fiche(tx, &id).await?;
+        appliquer_fiche(tx, user, &f, &mut avis).await?;
+    }
+    Ok(avis)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
-    use super::repartir_centimes;
+    use super::{allouer, part_cumulee, repartir_centimes};
 
     /// Le dossier 01/26 du classeur IMPORTATION 2026 (LOMAT, 12/2 et 12/4) :
     /// l'ERP doit retrouver les montants du classeur au centime.
@@ -1290,5 +2221,74 @@ mod tests {
     fn sans_base_rien_n_est_reparti() {
         assert_eq!(repartir_centimes(5_000, &[0, 0]), [0, 0]);
         assert_eq!(repartir_centimes(0, &[10, 20]), [0, 0]);
+    }
+
+    // ---- Les fiches de frais (12/10/2026) ---------------------------------
+
+    /// L'exemple officiel : 519 MAD sur 10 000 / 20 000 / 30 000 MAD.
+    #[test]
+    fn frais_519_par_valeur() {
+        let a = allouer(51_900, &[1_000_000, 2_000_000, 3_000_000]);
+        let c: Vec<i64> = a.iter().map(|x| x.2).collect();
+        assert_eq!(c, [8_650, 17_300, 25_950]); // 86,50 173,00 259,50
+        assert!((a[0].1 - 86.5).abs() < 1e-9 && (a[2].1 - 259.5).abs() < 1e-9);
+        assert!((a.iter().map(|x| x.0).sum::<f64>() - 100.0).abs() < 1e-9);
+    }
+
+    /// Des centimes qui ne tombent pas juste : la somme egale toujours le montant.
+    #[test]
+    fn arrondis_au_plus_fort_reste() {
+        for montant in [10_000, 10_001, 10_002, 51_900, 1, 7, 99_999_999] {
+            for bases in [&[1i64, 1, 1][..], &[3, 7, 11, 13], &[1, 2], &[123_456, 654_321, 1]] {
+                let c: i64 = allouer(montant, bases).iter().map(|x| x.2).sum();
+                assert_eq!(c, montant, "montant {montant} bases {bases:?}");
+            }
+        }
+        // Egalite des restes : la premiere ligne d'abord, a chaque fois.
+        assert_eq!(allouer(10_000, &[1, 1, 1]).iter().map(|x| x.2).collect::<Vec<_>>(), [3_334, 3_333, 3_333]);
+        assert_eq!(allouer(1, &[1, 1, 1]).iter().map(|x| x.2).collect::<Vec<_>>(), [1, 0, 0]);
+    }
+
+    /// Une rectificative negative se repartit au meme prorata, signe garde.
+    #[test]
+    fn rectificative_negative() {
+        let c: Vec<i64> = allouer(-100_000, &[60, 40]).iter().map(|x| x.2).collect();
+        assert_eq!(c, [-60_000, -40_000]);
+    }
+
+    /// Mille lignes : exact, et vite.
+    #[test]
+    fn mille_lignes() {
+        let bases: Vec<i64> = (1..=1_000).map(|i| (i * 7_919) % 100_003 + 1).collect();
+        let debut = std::time::Instant::now();
+        let a = allouer(123_456_789, &bases);
+        assert!(debut.elapsed().as_millis() < 200);
+        assert_eq!(a.iter().map(|x| x.2).sum::<i64>(), 123_456_789);
+    }
+
+    /// Une base totale nulle ne repartit rien (le moteur refuse en amont).
+    #[test]
+    fn base_nulle() {
+        assert!(allouer(5_000, &[0, 0]).iter().all(|x| x.2 == 0 && x.0 == 0.0));
+    }
+
+    /// L'application progressive : 40 puis 60 sur 100 -> 400 puis 600 ; la
+    /// somme des parts egale l'allocation, sans derive ; plafonnee.
+    #[test]
+    fn application_progressive() {
+        assert_eq!(part_cumulee(100_000, 40, 100), 40_000);
+        assert_eq!(part_cumulee(100_000, 100, 100) - part_cumulee(100_000, 40, 100), 60_000);
+        // 1 000,01 en trois receptions : la derniere tombe juste.
+        let a = 100_001;
+        let p1 = part_cumulee(a, 33, 100);
+        let p2 = part_cumulee(a, 66, 100) - p1;
+        let p3 = part_cumulee(a, 100, 100) - p1 - p2;
+        assert_eq!(p1 + p2 + p3, a);
+        // Excedent recu : jamais plus que l'allocation.
+        assert_eq!(part_cumulee(a, 120, 100), a);
+        // Negatif (rectificative) : symetrique.
+        assert_eq!(part_cumulee(-100_000, 40, 100), -40_000);
+        // Facture sans poids : tout ou rien n'a pas de sens, l'allocation entiere.
+        assert_eq!(part_cumulee(500, 10, 0), 500);
     }
 }

@@ -264,6 +264,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/import/taux-reference", get(importation::taux_reference_facture))
         .route("/api/import/frais/{id}",
                patch(importation::modifier_frais).delete(importation::supprimer_frais))
+        // Les fiches de frais (12/10/2026) : apercu, validation (allocation
+        // figee et application), retour en brouillon, rectificative, historique ;
+        // et la decision sur le reste d'une ligne soldee.
+        .route("/api/import/frais/{id}/apercu", post(importation::apercu_fiche))
+        .route("/api/import/frais/{id}/valider", post(importation::valider_fiche))
+        .route("/api/import/frais/{id}/brouillon", post(importation::remettre_fiche_en_brouillon))
+        .route("/api/import/frais/{id}/rectifier", post(importation::rectifier_fiche))
+        .route("/api/import/frais/{id}/historique", get(importation::historique_fiche))
+        .route("/api/import/lignes/{id}/reste-frais", post(importation::decider_reste_frais))
         // La reception est un document A PART : elle ne passe pas par un
         // dossier, et ses lignes peuvent venir de plusieurs.
         // Les pieces du dossier : scans, PDF, photos. La limite de corps est

@@ -170,6 +170,25 @@ function FicheImprimee({ sujet }: { sujet: Sujet }) {
         </Bloc>
       ))}
 
+      {sujet.exemples?.map((ex) => (
+        <Bloc key={ex.titre} titre={`Exemple — ${ex.titre}`}>
+          {ex.situation ? <p>{ex.situation}</p> : null}
+          {ex.calcul?.length ? (
+            <table className="w-full border-collapse">
+              <tbody>
+                {ex.calcul.map(([libelle, valeur], i) => (
+                  <tr key={i} className="border-b border-neutral-200">
+                    <td className="py-0.5 pr-2">{libelle}</td>
+                    <td className="py-0.5 text-right tabular-nums">{valeur}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+          {ex.conclusion ? <p className="mt-0.5 italic">{ex.conclusion}</p> : null}
+        </Bloc>
+      ))}
+
       {/* LE TABLEAU DES CHAMPS EST LE COEUR du manuel : c'est ce qu'on vient y
           chercher quand on hesite devant une case. */}
       {sujet.champs?.length ? (

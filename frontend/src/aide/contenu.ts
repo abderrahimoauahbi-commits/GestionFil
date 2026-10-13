@@ -9,6 +9,7 @@
  * l'ecran dit de lui-meme. Mais tout ecran de SAISIE doit avoir son tableau de
  * champs — c'est la que l'aide se gagne.
  */
+import { EXEMPLES } from './exemples'
 import type { Sujet } from './types'
 
 export const SUJETS: Sujet[] = [
@@ -1801,7 +1802,7 @@ export const SUJETS: Sujet[] = [
     droits: 'Voir la fiche « Mouvements » : chaque type a son droit.',
     regles: [
       'Le type « Consommation hors machine » demande un OF et refuse un fil qui se charge sur machine.',
-      'Le retour fournisseur n’est plus un mouvement libre : il a son document, rattaché à la réception.',
+      'Le retour fournisseur n’est plus un mouvement libre : il a son document (Achats → Retours fournisseur).',
     ],
     liens: [{ route: '/mouvements', libelle: 'Mouvements' }, { route: '/retours-fournisseur', libelle: 'Retours fournisseur' }],
   },
@@ -1812,6 +1813,12 @@ export const SUJETS: Sujet[] = [
     objectif: 'Installer l’application de bureau ou mobile sur un poste de l’usine.',
   },
 ]
+
+// LES EXEMPLES CHIFFRÉS (13/10/2026) s'attachent à la fiche de leur écran.
+for (const s of SUJETS) {
+  const ex = EXEMPLES[s.route]
+  if (ex) s.exemples = [...(s.exemples ?? []), ...ex]
+}
 
 /** La fiche d'un écran, trouvée par sa route. */
 export function sujetPour(chemin: string): Sujet | undefined {

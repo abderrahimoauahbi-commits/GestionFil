@@ -18,6 +18,9 @@
  *
  * Ne sont pas concernes : les tableaux de `DataTable` (ils ont leur ligne
  * complementaire) et ceux de l'etat imprime (le papier a sa propre largeur).
+ *
+ * SUR TELEPHONE (sous 640 px), un tableau de SAISIE ne se resserre pas : il
+ * devient une pile de cartes (voir `enCartes`).
  */
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
@@ -34,9 +37,54 @@ function cadreDe(t: HTMLElement): HTMLElement | null {
   return null
 }
 
+/** Un tableau de SAISIE : des champs dans son corps. */
+const deSaisie = (t: HTMLTableElement) =>
+  !!t.tBodies[0]?.querySelector('input:not([type="checkbox"]):not([type="radio"]), select, textarea')
+
+/**
+ * SUR TELEPHONE, UN TABLEAU DE SAISIE DEVIENT UNE PILE DE CARTES (13/10/2026).
+ * Chaque cellule recoit le titre de sa colonne (`data-libelle`), que le CSS
+ * affiche au-dessus du champ ; un nombre ou une cellule etroite (`data-court`)
+ * partage sa rangee avec la suivante.
+ */
+function enCartes(t: HTMLTableElement): boolean {
+  if (window.innerWidth >= 640 || !deSaisie(t)) {
+    t.removeAttribute('data-cartes')
+    return false
+  }
+  const entetes = t.tHead?.rows[t.tHead.rows.length - 1]
+  const titres: string[] = []
+  if (entetes) {
+    for (const th of Array.from(entetes.cells)) {
+      for (let i = 0; i < th.colSpan; i += 1) titres.push((th.textContent ?? '').trim())
+    }
+  }
+  for (const corps of Array.from(t.tBodies)) {
+    for (const tr of Array.from(corps.rows)) {
+      let col = 0
+      for (const td of Array.from(tr.cells)) {
+        const titre = td.colSpan === 1 ? titres[col] ?? '' : ''
+        if (titre) td.setAttribute('data-libelle', titre)
+        else td.removeAttribute('data-libelle')
+        const nombre = td.matches('.text-right, .tabular-nums')
+          || !!td.querySelector('input[inputmode="decimal"], input[inputmode="numeric"], input[type="number"], input[type="date"]')
+        if (nombre && td.colSpan === 1) td.setAttribute('data-court', '')
+        else td.removeAttribute('data-court')
+        col += td.colSpan
+      }
+    }
+  }
+  t.setAttribute('data-cartes', '')
+  return true
+}
+
 function ajuster(t: HTMLTableElement) {
   if (t.closest('.cadre-table, .zone-impression, .impression-seule, [data-pas-souple]')) return
   if (!t.offsetParent) return // cache (onglet ferme, cartes) : rien a mesurer
+  if (enCartes(t)) {
+    t.removeAttribute('data-souple')
+    return
+  }
   const cadre = cadreDe(t)
   const largeur = cadre ? cadre.clientWidth : document.documentElement.clientWidth
   if (!largeur) return

@@ -878,6 +878,7 @@ export function DataTable<L extends Record<string, unknown>>({
             {rangs.map((rang) => (
               <div
                 key={rang.id}
+                role="article"
                 onClick={surClic ? () => surClic(rang.original) : undefined}
                 className={cn(
                   'rounded-lg border border-bordure bg-surface p-3.5 shadow-[var(--ombre-pose)]',

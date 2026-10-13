@@ -27,11 +27,16 @@ export default defineConfig({
   },
   // E2E_LARGEURS=1280,1024 : d'autres largeurs a la place des deux habituelles
   // (portable a 125 %, fenetre non agrandie), pour chercher ce qui deborde.
+  // Sous 600 px, c'est un TELEPHONE (13/10/2026) : ecran tactile, haut, dense.
   projects: process.env.E2E_LARGEURS
-    ? process.env.E2E_LARGEURS.split(',').map((l) => ({
-        name: `largeur-${l}`,
-        use: { viewport: { width: Number(l), height: 768 } },
-      }))
+    ? process.env.E2E_LARGEURS.split(',').map((l) =>
+        Number(l) < 600
+          ? {
+              name: `telephone-${l}`,
+              use: { viewport: { width: Number(l), height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
+            }
+          : { name: `largeur-${l}`, use: { viewport: { width: Number(l), height: 768 } } },
+      )
     : [
         { name: 'portable-1366', use: { viewport: { width: 1366, height: 768 } } },
         { name: 'ecran-1920', use: { viewport: { width: 1920, height: 1080 } } },

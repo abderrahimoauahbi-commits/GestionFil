@@ -375,7 +375,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                           {magasins.map((m) => <option key={m} value={m}>{m}</option>)}
                         </Selecteur>
                       </div>
-                      <div>
+                      <div className="col-span-2 md:col-span-1">
                         {i === 0 && <Etiq>Référence</Etiq>}
                         <Selecteur className="h-8 w-full" aria-label="Référence" value={l.code_reference} disabled={!l.code_magasin}
                           onChange={(e) => choisirReference(l, e.target.value)}>
@@ -383,7 +383,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                           {refs.map(([c, d]) => <option key={c} value={c}>{c}{d ? ` — ${d}` : ''}</option>)}
                         </Selecteur>
                       </div>
-                      <div>
+                      <div className="col-span-2 md:col-span-1">
                         {i === 0 && <Etiq>Lot</Etiq>}
                         <Selecteur className="h-8 w-full" aria-label="Lot" value={l.lot} disabled={lots.length === 0}
                           onChange={(e) => maj(l.cle, { lot: e.target.value })}>
@@ -413,7 +413,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                         <Champ className="h-8 text-right" inputMode="numeric" aria-label="Bobines"
                           value={l.bobines} onChange={(e) => maj(l.cle, { bobines: e.target.value })} />
                       </div>
-                      <div>
+                      <div className="col-span-2 md:col-span-1">
                         {i === 0 && <Etiq>Motif</Etiq>}
                         <Selecteur className="h-8 w-full" aria-label="Motif de la ligne" value={l.motif}
                           onChange={(e) => maj(l.cle, { motif: e.target.value })}>

@@ -305,6 +305,90 @@ table,
   select {
     min-width: 8rem;
   }
+
+  /* LE « ? » DE L'AIDE RESTE UN ROND. La regle des 44 px l'etirait en lamelle
+     verticale, qui passait sous le titre. Un carre de 32 px se vise bien. */
+  [data-aide-bouton] {
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+  }
+}
+
+/* LES BARRES D'ACTION COLLEES EN BAS ne passent plus sous la navigation du
+   telephone (13/10/2026) : « Creer le bon », « Enregistrer la reception »
+   restaient caches derriere elle. La coquille publie sa hauteur. */
+@media (max-width: 767px) {
+  main .sticky.bottom-0 {
+    bottom: var(--barre-basse, 0px);
+  }
+}
+
+/* LES TABLEAUX DE SAISIE DEVIENNENT DES CARTES SUR TELEPHONE (13/10/2026).
+   Une grille de lignes de PC laissait 2 px a une quantite. Sous 640 px, chaque
+   ligne est une carte, un champ par rangee avec son libelle (repris du titre
+   de colonne par TablesSouples) ; les nombres vont par deux. */
+@media (max-width: 639px) {
+  table[data-cartes] {
+    display: block;
+    min-width: 0 !important;
+    width: 100%;
+  }
+  table[data-cartes] thead {
+    display: none;
+  }
+  table[data-cartes] tbody,
+  table[data-cartes] tfoot {
+    display: block;
+  }
+  table[data-cartes] tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+    margin: 0 0 8px;
+    padding: 10px;
+    border: 1px solid var(--color-bordure);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+  }
+  table[data-cartes] td,
+  table[data-cartes] th {
+    display: block;
+    min-width: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    position: static !important;
+    text-align: left !important;
+    white-space: normal;
+    grid-column: 1 / -1;
+  }
+  table[data-cartes] td[data-court] {
+    grid-column: auto;
+  }
+  table[data-cartes] td:empty {
+    display: none;
+  }
+  table[data-cartes] td[data-libelle]::before {
+    content: attr(data-libelle);
+    display: block;
+    margin-bottom: 2px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-attenue-texte);
+  }
+  table[data-cartes] td input:not([type="checkbox"]):not([type="radio"]),
+  table[data-cartes] td select,
+  table[data-cartes] td textarea,
+  table[data-cartes] td [role="combobox"] {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+  table[data-cartes] .sticky {
+    position: static !important;
+  }
 }
 
 /* Barre de titre Tauri : la fenetre est sans decoration native, on rend cette

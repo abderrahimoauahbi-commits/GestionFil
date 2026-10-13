@@ -412,7 +412,9 @@ test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis récep
   // NOTRE transfert : le plus recent (la liste en porte d'autres, dont un qu'on ne peut expedier).
   const transferts = await lireApi<Record<string, unknown>[]>(page, '/api/transferts')
   const numero = transferts.map((t) => String(t.numero_transfert)).sort().pop()!
+  // Sa ligne au tableau, ou sa carte sur un telephone.
   const ligne = page.getByRole('row', { name: new RegExp(numero) })
+    .or(page.getByRole('article').filter({ hasText: numero }))
 
   // L'expedition, depuis la liste, avec sa confirmation.
   await ligne.getByRole('button', { name: /^Exp[ée]dier$/ }).click()
@@ -448,7 +450,9 @@ test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg jus
     .filter((i) => i.statut === 'BROUILLON' && i.code_magasin === 'Polyfashions')
     .sort((a, b) => String(a.numero_inventaire).localeCompare(String(b.numero_inventaire)))
     .pop()!
-  await page.getByRole('row', { name: new RegExp(String(inv.numero_inventaire)) }).getByRole('button', { name: 'Ouvrir' }).click()
+  await page.getByRole('row', { name: new RegExp(String(inv.numero_inventaire)) })
+    .or(page.getByRole('article').filter({ hasText: String(inv.numero_inventaire) }))
+    .getByRole('button', { name: 'Ouvrir' }).click()
 
   // Chaque ligne comptee au clavier : le theorique, sauf notre reference (2,25 kg de moins).
   // Les lignes naissent a l'ouverture : on attend qu'elles soient a l'ecran ET au serveur.

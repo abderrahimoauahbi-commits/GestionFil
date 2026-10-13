@@ -1621,6 +1621,42 @@ export const SUJETS: Sujet[] = [
     ],
   },
 
+  {
+    route: '/roles',
+    titre: 'Rôles et permissions',
+    chemin: 'Paramètres → Paramètres utilisateurs → Rôles et permissions',
+    objectif: 'Créer un rôle, régler ses permissions module par module, le modèle de visibilité de ses champs et son plafond de validation des bons.',
+    droits: 'Rôle Administrateur seulement.',
+    procedures: [
+      {
+        titre: 'Créer un rôle',
+        etapes: [
+          'Nouveau rôle : donnez un code (majuscules, chiffres, _) et un libellé.',
+          'Partez d’un rôle vide, ou recopiez un rôle existant avec « À partir du rôle ».',
+          'Cochez Lire, Écrire, Valider pour chaque module ; réglez les champs module par module.',
+          'Enregistrer n’apparaît que si quelque chose a changé.',
+        ],
+      },
+      {
+        titre: 'Changer le modèle d’un rôle',
+        etapes: [
+          'Ouvrez le rôle, changez le niveau d’un champ (Masqué, Lecture, Écriture), enregistrez.',
+          'Les utilisateurs du rôle prennent le nouveau niveau, sauf pour les champs réglés à la main pour eux (marqués « à la main » dans leur grille).',
+          'Pour remettre un utilisateur au modèle : sa grille → Appliquer le modèle du rôle.',
+        ],
+      },
+    ],
+    champs: [
+      { nom: 'Plafond de validation des bons', description: 'Montant au-delà duquel ce rôle ne valide pas un bon.', valeurs: 'vide — sans plafond' },
+      { nom: 'Valider', description: 'Distinct d’Écrire : c’est la base de la séparation des tâches (celui qui crée un bon ne le valide pas).' },
+    ],
+    regles: [
+      'Un rôle porté par un utilisateur ne se supprime pas : réaffectez d’abord ses utilisateurs.',
+      'L’Administrateur garde toujours la gestion des utilisateurs, et voit tous les champs en écriture ; son rôle ne se supprime pas.',
+      'Chaque changement de rôle, de permission ou de modèle entre au journal d’audit.',
+    ],
+  },
+
   /* ============================================ ÉCRANS SANS FICHE (09/10) == */
   {
     route: '/rapports',

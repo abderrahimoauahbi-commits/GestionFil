@@ -22,6 +22,7 @@ pub mod pieces;
 mod production;
 mod referentiels;
 mod retours;
+mod roles;
 pub(crate) mod stock;
 mod telechargements;
 
@@ -168,7 +169,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/sauvegardes",
              get(admin::lister_sauvegardes).post(admin::sauvegarder))
         .route("/api/admin/champs", get(admin::lister_champs))
-        .route("/api/admin/roles", get(admin::lister_roles))
+        .route("/api/admin/roles", get(admin::lister_roles).post(roles::creer))
+        // Roles et permissions (13/10/2026), reserves a l'Administrateur.
+        .route("/api/admin/roles/{code}",
+               get(roles::lire).put(roles::modifier).delete(roles::supprimer))
         .route("/api/admin/registre", get(entites::registre))
         // --- Referentiels a traitement particulier ----------------------------
         .route("/api/devises", get(referentiels::devises))

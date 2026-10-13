@@ -211,6 +211,7 @@ pub async fn lire_droits(
                 CASE WHEN u.code_role_user = 'ADMIN' THEN 'ECRITURE'
                      ELSE COALESCE(dc.niveau, cc.niveau_defaut) END AS niveau,
                 (dc.niveau IS NOT NULL)               AS explicite,
+                dc.origine,
                 cc.niveau_defaut,
                 mdc.niveau                            AS niveau_modele,
                 dc.date_modification
@@ -289,14 +290,23 @@ pub async fn enregistrer_droits(
                 d.niveau, d.module, d.champ
             )));
         }
-        // La cle etrangere vers champ_configurable refuse un champ inexistant :
-        // impossible d'enregistrer un droit sur un champ qui n'existe pas.
-        sqlx::query(
+        // Un champ inexistant au catalogue n'insere rien : on le refuse.
+        let ecrit = sqlx::query(
+            // ORIGINE (13/10/2026) : egal au modele du role (ou, sans modele,
+            // au niveau par defaut) = suit le modele ; sinon regle a la main,
+            // et le modele ne le touchera plus.
             "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
-                                      date_modification, id_utilisateur_modif)
-             VALUES ($1,$2,$3,$4,$5,$6)
+                                      date_modification, id_utilisateur_modif, origine)
+             SELECT $1, $2, $3, $4, $5, $6,
+                    CASE WHEN COALESCE(m.niveau, cc.niveau_defaut) = $4 THEN 'MODELE' ELSE 'MANUEL' END
+               FROM champ_configurable cc
+               JOIN utilisateur u ON u.id_utilisateur = $1
+               LEFT JOIN modele_droit_champ m
+                      ON m.code_role_user = u.code_role_user AND m.module = cc.module AND m.champ = cc.champ
+              WHERE cc.module = $2 AND cc.champ = $3
              ON CONFLICT (id_utilisateur, module, champ) DO UPDATE SET
                  niveau = excluded.niveau,
+                 origine = excluded.origine,
                  date_modification = excluded.date_modification,
                  id_utilisateur_modif = excluded.id_utilisateur_modif",
         )
@@ -307,7 +317,11 @@ pub async fn enregistrer_droits(
         .bind(&horodatage)
         .bind(&user.id)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+        if ecrit == 0 {
+            return Err(AppError::Invalide(format!("champ inconnu : {}.{}", d.module, d.champ)));
+        }
         n += 1;
     }
 
@@ -362,8 +376,8 @@ pub async fn appliquer_modele_role(
 
     let n = sqlx::query(
         "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
-                                  date_modification, id_utilisateur_modif)
-         SELECT $1, m.module, m.champ, m.niveau, $4, $5
+                                  date_modification, id_utilisateur_modif, origine)
+         SELECT $1, m.module, m.champ, m.niveau, $4, $5, 'MODELE'
            FROM modele_droit_champ m
           WHERE m.code_role_user = $2
             AND ($3 IS NULL OR m.module = $3)",
@@ -395,8 +409,8 @@ async fn appliquer_modele(
 ) -> AppResult<u64> {
     Ok(sqlx::query(
         "INSERT INTO droit_champ (id_utilisateur, module, champ, niveau,
-                                  date_modification, id_utilisateur_modif)
-         SELECT $1, m.module, m.champ, m.niveau, $3, $4
+                                  date_modification, id_utilisateur_modif, origine)
+         SELECT $1, m.module, m.champ, m.niveau, $3, $4, 'MODELE'
            FROM modele_droit_champ m WHERE m.code_role_user = $2",
     )
     .bind(id_utilisateur)

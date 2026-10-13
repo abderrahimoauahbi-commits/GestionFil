@@ -62,6 +62,7 @@ import { Audit } from './Audit'
 import { ReglageApparence } from '../composants/ReglageApparence'
 import { Referentiels } from './Referentiels'
 import { Utilisateurs } from './Utilisateurs'
+import { ListeRoles } from './Roles'
 
 const MODULE = 'PARAMETRES'
 
@@ -317,8 +318,8 @@ const SECTIONS: Section[] = [
   {
     cle: 'utilisateurs',
     famille: 'Paramètres utilisateurs',
-    libelle: 'Rôles et transitions',
-    resume: "Rôles applicatifs et transitions d'état autorisees",
+    libelle: 'Rôles et permissions',
+    resume: "Rôles, leurs permissions et leurs champs ; transitions d'état",
     Icone: ShieldCheck,
   },
   {
@@ -512,7 +513,12 @@ export function Configuration() {
           ) : section === 'audit' ? (
             <Audit />
           ) : section === 'utilisateurs' ? (
-            <Referentiels cles={['roles-utilisateur', 'transitions']} />
+            /* Les roles se reglent sur leur propre ecran (13/10/2026) ; les
+               transitions d'etat restent un referentiel. */
+            <div className="space-y-4">
+              <ListeRoles />
+              <Referentiels cles={['transitions']} />
+            </div>
           ) : section === 'apparence' ? (
             <ReglageApparence />
           ) : section === 'sauvegardes' ? (

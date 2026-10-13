@@ -471,6 +471,22 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Le serveur ne l’envoie pas : il n’apparaît ni à l’écran, ni à l’impression, ni à l’export.',
     },
   ],
+  '/roles': [
+    {
+      titre: 'le modèle suit, le réglage à la main reste',
+      situation: 'Le rôle Magasinier passe le champ « Fil sur machine » de Lecture à Masqué. Ahmed et Karim sont magasiniers ; pour Karim, ce champ avait été réglé à la main en Écriture.',
+      calcul: [
+        ['Ahmed (suit le modèle)', 'Lecture → Masqué'],
+        ['Karim (réglé à la main)', 'reste Écriture'],
+      ],
+      conclusion: 'Pour remettre Karim au modèle : sa grille de droits → Appliquer le modèle du rôle.',
+    },
+    {
+      titre: 'supprimer un rôle',
+      situation: 'Le rôle « Acheteur » a encore 2 utilisateurs.',
+      conclusion: 'La suppression est refusée ; réaffectez les 2 comptes à un autre rôle, puis supprimez.',
+    },
+  ],
   '/audit': [
     {
       titre: 'retrouver une valeur',

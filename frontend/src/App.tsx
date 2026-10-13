@@ -83,6 +83,7 @@ const ReceptionNouvelle = lazy(() => import('./pages/ReceptionNouvelle').then((m
 const PlanAchat = lazy(() => import('./pages/PlanAchat').then((m) => ({ default: m.PlanAchat })))
 const Utilisateurs = lazy(() => import('./pages/Utilisateurs').then((m) => ({ default: m.Utilisateurs })))
 const Droits = lazy(() => import('./pages/Droits').then((m) => ({ default: m.Droits })))
+const Role = lazy(() => import('./pages/Roles').then((m) => ({ default: m.Role })))
 const Valorisation = lazy(() => import('./pages/Valorisation').then((m) => ({ default: m.Valorisation })))
 const EtatStock = lazy(() => import('./pages/EtatStock').then((m) => ({ default: m.EtatStock })))
 const Lots = lazy(() => import('./pages/lots/Lots').then((m) => ({ default: m.Lots })))
@@ -298,6 +299,8 @@ const ECRANS = (
       <Route path="parametres" element={<Navigate to="/configuration" replace />} />
       <Route path="utilisateurs" element={<ExigeModule module="UTILISATEURS"><Utilisateurs /></ExigeModule>} />
       <Route path="utilisateurs/:id/droits" element={<ExigeModule module="UTILISATEURS"><Droits /></ExigeModule>} />
+      {/* Roles et permissions : l'ecran le dit au non-administrateur, le serveur le refuse. */}
+      <Route path="roles/:code" element={<ExigeModule module="UTILISATEURS"><Role /></ExigeModule>} />
   </>
 )
 

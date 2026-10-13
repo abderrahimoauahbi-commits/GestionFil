@@ -298,6 +298,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_retour_fournisseur_garde')",
     ),
     (
+        // Les roles se reglent a l'ecran ; l'origine des droits (modele/manuel).
+        "2026-10-13a_roles_permissions.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'droit_champ'
+                           AND column_name = 'origine')",
+    ),
+    (
         // La repartition choisie sur la ligne de frais (manuelle possible).
         "2026-10-12a_repartition_frais.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

@@ -30,6 +30,8 @@ interface LigneDroit {
   explicite: number
   niveau_defaut: Niveau
   niveau_modele: Niveau | null
+  /** MODELE : suit le modele du role ; MANUEL : regle a la main (13/10/2026). */
+  origine: 'MODELE' | 'MANUEL' | null
   date_modification: string | null
 }
 
@@ -277,6 +279,11 @@ export function Droits() {
                         <span className="text-texte">{d.libelle}</span>
                         {d.sensible === 1 && <Etiquette ton="ambre">sensible</Etiquette>}
                         {!d.explicite && <Etiquette ton="gris">par defaut</Etiquette>}
+                        {d.origine === 'MANUEL' && (
+                          <Etiquette ton="bleu" title="Réglé à la main : le modèle du rôle ne le change plus">
+                            à la main
+                          </Etiquette>
+                        )}
                       </div>
                       <div className="text-xs text-attenue-texte lg:hidden">{d.champ}</div>
                     </td>

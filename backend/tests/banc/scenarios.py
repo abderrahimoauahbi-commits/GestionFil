@@ -1735,6 +1735,65 @@ def scenario_sauvegarde_restaurable(c, infra):
     verifier(reste == "0", "une base temporaire de verification n'a pas ete effacee")
 
 
+def scenario_roles_permissions(c, infra):
+    """Roles et permissions (13/10) : page de l'Administrateur seul ; le modele d'un role suit chez ses
+    utilisateurs, sauf les champs regles a la main ; un role porte ne se supprime pas ; l'Administrateur
+    garde la gestion des utilisateurs, et ses gestes entrent a l'audit."""
+    c.refus("Mohamed", "GET", "/api/admin/roles/MAGASIN", codes=(403,))
+    fiche = c.ok("admin", "GET", "/api/admin/roles/MAGASIN")
+    role = fiche["role"]
+    entete = {"libelle": role["libelle"], "description": role["description"],
+              "plafond_validation_bc_mad": role["plafond_validation_bc_mad"]}
+    perms = [{"module": p["module"], "action": p["action"]} for p in fiche["permissions"]]
+    champs = [x for x in fiche["champs"] if x["au_modele"]]
+    verifier(len(champs) >= 2, "le modele du magasinier n'a pas deux champs")
+    suivi, manuel = champs[0], champs[1]
+    autre = lambda n: "LECTURE" if n != "LECTURE" else "MASQUE"
+    mag = next(u for u in c.ok("admin", "GET", "/api/admin/utilisateurs") if u["login"] == "Magasinie")
+    uid = mag["id_utilisateur"]
+    niveau = lambda champ: next(d for d in c.ok("admin", "GET", f"/api/admin/utilisateurs/{uid}/droits")
+                                if d["module"] == champ["module"] and d["champ"] == champ["champ"])
+    # Un champ regle a la main pour le magasinier : il ne suit plus le modele.
+    c.ok("admin", "PUT", f"/api/admin/utilisateurs/{uid}/droits", {"droits": [
+        {"module": manuel["module"], "champ": manuel["champ"], "niveau": autre(manuel["niveau"])}]})
+    verifier(niveau(manuel)["origine"] == "MANUEL", "un droit regle a la main n'est pas marque MANUEL")
+    nouveau = lambda x: {"module": x["module"], "champ": x["champ"], "niveau": "ECRITURE" if x["niveau"] != "ECRITURE" else "MASQUE"}
+    r = c.ok("admin", "PUT", "/api/admin/roles/MAGASIN", {**entete, "permissions": perms,
+             "champs": [nouveau(suivi), nouveau(manuel)]})
+    verifier(r["droits_repercutes"] >= 1, f"le modele n'a rien repercute : {r}")
+    verifier(niveau(suivi)["niveau"] == nouveau(suivi)["niveau"], "le magasinier ne suit pas le modele de son role")
+    verifier(niveau(manuel)["niveau"] == autre(manuel["niveau"]), "le modele a ecrase un reglage fait a la main")
+    # Retour au modele d'origine (le masquage des prix en depend).
+    c.ok("admin", "PUT", "/api/admin/roles/MAGASIN", {**entete, "permissions": perms, "champs": [
+        {"module": x["module"], "champ": x["champ"], "niveau": x["niveau"]} for x in (suivi, manuel)]})
+    c.ok("admin", "POST", f"/api/admin/utilisateurs/{uid}/droits/appliquer-modele", {"module": manuel["module"]})
+    verifier(niveau(manuel)["niveau"] == manuel["niveau"] and niveau(manuel)["origine"] == "MODELE",
+             "appliquer le modele ne remet pas le champ au modele")
+    # Un role neuf, recopie du magasinier, puis supprime ; un role porte ne se supprime pas.
+    c.refus("admin", "POST", "/api/admin/roles", {"code_role_user": "essai banc", "libelle": "Essai"}, codes=(400,))
+    c.ok("admin", "POST", "/api/admin/roles", {"code_role_user": "ESSAI_BANC", "libelle": "Essai du banc",
+                                               "a_partir_de": "MAGASIN"})
+    copie = c.ok("admin", "GET", "/api/admin/roles/ESSAI_BANC")
+    verifier(sorted(map(str, copie["permissions"])) == sorted(map(str, fiche["permissions"])),
+             "le role recopie n'a pas les permissions du magasinier")
+    c.refus("admin", "POST", "/api/admin/roles", {"code_role_user": "ESSAI_BANC", "libelle": "Doublon"}, codes=(422,))
+    c.refus("admin", "DELETE", "/api/admin/roles/MAGASIN", codes=(422,), contient="ROLE-UTILISE")
+    c.ok("admin", "DELETE", "/api/admin/roles/ESSAI_BANC")
+    n = int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'role_utilisateur' "
+                         "AND id_enregistrement LIKE '%ESSAI_BANC%' AND id_utilisateur IS NOT NULL"))
+    verifier(n >= 2, f"creation et suppression du role sans trace d'audit signee ({n})")
+    # L'Administrateur ne s'enferme pas dehors.
+    admin = c.ok("admin", "GET", "/api/admin/roles/ADMIN")
+    sans = [{"module": p["module"], "action": p["action"]} for p in admin["permissions"] if p["module"] != "UTILISATEURS"]
+    c.ok("admin", "PUT", "/api/admin/roles/ADMIN", {"libelle": admin["role"]["libelle"], "permissions": sans,
+         "plafond_validation_bc_mad": admin["role"]["plafond_validation_bc_mad"]})
+    verifier(len([p for p in c.ok("admin", "GET", "/api/admin/roles/ADMIN")["permissions"]
+                  if p["module"] == "UTILISATEURS"]) == 3, "l'Administrateur a perdu la gestion des utilisateurs")
+    refus_sql(infra, "DELETE FROM permission WHERE code_role_user = 'ADMIN' AND module = 'UTILISATEURS'", "ROLE-ADMIN")
+    refus_sql(infra, "DELETE FROM role_utilisateur WHERE code_role_user = 'ADMIN'", "ROLE-ADMIN")
+    c.refus("admin", "DELETE", "/api/admin/roles/ADMIN", codes=(422,), contient="ROLE-ADMIN")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -1773,6 +1832,7 @@ SCENARIOS = [
     scenario_atomicite,
     scenario_concurrence_stock,
     scenario_contrat_droits,
+    scenario_roles_permissions,
     scenario_reception_date_du_fait,
     scenario_codes_erreur,
     scenario_sauvegarde_restaurable,

@@ -4,8 +4,8 @@
 -- Décisions du 13/10/2026 (audit de sécurité, points 3 à 9 et 13) :
 --   * les SESSIONS sont tenues par le serveur : la déconnexion révoque le
 --     jeton, le verrou d'inactivité tient même après un rechargement (F5) ;
---   * la DOUBLE AUTHENTIFICATION est obligatoire pour l'Administrateur et la
---     Direction (réglable par rôle) ;
+--   * la DOUBLE AUTHENTIFICATION peut être rendue obligatoire par rôle (aucun
+--     rôle par défaut, décision du 13/10/2026 au soir) ;
 --   * seul l'Administrateur attribue le rôle Administrateur ou touche à un
 --     compte administrateur ; personne ne change son propre rôle ;
 --   * les prix suggérés et les budgets se masquent comme les autres montants.
@@ -41,16 +41,10 @@ COMMENT ON TABLE session_ouverte IS
 ALTER TABLE role_utilisateur ADD COLUMN IF NOT EXISTS exige_totp smallint NOT NULL DEFAULT 0;
 ALTER TABLE role_utilisateur DROP CONSTRAINT IF EXISTS ck_role_exige_totp;
 ALTER TABLE role_utilisateur ADD CONSTRAINT ck_role_exige_totp CHECK (exige_totp IN (0, 1));
--- Décision du 13/10/2026 : Administrateur et Direction. Posé une fois : un
--- réglage changé ensuite depuis la page des rôles n'est pas écrasé au rejeu.
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM migration_appliquee WHERE fichier = '2026-10-13c_securite.sql') THEN
-        UPDATE role_utilisateur SET exige_totp = 1 WHERE code_role_user IN ('ADMIN', 'DIRECTION');
-    END IF;
-EXCEPTION WHEN undefined_table THEN
-    UPDATE role_utilisateur SET exige_totp = 1 WHERE code_role_user IN ('ADMIN', 'DIRECTION');
-END $$;
+-- RIEN N'EST IMPOSÉ PAR DÉFAUT (décision du 13/10/2026 au soir) : l'obligation
+-- posée d'abord pour l'Administrateur et la Direction est retirée. Chaque rôle
+-- garde la case (page Rôles et permissions) ; chaque compte peut activer la
+-- double authentification de lui-même.
 
 -- -----------------------------------------------------------------------------
 -- 3. Le rôle Administrateur ne s'attribue que par un administrateur

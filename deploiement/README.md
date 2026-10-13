@@ -573,7 +573,7 @@ recompilation quand l'adresse change.
 | Pare-feu | 22, 80 et 443 ouverts ; **8080 fermé** (l'application écoute sur 127.0.0.1) |
 | Échecs d'authentification | blocage progressif à la connexion, au déverrouillage de l'écran, au changement de mot de passe et au second facteur ; essais d'un même identifiant un par un, 20 échecs par adresse en 15 min, identifiant inconnu bloqué comme un vrai (13/10/2026) |
 | Sessions | tenues par le serveur (`session_ouverte`) : déconnexion = jeton révoqué ; verrou d'inactivité tenu même après F5 ; 8 h au plus |
-| Double authentification | **obligatoire** pour l'Administrateur et la Direction (case par rôle, page Rôles et permissions) |
+| Double authentification | facultative ; peut être rendue obligatoire par rôle (page Rôles et permissions) — aucun rôle par défaut |
 | Politique de contenu | CSP posée par l'application (aucun script hors du serveur) ; HSTS par nginx |
 
 ### À appliquer à la main sur un serveur déjà installé (09/10/2026)
@@ -600,10 +600,10 @@ Paramètres, réglage de l'assistant réservé à l'administrateur (adresse de l
 `.env` seulement), sessions et verrou tenus par le serveur, double authentification obligatoire.
 
 **À la publication de cette version, tous les comptes sont déconnectés** (les jetons d'avant n'ont
-pas de session) ; l'Administrateur et la Direction posent leur double authentification à la
-connexion suivante.
+pas de session). La double authentification n'est imposée à aucun rôle (obligation retirée le
+13/10 au soir) ; un rôle peut l'exiger depuis la page Rôles et permissions.
 
-**Téléphone perdu** (la double authentification ne se retire plus depuis l'écran pour ces rôles) :
+**Téléphone perdu** (pour un rôle qui l'exige, elle ne se retire pas depuis l'écran) :
 
 ```bash
 cd /opt/gestionfil && sudo -u gestionfil ./gestionfil-admin retirer-2fa <login>

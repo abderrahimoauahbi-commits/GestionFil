@@ -59,6 +59,8 @@ JOURNAL = "2026-10-08c_journal_migrations.sql"
 #   declares a la main (audit v5, U14, 09/10/2026) — ON CONFLICT DO NOTHING.
 EMPREINTES_REMPLACEES: dict[str, set[str]] = {
     "2026-10-08b_audit_v4.sql": {"b0d8a8015ece08fbf035c0693945aa8a32d49f934a9adf84bd0a73f8403939cc"},
+    # 13/10/2026 au soir : l'obligation de double authentification (Admin, Direction) retiree.
+    "2026-10-13c_securite.sql": {"65fab75c30cd387f31437cdb2a9b3fe76de500b818212bc7b8237cdcb8fc6447"},
 }
 
 

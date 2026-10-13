@@ -315,8 +315,9 @@ erreur de date probable : la saisie l'accepte avec un avis, et C53 le signale.
 
 - seul l'Administrateur attribue le rôle Administrateur ou touche à un compte administrateur ;
   personne ne change son propre rôle ni ses propres droits ;
-- la double authentification est **obligatoire** pour l'Administrateur et la Direction (réglable par
-  rôle ; retrait d'urgence par `gestionfil-admin retirer-2fa`) ;
+- la double authentification peut être rendue obligatoire **par rôle** (case de la page Rôles ;
+  retrait d'urgence par `gestionfil-admin retirer-2fa`). Imposée d'abord à l'Administrateur et à la
+  Direction, l'obligation a été **retirée le soir même** : aucun rôle ne l'exige par défaut ;
 - les types de mouvement se règlent sous **Paramètres** (plus par le droit d'écrire les mouvements) ;
 - le réglage de l'assistant revient à l'Administrateur ; l'adresse de la plateforme vient du `.env` ;
 - sessions tenues par le serveur (déconnexion = révocation, verrou tenu après F5) ;

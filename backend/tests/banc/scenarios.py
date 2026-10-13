@@ -292,13 +292,15 @@ def scenario_contre_passation(c, infra):
 
 
 def scenario_inventaire(c, infra):
-    """Un seul inventaire en cours par magasin ; le magasinier compte, la Direction cloture."""
+    """Comme un bon (13/10) : brouillon (lignes preparees a la creation, le magasinier compte), valide
+    par un AUTRE compte (comptage fige, renvoi possible), cloture ; un seul inventaire ouvert par magasin."""
     entree_stock(c, REF, 300, mag="Polyfashions")
     inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": "Polyfashions", "type_inventaire": "GLOBAL"})
     iid = inv["id_inventaire"]
-    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/ouvrir")
-    inv2 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": "Polyfashions", "type_inventaire": "GLOBAL"})
-    c.refus("Choukri", "POST", f"/api/inventaires/{inv2['id_inventaire']}/ouvrir")
+    verifier(inv["lignes_a_compter"] > 0, "l'inventaire cree n'a pas ses lignes")
+    c.refus("Choukri", "POST", "/api/inventaires", {"code_magasin": "Polyfashions", "type_inventaire": "GLOBAL"},
+            codes=(422,), contient="deja ouvert")
+    c.refus("Choukri", "POST", f"/api/inventaires/{iid}/valider", codes=(422,), contient="non comptee")
     lignes = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}/lignes")
     ligne = next(l for l in lignes if l["code_reference"] == REF)
     theorique = float(ligne["quantite_theorique_kg"])
@@ -311,12 +313,30 @@ def scenario_inventaire(c, infra):
                       "lot_fournisseur": ligne.get("lot_fournisseur"),
                       "quantite_comptee_kg": theorique - 12, "motif_ecart": "Bobine abimee au quai"})
     c.ok("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": comptages})
+    # Un brouillon ne se cloture pas ; le magasinier ne valide pas ; celui qui a compte non plus.
+    c.refus("Choukri", "POST", f"/api/inventaires/{iid}/cloturer", codes=(422,), contient="valide")
+    c.refus("Magasinie", "POST", f"/api/inventaires/{iid}/valider", codes=(403,))
+    c.ok("Mohamed", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": [comptages[-1]]})
+    c.refus("Mohamed", "POST", f"/api/inventaires/{iid}/valider", codes=(422,), contient="INV-SEPARATION")
+    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/valider")
+    verifier(c.ok("Choukri", "GET", f"/api/inventaires/{iid}")["valide_par"] == "Choukri", "le valideur n'est pas lu")
+    # Valide : le comptage est fige, au serveur comme en base.
+    c.refus("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": comptages}, codes=(422,))
+    refus_sql(infra, f"UPDATE ligne_inventaire SET quantite_comptee_kg = 1 WHERE id_inventaire = '{iid}'", "INV-FIGE")
+    # Renvoye au comptage (motif), recompte, revalide.
+    c.refus("Choukri", "POST", f"/api/inventaires/{iid}/renvoyer", {"motif": ""}, codes=(422,))
+    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/renvoyer", {"motif": "Recompter l'allee 3"})
+    c.ok("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": [comptages[-1]]})
+    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/valider")
+    verifier(abs(kg(infra, REF, "Polyfashions") - theorique) < 1e-6, "un inventaire valide a deja touche le stock")
     c.refus("Magasinie", "POST", f"/api/inventaires/{iid}/cloturer", codes=(403,))
     c.ok("Choukri", "POST", f"/api/inventaires/{iid}/cloturer")
     verifier(abs(kg(infra, REF, "Polyfashions") - (theorique - 12)) < 1e-6, "la cloture n'a pas ajuste le stock")
     c.refus("Choukri", "POST", f"/api/inventaires/{iid}/cloturer")
+    # Clos, le magasin se rouvre a un autre inventaire, qu'on annule.
+    inv2 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": "Polyfashions", "type_inventaire": "TOURNANT"})
     c.ok("Choukri", "POST", f"/api/inventaires/{inv2['id_inventaire']}/annuler", {"motif": "Doublon du banc"})
-    verifier(controle(infra, "C44") == 0, "C44 : deux inventaires en cours")
+    verifier(controle(infra, "C44") == 0, "C44 : deux inventaires ouverts")
 
 
 def scenario_colisage_signale(c, infra):
@@ -1409,7 +1429,6 @@ def inventaire_global(c, infra, mag, comptes, motif="Comptage du banc"):
     """Un inventaire global de `mag` : `comptes` {reference: kg compte}, le reste compte au theorique."""
     inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": mag, "type_inventaire": "GLOBAL"})
     iid = inv["id_inventaire"]
-    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/ouvrir")
     lignes = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}/lignes")
     comptages = []
     for l in lignes:
@@ -1421,6 +1440,7 @@ def inventaire_global(c, infra, mag, comptes, motif="Comptage du banc"):
             comptage["motif_ecart"] = motif
         comptages.append(comptage)
     c.ok("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": comptages})
+    c.ok("Choukri", "POST", f"/api/inventaires/{iid}/valider")
     c.ok("Choukri", "POST", f"/api/inventaires/{iid}/cloturer")
 
 

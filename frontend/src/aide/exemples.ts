@@ -336,7 +336,17 @@ export const EXEMPLES: Record<string, Exemple[]> = {
         ['Compté', '1 197,75 kg'],
         ['Écart', '−2,25 kg, motif « bobine abîmée au quai »'],
       ],
-      conclusion: 'Celui qui compte ne clôture pas ; la clôture passe l’écart en ajustement au CMUP.',
+      conclusion: 'Le magasinier compte et enregistre ; un autre compte valide ; la clôture passe l’écart en ajustement au CMUP.',
+    },
+    {
+      titre: 'renvoyer au comptage',
+      situation: 'INV-2026-0004 est validé, mais l’allée 3 a été comptée deux fois.',
+      calcul: [
+        ['Validé', 'comptage figé, stock intact'],
+        ['Renvoyer au comptage', 'motif « recompter l’allée 3 » → brouillon'],
+        ['Recompté puis revalidé', 'par un autre compte que le compteur'],
+      ],
+      conclusion: 'Tant qu’il n’est pas clôturé, rien n’a touché le stock.',
     },
   ],
   '/lots': [

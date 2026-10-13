@@ -879,7 +879,8 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
   const alea = hasardDe(e.id)
   const ouverts = async () =>
     (await lire<Inventaire[]>(p, '/api/inventaires')).filter((i) => i.code_magasin === e.magasin && i.statut !== 'ANNULE')
-  let inv = (await ouverts()).find((i) => i.statut === 'BROUILLON' || i.statut === 'EN_COURS')
+  // Comme un bon (13/10/2026) : brouillon (on compte), valide par un autre compte, cloture.
+  let inv = (await ouverts()).find((i) => i.statut === 'BROUILLON' || i.statut === 'VALIDE')
   if (!inv) {
     await aller(p, '/inventaires', login)
     await p.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
@@ -888,12 +889,26 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
     await p.getByRole('button', { name: /^Cr[ée]er$/ }).click()
     inv = (await attendre(ouverts, (l) => l.some((i) => i.statut === 'BROUILLON'), 'création de l’inventaire')).find((i) => i.statut === 'BROUILLON')!
   }
-  await aller(p, '/inventaires', login)
-  // Un brouillon s'ouvre par son bouton ; un inventaire en cours, en cliquant sa ligne.
-  const ligneInv = p.getByRole('row', { name: new RegExp(inv.numero_inventaire) })
-  const ouvrir = ligneInv.getByRole('button', { name: 'Ouvrir' })
-  if (await ouvrir.isVisible().catch(() => false)) await ouvrir.click()
-  else await ligneInv.getByRole('cell').first().click()
+  const valideur = await session('Mohamed')
+  const clore = async () => {
+    await aller(valideur, `/inventaires/${inv!.id_inventaire}`, 'Mohamed')
+    const valider = valideur.getByRole('button', { name: 'Valider le comptage' })
+    if (await valider.isVisible().catch(() => false)) {
+      await valider.click()
+      await confirmerSi(valideur, /^Valider$/, 5_000)
+    }
+    const cloturer = valideur.getByRole('button', { name: /^Cl[oô]turer et ajuster$/ })
+    await expect(cloturer).toBeEnabled({ timeout: 60_000 })
+    await cloturer.click()
+    await confirmerSi(valideur, /^Cl[oô]turer$/, 5_000)
+    await attendre(async () => (await lire<Inventaire[]>(p, '/api/inventaires')).find((i) => i.id_inventaire === inv!.id_inventaire)?.statut,
+      (s) => s === 'CLOTURE', `clôture de l’inventaire : ${await messageAffiche(valideur)}`, 60_000)
+  }
+  if (inv.statut === 'VALIDE') {
+    await clore()
+    return `${inv.numero_inventaire} : validé, clôturé`
+  }
+  await aller(p, `/inventaires/${inv.id_inventaire}`, login)
   const champs = p.getByRole('textbox', { name: /^Kilos comptés, / })
   await expect(champs.first()).toBeVisible({ timeout: 20_000 })
   const lignes = await attendre(
@@ -919,13 +934,9 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
     } else await taper(champ, fr(theorique, 4))
   }
   await p.getByRole('button', { name: 'Enregistrer le comptage' }).click()
-  // Le comptage s'enregistre d'abord (194 lignes : quelques secondes) ; la cloture attend.
-  const cloturer = p.getByRole('button', { name: /^Cl[oô]turer et ajuster$/ })
-  await expect(cloturer).toBeEnabled({ timeout: 120_000 })
-  await cloturer.click()
-  await confirmerSi(p, /^Cl[oô]turer$/, 5_000)
-  await attendre(async () => (await lire<Inventaire[]>(p, '/api/inventaires')).find((i) => i.id_inventaire === inv!.id_inventaire)?.statut,
-    (s) => s === 'CLOTURE', `clôture de l’inventaire : ${await messageAffiche(p)}`, 60_000)
+  // Le comptage s'enregistre d'abord (194 lignes : quelques secondes) ; la validation attend.
+  await expect(p.getByRole('button', { name: 'Enregistrer le comptage' })).toBeDisabled({ timeout: 120_000 })
+  await clore()
   return `${inv.numero_inventaire} : ${lignes.length} lignes, ${ecarts} écart(s)`
 }
 

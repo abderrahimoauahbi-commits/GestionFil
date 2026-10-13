@@ -121,14 +121,45 @@ pub async fn receptionner_transfert(
     Ok(Json(serde_json::to_value(r)?))
 }
 
-pub async fn ouvrir_inventaire(
+/// `POST /api/inventaires/{id}/preparer` — les lignes d'un brouillon cree
+/// avant le 13/10/2026, quand la photo attendait le bouton « Ouvrir ». Un
+/// inventaire cree depuis a deja ses lignes.
+pub async fn preparer_inventaire(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::INVENTAIRE, Action::Ecrire).await?;
-    let n = inventaire::ouvrir(&state.db, &user, &id).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let n = inventaire::preparer(&mut tx, &id).await?;
+    tx.commit().await?;
     Ok(Json(json!({ "id_inventaire": id, "lignes_a_compter": n })))
+}
+
+/// `POST /api/inventaires/{id}/valider` — le comptage est fige, par un autre
+/// compte que ceux qui ont compte (13/10/2026).
+pub async fn valider_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+    let numero = inventaire::valider(&state.db, &user, &id).await?;
+    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "statut": "VALIDE" })))
+}
+
+/// `POST /api/inventaires/{id}/renvoyer` — un inventaire valide revient au
+/// comptage, avec un motif (13/10/2026).
+pub async fn renvoyer_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(m): Json<MotifAnnulation>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+    let numero = inventaire::renvoyer(&state.db, &user, &id, &m.motif).await?;
+    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "statut": "BROUILLON" })))
 }
 
 pub async fn cloturer_inventaire(

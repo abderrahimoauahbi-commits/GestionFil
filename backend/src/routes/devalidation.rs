@@ -100,7 +100,9 @@ const REVERSIBLES: &[Reversible] = &[
         cle: "id_inventaire",
         module: "INVENTAIRE",
         depuis: &["CLOTURE"],
-        vers: "EN_COURS",
+        // Il retrouve l'etat valide (13/10/2026) ; « Renvoyer au comptage »
+        // le remet ensuite en brouillon si le comptage etait faux.
+        vers: "VALIDE",
         effacer: &["date_cloture"],
         // Les ajustements portent le NUMERO de l'inventaire en reference de
         // document, pas son identifiant : la garde cherchait l'identifiant et ne

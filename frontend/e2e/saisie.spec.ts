@@ -436,7 +436,7 @@ test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis récep
   await page.context().close()
 })
 
-test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg justifié, clôture', async ({ browser }, info) => {
+test('inventaire : Choukri compte Polyfashions (−2,25 kg justifié), Mohamed valide puis clôture', async ({ browser }, info) => {
   test.skip(!refRecue, 'pas de référence reçue')
   const { page, veille } = await session(browser, info, 'Choukri')
   const totalRef = async () =>
@@ -447,19 +447,12 @@ test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg jus
   await page.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption('Polyfashions')
   await page.getByRole('combobox', { name: /^Type/ }).last().selectOption('TOURNANT')
   await page.getByRole('button', { name: /^Cr[ée]er$/ }).click()
-  await expect
-    .poll(async () => (await lireApi<Record<string, unknown>[]>(page, '/api/inventaires')).some((i) => i.statut === 'BROUILLON' && i.code_magasin === 'Polyfashions'))
-    .toBe(true)
-  const inv = (await lireApi<Record<string, unknown>[]>(page, '/api/inventaires'))
-    .filter((i) => i.statut === 'BROUILLON' && i.code_magasin === 'Polyfashions')
-    .sort((a, b) => String(a.numero_inventaire).localeCompare(String(b.numero_inventaire)))
-    .pop()!
-  await page.getByRole('row', { name: new RegExp(String(inv.numero_inventaire)) })
-    .or(page.getByRole('article').filter({ hasText: String(inv.numero_inventaire) }))
-    .getByRole('button', { name: 'Ouvrir' }).click()
+  // L'inventaire cree s'ouvre sur SA page (13/10/2026), ses lignes deja preparees.
+  await expect(page).toHaveURL(/\/inventaires\/[0-9a-f-]{36}$/)
+  const inv = { id_inventaire: page.url().split('/').pop()! }
 
   // Chaque ligne comptee au clavier : le theorique, sauf notre reference (2,25 kg de moins).
-  // Les lignes naissent a l'ouverture : on attend qu'elles soient a l'ecran ET au serveur.
+  // On attend les lignes a l'ecran ET au serveur.
   const champs = page.getByRole('textbox', { name: /^Kilos comptés, / })
   await expect(champs.first()).toBeVisible()
   let lignes: Record<string, unknown>[] = []
@@ -489,10 +482,23 @@ test('inventaire : la direction compte Polyfashions, un écart de −2,25 kg jus
   await page.screenshot({ path: info.outputPath('inventaire.png'), fullPage: true })
   consigner(info, 'saisie : comptage d’inventaire', constats, info.outputPath('inventaire.png'))
   await page.getByRole('button', { name: 'Enregistrer le comptage' }).click()
-  await page.getByRole('button', { name: /^Cl[oô]turer et ajuster$/ }).click()
-  await page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: /^Cl[oô]turer$/ }).click()
-  await expect.poll(totalRef).toBeCloseTo(avant - 2.25, 4)
+  await expect(page.getByRole('button', { name: 'Enregistrer le comptage' })).toBeDisabled({ timeout: 30_000 })
+  // Celui qui a compte ne valide pas : le bouton le dit, la base le refuse.
+  await expect(page.getByRole('button', { name: 'Valider le comptage' })).toBeDisabled()
   expect(veille.erreurs).toEqual([])
+
+  // Un autre compte valide (comptage fige), puis cloture : les ecarts passent au stock.
+  const autre = await session(browser, info, 'Mohamed')
+  await autre.page.goto(`/inventaires/${inv.id_inventaire}`)
+  await autre.page.getByRole('button', { name: 'Valider le comptage' }).click()
+  await autre.page.getByRole('alertdialog').or(autre.page.getByRole('dialog')).getByRole('button', { name: /^Valider$/ }).click()
+  await expect(autre.page.getByRole('button', { name: /^Cl[oô]turer et ajuster$/ })).toBeVisible({ timeout: 30_000 })
+  expect(await totalRef(), 'un inventaire validé a déjà touché le stock').toBeCloseTo(avant, 4)
+  await autre.page.getByRole('button', { name: /^Cl[oô]turer et ajuster$/ }).click()
+  await autre.page.getByRole('alertdialog').or(autre.page.getByRole('dialog')).getByRole('button', { name: /^Cl[oô]turer$/ }).click()
+  await expect.poll(totalRef).toBeCloseTo(avant - 2.25, 4)
+  expect(autre.veille.erreurs).toEqual([])
+  await autre.page.context().close()
   await page.context().close()
 })
 

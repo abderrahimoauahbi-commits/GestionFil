@@ -38,12 +38,12 @@ pub struct ResultatInventaire {
     pub mouvements_crees: Vec<String>,
 }
 
-/// Prend la photo du stock theorique et ouvre le comptage.
-pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResult<i64> {
-    let mut tx = db.begin().await?;
-    user.poser_contexte(&mut tx).await?;
-
-    // VERROUILLE : un double clic sur « Ouvrir » photographiait deux fois.
+/// PREPARE LES LIGNES A COMPTER (13/10/2026) : la photo du stock theorique,
+/// prise a la creation de l'inventaire (il n'y a plus d'etape « ouvrir »).
+/// Dans la transaction de l'appelant ; l'inventaire reste en brouillon.
+/// Rend le nombre de lignes preparees (zero si elles l'etaient deja).
+pub async fn preparer(tx: &mut sqlx::PgConnection, id_inventaire: &str) -> AppResult<i64> {
+    // VERROUILLE : un double clic preparait deux fois.
     let (statut, magasin, type_inventaire): (String, String, String) = sqlx::query_as(
         "SELECT statut, code_magasin, type_inventaire FROM inventaire
           WHERE id_inventaire = $1 FOR UPDATE",
@@ -55,25 +55,15 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
 
     if statut != "BROUILLON" {
         return Err(AppError::RegleMetier(format!(
-            "Seul un inventaire au statut BROUILLON peut etre ouvert (statut actuel : {statut})."
+            "Les lignes se preparent sur un inventaire en brouillon (statut actuel : {statut})."
         )));
     }
-
-    // UN SEUL INVENTAIRE OUVERT PAR MAGASIN (06/10/2026). Deux comptages en
-    // cours sur le meme magasin appliquaient deux fois les memes ecarts.
-    let ouvert: Option<String> = sqlx::query_scalar(
-        "SELECT numero_inventaire FROM inventaire
-          WHERE code_magasin = $1 AND statut = 'EN_COURS' AND id_inventaire <> $2
-          LIMIT 1",
-    )
-    .bind(&magasin)
-    .bind(id_inventaire)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if let Some(autre) = ouvert {
-        return Err(AppError::RegleMetier(format!(
-            "L'inventaire {autre} est deja en cours sur le magasin {magasin} : cloturez-le (ou annulez-le) avant d'en ouvrir un autre, sinon les memes ecarts seraient appliques deux fois."
-        )));
+    let deja: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ligne_inventaire WHERE id_inventaire = $1")
+        .bind(id_inventaire)
+        .fetch_one(&mut *tx)
+        .await?;
+    if deja > 0 {
+        return Ok(0);
     }
 
     // Photo du theorique : un inventaire compte ce que la base croit detenir.
@@ -128,13 +118,123 @@ pub async fn ouvrir(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResu
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("UPDATE inventaire SET statut = 'EN_COURS' WHERE id_inventaire = $1")
-        .bind(id_inventaire)
-        .execute(&mut *tx)
-        .await?;
-
-    tx.commit().await?;
     Ok(res.rows_affected() as i64)
+}
+
+/// Le comptage est-il complet et justifie ? Rend un refus clair sinon. Lu a
+/// la validation, et relu a la cloture.
+async fn exiger_comptage_complet(tx: &mut sqlx::PgConnection, id_inventaire: &str) -> AppResult<()> {
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ligne_inventaire WHERE id_inventaire = $1")
+        .bind(id_inventaire)
+        .fetch_one(&mut *tx)
+        .await?;
+    if total == 0 {
+        return Err(AppError::RegleMetier("L'inventaire n'a aucune ligne : rien a valider.".into()));
+    }
+    let non_comptees: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM ligne_inventaire
+          WHERE id_inventaire = $1 AND statut_ligne = 'A_TRAITER'",
+    )
+    .bind(id_inventaire)
+    .fetch_one(&mut *tx)
+    .await?;
+    if non_comptees > 0 {
+        return Err(AppError::RegleMetier(format!(
+            "{non_comptees} ligne(s) non comptee(s) : comptez-les d'abord."
+        )));
+    }
+    // Un ecart hors tolerance doit etre justifie (CDC G6).
+    let injustifiees: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM ligne_inventaire
+          WHERE id_inventaire = $1
+            AND ((ecart_pct IS NOT NULL
+                  AND abs(ecart_pct) > (SELECT CAST(valeur_courante AS numeric) FROM parametre
+                                         WHERE code_parametre = 'P_TolerEcartPesee'))
+                 -- Un theorique nul n'a pas de pourcentage : trouver du stock la
+                 -- ou il n'y en avait pas est un ecart, et il s'explique aussi
+                 -- (regle 10, reserve de l'audit v4).
+                 OR (COALESCE(quantite_theorique_kg, 0) = 0 AND COALESCE(quantite_comptee_kg, 0) > 0))
+            AND (motif_ecart IS NULL OR trim(motif_ecart) = '')",
+    )
+    .bind(id_inventaire)
+    .fetch_one(&mut *tx)
+    .await?;
+    if injustifiees > 0 {
+        return Err(AppError::RegleMetier(format!(
+            "{injustifiees} ecart(s) hors tolerance sans motif : justification obligatoire."
+        )));
+    }
+    Ok(())
+}
+
+/// VALIDER LE COMPTAGE (13/10/2026) : brouillon -> valide. Par un autre compte
+/// que ceux qui ont compte (garde en base, l'Administrateur dispense). Rien ne
+/// touche encore le stock ; le comptage est fige.
+pub async fn valider(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppResult<String> {
+    let mut tx = db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let (numero, statut): (String, String) = sqlx::query_as(
+        "SELECT numero_inventaire, statut FROM inventaire WHERE id_inventaire = $1 FOR UPDATE",
+    )
+    .bind(id_inventaire)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("inventaire {id_inventaire}")))?;
+    if statut != "BROUILLON" {
+        return Err(AppError::RegleMetier(format!(
+            "Seul un inventaire en brouillon se valide (statut actuel : {statut})."
+        )));
+    }
+    exiger_comptage_complet(&mut tx, id_inventaire).await?;
+    sqlx::query(
+        "UPDATE inventaire
+            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = $3
+          WHERE id_inventaire = $1",
+    )
+    .bind(id_inventaire)
+    .bind(&user.id)
+    .bind(maintenant())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(numero)
+}
+
+/// RENVOYER AU COMPTAGE (13/10/2026) : valide -> brouillon, avec un motif.
+/// Rien n'a touche le stock ; le comptage redevient saisissable.
+pub async fn renvoyer(db: &Db, user: &Utilisateur, id_inventaire: &str, motif: &str) -> AppResult<String> {
+    let motif = motif.trim();
+    if motif.chars().count() < 5 {
+        return Err(AppError::RegleMetier(
+            "Le motif du renvoi est obligatoire : dites ce qu'il faut recompter.".into(),
+        ));
+    }
+    let mut tx = db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let (numero, statut): (String, String) = sqlx::query_as(
+        "SELECT numero_inventaire, statut FROM inventaire WHERE id_inventaire = $1 FOR UPDATE",
+    )
+    .bind(id_inventaire)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("inventaire {id_inventaire}")))?;
+    if statut != "VALIDE" {
+        return Err(AppError::RegleMetier(format!(
+            "Seul un inventaire valide se renvoie au comptage (statut actuel : {statut})."
+        )));
+    }
+    sqlx::query(
+        "UPDATE inventaire
+            SET statut = 'BROUILLON', motif_renvoi = $2,
+                id_utilisateur_validation = NULL, date_validation = NULL
+          WHERE id_inventaire = $1",
+    )
+    .bind(id_inventaire)
+    .bind(motif)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(numero)
 }
 
 /// ANNULER UN INVENTAIRE (regle 10, 08/10/2026).
@@ -164,9 +264,9 @@ pub async fn annuler(db: &Db, user: &Utilisateur, id_inventaire: &str, motif: &s
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("inventaire {id_inventaire}")))?;
 
-    if statut != "BROUILLON" && statut != "EN_COURS" {
+    if statut != "BROUILLON" && statut != "VALIDE" {
         return Err(AppError::RegleMetier(format!(
-            "L'inventaire {numero} est {statut} : seul un inventaire en brouillon ou en cours s'annule. \
+            "L'inventaire {numero} est {statut} : seul un inventaire en brouillon ou valide s'annule. \
              Un inventaire clos se devalide, apres contre-passation de ses ajustements."
         )));
     }
@@ -203,7 +303,7 @@ pub async fn cloturer(
     user.poser_contexte(&mut tx).await?;
 
     // VERROUILLE (08/10/2026) : un double clic sur « Cloturer » lancait deux
-    // transactions qui lisaient toutes deux EN_COURS et appliquaient deux fois
+    // transactions qui lisaient toutes deux le meme etat et appliquaient deux fois
     // les ecarts. La seconde attend desormais la premiere, puis lit CLOTURE.
     let (numero, statut, magasin): (String, String, String) = sqlx::query_as(
         "SELECT numero_inventaire, statut, code_magasin FROM inventaire
@@ -214,48 +314,13 @@ pub async fn cloturer(
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("inventaire {id_inventaire}")))?;
 
-    if statut != "EN_COURS" {
+    if statut != "VALIDE" {
         return Err(AppError::RegleMetier(format!(
-            "Seul un inventaire EN_COURS peut etre cloture (statut actuel : {statut})."
+            "Seul un inventaire valide se cloture (statut actuel : {statut}) : faites d'abord valider le comptage."
         )));
     }
-
-    let non_comptees: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM ligne_inventaire
-          WHERE id_inventaire = $1 AND statut_ligne = 'A_TRAITER'",
-    )
-    .bind(id_inventaire)
-    .fetch_one(&mut *tx)
-    .await?;
-
-    if non_comptees > 0 {
-        return Err(AppError::RegleMetier(format!(
-            "{non_comptees} ligne(s) non comptee(s) : cloture impossible."
-        )));
-    }
-
-    // Un ecart hors tolerance doit etre justifie (CDC G6).
-    let injustifiees: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM ligne_inventaire
-          WHERE id_inventaire = $1
-            AND ((ecart_pct IS NOT NULL
-                  AND abs(ecart_pct) > (SELECT CAST(valeur_courante AS numeric) FROM parametre
-                                         WHERE code_parametre = 'P_TolerEcartPesee'))
-                 -- Un theorique nul n'a pas de pourcentage : trouver du stock la
-                 -- ou il n'y en avait pas est un ecart, et il s'explique aussi
-                 -- (regle 10, reserve de l'audit v4).
-                 OR (COALESCE(quantite_theorique_kg, 0) = 0 AND COALESCE(quantite_comptee_kg, 0) > 0))
-            AND (motif_ecart IS NULL OR trim(motif_ecart) = '')",
-    )
-    .bind(id_inventaire)
-    .fetch_one(&mut *tx)
-    .await?;
-
-    if injustifiees > 0 {
-        return Err(AppError::RegleMetier(format!(
-            "{injustifiees} ecart(s) hors tolerance sans motif : justification obligatoire."
-        )));
-    }
+    // Relu sous verrou ; la base fige deja le comptage d'un inventaire valide.
+    exiger_comptage_complet(&mut tx, id_inventaire).await?;
 
     let ecarts: Vec<LigneEcart> = sqlx::query_as(
         "SELECT li.id_ligne_inv, li.code_reference, li.lot_fournisseur,

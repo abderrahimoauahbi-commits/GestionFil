@@ -61,6 +61,7 @@ const Accueil = lazy(() => import('./pages/Accueil').then((m) => ({ default: m.A
 const Mouvements = lazy(() => import('./pages/Mouvements').then((m) => ({ default: m.Mouvements })))
 const Transferts = lazy(() => import('./pages/Transferts').then((m) => ({ default: m.Transferts })))
 const Inventaires = lazy(() => import('./pages/Inventaires').then((m) => ({ default: m.Inventaires })))
+const InventaireDoc = lazy(() => import('./pages/inventaires/Inventaire').then((m) => ({ default: m.Inventaire })))
 const Qualites = lazy(() => import('./pages/Qualites').then((m) => ({ default: m.Qualites })))
 const Recettes = lazy(() => import('./pages/Recettes').then((m) => ({ default: m.Recettes })))
 const Plans = lazy(() => import('./pages/Plans').then((m) => ({ default: m.Plans })))
@@ -202,6 +203,8 @@ const ECRANS = (
       <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />
+      {/* Un inventaire sur sa page, comme un bon (13/10/2026) ; « nouveau » pour la creation. */}
+      <Route path="inventaires/:id" element={<ExigeModule module="INVENTAIRE"><InventaireDoc /></ExigeModule>} />
       <Route path="receptions" element={<ExigeModule module="RECEPTIONS"><Receptions /></ExigeModule>} />
       <Route path="import" element={<ExigeModule module="IMPORT"><DossiersImport /></ExigeModule>} />
       <Route path="import/assistant" element={<ExigeModule module="IMPORT"><AssistantImport /></ExigeModule>} />

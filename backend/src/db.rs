@@ -298,6 +298,11 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_retour_fournisseur_garde')",
     ),
     (
+        // L'inventaire comme un bon : brouillon, valide, cloture.
+        "2026-10-13b_inventaire_valide.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_inventaire_separation')",
+    ),
+    (
         // Les roles se reglent a l'ecran ; l'origine des droits (modele/manuel).
         "2026-10-13a_roles_permissions.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns

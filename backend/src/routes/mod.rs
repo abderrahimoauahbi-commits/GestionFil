@@ -359,7 +359,10 @@ pub fn router(state: AppState) -> Router {
                get(stock::lister_inventaires).post(stock::creer_inventaire))
         .route("/api/inventaires/{id}/lignes",
                get(stock::lignes_inventaire).put(stock::saisir_comptage))
-        .route("/api/inventaires/{id}/ouvrir", post(operations::ouvrir_inventaire))
+        .route("/api/inventaires/{id}", get(stock::lire_inventaire))
+        .route("/api/inventaires/{id}/preparer", post(operations::preparer_inventaire))
+        .route("/api/inventaires/{id}/valider", post(operations::valider_inventaire))
+        .route("/api/inventaires/{id}/renvoyer", post(operations::renvoyer_inventaire))
         .route("/api/inventaires/{id}/cloturer", post(operations::cloturer_inventaire))
         .route("/api/inventaires/{id}/annuler", post(operations::annuler_inventaire))
         // --- Achats et receptions ---------------------------------------------

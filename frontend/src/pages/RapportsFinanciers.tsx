@@ -162,6 +162,7 @@ export function RapportsFinanciers() {
             <Selecteur
               value={rapport}
               onChange={(e) => setRapport(e.target.value as Rapport)}
+              aria-label="Rapport affiché"
               className="w-64"
             >
               {RAPPORTS.map((r) => (

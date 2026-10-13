@@ -73,12 +73,14 @@ export function FeuilleComptage() {
   if (!inv) return <Alerte ton="danger">Inventaire introuvable.</Alerte>
 
   const lignes = qLignes.data ?? []
-  if (inv.statut === 'BROUILLON' || lignes.length === 0) {
+  // LE BROUILLON EST L'ETAT OU L'ON COMPTE (13/10/2026) : ses lignes sont
+  // preparees a la creation, la feuille s'imprime donc des ce moment.
+  if (lignes.length === 0) {
     return (
       <Alerte ton="info">
-        Cet inventaire n’a pas encore de lignes. Ouvrez-le : c’est l’ouverture qui fige le
-        périmètre à compter — tout le catalogue pour un inventaire global, le stock existant pour
-        un inventaire tournant.
+        Cet inventaire n’a pas de lignes à compter. Un inventaire créé avant le 13/10/2026 les
+        prépare depuis sa page (« Préparer les lignes ») — tout le catalogue pour un inventaire
+        global, le stock existant pour un inventaire tournant.
       </Alerte>
     )
   }

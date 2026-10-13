@@ -46,6 +46,7 @@ const VERS_LISIBLE: Record<string, string> = {
   BROUILLON: 'brouillon',
   A_CONTROLER: 'a controler',
   EN_COURS: 'en cours',
+  VALIDE: 'validé',
   ACTIF: 'actif',
 }
 

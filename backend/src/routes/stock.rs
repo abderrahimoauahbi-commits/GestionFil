@@ -1426,12 +1426,13 @@ pub async fn lister_inventaires(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::INVENTAIRE, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT i.*, u.login AS responsable,
+        "SELECT i.*, u.login AS responsable, v.login AS valide_par,
                 (SELECT COUNT(*) FROM ligne_inventaire l WHERE l.id_inventaire = i.id_inventaire) AS nb_lignes,
                 (SELECT COUNT(*) FROM ligne_inventaire l
                   WHERE l.id_inventaire = i.id_inventaire AND l.statut_ligne = 'A_TRAITER') AS nb_a_compter
            FROM inventaire i
            LEFT JOIN utilisateur u ON u.id_utilisateur = i.id_utilisateur_responsable
+           LEFT JOIN utilisateur v ON v.id_utilisateur = i.id_utilisateur_validation
           ORDER BY i.date_inventaire DESC LIMIT 200",
     )
     .fetch_all(&state.db)
@@ -1455,6 +1456,23 @@ pub async fn creer_inventaire(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
+    // UN SEUL INVENTAIRE OUVERT PAR MAGASIN (06/10/2026, garde en base depuis
+    // le 13/10) : deux comptages sur le meme magasin appliquaient deux fois les
+    // memes ecarts. On le dit avant de buter sur l'index.
+    let ouvert: Option<String> = sqlx::query_scalar(
+        "SELECT numero_inventaire FROM inventaire
+          WHERE code_magasin = $1 AND statut IN ('BROUILLON', 'VALIDE') LIMIT 1",
+    )
+    .bind(&i.code_magasin)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(autre) = ouvert {
+        return Err(AppError::RegleMetier(format!(
+            "L'inventaire {autre} est deja ouvert sur le magasin {} : cloturez-le (ou annulez-le) avant d'en creer un autre.",
+            i.code_magasin
+        )));
+    }
+
     let numero = numeroter(&mut tx, "inventaire", "numero_inventaire", "INV").await?;
     let id = uuid::Uuid::new_v4().to_string();
 
@@ -1471,9 +1489,43 @@ pub async fn creer_inventaire(
     .bind(&user.id)
     .execute(&mut *tx)
     .await?;
+    // Les lignes a compter, tout de suite (13/10/2026) : plus d'etape « ouvrir ».
+    let n = crate::domain::inventaire::preparer(&mut tx, &id).await?;
 
     tx.commit().await?;
-    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero })))
+    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "lignes_a_compter": n })))
+}
+
+/// `GET /api/inventaires/{id}` — l'en-tete d'un inventaire, pour sa page.
+pub async fn lire_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Lire).await?;
+    let rows = sqlx::query(
+        "SELECT i.*, u.login AS responsable, v.login AS valide_par, mg.nom AS magasin_nom,
+                (SELECT COUNT(*) FROM ligne_inventaire l WHERE l.id_inventaire = i.id_inventaire) AS nb_lignes,
+                (SELECT COUNT(*) FROM ligne_inventaire l
+                  WHERE l.id_inventaire = i.id_inventaire AND l.statut_ligne = 'A_TRAITER') AS nb_a_compter,
+                EXISTS (SELECT 1 FROM ligne_inventaire l
+                         WHERE l.id_inventaire = i.id_inventaire AND l.id_utilisateur_comptage = $2) AS j_ai_compte
+           FROM inventaire i
+           LEFT JOIN utilisateur u ON u.id_utilisateur = i.id_utilisateur_responsable
+           LEFT JOIN utilisateur v ON v.id_utilisateur = i.id_utilisateur_validation
+           LEFT JOIN magasin mg ON mg.code_magasin = i.code_magasin
+          WHERE i.id_inventaire = $1",
+    )
+    .bind(&id)
+    .bind(&user.id)
+    .fetch_all(&state.db)
+    .await?;
+    let mut valeur = lignes_en_json(&rows)
+        .get(0)
+        .cloned()
+        .ok_or_else(|| AppError::Introuvable(format!("inventaire {id}")))?;
+    user.masquer(&state.db, module::INVENTAIRE, &mut valeur).await?;
+    Ok(Json(valeur))
 }
 
 pub async fn lignes_inventaire(
@@ -1551,9 +1603,9 @@ pub async fn saisir_comptage(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| AppError::Introuvable(format!("inventaire {id}")))?;
-    if statut != "EN_COURS" {
+    if statut != "BROUILLON" {
         return Err(AppError::RegleMetier(format!(
-            "Le comptage n'est possible que sur un inventaire EN_COURS (statut actuel : {statut})."
+            "Le comptage se saisit sur un inventaire en brouillon (statut actuel : {statut})."
         )));
     }
 

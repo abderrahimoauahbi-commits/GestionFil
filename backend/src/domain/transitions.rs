@@ -34,7 +34,7 @@ fn rang(entite: &str, statut: &str) -> Option<u8> {
         "reception" => &["BROUILLON", "A_CONTROLER", "VALIDE", "CLOTURE"],
         "plan_production" => &["BROUILLON", "SIMULATION", "EN_COURS", "CLOTURE"],
         "qualite" => &["BROUILLON", "ACTIF", "CLOTURE"],
-        "inventaire" => &["BROUILLON", "EN_COURS", "CLOTURE"],
+        "inventaire" => &["BROUILLON", "VALIDE", "CLOTURE"],
         _ => &[],
     };
     ordre.iter().position(|s| *s == statut).map(|p| p as u8)
@@ -47,7 +47,7 @@ fn seuil_engage(entite: &str) -> u8 {
         "reception" => 2,       // VALIDE : la marchandise est en stock
         "plan_production" => 2, // EN_COURS : il alimente le MRP
         "qualite" => 1,         // ACTIF : elle se planifie
-        "inventaire" => 1,      // EN_COURS : le comptage a commence
+        "inventaire" => 1,      // VALIDE : le comptage est fige (13/10/2026)
         _ => u8::MAX,
     }
 }
@@ -86,7 +86,7 @@ const PAR_DEVALIDATION: &[(&str, &[&str], &str, &str)] = &[
     ("reception", &["VALIDE"], "A_CONTROLER", "receptions"),
     ("plan_production", &["EN_COURS", "CLOTURE"], "BROUILLON", "plans"),
     ("qualite", &["CLOTURE"], "ACTIF", "qualites"),
-    ("inventaire", &["CLOTURE"], "EN_COURS", "inventaires"),
+    ("inventaire", &["CLOTURE"], "VALIDE", "inventaires"),
 ];
 
 /// A appeler par toute route qui change un statut, avant l'UPDATE.
@@ -160,7 +160,7 @@ mod tests {
         assert!(est_retour_arriere("reception", "VALIDE", "ANNULE"));
         assert!(est_retour_arriere("plan_production", "EN_COURS", "BROUILLON"));
         assert!(est_retour_arriere("qualite", "ACTIF", "BROUILLON"));
-        assert!(est_retour_arriere("inventaire", "EN_COURS", "ANNULE"));
+        assert!(est_retour_arriere("inventaire", "VALIDE", "ANNULE"));
     }
 
     #[test]

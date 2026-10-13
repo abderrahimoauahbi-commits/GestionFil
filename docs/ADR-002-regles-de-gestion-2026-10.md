@@ -128,8 +128,16 @@ le **reste courant du bon** à la soumission et à la validation.
 valider l'inventaire) ; un inventaire s'annule avec un motif ; le théorique est pris à l'heure du
 comptage.
 
-**Où** — `domain/inventaire.rs` ; index `ux_inventaire_en_cours` ; C44. **Contrôle** — banc
+**Où** — `domain/inventaire.rs` ; index `ux_inventaire_ouvert` ; C44. **Contrôle** — banc
 `inventaire`.
+
+**Complément du 13/10/2026** — L'inventaire suit le cycle d'un bon : **Brouillon** (créé, lignes
+préparées d'emblée, le magasinier compte) → **Validé** (un autre compte que ceux qui ont compté,
+droit Valider, l'Administrateur dispensé ; comptage figé, stock intact ; « Renvoyer au comptage »
+avec motif le rouvre) → **Clôturé** (droit Valider, écarts au stock). L'ancien état `EN_COURS`
+devient `BROUILLON`. Une liste, puis une page par inventaire (en-tête et lignes). Garanties en
+base : `trg_inventaire_separation` (INV-SEPARATION), `trg_ligne_inventaire_fige` (INV-FIGE), un
+seul inventaire brouillon ou validé par magasin. Migration `2026-10-13b_inventaire_valide.sql`.
 
 ### R12 — Saisie libre : ajustements et déchets au coût moyen
 

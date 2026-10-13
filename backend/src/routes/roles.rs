@@ -63,6 +63,7 @@ pub async fn lire(State(state): State<AppState>, user: Utilisateur, Path(code): 
     let role = sqlx::query(
         "SELECT r.code_role_user, r.libelle, r.description, r.niveau_hierarchique,
                 r.plafond_validation_bc_mad::float8 AS plafond_validation_bc_mad,
+                (r.exige_totp = 1) AS exige_totp,
                 (SELECT count(*) FROM utilisateur u WHERE u.code_role_user = r.code_role_user) AS nb_utilisateurs
            FROM role_utilisateur r WHERE r.code_role_user = $1",
     )
@@ -117,6 +118,8 @@ pub struct RoleSaisi {
     libelle: String,
     description: Option<String>,
     plafond_validation_bc_mad: Option<f64>,
+    /// La double authentification est-elle obligatoire pour ce role ?
+    exige_totp: Option<bool>,
     /// A la creation : le role dont on part (permissions et modele recopies).
     a_partir_de: Option<String>,
     permissions: Option<Vec<Permission>>,
@@ -252,13 +255,15 @@ pub async fn creer(State(state): State<AppState>, user: Utilisateur, Json(s): Js
         return Err(AppError::RegleMetier(format!("Le rôle {code} existe déjà.")));
     }
     sqlx::query(
-        "INSERT INTO role_utilisateur (code_role_user, libelle, description, niveau_hierarchique, plafond_validation_bc_mad)
-         VALUES ($1, btrim($2), NULLIF(btrim($3), ''), 10, round($4::numeric, 2))",
+        "INSERT INTO role_utilisateur (code_role_user, libelle, description, niveau_hierarchique,
+                                       plafond_validation_bc_mad, exige_totp)
+         VALUES ($1, btrim($2), NULLIF(btrim($3), ''), 10, round($4::numeric, 2), $5)",
     )
     .bind(&code)
     .bind(&s.libelle)
     .bind(&s.description)
     .bind(s.plafond_validation_bc_mad)
+    .bind(i16::from(s.exige_totp.unwrap_or(false)))
     .execute(&mut *tx)
     .await?;
     if let Some(source) = s.a_partir_de.as_deref().filter(|x| !x.is_empty()) {
@@ -300,13 +305,15 @@ pub async fn modifier(
     let n = sqlx::query(
         "UPDATE role_utilisateur
             SET libelle = btrim($2), description = NULLIF(btrim($3), ''),
-                plafond_validation_bc_mad = round($4::numeric, 2)
+                plafond_validation_bc_mad = round($4::numeric, 2),
+                exige_totp = COALESCE($5, exige_totp)
           WHERE code_role_user = $1",
     )
     .bind(&code)
     .bind(&s.libelle)
     .bind(&s.description)
     .bind(s.plafond_validation_bc_mad)
+    .bind(s.exige_totp.map(i16::from))
     .execute(&mut *tx)
     .await?
     .rows_affected();

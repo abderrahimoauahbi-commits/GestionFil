@@ -158,6 +158,9 @@ pub fn router(state: AppState) -> Router {
         // Le verrou d'inactivite : verifie le mot de passe sans prolonger la
         // session. Voir auth_routes::deverrouiller.
         .route("/api/auth/deverrouiller", post(auth_routes::deverrouiller))
+        // Le verrou et la deconnexion tenus par le serveur (audit du 13/10/2026).
+        .route("/api/auth/verrouiller", post(auth_routes::verrouiller))
+        .route("/api/auth/deconnexion", post(auth_routes::deconnexion))
         // --- Administration ---------------------------------------------------
         .route("/api/admin/utilisateurs",
                get(admin::lister_utilisateurs).post(admin::creer_utilisateur))
@@ -489,6 +492,30 @@ pub fn router(state: AppState) -> Router {
         ))
         .layer(cors);
 
+    // LA POLITIQUE DE CONTENU (CSP) ET NOSNIFF, POSES PAR LE SERVEUR LUI-MEME
+    // (audit de securite du 13/10/2026) : derriere nginx comme en direct sur le
+    // poste, sur l'API comme sur les pages. L'interface ne charge rien
+    // d'ailleurs : une injection de script ne pourrait ni s'executer ni envoyer
+    // le jeton hors du serveur. Les styles en ligne restent permis (attributs
+    // `style` des graphiques) ; les scripts, jamais.
+    use axum::http::{header, HeaderValue};
+    use tower_http::set_header::SetResponseHeaderLayer;
+    let en_tetes = |r: Router| {
+        r.layer(SetResponseHeaderLayer::if_not_present(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+                 img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; \
+                 worker-src 'self'; manifest-src 'self'; frame-src 'self' blob:; \
+                 object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+            ),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+    };
+
     match interface {
         Some(rep) => {
             let index = rep.join("index.html");
@@ -514,7 +541,7 @@ pub fn router(state: AppState) -> Router {
                 ),
             );
 
-            routeur
+            en_tetes(routeur
                 // LES RESSOURCES CONSTRUITES SE SERVENT A PART, sans repli : un
                 // fichier absent doit repondre 404. Avec le repli general, un
                 // `.js` manquant renverrait la page HTML avec un code 200, et le
@@ -527,13 +554,15 @@ pub fn router(state: AppState) -> Router {
                 // tromper un cache, une sonde ou un service worker.
                 .fallback_service(ServeDir::new(&rep).fallback(ServeFile::new(index)))
                 .layer(axum::middleware::from_fn(nommer_route_inconnue))
-                .with_state(state)
+                .with_state(state))
         }
         None => {
             tracing::info!("aucune interface a servir : API seule");
-            routeur
-                .layer(axum::middleware::from_fn(nommer_route_inconnue))
-                .with_state(state)
+            en_tetes(
+                routeur
+                    .layer(axum::middleware::from_fn(nommer_route_inconnue))
+                    .with_state(state),
+            )
         }
     }
 }

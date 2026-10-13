@@ -55,6 +55,61 @@ pub async fn lister_roles(
     Ok(Json(lignes_en_json(&rows)))
 }
 
+/// LE ROLE ADMINISTRATEUR NE SE PREND PAS (audit de securite du 13/10/2026).
+///
+/// Le droit d'ecrire sur les utilisateurs suffisait a tout : se donner le role
+/// Administrateur, reinitialiser le mot de passe d'un administrateur, s'ouvrir
+/// ses propres champs. Desormais, hors l'Administrateur : pas de role
+/// Administrateur a donner, pas de compte administrateur a toucher, pas de mot
+/// de passe d'autrui a reinitialiser, et pour personne : pas son propre role ni
+/// ses propres droits. La base garde la meme regle pour le role
+/// (`trg_utilisateur_garde_role`).
+async fn garder_compte(
+    db: &crate::db::Db,
+    user: &Utilisateur,
+    cible: Option<&str>,
+    nouveau_role: Option<&str>,
+    mot_de_passe_d_autrui: bool,
+) -> AppResult<()> {
+    let refus = |m: &str| Err(AppError::RegleMetier(m.into()));
+    let role_cible: Option<String> = match cible {
+        Some(id) => sqlx::query_scalar("SELECT code_role_user FROM utilisateur WHERE id_utilisateur = $1")
+            .bind(id)
+            .fetch_optional(db)
+            .await?,
+        None => None,
+    };
+    let soi_meme = cible == Some(user.id.as_str());
+    if soi_meme && nouveau_role.is_some_and(|r| Some(r) != role_cible.as_deref()) {
+        return refus("On ne change pas son propre rôle : un autre administrateur le fait.");
+    }
+    if user.role == "ADMIN" {
+        return Ok(());
+    }
+    if nouveau_role == Some("ADMIN") {
+        return refus("Seul un administrateur attribue le rôle Administrateur.");
+    }
+    if role_cible.as_deref() == Some("ADMIN") {
+        return refus("Seul un administrateur modifie un compte administrateur.");
+    }
+    if mot_de_passe_d_autrui && !soi_meme {
+        return refus("Seul un administrateur réinitialise le mot de passe d'un autre compte.");
+    }
+    Ok(())
+}
+
+/// Les droits par champ d'un compte : pas les siens, pas ceux d'un
+/// administrateur, sauf par un administrateur.
+async fn garder_droits(db: &crate::db::Db, user: &Utilisateur, cible: &str) -> AppResult<()> {
+    if user.role == "ADMIN" {
+        return Ok(());
+    }
+    if cible == user.id {
+        return Err(AppError::RegleMetier("On ne règle pas ses propres droits : un administrateur le fait.".into()));
+    }
+    garder_compte(db, user, Some(cible), None, false).await
+}
+
 #[derive(Debug, Deserialize)]
 pub struct NouvelUtilisateur {
     pub login: String,
@@ -72,6 +127,7 @@ pub async fn creer_utilisateur(
     Json(nouveau): Json<NouvelUtilisateur>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::UTILISATEURS, Action::Ecrire).await?;
+    garder_compte(&state.db, &user, None, Some(&nouveau.code_role_user), false).await?;
 
     password::valider_longueur(&nouveau.mot_de_passe).map_err(AppError::Invalide)?;
     if nouveau.login.trim().is_empty() || nouveau.nom.trim().is_empty() {
@@ -133,6 +189,8 @@ pub async fn modifier_utilisateur(
     Json(m): Json<ModificationUtilisateur>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::UTILISATEURS, Action::Ecrire).await?;
+
+    garder_compte(&state.db, &user, Some(&id), m.code_role_user.as_deref(), m.mot_de_passe.is_some()).await?;
 
     // Se desactiver soi-meme fermerait la porte de l'interieur.
     if m.actif == Some(false) && id == user.id {
@@ -269,6 +327,7 @@ pub async fn enregistrer_droits(
     Json(lot): Json<LotDroits>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::UTILISATEURS, Action::Ecrire).await?;
+    garder_droits(&state.db, &user, &id).await?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -348,6 +407,10 @@ pub async fn appliquer_modele_role(
     Json(d): Json<DemandeModele>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::UTILISATEURS, Action::Ecrire).await?;
+    garder_droits(&state.db, &user, &id).await?;
+    if d.code_role_user.as_deref() == Some("ADMIN") && user.role != "ADMIN" {
+        return Err(AppError::RegleMetier("Seul un administrateur applique le modèle du rôle Administrateur.".into()));
+    }
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;

@@ -3046,9 +3046,12 @@ pub async fn references_commandables(
                       -- creation d'un bon n'affichait AUCUNE reference — sans
                       -- un mot expliquant pourquoi.
                       / $3::numeric, 6) AS prix_suggere_devise,
+                -- LA SOURCE SUIT L'ORDRE DU COALESCE (audit du 13/10/2026) : elle
+                -- annoncait « CATALOGUE » pour un prix qui etait le CMUP, et le
+                -- masquage du CMUP ne le reconnaissait donc pas.
                 CASE WHEN pa.prix_estime_mad IS NOT NULL THEN pa.source_prix
-                     WHEN r.prix_catalogue_kg IS NOT NULL THEN 'CATALOGUE'
                      WHEN r.cmup_mad IS NOT NULL THEN 'CMUP'
+                     WHEN r.prix_catalogue_kg IS NOT NULL THEN 'CATALOGUE'
                      ELSE 'AUCUN' END AS source_prix,
                 -- Deja saisie sur ce bon : on la montre barree plutot que de la
                 -- masquer, sinon on la cherche sans comprendre pourquoi elle
@@ -3104,8 +3107,10 @@ pub async fn references_commandables(
     let rows = requete.fetch_all(&state.db).await?;
 
     let mut valeur = lignes_en_json(&rows);
-    user.masquer(&state.db, module::BONS_COMMANDE, &mut valeur).await?;
+    // LE PRIX AU CMUP D'ABORD (audit du 13/10/2026) : `masquer` retire la
+    // source du prix, et le masquage du CMUP, passe apres, ne la trouvait plus.
     user.masquer_prix_au_cmup(&state.db, &mut valeur).await?;
+    user.masquer(&state.db, module::BONS_COMMANDE, &mut valeur).await?;
     Ok(Json(valeur))
 }
 
@@ -4059,11 +4064,19 @@ pub async fn ajouter_ligne_reception(
         )));
     }
 
+    // LE PRIX SAISI NE COMPTE QUE POUR QUI PEUT L'ECRIRE (audit de securite du
+    // 13/10/2026) : le magasinier, a qui le prix est masque, imposait le sien a
+    // la place de celui du bon. Ignore pour lui : le bon, sinon le catalogue.
+    let droits_prix = user.droits(&state.db, module::RECEPTIONS).await?;
+    let prix_saisi = l
+        .prix_kg_devise
+        .filter(|_| matches!(droits_prix.get("prix_kg_devise"), Some(crate::auth::rbac::Niveau::Ecriture)));
+
     // Prix et devise : repris de la ligne de BC quand elle existe, sinon du
     // catalogue. Une reception hors commande reste possible, mais son prix doit
     // etre explicite.
     let (prix_devise, devise, qte_commandee): (f64, String, Option<f64>) =
-        match (&l.id_ligne_bc, l.prix_kg_devise) {
+        match (&l.id_ligne_bc, prix_saisi) {
             (Some(ligne_bc), _) => {
                 // Le RESTE a livrer, pas le total commande : un bon livre en
                 // deux camions verrait sinon chaque reception jugee incomplete,
@@ -4076,7 +4089,7 @@ pub async fn ajouter_ligne_reception(
                 .fetch_optional(&mut *tx)
                 .await?
                 .ok_or_else(|| AppError::Introuvable(format!("ligne de BC {ligne_bc}")))?;
-                (l.prix_kg_devise.unwrap_or(r.0), r.1, Some(r.2))
+                (prix_saisi.unwrap_or(r.0), r.1, Some(r.2))
             }
             (None, Some(p)) => (
                 p,
@@ -4165,11 +4178,14 @@ pub async fn ajouter_ligne_reception(
     let _ = id_bc;
     tx.commit().await?;
 
-    Ok(Json(json!({
+    // Le prix et le taux se masquent dans la reponse aussi.
+    let mut v = json!({
         "id_ligne_reception": id_ligne, "ligne_numero": numero,
         "quantite_stock_kg": kg, "prix_kg_mad": arrondi_kg(prix_devise * taux),
         "taux_change": taux
-    })))
+    });
+    user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
+    Ok(Json(v))
 }
 
 #[derive(Debug, Deserialize)]

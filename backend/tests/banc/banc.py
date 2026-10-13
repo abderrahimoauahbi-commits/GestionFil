@@ -181,6 +181,10 @@ class Infra:
         # remplace — les references du banc s'y rattachent.
         self.psql(self.base, "-q", "-c", "DELETE FROM famille; DELETE FROM couleur;")
         self.psql(self.base, "-q", "-f", str(ICI / "referentiel.sql"))
+        # LA DOUBLE AUTHENTIFICATION OBLIGATOIRE (13/10/2026) se teste dans son
+        # scenario (`securite`), qui la remet ; les autres se connectent au seul
+        # mot de passe, comme avant.
+        self.psql(self.base, "-q", "-c", "UPDATE role_utilisateur SET exige_totp = 0;")
         for login in COMPTES:
             p = subprocess.run([str(self.admin), "definir-mot-de-passe", login],
                                cwd=tempfile.gettempdir(), capture_output=True, text=True,
@@ -197,7 +201,10 @@ class Infra:
         self.journal = open(Path(self.vide) / "serveur.log", "w", encoding="utf-8")
         env = dict(self.env, DATABASE_URL=self.url(), JWT_SECRET=secrets.token_hex(32),
                    BIND_ADDR=f"127.0.0.1:{self.port}", FRONTEND_DIR=str(frontend or self.vide),
-                   RUST_LOG="warn")
+                   RUST_LOG="warn",
+                   # Le banc echoue expres, depuis une seule adresse : la limite par
+                   # adresse se teste en Rust (auth::garde), pas ici.
+                   GESTIONFIL_ECHECS_PAR_ADRESSE="100000")
         self.serveur = subprocess.Popen([str(self.binaire)], cwd=self.vide, env=env,
                                         stdout=self.journal, stderr=subprocess.STDOUT)
         for _ in range(60):

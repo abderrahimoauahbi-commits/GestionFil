@@ -55,7 +55,10 @@ pub async fn generer_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
     let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref()).await?;
-    Ok(Json(serde_json::to_value(r)?))
+    // Le budget total se masque comme les montants estimes (audit du 13/10/2026).
+    let mut v = serde_json::to_value(r)?;
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    Ok(Json(v))
 }
 
 #[derive(Debug, Deserialize)]

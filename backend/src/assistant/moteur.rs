@@ -120,9 +120,12 @@ impl Reglage {
                 Moteur::Plateforme => "(choisi par la plateforme)".into(),
             };
         }
-        if let Some(u) = lire("P_AssistantPlateforme").await {
-            r.url_plateforme = Some(u.trim_end_matches('/').to_string());
-        }
+        // L'ADRESSE DE LA PLATEFORME NE SE LIT PLUS EN BASE (audit de securite
+        // du 13/10/2026) : l'ERP y envoie sa cle d'application et le jeton de
+        // l'utilisateur. Reglable a l'ecran, elle permettait a un compte de la
+        // Direction de detourner les sessions des autres vers sa machine. Elle
+        // vient du seul .env du serveur (GESTIONAI_URL) ; `P_AssistantPlateforme`
+        // est ignore.
         if let Some(m) = lire("P_AssistantModele").await {
             // Un modele explicitement choisi prime, mais seulement s'il
             // appartient au moteur retenu : « qwen2.5 » demande a Claude ne

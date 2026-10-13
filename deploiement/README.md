@@ -571,7 +571,10 @@ recompilation quand l'adresse change.
 | Droits par champ | appliqués **côté serveur**, en sortie et en entrée |
 | nginx | seul service exposé (80 → 443, TLS 1.2/1.3) ; en-têtes `nosniff`, `SAMEORIGIN`, `same-origin` ; délai de 310 s, au-delà de celui de l'application (300 s) |
 | Pare-feu | 22, 80 et 443 ouverts ; **8080 fermé** (l'application écoute sur 127.0.0.1) |
-| Échecs d'authentification | blocage progressif à la connexion, au déverrouillage de l'écran, au changement de mot de passe et au second facteur |
+| Échecs d'authentification | blocage progressif à la connexion, au déverrouillage de l'écran, au changement de mot de passe et au second facteur ; essais d'un même identifiant un par un, 20 échecs par adresse en 15 min, identifiant inconnu bloqué comme un vrai (13/10/2026) |
+| Sessions | tenues par le serveur (`session_ouverte`) : déconnexion = jeton révoqué ; verrou d'inactivité tenu même après F5 ; 8 h au plus |
+| Double authentification | **obligatoire** pour l'Administrateur et la Direction (case par rôle, page Rôles et permissions) |
+| Politique de contenu | CSP posée par l'application (aucun script hors du serveur) ; HSTS par nginx |
 
 ### À appliquer à la main sur un serveur déjà installé (09/10/2026)
 
@@ -586,3 +589,32 @@ sudo ufw status
 
 `nginx -t` doit répondre « syntax is ok » avant le rechargement : une erreur de
 syntaxe laisserait l'ancienne configuration en place, sans rien casser.
+
+### Audit de sécurité du 13/10/2026
+
+Corrigé dans l'application (migration `2026-10-13c_securite.sql`, exigée au démarrage) : rôle
+Administrateur gardé (seul un administrateur l'attribue ou touche à un compte administrateur ;
+personne ne change son propre rôle ni ses propres droits), prix suggérés et budgets masqués, prix
+d'une réception ou d'un retour ignoré pour qui ne peut pas l'écrire, types de mouvement sous
+Paramètres, réglage de l'assistant réservé à l'administrateur (adresse de la plateforme dans le
+`.env` seulement), sessions et verrou tenus par le serveur, double authentification obligatoire.
+
+**À la publication de cette version, tous les comptes sont déconnectés** (les jetons d'avant n'ont
+pas de session) ; l'Administrateur et la Direction posent leur double authentification à la
+connexion suivante.
+
+**Téléphone perdu** (la double authentification ne se retire plus depuis l'écran pour ces rôles) :
+
+```bash
+cd /opt/gestionfil && sudo -u gestionfil ./gestionfil-admin retirer-2fa <login>
+```
+
+Reste à faire à la main sur le serveur :
+
+- mot de passe de `sysadmin` (12 caractères au moins), puis clé SSH et `PasswordAuthentication no` ;
+  `fail2ban` pour SSH ;
+- sauvegardes lisibles par le seul compte du service : `chmod 700 /opt/gestionfil/sauvegardes` et
+  `chmod 600` sur les fichiers (constaté le 13/10 : `755` et `644`, lisibles par les autres services) ;
+- recopier `nginx-gestionfil.conf` (HSTS), comme ci-dessus ;
+- plus tard : un rôle propriétaire distinct de `gestionfil`, pour que l'application ne puisse ni
+  désactiver les gardes ni vider le journal d'audit.

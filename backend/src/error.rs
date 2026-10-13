@@ -49,6 +49,14 @@ pub enum AppError {
     #[error("Conflit : {0}")]
     Conflit(String),
 
+    /// La session est verrouillee (inactivite) : seul le mot de passe la rouvre.
+    #[error("Session verrouillée : saisissez votre mot de passe pour reprendre.")]
+    SessionVerrouillee,
+
+    /// Le role exige la double authentification et le compte ne l'a pas posee.
+    #[error("La double authentification est obligatoire pour votre rôle : activez-la avant de continuer.")]
+    DoubleAuthRequise,
+
     #[error("Erreur interne")]
     Interne(#[from] anyhow::Error),
 
@@ -154,6 +162,8 @@ impl IntoResponse for AppError {
             AppError::NonAutorise { .. } => (StatusCode::FORBIDDEN, "NON_AUTORISE"),
             AppError::ChampNonModifiable { .. } => (StatusCode::FORBIDDEN, "CHAMP_NON_MODIFIABLE"),
             AppError::Conflit(_) => (StatusCode::CONFLICT, "CONFLIT"),
+            AppError::SessionVerrouillee => (StatusCode::LOCKED, "SESSION_VERROUILLEE"),
+            AppError::DoubleAuthRequise => (StatusCode::FORBIDDEN, "DOUBLE_AUTH_REQUISE"),
             AppError::Interne(_) | AppError::Sqlx(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "ERREUR_INTERNE")
             }

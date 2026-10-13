@@ -136,15 +136,51 @@ pub async fn lire(State(state): State<AppState>, user: Utilisateur, Path(id): Pa
     Ok(Json(v))
 }
 
+/// LE PRIX DU RETOUR EST CELUI DES ACHATS (audit de securite du 13/10/2026).
+///
+/// Un compte qui ne voit pas le prix (le magasinier) l'imposait pourtant en
+/// l'envoyant. Son prix est ignore : une ligne deja chiffree garde le sien,
+/// une ligne neuve part au CMUP du magasin, comme prevu.
+async fn retenir_prix(
+    tx: &mut sqlx::PgConnection,
+    state: &AppState,
+    user: &Utilisateur,
+    id: Option<&str>,
+    s: &mut metier::RetourSaisie,
+) -> AppResult<()> {
+    let droits = user.droits(&state.db, module::RECEPTIONS).await?;
+    if matches!(droits.get("prix_kg_mad"), Some(crate::auth::rbac::Niveau::Ecriture)) {
+        return Ok(());
+    }
+    let anciens: Vec<(String, String, Option<String>, f64)> = match id {
+        Some(id) => sqlx::query_as(
+            "SELECT code_reference, code_magasin, lot_fournisseur, prix_kg_mad::float8
+               FROM ligne_retour_fournisseur WHERE id_retour = $1",
+        )
+        .bind(id)
+        .fetch_all(&mut *tx)
+        .await?,
+        None => Vec::new(),
+    };
+    for l in &mut s.lignes {
+        l.prix_kg_mad = anciens
+            .iter()
+            .find(|(r, m, lot, _)| *r == l.code_reference && *m == l.code_magasin && *lot == l.lot_fournisseur)
+            .map(|a| a.3);
+    }
+    Ok(())
+}
+
 /// `POST /api/retours-fournisseur` — un brouillon. Droit ECRIRE des receptions.
 pub async fn creer(
     State(state): State<AppState>,
     user: Utilisateur,
-    Json(s): Json<metier::RetourSaisie>,
+    Json(mut s): Json<metier::RetourSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    retenir_prix(&mut tx, &state, &user, None, &mut s).await?;
     let v = metier::enregistrer(&mut tx, &user, None, &s).await?;
     tx.commit().await?;
     Ok(Json(v))
@@ -155,11 +191,12 @@ pub async fn modifier(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
-    Json(s): Json<metier::RetourSaisie>,
+    Json(mut s): Json<metier::RetourSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    retenir_prix(&mut tx, &state, &user, Some(&id), &mut s).await?;
     let v = metier::enregistrer(&mut tx, &user, Some(&id), &s).await?;
     tx.commit().await?;
     Ok(Json(v))

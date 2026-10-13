@@ -169,6 +169,19 @@ pub async fn connexion(
         .and_then(|v| v.to_str().ok());
     let login = demande.login.trim().to_string();
 
+    // UNE MACHINE QUI ESSAIE TROP ATTEND (audit du 13/10/2026), quel que soit
+    // l'identifiant qu'elle tente.
+    if state.garde.adresse_bloquee(ip.as_deref()) {
+        journaliser(&state.db, &login, None, "ADRESSE_BLOQUEE", ip.as_deref(), agent).await;
+        return Err(AppError::TropDeTentatives(
+            "Trop de tentatives depuis ce poste. Réessayez dans quelques minutes.".into(),
+        ));
+    }
+    // LES ESSAIS SUR UN MEME IDENTIFIANT PASSENT UN PAR UN : une rafale lisait
+    // sinon « pas bloque » cinq cents fois avant que le premier echec soit ecrit.
+    let verrou = state.garde.verrou_login(&login);
+    let _tour = verrou.lock().await;
+
     let compte: Option<(String, String, String, String, i64, i64, Option<String>, Option<String>, i64, Option<i64>)> =
         sqlx::query_as(
             "SELECT id_utilisateur, mot_de_passe_hash, nom, code_role_user, actif,
@@ -181,9 +194,25 @@ pub async fn connexion(
 
     // Un compte inconnu et un mot de passe faux renvoient la meme erreur : ne
     // pas reveler quels logins existent.
+    //
+    // ET LE MEME COMPORTEMENT (audit du 13/10/2026) : le meme calcul (une
+    // empreinte leurre), le meme blocage apres trois echecs. Sans cela, la
+    // duree de la reponse et l'absence de blocage trahissaient l'inconnu.
     let Some((id, hash, nom, role, actif, _echecs, bloque, secret, totp_actif, dernier_pas)) = compte else {
+        if let Some(reste) = state.garde.inconnu_bloque(&login, attente_secondes) {
+            journaliser(&state.db, &login, None, "BLOQUE", ip.as_deref(), agent).await;
+            return Err(AppError::TropDeTentatives(format!("Trop de tentatives. Réessayez dans {}.", duree_lisible(reste))));
+        }
+        state.garde.leurrer(&demande.mot_de_passe).await;
+        state.garde.noter_echec_adresse(ip.as_deref());
+        let n = state.garde.noter_echec_inconnu(&login);
         journaliser(&state.db, &login, None, "INCONNU", ip.as_deref(), agent).await;
-        return Err(AppError::IdentifiantsInvalides);
+        let attente = attente_secondes(n);
+        return Err(if attente > 0 {
+            AppError::TropDeTentatives(format!("Trop de tentatives. Réessayez dans {}.", duree_lisible(attente)))
+        } else {
+            AppError::IdentifiantsInvalides
+        });
     };
 
     // LE BLOCAGE SE VERIFIE AVANT LE MOT DE PASSE, sinon il ne bloque rien :
@@ -199,6 +228,7 @@ pub async fn connexion(
     }
 
     if actif != 1 {
+        state.garde.leurrer(&demande.mot_de_passe).await;
         journaliser(&state.db, &login, Some(&id), "INACTIF", ip.as_deref(), agent).await;
         return Err(AppError::IdentifiantsInvalides);
     }
@@ -206,11 +236,15 @@ pub async fn connexion(
     // Un echec, quelle qu'en soit la cause, allonge l'attente et l'inscrit.
     let echouer = |raison: &'static str| {
         let db = state.db.clone();
+        let garde = state.garde.clone();
         let (id, login, ip2, agent2) = (id.clone(), login.clone(), ip.clone(), agent.map(String::from));
-        async move { noter_echec(&db, &id, &login, raison, ip2.as_deref(), agent2.as_deref()).await }
+        async move {
+            garde.noter_echec_adresse(ip2.as_deref());
+            noter_echec(&db, &id, &login, raison, ip2.as_deref(), agent2.as_deref()).await
+        }
     };
 
-    if !password::verifier(&demande.mot_de_passe, &hash) {
+    if !state.garde.verifier(&demande.mot_de_passe, &hash).await {
         return Err(echouer("MOT_DE_PASSE").await);
     }
 
@@ -252,6 +286,7 @@ pub async fn connexion(
         state.config.jwt_ttl_minutes,
     )
     .map_err(AppError::Interne)?;
+    ouvrir_session(&state.db, &claims, ip.as_deref()).await?;
 
     // La reussite remet le compteur a zero : c'est la SERIE d'echecs qui
     // compte, pas leur total depuis la creation du compte.
@@ -271,6 +306,51 @@ pub async fn connexion(
         "expire_le": claims.exp,
         "utilisateur": { "id": id, "login": login, "nom": nom, "role": role },
     })))
+}
+
+/// LA SESSION EST INSCRITE (audit du 13/10/2026) : un jeton sans session est
+/// refuse, et la deconnexion la revoque. Les sessions echues depuis un mois
+/// s'effacent au passage.
+async fn ouvrir_session(db: &crate::db::Db, claims: &jwt::Claims, ip: Option<&str>) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO session_ouverte (sid, id_utilisateur, ouverte_le, expire_le, adresse_ip)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(&claims.sid)
+    .bind(&claims.sub)
+    .bind(maintenant())
+    .bind(claims.exp)
+    .bind(ip)
+    .execute(db)
+    .await?;
+    sqlx::query("DELETE FROM session_ouverte WHERE expire_le < $1")
+        .bind(claims.iat - 30 * 86_400)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// `POST /api/auth/verrouiller` — l'ecran se verrouille : la session aussi, au
+/// serveur. Un rechargement de la page ou un appel direct ne la rouvrent pas ;
+/// seul le mot de passe (`deverrouiller`).
+pub async fn verrouiller(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    sqlx::query("UPDATE session_ouverte SET verrouillee_le = $2 WHERE sid = $1 AND verrouillee_le IS NULL")
+        .bind(&user.session_id)
+        .bind(maintenant())
+        .execute(&state.db)
+        .await?;
+    Ok(Json(json!({ "verrouillee": true })))
+}
+
+/// `POST /api/auth/deconnexion` — la session est revoquee : le jeton, meme
+/// copie ailleurs, ne sert plus.
+pub async fn deconnexion(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    sqlx::query("UPDATE session_ouverte SET revoquee_le = $2 WHERE sid = $1 AND revoquee_le IS NULL")
+        .bind(&user.session_id)
+        .bind(maintenant())
+        .execute(&state.db)
+        .await?;
+    Ok(Json(json!({ "deconnecte": true })))
 }
 
 /// « 30 secondes », « 2 minutes » — un delai qui se lit.
@@ -332,9 +412,13 @@ pub async fn preparer_2fa(
             .bind(&user.id)
             .fetch_one(&state.db)
             .await?;
-    if !password::verifier(&d.mot_de_passe, &hash) {
-        return Err(AppError::IdentifiantsInvalides);
+    // UN ECHEC COMPTE ICI AUSSI (audit du 13/10/2026) : cette route servait
+    // sinon a essayer des mots de passe sans limite.
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
+    if !state.garde.verifier(&d.mot_de_passe, &hash).await {
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
     }
+    remettre_compteur(&state.db, &user.id).await?;
     let deja: i64 = sqlx::query_scalar("SELECT totp_actif FROM utilisateur WHERE id_utilisateur = $1")
         .bind(&user.id)
         .fetch_one(&state.db)
@@ -422,8 +506,25 @@ pub async fn desactiver_2fa(
             .bind(&user.id)
             .fetch_one(&state.db)
             .await?;
+    // OBLIGATOIRE POUR CE ROLE (13/10/2026) : on ne la retire pas. Un
+    // telephone perdu se traite sur le serveur (`gestionfil-admin retirer-2fa`).
+    let exigee: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(r.exige_totp, 0)::int8 FROM utilisateur u
+           LEFT JOIN role_utilisateur r ON r.code_role_user = u.code_role_user
+          WHERE u.id_utilisateur = $1",
+    )
+    .bind(&user.id)
+    .fetch_one(&state.db)
+    .await?;
+    if exigee == 1 {
+        return Err(AppError::RegleMetier(
+            "La double authentification est obligatoire pour votre rôle : elle ne se retire pas. \
+             Téléphone perdu : l'administrateur la retire sur le serveur."
+                .into(),
+        ));
+    }
     exiger_non_bloque(&state.db, &user.id, &user.login).await?;
-    if !password::verifier(&d.mot_de_passe, &hash) {
+    if !state.garde.verifier(&d.mot_de_passe, &hash).await {
         return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
     }
     remettre_compteur(&state.db, &user.id).await?;
@@ -525,6 +626,11 @@ pub async fn moi(
         // SECRET, lui, ne sort jamais d'ici : seule l'adresse otpauth le porte,
         // le temps d'un scan.
         "totp_actif": totp_actif == 1,
+        // Le role l'exige et le compte ne l'a pas : l'ecran ne propose que de
+        // la poser (le serveur refuse le reste).
+        "totp_requis": user.totp_requis,
+        // La session est verrouillee au serveur : l'ecran se rouvre verrouille.
+        "session_verrouillee": user.verrouillee,
         "permissions": permissions.iter()
             .map(|(m, a)| json!({ "module": m, "action": a }))
             .collect::<Vec<_>>(),
@@ -565,7 +671,7 @@ pub async fn changer_mot_de_passe(
     .await?;
 
     exiger_non_bloque(&state.db, &user.id, &user.login).await?;
-    if !password::verifier(&d.ancien, &hash) {
+    if !state.garde.verifier(&d.ancien, &hash).await {
         // Le meme message que pour un compte inconnu a la connexion : ne rien
         // apprendre a qui essaie. Et l'echec compte (T8).
         return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
@@ -599,6 +705,7 @@ pub async fn changer_mot_de_passe(
         state.config.jwt_ttl_minutes,
     )
     .map_err(AppError::Interne)?;
+    ouvrir_session(&state.db, &claims, user.adresse_ip.as_deref()).await?;
     Ok(Json(json!({
         "change": true,
         "le": maintenant(),
@@ -648,10 +755,14 @@ pub async fn deverrouiller(
     // L'ECRAN VERROUILLE N'EST PAS UN BANC D'ESSAI (audit v5, T8) : un poste
     // abandonne permettait d'essayer des mots de passe sans fin.
     exiger_non_bloque(&state.db, &user.id, &user.login).await?;
-    if !password::verifier(&demande.mot_de_passe, &hash) {
+    if !state.garde.verifier(&demande.mot_de_passe, &hash).await {
         return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
     }
     remettre_compteur(&state.db, &user.id).await?;
+    sqlx::query("UPDATE session_ouverte SET verrouillee_le = NULL WHERE sid = $1")
+        .bind(&user.session_id)
+        .execute(&state.db)
+        .await?;
 
     Ok(Json(json!({ "ok": true })))
 }

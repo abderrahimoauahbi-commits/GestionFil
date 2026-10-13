@@ -210,6 +210,9 @@ async function requete<T>(
         location.replace(import.meta.env.BASE_URL + 'connexion')
       }
     }
+    // SESSION VERROUILLEE AU SERVEUR (13/10/2026) : l'ecran se verrouille aussi
+    // (le verrou a pu etre pose par un autre onglet).
+    if (reponse.status === 423) window.dispatchEvent(new Event('gestionfil:verrou'))
     throw new ErreurApi(reponse.status, code, message, donnees?.regle, donnees?.incident)
   }
   return donnees as T

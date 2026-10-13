@@ -67,6 +67,10 @@ async fn main() -> Result<()> {
             let login = args.get(1).context("usage : definir-mot-de-passe <login>")?;
             definir_mot_de_passe(&pool, login).await?;
         }
+        Some("retirer-2fa") => {
+            let login = args.get(1).context("usage : retirer-2fa <login>")?;
+            retirer_2fa(&pool, login).await?;
+        }
         Some("lister-comptes") => lister_comptes(&pool).await?,
         Some("verifier") => verifier(&pool).await?,
         Some("sauvegarder") => sauvegarder(&pool).await?,
@@ -76,6 +80,7 @@ async fn main() -> Result<()> {
             eprintln!("Commandes :");
             eprintln!("  init-config                    Cree le fichier .env avec un secret genere");
             eprintln!("  definir-mot-de-passe <login>   Definit le mot de passe d'un compte");
+            eprintln!("  retirer-2fa <login>            Retire la double authentification (telephone perdu)");
             eprintln!("  lister-comptes                 Liste les comptes et leur etat");
             eprintln!("  verifier                       Execute les controles metier");
             eprintln!();
@@ -164,6 +169,39 @@ async fn definir_mot_de_passe(pool: &db::Db, login: &str) -> Result<()> {
         .await?;
 
     println!("Mot de passe defini pour {login}.");
+    Ok(())
+}
+
+/// TELEPHONE PERDU (13/10/2026). La double authentification est obligatoire
+/// pour l'Administrateur et la Direction : elle ne se retire pas depuis
+/// l'ecran. L'exploitant la retire ici, sur le serveur ; a la connexion
+/// suivante, le compte doit la poser de nouveau. Ses sessions ouvertes sont
+/// fermees.
+async fn retirer_2fa(pool: &db::Db, login: &str) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    let n = sqlx::query(
+        "UPDATE utilisateur SET totp_actif = 0, secret_totp = NULL, totp_active_le = NULL,
+                                totp_dernier_pas = NULL
+          WHERE login = $1",
+    )
+    .bind(login)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if n == 0 {
+        bail!("compte inconnu : {login}");
+    }
+    sqlx::query(
+        "UPDATE session_ouverte SET revoquee_le = $2
+          WHERE revoquee_le IS NULL
+            AND id_utilisateur = (SELECT id_utilisateur FROM utilisateur WHERE login = $1)",
+    )
+    .bind(login)
+    .bind(db::maintenant())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    println!("Double authentification retiree pour {login} ; ses sessions sont fermees. Il la reposera a sa prochaine connexion.");
     Ok(())
 }
 

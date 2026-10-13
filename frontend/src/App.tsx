@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { Verrou } from './auth/Verrou'
+import { DoubleAuthObligatoire } from './auth/DoubleAuthObligatoire'
 import { FournisseurTheme, useTheme } from './composants/Theme'
 import { FournisseurApparence } from './composants/Apparence'
 import { Coquille } from './composants/Coquille'
@@ -117,6 +118,8 @@ function Protege({ children }: { children: React.ReactNode }) {
   const { moi, chargement } = useAuth()
   if (chargement) return <Chargement />
   if (!moi) return <Navigate to="/connexion" replace />
+  // Le role exige la double authentification : rien d'autre avant (13/10/2026).
+  if (moi.totp_requis) return <DoubleAuthObligatoire />
   return <>{children}</>
 }
 

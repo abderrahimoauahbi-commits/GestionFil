@@ -397,6 +397,13 @@ pub async fn modifier_parametre(
     Json(m): Json<ModifParametre>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PARAMETRES, Action::Ecrire).await?;
+    // L'ASSISTANT SE REGLE PAR L'ADMINISTRATEUR (audit du 13/10/2026) : son
+    // moteur decide si des donnees partent chez un service exterieur.
+    if code.starts_with("P_Assistant") && user.role != "ADMIN" {
+        return Err(AppError::RegleMetier(
+            "Le réglage de l'assistant (moteur, modèle) revient à l'administrateur.".into(),
+        ));
+    }
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;

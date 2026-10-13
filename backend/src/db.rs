@@ -298,6 +298,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_retour_fournisseur_garde')",
     ),
     (
+        // Audit de securite : sessions tenues par le serveur, double
+        // authentification exigee par role, role Administrateur garde.
+        "2026-10-13c_securite.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_utilisateur_garde_role')
+            AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'session_ouverte')",
+    ),
+    (
         // L'inventaire comme un bon : brouillon, valide, cloture.
         "2026-10-13b_inventaire_valide.sql",
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_inventaire_separation')",

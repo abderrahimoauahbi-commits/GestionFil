@@ -171,7 +171,11 @@ pub const ENTITES: &[Entite] = &[
     Entite {
         chemin: "types-mouvement",
         table: "type_mouvement",
-        module: "MOUVEMENTS",
+        // SOUS PARAMETRES (decision du 13/10/2026) : le signe, l'effet sur le
+        // CMUP, le prix exige d'un type ne se reglent pas avec le droit
+        // d'ecrire des mouvements, que le magasinier possede. Tous les roles
+        // lisent les Parametres : la saisie d'un mouvement les lit toujours.
+        module: "PARAMETRES",
         cle: "code_type_mvt",
         cle_generee: false,
         creation: &[

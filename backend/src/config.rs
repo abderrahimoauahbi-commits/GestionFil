@@ -62,8 +62,11 @@ impl Config {
             jwt_secret,
             jwt_ttl_minutes: std::env::var("JWT_TTL_MINUTES")
                 .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(480),
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(480)
+                // PLAFONNEE A HUIT HEURES (audit du 13/10/2026) : une valeur
+                // oubliee dans le .env ne doit pas ouvrir des sessions d'un mois.
+                .clamp(5, 480),
             // LE VERROU D'INACTIVITE, en secondes.
             //
             // Reglable sans recompiler, et c'est voulu : la bonne valeur ne se

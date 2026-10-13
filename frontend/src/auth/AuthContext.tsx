@@ -26,6 +26,10 @@ export interface Moi {
   /** Le compte exige-t-il un code a la connexion ? Le secret, lui, ne sort
       jamais du serveur. */
   totp_actif: boolean
+  /** Le role exige la double authentification et le compte ne l'a pas (13/10/2026). */
+  totp_requis?: boolean
+  /** La session est verrouillee au serveur : l'ecran se rouvre verrouille. */
+  session_verrouillee?: boolean
   permissions: { module: string; action: ActionModule }[]
   droits_champ: Record<string, Record<string, Niveau>>
 }
@@ -108,6 +112,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const deconnecter = useCallback(() => {
+    // LA SESSION EST REVOQUEE AU SERVEUR (13/10/2026) : un jeton copie
+    // ailleurs ne sert plus. Sans attendre la reponse : on sort quoi qu'il arrive.
+    if (jeton.lire()) void api.post('/api/auth/deconnexion').catch(() => {})
     jeton.effacer()
     echeance.effacer()
     setMoi(null)

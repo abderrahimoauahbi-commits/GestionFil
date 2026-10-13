@@ -33,6 +33,7 @@ interface RoleResume {
   description: string | null
   plafond_validation_bc_mad: number | null
   nb_utilisateurs: number
+  exige_totp?: boolean
 }
 
 interface FicheRole {
@@ -175,6 +176,7 @@ function EditeurRole({ nouveau, fiche }: { nouveau: boolean; fiche: FicheRole })
   const [plafond, setPlafond] = useState(
     nouveau || fiche.role.plafond_validation_bc_mad === null ? '' : String(fiche.role.plafond_validation_bc_mad),
   )
+  const [exigeTotp, setExigeTotp] = useState(nouveau ? false : fiche.role.exige_totp === true)
   const [perms, setPerms] = useState<Set<string>>(permsDepart)
   const [champs, setChamps] = useState<Record<string, Niveau>>(champsDepart)
   const [source, setSource] = useState('')
@@ -217,7 +219,8 @@ function EditeurRole({ nouveau, fiche }: { nouveau: boolean; fiche: FicheRole })
       : libelle !== fiche.role.libelle ||
         description !== (fiche.role.description ?? '') ||
         plafond !== (fiche.role.plafond_validation_bc_mad === null ? '' : String(fiche.role.plafond_validation_bc_mad))
-  const modifie = enteteModifiee || permsModifiees || champsModifies.length > 0
+  const totpModifie = exigeTotp !== (nouveau ? false : fiche.role.exige_totp === true)
+  const modifie = enteteModifiee || totpModifie || permsModifiees || champsModifies.length > 0
   const quitter = useGardeSaisie(modifie)
 
   const plafondNombre = (() => {
@@ -235,6 +238,7 @@ function EditeurRole({ nouveau, fiche }: { nouveau: boolean; fiche: FicheRole })
         libelle,
         description,
         plafond_validation_bc_mad: plafondNombre,
+        exige_totp: exigeTotp,
         permissions: [...perms].map((p) => {
           const [m, a] = p.split('/')
           return { module: m, action: a }
@@ -402,6 +406,15 @@ function EditeurRole({ nouveau, fiche }: { nouveau: boolean; fiche: FicheRole })
               onChange={(e) => setPlafond(e.target.value)}
             />
           </div>
+          <label className="flex items-center gap-2 self-end pb-1 text-[13px] text-texte">
+            <input
+              type="checkbox"
+              className="size-4 accent-[hsl(var(--primaire))]"
+              checked={exigeTotp}
+              onChange={(e) => setExigeTotp(e.target.checked)}
+            />
+            Double authentification obligatoire
+          </label>
           {nouveau && (
             <div>
               <Etiq htmlFor="role-source">À partir du rôle</Etiq>

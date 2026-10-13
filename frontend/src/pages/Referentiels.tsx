@@ -386,7 +386,7 @@ const ONGLETS: Onglet[] = [
   {
     cle: 'types-mouvement',
     libelle: 'Types de mouvement',
-    module: 'MOUVEMENTS',
+    module: 'PARAMETRES',
     chemin: 'types-mouvement',
     identifiant: 'code_type_mvt',
     unite: 'type',

@@ -80,3 +80,7 @@ frontend/rapport-simulation*/
 # Skills Higgsfield (npx skills add higgsfield-ai/skills), propres au poste
 .agents/
 frontend/dist-essai/
+
+# Paquets de publication : fabriques a la demande, jamais versionnes (audit du 13/10/2026).
+deploiement/*.tar.gz
+deploiement/paquet/

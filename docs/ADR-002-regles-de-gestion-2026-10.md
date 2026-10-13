@@ -309,6 +309,24 @@ erreur de date probable : la saisie l'accepte avec un avis, et C53 le signale.
 
 ---
 
+## Décisions de sécurité du 13/10/2026 (audit de sécurité)
+
+**Décision** — Après l'audit du 13/10/2026 :
+
+- seul l'Administrateur attribue le rôle Administrateur ou touche à un compte administrateur ;
+  personne ne change son propre rôle ni ses propres droits ;
+- la double authentification est **obligatoire** pour l'Administrateur et la Direction (réglable par
+  rôle ; retrait d'urgence par `gestionfil-admin retirer-2fa`) ;
+- les types de mouvement se règlent sous **Paramètres** (plus par le droit d'écrire les mouvements) ;
+- le réglage de l'assistant revient à l'Administrateur ; l'adresse de la plateforme vient du `.env` ;
+- sessions tenues par le serveur (déconnexion = révocation, verrou tenu après F5) ;
+- un prix qu'un compte ne peut pas écrire est ignoré (réception, retour) ; prix suggérés et budgets
+  masqués comme les autres montants ; CSP posée par l'application, HSTS par nginx.
+
+**Où** — migration `2026-10-13c_securite.sql` (`session_ouverte`, `role_utilisateur.exige_totp`,
+`trg_utilisateur_garde_role`, déclarations de champs) ; `auth/garde.rs`, `auth/mod.rs`,
+`routes/admin.rs`, `routes/auth_routes.rs`. **Contrôle** — banc `securite`, tests `auth::garde`.
+
 ## Ce qui reste ouvert
 
 - R4 : la contrepartie du retour fournisseur (avoir) n'est pas imposée à sa saisie.

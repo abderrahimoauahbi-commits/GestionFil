@@ -8,7 +8,10 @@ Comptes (seed_110) : Assistante (ASSISTANTE), Choukri et Mohamed (DIRECTION),
 Magasinie (MAGASIN), admin (ADMIN). Fournisseur FRS-011 (MAD), references
 PLA 100 CHE et PLA 50 CHE (sans suivi de lot), magasins Morocco et Polyfashions.
 """
-from banc import PSQL, Echec, verifier
+import time
+import urllib.request
+
+from banc import MOT_DE_PASSE, PSQL, Echec, verifier
 
 FRS = "FRS-011"
 REF = "PLA 100 CHE"
@@ -987,7 +990,9 @@ def scenario_retour_cloture_avoirs(c, infra):
     plus_gros = max(x["quantite_kg"] for x in c.ok("Choukri", "GET", "/api/retours-fournisseur/disponible")
                     if x["code_reference"] == ref and x["code_magasin"] == mag)
     rendu, prix = round(min(plus_gros, q - 10), 4), round(cm * 3, 4)
-    code, r = retour_fournisseur(c, [(ref, rendu, mag, prix)])
+    # Le prix du retour est celui des achats (13/10/2026) : l'assistante le saisit ; celui que
+    # le magasinier enverrait serait ignore (scenario securite).
+    code, r = retour_fournisseur(c, [(ref, rendu, mag, prix)], saisie="Assistante")
     verifier(code == 200, f"retour de {rendu} kg refuse : {r}")
     apres = cmup_magasin(infra, ref, mag)
     verifier(apres >= 0, "le CMUP est passe sous zero")
@@ -1814,6 +1819,118 @@ def scenario_roles_permissions(c, infra):
     c.refus("admin", "DELETE", "/api/admin/roles/ADMIN", codes=(422,), contient="ROLE-ADMIN")
 
 
+def totp(secret, decalage=0):
+    """Le code a six chiffres d'un secret base32, comme un telephone (RFC 6238, SHA-1, 30 s)."""
+    import base64, hashlib, hmac, struct
+    cle = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    pas = int(time.time() // 30) + decalage
+    h = hmac.new(cle, struct.pack(">Q", pas), hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    return f"{(struct.unpack('>I', h[o:o + 4])[0] & 0x7FFFFFFF) % 1_000_000:06d}"
+
+
+def scenario_securite(c, infra):
+    """Audit de securite du 13/10 : double authentification obligatoire (Direction), verrou et
+    deconnexion tenus par le serveur, rafale de connexions bloquee, identifiant inconnu bloque comme un
+    vrai, role Administrateur garde, prix suggeres masques au magasinier, types de mouvement sous
+    Parametres, reglage de l'assistant reserve a l'administrateur, politique de contenu posee."""
+    import concurrent.futures
+    # 1. Double authentification obligatoire pour la Direction.
+    infra.sql("UPDATE role_utilisateur SET exige_totp = 1 WHERE code_role_user = 'DIRECTION'")
+    try:
+        c.refus("Tarik", "GET", "/api/stock", codes=(403,), contient="DOUBLE_AUTH_REQUISE")
+        verifier(c.ok("Tarik", "GET", "/api/auth/moi")["totp_requis"] is True, "moi ne dit pas que la 2FA est requise")
+        secret = c.ok("Tarik", "POST", "/api/auth/2fa/preparer", {"mot_de_passe": MOT_DE_PASSE})["secret"]
+        c.ok("Tarik", "POST", "/api/auth/2fa/activer", {"code": totp(secret)})
+        c.ok("Tarik", "GET", "/api/stock")
+        c.refus("Tarik", "POST", "/api/auth/2fa/desactiver", {"mot_de_passe": MOT_DE_PASSE}, codes=(422,),
+                contient="obligatoire")
+        code, r = c.appel("Tarik#2", "POST", "/api/auth/connexion", {"login": "Tarik", "mot_de_passe": MOT_DE_PASSE})
+        verifier(code == 200 and r.get("exige_code") is True, f"la connexion ne demande pas le code : {r}")
+        code, r = c.appel("Tarik#2", "POST", "/api/auth/connexion",
+                          {"login": "Tarik", "mot_de_passe": MOT_DE_PASSE, "code": totp(secret, 1)})
+        verifier(code == 200 and r.get("jeton"), f"connexion avec code refusee : {code} {r}")
+    finally:
+        infra.sql("UPDATE role_utilisateur SET exige_totp = 0; "
+                  "UPDATE utilisateur SET totp_actif = 0, secret_totp = NULL, totp_dernier_pas = NULL WHERE login = 'Tarik'")
+
+    # 2. Le verrou d'inactivite tient au serveur : ni F5 ni un appel direct ne le levent.
+    code, r = c.appel("Assistante#2", "POST", "/api/auth/connexion", {"login": "Assistante", "mot_de_passe": MOT_DE_PASSE})
+    c.jetons["Assistante#2"] = r["jeton"]
+    c.ok("Assistante#2", "POST", "/api/auth/verrouiller")
+    c.refus("Assistante#2", "GET", "/api/stock", codes=(423,))
+    verifier(c.ok("Assistante#2", "GET", "/api/auth/moi")["session_verrouillee"] is True, "moi ne dit pas le verrou")
+    c.refus("Assistante#2", "POST", "/api/auth/deverrouiller", {"mot_de_passe": "faux-mot-de-passe"}, codes=(401,))
+    c.ok("Assistante#2", "POST", "/api/auth/deverrouiller", {"mot_de_passe": MOT_DE_PASSE})
+    c.ok("Assistante#2", "GET", "/api/stock")
+    # 3. La deconnexion revoque le jeton.
+    c.ok("Assistante#2", "POST", "/api/auth/deconnexion")
+    c.refus("Assistante#2", "GET", "/api/auth/moi", codes=(401,))
+
+    # 4. Une rafale sur un identifiant : les essais passent un par un, le blocage tient.
+    def essai(_):
+        return c.appel("rafale", "POST", "/api/auth/connexion", {"login": "Choukri", "mot_de_passe": "mauvais-mot-de-passe"})[0]
+    try:
+        with concurrent.futures.ThreadPoolExecutor(8) as p:
+            codes = list(p.map(essai, range(8)))
+        verifier(codes.count(429) >= 5, f"la rafale n'a pas ete bloquee : {codes}")
+        code, _ = c.appel("rafale", "POST", "/api/auth/connexion", {"login": "Choukri", "mot_de_passe": MOT_DE_PASSE})
+        verifier(code == 429, f"le bon mot de passe passe pendant le blocage : {code}")
+    finally:
+        infra.sql("UPDATE utilisateur SET echecs_consecutifs = 0, bloque_jusqu_a = NULL WHERE login = 'Choukri'")
+    # Un identifiant inconnu se bloque comme un vrai : rien ne le distingue.
+    codes = [c.appel("x", "POST", "/api/auth/connexion", {"login": "personne-du-banc", "mot_de_passe": "x" * 12})[0]
+             for _ in range(4)]
+    verifier(codes == [401, 401, 429, 429], f"un inconnu ne se bloque pas comme un vrai compte : {codes}")
+
+    # 5. Le role Administrateur ne se prend pas, meme avec le droit d'ecrire les utilisateurs.
+    infra.sql("INSERT INTO permission (code_role_user, module, action) VALUES ('DIRECTION', 'UTILISATEURS', 'LIRE'), "
+              "('DIRECTION', 'UTILISATEURS', 'ECRIRE') ON CONFLICT DO NOTHING")
+    try:
+        comptes = {u["login"]: u for u in c.ok("Mohamed", "GET", "/api/admin/utilisateurs")}
+        moi = comptes["Mohamed"]["id_utilisateur"]
+        c.refus("Mohamed", "PATCH", f"/api/admin/utilisateurs/{moi}", {"code_role_user": "ADMIN"}, codes=(422,))
+        c.refus("Mohamed", "PATCH", f"/api/admin/utilisateurs/{comptes['admin']['id_utilisateur']}",
+                {"nom": "Pris"}, codes=(422,), contient="administrateur")
+        c.refus("Mohamed", "PATCH", f"/api/admin/utilisateurs/{comptes['Magasinie']['id_utilisateur']}",
+                {"mot_de_passe": "Un-autre-mot-de-passe"}, codes=(422,), contient="mot de passe")
+        c.refus("Mohamed", "PUT", f"/api/admin/utilisateurs/{moi}/droits",
+                {"droits": [{"module": "STOCK", "champ": "cmup_mad", "niveau": "ECRITURE"}]}, codes=(422,))
+        c.refus("Mohamed", "POST", "/api/admin/utilisateurs", {"login": "intrus", "nom": "Intrus",
+                "code_role_user": "ADMIN", "mot_de_passe": "Un-mot-de-passe-12"}, codes=(422,))
+        # La base garde la meme regle, sous le contexte d'un compte de la Direction.
+        refus_sql(infra, "BEGIN; SELECT set_config('gestionfil.id_utilisateur', "
+                         f"'{moi}', true); UPDATE utilisateur SET code_role_user = 'ADMIN' WHERE login = 'Magasinie'; COMMIT;",
+                  "UTIL-ADMIN")
+    finally:
+        infra.sql("DELETE FROM permission WHERE code_role_user = 'DIRECTION' AND module = 'UTILISATEURS'")
+
+    # 6. Le magasinier ne recoit aucun prix suggere (le CMUP compris).
+    refs = c.ok("Magasinie", "GET", f"/api/references-commandables?code_fournisseur={FRS}&toutes=1")
+    verifier(refs and not any(l.get("prix_mad_suggere") or l.get("prix_suggere_devise") for l in refs),
+             "le magasinier recoit des prix suggeres")
+    # Le prix d'un retour que le magasinier envoie est ignore : le CMUP du magasin.
+    entree_stock(c, REF, 50)
+    dispo = next(x for x in c.ok("Magasinie", "GET", "/api/retours-fournisseur/disponible") if x["quantite_kg"] >= 1)
+    r = c.ok("Magasinie", "POST", "/api/retours-fournisseur", {"code_fournisseur": "FRS-001", "motif": "Essai du prix",
+             "lignes": [{"code_reference": dispo["code_reference"], "code_magasin": dispo["code_magasin"],
+                         "lot_fournisseur": dispo["lot_fournisseur"], "quantite_kg": 1, "prix_kg_mad": 999.0,
+                         "code_motif_ligne": "R1"}]})
+    prix = float(infra.valeur(f"SELECT prix_kg_mad FROM ligne_retour_fournisseur WHERE id_retour = '{r['id_retour']}'"))
+    verifier(abs(prix - 999.0) > 0.01, "le magasinier a impose le prix du retour")
+    c.ok("Magasinie", "DELETE", f"/api/retours-fournisseur/{r['id_retour']}")
+    # 7. Les types de mouvement se reglent sous Parametres : plus par le magasinier.
+    c.ok("Magasinie", "GET", "/api/types-mouvement")
+    c.refus("Magasinie", "POST", "/api/types-mouvement", {"code_type_mvt": "PIRATE", "libelle": "Pirate", "signe": 1},
+            codes=(403,))
+    # 8. L'assistant se regle par l'administrateur.
+    c.refus("Mohamed", "PATCH", "/api/parametres/P_AssistantMoteur", {"valeur_courante": "claude"}, codes=(422,))
+    # 9. La politique de contenu est posee par le serveur.
+    with urllib.request.urlopen(c.base_url + "/") as rep:
+        csp = rep.headers.get("Content-Security-Policy") or ""
+    verifier("script-src 'self'" in csp and "object-src 'none'" in csp, f"politique de contenu absente : {csp!r}")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_reception_cloture_avoir,
@@ -1853,6 +1970,7 @@ SCENARIOS = [
     scenario_concurrence_stock,
     scenario_contrat_droits,
     scenario_roles_permissions,
+    scenario_securite,
     scenario_reception_date_du_fait,
     scenario_codes_erreur,
     scenario_sauvegarde_restaurable,

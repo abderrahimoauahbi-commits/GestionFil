@@ -1,5 +1,6 @@
 //! Authentification et autorisation.
 
+pub mod garde;
 pub mod jwt;
 pub mod password;
 pub mod rbac;
@@ -23,7 +24,34 @@ pub struct Utilisateur {
     pub role: String,
     pub session_id: String,
     pub adresse_ip: Option<String>,
+    /// Le role exige la double authentification et le compte ne l'a pas.
+    pub totp_requis: bool,
+    /// La session est verrouillee (inactivite).
+    pub verrouillee: bool,
 }
+
+/// Ce qu'une session verrouillee peut encore faire : se voir, se deverrouiller,
+/// se fermer.
+const PERMIS_VERROUILLE: &[&str] = &[
+    "/api/auth/moi",
+    "/api/auth/deverrouiller",
+    "/api/auth/verrouiller",
+    "/api/auth/deconnexion",
+    "/api/auth/preferences",
+];
+
+/// Ce qu'un compte sans la double authentification exigee peut encore faire :
+/// la poser, changer son mot de passe, se fermer.
+const PERMIS_SANS_TOTP: &[&str] = &[
+    "/api/auth/moi",
+    "/api/auth/2fa/preparer",
+    "/api/auth/2fa/activer",
+    "/api/auth/mot-de-passe",
+    "/api/auth/deverrouiller",
+    "/api/auth/verrouiller",
+    "/api/auth/deconnexion",
+    "/api/auth/preferences",
+];
 
 impl FromRequestParts<AppState> for Utilisateur {
     type Rejection = AppError;
@@ -47,17 +75,39 @@ impl FromRequestParts<AppState> for Utilisateur {
         // champs du nouveau.
         // LE CHANGEMENT DE MOT DE PASSE FERME LES SESSIONS ANTERIEURES (audit
         // v4) : un jeton emis avant reste refuse, meme non expire.
-        let compte: Option<(i64, String, Option<i64>)> = sqlx::query_as(
-            "SELECT actif, code_role_user, mot_de_passe_change_le FROM utilisateur WHERE id_utilisateur = $1",
-        )
-        .bind(&claims.sub)
-        .fetch_optional(&state.db)
-        .await?;
-        let role = match compte {
-            Some((1, _, Some(change))) if claims.iat < change => return Err(AppError::NonAuthentifie),
-            Some((1, role, _)) => role,
-            _ => return Err(AppError::NonAuthentifie),
+        // LA SESSION EST TENUE PAR LE SERVEUR (audit du 13/10/2026) : un jeton
+        // dont la session est absente ou revoquee (deconnexion) est refuse ; une
+        // session verrouillee (inactivite) ne sert plus qu'a se deverrouiller,
+        // meme apres un rechargement de la page.
+        #[allow(clippy::type_complexity)]
+        let compte: Option<(i64, String, Option<i64>, i64, i64, Option<i64>, Option<String>, Option<String>)> =
+            sqlx::query_as(
+                "SELECT u.actif, u.code_role_user, u.mot_de_passe_change_le, u.totp_actif,
+                        COALESCE(r.exige_totp, 0)::int8, s.expire_le, s.revoquee_le, s.verrouillee_le
+                   FROM utilisateur u
+                   LEFT JOIN role_utilisateur r ON r.code_role_user = u.code_role_user
+                   LEFT JOIN session_ouverte s ON s.sid = $2 AND s.id_utilisateur = u.id_utilisateur
+                  WHERE u.id_utilisateur = $1",
+            )
+            .bind(&claims.sub)
+            .bind(&claims.sid)
+            .fetch_optional(&state.db)
+            .await?;
+        let Some((actif, role, change, totp_actif, exige_totp, session, revoquee, verrou)) = compte else {
+            return Err(AppError::NonAuthentifie);
         };
+        if actif != 1 || change.is_some_and(|c| claims.iat < c) || session.is_none() || revoquee.is_some() {
+            return Err(AppError::NonAuthentifie);
+        }
+        let chemin = parts.uri.path();
+        let verrouillee = verrou.is_some();
+        if verrouillee && !PERMIS_VERROUILLE.contains(&chemin) {
+            return Err(AppError::SessionVerrouillee);
+        }
+        let totp_requis = exige_totp == 1 && totp_actif != 1;
+        if totp_requis && !PERMIS_SANS_TOTP.contains(&chemin) {
+            return Err(AppError::DoubleAuthRequise);
+        }
 
         // L'adresse du poste, telle que nginx la transmet (audit v4 : l'audit
         // inscrivait 127.0.0.1, l'adresse du proxy).
@@ -70,6 +120,8 @@ impl FromRequestParts<AppState> for Utilisateur {
             role,
             session_id: claims.sid,
             adresse_ip,
+            totp_requis,
+            verrouillee,
         })
     }
 }

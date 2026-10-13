@@ -1176,8 +1176,9 @@ pub async fn propositions_achat(
     .await?;
 
     let mut valeur = lignes_en_json(&rows);
-    user.masquer(&state.db, module::PLAN_ACHAT, &mut valeur).await?;
+    // Le prix au CMUP d'abord : `masquer` peut retirer la source du prix.
     user.masquer_prix_au_cmup(&state.db, &mut valeur).await?;
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut valeur).await?;
     Ok(Json(valeur))
 }
 

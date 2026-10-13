@@ -131,7 +131,10 @@ export function RapportsFinanciers() {
 
   if (qAnalyse.isLoading || qAbc.isLoading) return <Chargement texte="Préparation des rapports…" />
 
-  if (!droits.visible('valeur_totale_mad')) {
+  // Le temoin est la valeur du stock, champ DECLARE du module (13/10/2026) :
+  // `valeur_totale_mad` n'existe qu'au module Mouvements, il etait donc masque
+  // ici pour tout le monde, administrateur compris.
+  if (!droits.visible('valeur_mad')) {
     return (
       <div>
         <EnTetePage titre="Rapports financiers" />

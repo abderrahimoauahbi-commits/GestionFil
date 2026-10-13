@@ -1,0 +1,743 @@
+//! Validation d'une reception : cascade 3-en-1 atomique (CDC G3).
+//!
+//! Une reception validee genere OBLIGATOIREMENT et SIMULTANEMENT :
+//! 1. un mouvement de stock ENTREE_REC (par magasin destinataire) ;
+//! 2. une archive de reception figee ;
+//! 3. une ligne d'historique de prix (base du CMUP).
+//!
+//! Le tout dans une seule transaction : tout ou rien.
+//!
+//! Trois defauts du trigger J4 du CDC sont corriges ici :
+//!
+//!   * MULTI-MAGASIN — J4 creait UN mouvement pour toute la reception, avec le
+//!     magasin de la premiere ligne (`LIMIT 1` sans `ORDER BY`, donc non
+//!     deterministe), alors que le magasin est defini par ligne. Une reception
+//!     ventilee sur deux magasins atterrissait entierement dans le premier.
+//!     -> un mouvement par magasin destinataire.
+//!
+//!   * DEVISE — J4 utilisait `prix_kg_reel` a la fois comme montant en MAD
+//!     (pour le CMUP) et comme montant en devise etrangere (pour l'historique).
+//!     Le CMUP d'un achat en USD ressortait ~9,5 fois trop faible.
+//!     -> `prix_kg_devise` et `prix_kg_mad` sont deux grandeurs distinctes,
+//!     dont la coherence est contrainte au niveau de la table.
+//!
+//!   * UNITES — J4 ajoutait des kilogrammes a `ligne_bc.quantite_recue`, dont
+//!     l'unite n'etait pas definie. -> tout est en kg (unite canonique R01).
+
+use crate::auth::Utilisateur;
+use crate::db::{arrondi_kg, arrondi_mad, maintenant, Db};
+use crate::error::{AppError, AppResult};
+use serde::Serialize;
+use sqlx::FromRow;
+use std::collections::{BTreeMap, HashMap};
+
+const EPSILON_KG: f64 = 0.001;
+
+#[derive(Debug, FromRow)]
+struct EnteteReception {
+    numero_reception: String,
+    date_reception: String,
+    statut: String,
+    id_bc: Option<String>,
+    code_fournisseur: String,
+    id_utilisateur_reception: String,
+}
+
+#[derive(Debug, FromRow)]
+struct LigneReception {
+    id_ligne_reception: String,
+    id_ligne_bc: Option<String>,
+    code_reference: String,
+    unite_saisie: String,
+    facteur_kg: f64,
+    quantite_pesee_unite: f64,
+    quantite_stock_kg: f64,
+    ecart_pct: Option<f64>,
+    prix_kg_devise: f64,
+    code_devise: String,
+    taux_change: f64,
+    prix_kg_mad: f64,
+    lot_fournisseur: Option<String>,
+    date_fabrication: Option<String>,
+    date_peremption: Option<String>,
+    statut_qualite: String,
+    code_magasin_dest: String,
+    /// Les bobines comptees au quai : elles font le poids theorique du lot.
+    nb_bobines_saisi: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResultatReception {
+    pub id_reception: String,
+    pub numero_reception: String,
+    pub mouvements_crees: Vec<String>,
+    pub lignes_traitees: usize,
+    pub quantite_totale_kg: f64,
+    pub montant_total_mad: f64,
+    pub statut_bc: Option<String>,
+}
+
+/// Valide une reception et declenche la cascade.
+///
+/// `id_utilisateur_controle` est le controleur qualite : distinct du magasinier
+/// qui a pese (CDC B4 regle 2) et distinct du createur du BC.
+pub async fn valider(
+    db: &Db,
+    user: &Utilisateur,
+    id_reception: &str,
+) -> AppResult<ResultatReception> {
+    let mut tx = db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+
+    // ---- 1. Entete ----------------------------------------------------------
+    let entete: EnteteReception = sqlx::query_as(
+        "SELECT numero_reception, date_reception, statut, id_bc,
+                code_fournisseur, id_utilisateur_reception
+           FROM reception WHERE id_reception = $1",
+    )
+    .bind(id_reception)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("reception {id_reception}")))?;
+
+    if entete.statut != "A_CONTROLER" {
+        return Err(AppError::RegleMetier(format!(
+            "Seule une reception au statut A_CONTROLER peut etre validee (statut actuel : {}).",
+            entete.statut
+        )));
+    }
+
+    // ---- 2. Segregation des taches (CDC B4 regle 2) -------------------------
+    // Les contraintes de table couvrent aussi ces deux cas ; les verifier ici
+    // permet de renvoyer un message metier plutot qu'un echec de CHECK.
+    if user.id == entete.id_utilisateur_reception {
+        return Err(AppError::RegleMetier(
+            "B4 regle 2 : le magasinier qui a pese ne peut pas valider sa propre reception.".into(),
+        ));
+    }
+    // Une reception couvre parfois PLUSIEURS bons : un camion arrive avec ce qui
+    // etait pret chez le fournisseur, et l'en-tete n'en designe alors aucun. Tout
+    // ce qui suit doit donc se lire depuis les LIGNES. Ne regarder que
+    // `entete.id_bc` laisserait le createur d'un bon controler sa propre
+    // reception des lors qu'elle en couvre deux — la segregation sauterait
+    // precisement dans le cas ou elle compte le plus.
+    let bons: Vec<BonCouvert> = sqlx::query_as(
+        "SELECT DISTINCT bc.id_bc, bc.numero_bc, bc.statut,
+                bc.date_livraison_prevue, bc.id_utilisateur_creation
+           FROM bon_commande bc
+          WHERE bc.id_bc = $2
+             OR bc.id_bc IN (SELECT lb.id_bc
+                               FROM ligne_reception lr
+                               JOIN ligne_bc lb ON lb.id_ligne_bc = lr.id_ligne_bc
+                              WHERE lr.id_reception = $1)
+          ORDER BY bc.numero_bc",
+    )
+    .bind(id_reception)
+    .bind(&entete.id_bc)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    // Un bon encore en brouillon, en attente ou seulement valide n'a pas ete
+    // envoye au fournisseur : rien n'est engage. Valider la reception ferait
+    // entrer en stock, et valoriser, une marchandise sans commande derriere —
+    // c'est precisement ce que la regularisation doit empecher de noyer.
+    if let Some(b) = bons.iter().find(|b| {
+        matches!(
+            b.statut.as_str(),
+            "BROUILLON" | "EN_ATTENTE_VALIDATION" | "VALIDE" | "ANNULE"
+        )
+    }) {
+        return Err(AppError::RegleMetier(format!(
+            "Le bon {} est au statut {} : il n'a pas ete envoye au fournisseur. \
+             Faites-le valider puis envoyer avant de controler cette reception.",
+            b.numero_bc, b.statut
+        )));
+    }
+
+    if let Some(b) = bons
+        .iter()
+        .find(|b| b.id_utilisateur_creation.as_deref() == Some(user.id.as_str()))
+    {
+        return Err(AppError::RegleMetier(format!(
+            "B4 regle 2 : vous avez cree le bon {}, vous ne pouvez pas controler la reception qui le solde.",
+            b.numero_bc
+        )));
+    }
+
+    // ---- 2 bis. LE LOT INTERNE, quand le fournisseur n'en a pas mis ---------
+    // Deux livraisons sont presque toujours deux productions : les ranger sous
+    // un meme « sans lot » les melangerait au tissage. Chaque ligne d'une
+    // reference suivie, laissee sans lot, recoit donc le sien, au format du
+    // cahier « Gestion des lots » : FOURNISSEUR-JJMMAA-NN (HASIRCI-280826-01).
+    // NN continue la numerotation du meme fournisseur le meme jour : deux
+    // livraisons du meme jour n'ont jamais le meme lot.
+    //
+    // LE TYPE DE LOT DE L'ARTICLE decide (fiche article, « Gestion des lots ») :
+    //   OBLIGATOIRE — le numero du fournisseur est exige : une ligne sans lot
+    //                 est refusee, on ne l'invente pas ;
+    //   GENERIQUE   — l'ERP numerote toujours, meme si un numero a ete saisi ;
+    //   INDIFFERENT — le numero saisi s'il y en a un, sinon un numero genere.
+    let manquants: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT lr.code_reference
+           FROM ligne_reception lr JOIN reference r ON r.code_reference = lr.code_reference
+          WHERE lr.id_reception = $1 AND r.suivi_lot = 1 AND r.type_lot = 'OBLIGATOIRE'
+            AND COALESCE(btrim(lr.lot_fournisseur), '') = ''
+          ORDER BY 1",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *tx)
+    .await?;
+    if !manquants.is_empty() {
+        return Err(AppError::RegleMetier(format!(
+            "Lot obligatoire : le numero de lot du fournisseur manque pour {}. \
+             Lisez-le sur l'etiquette et saisissez-le sur la ligne.",
+            manquants.join(", ")
+        )));
+    }
+    let lots_generes: Vec<String> = sqlx::query_scalar(
+        "WITH prefixe AS (
+             SELECT upper(regexp_replace(split_part(btrim(f.nom), ' ', 1), '[^A-Za-z0-9]', '', 'g'))
+                    || '-' || to_char(substr(rc.date_reception, 1, 10)::date, 'DDMMYY') AS p
+               FROM reception rc JOIN fournisseur f ON f.code_fournisseur = rc.code_fournisseur
+              WHERE rc.id_reception = $1
+         ), deja AS (
+             SELECT count(*) AS n FROM lot, prefixe WHERE lot.lot_fournisseur LIKE prefixe.p || '-%'
+         ), cible AS (
+             SELECT lr.id_ligne_reception, row_number() OVER (ORDER BY lr.ligne_numero) AS rang
+               FROM ligne_reception lr JOIN reference r ON r.code_reference = lr.code_reference
+              WHERE lr.id_reception = $1 AND r.suivi_lot = 1
+                AND (r.type_lot = 'GENERIQUE' OR COALESCE(btrim(lr.lot_fournisseur), '') = '')
+         )
+         UPDATE ligne_reception lr
+            SET lot_fournisseur = prefixe.p || '-' || lpad((deja.n + cible.rang)::text, 2, '0')
+           FROM cible, prefixe, deja
+          WHERE lr.id_ligne_reception = cible.id_ligne_reception
+      RETURNING lr.lot_fournisseur",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    // ---- 3. Lignes ----------------------------------------------------------
+    let lignes: Vec<LigneReception> = sqlx::query_as(
+        // Chaque NUMERIC est converti ET garde son nom : `FromRow` lie par nom.
+        "SELECT id_ligne_reception, id_ligne_bc, code_reference,
+                unite_saisie, facteur_kg::float8 AS facteur_kg,
+                quantite_pesee_unite::float8 AS quantite_pesee_unite,
+                quantite_stock_kg::float8 AS quantite_stock_kg, ecart_pct::float8 AS ecart_pct,
+                prix_kg_devise::float8 AS prix_kg_devise, code_devise,
+                taux_change::float8 AS taux_change, prix_kg_mad::float8 AS prix_kg_mad,
+                lot_fournisseur, date_fabrication, date_peremption,
+                statut_qualite, code_magasin_dest, nb_bobines_saisi
+           FROM ligne_reception
+          WHERE id_reception = $1
+          ORDER BY ligne_numero",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    if lignes.is_empty() {
+        return Err(AppError::RegleMetier(
+            "Une reception sans ligne ne peut pas etre validee.".into(),
+        ));
+    }
+    verifier_ecarts_courants(&mut tx, id_reception).await?;
+    // LES BOBINES SE REVERIFIENT A LA VALIDATION (regle 4, 09/10/2026) : elles
+    // ne l'etaient qu'a la soumission, et un compte remis a zero passait.
+    exiger_bobines_comptees(&mut tx, id_reception).await?;
+
+    // Ponctualite : chaque ligne se juge contre la promesse de SON bon. Deux
+    // bons du meme fournisseur n'ont pas la meme date, et archiver un retard
+    // unique pour toutes les lignes inventerait une avance ici, une faute la.
+    let promesses: HashMap<String, Option<String>> = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT lb.id_ligne_bc, bc.date_livraison_prevue
+           FROM ligne_reception lr
+           JOIN ligne_bc lb     ON lb.id_ligne_bc = lr.id_ligne_bc
+           JOIN bon_commande bc ON bc.id_bc = lb.id_bc
+          WHERE lr.id_reception = $1",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+
+    // Repli pour les lignes hors commande d'une reception qui, elle, designe un
+    // bon : la promesse de l'en-tete reste la seule reference disponible.
+    let date_prevue_entete: Option<String> = entete
+        .id_bc
+        .as_ref()
+        .and_then(|id| bons.iter().find(|b| &b.id_bc == id))
+        .and_then(|b| b.date_livraison_prevue.clone());
+
+    let retard_de = |l: &LigneReception| -> Option<i64> {
+        let prevue = l
+            .id_ligne_bc
+            .as_ref()
+            .and_then(|id| promesses.get(id))
+            .cloned()
+            .flatten()
+            .or_else(|| date_prevue_entete.clone())?;
+        Some(jours_entre(&prevue, &entete.date_reception).max(0))
+    };
+
+    let horodatage = maintenant();
+    let mut mouvements_crees = Vec::new();
+    let mut quantite_totale = 0.0_f64;
+    let mut montant_total = 0.0_f64;
+
+    // ---- 4. Un mouvement par magasin destinataire ---------------------------
+    let mut par_magasin: BTreeMap<&str, Vec<&LigneReception>> = BTreeMap::new();
+    for l in &lignes {
+        par_magasin
+            .entry(l.code_magasin_dest.as_str())
+            .or_default()
+            .push(l);
+    }
+
+    for (magasin, lignes_magasin) in &par_magasin {
+        let id_mouvement = uuid::Uuid::new_v4().to_string();
+        // UNE REVALIDATION PORTE SON PROPRE NUMERO (audit v4) : apres
+        // contre-passation et devalidation, l'entree d'origine reste au grand
+        // livre sous « MVT-REC-…-magasin » ; la suivante devient « …-R2 ».
+        let base = format!("MVT-REC-{}-{}", entete.numero_reception, magasin);
+        let deja: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM mouvement WHERE numero_mouvement = $1 OR numero_mouvement LIKE $1 || '-R%'",
+        )
+        .bind(&base)
+        .fetch_one(&mut *tx)
+        .await?;
+        let numero_mouvement = if deja == 0 { base } else { format!("{base}-R{}", deja + 1) };
+
+        sqlx::query(
+            "INSERT INTO mouvement
+                 (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt,
+                  code_magasin, code_motif, reference_document, id_utilisateur)
+             VALUES ($1, $2, $3, 'ENTREE_REC', $4, 'RECEPTION', $5, $6)",
+        )
+        .bind(&id_mouvement)
+        .bind(&numero_mouvement)
+        .bind(&entete.date_reception)
+        .bind(magasin)
+        .bind(&entete.numero_reception)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+
+        for (i, l) in lignes_magasin.iter().enumerate() {
+            // (1/3) Mouvement de stock — declenche l'application du solde et le
+            // recalcul du CMUP par le trigger `trg_lmvt_appliquer`.
+            sqlx::query(
+                "INSERT INTO ligne_mouvement
+                     (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
+                      quantite_saisie, unite_saisie, facteur_conversion,
+                      lot_fournisseur, date_fabrication, date_peremption, statut_qualite, nb_bobines)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+            )
+            .bind(&id_mouvement)
+            .bind((i + 1) as i64)
+            .bind(&l.code_reference)
+            .bind(arrondi_kg(l.quantite_stock_kg))
+            .bind(arrondi_kg(l.prix_kg_mad))
+            .bind(l.quantite_pesee_unite)
+            .bind(&l.unite_saisie)
+            .bind(l.facteur_kg)
+            .bind(&l.lot_fournisseur)
+            .bind(&l.date_fabrication)
+            .bind(&l.date_peremption)
+            .bind(&l.statut_qualite)
+            .bind(l.nb_bobines_saisi.filter(|b| *b > 0))
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query("UPDATE ligne_reception SET id_mouvement_genere = $1 WHERE id_ligne_reception = $2")
+                .bind(&id_mouvement)
+                .bind(&l.id_ligne_reception)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        mouvements_crees.push(numero_mouvement);
+    }
+
+    // ---- 5. Archive + historique de prix, ligne a ligne ---------------------
+    // LA CONFORMITE SE JUGE A LA TOLERANCE DU FOURNISSEUR (audit v5, U3) :
+    // l'archive jugeait a 2 % fixes, et la fiche fournisseur en heritait.
+    let tolerance: f64 = sqlx::query_scalar("SELECT fn_tolerance_fournisseur($1)::float8")
+        .bind(&entete.code_fournisseur)
+        .fetch_one(&mut *tx)
+        .await?;
+    for l in &lignes {
+        let total_mad = arrondi_mad(l.quantite_stock_kg * l.prix_kg_mad);
+        quantite_totale += l.quantite_stock_kg;
+        montant_total += total_mad;
+
+        // L'ATTENDU EST LE RESTE DU BON AU MOMENT DE VALIDER (U3) : l'ecart
+        // fige a la saisie gardait l'ancien attendu apres une contre-passation
+        // ou une reception intermediaire.
+        let reste: Option<f64> = match &l.id_ligne_bc {
+            Some(lb) => sqlx::query_scalar(
+                "SELECT quantite_restante_kg::float8 FROM ligne_bc WHERE id_ligne_bc = $1",
+            )
+            .bind(lb)
+            .fetch_optional(&mut *tx)
+            .await?,
+            None => None,
+        };
+        let ecart_pct = match reste {
+            Some(r) if r > 0.0 => Some(((l.quantite_stock_kg - r) / r * 100.0 * 10_000.0).round() / 10_000.0),
+            _ => l.ecart_pct,
+        };
+        let conforme_quantite = ecart_pct.map(|e| i64::from(e.abs() <= 0.0001 || e.abs() <= tolerance));
+        let jours_retard = retard_de(l);
+        let conforme_delai = jours_retard.map(|j| i64::from(j == 0));
+
+        // (2/3) Archive figee — volontairement autonome de ligne_reception, qui
+        // reste modifiable tant que la reception n'est pas validee.
+        sqlx::query(
+            "INSERT INTO archive_reception
+                 (id_ligne_reception, numero_reception, code_reference, code_fournisseur,
+                  date_reception, lot_fournisseur, quantite_pesee_unite, unite_saisie,
+                  quantite_stock_kg, prix_kg_devise, code_devise, taux_change, prix_kg_mad,
+                  total_mad, code_magasin_dest, statut_qualite, ecart_pct,
+                  conformite_specifications, conformite_quantite, conformite_delai,
+                  jours_retard, date_archive, id_utilisateur_archive, version)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+                     -- Une revalidation ecrit la version suivante (2026-10-08g).
+                     (SELECT COALESCE(max(version), 0) + 1 FROM archive_reception WHERE id_ligne_reception = $1))",
+        )
+        .bind(&l.id_ligne_reception)
+        .bind(&entete.numero_reception)
+        .bind(&l.code_reference)
+        .bind(&entete.code_fournisseur)
+        .bind(&entete.date_reception)
+        .bind(&l.lot_fournisseur)
+        .bind(l.quantite_pesee_unite)
+        .bind(&l.unite_saisie)
+        .bind(arrondi_kg(l.quantite_stock_kg))
+        .bind(l.prix_kg_devise)
+        .bind(&l.code_devise)
+        .bind(l.taux_change)
+        .bind(arrondi_kg(l.prix_kg_mad))
+        .bind(total_mad)
+        .bind(&l.code_magasin_dest)
+        .bind(&l.statut_qualite)
+        .bind(ecart_pct)
+        .bind(i64::from(l.statut_qualite == "CONFORME"))
+        .bind(conforme_quantite)
+        .bind(conforme_delai)
+        .bind(jours_retard)
+        .bind(&horodatage)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+
+        // (3/3) Historique de prix — seule source du CMUP (RG-08).
+        sqlx::query(
+            "INSERT INTO historique_prix
+                 (id_ligne_reception, code_reference, code_fournisseur, date_achat,
+                  prix_kg_devise, code_devise, taux_change, prix_kg_mad,
+                  quantite_achetee_kg, total_mad, date_enregistrement)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             -- Revalidee, la ligne garde son entree d'origine (meme prix de bon).
+             ON CONFLICT (id_ligne_reception) DO NOTHING",
+        )
+        .bind(&l.id_ligne_reception)
+        .bind(&l.code_reference)
+        .bind(&entete.code_fournisseur)
+        .bind(&entete.date_reception)
+        .bind(l.prix_kg_devise)
+        .bind(&l.code_devise)
+        .bind(l.taux_change)
+        .bind(arrondi_kg(l.prix_kg_mad))
+        .bind(arrondi_kg(l.quantite_stock_kg))
+        .bind(total_mad)
+        .bind(&horodatage)
+        .execute(&mut *tx)
+        .await?;
+        // REVALIDEE AVEC UN AUTRE PRIX OU UN AUTRE POIDS (U3) : l'historique
+        // immuable garde l'entree d'origine ; la correction s'ecrit en revision,
+        // et les statistiques lisent la derniere (v_historique_prix_courant).
+        sqlx::query(
+            "INSERT INTO historique_prix_revision
+                 (id_ligne_reception, version, prix_kg_devise, code_devise, taux_change, prix_kg_mad,
+                  quantite_achetee_kg, total_mad, id_utilisateur)
+             SELECT c.id_ligne_reception, c.version + 1, $2, $3, $4, $5, $6, $7, $8
+               FROM v_historique_prix_courant c
+              WHERE c.id_ligne_reception = $1
+                AND (c.prix_kg_mad <> round($5::numeric, 4) OR c.quantite_achetee_kg <> round($6::numeric, 4))",
+        )
+        .bind(&l.id_ligne_reception)
+        .bind(l.prix_kg_devise)
+        .bind(&l.code_devise)
+        .bind(l.taux_change)
+        .bind(arrondi_kg(l.prix_kg_mad))
+        .bind(arrondi_kg(l.quantite_stock_kg))
+        .bind(total_mad)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+
+        // ---- 6. Soldes du bon de commande, en kg ---------------------------
+        if let Some(id_ligne_bc) = &l.id_ligne_bc {
+            sqlx::query(
+                // LA TOLERANCE DE PESEE PASSE (06/10/2026) : 1 015 kg pesés pour
+                // 1 000 commandés, admis a ±2 %, faisaient echouer la validation sur
+                // la contrainte « recu <= commande ». Le stock prend le poids reel ;
+                // le bon, lui, est solde a sa quantite.
+                "UPDATE ligne_bc
+                    SET quantite_recue_kg = LEAST(quantite_commandee_kg,
+                                                  ROUND(quantite_recue_kg + $2::numeric, 4))
+                  WHERE id_ligne_bc = $1",
+            )
+            .bind(id_ligne_bc)
+            .bind(arrondi_kg(l.quantite_stock_kg))
+            .execute(&mut *tx)
+            .await?;
+
+            // UN RELIQUAT DANS LA TOLERANCE SOLDE LA LIGNE (regle 6, 09/10/2026) :
+            // 751 kg recus sur 751,362 commandes ne laissent plus 0,362 kg
+            // « en cours » que seule la Direction pouvait abandonner.
+            sqlx::query(
+                "UPDATE ligne_bc
+                    SET statut = CASE WHEN quantite_recue_kg >= quantite_commandee_kg
+                                          * (1 - fn_tolerance_fournisseur(
+                                                   (SELECT b.code_fournisseur FROM bon_commande b
+                                                     WHERE b.id_bc = ligne_bc.id_bc)) / 100.0) - $2
+                                      THEN 'SOLDE' ELSE 'PARTIEL' END
+                  WHERE id_ligne_bc = $1",
+            )
+            .bind(id_ligne_bc)
+            .bind(EPSILON_KG)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    // ---- 7. Statut de CHAQUE bon couvert -----------------------------------
+    // Chaque bon avance selon ses propres lignes : un camion peut solder l'un et
+    // laisser l'autre partiel. Ne traiter que celui de l'en-tete laisserait le
+    // second indefiniment ENVOYE alors que ses lignes sont soldees — et il
+    // reapparaitrait a chaque nouvelle reception.
+    let mut avances: Vec<String> = Vec::new();
+    for b in &bons {
+        // Seuls ENVOYE et LIVRE_PARTIEL menent a une reception : les autres
+        // etats ne sont pas des sources de transition valides (table
+        // transition_statut).
+        if b.statut != "ENVOYE" && b.statut != "LIVRE_PARTIEL" {
+            avances.push(format!("{} : {}", b.numero_bc, b.statut));
+            continue;
+        }
+
+        // SEULE LA MARCHANDISE DECIDE DE LA CLOTURE. Une ligne de service —
+        // transport, commission — ne se receptionne jamais : rien ne viendra
+        // jamais la solder. Sans ce filtre, un bon portant du fret resterait
+        // LIVRE_PARTIEL a vie, ressortirait en en-cours d'approvisionnement et
+        // partirait en anomalie au controle C02.
+        let restantes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ligne_bc
+              WHERE id_bc = $1 AND statut NOT IN ('SOLDE','ANNULE')
+                AND type_ligne = 'MARCHANDISE'",
+        )
+        .bind(&b.id_bc)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let nouveau = if restantes == 0 { "CLOTURE" } else { "LIVRE_PARTIEL" };
+        if nouveau != b.statut {
+            sqlx::query("UPDATE bon_commande SET statut = $2 WHERE id_bc = $1")
+                .bind(&b.id_bc)
+                .bind(nouveau)
+                .execute(&mut *tx)
+                .await?;
+        }
+        avances.push(format!("{} : {nouveau}", b.numero_bc));
+    }
+
+    // Un seul bon : on renvoie son statut nu, comme avant. Plusieurs : on les
+    // nomme, sinon l'appelant croirait qu'un seul a bouge.
+    let statut_bc = match (bons.len(), bons.first()) {
+        (0, _) => None,
+        (1, Some(b)) => Some(
+            avances
+                .first()
+                .and_then(|s| s.split(" : ").nth(1))
+                .unwrap_or(b.statut.as_str())
+                .to_string(),
+        ),
+        _ => Some(avances.join(" · ")),
+    };
+
+    // ---- 8. Cloture de la reception ----------------------------------------
+    // Le taux de l'entete est celui de la devise du fournisseur a la date de
+    // reception (RG-09) ; chaque ligne porte par ailleurs son propre taux.
+    let taux_entete: f64 = lignes.first().map(|l| l.taux_change).unwrap_or(1.0);
+
+    sqlx::query(
+        "UPDATE reception
+            SET statut = 'VALIDE',
+                id_utilisateur_controle = $2,
+                date_controle = $3,
+                taux_change_reception = $4
+          WHERE id_reception = $1",
+    )
+    .bind(id_reception)
+    .bind(&user.id)
+    .bind(&horodatage)
+    .bind(taux_entete)
+    .execute(&mut *tx)
+    .await?;
+
+    // LA FICHE DU LOT DIT D'OU IL VIENT : le fournisseur de cette reception,
+    // et « genere » pour ceux que l'ERP a numerotes.
+    sqlx::query(
+        "UPDATE lot l
+            SET code_fournisseur = rc.code_fournisseur,
+                origine = CASE WHEN l.lot_fournisseur = ANY($2) THEN 'GENERE' ELSE l.origine END
+           FROM ligne_reception lr JOIN reception rc ON rc.id_reception = lr.id_reception
+          WHERE lr.id_reception = $1
+            AND l.code_reference = lr.code_reference AND l.lot_fournisseur = lr.lot_fournisseur",
+    )
+    .bind(id_reception)
+    .bind(&lots_generes)
+    .execute(&mut *tx)
+    .await?;
+
+    // LE POIDS D'UNE BOBINE ET LES BOBINES PAR PALETTE SUIVENT LA LIVRAISON :
+    // la mesure de cette reception est historisee (avec le prix paye) et la
+    // fiche article mise a jour — sauf mesure aberrante, gardee mais ecartee.
+    // Apres les mouvements : ils ont deja fige l'ancien poids, contre lequel
+    // l'ecart de la livraison se lit.
+    sqlx::query("SELECT fn_suivi_conditionnement('RECEPTION', $1, $2)")
+        .bind(id_reception)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+
+    Ok(ResultatReception {
+        id_reception: id_reception.to_string(),
+        numero_reception: entete.numero_reception,
+        mouvements_crees,
+        lignes_traitees: lignes.len(),
+        quantite_totale_kg: arrondi_kg(quantite_totale),
+        montant_total_mad: arrondi_mad(montant_total),
+        statut_bc,
+    })
+}
+
+/// LES BOBINES SE COMPTENT (regle 13, audit v4). La derive d'un fournisseur se
+/// lit sur le poids reel par bobine a la reception initiale : sans bobines,
+/// ou avec des bobines deduites des kilos, elle est nulle par construction
+/// (9 lignes sur 10 a 0,00 % le 08/10). Pour une reference suivie au lot et
+/// vendue en bobines, le compte est exige a la soumission au controle.
+pub async fn exiger_bobines_comptees(c: &mut sqlx::PgConnection, id_reception: &str) -> AppResult<()> {
+    let manquantes: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT lr.code_reference
+           FROM ligne_reception lr
+           JOIN reference r ON r.code_reference = lr.code_reference
+          WHERE lr.id_reception = $1 AND r.suivi_lot = 1 AND COALESCE(r.poids_bobine_kg, 0) > 0
+            AND COALESCE(lr.nb_bobines_saisi, 0) = 0
+          ORDER BY 1",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *c)
+    .await?;
+    if !manquantes.is_empty() {
+        return Err(AppError::RegleMetier(format!(
+            "Comptez les bobines avant le controle : {}. Le poids reel par bobine juge le fournisseur \
+             (derive) ; deduit des kilos, il ne mesure rien.",
+            manquantes.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// L'ECART DE PESEE SE JUGE SUR LE RESTE DU BON A L'INSTANT (audit v4).
+///
+/// L'attendu d'une ligne etait fige a sa saisie. Deux receptions saisies en
+/// meme temps sur la meme ligne de bon portaient chacune tout le reste : la
+/// seconde validee faisait entrer un excedent sans derogation (8 500 kg pour
+/// 7 200 restants, +18 %), et le bon, plafonne, effacait la trace. A la
+/// soumission au controle et a la validation, chaque ligne de bon est donc
+/// rejugee contre son reste courant, avec la tolerance du fournisseur ;
+/// l'attendu de la ligne est recale sur ce reste.
+pub async fn verifier_ecarts_courants(c: &mut sqlx::PgConnection, id_reception: &str) -> AppResult<()> {
+    let excedents: Vec<(String, f64, f64, f64)> = sqlx::query_as(
+        "SELECT min(lr.code_reference), sum(lr.quantite_stock_kg)::float8,
+                max(lb.quantite_restante_kg)::float8, max(fn_tolerance_pesee(lr.id_reception))::float8
+           FROM ligne_reception lr
+           JOIN ligne_bc lb ON lb.id_ligne_bc = lr.id_ligne_bc
+          WHERE lr.id_reception = $1
+          GROUP BY lr.id_ligne_bc
+         HAVING bool_and(lr.derogation_ecart = 0)
+            AND sum(lr.quantite_stock_kg)
+                > max(lb.quantite_restante_kg) * (1 + max(fn_tolerance_pesee(lr.id_reception)) / 100.0) + 0.0005",
+    )
+    .bind(id_reception)
+    .fetch_all(&mut *c)
+    .await?;
+    if let Some((reference, kg, reste, tol)) = excedents.first() {
+        return Err(AppError::RegleMetier(format!(
+            "C10 : {reference} : {} kg pesés pour {} kg restant à recevoir sur le bon — d'autres \
+             réceptions ont été validées depuis la saisie. Au-delà de la tolérance de {} %, \
+             l'excédent demande une dérogation motivée : corrigez la pesée ou ajoutez la dérogation.",
+            arrondi_kg(*kg),
+            arrondi_kg(*reste),
+            tol
+        )));
+    }
+    // L'attendu affiche et l'OTIF se lisent sur le reste courant.
+    sqlx::query(
+        "UPDATE ligne_reception lr
+            SET quantite_commandee_kg = lb.quantite_restante_kg
+           FROM ligne_bc lb
+          WHERE lb.id_ligne_bc = lr.id_ligne_bc AND lr.id_reception = $1
+            AND lb.quantite_restante_kg > 0
+            AND lr.quantite_commandee_kg IS DISTINCT FROM lb.quantite_restante_kg",
+    )
+    .bind(id_reception)
+    .execute(&mut *c)
+    .await?;
+    Ok(())
+}
+
+/// Un bon de commande touche par la reception — celui de l'en-tete, ou tous ceux
+/// que les lignes couvrent quand un camion en porte plusieurs.
+#[derive(Debug, sqlx::FromRow)]
+struct BonCouvert {
+    id_bc: String,
+    numero_bc: String,
+    statut: String,
+    date_livraison_prevue: Option<String>,
+    id_utilisateur_creation: Option<String>,
+}
+
+/// Nombre de jours entiers separant deux horodatages ISO-8601.
+fn jours_entre(depuis: &str, jusqu_a: &str) -> i64 {
+    let parse = |s: &str| -> Option<chrono::NaiveDate> {
+        chrono::NaiveDate::parse_from_str(&s[..s.len().min(10)], "%Y-%m-%d").ok()
+    };
+    match (parse(depuis), parse(jusqu_a)) {
+        (Some(a), Some(b)) => (b - a).num_days(),
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calcul_du_retard() {
+        assert_eq!(
+            jours_entre("2026-07-01", "2026-07-15T10:00:00.000Z"),
+            14
+        );
+        // Livraison en avance : valeur negative, ramenee a 0 par l'appelant.
+        assert_eq!(jours_entre("2026-07-20", "2026-07-15"), -5);
+        assert_eq!(jours_entre("invalide", "2026-07-15"), 0);
+    }
+}

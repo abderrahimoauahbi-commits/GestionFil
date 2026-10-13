@@ -1,0 +1,86 @@
+[package]
+name = "gestionfil"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.82"
+description = "ERP Gestion Fil - Polyfashions Carpet Morocco"
+# Le paquet expose trois binaires ; `cargo run` sans argument demarre le serveur.
+default-run = "gestionfil"
+
+[[bin]]
+name = "gestionfil"
+path = "src/main.rs"
+
+[[bin]]
+name = "gestionfil-admin"
+path = "src/bin/admin.rs"
+
+[[bin]]
+name = "gestionfil-import"
+path = "src/bin/import.rs"
+
+[dependencies]
+# `multipart` : le depot des pieces d'un dossier d'importation (scans, PDF).
+axum = { version = "0.8", features = ["macros", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "fs", "timeout"] }
+
+# sqlx en mode requetes dynamiques (pas de macros query!) : la couche SQL est
+# verifiee par PREPARE sur une copie de la base, et cela evite d'exiger une base
+# accessible a la compilation.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio", "postgres", "macros", "chrono", "json",
+    # `numeric` du schema ne se decode pas en f64 : sqlx le refuse, et il a
+    # raison — la conversion perdrait la precision exacte que le type existe
+    # pour porter. `bigdecimal` fournit le type de decodage ; la conversion en
+    # nombre JSON se fait ensuite par la representation textuelle (routes/json.rs).
+    "bigdecimal",
+    # TLS : la base est sur la boucle locale aujourd'hui, mais un backend
+    # deporte se connecterait en clair sans cela.
+    "tls-rustls",
+] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+jsonwebtoken = "9"
+argon2 = "0.5"
+# Empreinte des pieces deposees : reconnaitre un scan deja recu, et prouver
+# qu'il n'a pas bouge depuis.
+sha2 = "0.10"
+# Le second facteur : HMAC-SHA1, fige par la RFC 6238.
+hmac = "0.12"
+sha1 = "0.10"
+hex = "0.4"
+password-hash = { version = "0.5", features = ["rand_core"] }
+rand = "0.8"
+
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Lecture du classeur GESTION Fil.xlsx (import de reprise)
+calamine = "0.26"
+
+# LE CLIENT HTTP SORTANT DU SERVEUR, pour deux usages : joindre le moteur de
+# langage de l'assistant, et lire le cours de reference de Bank Al-Maghrib. `rustls` plutot qu'OpenSSL pour
+# ne pas dependre d'une bibliotheque systeme sur la machine cible ; pas de
+# compression ni de cookies, dont un appel d'API n'a que faire.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json", "rustls-tls", "charset",
+] }
+
+thiserror = "2"
+anyhow = "1"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rpassword = "7"
+
+[dev-dependencies]
+http-body-util = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

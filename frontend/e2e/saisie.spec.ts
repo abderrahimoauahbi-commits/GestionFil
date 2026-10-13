@@ -152,6 +152,10 @@ test('bon de commande : la direction le valide à un autre taux, puis l’envoie
   await page.screenshot({ path: info.outputPath('bc-validation.png') })
   consigner(info, 'saisie : validation du bon (taux)', constats, info.outputPath('bc-validation.png'))
   await page.getByRole('button', { name: 'Valider à ce taux' }).click()
+  // Plus de 3 % d'ecart avec le cours BAM du jour (il varie) : l'ecran demande
+  // de confirmer, comme le ferait l'utilisateur.
+  const confirmer = page.getByRole('alertdialog').getByRole('button', { name: 'Je confirme ce taux' })
+  await confirmer.click({ timeout: 3000 }).catch(() => undefined)
 
   await expect(page.getByRole('button', { name: 'Envoyer au fournisseur' })).toBeVisible()
   // L'ecran du bon lit la liste et y prend le sien : on fait de meme.

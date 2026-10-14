@@ -20,12 +20,11 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
-import { CelluleEditable } from '../composants/CelluleEditable'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
   Alerte,
@@ -177,37 +176,6 @@ const LIBELLE_STATUT: Record<string, string> = {
   IGNORE: 'Ecartee',
 }
 
-/**
- * Ce que le calcul pense d'une ligne protegee.
- *
- * Proteger n'est pas ignorer : le MRP continue de dire ce qu'il faudrait
- * acheter, et l'ecart se lit ici. Une ligne figee sans ce retour serait une
- * ligne aveugle — l'acheteur croirait tenir un arbitrage encore valable.
- */
-const LIBELLE_FIGEMENT: Record<string, string> = {
-  COHERENTE: 'conforme au calcul',
-  SURDIMENSIONNEE: 'au-dessus du besoin',
-  SOUS_DIMENSIONNEE: 'sous le besoin',
-  BESOIN_DISPARU: 'besoin disparu',
-  REFERENCE_INACTIVE: 'référence inactive',
-}
-
-const TON_FIGEMENT: Record<string, 'succes' | 'alerte' | 'danger' | 'info' | 'neutre'> = {
-  COHERENTE: 'succes',
-  SURDIMENSIONNEE: 'alerte',
-  SOUS_DIMENSIONNEE: 'info',
-  BESOIN_DISPARU: 'danger',
-  REFERENCE_INACTIVE: 'danger',
-}
-
-const MOTIF_FIGEMENT: Record<string, string> = {
-  PRIX_NEGOCIE: 'prix negocie',
-  QUANTITE_AJUSTEE: 'quantité ajustee',
-  LIVRAISON_GROUPEE: 'livraison groupee',
-  DELAI_FOURNISSEUR: 'délai fournisseur',
-  AUTRE: 'arbitrage',
-}
-
 /** Une proposition n'est convertible que tant qu'elle n'engage rien. */
 const convertible = (p: Proposition) =>
   p.statut === 'PROPOSE' || p.statut === 'EN_REVISION' || p.statut === 'VALIDE'
@@ -283,56 +251,6 @@ export function PlanAchat() {
       await rafraichir()
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Conversion impossible.'),
-  })
-
-  const ajuster = useMutation({
-    mutationFn: (v: { id: string; corps: Record<string, unknown> }) =>
-      api.patch<{ figement_nouveau: boolean }>(
-        `/api/plan-achat/propositions/${v.id}`,
-        v.corps,
-      ),
-    onSuccess: async (r) => {
-      toast.success('Proposition ajustee', {
-        description: r.figement_nouveau
-          ? 'Elle est desormais protégée : le prochain recalcul ne l ecrasera plus. ' +
-            "L'ecart avec le calcul reste affiche sur la ligne."
-          : 'Elle ne sort plus telle quelle du calcul.',
-        duration: 8000,
-      })
-      await rafraichir()
-    },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Ajustement impossible.'),
-  })
-
-  /**
-   * Proteger une ligne du prochain recalcul, ou la lui rendre.
-   *
-   * Le MRP ne connait ni le camion a remplir, ni le lot minimum non declare, ni
-   * la remise obtenue au telephone.
-   */
-  const figer = useMutation({
-    mutationFn: (v: { id: string; motif: string }) =>
-      api.post(`/api/plan-achat/propositions/${v.id}/figer`, { motif_figement: v.motif }),
-    onSuccess: async () => {
-      toast.success('Proposition protégée', {
-        description: 'Le recalcul ne la remplacera plus. L’écart avec le calcul reste visible.',
-        duration: 7000,
-      })
-      await rafraichir()
-    },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Protection impossible.'),
-  })
-
-  const defiger = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/plan-achat/propositions/${id}/figer`),
-    onSuccess: async () => {
-      toast.success('Proposition rendue au calcul', {
-        description: 'Le prochain recalcul la remplacera par ce que le MRP dit aujourd hui.',
-        duration: 7000,
-      })
-      await rafraichir()
-    },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.'),
   })
 
   const ignorer = useMutation({
@@ -547,31 +465,20 @@ export function PlanAchat() {
       entete: 'A commander',
       numerique: true,
       largeur: '140px',
+      // LECTURE SEULE DANS LE PLAN (14/10/2026) : la quantite s'ajuste sur la
+      // commande, pas ici — editer dans le plan relancait le calcul a chaque
+      // frappe, lent sur des centaines de lignes.
       rendu: (p) => (
-        <CelluleEditable
-          valeur={p.quantite_suggeree_kg}
-          affichage={
-            <span>
-              <span className="font-medium tabular-nums">
-                {fmt.nombre(p.quantite_suggeree_kg, 0)} kg
-              </span>
-              {p.quantite_suggeree_unite != null && p.unite_catalogue !== 'kg' && (
-                <span className="block text-[11px] text-attenue-texte tabular-nums">
-                  {fmt.nombre(p.quantite_suggeree_unite, 1)} {p.unite_catalogue}
-                </span>
-              )}
+        <span>
+          <span className="font-medium tabular-nums">
+            {fmt.nombre(p.quantite_suggeree_kg, 0)} kg
+          </span>
+          {p.quantite_suggeree_unite != null && p.unite_catalogue !== 'kg' && (
+            <span className="block text-[11px] text-attenue-texte tabular-nums">
+              {fmt.nombre(p.quantite_suggeree_unite, 1)} {p.unite_catalogue}
             </span>
-          }
-          type="nombre"
-          min={0}
-          aligneDroite
-          modifiable={droits.peutEcrire && convertible(p)}
-          surValider={(v) =>
-            v != null &&
-            Number(v) !== p.quantite_suggeree_kg &&
-            ajuster.mutate({ id: p.id_proposition, corps: { quantite_suggeree_kg: Number(v) } })
-          }
-        />
+          )}
+        </span>
       ),
     },
     {
@@ -579,26 +486,13 @@ export function PlanAchat() {
       entete: 'Prix MAD/kg',
       numerique: true,
       largeur: '120px',
-      // LE PRIX SE NEGOCIE, DONC IL SE SAISIT. Il etait seul en lecture au
-      // milieu de colonnes modifiables : l'acheteur qui obtenait un rabais
-      // devait commander au tarif, puis corriger le bon apres coup. Le prix en
-      // devise et le montant suivent, cote serveur.
+      // LE PRIX EN LECTURE : il se negocie et s'ajuste sur la commande, plus
+      // dans le plan. La source (dernier achat / catalogue / cout moyen) reste
+      // affichee pour juger de sa fiabilite.
       rendu: (p) =>
         p.prix_estime_mad == null ? (
-          '—'
+          <span className="text-attenue-texte">—</span>
         ) : (
-          <CelluleEditable
-            valeur={p.prix_estime_mad}
-            type="nombre"
-            min={0}
-            aligneDroite
-            modifiable={droits.peutEcrire && convertible(p)}
-            surValider={(v) =>
-              v != null &&
-              Number(v) !== p.prix_estime_mad &&
-              ajuster.mutate({ id: p.id_proposition, corps: { prix_estime_mad: Number(v) } })
-            }
-            affichage={
           <div>
             <div className="tabular-nums">{p.prix_a_saisir ? '—' : fmt.nombre(p.prix_estime_mad, 3)}</div>
             {/* Le meme prix dans l'unite d'achat : au metre, un prix au kg ne
@@ -622,8 +516,6 @@ export function PlanAchat() {
               <div className="text-[11px] text-alerte">coût moyen</div>
             ) : null}
           </div>
-            }
-          />
         ),
     },
     // LES TROIS COLONNES DU CLASSEUR. Le fournisseur est turc ou indien : le
@@ -700,50 +592,6 @@ export function PlanAchat() {
       largeur: '110px',
       secondaire: true,
       rendu: (p) => fmt.date(p.date_besoin_prevue),
-    },
-    {
-      // Une ligne protegee sans son ecart serait une ligne aveugle : on saurait
-      // que le calcul ne la touche plus, sans savoir ce qu'il en pense.
-      champ: 'etat_figement',
-      entete: 'Protection',
-      largeur: '190px',
-      filtre: 'liste',
-      rendu: (p) =>
-        !p.figee ? (
-          <span className="text-[11px] text-attenue-texte">suit le calcul</span>
-        ) : (
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-1">
-              <Lock className="size-3 shrink-0 text-primaire" />
-              <Badge ton={TON_FIGEMENT[p.etat_figement ?? ''] ?? 'neutre'}>
-                {LIBELLE_FIGEMENT[p.etat_figement ?? ''] ?? 'protegee'}
-              </Badge>
-            </div>
-            {p.etat_figement === 'BESOIN_DISPARU' ? (
-              <div className="text-[11px] text-danger">
-                le calcul ne demande plus rien sur cette référence
-              </div>
-            ) : p.etat_figement === 'REFERENCE_INACTIVE' ? (
-              <div className="text-[11px] text-danger">référence desactivee au catalogue</div>
-            ) : (
-              p.ecart_calcul_kg != null &&
-              Math.abs(p.ecart_calcul_kg) > 0.001 && (
-                <div className="text-[11px] tabular-nums text-attenue-texte">
-                  calcul {fmt.nombre(p.quantite_calculee_kg ?? 0, 0)} kg ·{' '}
-                  <span className={p.ecart_calcul_kg > 0 ? 'text-alerte' : 'text-info'}>
-                    {p.ecart_calcul_kg > 0 ? '+' : ''}
-                    {fmt.nombre(p.ecart_calcul_kg, 0)} kg
-                  </span>
-                </div>
-              )
-            )}
-            {p.figee_par && (
-              <div className="text-[11px] text-attenue-texte">
-                {MOTIF_FIGEMENT[p.motif_figement ?? ''] ?? p.motif_figement} · {p.figee_par}
-              </div>
-            )}
-          </div>
-        ),
     },
   ]
 
@@ -1042,55 +890,18 @@ export function PlanAchat() {
             ? (p) =>
                 convertible(p) ? (
                   <div className="flex justify-end gap-0.5">
-                    {(p.nb_equivalents ?? 0) > 0 && (
-                      <Bouton
-                        variante="discret"
-                        taille="icone-xs"
-                        className={cn(
-                          (p.equivalent_dispo_kg ?? 0) > 0
-                            ? 'text-primaire hover:bg-primaire/10'
-                            : 'text-attenue-texte hover:bg-attenue',
-                        )}
-                        onClick={() => setArbitrage(p)}
-                        aria-label="Equivalents"
-                        title={
-                          (p.equivalent_dispo_kg ?? 0) > 0
-                            ? `Un equivalent a ${fmt.nombre(p.equivalent_dispo_kg, 0)} kg en stock`
-                            : 'Voir les références equivalentes'
-                        }
-                      >
-                        <Repeat />
-                      </Bouton>
-                    )}
-                  {/* Proteger du recalcul, ou rendre la ligne au calcul. */}
-                  <Bouton
-                    variante="discret"
-                    taille="icone-xs"
-                    className={cn(
-                      p.figee ? 'text-primaire hover:bg-primaire/10' : 'text-attenue-texte hover:bg-attenue',
-                    )}
-                    onClick={() =>
-                      p.figee
-                        ? confirmation.demander({
-                            titre: `Rendre ${p.code_reference} au calcul ?`,
-                            description:
-                              'Le prochain recalcul remplacera cette ligne par ce que le MRP dit ' +
-                              'aujourd hui. Votre ajustement sera perdu.',
-                            libelleConfirmer: 'Rendre au calcul',
-                            destructif: true,
-                            action: () => defiger.mutate(p.id_proposition),
-                          })
-                        : figer.mutate({ id: p.id_proposition, motif: 'AUTRE' })
-                    }
-                    aria-label={p.figee ? 'Rendre au calcul' : 'Protéger du recalcul'}
-                    title={
-                      p.figee
-                        ? `Protegee${p.figee_par ? ` par ${p.figee_par}` : ''} — cliquer pour rendre au calcul`
-                        : 'Protéger cette ligne du prochain recalcul'
-                    }
-                  >
-                    {p.figee ? <Lock /> : <LockOpen />}
-                  </Bouton>
+                    {/* Les equivalents se chargent A LA DEMANDE : le bouton est
+                        toujours la, le panneau lit le groupe au clic. */}
+                    <Bouton
+                      variante="discret"
+                      taille="icone-xs"
+                      className="text-attenue-texte hover:bg-attenue"
+                      onClick={() => setArbitrage(p)}
+                      aria-label="Equivalents"
+                      title="Voir les références équivalentes"
+                    >
+                      <Repeat />
+                    </Bouton>
                   <Bouton
                     variante="discret"
                     taille="icone-xs"

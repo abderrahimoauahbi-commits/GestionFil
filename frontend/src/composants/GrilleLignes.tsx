@@ -29,6 +29,8 @@ import { Check, Link2, Pencil, Plus, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
+import { useEstMobile } from '../lib/mediaQuery'
+import { GrilleLignesMobile } from './GrilleLignesMobile'
 import { couleurEcart } from '../lib/lots'
 import { AvisColisage } from './AvisColisage'
 import {
@@ -570,8 +572,14 @@ export interface ColonneGrille {
   rendu: (l: LigneSaisie, poser: (valeur: string) => void) => ReactNode
 }
 
-export function GrilleLignes({
-  codeFournisseur,
+export function GrilleLignes(props: ProprietesGrille) {
+  // Sous 768 px, la saisie passe en cartes + feuille plein ecran : la grille
+  // large deborde sur un telephone de quai (constat e2e du 14/10). Meme etat,
+  // memes regles, memes colonnes du document.
+  const estMobile = useEstMobile()
+  if (estMobile) return <GrilleLignesMobile {...props} />
+  const {
+    codeFournisseur,
   devise,
   lignes,
   setLignes,
@@ -601,7 +609,7 @@ export function GrilleLignes({
   libelles,
   poidsBobine,
   controleColisage = false,
-}: ProprietesGrille) {
+  } = props
   const prises = doublonsReference
     ? new Set<string>()
     : (dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean)))

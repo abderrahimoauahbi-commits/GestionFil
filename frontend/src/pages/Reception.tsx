@@ -53,6 +53,8 @@ import {
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { useEstMobile } from '../lib/mediaQuery'
+import { PeseesMobile } from './receptions/PeseesMobile'
 
 const MODULE = 'RECEPTIONS'
 
@@ -362,6 +364,9 @@ export function Reception() {
   const { moi } = useAuth()
   const qc = useQueryClient()
   const naviguer = useNavigate()
+  // Sous 768 px, la grille large cede la place a la pesee au doigt (cartes +
+  // feuille plein ecran) ; au-dessus, la grille reste.
+  const estMobile = useEstMobile()
 
   const [entete, setEntete] = useState({
     num_bon_livraison: '',
@@ -1240,27 +1245,43 @@ export function Reception() {
           </CarteEntete>
           <CarteCorps className="p-0">
             {modifiable ? (
-              /* LA MEME GRILLE QUE LE BON DE COMMANDE. Les colonnes propres a
-                 la reception — BL, colis, lot, magasin, qualite — lui sont
-                 decrites ; elle les place et les rend, sans avoir a les
-                 comprendre. Le prix et les champs fournisseur sont masques :
-                 une reception ne negocie rien, son prix vient du bon. */
-              <GrilleLignes
-                controleColisage
-                codeFournisseur={rec.code_fournisseur ?? ''}
-                devise={rec.code_devise ?? 'MAD'}
-                lignes={nouvelles}
-                setLignes={setNouvelles}
-                mode={mode}
-                setMode={setMode}
-                proposees={proposees}
-                chercherCatalogue={chercherCatalogue}
-                sansPrix
-                sansFournisseur
-                colonnesSupplementaires={colonnesReception}
-                validationLocale
-                surSupprimerLigne={retirerLigne}
-              />
+              estMobile ? (
+                /* LA PESEE AU DOIGT, sous 768 px : la grille large deborde sur
+                   un telephone de quai. Meme etat `nouvelles`, meme validation
+                   locale — seule la forme change (cartes + feuille plein ecran). */
+                <PeseesMobile
+                  lignes={nouvelles}
+                  setLignes={setNouvelles}
+                  proposees={proposees}
+                  chercherCatalogue={chercherCatalogue}
+                  magasins={qMagasins.data ?? []}
+                  tolerancePct={TOLERANCE_PCT}
+                  brouillon={rec.statut === 'BROUILLON'}
+                  surRetirer={retirerLigne}
+                />
+              ) : (
+                /* LA MEME GRILLE QUE LE BON DE COMMANDE. Les colonnes propres a
+                   la reception — BL, colis, lot, magasin, qualite — lui sont
+                   decrites ; elle les place et les rend, sans avoir a les
+                   comprendre. Le prix et les champs fournisseur sont masques :
+                   une reception ne negocie rien, son prix vient du bon. */
+                <GrilleLignes
+                  controleColisage
+                  codeFournisseur={rec.code_fournisseur ?? ''}
+                  devise={rec.code_devise ?? 'MAD'}
+                  lignes={nouvelles}
+                  setLignes={setNouvelles}
+                  mode={mode}
+                  setMode={setMode}
+                  proposees={proposees}
+                  chercherCatalogue={chercherCatalogue}
+                  sansPrix
+                  sansFournisseur
+                  colonnesSupplementaires={colonnesReception}
+                  validationLocale
+                  surSupprimerLigne={retirerLigne}
+                />
+              )
             ) : (
               <DataTable<LigneRec>
                 exportable="lignes-de-reception"

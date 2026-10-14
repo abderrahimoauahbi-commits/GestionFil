@@ -1102,72 +1102,25 @@ pub async fn propositions_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
     let rows = sqlx::query(
-        // `nb_equivalents` et `equivalent_dispo_kg` disent, sans second appel,
-        // si un substitut existe et s'il a du stock. Sans ces deux nombres,
-        // l'ecran devrait interroger l'equivalence reference par reference, et
-        // l'acheteur ne verrait l'alternative qu'apres l'avoir cherchee.
-        // LE CALCUL, UNE FOIS (audit v5, T15) : chaque ligne interrogeait
-        // v_plan_achat jusqu'a six fois. Il est materialise en tete et joint.
-        "WITH calcul AS MATERIALIZED (
-             SELECT code_reference, qte_a_commander_kg, complement_palette_kg FROM v_plan_achat
-         )
-         SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
+        // LECTURE SEULE ET RAPIDE (14/10/2026). La liste RECALCULAIT tout le MRP
+        // (v_plan_achat) a chaque ouverture, uniquement pour l'ecart de la
+        // « Protection » — retiree le 14/10. On lit donc la seule table
+        // `plan_achat` : le complement de palette y est desormais fige a la
+        // generation (migration 2026-10-14), les palettes aussi. Les equivalents
+        // et le detail du calcul se chargent A LA DEMANDE (bouton, depliage).
+        "SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
                 bc.numero_bc, bc.statut AS statut_bc,
                 ro.designation AS designation_origine,
-                uf.login AS figee_par,
-                -- Le bloc « RISQUES IDENTIFIES » du classeur, joint ici plutot
-                -- que servi par une seconde route : l'acheteur decide sur une
-                -- seule ligne, il ne doit pas croiser deux tableaux pour savoir
-                -- si la reference qu'il commande a une alternative.
+                -- Le bloc « RISQUES IDENTIFIES » du classeur (ABC/XYZ, tier,
+                -- source, action) : une seule jointure, pas une requete par ligne.
                 rs.classe_abc, rs.classe_xyz, rs.tier, rs.risque_source,
-                rs.nb_sources, rs.action_recommandee, rs.budget_annuel_mad,
-                -- Le fil sur machine que le calcul a compte (regle 9) : l'acheteur
-                -- le voit, au lieu de croire que le besoin l'ignore.
-                (SELECT ph.stock_machine_kg FROM v_stock_physique ph
-                  WHERE ph.code_reference = pa.code_reference)        AS stock_machine_kg,
-                (SELECT COUNT(*) FROM v_equivalence e
-                  WHERE e.code_reference = pa.code_reference)         AS nb_equivalents,
-                (SELECT ROUND(COALESCE(MAX(e.equivalent_stock_kg), 0), 3)
-                   FROM v_equivalence e
-                  WHERE e.code_reference = pa.code_reference
-                    AND e.interchangeable = 1)                        AS equivalent_dispo_kg,
-
-                -- L'ECART se calcule A LA LECTURE, jamais stocke. Le projet
-                -- procede deja ainsi pour le besoin fige d'une ligne de commande
-                -- (cf. convertir() dans domain/plan_achat.rs) : une alerte
-                -- enregistree serait perimee des le recalcul suivant, alors
-                -- qu'une comparaison faite maintenant ne peut pas mentir.
-                ROUND(vpa.qte_a_commander_kg, 3)                       AS quantite_calculee_kg,
-                -- Le complement de palette : ce que l'arrondi a la palette
-                -- pleine ajoute au besoin, pour la seule logistique.
-                ROUND(vpa.complement_palette_kg, 3)                    AS complement_palette_kg,
-                CASE WHEN pa.figee = 1 THEN ROUND(
-                    pa.quantite_suggeree_kg
-                  - COALESCE(vpa.qte_a_commander_kg, 0), 3)
-                END                                                   AS ecart_calcul_kg,
-                CASE
-                    WHEN pa.figee = 0 THEN NULL
-                    WHEN r.actif = 0 THEN 'REFERENCE_INACTIVE'
-                    WHEN vpa.code_reference IS NULL
-                         THEN 'BESOIN_DISPARU'
-                    -- 2 % de tolerance : un arrondi a la palette cree toujours un
-                    -- petit ecart, et le signaler noierait les vrais.
-                    WHEN ABS(pa.quantite_suggeree_kg
-                           - vpa.qte_a_commander_kg)
-                         <= 0.02 * pa.quantite_suggeree_kg THEN 'COHERENTE'
-                    WHEN pa.quantite_suggeree_kg
-                       > vpa.qte_a_commander_kg
-                         THEN 'SURDIMENSIONNEE'
-                    ELSE 'SOUS_DIMENSIONNEE'
-                END                                                   AS etat_figement
+                rs.nb_sources, rs.action_recommandee, rs.budget_annuel_mad
            FROM plan_achat pa
           LEFT JOIN v_risque_sourcing rs ON rs.code_reference = pa.code_reference
            JOIN reference r    ON r.code_reference     = pa.code_reference
            JOIN fournisseur f  ON f.code_fournisseur   = pa.code_fournisseur
            LEFT JOIN reference ro    ON ro.code_reference = pa.code_reference_origine
-           LEFT JOIN utilisateur uf  ON uf.id_utilisateur = pa.id_utilisateur_figement
            LEFT JOIN bon_commande bc ON bc.id_bc       = pa.id_bc_genere
-           LEFT JOIN calcul vpa       ON vpa.code_reference = pa.code_reference
           ORDER BY CASE pa.urgence WHEN 'TIER 1' THEN 1 WHEN 'TIER 2' THEN 2
                                    WHEN 'TIER 3' THEN 3 ELSE 4 END,
                    pa.code_fournisseur, pa.code_reference",

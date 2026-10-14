@@ -109,6 +109,14 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Le complement de palette est fige sur la proposition : la liste du
+        // plan d'achat ne recalcule plus le MRP a l'ouverture.
+        "2026-10-14_plan_achat_complement_palette.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'plan_achat'
+                           AND column_name = 'complement_palette_kg')",
+    ),
+    (
         "2026-10-03b_multiple_achat_palette.sql",
         "SELECT EXISTS (SELECT 1 FROM information_schema.columns
                          WHERE table_schema = 'public' AND table_name = 'reference'

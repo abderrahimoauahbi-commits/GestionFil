@@ -70,6 +70,11 @@ pub struct DemandeConversion {
     /// bon, s'il est du meme fournisseur et encore modifiable.
     #[serde(default)]
     pub cibles: Option<std::collections::HashMap<String, String>>,
+    /// CE QUE L'ACHETEUR CONFIRME SUR LA COMMANDE (14/10/2026), par identifiant
+    /// de proposition : quantite, prix, nb palettes, nb bobines. Absent = la
+    /// valeur du plan. On ajuste sur la commande, pas dans le plan.
+    #[serde(default)]
+    pub ajustements: Option<std::collections::HashMap<String, plan_achat::AjustementLigne>>,
 }
 
 /// Convertit des propositions d'achat en bons de commande.
@@ -84,7 +89,14 @@ pub async fn convertir_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
     user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
-    let r = plan_achat::convertir(&state.db, &user, d.propositions.as_deref(), d.cibles.as_ref()).await?;
+    let r = plan_achat::convertir(
+        &state.db,
+        &user,
+        d.propositions.as_deref(),
+        d.cibles.as_ref(),
+        d.ajustements.as_ref(),
+    )
+    .await?;
     Ok(Json(serde_json::to_value(r)?))
 }
 

@@ -137,11 +137,37 @@ export interface EntreeNav {
 }
 
 /**
+ * CURATION DU MENU PAR ROLE — « cacher les menus par role » (14/10/2026).
+ *
+ * Un role liste ici ne voit au menu QUE les ecrans de sa liste, plus ceux
+ * ouverts a tous (module vide : Accueil, Guide). C'est un confort de
+ * presentation, PAS une barriere de securite : les droits serveur ne changent
+ * pas, un ecran retire du menu reste atteignable par son adresse et le serveur
+ * l'autorise ou le refuse selon les permissions, comme avant.
+ *
+ * L'ORDRE DE LA LISTE EST AUSSI CELUI DE LA BARRE DU BAS sur telephone : les
+ * premiers ecrans deviennent les onglets que le pouce atteint.
+ *
+ * Un role ABSENT d'ici garde le menu complet de ses droits (DIRECTION, ADMIN,
+ * ASSISTANTE pour l'instant ; leurs listes viendront apres validation). On
+ * commence par le magasinier.
+ */
+export const MENU_PAR_ROLE: Record<string, string[]> = {
+  // MAGASIN — le quai et les magasins. Les quatre gestes du metier d'abord
+  // (ils arment la barre du bas), puis la consultation et le reste.
+  MAGASIN: [
+    '/receptions', '/mouvements', '/machines', '/inventaires',
+    '/etat-stock', '/transferts', '/receptions-import', '/retours-fournisseur',
+    '/catalogue', '/chat',
+  ],
+}
+
+/**
  * Un ecran est-il accessible a cet utilisateur ?
  *
- * Deux conditions, et la seconde n'est pas redondante : la grille de droits
- * raisonne par module, or certains ecrans ne se decident que par role. Les
- * filtrer au seul module ferait apparaitre une entree qui repond 403.
+ * Trois conditions, et aucune n'est redondante : la grille de droits raisonne
+ * par module, certains ecrans ne se decident que par role, et la curation
+ * ci-dessus reduit encore le menu des roles qui en ont une.
  */
 export function estAccessible(
   entree: EntreeNav,
@@ -150,10 +176,15 @@ export function estAccessible(
 ): boolean {
   /* UN MODULE VIDE VEUT DIRE « OUVERT A TOUS ». L'accueil n'appartient a aucun
      module : il ne montre que les ecrans auxquels celui qui regarde a deja
-     droit, et le lui fermer reviendrait a le laisser sans porte de sortie. */
+     droit, et le lui fermer reviendrait a le laisser sans porte de sortie. Le
+     guide suit la meme regle — un role cure garde donc toujours Accueil et le
+     guide, meme absents de sa liste. */
   if (entree.module === '') return true
   if (!peut(entree.module, 'LIRE')) return false
   if (entree.roles && !entree.roles.includes(role ?? '')) return false
+  // Curation : si le role a une liste, il ne voit au menu que ses ecrans.
+  const cure = MENU_PAR_ROLE[role ?? '']
+  if (cure && !cure.includes(entree.vers)) return false
   return true
 }
 
@@ -376,7 +407,17 @@ export function Coquille() {
   const entreprise = useEntreprise()
 
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
-  const principales = accessibles.filter((e) => e.principale).slice(0, 4)
+  // LA BARRE DU BAS (telephone) SUIT LA CURATION DU ROLE quand il en a une :
+  // ses premiers ecrans — les gestes du metier — deviennent les onglets, dans
+  // leur ordre de liste. Sans curation, repli sur le marquage `principale`
+  // global, comme avant.
+  const listeRole = MENU_PAR_ROLE[moi?.role ?? '']
+  const principales = listeRole
+    ? listeRole
+        .map((vers) => accessibles.find((e) => e.vers === vers))
+        .filter((e): e is EntreeNav => Boolean(e))
+        .slice(0, 4)
+    : accessibles.filter((e) => e.principale).slice(0, 4)
   const courante = entreeCourante(accessibles, emplacement.pathname)
 
   useEffect(() => setTiroir(false), [emplacement.pathname])

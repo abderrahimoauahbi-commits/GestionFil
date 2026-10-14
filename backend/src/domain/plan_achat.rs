@@ -378,14 +378,14 @@ pub async fn convertir(
                  (id_bc, ligne_numero, code_reference, designation, unite_commande,
                   facteur_kg, quantite_commandee_unite, quantite_commandee_kg,
                   prix_unitaire_devise, code_devise, date_livraison_prevue,
-                  id_proposition, besoin_kg_origine, nb_palettes, nb_bobines)
+                  id_proposition, besoin_kg_origine, nb_palettes_saisi, nb_bobines_saisi)
              SELECT $1, $2, pa.code_reference, r.designation, 'kg',
                     1.0, $5::numeric, $5::numeric,
                     ROUND($6::numeric / $3::numeric, 6), bc.code_devise, pa.date_besoin_prevue,
                     pa.id_proposition,
                     COALESCE((SELECT b.besoin_12m_kg FROM v_besoin_12m b
                                WHERE b.code_reference = pa.code_reference), 0),
-                    $7::bigint, $8::bigint
+                    $7::numeric, $8::bigint
                FROM plan_achat pa
                JOIN reference r  ON r.code_reference = pa.code_reference
                JOIN bon_commande bc ON bc.id_bc = $1

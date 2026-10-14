@@ -236,7 +236,11 @@ export function PlanAchat() {
   })
 
   const commander = useMutation({
-    mutationFn: (v: { propositions: string[]; cibles: Record<string, string> }) =>
+    mutationFn: (v: {
+      propositions: string[]
+      cibles: Record<string, string>
+      ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>
+    }) =>
       api.post<{
         propositions_converties: number
         bons: { numero_bc: string; code_fournisseur: string; lignes: number; montant_total_mad: number }[]
@@ -788,7 +792,7 @@ export function PlanAchat() {
             retirer={(id) => setCoches((c) => ({ ...c, [id]: false }))}
             enCours={commander.isPending}
             ecrire={droits.peutEcrire}
-            envoyer={(cibles) => commander.mutate({ propositions: selection, cibles })}
+            envoyer={(cibles, ajustements) => commander.mutate({ propositions: selection, cibles, ajustements })}
             revenir={() => setOnglet('besoins')}
           />
         </OngletContenu>
@@ -1139,10 +1143,31 @@ function LignesACommander({
   retirer: (id: string) => void
   enCours: boolean
   ecrire: boolean
-  envoyer: (cibles: Record<string, string>) => void
+  envoyer: (
+    cibles: Record<string, string>,
+    ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>,
+  ) => void
   revenir: () => void
 }) {
   const [cibles, setCibles] = useState<Record<string, string>>({})
+  // L'ACHETEUR AJUSTE SUR LA COMMANDE (14/10/2026), pas dans le plan : quantite,
+  // prix, et le colisage (palettes / bobines) qu'il confirme. Pre-rempli par le
+  // calcul ; ce qu'il envoie fait foi sur le bon.
+  const [aj, setAj] = useState<Record<string, { qte: string; prix: string; pal: string; bob: string }>>({})
+  const defauts = (p: Proposition) => ({
+    qte: p.quantite_suggeree_kg != null ? String(p.quantite_suggeree_kg) : '',
+    prix: p.prix_estime_mad != null ? String(p.prix_estime_mad) : '',
+    pal: p.palettes_a_commander != null ? String(p.palettes_a_commander) : '',
+    bob: '',
+  })
+  const courant = (p: Proposition) => aj[p.id_proposition] ?? defauts(p)
+  const poser = (p: Proposition, champ: 'qte' | 'prix' | 'pal' | 'bob', v: string) =>
+    setAj((a) => ({ ...a, [p.id_proposition]: { ...courant(p), [champ]: v } }))
+  const nn = (s: string) => {
+    const x = Number(s)
+    return Number.isFinite(x) ? x : 0
+  }
+  const montantLigne = (p: Proposition) => nn(courant(p).qte) * nn(courant(p).prix)
   const qBc = useQuery({
     queryKey: ['bons-commande'],
     queryFn: ({ signal }) => api.get<BcResume[]>('/api/bons-commande', { signal }),
@@ -1167,13 +1192,11 @@ function LignesACommander({
   }
 
   const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
-  const totalMad = lignes.reduce((t, p) => t + (p.montant_total_mad ?? 0), 0)
+  const totalMad = lignes.reduce((t, p) => t + montantLigne(p), 0)
 
   return (
     <div className="space-y-3">
       {groupes.map(([frs, ls]) => {
-        const devise = ls[0].code_devise ?? ''
-        const montantDevise = ls.reduce((t, p) => t + (p.montant_devise ?? 0), 0)
         return (
           <Carte key={frs}>
             <CarteEntete>
@@ -1197,31 +1220,60 @@ function LignesACommander({
               </div>
             </CarteEntete>
             <CarteCorps className="p-0">
+              {/* ON AJUSTE ICI, PAS DANS LE PLAN : quantite, prix, palettes,
+                  bobines, pre-remplis par le calcul. Le complement de palette —
+                  les kilos ajoutes pour FERMER la palette — est signale sous le
+                  nombre de palettes. */}
               <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-                <table className="w-full min-w-[44rem] text-[12.5px]">
+                <table className="w-full min-w-[46rem] text-[12.5px]">
                   <thead>
                     <tr className="border-b border-bordure">
                       <th className={cn(th, 'text-left')}>Référence</th>
-                      <th className={cn(th, 'w-24 text-left')}>Urgence</th>
-                      <th className={cn(th, 'w-32 text-right')}>Quantité</th>
-                      <th className={cn(th, 'w-28 text-right')}>Prix {devise}</th>
-                      <th className={cn(th, 'w-32 text-right')}>Montant {devise}</th>
-                      <th className={cn(th, 'w-36 text-right')}>Montant MAD</th>
+                      <th className={cn(th, 'w-32 text-right')}>Qté (kg)</th>
+                      <th className={cn(th, 'w-28 text-right')}>Prix MAD/kg</th>
+                      <th className={cn(th, 'w-28 text-right')}>Palettes</th>
+                      <th className={cn(th, 'w-24 text-right')}>Bobines</th>
+                      <th className={cn(th, 'w-32 text-right')}>Montant MAD</th>
                       {ecrire && <th className={cn(th, 'w-10')} />}
                     </tr>
                   </thead>
                   <tbody>
-                    {ls.map((p) => (
-                      <tr key={p.id_proposition} className="border-b border-bordure/60">
+                    {ls.map((p) => {
+                      const c = courant(p)
+                      return (
+                      <tr key={p.id_proposition} className="border-b border-bordure/60 align-top">
                         <td className="px-2 py-1.5">
                           <div className="font-medium">{p.code_reference}</div>
                           {p.designation && <div className="text-[11px] text-attenue-texte">{p.designation}</div>}
+                          <Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge>
                         </td>
-                        <td className="px-2 py-1.5"><Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge></td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt.nombre(p.quantite_suggeree_kg, 0)} kg</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{p.prix_devise == null ? '—' : fmt.nombre(p.prix_devise, 3)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{p.montant_devise == null ? '—' : fmt.nombre(p.montant_devise, 2)}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{p.montant_total_mad == null ? '—' : fmt.mad(p.montant_total_mad)}</td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="any" min="0" value={c.qte} disabled={!ecrire}
+                            onChange={(e) => poser(p, 'qte', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Quantité (kg) pour ${p.code_reference}`} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="any" min="0" value={c.prix} disabled={!ecrire}
+                            onChange={(e) => poser(p, 'prix', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Prix MAD par kg pour ${p.code_reference}`} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="1" min="0" value={c.pal} disabled={!ecrire}
+                            onChange={(e) => poser(p, 'pal', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Palettes pour ${p.code_reference}`} />
+                          {p.complement_palette_kg != null && p.complement_palette_kg > 0 && (
+                            <div className="mt-0.5 text-right text-[10.5px] text-alerte"
+                              title="Arrondi à la palette pleine : ces kilos ferment la palette, ils ne produisent pas">
+                              + {fmt.nombre(p.complement_palette_kg, 0)} kg palette
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="1" min="0" value={c.bob} disabled={!ecrire}
+                            placeholder="—" onChange={(e) => poser(p, 'bob', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Bobines pour ${p.code_reference}`} />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium tabular-nums">{fmt.mad(montantLigne(p))}</td>
                         {ecrire && (
                           <td className="px-2 py-1.5">
                             <Bouton taille="icone-xs" variante="discret" aria-label={`Retirer ${p.code_reference}`}
@@ -1232,13 +1284,12 @@ function LignesACommander({
                           </td>
                         )}
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                   <tfoot>
                     <tr className="bg-attenue/40 font-semibold">
-                      <td className="px-2 py-1.5" colSpan={4}>{ls.length} ligne(s)</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{fmt.nombre(montantDevise, 2)}</td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{fmt.mad(ls.reduce((t, p) => t + (p.montant_total_mad ?? 0), 0))}</td>
+                      <td className="px-2 py-1.5" colSpan={5}>{ls.length} ligne(s)</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{fmt.mad(ls.reduce((t, p) => t + montantLigne(p), 0))}</td>
                       {ecrire && <td />}
                     </tr>
                   </tfoot>
@@ -1256,7 +1307,27 @@ function LignesACommander({
             <span className="text-attenue-texte"> · {groupes.length} fournisseur(s) · {fmt.mad(totalMad)}</span>
             <span className="text-attenue-texte"> — les bons restent en brouillon, rien n’est engagé.</span>
           </span>
-          <Bouton chargement={enCours} onClick={() => envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)))}>
+          <Bouton
+            chargement={enCours}
+            onClick={() => {
+              // Ce que l'acheteur confirme part sur le bon : qte, prix, palettes,
+              // bobines (meme non modifies : la valeur du plan vaut confirmation).
+              const ajustements: Record<
+                string,
+                { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }
+              > = {}
+              for (const p of lignes) {
+                const c = courant(p)
+                ajustements[p.id_proposition] = {
+                  quantite_kg: c.qte.trim() ? Number(c.qte) : undefined,
+                  prix_mad: c.prix.trim() ? Number(c.prix) : undefined,
+                  nb_palettes: c.pal.trim() ? Math.round(Number(c.pal)) : undefined,
+                  nb_bobines: c.bob.trim() ? Math.round(Number(c.bob)) : undefined,
+                }
+              }
+              envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)), ajustements)
+            }}
+          >
             <FileCheck2 />
             Envoyer au bon de commande
           </Bouton>

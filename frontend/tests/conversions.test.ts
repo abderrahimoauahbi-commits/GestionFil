@@ -155,3 +155,11 @@ test('pourChamp : vide plutot que « null », arrondi ou decimales', () => {
   assert.equal(pourChamp(1.5, 2), '1.5')             // pas de zero inutile
   assert.equal(pourChamp(1234.5, 1), '1234.5')
 })
+
+test('pourChamp : un nombre non fini donne un champ vide (T-GF-007)', () => {
+  assert.equal(pourChamp(Number.NaN), '')
+  assert.equal(pourChamp(Number.NaN, 3), '')
+  assert.equal(pourChamp(Number.POSITIVE_INFINITY), '')
+  assert.equal(pourChamp(Number.NEGATIVE_INFINITY, 2), '')
+  assert.equal(pourChamp(12 * Number.NaN, 3), '')    // quantite x facteur manquant
+})

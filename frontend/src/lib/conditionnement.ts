@@ -181,9 +181,13 @@ export function depuisUnite(valeur: unknown, unite: string, c: Conditionnement):
   }
 }
 
-/** Formate un nombre pour un champ de saisie : vide plutôt que « null ». */
+/**
+ * Formate un nombre pour un champ de saisie : vide plutôt que « null » — ou que
+ * « NaN » : une quantité multipliée par un facteur manquant écrivait « NaN »
+ * dans la grille des lignes (T-GF-007, 15/10/2026).
+ */
 export function pourChamp(n: number | null, decimales = 0): string {
-  if (n === null) return ''
+  if (n === null || !Number.isFinite(n)) return ''
   return decimales > 0 ? String(Number(n.toFixed(decimales))) : String(Math.round(n))
 }
 

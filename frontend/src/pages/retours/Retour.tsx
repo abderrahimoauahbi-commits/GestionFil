@@ -20,6 +20,7 @@ import { EnTetePage } from '../../composants/Coquille'
 import { Alerte, Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Chargement, Etiq, Selecteur } from '../../composants/ui/base'
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { useGardeSaisie } from '../../hooks/useGardeSaisie'
+import { lireNombre } from '../../lib/nombres'
 import { cn, fmt } from '../../lib/utils'
 import { LIBELLE_STATUT_RETOUR, MODULE_RETOURS } from './commun'
 
@@ -83,10 +84,19 @@ const MOTIFS = [
   { code: 'R2', libelle: 'Erreur de référence' },
 ]
 
+/**
+ * LA SAISIE SE LIT A LA FRANCAISE (lib/nombres) : « 1.234,56 » vaut 1 234,56.
+ * La lecture locale d'avant remplacait la premiere virgule par un point : ce
+ * prix devenait « 1.234.56 », illisible, puis 0 — l'avoir partait a 0 DH — et
+ * un poids de « 1.234,5 » retirait la ligne sans prevenir (T-GF-011,
+ * 15/10/2026). Vide : 0, comme avant. Illisible : signale, et bloque
+ * l'enregistrement — jamais lu 0.
+ */
 const nombre = (s: string) => {
-  const n = Number(s.replace(/\s/g, '').replace(',', '.'))
-  return Number.isFinite(n) ? n : 0
+  const n = lireNombre(s)
+  return n === null || Number.isNaN(n) ? 0 : n
 }
+const illisible = (s: string) => Number.isNaN(lireNombre(s))
 
 const echec = (e: unknown) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
@@ -173,9 +183,11 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
   const saisies = lignes.filter((l) => l.code_reference && nombre(l.kg) > 0)
   const depassements = saisies.filter((l) => nombre(l.kg) > (ligneStock(l)?.quantite_kg ?? Infinity) + 0.0005)
   const incompletes = saisies.filter((l) => !l.code_magasin || !l.motif)
+  const illisibles = lignes.filter((l) => l.code_reference && [l.kg, l.prix, l.bobines].some(illisible))
   const montant = saisies.reduce((t, l) => t + Math.round(nombre(l.kg) * nombre(l.prix) * 100) / 100, 0)
   const modifie = etat !== initial
-  const complet = !!fournisseur && motif.trim().length >= 3 && saisies.length > 0 && depassements.length === 0 && incompletes.length === 0
+  const complet = !!fournisseur && motif.trim().length >= 3 && saisies.length > 0 && depassements.length === 0 &&
+    incompletes.length === 0 && illisibles.length === 0
   const quitter = useGardeSaisie(ecrire && modifie)
 
   const corps = () => ({
@@ -364,6 +376,8 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                   const refs = [...new Map(dispo.filter((d) => d.code_magasin === l.code_magasin)
                     .map((d) => [d.code_reference, d.designation])).entries()]
                   const trop = !!stock && nombre(l.kg) > stock.quantite_kg + 0.0005
+                  const aRelire = [['poids', l.kg], ['prix', l.prix], ['bobines', l.bobines]]
+                    .filter(([, v]) => illisible(v)).map(([nom]) => nom)
                   return (
                     <div key={l.cle}
                       className="grid grid-cols-2 items-end gap-2 p-2 md:grid-cols-4 xl:grid-cols-[9rem_minmax(12rem,1fr)_10rem_7rem_7rem_6rem_13rem_2rem]">
@@ -425,9 +439,11 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                         onClick={() => setLignes((x) => x.filter((y) => y.cle !== l.cle))}>
                         <X />
                       </Bouton>
-                      {(trop || (prixVisibles && l.code_reference && nombre(l.kg) > 0 && l.prix.trim() !== '')) && (
+                      {(aRelire.length > 0 || trop || (prixVisibles && l.code_reference && nombre(l.kg) > 0 && l.prix.trim() !== '')) && (
                         <div className="col-span-full text-[11.5px]">
-                          {trop ? (
+                          {aRelire.length > 0 ? (
+                            <span className="text-danger">Saisie illisible ({aRelire.join(', ')}) : écrire par exemple 1 234,56.</span>
+                          ) : trop ? (
                             <span className="text-danger">Le magasin n’en porte que {fmt.nombre(stock!.quantite_kg, 2)} kg.</span>
                           ) : (
                             <span className="text-attenue-texte">Montant : {fmt.nombre(nombre(l.kg) * nombre(l.prix), 2)} DH</span>
@@ -444,6 +460,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                     Ajouter une ligne
                   </Bouton>
                   {incompletes.length > 0 && <span className="text-[11.5px] text-alerte">{incompletes.length} ligne(s) sans magasin ou sans motif</span>}
+                  {illisibles.length > 0 && <span className="text-[11.5px] text-danger">{illisibles.length} ligne(s) à saisie illisible</span>}
                 </div>
               </div>
             )

@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { lireNombre, versCanonique, versSaisie } from '../src/lib/nombres.ts'
+import { lireNombre, nombreOuZero, versCanonique, versSaisie } from '../src/lib/nombres.ts'
 
 const LISIBLES: [string, number][] = [
   ['1234,5', 1234.5],
@@ -42,6 +42,28 @@ test('vide : null', () => {
   assert.equal(lireNombre(''), null)
   assert.equal(lireNombre('   '), null)
   assert.equal(lireNombre(null), null)
+})
+
+// Un nombre deja lu (champ numerique, valeur venue du serveur) passe tel quel ; l'infini et NaN sont illisibles.
+test('lireNombre : un nombre deja lu', () => {
+  assert.equal(lireNombre(3.5), 3.5)
+  assert.equal(lireNombre(0), 0)
+  assert.equal(lireNombre(-2), -2)
+  assert.ok(Number.isNaN(lireNombre(Number.POSITIVE_INFINITY)))
+  assert.ok(Number.isNaN(lireNombre(Number.NaN)))
+})
+
+// Pour un total d'affichage seulement : le vide et l'illisible comptent pour 0, le reste est lu.
+test('nombreOuZero : vide et illisible valent 0', () => {
+  assert.equal(nombreOuZero(''), 0)
+  assert.equal(nombreOuZero('   '), 0)
+  assert.equal(nombreOuZero(null), 0)
+  assert.equal(nombreOuZero(undefined), 0)
+  assert.equal(nombreOuZero('abc'), 0)
+  assert.equal(nombreOuZero('1,2,3'), 0)
+  assert.equal(nombreOuZero(Number.NaN), 0)
+  assert.equal(nombreOuZero('1 234,5'), 1234.5)
+  assert.equal(nombreOuZero(12), 12)
 })
 
 test('forme canonique et affichage', () => {

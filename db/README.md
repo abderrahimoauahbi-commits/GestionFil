@@ -161,7 +161,7 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 
 | Code | Ce qu'il signale | Migration |
 |---|---|---|
-| C45 | ligne de bon reçue à la fois en local et à l'import | 08f (étanchéité) |
+| C45 | ligne de bon reçue à la fois en local et à l'import — **dossiers en circuit `FACTURE` seulement** (ADR-003 phase C : pour un dossier basculé en `BON`, ce lien est le chaînon qui relie ses frais à la marchandise) | 08f, recadré par 2026-10-14b |
 | C46 | champ sensible sans ligne dans le modèle de droits d'un rôle | 09a |
 | C47 | fil prêté à une autre usine, non rendu dans le délai (`P_PretJoursAlerte`) | 09d |
 | C48 | chargement : fil chargé déjà consommé, à relire | 09e |

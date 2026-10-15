@@ -47,6 +47,14 @@ CREATE TABLE bon_commande (
     conditions_paiement text,
     notes               text,
 
+    -- L'ARRIVAGE QUI A FAIT NAITRE CE BON (ADR-003 D2, 14/10/2026). Plus de
+    -- reception « hors commande » : une marchandise arrivee sans commande fait
+    -- creer le bon qui manque, en BROUILLON, et la reception ne se validera
+    -- qu'une fois ce bon regularise. Un seul bon de regularisation par
+    -- arrivage : les lignes suivantes du meme camion s'y ajoutent.
+    -- La cle etrangere est posee par 007 (reception nait apres).
+    id_reception_regularisee text,
+
     id_utilisateur_creation   text NOT NULL REFERENCES utilisateur(id_utilisateur),
     id_utilisateur_validation text REFERENCES utilisateur(id_utilisateur),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

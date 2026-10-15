@@ -32,6 +32,10 @@ interface Reception extends Record<string, unknown> {
   fournisseur_nom: string
   numero_bc: string | null
   id_bc: string | null
+  /* L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier rattache et sa DUM. */
+  id_dossier_import: string | null
+  dossier_numero: string | null
+  numero_dum: string | null
   num_bon_livraison: string | null
   numero_facture: string | null
   transporteur: string | null
@@ -121,6 +125,24 @@ export function Receptions() {
           <span className="tabular-nums">{r.numero_bc}</span>
         ) : (
           <span className="text-attenue-texte">hors commande</span>
+        ),
+    },
+    {
+      /* L'ARRIVAGE D'IMPORT (ADR-003 phase A) : quel dossier, et sa DUM. Vide
+         sur un achat local, qui est le cas ordinaire. */
+      champ: 'dossier_numero',
+      entete: "Dossier d'import",
+      largeur: '150px',
+      rendu: (r) =>
+        r.dossier_numero ? (
+          <div className="min-w-0">
+            <div className="truncate tabular-nums">{r.dossier_numero}</div>
+            {r.numero_dum && (
+              <div className="truncate text-[11px] text-attenue-texte">DUM {r.numero_dum}</div>
+            )}
+          </div>
+        ) : (
+          <span className="text-attenue-texte">local</span>
         ),
     },
     {

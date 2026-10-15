@@ -211,6 +211,12 @@ INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible,
  ('RECEPTIONS','poids_moyen_colis_kg',  'Poids moyen / colis',  'LECTURE', 0,193),
  ('RECEPTIONS','date_fabrication',      'Date de fabrication',  'LECTURE', 0,165),
  ('RECEPTIONS','notes',                 'Observations',         'LECTURE', 0,230),
+ -- L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier auquel il se rattache, et
+ -- ce que ce dossier porte de douanier. Pas des montants : le magasinier les
+ -- voit, c'est ce qui lui dit quel conteneur il est en train de vider.
+ ('RECEPTIONS','dossier_numero',        'Dossier d''import',    'LECTURE', 0, 36),
+ ('RECEPTIONS','numero_dum',            'Numero de DUM',        'LECTURE', 0, 37),
+ ('RECEPTIONS','conteneurs',            'Conteneurs',           'LECTURE', 0, 38),
  -- OTIF : produit de trois conditions, pas moyenne. Une livraison a l'heure
  -- mais incomplete vaut zero — c'est la seule lecture honnete pour un achat.
  ('RECEPTIONS','delai_reel_jours',      'Delai reel (j)',       'LECTURE', 0,240),

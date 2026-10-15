@@ -33,20 +33,52 @@ use crate::error::{AppError, AppResult};
 use serde_json::{json, Value};
 use sqlx::PgConnection;
 
-/// La devise dans laquelle une reception se facture : celle de son bon, a
-/// defaut celle du fournisseur, a defaut le dirham.
+/// LA DEVISE D'UNE RECEPTION : CELLE DE SES LIGNES.
+///
+/// Elle se lisait sur le bon de l'EN-TETE. Depuis que la reception est un
+/// arrivage (ADR-003 phase A), cet en-tete n'a souvent aucun bon — un camion
+/// qui en couvre deux n'en designe aucun —, et la lecture retombait alors sur
+/// la devise du FOURNISSEUR : un conteneur paye en dollars se facturait en
+/// dirhams, au taux 1. Chaque ligne, elle, tient sa devise de sa ligne de bon ;
+/// c'est la seule verite.
+///
+/// Repli, dans l'ordre : le bon de l'en-tete (reception encore sans ligne),
+/// la devise du fournisseur, le dirham.
+///
+/// Expression partagee avec `cloturer`, pour que les deux ne divergent jamais.
+const DEVISE_DE_LA_RECEPTION: &str = "COALESCE(
+         (SELECT CASE WHEN count(DISTINCT lr.code_devise) = 1 THEN min(lr.code_devise) END
+            FROM ligne_reception lr WHERE lr.id_reception = r.id_reception),
+         bc.code_devise, fo.code_devise, 'MAD')";
+
+/// La devise dans laquelle une reception se facture (cf. `DEVISE_DE_LA_RECEPTION`).
+///
+/// UN ARRIVAGE A PLUSIEURS DEVISES NE SE CLOTURE PAS D'UN BLOC : un conteneur
+/// qui porte un bon en dollars et un bon en euros se facture par deux factures,
+/// et les melanger au prorata donnerait une valeur fausse au stock. On le dit
+/// plutot que de choisir une devise au hasard.
 pub async fn devise_reception(c: &mut PgConnection, id_reception: &str) -> AppResult<String> {
-    sqlx::query_scalar(
-        "SELECT COALESCE(bc.code_devise, fo.code_devise, 'MAD')
+    let (devise, devises): (String, Option<String>) = sqlx::query_as(&format!(
+        "SELECT {DEVISE_DE_LA_RECEPTION},
+                (SELECT string_agg(DISTINCT lr.code_devise, ', ')
+                   FROM ligne_reception lr WHERE lr.id_reception = r.id_reception
+                  HAVING count(DISTINCT lr.code_devise) > 1)
            FROM reception r
            LEFT JOIN bon_commande bc ON bc.id_bc = r.id_bc
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = r.code_fournisseur
-          WHERE r.id_reception = $1",
-    )
+          WHERE r.id_reception = $1"
+    ))
     .bind(id_reception)
     .fetch_optional(&mut *c)
     .await?
-    .ok_or_else(|| AppError::Introuvable(format!("reception {id_reception}")))
+    .ok_or_else(|| AppError::Introuvable(format!("reception {id_reception}")))?;
+    if let Some(liste) = devises {
+        return Err(AppError::RegleMetier(format!(
+            "Cet arrivage porte des lignes en {liste} : une facture ne couvre qu'une devise. \
+             Clôturez-le avec une facture par devise."
+        )));
+    }
+    Ok(devise)
 }
 
 /// Une facture de fournisseur, deja convertie en MAD par la route (le taux y
@@ -67,7 +99,7 @@ pub struct FactureLocale {
 
 /// La valeur provisoire d'une reception, par reference : ce que la validation
 /// a fait entrer, au prix du bon (l'archive figee de la reception).
-async fn provisoire(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(String, i64, f64)>> {
+pub(crate) async fn provisoire(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(String, i64, f64)>> {
     Ok(sqlx::query_as(
         "SELECT a.code_reference, round(sum(a.total_mad) * 100)::bigint, sum(a.quantite_stock_kg)::float8
            FROM v_archive_reception_courante a
@@ -84,7 +116,7 @@ async fn provisoire(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(
 /// LES RETOURS FOURNISSEUR NON ENCORE SOLDES d'une reception (regle 3,
 /// 09/10/2026) : (mouvement, numero, reference, kg). Un retour se solde une
 /// fois, par une facture nette ou par un avoir pour retour.
-async fn retours_non_soldes(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(String, String, String, f64)>> {
+pub(crate) async fn retours_non_soldes(c: &mut PgConnection, id_reception: &str) -> AppResult<Vec<(String, String, String, f64)>> {
     Ok(sqlx::query_as(
         "SELECT id_mouvement, numero_mouvement, code_reference, kg::float8
            FROM v_retours_reception
@@ -98,7 +130,7 @@ async fn retours_non_soldes(c: &mut PgConnection, id_reception: &str) -> AppResu
 
 /// La valeur au prix du bon des kilos rendus, par retour et par reference
 /// (le prix moyen provisoire de la reference dans la reception).
-fn valeur_retours(refs: &[(String, i64, f64)], retours: &[(String, String, String, f64)]) -> Vec<i64> {
+pub(crate) fn valeur_retours(refs: &[(String, i64, f64)], retours: &[(String, String, String, f64)]) -> Vec<i64> {
     retours
         .iter()
         .map(|(_, _, reference, kg)| {
@@ -114,7 +146,7 @@ fn valeur_retours(refs: &[(String, i64, f64)], retours: &[(String, String, Strin
 /// Inscrit au journal les retours soldes (nature RETOUR) : par une facture
 /// nette, ou par un avoir pour retour.
 #[allow(clippy::too_many_arguments)]
-async fn solder_retours(
+pub(crate) async fn solder_retours(
     c: &mut PgConnection,
     user: &Utilisateur,
     id_reception: &str,
@@ -149,7 +181,7 @@ async fn solder_retours(
 /// Refuse une reception dont une entree en stock a ete contre-passee : il n'y
 /// a plus de marchandise a valoriser (audit v4 — la cloture lisait l'archive
 /// et revalorisait un stock qui n'etait plus la).
-async fn exiger_entrees_vivantes(c: &mut PgConnection, id_reception: &str, numero: &str) -> AppResult<()> {
+pub(crate) async fn exiger_entrees_vivantes(c: &mut PgConnection, id_reception: &str, numero: &str) -> AppResult<()> {
     let annulees: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT lr.code_magasin_dest
            FROM ligne_reception lr
@@ -180,7 +212,7 @@ async fn exiger_entrees_vivantes(c: &mut PgConnection, id_reception: &str, numer
 /// au stock encore present de ses lots, le reste en ecart de prix — et le
 /// journalise. Commun a la cloture, a l'avoir et a la facture complementaire.
 #[allow(clippy::too_many_arguments)]
-async fn appliquer(
+pub(crate) async fn appliquer(
     c: &mut PgConnection,
     user: &Utilisateur,
     id_reception: &str,
@@ -343,7 +375,7 @@ async fn appliquer(
 }
 
 /// Le seuil de l'avis d'ecart, en % de la valeur provisoire.
-async fn seuil_avis_pct(c: &mut PgConnection) -> AppResult<f64> {
+pub(crate) async fn seuil_avis_pct(c: &mut PgConnection) -> AppResult<f64> {
     let v: Option<f64> = sqlx::query_scalar(
         "SELECT CAST(valeur_courante AS float8) FROM parametre WHERE code_parametre = 'P_ClotureEcartAvisPct'",
     )
@@ -355,7 +387,7 @@ async fn seuil_avis_pct(c: &mut PgConnection) -> AppResult<f64> {
 /// L'AVIS, PAS LE REFUS : une facture tres loin du bon se signale avant de
 /// signer (une virgule deplacee, une facture d'un autre camion), elle ne se
 /// bloque pas — l'ecart peut etre reel.
-fn avis_ecart(numero: &str, provisoire_c: i64, difference_c: i64, seuil: f64) -> Option<String> {
+pub(crate) fn avis_ecart(numero: &str, provisoire_c: i64, difference_c: i64, seuil: f64) -> Option<String> {
     if provisoire_c <= 0 {
         return None;
     }
@@ -391,16 +423,18 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    let entetes: Vec<(String, String, String, String, String)> = sqlx::query_as(
+    let entetes: Vec<(String, String, String, String, String)> = sqlx::query_as(&format!(
+        // La devise vient des LIGNES (cf. DEVISE_DE_LA_RECEPTION) : sur un
+        // arrivage qui couvre deux bons, l'en-tete n'en designe aucun.
         "SELECT r.id_reception, r.numero_reception, r.statut, r.code_fournisseur,
-                COALESCE(bc.code_devise, fo.code_devise, 'MAD')
+                {DEVISE_DE_LA_RECEPTION}
            FROM reception r
            LEFT JOIN bon_commande bc ON bc.id_bc = r.id_bc
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = r.code_fournisseur
           WHERE r.id_reception = ANY($1)
           ORDER BY r.numero_reception
-            FOR UPDATE OF r",
-    )
+            FOR UPDATE OF r"
+    ))
     .bind(&ids)
     .fetch_all(&mut *tx)
     .await?;
@@ -497,6 +531,10 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
     let mut par_reception = Vec::new();
     let mut tout_detail = Vec::new();
     let (mut prov_tot, mut def_tot, mut stock_tot, mut ecart_tot) = (0i64, 0i64, 0i64, 0i64);
+    // Les frais d'approche saisis sur les arrivages, portes au CUMP par cette
+    // cloture : distincts du `frais_mad` tape sur la facture, qui est ce que la
+    // FACTURE porte elle-meme.
+    let mut frais_arrivage_tot: i64 = 0;
 
     for (i, (id, numero, refs, prov_c)) in valeurs.iter().enumerate() {
         let definitif_c = parts_montant[i] + parts_frais[i];
@@ -535,6 +573,74 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
             d["numero_reception"] = json!(numero);
             tout_detail.push(d);
         }
+
+        // ---- LES FRAIS D'APPROCHE DE L'ARRIVAGE (ADR-003 phase C) ----------
+        //
+        // CHACUN SELON SA PROPRE CLE. Un fret se repartit au POIDS, une
+        // assurance a la VALEUR, une manutention en PARTS EGALES. Les fondre
+        // dans le total de la facture les aurait tous repartis a la valeur : la
+        // matiere chere aurait porte le transport de la matiere lourde.
+        //
+        // La base change, le moteur ne change pas : `appliquer` repartit au
+        // prorata de ce qu'on lui donne, puis porte au stock encore present et
+        // trace le reste en ecart de prix, exactement comme pour la facture.
+        let frais_arrivage: Vec<(String, String, String, f64)> = sqlx::query_as(
+            "SELECT id_frais, type_frais, cle_repartition, montant_mad::float8
+               FROM frais_approche
+              WHERE id_reception = $1 AND date_portee IS NULL
+              ORDER BY date_frais, type_frais
+                FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut frais_c: i64 = 0;
+        for (id_frais, type_frais, cle, montant) in &frais_arrivage {
+            let montant_c = (montant * 100.0).round() as i64;
+            if montant_c != 0 {
+                let bases: Vec<(String, i64, f64)> = match cle.as_str() {
+                    // Le poids en dixiemes de gramme : la repartition travaille
+                    // en entiers, et arrondir au kilo perdrait les petites
+                    // lignes d'un arrivage qui en compte beaucoup.
+                    "POIDS" => refs
+                        .iter()
+                        .map(|(r, _, kg)| (r.clone(), (kg * 10_000.0).round() as i64, *kg))
+                        .collect(),
+                    "LIGNES" => refs.iter().map(|(r, _, kg)| (r.clone(), 1, *kg)).collect(),
+                    _ => refs.clone(),
+                };
+                let motif = format!("Frais {type_frais} de l'arrivage {numero}");
+                let (detail_frais, s_c, e_c) = appliquer(
+                    &mut tx, user, id, &bases, montant_c, "FRAIS", numero_facture,
+                    Some(&motif), &horodatage,
+                )
+                .await?;
+                for mut d in detail_frais {
+                    d["numero_reception"] = json!(numero);
+                    d["origine"] = json!("FRAIS");
+                    tout_detail.push(d);
+                }
+                frais_c += montant_c;
+                stock_tot += s_c;
+                ecart_tot += e_c;
+            }
+            // PORTE UNE FOIS. Sans cette marque, une re-cloture apres
+            // devalidation ajouterait les memes frais une seconde fois.
+            sqlx::query("UPDATE frais_approche SET date_portee = $2 WHERE id_frais = $1")
+                .bind(id_frais)
+                .bind(&horodatage)
+                .execute(&mut *tx)
+                .await?;
+        }
+        frais_arrivage_tot += frais_c;
+        if let Some(obj) = par_reception.last_mut().and_then(|v| v.as_object_mut()) {
+            obj.insert("frais_arrivage_mad".into(), json!(frais_c as f64 / 100.0));
+            obj.insert(
+                "valeur_complete_mad".into(),
+                json!((definitif_c + frais_c) as f64 / 100.0),
+            );
+        }
+
         prov_tot += prov_c;
         def_tot += definitif_c;
         stock_tot += stock_c;
@@ -559,6 +665,10 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
         "valeur_provisoire_mad": prov_tot as f64 / 100.0,
         "valeur_definitive_mad": def_tot as f64 / 100.0,
         "difference_mad": (def_tot - prov_tot) as f64 / 100.0,
+        // LE COUT DE REVIENT COMPLET (ADR-003 phase C) : la marchandise de la
+        // facture, plus les frais d'approche de l'arrivage.
+        "frais_arrivage_mad": frais_arrivage_tot as f64 / 100.0,
+        "valeur_complete_mad": (def_tot + frais_arrivage_tot) as f64 / 100.0,
         "au_stock_mad": stock_tot as f64 / 100.0,
         "ecart_prix_mad": ecart_tot as f64 / 100.0,
         "receptions": par_reception,

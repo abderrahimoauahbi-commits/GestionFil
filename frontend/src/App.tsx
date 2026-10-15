@@ -80,6 +80,12 @@ const Retours = lazy(() => import('./pages/retours/Retours').then((m) => ({ defa
 const Retour = lazy(() => import('./pages/retours/Retour').then((m) => ({ default: m.Retour })))
 const BonCommandeNouveau = lazy(() => import('./pages/BonCommandeNouveau').then((m) => ({ default: m.BonCommandeNouveau })))
 const Receptions = lazy(() => import('./pages/Receptions').then((m) => ({ default: m.Receptions })))
+const FacturesFournisseur = lazy(() =>
+  import('./pages/FacturesFournisseur').then((m) => ({ default: m.FacturesFournisseur })),
+)
+const FactureFournisseur = lazy(() =>
+  import('./pages/FactureFournisseur').then((m) => ({ default: m.FactureFournisseur })),
+)
 const Reception = lazy(() => import('./pages/Reception').then((m) => ({ default: m.Reception })))
 const ReceptionNouvelle = lazy(() => import('./pages/ReceptionNouvelle').then((m) => ({ default: m.ReceptionNouvelle })))
 const PlanAchat = lazy(() => import('./pages/PlanAchat').then((m) => ({ default: m.PlanAchat })))
@@ -218,6 +224,12 @@ const ECRANS = (
           le module RECEPTIONS — le magasinier y a ses droits, sans voir les prix. */}
       <Route path="receptions-import" element={<ExigeModule module="RECEPTIONS"><ReceptionsImport /></ExigeModule>} />
       <Route path="receptions-import/:idReception" element={<ExigeModule module="RECEPTIONS"><ReceptionImport /></ExigeModule>} />
+      {/* LA FACTURE FOURNISSEUR, document (ADR-003 phase B) : elle rapproche ce
+          qui a ete commande, pese et facture, puis cloture les arrivages. Le
+          module RECEPTIONS : c'est la meme chaine, et les montants restent
+          masques a qui ne voit pas la valeur du stock. */}
+      <Route path="factures-fournisseur" element={<ExigeModule module="RECEPTIONS"><FacturesFournisseur /></ExigeModule>} />
+      <Route path="factures-fournisseur/:id" element={<ExigeModule module="RECEPTIONS"><FactureFournisseur /></ExigeModule>} />
       <Route path="retours-fournisseur" element={<ExigeModule module="RECEPTIONS"><Retours /></ExigeModule>} />
       <Route path="retours-fournisseur/nouveau" element={<ExigeModule module="RECEPTIONS"><Retour /></ExigeModule>} />
       <Route path="retours-fournisseur/:id" element={<ExigeModule module="RECEPTIONS"><Retour /></ExigeModule>} />

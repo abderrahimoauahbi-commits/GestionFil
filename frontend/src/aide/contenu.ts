@@ -540,6 +540,46 @@ export const SUJETS: Sujet[] = [
   },
 
   {
+    route: '/factures-fournisseur',
+    titre: 'Factures fournisseur',
+    chemin: 'Achats → Factures fournisseur',
+    objectif:
+      'Saisir la facture du fournisseur en face de ce qui est entré, rapprocher commande / pesée / facture, et clôturer les arrivages à leur valeur définitive.',
+    prerequis: [
+      'Les arrivages doivent être validés : une facture ne porte que des pesées dont les poids ne bougent plus.',
+    ],
+    droits:
+      'Écriture du module Réceptions pour saisir le brouillon ; validation pour valider — c’est elle qui bouge le CMUP.',
+    procedures: [
+      {
+        titre: 'Saisir et valider une facture',
+        etapes: [
+          'Nouvelle facture : choisissez le fournisseur, le numéro et la date.',
+          'En devise, le taux est proposé au cours Bank Al-Maghrib du jour de la facture.',
+          'Cochez, dans « ce qui attend sa facture », les pesées que le papier couvre : les kilos et le prix proposés sont ceux du quai et du bon.',
+          'Corrigez ce que la facture dit autrement ; le rapprochement affiche les deux écarts, quantité et prix.',
+          'Enregistrez : c’est un brouillon, rien n’est au CMUP.',
+          'Aperçu : il montre ce que la validation fera au stock et en écart de prix.',
+          'Validez : la valeur définitive part au stock et les arrivages entièrement facturés se clôturent.',
+        ],
+        resultat:
+          'Le CMUP de chaque référence facturée est ajusté de son écart, la part des kilos déjà sortis est tracée hors CMUP, et la facture est figée.',
+      },
+    ],
+    liens: [
+      { route: '/receptions', libelle: 'Réceptions' },
+      { route: '/ecarts-prix', libelle: 'Écarts de prix' },
+    ],
+    regles: [
+      'Une facture couvre plusieurs arrivages et plusieurs bons de commande — c’est rare, mais réel : ce sont ses LIGNES qui disent ce qu’elle facture.',
+      'Une même pesée ne se facture pas deux fois : la base le refuse. C’est le seul écart qui ne se contente pas d’un avis.',
+      'Une référence se facture d’un bloc : on peut n’en facturer qu’une partie des références d’un arrivage, pas une partie des kilos d’une référence.',
+      'L’écart de prix est porté référence par référence : une référence facturée au prix du bon ne bouge pas.',
+      'Validée, la facture est figée : elle a bougé un CMUP. Une correction passe par un avoir ou une facture complémentaire sur l’arrivage.',
+    ],
+  },
+
+  {
     route: '/receptions-import',
     titre: 'Réceptions import',
     chemin: 'Achats → Réceptions import',

@@ -27,8 +27,6 @@ import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { ClotureFacture, CorrectionFacture } from './ReceptionCloture'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
-  GrilleLignes,
-  type ColonneGrille,
   type LigneSaisie,
   type RefLigne,
 } from '../composants/GrilleLignes'
@@ -53,8 +51,8 @@ import {
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
-import { useEstMobile } from '../lib/mediaQuery'
 import { PeseesMobile } from './receptions/PeseesMobile'
+import { FraisApproche } from './receptions/FraisApproche'
 
 const MODULE = 'RECEPTIONS'
 
@@ -67,6 +65,12 @@ interface Reception extends Record<string, unknown> {
   code_devise?: string
   numero_bc: string | null
   id_bc: string | null
+  /* L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier rattache porte la DUM,
+     les conteneurs et le regime. Il ne remplace pas la commande. */
+  id_dossier_import: string | null
+  dossier_numero?: string | null
+  numero_dum?: string | null
+  conteneurs?: string | null
   num_bon_livraison: string | null
   numero_facture: string | null
   transporteur: string | null
@@ -90,6 +94,10 @@ interface Reception extends Record<string, unknown> {
 interface LigneRec extends Record<string, unknown> {
   id_ligne_reception: string
   ligne_numero: number
+  /* LE BON QUE CETTE LIGNE SERT (ADR-003 D2). Un arrivage en couvre plusieurs :
+     le peg est porte par la LIGNE, pas par l'en-tete. */
+  id_ligne_bc: string | null
+  numero_bc: string | null
   /** 1 : la reference se suit par lot (le lot est exige a l'entree en stock). */
   suivi_lot?: number
   code_reference: string
@@ -124,6 +132,18 @@ interface LigneRec extends Record<string, unknown> {
   bobines_par_palette?: number | null
   bobines_par_lot?: number | null
   densite_kg_ml?: number | null
+}
+
+/** Un dossier d'import ouvert : ce qui identifie l'arrivage, aucun montant. */
+interface DossierImport {
+  id_dossier: string
+  numero: string
+  numero_bl: string | null
+  numero_dum: string | null
+  conteneurs: string | null
+  date_arrivee: string | null
+  statut: string
+  fournisseurs: string | null
 }
 
 interface LigneAttendue extends Record<string, unknown> {
@@ -215,6 +235,10 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
     // au crayon ; une frappe egaree ne la modifie pas en passant.
     valide: true,
     extra: {
+      // LE PEG RELU DEPUIS LA BASE : une ligne corrigee garde la ligne de bon
+      // qu'elle servait, et la carte affiche contre quelle commande on a pese.
+      id_ligne_bc: l.id_ligne_bc ?? '',
+      numero_bc: l.numero_bc ?? '',
       prix_mad: l.prix_kg_mad != null ? String(l.prix_kg_mad) : '',
       bl: l.quantite_bl_kg != null ? String(l.quantite_bl_kg) : '',
       colis: l.nb_colis_ligne != null ? String(l.nb_colis_ligne) : '',
@@ -364,9 +388,6 @@ export function Reception() {
   const { moi } = useAuth()
   const qc = useQueryClient()
   const naviguer = useNavigate()
-  // Sous 768 px, la grille large cede la place a la pesee au doigt (cartes +
-  // feuille plein ecran) ; au-dessus, la grille reste.
-  const estMobile = useEstMobile()
 
   const [entete, setEntete] = useState({
     num_bon_livraison: '',
@@ -375,6 +396,7 @@ export function Reception() {
     nombre_colis: '',
     poids_total_brut_kg: '',
     date_reception: '',
+    id_dossier_import: '',
   })
   /*
    * UNE SEULE SOURCE POUR LES LIGNES, comme sur le bon de commande.
@@ -429,6 +451,7 @@ export function Reception() {
       nombre_colis: rec.nombre_colis?.toString() ?? '',
       poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
       date_reception: rec.date_reception?.slice(0, 10) ?? '',
+      id_dossier_import: rec.id_dossier_import ?? '',
     })
   }, [
     rec?.id_reception,
@@ -438,6 +461,7 @@ export function Reception() {
     rec?.nombre_colis,
     rec?.poids_total_brut_kg,
     rec?.date_reception,
+    rec?.id_dossier_import,
   ])
 
   /* DECLARE AVANT L'EFFET QUI LE LIT. `const` n'est pas remonte : plus bas, il
@@ -465,8 +489,6 @@ export function Reception() {
     setNouvelles(chargees)
   }, [id, modifiable, qLignes.isSuccess, lignesServeur])
 
-  const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
-
   const qMagasins = useQuery({
     queryKey: ['magasins'],
     queryFn: () =>
@@ -474,6 +496,24 @@ export function Reception() {
         '/api/magasins',
       ),
   })
+
+  /*
+   * LES DOSSIERS D'IMPORT OUVERTS (ADR-003 phase A).
+   *
+   * Un arrivage venu de l'etranger se rattache au dossier qui porte sa DUM et
+   * ses conteneurs. La liste est servie par la route des receptions, pas par
+   * celle de l'import : c'est le magasinier qui dit quel conteneur il vide, et
+   * il n'a pas a lire les dossiers d'import pour cela.
+   */
+  const qDossiers = useQuery({
+    queryKey: ['receptions-dossiers-import'],
+    queryFn: ({ signal }) =>
+      api.get<DossierImport[]>('/api/receptions-dossiers-import', { signal }),
+    enabled: !!modifiable,
+  })
+  const dossierRattache = (qDossiers.data ?? []).find(
+    (d) => d.id_dossier === entete.id_dossier_import,
+  )
 
   /*
    * CE QUE LE BON DE COMMANDE ATTEND ENCORE, propose comme references.
@@ -502,6 +542,11 @@ export function Reception() {
           designation: a.designation,
           unite_catalogue: a.unite_catalogue,
           code_fournisseur: rec?.code_fournisseur ?? null,
+          // LE PEG (ADR-003 D2) : la pesee sert CETTE ligne de bon. Sans lui,
+          // la ligne entrait sans engagement et le serveur devait inventer un
+          // bon de regularisation pour une marchandise bel et bien commandee.
+          id_ligne_bc: a.id_ligne_bc,
+          numero_bc: a.numero_bc,
           poids_bobine_kg: a.poids_bobine_kg,
           bobines_par_palette: a.bobines_par_palette,
           bobines_par_lot: a.bobines_par_lot,
@@ -524,128 +569,6 @@ export function Reception() {
     return api.get<RefLigne[]>(`/api/references-commandables?${q}`)
   }
 
-  /*
-   * LES COLONNES QUE LA RECEPTION AJOUTE A LA GRILLE.
-   *
-   * La grille ne sait pas ce qu'est un lot ni un magasin de destination : elle
-   * les range dans `extra` et les rend par ces descriptions. C’est ce qui lui
-   * permet de servir quatre documents sans porter les champs des trois autres.
-   */
-  const colonnesReception: ColonneGrille[] = [
-    {
-      cle: 'bl',
-      entete: 'Qté BL (kg)',
-      largeur: 'w-28',
-      alignement: 'right',
-      rendu: (l, poser) => (
-        <Champ
-          type="number"
-          step="any"
-          min="0"
-          value={l.extra?.bl ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9 text-right tabular-nums"
-          aria-label="Quantité annoncée au bon de livraison, en kilos"
-        />
-      ),
-    },
-    {
-      cle: 'colis',
-      entete: 'Colis (BL)',
-      largeur: 'w-20',
-      alignement: 'right',
-      rendu: (l, poser) => (
-        <Champ
-          type="number"
-          min="0"
-          value={l.extra?.colis ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9 text-right tabular-nums"
-          aria-label="Nombre de colis annoncé au bon de livraison"
-        />
-      ),
-    },
-    {
-      cle: 'lot',
-      entete: 'Lot fournisseur',
-      largeur: 'w-32',
-      rendu: (l, poser) => (
-        <Champ
-          value={l.extra?.lot ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9"
-          aria-label="Lot du fournisseur"
-        />
-      ),
-    },
-    {
-      cle: 'magasin',
-      entete: 'Magasin',
-      largeur: 'w-36',
-      rendu: (l, poser) => (
-        <Selecteur
-          value={l.extra?.magasin ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9"
-          aria-label="Magasin de destination"
-        >
-          <option value="">—</option>
-          {(qMagasins.data ?? []).map((m) => (
-            <option key={m.code_magasin} value={m.code_magasin}>
-              {m.nom}
-            </option>
-          ))}
-        </Selecteur>
-      ),
-    },
-    {
-      cle: 'derog',
-      entete: 'Dérogation',
-      largeur: 'w-44',
-      rendu: (l, poser) => (
-        <label className="flex items-center gap-1.5 text-[12px]" title="Un excédent au-delà de la tolérance du fournisseur exige une dérogation motivée">
-          <input
-            type="checkbox"
-            checked={l.extra?.derog === '1'}
-            onChange={(e) => poser(e.target.checked ? '1' : '')}
-            disabled={rec?.statut !== 'BROUILLON'}
-            aria-label="Dérogation à l’écart de pesée"
-          />
-          {l.extra?.derog === '1' && (
-            <Champ
-              value={l.extra?.motif_derog ?? ''}
-              onChange={(e) =>
-                setNouvelles((ls) =>
-                  ls.map((x) => (x.cle === l.cle ? { ...x, extra: { ...x.extra, motif_derog: e.target.value } } : x)),
-                )
-              }
-              placeholder="Motif"
-              className="h-8 min-w-0"
-              disabled={rec?.statut !== 'BROUILLON'}
-              aria-label="Motif de la dérogation"
-            />
-          )}
-        </label>
-      ),
-    },
-    {
-      cle: 'qualite',
-      entete: 'Qualité',
-      largeur: 'w-36',
-      rendu: (l, poser) => (
-        <Selecteur
-          value={l.extra?.qualite ?? 'CONFORME'}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9"
-          aria-label="Statut qualité de la ligne"
-        >
-          <option value="CONFORME">Conforme</option>
-          <option value="QUARANTAINE">Quarantaine</option>
-          <option value="NON_CONFORME">Non conforme</option>
-        </Selecteur>
-      ),
-    },
-  ]
   /** Retirer une ligne : de l'ecran tout de suite, de la base a l'enregistrement. */
   const retirerLigne = (ligne: LigneSaisie) => {
     if (ligne.idExistant) setSupprimees((s) => [...s, ligne.idExistant as string])
@@ -659,7 +582,8 @@ export function Reception() {
       entete.transporteur !== (rec.transporteur ?? '') ||
       entete.nombre_colis !== (rec.nombre_colis?.toString() ?? '') ||
       entete.poids_total_brut_kg !== (rec.poids_total_brut_kg?.toString() ?? '') ||
-      entete.date_reception !== (rec.date_reception?.slice(0, 10) ?? ''))
+      entete.date_reception !== (rec.date_reception?.slice(0, 10) ?? '') ||
+      entete.id_dossier_import !== (rec.id_dossier_import ?? ''))
 
   const lignes = qLignes.data ?? []
 
@@ -697,6 +621,12 @@ export function Reception() {
             ? Number(entete.poids_total_brut_kg)
             : undefined,
           date_reception: entete.date_reception || undefined,
+          // VIDE = DETACHER, absent = ne pas y toucher. Sans ce signe, un
+          // dossier rattache par erreur ne pourrait plus s'enlever.
+          id_dossier_import:
+            entete.id_dossier_import !== (rec?.id_dossier_import ?? '')
+              ? entete.id_dossier_import
+              : undefined,
         })
       }
       for (const ligne of supprimees) {
@@ -1099,6 +1029,14 @@ export function Reception() {
               : 'Réception figee.'}
         </Alerte>
       )}
+      {/* LES FRAIS D'APPROCHE AVANT LA CLOTURE (ADR-003 phase C) : c'est elle
+          qui les porte au CMUP, chacun selon sa cle. L'ordre de l'ecran suit
+          l'ordre du geste — on saisit ce qu'on a paye, puis on cloture. */}
+      {(rec.statut === 'VALIDE' || rec.statut === 'CLOTURE') && (
+        <div className="mb-3">
+          <FraisApproche idReception={id!} statut={rec.statut} />
+        </div>
+      )}
       {/* LA VALEUR DEFINITIVE (regle 6) : la facture, puis la cloture. */}
       {rec.statut === 'VALIDE' && droits.peutValider && (
         <div className="mb-3">
@@ -1236,6 +1174,72 @@ export function Reception() {
                 className="text-right tabular-nums"
               />
             </div>
+            {/* L'ARRIVAGE D'IMPORT (ADR-003 phase A). Le dossier porte la DUM,
+                les conteneurs et le regime ; il se RATTACHE a l'arrivage et ne
+                remplace pas la commande — le prix de chaque ligne vient
+                toujours de sa ligne de bon. */}
+            <div>
+              <Etiq htmlFor="dossier">
+                Dossier d’import
+                <Aide>
+                  Pour une marchandise venue de l’étranger : le dossier qui porte la DUM et
+                  les conteneurs. Le prix reste celui du bon de commande.
+                </Aide>
+              </Etiq>
+              <Selecteur
+                id="dossier"
+                value={entete.id_dossier_import}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, id_dossier_import: e.target.value })}
+              >
+                <option value="">— Achat local —</option>
+                {(qDossiers.data ?? []).map((d) => (
+                  <option key={d.id_dossier} value={d.id_dossier}>
+                    {d.numero}
+                    {d.numero_bl ? ` · BL ${d.numero_bl}` : ''}
+                    {d.fournisseurs ? ` · ${d.fournisseurs}` : ''}
+                  </option>
+                ))}
+                {/* Le dossier deja rattache n'est plus dans la liste quand il a
+                    ete clos : le montrer quand meme, sinon le champ parait vide
+                    alors que la reception en porte un. */}
+                {entete.id_dossier_import && !dossierRattache && (
+                  <option value={entete.id_dossier_import}>
+                    {rec.dossier_numero ?? 'Dossier clos'}
+                  </option>
+                )}
+              </Selecteur>
+            </div>
+            {(dossierRattache ?? rec.id_dossier_import) && (
+              <div>
+                <Etiq>Douane du dossier</Etiq>
+                <p className="pt-1.5 text-[13px] tabular-nums">
+                  {(dossierRattache?.numero_dum ?? rec.numero_dum) ? (
+                    <>DUM {dossierRattache?.numero_dum ?? rec.numero_dum}</>
+                  ) : (
+                    <span className="text-attenue-texte">DUM non saisie</span>
+                  )}
+                  {(dossierRattache?.conteneurs ?? rec.conteneurs) && (
+                    <span className="text-attenue-texte">
+                      {' · '}
+                      {dossierRattache?.conteneurs ?? rec.conteneurs}
+                    </span>
+                  )}
+                </p>
+              </div>
+            )}
+            {rec.code_devise && rec.code_devise !== 'MAD' && (
+              <div>
+                <Etiq>
+                  Devise de l’arrivage
+                  <Aide>
+                    Celle des lignes, prise à leur ligne de bon. Le stock entre en dirhams,
+                    au taux du jour de la réception.
+                  </Aide>
+                </Etiq>
+                <p className="pt-1.5 text-[13px] font-medium">{rec.code_devise}</p>
+              </div>
+            )}
           </CarteCorps>
         </Carte>
 
@@ -1245,43 +1249,21 @@ export function Reception() {
           </CarteEntete>
           <CarteCorps className="p-0">
             {modifiable ? (
-              estMobile ? (
-                /* LA PESEE AU DOIGT, sous 768 px : la grille large deborde sur
-                   un telephone de quai. Meme etat `nouvelles`, meme validation
-                   locale — seule la forme change (cartes + feuille plein ecran). */
-                <PeseesMobile
-                  lignes={nouvelles}
-                  setLignes={setNouvelles}
-                  proposees={proposees}
-                  chercherCatalogue={chercherCatalogue}
-                  magasins={qMagasins.data ?? []}
-                  tolerancePct={TOLERANCE_PCT}
-                  brouillon={rec.statut === 'BROUILLON'}
-                  surRetirer={retirerLigne}
-                />
-              ) : (
-                /* LA MEME GRILLE QUE LE BON DE COMMANDE. Les colonnes propres a
-                   la reception — BL, colis, lot, magasin, qualite — lui sont
-                   decrites ; elle les place et les rend, sans avoir a les
-                   comprendre. Le prix et les champs fournisseur sont masques :
-                   une reception ne negocie rien, son prix vient du bon. */
-                <GrilleLignes
-                  controleColisage
-                  codeFournisseur={rec.code_fournisseur ?? ''}
-                  devise={rec.code_devise ?? 'MAD'}
-                  lignes={nouvelles}
-                  setLignes={setNouvelles}
-                  mode={mode}
-                  setMode={setMode}
-                  proposees={proposees}
-                  chercherCatalogue={chercherCatalogue}
-                  sansPrix
-                  sansFournisseur
-                  colonnesSupplementaires={colonnesReception}
-                  validationLocale
-                  surSupprimerLigne={retirerLigne}
-                />
-              )
+              /* SAISIE RECEPTION SIMPLE, bureau comme telephone (ADR-003, Phase A).
+                 La reception a son PROPRE geste — peser contre des lignes de bon
+                 de commande — distinct de la grille large du bon de commande.
+                 Lignes simples (cartes + feuille plein ecran) ; les colonnes
+                 BL/colis/lot/magasin/qualite vivent dans la feuille d'edition. */
+              <PeseesMobile
+                lignes={nouvelles}
+                setLignes={setNouvelles}
+                proposees={proposees}
+                chercherCatalogue={chercherCatalogue}
+                magasins={qMagasins.data ?? []}
+                tolerancePct={TOLERANCE_PCT}
+                brouillon={rec.statut === 'BROUILLON'}
+                surRetirer={retirerLigne}
+              />
             ) : (
               <DataTable<LigneRec>
                 exportable="lignes-de-reception"
@@ -1354,6 +1336,7 @@ export function Reception() {
                     nombre_colis: rec.nombre_colis?.toString() ?? '',
                     poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
                     date_reception: rec.date_reception?.slice(0, 10) ?? '',
+                    id_dossier_import: rec.id_dossier_import ?? '',
                   })
                 }
                 setSupprimees([])

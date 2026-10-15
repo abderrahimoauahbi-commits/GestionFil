@@ -109,6 +109,52 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // ADR-003 phase B : la facture fournisseur est un document. Sans ses
+        // tables, l'ecran et sa validation tombent.
+        "2026-10-14d_facture_fournisseur.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables
+                         WHERE table_schema = 'public' AND table_name = 'facture_fournisseur')
+            AND EXISTS (SELECT 1 FROM information_schema.views
+                         WHERE table_schema = 'public' AND table_name = 'v_facture_rapprochement')",
+    ),
+    (
+        // ADR-003 phase C : les frais d'approche d'un arrivage local vont au
+        // CMUP, chacun selon sa cle. Sans la colonne, la cloture tombe.
+        "2026-10-14c_frais_approche_cmup.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'frais_approche'
+                           AND column_name = 'date_portee')",
+    ),
+    (
+        // ADR-003 phase C : l'import se recoit par l'arrivage. L'etancheite
+        // local/import depend du circuit du dossier ; sans cette migration, un
+        // dossier bascule refuserait ses propres pesees.
+        "2026-10-14b_import_sur_arrivage.sql",
+        // `pg_get_functiondef` sur un regproc absent LEVE : on passe par pg_proc,
+        // qui ne rend simplement aucune ligne.
+        "SELECT EXISTS (SELECT 1 FROM pg_proc p
+                         WHERE p.proname = 'fn_trg_reception_locale_hors_import'
+                           AND pg_get_functiondef(p.oid) LIKE '%circuit_reception%')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_dossiers'
+                           AND column_name = 'circuit_reception'
+                           AND column_default LIKE '%BON%')",
+    ),
+    (
+        // ADR-003 phase A : la reception est un arrivage, rattache a un dossier
+        // d'import. Sans la colonne, toute creation de reception tombe.
+        "2026-10-14a_reception_arrivage.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reception'
+                           AND column_name = 'id_dossier_import')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'bon_commande'
+                           AND column_name = 'id_reception_regularisee')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_dossiers'
+                           AND column_name = 'circuit_reception')",
+    ),
+    (
         // Le complement de palette est fige sur la proposition : la liste du
         // plan d'achat ne recalcule plus le MRP a l'ouverture.
         "2026-10-14_plan_achat_complement_palette.sql",

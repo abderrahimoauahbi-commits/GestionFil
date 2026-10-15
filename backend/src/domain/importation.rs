@@ -646,6 +646,48 @@ pub async fn valider_reception_dans(
     }))
 }
 
+/// LES KILOS RECUS D'UN DOSSIER BASCULE, RELUS DEPUIS SES ARRIVAGES.
+///
+/// ADR-003 phase C. Un dossier en `circuit_reception = 'BON'` ne recoit plus
+/// contre ses lignes de facture : sa marchandise se pese dans la reception
+/// unifiee, contre les lignes du bon de commande qui l'a engagee. Toute la
+/// chaine des frais — le reste a recevoir, la base de repartition, la
+/// localisation des lots, le CUMP definitif — lit pourtant
+/// `import_facture_lignes.quantite_recue_kg`.
+///
+/// UN RECALCUL, PAS UN INCREMENT. La facture arrive souvent APRES le camion :
+/// un compteur incremente a la validation aurait rate les kilos entres avant
+/// qu'elle soit saisie, et le dossier aurait refuse de se cloturer en disant
+/// qu'il restait tout a recevoir. On relit donc, a chaque fois, ce que les
+/// arrivages valides de ce dossier ont fait entrer sur la ligne de bon.
+///
+/// Sans effet sur un dossier en `FACTURE` : la, c'est l'ecran des receptions
+/// d'import qui tient ce compteur, et lui seul.
+pub async fn synchroniser_recu_arrivages(tx: &mut PgConnection, id_dossier: &str) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE import_facture_lignes fl
+            SET quantite_recue_kg = n.kg
+           FROM (SELECT fl2.id_ligne,
+                        COALESCE((SELECT ROUND(SUM(lr.quantite_stock_kg), 4)
+                                    FROM ligne_reception lr
+                                    JOIN reception r ON r.id_reception = lr.id_reception
+                                   WHERE lr.id_ligne_bc = fl2.id_ligne_bc
+                                     AND r.id_dossier_import = $1
+                                     AND r.statut IN ('VALIDE', 'CLOTURE')), 0) AS kg
+                   FROM import_facture_lignes fl2
+                   JOIN import_factures f ON f.id_facture = fl2.id_facture
+                  WHERE f.id_dossier = $1 AND fl2.id_ligne_bc IS NOT NULL) n
+          WHERE fl.id_ligne = n.id_ligne
+            AND fl.quantite_recue_kg IS DISTINCT FROM n.kg
+            AND EXISTS (SELECT 1 FROM import_dossiers d
+                         WHERE d.id_dossier = $1 AND d.circuit_reception = 'BON')",
+    )
+    .bind(id_dossier)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
 /// Le statut de reception de chaque facture du dossier, deduit de ses lignes
 /// ERP : une facture qui n'en porte aucune n'a rien a attendre.
 pub async fn statuer_factures(tx: &mut PgConnection, id_dossier: &str) -> AppResult<()> {
@@ -768,6 +810,10 @@ async fn porter(
         // Ils allaient a tout le stock de la reference : 5 745 MAD finissaient
         // dans un magasin qui n'avait rien recu du dossier.
         let stocks: Vec<(String, f64, Option<f64>, f64)> = sqlx::query_as(
+            // LES DEUX CIRCUITS, D'OU QUE LA MARCHANDISE SOIT ENTREE (phase C) :
+            // les lignes de reception d'import pour un dossier en FACTURE, les
+            // lignes d'arrivage pour un dossier bascule en BON. L'UNION les
+            // reunit ; un dossier n'a jamais les deux (l'etancheite y veille).
             "WITH recu AS (
                  SELECT rl.lot_fournisseur, rl.code_magasin, rl.quantite_recue_kg
                    FROM import_reception_lignes rl
@@ -775,6 +821,13 @@ async fn porter(
                    JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
                    JOIN import_factures f ON f.id_facture = l.id_facture
                   WHERE f.id_dossier = $1 AND l.code_reference = $2
+                 UNION ALL
+                 SELECT lr.lot_fournisseur, lr.code_magasin_dest AS code_magasin,
+                        lr.quantite_stock_kg AS quantite_recue_kg
+                   FROM ligne_reception lr
+                   JOIN reception r2 ON r2.id_reception = lr.id_reception
+                                    AND r2.statut IN ('VALIDE', 'CLOTURE')
+                  WHERE r2.id_dossier_import = $1 AND lr.code_reference = $2
              ), lots AS (
                  SELECT DISTINCT btrim(lot_fournisseur) AS lot FROM recu
                   WHERE COALESCE(btrim(lot_fournisseur), '') <> ''
@@ -942,6 +995,11 @@ pub async fn cloturer_dans(
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("dossier {id_dossier}")))?;
 
+    // LES KILOS RECUS D'ABORD (phase C) : un dossier bascule les tient de ses
+    // arrivages, et c'est sur eux que portent toutes les gardes qui suivent.
+    synchroniser_recu_arrivages(tx, id_dossier).await?;
+    statuer_factures(tx, id_dossier).await?;
+
     match statut.as_str() {
         "CLOTURE" if !post_cloture => {
             return Err(AppError::RegleMetier(format!("Le dossier {numero} est déjà clôturé.")))
@@ -985,14 +1043,19 @@ pub async fn cloturer_dans(
     }
 
     // Une reception en brouillon qui porte une ligne du dossier : elle ferait
-    // entrer du stock APRES la repartition des frais.
+    // entrer du stock APRES la repartition des frais. Les ARRIVAGES rattaches
+    // au dossier comptent de la meme facon depuis la phase C — sans eux, un
+    // camion encore sur la bascule passait inapercu de la cloture.
     let brouillons: i64 = sqlx::query_scalar(
-        "SELECT count(DISTINCT r.id_reception)
-           FROM import_receptions r
-           JOIN import_reception_lignes rl ON rl.id_reception = r.id_reception
-           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
-           JOIN import_factures f ON f.id_facture = l.id_facture
-          WHERE f.id_dossier = $1 AND r.statut IN ('BROUILLON','A_CONTROLER')",
+        "SELECT (SELECT count(DISTINCT r.id_reception)
+                   FROM import_receptions r
+                   JOIN import_reception_lignes rl ON rl.id_reception = r.id_reception
+                   JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+                   JOIN import_factures f ON f.id_facture = l.id_facture
+                  WHERE f.id_dossier = $1 AND r.statut IN ('BROUILLON','A_CONTROLER'))
+              + (SELECT count(*) FROM reception r2
+                  WHERE r2.id_dossier_import = $1
+                    AND r2.statut IN ('BROUILLON','A_CONTROLER'))",
     )
     .bind(id_dossier)
     .fetch_one(&mut *tx)

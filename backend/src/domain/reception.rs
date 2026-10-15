@@ -41,6 +41,10 @@ struct EnteteReception {
     id_bc: Option<String>,
     code_fournisseur: String,
     id_utilisateur_reception: String,
+    /// Le dossier d'import de l'arrivage (ADR-003 phase A). C'est par lui que
+    /// la chaine des frais d'import retrouve les kilos que ce camion a
+    /// apportes.
+    id_dossier_import: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -92,7 +96,7 @@ pub async fn valider(
     // ---- 1. Entete ----------------------------------------------------------
     let entete: EnteteReception = sqlx::query_as(
         "SELECT numero_reception, date_reception, statut, id_bc,
-                code_fournisseur, id_utilisateur_reception
+                code_fournisseur, id_utilisateur_reception, id_dossier_import
            FROM reception WHERE id_reception = $1",
     )
     .bind(id_reception)
@@ -614,6 +618,26 @@ pub async fn valider(
         .bind(&user.id)
         .execute(&mut *tx)
         .await?;
+
+    // ---- 9. L'ARRIVAGE D'IMPORT NOURRIT SON DOSSIER (ADR-003 phase C) ------
+    //
+    // Un dossier bascule (`circuit_reception = 'BON'`) ne recoit plus contre
+    // ses lignes de facture : sa marchandise se pese ici. Toute sa chaine de
+    // frais — reste a recevoir, base de repartition, localisation des lots,
+    // CUMP definitif — lit pourtant `import_facture_lignes.quantite_recue_kg`.
+    // On le relit donc depuis les arrivages, et le dossier passe EN_COURS : de
+    // la marchandise est entree, il y a desormais un stock a ajuster.
+    if let Some(id_dossier) = &entete.id_dossier_import {
+        crate::domain::importation::synchroniser_recu_arrivages(&mut tx, id_dossier).await?;
+        sqlx::query(
+            "UPDATE import_dossiers SET statut = 'EN_COURS'
+              WHERE id_dossier = $1 AND statut = 'BROUILLON'",
+        )
+        .bind(id_dossier)
+        .execute(&mut *tx)
+        .await?;
+        crate::domain::importation::statuer_factures(&mut tx, id_dossier).await?;
+    }
 
     tx.commit().await?;
 

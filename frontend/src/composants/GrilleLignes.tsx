@@ -80,6 +80,17 @@ export interface RefLigne extends Record<string, unknown> {
   statut_stock?: string | null
   qte_a_commander_kg?: number | null
   prix_suggere_devise?: number
+  /**
+   * LA LIGNE DE BON QUE CETTE REFERENCE VIENT SERVIR (ADR-003 D2).
+   *
+   * En reception, une proposition n'est pas « une reference du catalogue » :
+   * c'est une ligne de commande dont la marchandise est arrivee. Le peg doit
+   * suivre jusqu'a l'enregistrement, sinon la pesee entre sans engagement et
+   * le serveur doit inventer un bon de regularisation pour chaque ligne.
+   * Les autres documents (bon de commande, transfert) l'ignorent.
+   */
+  id_ligne_bc?: string | null
+  numero_bc?: string | null
 }
 
 export interface LigneSaisie {
@@ -357,6 +368,12 @@ export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {
     reference_fournisseur: r.reference_fournisseur ?? '',
     couleur: r.couleur ?? '',
     code_couleur: r.code_couleur ?? '',
+    // LE PEG VOYAGE DANS `extra` : la grille le transporte sans le comprendre,
+    // et la reception le rend au serveur a l'enregistrement. Absent sur les
+    // autres documents, il n'y ajoute rien.
+    ...(r.id_ligne_bc
+      ? { extra: { id_ligne_bc: r.id_ligne_bc, numero_bc: r.numero_bc ?? '' } }
+      : {}),
   }
 }
 

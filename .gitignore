@@ -84,3 +84,9 @@ frontend/dist-essai/
 # Paquets de publication : fabriques a la demande, jamais versionnes (audit du 13/10/2026).
 deploiement/*.tar.gz
 deploiement/paquet/
+
+# --- Reglages locaux de l outil (retires du suivi le 13/10/2026, commit 35cccc0) ---
+# Ils portent des chemins et des reglages propres au poste : ils ne se partagent pas.
+.claude/
+.mcp.json
+skills-lock.json

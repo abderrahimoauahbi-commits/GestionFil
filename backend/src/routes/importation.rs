@@ -78,6 +78,9 @@ pub async fn lister_dossiers(
     let lignes = sqlx::query(
         "SELECT d.id_dossier, d.numero, d.numero_bl, d.conteneurs, d.code_devise, d.taux_change,
                 d.date_arrivee, d.statut, d.date_creation, d.date_cloture,
+                -- Par quel circuit il recoit sa marchandise (ADR-003 phase A) :
+                -- FACTURE pour les dossiers d'avant la bascule, BON depuis.
+                d.circuit_reception,
                 (SELECT count(*) FROM import_factures f WHERE f.id_dossier = d.id_dossier) AS nb_factures,
                 (SELECT string_agg(DISTINCT fo.nom, ', ')
                    FROM import_factures f JOIN fournisseur fo ON fo.code_fournisseur = f.code_fournisseur
@@ -1515,6 +1518,12 @@ pub async fn a_recevoir(
            LEFT JOIN bon_commande bc ON bc.id_bc = lb.id_bc
           WHERE d.statut <> 'CLOTURE' AND ($1::text IS NULL OR d.id_dossier = $1)
             AND l.type_ligne = 'ERP' AND l.soldee = 0 AND l.reste_kg > 0
+            -- LA BASCULE DOUCE (ADR-003 phase A, 14/10/2026). Cet ecran ne sert
+            -- plus qu'aux dossiers d'AVANT la bascule : eux finissent de se
+            -- recevoir ici, sur leurs lignes de facture, sans qu'on touche a
+            -- leur valorisation. Un dossier ne depuis se recoit par la
+            -- reception unifiee, contre les lignes de son bon de commande.
+            AND d.circuit_reception = 'FACTURE'
           ORDER BY d.numero, f.numero_facture, l.ligne_numero",
     )
     .bind(q.get("dossier").filter(|s| !s.is_empty()))
@@ -1635,6 +1644,30 @@ async fn inserer_lignes_reception(
     lignes: &[LigneRecue],
     id_utilisateur: &str,
 ) -> AppResult<()> {
+    // LA BASCULE DOUCE (ADR-003 phase A, 14/10/2026). Ce circuit — recevoir
+    // contre des lignes de FACTURE — ne sert plus qu'aux dossiers ouverts avant
+    // la bascule, le temps qu'ils se terminent. Un dossier ne depuis se recoit
+    // par la reception unifiee, sur bon de commande : le refuser ici, c'est
+    // empecher qu'une meme marchandise entre par deux portes.
+    let ids: Vec<String> = lignes.iter().map(|l| l.id_ligne.clone()).collect();
+    let apres: Option<String> = sqlx::query_scalar(
+        "SELECT string_agg(DISTINCT d.numero, ', ')
+           FROM import_facture_lignes l
+           JOIN import_factures f ON f.id_facture = l.id_facture
+           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+          WHERE l.id_ligne = ANY($1) AND d.circuit_reception <> 'FACTURE'",
+    )
+    .bind(&ids)
+    .fetch_one(&mut *tx)
+    .await?;
+    if let Some(numeros) = apres {
+        return Err(AppError::RegleMetier(format!(
+            "Le dossier {numeros} se recoit sur bon de commande : sa marchandise se pese \
+             dans Receptions, contre les lignes du bon qui l'a engagee (ADR-003). \
+             Cet ecran ne sert plus qu'aux dossiers ouverts avant la bascule."
+        )));
+    }
+
     for l in lignes {
         let derogation = l.derogation_ecart.unwrap_or(0) == 1;
         let motif = l.motif_derogation.as_deref().map(str::trim).unwrap_or("");

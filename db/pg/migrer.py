@@ -61,6 +61,10 @@ EMPREINTES_REMPLACEES: dict[str, set[str]] = {
     "2026-10-08b_audit_v4.sql": {"b0d8a8015ece08fbf035c0693945aa8a32d49f934a9adf84bd0a73f8403939cc"},
     # 13/10/2026 au soir : l'obligation de double authentification (Admin, Direction) retiree.
     "2026-10-13c_securite.sql": {"65fab75c30cd387f31437cdb2a9b3fe76de500b818212bc7b8237cdcb8fc6447"},
+    # 14/10/2026 (ADR-003 phase C) : 'FRAIS' entre dans ck_rec_ajust_origine. Corrige
+    # DANS CETTE migration parce qu'elle se rejoue : rejouee sur une base qui porte
+    # deja des ajustements 'FRAIS', l'ancienne liste echouait sur ses propres lignes.
+    "2026-10-09g_avoirs_retours.sql": {"30cc67b5115c101cffeb9443e9e87641656793e534307d225972668ac60f7518"},
 }
 
 

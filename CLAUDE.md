@@ -171,6 +171,25 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
 
 - `docs/ADR-001-decisions-fondatrices.md` — décisions d'architecture.
 - `docs/ADR-002-regles-de-gestion-2026-10.md` — les 18 règles du 08/10/2026 : décision, lieu de la garantie, contrôle.
+- `docs/ADR-003-reception-unifiee-gr-ir-landed-cost.md` — réception unifiée GR → IR → Landed Cost
+  (logique SAP, CMUP seul). **Phase A livrée le 14/10** (migration `2026-10-14a_reception_arrivage.sql`,
+  exigée au démarrage) : une réception est un **arrivage** dont chaque **ligne** pege à une ligne de bon
+  de commande — un bon ou plusieurs ; le dossier d'import se rattache à l'en-tête ; une ligne sans bon
+  fait naître le bon de régularisation (un seul par arrivage) et bloque la validation jusqu'à son envoi.
+  **Phase C livrée le 14/10** (`2026-10-14b`, `2026-10-14c`, exigées au démarrage) — l'ordre est devenu
+  A → C → B, C étant le préalable de la bascule de l'import : `synchroniser_recu_arrivages` relit les kilos
+  d'un dossier depuis ses arrivages validés (recalcul, pas incrément : la facture arrive après le camion),
+  l'étanchéité local/import et le contrôle C45 ne visent plus que les dossiers restés en circuit `FACTURE`,
+  et `import_dossiers.circuit_reception` passe à `BON` par défaut (les dossiers déjà ouverts gardent
+  `FACTURE` et finissent dans `/receptions-import`). Les frais d'approche d'un arrivage local vont au CMUP
+  **chacun selon sa clé** (poids / valeur / parts égales), une fois (`frais_approche.date_portee` les fige),
+  journalisés en `origine = 'FRAIS'`.
+  **Phase B livrée le 14/10** (`2026-10-14d`, exigée au démarrage) : `facture_fournisseur` +
+  `ligne_facture_fournisseur`, chaque ligne pegée à une **ligne de réception** (donc au bon et à l'arrivage) ;
+  `v_facture_rapprochement` donne le 3-way par ligne ; l'écart de prix est porté **exact par référence** (là où
+  l'ancienne saisie, qui n'a qu'un total, le répartit au prorata — elle reste en place, même moteur) ;
+  `FACTURE-DOUBLE` refuse de facturer deux fois la même pesée, `FACTURE-BLOC` refuse de couper une référence en
+  deux factures, et l'arrivage ne se clôture que quand tout est facturé. Écrans `/factures-fournisseur`.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
 - `db/README.md` — invariants, vues, contrôles C01–C54 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, tous des signaux).

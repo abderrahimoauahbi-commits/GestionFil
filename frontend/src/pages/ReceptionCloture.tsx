@@ -27,6 +27,7 @@ import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Etiq
 import { cn, fmt } from '../lib/utils'
 import { PanneRequetes } from '../composants/PanneRequetes'
 import { lireNombre } from '../lib/nombres'
+import { Aide } from '../composants/ui/surcouches'
 
 interface LigneRef {
   code_reference: string
@@ -46,6 +47,11 @@ interface Resultat {
   valeur_provisoire_mad: number
   valeur_definitive_mad: number
   difference_mad: number
+  /* LES FRAIS D'APPROCHE DE L'ARRIVAGE (ADR-003 phase C), portes au CMUP par
+     cette cloture, chacun selon sa cle. Distincts du champ « Frais » ci-dessous,
+     qui est ce que la FACTURE porte elle-meme. */
+  frais_arrivage_mad?: number
+  valeur_complete_mad?: number
   au_stock_mad: number
   ecart_prix_mad: number
   references: LigneRef[]
@@ -271,7 +277,14 @@ export function ClotureFacture({
             </div>
           )}
           <div>
-            <Etiq htmlFor="ch-receptioncloture-5">Frais (transport, manutention) en MAD</Etiq>
+            <Etiq htmlFor="ch-receptioncloture-5">
+              Frais portés par la facture (MAD)
+              <Aide>
+                Ce que le fournisseur facture en plus de la marchandise. Les frais payés à
+                part — fret, douane, transitaire — se saisissent sur l’arrivage, chacun avec
+                sa clé de répartition, et la clôture les porte aussi au CMUP.
+              </Aide>
+            </Etiq>
             <Champ id="ch-receptioncloture-5" inputMode="decimal" className="text-right tabular-nums" value={f.frais} onChange={maj('frais')} />
           </div>
           {enDevise && tauxEffectif != null && nb(f.montant) > 0 && (
@@ -310,6 +323,23 @@ export function ClotureFacture({
               {apercu.avis!.map((a) => <li key={a}>{a}</li>)}
             </ul>
           </Alerte>
+        )}
+        {/* LE COUT DE REVIENT COMPLET, avant de signer : sans cette ligne, on
+            cloture sans voir que les frais d'approche saisis sur l'arrivage
+            vont, eux aussi, rejoindre le CMUP. */}
+        {apercu && (apercu.frais_arrivage_mad ?? 0) > 0 && (
+          <p className="text-[12.5px] tabular-nums">
+            Marchandise {fmt.nombre(apercu.valeur_definitive_mad, 2)} MAD
+            <span className="text-attenue-texte">
+              {' + frais d’approche de l’arrivage '}
+              {fmt.nombre(apercu.frais_arrivage_mad!, 2)} MAD
+            </span>
+            {' = '}
+            <span className="font-medium">
+              {fmt.nombre(apercu.valeur_complete_mad ?? 0, 2)} MAD
+            </span>
+            <span className="text-attenue-texte"> de coût de revient</span>
+          </p>
         )}
         {apercu && <TableApercu r={apercu} plusieurs={(apercu.receptions?.length ?? 1) > 1} />}
 

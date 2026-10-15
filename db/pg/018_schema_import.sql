@@ -73,6 +73,21 @@ CREATE TABLE import_dossiers (
     date_arrivee        text,
     statut              text    NOT NULL DEFAULT 'BROUILLON'
                                 CHECK (statut IN ('BROUILLON','EN_COURS','CLOTURE')),
+    -- PAR QUEL CIRCUIT CE DOSSIER RECOIT SA MARCHANDISE (ADR-003, 14/10/2026).
+    --   BON     : la marchandise se pese dans la RECEPTION UNIFIEE, contre les
+    --             lignes du bon de commande qui l'a engagee. C'est le defaut
+    --             depuis la phase C : la chaine des frais (cloture,
+    --             repartition, CUMP definitif) sait lire les arrivages.
+    --   FACTURE : par ses lignes de facture, dans l'ecran des receptions
+    --             d'import. Les dossiers ouverts avant la bascule finissent
+    --             par la : leur marchandise est en route et leurs factures
+    --             portent deja des kilos recus.
+    -- Le marqueur est porte par le dossier et non par une date : un dossier
+    -- ouvert la veille dont le conteneur arrive dans deux mois doit finir par
+    -- le circuit ou il a commence. C'est lui, aussi, qui conditionne
+    -- l'etancheite local / import (010b, fn_trg_reception_locale_hors_import).
+    circuit_reception   text    NOT NULL DEFAULT 'BON'
+                                CHECK (circuit_reception IN ('BON','FACTURE')),
     notes               text,
     id_utilisateur_creation text NOT NULL REFERENCES utilisateur(id_utilisateur),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
@@ -599,3 +614,50 @@ CREATE TABLE import_engagements (
     UNIQUE (id_dossier, numero_ei)
 );
 CREATE INDEX idx_import_engagements_numero ON import_engagements (numero_ei);
+
+
+-- =============================================================================
+-- L'ARRIVAGE D'IMPORT SE RATTACHE AU DOSSIER (ADR-003 D2, 14/10/2026)
+-- -----------------------------------------------------------------------------
+-- La colonne vit dans 007 (module des receptions) ; la cle etrangere ne peut
+-- etre posee qu'ici, ou `import_dossiers` existe enfin. Un arrivage porte UN
+-- dossier : la DUM est celle du dossier (01/10/2026), et un conteneur ne se
+-- dedouane pas deux fois.
+-- =============================================================================
+ALTER TABLE reception
+    ADD CONSTRAINT fk_reception_dossier_import
+    FOREIGN KEY (id_dossier_import) REFERENCES import_dossiers(id_dossier);
+
+-- Un arrivage ne se rattache pas a un dossier CLOS (sa valeur est deja portee
+-- au CUMP), et le rattachement ne bouge plus une fois la marchandise en stock :
+-- les frais du dossier se repartiront sur ces lignes-la.
+CREATE OR REPLACE FUNCTION fn_trg_reception_dossier() RETURNS trigger AS $$
+DECLARE
+    v_statut  text;
+    v_numero  text;
+BEGIN
+    -- OLD n'existe pas a l'INSERT : ne jamais le lire hors du UPDATE.
+    IF TG_OP = 'UPDATE' AND NEW.id_dossier_import IS DISTINCT FROM OLD.id_dossier_import
+       AND OLD.statut IN ('VALIDE', 'CLOTURE') THEN
+        RAISE EXCEPTION 'La reception % est % : son dossier d''import ne change plus (les frais se repartissent sur ces lignes).',
+            OLD.numero_reception, OLD.statut USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NEW.id_dossier_import IS NOT NULL
+       AND (TG_OP = 'INSERT' OR NEW.id_dossier_import IS DISTINCT FROM OLD.id_dossier_import) THEN
+        SELECT statut, numero INTO v_statut, v_numero
+          FROM import_dossiers WHERE id_dossier = NEW.id_dossier_import;
+        IF v_statut = 'CLOTURE' THEN
+            RAISE EXCEPTION 'Le dossier d''import % est clos : sa valeur est deja portee au CUMP, on ne peut plus y rattacher un arrivage.',
+                v_numero USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_reception_dossier ON reception;
+CREATE TRIGGER trg_reception_dossier
+    BEFORE INSERT OR UPDATE OF id_dossier_import, statut ON reception
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_reception_dossier();

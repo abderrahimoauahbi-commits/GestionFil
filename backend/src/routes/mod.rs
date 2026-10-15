@@ -13,6 +13,7 @@ pub(crate) mod auth_routes;
 mod consultation;
 mod devalidation;
 mod entites;
+mod factures;
 mod importation;
 mod lots;
 mod machines;
@@ -387,6 +388,10 @@ pub fn router(state: AppState) -> Router {
         // Sans `{id}` : sert aussi a la creation, quand la reception n'existe pas
         // encore et qu'on vient de designer le bon de commande.
         .route("/api/lignes-attendues", get(stock::lignes_attendues))
+        // Les dossiers d'import ouverts, pour l'en-tete d'un arrivage (ADR-003
+        // phase A). Garde par RECEPTIONS : le magasinier dit quel conteneur il
+        // vide sans avoir a lire les dossiers d'import.
+        .route("/api/receptions-dossiers-import", get(stock::dossiers_import_ouverts))
         .route("/api/receptions/{id}/lignes",
                get(stock::lignes_reception).post(stock::ajouter_ligne_reception))
         .route(
@@ -398,6 +403,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/receptions/{id}/cloturer", post(operations::cloturer_reception))
         .route("/api/receptions/{id}/facture-contexte", get(operations::contexte_facture_reception))
         .route("/api/receptions/{id}/avoir", post(operations::corriger_reception))
+        // --- La facture fournisseur, document (ADR-003 phase B) --------------
+        // `a-facturer` AVANT `{id}` : un chemin fixe ne doit pas se faire
+        // prendre pour un identifiant.
+        .route("/api/factures-fournisseur/a-facturer", get(factures::a_facturer))
+        .route("/api/factures-fournisseur",
+               get(factures::lister).post(factures::creer))
+        .route("/api/factures-fournisseur/{id}",
+               get(factures::lire).patch(factures::modifier).delete(factures::supprimer))
+        .route("/api/factures-fournisseur/{id}/valider", post(factures::valider))
         .route("/api/plan-achat", get(consultation::plan_achat))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))
@@ -425,6 +439,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/ecarts-prix", get(consultation::ecarts_prix))
         .route("/api/frais-approche",
              get(consultation::frais_approche).post(operations::creer_frais_approche))
+        // Un frais se retire tant qu'il n'est pas porte au CUMP (ADR-003 phase C).
+        .route("/api/frais-approche/{id}", delete(operations::supprimer_frais_approche))
         .route("/api/stats/mouvements", get(consultation::stats_mouvements))
         .route("/api/stats/familles", get(consultation::stats_familles))
         .route("/api/stats/prix", get(consultation::stats_prix))

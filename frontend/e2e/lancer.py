@@ -60,6 +60,7 @@ EXEMPLES = {
     "etats/receptions/:id": "SELECT id_reception FROM reception ORDER BY date_creation DESC LIMIT 1",
     "import/:id": "SELECT id_dossier FROM import_dossiers ORDER BY date_creation DESC LIMIT 1",
     "receptions-import/:idReception": "SELECT id_reception FROM import_receptions ORDER BY date_creation DESC LIMIT 1",
+    "factures-fournisseur/:id": "SELECT id_facture FROM facture_fournisseur ORDER BY date_creation DESC LIMIT 1",
     "mouvements/:id": "SELECT id_mouvement FROM mouvement ORDER BY date_mouvement DESC LIMIT 1",
     "machines/:code": "SELECT code_machine FROM machine ORDER BY code_machine LIMIT 1",
     "utilisateurs/:id/droits": "SELECT id_utilisateur FROM utilisateur WHERE login = 'Magasinie'",

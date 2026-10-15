@@ -63,6 +63,21 @@ def bon_envoye(c, lignes, frs=FRS, date_bc=None):
     return id_bc, lignes
 
 
+def dossier_avant_bascule(c, infra, numero, devise="USD"):
+    """Un dossier d'import de l'ANCIEN circuit : celui qui recoit par ses LIGNES DE FACTURE.
+
+    Depuis la phase C (ADR-003), un dossier neuf nait en `circuit_reception = 'BON'` : sa
+    marchandise se pese dans la reception unifiee. Les dossiers OUVERTS AVANT la bascule, eux,
+    finissent par l'ecran qui les a vus naitre — leur marchandise est en route et leurs factures
+    portent deja des kilos recus. C'est cette population que l'on simule ici, parce qu'elle doit
+    continuer de marcher : `scenario_import` et `scenario_import_coherence` la prouvent.
+    Rend l'id du dossier."""
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": numero, "code_devise": devise})
+    id_dossier = d.get("id_dossier") or d.get("id")
+    infra.sql(f"UPDATE import_dossiers SET circuit_reception = 'FACTURE' WHERE id_dossier = '{id_dossier}'")
+    return id_dossier
+
+
 def reception_validee(c, id_bc, lignes_bc, pesees, mag=MAG, **ligne_extra):
     """Pesee par le magasinier, soumise, validee par la Direction. Rend l'id de la reception."""
     lignes = []
@@ -271,6 +286,326 @@ def scenario_saisie_libre(c, infra):
     verifier(controle(infra, "C11") == 0, "C11 apres la saisie libre")
 
 
+def scenario_arrivage_unifie(c, infra):
+    """ADR-003 phase A : une reception est un ARRIVAGE — un camion, un BL — dont chaque LIGNE pege a
+    une ligne de bon de commande. Un arrivage couvre un bon (local) ou plusieurs (groupage). Le
+    dossier d'import se rattache a l'en-tete ; la ligne sans peg fait naitre le bon qui manquait ; et
+    l'ancien circuit des lignes de facture est ferme aux dossiers nes depuis la bascule."""
+    # Deux bons du meme fournisseur : un seul camion les apporte tous les deux.
+    _id_bc1, l1 = bon_envoye(c, [(REF, 300, 20.0)])
+    _id_bc2, l2 = bon_envoye(c, [(REF2, 200, 18.0)])
+
+    # L'ARRIVAGE N'A PAS DE BON D'EN-TETE : ce sont ses lignes qui portent le peg.
+    r = c.ok("Magasinie", "POST", "/api/receptions", {
+        "code_fournisseur": FRS, "num_bon_livraison": "BL-ARRIVAGE",
+        "lignes": [
+            {"code_reference": REF, "id_ligne_bc": l1[0]["id_ligne_bc"], "unite_saisie": "kg",
+             "quantite_pesee_unite": 300, "code_magasin_dest": MAG},
+            {"code_reference": REF2, "id_ligne_bc": l2[0]["id_ligne_bc"], "unite_saisie": "kg",
+             "quantite_pesee_unite": 200, "code_magasin_dest": MAG},
+        ]})
+    rid = r["id_reception"]
+    verifier(r.get("numero_bc_regularisation") is None,
+             f"un bon de regularisation pour un arrivage entierement commande : {r}")
+
+    # D2 : AUCUNE LIGNE SANS SA LIGNE DE BON, et l'arrivage couvre bien deux bons.
+    orphelines = int(infra.valeur(
+        f"SELECT count(*) FROM ligne_reception WHERE id_reception = '{rid}' AND id_ligne_bc IS NULL"))
+    verifier(orphelines == 0, f"{orphelines} ligne(s) recue(s) sans ligne de bon")
+    bons = int(infra.valeur(
+        "SELECT count(DISTINCT lb.id_bc) FROM ligne_reception lr "
+        f"JOIN ligne_bc lb ON lb.id_ligne_bc = lr.id_ligne_bc WHERE lr.id_reception = '{rid}'"))
+    verifier(bons == 2, f"l'arrivage couvre {bons} bon(s) au lieu de 2")
+
+    # L'ecran lit les deux bons sur l'arrivage, et chaque ligne dit le sien : sans ce repere, le
+    # magasinier ne sait pas contre quelle commande il pese.
+    vue = next(x for x in c.ok("Choukri", "GET", "/api/receptions") if x["id_reception"] == rid)
+    verifier(vue.get("numero_bc") and "," in vue["numero_bc"],
+             f"la liste ne montre pas les deux bons de l'arrivage : {vue.get('numero_bc')}")
+    lignes_vues = c.ok("Choukri", "GET", f"/api/receptions/{rid}/lignes")
+    verifier(all(x.get("numero_bc") for x in lignes_vues),
+             "une ligne recue arrive a l'ecran sans son numero de bon")
+
+    # UNE LIGNE SANS PEG fait naitre le bon qui manquait, en BROUILLON — UN SEUL pour l'arrivage,
+    # meme si deux lignes arrivent sans commande.
+    c.ok("Magasinie", "POST", f"/api/receptions/{rid}/lignes", {
+        "code_reference": REF, "unite_saisie": "kg", "quantite_pesee_unite": 40,
+        "code_magasin_dest": MAG})
+    c.ok("Magasinie", "POST", f"/api/receptions/{rid}/lignes", {
+        "code_reference": REF2, "unite_saisie": "kg", "quantite_pesee_unite": 15,
+        "code_magasin_dest": MAG})
+    regul = infra.sql("SELECT id_bc, numero_bc, statut FROM bon_commande "
+                      f"WHERE id_reception_regularisee = '{rid}'")
+    verifier(len(regul) == 1, f"{len(regul)} bon(s) de regularisation pour un seul arrivage : {regul}")
+    verifier(regul[0][2] == "BROUILLON",
+             f"le bon de regularisation nait {regul[0][2]} au lieu de BROUILLON")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM ligne_bc WHERE id_bc = '{regul[0][0]}'")) == 2,
+             "les deux lignes sans commande n'ont pas rejoint le meme bon")
+    orphelines = int(infra.valeur(
+        f"SELECT count(*) FROM ligne_reception WHERE id_reception = '{rid}' AND id_ligne_bc IS NULL"))
+    verifier(orphelines == 0, "une ligne ajoutee sans commande est restee sans ligne de bon")
+
+    # Tant que ce bon n'est pas envoye, la marchandise n'est engagee par personne : la validation
+    # refuse, en le nommant. C'est tout l'interet de la regularisation.
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.refus("Choukri", "POST", f"/api/receptions/{rid}/valider", contient=regul[0][1])
+
+    # LE DOSSIER D'IMPORT SE RATTACHE A L'EN-TETE. Il porte la DUM et les conteneurs ; il ne
+    # remplace pas la commande — le prix de chaque ligne reste celui de son bon.
+    dos = c.ok("Choukri", "POST", "/api/import/dossiers",
+               {"numero": "BANC/ARRIVAGE", "code_devise": "USD"})
+    id_dossier = dos.get("id_dossier") or dos.get("id")
+    # DEPUIS LA PHASE C, un dossier neuf nait sur le circuit du bon de commande : sa marchandise
+    # se pese ici, et la chaine des frais sait l'y retrouver.
+    verifier(infra.valeur("SELECT circuit_reception FROM import_dossiers "
+                          f"WHERE id_dossier = '{id_dossier}'") == "BON",
+             "un dossier neuf ne nait pas sur le circuit du bon de commande")
+    infra.sql("UPDATE import_dossiers SET numero_dum = '123 010 26 456789', "
+              f"conteneurs = 'MSCU1234567' WHERE id_dossier = '{id_dossier}'")
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": id_dossier})
+    vue = next(x for x in c.ok("Choukri", "GET", "/api/receptions") if x["id_reception"] == rid)
+    verifier(vue.get("dossier_numero") == "BANC/ARRIVAGE"
+             and vue.get("numero_dum") == "123 010 26 456789",
+             f"le dossier rattache ne se lit pas sur l'arrivage : {vue.get('dossier_numero')}")
+    # Le magasinier choisit son conteneur sans lire les dossiers d'import.
+    ouverts = c.ok("Magasinie", "GET", "/api/receptions-dossiers-import")
+    verifier(any(d["id_dossier"] == id_dossier for d in ouverts),
+             "le dossier ouvert ne descend pas a l'ecran du magasinier")
+    # Vide = detacher ; c'est le seul moyen de reparer un rattachement errone.
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": ""})
+    verifier(infra.valeur("SELECT COALESCE(id_dossier_import, '-') FROM reception "
+                          f"WHERE id_reception = '{rid}'") == "-", "le dossier ne se detache pas")
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": id_dossier})
+
+    # UN DOSSIER CLOS NE RECOIT PLUS D'ARRIVAGE : sa valeur est deja portee au CUMP.
+    clos = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/CLOS", "code_devise": "USD"})
+    id_clos = clos.get("id_dossier") or clos.get("id")
+    infra.sql("UPDATE import_dossiers SET statut = 'CLOTURE', "
+              "date_cloture = to_char(current_date, 'YYYY-MM-DD'), "
+              "id_utilisateur_cloture = (SELECT id_utilisateur FROM utilisateur WHERE login = 'Choukri') "
+              f"WHERE id_dossier = '{id_clos}'")
+    c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": id_clos}, contient="clos")
+
+    # L'ANCIEN CIRCUIT EST FERME AUX DOSSIERS NES DEPUIS LA BASCULE : une meme marchandise ne doit
+    # pas pouvoir entrer par deux portes.
+    #
+    # ON NE TOUCHE PAS AUX TAUX ICI. Poser un cours USD du jour (`taux_usd_du_jour`) laissait une
+    # ligne de `taux_change` ouverte le jour meme ; `import_coherence`, plus loin, la fermait a la
+    # meme date et butait sur `taux_change_check` (date_fin > date_debut). Le cours de reference du
+    # jour existe deja au referentiel : on le LIT, comme le scenario import.
+    jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={jour}")["reference"]
+    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-ARRIVAGE", "date_facture": jour,
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 200})
+    id_facture = fac.get("id_facture") or fac.get("id")
+    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+        "type_ligne": "ERP", "code_reference": "PP-1500 Dtex-Cream 2951-Hs", "unite": "kg",
+        "quantite": 100, "poids_net_kg": 100, "prix_unitaire_devise": 2.0,
+        "lot_fournisseur": "LOT-ARR-1"})
+    id_ligne = lig.get("id_ligne") or lig.get("id")
+    # LA FRONTIERE EST GARDEE DANS LES DEUX SENS : le dossier recoit sur son bon, donc sa ligne de
+    # facture ne se propose plus a l'ancien ecran, et le serveur y refuse ses lignes. Une meme
+    # marchandise ne doit jamais pouvoir entrer par deux portes.
+    a_recevoir = c.ok("Magasinie", "GET", "/api/import/a-recevoir")
+    verifier(all(x["id_ligne"] != id_ligne for x in a_recevoir),
+             "la ligne de facture d'un dossier en circuit BON reste a recevoir dans l'ancien ecran")
+    c.refus("Magasinie", "POST", "/api/import/receptions",
+            {"date_reception": jour, "lignes": [{"id_ligne": id_ligne, "quantite_recue_kg": 100,
+                                                 "code_magasin": MAG, "lot_fournisseur": "LOT-ARR-1"}]},
+            contient="bon de commande")
+    # L'ancien circuit, lui, continue de servir les dossiers ouverts avant la bascule.
+    ancien = dossier_avant_bascule(c, infra, "BANC/AVANT")
+    fac_a = c.ok("Choukri", "POST", f"/api/import/dossiers/{ancien}/factures", {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-AVANT", "date_facture": jour,
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 200})
+    lig_a = c.ok("Choukri", "POST",
+                 f"/api/import/factures/{fac_a.get('id_facture') or fac_a.get('id')}/lignes",
+                 {"type_ligne": "ERP", "code_reference": "PP-1500 Dtex-Cream 2951-Hs",
+                  "unite": "kg", "quantite": 100, "poids_net_kg": 100,
+                  "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-AVANT-1"})
+    id_lig_a = lig_a.get("id_ligne") or lig_a.get("id")
+    verifier(any(x["id_ligne"] == id_lig_a for x in c.ok("Magasinie", "GET", "/api/import/a-recevoir")),
+             "un dossier d'avant la bascule ne trouve plus ses lignes a recevoir")
+
+    verifier(controle(infra, "C11") == 0, "C11 apres l'arrivage unifie")
+
+
+def scenario_frais_approche_locaux(c, infra):
+    """ADR-003 phase C (2/2) : les frais d'approche d'un arrivage LOCAL vont au CUMP, et CHACUN
+    SELON SA CLE — un fret au poids, une assurance a la valeur.
+
+    La table `frais_approche` existait depuis le portage et personne ne s'en servait : aucun de
+    ces frais n'atteignait le CUMP, et la cloture ne connaissait qu'un total tape sur la facture,
+    reparti a la valeur. Reparti ainsi, le fret se fait payer au prix du kilo : la matiere chere
+    porte le transport de la matiere lourde. C'est exactement ce que ce scenario mesure.
+
+    Deux references au profil oppose, dans un seul arrivage :
+        A = 100 kg a 50 MAD/kg -> 5 000 MAD de valeur, 100 kg de poids
+        B = 400 kg a 10 MAD/kg -> 4 000 MAD de valeur, 400 kg de poids
+    Fret 1 000 MAD AU POIDS      -> A : 200, B : 800
+    Assurance 900 MAD A LA VALEUR -> A : 500, B : 400
+                                     A : 700 au total, B : 1 200.
+    Tout a la valeur, A en aurait porte 1 055,56 : les deux cles ne se confondent pas."""
+    id_bc, lignes = bon_envoye(c, [(REF, 100, 50.0), (REF2, 400, 10.0)])
+    rid = reception_validee(c, id_bc, lignes, [100, 400])
+
+    # Les frais se saisissent sur l'arrivage VALIDE : avant, les poids peuvent encore changer, et
+    # repartir un fret sur des poids provisoires donnerait un cout a refaire.
+    frais = {"id_reception": rid, "code_devise": "MAD", "taux_change": 1.0}
+    c.ok("Choukri", "POST", "/api/frais-approche",
+         dict(frais, type_frais="FRET", libelle="Transport Tanger-Casablanca",
+              montant_devise=1000, cle_repartition="POIDS", reference_externe="FT-BANC-1"))
+    c.ok("Choukri", "POST", "/api/frais-approche",
+         dict(frais, type_frais="ASSURANCE", libelle="Assurance transport",
+              montant_devise=900, cle_repartition="VALEUR", reference_externe="AS-BANC-1"))
+    # Le magasinier ne voit pas ces montants : le module Valorisation lui est ferme.
+    c.refus("Magasinie", "GET", f"/api/frais-approche?code_reference={rid}", codes=(403,))
+
+    avant_a, stock_a = cmup_magasin(infra, REF), kg(infra, REF)
+    avant_b, stock_b = cmup_magasin(infra, REF2), kg(infra, REF2)
+
+    # LA FACTURE AU PRIX DU BON : aucune difference de prix, seuls les frais bougent le CUMP.
+    corps = {"numero_facture": "FA-FRAIS-1", "montant_facture": 9000, "frais_mad": 0,
+             "date_facture": infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")}
+    ap = c.ok("Choukri", "POST", f"/api/receptions/{rid}/cloturer", dict(corps, simuler=True))
+    verifier(abs(ap["difference_mad"]) < 0.01, f"la facture au prix du bon laisse un ecart : {ap['difference_mad']}")
+    verifier(abs(ap["frais_arrivage_mad"] - 1900) < 0.01,
+             f"frais d'arrivage attendus 1 900, obtenus {ap.get('frais_arrivage_mad')}")
+    verifier(abs(ap["valeur_complete_mad"] - 10900) < 0.01,
+             f"cout de revient complet attendu 10 900, obtenu {ap.get('valeur_complete_mad')}")
+    verifier(abs(cmup_magasin(infra, REF) - avant_a) < 1e-6, "l'apercu de la cloture a ecrit")
+
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/cloturer", dict(corps, simuler=False))
+    porte_a = (cmup_magasin(infra, REF) - avant_a) * stock_a
+    porte_b = (cmup_magasin(infra, REF2) - avant_b) * stock_b
+    verifier(abs(porte_a - 700) < 0.05, f"{REF} a porte {porte_a:.2f} MAD de frais au lieu de 700")
+    verifier(abs(porte_b - 1200) < 0.05, f"{REF2} a porte {porte_b:.2f} MAD de frais au lieu de 1 200")
+
+    # LE JOURNAL DIT POURQUOI LE CUMP A BOUGE : les frais s'y lisent a part de l'ecart de prix.
+    montant_frais = float(infra.valeur(
+        "SELECT COALESCE(sum(montant_mad), 0) FROM reception_ajustements_cmup "
+        f"WHERE id_reception = '{rid}' AND origine = 'FRAIS' AND nature = 'STOCK'"))
+    verifier(abs(montant_frais - 1900) < 0.05,
+             f"le journal porte {montant_frais} MAD de frais au stock au lieu de 1 900")
+
+    # PORTE UNE FOIS. Marque, le frais est fige : il a bouge une valeur de stock.
+    non_portes = int(infra.valeur(f"SELECT count(*) FROM frais_approche WHERE id_reception = '{rid}' AND date_portee IS NULL"))
+    verifier(non_portes == 0, f"{non_portes} frais n'ont pas ete marques portes au CUMP")
+    refus_sql(infra, f"UPDATE frais_approche SET montant_devise = 5000 WHERE id_reception = '{rid}'", "FRAIS-PORTE")
+    refus_sql(infra, f"DELETE FROM frais_approche WHERE id_reception = '{rid}'", "FRAIS-PORTE")
+
+    verifier(controle(infra, "C11") == 0, "C11 apres les frais d'approche locaux")
+
+
+def scenario_facture_document(c, infra):
+    """ADR-003 phase B : la facture fournisseur est un DOCUMENT — ses lignes pegent aux pesees,
+    le rapprochement 3-way se lit avant de signer, et la validation porte l'ecart de prix EXACT
+    PAR REFERENCE avant de cloturer les arrivages entierement factures.
+
+    LE POINT QUI SE MESURE ICI. L'ancienne saisie ne connaissait qu'un total : elle repartissait
+    la difference au prorata de la valeur provisoire, donc l'ecart d'UNE reference s'etalait sur
+    toutes. Avec des lignes, l'ecart de chacune est connu. On facture donc une reference 2 MAD/kg
+    plus cher et l'autre au prix du bon : la seconde ne doit PAS bouger. Au prorata, elle aurait
+    pris sa part."""
+    id_bc, lignes = bon_envoye(c, [(REF, 200, 40.0), (REF2, 100, 10.0)])
+    rid = reception_validee(c, id_bc, lignes, [200, 100])
+
+    # CE QUI ATTEND SA FACTURE : les pesees validees que rien ne couvre.
+    attente = c.ok("Choukri", "GET", f"/api/factures-fournisseur/a-facturer?fournisseur={FRS}")
+    miennes = [x for x in attente if x["id_reception"] == rid]
+    verifier(len(miennes) == 2, f"{len(miennes)} pesee(s) a facturer au lieu de 2")
+    a = next(x for x in miennes if x["code_reference"] == REF)
+    b = next(x for x in miennes if x["code_reference"] == REF2)
+    verifier(abs(a["prix_kg_devise"] - 40.0) < 1e-9 and a["numero_bc"],
+             f"la pesee a facturer ne porte pas son prix engage ni son bon : {a}")
+
+    # La facture : REF facturee 42 (2 de plus que le bon), REF2 au prix du bon.
+    f = c.ok("Choukri", "POST", "/api/factures-fournisseur", {
+        "numero_facture": "FF-BANC-1", "code_fournisseur": FRS,
+        "lignes": [
+            {"id_ligne_reception": a["id_ligne_reception"], "quantite_facturee_kg": 200,
+             "prix_kg_devise": 42.0},
+            {"id_ligne_reception": b["id_ligne_reception"], "quantite_facturee_kg": 100,
+             "prix_kg_devise": 10.0},
+        ]})
+    idf = f["id_facture"]
+
+    # LE RAPPROCHEMENT 3-WAY se lit ligne par ligne, avant toute ecriture de valeur.
+    lu = c.ok("Choukri", "GET", f"/api/factures-fournisseur/{idf}")
+    par_ref = {l["code_reference"]: l for l in lu["lignes"]}
+    verifier(abs(par_ref[REF]["ecart_prix_devise"] - 2.0) < 1e-9,
+             f"ecart de prix attendu +2 sur {REF}, lu {par_ref[REF].get('ecart_prix_devise')}")
+    verifier(abs(par_ref[REF2]["ecart_prix_devise"]) < 1e-9,
+             f"{REF2} est facturee au prix du bon, son ecart devrait etre nul")
+    verifier(abs(par_ref[REF]["ecart_quantite_kg"]) < 1e-9,
+             "la quantite facturee egale la pesee : l'ecart devrait etre nul")
+
+    # UNE MEME PESEE NE SE FACTURE PAS DEUX FOIS : la base le refuse sec.
+    c.refus("Choukri", "POST", "/api/factures-fournisseur", {
+        "numero_facture": "FF-BANC-DOUBLE", "code_fournisseur": FRS,
+        "lignes": [{"id_ligne_reception": a["id_ligne_reception"], "quantite_facturee_kg": 200,
+                    "prix_kg_devise": 42.0}]}, contient="FACTURE-DOUBLE")
+
+    # L'APERCU N'ECRIT RIEN, et dit ce que la validation fera.
+    cm_a, stock_a = cmup_magasin(infra, REF), kg(infra, REF)
+    cm_b = cmup_magasin(infra, REF2)
+    ap = c.ok("Choukri", "POST", f"/api/factures-fournisseur/{idf}/valider", {"simuler": True})
+    verifier(abs(ap["difference_mad"] - 400) < 0.01,
+             f"difference attendue +400 (200 kg x 2 MAD), obtenue {ap['difference_mad']}")
+    verifier(abs(cmup_magasin(infra, REF) - cm_a) < 1e-6, "l'apercu de la facture a ecrit")
+    verifier(infra.valeur(f"SELECT statut FROM facture_fournisseur WHERE id_facture = '{idf}'") == "BROUILLON",
+             "l'apercu a valide la facture")
+
+    # LA VALIDATION : l'ecart va a la reference qui l'a, et a elle seule.
+    c.ok("Choukri", "POST", f"/api/factures-fournisseur/{idf}/valider", {"simuler": False})
+    verifier(abs(cmup_magasin(infra, REF) - (cm_a + 400 / stock_a)) < 0.0002,
+             f"{REF} : CMUP {cmup_magasin(infra, REF)} au lieu de {cm_a + 400 / stock_a}")
+    verifier(abs(cmup_magasin(infra, REF2) - cm_b) < 1e-6,
+             f"{REF2} est facturee au prix du bon et son CMUP a bouge ({cm_b} -> "
+             f"{cmup_magasin(infra, REF2)}) : l'ecart n'est pas exact par reference")
+    verifier(infra.valeur(f"SELECT statut FROM reception WHERE id_reception = '{rid}'") == "CLOTURE",
+             "l'arrivage entierement facture n'est pas cloture")
+
+    # FIGEE : ses lignes et ses montants ne bougent plus.
+    refus_sql(infra, f"DELETE FROM ligne_facture_fournisseur WHERE id_facture = '{idf}'", "FACTURE-FIGEE")
+    refus_sql(infra, f"UPDATE facture_fournisseur SET taux_change = 2 WHERE id_facture = '{idf}'",
+              "FACTURE-FIGEE")
+    c.refus("Choukri", "DELETE", f"/api/factures-fournisseur/{idf}", contient="CUMP")
+
+    # UNE REFERENCE SE FACTURE D'UN BLOC : deux pesees de la meme reference ne se coupent pas en
+    # deux factures — la valeur provisoire et les lots se tiennent par reference.
+    id_bc2, lignes2 = bon_envoye(c, [(REF, 100, 40.0), (REF, 50, 40.0)])
+    rid2 = reception_validee(c, id_bc2, lignes2, [100, 50])
+    attente2 = [x for x in c.ok("Choukri", "GET", f"/api/factures-fournisseur/a-facturer?fournisseur={FRS}")
+                if x["id_reception"] == rid2]
+    verifier(len(attente2) == 2, f"{len(attente2)} pesee(s) sur le second arrivage au lieu de 2")
+    partielle = c.ok("Choukri", "POST", "/api/factures-fournisseur", {
+        "numero_facture": "FF-BANC-2", "code_fournisseur": FRS,
+        "lignes": [{"id_ligne_reception": attente2[0]["id_ligne_reception"],
+                    "quantite_facturee_kg": attente2[0]["quantite_stock_kg"],
+                    "prix_kg_devise": 40.0}]})
+    c.refus("Choukri", "POST", f"/api/factures-fournisseur/{partielle['id_facture']}/valider",
+            {"simuler": True}, contient="FACTURE-BLOC")
+    # Complete, elle passe — et solde l'arrivage.
+    c.ok("Choukri", "PATCH", f"/api/factures-fournisseur/{partielle['id_facture']}", {
+        "numero_facture": "FF-BANC-2", "code_fournisseur": FRS,
+        "lignes": [{"id_ligne_reception": x["id_ligne_reception"],
+                    "quantite_facturee_kg": x["quantite_stock_kg"], "prix_kg_devise": 40.0}
+                   for x in attente2]})
+    c.ok("Choukri", "POST", f"/api/factures-fournisseur/{partielle['id_facture']}/valider",
+         {"simuler": False})
+    verifier(infra.valeur(f"SELECT statut FROM reception WHERE id_reception = '{rid2}'") == "CLOTURE",
+             "le second arrivage n'est pas cloture apres sa facture complete")
+
+    # Le magasinier saisit les pesees, pas les factures : les montants lui sont masques.
+    vu = c.ok("Magasinie", "GET", f"/api/factures-fournisseur/{idf}")
+    verifier(all("prix_kg_devise" not in l for l in vu["lignes"]),
+             "le prix d'une ligne de facture n'est pas masque au magasinier")
+
+    verifier(controle(infra, "C11") == 0, "C11 apres la facture-document")
+
+
 def scenario_stock_jamais_negatif(c, infra):
     """R02 : une sortie au-dela du stock est refusee par la base, et le message remonte tel quel."""
     stock = kg(infra, REF2)
@@ -405,8 +740,7 @@ def scenario_import(c, infra):
     validation, cloture qui porte les frais aux lots du dossier."""
     ref = "PP-1500 Dtex-Cream 2951-Hs"
     aujourdhui = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
-    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/26", "code_devise": "USD"})
-    id_dossier = d.get("id_dossier") or d.get("id")
+    id_dossier = dossier_avant_bascule(c, infra, "BANC/26")
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={aujourdhui}")["reference"]
     verifier(cours and cours > 1, f"pas de cours BAM pour l'USD : {cours}")
     # Le taux 1 en devise est refuse (regle 18).
@@ -600,6 +934,94 @@ def scenario_audit_montants(c, infra):
     verifier(qui == "Assistante", f"l'auteur de la modification n'est pas inscrit : {qui}")
 
 
+def scenario_import_sur_arrivage(c, infra):
+    """ADR-003 phase C : un dossier d'import NE DEPUIS LA BASCULE recoit sa marchandise par
+    l'ARRIVAGE — la reception unifiee, sur le bon de commande qui l'a engagee — et toute sa chaine
+    de frais la retrouve : reste a recevoir, repartition, CUMP definitif. C'est ce chainon qui
+    manquait : la cloture lisait ses kilos dans les seules lignes de facture, et un dossier neuf
+    n'aurait jamais pu se cloturer — ses frais n'auraient jamais atteint le CUMP."""
+    ref, mag = "PP-1500 Dtex-Cream 2951-Hs", "Polyfashions"
+    jour = taux_usd_du_jour(infra)
+    cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={jour}")["reference"]
+
+    # Le bon d'import, en devise, envoye au fournisseur : c'est lui qui engage le prix.
+    _id_bc, lignes = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
+    lb = lignes[0]["id_ligne_bc"]
+
+    # LE DOSSIER NAIT BASCULE : sa marchandise se pese dans la reception unifiee.
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/ARR", "code_devise": "USD"})
+    id_dossier = d.get("id_dossier") or d.get("id")
+    verifier(infra.valeur("SELECT circuit_reception FROM import_dossiers "
+                          f"WHERE id_dossier = '{id_dossier}'") == "BON",
+             "un dossier neuf ne nait pas sur le circuit du bon de commande")
+    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-ARR", "date_facture": jour,
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
+    id_facture = fac.get("id_facture") or fac.get("id")
+    # LA LIGNE DE FACTURE SE RATTACHE A UN BON, meme deja recu : la facture arrive apres le camion,
+    # et l'etancheite ne vise plus que les dossiers restes sur l'ancien circuit.
+    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+        "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000,
+        "poids_net_kg": 1000, "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-ARR-IMP",
+        "id_ligne_bc": lb})
+    id_ligne = lig.get("id_ligne") or lig.get("id")
+
+    # L'ancien ecran ne la propose pas : ce dossier-la se recoit sur son bon.
+    verifier(all(x["id_ligne"] != id_ligne for x in c.ok("Magasinie", "GET", "/api/import/a-recevoir")),
+             "la ligne d'un dossier bascule reste proposee a l'ancien ecran")
+
+    # L'ARRIVAGE : un BL, une ligne pegee au bon, le dossier rattache a l'en-tete.
+    r = c.ok("Magasinie", "POST", "/api/receptions", {
+        "code_fournisseur": "FRS-001", "num_bon_livraison": "BL-ARR-IMP",
+        "id_dossier_import": id_dossier,
+        "lignes": [{"code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg",
+                    "quantite_pesee_unite": 1000, "code_magasin_dest": mag,
+                    "lot_fournisseur": "LOT-ARR-IMP", "nb_bobines": 385}]})
+    rid = r["id_reception"]
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+
+    # LE DOSSIER A APPRIS CE QUI EST ENTRE, sans qu'on le lui saisisse deux fois.
+    recu = float(infra.valeur("SELECT quantite_recue_kg FROM import_facture_lignes "
+                              f"WHERE id_ligne = '{id_ligne}'"))
+    verifier(abs(recu - 1000) < 1e-6, f"la ligne de facture porte {recu} kg recus au lieu de 1 000")
+    verifier(infra.valeur(f"SELECT statut FROM import_dossiers WHERE id_dossier = '{id_dossier}'") == "EN_COURS",
+             "le dossier n'est pas passe EN_COURS alors que sa marchandise est entree")
+    verifier(infra.valeur("SELECT statut_reception FROM import_factures "
+                          f"WHERE id_facture = '{id_facture}'") == "RECUE",
+             "la facture ne se dit pas recue alors que tout est pese")
+
+    # Une pesee encore en cours sur le dossier empeche la cloture : elle entrerait APRES la
+    # repartition des frais.
+    r2 = c.ok("Magasinie", "POST", "/api/receptions", {
+        "code_fournisseur": "FRS-001", "num_bon_livraison": "BL-ARR-BROUILLON",
+        "id_dossier_import": id_dossier,
+        "lignes": [{"code_reference": ref, "unite_saisie": "kg", "quantite_pesee_unite": 5,
+                    "code_magasin_dest": mag, "lot_fournisseur": "LOT-ARR-IMP", "nb_bobines": 2}]})
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
+        "id_frais": "DOUANE", "numero_piece": "DUM-ARR", "montant_devise": 7500, "code_devise": "MAD"})
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True},
+            contient="brouillon")
+    # On l'ABANDONNE, on ne la supprime pas : le numero a ete attribue, et un trou dans la
+    # numerotation ne s'explique pas (transition BROUILLON -> ANNULE, declaree).
+    c.ok("Magasinie", "PUT", f"/api/receptions/{r2['id_reception']}/statut", {"statut": "ANNULE"})
+
+    # LA CLOTURE PORTE LES FRAIS AU CUMP DE LA MARCHANDISE DE CE DOSSIER, la ou elle est.
+    cm, stock = cmup_magasin(infra, ref, mag), kg(infra, ref, mag)
+    ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True})
+    verifier(abs(ap["ecart_stock_dhs"] - 7500) < 0.01 and abs(ap["ecart_consomme_dhs"]) < 0.01,
+             f"frais attendus 7 500 au stock, obtenus {ap['ecart_stock_dhs']} / {ap['ecart_consomme_dhs']}")
+    verifier(abs(cmup_magasin(infra, ref, mag) - cm) < 1e-6, "l'apercu de la cloture a ecrit")
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": False})
+    verifier(abs(cmup_magasin(infra, ref, mag) - (cm + 7500 / stock)) < 0.0002,
+             f"les frais du dossier n'ont pas rejoint le CMUP de l'arrivage ({cmup_magasin(infra, ref, mag)})")
+    verifier(infra.valeur("SELECT code_magasin FROM import_ajustements_cump "
+                          f"WHERE id_dossier = '{id_dossier}' AND nature = 'STOCK'") == mag,
+             "les frais sont alles a un autre magasin que celui qui a recu")
+
+    verifier(controle(infra, "C11") == 0, "C11 apres l'import recu par l'arrivage")
+
+
 def scenario_lots_autorisations(c, infra):
     """Une derogation se demande au droit d'ecrire sur les lots, s'accorde avec un motif, une seule fois ;
     declarer un magasin « quarantaine » demande VALIDER."""
@@ -674,14 +1096,13 @@ def scenario_import_coherence(c, infra):
     ref = "PP-1500 Dtex-Bleu 6666-Hs"
     jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
     # Un taux du jour pour l'USD : un bon en devise ne se valide pas sur un taux de plus de 7 jours.
-    infra.sql(f"UPDATE taux_change SET date_fin = '{jour}' WHERE code_devise = 'USD' AND date_fin IS NULL")
-    infra.sql("INSERT INTO taux_change (id_taux, code_devise, taux, date_debut, source) "
-              f"VALUES (gen_random_uuid()::text, 'USD', 9.30, '{jour}', 'banc')")
+    # PAR LE HELPER, qui ne pose le cours que s'il manque : ferme inconditionnellement, la ligne
+    # du jour posee par un autre scenario violait taux_change_check (date_fin > date_debut).
+    taux_usd_du_jour(infra)
     id_bc, lignes = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
     lb = lignes[0]["id_ligne_bc"]
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={jour}")["reference"]
-    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/27", "code_devise": "USD"})
-    id_dossier = d.get("id_dossier") or d.get("id")
+    id_dossier = dossier_avant_bascule(c, infra, "BANC/27")
     f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-2", "date_facture": jour,
         "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
@@ -1936,6 +2357,9 @@ SCENARIOS = [
     scenario_reception_cloture_avoir,
     scenario_ecart_pesee,
     scenario_reception_devalidee_revalidee,
+    scenario_arrivage_unifie,
+    scenario_frais_approche_locaux,
+    scenario_facture_document,
     scenario_saisie_libre,
     scenario_stock_jamais_negatif,
     scenario_contre_passation,
@@ -1944,6 +2368,7 @@ SCENARIOS = [
     scenario_colisage_ecran_et_base,
     scenario_import,
     scenario_import_coherence,
+    scenario_import_sur_arrivage,
     scenario_lots_autorisations,
     scenario_machine,
     scenario_machine_surplus,

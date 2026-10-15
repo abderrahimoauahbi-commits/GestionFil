@@ -5,6 +5,19 @@
  *
  * Elle se lit avec le module RECEPTIONS, comme toute reception : le magasinier
  * y prepare le brouillon, la direction valide l'entree en stock.
+ *
+ * CE CIRCUIT RESTE CELUI DE L'IMPORT (ADR-003, 14/10/2026). La reception est
+ * devenue un ARRIVAGE dont chaque ligne pege a une ligne de bon de commande —
+ * phase A —, et l'import la rejoindra en phase C. Pas avant : la chaine des
+ * frais d'import (cloture du dossier, repartition, CUMP definitif) lit ses
+ * kilos recus dans `import_facture_lignes.quantite_recue_kg`, que seul cet
+ * ecran alimente. Fermer la porte avant que l'autre mene au bout aurait
+ * empeche tout dossier neuf de se cloturer.
+ *
+ * La frontiere est deja gardee, dossier par dossier
+ * (`import_dossiers.circuit_reception`) : posee a BON, la marchandise du
+ * dossier se pese dans la reception unifiee et le serveur refuse ses lignes
+ * ici. Une meme marchandise n'entre jamais par deux portes.
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'

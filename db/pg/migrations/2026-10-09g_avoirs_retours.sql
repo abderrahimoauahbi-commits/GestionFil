@@ -34,8 +34,16 @@ ALTER TABLE reception_ajustements_cmup ADD CONSTRAINT reception_ajustements_cmup
         OR (nature = 'ECART_PRIX' AND code_magasin IS NULL)
         OR (nature = 'RETOUR' AND code_magasin IS NULL AND id_mouvement_retour IS NOT NULL));
 ALTER TABLE reception_ajustements_cmup DROP CONSTRAINT IF EXISTS ck_rec_ajust_origine;
+-- 'FRAIS' ajoute le 14/10/2026 (ADR-003 phase C, migration 2026-10-14c) :
+-- les frais d'approche d'un arrivage vont au CUMP avec leur propre origine.
+-- IL EST ICI, et pas seulement dans la migration qui l'introduit, parce que
+-- cette migration-ci se REJOUE : rejouee sur une base qui porte deja des
+-- ajustements 'FRAIS', elle y reposait l'ancienne liste et la contrainte
+-- echouait sur ses propres lignes. Empreinte d'origine declaree dans
+-- EMPREINTES_REMPLACEES (migrer.py).
 ALTER TABLE reception_ajustements_cmup ADD CONSTRAINT ck_rec_ajust_origine
-    CHECK (origine = ANY (ARRAY['CLOTURE', 'AVOIR', 'COMPLEMENT', 'AVOIR_RETOUR', 'FACTURE_NETTE'])
+    CHECK (origine = ANY (ARRAY['CLOTURE', 'AVOIR', 'COMPLEMENT', 'AVOIR_RETOUR',
+                                'FACTURE_NETTE', 'FRAIS'])
            AND (origine = 'CLOTURE' OR length(btrim(COALESCE(motif, ''))) >= 5));
 
 -- Les retours d'une reception et ce qui les solde.

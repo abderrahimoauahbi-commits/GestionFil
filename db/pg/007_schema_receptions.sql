@@ -48,6 +48,14 @@ CREATE TABLE reception (
     -- RG-09 : taux fige a la date de RECEPTION (distinct du taux engage du BC)
     taux_change_reception numeric(9,4)  CHECK (taux_change_reception IS NULL OR taux_change_reception > 0),
 
+    -- L'ARRIVAGE D'IMPORT (ADR-003 D2, 14/10/2026). Une reception est un
+    -- arrivage : un camion, un conteneur, un bon de livraison. Quand il vient
+    -- de l'etranger, il se RATTACHE a un dossier d'import — qui porte la DUM,
+    -- les conteneurs, le regime douanier — sans jamais remplacer la commande :
+    -- le prix de chaque ligne vient de sa ligne de bon.
+    -- La cle etrangere est posee par 018 (import_dossiers nait apres).
+    id_dossier_import   text,
+
     id_utilisateur_reception text NOT NULL REFERENCES utilisateur(id_utilisateur),
     id_utilisateur_controle  text REFERENCES utilisateur(id_utilisateur),
     date_controle       text,
@@ -74,6 +82,17 @@ CREATE TABLE reception (
 
 CREATE INDEX ix_reception_bc     ON reception(id_bc);
 CREATE INDEX ix_reception_statut ON reception(statut, date_reception DESC);
+CREATE INDEX ix_reception_dossier_import
+    ON reception(id_dossier_import) WHERE id_dossier_import IS NOT NULL;
+
+-- Le bon ne d'un arrivage sans commande (colonne declaree en 006, module des
+-- achats) : la cle ne peut etre posee qu'ici, ou `reception` existe enfin.
+ALTER TABLE bon_commande
+    ADD CONSTRAINT fk_bc_reception_regularisee
+    FOREIGN KEY (id_reception_regularisee) REFERENCES reception(id_reception);
+
+CREATE INDEX ix_bc_reception_regularisee
+    ON bon_commande(id_reception_regularisee) WHERE id_reception_regularisee IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- ligne_reception

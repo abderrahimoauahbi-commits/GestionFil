@@ -144,7 +144,10 @@ export function PeseesMobile({
         <FeuilleAjout
           proposees={proposees}
           chercherCatalogue={chercherCatalogue}
-          dejaSaisies={lignes.map((l) => l.code_reference)}
+          /* DEJA SAISIE SE JUGE SUR LA LIGNE DE BON quand il y en a une : la
+             meme reference peut etre attendue sur deux bons du meme camion, et
+             en peser une ne solde pas l'autre. */
+          dejaSaisies={lignes.map((l) => l.extra?.id_ligne_bc || l.code_reference)}
           surChoix={ouvrirNouvelle}
           surFermer={() => setAjout(false)}
         />
@@ -184,16 +187,36 @@ function CarteLigne({
   const hors = ecart != null && ecart.pct > tolerancePct
   const prete = estPrete(ligne, true)
   const secondaires = [
-    e.lot ? `Lot ${e.lot}` : 'Lot —',
     e.magasin ? `Magasin ${e.magasin}` : null,
-    e.colis ? `${e.colis} colis` : null,
+    e.colis ? `${e.colis} colis (BL)` : null,
+    e.bl ? `${fmt.nombre(Number(e.bl), 2)} kg annoncés` : null,
   ].filter(Boolean) as string[]
+
+  /*
+   * CE QUI SE LIT EN SURVOL, pas dans la ligne (ADR-003 phase A) : l'attendu,
+   * l'ecart et le lot. La ligne garde les six grandeurs du quai — reference,
+   * commande, pese, palettes, bobines — et ne deborde pas.
+   *
+   * L'ECART HORS TOLERANCE RESTE VISIBLE, lui : sur un telephone il n'y a pas
+   * de survol, et c'est le seul chiffre qui demande une decision tout de suite.
+   */
+  const infobulle = [
+    ligne.suggere_kg != null ? `Attendu ${fmt.nombre(ligne.suggere_kg, 2)} kg` : 'Rien d’attendu',
+    ecart != null
+      ? `Écart ${ecart.kg > 0 ? '+' : ''}${fmt.nombre(ecart.kg, 2)} kg (${fmt.nombre(ecart.pct, 1)} %)`
+      : null,
+    e.lot ? `Lot ${e.lot}` : 'Lot non relevé',
+    e.numero_bc ? `Bon ${e.numero_bc}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <li>
       <button
         type="button"
         onClick={surOuvrir}
+        title={infobulle}
         className={cn(
           'flex w-full items-start gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2.5 text-left transition-colors hover:bg-attenue/40',
           hors ? 'border-danger/50' : 'border-bordure',
@@ -202,6 +225,14 @@ function CarteLigne({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate font-medium">{ligne.code_reference || '—'}</span>
+            {/* LE BON QUE CETTE LIGNE SERT. Un arrivage en couvre plusieurs :
+                sans ce repere, le magasinier ne sait pas contre quelle commande
+                il pese. */}
+            {e.numero_bc && (
+              <span className="shrink-0 rounded-[var(--radius-sm)] bg-attenue px-1.5 py-0.5 text-[11px] text-attenue-texte">
+                {e.numero_bc}
+              </span>
+            )}
             {ligne.valide ? (
               <Badge ton="succes">validée</Badge>
             ) : prete ? (
@@ -220,14 +251,23 @@ function CarteLigne({
             </span>
             {ligne.suggere_kg != null && (
               <span className="text-[12px] text-attenue-texte tabular-nums">
-                attendu {fmt.nombre(ligne.suggere_kg, 0)} kg
+                / {fmt.nombre(ligne.suggere_kg, 0)} kg commandés
               </span>
             )}
-            {ecart != null && Math.abs(ecart.kg) > 0.001 && (
-              <span className={cn('text-[12px] tabular-nums', hors ? 'font-medium text-danger' : 'text-attenue-texte')}>
+            {ligne.palettes.trim() !== '' && (
+              <span className="text-[12px] text-attenue-texte tabular-nums">
+                {fmt.nombre(Number(ligne.palettes), 2)} pal.
+              </span>
+            )}
+            {ligne.bobines.trim() !== '' && (
+              <span className="text-[12px] text-attenue-texte tabular-nums">
+                {fmt.nombre(Number(ligne.bobines), 0)} bob.
+              </span>
+            )}
+            {hors && ecart != null && (
+              <span className="text-[12px] font-medium text-danger tabular-nums">
                 {ecart.kg > 0 ? '+' : ''}
-                {fmt.nombre(ecart.kg, 1)} kg
-                {hors ? ' · hors tolérance' : ''}
+                {fmt.nombre(ecart.kg, 1)} kg · hors tolérance
               </span>
             )}
           </div>
@@ -552,11 +592,14 @@ function FeuilleAjout({
         <p className="px-1 py-2 text-[13px] text-attenue-texte">Rien d’attendu ne correspond.</p>
       ) : (
         <ul className="space-y-1.5">
+          {/* LA CLE EST LA LIGNE DE BON, pas la reference : un arrivage
+              couvre plusieurs bons, et la meme reference y est attendue deux
+              fois. Keyee par reference, la seconde proposition disparaissait. */}
           {attendues.map((r) => (
             <PropositionRef
-              key={r.code_reference}
+              key={r.id_ligne_bc ?? r.code_reference}
               ref_={r}
-              deja={dejaSaisies.includes(r.code_reference)}
+              deja={dejaSaisies.includes(r.id_ligne_bc ?? r.code_reference)}
               surChoix={() => surChoix(r)}
             />
           ))}
@@ -613,6 +656,13 @@ function PropositionRef({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate font-medium">{ref_.code_reference}</span>
+            {/* CONTRE QUEL BON on pese : deux lignes de deux bons ne se
+                distinguent que par lui. */}
+            {ref_.numero_bc && (
+              <span className="shrink-0 rounded-[var(--radius-sm)] bg-attenue px-1.5 py-0.5 text-[11px] text-attenue-texte">
+                {ref_.numero_bc}
+              </span>
+            )}
             {deja && <Badge ton="info">déjà saisie</Badge>}
             {horsCommande && <Badge ton="neutre">hors commande</Badge>}
           </div>

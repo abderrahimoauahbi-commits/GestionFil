@@ -33,6 +33,13 @@ pub struct Filtres {
     /// tonnes depuis un magasin qui en tenait une, et seule la regle R02 le
     /// refusait — a l'expedition, une fois tout saisi.
     pub code_magasin: Option<String>,
+    /// LA RECEPTION, pour les frais d'approche d'un arrivage.
+    ///
+    /// Ils se filtraient par `code_reference`, qui portait en fait un
+    /// identifiant de reception : le nom mentait, et un appelant de bonne foi
+    /// y mettait une reference et recevait tout. Le nom juste existe
+    /// maintenant ; l'ancien reste accepte, des paquets deployes l'utilisent.
+    pub id_reception: Option<String>,
 }
 
 impl Filtres {
@@ -1350,10 +1357,10 @@ pub async fn frais_approche(
            JOIN reception rc ON rc.id_reception = fa.id_reception
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = rc.code_fournisseur
           WHERE ($1 IS NULL OR fa.id_reception = $1)
-          ORDER BY fa.date_frais DESC
+          ORDER BY fa.date_frais DESC, fa.type_frais
           LIMIT $2",
     )
-    .bind(&f.code_reference)
+    .bind(f.id_reception.as_ref().or(f.code_reference.as_ref()))
     .bind(f.limite())
     .fetch_all(&state.db)
     .await?;

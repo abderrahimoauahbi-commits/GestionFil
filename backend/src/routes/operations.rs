@@ -290,7 +290,13 @@ pub async fn contexte_facture_reception(
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = r.code_fournisseur
           WHERE r.statut = 'VALIDE' AND r.id_reception <> $1
             AND r.code_fournisseur = moi.code_fournisseur
-            AND COALESCE(bc.code_devise, fo.code_devise, 'MAD') = $2
+            -- LA DEVISE VIENT DES LIGNES (ADR-003 phase A) : sur un arrivage qui
+            -- couvre deux bons, l'en-tete n'en designe aucun, et lire la devise
+            -- du fournisseur proposait de melanger des dollars a des dirhams.
+            AND COALESCE(
+                  (SELECT CASE WHEN count(DISTINCT lr.code_devise) = 1 THEN min(lr.code_devise) END
+                     FROM ligne_reception lr WHERE lr.id_reception = r.id_reception),
+                  bc.code_devise, fo.code_devise, 'MAD') = $2
           ORDER BY r.date_reception DESC, r.numero_reception
           LIMIT 50",
     )
@@ -554,4 +560,31 @@ pub async fn creer_frais_approche(
 
     tx.commit().await?;
     Ok(Json(serde_json::json!({ "enregistre": true })))
+}
+
+/// Retire un frais d'approche d'un arrivage.
+///
+/// TANT QU'IL N'EST PAS PORTE AU CUMP. Un frais saisi mais pas encore passe au
+/// stock n'est qu'une saisie : la corriger est legitime, et l'y laisser pour
+/// toujours forcerait a inventer un avoir pour une faute de frappe. Porte, il a
+/// bouge une valeur de stock — le declencheur `trg_frais_approche_porte` le
+/// refuse alors, et son message remonte tel quel (ADR-003 phase C).
+pub async fn supprimer_frais_approche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::VALORISATION, Action::Ecrire).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let efface = sqlx::query("DELETE FROM frais_approche WHERE id_frais = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if efface == 0 {
+        return Err(AppError::Introuvable(format!("frais d'approche {id}")));
+    }
+    tx.commit().await?;
+    Ok(Json(serde_json::json!({ "supprime": true })))
 }

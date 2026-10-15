@@ -208,7 +208,7 @@ const ORDRE_MENU = [
   '/catalogue', '/categories', '/equivalences', '/fournisseurs', '/roles-bom',
   '/qualites', '/recettes', '/besoins',
   '/plans', '/plan-achat', '/stock',
-  '/bons-commande', '/receptions', '/import', '/receptions-import', '/retours-fournisseur',
+  '/bons-commande', '/receptions', '/factures-fournisseur', '/import', '/receptions-import', '/retours-fournisseur',
   '/etat-stock', '/mouvements', '/transferts', '/machines', '/inventaires', '/lots', '/autorisations',
   '/statistiques', '/controles', '/historique-prix', '/matrice-prix',
   '/valorisation', '/landed-cost', '/classification', '/rapports',
@@ -292,10 +292,20 @@ export const NAVIGATION: EntreeNav[] = ([
     section: 'ACHATS',
     resume: 'Dossiers, factures et frais d’approche',
   },
-  /* LA RECEPTION D'IMPORT N'AVAIT PAS NON PLUS D'ENTREE. Elle vit a part du
-     dossier — une reception peut prendre des lignes de plusieurs factures —,
-     et l'on n'y arrivait que par un lien interne. Meme defaut que l'Importation
-     avant le 25/09. */
+  /* LA FACTURE FOURNISSEUR (ADR-003 phase B) : elle suit la reception dans le
+     menu parce qu'elle la suit dans le geste — on pese, puis on facture. */
+  {
+    vers: '/factures-fournisseur',
+    libelle: 'Factures fournisseur',
+    module: 'RECEPTIONS',
+    Icone: Receipt,
+    section: 'ACHATS',
+    resume: 'Rapprocher commande, pesée et facture, puis clôturer',
+  },
+  /* LA RECEPTION D'IMPORT RESTE SON PROPRE CIRCUIT jusqu'a la phase C de
+     l'ADR-003 : la chaine des frais d'import ne sait lire que lui. L'arrivage
+     unifie (phase A) couvre le local ; l'import la rejoindra quand les frais
+     sauront lire les arrivages. */
   {
     vers: '/receptions-import',
     libelle: 'Réceptions import',

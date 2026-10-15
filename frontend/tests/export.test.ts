@@ -66,9 +66,15 @@ test('colonne numerique : le texte n\'est pas converti', () => {
   assert.equal(numerique('PP-1500 Dtex-1.5'), 'PP-1500 Dtex-1.5')
 })
 
-test('colonne numerique : NaN et l\'infini sortent tels quels (comportement actuel)', () => {
-  assert.equal(numerique(Number.NaN), 'NaN')
-  assert.equal(numerique(Number.POSITIVE_INFINITY), 'Infinity')
+test('colonne numerique : NaN et l\'infini donnent une cellule vide (T-GF-003)', () => {
+  assert.equal(numerique(Number.NaN), '')
+  assert.equal(numerique(Number.POSITIVE_INFINITY), '')
+  assert.equal(numerique(Number.NEGATIVE_INFINITY), '')
+  assert.equal(numerique(1 / 0), '')
+})
+
+test('colonne de texte : NaN reste ecrit tel quel (hors du champ de T-GF-003)', () => {
+  assert.equal(texte(Number.NaN), 'NaN')
 })
 
 test('colonne de texte : un nombre garde son point', () => {

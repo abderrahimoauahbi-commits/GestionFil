@@ -287,7 +287,9 @@ export function ClotureFacture({
             </Etiq>
             <Champ id="ch-receptioncloture-5" inputMode="decimal" className="text-right tabular-nums" value={f.frais} onChange={maj('frais')} />
           </div>
-          {enDevise && tauxEffectif != null && nb(f.montant) > 0 && (
+          {/* Taux fini seulement : un taux illisible (« 10,8,5 ») vaut NaN et
+              affichait « soit NaN MAD » (T-GF-010, 15/10/2026). */}
+          {enDevise && tauxEffectif != null && Number.isFinite(tauxEffectif) && nb(f.montant) > 0 && (
             <div className="flex items-end pb-1.5 text-[12.5px] tabular-nums text-attenue-texte">
               soit {fmt.nombre(nb(f.montant) * tauxEffectif, 2)} MAD de marchandise
             </div>

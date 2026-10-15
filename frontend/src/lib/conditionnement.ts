@@ -50,11 +50,15 @@ export interface Colisage {
 
 const VIDE: Colisage = { kg: null, bobines: null, palettes: null }
 
-/** Un nombre utilisable, ou null. Une chaîne vide n'est pas un zéro. */
+/**
+ * Un nombre utilisable, ou null. Une chaîne vide n'est pas un zéro — ni une
+ * chaîne faite d'espaces : elle valait 0 et affichait « 0 bobine, 0 palette »
+ * pour un champ que personne n'avait rempli (T-GF-006, 15/10/2026).
+ */
 function nombre(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null
-  const n = typeof v === 'number' ? v : (lireNombre(String(v)) ?? 0)
-  return Number.isFinite(n) ? n : null
+  const n = typeof v === 'number' ? v : lireNombre(String(v))
+  return n !== null && Number.isFinite(n) ? n : null
 }
 
 /** Les comptes de colis sont entiers : on ne manutentionne pas 3,4 bobines. */

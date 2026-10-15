@@ -83,6 +83,17 @@ test('depuisBobines : vide ou illisible ne donne rien', () => {
   assert.deepEqual(depuisBobines('abc', FICHE), VIDE)
 })
 
+test('une saisie faite d\'espaces n\'est pas un zero (T-GF-006)', () => {
+  for (const blanc of ['   ', ' ', ' ', '\t'])
+    for (const r of [
+      depuisBobines(blanc, FICHE),
+      depuisKg(blanc, FICHE),
+      depuisPalettes(blanc, FICHE),
+      depuisUnite(blanc, 'Lot', FICHE),
+    ])
+      assert.deepEqual(r, VIDE, JSON.stringify(blanc))
+})
+
 test('depuisKg : le poids pese fait foi', () => {
   const r = depuisKg(211, FICHE)
   assert.equal(r.kg, 211)                            // jamais ramene a 100 bobines x 2,1

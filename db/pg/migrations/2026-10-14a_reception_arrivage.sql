@@ -96,6 +96,10 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- Les migrations se jouent en `postgres` sur le serveur : sans ce transfert, la
+-- fonction appartiendrait a postgres alors que tout le schema appartient au
+-- service, et le service ne pourrait plus la remplacer.
+ALTER FUNCTION fn_trg_reception_dossier() OWNER TO gestionfil;
 
 DROP TRIGGER IF EXISTS trg_reception_dossier ON reception;
 CREATE TRIGGER trg_reception_dossier

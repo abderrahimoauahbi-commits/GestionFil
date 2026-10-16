@@ -85,7 +85,10 @@ const REVERSIBLES: &[Reversible] = &[
         table: "reception",
         cle: "id_reception",
         module: "RECEPTIONS",
-        depuis: &["VALIDE", "CLOTURE"],
+        // CLOTUREE, elle ne se devalide plus (audit v4) : sa facture a ajuste
+        // le CMUP, et devalider remettait les montants en jeu une seconde
+        // fois. Sa correction passe par un avoir (/api/receptions/{id}/avoir).
+        depuis: &["VALIDE"],
         vers: "A_CONTROLER",
         effacer: &["id_utilisateur_controle", "date_controle"],
         document_mouvements: Some("numero_reception"),
@@ -97,9 +100,14 @@ const REVERSIBLES: &[Reversible] = &[
         cle: "id_inventaire",
         module: "INVENTAIRE",
         depuis: &["CLOTURE"],
-        vers: "EN_COURS",
+        // Il retrouve l'etat valide (13/10/2026) ; « Renvoyer au comptage »
+        // le remet ensuite en brouillon si le comptage etait faux.
+        vers: "VALIDE",
         effacer: &["date_cloture"],
-        document_mouvements: Some("id_inventaire"),
+        // Les ajustements portent le NUMERO de l'inventaire en reference de
+        // document, pas son identifiant : la garde cherchait l'identifiant et ne
+        // voyait jamais les ajustements encore au stock (corrige le 06/10/2026).
+        document_mouvements: Some("numero_inventaire"),
         garde: None,
     },
     Reversible {
@@ -129,17 +137,9 @@ const REVERSIBLES: &[Reversible] = &[
         document_mouvements: None,
         garde: None,
     },
-    Reversible {
-        chemin: "dossiers-import",
-        table: "import_dossiers",
-        cle: "id_dossier",
-        module: "IMPORT",
-        depuis: &["CLOTURE"],
-        vers: "EN_COURS",
-        effacer: &["id_utilisateur_cloture", "date_cloture"],
-        document_mouvements: None,
-        garde: None,
-    },
+    // Le dossier d'import ne se rouvre plus (regle 5, 09/10/2026) : sa reouverture,
+    // sans garde, rouvrait la contre-passation apres que ses frais etaient au
+    // CMUP. Une facture tardive passe par le frais post-cloture.
 ];
 
 fn reversible(chemin: &str) -> AppResult<&'static Reversible> {

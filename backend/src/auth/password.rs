@@ -63,14 +63,10 @@ mod tests {
 /// reel est donc celui d'une empreinte exfiltree — c'est-a-dire d'un serveur
 /// deja compromis.
 ///
-/// EN DESSOUS DE HUIT, ON NE DESCEND PAS. C'est le plancher de toutes les
-/// recommandations publiques, et le franchir ferait basculer l'attaque en ligne
-/// dans le domaine du faisable.
-///
-/// Pour les comptes de direction, qui voient les prix et valident les engagements,
-/// une phrase longue reste vivement conseillee : la regle autorise huit
-/// caracteres, elle n'oblige personne a s'y tenir.
-pub const LONGUEUR_MINIMALE: usize = 8;
+/// DOUZE CARACTERES (regle de l'entreprise, rappelee a l'audit v4). L'ecran
+/// l'annoncait, le serveur en acceptait huit : c'est le serveur qui decide.
+/// Une phrase longue reste la meilleure protection ; la regle fixe le plancher.
+pub const LONGUEUR_MINIMALE: usize = 12;
 
 /// Verifie la longueur, en CARACTERES et non en octets.
 ///

@@ -101,25 +101,32 @@ fn code_pour(secret: &[u8], fenetre: u64) -> String {
 /// LA COMPARAISON NE S'ARRETE PAS AU PREMIER CARACTERE DIFFERENT. Comparer deux
 /// codes avec `==` laisse fuir, par le temps de reponse, combien de chiffres
 /// sont justes — et six chiffres se retrouvent alors un par un.
+#[cfg(test)]
 pub fn verifier(secret_base32: &str, code: &str, instant: u64) -> bool {
+    verifier_pas(secret_base32, code, instant).is_some()
+}
+
+/// Comme `verifier`, mais rend le PAS DE TEMPS accepte : l'appelant refuse un
+/// pas deja employe (audit v4 — un code se rejouait pendant sa fenetre).
+pub fn verifier_pas(secret_base32: &str, code: &str, instant: u64) -> Option<i64> {
     let code = code.trim().replace(' ', "");
     if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
-        return false;
+        return None;
     }
-    let Some(secret) = decoder_base32(secret_base32) else {
-        return false;
-    };
+    let secret = decoder_base32(secret_base32)?;
     if secret.is_empty() {
-        return false;
+        return None;
     }
     let fenetre = (instant / PAS) as i64;
-    let mut juste = false;
+    let mut trouve: Option<i64> = None;
     for d in -TOLERANCE..=TOLERANCE {
-        let f = (fenetre + d).max(0) as u64;
+        let f = (fenetre + d).max(0);
         // Pas de sortie anticipee : on parcourt toujours les trois fenetres.
-        juste |= egalite_constante(&code_pour(&secret, f), &code);
+        if egalite_constante(&code_pour(&secret, f as u64), &code) {
+            trouve = Some(f);
+        }
     }
-    juste
+    trouve
 }
 
 /// Compare deux chaines en parcourant toute leur longueur.

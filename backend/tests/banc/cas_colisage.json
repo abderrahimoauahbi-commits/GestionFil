@@ -1,0 +1,19 @@
+{
+  "_note": "Cas communs au controle de l'ecran (frontend/src/lib/conditionnement.ts) et de la base (fn_controle_colisage). Fiche : 2,1 kg la bobine, 336 bobines par palette ; tolerances 10 % (alerte) et 25 % (incoherent). La base ne rend un message que pour « incoherent » : l'alerte reste a l'ecran.",
+  "poids_bobine_kg": 2.1,
+  "bobines_par_palette": 336,
+  "alerte_pct": 10,
+  "refus_pct": 25,
+  "cas": [
+    { "nom": "le cas du 08/10 : 20 palettes pour 1 920 bobines", "kg": 4032, "bobines": 1920, "palettes": 20, "attendu": "incoherent" },
+    { "nom": "6 palettes pleines", "kg": 4032, "bobines": 1920, "palettes": 6, "attendu": "ok" },
+    { "nom": "une palette entamee de plus", "kg": 4032, "bobines": 1920, "palettes": 7, "attendu": "ok" },
+    { "nom": "bobine a +20 % : alerte, pas refus", "kg": 4032, "bobines": 1600, "palettes": null, "attendu": "alerte" },
+    { "nom": "bobine a +92 % : incoherent", "kg": 4032, "bobines": 1000, "palettes": null, "attendu": "incoherent" },
+    { "nom": "bobine a -20 % : alerte", "kg": 3360, "bobines": 2000, "palettes": null, "attendu": "alerte" },
+    { "nom": "kilos seuls : rien a juger", "kg": 4032, "bobines": null, "palettes": null, "attendu": "ok" },
+    { "nom": "palettes deduites des kilos : 5 palettes pour 960 bobines", "kg": 2016, "bobines": null, "palettes": 5, "attendu": "incoherent" },
+    { "nom": "palettes deduites des kilos : 3 palettes", "kg": 2016, "bobines": null, "palettes": 3, "attendu": "ok" },
+    { "nom": "palette surchargee : 1 palette pour 500 bobines", "kg": 1050, "bobines": 500, "palettes": 1, "attendu": "incoherent" }
+  ]
+}

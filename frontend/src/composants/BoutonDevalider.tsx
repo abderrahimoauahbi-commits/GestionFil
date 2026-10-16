@@ -37,7 +37,7 @@ interface Reversible {
 export function useReversibles() {
   return useQuery({
     queryKey: ['devalider'],
-    queryFn: () => api.get<Reversible[]>('/api/devalider'),
+    queryFn: ({ signal }) => api.get<Reversible[]>('/api/devalider', { signal }),
     staleTime: Infinity,
   })
 }
@@ -46,6 +46,7 @@ const VERS_LISIBLE: Record<string, string> = {
   BROUILLON: 'brouillon',
   A_CONTROLER: 'a controler',
   EN_COURS: 'en cours',
+  VALIDE: 'validé',
   ACTIF: 'actif',
 }
 
@@ -83,9 +84,9 @@ export function BoutonDevalider({
       <ActionMotivee
         ouvert={ouvert}
         surFermeture={() => setOuvert(false)}
-        titre="Revenir en arriere sur ce document"
+        titre="Revenir en arrière sur ce document"
         description={`Il repassera de « ${statut} » a « ${r.vers} ».`}
-        libelleBouton="Devalider"
+        libelleBouton="Dévalider"
         chemin={`/api/devalider/${document}/${id}`}
         consequence={
           <>

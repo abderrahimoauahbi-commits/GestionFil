@@ -52,8 +52,94 @@ pub struct Entite {
     pub tri: &'static str,
 }
 
+/// LES SEUILS SE FIXENT AU DROIT DE VALIDER (U5, 09/10/2026).
+///
+/// La tolerance de pesee d'un fournisseur est le seuil qui dispense une
+/// reception de derogation : celle qui la prepare pourrait l'elargir la veille
+/// et la resserrer le lendemain. Celui qui fixe un seuil n'est pas celui qui en
+/// profite : ces colonnes s'ecrivent avec le droit VALIDER du module ; le reste
+/// de la fiche reste au droit d'ecrire. Chaque changement est journalise par le
+/// declencheur d'audit de la table.
+pub fn champs_au_droit_valider(e: &Entite) -> &'static [&'static str] {
+    match e.chemin {
+        "fournisseurs" => &["tolerance_pesee_pct"],
+        _ => &[],
+    }
+}
+
+/// Refuse l'ecriture d'un champ reserve a VALIDER, sauf s'il ne change pas :
+/// un formulaire renvoie toute la fiche, et corriger un telephone ne doit pas
+/// demander la Direction.
+async fn exiger_valider_si_change(
+    db: &Db,
+    user: &Utilisateur,
+    e: &Entite,
+    id: Option<&str>,
+    champs: &[(String, Value)],
+) -> AppResult<()> {
+    let reserves = champs_au_droit_valider(e);
+    for (nom, valeur) in champs {
+        if !reserves.contains(&nom.as_str()) {
+            continue;
+        }
+        let nouvelle = match valeur {
+            Value::Null => None,
+            Value::String(t) if t.trim().is_empty() => None,
+            v => Some(v.to_string().trim_matches('"').to_string()),
+        };
+        let actuelle: Option<String> = match id {
+            Some(id) => sqlx::query_scalar(&format!(
+                "SELECT {nom}::text FROM {} WHERE {}::text = $1",
+                e.table, e.cle
+            ))
+            .bind(id)
+            .fetch_optional(db)
+            .await?
+            .flatten(),
+            // A la creation, le seuil par defaut ne demande rien a personne.
+            None if nom == "tolerance_pesee_pct" => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT COALESCE((SELECT valeur_courante FROM parametre
+                                   WHERE code_parametre = 'P_TolerEcartPesee'), '2')",
+            )
+            .fetch_one(db)
+            .await?,
+            None => None,
+        };
+        let egal = match (&nouvelle, &actuelle) {
+            (None, None) => true,
+            (Some(a), Some(b)) => match (a.parse::<f64>(), b.parse::<f64>()) {
+                (Ok(x), Ok(y)) => (x - y).abs() < 1e-9,
+                _ => a == b,
+            },
+            _ => false,
+        };
+        if !egal && !crate::auth::rbac::a_permission(db, &user.role, e.module, Action::Valider).await? {
+            return Err(AppError::RegleMetier(format!(
+                "{nom} est un seuil de controle : il se fixe avec le droit de valider ({}). Demandez-le a la Direction.",
+                e.module
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Registre des entites gerees par le moteur generique.
 pub const ENTITES: &[Entite] = &[
+    // LA SAISON DU PLAN D'ACHAT (regle 9, 09/10/2026) : un coefficient par mois
+    // multiplie la demande prolongee au-dela du plan. Douze lignes fixes, que la
+    // Direction regle ; elles ne se creent ni ne se suppriment.
+    Entite {
+        chemin: "saisons",
+        table: "saison_mois",
+        module: "PARAMETRES",
+        cle: "mois",
+        cle_generee: false,
+        creation: &[],
+        modification: &["coefficient"],
+        suppression: Suppression::Interdite,
+        selection: "c.*",
+        tri: "c.mois",
+    },
     Entite {
         chemin: "categories",
         table: "categorie_matiere",
@@ -85,7 +171,11 @@ pub const ENTITES: &[Entite] = &[
     Entite {
         chemin: "types-mouvement",
         table: "type_mouvement",
-        module: "MOUVEMENTS",
+        // SOUS PARAMETRES (decision du 13/10/2026) : le signe, l'effet sur le
+        // CMUP, le prix exige d'un type ne se reglent pas avec le droit
+        // d'ecrire des mouvements, que le magasinier possede. Tous les roles
+        // lisent les Parametres : la saisie d'un mouvement les lit toujours.
+        module: "PARAMETRES",
         cle: "code_type_mvt",
         cle_generee: false,
         creation: &[
@@ -354,7 +444,14 @@ pub const ENTITES: &[Entite] = &[
                     (SELECT COUNT(*) FROM recette lr
                       WHERE lr.code_reference = c.code_reference AND lr.actif = 1) AS nb_recettes,
                     (SELECT COALESCE(SUM(s.quantite_kg), 0) FROM stock_magasin s
-                      WHERE s.code_reference = c.code_reference) AS stock_total_kg",
+                      WHERE s.code_reference = c.code_reference) AS stock_total_kg,
+                    -- LE FIL EN ROUTE (10/10/2026) : expedie, pas encore recu, dans
+                    -- aucun magasin. La Valorisation l'ajoute au total, a son CMUP
+                    -- de depart (il voyage avec la marchandise).
+                    COALESCE((SELECT t.kg_en_route FROM v_stock_transit_reference t
+                               WHERE t.code_reference = c.code_reference), 0) AS stock_transit_kg,
+                    COALESCE((SELECT t.valeur_en_route_mad FROM v_stock_transit_reference t
+                               WHERE t.code_reference = c.code_reference), 0) AS valeur_transit_mad",
         tri: "c.code_reference",
     },
     Entite {
@@ -510,6 +607,18 @@ pub async fn lister(
 ) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Lire).await?;
 
+    // ON NE TRIE NI NE FILTRE SUR CE QU'ON NE VOIT PAS (audit v4) : trier les
+    // fournisseurs par un prix masque, ou filtrer sur sa valeur, revelait le
+    // prix par l'ordre ou par la reponse.
+    let droits = user.droits(db, e.module).await?;
+    let masque = |c: &str| matches!(droits.get(c), Some(crate::auth::rbac::Niveau::Masque));
+    if let Some(c) = f.tri.as_deref().filter(|c| masque(c)) {
+        return Err(AppError::Invalide(format!("tri impossible : le champ {c} vous est masque")));
+    }
+    if let Some((c, _)) = f.egalites.iter().find(|(c, _)| masque(c)) {
+        return Err(AppError::Invalide(format!("filtre impossible : le champ {c} vous est masque")));
+    }
+
     let mut conditions = Vec::new();
     let mut valeurs: Vec<String> = Vec::new();
 
@@ -532,7 +641,7 @@ pub async fn lister(
         // `suivi_lot` ou `priorite` tombait en erreur. Comparer en `::text`
         // aurait rate « 2.5 » contre « 2.5000 ».
         conditions.push(format!(
-            "c.{colonne} IS NOT DISTINCT FROM (jsonb_populate_record(NULL::{table},              jsonb_build_object('{colonne}', ${n}::text))).{colonne}",
+            "c.{colonne} IS NOT DISTINCT FROM (jsonb_populate_record(NULL::{table}, jsonb_build_object('{colonne}', ${n}::text))).{colonne}",
             table = e.table,
             n = valeurs.len()
         ));
@@ -639,7 +748,7 @@ pub async fn lire(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResul
     user.exiger(db, e.module, Action::Lire).await?;
 
     let sql = format!(
-        "SELECT {} FROM {} c {} WHERE c.{} = $1",
+        "SELECT {} FROM {} c {} WHERE c.{}::text = $1",
         e.selection,
         e.table,
         jointures(e.table),
@@ -688,6 +797,7 @@ pub async fn creer(
     };
 
     let champs = valider_charge(db, user, e.module, e.creation, &reste).await?;
+    exiger_valider_si_change(db, user, e, None, &champs).await?;
 
     // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES.
     //
@@ -736,6 +846,7 @@ pub async fn modifier(
 ) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
     let champs = valider_charge(db, user, e.module, e.modification, charge).await?;
+    exiger_valider_si_change(db, user, e, Some(id), &champs).await?;
 
     // LA BASE COULE ELLE-MEME LES VALEURS DANS SES TYPES — voir `charge_jsonb`.
     // Un « 500 » saisi au clavier est du TEXTE ; lie tel quel a une colonne
@@ -744,7 +855,7 @@ pub async fn modifier(
     let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
     let sql = format!(
         "UPDATE {} AS c SET {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) AS p
-          WHERE c.{} = $2",
+          WHERE c.{}::text = $2",
         e.table,
         set.join(", "),
         e.table,

@@ -218,7 +218,6 @@
   border-radius: 14px;
   background-color: rgb(255 255 255 / 0.1);
   backdrop-filter: blur(14px) saturate(190%) brightness(108%);
-  -webkit-backdrop-filter: blur(14px) saturate(190%) brightness(108%);
   border: 1px solid rgb(255 255 255 / 0.18);
   box-shadow:
     /* l'ombre portee : la carte flotte au-dessus du decor */
@@ -262,7 +261,6 @@
 @supports (backdrop-filter: url(#verre-lentille)) {
   .cnx__carte {
     backdrop-filter: url(#verre-lentille) blur(6px) saturate(185%) brightness(106%);
-    -webkit-backdrop-filter: url(#verre-lentille) blur(6px) saturate(185%) brightness(106%);
   }
 }
 
@@ -298,7 +296,6 @@
   border-radius: 8px;
   background-color: rgb(255 255 255 / 0.12);
   backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
   border: 1px solid rgb(255 255 255 / 0.22);
   color: #f8fafc;
   /* Meme arete que la carte : le champ appartient a la meme piece de verre. */
@@ -355,7 +352,6 @@
     rgb(255 255 255 / 0.16) 100%
   );
   backdrop-filter: blur(18px) saturate(190%);
-  -webkit-backdrop-filter: blur(18px) saturate(190%);
   border: 1px solid rgb(255 255 255 / 0.4);
   box-shadow:
     0 8px 26px rgb(0 0 0 / 0.4),
@@ -405,7 +401,6 @@
   border-radius: 8px;
   background-color: rgb(255 255 255 / 0.09);
   backdrop-filter: blur(14px) saturate(170%);
-  -webkit-backdrop-filter: blur(14px) saturate(170%);
   border: 1px solid rgb(255 255 255 / 0.18);
   box-shadow: inset 1px 1px 0 rgb(255 255 255 / 0.2);
 }
@@ -438,7 +433,6 @@
   color: rgb(226 232 240 / 0.6);
   background-color: rgb(255 255 255 / 0.08);
   backdrop-filter: blur(14px) saturate(170%);
-  -webkit-backdrop-filter: blur(14px) saturate(170%);
   border: 1px solid rgb(255 255 255 / 0.16);
   box-shadow: inset 1px 1px 0 rgb(255 255 255 / 0.18);
 }

@@ -125,7 +125,7 @@ export function Pareto({
       </p>
 
       {tableau ? (
-        <div className="defilement-x max-h-72 overflow-y-auto">
+        <div tabIndex={0} role="region" aria-label="Graphique" className="defilement-x max-h-72 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <table className="w-full text-[11px]">
             <thead className="sticky top-0 bg-surface">
               <tr>
@@ -133,7 +133,7 @@ export function Pareto({
                   Rang
                 </th>
                 <th className="border-b border-bordure py-1 pr-3 text-left font-medium text-attenue-texte">
-                  Reference
+                  Référence
                 </th>
                 <th className="border-b border-bordure py-1 pr-3 text-right font-medium text-attenue-texte">
                   {unite ?? 'Valeur'}

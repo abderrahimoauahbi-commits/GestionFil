@@ -32,7 +32,7 @@ export function BarreEtat({
      la sonde tombe, l'utilisateur doit le savoir avant de saisir une pesee. */
   const sante = useQuery({
     queryKey: ['atelier-sante'],
-    queryFn: () => api.get<unknown>('/api/sante'),
+    queryFn: ({ signal }) => api.get<unknown>('/api/sante', { signal }),
     refetchInterval: 30_000,
     retry: false,
     staleTime: 0,

@@ -11,6 +11,7 @@ import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { lireNombre, versCanonique, versSaisie } from '../../lib/nombres'
 
 // ============================================================================
 // Bouton
@@ -20,7 +21,7 @@ import { cn } from '../../lib/utils'
 // Un ERP se consulte huit heures par jour — chaque pixel de hauteur en trop est
 // une ligne de moins a l'ecran.
 const varianteBouton = cva(
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius)] ' +
+  'bouton inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius)] ' +
     'text-[13px] font-medium outline-none select-none ' +
     // LA TRANSITION PORTE AUSSI SUR L'OMBRE ET LA POSITION : sans elles,
     // l'enfoncement est un saut, pas un geste.
@@ -42,9 +43,12 @@ const varianteBouton = cva(
         // AU SURVOL, LA TEINTE SEULE CHANGE (02/10/2026) : le bouton ne monte
         // plus. Le style sobre n'a presque pas d'ombre, et un objet qui bouge
         // au passage de la souris distrait d'un tableau qu'on lit.
+        // L'ACTION PRINCIPALE EST EN COBALT (05/10/2026), plus en encre : un
+        // bouton noir sur une page blanche se confondait avec le texte, et
+        // l'interface n'avait plus de couleur pour dire « c'est ici ».
         principal:
-          'bg-accent text-accent-texte shadow-[var(--ombre-pose)] ' +
-          'hover:bg-accent/92 hover:shadow-[var(--ombre-levee)]',
+          'bg-primaire text-primaire-texte shadow-[var(--ombre-pose)] ' +
+          'hover:bg-primaire/90 hover:shadow-[var(--ombre-levee)]',
         primaire:
           'bg-primaire text-primaire-texte shadow-[var(--ombre-pose)] ' +
           'hover:bg-primaire/92 hover:shadow-[var(--ombre-levee)]',
@@ -90,6 +94,9 @@ export const Bouton = React.forwardRef<HTMLButtonElement, BoutonProps>(
       <Composant
         ref={ref}
         className={cn(varianteBouton({ variante, taille }), className)}
+        // L'ACCROCHE DES CHARTES : chaque style habille la variante a sa facon
+        // (degrade, verre, or) sans que les ecrans aient a le savoir.
+        data-variante={variante ?? 'principal'}
         disabled={disabled || chargement}
         {...props}
       >
@@ -121,16 +128,84 @@ Bouton.displayName = 'Bouton'
  * franchement plus claire : la difference se voit d'un coup d'oeil, sans lire.
  */
 const classeChamp =
-  'flex h-8 w-full rounded-[var(--radius)] border border-champ bg-surface px-2.5 py-1 text-[13px] ' +
+  'champ-saisie flex h-8 w-full rounded-[var(--radius)] border border-champ bg-surface px-2.5 py-1 text-[13px] ' +
   'transition-colors placeholder:italic placeholder:text-attenue-texte/55 ' +
   'focus-visible:border-anneau focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau/20 ' +
   'disabled:cursor-not-allowed disabled:bg-attenue disabled:text-attenue-texte ' +
   'aria-[invalid=true]:border-danger aria-[invalid=true]:ring-danger/25'
 
+/**
+ * LA SAISIE D'UN NOMBRE, a la francaise (10/10/2026). Le champ numerique du
+ * navigateur lisait « 1.234,5 » comme 1,2345 et effacait sans prevenir ce
+ * qu'il ne comprenait pas. Ici, un champ texte au clavier decimal : on voit ce
+ * qu'on a tape, l'ecran recoit la valeur lue par `lireNombre` (« 1234.5 »), et un
+ * nombre illisible se borde de rouge au lieu d'etre devine. Les ecrans n'ont
+ * rien a changer : ils lisent toujours `e.target.value`.
+ */
+export const SaisieNombre = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ value, defaultValue, onChange, onBlur, onKeyDown, step, min, max, type: _type, ...props }, ref) => {
+    const exterieur = value === undefined ? undefined : String(value ?? '')
+    const [texte, setTexte] = React.useState(() => versSaisie(exterieur ?? (defaultValue as string | undefined)))
+    // La derniere valeur transmise : si l'ecran la renvoie telle quelle, on garde
+    // ce que l'utilisateur a tape (« 1 234,5 ») au lieu de le reecrire.
+    const emise = React.useRef(exterieur)
+    React.useEffect(() => {
+      if (exterieur !== undefined && exterieur !== emise.current) {
+        emise.current = exterieur
+        setTexte(versSaisie(exterieur))
+      }
+    }, [exterieur])
+    const lu = lireNombre(texte)
+    const illisible = lu !== null && Number.isNaN(lu)
+    const emettre = (e: React.SyntheticEvent<HTMLInputElement>, brut: string) => {
+      setTexte(brut)
+      const canon = versCanonique(brut)
+      const transmis = Number.isNaN(lireNombre(brut) ?? 0) ? '' : canon
+      emise.current = transmis
+      // L'evenement d'origine, la valeur remplacee par la valeur lue.
+      onChange?.({ ...e, target: { ...e.currentTarget, value: transmis, name: e.currentTarget.name } } as unknown as React.ChangeEvent<HTMLInputElement>)
+    }
+    const pas = step === undefined || step === 'any' ? 1 : Number(step)
+    return (
+      <input
+        ref={ref}
+        {...props}
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        value={texte}
+        aria-invalid={illisible || props['aria-invalid'] ? true : undefined}
+        title={illisible ? `Nombre illisible : « ${texte} ». Exemples : 1234,5 — 1 234,5 — 1.234,5` : props.title}
+        onChange={(e) => emettre(e, e.currentTarget.value)}
+        onKeyDown={(e) => {
+          // Les fleches gardent leur role de compteur, comme le champ numerique.
+          if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !illisible) {
+            e.preventDefault()
+            let n = (lu ?? 0) + (e.key === 'ArrowUp' ? pas : -pas)
+            if (min !== undefined && n < Number(min)) n = Number(min)
+            if (max !== undefined && n > Number(max)) n = Number(max)
+            emettre(e, versSaisie(Number(n.toFixed(6))))
+          }
+          onKeyDown?.(e)
+        }}
+        onBlur={(e) => {
+          // En quittant le champ, la saisie se range : « 1 234,5 » devient « 1234,5 ».
+          if (!illisible && lu !== null) setTexte(versSaisie(lu))
+          onBlur?.(e)
+        }}
+      />
+    )
+  },
+)
+SaisieNombre.displayName = 'SaisieNombre'
+
 export const Champ = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, ...props }, ref) => (
-    <input ref={ref} className={cn(classeChamp, className)} {...props} />
-  ),
+  ({ className, ...props }, ref) =>
+    props.type === 'number' ? (
+      <SaisieNombre ref={ref} className={cn(classeChamp, 'tabular-nums', className)} {...props} />
+    ) : (
+      <input ref={ref} className={cn(classeChamp, className)} {...props} />
+    ),
 )
 Champ.displayName = 'Champ'
 
@@ -279,7 +354,7 @@ export function CarteEntete({
         // L'EN-TETE RESPIRE. A 1.5 de padding vertical, le titre touchait le
         // trait du dessous ; l'espace est ce qui distingue une interface qu'on
         // a dessinee d'une interface qu'on a assemblee.
-        'flex min-h-10 items-center justify-between gap-3 border-b border-bordure bg-attenue/60 px-4 py-2',
+        'carte-entete flex min-h-11 items-center justify-between gap-3 border-b border-bordure px-4 py-2',
         className,
       )}
       {...props}
@@ -310,7 +385,7 @@ export function CarteTitre({ className, ...props }: React.HTMLAttributes<HTMLHea
   return (
     <h3
       className={cn(
-        'text-[10px] font-semibold uppercase tracking-wider text-attenue-texte',
+        'carte-titre text-[13px] font-semibold tracking-[-0.01em] text-texte',
         className,
       )}
       {...props}
@@ -323,7 +398,7 @@ export function CarteCorps({ className, ...props }: React.HTMLAttributes<HTMLDiv
   // Demonte plutot que masque : un formulaire replie ne doit pas continuer a
   // recevoir le focus au clavier.
   if (repli?.replie) return null
-  return <div className={cn('p-2.5', className)} {...props} />
+  return <div className={cn('p-3.5', className)} {...props} />
 }
 
 // ============================================================================
@@ -341,7 +416,7 @@ export function CarteCorps({ className, ...props }: React.HTMLAttributes<HTMLDiv
  * ces trois valeurs, pas d'une ombre.
  */
 const varianteBadge = cva(
-  'inline-flex items-center gap-1 rounded-full border px-2 py-[1px] text-[10.5px] font-medium ' +
+  'etiquette inline-flex items-center gap-1 rounded-full border px-2 py-[1px] text-[10.5px] font-medium ' +
     'leading-[1.35] whitespace-nowrap',
   {
     variants: {
@@ -365,7 +440,7 @@ export function Badge({
   ton,
   ...props
 }: React.HTMLAttributes<HTMLSpanElement> & VariantProps<typeof varianteBadge>) {
-  return <span className={cn(varianteBadge({ ton }), className)} {...props} />
+  return <span data-ton={ton ?? 'neutre'} className={cn(varianteBadge({ ton }), className)} {...props} />
 }
 
 // ============================================================================

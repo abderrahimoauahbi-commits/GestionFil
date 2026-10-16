@@ -85,12 +85,15 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 
-# Les deux seuls chemins ou le service peut ecrire.
+# Les trois seuls chemins ou le service peut ecrire : ses sauvegardes, ses
+# journaux, et les pieces jointes (factures, DUM) qu'on lui confie. Sans ce
+# dernier, ProtectSystem=strict mettait /opt/gestionfil/pieces en lecture
+# seule : deposer une facture echouait (audit v5, T2).
 # Les paquets clients sont en LECTURE SEULE pour le service : il les sert, il
 # ne les fabrique pas. Un installateur se depose par SSH, jamais par l'API —
 # une application qui peut ecrire les binaires qu'elle distribue est une
 # application dont une faille suffit a contaminer tous les postes.
-ReadWritePaths=/opt/gestionfil/sauvegardes /opt/gestionfil/journaux
+ReadWritePaths=/opt/gestionfil/sauvegardes /opt/gestionfil/journaux /opt/gestionfil/pieces
 
 # Familles d'adresses : IPv4, IPv6, et le socket UNIX de PostgreSQL.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

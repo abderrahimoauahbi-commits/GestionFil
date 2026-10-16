@@ -1,20 +1,27 @@
 @import "tailwindcss";
 
 /* =============================================================================
-   LE STYLE DE L'OUTIL — un seul, depuis le 02/10/2026
+   LE STYLE DE L'OUTIL — cinq chartes au choix, depuis le 05/10/2026
    -----------------------------------------------------------------------------
-   Les quinze familles de couleurs, la barre laiton et le verre sont retires :
-   l'outil a UNE apparence, claire sans eblouir, sombre sur demande. Le modele
-   est la sobriete des outils d'ingenierie (electric.ax) : des gris froids, une
-   seule encre petrole pour agir, des filets d'un pixel, presque aucune ombre,
-   des etiquettes en petites capitales espacees.
-
-   LA POLICE EST SOURCE SANS 3, servie avec l'application (le reseau de l'usine
-   n'a pas d'acces internet garanti). Plus fine et plus etroite qu'Inter : elle
-   tient davantage de colonnes sans paraitre serree, et ses chiffres a chasse
-   fixe alignent les kilos.
+   Les jetons ci-dessous sont la base ; chaque charte les redefinit et habille
+   les accroches des composants dans `styles/chartes.css` (fichier genere).
+   Choix : Apparence › Style, attribut `data-charte` sur <html>.
    ========================================================================== */
 @import "@fontsource-variable/source-sans-3";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/space-grotesk";
+/* Les polices au choix (Réglages › Texte › Police), fines et lisibles. */
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/lexend";
+@import "@fontsource-variable/ibm-plex-sans";
+/* Les familles de la v1 AVANT les chartes : la palette choisie dans les
+   réglages (dans chartes.css) doit pouvoir les recolorer. */
+@import "./styles/familles-v1.css";
+@import "./styles/chartes.css";
 
 @theme {
   --font-sans: "Source Sans 3 Variable", "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -70,7 +77,7 @@
 
   --bordure: 220 9% 83%;
   --ligne: 220 10% 89%;
-  --champ: 220 8% 76%;
+  --champ: 220 8% 57.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 188 72% 30%;
 
   --barre: 222 20% 12%;
@@ -109,7 +116,7 @@
 
   --bordure: 222 11% 19%;
   --ligne: 222 11% 14.5%;
-  --champ: 222 10% 25%;
+  --champ: 222 10% 41.5%; /* 3:1 sur la surface (audit v4) */
   --anneau: 185 62% 58%;
 
   --barre: 222 18% 5.5%;
@@ -297,6 +304,90 @@ table,
      d'un telephone est le minimum lisible. */
   select {
     min-width: 8rem;
+  }
+
+  /* LE « ? » DE L'AIDE RESTE UN ROND. La regle des 44 px l'etirait en lamelle
+     verticale, qui passait sous le titre. Un carre de 32 px se vise bien. */
+  [data-aide-bouton] {
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+  }
+}
+
+/* LES BARRES D'ACTION COLLEES EN BAS ne passent plus sous la navigation du
+   telephone (13/10/2026) : « Creer le bon », « Enregistrer la reception »
+   restaient caches derriere elle. La coquille publie sa hauteur. */
+@media (max-width: 767px) {
+  main .sticky.bottom-0 {
+    bottom: var(--barre-basse, 0px);
+  }
+}
+
+/* LES TABLEAUX DE SAISIE DEVIENNENT DES CARTES SUR TELEPHONE (13/10/2026).
+   Une grille de lignes de PC laissait 2 px a une quantite. Sous 640 px, chaque
+   ligne est une carte, un champ par rangee avec son libelle (repris du titre
+   de colonne par TablesSouples) ; les nombres vont par deux. */
+@media (max-width: 639px) {
+  table[data-cartes] {
+    display: block;
+    min-width: 0 !important;
+    width: 100%;
+  }
+  table[data-cartes] thead {
+    display: none;
+  }
+  table[data-cartes] tbody,
+  table[data-cartes] tfoot {
+    display: block;
+  }
+  table[data-cartes] tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+    margin: 0 0 8px;
+    padding: 10px;
+    border: 1px solid var(--color-bordure);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+  }
+  table[data-cartes] td,
+  table[data-cartes] th {
+    display: block;
+    min-width: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    position: static !important;
+    text-align: left !important;
+    white-space: normal;
+    grid-column: 1 / -1;
+  }
+  table[data-cartes] td[data-court] {
+    grid-column: auto;
+  }
+  table[data-cartes] td:empty {
+    display: none;
+  }
+  table[data-cartes] td[data-libelle]::before {
+    content: attr(data-libelle);
+    display: block;
+    margin-bottom: 2px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-attenue-texte);
+  }
+  table[data-cartes] td input:not([type="checkbox"]):not([type="radio"]),
+  table[data-cartes] td select,
+  table[data-cartes] td textarea,
+  table[data-cartes] td [role="combobox"] {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+  table[data-cartes] .sticky {
+    position: static !important;
   }
 }
 
@@ -508,6 +599,61 @@ table.grille td {
   animation: valeur-arrive 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
+/* LES MINI-GRAPHIQUES DES CARTES (12/10/2026) : la courbe se trace, l'aire
+   suit, le dernier point s'allume ; les barres poussent depuis la ligne zero,
+   l'une apres l'autre ; la jauge se remplit jusqu'a sa valeur. Une fois, au
+   montage. */
+@keyframes spark-trace { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes spark-fondu { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spark-pousse { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes spark-jauge { from { stroke-dashoffset: 100; } to { stroke-dashoffset: calc(100 - var(--v)); } }
+.spark-trait { stroke-dasharray: 1; animation: spark-trace 700ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+.spark-aire { animation: spark-fondu 500ms ease-out 350ms both; }
+.spark-point { transform-box: fill-box; transform-origin: center; animation: valeur-arrive 200ms ease-out 650ms both; }
+.spark-barre {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: spark-pousse 420ms cubic-bezier(0.4, 0, 0.2, 1) calc(var(--i, 0) * 35ms) both;
+}
+.spark-barre-bas { transform-origin: top; }
+.spark-jauge { animation: spark-jauge 800ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+
+/* LES TABLEAUX FAITS A LA MAIN SE RESSERRENT AU LIEU DE DEFILER (12/10/2026).
+   Le cran est pose par composants/TablesSouples.tsx, seulement quand le
+   tableau deborde de son cadre. Hors couche : ces regles l'emportent sur les
+   utilitaires (`whitespace-nowrap`, `truncate`) des ecrans. */
+/* Une largeur minimale figee (min-w-[60rem]) forcait le debordement : elle tombe des le premier cran. */
+table[data-souple] { min-width: 0; }
+table[data-souple] th { white-space: normal; }
+table[data-souple] th > button { white-space: normal; text-align: inherit; }
+table[data-souple='2'] td,
+table[data-souple='3'] td { white-space: normal; overflow-wrap: break-word; }
+table[data-souple='2'] td .truncate,
+table[data-souple='3'] td .truncate,
+table[data-souple='4'] td .truncate,
+table[data-souple='2'] td.truncate,
+table[data-souple='3'] td.truncate,
+table[data-souple='4'] td.truncate { white-space: normal; overflow: visible; text-overflow: clip; }
+/* Un nombre, un montant, une date, un code ou un numero de lot restent d'un
+   tenant : coupes, ils se lisent mal. Le texte, lui, ne passe a la ligne
+   qu'entre deux mots. */
+table[data-souple] td.text-right,
+table[data-souple] td.tabular-nums,
+table[data-souple] td .tabular-nums,
+table[data-souple] td.font-mono,
+table[data-souple] td .font-mono { white-space: nowrap; overflow-wrap: normal; }
+table[data-souple='3'] th,
+table[data-souple='3'] td { padding-left: 4px; padding-right: 4px; }
+table[data-souple='3'] { font-size: 0.94em; }
+/* Dernier cran, pour les grilles de nombres (besoins mois par mois) a 1024 px. */
+table[data-souple='4'] td { white-space: normal; overflow-wrap: break-word; }
+table[data-souple='4'] th,
+table[data-souple='4'] td { padding-left: 2px; padding-right: 2px; }
+table[data-souple='4'] { font-size: 0.86em; }
+/* Au dernier cran, un code ou un numero de lot se coupe a ses tirets, jamais ailleurs. */
+table[data-souple='4'] td.font-mono,
+table[data-souple='4'] td .font-mono { white-space: normal; }
+
 /* RIEN DE TOUT CELA POUR QUI A DEMANDE LE CALME.
    Un systeme regle sur « animations reduites » le demande pour une raison —
    vertiges, migraines, fatigue visuelle. On respecte, sans rien perdre du
@@ -516,4 +662,53 @@ table.grille td {
   .squelette::after { animation: none; }
   .carte-active:hover { transform: none; }
   .valeur-arrive { animation: none; }
+  .spark * { animation: none !important; }
+  .spark-trait { stroke-dasharray: none; }
+}
+
+/* =============================================================================
+   LES ASCENSEURS (06/10/2026) — fins, arrondis, discrets
+   -----------------------------------------------------------------------------
+   Plus de barres grises carrées « Windows 95 » : un rail invisible, un curseur
+   arrondi et translucide qui fonce au survol, aux couleurs du style (clair,
+   sombre, verre). Dans le menu sombre, le curseur prend la teinte du menu.
+   Chromium/WebView2 : pseudo-éléments `::-webkit-scrollbar` (ils ne valent que
+   si `scrollbar-width` reste à `auto`) ; Firefox : `scrollbar-color`.
+   ========================================================================== */
+*,
+.defilement-x {
+  scrollbar-width: auto;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: hsl(var(--attenue-texte) / 0.32);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-color: hsl(var(--primaire) / 0.6);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+.barre-laterale ::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--barre-attenue) / 0.35);
+}
+.defilement-x::-webkit-scrollbar {
+  height: 8px;
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--attenue-texte) / 0.35) transparent;
+  }
 }

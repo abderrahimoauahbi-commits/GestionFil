@@ -45,6 +45,9 @@ interface LigneCatalogue {
   prix_catalogue_mad: number | null
   /** Somme des magasins, chacun a son CMUP. */
   valeur_stock_mad: number | null
+  /** Expedie, pas encore recu : dans aucun magasin, a son CMUP de depart (10/10/2026). */
+  stock_transit_kg?: number | null
+  valeur_transit_mad?: number | null
   source_prix: string | null
   classe_abc: string | null
 }
@@ -58,7 +61,7 @@ export function Valorisation() {
 
   const q = useQuery({
     queryKey: ['valorisation'],
-    queryFn: () => api.get<LigneCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
+    queryFn: ({ signal }) => api.get<LigneCatalogue[]>('/api/catalogue?actif=1&limite=2000', { signal }),
     enabled: peut('VALORISATION', 'LIRE') || peut('CATALOGUE', 'LIRE'),
   })
 
@@ -75,13 +78,18 @@ export function Valorisation() {
             : null
         return { ...r, kg, cmup, catalogue, valeur, ecart }
       })
-      .filter((r) => r.kg > 0)
+      .filter((r) => r.kg > 0 || (r.stock_transit_kg ?? 0) > 0)
   }, [q.data])
 
   const total = useMemo(
     () => ({
-      valeur: lignes.reduce((s, r) => s + (r.valeur ?? 0), 0),
-      kg: lignes.reduce((s, r) => s + r.kg, 0),
+      // LE FIL EN ROUTE COMPTE (10/10/2026) : sorti d'un magasin, pas encore
+      // entre dans l'autre, il reste a nous. Sans lui, la valeur baissait le
+      // temps du trajet puis remontait a l'arrivee.
+      valeur: lignes.reduce((s, r) => s + (r.valeur ?? 0) + (r.valeur_transit_mad ?? 0), 0),
+      kg: lignes.reduce((s, r) => s + r.kg + (r.stock_transit_kg ?? 0), 0),
+      enRouteKg: lignes.reduce((s, r) => s + (r.stock_transit_kg ?? 0), 0),
+      enRouteValeur: lignes.reduce((s, r) => s + (r.valeur_transit_mad ?? 0), 0),
       sansCmup: lignes.filter((r) => r.cmup === null).length,
       ecarts: lignes.filter((r) => r.ecart !== null && Math.abs(r.ecart) >= ECART_NOTABLE).length,
     }),
@@ -104,7 +112,7 @@ export function Valorisation() {
     <div className="flex flex-col gap-3">
       <EnTetePage
         titre="Valorisation du stock"
-        description="CMUP par référence, et ecart au prix catalogue converti"
+        description="CMUP par référence, et écart au prix catalogue converti"
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -112,8 +120,17 @@ export function Valorisation() {
           Icone={Coins}
           libelle="Valeur totale"
           valeur={`${fmt.nombre(Math.round(total.valeur))} MAD`}
+          aide={
+            total.enRouteKg > 0
+              ? `Dont ${fmt.nombre(Math.round(total.enRouteValeur))} MAD en route (${fmt.nombre(Math.round(total.enRouteKg))} kg expédiés, pas encore reçus).`
+              : undefined
+          }
         />
-        <Chiffre libelle="Quantité" valeur={`${fmt.nombre(Math.round(total.kg))} kg`} />
+        <Chiffre
+          libelle="Quantité"
+          valeur={`${fmt.nombre(Math.round(total.kg))} kg`}
+          aide={total.enRouteKg > 0 ? `Dont ${fmt.nombre(Math.round(total.enRouteKg))} kg en route entre deux magasins.` : undefined}
+        />
         <Chiffre
           libelle="Sans CMUP"
           valeur={String(total.sansCmup)}
@@ -129,10 +146,10 @@ export function Valorisation() {
       </div>
 
       {total.sansCmup > 0 && (
-        <Alerte ton="alerte" titre="Une partie du stock n'est pas valorisee">
+        <Alerte ton="alerte" titre="Une partie du stock n'est pas valorisée">
           {total.sansCmup} reference{total.sansCmup > 1 ? 's portent' : ' porte'} du stock sans
           CMUP : ni achat, ni prix catalogue convertible — sa devise n'a pas de taux en vigueur.
-          Leur valeur est comptee pour zero dans le total ci-dessus, qui est donc un plancher.
+          Leur valeur est comptée pour zéro dans le total ci-dessus, qui est donc un plancher.
         </Alerte>
       )}
 
@@ -145,7 +162,7 @@ export function Valorisation() {
         <CarteEntete>
           <CarteTitre className="flex items-center gap-1.5">
             <Calculator className="size-3.5" />
-            Methode et hypotheses
+            Méthode et hypotheses
           </CarteTitre>
         </CarteEntete>
         <CarteCorps className="grid gap-x-8 gap-y-2 text-[12px] md:grid-cols-2">
@@ -156,7 +173,7 @@ export function Valorisation() {
           <div>
             <div className="text-[11px] text-attenue-texte">Formule</div>
             <div className="font-mono text-[11px]">
-              (qte x CMUP + entree x prix) / (qte + entree)
+              (qte x CMUP + entrée x prix) / (qte + entrée)
             </div>
           </div>
           <div>
@@ -225,7 +242,7 @@ export function Valorisation() {
         ))}
       </div>
 
-      <div className="defilement-x rounded-[var(--radius)] border border-bordure bg-surface">
+      <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x rounded-[var(--radius)] border border-bordure bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
         <table className="grille w-full text-[12px]">
           <thead className="bg-attenue">
             <tr>

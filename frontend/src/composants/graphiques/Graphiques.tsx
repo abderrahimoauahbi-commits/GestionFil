@@ -126,7 +126,7 @@ function TableauValeurs({
   lignes: (string | number)[][]
 }) {
   return (
-    <div className="defilement-x max-h-72 overflow-y-auto">
+    <div tabIndex={0} role="region" aria-label="Graphique" className="defilement-x max-h-72 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
       <table className="w-full text-[11px]">
         <thead className="sticky top-0 bg-surface">
           <tr>
@@ -536,7 +536,7 @@ export function Pareto({
       titre={titre}
       sousTitre={sousTitre}
       series={[
-        { cle: 'valeur', libelle: 'Valeur consommee' },
+        { cle: 'valeur', libelle: 'Valeur consommée' },
         { cle: 'cumul', libelle: 'Part cumulée' },
       ]}
       vueTableau={tableau}

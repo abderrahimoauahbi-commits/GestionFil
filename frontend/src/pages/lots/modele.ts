@@ -13,6 +13,8 @@ import { api, ErreurApi } from '../../api/client'
 import { libelleLot } from '../../lib/lots'
 
 export const MODULE = 'STOCK'
+/** Les decisions sur un lot (derogation, blocage, dormant) : regle 5. */
+export const MODULE_DECISION = 'LOTS'
 
 // ============================================================================
 // Types — les champs exacts de `v_lot`, `v_lot_vie` et `demande_autorisation`
@@ -83,6 +85,10 @@ export interface Demande extends Record<string, unknown> {
   motif_decision: string | null
   demandeur: string | null
   decideur: string | null
+  /** Les kilos que couvre une derogation de lot bloque (F17), et ceux employes. */
+  kg_autorises?: number | string | null
+  kg_consommes?: number | string | null
+  date_consommation?: string | null
 }
 
 // ============================================================================

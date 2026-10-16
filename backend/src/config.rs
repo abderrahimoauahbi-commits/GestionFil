@@ -34,6 +34,26 @@ impl Config {
         if jwt_secret.len() < 32 {
             anyhow::bail!("JWT_SECRET doit faire au moins 32 caracteres");
         }
+        // LE SECRET D'EXEMPLE EST REFUSE (audit v4). Le modele de configuration
+        // de l'installateur en portait un, ecrit en clair dans le depot : toutes
+        // les installations qui ne l'avaient pas change signaient leurs jetons
+        // avec la meme cle, connue de quiconque lit le depot. On le reconnait a
+        // son empreinte, pour ne pas le recopier ici.
+        const EMPREINTES_REFUSEES: &[&str] =
+            &["378cec43a37f0fbcd9a7e7263b56f1ad8e3ea585f0945cfa770fbe5175b6b01b"];
+        let empreinte = {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(jwt_secret.as_bytes()).iter().map(|o| format!("{o:02x}")).collect::<String>()
+        };
+        if EMPREINTES_REFUSEES.contains(&empreinte.as_str())
+            || jwt_secret.contains("A_GENERER")
+            || jwt_secret.to_lowercase().contains("changez")
+        {
+            anyhow::bail!(
+                "JWT_SECRET est le secret d'exemple : tirez-en un au sort (openssl rand -base64 48) \
+                 et redemarrez. Les sessions ouvertes devront se reconnecter."
+            );
+        }
 
         Ok(Self {
             database_url: std::env::var("DATABASE_URL")
@@ -42,8 +62,11 @@ impl Config {
             jwt_secret,
             jwt_ttl_minutes: std::env::var("JWT_TTL_MINUTES")
                 .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(480),
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(480)
+                // PLAFONNEE A HUIT HEURES (audit du 13/10/2026) : une valeur
+                // oubliee dans le .env ne doit pas ouvrir des sessions d'un mois.
+                .clamp(5, 480),
             // LE VERROU D'INACTIVITE, en secondes.
             //
             // Reglable sans recompiler, et c'est voulu : la bonne valeur ne se

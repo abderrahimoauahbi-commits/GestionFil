@@ -72,3 +72,21 @@ Thumbs.db
 # Cache Python de db/pg/charger.py — regenere a chaque execution.
 __pycache__/
 *.pyc
+
+# Tests de bout en bout (frontend/e2e) : rapports, captures, traces
+frontend/rapport-e2e/
+frontend/rapport-simulation*/
+
+# Skills Higgsfield (npx skills add higgsfield-ai/skills), propres au poste
+.agents/
+frontend/dist-essai/
+
+# Paquets de publication : fabriques a la demande, jamais versionnes (audit du 13/10/2026).
+deploiement/*.tar.gz
+deploiement/paquet/
+
+# --- Reglages locaux de l outil (retires du suivi le 13/10/2026, commit 35cccc0) ---
+# Ils portent des chemins et des reglages propres au poste : ils ne se partagent pas.
+.claude/
+.mcp.json
+skills-lock.json

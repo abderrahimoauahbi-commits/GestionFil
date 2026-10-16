@@ -34,7 +34,7 @@ cargo run --bin gestionfil-import -- --simuler    # import à blanc, rapport ide
 src/
 ├── main.rs           démarrage, arrêt gracieux
 ├── config.rs         configuration depuis l'environnement
-├── db.rs             pool SQLite, contexte de session, arrondis
+├── db.rs             pool PostgreSQL, témoins de migration, contexte de session, arrondis, délais
 ├── error.rs          AppError → HTTP ; les messages des triggers remontent tels quels
 ├── state.rs          état partagé
 ├── auth/
@@ -45,7 +45,11 @@ src/
 ├── domain/
 │   ├── unites.rs     conversion vers le kg (R01), sans repli silencieux
 │   ├── mrp.rs        figer les recettes, calcul idempotent, snapshot
-│   ├── reception.rs  cascade 3-en-1
+│   ├── reception.rs  cascade 3-en-1, écart au reste courant, bobines comptées
+│   ├── facture_locale.rs  clôture par facture (devise, plusieurs réceptions), avoir
+│   ├── importation.rs     dossiers d'import : répartition, réception, clôture
+│   ├── decision_machine.rs  décisions machine (avant → saisie → après)
+│   ├── transitions.rs     retours arrière à VALIDER
 │   ├── transfert.rs  deux mouvements, valeur qui suit la marchandise
 │   ├── inventaire.rs ouverture et clôture avec ajustements
 │   ├── plan_achat.rs génération des propositions
@@ -54,7 +58,7 @@ src/
     ├── auth_routes.rs  connexion, identité et droits effectifs
     ├── consultation.rs lectures (permission LIRE + masquage)
     ├── operations.rs   écritures (permission ÉCRIRE ou VALIDER)
-    └── json.rs         lignes SQLite → JSON
+    └── json.rs         lignes PostgreSQL → JSON
 ```
 
 ---

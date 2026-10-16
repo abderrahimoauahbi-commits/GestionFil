@@ -107,11 +107,11 @@ export function EtatStock() {
 
   const q = useQuery({
     queryKey: ['etat-stock'],
-    queryFn: () => api.get<LigneStock[]>('/api/etat-stock?limite=5000'),
+    queryFn: ({ signal }) => api.get<LigneStock[]>('/api/etat-stock?limite=5000', { signal }),
   })
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
-    queryFn: () => api.get<Magasin[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<Magasin[]>('/api/magasins?actif=1', { signal }),
   })
 
   const lignes = q.data ?? []
@@ -219,7 +219,7 @@ export function EtatStock() {
           }}
           className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure
                      bg-fond px-2 text-[12.5px]"
-          aria-label="References par page"
+          aria-label="Références par page"
         >
           {[25, 50, 100, 250].map((n) => (
             <option key={n} value={n}>
@@ -257,7 +257,7 @@ export function EtatStock() {
     </div>
   )
 
-  if (q.isLoading) return <Chargement texte="Lecture de l etat des stocks…" />
+  if (q.isLoading) return <Chargement texte="Lecture de l’état des stocks…" />
 
   return (
     <div className="flex flex-col gap-3">
@@ -351,7 +351,7 @@ export function EtatStock() {
           <input
             value={recherche}
             onChange={(e) => setRecherche(e.target.value)}
-            placeholder="Référence, designation, fournisseur…"
+            placeholder="Référence, désignation, fournisseur…"
             className="min-h-[38px] w-full rounded-[var(--radius-sm)] border border-bordure
                        bg-fond pl-8 pr-8 text-[13px]"
           />
@@ -390,7 +390,7 @@ export function EtatStock() {
 
       {filtrees.length === 0 ? (
         <Alerte ton="info" titre="Aucune référence">
-          Aucune reference ne correspond a ces criteres.
+          Aucune référence ne correspond a ces critères.
         </Alerte>
       ) : (
         <>
@@ -424,7 +424,7 @@ function Tuile({
   Icone?: typeof Cog
 }) {
   return (
-    <div className="rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2">
+    <div data-ton={alerte ? 'danger' : 'neutre'} className="carte-stat rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2">
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-attenue-texte">
         {Icone && <Icone className="size-3" />}
         {t}
@@ -490,7 +490,7 @@ function TableauLarge({
               Comptage
             </th>
             <th className="border-l border-bordure px-2 py-1 text-center" colSpan={3}>
-              Ce qu il annonce
+              Ce qu’il annonce
             </th>
             <th className="border-l border-bordure px-2 py-1 text-center" colSpan={3}>
               Valeur
@@ -643,12 +643,12 @@ function TableauLarge({
           jamais a l'ecran (`hidden print:block`) et remplace entierement la
           page a l'impression. */}
       <TableauImprimable<LigneStock>
-        titre="Etat du stock"
+        titre="État du stock"
         resume={`${toutes.length} reference(s) · global ${fmt.nombre(totaux.global, 0)} kg · magasins ${fmt.nombre(totaux.magasins, 0)} kg · machines ${fmt.nombre(totaux.machines, 0)} kg`}
         lignes={toutes}
         colonnes={[
-          { entete: 'Reference', valeur: (l) => l.code_reference },
-          { entete: 'Designation', valeur: (l) => l.designation },
+          { entete: 'Référence', valeur: (l) => l.code_reference },
+          { entete: 'Désignation', valeur: (l) => l.designation },
           { entete: 'Fournisseur', valeur: (l) => l.fournisseur_nom ?? '—' },
           { entete: 'Magasins', numerique: true, valeur: (l) => fmt.nombre(l.magasins_kg ?? 0, 0) },
           { entete: 'Machines', numerique: true, valeur: (l) => fmt.nombre(l.machines_kg ?? 0, 0) },
@@ -814,9 +814,9 @@ function exporter(lignes: LigneStock[], magasins: { code: string; nom: string }[
     'Stock global kg', ...magasins.map((m) => `${m.nom} kg`), 'Machines kg', 'Machines bobines',
     'Palettes', 'Bobines', 'Kg par palette',
     'Disponible kg', 'Quarantaine kg', 'En commande kg', 'Besoin 12m kg', 'Stock projete kg',
-    'Stock min kg', 'Conso mens. kg', 'Couverture j', 'Delai j', 'Statut', 'Sous minimum', 'ABC', 'XYZ',
+    'Stock min kg', 'Conso mens. kg', 'Couverture j', 'Délai j', 'Statut', 'Sous minimum', 'ABC', 'XYZ',
     'CMUP MAD', 'Prix catalogue', 'Devise', 'Valeur MAD', 'A commander kg',
-    'Derniere sortie', 'Jours sans mvt', 'Equivalents',
+    'Dernière sortie', 'Jours sans mvt', 'Equivalents',
   ]
   const cellule = (v: unknown) =>
     v == null ? '' : String(v).includes(';') ? `"${String(v).replace(/"/g, '""')}"` : String(v)

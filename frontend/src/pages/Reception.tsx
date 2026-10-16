@@ -21,12 +21,12 @@ import { ArrowLeft, Save, Send, ShieldCheck, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
+import { useToleranceFournisseur } from '../lib/lots'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
+import { ClotureFacture, CorrectionFacture } from './ReceptionCloture'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
-  GrilleLignes,
-  type ColonneGrille,
   type LigneSaisie,
   type RefLigne,
 } from '../composants/GrilleLignes'
@@ -51,10 +51,10 @@ import {
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { PeseesMobile } from './receptions/PeseesMobile'
+import { FraisApproche } from './receptions/FraisApproche'
 
 const MODULE = 'RECEPTIONS'
-/** Au-dela, l'ecart de pesee exige une derogation motivee (controle C10). */
-const TOLERANCE_PCT = 2
 
 interface Reception extends Record<string, unknown> {
   id_reception: string
@@ -65,6 +65,12 @@ interface Reception extends Record<string, unknown> {
   code_devise?: string
   numero_bc: string | null
   id_bc: string | null
+  /* L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier rattache porte la DUM,
+     les conteneurs et le regime. Il ne remplace pas la commande. */
+  id_dossier_import: string | null
+  dossier_numero?: string | null
+  numero_dum?: string | null
+  conteneurs?: string | null
   num_bon_livraison: string | null
   numero_facture: string | null
   transporteur: string | null
@@ -88,6 +94,10 @@ interface Reception extends Record<string, unknown> {
 interface LigneRec extends Record<string, unknown> {
   id_ligne_reception: string
   ligne_numero: number
+  /* LE BON QUE CETTE LIGNE SERT (ADR-003 D2). Un arrivage en couvre plusieurs :
+     le peg est porte par la LIGNE, pas par l'en-tete. */
+  id_ligne_bc: string | null
+  numero_bc: string | null
   /** 1 : la reference se suit par lot (le lot est exige a l'entree en stock). */
   suivi_lot?: number
   code_reference: string
@@ -113,6 +123,8 @@ interface LigneRec extends Record<string, unknown> {
   lot_fournisseur: string | null
   statut_qualite: string
   code_magasin_dest: string
+  derogation_ecart?: number | null
+  motif_derogation?: string | null
   unite_catalogue?: string
   /* LE CONDITIONNEMENT DE LA FICHE, ajoute a la requete : sans lui, la grille
      ne sait pas convertir une pesee en palettes ni en bobines. */
@@ -120,6 +132,18 @@ interface LigneRec extends Record<string, unknown> {
   bobines_par_palette?: number | null
   bobines_par_lot?: number | null
   densite_kg_ml?: number | null
+}
+
+/** Un dossier d'import ouvert : ce qui identifie l'arrivage, aucun montant. */
+interface DossierImport {
+  id_dossier: string
+  numero: string
+  numero_bl: string | null
+  numero_dum: string | null
+  conteneurs: string | null
+  date_arrivee: string | null
+  statut: string
+  fournisseurs: string | null
 }
 
 interface LigneAttendue extends Record<string, unknown> {
@@ -193,7 +217,11 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
     qte: pourChamp(l.quantite_stock_kg, 3),
     unite: l.unite_saisie,
     palettes: l.nb_palettes != null ? String(l.nb_palettes) : pourChamp(colis.palettes),
-    bobines: l.nb_bobines != null ? String(l.nb_bobines) : pourChamp(colis.bobines),
+    // UNE LIGNE JAMAIS COMPTEE RESTE VIDE (10/10/2026). Le chiffre deduit des kilos
+    // s'affichait comme un compte : retaper le meme nombre ne changeait rien a
+    // l'ecran, rien ne partait, et la soumission restait refusee (« Comptez les
+    // bobines ») sans issue. Le compte du quai se tape, il ne se devine pas.
+    bobines: l.nb_bobines != null ? String(l.nb_bobines) : '',
     // DETACHEE DES QU'UN COLISAGE A ETE CONSTATE. Sur un quai, « 21 palettes
     // ET ce poids-la » est la regle plutot que l'exception : une palette
     // entamee ne se deduit d'aucune pesee. Relier d'office effacerait le
@@ -207,12 +235,18 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
     // au crayon ; une frappe egaree ne la modifie pas en passant.
     valide: true,
     extra: {
+      // LE PEG RELU DEPUIS LA BASE : une ligne corrigee garde la ligne de bon
+      // qu'elle servait, et la carte affiche contre quelle commande on a pese.
+      id_ligne_bc: l.id_ligne_bc ?? '',
+      numero_bc: l.numero_bc ?? '',
       prix_mad: l.prix_kg_mad != null ? String(l.prix_kg_mad) : '',
       bl: l.quantite_bl_kg != null ? String(l.quantite_bl_kg) : '',
       colis: l.nb_colis_ligne != null ? String(l.nb_colis_ligne) : '',
       lot: l.lot_fournisseur ?? '',
       magasin: l.code_magasin_dest,
       qualite: l.statut_qualite,
+      derog: l.derogation_ecart === 1 ? '1' : '',
+      motif_derog: l.motif_derogation ?? '',
     },
   }
 }
@@ -257,6 +291,10 @@ function corpsReception(l: LigneSaisie) {
     lot_fournisseur: e.lot?.trim() || undefined,
     code_magasin_dest: e.magasin,
     statut_qualite: e.qualite,
+    // LA DEROGATION SUR UNE LIGNE DEJA SAISIE (F11, 09/10/2026) : le refus
+    // « ajoutez la derogation » menait nulle part sur une reception existante.
+    derogation_ecart: e.derog === '1',
+    motif_derogation: e.derog === '1' ? e.motif_derog?.trim() || undefined : undefined,
   }
 }
 /**
@@ -358,6 +396,7 @@ export function Reception() {
     nombre_colis: '',
     poids_total_brut_kg: '',
     date_reception: '',
+    id_dossier_import: '',
   })
   /*
    * UNE SEULE SOURCE POUR LES LIGNES, comme sur le bon de commande.
@@ -383,13 +422,13 @@ export function Reception() {
 
   const qRec = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<Reception[]>('/api/receptions'),
+    queryFn: ({ signal }) => api.get<Reception[]>('/api/receptions', { signal }),
   })
   const rec = qRec.data?.find((r) => r.id_reception === id) ?? null
 
   const qLignes = useQuery({
     queryKey: ['lignes-reception', id],
-    queryFn: () => api.get<LigneRec[]>(`/api/receptions/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneRec[]>(`/api/receptions/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 
@@ -412,6 +451,7 @@ export function Reception() {
       nombre_colis: rec.nombre_colis?.toString() ?? '',
       poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
       date_reception: rec.date_reception?.slice(0, 10) ?? '',
+      id_dossier_import: rec.id_dossier_import ?? '',
     })
   }, [
     rec?.id_reception,
@@ -421,6 +461,7 @@ export function Reception() {
     rec?.nombre_colis,
     rec?.poids_total_brut_kg,
     rec?.date_reception,
+    rec?.id_dossier_import,
   ])
 
   /* DECLARE AVANT L'EFFET QUI LE LIT. `const` n'est pas remonte : plus bas, il
@@ -448,8 +489,6 @@ export function Reception() {
     setNouvelles(chargees)
   }, [id, modifiable, qLignes.isSuccess, lignesServeur])
 
-  const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
-
   const qMagasins = useQuery({
     queryKey: ['magasins'],
     queryFn: () =>
@@ -457,6 +496,24 @@ export function Reception() {
         '/api/magasins',
       ),
   })
+
+  /*
+   * LES DOSSIERS D'IMPORT OUVERTS (ADR-003 phase A).
+   *
+   * Un arrivage venu de l'etranger se rattache au dossier qui porte sa DUM et
+   * ses conteneurs. La liste est servie par la route des receptions, pas par
+   * celle de l'import : c'est le magasinier qui dit quel conteneur il vide, et
+   * il n'a pas a lire les dossiers d'import pour cela.
+   */
+  const qDossiers = useQuery({
+    queryKey: ['receptions-dossiers-import'],
+    queryFn: ({ signal }) =>
+      api.get<DossierImport[]>('/api/receptions-dossiers-import', { signal }),
+    enabled: !!modifiable,
+  })
+  const dossierRattache = (qDossiers.data ?? []).find(
+    (d) => d.id_dossier === entete.id_dossier_import,
+  )
 
   /*
    * CE QUE LE BON DE COMMANDE ATTEND ENCORE, propose comme references.
@@ -485,6 +542,11 @@ export function Reception() {
           designation: a.designation,
           unite_catalogue: a.unite_catalogue,
           code_fournisseur: rec?.code_fournisseur ?? null,
+          // LE PEG (ADR-003 D2) : la pesee sert CETTE ligne de bon. Sans lui,
+          // la ligne entrait sans engagement et le serveur devait inventer un
+          // bon de regularisation pour une marchandise bel et bien commandee.
+          id_ligne_bc: a.id_ligne_bc,
+          numero_bc: a.numero_bc,
           poids_bobine_kg: a.poids_bobine_kg,
           bobines_par_palette: a.bobines_par_palette,
           bobines_par_lot: a.bobines_par_lot,
@@ -507,98 +569,6 @@ export function Reception() {
     return api.get<RefLigne[]>(`/api/references-commandables?${q}`)
   }
 
-  /*
-   * LES COLONNES QUE LA RECEPTION AJOUTE A LA GRILLE.
-   *
-   * La grille ne sait pas ce qu'est un lot ni un magasin de destination : elle
-   * les range dans `extra` et les rend par ces descriptions. C’est ce qui lui
-   * permet de servir quatre documents sans porter les champs des trois autres.
-   */
-  const colonnesReception: ColonneGrille[] = [
-    {
-      cle: 'bl',
-      entete: 'Qté BL (kg)',
-      largeur: 'w-28',
-      alignement: 'right',
-      rendu: (l, poser) => (
-        <Champ
-          type="number"
-          step="any"
-          min="0"
-          value={l.extra?.bl ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9 text-right tabular-nums"
-          aria-label="Quantité annoncée au bon de livraison, en kilos"
-        />
-      ),
-    },
-    {
-      cle: 'colis',
-      entete: 'Colis (BL)',
-      largeur: 'w-20',
-      alignement: 'right',
-      rendu: (l, poser) => (
-        <Champ
-          type="number"
-          min="0"
-          value={l.extra?.colis ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9 text-right tabular-nums"
-          aria-label="Nombre de colis annoncé au bon de livraison"
-        />
-      ),
-    },
-    {
-      cle: 'lot',
-      entete: 'Lot fournisseur',
-      largeur: 'w-32',
-      rendu: (l, poser) => (
-        <Champ
-          value={l.extra?.lot ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9"
-          aria-label="Lot du fournisseur"
-        />
-      ),
-    },
-    {
-      cle: 'magasin',
-      entete: 'Magasin',
-      largeur: 'w-36',
-      rendu: (l, poser) => (
-        <Selecteur
-          value={l.extra?.magasin ?? ''}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9"
-          aria-label="Magasin de destination"
-        >
-          <option value="">—</option>
-          {(qMagasins.data ?? []).map((m) => (
-            <option key={m.code_magasin} value={m.code_magasin}>
-              {m.nom}
-            </option>
-          ))}
-        </Selecteur>
-      ),
-    },
-    {
-      cle: 'qualite',
-      entete: 'Qualité',
-      largeur: 'w-36',
-      rendu: (l, poser) => (
-        <Selecteur
-          value={l.extra?.qualite ?? 'CONFORME'}
-          onChange={(e) => poser(e.target.value)}
-          className="h-9"
-          aria-label="Statut qualité de la ligne"
-        >
-          <option value="CONFORME">Conforme</option>
-          <option value="QUARANTAINE">Quarantaine</option>
-          <option value="NON_CONFORME">Non conforme</option>
-        </Selecteur>
-      ),
-    },
-  ]
   /** Retirer une ligne : de l'ecran tout de suite, de la base a l'enregistrement. */
   const retirerLigne = (ligne: LigneSaisie) => {
     if (ligne.idExistant) setSupprimees((s) => [...s, ligne.idExistant as string])
@@ -612,7 +582,8 @@ export function Reception() {
       entete.transporteur !== (rec.transporteur ?? '') ||
       entete.nombre_colis !== (rec.nombre_colis?.toString() ?? '') ||
       entete.poids_total_brut_kg !== (rec.poids_total_brut_kg?.toString() ?? '') ||
-      entete.date_reception !== (rec.date_reception?.slice(0, 10) ?? ''))
+      entete.date_reception !== (rec.date_reception?.slice(0, 10) ?? '') ||
+      entete.id_dossier_import !== (rec.id_dossier_import ?? ''))
 
   const lignes = qLignes.data ?? []
 
@@ -650,6 +621,12 @@ export function Reception() {
             ? Number(entete.poids_total_brut_kg)
             : undefined,
           date_reception: entete.date_reception || undefined,
+          // VIDE = DETACHER, absent = ne pas y toucher. Sans ce signe, un
+          // dossier rattache par erreur ne pourrait plus s'enlever.
+          id_dossier_import:
+            entete.id_dossier_import !== (rec?.id_dossier_import ?? '')
+              ? entete.id_dossier_import
+              : undefined,
         })
       }
       for (const ligne of supprimees) {
@@ -685,10 +662,15 @@ export function Reception() {
     onError: echec,
   })
 
+  /* LE RENVOI AU MAGASINIER (regle 4, 09/10/2026), saisi sur la page : au
+     controle, la pesee est figee ; une erreur se renvoie avec ce qu'il faut
+     corriger, elle ne se corrige pas par celui qui validera. */
+  const [renvoi, setRenvoi] = useState<string | null>(null)
   const changerStatut = useMutation({
-    mutationFn: (statut: string) => api.put(`/api/receptions/${id}/statut`, { statut }),
-    onSuccess: () => {
-      toast.success('Reception soumise au controle qualite')
+    mutationFn: (c: { statut: string; motif?: string }) => api.put(`/api/receptions/${id}/statut`, c),
+    onSuccess: (_r, c) => {
+      toast.success(c.statut === 'BROUILLON' ? 'Réception renvoyée au magasinier' : 'Réception soumise au contrôle qualité')
+      setRenvoi(null)
       rafraichir()
     },
     onError: echec,
@@ -698,8 +680,8 @@ export function Reception() {
   const valider = useMutation({
     mutationFn: () => api.post(`/api/receptions/${id}/valider`),
     onSuccess: () => {
-      toast.success('Reception validee', {
-        description: 'Stock, CMUP, archive et historique de prix mis a jour en une transaction.',
+      toast.success('Réception validée', {
+        description: 'Stock, CMUP, archive et historique de prix mis à jour en une transaction.',
       })
       rafraichir()
     },
@@ -718,10 +700,12 @@ export function Reception() {
    * que ce que le serveur a vraiment enregistre.
    */
   const lignesAffichees: LigneRec[] = lignes
+  /** Un EXCEDENT au-dela exige une derogation motivee (C10) ; un manque, non. Tolerance du fournisseur. */
+  const TOLERANCE_PCT = useToleranceFournisseur(rec?.code_fournisseur)
 
   const horsTolerance = useMemo(
-    () => lignesAffichees.filter((l) => Math.abs(l.ecart_pct ?? 0) > TOLERANCE_PCT).length,
-    [lignesAffichees],
+    () => lignesAffichees.filter((l) => (l.ecart_pct ?? 0) > TOLERANCE_PCT).length,
+    [lignesAffichees, TOLERANCE_PCT],
   )
 
   const colonnes: ColonneDT<LigneRec>[] = [
@@ -795,7 +779,7 @@ export function Reception() {
       largeur: '110px',
       rendu: (l) => {
         if (l.ecart_pct == null) return <span className="text-attenue-texte">—</span>
-        const hors = Math.abs(l.ecart_pct) > TOLERANCE_PCT
+        const hors = l.ecart_pct > TOLERANCE_PCT
         return (
           <span className={cn('tabular-nums', hors && 'font-medium text-danger')}>
             {l.ecart_pct > 0 ? '+' : ''}
@@ -889,14 +873,18 @@ export function Reception() {
         <Alerte ton="alerte">
           Cette reception n'existe pas, ou vous n'y avez pas acces.{' '}
           <button className="underline" onClick={() => naviguer('/receptions')}>
-            Revenir a la liste
+            Revenir à la liste
           </button>
         </Alerte>
       </div>
     )
   }
 
-  const estPeseur = rec.receptionnaire === moi?.login
+  /* B4 : celui qui a pese EN DERNIER ne valide pas (regle 4) — la base le
+     refuse ; l'ecran le dit avant. */
+  const estPeseur = rec.id_utilisateur_pesee
+    ? rec.id_utilisateur_pesee === moi?.id
+    : rec.receptionnaire === moi?.login
 
   return (
     <div>
@@ -914,7 +902,7 @@ export function Reception() {
             {droits.peutEcrire && rec.statut === 'BROUILLON' && (
               <Bouton
                 variante="contour"
-                onClick={() => changerStatut.mutate('A_CONTROLER')}
+                onClick={() => changerStatut.mutate({ statut: 'A_CONTROLER' })}
                 disabled={lignes.length === 0 || enteteModifie}
                 title={
                   lignes.length === 0
@@ -925,17 +913,21 @@ export function Reception() {
                 }
               >
                 <Send />
-                Soumettre au controle
+                Soumettre au contrôle
               </Bouton>
             )}
             {droits.peutValider && rec.statut === 'A_CONTROLER' && (
               <Bouton
                 onClick={() => {
                   /* LE LOT INTERNE, ANNONCE AVANT D'ETRE POSE (01/10/2026).
-                     Une reference suivie sans lot recoit a la validation le
-                     numero de la reception et de sa ligne. On le dit, on fait
-                     confirmer : on peut encore saisir le vrai lot a la place. */
+                     Une reference suivie sans lot recoit a la validation un
+                     lot FOURNISSEUR-JJMMAA-NN (domain/reception.rs) — l'ecran
+                     annoncait a tort le numero de la reception. Le rang NN
+                     n'est connu qu'a la validation. On fait confirmer : on peut
+                     encore saisir le vrai lot a la place. */
                   const aGenerer = lignes.filter((l) => l.suivi_lot === 1 && !(l.lot_fournisseur ?? '').trim())
+                  const [aa, mm, jj] = (rec.date_reception ?? '').slice(0, 10).split('-')
+                  const prefixeLot = `${(rec.fournisseur_nom ?? '').trim().split(' ')[0].replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-${jj ?? ''}${mm ?? ''}${(aa ?? '').slice(2)}`
                   if (aGenerer.length === 0) return valider.mutate()
                   confirmation.demander({
                     titre: `${aGenerer.length} ligne(s) sans lot fournisseur`,
@@ -947,7 +939,7 @@ export function Reception() {
                         <ul className="mt-2 space-y-0.5 font-mono text-[12px]">
                           {aGenerer.map((l) => (
                             <li key={l.id_ligne_reception}>
-                              {l.code_reference} → {rec.numero_reception}-{String(l.ligne_numero).padStart(2, '0')}
+                              {l.code_reference} → {prefixeLot}-NN
                             </li>
                           ))}
                         </ul>
@@ -960,12 +952,18 @@ export function Reception() {
                 disabled={estPeseur}
                 title={
                   estPeseur
-                    ? 'B4 : le peseur ne peut pas controler sa propre reception'
+                    ? 'B4 : vous avez pesé ou corrigé cette réception — un autre la valide'
                     : 'Entree en stock, CMUP, archive et historique de prix'
                 }
               >
                 <ShieldCheck />
-                Valider le controle
+                Valider le contrôle
+              </Bouton>
+            )}
+            {droits.peutEcrire && rec.statut === 'A_CONTROLER' && renvoi === null && (
+              <Bouton variante="contour" onClick={() => setRenvoi('')}>
+                <ArrowLeft />
+                Renvoyer au magasinier
               </Bouton>
             )}
             {confirmation.element}
@@ -977,24 +975,86 @@ export function Reception() {
               id={id}
               statut={rec.statut}
               taille="md"
-              consequence="Les lignes redeviendront modifiables et devront etre controlees a nouveau."
+              consequence="Les lignes redeviendront modifiables et devront être controlees a nouveau."
             />
           </>
         }
       />
 
+      {renvoi !== null && (
+        <Carte className="mb-3">
+          <CarteCorps className="flex flex-wrap items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <Etiq obligatoire htmlFor="ch-reception-1">Ce que le magasinier doit corriger</Etiq>
+              <Champ id="ch-reception-1"
+                autoFocus
+                value={renvoi}
+                onChange={(e) => setRenvoi(e.target.value)}
+                placeholder="Ex. : repeser la ligne 3, le poids ne correspond pas au BL"
+              />
+            </div>
+            <Bouton variante="contour" onClick={() => setRenvoi(null)}>
+              Annuler
+            </Bouton>
+            <Bouton
+              disabled={renvoi.trim().length < 5}
+              chargement={changerStatut.isPending}
+              onClick={() => changerStatut.mutate({ statut: 'BROUILLON', motif: renvoi.trim() })}
+            >
+              Renvoyer
+            </Bouton>
+          </CarteCorps>
+        </Carte>
+      )}
+      {rec.statut === 'BROUILLON' && typeof rec.motif_renvoi === 'string' && rec.motif_renvoi && (
+        <Alerte ton="alerte" titre="Renvoyée au magasinier" className="mb-3">
+          {String(rec.motif_renvoi)}
+          {rec.renvoye_par ? ` — ${String(rec.renvoye_par)}` : ''}
+          {rec.date_renvoi ? `, ${fmt.date(String(rec.date_renvoi))}` : ''}. Corrigez la pesée, puis
+          soumettez de nouveau au contrôle.
+        </Alerte>
+      )}
+      {rec.statut === 'A_CONTROLER' && (
+        <Alerte ton="info" className="mb-3">
+          Au contrôle, la pesée est figée : seuls la qualité, la destination et les notes se modifient. Une
+          erreur de pesée se renvoie au magasinier.
+        </Alerte>
+      )}
       {!modifiable && !['ANNULE'].includes(rec.statut) && (
         <Alerte ton={rec.statut === 'VALIDE' || rec.statut === 'CLOTURE' ? 'succes' : 'info'} className="mb-3">
-          {rec.statut === 'VALIDE' || rec.statut === 'CLOTURE'
-            ? 'Reception validee : le stock, le CMUP et l’historique de prix ont ete mis a jour. Les lignes sont figees.'
-            : 'Reception figee.'}
+          {rec.statut === 'CLOTURE'
+            ? `Reception cloturee avec la facture${rec.numero_facture ? ` ${rec.numero_facture}` : ''} : la valeur definitive est au stock. Une correction passe par un avoir.`
+            : rec.statut === 'VALIDE'
+              ? 'Réception validee au prix du bon (valeur provisoire) : le stock, le CMUP et l’historique de prix ont ete mis à jour. La facture la rendra definitive.'
+              : 'Réception figee.'}
         </Alerte>
+      )}
+      {/* LES FRAIS D'APPROCHE AVANT LA CLOTURE (ADR-003 phase C) : c'est elle
+          qui les porte au CMUP, chacun selon sa cle. L'ordre de l'ecran suit
+          l'ordre du geste — on saisit ce qu'on a paye, puis on cloture. */}
+      {(rec.statut === 'VALIDE' || rec.statut === 'CLOTURE') && (
+        <div className="mb-3">
+          <FraisApproche idReception={id!} statut={rec.statut} />
+        </div>
+      )}
+      {/* LA VALEUR DEFINITIVE (regle 6) : la facture, puis la cloture. */}
+      {rec.statut === 'VALIDE' && droits.peutValider && (
+        <div className="mb-3">
+          <ClotureFacture idReception={id!} numeroFacture={rec.numero_facture} surCloture={rafraichir} />
+        </div>
+      )}
+      {/* Cloturee, elle se corrige par un avoir ou une facture complementaire (regle 8). */}
+      {rec.statut === 'CLOTURE' && droits.peutValider && (
+        <div className="mb-3">
+          <CorrectionFacture idReception={id!} surCorrection={rafraichir} />
+        </div>
       )}
 
       {horsTolerance > 0 && (
-        <Alerte ton="alerte" titre="Écart de pesee" className="mb-3">
-          {horsTolerance} ligne(s) s'ecartent de plus de {TOLERANCE_PCT} % de la quantite
-          commandee. Au-dela, le controle qualite exigera une derogation motivee.
+        <Alerte ton="alerte" titre="Écart de pesée" className="mb-3">
+          {horsTolerance} ligne(s) depassent de plus de {TOLERANCE_PCT} % la quantite attendue.
+          Un tel excédent exige une dérogation motivée. Un manque dans la tolérance solde la ligne du bon ; au-delà,
+          il laisse un reliquat à recevoir.
         </Alerte>
       )}
 
@@ -1013,7 +1073,7 @@ export function Reception() {
             </Badge>
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <Indicateur libelle="Délai reel" valeur={rec.delai_reel_jours} suffixe=" j" />
+            <Indicateur libelle="Délai réel" valeur={rec.delai_reel_jours} suffixe=" j" />
             <Indicateur libelle="Délai promis" valeur={rec.delai_prevu_jours} suffixe=" j" />
             <Indicateur
               libelle="Retard"
@@ -1114,6 +1174,72 @@ export function Reception() {
                 className="text-right tabular-nums"
               />
             </div>
+            {/* L'ARRIVAGE D'IMPORT (ADR-003 phase A). Le dossier porte la DUM,
+                les conteneurs et le regime ; il se RATTACHE a l'arrivage et ne
+                remplace pas la commande — le prix de chaque ligne vient
+                toujours de sa ligne de bon. */}
+            <div>
+              <Etiq htmlFor="dossier">
+                Dossier d’import
+                <Aide>
+                  Pour une marchandise venue de l’étranger : le dossier qui porte la DUM et
+                  les conteneurs. Le prix reste celui du bon de commande.
+                </Aide>
+              </Etiq>
+              <Selecteur
+                id="dossier"
+                value={entete.id_dossier_import}
+                disabled={!modifiable}
+                onChange={(e) => setEntete({ ...entete, id_dossier_import: e.target.value })}
+              >
+                <option value="">— Achat local —</option>
+                {(qDossiers.data ?? []).map((d) => (
+                  <option key={d.id_dossier} value={d.id_dossier}>
+                    {d.numero}
+                    {d.numero_bl ? ` · BL ${d.numero_bl}` : ''}
+                    {d.fournisseurs ? ` · ${d.fournisseurs}` : ''}
+                  </option>
+                ))}
+                {/* Le dossier deja rattache n'est plus dans la liste quand il a
+                    ete clos : le montrer quand meme, sinon le champ parait vide
+                    alors que la reception en porte un. */}
+                {entete.id_dossier_import && !dossierRattache && (
+                  <option value={entete.id_dossier_import}>
+                    {rec.dossier_numero ?? 'Dossier clos'}
+                  </option>
+                )}
+              </Selecteur>
+            </div>
+            {(dossierRattache ?? rec.id_dossier_import) && (
+              <div>
+                <Etiq>Douane du dossier</Etiq>
+                <p className="pt-1.5 text-[13px] tabular-nums">
+                  {(dossierRattache?.numero_dum ?? rec.numero_dum) ? (
+                    <>DUM {dossierRattache?.numero_dum ?? rec.numero_dum}</>
+                  ) : (
+                    <span className="text-attenue-texte">DUM non saisie</span>
+                  )}
+                  {(dossierRattache?.conteneurs ?? rec.conteneurs) && (
+                    <span className="text-attenue-texte">
+                      {' · '}
+                      {dossierRattache?.conteneurs ?? rec.conteneurs}
+                    </span>
+                  )}
+                </p>
+              </div>
+            )}
+            {rec.code_devise && rec.code_devise !== 'MAD' && (
+              <div>
+                <Etiq>
+                  Devise de l’arrivage
+                  <Aide>
+                    Celle des lignes, prise à leur ligne de bon. Le stock entre en dirhams,
+                    au taux du jour de la réception.
+                  </Aide>
+                </Etiq>
+                <p className="pt-1.5 text-[13px] font-medium">{rec.code_devise}</p>
+              </div>
+            )}
           </CarteCorps>
         </Carte>
 
@@ -1123,30 +1249,25 @@ export function Reception() {
           </CarteEntete>
           <CarteCorps className="p-0">
             {modifiable ? (
-              /* LA MEME GRILLE QUE LE BON DE COMMANDE. Les colonnes propres a
-                 la reception — BL, colis, lot, magasin, qualite — lui sont
-                 decrites ; elle les place et les rend, sans avoir a les
-                 comprendre. Le prix et les champs fournisseur sont masques :
-                 une reception ne negocie rien, son prix vient du bon. */
-              <GrilleLignes
-                codeFournisseur={rec.code_fournisseur ?? ''}
-                devise={rec.code_devise ?? 'MAD'}
+              /* SAISIE RECEPTION SIMPLE, bureau comme telephone (ADR-003, Phase A).
+                 La reception a son PROPRE geste — peser contre des lignes de bon
+                 de commande — distinct de la grille large du bon de commande.
+                 Lignes simples (cartes + feuille plein ecran) ; les colonnes
+                 BL/colis/lot/magasin/qualite vivent dans la feuille d'edition. */
+              <PeseesMobile
                 lignes={nouvelles}
                 setLignes={setNouvelles}
-                mode={mode}
-                setMode={setMode}
                 proposees={proposees}
                 chercherCatalogue={chercherCatalogue}
-                sansPrix
-                sansFournisseur
-                colonnesSupplementaires={colonnesReception}
-                validationLocale
-                surSupprimerLigne={retirerLigne}
+                magasins={qMagasins.data ?? []}
+                tolerancePct={TOLERANCE_PCT}
+                brouillon={rec.statut === 'BROUILLON'}
+                surRetirer={retirerLigne}
               />
             ) : (
               <DataTable<LigneRec>
                 exportable="lignes-de-reception"
-                imprimable="Lignes de reception"
+                imprimable="Lignes de réception"
                 module={MODULE}
                 colonnes={colonnes}
                 lignes={lignesAffichees}
@@ -1157,8 +1278,8 @@ export function Reception() {
                 pagination={false}
                 tailleParDefaut={500}
                 titreCarte={(l) => l.code_reference}
-                videTitre="Aucune pesee"
-                videDescription="Cette reception ne porte aucune ligne."
+                videTitre="Aucune pesée"
+                videDescription="Cette réception ne porte aucune ligne."
               />
             )}
             <TotauxReception
@@ -1215,6 +1336,7 @@ export function Reception() {
                     nombre_colis: rec.nombre_colis?.toString() ?? '',
                     poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
                     date_reception: rec.date_reception?.slice(0, 10) ?? '',
+                    id_dossier_import: rec.id_dossier_import ?? '',
                   })
                 }
                 setSupprimees([])

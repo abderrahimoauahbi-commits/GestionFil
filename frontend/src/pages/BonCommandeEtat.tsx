@@ -104,11 +104,11 @@ export function BonCommandeEtat() {
 
   const qBc = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<Bc[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<Bc[]>('/api/bons-commande', { signal }),
   })
   const qLignes = useQuery({
     queryKey: ['lignes-bc', id],
-    queryFn: () => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 
@@ -142,13 +142,13 @@ export function BonCommandeEtat() {
       {!valide && (
         <Alerte ton="alerte" className="sans-impression mb-3">
           Ce bon est encore en brouillon. Le document portera la mention « DRAFT » : il se relit,
-          il ne s envoie pas.
+          il ne s’envoie pas.
         </Alerte>
       )}
       {lignes.some((l) => !l.description_commerciale) && (
         <Alerte ton="info" className="sans-impression mb-3">
           Certaines lignes n ont pas de description commerciale : leur designation interne partira
-          a sa place. Renseignez-la au catalogue pour que le fournisseur reconnaisse l article.
+          a sa place. Renseignez-la au catalogue pour que le fournisseur reconnaisse l’article.
         </Alerte>
       )}
 
@@ -169,8 +169,20 @@ export function BonCommandeEtat() {
               <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
                 Order
               </div>
-              <Champ libelle="Date" valeur={fmt.date(bc.date_bc)} />
+              {/* LA DATE DE COMMANDE EST CELLE DE LA VALIDATION (regle 10,
+                  09/10/2026) : le jour ou l'entreprise s'engage. Le brouillon
+                  garde sa date d'etablissement, en second. */}
+              <Champ libelle="Order date" valeur={fmt.date(String(bc.date_validation ?? bc.date_bc))} />
               <Champ libelle="Order N°" valeur={bc.numero_bc} />
+              {bc.date_validation ? (
+                <div className="text-[9px] text-neutral-600">Prepared on {fmt.date(bc.date_bc)}</div>
+              ) : null}
+              {bc.code_devise && bc.code_devise !== 'MAD' && bc.date_validation ? (
+                <div className="text-[9px] text-neutral-600">
+                  Rate {fmt.nombre(Number(bc.taux_change_engage), 4)} MAD/{String(bc.code_devise)}
+                  {bc.date_cours_engage ? ` (${fmt.date(String(bc.date_cours_engage))})` : ''}
+                </div>
+              ) : null}
             </div>
           </div>
         }

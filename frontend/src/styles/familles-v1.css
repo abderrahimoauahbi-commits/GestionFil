@@ -1,0 +1,1198 @@
+/* =============================================================================
+   LES FAMILLES DE COULEURS DE LA V1 — importées le 06/10/2026
+   Fichier GÉNÉRÉ par outils/importer-familles-v1.py : ne pas éditer à la main.
+   Laiton, Industrial Clean, Atlas Data, Nordic Textile, Terminal Supply,
+   Ardoise, Graphite, Slate industriel, Divalto, Chaud, Contraste renforcé,
+   Claude, Azur. Les familles en verre de la v1 ne sont pas reprises.
+   Elles partagent le rendu du style Classique (voir chartes.css).
+   ========================================================================== */
+
+:root[data-charte="ardoise"] {
+  --fond: 220 20% 97%;
+  --texte: 214 28% 15%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 214 28% 15%;
+
+  --attenue: 216 25% 92%;
+  --attenue-texte: 212 13% 41%;
+
+  --accent: 210 64% 40%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 210 64% 40%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 3 71% 41%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 157 61% 30%;
+  --alerte: 40 100% 30%;
+  --info: 207 75% 41%;
+
+  --bordure: 214 20% 89%;
+  --ligne: 215 22% 93%;
+  --champ: 214 18% 59.5%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 210 64% 40%;
+
+  --barre: 218 24% 96%;
+  --barre-texte: 214 28% 15%;
+  --barre-attenue: 212 13% 45%;
+  --barre-actif: 216 25% 92%;
+
+  --at-titre: 218 24% 95%;
+  --at-activite: 218 24% 95%;
+  --at-lateral: 219 26% 96%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 219 26% 96%;
+  --at-etat: 218 24% 95%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 218 24% 93%;
+  --at-liste-survol: 216 25% 92%;
+  --at-liste-selection: 213 55% 89%;
+  --at-liste-selection-texte: 214 40% 18%;
+  --at-badge: 210 64% 40%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="ardoise"] {
+  --fond: 214 18% 11%;
+  --texte: 213 24% 89%;
+
+  --surface: 216 18% 14%;
+  --surface-texte: 213 24% 89%;
+
+  --attenue: 217 16% 18%;
+  --attenue-texte: 212 15% 60%;
+
+  --accent: 210 63% 60%;
+  --accent-texte: 214 40% 10%;
+
+  --primaire: 210 63% 60%;
+  --primaire-texte: 214 40% 10%;
+
+  --danger: 3 84% 68%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 155 47% 55%;
+  --alerte: 36 71% 59%;
+  --info: 208 72% 65%;
+
+  --bordure: 215 16% 20%;
+  --ligne: 218 16% 16%;
+  --champ: 215 14% 44%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 210 63% 60%;
+
+  --barre: 215 19% 9%;
+  --barre-texte: 213 24% 89%;
+  --barre-attenue: 212 15% 58%;
+  --barre-actif: 217 16% 18%;
+
+  --at-titre: 215 19% 9%;
+  --at-activite: 215 19% 9%;
+  --at-lateral: 215 18% 10%;
+  --at-editeur: 214 18% 13%;
+  --at-panneau: 215 18% 10%;
+  --at-etat: 215 19% 9%;
+  --at-onglet-actif: 214 18% 13%;
+  --at-onglet-inactif: 215 19% 9%;
+  --at-liste-survol: 217 16% 18%;
+  --at-liste-selection: 211 51% 24%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 210 63% 60%;
+  --at-badge-texte: 214 40% 10%;
+
+  color-scheme: dark;
+}
+
+:root[data-charte="graphite"] {
+  --fond: 0 0% 100%;
+  --texte: 0 0% 23%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 0 0% 23%;
+
+  --attenue: 0 0% 91%;
+  --attenue-texte: 0 0% 38%;
+
+  --accent: 210 100% 36%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 210 100% 36%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 100% 35%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 120 61% 30%;
+  --alerte: 44 100% 30%;
+  --info: 210 100% 36%;
+
+  --bordure: 0 0% 90%;
+  --ligne: 0 0% 93%;
+  --champ: 0 0% 58%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 210 100% 36%;
+
+  --barre: 0 0% 97%;
+  --barre-texte: 0 0% 23%;
+  --barre-attenue: 0 0% 45%;
+  --barre-actif: 0 0% 91%;
+
+  --at-titre: 0 0% 97%;
+  --at-activite: 0 0% 97%;
+  --at-lateral: 0 0% 97%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 0 0% 97%;
+  --at-etat: 0 0% 97%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 0 0% 93%;
+  --at-liste-survol: 0 0% 91%;
+  --at-liste-selection: 213 45% 89%;
+  --at-liste-selection-texte: 0 0% 12%;
+  --at-badge: 210 100% 36%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="graphite"] {
+  --fond: 0 0% 12%;
+  --texte: 0 0% 80%;
+
+  --surface: 0 0% 12%;
+  --surface-texte: 0 0% 80%;
+
+  --attenue: 200 5% 17%;
+  --attenue-texte: 0 0% 62%;
+
+  --accent: 207 100% 42%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 207 100% 42%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 85% 62%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 117 42% 67%;
+  --alerte: 49 100% 40%;
+  --info: 213 100% 61%;
+
+  --bordure: 0 0% 17%;
+  --ligne: 240 2% 15%;
+  --champ: 0 0% 41.5%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 207 100% 42%;
+
+  --barre: 0 0% 9%;
+  --barre-texte: 0 0% 80%;
+  --barre-attenue: 0 0% 62%;
+  --barre-actif: 200 5% 17%;
+
+  --at-titre: 0 0% 9%;
+  --at-activite: 0 0% 9%;
+  --at-lateral: 0 0% 9%;
+  --at-editeur: 0 0% 12%;
+  --at-panneau: 0 0% 9%;
+  --at-etat: 0 0% 9%;
+  --at-onglet-actif: 0 0% 12%;
+  --at-onglet-inactif: 0 0% 9%;
+  --at-liste-survol: 200 5% 17%;
+  --at-liste-selection: 205 92% 19%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 207 100% 42%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: dark;
+}
+
+:root[data-charte="chaud"] {
+  --fond: 45 20% 96%;
+  --texte: 40 12% 15%;
+
+  --surface: 40 33% 99%;
+  --surface-texte: 40 12% 15%;
+
+  --attenue: 44 18% 91%;
+  --attenue-texte: 40 8% 39%;
+
+  --accent: 157 40% 30%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 157 40% 30%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 5 66% 42%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 55% 28%;
+  --alerte: 32 82% 34%;
+  --info: 205 60% 38%;
+
+  --bordure: 44 16% 87%;
+  --ligne: 44 18% 92%;
+  --champ: 42 14% 55%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 157 40% 30%;
+
+  --barre: 44 20% 94%;
+  --barre-texte: 40 12% 15%;
+  --barre-attenue: 40 8% 42%;
+  --barre-actif: 44 18% 90%;
+
+  --at-titre: 44 20% 94%;
+  --at-activite: 44 20% 94%;
+  --at-lateral: 45 20% 95%;
+  --at-editeur: 40 33% 99%;
+  --at-panneau: 45 20% 95%;
+  --at-etat: 44 20% 94%;
+  --at-onglet-actif: 40 33% 99%;
+  --at-onglet-inactif: 44 18% 91%;
+  --at-liste-survol: 44 18% 89%;
+  --at-liste-selection: 152 30% 85%;
+  --at-liste-selection-texte: 157 45% 16%;
+  --at-badge: 157 40% 30%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="chaud"] {
+  --fond: 40 8% 11%;
+  --texte: 44 15% 87%;
+
+  --surface: 40 8% 14%;
+  --surface-texte: 44 15% 87%;
+
+  --attenue: 40 7% 19%;
+  --attenue-texte: 42 9% 60%;
+
+  --accent: 155 42% 52%;
+  --accent-texte: 157 45% 10%;
+
+  --primaire: 155 42% 52%;
+  --primaire-texte: 157 45% 10%;
+
+  --danger: 5 78% 66%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 44% 56%;
+  --alerte: 33 72% 58%;
+  --info: 205 62% 62%;
+
+  --bordure: 40 7% 21%;
+  --ligne: 40 7% 17%;
+  --champ: 40 7% 42%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 155 42% 52%;
+
+  --barre: 40 8% 9%;
+  --barre-texte: 44 15% 87%;
+  --barre-attenue: 42 9% 58%;
+  --barre-actif: 40 7% 19%;
+
+  --at-titre: 40 8% 9%;
+  --at-activite: 40 8% 9%;
+  --at-lateral: 40 8% 10%;
+  --at-editeur: 40 8% 13%;
+  --at-panneau: 40 8% 10%;
+  --at-etat: 40 8% 9%;
+  --at-onglet-actif: 40 8% 13%;
+  --at-onglet-inactif: 40 8% 9%;
+  --at-liste-survol: 40 7% 19%;
+  --at-liste-selection: 157 38% 20%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 155 42% 52%;
+  --at-badge-texte: 157 45% 10%;
+
+  color-scheme: dark;
+}
+
+:root[data-charte="contraste"] {
+  --fond: 0 0% 100%;
+  --texte: 0 0% 0%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 0 0% 0%;
+
+  --attenue: 0 0% 93%;
+  --attenue-texte: 0 0% 25%;
+
+  --accent: 214 88% 32%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 214 88% 32%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 100% 30%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 150 100% 21%;
+  --alerte: 30 100% 25%;
+  --info: 214 88% 32%;
+
+  --bordure: 0 0% 46%;
+  --ligne: 0 0% 66%;
+  --champ: 0 0% 30%;
+  --anneau: 214 88% 32%;
+
+  --barre: 0 0% 96%;
+  --barre-texte: 0 0% 0%;
+  --barre-attenue: 0 0% 28%;
+  --barre-actif: 0 0% 88%;
+
+  --at-titre: 0 0% 96%;
+  --at-activite: 0 0% 96%;
+  --at-lateral: 0 0% 98%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 0 0% 98%;
+  --at-etat: 0 0% 96%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 0 0% 90%;
+  --at-liste-survol: 0 0% 88%;
+  --at-liste-selection: 214 88% 32%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 0 0% 0%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="contraste"] {
+  --fond: 0 0% 4%;
+  --texte: 0 0% 100%;
+
+  --surface: 0 0% 4%;
+  --surface-texte: 0 0% 100%;
+
+  --attenue: 0 0% 16%;
+  --attenue-texte: 0 0% 82%;
+
+  --accent: 210 100% 70%;
+  --accent-texte: 0 0% 0%;
+
+  --primaire: 210 100% 70%;
+  --primaire-texte: 0 0% 0%;
+
+  --danger: 0 100% 72%;
+  --danger-texte: 0 0% 0%;
+
+  --succes: 130 90% 66%;
+  --alerte: 50 100% 60%;
+  --info: 210 100% 70%;
+
+  --bordure: 0 0% 54%;
+  --ligne: 0 0% 34%;
+  --champ: 0 0% 62%;
+  --anneau: 210 100% 70%;
+
+  --barre: 0 0% 0%;
+  --barre-texte: 0 0% 100%;
+  --barre-attenue: 0 0% 80%;
+  --barre-actif: 0 0% 18%;
+
+  --at-titre: 0 0% 0%;
+  --at-activite: 0 0% 0%;
+  --at-lateral: 0 0% 2%;
+  --at-editeur: 0 0% 4%;
+  --at-panneau: 0 0% 2%;
+  --at-etat: 0 0% 0%;
+  --at-onglet-actif: 0 0% 4%;
+  --at-onglet-inactif: 0 0% 0%;
+  --at-liste-survol: 0 0% 18%;
+  --at-liste-selection: 210 100% 70%;
+  --at-liste-selection-texte: 0 0% 0%;
+  --at-badge: 0 0% 100%;
+  --at-badge-texte: 0 0% 0%;
+
+  color-scheme: dark;
+}
+
+:root[data-charte="contraste"] .grille {
+  --filet: hsl(var(--bordure));
+}
+
+:root[data-charte="divalto"] {
+  --fond: 210 27% 96%;
+  --texte: 210 30% 13%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 210 30% 13%;
+
+  --attenue: 210 30% 92%;
+  --attenue-texte: 210 15% 40%;
+
+  --accent: 207 88% 34%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 207 88% 34%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 2 70% 42%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 58% 29%;
+  --alerte: 36 92% 32%;
+  --info: 207 88% 34%;
+
+  --bordure: 210 24% 86%;
+  --ligne: 210 26% 92%;
+  --champ: 210 20% 59%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 207 88% 34%;
+
+  
+  --barre: 207 88% 27%;
+  --barre-texte: 0 0% 100%;
+  --barre-attenue: 207 40% 82%;
+  --barre-actif: 207 80% 34%;
+
+  --at-titre: 207 88% 27%;
+  --at-activite: 207 88% 27%;
+  --at-lateral: 210 27% 96%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 210 27% 96%;
+  --at-etat: 207 88% 27%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 210 27% 91%;
+  --at-liste-survol: 210 30% 90%;
+  --at-liste-selection: 207 60% 87%;
+  --at-liste-selection-texte: 207 70% 18%;
+  --at-badge: 36 92% 45%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="divalto"] {
+  --fond: 210 24% 12%;
+  --texte: 208 25% 90%;
+
+  --surface: 210 24% 15%;
+  --surface-texte: 208 25% 90%;
+
+  --attenue: 210 20% 20%;
+  --attenue-texte: 208 16% 62%;
+
+  --accent: 205 80% 62%;
+  --accent-texte: 210 40% 10%;
+
+  --primaire: 205 80% 62%;
+  --primaire-texte: 210 40% 10%;
+
+  --danger: 2 82% 68%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 152 46% 56%;
+  --alerte: 38 78% 58%;
+  --info: 205 80% 62%;
+
+  --bordure: 210 18% 22%;
+  --ligne: 210 18% 18%;
+  --champ: 210 16% 44%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 205 80% 62%;
+
+  --barre: 208 45% 16%;
+  --barre-texte: 208 25% 92%;
+  --barre-attenue: 208 20% 66%;
+  --barre-actif: 208 40% 22%;
+
+  --at-titre: 208 45% 16%;
+  --at-activite: 208 45% 16%;
+  --at-lateral: 210 24% 11%;
+  --at-editeur: 210 24% 14%;
+  --at-panneau: 210 24% 11%;
+  --at-etat: 208 45% 16%;
+  --at-onglet-actif: 210 24% 14%;
+  --at-onglet-inactif: 210 24% 11%;
+  --at-liste-survol: 210 20% 20%;
+  --at-liste-selection: 207 55% 25%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 38 78% 52%;
+  --at-badge-texte: 210 40% 10%;
+
+  color-scheme: dark;
+}
+
+:root[data-charte="divalto"] header,
+:root[data-charte="divalto"] footer {
+  color: hsl(var(--barre-texte));
+}
+
+:root[data-charte="slate"] {
+  --fond: 210 40% 98%;
+  --texte: 222 47% 11%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 222 47% 11%;
+
+  --attenue: 214 32% 91%;
+  --attenue-texte: 215 16% 47%;
+
+  --accent: 224 76% 48%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 224 76% 48%;
+  --primaire-texte: 0 0% 100%;
+
+  --danger: 0 72% 51%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 160 84% 31%;
+  --alerte: 32 95% 44%;
+  --info: 224 76% 48%;
+
+  --bordure: 214 32% 91%;
+  --ligne: 210 40% 96%;
+  --champ: 213 27% 60%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 224 76% 48%;
+
+  --barre: 210 40% 96%;
+  --barre-texte: 222 47% 11%;
+  --barre-attenue: 215 16% 47%;
+  --barre-actif: 214 32% 91%;
+
+  --at-titre: 210 40% 96%;
+  --at-activite: 210 40% 96%;
+  --at-lateral: 210 40% 98%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 210 40% 98%;
+  --at-etat: 210 40% 96%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 210 40% 94%;
+  --at-liste-survol: 214 32% 91%;
+  --at-liste-selection: 214 95% 89%;
+  --at-liste-selection-texte: 224 64% 25%;
+  --at-badge: 224 76% 48%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="slate"] {
+  
+  --fond: 229 84% 5%;
+  
+  --texte: 214 32% 91%;
+
+  
+  --surface: 222 47% 11%;
+  --surface-texte: 214 32% 91%;
+
+  
+  --attenue: 217 33% 17%;
+  
+  --attenue-texte: 213 20% 65%;
+
+  
+  --accent: 221 83% 53%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 221 83% 53%;
+  --primaire-texte: 0 0% 100%;
+
+  
+  --danger: 0 84% 60%;
+  --danger-texte: 0 0% 100%;
+
+  
+  --succes: 160 84% 39%;
+  --alerte: 38 92% 50%;
+  --info: 221 83% 53%;
+
+  
+  --bordure: 217 33% 17%;
+  --ligne: 222 40% 13%;
+  --champ: 215 16% 41%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 221 83% 53%;
+
+  --barre: 229 84% 4%;
+  --barre-texte: 214 32% 91%;
+  --barre-attenue: 213 20% 65%;
+  --barre-actif: 217 33% 17%;
+
+  --at-titre: 229 84% 4%;
+  --at-activite: 229 84% 4%;
+  --at-lateral: 222 47% 9%;
+  --at-editeur: 222 47% 11%;
+  --at-panneau: 222 47% 9%;
+  --at-etat: 229 84% 4%;
+  --at-onglet-actif: 222 47% 11%;
+  --at-onglet-inactif: 229 60% 7%;
+  --at-liste-survol: 217 33% 17%;
+  --at-liste-selection: 221 60% 22%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 221 83% 53%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: dark;
+}
+
+:root[data-charte="industriel"] {
+  --fond: 0 0% 98%;
+  --texte: 221 39% 11%;
+  --surface: 0 0% 100%;
+  --surface-texte: 221 39% 11%;
+  --attenue: 220 14% 96%;
+  --attenue-texte: 220 9% 46%;
+  --accent: 221 39% 11%;
+  --accent-texte: 0 0% 100%;
+  --primaire: 221 83% 53%;
+  --primaire-texte: 0 0% 100%;
+  --danger: 0 84% 60%;
+  --danger-texte: 0 0% 100%;
+  --succes: 160 84% 39%;
+  --alerte: 38 92% 50%;
+  --info: 221 83% 53%;
+  --or: 38 92% 50%;
+  --bordure: 220 13% 91%;
+  --ligne: 220 14% 95%;
+  --champ: 220 13% 60%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 221 83% 53%;
+  --barre: 0 0% 100%;
+  --barre-texte: 221 39% 11%;
+  --barre-attenue: 220 9% 46%;
+  --barre-actif: 220 14% 96%;
+  --at-titre: 0 0% 100%;
+  --at-activite: 0 0% 100%;
+  --at-lateral: 0 0% 100%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 0 0% 98%;
+  --at-etat: 0 0% 100%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 0 0% 98%;
+  --at-liste-survol: 220 14% 96%;
+  --at-liste-selection: 221 83% 94%;
+  --at-liste-selection-texte: 221 39% 11%;
+  --at-badge: 221 83% 53%;
+  --at-badge-texte: 0 0% 100%;
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="industriel"] {
+  --fond: 221 39% 8%;
+  --texte: 220 14% 93%;
+  --surface: 221 33% 12%;
+  --surface-texte: 220 14% 93%;
+  --attenue: 220 26% 17%;
+  --attenue-texte: 220 9% 62%;
+  --accent: 220 14% 93%;
+  --accent-texte: 221 39% 8%;
+  --primaire: 217 91% 65%;
+  --primaire-texte: 221 39% 8%;
+  --danger: 0 84% 68%;
+  --danger-texte: 221 39% 8%;
+  --succes: 160 70% 50%;
+  --alerte: 38 92% 60%;
+  --info: 217 91% 65%;
+  --or: 38 92% 62%;
+  --bordure: 220 20% 22%;
+  --ligne: 220 22% 17%;
+  --champ: 220 18% 43%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 217 91% 65%;
+  --barre: 221 39% 8%;
+  --barre-texte: 220 14% 93%;
+  --barre-attenue: 220 9% 58%;
+  --barre-actif: 220 26% 17%;
+  --at-titre: 221 39% 8%;
+  --at-activite: 221 39% 8%;
+  --at-lateral: 221 39% 8%;
+  --at-editeur: 221 33% 12%;
+  --at-panneau: 221 39% 10%;
+  --at-etat: 221 39% 8%;
+  --at-onglet-actif: 221 33% 12%;
+  --at-onglet-inactif: 221 39% 10%;
+  --at-liste-survol: 220 26% 17%;
+  --at-liste-selection: 217 60% 24%;
+  --at-liste-selection-texte: 220 14% 96%;
+  --at-badge: 217 91% 65%;
+  --at-badge-texte: 221 39% 8%;
+  color-scheme: dark;
+}
+
+:root[data-charte="terminal"] {
+  --fond: 213 29% 6%;
+  --texte: 220 13% 91%;
+  --surface: 212 31% 10%;
+  --surface-texte: 220 13% 91%;
+  --attenue: 215 28% 14%;
+  --attenue-texte: 218 11% 65%;
+  --accent: 188 86% 53%;
+  --accent-texte: 213 29% 6%;
+  --primaire: 188 86% 53%;
+  --primaire-texte: 213 29% 6%;
+  --danger: 0 91% 71%;
+  --danger-texte: 213 29% 6%;
+  --succes: 158 64% 52%;
+  --alerte: 43 96% 56%;
+  --info: 255 92% 76%;
+  --or: 43 96% 56%;
+  --bordure: 215 28% 17%;
+  --ligne: 215 28% 13%;
+  --champ: 215 28% 42%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 188 86% 53%;
+  --barre: 213 29% 5%;
+  --barre-texte: 220 13% 91%;
+  --barre-attenue: 218 11% 58%;
+  --barre-actif: 215 28% 14%;
+  --at-titre: 213 29% 5%;
+  --at-activite: 213 29% 5%;
+  --at-lateral: 213 29% 5%;
+  --at-editeur: 212 31% 10%;
+  --at-panneau: 213 29% 7%;
+  --at-etat: 213 29% 5%;
+  --at-onglet-actif: 212 31% 10%;
+  --at-onglet-inactif: 213 29% 7%;
+  --at-liste-survol: 215 28% 14%;
+  --at-liste-selection: 188 60% 18%;
+  --at-liste-selection-texte: 188 86% 85%;
+  --at-badge: 188 86% 53%;
+  --at-badge-texte: 213 29% 6%;
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="terminal"] {
+  --fond: 213 29% 6%;
+  --texte: 220 13% 91%;
+  --surface: 212 31% 10%;
+  --surface-texte: 220 13% 91%;
+  --attenue: 215 28% 14%;
+  --attenue-texte: 218 11% 65%;
+  --accent: 188 86% 53%;
+  --accent-texte: 213 29% 6%;
+  --primaire: 188 86% 53%;
+  --primaire-texte: 213 29% 6%;
+  --danger: 0 91% 71%;
+  --danger-texte: 213 29% 6%;
+  --succes: 158 64% 52%;
+  --alerte: 43 96% 56%;
+  --info: 255 92% 76%;
+  --or: 43 96% 56%;
+  --bordure: 215 28% 17%;
+  --ligne: 215 28% 13%;
+  --champ: 215 28% 42%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 188 86% 53%;
+  --barre: 213 29% 5%;
+  --barre-texte: 220 13% 91%;
+  --barre-attenue: 218 11% 58%;
+  --barre-actif: 215 28% 14%;
+  --at-titre: 213 29% 5%;
+  --at-activite: 213 29% 5%;
+  --at-lateral: 213 29% 5%;
+  --at-editeur: 212 31% 10%;
+  --at-panneau: 213 29% 7%;
+  --at-etat: 213 29% 5%;
+  --at-onglet-actif: 212 31% 10%;
+  --at-onglet-inactif: 213 29% 7%;
+  --at-liste-survol: 215 28% 14%;
+  --at-liste-selection: 188 60% 18%;
+  --at-liste-selection-texte: 188 86% 85%;
+  --at-badge: 188 86% 53%;
+  --at-badge-texte: 213 29% 6%;
+  color-scheme: dark;
+}
+
+:root[data-charte="terminal"] table {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+:root[data-charte="terminal"] .grille > tbody > tr:nth-child(even) {
+  background-color: hsl(var(--attenue) / 0.55);
+}
+
+:root[data-charte="nordique"] {
+  --fond: 36 26% 96%;
+  --texte: 27 12% 15%;
+  --surface: 0 0% 100%;
+  --surface-texte: 27 12% 15%;
+  --attenue: 36 26% 93%;
+  --attenue-texte: 25 5% 45%;
+  --accent: 27 12% 15%;
+  --accent-texte: 36 26% 96%;
+  --primaire: 26 90% 37%;
+  --primaire-texte: 0 0% 100%;
+  --danger: 0 74% 42%;
+  --danger-texte: 0 0% 100%;
+  --succes: 85 85% 35%;
+  --alerte: 32 95% 44%;
+  --info: 193 82% 31%;
+  --or: 32 95% 50%;
+  --bordure: 35 21% 89%;
+  --ligne: 35 21% 93%;
+  --champ: 35 21% 55.5%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 26 90% 37%;
+  --barre: 36 26% 94%;
+  --barre-texte: 27 12% 15%;
+  --barre-attenue: 25 5% 45%;
+  --barre-actif: 35 21% 88%;
+  --at-titre: 36 26% 94%;
+  --at-activite: 36 26% 94%;
+  --at-lateral: 36 26% 94%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 36 26% 96%;
+  --at-etat: 36 26% 94%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 36 26% 96%;
+  --at-liste-survol: 36 26% 93%;
+  --at-liste-selection: 26 60% 90%;
+  --at-liste-selection-texte: 27 12% 15%;
+  --at-badge: 26 90% 37%;
+  --at-badge-texte: 0 0% 100%;
+  
+  --radius: 0.875rem;
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="nordique"] {
+  --fond: 27 14% 10%;
+  --texte: 36 26% 92%;
+  --surface: 27 13% 14%;
+  --surface-texte: 36 26% 92%;
+  --attenue: 27 12% 19%;
+  --attenue-texte: 25 8% 62%;
+  --accent: 36 26% 92%;
+  --accent-texte: 27 14% 10%;
+  --primaire: 26 85% 58%;
+  --primaire-texte: 27 14% 10%;
+  --danger: 0 74% 62%;
+  --danger-texte: 27 14% 10%;
+  --succes: 85 60% 52%;
+  --alerte: 32 90% 58%;
+  --info: 193 70% 52%;
+  --or: 32 90% 62%;
+  --bordure: 27 12% 23%;
+  --ligne: 27 12% 18%;
+  --champ: 27 12% 42.5%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 26 85% 58%;
+  --barre: 27 14% 9%;
+  --barre-texte: 36 26% 92%;
+  --barre-attenue: 25 8% 58%;
+  --barre-actif: 27 12% 19%;
+  --at-titre: 27 14% 9%;
+  --at-activite: 27 14% 9%;
+  --at-lateral: 27 14% 9%;
+  --at-editeur: 27 13% 14%;
+  --at-panneau: 27 14% 11%;
+  --at-etat: 27 14% 9%;
+  --at-onglet-actif: 27 13% 14%;
+  --at-onglet-inactif: 27 14% 11%;
+  --at-liste-survol: 27 12% 19%;
+  --at-liste-selection: 26 50% 24%;
+  --at-liste-selection-texte: 36 26% 94%;
+  --at-badge: 26 85% 58%;
+  --at-badge-texte: 27 14% 10%;
+  --radius: 0.875rem;
+  color-scheme: dark;
+}
+
+:root[data-charte="atlas"] {
+  --fond: 216 33% 97%;
+  --texte: 220 26% 14%;
+  --surface: 0 0% 100%;
+  --surface-texte: 220 26% 14%;
+  --attenue: 216 38% 95%;
+  --attenue-texte: 218 17% 35%;
+  --accent: 220 26% 14%;
+  --accent-texte: 0 0% 100%;
+  --primaire: 226 71% 40%;
+  --primaire-texte: 0 0% 100%;
+  --danger: 0 72% 51%;
+  --danger-texte: 0 0% 100%;
+  --succes: 161 94% 30%;
+  --alerte: 32 95% 44%;
+  --info: 192 91% 36%;
+  --or: 262 83% 58%;
+  --bordure: 216 28% 90%;
+  --ligne: 216 28% 94%;
+  --champ: 216 28% 61%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 226 71% 40%;
+  --barre: 220 26% 14%;
+  --barre-texte: 216 33% 95%;
+  --barre-attenue: 218 17% 62%;
+  --barre-actif: 220 26% 20%;
+  --at-titre: 220 26% 14%;
+  --at-activite: 220 26% 14%;
+  --at-lateral: 220 26% 14%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 216 33% 97%;
+  --at-etat: 220 26% 14%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 216 33% 97%;
+  --at-liste-survol: 216 38% 95%;
+  --at-liste-selection: 226 60% 92%;
+  --at-liste-selection-texte: 220 26% 14%;
+  --at-badge: 226 71% 40%;
+  --at-badge-texte: 0 0% 100%;
+  
+  --radius: 0.25rem;
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="atlas"] {
+  --fond: 220 26% 9%;
+  --texte: 216 33% 94%;
+  --surface: 220 24% 13%;
+  --surface-texte: 216 33% 94%;
+  --attenue: 219 22% 18%;
+  --attenue-texte: 218 14% 62%;
+  --accent: 216 33% 94%;
+  --accent-texte: 220 26% 9%;
+  --primaire: 226 80% 66%;
+  --primaire-texte: 220 26% 9%;
+  --danger: 0 72% 62%;
+  --danger-texte: 220 26% 9%;
+  --succes: 161 70% 45%;
+  --alerte: 32 90% 58%;
+  --info: 192 80% 52%;
+  --or: 262 83% 72%;
+  --bordure: 219 20% 23%;
+  --ligne: 219 22% 17%;
+  --champ: 219 20% 44%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 226 80% 66%;
+  --barre: 220 26% 7%;
+  --barre-texte: 216 33% 94%;
+  --barre-attenue: 218 14% 58%;
+  --barre-actif: 219 22% 18%;
+  --at-titre: 220 26% 7%;
+  --at-activite: 220 26% 7%;
+  --at-lateral: 220 26% 7%;
+  --at-editeur: 220 24% 13%;
+  --at-panneau: 220 26% 10%;
+  --at-etat: 220 26% 7%;
+  --at-onglet-actif: 220 24% 13%;
+  --at-onglet-inactif: 220 26% 10%;
+  --at-liste-survol: 219 22% 18%;
+  --at-liste-selection: 226 50% 26%;
+  --at-liste-selection-texte: 216 33% 96%;
+  --at-badge: 226 80% 66%;
+  --at-badge-texte: 220 26% 9%;
+  --radius: 0.25rem;
+  color-scheme: dark;
+}
+
+:root[data-charte="laiton"] {
+  --fond: 45 12% 95%;
+  --texte: 213 13% 13%;
+
+  --surface: 0 0% 100%;
+  --surface-texte: 213 13% 13%;
+
+  --attenue: 43 15% 92%;
+  --attenue-texte: 220 6% 38%;
+
+  --accent: 194 56% 28%;
+  --accent-texte: 0 0% 100%;
+
+  --primaire: 194 56% 28%;
+  --primaire-texte: 0 0% 100%;
+
+  --or: 36 46% 45%;
+
+  --danger: 4 76% 40%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 156 79% 27%;
+  --alerte: 30 90% 37%;
+  --info: 214 73% 42%;
+
+  --bordure: 40 12% 87%;
+  --ligne: 43 13% 91%;
+  --champ: 40 10% 56.5%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 194 56% 28%;
+
+  --barre: 213 14% 12%;
+  --barre-texte: 43 13% 91%;
+  --barre-attenue: 48 3% 62%;
+  --barre-actif: 214 13% 19%;
+
+  --ombre-pose: 0 1px 2px -1px hsl(30 15% 20% / 0.08), 0 1px 3px hsl(30 15% 20% / 0.05);
+  --ombre-levee: 0 2px 4px -2px hsl(30 15% 20% / 0.10), 0 6px 14px -4px hsl(30 15% 20% / 0.10);
+
+  --at-titre: 213 14% 12%;
+  --at-activite: 213 14% 12%;
+  --at-lateral: 43 15% 94%;
+  --at-editeur: 0 0% 100%;
+  --at-panneau: 43 15% 94%;
+  --at-etat: 213 14% 12%;
+  --at-onglet-actif: 0 0% 100%;
+  --at-onglet-inactif: 43 15% 92%;
+  --at-liste-survol: 43 15% 92%;
+  --at-liste-selection: 194 40% 90%;
+  --at-liste-selection-texte: 194 56% 18%;
+  --at-badge: 36 46% 45%;
+  --at-badge-texte: 0 0% 100%;
+
+  color-scheme: light;
+}
+
+:root.sombre[data-charte="laiton"] {
+  --fond: 210 10% 8%;
+  --texte: 43 13% 90%;
+
+  --surface: 214 12% 12%;
+  --surface-texte: 43 13% 90%;
+
+  --attenue: 213 11% 15%;
+  --attenue-texte: 42 4% 61%;
+
+  --accent: 192 47% 57%;
+  --accent-texte: 194 48% 8%;
+
+  --primaire: 192 47% 57%;
+  --primaire-texte: 194 48% 8%;
+
+  --or: 39 53% 62%;
+
+  --danger: 4 82% 67%;
+  --danger-texte: 0 0% 100%;
+
+  --succes: 151 50% 53%;
+  --alerte: 33 87% 61%;
+  --info: 209 81% 68%;
+
+  --bordure: 213 11% 19%;
+  --ligne: 213 11% 15%;
+  --champ: 212 10% 42%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 192 47% 57%;
+
+  --barre: 210 13% 6%;
+  --barre-texte: 43 13% 90%;
+  --barre-attenue: 43 4% 56%;
+  --barre-actif: 213 13% 14%;
+
+  --at-titre: 210 13% 6%;
+  --at-activite: 210 13% 6%;
+  --at-lateral: 210 12% 7%;
+  --at-editeur: 214 12% 12%;
+  --at-panneau: 210 12% 7%;
+  --at-etat: 210 13% 6%;
+  --at-onglet-actif: 214 12% 12%;
+  --at-onglet-inactif: 210 13% 6%;
+  --at-liste-survol: 213 11% 15%;
+  --at-liste-selection: 194 40% 20%;
+  --at-liste-selection-texte: 0 0% 100%;
+  --at-badge: 39 53% 62%;
+  --at-badge-texte: 210 13% 6%;
+
+  color-scheme: dark;
+}
+
+:root[data-charte="laiton"] {
+  --font-mono: var(--font-sans);
+}
+
+:root[data-charte="laiton"] .font-mono {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* --- Claude et Azur : composés à partir de leurs trois teintes --- */
+:root[data-charte="claude"] {
+  --fond: 51 25.9% 94.7%;
+  --texte: 37 10.3% 15.3%;
+  --surface: 48 38.5% 97.5%;
+  --surface-texte: 37 10.3% 15.3%;
+  --attenue: 50 24% 90.2%;
+  --attenue-texte: 39 8.6% 38.6%;
+  --accent: 37 10.3% 15.3%;
+  --accent-texte: 48 38.5% 97.5%;
+  --primaire: 15 52% 50.2%;
+  --primaire-texte: 0 0% 100%;
+  --or: 40 56.9% 40%;
+  --danger: 3 71.3% 41%;
+  --danger-texte: 0 0% 100%;
+  --succes: 145 45.3% 33.7%;
+  --alerte: 31 88.5% 37.5%;
+  --info: 211 48% 43.7%;
+  --bordure: 46 20% 83.3%;
+  --ligne: 47 22.6% 87.8%;
+  --champ: 46 13.7% 53.5%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 15 63.1% 59.6%;
+  --barre: 37 10.3% 15.3%;
+  --barre-texte: 51 25.9% 94.7%;
+  --barre-attenue: 41 13.6% 68.2%;
+  --barre-actif: 36 9.4% 20.8%;
+  color-scheme: light;
+}
+:root.sombre[data-charte="claude"] {
+  --fond: 36 8.8% 11.2%;
+  --texte: 44 23.4% 90.8%;
+  --surface: 34 9.9% 13.9%;
+  --surface-texte: 44 23.4% 90.8%;
+  --attenue: 37 9.3% 16.9%;
+  --attenue-texte: 41 11.3% 62%;
+  --accent: 44 23.4% 90.8%;
+  --accent-texte: 36 8.8% 11.2%;
+  --primaire: 16 65.4% 64.9%;
+  --primaire-texte: 36 8.8% 11.2%;
+  --or: 40 54.4% 62.2%;
+  --danger: 6 82.2% 71.4%;
+  --danger-texte: 36 8.8% 11.2%;
+  --succes: 145 50% 62.4%;
+  --alerte: 36 83.3% 64.7%;
+  --info: 213 67.1% 72.5%;
+  --bordure: 36 9.4% 20.8%;
+  --ligne: 38 9.1% 17.3%;
+  --champ: 37 9.6% 42%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 16 65.4% 64.9%;
+  --barre: 36 12.2% 8%;
+  --barre-texte: 44 23.4% 90.8%;
+  --barre-attenue: 41 11.3% 62%;
+  --barre-actif: 37 9.3% 16.9%;
+  color-scheme: dark;
+}
+:root[data-charte="azur"] {
+  --fond: 210 16.7% 97.6%;
+  --texte: 225 5.9% 13.3%;
+  --surface: 0 0% 100%;
+  --surface-texte: 225 5.9% 13.3%;
+  --attenue: 200 12% 95.1%;
+  --attenue-texte: 213 4.5% 39%;
+  --accent: 214 81.7% 50.6%;
+  --accent-texte: 0 0% 100%;
+  --primaire: 214 81.7% 50.6%;
+  --primaire-texte: 0 0% 100%;
+  --or: 40 56.9% 40%;
+  --danger: 1 72.8% 44.7%;
+  --danger-texte: 0 0% 100%;
+  --succes: 138 68.4% 29.8%;
+  --alerte: 33 100% 34.5%;
+  --info: 214 81.7% 50.6%;
+  --bordure: 220 8.8% 86.7%;
+  --ligne: 216 12.2% 92%;
+  --champ: 213 7.3% 58.9%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 214 81.7% 50.6%;
+  --barre: 0 0% 100%;
+  --barre-texte: 225 5.9% 13.3%;
+  --barre-attenue: 213 4.5% 39%;
+  --barre-actif: 218 91.7% 95.3%;
+  color-scheme: light;
+}
+:root.sombre[data-charte="azur"] {
+  --fond: 225 5.9% 13.3%;
+  --texte: 216 12.2% 92%;
+  --surface: 225 4.7% 16.9%;
+  --surface-texte: 216 12.2% 92%;
+  --attenue: 225 4% 19.6%;
+  --attenue-texte: 210 6.3% 62.7%;
+  --accent: 217 88.7% 75.7%;
+  --accent-texte: 225 5.9% 13.3%;
+  --primaire: 217 88.7% 75.7%;
+  --primaire-texte: 225 5.9% 13.3%;
+  --or: 40 54.4% 62.2%;
+  --danger: 5 81.2% 72.9%;
+  --danger-texte: 225 5.9% 13.3%;
+  --succes: 137 40% 64.7%;
+  --alerte: 45 97.5% 69%;
+  --info: 217 88.7% 75.7%;
+  --bordure: 206 5.5% 24.9%;
+  --ligne: 225 4% 19.6%;
+  --champ: 213 4.5% 45.5%; /* 3:1 sur la surface (audit v4) */
+  --anneau: 217 88.7% 75.7%;
+  --barre: 225 6.9% 11.4%;
+  --barre-texte: 216 12.2% 92%;
+  --barre-attenue: 210 6.3% 62.7%;
+  --barre-actif: 225 4% 19.6%;
+  color-scheme: dark;
+}

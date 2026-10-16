@@ -40,14 +40,24 @@ fn attente_secondes(echecs: i64) -> i64 {
 /// `ConnectInfo` ne voit que 127.0.0.1 : le serveur est derriere un proxy. Sans
 /// cet en-tete, le journal des connexions dirait « c'est le serveur qui a
 /// essaye », ce qui ne sert a rien.
-fn adresse_client(entetes: &axum::http::HeaderMap, direct: Option<String>) -> Option<String> {
-    entetes
-        .get("x-real-ip")
-        .or_else(|| entetes.get("x-forwarded-for"))
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.split(',').next().unwrap_or(v).trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or(direct)
+///
+/// LES EN-TETES NE SONT CRUS QUE VENANT DU PROXY LOCAL (audit v4). Un poste
+/// qui joint le service en direct pouvait ecrire n'importe quelle adresse
+/// dans `X-Forwarded-For` et se faire inscrire sous celle d'un autre. Seul
+/// nginx, sur la meme machine (127.0.0.1), est cru ; sinon l'adresse vue.
+pub(crate) fn adresse_client(entetes: &axum::http::HeaderMap, direct: Option<std::net::IpAddr>) -> Option<String> {
+    let par_proxy = direct.map(|ip| ip.is_loopback()).unwrap_or(false);
+    par_proxy
+        .then(|| {
+            entetes
+                .get("x-real-ip")
+                .or_else(|| entetes.get("x-forwarded-for"))
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.split(',').next().unwrap_or(v).trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+        .flatten()
+        .or_else(|| direct.map(|ip| ip.to_string()))
 }
 
 /// Inscrit la tentative au journal. N'echoue jamais la connexion : un journal
@@ -77,6 +87,74 @@ async fn journaliser(
     }
 }
 
+/// LE COMPTE EST-IL BLOQUE ? A verifier AVANT le secret, sinon le blocage
+/// n'arrete rien (audit v4 a la connexion, v5 pour le reste).
+async fn exiger_non_bloque(db: &crate::db::Db, id: &str, login: &str) -> AppResult<()> {
+    let bloque: Option<String> =
+        sqlx::query_scalar("SELECT bloque_jusqu_a FROM utilisateur WHERE id_utilisateur = $1")
+            .bind(id)
+            .fetch_optional(db)
+            .await?
+            .flatten();
+    if let Some(jusqu_a) = bloque.as_deref() {
+        if jusqu_a > maintenant().as_str() {
+            journaliser(db, login, Some(id), "BLOQUE", None, None).await;
+            return Err(AppError::TropDeTentatives(
+                "Trop de tentatives. Le compte se rouvrira dans quelques minutes.".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// UN ECHEC COMPTE, OU QU'IL SOIT : connexion, deverrouillage, changement de
+/// mot de passe, second facteur (audit v5, T8). Un poste laisse ouvert sur
+/// l'ecran verrouille permettait sinon d'essayer des mots de passe sans fin.
+/// Le compteur s'incremente en base (dix essais simultanes comptent dix).
+async fn noter_echec(
+    db: &crate::db::Db,
+    id: &str,
+    login: &str,
+    raison: &'static str,
+    ip: Option<&str>,
+    agent: Option<&str>,
+) -> AppError {
+    let n: i64 = sqlx::query_scalar(
+        "UPDATE utilisateur
+            SET echecs_consecutifs = echecs_consecutifs + 1, dernier_echec = $2
+          WHERE id_utilisateur = $1
+      RETURNING echecs_consecutifs",
+    )
+    .bind(id)
+    .bind(maintenant())
+    .fetch_one(db)
+    .await
+    .unwrap_or(1);
+    let attente = attente_secondes(n);
+    let jusqu_a = (attente > 0).then(|| crate::db::dans_secondes(attente));
+    if jusqu_a.is_some() {
+        let _ = sqlx::query("UPDATE utilisateur SET bloque_jusqu_a = $2 WHERE id_utilisateur = $1")
+            .bind(id)
+            .bind(&jusqu_a)
+            .execute(db)
+            .await;
+    }
+    journaliser(db, login, Some(id), raison, ip, agent).await;
+    match jusqu_a {
+        Some(_) => AppError::TropDeTentatives(format!("Trop de tentatives. Réessayez dans {}.", duree_lisible(attente))),
+        None => AppError::IdentifiantsInvalides,
+    }
+}
+
+/// La reussite remet la serie a zero.
+async fn remettre_compteur(db: &crate::db::Db, id: &str) -> AppResult<()> {
+    sqlx::query("UPDATE utilisateur SET echecs_consecutifs = 0, bloque_jusqu_a = NULL WHERE id_utilisateur = $1")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub async fn connexion(
     State(state): State<AppState>,
     axum::extract::ConnectInfo(direct): axum::extract::ConnectInfo<std::net::SocketAddr>,
@@ -85,16 +163,29 @@ pub async fn connexion(
 ) -> AppResult<Json<Value>> {
     // L'en-tete de nginx d'abord ; a defaut l'adresse vue par le serveur, pour
     // qu'un appel direct sur le port 8080 laisse tout de meme une trace.
-    let ip = adresse_client(&entetes, Some(direct.ip().to_string()));
+    let ip = adresse_client(&entetes, Some(direct.ip()));
     let agent = entetes
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok());
     let login = demande.login.trim().to_string();
 
-    let compte: Option<(String, String, String, String, i64, i64, Option<String>, Option<String>, i64)> =
+    // UNE MACHINE QUI ESSAIE TROP ATTEND (audit du 13/10/2026), quel que soit
+    // l'identifiant qu'elle tente.
+    if state.garde.adresse_bloquee(ip.as_deref()) {
+        journaliser(&state.db, &login, None, "ADRESSE_BLOQUEE", ip.as_deref(), agent).await;
+        return Err(AppError::TropDeTentatives(
+            "Trop de tentatives depuis ce poste. Réessayez dans quelques minutes.".into(),
+        ));
+    }
+    // LES ESSAIS SUR UN MEME IDENTIFIANT PASSENT UN PAR UN : une rafale lisait
+    // sinon « pas bloque » cinq cents fois avant que le premier echec soit ecrit.
+    let verrou = state.garde.verrou_login(&login);
+    let _tour = verrou.lock().await;
+
+    let compte: Option<(String, String, String, String, i64, i64, Option<String>, Option<String>, i64, Option<i64>)> =
         sqlx::query_as(
             "SELECT id_utilisateur, mot_de_passe_hash, nom, code_role_user, actif,
-                    echecs_consecutifs, bloque_jusqu_a, secret_totp, totp_actif
+                    echecs_consecutifs, bloque_jusqu_a, secret_totp, totp_actif, totp_dernier_pas
                FROM utilisateur WHERE login = $1",
         )
         .bind(&login)
@@ -103,9 +194,25 @@ pub async fn connexion(
 
     // Un compte inconnu et un mot de passe faux renvoient la meme erreur : ne
     // pas reveler quels logins existent.
-    let Some((id, hash, nom, role, actif, echecs, bloque, secret, totp_actif)) = compte else {
+    //
+    // ET LE MEME COMPORTEMENT (audit du 13/10/2026) : le meme calcul (une
+    // empreinte leurre), le meme blocage apres trois echecs. Sans cela, la
+    // duree de la reponse et l'absence de blocage trahissaient l'inconnu.
+    let Some((id, hash, nom, role, actif, _echecs, bloque, secret, totp_actif, dernier_pas)) = compte else {
+        if let Some(reste) = state.garde.inconnu_bloque(&login, attente_secondes) {
+            journaliser(&state.db, &login, None, "BLOQUE", ip.as_deref(), agent).await;
+            return Err(AppError::TropDeTentatives(format!("Trop de tentatives. Réessayez dans {}.", duree_lisible(reste))));
+        }
+        state.garde.leurrer(&demande.mot_de_passe).await;
+        state.garde.noter_echec_adresse(ip.as_deref());
+        let n = state.garde.noter_echec_inconnu(&login);
         journaliser(&state.db, &login, None, "INCONNU", ip.as_deref(), agent).await;
-        return Err(AppError::IdentifiantsInvalides);
+        let attente = attente_secondes(n);
+        return Err(if attente > 0 {
+            AppError::TropDeTentatives(format!("Trop de tentatives. Réessayez dans {}.", duree_lisible(attente)))
+        } else {
+            AppError::IdentifiantsInvalides
+        });
     };
 
     // LE BLOCAGE SE VERIFIE AVANT LE MOT DE PASSE, sinon il ne bloque rien :
@@ -121,6 +228,7 @@ pub async fn connexion(
     }
 
     if actif != 1 {
+        state.garde.leurrer(&demande.mot_de_passe).await;
         journaliser(&state.db, &login, Some(&id), "INACTIF", ip.as_deref(), agent).await;
         return Err(AppError::IdentifiantsInvalides);
     }
@@ -128,34 +236,15 @@ pub async fn connexion(
     // Un echec, quelle qu'en soit la cause, allonge l'attente et l'inscrit.
     let echouer = |raison: &'static str| {
         let db = state.db.clone();
+        let garde = state.garde.clone();
         let (id, login, ip2, agent2) = (id.clone(), login.clone(), ip.clone(), agent.map(String::from));
         async move {
-            let n = echecs + 1;
-            let attente = attente_secondes(n);
-            let jusqu_a = (attente > 0).then(|| crate::db::dans_secondes(attente));
-            let _ = sqlx::query(
-                "UPDATE utilisateur
-                    SET echecs_consecutifs = $2, bloque_jusqu_a = $3, dernier_echec = $4
-                  WHERE id_utilisateur = $1",
-            )
-            .bind(&id)
-            .bind(n)
-            .bind(&jusqu_a)
-            .bind(maintenant())
-            .execute(&db)
-            .await;
-            journaliser(&db, &login, Some(&id), raison, ip2.as_deref(), agent2.as_deref()).await;
-            match jusqu_a {
-                Some(_) => AppError::TropDeTentatives(format!(
-                    "Trop de tentatives. Réessayez dans {}.",
-                    duree_lisible(attente)
-                )),
-                None => AppError::IdentifiantsInvalides,
-            }
+            garde.noter_echec_adresse(ip2.as_deref());
+            noter_echec(&db, &id, &login, raison, ip2.as_deref(), agent2.as_deref()).await
         }
     };
 
-    if !password::verifier(&demande.mot_de_passe, &hash) {
+    if !state.garde.verifier(&demande.mot_de_passe, &hash).await {
         return Err(echouer("MOT_DE_PASSE").await);
     }
 
@@ -166,8 +255,26 @@ pub async fn connexion(
             return Ok(Json(json!({ "exige_code": true })));
         };
         let secret = secret.unwrap_or_default();
-        if !crate::auth::totp::verifier(&secret, code, horodatage_unix()) {
-            return Err(echouer("CODE").await);
+        // UN CODE NE SERT QU'UNE FOIS (audit v4) : son pas de temps doit etre
+        // posterieur au dernier accepte.
+        match crate::auth::totp::verifier_pas(&secret, code, horodatage_unix()) {
+            Some(pas) if dernier_pas.is_none_or(|d| pas > d) => {
+                // A CONDITION (audit v5, T8) : relu puis ecrit, le meme code
+                // passait deux fois en deux connexions simultanees.
+                let pris = sqlx::query(
+                    "UPDATE utilisateur SET totp_dernier_pas = $2
+                      WHERE id_utilisateur = $1 AND (totp_dernier_pas IS NULL OR totp_dernier_pas < $2)",
+                )
+                .bind(&id)
+                .bind(pas)
+                .execute(&state.db)
+                .await?
+                .rows_affected();
+                if pris != 1 {
+                    return Err(echouer("CODE").await);
+                }
+            }
+            _ => return Err(echouer("CODE").await),
         }
     }
 
@@ -179,6 +286,7 @@ pub async fn connexion(
         state.config.jwt_ttl_minutes,
     )
     .map_err(AppError::Interne)?;
+    ouvrir_session(&state.db, &claims, ip.as_deref()).await?;
 
     // La reussite remet le compteur a zero : c'est la SERIE d'echecs qui
     // compte, pas leur total depuis la creation du compte.
@@ -198,6 +306,51 @@ pub async fn connexion(
         "expire_le": claims.exp,
         "utilisateur": { "id": id, "login": login, "nom": nom, "role": role },
     })))
+}
+
+/// LA SESSION EST INSCRITE (audit du 13/10/2026) : un jeton sans session est
+/// refuse, et la deconnexion la revoque. Les sessions echues depuis un mois
+/// s'effacent au passage.
+async fn ouvrir_session(db: &crate::db::Db, claims: &jwt::Claims, ip: Option<&str>) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO session_ouverte (sid, id_utilisateur, ouverte_le, expire_le, adresse_ip)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(&claims.sid)
+    .bind(&claims.sub)
+    .bind(maintenant())
+    .bind(claims.exp)
+    .bind(ip)
+    .execute(db)
+    .await?;
+    sqlx::query("DELETE FROM session_ouverte WHERE expire_le < $1")
+        .bind(claims.iat - 30 * 86_400)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// `POST /api/auth/verrouiller` — l'ecran se verrouille : la session aussi, au
+/// serveur. Un rechargement de la page ou un appel direct ne la rouvrent pas ;
+/// seul le mot de passe (`deverrouiller`).
+pub async fn verrouiller(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    sqlx::query("UPDATE session_ouverte SET verrouillee_le = $2 WHERE sid = $1 AND verrouillee_le IS NULL")
+        .bind(&user.session_id)
+        .bind(maintenant())
+        .execute(&state.db)
+        .await?;
+    Ok(Json(json!({ "verrouillee": true })))
+}
+
+/// `POST /api/auth/deconnexion` — la session est revoquee : le jeton, meme
+/// copie ailleurs, ne sert plus.
+pub async fn deconnexion(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    sqlx::query("UPDATE session_ouverte SET revoquee_le = $2 WHERE sid = $1 AND revoquee_le IS NULL")
+        .bind(&user.session_id)
+        .bind(maintenant())
+        .execute(&state.db)
+        .await?;
+    Ok(Json(json!({ "deconnecte": true })))
 }
 
 /// « 30 secondes », « 2 minutes » — un delai qui se lit.
@@ -250,7 +403,22 @@ pub struct DemandeMotDePasse {
 pub async fn preparer_2fa(
     State(state): State<AppState>,
     user: Utilisateur,
+    Json(d): Json<DemandeMotDePasse>,
 ) -> AppResult<Json<Value>> {
+    // LE MOT DE PASSE EST EXIGE ICI AUSSI (audit v4) : sur un poste laisse
+    // ouvert, poser son propre second facteur fermait la porte au titulaire.
+    let hash: String =
+        sqlx::query_scalar("SELECT mot_de_passe_hash FROM utilisateur WHERE id_utilisateur = $1")
+            .bind(&user.id)
+            .fetch_one(&state.db)
+            .await?;
+    // UN ECHEC COMPTE ICI AUSSI (audit du 13/10/2026) : cette route servait
+    // sinon a essayer des mots de passe sans limite.
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
+    if !state.garde.verifier(&d.mot_de_passe, &hash).await {
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
+    }
+    remettre_compteur(&state.db, &user.id).await?;
     let deja: i64 = sqlx::query_scalar("SELECT totp_actif FROM utilisateur WHERE id_utilisateur = $1")
         .bind(&user.id)
         .fetch_one(&state.db)
@@ -302,18 +470,22 @@ pub async fn activer_2fa(
         ));
     };
 
-    if !crate::auth::totp::verifier(&secret, &d.code, horodatage_unix()) {
-        return Err(AppError::Invalide(
-            "Ce code ne correspond pas. Vérifiez l'heure de votre téléphone, puis réessayez."
-                .into(),
-        ));
-    }
-
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
+    let Some(pas) = crate::auth::totp::verifier_pas(&secret, &d.code, horodatage_unix()) else {
+        return match noter_echec(&state.db, &user.id, &user.login, "CODE", None, None).await {
+            AppError::IdentifiantsInvalides => Err(AppError::Invalide(
+                "Ce code ne correspond pas. Vérifiez l'heure de votre téléphone, puis réessayez.".into(),
+            )),
+            autre => Err(autre),
+        };
+    };
     sqlx::query(
-        "UPDATE utilisateur SET totp_actif = 1, totp_active_le = $2 WHERE id_utilisateur = $1",
+        "UPDATE utilisateur SET totp_actif = 1, totp_active_le = $2, totp_dernier_pas = $3
+          WHERE id_utilisateur = $1",
     )
     .bind(&user.id)
     .bind(maintenant())
+    .bind(pas)
     .execute(&state.db)
     .await?;
 
@@ -334,9 +506,28 @@ pub async fn desactiver_2fa(
             .bind(&user.id)
             .fetch_one(&state.db)
             .await?;
-    if !password::verifier(&d.mot_de_passe, &hash) {
-        return Err(AppError::IdentifiantsInvalides);
+    // OBLIGATOIRE POUR CE ROLE (13/10/2026) : on ne la retire pas. Un
+    // telephone perdu se traite sur le serveur (`gestionfil-admin retirer-2fa`).
+    let exigee: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(r.exige_totp, 0)::int8 FROM utilisateur u
+           LEFT JOIN role_utilisateur r ON r.code_role_user = u.code_role_user
+          WHERE u.id_utilisateur = $1",
+    )
+    .bind(&user.id)
+    .fetch_one(&state.db)
+    .await?;
+    if exigee == 1 {
+        return Err(AppError::RegleMetier(
+            "La double authentification est obligatoire pour votre rôle : elle ne se retire pas. \
+             Téléphone perdu : l'administrateur la retire sur le serveur."
+                .into(),
+        ));
     }
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
+    if !state.garde.verifier(&d.mot_de_passe, &hash).await {
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
+    }
+    remettre_compteur(&state.db, &user.id).await?;
 
     sqlx::query(
         "UPDATE utilisateur SET totp_actif = 0, secret_totp = NULL, totp_active_le = NULL
@@ -435,6 +626,11 @@ pub async fn moi(
         // SECRET, lui, ne sort jamais d'ici : seule l'adresse otpauth le porte,
         // le temps d'un scan.
         "totp_actif": totp_actif == 1,
+        // Le role l'exige et le compte ne l'a pas : l'ecran ne propose que de
+        // la poser (le serveur refuse le reste).
+        "totp_requis": user.totp_requis,
+        // La session est verrouillee au serveur : l'ecran se rouvre verrouille.
+        "session_verrouillee": user.verrouillee,
         "permissions": permissions.iter()
             .map(|(m, a)| json!({ "module": m, "action": a }))
             .collect::<Vec<_>>(),
@@ -474,11 +670,13 @@ pub async fn changer_mot_de_passe(
     .fetch_one(&state.db)
     .await?;
 
-    if !password::verifier(&d.ancien, &hash) {
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
+    if !state.garde.verifier(&d.ancien, &hash).await {
         // Le meme message que pour un compte inconnu a la connexion : ne rien
-        // apprendre a qui essaie.
-        return Err(AppError::IdentifiantsInvalides);
+        // apprendre a qui essaie. Et l'echec compte (T8).
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
     }
+    remettre_compteur(&state.db, &user.id).await?;
 
     let nouveau_hash = password::hacher(&d.nouveau).map_err(AppError::Interne)?;
 
@@ -496,13 +694,23 @@ pub async fn changer_mot_de_passe(
     .await?;
     tx.commit().await?;
 
-    // LE JETON RESTE VALIDE. Le revoquer obligerait a se reconnecter
-    // immediatement apres avoir change son mot de passe, ce qui n'apporte rien
-    // ici : le jeton appartient deja a la bonne personne, qui vient de prouver
-    // qu'elle connait l'ancien mot de passe.
+    // LES AUTRES SESSIONS SE FERMENT (audit v4) : la base date le changement,
+    // et tout jeton plus ancien est refuse. Celle-ci recoit un jeton neuf : la
+    // personne vient de prouver qu'elle connait l'ancien mot de passe.
+    let (jeton, claims) = jwt::emettre(
+        &state.config.jwt_secret,
+        &user.id,
+        &user.login,
+        &user.role,
+        state.config.jwt_ttl_minutes,
+    )
+    .map_err(AppError::Interne)?;
+    ouvrir_session(&state.db, &claims, user.adresse_ip.as_deref()).await?;
     Ok(Json(json!({
         "change": true,
         "le": maintenant(),
+        "jeton": jeton,
+        "expire_le": claims.exp,
     })))
 }
 
@@ -522,7 +730,7 @@ pub struct DemandeDeverrouillage {
 /// verrou plutot que de le subir.
 ///
 /// Deverrouiller NE PROLONGE DONC PAS la session. Le jeton garde son echeance
-/// d'origine : au bout des quatre heures, il expire quoi qu'il arrive et il
+/// d'origine (JWT_TTL_MINUTES, huit heures par defaut) : a son terme, il expire quoi qu'il arrive et il
 /// faut se reconnecter pour de bon. Emettre un jeton neuf ici rendrait la
 /// session eternelle — il suffirait de bouger la souris une fois par heure.
 ///
@@ -541,9 +749,106 @@ pub async fn deverrouiller(
     .await?;
 
     let (hash, actif) = compte.ok_or(AppError::IdentifiantsInvalides)?;
-    if actif != 1 || !password::verifier(&demande.mot_de_passe, &hash) {
+    if actif != 1 {
         return Err(AppError::IdentifiantsInvalides);
     }
+    // L'ECRAN VERROUILLE N'EST PAS UN BANC D'ESSAI (audit v5, T8) : un poste
+    // abandonne permettait d'essayer des mots de passe sans fin.
+    exiger_non_bloque(&state.db, &user.id, &user.login).await?;
+    if !state.garde.verifier(&demande.mot_de_passe, &hash).await {
+        return Err(noter_echec(&state.db, &user.id, &user.login, "MOT_DE_PASSE", None, None).await);
+    }
+    remettre_compteur(&state.db, &user.id).await?;
+    sqlx::query("UPDATE session_ouverte SET verrouillee_le = NULL WHERE sid = $1")
+        .bind(&user.session_id)
+        .execute(&state.db)
+        .await?;
 
+    Ok(Json(json!({ "ok": true })))
+}
+
+// =============================================================================
+// PREFERENCES D'AFFICHAGE (06/10/2026)
+// -----------------------------------------------------------------------------
+// Style, palette, police, taille, fond d'ecran, reglages du verre : rangés par
+// COMPTE, relus a chaque connexion, sur n'importe quel poste. Chacun ne lit et
+// n'ecrit QUE les siennes : l'identifiant vient du jeton, jamais du corps.
+// =============================================================================
+
+/// Taille maximale de l'image de fond, en caracteres de data URL. L'interface
+/// la reduit avant l'envoi ; au-dela, c'est un envoi qui n'est pas passe par
+/// elle.
+const FOND_IMAGE_MAX: usize = 2_000_000;
+
+pub async fn lire_preferences(
+    State(state): State<AppState>,
+    user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    let ligne: Option<(Value, Option<String>)> = sqlx::query_as(
+        "SELECT apparence, fond_image FROM preference_utilisateur WHERE id_utilisateur = $1",
+    )
+    .bind(&user.id)
+    .fetch_optional(&state.db)
+    .await?;
+    Ok(Json(match ligne {
+        Some((apparence, fond_image)) => json!({ "apparence": apparence, "fond_image": fond_image }),
+        None => json!({ "apparence": null, "fond_image": null }),
+    }))
+}
+
+/// Distingue « champ absent » (None) de « champ a null » (Some(None)).
+fn present<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(d).map(Some)
+}
+
+#[derive(Deserialize)]
+pub struct Preferences {
+    pub apparence: Value,
+    /// Absent : l'image ne change pas. `null` : retirer l'image. Texte : la
+    /// nouvelle image (data URL).
+    #[serde(default, deserialize_with = "present")]
+    pub fond_image: Option<Option<String>>,
+}
+
+pub async fn enregistrer_preferences(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Json(p): Json<Preferences>,
+) -> AppResult<Json<Value>> {
+    if !p.apparence.is_object() {
+        return Err(AppError::Invalide("Les préférences doivent être un objet.".into()));
+    }
+    if let Some(Some(img)) = &p.fond_image {
+        if img.len() > FOND_IMAGE_MAX || !img.starts_with("data:image/") {
+            return Err(AppError::Invalide(
+                "Image de fond refusée : format inattendu ou trop lourde.".into(),
+            ));
+        }
+    }
+
+    let mut tx = state.db.begin().await?;
+    crate::db::poser_contexte(&mut tx, &user.id, None, None).await?;
+    sqlx::query(
+        "INSERT INTO preference_utilisateur (id_utilisateur, apparence, modifie_le)
+              VALUES ($1, $2, now())
+         ON CONFLICT (id_utilisateur)
+         DO UPDATE SET apparence = EXCLUDED.apparence, modifie_le = now()",
+    )
+    .bind(&user.id)
+    .bind(&p.apparence)
+    .execute(&mut *tx)
+    .await?;
+    if let Some(image) = &p.fond_image {
+        sqlx::query("UPDATE preference_utilisateur SET fond_image = $2 WHERE id_utilisateur = $1")
+            .bind(&user.id)
+            .bind(image)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
     Ok(Json(json!({ "ok": true })))
 }

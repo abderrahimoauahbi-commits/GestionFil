@@ -121,3 +121,25 @@ Traçabilité entre le CDC du 07/08/2026 et l'implémentation. Toute divergence 
 - **Stockage documentaire** : `documents_attaches` et `photos` sont des colonnes JSON sans backend de fichiers.
 - **Procédure de reprise Excel → ERP** : `est_initial` et `P_DateSaisie` existent, la procédure de go-live reste à écrire.
 - **Multi-société** : la table `entreprise` existe, aucune table n'y fait référence.
+
+---
+
+## Mise à jour du 09/10/2026 (audit v5)
+
+Les points du cahier des charges touchés par les arbitrages du 09/10 (détail dans
+`docs/ADR-002-regles-de-gestion-2026-10.md`, section « Arbitrages du 09/10/2026 ») :
+
+| Domaine | Ce qui est désormais implémenté | Où |
+|---|---|---|
+| Sorties de stock | sortie hors machine motivée, prêt à une autre usine et son retour | `SORTIE_HORS_MACHINE`, `RETOUR_PRET`, C47 |
+| Réception | séparation peseur / valideur, renvoi motivé au magasinier, solde dans la tolérance | 09f, 09i |
+| Facturation | avoirs typés (prix, retour), facture nette ou brute, avoir d'import | 09g, 09n |
+| Import | DUM corrigeable et jamais effacée, frais post-clôture, paiements et coût de revient réel | 09h, 09m |
+| Achats | taux du bon proposé au jour de validation et justifié, ligne de facture sur un bon envoyé | 09l, 09t |
+| Planification | prix du plan (dernier achat, catalogue, CMUP), saisons, détail pas à pas, brouillons d'import hors en-cours | 09j, 09k, 09o |
+| Machines | surplus au chargement à confirmer, date de constat par ligne, C35/C36 réels | 09e, 09r |
+| Lots | dérogation bornée en kilos, lot soldé rouvert, plus ancien proposé d'abord, C51 | 09p, 09s |
+| Valorisation | réceptions clôturées au coût de revient, rapport des écarts de prix, historique de prix révisé | 09q, 09v |
+
+Restent en attente de décision métier : le prêt refacturé plutôt que rendu (A1), l'acompte payé avant
+le dédouanement (A11).

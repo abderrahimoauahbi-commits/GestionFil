@@ -105,6 +105,23 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
     }
 
     if peut(module::BONS_COMMANDE) {
+        // Regle 18 : un taux de reference de plus de P_AncienneteTauxJours
+        // bloque la validation des bons dans cette devise. On le dit avant.
+        let perimes = compter(
+            db,
+            "SELECT count(DISTINCT t.code_devise) FROM taux_change t
+              WHERE t.code_devise <> 'MAD' AND t.date_fin IS NULL
+                AND substr(t.date_debut, 1, 10)::date
+                    < current_date - COALESCE((SELECT CAST(valeur_courante AS integer) FROM parametre
+                                                WHERE code_parametre = 'P_AncienneteTauxJours'), 7)
+                AND NOT EXISTS (SELECT 1 FROM taux_change t2
+                                 WHERE t2.code_devise = t.code_devise AND t2.date_debut > t.date_debut)",
+        )
+        .await;
+        if perimes > 0 {
+            points.push(point("taux_perimes", "taux de change à mettre à jour", perimes, "alerte",
+                              "/configuration", "plus de 7 jours : les bons en devise ne se valident pas"));
+        }
         let n = compter(
             db,
             "SELECT count(*) FROM bon_commande
@@ -120,14 +137,16 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
     }
 
     if peut(module::RECEPTIONS) {
-        let n = compter(db, "SELECT count(*) FROM import_receptions WHERE statut = 'BROUILLON'").await;
+        let n = compter(db, "SELECT count(*) FROM import_receptions WHERE statut IN ('BROUILLON','A_CONTROLER')").await;
         if n > 0 {
-            points.push(point("receptions_import", "réception(s) d'import en brouillon", n,
-                              "alerte", "/receptions-import", "à valider pour entrer en stock"));
+            points.push(point("receptions_import", "réception(s) d'import pas encore en stock", n,
+                              "alerte", "/receptions-import", "à soumettre ou à contrôler"));
         }
         let locales = compter(
             db,
-            "SELECT count(*) FROM reception WHERE statut NOT IN ('VALIDEE','ANNULEE')",
+            // Les statuts locaux sont VALIDE et ANNULE : « NOT IN VALIDEE » comptait
+            // toutes les receptions validees comme « en cours ».
+            "SELECT count(*) FROM reception WHERE statut IN ('BROUILLON','A_CONTROLER')",
         )
         .await;
         if locales > 0 {
@@ -155,7 +174,7 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
                           JOIN import_reception_lignes rl ON rl.id_reception = r.id_reception
                           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
                           JOIN import_factures f ON f.id_facture = l.id_facture
-                         WHERE f.id_dossier = d.id_dossier AND r.statut = 'BROUILLON')",
+                         WHERE f.id_dossier = d.id_dossier AND r.statut IN ('BROUILLON','A_CONTROLER'))",
             )
             .await;
             points.push(point(

@@ -73,6 +73,21 @@ CREATE TABLE import_dossiers (
     date_arrivee        text,
     statut              text    NOT NULL DEFAULT 'BROUILLON'
                                 CHECK (statut IN ('BROUILLON','EN_COURS','CLOTURE')),
+    -- PAR QUEL CIRCUIT CE DOSSIER RECOIT SA MARCHANDISE (ADR-003, 14/10/2026).
+    --   BON     : la marchandise se pese dans la RECEPTION UNIFIEE, contre les
+    --             lignes du bon de commande qui l'a engagee. C'est le defaut
+    --             depuis la phase C : la chaine des frais (cloture,
+    --             repartition, CUMP definitif) sait lire les arrivages.
+    --   FACTURE : par ses lignes de facture, dans l'ecran des receptions
+    --             d'import. Les dossiers ouverts avant la bascule finissent
+    --             par la : leur marchandise est en route et leurs factures
+    --             portent deja des kilos recus.
+    -- Le marqueur est porte par le dossier et non par une date : un dossier
+    -- ouvert la veille dont le conteneur arrive dans deux mois doit finir par
+    -- le circuit ou il a commence. C'est lui, aussi, qui conditionne
+    -- l'etancheite local / import (010b, fn_trg_reception_locale_hors_import).
+    circuit_reception   text    NOT NULL DEFAULT 'BON'
+                                CHECK (circuit_reception IN ('BON','FACTURE')),
     notes               text,
     id_utilisateur_creation text NOT NULL REFERENCES utilisateur(id_utilisateur),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
@@ -229,8 +244,11 @@ CREATE TABLE import_receptions (
     id_reception        text    NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
     numero              text    NOT NULL UNIQUE,
     date_reception      text    NOT NULL,
+    -- A_CONTROLER (08/10/2026) : comme une reception locale, le magasinier
+    -- soumet sa pesee, un autre compte la controle et la fait entrer en stock.
     statut              text    NOT NULL DEFAULT 'BROUILLON'
-                                CHECK (statut IN ('BROUILLON','VALIDEE','ANNULEE')),
+                                CONSTRAINT import_receptions_statut_check
+                                CHECK (statut IN ('BROUILLON','A_CONTROLER','VALIDEE','ANNULEE')),
     litige              bigint  NOT NULL DEFAULT 0 CHECK (litige IN (0,1)),
     motif_litige        text,
     notes               text,
@@ -260,7 +278,18 @@ CREATE TABLE import_reception_lignes (
     code_couleur        text,
     libelle_couleur     text,
     code_magasin        text    NOT NULL REFERENCES magasin(code_magasin),
+    -- Le verdict du controle, ligne a ligne (08/10/2026) : il suit le lot en
+    -- stock, et une ligne non conforme ou en quarantaine va en quarantaine.
+    statut_qualite      text    NOT NULL DEFAULT 'CONFORME'
+                                CHECK (statut_qualite IN ('CONFORME','NON_CONFORME','QUARANTAINE')),
     id_mouvement        text    REFERENCES mouvement(id_mouvement),
+    -- L'EXCEDENT AU-DELA DE LA TOLERANCE DU FOURNISSEUR se derogue, motif a
+    -- l'appui, comme en reception locale (audit v4) — il ne se refuse plus sec.
+    derogation_ecart    smallint NOT NULL DEFAULT 0,
+    motif_derogation    text,
+    id_utilisateur_derogation text REFERENCES utilisateur(id_utilisateur),
+    CONSTRAINT ck_irl_derogation CHECK (derogation_ecart IN (0,1)
+        AND (derogation_ecart = 0 OR length(btrim(COALESCE(motif_derogation, ''))) >= 5)),
     UNIQUE (id_reception, id_ligne)
 );
 
@@ -450,6 +479,39 @@ CREATE TRIGGER trg_irl_coherence
 BEFORE INSERT OR UPDATE OF id_ligne, id_reception ON import_reception_lignes
 FOR EACH ROW EXECUTE FUNCTION fn_trg_irl_coherence();
 
+-- Une ligne non conforme ou en quarantaine entre en magasin de quarantaine,
+-- comme a la reception locale (trg_ligne_reception_quarantaine).
+CREATE OR REPLACE FUNCTION fn_trg_irl_quarantaine() RETURNS trigger AS $$
+BEGIN
+    IF NEW.statut_qualite IN ('NON_CONFORME','QUARANTAINE')
+ AND COALESCE((SELECT est_quarantaine FROM magasin WHERE code_magasin = NEW.code_magasin), 0) = 0 THEN
+        RAISE EXCEPTION 'Une ligne non conforme ou en quarantaine doit etre dirigee vers un magasin de quarantaine.';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_irl_quarantaine
+BEFORE INSERT OR UPDATE OF statut_qualite, code_magasin ON import_reception_lignes
+FOR EACH ROW EXECUTE FUNCTION fn_trg_irl_quarantaine();
+
+-- B4 regle 2 a l'import (08/10/2026) : celui qui a saisi la reception ne la
+-- valide pas. Declencheur et non contrainte : les receptions deja validees
+-- ne sont pas rejugees.
+CREATE OR REPLACE FUNCTION fn_trg_import_reception_segregation() RETURNS trigger AS $$
+BEGIN
+    IF NEW.statut = 'VALIDEE' AND OLD.statut IS DISTINCT FROM 'VALIDEE'
+ AND NEW.id_utilisateur_validation = NEW.id_utilisateur_creation THEN
+        RAISE EXCEPTION 'B4 regle 2 : celui qui a saisi la reception ne peut pas la valider.';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_import_reception_segregation
+BEFORE UPDATE OF statut ON import_receptions
+FOR EACH ROW EXECUTE FUNCTION fn_trg_import_reception_segregation();
+
 
 -- Le journal de la cloture est immuable, comme les autres journaux (R03).
 CREATE OR REPLACE FUNCTION fn_trg_iac_immuable() RETURNS trigger AS $$
@@ -552,3 +614,50 @@ CREATE TABLE import_engagements (
     UNIQUE (id_dossier, numero_ei)
 );
 CREATE INDEX idx_import_engagements_numero ON import_engagements (numero_ei);
+
+
+-- =============================================================================
+-- L'ARRIVAGE D'IMPORT SE RATTACHE AU DOSSIER (ADR-003 D2, 14/10/2026)
+-- -----------------------------------------------------------------------------
+-- La colonne vit dans 007 (module des receptions) ; la cle etrangere ne peut
+-- etre posee qu'ici, ou `import_dossiers` existe enfin. Un arrivage porte UN
+-- dossier : la DUM est celle du dossier (01/10/2026), et un conteneur ne se
+-- dedouane pas deux fois.
+-- =============================================================================
+ALTER TABLE reception
+    ADD CONSTRAINT fk_reception_dossier_import
+    FOREIGN KEY (id_dossier_import) REFERENCES import_dossiers(id_dossier);
+
+-- Un arrivage ne se rattache pas a un dossier CLOS (sa valeur est deja portee
+-- au CUMP), et le rattachement ne bouge plus une fois la marchandise en stock :
+-- les frais du dossier se repartiront sur ces lignes-la.
+CREATE OR REPLACE FUNCTION fn_trg_reception_dossier() RETURNS trigger AS $$
+DECLARE
+    v_statut  text;
+    v_numero  text;
+BEGIN
+    -- OLD n'existe pas a l'INSERT : ne jamais le lire hors du UPDATE.
+    IF TG_OP = 'UPDATE' AND NEW.id_dossier_import IS DISTINCT FROM OLD.id_dossier_import
+       AND OLD.statut IN ('VALIDE', 'CLOTURE') THEN
+        RAISE EXCEPTION 'La reception % est % : son dossier d''import ne change plus (les frais se repartissent sur ces lignes).',
+            OLD.numero_reception, OLD.statut USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NEW.id_dossier_import IS NOT NULL
+       AND (TG_OP = 'INSERT' OR NEW.id_dossier_import IS DISTINCT FROM OLD.id_dossier_import) THEN
+        SELECT statut, numero INTO v_statut, v_numero
+          FROM import_dossiers WHERE id_dossier = NEW.id_dossier_import;
+        IF v_statut = 'CLOTURE' THEN
+            RAISE EXCEPTION 'Le dossier d''import % est clos : sa valeur est deja portee au CUMP, on ne peut plus y rattacher un arrivage.',
+                v_numero USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_reception_dossier ON reception;
+CREATE TRIGGER trg_reception_dossier
+    BEFORE INSERT OR UPDATE OF id_dossier_import, statut ON reception
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_reception_dossier();

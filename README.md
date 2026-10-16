@@ -20,15 +20,18 @@ Compile le backend, le démarre sur `:8080`, attend qu'il réponde, puis lance l
 ## Première installation
 
 ```powershell
-# 1. Base de données (sans -Demo : les données viennent du classeur Excel)
-cd db
-.\build.ps1
+# 1. La base PostgreSQL 18 : une base vide appartenant au rôle gestionfil, puis le socle
+#    (schéma complet d'une base migrée + configuration) et les migrations venues après lui.
+cd db\pg
+python charger.py --base gestionfil --socle --comptes --confirmer-gestionfil
+python migrer.py --base gestionfil
 
 # 2. Backend
-cd ..\backend
+cd ..\..\backend
 cargo run --bin gestionfil-admin -- init-config              # crée .env, secret aléatoire
+cargo run --bin gestionfil-import -- --simuler               # le classeur, à blanc d'abord
 cargo run --bin gestionfil-import                            # charge GESTION Fil.xlsx
-cargo run --bin gestionfil-admin -- definir-mot-de-passe direction
+cargo run --bin gestionfil-admin -- definir-mot-de-passe <login>   # 12 caractères au moins
 cargo run                                                    # http://127.0.0.1:8080
 
 # 3. Interface
@@ -37,6 +40,10 @@ npm install
 npm run dev                                                  # web    → :5173
 npm run bureau:dev                                           # bureau → fenêtre native
 ```
+
+Le serveur refuse de démarrer sur une base incomplète ou à laquelle manque une migration
+exigée, et la nomme. Le détail de la base : `db/README.md` ; le serveur de production :
+`deploiement/README.md`.
 
 ### Les trois cibles
 
@@ -48,38 +55,30 @@ npm run bureau:dev                                           # bureau → fenêt
 
 Un seul code source. L'enveloppe de bureau n'embarque ni base ni logique métier : elle reste un client du serveur, ce qui écarte tout conflit de synchronisation sur le stock et le CMUP.
 
-Les autres comptes (`achat`, `planif`, `qualite`, `magasin`, `daf`) exigent chacun un mot de passe avant de pouvoir se connecter.
+Les comptes sont nominatifs (`seed_110_comptes_production.sql`) ; chacun exige un mot de passe avant de pouvoir se connecter.
 
 ### Tests
 
 ```powershell
-cd db;       .\tests\run-tests.ps1     # 39 invariants  (base de référence autonome)
-cd ..\backend; cargo test              # 20 unitaires
-             .\tests\e2e.ps1           # 40 bout en bout (base jetable + serveur)
-cd ..\frontend; npm run build          # types + bundle
+cd backend;  cargo test                                  # tests unitaires (calculs purs)
+cd ..\frontend; npm test                                 # colisage, mêmes cas que la base
+             npm run build                               # types + bundle
+cd ..;       python backend\tests\banc\banc.py --cible <CARGO_TARGET_DIR>
 ```
 
-Les trois suites construisent leur propre base : aucune ne touche `db/gestionfil.db`.
+Le **banc** bâtit une base jetable depuis le socle, lance un serveur d'essai sur le port 8096
+depuis un dossier vide (aucun `.env` lu), joue les scénarios métier de bout en bout
+(réception, clôture et avoir, écart de pesée, saisie libre, inventaire, import, machines, lots,
+sessions, concurrence, déclencheurs, masquage) puis supprime la base. Il ne touche jamais la
+base `gestionfil`. `deploiement/fabriquer-paquet.ps1` l'exige avant de fabriquer un paquet.
 
 ---
 
-## État
+## État et décisions
 
-| Couche | État | Vérification |
-|---|---|---|
-| Base de données | **livrée** | 53 tables, 37 vues, 53 triggers · 39/39 |
-| Import Excel | **livré** | 124 réfs · 18 qualités · 18 recettes validées · 93 groupes |
-| Backend Rust/Axum | **livré** | auth, RBAC, droits par champ, CRUD complet · 21/21 + 55/55 |
-| Interface React 19 | **livrée** | design system Radix, thème clair/sombre, adaptative |
-| Bureau (Tauri 2) | **livré** | Windows · macOS · Linux |
-| Mobile (PWA) | **livré** | installable, service worker, icônes maskable |
-| Bout en bout | **40/40** | `backend/tests/e2e.ps1` |
-
-**Total : 155 tests, 0 échec.**
-
-### Ce qui reste
-
-Écrans de saisie pour recettes, plans, transferts, inventaires, bons de commande et réceptions. Leurs API sont complètes et testées ; il manque l'interface.
+- `docs/ADR-001-decisions-fondatrices.md` — les décisions du modèle de données.
+- `docs/ADR-002-regles-de-gestion-2026-10.md` — les 18 règles de gestion du 08/10/2026, où chacune est garantie et ce qui la contrôle.
+- `docs/ecarts-cahier-des-charges.md` — la traçabilité du cahier des charges et les points en attente de décision.
 
 ## Droits par champ
 

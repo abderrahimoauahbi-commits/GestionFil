@@ -14,11 +14,11 @@
  * Les entrees dont le module n'est pas accessible ne sont pas rendues : la
  * navigation reflete exactement ce que l'utilisateur peut faire.
  */
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ArrowLeftRight, BadgeCheck, BarChart3, Bell, BookOpen, Bot, Boxes, Calculator, ChevronDown, ClipboardCheck, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, Tags, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
+  ArrowLeftRight, BadgeCheck, BarChart3, Bell, BookOpen, Bot, Boxes, Calculator, ChevronDown, ChevronRight, ClipboardCheck, PanelLeftClose, PanelLeftOpen, Cog, Coins, Download, Factory, FileSpreadsheet, FileText, Gauge, Grid3x3, Home, KeyRound, Layers, LayoutGrid, Link2, LogOut, Menu as MenuIcone, Monitor, Moon, Package, PackageCheck, PackageSearch, Palette, Receipt, Shapes, ShieldAlert, ShieldCheck, Ship, ShoppingCart, SlidersHorizontal, Sparkles, Sun, Tags, TrendingUp, Truck, Undo2, Warehouse, type LucideIcon,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -26,6 +26,7 @@ import { useEntreprise } from '../lib/entreprise'
 import { cn, sousChemin } from '../lib/utils'
 import { useTheme } from './Theme'
 import { BarreLaterale } from './BarreLaterale'
+import { SynchroPreferences } from './SynchroPreferences'
 import { BoutonRafraichir, useEcranCalcule } from './BoutonRafraichir'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
@@ -35,6 +36,10 @@ import { MiseAJourAuto } from './MiseAJourAuto'
 import { RobotConnexion } from './RobotConnexion'
 import { ChangerMotDePasse } from './ChangerMotDePasse'
 import { DoubleAuthentification } from './DoubleAuthentification'
+import { BarriereErreur } from './BarriereErreur'
+import { TablesSouples } from './TablesSouples'
+import { ConfirmationQuitter } from '../hooks/useGardeSaisie'
+import { Chargement } from './ui/base'
 import { useApparence } from './Apparence'
 import { Badge, Bouton } from './ui/base'
 import {
@@ -78,9 +83,12 @@ export type Section =
   | 'GENERAL'
   | 'CATALOGUE'
   | 'PRODUCTION'
+  | 'PLANIFICATION'
   | 'ACHATS'
   | 'STOCK'
+  | 'ANALYSES'
   | 'FINANCE'
+  | 'AIDE'
   | 'PARAMETRES'
 
 export const MODULES: {
@@ -89,13 +97,21 @@ export const MODULES: {
   resume: string
   Icone: LucideIcon
 }[] = [
-  { id: 'GENERAL',    libelle: 'Général',    resume: 'Tableau de bord, statistiques, entreprise', Icone: Gauge },
-  { id: 'CATALOGUE',  libelle: 'Catalogue',  resume: 'Références, équivalences, fournisseurs',    Icone: Package },
-  { id: 'PRODUCTION', libelle: 'Production', resume: 'Qualités, recettes, plans, besoins',        Icone: Factory },
-  { id: 'ACHATS',     libelle: 'Achats',     resume: "Plan d'achat, commandes, réceptions",       Icone: ShoppingCart },
-  { id: 'STOCK',      libelle: 'Stock',      resume: 'État, mouvements, transferts, inventaires', Icone: Boxes },
-  { id: 'FINANCE',    libelle: 'Finance',    resume: 'Valorisation, classification, rapports',    Icone: Coins },
-  { id: 'PARAMETRES', libelle: 'Paramètres', resume: 'Apparence, entreprise, droits, sauvegardes', Icone: SlidersHorizontal },
+  // L'ORDRE DU MENU (12/10/2026, demande de l'utilisateur) : d'abord les
+  // tableaux de bord, puis les fiches de base, la production, la
+  // planification, les achats, le stock — chaque groupe sous un titre court et
+  // separe du suivant par un filet — et ensuite le reste. Il remplace le
+  // rangement par domaine du 10/10.
+  { id: 'GENERAL',       libelle: 'Tableaux de bord', resume: 'Accueil, tableau de bord et ses pages',                    Icone: Gauge },
+  { id: 'CATALOGUE',     libelle: 'Fiches de base',   resume: 'Références, catégories, équivalences, fournisseurs',       Icone: Package },
+  { id: 'PRODUCTION',    libelle: 'Production',       resume: 'Qualités, recettes, besoins',                              Icone: Factory },
+  { id: 'PLANIFICATION', libelle: 'Planification',    resume: "Plans de production, plans d'achat, stock projeté",       Icone: LayoutGrid },
+  { id: 'ACHATS',        libelle: 'Achats',           resume: 'Commandes, réceptions, importation, retours',              Icone: ShoppingCart },
+  { id: 'STOCK',         libelle: 'Stock',            resume: 'État, mouvements, transferts, machines, inventaires',      Icone: Boxes },
+  { id: 'ANALYSES',      libelle: 'Analyses',         resume: 'Statistiques, contrôles, prix',                            Icone: BarChart3 },
+  { id: 'FINANCE',       libelle: 'Finance',          resume: 'Valorisation, coût de revient, analyses, rapports',        Icone: Coins },
+  { id: 'AIDE',          libelle: 'Aide',             resume: 'Assistant, questions types, guide',                        Icone: BookOpen },
+  { id: 'PARAMETRES',    libelle: 'Paramètres',       resume: 'Entreprise, apparence, droits, sauvegardes',               Icone: SlidersHorizontal },
 ]
 
 export interface EntreeNav {
@@ -121,11 +137,37 @@ export interface EntreeNav {
 }
 
 /**
+ * CURATION DU MENU PAR ROLE — « cacher les menus par role » (14/10/2026).
+ *
+ * Un role liste ici ne voit au menu QUE les ecrans de sa liste, plus ceux
+ * ouverts a tous (module vide : Accueil, Guide). C'est un confort de
+ * presentation, PAS une barriere de securite : les droits serveur ne changent
+ * pas, un ecran retire du menu reste atteignable par son adresse et le serveur
+ * l'autorise ou le refuse selon les permissions, comme avant.
+ *
+ * L'ORDRE DE LA LISTE EST AUSSI CELUI DE LA BARRE DU BAS sur telephone : les
+ * premiers ecrans deviennent les onglets que le pouce atteint.
+ *
+ * Un role ABSENT d'ici garde le menu complet de ses droits (DIRECTION, ADMIN,
+ * ASSISTANTE pour l'instant ; leurs listes viendront apres validation). On
+ * commence par le magasinier.
+ */
+export const MENU_PAR_ROLE: Record<string, string[]> = {
+  // MAGASIN — le quai et les magasins. Les quatre gestes du metier d'abord
+  // (ils arment la barre du bas), puis la consultation et le reste.
+  MAGASIN: [
+    '/receptions', '/mouvements', '/machines', '/inventaires',
+    '/etat-stock', '/transferts', '/retours-fournisseur',
+    '/catalogue', '/chat',
+  ],
+}
+
+/**
  * Un ecran est-il accessible a cet utilisateur ?
  *
- * Deux conditions, et la seconde n'est pas redondante : la grille de droits
- * raisonne par module, or certains ecrans ne se decident que par role. Les
- * filtrer au seul module ferait apparaitre une entree qui repond 403.
+ * Trois conditions, et aucune n'est redondante : la grille de droits raisonne
+ * par module, certains ecrans ne se decident que par role, et la curation
+ * ci-dessus reduit encore le menu des roles qui en ont une.
  */
 export function estAccessible(
   entree: EntreeNav,
@@ -134,26 +176,69 @@ export function estAccessible(
 ): boolean {
   /* UN MODULE VIDE VEUT DIRE « OUVERT A TOUS ». L'accueil n'appartient a aucun
      module : il ne montre que les ecrans auxquels celui qui regarde a deja
-     droit, et le lui fermer reviendrait a le laisser sans porte de sortie. */
+     droit, et le lui fermer reviendrait a le laisser sans porte de sortie. Le
+     guide suit la meme regle — un role cure garde donc toujours Accueil et le
+     guide, meme absents de sa liste. */
   if (entree.module === '') return true
   if (!peut(entree.module, 'LIRE')) return false
   if (entree.roles && !entree.roles.includes(role ?? '')) return false
+  // Curation : si le role a une liste, il ne voit au menu que ses ecrans.
+  const cure = MENU_PAR_ROLE[role ?? '']
+  if (cure && !cure.includes(entree.vers)) return false
   return true
 }
 
-export const NAVIGATION: EntreeNav[] = [
+/**
+ * L'entree du menu ou l'on se trouve : l'adresse exacte d'abord, sinon la plus
+ * longue qui la contient. « /tableau-de-bord/analyse » est sous
+ * « /tableau-de-bord » ET a sa propre entree : la premiere trouvee ne suffit
+ * plus depuis que les pages du tableau de bord sont au menu.
+ */
+export function entreeCourante(entrees: EntreeNav[], chemin: string): EntreeNav | undefined {
+  return (
+    entrees.find((e) => e.vers === chemin) ??
+    entrees
+      .filter((e) => e.vers !== '/' && sousChemin(chemin, e.vers.split('?')[0]))
+      .sort((a, b) => b.vers.length - a.vers.length)[0]
+  )
+}
+
+const ORDRE_MENU = [
+  '/', '/tableau-de-bord', '/tableau-de-bord/situation', '/tableau-de-bord/analyse', '/tableau-de-bord/opportunites', '/tableau-de-bord/matiere',
+  '/catalogue', '/categories', '/equivalences', '/fournisseurs', '/roles-bom',
+  '/qualites', '/recettes', '/besoins',
+  '/plans', '/plan-achat', '/stock',
+  '/bons-commande', '/receptions', '/factures-fournisseur', '/import', '/retours-fournisseur',
+  '/etat-stock', '/mouvements', '/transferts', '/machines', '/inventaires', '/lots', '/autorisations',
+  '/statistiques', '/controles', '/historique-prix', '/matrice-prix',
+  '/valorisation', '/landed-cost', '/classification', '/rapports',
+  '/chat', '/assistant', '/guide-utilisateur',
+  '/parc-machines', '/configuration', '/telecharger',
+]
+const rang = (e: { vers: string }) => {
+  const i = ORDRE_MENU.indexOf(e.vers)
+  return i < 0 ? ORDRE_MENU.length : i
+}
+
+export const NAVIGATION: EntreeNav[] = ([
   /* --- 1. General -------------------------------------------------------- */
   { vers: '/', libelle: 'Accueil', module: '', Icone: Home, section: 'GENERAL', principale: true },
   { vers: '/tableau-de-bord', libelle: 'Tableau de bord', module: 'COCKPIT', Icone: Gauge, section: 'GENERAL', resume: 'Indicateurs, alertes et mur de risques', principale: true },
-  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'GENERAL' },
+  // Les pages du tableau de bord ont chacune leur entree : on y va d'un clic,
+  // sans passer par la vue d'ensemble puis l'onglet.
+  { vers: '/tableau-de-bord/situation', libelle: 'Risques et files', module: 'COCKPIT', Icone: ShieldAlert, section: 'GENERAL' },
+  { vers: '/tableau-de-bord/analyse', libelle: 'Analyse', module: 'COCKPIT', Icone: TrendingUp, section: 'GENERAL' },
+  { vers: '/tableau-de-bord/opportunites', libelle: 'Opportunités', module: 'COCKPIT', Icone: Sparkles, section: 'GENERAL' },
+  { vers: '/tableau-de-bord/matiere', libelle: 'Matière', module: 'COCKPIT', Icone: Layers, section: 'GENERAL' },
+  { vers: '/statistiques', libelle: 'Statistiques', module: 'MOUVEMENTS', Icone: BarChart3, section: 'ANALYSES' },
   // La coherence est un ecran de pilotage, pas d'administration : c'est la
   // direction et l'assistante qui corrigent les anomalies, pas l'informaticien.
-  { vers: '/controles', libelle: 'Contrôles de cohérence', module: 'COCKPIT', Icone: ShieldCheck, section: 'GENERAL' },
+  { vers: '/controles', libelle: 'Contrôles de cohérence', module: 'COCKPIT', Icone: ShieldCheck, section: 'ANALYSES' },
   /* LE CHATBOT EST OUVERT A TOUS, l'ancien assistant reste a la Direction.
      Le premier n'expose que les competences que le role de l'appelant autorise
      deja, chacune verifiee module par module ; le second lit des vues
      consolidees sans ce filtre, d'ou sa restriction. */
-  { vers: '/chat', libelle: 'Assistant', module: 'COCKPIT', Icone: Bot, section: 'GENERAL',
+  { vers: '/chat', libelle: 'Assistant', module: 'COCKPIT', Icone: Bot, section: 'AIDE',
     resume: 'Poser une question sur le stock et les achats',
     principale: true },
   {
@@ -161,7 +246,7 @@ export const NAVIGATION: EntreeNav[] = [
     libelle: 'Questions types',
     module: 'COCKPIT',
     Icone: Sparkles,
-    section: 'GENERAL',
+    section: 'AIDE',
     roles: ['DIRECTION'],
   },
   {
@@ -169,7 +254,7 @@ export const NAVIGATION: EntreeNav[] = [
     libelle: 'Guide utilisateur',
     module: '',
     Icone: BookOpen,
-    section: 'GENERAL',
+    section: 'AIDE',
     resume: 'Documentation complète pour utiliser l\'ERP',
   },
 
@@ -181,15 +266,15 @@ export const NAVIGATION: EntreeNav[] = [
   // Categories et roles BOM decrivent le PRODUIT : ils quittent l'administration
   // pour rejoindre ce qu'ils qualifient. Chacun ouvre l'ecran des referentiels
   // reduit a son seul onglet — meme code, meme CRUD, pas de doublon.
-  { vers: '/categories', libelle: 'Catégories matière', module: 'CATALOGUE', Icone: Shapes, section: 'CATALOGUE' },
+  { vers: '/categories', libelle: 'Catégories et familles', module: 'CATALOGUE', Icone: Shapes, section: 'CATALOGUE' },
   { vers: '/roles-bom', libelle: 'Rôles BOM', module: 'CATALOGUE', Icone: Layers, section: 'CATALOGUE' },
 
   /* --- 3. Production & MRP ----------------------------------------------- */
   { vers: '/qualites', libelle: 'Qualités', module: 'QUALITES', Icone: Factory, section: 'PRODUCTION' },
   { vers: '/recettes', libelle: 'Recettes (BOM)', module: 'RECETTES', Icone: FileText, section: 'PRODUCTION' },
-  { vers: '/plans', libelle: 'Plan de production', module: 'PLANS', Icone: LayoutGrid, section: 'PRODUCTION' },
+  { vers: '/plans', libelle: 'Plans de production', module: 'PLANS', Icone: LayoutGrid, section: 'PLANIFICATION' },
   { vers: '/besoins', libelle: 'Besoins (MRP)', module: 'MRP', Icone: Calculator, section: 'PRODUCTION', resume: 'Ce qu’il faut acheter, et quand', principale: true },
-  { vers: '/plan-achat', libelle: "Plan d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'PRODUCTION' },
+  { vers: '/plan-achat', libelle: "Plans d'achat", module: 'PLAN_ACHAT', Icone: ShoppingCart, section: 'PLANIFICATION' },
 
   /* --- 4. Achats --------------------------------------------------------- */
   { vers: '/bons-commande', libelle: 'Bons de commande', module: 'BONS_COMMANDE', Icone: Receipt, section: 'ACHATS' },
@@ -207,24 +292,22 @@ export const NAVIGATION: EntreeNav[] = [
     section: 'ACHATS',
     resume: 'Dossiers, factures et frais d’approche',
   },
-  /* LA RECEPTION D'IMPORT N'AVAIT PAS NON PLUS D'ENTREE. Elle vit a part du
-     dossier — une reception peut prendre des lignes de plusieurs factures —,
-     et l'on n'y arrivait que par un lien interne. Meme defaut que l'Importation
-     avant le 25/09. */
+  /* LA FACTURE FOURNISSEUR (ADR-003 phase B) : elle suit la reception dans le
+     menu parce qu'elle la suit dans le geste — on pese, puis on facture. */
   {
-    vers: '/receptions-import',
-    libelle: 'Réceptions import',
+    vers: '/factures-fournisseur',
+    libelle: 'Factures fournisseur',
     module: 'RECEPTIONS',
-    Icone: PackageCheck,
+    Icone: Receipt,
     section: 'ACHATS',
-    resume: 'Recevoir les conteneurs d’un dossier d’import',
+    resume: 'Rapprocher commande, pesée et facture, puis clôturer',
   },
   {
     vers: '/historique-prix',
     libelle: 'Historique des prix',
     module: 'CATALOGUE',
     Icone: TrendingUp,
-    section: 'ACHATS',
+    section: 'ANALYSES',
   },
   // La matrice et l'historique montrent les MEMES achats : l'un en liste
   // chronologique, l'autre croise par mois. Ce n'est pas un doublon — c'est la
@@ -234,25 +317,24 @@ export const NAVIGATION: EntreeNav[] = [
     libelle: 'Matrice des prix',
     module: 'CATALOGUE',
     Icone: Grid3x3,
-    section: 'ACHATS',
+    section: 'ANALYSES',
   },
   {
     vers: '/retours-fournisseur',
     libelle: 'Retours fournisseur',
-    module: 'MOUVEMENTS',
+    module: 'RECEPTIONS',
     Icone: Undo2,
     section: 'ACHATS',
-    aVenir:
-      "Le type de mouvement existe et la sortie fonctionne ; il manque l'ecran qui rattache le retour a sa ligne de reception.",
+    resume: 'La marchandise rendue, rattachée à sa réception',
   },
 
   /* --- 5. Stock & mouvements --------------------------------------------- */
   { vers: '/etat-stock', libelle: 'État des stocks', module: 'STOCK', Icone: Warehouse, section: 'STOCK', resume: 'Ce que chaque magasin porte, en kilos', principale: true },
-  { vers: '/stock', libelle: 'Stock projeté & alertes', module: 'STOCK', Icone: PackageSearch, section: 'STOCK' },
+  { vers: '/stock', libelle: 'Stock projeté et alertes', module: 'STOCK', Icone: PackageSearch, section: 'PLANIFICATION' },
   // Le stock lot par lot (cahier du 02/10/2026) : vues Projet / Restes, alertes
   // a traiter, fiche de vie ; et la file des demandes d'autorisation.
-  { vers: '/lots', libelle: 'Lots', module: 'STOCK', Icone: Tags, section: 'STOCK', resume: 'Projet, Restes, lots bloqués et dormants' },
-  { vers: '/autorisations', libelle: 'Autorisations', module: 'STOCK', Icone: BadgeCheck, section: 'STOCK' },
+  { vers: '/lots', libelle: 'Lots', module: 'LOTS', Icone: Tags, section: 'STOCK', resume: 'Projet, Restes, lots bloqués et dormants' },
+  { vers: '/autorisations', libelle: 'Autorisations', module: 'LOTS', Icone: BadgeCheck, section: 'STOCK' },
   { vers: '/mouvements', libelle: 'Mouvements', module: 'MOUVEMENTS', Icone: ArrowLeftRight, section: 'STOCK', resume: 'Entrées, sorties, transferts', principale: true },
   { vers: '/transferts', libelle: 'Transferts', module: 'MOUVEMENTS', Icone: Truck, section: 'STOCK' },
   // Le stock pose sur les metiers. Il vit dans les memes tables que le reste :
@@ -298,8 +380,8 @@ export const NAVIGATION: EntreeNav[] = [
      sert dessus. Il est rattache au module COCKPIT, que tout le monde lit,
      precisement pour cela. Le JOURNAL qu'il affiche, lui, reste reserve a
      PARAMETRES — c'est l'ecran qui le masque, et le serveur qui le refuse. */
-  { vers: '/telecharger', libelle: 'Télécharger l application', module: 'COCKPIT', Icone: Download, section: 'PARAMETRES' },
-]
+  { vers: '/telecharger', libelle: 'Télécharger l’application', module: 'COCKPIT', Icone: Download, section: 'PARAMETRES' },
+] as EntreeNav[]).sort((a, b) => rang(a) - rang(b))
 
 /** Sections dans l'ordre du rail. */
 const GROUPES = MODULES.map((m) => m.id)
@@ -323,12 +405,18 @@ export function Coquille() {
   const entreprise = useEntreprise()
 
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
-  const principales = accessibles.filter((e) => e.principale).slice(0, 4)
-  const courante = accessibles.find(
-    (e) =>
-      e.vers === emplacement.pathname ||
-      (e.vers !== '/' && sousChemin(emplacement.pathname, e.vers)),
-  )
+  // LA BARRE DU BAS (telephone) SUIT LA CURATION DU ROLE quand il en a une :
+  // ses premiers ecrans — les gestes du metier — deviennent les onglets, dans
+  // leur ordre de liste. Sans curation, repli sur le marquage `principale`
+  // global, comme avant.
+  const listeRole = MENU_PAR_ROLE[moi?.role ?? '']
+  const principales = listeRole
+    ? listeRole
+        .map((vers) => accessibles.find((e) => e.vers === vers))
+        .filter((e): e is EntreeNav => Boolean(e))
+        .slice(0, 4)
+    : accessibles.filter((e) => e.principale).slice(0, 4)
+  const courante = entreeCourante(accessibles, emplacement.pathname)
 
   useEffect(() => setTiroir(false), [emplacement.pathname])
 
@@ -339,7 +427,7 @@ export function Coquille() {
    */
   const qControles = useQuery({
     queryKey: ['controles'],
-    queryFn: () => api.get<Controle[]>('/api/controles'),
+    queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }),
     enabled: peut('COCKPIT', 'LIRE'),
     refetchInterval: 5 * 60_000,
     staleTime: 60_000,
@@ -385,7 +473,7 @@ export function Coquille() {
         >
           {children}
           <Badge ton="contour" className="ml-auto shrink-0 text-[9px]">
-            a venir
+            à venir
           </Badge>
         </span>
       )
@@ -397,19 +485,10 @@ export function Coquille() {
     )
   }
 
-  const lienNav = (actif: boolean) =>
-    cn(
-      'flex items-center gap-2 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-[13px]',
-      'whitespace-nowrap transition-colors',
-      actif
-        ? 'bg-attenue font-medium text-texte'
-        : 'text-attenue-texte hover:bg-attenue hover:text-texte',
-    )
-
 
   return (
     <div
-      className="flex h-full bg-fond"
+      className="coquille flex h-full bg-fond"
       /* LA HAUTEUR DE LA BARRE DU BAS, PUBLIEE POUR LES AUTRES.
          Une barre d'action figee en bas d'un tableau se collerait sinon au bord
          de l'ecran — c'est-a-dire DERRIERE la navigation du telephone, ou elle
@@ -429,13 +508,22 @@ export function Coquille() {
           tiennent pas sur une ligne : la barre du haut les repliait en menus
           deroulants, et il fallait deux clics et une memoire du rangement pour
           atteindre un ecran. */}
+      {/* LE FOND CHOISI (Apparence › Fond) : une couche fixe sous toute
+          l'interface, avec ses filtres. Invisible tant qu'on garde le fond du
+          style. */}
+      <div className="fond-perso sans-impression" aria-hidden />
+      {/* Les reglages d'apparence suivent le compte : relus a la connexion,
+          renvoyes au serveur a chaque changement. */}
+      <SynchroPreferences />
+      {/* Les tableaux faits a la main se resserrent au lieu de defiler. */}
+      <TablesSouples />
       {reglages.disposition !== 'entete' && <BarreLaterale />}
 
       <div className="flex min-w-0 flex-1 flex-col">
       {/* --- Bandeau superieur : marque, navigation, alertes, profil ------- */}
       <header
         className={cn(
-          'sans-impression z-30 flex shrink-0 items-center gap-2 border-b border-bordure bg-surface px-3',
+          'barre-haut sans-impression z-30 flex shrink-0 items-center gap-1.5 border-b border-bordure bg-surface px-3 sm:px-5',
           // LA FENETRE A RETROUVE SA BORDURE : l'entete n'a plus a servir de
           // poignee de deplacement, et rien ne justifie qu'elle soit plus
           // basse au bureau qu'au navigateur.
@@ -467,6 +555,19 @@ export function Coquille() {
           </>
         )}
 
+        {/* LE BOUTON QUI FAIT GLISSER LA BARRE LATERALE (06/10/2026). */}
+        {reglages.disposition !== 'entete' && (
+          <button
+            type="button"
+            onClick={() => reglages.definir({ menuMasque: !reglages.menuMasque })}
+            title={reglages.menuMasque ? 'Afficher le menu' : 'Masquer le menu'}
+            aria-label={reglages.menuMasque ? 'Afficher le menu' : 'Masquer le menu'}
+            className="bouton-menu hidden size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-attenue-texte transition-colors hover:bg-attenue hover:text-texte md:grid"
+          >
+            {reglages.menuMasque ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </button>
+        )}
+
         {/* La navigation vit desormais dans la barre laterale. Il reste ici
             le fil d'Ariane de l'ecran courant, qui dit OU l'on est — la barre
             dit ou l'on peut aller, ce n'est pas la meme question. */}
@@ -474,22 +575,31 @@ export function Coquille() {
           /* La barre laterale porte deja la navigation : l'entete ne dit plus
              que l'ecran courant. Ou l'on peut aller et ou l'on est sont deux
              questions differentes, et les melanger encombre. */
-          <div className="hidden min-w-0 flex-1 items-center gap-1.5 text-[13px] md:flex">
+          <nav aria-label="Emplacement" className="hidden min-w-0 flex-1 items-center gap-2 text-[13px] md:flex">
+            {courante && courante.vers !== '/' && (
+              <>
+                <span className="truncate text-attenue-texte">
+                  {MODULES.find((m) => m.id === courante.section)?.libelle}
+                </span>
+                <ChevronRight className="size-3.5 shrink-0 text-attenue-texte/60" />
+              </>
+            )}
             <span className="truncate font-medium text-texte">
               {courante?.libelle ?? 'Gestion Fil'}
             </span>
-            {courante && (
-              <span className="truncate text-attenue-texte">
-                · {MODULES.find((m) => m.id === courante.section)?.libelle}
-              </span>
-            )}
-          </div>
+          </nav>
         ) : (
           <NavigationEntete accessibles={accessibles} courante={courante} />
         )}
 
-        {/* Navigation repliee en dessous de 1280 px */}
-        <div className="min-w-0 flex-1 xl:hidden">
+        {/* Navigation repliee : sous 768 px quand la barre laterale existe
+            (elle disparait a cette largeur), sous 1280 px sinon. */}
+        <div
+          className={cn(
+            'min-w-0 flex-1',
+            reglages.disposition === 'entete' ? 'xl:hidden' : 'md:hidden',
+          )}
+        >
           <Bouton
             variante="discret"
             taille="sm"
@@ -511,7 +621,7 @@ export function Coquille() {
         <button
           onClick={() => setApparence(true)}
           aria-label="Apparence"
-          title="Theme, caracteres, disposition"
+          title="Thème, caractères, disposition"
           className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-attenue-texte transition-colors hover:bg-attenue hover:text-texte"
         >
           <Palette className="size-4" />
@@ -633,32 +743,47 @@ export function Coquille() {
       {/* --- Tiroir de navigation : sous 1280 px -------------------------- */}
       {tiroir && (
         <div
-          className="sans-impression fixed inset-0 z-40 xl:hidden"
+          className={cn(
+            'sans-impression fixed inset-0 z-40',
+            reglages.disposition === 'entete' ? 'xl:hidden' : 'md:hidden',
+          )}
           onClick={() => setTiroir(false)}
         >
-          <div className="absolute inset-0 bg-black/40" />
+          <div className="absolute inset-0 bg-black/45" />
+          {/* UN TIROIR LATERAL SOMBRE, LE MEME QUE LA BARRE DU BUREAU : on
+              retrouve au telephone la colonne qu'on connait sur l'ecran large,
+              au lieu d'un rideau qui descend du haut. */}
           <div
-            className="absolute inset-x-0 top-0 max-h-[85vh] overflow-y-auto border-b border-bordure bg-surface p-3 shadow-lg"
+            className="absolute bottom-0 left-0 top-0 flex w-[min(288px,86vw)] flex-col bg-barre text-barre-texte shadow-xl [color-scheme:dark]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {GROUPES.map((section) => {
+            <div className="flex h-14 shrink-0 items-center px-4 text-[13.5px] font-semibold">
+              Gestion Fil
+            </div>
+            <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 pb-6">
+              {GROUPES.filter((section) => accessibles.some((e) => e.section === section)).map((section, i) => {
                 const entrees = accessibles.filter((e) => e.section === section)
-                if (!entrees.length) return null
                 return (
-                  <div key={section}>
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
+                  <div key={section} className={cn(i > 0 && 'border-t border-white/[0.06] pt-3')}>
+                    <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-barre-attenue/80">
                       {MODULES.find((m) => m.id === section)?.libelle ?? section}
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-y-px">
                       {entrees.map((e) => (
                         <LienNav
                           key={e.vers}
                           e={e}
                           end={e.vers === '/'}
-                          className={({ isActive }) => lienNav(isActive)}
+                          className={({ isActive }) =>
+                            cn(
+                              'flex h-9 items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 text-[13px] transition-colors',
+                              isActive
+                                ? 'bg-barre-actif font-medium text-barre-texte'
+                                : 'text-barre-attenue hover:bg-barre-actif/70 hover:text-barre-texte',
+                            )
+                          }
                         >
-                          <e.Icone className="size-3.5" />
+                          <e.Icone className="size-4" />
                           {e.libelle}
                         </LienNav>
                       ))}
@@ -666,7 +791,7 @@ export function Coquille() {
                   </div>
                 )
               })}
-            </div>
+            </nav>
           </div>
         </div>
       )}
@@ -677,7 +802,7 @@ export function Coquille() {
           // Pas de largeur maximale : une table de quinze colonnes se lit
           // mieux etalee que centree entre deux marges vides. La densite
           // reste reglable, la largeur suit la fenetre.
-          className="p-3 lg:p-4"
+          className="px-3 pt-3 sm:px-5 sm:pt-4"
           style={{ paddingBottom: 'calc(4rem + var(--marge-sure-bas))' }}
         >
           {/* L'AVIS DE MISE A JOUR VIT ICI, et non plus dans l'atelier.
@@ -692,7 +817,15 @@ export function Coquille() {
               doivent encore passer par l'installateur, une derniere fois. */}
           <MiseAJourAuto />
           <BandeauMiseAJour />
-          <Outlet key={emplacement.pathname} />
+          {/* L'ECRAN, DANS SA BARRIERE (audit v4) : une erreur reste dans son
+              cadre, le menu demeure ; l'ecran se charge a la demande. */}
+          <BarriereErreur cle={emplacement.pathname}>
+            <Suspense fallback={<Chargement />}>
+              <Outlet key={emplacement.pathname} />
+            </Suspense>
+          </BarriereErreur>
+          {/* La question de la garde de saisie, une pour toute l'application. */}
+          <ConfirmationQuitter />
         </div>
       </main>
 
@@ -804,18 +937,25 @@ export function EnTetePage({
        du papier, au-dessus de l'entete de societe — deux titres pour un seul
        document. L'etat porte le sien. */
     <div
-      className="sans-impression sticky top-0 z-30 mb-3 -mx-3 flex flex-wrap items-center
-                 justify-between gap-3 border-b border-bordure bg-fond px-3 pb-2 pt-1
-                 sm:-mx-4 sm:px-4"
+      className="entete-page sans-impression sticky top-0 z-30 mb-4 -mx-3 flex flex-wrap items-center
+                 justify-between gap-x-4 gap-y-2 border-b border-bordure bg-fond px-3 py-2.5
+                 sm:-mx-5 sm:px-5"
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        {/* 17 PX ET NON 15. A quinze, le titre ne depassait le texte courant que
-            d'un pixel ou deux : la page n'avait pas de point d'entree. */}
-        <h1 className="text-[17px] font-semibold leading-tight tracking-[-0.015em]">{titre}</h1>
-        {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
-            par la route courante : aucun ecran n'a a la declarer, donc aucun ne
-            peut l'oublier. */}
-        <AideEcran description={description} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="truncate text-[19px] font-semibold leading-tight tracking-[-0.02em]">{titre}</h1>
+          {/* L'AIDE DE L'ECRAN, ici et nulle part ailleurs. Elle trouve sa fiche
+              par la route courante : aucun ecran n'a a la declarer. */}
+          <AideEcran description={description} />
+        </div>
+        {/* LA DESCRIPTION SE LIT SOUS LE TITRE : sur un document, c'est son
+            identite (numero, date, auteur) ; sur une liste, ce qu'on y fait.
+            Une ligne, coupee au besoin — le texte entier reste dans l'aide. */}
+        {description && (
+          <p className="mt-0.5 hidden truncate text-[12.5px] leading-snug text-attenue-texte sm:block">
+            {description}
+          </p>
+        )}
       </div>
       {/* LES ACTIONS PRENNENT LEUR PROPRE LIGNE SUR TELEPHONE.
 

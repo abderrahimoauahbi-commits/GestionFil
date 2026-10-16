@@ -11,9 +11,10 @@
  * base : il s'affiche en moins d'une seconde, meme moteur local arrete. La
  * conversation, elle, reste dans l'ecran Assistant.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useLocation } from 'react-router-dom'
 import { Bot, Check, ChevronRight, X } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -60,7 +61,7 @@ export function RobotConnexion() {
 
   const q = useQuery({
     queryKey: ['briefing'],
-    queryFn: () => api.get<Briefing>('/api/briefing'),
+    queryFn: ({ signal }) => api.get<Briefing>('/api/briefing', { signal }),
     enabled: !!moi,
     staleTime: 5 * 60_000,
   })
@@ -68,8 +69,11 @@ export function RobotConnexion() {
   // A LA CONNEXION, une fois : le drapeau vit dans la session, comme le jeton.
   // Il disparait donc avec l'onglet, et le robot revient a la prochaine
   // ouverture — pas a chaque changement d'ecran.
+  // Sur l'accueil seulement : arrive par un lien ou un rechargement sur une
+  // fiche, le panneau couvrirait ses boutons — la pastille du bandeau suffit.
+  const { pathname } = useLocation()
   useEffect(() => {
-    if (!moi || !q.data) return
+    if (!moi || !q.data || pathname !== '/') return
     try {
       if (sessionStorage.getItem(CLE_VU)) return
       sessionStorage.setItem(CLE_VU, '1')
@@ -77,7 +81,7 @@ export function RobotConnexion() {
       // Session storage refuse (navigation privee) : on ouvre quand meme.
     }
     setOuvert(true)
-  }, [moi, q.data])
+  }, [moi, q.data, pathname])
 
   // Echap referme, comme tout panneau de l'application.
   useEffect(() => {
@@ -85,6 +89,29 @@ export function RobotConnexion() {
     const f = (e: KeyboardEvent) => e.key === 'Escape' && setOuvert(false)
     window.addEventListener('keydown', f)
     return () => window.removeEventListener('keydown', f)
+  }, [ouvert])
+
+  // LE PANNEAU NE GARDE PLUS LES BOUTONS DE L'ECRAN (08/10/2026). Ouvert a la
+  // connexion en haut a droite, il restait pose sur la barre d'actions de la
+  // page suivante — « Valider le controle » d'une reception etait dessous, et
+  // le clic tombait sur le panneau. Il se referme desormais quand on change
+  // d'ecran et quand on clique ailleurs.
+  const ecranOuverture = useRef(pathname)
+  useEffect(() => {
+    if (pathname !== ecranOuverture.current) {
+      ecranOuverture.current = pathname
+      setOuvert(false)
+    }
+  }, [pathname])
+  useEffect(() => {
+    if (!ouvert) return
+    const f = (e: PointerEvent) => {
+      const cible = e.target as Element | null
+      if (cible?.closest?.('[data-robot], [data-robot-bouton]')) return
+      setOuvert(false)
+    }
+    document.addEventListener('pointerdown', f)
+    return () => document.removeEventListener('pointerdown', f)
   }, [ouvert])
 
   if (!moi) return null

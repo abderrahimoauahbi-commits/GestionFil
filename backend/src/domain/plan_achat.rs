@@ -78,14 +78,38 @@ pub async fn generer(
     .fetch_one(&mut *tx)
     .await?;
 
-    sqlx::query(
+    // LA PURGE SE JOURNALISE EN UNE LIGNE (audit v5, T10) : une ligne
+    // d'audit par proposition remplacee noyait le journal a chaque calcul. Le
+    // declencheur se tait sous le drapeau ; le resume dit combien.
+    sqlx::query("SELECT set_config('gestionfil.purge_plan', 'on', true)")
+        .execute(&mut *tx)
+        .await?;
+    let purgees = sqlx::query(
         "DELETE FROM plan_achat
           WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
             AND code_reference_origine IS NULL
             AND figee = 0",
     )
     .execute(&mut *tx)
-    .await?;
+    .await?
+    .rows_affected();
+    sqlx::query("SELECT set_config('gestionfil.purge_plan', '', true)")
+        .execute(&mut *tx)
+        .await?;
+    if purgees > 0 {
+        sqlx::query(
+            "INSERT INTO audit_log (table_concernee, operation, id_enregistrement, anciennes_valeurs,
+                                    id_utilisateur, adresse_ip, session_id)
+             VALUES ('plan_achat', 'DELETE', 'RECALCUL',
+                     jsonb_build_object('propositions_remplacees', $1::bigint)::text,
+                     current_setting('gestionfil.id_utilisateur', true),
+                     current_setting('gestionfil.adresse_ip', true),
+                     current_setting('gestionfil.session_id', true))",
+        )
+        .bind(purgees as i64)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     let horodatage = maintenant();
 
@@ -103,7 +127,7 @@ pub async fn generer(
               -- avec elles — sans quoi le montant en MAD deviendrait
               -- irreproductible des que le taux bouge.
               code_devise, prix_devise, montant_devise, taux_devise,
-              palettes_a_commander)
+              palettes_a_commander, complement_palette_kg)
          SELECT $1, $2, pa.code_reference, pa.qte_a_commander_kg,
                 pa.unite_catalogue, pa.qte_a_commander_unite, pa.code_fournisseur,
                 pa.prix_estime_mad, pa.source_prix, pa.date_besoin_prevue, pa.tier,
@@ -116,12 +140,30 @@ pub async fn generer(
                 END,
                 'PROPOSE',
                 pa.devise, pa.prix_devise, pa.montant_devise, pa.taux_devise,
-                pa.palettes_a_commander
+                pa.palettes_a_commander, ROUND(pa.complement_palette_kg, 4)
            FROM v_plan_achat pa
+          -- UNE REFERENCE COMMANDEE SE REPROPOSE (06/10/2026). Elle etait
+          -- ecartee a vie des sa premiere commande. Or un bon VALIDE, ENVOYE ou
+          -- LIVRE_PARTIEL est deja deduit par l'en-cours de la vue, et un bon
+          -- CLOTURE est en stock : ce qui reste a proposer est un vrai besoin.
+          -- Seul un bon pas encore valide (BROUILLON, EN_ATTENTE_VALIDATION),
+          -- que l'en-cours ne compte pas, ecarte encore la reference.
+          --
+          -- UNE PROPOSITION ECARTEE EXPIRE (regle 17, 08/10/2026). Ecartee, elle
+          -- masquait la reference A VIE : le besoin ne revenait jamais. Au-dela
+          -- de P_DureeEcartJours (90 j), elle cesse de masquer ; elle reste en
+          -- base, jamais supprimee, marquee expiree.
           WHERE NOT EXISTS (
                 SELECT 1 FROM plan_achat pa2
                  WHERE pa2.code_reference = pa.code_reference
-                   AND pa2.statut IN ('COMMANDE','IGNORE'))
+                   AND ((pa2.statut = 'IGNORE'
+                         AND substr(COALESCE(pa2.date_ecartee, pa2.date_generation), 1, 10)::date
+                             > current_date - COALESCE((SELECT CAST(valeur_courante AS integer) FROM parametre
+                                                         WHERE code_parametre = 'P_DureeEcartJours'), 90))
+                        OR (pa2.statut = 'COMMANDE'
+                            AND EXISTS (SELECT 1 FROM bon_commande bc
+                                         WHERE bc.id_bc = pa2.id_bc_genere
+                                           AND bc.statut IN ('BROUILLON','EN_ATTENTE_VALIDATION')))))
             -- Une proposition ARBITREE couvre deux references a la fois : celle
             -- qu'on achetera, et celle dont le besoin a ete reporte. Les deux
             -- doivent etre ecartees ici. Oublier la seconde recreerait le besoin
@@ -149,7 +191,9 @@ pub async fn generer(
     .await?;
 
     let (budget, tier1): (Option<f64>, i64) = sqlx::query_as(
-        "SELECT SUM(montant_total_mad)::float8, SUM(CASE WHEN urgence = 'TIER 1' THEN 1 ELSE 0 END)
+        // COUNT FILTER et non SUM(CASE) : sans proposition, une somme vaut NULL,
+        // que le decodage en entier refusait — « erreur interne » (audit v3-v4).
+        "SELECT SUM(montant_total_mad)::float8, COUNT(*) FILTER (WHERE urgence = 'TIER 1')
            FROM plan_achat WHERE statut = 'PROPOSE'",
     )
     .fetch_one(&mut *tx)
@@ -195,6 +239,18 @@ pub struct ResultatConversion {
 /// MRP dit aujourd'hui. Rien n'est stocke comme alerte — la comparaison se fait
 /// a la lecture, donc elle ne peut pas etre perimee.
 ///
+/// Ce que l'acheteur CONFIRME sur la commande, par proposition : la quantite, le
+/// prix, et le colisage (palettes / bobines) qu'il arrete. Absent pour un champ =
+/// la valeur du plan telle quelle. On ajuste ICI, pas dans le plan : le plan ne
+/// sert qu'a choisir, la commande porte la decision (14/10/2026).
+#[derive(Debug, serde::Deserialize)]
+pub struct AjustementLigne {
+    pub quantite_kg: Option<f64>,
+    pub prix_mad: Option<f64>,
+    pub nb_palettes: Option<i64>,
+    pub nb_bobines: Option<i64>,
+}
+
 /// Le bon nait en BROUILLON : convertir n'est pas commander. L'acheteur negocie,
 /// ajuste, puis soumet a validation.
 pub async fn convertir(
@@ -202,6 +258,7 @@ pub async fn convertir(
     user: &Utilisateur,
     propositions: Option<&[String]>,
     cibles: Option<&std::collections::HashMap<String, String>>,
+    ajustements: Option<&std::collections::HashMap<String, AjustementLigne>>,
 ) -> AppResult<ResultatConversion> {
     use crate::error::AppError;
 
@@ -212,11 +269,11 @@ pub async fn convertir(
     // COMMANDE et IGNORE sont exclues — l'une engage deja, l'autre a ete ecartee.
     // `= ANY($1)` et non des `?` a la SQLite ; quantites et prix en `::float8`,
     // sans quoi le decodage des NUMERIC echouait. « Commander » ne marchait pas.
-    let ouvertes: Vec<(String, String, f64, f64, Option<String>)> = match propositions {
+    let ouvertes: Vec<(String, String, f64, f64, Option<String>, Option<i64>)> = match propositions {
         Some(ids) if !ids.is_empty() => {
             sqlx::query_as(
                 "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
-                        prix_estime_mad::float8, date_besoin_prevue
+                        prix_estime_mad::float8, date_besoin_prevue, palettes_a_commander
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
                     AND id_proposition = ANY($1)
@@ -229,7 +286,7 @@ pub async fn convertir(
         _ => {
             sqlx::query_as(
                 "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
-                        prix_estime_mad::float8, date_besoin_prevue
+                        prix_estime_mad::float8, date_besoin_prevue, palettes_a_commander
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
                   ORDER BY code_fournisseur, code_reference",
@@ -251,7 +308,7 @@ pub async fn convertir(
     // meme fournisseur ouverts le meme jour seraient indiscernables.
     let mut ouverts: Vec<(String, String)> = Vec::new();
 
-    for (id_prop, fournisseur, qte_kg, prix_mad, date_besoin) in &ouvertes {
+    for (id_prop, fournisseur, qte_kg, prix_mad, date_besoin, palettes_plan) in &ouvertes {
         // Un bon par fournisseur : la liste est triee, on ouvre a chaque rupture.
         let id_bc = match ouverts.last() {
             Some((f, id)) if f == fournisseur => id.clone(),
@@ -304,6 +361,16 @@ pub async fn convertir(
         .fetch_one(&mut *tx)
         .await?;
 
+        // CE QUE L'ACHETEUR A CONFIRME SUR LA COMMANDE : quantite, prix, et le
+        // colisage (palettes / bobines). A defaut : la quantite et le prix du
+        // plan, et les palettes calculees. Le plan ne sert qu'a choisir ; la
+        // decision se prend ici, sur la commande (14/10/2026).
+        let aj = ajustements.and_then(|m| m.get(id_prop));
+        let qte_final = aj.and_then(|a| a.quantite_kg).filter(|q| *q > 0.0).unwrap_or(*qte_kg);
+        let prix_final = aj.and_then(|a| a.prix_mad).filter(|p| *p >= 0.0).unwrap_or(*prix_mad);
+        let palettes_final = aj.and_then(|a| a.nb_palettes).or(*palettes_plan);
+        let bobines_final = aj.and_then(|a| a.nb_bobines);
+
         // La commande se passe en kg : c'est l'unite du besoin, et la seule dont
         // le facteur vaut 1 pour toute reference.
         sqlx::query(
@@ -311,13 +378,14 @@ pub async fn convertir(
                  (id_bc, ligne_numero, code_reference, designation, unite_commande,
                   facteur_kg, quantite_commandee_unite, quantite_commandee_kg,
                   prix_unitaire_devise, code_devise, date_livraison_prevue,
-                  id_proposition, besoin_kg_origine)
+                  id_proposition, besoin_kg_origine, nb_palettes_saisi, nb_bobines_saisi)
              SELECT $1, $2, pa.code_reference, r.designation, 'kg',
-                    1.0, pa.quantite_suggeree_kg, pa.quantite_suggeree_kg,
-                    ROUND(pa.prix_estime_mad / $3::numeric, 6), bc.code_devise, pa.date_besoin_prevue,
+                    1.0, $5::numeric, $5::numeric,
+                    ROUND($6::numeric / $3::numeric, 6), bc.code_devise, pa.date_besoin_prevue,
                     pa.id_proposition,
                     COALESCE((SELECT b.besoin_12m_kg FROM v_besoin_12m b
-                               WHERE b.code_reference = pa.code_reference), 0)
+                               WHERE b.code_reference = pa.code_reference), 0),
+                    $7::numeric, $8::bigint
                FROM plan_achat pa
                JOIN reference r  ON r.code_reference = pa.code_reference
                JOIN bon_commande bc ON bc.id_bc = $1
@@ -327,6 +395,10 @@ pub async fn convertir(
         .bind(numero)
         .bind(taux)
         .bind(id_prop)
+        .bind(qte_final)
+        .bind(prix_final)
+        .bind(palettes_final)
+        .bind(bobines_final)
         .execute(&mut *tx)
         .await?;
 
@@ -345,7 +417,6 @@ pub async fn convertir(
         .await?;
 
         converties += 1;
-        let _ = (qte_kg, prix_mad);
     }
 
     // Totaux, une fois toutes les lignes posees.
@@ -403,17 +474,9 @@ async fn ouvrir_bon(
     .await?
     .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise}.")))?;
 
-    let annee = chrono::Utc::now().format("%Y").to_string();
-    let prefixe = format!("BC-{annee}-");
-    let suivant: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(CAST(substr(numero_bc, length($1) + 1) AS bigint)), 0) + 1
-           FROM bon_commande WHERE numero_bc LIKE $2",
-    )
-    .bind(&prefixe)
-    .bind(format!("{prefixe}%"))
-    .fetch_one(&mut *tx)
-    .await?;
-    let numero = format!("{prefixe}{suivant:04}");
+    // Le meme compteur que la saisie d'un bon (audit v4) : deux conversions
+    // simultanees ne se disputent plus un numero.
+    let numero = crate::routes::stock::numeroter(&mut *tx, "bon_commande", "numero_bc", "BC").await?;
 
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(

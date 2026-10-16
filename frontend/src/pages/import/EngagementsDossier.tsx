@@ -38,12 +38,12 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
 
   const qFrs = useQuery({
     queryKey: ['fournisseurs-actifs'],
-    queryFn: () => api.get<FournisseurActif[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: ({ signal }) => api.get<FournisseurActif[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
     enabled: ecrire,
   })
   const qDevises = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
     enabled: ecrire,
   })
 
@@ -154,7 +154,7 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
                 </span>
               </header>
 
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="w-full min-w-[52rem] text-[12.5px]">
                   <thead>
                     <tr className="border-b border-bordure">

@@ -5,20 +5,18 @@
 # `03-publier.sh` met de cote les binaires et l'interface avant de les remplacer.
 # Ce script les remet en place et redemarre le service.
 #
-# CE QU'IL NE FAIT PAS, ET C'EST ESSENTIEL : il ne touche pas a la BASE. Si la
-# version publiee a modifie le schema, revenir au binaire precedent ne suffit
-# pas — il faut aussi restaurer la base, ce qui est une operation distincte,
-# plus lourde, et qui perd les ecritures faites depuis :
-#
-#     sudo systemctl stop gestionfil
-#     sudo -u gestionfil /opt/gestionfil/gestionfil-admin restaurer <fichier>
-#
-# Un retour de binaire sur une base migree donne un service qui demarre et se
-# comporte de facon imprevisible. Le message ci-dessous le rappelle a chaque
-# execution, parce que c'est le genre de detail qu'on oublie sous pression.
+# LA BASE, SUR DEMANDE EXPRESSE (09/10/2026, audit v5). Si la version publiee a
+# migre le schema, l'ancien binaire tourne sur une base trop recente : il faut
+# aussi restaurer la sauvegarde que 03-publier.sh a prise juste avant (son nom
+# est garde dans precedent/SAUVEGARDE). Cette restauration EFFACE tout ce qui a
+# ete saisi depuis la publication (receptions, fiches machine, mouvements) :
+# c'est une decision humaine, jamais un automatisme. Regle pratique :
+#   - le probleme est vu tout de suite, avant toute saisie : --avec-base ;
+#   - des saisies ont eu lieu : ne pas restaurer, corriger en avant.
 #
 # Usage :
-#     sudo bash 04-revenir.sh
+#     sudo bash 04-revenir.sh               # binaires et interface seulement
+#     sudo bash 04-revenir.sh --avec-base   # et la base d'avant la publication
 # =============================================================================
 set -euo pipefail
 
@@ -31,6 +29,21 @@ dire() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 [[ $EUID -eq 0 ]] || { echo "A lancer avec sudo."; exit 1; }
 [[ -d "$PRECEDENT" ]] || { echo "Aucune version precedente dans $PRECEDENT"; exit 1; }
 [[ -f "$PRECEDENT/gestionfil" ]] || { echo "$PRECEDENT ne contient pas de binaire"; exit 1; }
+
+AVEC_BASE=0
+[[ "${1:-}" == "--avec-base" ]] && AVEC_BASE=1
+SAUVEGARDE=$(cat "$PRECEDENT/SAUVEGARDE" 2>/dev/null || true)
+if [[ $AVEC_BASE -eq 1 ]]; then
+    [[ -n "$SAUVEGARDE" && -f "$SAUVEGARDE" ]] || {
+        echo "Aucune sauvegarde d'avant publication connue ($PRECEDENT/SAUVEGARDE) : base non restauree."
+        echo "Choisissez-en une : sudo -u gestionfil $RACINE/gestionfil-admin lister-sauvegardes"
+        exit 1; }
+    echo
+    echo "La base va etre REMPLACEE par : $SAUVEGARDE"
+    echo "Tout ce qui a ete saisi depuis cette sauvegarde sera PERDU."
+    read -r -p "Tapez RESTAURER pour confirmer : " reponse
+    [[ "$reponse" == "RESTAURER" ]] || { echo "Abandon : rien n'a ete touche."; exit 1; }
+fi
 
 dire "Version qui va etre remise en place"
 ls -l --time-style=+'%Y-%m-%d %H:%M' "$PRECEDENT" | tail -n +2
@@ -47,6 +60,11 @@ if [[ -d "$PRECEDENT/web" ]]; then
     rm -rf "$RACINE/web"
     cp -r "$PRECEDENT/web" "$RACINE/web"
     chown -R "$UTILISATEUR:$UTILISATEUR" "$RACINE/web"
+fi
+
+if [[ $AVEC_BASE -eq 1 ]]; then
+    dire "Restauration de la base d'avant la publication"
+    ( cd "$RACINE" && sudo -u "$UTILISATEUR" ./gestionfil-admin restaurer "$SAUVEGARDE" )
 fi
 
 dire "Demarrage"

@@ -169,12 +169,23 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
     ('P_ScoreStandard',    'Score fournisseur STANDARD',                '65',    'DECIMAL', '/100',  'ACHAT',   'DIRECTION', 0),
     ('P_ScoreSurveiller',  'Score fournisseur A SURVEILLER',            '45',    'DECIMAL', '/100',  'ACHAT',   'DIRECTION', 0),
     ('P_TolerEcartPesee',  'Tolerance ecart de pesee en reception',     '2',     'DECIMAL', '%',     'RECEPT',  'DIRECTION', 0),
+    ('P_ClotureEcartAvisPct', 'Cloture facture : avis au-dela de l''ecart', '10', 'DECIMAL', '%',     'RECEPT',  'DIRECTION', 0),
+    ('P_ColisageTolAlertePct', 'Colisage : alerte sur le poids d''une bobine', '10', 'DECIMAL', '%', 'RECEPT', 'DIRECTION', 0),
+    ('P_ColisageTolRefusPct',  'Colisage : refus sur le poids d''une bobine',  '25', 'DECIMAL', '%', 'RECEPT', 'DIRECTION', 0),
     -- MACHINES. Le premier regle l'avertissement visuel du mode Estimation et le
     -- controle C35 ; le second, l'anciennete d'inventaire que C36 signale. Tous
     -- deux se reglent sans redeploiement, comme la tolerance de pesee au-dessus.
     ('P_TolerEstimMachine', 'Tolerance ecart estimation en machine',    '10',    'DECIMAL', '%',     'MACHINE', 'DIRECTION', 0),
     ('P_JoursInventMachine','Anciennete max d''inventaire d''un emplacement','30','ENTIER', 'jours', 'MACHINE', 'DIRECTION', 0),
     ('P_SeuilDormant',     'Seuil de stock dormant',                    '180',   'ENTIER',  'jours', 'STOCK',   'DIRECTION', 0),
+    -- ADR-003 phase A : le jour ou la reception unifiee a pris la releve. Les
+    -- dossiers d'import ouverts AVANT finissent de se recevoir par l'ancien
+    -- ecran ; apres lui, tout arrivage passe par la reception, sur bon de
+    -- commande. Verrouille : c'est un fait, pas un reglage. Sur une base neuve
+    -- il n'y a aucun dossier d'avant, donc l'ancien circuit ne propose rien.
+    ('P_BasculeReceptionGR','Jour de la bascule vers la reception unifiee',
+                                                                 to_char(current_date,'YYYY-MM-DD'),
+                                                                        'DATE',    NULL,    'SYSTEME', 'AUCUN',     1),
     ('P_SeuilValidationBC','Montant BC exigeant validation Direction',  '300000','DECIMAL', 'MAD',   'ACHAT',   'DIRECTION', 0);
 
 -- -----------------------------------------------------------------------------

@@ -36,9 +36,10 @@ function Choix({
     <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
       <span className="text-[12px] text-attenue-texte">{libelle}</span>
       <Selecteur
+        aria-label={libelle}
         value={valeur}
         onChange={(e) => surChangement(e.target.value)}
-        className="w-[26rem] max-w-full"
+        className="w-[32rem] max-w-full"
       >
         {options.map((o) => (
           <option key={o.valeur} value={o.valeur}>
@@ -87,7 +88,7 @@ export function EtatReception() {
 
   const qListe = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<Reception[]>('/api/receptions?limite=200'),
+    queryFn: ({ signal }) => api.get<Reception[]>('/api/receptions?limite=200', { signal }),
   })
   const liste = useMemo(() => {
     const d = qListe.data
@@ -100,7 +101,7 @@ export function EtatReception() {
 
   const qLignes = useQuery({
     queryKey: ['lignes-reception', choisi],
-    queryFn: () => api.get<LigneRecept[]>(`/api/receptions/${choisi}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneRecept[]>(`/api/receptions/${choisi}/lignes`, { signal }),
     enabled: !!choisi,
   })
 
@@ -115,7 +116,7 @@ export function EtatReception() {
     <div>
       {!idUrl && (
       <Choix
-        libelle="Réception a imprimer :"
+        libelle="Réception à imprimer :"
         valeur={choisi}
         surChangement={setId}
         options={liste.map((x) => ({
@@ -152,7 +153,7 @@ export function EtatReception() {
               </div>
               <div className="space-y-1">
                 <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-                  Reception
+                  Réception
                 </div>
                 <div className="text-[10px]">
                   <span className="text-neutral-600">Date : </span>
@@ -219,7 +220,7 @@ export function EtatReception() {
           />
 
           <div className="mt-8 grid grid-cols-2 gap-8">
-            {['Receptionnaire', 'Controle qualite'].map((s) => (
+            {['Receptionnaire', 'Contrôle qualité'].map((s) => (
               <div key={s}>
                 <div className="mb-10 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
                   {s}
@@ -273,7 +274,7 @@ export function EtatInventaire() {
 
   const qListe = useQuery({
     queryKey: ['inventaires'],
-    queryFn: () => api.get<Inventaire[]>('/api/inventaires'),
+    queryFn: ({ signal }) => api.get<Inventaire[]>('/api/inventaires', { signal }),
   })
   const liste = useMemo(() => {
     const d = qListe.data
@@ -286,7 +287,7 @@ export function EtatInventaire() {
 
   const qLignes = useQuery({
     queryKey: ['lignes-inventaire', choisi],
-    queryFn: () => api.get<LigneInv[]>(`/api/inventaires/${choisi}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneInv[]>(`/api/inventaires/${choisi}/lignes`, { signal }),
     enabled: !!choisi,
   })
 
@@ -326,7 +327,7 @@ export function EtatInventaire() {
 
       {!inv ? null : (
         <EtatImprimable
-          titre="Proces-verbal d inventaire"
+          titre="Procès-verbal d’inventaire"
           reference={inv.numero_inventaire}
           sousTitre={inv.statut !== 'CLOTURE' ? `Statut : ${inv.statut}` : undefined}
           enTete={
@@ -377,7 +378,7 @@ export function EtatInventaire() {
               },
               { entete: 'Lot', valeur: (l) => l.lot_fournisseur ?? '—' },
               {
-                entete: 'Theorique kg',
+                entete: 'Théorique kg',
                 numerique: true,
                 valeur: (l) =>
                   l.quantite_theorique_kg == null ? '—' : fmt.nombre(l.quantite_theorique_kg, 3),
@@ -453,7 +454,7 @@ export function EtatPlanProduction() {
 
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<Plan[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<Plan[]>('/api/plans', { signal }),
   })
   const liste = useMemo(() => {
     const d = qPlans.data
@@ -468,7 +469,7 @@ export function EtatPlanProduction() {
      appel quand on arrive de la. */
   const q = useQuery({
     queryKey: ['plan-dossier', choisi],
-    queryFn: () => api.get<Dossier>(`/api/plans/${choisi}/production-besoins`),
+    queryFn: ({ signal }) => api.get<Dossier>(`/api/plans/${choisi}/production-besoins`, { signal }),
     enabled: !!choisi,
   })
 
@@ -490,14 +491,14 @@ export function EtatPlanProduction() {
 
   if (qPlans.isLoading) return <Chargement texte="Chargement des plans…" />
   if (!liste.length) return <Alerte ton="info">Aucun plan de production.</Alerte>
-  if (q.isLoading) return <Chargement texte="Preparation du plan…" />
+  if (q.isLoading) return <Chargement texte="Préparation du plan…" />
 
   const plan = q.data?.plan
   if (!plan || !qualites.length) {
     return (
       <Alerte ton="info">
         Ce plan ne porte aucune ligne de production. Ouvrez-le depuis l ecran Plan de production
-        pour completer sa grille.
+        pour compléter sa grille.
       </Alerte>
     )
   }
@@ -541,7 +542,7 @@ export function EtatPlanProduction() {
           </div>
         }
       >
-        <div className="defilement-x">
+        <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <TableEtat<(typeof qualites)[number]>
             colonnes={[
               { entete: 'Qualité', valeur: (p) => p.nom },
@@ -571,7 +572,7 @@ export function EtatPlanProduction() {
         </div>
         <p className="mt-2 text-[9px] text-neutral-600">
           Metres carres prevus par qualite et par mois. Le taux de perte figure a l entete : c est
-          celui fige sur le plan, pas le parametre general du jour.
+          celui figé sur le plan, pas le paramètre général du jour.
         </p>
       </EtatImprimable>
     </div>
@@ -594,7 +595,7 @@ interface Besoin {
 export function EtatBesoins() {
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<Plan[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<Plan[]>('/api/plans', { signal }),
   })
   const liste = useMemo(() => {
     const d = qPlans.data
@@ -606,7 +607,7 @@ export function EtatBesoins() {
 
   const q = useQuery({
     queryKey: ['plan-besoins', choisi],
-    queryFn: () => api.get<Besoin[]>(`/api/plans/${choisi}/besoins`),
+    queryFn: ({ signal }) => api.get<Besoin[]>(`/api/plans/${choisi}/besoins`, { signal }),
     enabled: !!choisi,
   })
 
@@ -634,7 +635,7 @@ export function EtatBesoins() {
   if (!refs.length) {
     return (
       <Alerte ton="info">
-        Ce plan ne porte aucun besoin calcule. Relancez le calcul depuis l ecran Besoins.
+        Ce plan ne porte aucun besoin calcule. Relancez le calcul depuis l’écran Besoins.
       </Alerte>
     )
   }
@@ -656,7 +657,7 @@ export function EtatBesoins() {
       )}
 
       <EtatImprimable
-        titre="Besoins matiere"
+        titre="Besoins matière"
         reference={plan?.libelle}
         sousTitre={plan ? `${plan.date_debut} au ${plan.date_fin}` : undefined}
         enTete={
@@ -678,7 +679,7 @@ export function EtatBesoins() {
           </div>
         }
       >
-        <div className="defilement-x">
+        <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
           <TableEtat<(typeof refs)[number]>
             colonnes={[
               {
@@ -723,7 +724,7 @@ export function EtatBesoins() {
         </div>
         <p className="mt-2 text-[9px] text-neutral-600">
           Kilos par reference et par mois, issus de l explosion des recettes figees sur le plan.
-          Les references sont triees par besoin total decroissant.
+          Les références sont triees par besoin total decroissant.
         </p>
       </EtatImprimable>
     </div>

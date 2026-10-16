@@ -75,13 +75,14 @@ else
 # La base est sur cette machine, sur la boucle locale.
 DATABASE_URL=postgres://gestionfil:MOT_DE_PASSE_A_REMPLACER@127.0.0.1:5432/gestionfil
 
-# 0.0.0.0 : l'API doit etre joignable depuis les postes du reseau. C'est le
-# SEUL service expose — la base, elle, n'ecoute que sur localhost.
-BIND_ADDR=0.0.0.0:8080
+# 127.0.0.1 : nginx, sur la meme machine, expose l'application en HTTPS
+# (https://192.168.1.140) ; le service n'a pas a ecouter le reseau en clair
+# (audit v4). 0.0.0.0:8080 seulement sans nginx devant.
+BIND_ADDR=127.0.0.1:8080
 
-# Au moins 32 caracteres, tire au sort. En generer un :
-#     openssl rand -base64 48
-JWT_SECRET=A_REMPLACER_PAR_UN_SECRET_TIRE_AU_SORT
+# Au moins 32 caracteres, TIRE AU SORT a l'installation (ci-dessous). Le
+# serveur refuse de demarrer sur la valeur d'exemple (audit v4).
+JWT_SECRET=A_GENERER
 
 # Duree de validite d'un jeton, en minutes. 480 = une journee de travail : au
 # dela, une session oubliee sur un poste de magasin reste ouverte la nuit.
@@ -95,7 +96,20 @@ CORS_ORIGINS=tauri://localhost,http://tauri.localhost
 
 # Dossier des sauvegardes.
 GESTIONFIL_SAUVEGARDES=/opt/gestionfil/sauvegardes
+
+# Les pieces jointes (factures, DUM) : un dossier du compte de service,
+# archive avec chaque sauvegarde.
+GESTIONFIL_PIECES=/opt/gestionfil/pieces
+
+# Delais (secondes) : une requete SQL, une requete HTTP.
+GESTIONFIL_DELAI_SQL_S=120
+GESTIONFIL_DELAI_HTTP_S=300
 MODELE
+    # Le secret se tire au sort ICI : jamais de valeur commune a deux installations.
+    SECRET=$(openssl rand -base64 48 | tr -d '\n/+=')
+    sed -i "s|^JWT_SECRET=A_GENERER$|JWT_SECRET=${SECRET}|" "$RACINE/.env"
+    unset SECRET
+    install -d -o "$UTILISATEUR" -g "$UTILISATEUR" -m 0750 "$RACINE/pieces"
     chown "$UTILISATEUR:$UTILISATEUR" "$RACINE/.env"
     chmod 0600 "$RACINE/.env"
     echo "  modele ecrit dans $RACINE/.env"
@@ -120,7 +134,12 @@ fi
 dire "Pare-feu"
 if command -v ufw >/dev/null 2>&1; then
     ufw allow 22/tcp  comment 'SSH' >/dev/null 2>&1 || true
-    ufw allow 8080/tcp comment 'Gestion Fil (API et interface)' >/dev/null 2>&1 || true
+    # nginx seul est expose (80, 443) ; l'application ecoute sur 127.0.0.1:8080
+    # et le port 8080 n'a rien a faire ouvert (audit v5, T13). Une regle posee
+    # par une installation precedente est retiree.
+    ufw allow 80/tcp  comment 'Gestion Fil (redirection, certificat)' >/dev/null 2>&1 || true
+    ufw allow 443/tcp comment 'Gestion Fil (HTTPS)' >/dev/null 2>&1 || true
+    ufw delete allow 8080/tcp >/dev/null 2>&1 || true
     echo "  regles posees (ufw reste inactif tant qu'il n'est pas active)"
     ufw status | head -6
 else
@@ -162,9 +181,43 @@ RandomizedDelaySec=300
 WantedBy=timers.target
 TIMER
 
+# LA PREUVE QUE LA SAUVEGARDE SE RESTAURE (10/10/2026) : chaque semaine, la plus
+# recente est restauree dans une base temporaire, controlee (schema, migrations,
+# C11), puis effacee. La base vivante n'est pas touchee. Le resultat se lit par
+# `journalctl -u gestionfil-verif-sauvegarde`. Le role de la base doit pouvoir
+# creer une base (CREATEDB) : `restaurer` en a besoin aussi.
+cat > /etc/systemd/system/gestionfil-verif-sauvegarde.service <<SERVICE
+[Unit]
+Description=Verification hebdomadaire : la derniere sauvegarde Gestion Fil se restaure
+Requires=postgresql.service
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=$UTILISATEUR
+Group=$UTILISATEUR
+WorkingDirectory=$RACINE
+EnvironmentFile=$RACINE/.env
+ExecStart=$RACINE/gestionfil-admin verifier-sauvegarde
+SERVICE
+
+cat > /etc/systemd/system/gestionfil-verif-sauvegarde.timer <<'TIMER'
+[Unit]
+Description=Verification hebdomadaire de la sauvegarde Gestion Fil
+
+[Timer]
+# Le dimanche a 03h30, apres la sauvegarde de 02h30.
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
+
 systemctl daemon-reload
 systemctl enable gestionfil-sauvegarde.timer >/dev/null 2>&1 || true
-echo "  minuterie posee : tous les jours a 02h30"
+systemctl enable gestionfil-verif-sauvegarde.timer >/dev/null 2>&1 || true
+echo "  minuterie posee : tous les jours a 02h30 ; verification de la sauvegarde le dimanche a 03h30"
 
 dire "Termine"
 echo "Etape suivante : 03-publier.sh, depuis le poste de developpement."

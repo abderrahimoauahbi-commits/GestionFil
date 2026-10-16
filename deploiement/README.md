@@ -72,19 +72,24 @@ sudo -e /opt/gestionfil/.env
 
 ### 3. La base
 
-Depuis le poste de développement :
+Une base neuve se bâtit depuis le **socle** (le schéma exact d'une base migrée
+et sa configuration), puis reçoit les migrations venues après lui :
 
 ```bash
-python deployer_production.py
+cd db/pg
+python charger.py --hote 192.168.1.140 --base gestionfil_neuve --socle --comptes
+python migrer.py  --hote 192.168.1.140 --base gestionfil_neuve
+# vérifiée, elle prend son nom (service arrêté) :
+#   ALTER DATABASE gestionfil_neuve RENAME TO gestionfil;
 ```
 
-Charge le schéma (53 tables, 73 vues, 76 déclencheurs), le référentiel réel
-(124 références, 12 fournisseurs, 18 qualités, 301 lignes de recette) et les six
-comptes nominatifs.
+Le schéma complet : 93 tables, 117 vues, 166 déclencheurs, 46 contrôles
+(C01 à C46), avec les six comptes nominatifs et l'identité de l'entreprise.
 
-> **Une seule fois.** Ce script **supprime et recrée** la base. Il n'a de sens
-> qu'avant le premier mot de passe posé et la première écriture. Ensuite, toute
-> évolution du schéma passe par une migration (voir « Faire évoluer la base »).
+> **Une seule fois.** `--socle` refuse de viser une base nommée `gestionfil` :
+> il bâtit une base neuve à côté, qu'on renomme une fois vérifiée. Ensuite, toute évolution du schéma passe par une migration (voir
+> « Faire évoluer la base ») ; l'historique des migrations ne se rejoue pas sur
+> une base vide.
 
 ### 4. Les mots de passe
 
@@ -92,14 +97,11 @@ Les six comptes portent `!A_DEFINIR!`, qui n'est pas une empreinte Argon2
 valide : **aucune connexion n'est possible** tant qu'un mot de passe réel n'a pas
 été posé. Le serveur le signale au démarrage.
 
-> **Le minimum est de 8 caractères**, abaissé depuis 12 le 3 septembre 2026 à la
-> demande de la direction. Ce que cela coûte, dit franchement : une empreinte
-> volée se casse en quelques heures à 8 caractères, contre des années à 12. Ce
-> qui rend le compromis tenable ici : la base n'est joignable que depuis le
-> réseau local, PostgreSQL n'écoute que sur la boucle locale, et Argon2id rend
-> une attaque par le formulaire de connexion trop lente pour aboutir. Pour les
-> comptes de direction, qui voient les prix et valident les engagements, une
-> phrase longue reste vivement conseillée.
+> **Le minimum est de 12 caractères**, exigé par le serveur depuis le 08/10/2026
+> (il avait été abaissé à 8 le 3 septembre). Une empreinte volée se casse en
+> quelques heures à 8 caractères, contre des années à 12. Pour les comptes de
+> direction, qui voient les prix et valident les engagements, une phrase longue
+> reste vivement conseillée.
 
 ```bash
 cd /opt/gestionfil
@@ -120,7 +122,8 @@ Voir ci-dessous.
 
 ## Publier une version
 
-Sur le poste de développement :
+Sur le poste de développement (le banc de tests doit passer, sinon le paquet
+n'est pas fabriqué ; `-SansTests -Motif "…"` en garde la trace jusqu'au serveur) :
 
 ```powershell
 .\deploiement\fabriquer-paquet.ps1        # produit gestionfil-AAAAMMJJ.tar.gz
@@ -129,23 +132,34 @@ Sur le poste de développement :
 Sur le serveur :
 
 ```bash
-sudo bash 03-publier.sh gestionfil-AAAAMMJJ.tar.gz
+mkdir -p ~/gestionfil-build && tar -xzf ~/gestionfil-AAAAMMJJ.tar.gz -C ~/gestionfil-build
+cd ~/gestionfil-build && bash compiler.sh        # produit ~/gestionfil-pret.tar.gz
+sudo bash /chemin/vers/03-publier.sh ~/gestionfil-pret.tar.gz
 ```
 
-Le script met la version en place de côté **avant** de la remplacer, arrête le
-service, installe, redémarre, puis **vérifie que `/api/sante` répond**. Un
-service qui écoute mais ne répond pas est en panne, simplement moins visible.
+`03-publier.sh`, dans l'ordre :
+
+1. met la version en place **de côté** ;
+2. arrête le service, **sauvegarde** la base et les pièces jointes (s'arrête si
+   la sauvegarde échoue) et retient le nom du fichier ;
+3. **joue les migrations** que le journal n'a pas, par `migrer.py`, dans l'ordre
+   des noms, et s'arrête à la première qui échoue — le service reste alors arrêté
+   avec l'ancien binaire, et la migration fautive n'a rien écrit ;
+4. installe binaires, interface et unité systemd (si elle a changé) ;
+5. redémarre et **vérifie que `/api/sante` répond** ;
+6. note la publication dans `journaux/publications.log` (avec ou sans tests).
 
 En cas de problème :
 
 ```bash
-sudo bash 04-revenir.sh
+sudo bash 04-revenir.sh               # binaires et interface précédents
+sudo bash 04-revenir.sh --avec-base   # et la base d'avant la publication
 ```
 
-> **Le retour ne touche pas à la base.** Si la version annulée avait modifié le
-> schéma, revenir au binaire précédent ne suffit pas — il faut aussi restaurer la
-> base, ce qui perd les écritures faites depuis. Le script le rappelle à chaque
-> exécution.
+> **`--avec-base` efface tout ce qui a été saisi depuis la publication.** C'est
+> une décision humaine, confirmée en tapant `RESTAURER` : la prendre quand le
+> problème est vu tout de suite, avant toute saisie. Si des réceptions ou des
+> fiches ont été saisies depuis, corriger en avant plutôt que restaurer.
 
 ---
 
@@ -157,7 +171,9 @@ changement de schéma est un fichier daté dans `db/pg/migrations/`, écrit pour
 être **rejouable sans effet** s'il a déjà été appliqué (`ADD COLUMN IF NOT
 EXISTS`, `CREATE OR REPLACE VIEW`, upsert pour les données).
 
-Sur le serveur, après avoir déposé le fichier dans
+Depuis le 09/10/2026, les migrations **voyagent dans le paquet** et
+`03-publier.sh` les joue par `migrer.py`, journal compris (voir « Publier une
+version »). À la main, en dépannage seulement, après avoir déposé le fichier dans
 `/home/sysadmin/gestionfil/db/migrations/` :
 
 ```bash
@@ -193,6 +209,56 @@ Migrations appliquées :
 > référentiel réimporté du classeur (voir « Reprise depuis le classeur »). Les
 > deux migrations du 2 septembre sont donc déjà comprises dans le schéma ; elles
 > restent listées parce qu'une base plus ancienne peut encore en avoir besoin.
+
+### La première publication avec le journal des migrations (règles du 08/10)
+
+Une base migrée à la main avant le 08/10 n'a pas de journal (`migration_appliquee`) :
+`03-publier.sh` le dit et s'arrête. On l'inscrit **une fois**, avec vérification :
+
+> **Avant tout, le secret JWT.** Le binaire refuse de démarrer sur la valeur d'exemple que portait le
+> modèle de `.env` de l'installateur. Si `journalctl -u gestionfil` dit « JWT_SECRET est le secret
+> d'exemple », tirez-en un au sort (les sessions ouvertes devront se reconnecter) :
+>
+> ```bash
+> sudo sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n/+=')|" /opt/gestionfil/.env
+> ```
+
+```bash
+cd ~/gestionfil-build/db          # migrer.py et les migrations, livrés dans le paquet
+sudo -u postgres python3 migrer.py --base gestionfil --hote '' \
+     --marquer-jusqua 2026-10-06_preferences_utilisateur.sql
+```
+
+Le marquage **rejoue à blanc** (transaction annulée) toute la suite des migrations
+et n'inscrit que celles qui ne changent plus rien au schéma. Il refuse les autres
+et dit ce qu'elles changeraient. Pour chacune :
+
+- **`2026-09-20d_supervision_complete.sql`** n'a jamais été jouée sur les bases
+  locales ; `2026-10-09b_supervision_rejouee.sql` la rejoue. L'accepter :
+  `--accepter 2026-09-20d_supervision_complete.sql` ;
+- une migration dont les fonctions ou vues ont été **remplacées depuis** par un
+  fichier source rechargé paraît aussi « non jouée » : après lecture du rapport,
+  `--accepter <fichier>` ;
+- une migration **réellement absente** : la jouer
+  (`cat <fichier> | sudo -u postgres psql -d gestionfil -v ON_ERROR_STOP=1`), puis
+  relancer le marquage.
+
+Ensuite, la publication normale joue tout ce qui suit (08 à 09c) :
+
+```bash
+sudo bash /chemin/vers/03-publier.sh ~/gestionfil-pret.tar.gz
+```
+
+> **Deux inventaires en cours sur un même magasin** arrêtent la publication à
+> `2026-10-09c_index_inventaire.sql`, qui les nomme. Relancer l'ancien service
+> (`sudo systemctl start gestionfil`), annuler le doublon (avec un motif), puis
+> relancer la publication : elle reprend là où elle s'était arrêtée.
+
+Témoins après publication : `SELECT code, anomalies FROM v_controles WHERE code IN
+('C43','C44','C45','C46')` répond quatre lignes, `/api/cockpit` et `/api/supervision`
+répondent 200, et le journal du service ne contient pas « migration(s) manquante(s) ».
+
+**Base neuve** : `charger.py --socle --comptes` puis `migrer.py` (voir `db/README.md`).
 
 ---
 
@@ -251,6 +317,25 @@ sudo -u gestionfil /opt/gestionfil/gestionfil-admin lister-sauvegardes
 Les fichiers vont dans `/opt/gestionfil/sauvegardes`, en `0700` : chacun
 contient **toute la base**.
 
+### Prouver qu'une sauvegarde se restaure
+
+Une sauvegarde jamais restaurée n'est pas une sauvegarde. Chaque dimanche à
+03 h 30, `gestionfil-verif-sauvegarde.timer` restaure la plus récente dans une
+base **temporaire**, la contrôle (schéma et migrations exigées, volumes comparés
+à la base vivante, contrôles métier, C11 nul), puis l'efface. La base vivante
+n'est jamais touchée ; le service peut tourner pendant la vérification.
+
+```bash
+sudo -u gestionfil /opt/gestionfil/gestionfil-admin verifier-sauvegarde            # la plus récente
+sudo -u gestionfil /opt/gestionfil/gestionfil-admin verifier-sauvegarde <fichier>  # une autre
+journalctl -u gestionfil-verif-sauvegarde -n 30                                   # le dernier verdict
+```
+
+Le dernier mot doit être `SAUVEGARDE RESTAURABLE`. « impossible de créer la base
+temporaire » signifie que le rôle de la base n'a pas le droit `CREATEDB` :
+`restaurer` échouerait de même le jour venu (`ALTER ROLE gestionfil CREATEDB;`
+en `postgres`).
+
 ### Restaurer
 
 ```bash
@@ -262,6 +347,16 @@ sudo systemctl start gestionfil
 La base actuelle n'est pas détruite : elle est **renommée**
 `gestionfil_remplacee_<horodatage>`. Si la restauration déçoit, elle est encore
 là, entière.
+
+Les **pièces jointes** (scans, PDF des dossiers d'import) suivent la base : la
+sauvegarde les archive à côté du dump (`<dump>.pieces.tar`), et la restauration
+les remet en place après avoir mis de côté le dossier actuel
+(`pieces_remplacees_<horodatage>`). Sans archive à côté du dump, le dossier des
+pièces n'est pas touché, et la commande le dit.
+
+Le mot de passe de la base ne passe jamais en argument de `pg_dump`,
+`pg_restore` ou `psql` (il se lirait dans la liste des processus) : il leur est
+donné par `PGPASSWORD`.
 
 > ⚠️ **Une sauvegarde qui reste sur la même machine ne protège que des erreurs
 > humaines**, pas d'une panne de disque ni d'un vol. Copiez régulièrement
@@ -284,7 +379,7 @@ sudo systemctl restart gestionfil    # redémarrage
 sudo -u gestionfil /opt/gestionfil/gestionfil-admin diagnostic
 ```
 
-Vérifie la structure, la taille, les contraintes, et déroule les **32 contrôles
+Vérifie la structure, la taille, les contraintes, et déroule les **46 contrôles
 de cohérence métier**. Ne modifie rien.
 
 ### Maintenance
@@ -474,8 +569,52 @@ recompilation quand l'adresse change.
 | Service systemd | `ProtectSystem=strict`, `NoNewPrivileges`, deux chemins inscriptibles |
 | Mots de passe | Argon2id, 12 caractères minimum |
 | Droits par champ | appliqués **côté serveur**, en sortie et en entrée |
+| nginx | seul service exposé (80 → 443, TLS 1.2/1.3) ; en-têtes `nosniff`, `SAMEORIGIN`, `same-origin` ; délai de 310 s, au-delà de celui de l'application (300 s) |
+| Pare-feu | 22, 80 et 443 ouverts ; **8080 fermé** (l'application écoute sur 127.0.0.1) |
+| Échecs d'authentification | blocage progressif à la connexion, au déverrouillage de l'écran, au changement de mot de passe et au second facteur ; essais d'un même identifiant un par un, 20 échecs par adresse en 15 min, identifiant inconnu bloqué comme un vrai (13/10/2026) |
+| Sessions | tenues par le serveur (`session_ouverte`) : déconnexion = jeton révoqué ; verrou d'inactivité tenu même après F5 ; 8 h au plus |
+| Double authentification | facultative ; peut être rendue obligatoire par rôle (page Rôles et permissions) — aucun rôle par défaut |
+| Politique de contenu | CSP posée par l'application (aucun script hors du serveur) ; HSTS par nginx |
 
-**Ce qui n'est pas fait, et qu'il faut savoir :** le trafic entre les postes et
-le serveur est en **HTTP, non chiffré**. Sur un réseau d'usine fermé c'est un
-risque mesuré ; dès qu'un accès depuis l'extérieur est envisagé, il faut un
-reverse proxy TLS devant le service.
+### À appliquer à la main sur un serveur déjà installé (09/10/2026)
+
+`03-publier.sh` ne touche ni nginx ni le pare-feu. Après la publication :
+
+```bash
+sudo cp deploiement/nginx-gestionfil.conf /etc/nginx/sites-available/gestionfil
+sudo nginx -t && sudo systemctl reload nginx
+sudo ufw delete allow 8080/tcp      # la règle d'une installation précédente
+sudo ufw status
+```
+
+`nginx -t` doit répondre « syntax is ok » avant le rechargement : une erreur de
+syntaxe laisserait l'ancienne configuration en place, sans rien casser.
+
+### Audit de sécurité du 13/10/2026
+
+Corrigé dans l'application (migration `2026-10-13c_securite.sql`, exigée au démarrage) : rôle
+Administrateur gardé (seul un administrateur l'attribue ou touche à un compte administrateur ;
+personne ne change son propre rôle ni ses propres droits), prix suggérés et budgets masqués, prix
+d'une réception ou d'un retour ignoré pour qui ne peut pas l'écrire, types de mouvement sous
+Paramètres, réglage de l'assistant réservé à l'administrateur (adresse de la plateforme dans le
+`.env` seulement), sessions et verrou tenus par le serveur, double authentification obligatoire.
+
+**À la publication de cette version, tous les comptes sont déconnectés** (les jetons d'avant n'ont
+pas de session). La double authentification n'est imposée à aucun rôle (obligation retirée le
+13/10 au soir) ; un rôle peut l'exiger depuis la page Rôles et permissions.
+
+**Téléphone perdu** (pour un rôle qui l'exige, elle ne se retire pas depuis l'écran) :
+
+```bash
+cd /opt/gestionfil && sudo -u gestionfil ./gestionfil-admin retirer-2fa <login>
+```
+
+Reste à faire à la main sur le serveur :
+
+- mot de passe de `sysadmin` (12 caractères au moins), puis clé SSH et `PasswordAuthentication no` ;
+  `fail2ban` pour SSH ;
+- sauvegardes lisibles par le seul compte du service : `chmod 700 /opt/gestionfil/sauvegardes` et
+  `chmod 600` sur les fichiers (constaté le 13/10 : `755` et `644`, lisibles par les autres services) ;
+- recopier `nginx-gestionfil.conf` (HSTS), comme ci-dessus ;
+- plus tard : un rôle propriétaire distinct de `gestionfil`, pour que l'application ne puisse ni
+  désactiver les gardes ni vider le journal d'audit.

@@ -100,12 +100,74 @@ DROP VIEW IF EXISTS v_ctl_c10 CASCADE;
 CREATE VIEW v_ctl_c10 AS
 SELECT lr.id_ligne_reception, rc.numero_reception, lr.code_reference,
        lr.quantite_commandee_kg, lr.quantite_stock_kg, ROUND(lr.ecart_pct, 2) AS ecart_pct,
-       lr.derogation_ecart
+       lr.derogation_ecart::bigint AS derogation_ecart
 FROM ligne_reception lr
 JOIN reception rc ON rc.id_reception = lr.id_reception
 WHERE lr.ecart_pct IS NOT NULL
   AND lr.derogation_ecart = 0
-  AND abs(lr.ecart_pct) > (SELECT CAST(valeur_courante AS numeric) FROM parametre WHERE code_parametre = 'P_TolerEcartPesee');
+  -- L'excedent seul (08/10/2026) : un manque est une livraison partielle.
+  AND lr.ecart_pct > fn_tolerance_pesee(lr.id_reception)
+UNION ALL
+-- L'import aussi (audit v4) : un excedent au-dela de la tolerance du
+-- fournisseur, sans derogation motivee.
+SELECT rl.id_reception_ligne, r.numero, fl.code_reference,
+       rl.quantite_attendue_kg, rl.quantite_recue_kg,
+       ROUND((rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg, 2),
+       rl.derogation_ecart::bigint
+FROM import_reception_lignes rl
+JOIN import_receptions r ON r.id_reception = rl.id_reception
+JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+JOIN import_factures f ON f.id_facture = fl.id_facture
+WHERE rl.quantite_attendue_kg > 0
+  AND rl.derogation_ecart = 0
+  AND r.statut <> 'ANNULEE'
+  AND (rl.quantite_recue_kg - rl.quantite_attendue_kg) * 100.0 / rl.quantite_attendue_kg
+      > fn_tolerance_fournisseur(f.code_fournisseur);
+
+-- C44 : plus d'un inventaire en cours sur un meme magasin (audit v4). L'index
+-- ux_inventaire_en_cours l'interdit ; une base ou la migration du 08/10 n'a pas
+-- pu le poser (doublon deja present) le montre ici au lieu de le taire.
+DROP VIEW IF EXISTS v_ctl_c44 CASCADE;
+CREATE OR REPLACE VIEW v_ctl_c44 AS
+SELECT code_magasin, count(*) AS nb_en_cours,
+       string_agg(numero_inventaire, ', ' ORDER BY numero_inventaire) AS inventaires
+  FROM inventaire
+ WHERE statut = 'EN_COURS'
+ GROUP BY code_magasin
+HAVING count(*) > 1;
+
+DROP VIEW IF EXISTS v_ctl_c43 CASCADE;
+CREATE OR REPLACE VIEW v_ctl_c43 AS
+-- C43 : colisage incoherent sur un document d'achat encore ouvert — kilos,
+-- bobines et palettes ne s'accordent pas avec la fiche article (08/10/2026).
+SELECT *
+  FROM (SELECT 'BON DE COMMANDE' AS document, bc.numero_bc AS numero, lb.code_reference,
+               lb.quantite_commandee_kg AS kg, lb.nb_bobines_saisi AS bobines, lb.nb_palettes_saisi AS palettes,
+               fn_controle_colisage(lb.code_reference, lb.quantite_commandee_kg,
+                                    lb.nb_bobines_saisi, lb.nb_palettes_saisi) AS message
+          FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
+         WHERE lb.type_ligne = 'MARCHANDISE' AND bc.statut NOT IN ('CLOTURE', 'ANNULE')
+        UNION ALL
+        SELECT 'FACTURE IMPORT', f.numero_facture, fl.code_reference, fl.poids_net_kg, fl.nb_bobines, fl.nb_palettes,
+               fn_controle_colisage(fl.code_reference, fl.poids_net_kg, fl.nb_bobines, fl.nb_palettes)
+          FROM import_facture_lignes fl
+          JOIN import_factures f ON f.id_facture = fl.id_facture
+          JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+         WHERE d.statut <> 'CLOTURE'
+        UNION ALL
+        SELECT 'RECEPTION IMPORT', r.numero, fl.code_reference, rl.quantite_recue_kg, rl.nb_bobines, rl.nb_palettes,
+               fn_controle_colisage(fl.code_reference, rl.quantite_recue_kg, rl.nb_bobines, rl.nb_palettes)
+          FROM import_reception_lignes rl
+          JOIN import_receptions r ON r.id_reception = rl.id_reception
+          JOIN import_facture_lignes fl ON fl.id_ligne = rl.id_ligne
+         WHERE r.statut IN ('BROUILLON', 'A_CONTROLER')
+        UNION ALL
+        SELECT 'RECEPTION', rc.numero_reception, lr.code_reference, lr.quantite_stock_kg,
+               lr.nb_bobines_saisi, lr.nb_palettes_saisi,
+               fn_controle_colisage(lr.code_reference, lr.quantite_stock_kg, lr.nb_bobines_saisi, lr.nb_palettes_saisi)
+          FROM ligne_reception lr JOIN reception rc ON rc.id_reception = lr.id_reception
+         WHERE rc.statut IN ('BROUILLON', 'A_CONTROLER')) x
+ WHERE x.message IS NOT NULL;
 
 -- C11 / C15 : DERIVE entre le solde cache (stock_magasin) et le grand livre.
 -- Controle central : stock_magasin est un cache recalculable, ligne_mouvement
@@ -271,7 +333,7 @@ FROM v_stock_projete sp
 JOIN reference r ON r.code_reference = sp.code_reference
 WHERE sp.ecart_majeur = 1;
 
--- C28 : commande en retard qui ne compte plus dans la couverture.
+-- C28 : commande en retard (comptee ou non dans la couverture selon P_EncoursRetardInclus).
 --
 -- Passe la tolerance, la quantite est retiree du calcul (v_encours_fiable) et la
 -- couverture s'effondre. Le controle nomme la cause, sans quoi l'acheteur verrait
@@ -506,7 +568,9 @@ SELECT 'C24', 'Reception d''une autre reference sans substitution declaree', 'CR
 SELECT 'C25', 'Stock mobilisable face a un equivalent en tension',        'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c25) UNION ALL
 SELECT 'C26', 'Groupe d''equivalence limite a un seul fournisseur',        'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c26) UNION ALL
 SELECT 'C27', 'Ecart majeur : couverture confortable, magasin sous le minimum', 'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c27) UNION ALL
-SELECT 'C28', 'Commande en retard, retiree du calcul de couverture',      'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c28) UNION ALL
+SELECT 'C28', CASE WHEN COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'), '1') = '1'
+                   THEN 'Commande en retard, toujours comptee dans la couverture'
+                   ELSE 'Commande en retard, retiree du calcul de couverture' END, 'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c28) UNION ALL
 SELECT 'C29', 'Besoins plus anciens que le plan : projection perimee',    'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c29) UNION ALL
 -- Les trois derniers viennent de la feuille Tests du classeur (T12, T17, T19).
 -- Leurs vues de detail sont definies dans 016_controles_classeur.sql, charge
@@ -520,4 +584,6 @@ SELECT 'C33', 'Emplacement de machine au-dela de sa capacite',          'BLOQUAN
 SELECT 'C34', 'Machine au-dela de sa capacite totale',                  'BLOQUANT',  (SELECT COUNT(*) FROM v_ctl_c34) UNION ALL
 SELECT 'C35', 'Estimation de poids hors tolerance en machine',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c35) UNION ALL
 SELECT 'C36', 'Emplacement de machine sans inventaire recent',          'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c36) UNION ALL
-SELECT 'C37', 'Bobines sans kilos, ou kilos sans bobines, en machine',  'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c37);
+SELECT 'C37', 'Bobines sans kilos, ou kilos sans bobines, en machine',  'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c37) UNION ALL
+SELECT 'C43', 'Colisage incoherent sur un document d''achat ouvert',    'ATTENTION', (SELECT COUNT(*) FROM v_ctl_c43) UNION ALL
+SELECT 'C44', 'Plus d''un inventaire en cours sur un magasin',           'CRITIQUE',  (SELECT COUNT(*) FROM v_ctl_c44);

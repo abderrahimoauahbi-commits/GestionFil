@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Pencil, X } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { SaisieNombre } from './ui/base'
 
 export interface OptionCellule {
   valeur: string
@@ -144,15 +145,22 @@ export function CelluleEditable({
             ))}
           </select>
         ) : (
-          <input
-            {...commun}
-            type={type === 'date' ? 'date' : type === 'texte' ? 'text' : 'number'}
-            inputMode={type === 'nombre' || type === 'entier' ? 'decimal' : undefined}
-            step={type === 'entier' ? 1 : (pas ?? 'any')}
-            min={min}
-            max={max}
-            onChange={(e) => setBrouillon(e.target.value)}
-          />
+          // Un nombre se saisit a la francaise (« 1 234,5 »), comme partout (10/10/2026).
+          type === 'nombre' || type === 'entier' ? (
+            <SaisieNombre
+              {...commun}
+              step={type === 'entier' ? 1 : (pas ?? 'any')}
+              min={min}
+              max={max}
+              onChange={(e) => setBrouillon(e.target.value)}
+            />
+          ) : (
+            <input
+              {...commun}
+              type={type === 'date' ? 'date' : 'text'}
+              onChange={(e) => setBrouillon(e.target.value)}
+            />
+          )
         )}
         {enCours ? (
           <Loader2 className="size-3.5 shrink-0 animate-spin text-attenue-texte" />

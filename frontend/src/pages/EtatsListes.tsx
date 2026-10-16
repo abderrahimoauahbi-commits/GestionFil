@@ -52,10 +52,10 @@ export function EtatStockImprime() {
 
   const q = useQuery({
     queryKey: ['stock-projete'],
-    queryFn: () => api.get<LigneStock[]>('/api/stock/projete'),
+    queryFn: ({ signal }) => api.get<LigneStock[]>('/api/stock/projete', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation de l etat…" />
+  if (q.isLoading) return <Chargement texte="Préparation de l’état…" />
   const toutes = q.data ?? []
   const lignes = filtre ? toutes.filter((l) => l.statut === filtre) : toutes
   const valeurVisible = droits.visible('valeur_totale_mad')
@@ -65,7 +65,7 @@ export function EtatStockImprime() {
     <div>
       <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
         <span className="text-[12px] text-attenue-texte">Restreindre a un statut :</span>
-        <Selecteur value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
+        <Selecteur aria-label="Restreindre à un statut" value={filtre} onChange={(e) => setFiltre(e.target.value)} className="w-52">
           <option value="">Toutes les références</option>
           <option value="RUPTURE">Ruptures</option>
           <option value="CRITIQUE">Critiques</option>
@@ -166,14 +166,14 @@ export function EtatComptage() {
 
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
   const q = useQuery({
     queryKey: ['stock-projete'],
-    queryFn: () => api.get<LigneStock[]>('/api/stock/projete'),
+    queryFn: ({ signal }) => api.get<LigneStock[]>('/api/stock/projete', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation de la feuille…" />
+  if (q.isLoading) return <Chargement texte="Préparation de la feuille…" />
   const lignes = [...(q.data ?? [])].sort((a, b) =>
     a.code_reference.localeCompare(b.code_reference),
   )
@@ -183,7 +183,7 @@ export function EtatComptage() {
     <div>
       <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
         <span className="text-[12px] text-attenue-texte">Magasin a compter :</span>
-        <Selecteur value={magasin} onChange={(e) => setMagasin(e.target.value)} className="w-56">
+        <Selecteur aria-label="Magasin à compter" value={magasin} onChange={(e) => setMagasin(e.target.value)} className="w-56">
           <option value="">— a preciser a la main —</option>
           {(qMag.data ?? []).map((m) => (
             <option key={m.code_magasin} value={m.code_magasin}>
@@ -219,7 +219,7 @@ export function EtatComptage() {
               entete: 'Référence',
               valeur: (l) => <span className="font-mono text-[10px]">{l.code_reference}</span>,
             },
-            { entete: 'Designation', valeur: (l) => l.designation ?? '—' },
+            { entete: 'Désignation', valeur: (l) => l.designation ?? '—' },
             {
               entete: 'Lot / emplacement',
               valeur: () => <span className="inline-block h-3 w-full" />,
@@ -268,7 +268,7 @@ export function EtatPlanAchat() {
   const droits = useDroits('PLAN_ACHAT')
   const q = useQuery({
     queryKey: ['plan-achat-propositions'],
-    queryFn: () => api.get<Proposition[]>('/api/plan-achat/propositions'),
+    queryFn: ({ signal }) => api.get<Proposition[]>('/api/plan-achat/propositions', { signal }),
   })
 
   const parFournisseur = useMemo(() => {
@@ -281,7 +281,7 @@ export function EtatPlanAchat() {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [q.data])
 
-  if (q.isLoading) return <Chargement texte="Preparation de l etat…" />
+  if (q.isLoading) return <Chargement texte="Préparation de l’état…" />
   const prixVisible = droits.visible('prix_estime_mad')
   const total = (q.data ?? []).reduce(
     (s, p) => s + (p.quantite_suggeree_kg ?? 0) * (p.prix_estime_mad ?? 0),
@@ -291,14 +291,14 @@ export function EtatPlanAchat() {
   if (!parFournisseur.length) {
     return (
       <Alerte ton="info">
-        Aucune proposition d achat en cours. Relancez le calcul depuis l ecran Plan d achat.
+        Aucune proposition d’achat en cours. Relancez le calcul depuis l’écran Plan d’achat.
       </Alerte>
     )
   }
 
   return (
     <EtatImprimable
-      titre="Plan d achat a engager"
+      titre="Plan d’achat à engager"
       enTete={
         <div className="flex flex-wrap gap-x-8 gap-y-1">
           <span>
@@ -405,10 +405,10 @@ interface LigneMvt {
 export function EtatMouvements() {
   const q = useQuery({
     queryKey: ['mouvements', ''],
-    queryFn: () => api.get<LigneMvt[]>('/api/mouvements?limite=1000'),
+    queryFn: ({ signal }) => api.get<LigneMvt[]>('/api/mouvements?limite=1000', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation du registre…" />
+  if (q.isLoading) return <Chargement texte="Préparation du registre…" />
   const lignes = q.data ?? []
   const periode = lignes.length
     ? `${(lignes[lignes.length - 1].date_mouvement ?? '').slice(0, 10)} au ${(lignes[0].date_mouvement ?? '').slice(0, 10)}`
@@ -476,10 +476,10 @@ export function EtatCatalogue() {
   const droits = useDroits('CATALOGUE')
   const q = useQuery({
     queryKey: ['catalogue', 'etat'],
-    queryFn: () => api.get<Ref[]>('/api/catalogue?limite=2000&actif=1'),
+    queryFn: ({ signal }) => api.get<Ref[]>('/api/catalogue?limite=2000&actif=1', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation du catalogue…" />
+  if (q.isLoading) return <Chargement texte="Préparation du catalogue…" />
   const brut: unknown = q.data ?? []
   const lignes = (Array.isArray(brut) ? brut : ((brut as { lignes?: Ref[] }).lignes ?? [])).sort(
     (a: Ref, b: Ref) => a.code_reference.localeCompare(b.code_reference),
@@ -503,7 +503,7 @@ export function EtatCatalogue() {
             entete: 'Référence',
             valeur: (r) => <span className="font-mono text-[10px]">{r.code_reference}</span>,
           },
-          { entete: 'Designation', valeur: (r) => r.designation ?? '—' },
+          { entete: 'Désignation', valeur: (r) => r.designation ?? '—' },
           { entete: 'Catégorie', valeur: (r) => r.code_categorie ?? '—' },
           { entete: 'Unité', valeur: (r) => r.unite_catalogue ?? '—' },
           { entete: 'Fournisseur', valeur: (r) => r.code_fournisseur ?? '—' },
@@ -553,10 +553,10 @@ interface Fourn {
 export function EtatFournisseurs() {
   const q = useQuery({
     queryKey: ['fournisseurs', 'etat'],
-    queryFn: () => api.get<Fourn[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: ({ signal }) => api.get<Fourn[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
   })
 
-  if (q.isLoading) return <Chargement texte="Preparation du repertoire…" />
+  if (q.isLoading) return <Chargement texte="Préparation du repertoire…" />
   const brut: unknown = q.data ?? []
   const lignes = (
     Array.isArray(brut) ? brut : ((brut as { lignes?: Fourn[] }).lignes ?? [])
@@ -577,7 +577,7 @@ export function EtatFournisseurs() {
           { entete: 'Code', valeur: (f) => <span className="font-mono text-[10px]">{f.code_fournisseur}</span> },
           { entete: 'Nom', valeur: (f) => <span className="font-semibold">{f.nom}</span> },
           { entete: 'Contact', valeur: (f) => f.contact ?? '—' },
-          { entete: 'Telephone', valeur: (f) => f.telephone ?? '—' },
+          { entete: 'Téléphone', valeur: (f) => f.telephone ?? '—' },
           { entete: 'Pays', valeur: (f) => f.pays ?? '—' },
           { entete: 'Devise', valeur: (f) => f.code_devise ?? '—' },
           {
@@ -636,11 +636,11 @@ interface Famille {
 export function EtatCategories() {
   const qCat = useQuery({
     queryKey: ['categories', 'etat'],
-    queryFn: () => api.get<Categorie[]>('/api/categories'),
+    queryFn: ({ signal }) => api.get<Categorie[]>('/api/categories', { signal }),
   })
   const qFam = useQuery({
     queryKey: ['familles', 'etat'],
-    queryFn: () => api.get<Famille[]>('/api/familles'),
+    queryFn: ({ signal }) => api.get<Famille[]>('/api/familles', { signal }),
   })
 
   const arbre = useMemo(() => {
@@ -664,7 +664,7 @@ export function EtatCategories() {
       }))
   }, [qCat.data, qFam.data])
 
-  if (qCat.isLoading || qFam.isLoading) return <Chargement texte="Preparation de la nomenclature…" />
+  if (qCat.isLoading || qFam.isLoading) return <Chargement texte="Préparation de la nomenclature…" />
 
   const nbFamilles = (qFam.data ?? []).length
   const nbRefs = (qCat.data ?? []).reduce((s, c) => s + (c.nb_references ?? 0), 0)
@@ -820,11 +820,11 @@ export function EtatCouleurs() {
   const droits = useDroits('CATALOGUE')
   const qCoul = useQuery({
     queryKey: ['couleurs', 'etat'],
-    queryFn: () => api.get<Couleur[]>('/api/couleurs'),
+    queryFn: ({ signal }) => api.get<Couleur[]>('/api/couleurs', { signal }),
   })
   const qFrs = useQuery({
     queryKey: ['couleurs-fournisseur', 'etat'],
-    queryFn: () => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur'),
+    queryFn: ({ signal }) => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur', { signal }),
   })
 
   const groupes = useMemo(() => {
@@ -844,7 +844,7 @@ export function EtatCouleurs() {
       }))
   }, [qCoul.data, qFrs.data])
 
-  if (qCoul.isLoading || qFrs.isLoading) return <Chargement texte="Preparation du nuancier…" />
+  if (qCoul.isLoading || qFrs.isLoading) return <Chargement texte="Préparation du nuancier…" />
 
   // Le supplement de teinture est un PRIX : il suit les droits comme les autres.
   const supplementVisible = droits.visible('supplement_teinture')
@@ -972,15 +972,15 @@ export function EtatCouleur() {
 
   const qCoul = useQuery({
     queryKey: ['couleurs', 'etat'],
-    queryFn: () => api.get<Couleur[]>('/api/couleurs'),
+    queryFn: ({ signal }) => api.get<Couleur[]>('/api/couleurs', { signal }),
   })
   const qFrs = useQuery({
     queryKey: ['couleurs-fournisseur', 'etat'],
-    queryFn: () => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur'),
+    queryFn: ({ signal }) => api.get<CouleurFournisseur[]>('/api/couleurs-fournisseur', { signal }),
   })
   const qRefs = useQuery({
     queryKey: ['catalogue', 'etat'],
-    queryFn: () => api.get<RefCouleur[]>('/api/catalogue?limite=2000&actif=1'),
+    queryFn: ({ signal }) => api.get<RefCouleur[]>('/api/catalogue?limite=2000&actif=1', { signal }),
   })
 
   const couleurs = useMemo(
@@ -996,7 +996,7 @@ export function EtatCouleur() {
   )
 
   if (qCoul.isLoading || qFrs.isLoading || qRefs.isLoading)
-    return <Chargement texte="Preparation de la fiche…" />
+    return <Chargement texte="Préparation de la fiche…" />
 
   const couleur = couleurs.find((c) => c.code_couleur_interne === code)
   const codes = (qFrs.data ?? [])
@@ -1014,6 +1014,7 @@ export function EtatCouleur() {
     <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
       <span className="text-[12px] text-attenue-texte">Couleur :</span>
       <Selecteur
+        aria-label="Couleur"
         value={code ?? ''}
         onChange={(e) => naviguer(`/etats/couleur/${encodeURIComponent(e.target.value)}`)}
         className="w-72"
@@ -1136,7 +1137,7 @@ export function EtatCouleur() {
                   entete: 'Référence',
                   valeur: (r) => <span className="font-mono text-[10px]">{r.code_reference}</span>,
                 },
-                { entete: 'Designation', valeur: (r) => r.designation ?? '—' },
+                { entete: 'Désignation', valeur: (r) => r.designation ?? '—' },
                 { entete: 'Famille', valeur: (r) => r.famille_libelle ?? r.code_categorie ?? '—' },
                 { entete: 'Titrage', valeur: (r) => r.titrage ?? '—' },
                 {
@@ -1252,19 +1253,19 @@ export function EtatLots() {
 
   const qLots = useQuery({
     queryKey: ['lots', def.api ?? '', 'etat'],
-    queryFn: () => api.get<LigneLot[]>(`/api/lots?vue=${def.api}&limite=10000`),
+    queryFn: ({ signal }) => api.get<LigneLot[]>(`/api/lots?vue=${def.api}&limite=10000`, { signal }),
     enabled: !!def.api,
   })
   const qStats = useQuery({
     queryKey: ['stats', 'lots'],
-    queryFn: () => api.get<Record<string, unknown>>('/api/stats/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/stats/lots', { signal }),
     enabled: vue === 'ecarts',
   })
 
   const selecteur = (
     <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
       <span className="text-[12px] text-attenue-texte">État :</span>
-      <Selecteur value={vue} onChange={(e) => setVue(e.target.value)} className="w-80">
+      <Selecteur aria-label="État" value={vue} onChange={(e) => setVue(e.target.value)} className="w-80">
         {VUES_ETAT_LOTS.map((v) => (
           <option key={v.cle} value={v.cle}>
             {v.titre}
@@ -1275,7 +1276,7 @@ export function EtatLots() {
   )
 
   if (vue === 'ecarts') {
-    if (qStats.isLoading) return <Chargement texte="Preparation de l etat…" />
+    if (qStats.isLoading) return <Chargement texte="Préparation de l’état…" />
     const brut = qStats.data?.divergence_fournisseur
     const lignes = (Array.isArray(brut) ? brut : []) as LigneEcartFournisseur[]
     // Le niveau s'ecrit en toutes lettres : le papier ne porte pas la couleur.
@@ -1371,7 +1372,7 @@ export function EtatLots() {
     )
   }
 
-  if (qLots.isLoading) return <Chargement texte="Preparation de l etat…" />
+  if (qLots.isLoading) return <Chargement texte="Préparation de l’état…" />
   if (qLots.isError) {
     return (
       <div>

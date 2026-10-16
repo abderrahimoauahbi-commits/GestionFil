@@ -2,362 +2,358 @@
  * Machines — l'interface de bureau.
  *
  * CE N'EST PAS L'ECRAN MOBILE ELARGI. Un poste de bureau sert a comparer, a
- * verifier et a corriger : trois colonnes tiennent a l'ecran, la grille de
- * saisie se remplit au clavier sans jamais lever les mains, et la consommation
- * previsionnelle s'affiche pendant qu'on tape — c'est elle qu'on relit avant
- * de valider, pas les kilos.
+ * verifier et a corriger.
  *
- * Le telephone, lui, montre une chose a la fois. Deux ecrans, un seul modele.
+ *   /machines          la liste des machines
+ *   /machines/:code    une machine : ses etages, ses fiches, sa consommation,
+ *                      filtres par l'etage choisi (?etage=…)
+ *
+ * Les fiches s'ouvrent sur leur propre ecran (`Fiche.tsx`), jamais en fenetre
+ * surgissante : ce sont des documents.
+ *
+ * LE MODELE DU 05/10/2026 : chaque validation est une DECISION. Seule la
+ * derniere decision d'un etage se devalide ou s'annule ; les autres se
+ * reparent par un constat « Correction ».
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Cog, Loader2, Minus, Plus, RefreshCw, Trash2, X } from 'lucide-react'
-import { api } from '../../api/client'
-import { Alerte, Chargement } from '../../composants/ui/base'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, Cog, Eye, Minus, Pencil, PencilLine, Plus, RefreshCw, RotateCcw, XCircle } from 'lucide-react'
+import { Alerte, Badge, Bouton, Chargement } from '../../composants/ui/base'
+import { Onglet, OngletContenu, Onglets, OngletsListe } from '../../composants/ui/surcouches'
 import { EnTetePage } from '../../composants/Coquille'
-import { cn } from '../../lib/utils'
-import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
-import { ChampLot } from '../../composants/ChampLot'
-import {
-  CLASSE_ECART, ecartPoidsBobine, etatKg, fmtDate, LIBELLE_TYPE, ligneNeuve, machinesApi, nb,
-  rappelCatalogue,
-  type LigneConso, type Machine, type TypeFiche, type Zone,
-} from './noyau'
-import { useFiche } from './useFiche'
-import { QuestionStock, useValiderFiche } from './Questions'
+import { cn, fmt } from '../../lib/utils'
+import { useEtatDepuisParam, useOuvrirVue } from '../../lib/navigation'
 import { useAuth } from '../../auth/AuthContext'
-import { Link } from 'react-router-dom'
+import {
+  cheminMachine, cheminNouvelleFiche, fmtDate, LIBELLE_TYPE, machinesApi, nb,
+  type Fiche, type LigneConso, type Machine, type TypeFiche, type Zone,
+} from './noyau'
+import { GesteRetrait } from './Fiche'
+import { PanneRequetes } from '../../composants/PanneRequetes'
 
-interface RefCat {
-  code_reference: string
-  designation: string
-  poids_bobine_kg: number | null
-}
-interface Magasin {
-  code_magasin: string
-  nom: string
-}
+// =============================================================================
+// LA LISTE DES MACHINES
+// =============================================================================
 
 export function MachinesBureau() {
-  const [machine, setMachine] = useState<Machine | null>(null)
-  const [zone, setZone] = useState<Zone | null>(null)
-  const [type, setType] = useState<TypeFiche | null>(null)
-  /* CET ECRAN NE DECLARE PAS DE MACHINE, ET C'EST VOULU. Le parc est du
-     parametrage — declarer un metier, corriger ses capacites, dire pourquoi il
-     ne tourne pas — et il vit sur son propre ecran, sous PARAMETRES. Ici on
-     charge, on decharge, on constate : c'est le travail du magasin, tous les
-     jours, et il n'a pas a cotoyer un bouton qui change une capacite.
-     On garde juste le chemin, pour qui a le droit. */
+  const ouvrir = useOuvrirVue()
+  /* CET ECRAN NE DECLARE PAS DE MACHINE, ET C'EST VOULU : le parc est du
+     parametrage, il vit sous PARAMETRES. On garde le chemin, pour qui a le droit. */
   const { peut } = useAuth()
   const parametrable = peut('PARAMETRES', 'ECRIRE')
-
   const qMachines = useQuery({ queryKey: ['machines'], queryFn: machinesApi.liste })
-  const qPlan = useQuery({
-    queryKey: ['machine-plan', machine?.code_machine],
-    queryFn: () => machinesApi.plan(machine!.code_machine),
-    enabled: !!machine,
-  })
-
   if (qMachines.isLoading) return <Chargement texte="Lecture des machines…" />
   const machines = qMachines.data ?? []
-
-  /* ----------------------------------------------------------------------
-     L'ENCHAINEMENT DEMANDE, ET POURQUOI IL EST MEILLEUR.
-
-     Avant : trois colonnes cote a cote — machines, etages, travail. Choisir
-     une machine n'affichait que des nombres d'etages ; il fallait descendre
-     dans un etage pour voir quoi que ce soit, et remonter pour passer au
-     suivant. Sur un metier a huit etages, huit allers-retours pour faire le
-     tour de ce qu'il porte.
-
-     Maintenant : une LISTE de machines, puis UNE PAGE par machine qui montre
-     TOUS ses etages et ce qu'ils portent, avec sur chaque ligne les trois
-     gestes du magasin — charger, decharger, constater. La saisie s'ouvre en
-     fenetre au-dessus de la table, qui reste visible derriere : on voit ce
-     qu'on modifie pendant qu'on le modifie.
-     ---------------------------------------------------------------------- */
-  if (!machine) {
-    return (
-      <div className="flex flex-col gap-3">
-        <EnTetePage
-          titre="Machines"
-          description="Ce que chaque metier porte, et les trois gestes du magasin."
-          actions={
-            parametrable ? (
-              <Link
-                to="/parc-machines"
-                className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)]
-                           border border-bordure px-2.5 py-1.5 text-[12px] font-medium
-                           transition-colors hover:bg-attenue"
-              >
-                <Cog className="size-3.5" />
-                Le parc
-              </Link>
-            ) : null
-          }
-        />
-        {machines.length === 0 ? (
-          <Vide
-            texte={
-              parametrable
-                ? 'Aucune machine declaree. Passez par « Le parc » pour en saisir une.'
-                : 'Aucune machine declaree. La direction doit les saisir.'
-            }
-          />
-        ) : (
-          <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure
-                          bg-surface shadow-[var(--ombre-pose)]">
-            <table className="grille w-full text-[12.5px]">
-              <thead>
-                <tr className="bg-attenue">
-                  {['Machine', 'Etages', 'Bobines', 'Charge', 'Etat', ''].map((e, i) => (
-                    <th
-                      key={e || i}
-                      className={cn(
-                        'px-3 py-2 text-left text-[10px] font-semibold uppercase',
-                        'tracking-wider text-attenue-texte',
-                        i >= 1 && i <= 2 && 'text-right',
-                      )}
-                    >
-                      {e}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {machines.map((m) => {
-                  const part = m.capacite_bobines
-                    ? (m.bobines_presentes / m.capacite_bobines) * 100
-                    : 0
-                  return (
-                    <tr
-                      key={m.code_machine}
-                      className="cursor-pointer transition-colors hover:bg-primaire/5"
-                      onClick={() => setMachine(m)}
-                    >
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-texte">{m.nom}</div>
-                        <div className="text-[11px] text-attenue-texte">{m.code_machine}</div>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{m.nb_etages}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        {m.bobines_presentes} / {m.capacite_bobines}
-                      </td>
-                      <td className="px-3 py-2">
-                        {/* LA CHARGE SE LIT MIEUX EN LONGUEUR QU'EN CHIFFRE :
-                            on compare cinq metiers d'un seul coup d'oeil. */}
-                        <div className="h-2 w-24 rounded-full bg-attenue">
-                          <div
-                            className={cn(
-                              'h-full rounded-full',
-                              part > 90 ? 'bg-succes' : part > 40 ? 'bg-primaire' : 'bg-alerte',
-                            )}
-                            style={{ width: `${Math.min(100, part)}%` }}
-                          />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={cn(
-                            'rounded-full border px-2 py-[1px] text-[10.5px]',
-                            m.etat === 'ACTIVE'
-                              ? 'border-succes/30 bg-succes/10 text-succes'
-                              : 'border-alerte/30 bg-alerte/10 text-alerte',
-                          )}
-                        >
-                          {m.etat}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right text-[12px] text-primaire">
-                        Consulter
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    )
-  }
 
   return (
     <div className="flex flex-col gap-3">
       <EnTetePage
-        titre={machine.nom}
-        description={`${machine.code_machine} · ${machine.bobines_presentes} / ${machine.capacite_bobines} bobines`}
-        actions={
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setMachine(null)
-                setZone(null)
-                setType(null)
-              }}
-              className="rounded-[var(--radius-sm)] border border-bordure px-2.5 py-1.5
-                         text-[12px] font-medium transition-colors hover:bg-attenue"
-            >
-              Toutes les machines
-            </button>
-            {parametrable && (
-              <Link
-                to="/parc-machines"
-                className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)]
-                           border border-bordure px-2.5 py-1.5 text-[12px] font-medium
-                           transition-colors hover:bg-attenue"
-              >
-                <Cog className="size-3.5" />
-                Modifier la machine
-              </Link>
-            )}
-          </div>
-        }
+        titre="Machines"
+        description="Ce que chaque métier porte, et les trois gestes du magasin."
+        actions={parametrable ? <LienParc libelle="Le parc" /> : null}
       />
-
-      <TableEtages
-        machine={machine}
-        zones={qPlan.data ?? []}
-        ouvrir={(z, tp) => {
-          setZone(z)
-          setType(tp)
-        }}
-      />
-
-      {/* LE JOURNAL EN ENTIER, PUIS LE FILTRE.
-          Il etait enferme dans un onglet d'une zone : on ne voyait que la
-          consommation de l'etage ouvert, et il fallait passer les huit etages
-          pour faire le compte d'un metier. On montre donc TOUT le journal de
-          la machine, et l'on filtre ensuite — c'est l'ordre naturel, on
-          regarde d'abord, on restreint apres. */}
-      <JournalMachine machine={machine} zones={qPlan.data ?? []} />
-
-      {/* LA SAISIE S'OUVRE AU-DESSUS, la table reste derriere : on voit ce
-          qu'on modifie pendant qu'on le modifie. */}
-      {zone && type && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-auto
-                     bg-accent/40 p-4 backdrop-blur-[2px]"
-        >
-          <div
-            className="w-full max-w-5xl rounded-[var(--radius-lg)] border border-bordure
-                       bg-surface shadow-[var(--ombre-modale)]"
-          >
-            <FicheBureau
-              machine={machine}
-              zone={zone}
-              type={type}
-              fermer={() => {
-                setType(null)
-                setZone(null)
-              }}
-            />
-          </div>
+      <PanneRequetes requetes={[['Les machines', qMachines]]} />
+      {qMachines.isError ? null : machines.length === 0 ? (
+        <Vide
+          texte={
+            parametrable
+              ? 'Aucune machine declaree. Passez par « Le parc » pour en saisir une.'
+              : 'Aucune machine declaree. La direction doit les saisir.'
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-pose)]">
+          <table className="grille w-full text-[12.5px]">
+            <thead>
+              <tr className="bg-attenue">
+                {['Machine', 'Etages', 'Bobines', 'Charge', 'Etat', ''].map((e, i) => (
+                  <th
+                    key={e || i}
+                    className={cn(
+                      'px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte',
+                      i >= 1 && i <= 2 && 'text-right',
+                    )}
+                  >
+                    {e}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {machines.map((m) => {
+                const part = m.capacite_bobines > 0 ? (m.bobines_presentes / m.capacite_bobines) * 100 : 0
+                return (
+                  <tr
+                    key={m.code_machine}
+                    className="cursor-pointer transition-colors hover:bg-primaire/5"
+                    onClick={() => ouvrir(cheminMachine(m.code_machine))}
+                  >
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-texte">{m.nom}</div>
+                      <div className="text-[11px] text-attenue-texte">{m.code_machine}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{m.nb_etages}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {m.bobines_presentes} / {m.capacite_bobines}
+                    </td>
+                    <td className="px-3 py-2"><Jauge part={part} /></td>
+                    <td className="px-3 py-2"><EtatMachine etat={m.etat} /></td>
+                    <td className="px-3 py-2 text-right text-[12px] text-primaire">Ouvrir</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   )
 }
 
+function LienParc({ libelle }: { libelle: string }) {
+  return (
+    <Link
+      to="/parc-machines"
+      className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-bordure px-2.5 py-1.5
+                 text-[12px] font-medium transition-colors hover:bg-attenue"
+    >
+      <Cog className="size-3.5" />
+      {libelle}
+    </Link>
+  )
+}
+
+function Jauge({ part }: { part: number }) {
+  return (
+    <div className="h-2 w-24 rounded-full bg-attenue">
+      <div
+        className={cn('h-full rounded-full', part > 90 ? 'bg-succes' : part > 40 ? 'bg-primaire' : 'bg-alerte')}
+        style={{ width: `${Math.min(100, part)}%` }}
+      />
+    </div>
+  )
+}
+
+function EtatMachine({ etat }: { etat: string }) {
+  return (
+    <span
+      className={cn(
+        'rounded-full border px-2 py-[1px] text-[10.5px]',
+        etat === 'ACTIVE' ? 'border-succes/30 bg-succes/10 text-succes' : 'border-alerte/30 bg-alerte/10 text-alerte',
+      )}
+    >
+      {etat}
+    </span>
+  )
+}
+
+function Vide({ texte }: { texte: string }) {
+  return <p className="px-3 py-6 text-center text-[13px] text-attenue-texte">{texte}</p>
+}
+
+// =============================================================================
+// UNE MACHINE
+// =============================================================================
+
+type Vue = 'etages' | 'fiches' | 'mouvements' | 'conso'
+
 /**
- * TOUS LES ETAGES ET LEUR CONTENU, DANS UNE SEULE TABLE.
- *
- * C'est la « consultation globale » : on choisit une machine, on voit ce
- * qu'elle porte — etage par etage, reference par reference, lot par lot — sans
- * descendre nulle part. Les etages VIDES y figurent : un etage sans fil est
- * une information de travail, c'est la qu'il faut charger.
- *
- * LES TROIS GESTES SONT SUR LA LIGNE DE L'ETAGE, pas dans un menu. Charger,
- * decharger, constater : ce sont les seules choses que le magasin fait, et
- * elles doivent etre a un clic de ce qu'elles concernent.
+ * UNE MACHINE, FILTREE PAR L'ETAGE CHOISI. L'etage se choisit en tete (ou en
+ * cliquant sa ligne) et s'applique aux trois onglets : son contenu, ses
+ * fiches, sa consommation. « Toute la machine » les montre tous.
+ */
+export function MachineEcran() {
+  const { code = '' } = useParams()
+  const ouvrir = useOuvrirVue()
+  const { peut } = useAuth()
+  const [etage, setEtage] = useEtatDepuisParam('etage')
+  const [vue, setVue] = useState<Vue>(etage ? 'fiches' : 'etages')
+
+  const qMachines = useQuery({ queryKey: ['machines'], queryFn: machinesApi.liste })
+  const qPlan = useQuery({ queryKey: ['machine-plan', code], queryFn: () => machinesApi.plan(code) })
+  if (qMachines.isLoading || qPlan.isLoading) return <Chargement texte="Lecture de la machine…" />
+  const machine = (qMachines.data ?? []).find((m) => m.code_machine === code)
+  if (!machine) return <Alerte ton="danger" titre="Machine introuvable">{code}</Alerte>
+  const zones = qPlan.data ?? []
+  const zone = zones.find((z) => z.code_emplacement === etage)
+
+  const choisir = (c: string, versFiches = false) => {
+    setEtage(c)
+    if (versFiches && c) setVue('fiches')
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <EnTetePage
+        titre={zone ? `${machine.nom} · ${zone.libelle}` : machine.nom}
+        description={`${machine.code_machine} · ${machine.bobines_presentes} / ${machine.capacite_bobines} bobines`}
+        actions={
+          <>
+            <Bouton variante="contour" onClick={() => ouvrir('/machines')}>
+              <ArrowLeft />
+              Toutes les machines
+            </Bouton>
+            {zone && <Gestes machine={machine} zone={zone} />}
+            {peut('PARAMETRES', 'ECRIRE') && <LienParc libelle="Modifier la machine" />}
+          </>
+        }
+      />
+
+      {/* --- Le choix de l'etage : il filtre tout l'ecran ------------------- */}
+      <div className="flex flex-wrap gap-1.5">
+        <Puce actif={!etage} onClick={() => choisir('')}>
+          Toute la machine
+        </Puce>
+        {zones.map((z) => (
+          <Puce key={z.code_emplacement} actif={etage === z.code_emplacement} onClick={() => choisir(z.code_emplacement)}>
+            {z.libelle}
+            <span className="ml-1.5 tabular-nums opacity-70">
+              {z.bobines_presentes}/{z.capacite_bobines}
+            </span>
+          </Puce>
+        ))}
+      </div>
+
+      <Onglets value={vue} onValueChange={(v) => setVue(v as Vue)}>
+        <OngletsListe>
+          <Onglet value="etages">{zone ? 'Contenu de l’étage' : 'Étages'}</Onglet>
+          <Onglet value="fiches">{zone ? 'Fiches de l’étage' : 'Fiches'}</Onglet>
+          <Onglet value="mouvements">Mouvements</Onglet>
+          <Onglet value="conso">Consommation</Onglet>
+        </OngletsListe>
+        <OngletContenu value="etages" className="mt-3">
+          <TableEtages machine={machine} zones={zones} etage={etage} choisir={(c) => choisir(c, true)} />
+        </OngletContenu>
+        <OngletContenu value="fiches" className="mt-3">
+          <FichesMachine machine={machine} zones={zones} etage={etage} />
+        </OngletContenu>
+        <OngletContenu value="mouvements" className="mt-3">
+          <MouvementsMachine machine={machine} etage={etage} />
+        </OngletContenu>
+        <OngletContenu value="conso" className="mt-3">
+          <JournalMachine machine={machine} etage={etage} />
+        </OngletContenu>
+      </Onglets>
+    </div>
+  )
+}
+
+function Puce({ actif, onClick, children }: { actif: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={actif}
+      className={cn(
+        'inline-flex min-h-[30px] items-center rounded-full border px-3 text-[12.5px] transition-colors',
+        actif
+          ? 'border-primaire bg-primaire text-primaire-texte'
+          : 'border-bordure bg-surface text-texte hover:border-primaire/50 hover:bg-primaire/5',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Les trois gestes du magasin sur un etage : chacun ouvre une fiche sur son ecran. */
+function Gestes({ machine, zone, compact }: { machine: Machine; zone: Zone; compact?: boolean }) {
+  const ouvrir = useOuvrirVue()
+  /* LA CORRECTION (F22, 09/10/2026) : quand l'erreur n'est pas sur la derniere
+     fiche de l'etage, on ne remonte pas le temps — on constate l'etat reel avec
+     le motif « Correction », juge par les seuils (regle 2). */
+  const gestes: [TypeFiche, string, React.ComponentType<{ className?: string }>, string][] = [
+    ['CHARGE', 'Charger', Plus, ''],
+    ['DECHARGE', 'Décharger', Minus, ''],
+    ['MAJ', 'Constater', RefreshCw, ''],
+    ['MAJ', 'Corriger', PencilLine, '?motif=MJ_CORRECTION'],
+  ]
+  return (
+    <div className="inline-flex gap-1">
+      {gestes.map(([type, titre, Icone, suite]) => (
+        <button
+          key={titre}
+          type="button"
+          title={`${titre} — ${zone.libelle}`}
+          aria-label={titre}
+          onClick={(e) => {
+            e.stopPropagation()
+            ouvrir(cheminNouvelleFiche(machine.code_machine, type, zone.code_emplacement) + suite)
+          }}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-bordure text-attenue-texte',
+            'transition-colors hover:border-primaire/50 hover:bg-primaire/10 hover:text-primaire',
+            compact ? 'size-6 justify-center' : 'min-h-[32px] px-2.5 text-[12.5px] font-medium',
+          )}
+        >
+          <Icone className="size-3.5" />
+          {!compact && titre}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// =============================================================================
+// LES ETAGES ET LEUR CONTENU
+// =============================================================================
+
+/**
+ * TOUS LES ETAGES (OU LE SEUL CHOISI) ET LEUR CONTENU. Les etages vides y
+ * figurent : c'est la qu'il faut charger. Un clic sur un etage le choisit et
+ * montre ses fiches ; les trois gestes sont sur la ligne.
  */
 function TableEtages({
-  machine,
-  zones,
-  ouvrir,
-}: {
-  machine: Machine
-  zones: Zone[]
-  ouvrir: (z: Zone, t: TypeFiche) => void
-}) {
-  const [filtre, setFiltre] = useState('')
-
+  machine, zones, etage, choisir,
+}: { machine: Machine; zones: Zone[]; etage: string; choisir: (code: string) => void }) {
   const q = useQuery({
     queryKey: ['machine-contenu', machine.code_machine],
     queryFn: () => machinesApi.contenu(machine.code_machine),
   })
   if (q.isLoading) return <Chargement texte="Lecture de la machine…" />
 
-  const lignes = q.data ?? []
-  const visibles = filtre ? lignes.filter((l) => l.code_emplacement === filtre) : lignes
-
+  const lignes = (q.data ?? []).filter((l) => !etage || l.code_emplacement === etage)
   const parZone = new Map<string, typeof lignes>()
-  for (const l of visibles) {
+  for (const l of lignes) {
     if (!parZone.has(l.code_emplacement)) parZone.set(l.code_emplacement, [])
     parZone.get(l.code_emplacement)!.push(l)
   }
 
   return (
-    <div
-      className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface
-                 shadow-[var(--ombre-pose)]"
-    >
-      <div className="flex flex-wrap items-center gap-3 border-b border-bordure bg-attenue/60 px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-attenue-texte">
-          Etages et composants
-        </span>
-        <label className="ml-auto flex items-center gap-2 text-[12px] text-attenue-texte">
-          Etage
-          <select
-            value={filtre}
-            onChange={(e) => setFiltre(e.target.value)}
-            className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-2 py-1
-                       text-[12px] text-texte outline-none focus:border-primaire/60"
-          >
-            <option value="">Tous</option>
-            {zones.map((z) => (
-              <option key={z.code_emplacement} value={z.code_emplacement}>
-                {z.libelle}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-pose)]">
       <div className="max-h-[70vh] overflow-auto">
-        <table className="grille w-full text-[12px]">
+        <table className="grille w-full text-[12.5px]">
           <thead className="sticky top-0 z-10">
             <tr className="bg-attenue">
-              {['Etage', 'Reference', 'Couleur', 'Lot', 'Bobines', '%', 'Kg', 'Constat', ''].map(
-                (e, i) => (
-                  <th
-                    key={e || i}
-                    className={cn(
-                      'bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold',
-                      'uppercase tracking-wider text-attenue-texte whitespace-nowrap',
-                      i >= 4 && i <= 6 && 'text-right',
-                    )}
-                  >
-                    {e}
-                  </th>
-                ),
-              )}
+              {['Etage', 'Reference', 'Couleur', 'Lot', 'Bobines', '%', 'Kg', 'Constat', ''].map((e, i) => (
+                <th
+                  key={e || i}
+                  className={cn(
+                    'bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold',
+                    'uppercase tracking-wider text-attenue-texte whitespace-nowrap',
+                    i >= 4 && i <= 6 && 'text-right',
+                  )}
+                >
+                  {e}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {[...parZone.entries()].map(([code, contenu]) => {
               const zone = zones.find((z) => z.code_emplacement === code)
               const montees = contenu.reduce((s, x) => s + (x.nb_bobines ?? 0), 0)
+              const choisi = etage === code
               return contenu.map((l, i) => (
-                <tr key={`${code}-${l.code_reference ?? 'vide'}-${l.lot_fournisseur ?? i}`}>
-                  {/* Le nom de l'etage ne se repete pas sur chaque ligne : il
-                      fusionne sur toute la hauteur de son contenu. */}
+                <tr
+                  key={`${code}-${l.code_reference ?? 'vide'}-${l.lot_fournisseur ?? i}`}
+                  onClick={() => choisir(code)}
+                  title={`Voir les fiches de ${l.zone_libelle}`}
+                  className={cn('cursor-pointer transition-colors hover:bg-primaire/5', choisi && 'bg-primaire/5')}
+                >
                   {i === 0 && (
-                    <td
-                      rowSpan={contenu.length}
-                      className="whitespace-nowrap px-2.5 py-1.5 align-top font-medium"
-                    >
+                    <td rowSpan={contenu.length} className="whitespace-nowrap px-2.5 py-1.5 align-top font-medium">
                       {l.zone_libelle}
                       <div className="text-[10.5px] font-normal text-attenue-texte">
                         {montees} / {l.capacite_bobines}
@@ -368,14 +364,10 @@ function TableEtages({
                     <>
                       <td className="px-2.5 py-1.5">{l.code_reference}</td>
                       <td className="px-2.5 py-1.5 text-attenue-texte">{l.couleur ?? '—'}</td>
-                      <td className="px-2.5 py-1.5 font-mono text-[11px]">
-                        {l.lot_fournisseur ?? '—'}
-                      </td>
+                      <td className="px-2.5 py-1.5 font-mono text-[11px]">{l.lot_fournisseur ?? '—'}</td>
+                      <td className="px-2.5 py-1.5 text-right tabular-nums">{l.nb_bobines ?? '—'}</td>
                       <td className="px-2.5 py-1.5 text-right tabular-nums">
-                        {l.nb_bobines ?? '—'}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-right tabular-nums">
-                        {l.pourcentage != null ? `${l.pourcentage} %` : '—'}
+                        {l.pourcentage != null ? `${nb(l.pourcentage, 1)} %` : '—'}
                       </td>
                       <td className="px-2.5 py-1.5 text-right tabular-nums">{nb(l.kg ?? 0)}</td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-attenue-texte">
@@ -389,29 +381,7 @@ function TableEtages({
                   )}
                   {i === 0 && (
                     <td rowSpan={contenu.length} className="w-px px-2 py-1.5 align-top">
-                      <div className="flex items-center gap-1">
-                        <BoutonGeste
-                          titre="Charger"
-                          zone={zone}
-                          type="CHARGE"
-                          ouvrir={ouvrir}
-                          Icone={Plus}
-                        />
-                        <BoutonGeste
-                          titre="Decharger"
-                          zone={zone}
-                          type="DECHARGE"
-                          ouvrir={ouvrir}
-                          Icone={Minus}
-                        />
-                        <BoutonGeste
-                          titre="Mettre a jour"
-                          zone={zone}
-                          type="MAJ"
-                          ouvrir={ouvrir}
-                          Icone={RefreshCw}
-                        />
-                      </div>
+                      {zone && <Gestes machine={machine} zone={zone} compact />}
                     </td>
                   )}
                 </tr>
@@ -424,88 +394,153 @@ function TableEtages({
   )
 }
 
-/** Un des trois gestes du magasin, pose sur la ligne de son etage. */
-function BoutonGeste({
-  titre,
-  zone,
-  type,
-  ouvrir,
-  Icone,
-}: {
-  titre: string
-  zone: Zone | undefined
-  type: TypeFiche
-  ouvrir: (z: Zone, t: TypeFiche) => void
-  Icone: React.ComponentType<{ className?: string }>
-}) {
-  if (!zone) return null
+// =============================================================================
+// LES FICHES
+// =============================================================================
+
+const STATUT: Record<string, { libelle: string; ton: 'alerte' | 'succes' | 'neutre' }> = {
+  BROUILLON: { libelle: 'Brouillon', ton: 'alerte' },
+  VALIDE: { libelle: 'Validée', ton: 'succes' },
+  ANNULE: { libelle: 'Annulée', ton: 'neutre' },
+}
+
+/**
+ * LES FICHES DE LA MACHINE, OU DU SEUL ETAGE CHOISI, la plus recente en tete.
+ * Un clic ouvre la fiche sur son ecran. « Dévalider » et « Annuler » ne
+ * figurent que sur la DERNIERE decision de chaque etage : c'est la seule qui
+ * se retire seule (les autres se reparent par un constat « Correction »).
+ */
+function FichesMachine({ machine, zones, etage }: { machine: Machine; zones: Zone[]; etage: string }) {
+  const ouvrir = useOuvrirVue()
+  // Devalider ou annuler une decision validee demande VALIDER (regle 15).
+  const { peut } = useAuth()
+  const peutRetirer = peut('MOUVEMENTS', 'VALIDER')
+  const [geste, setGeste] = useState<{ fiche: Fiche; mode: 'devalider' | 'annuler' } | null>(null)
+  const q = useQuery({
+    queryKey: ['machine-fiches', machine.code_machine, etage],
+    queryFn: () => machinesApi.fiches(machine.code_machine, etage || undefined),
+  })
+  if (q.isLoading) return <Chargement texte="Lecture des fiches…" />
+  const fiches = q.data ?? []
+  const libelleZone = (c: string) => zones.find((z) => z.code_emplacement === c)?.libelle ?? c
+
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-pose)]">
+      <div className="max-h-[70vh] overflow-auto">
+        <table className="grille w-full text-[12.5px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
+              <th className="bg-attenue px-2.5 py-1.5 text-left">Fiche</th>
+              <th className="bg-attenue px-2.5 py-1.5 text-left">Type</th>
+              {!etage && <th className="bg-attenue px-2.5 py-1.5 text-left">Etage</th>}
+              <th className="bg-attenue px-2.5 py-1.5 text-left">Date</th>
+              <th className="bg-attenue px-2.5 py-1.5 text-left">Responsable</th>
+              <th className="bg-attenue px-2.5 py-1.5 text-left">Validée par</th>
+              <th className="bg-attenue px-2.5 py-1.5 text-left">Statut</th>
+              <th className="bg-attenue px-2.5 py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {fiches.map((f) => {
+              const tete = Number(f.est_tete) === 1
+              const s = STATUT[f.statut] ?? STATUT.ANNULE
+              return (
+                <tr
+                  key={f.id_fiche}
+                  onClick={() => ouvrir(`/machines/fiches/${f.id_fiche}`)}
+                  className={cn('cursor-pointer transition-colors hover:bg-primaire/5', tete && 'bg-succes/[0.04]')}
+                >
+                  <td className="px-2.5 py-1.5 font-mono text-[11.5px]">{f.numero_fiche}</td>
+                  <td className="px-2.5 py-1.5">{LIBELLE_TYPE[f.type_fiche]}</td>
+                  {!etage && <td className="px-2.5 py-1.5">{libelleZone(f.code_emplacement)}</td>}
+                  <td className="px-2.5 py-1.5 tabular-nums">{fmtDate(f.date_fiche)}</td>
+                  <td className="px-2.5 py-1.5 text-attenue-texte">{f.responsable}</td>
+                  <td className="px-2.5 py-1.5 text-attenue-texte">{f.statut === 'VALIDE' ? f.valide_par ?? '—' : '—'}</td>
+                  <td className="whitespace-nowrap px-2.5 py-1.5">
+                    <Badge ton={s.ton}>{s.libelle}</Badge>
+                    {tete && <Badge ton="info" className="ml-1">dernière de l’étage</Badge>}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1 text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="inline-flex gap-1">
+                      {f.statut === 'BROUILLON' ? (
+                        <BoutonFiche titre="Reprendre" Icone={Pencil} onClick={() => ouvrir(`/machines/fiches/${f.id_fiche}`)} />
+                      ) : (
+                        <BoutonFiche titre="Ouvrir" Icone={Eye} onClick={() => ouvrir(`/machines/fiches/${f.id_fiche}`)} />
+                      )}
+                      {f.statut === 'VALIDE' && tete && peutRetirer && (
+                        <BoutonFiche titre="Dévalider" Icone={RotateCcw} onClick={() => setGeste({ fiche: f, mode: 'devalider' })} />
+                      )}
+                      {(f.statut === 'BROUILLON' || (f.statut === 'VALIDE' && tete && peutRetirer)) && (
+                        <BoutonFiche titre="Annuler" Icone={XCircle} onClick={() => setGeste({ fiche: f, mode: 'annuler' })} />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+            {fiches.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-2.5 py-6 text-center text-attenue-texte">
+                  {etage ? `Aucune fiche sur ${libelleZone(etage)}.` : 'Aucune fiche.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {geste && <GesteRetrait fiche={geste.fiche} mode={geste.mode} fermer={() => setGeste(null)} />}
+    </div>
+  )
+}
+
+function BoutonFiche({
+  titre, Icone, onClick,
+}: { titre: string; Icone: React.ComponentType<{ className?: string }>; onClick: () => void }) {
   return (
     <button
       type="button"
       title={titre}
       aria-label={titre}
-      onClick={() => ouvrir(zone, type)}
-      className="grid size-6 place-items-center rounded-[var(--radius-sm)] border border-bordure
-                 text-attenue-texte transition-colors hover:border-primaire/50
-                 hover:bg-primaire/10 hover:text-primaire"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-bordure px-1.5 py-0.5
+                 text-[11px] text-attenue-texte transition-colors hover:border-primaire/50 hover:text-primaire"
     >
       <Icone className="size-3" />
+      {titre}
     </button>
   )
 }
 
-function Vide({ texte }: { texte: string }) {
-  return <p className="px-3 py-6 text-center text-[13px] text-attenue-texte">{texte}</p>
-}
-
 // =============================================================================
-// LE CONSTAT D'UNE ZONE
-/**
- * LE JOURNAL DE CONSOMMATION, EN CUMUL.
- *
- * Une ligne par zone, reference et lot : ce qui a ete charge, ce qui est
- * revenu, l'etat au depart et a l'arrivee, et le reste. Aucune repartition par
- * fiche — personne ne sait quel chargement a ete tisse quand.
- */
-/**
- * LE JOURNAL DE CONSOMMATION D'UNE MACHINE, EN ENTIER.
- *
- * LA CONSOMMATION NE SE SAISIT PAS, elle se deduit en cumul : etat au depart,
- * plus les charges, moins les retours, moins l'etat de cloture. C'est la regle
- * du modele, et elle explique pourquoi ce tableau n'a aucun bouton : il n'y a
- * rien a y corriger, seulement a lire.
- *
- * ON AFFICHE TOUT, PUIS ON FILTRE. Le journal etait enferme dans un onglet de
- * zone — on ne voyait que l'etage ouvert. Ici la machine entiere est la, et
- * les deux filtres — etage, reference — reduisent sans changer d'ecran.
- */
-function JournalMachine({ machine, zones }: { machine: Machine; zones: Zone[] }) {
-  const [zone, setZone] = useState('')
-  const [texte, setTexte] = useState('')
+// LE JOURNAL DE CONSOMMATION
+// =============================================================================
 
+/**
+ * LA CONSOMMATION EST LA SOMME DES ECARTS QUALIFIES « consommation » des
+ * decisions actives (05/10/2026). Les pertes, dechets, casses, les ecarts non
+ * qualifies et les regularisations sont montres a part : ils ne sont pas du
+ * fil tisse.
+ */
+function JournalMachine({ machine, etage }: { machine: Machine; etage: string }) {
+  const [texte, setTexte] = useState('')
   const q = useQuery({
     queryKey: ['machine-conso', machine.code_machine],
     queryFn: () => machinesApi.consommation(machine.code_machine),
   })
   if (q.isLoading) return <Chargement texte="Lecture du journal…" />
 
-  const tout = q.data ?? []
+  const tout = (q.data ?? []).filter((l) => !etage || l.code_emplacement === etage)
   const motif = texte.trim().toLowerCase()
   const lignes = tout.filter(
     (l) =>
-      (!zone || l.zone === zone) &&
-      (!motif ||
-        (l.code_reference ?? '').toLowerCase().includes(motif) ||
-        (l.lot_fournisseur ?? '').toLowerCase().includes(motif)),
+      !motif ||
+      (l.code_reference ?? '').toLowerCase().includes(motif) ||
+      (l.lot_fournisseur ?? '').toLowerCase().includes(motif),
   )
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface
-                    shadow-[var(--ombre-pose)]">
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-pose)]">
       <div className="flex flex-wrap items-center gap-3 border-b border-bordure bg-attenue/60 px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-attenue-texte">
-          Journal de consommation
-        </span>
         <span className="text-[11px] text-attenue-texte">
           {lignes.length} ligne(s){lignes.length !== tout.length ? ` sur ${tout.length}` : ''}
         </span>
@@ -513,43 +548,129 @@ function JournalMachine({ machine, zones }: { machine: Machine; zones: Zone[] })
           value={texte}
           onChange={(e) => setTexte(e.target.value)}
           placeholder="Référence ou lot…"
-          className="ml-auto w-52 rounded-[var(--radius-sm)] border border-bordure bg-surface
-                     px-2.5 py-1 text-[12px] outline-none focus:border-primaire/60"
+          className="ml-auto w-52 rounded-[var(--radius-sm)] border border-bordure bg-surface px-2.5 py-1 text-[12px]
+                     outline-none focus:border-primaire/60"
         />
-        <select
-          value={zone}
-          onChange={(e) => setZone(e.target.value)}
-          className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-2 py-1
-                     text-[12px] text-texte outline-none focus:border-primaire/60"
-        >
-          <option value="">Tous les étages</option>
-          {zones.map((z) => (
-            <option key={z.code_emplacement} value={z.libelle}>{z.libelle}</option>
-          ))}
-        </select>
       </div>
-      <div className="max-h-[50vh] overflow-auto">
+      <div className="max-h-[60vh] overflow-auto">
         <TableConso lignes={lignes} />
       </div>
     </div>
   )
 }
 
-function TableConso({ lignes }: { lignes: LigneConso[] }) {
-  const total = lignes.reduce((s, l) => s + l.consommation_kg, 0)
+/**
+ * LES MOUVEMENTS MACHINE (F22, 09/10/2026) : le cote machine, isole du grand
+ * livre. Chaque decision, ligne par ligne, avec le mouvement magasin qui en est
+ * l'autre moitie — et son annulation quand la fiche a ete retiree. Seule la
+ * derniere decision d'un etage se retire ; on remonte ainsi pas a pas.
+ */
+function MouvementsMachine({ machine, etage }: { machine: Machine; etage: string }) {
+  const ouvrir = useOuvrirVue()
+  const q = useQuery({
+    queryKey: ['machine-mouvements', machine.code_machine, etage],
+    queryFn: () => machinesApi.mouvements(machine.code_machine, etage || undefined),
+  })
+  if (q.isLoading) return <Chargement texte="Lecture des mouvements…" />
+  if (q.isError) return <Alerte ton="danger">Les mouvements de la machine n’ont pas pu être lus.</Alerte>
+  const lignes = q.data ?? []
+  if (lignes.length === 0) return <Vide texte="Aucune décision sur cette machine." />
+  const kg = (v: number | null | undefined) => (v == null ? '—' : fmt.nombre(v, 1))
   return (
-    <div className="overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface">
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-bordure bg-surface shadow-[var(--ombre-pose)]">
+      <div className="max-h-[70vh] overflow-auto">
+        <table className="grille w-full text-[12px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
+              <th className="bg-attenue px-2 py-1.5 text-left">Date</th>
+              <th className="bg-attenue px-2 py-1.5 text-left">Fiche</th>
+              {!etage && <th className="bg-attenue px-2 py-1.5 text-left">Étage</th>}
+              <th className="bg-attenue px-2 py-1.5 text-left">Référence · lot</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Avant</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Chargé / retiré</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Après</th>
+              <th className="bg-attenue px-2 py-1.5 text-right">Écart</th>
+              <th className="bg-attenue px-2 py-1.5 text-left">Mouvement magasin</th>
+              <th className="bg-attenue px-2 py-1.5 text-left">Statut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lignes.map((l) => {
+              const retire = l.nature === 'DECHARGE'
+              return (
+                <tr key={`${l.id_decision}-${l.ligne_numero}`} className={cn(l.statut !== 'ACTIVE' && 'text-attenue-texte line-through decoration-attenue-texte/40')}>
+                  <td className="whitespace-nowrap px-2 py-1 tabular-nums">{fmtDate(l.date_decision)}</td>
+                  <td className="px-2 py-1">
+                    {l.id_fiche ? (
+                      <button type="button" className="font-mono text-[11.5px] text-primaire hover:underline"
+                        onClick={() => ouvrir(`/machines/fiches/${l.id_fiche}`)}>
+                        {l.numero_fiche}
+                      </button>
+                    ) : '—'}
+                    <div className="text-[10.5px] text-attenue-texte">{LIBELLE_TYPE[l.nature as TypeFiche] ?? l.nature}</div>
+                  </td>
+                  {!etage && <td className="px-2 py-1">{l.zone ?? l.code_emplacement}</td>}
+                  <td className="px-2 py-1">
+                    {l.code_reference}
+                    <div className="text-[10.5px] text-attenue-texte">{l.lot_fournisseur || '—'}</div>
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">{kg(l.kg_avant)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {l.kg_mouvementes ? `${retire ? '−' : '+'}${kg(l.kg_mouvementes)}` : '—'}
+                    {retire && l.destination && <div className="text-[10.5px] text-attenue-texte">{l.destination.toLowerCase()}</div>}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">{kg(l.kg_apres)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {Math.abs(l.ecart_kg) < 0.0005 ? '—' : kg(l.ecart_kg)}
+                    {l.niveau_ecart && l.niveau_ecart !== 'AUCUN' && (
+                      <div className="text-[10.5px] text-attenue-texte">{(l.effet_ecart ?? '').toLowerCase()} · {l.niveau_ecart.toLowerCase()}</div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1">
+                    {l.id_mouvement ? (
+                      <button type="button" className="font-mono text-[11.5px] text-primaire hover:underline"
+                        onClick={() => ouvrir(`/mouvements/${l.id_mouvement}`)}>
+                        {l.numero_mouvement}
+                      </button>
+                    ) : <span className="text-attenue-texte">aucun (constat)</span>}
+                    {l.id_annulation && (
+                      <div className="text-[10.5px]">
+                        annulé par{' '}
+                        <button type="button" className="font-mono text-primaire hover:underline"
+                          onClick={() => ouvrir(`/mouvements/${l.id_annulation}`)}>
+                          {l.numero_annulation}
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1">
+                    <Badge ton={l.statut === 'ACTIVE' ? 'succes' : 'neutre'}>
+                      {l.statut === 'ACTIVE' ? 'active' : l.statut === 'RETIREE' ? 'dévalidée' : 'annulée'}
+                    </Badge>
+                    {l.est_tete === 1 && l.statut === 'ACTIVE' && <Badge ton="info" className="ml-1">dernière</Badge>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function TableConso({ lignes }: { lignes: LigneConso[] }) {
+  const total = (k: keyof LigneConso) => lignes.reduce((s, l) => s + Number(l[k] ?? 0), 0)
+  const enTete = ['Zone', 'Référence', 'Lot', 'Départ', 'Chargé', 'Retour magasin', 'Sorti (perte, déchet…)', 'Fin',
+                  'Consommé', 'Déchet / perte / casse', 'Non qualifié', 'Régularisation', 'Erreur de saisie']
+  return (
+    <div className="overflow-x-auto">
       <table className="w-full text-[12px]">
         <thead>
           <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
-            <th className="px-2 py-1.5 text-left">Zone</th>
-            <th className="px-2 py-1.5 text-left">Référence</th>
-            <th className="px-2 py-1.5 text-left">Lot</th>
-            <th className="px-2 py-1.5 text-right">État au départ</th>
-            <th className="px-2 py-1.5 text-right">Chargé</th>
-            <th className="px-2 py-1.5 text-right">Retourné</th>
-            <th className="px-2 py-1.5 text-right">État constaté</th>
-            <th className="px-2 py-1.5 text-right">Consommé</th>
+            {enTete.map((e, i) => (
+              <th key={e} className={cn('px-2 py-1.5', i >= 3 ? 'text-right' : 'text-left')}>{e}</th>
+            ))}
           </tr>
         </thead>
         <tbody className="tabular-nums">
@@ -558,422 +679,41 @@ function TableConso({ lignes }: { lignes: LigneConso[] }) {
               <td className="px-2 py-1.5">{l.zone}</td>
               <td className="max-w-[18rem] truncate px-2 py-1.5">{l.designation}</td>
               <td className="px-2 py-1.5 font-mono text-[11px]">{l.lot_fournisseur}</td>
-              <td className="px-2 py-1.5 text-right text-attenue-texte">
-                {nb(l.kg_debut)}
-                {l.date_debut && (
-                  <span className="ml-1 text-[10px]">{fmtDate(l.date_debut)}</span>
-                )}
-              </td>
+              <td className="px-2 py-1.5 text-right text-attenue-texte">{nb(l.kg_debut)}</td>
               <td className="px-2 py-1.5 text-right text-attenue-texte">{nb(l.kg_charge)}</td>
               <td className="px-2 py-1.5 text-right text-attenue-texte">{nb(l.kg_retourne)}</td>
-              <td className="px-2 py-1.5 text-right text-attenue-texte">
-                {nb(l.kg_fin)}
-                {l.date_fin && <span className="ml-1 text-[10px]">{fmtDate(l.date_fin)}</span>}
-              </td>
-              <td
-                className={cn(
-                  'px-2 py-1.5 text-right font-medium',
-                  l.consommation_kg < 0 ? 'text-danger' : 'text-texte',
-                )}
-              >
+              <td className="px-2 py-1.5 text-right text-attenue-texte">{nb(l.kg_sorti_autre)}</td>
+              <td className="px-2 py-1.5 text-right text-attenue-texte">{nb(l.kg_fin)}</td>
+              <td className={cn('px-2 py-1.5 text-right font-medium', l.consommation_kg < 0 ? 'text-danger' : 'text-texte')}>
                 {nb(l.consommation_kg)}
               </td>
+              <td className="px-2 py-1.5 text-right">{nb(l.dechet_perte_casse_kg)}</td>
+              <td className={cn('px-2 py-1.5 text-right', l.non_qualifie_kg ? 'text-alerte' : '')}>{nb(l.non_qualifie_kg)}</td>
+              <td className={cn('px-2 py-1.5 text-right', l.regularisation_kg ? 'text-alerte' : '')}>{nb(l.regularisation_kg)}</td>
+              <td className="px-2 py-1.5 text-right">{nb(l.erreur_saisie_kg)}</td>
             </tr>
           ))}
           {lignes.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-2 py-6 text-center text-attenue-texte">
-                Aucun chargement enregistré.
+              <td colSpan={13} className="px-2 py-6 text-center text-attenue-texte">
+                Aucune décision enregistrée depuis la fiche de départ.
               </td>
             </tr>
           )}
         </tbody>
         {lignes.length > 0 && (
           <tfoot>
-            <tr className="border-t-2 border-ink/20 bg-attenue font-semibold">
-              <td className="px-2 py-1.5" colSpan={7}>
-                Total consommé
-              </td>
-              <td className="px-2 py-1.5 text-right tabular-nums">{nb(total)}</td>
+            <tr className="border-t-2 border-ink/20 bg-attenue font-semibold tabular-nums">
+              <td className="px-2 py-1.5" colSpan={8}>Total</td>
+              <td className="px-2 py-1.5 text-right">{nb(total('consommation_kg'))}</td>
+              <td className="px-2 py-1.5 text-right">{nb(total('dechet_perte_casse_kg'))}</td>
+              <td className="px-2 py-1.5 text-right">{nb(total('non_qualifie_kg'))}</td>
+              <td className="px-2 py-1.5 text-right">{nb(total('regularisation_kg'))}</td>
+              <td className="px-2 py-1.5 text-right">{nb(total('erreur_saisie_kg'))}</td>
             </tr>
           </tfoot>
         )}
       </table>
     </div>
-  )
-}
-
-// =============================================================================
-// LA FICHE, EN GRILLE
-// =============================================================================
-
-function FicheBureau({
-  machine, zone, type, fermer,
-}: {
-  machine: Machine
-  zone: Zone
-  type: TypeFiche
-  fermer: () => void
-}) {
-  const f = useFiche(machine.code_machine, zone, type)
-  const v = useValiderFiche(f)
-  const [ajout, setAjout] = useState(false)
-  const tolerances = useTolerancesLot()
-
-  const qMag = useQuery({
-    queryKey: ['magasins', 'actifs'],
-    queryFn: () => api.get<Magasin[]>('/api/magasins?actif=1'),
-  })
-  const qCat = useQuery({
-    queryKey: ['catalogue-machine'],
-    queryFn: () => api.get<RefCat[]>('/api/catalogue?actif=1&limite=2000'),
-    enabled: ajout,
-  })
-
-  const toucheMagasin = type === 'CHARGE' || type === 'DECHARGE'
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-[15px] font-semibold text-texte">
-          {LIBELLE_TYPE[type]} · {zone.libelle}
-        </h2>
-        <button
-          type="button"
-          onClick={fermer}
-          className="inline-flex min-h-[34px] items-center gap-1 rounded-[var(--radius-sm)]
-                     border border-bordure px-3 text-[13px] hover:bg-attenue"
-        >
-          <X className="size-3.5" />
-          Fermer
-        </button>
-      </div>
-
-      {/* --- L'entete, sur une ligne ---------------------------------- */}
-      <div className="grid grid-cols-2 gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3 lg:grid-cols-5">
-        <Champ label="Date" type="date" v={f.entete.date} set={(v) => f.setEntete({ ...f.entete, date: v })} />
-        {toucheMagasin && (
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-attenue-texte">
-              {type === 'CHARGE' ? 'Magasin d’origine' : 'Magasin de retour'}
-            </span>
-            <select
-              value={f.entete.magasin}
-              onChange={(e) => f.setEntete({ ...f.entete, magasin: e.target.value })}
-              className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[13px]"
-            >
-              <option value="">—</option>
-              {(qMag.data ?? []).map((m) => (
-                <option key={m.code_magasin} value={m.code_magasin}>
-                  {m.nom}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <Champ label="Bobines de l’étage" type="number" v={String(f.entete.bobinesEtage)}
-               set={(v) => f.setEntete({ ...f.entete, bobinesEtage: Number(v) || 0 })} />
-        <Champ label="Ordre de fabrication" v={f.entete.of} set={(v) => f.setEntete({ ...f.entete, of: v })} />
-        <Champ label="Responsable" v={f.entete.responsable} set={(v) => f.setEntete({ ...f.entete, responsable: v })} />
-      </div>
-
-      {/* --- La grille de saisie -------------------------------------- */}
-      <div className="overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface">
-        <table className="w-full min-w-[62rem] text-[12px]">
-          <thead>
-            <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
-              <th className="px-2 py-1.5 text-left">Référence</th>
-              <th className="px-2 py-1.5 text-left">Lot</th>
-              <th className="px-2 py-1.5 text-right">Avant</th>
-              <th className="px-2 py-1.5 text-right">
-                {type === 'DECHARGE' ? 'Retirées' : 'Chargées'}
-              </th>
-              <th className="px-2 py-1.5 text-right">Présentes</th>
-              <th className="px-2 py-1.5 text-right">Poids/bob.</th>
-              <th className="px-2 py-1.5 text-right">%</th>
-              <th className="px-2 py-1.5 text-right">Constaté kg</th>
-              <th className="w-8" />
-            </tr>
-          </thead>
-          <tbody className="tabular-nums">
-            {f.lignes.map((l) => (
-                <tr key={l.cle} className="border-t border-bordure">
-                  <td className="max-w-[16rem] truncate px-2 py-1 text-texte">{l.designation}</td>
-                  <td className="px-1 py-1">
-                    {/* AU CHARGEMENT, LE LOT SE CHOISIT dans ce que le magasin
-                        d'origine tient de cette reference, le plus ancien
-                        d'abord. Sans magasin, ou pour un retour et une mise a
-                        jour, la saisie reste libre. */}
-                    {type === 'CHARGE' && f.entete.magasin ? (
-                      <ChampLot
-                        reference={l.code_reference}
-                        magasin={f.entete.magasin}
-                        valeur={l.lot_fournisseur}
-                        onChange={(v) => f.majLigne(l.cle, 'lot_fournisseur', v)}
-                        invalide={!l.lot_fournisseur}
-                        className="min-h-[30px] w-44 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
-                      />
-                    ) : l.lot_fournisseur === SANS_LOT ? (
-                      /* « Sans lot » se lit en clair ; l'effacer rouvre la saisie. */
-                      <span className="inline-flex min-h-[30px] items-center gap-1.5 px-1.5 text-[11px] italic text-attenue-texte">
-                        {libelleLot(l.lot_fournisseur)}
-                        <button
-                          type="button"
-                          onClick={() => f.majLigne(l.cle, 'lot_fournisseur', '')}
-                          className="not-italic text-attenue-texte hover:text-texte"
-                          aria-label="Saisir un lot"
-                          title="Saisir un lot"
-                        >
-                          <X className="size-3" />
-                        </button>
-                      </span>
-                    ) : (
-                      <input
-                        value={l.lot_fournisseur}
-                        onChange={(e) => f.majLigne(l.cle, 'lot_fournisseur', e.target.value)}
-                        aria-label="Lot fournisseur"
-                        className="min-h-[30px] w-28 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
-                      />
-                    )}
-                  </td>
-                  <td className="px-2 py-1 text-right text-attenue-texte">
-                    {l.avant_bobines} · {nb(l.avant_kg, 1)}
-                  </td>
-                  <td className="px-1 py-1">
-                    <Case v={l.mouvementees} set={(v) => f.majLigne(l.cle, 'mouvementees', v)}
-                          desactive={type === 'MAJ'} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <Case v={l.presentes} set={(v) => f.majLigne(l.cle, 'presentes', v)}
-                          desactive={type === 'MAJ'} />
-                  </td>
-                  <td className="px-1 py-1 text-right">
-                    <Case v={l.poids_unitaire} pas={0.001}
-                          set={(v) => f.majLigne(l.cle, 'poids_unitaire', v)} />
-                    {/* LA DIVERGENCE AVEC LE CATALOGUE, sous la valeur : une
-                        bobine plus legere ou plus lourde que prevu se voit
-                        pendant qu'on tape, coloree selon les tolerances. */}
-                    {(() => {
-                      const rappel = rappelCatalogue(l)
-                      if (!rappel) return null
-                      const c = couleurEcart(ecartPoidsBobine(l), tolerances)
-                      return (
-                        <div className={cn('mt-0.5 whitespace-nowrap text-[10.5px]',
-                                           c ? CLASSE_ECART[c] : 'text-attenue-texte')}>
-                          {rappel}
-                        </div>
-                      )
-                    })()}
-                  </td>
-                  <td className="px-1 py-1">
-                    <Case v={l.pourcentage} pas={0.1} max={100}
-                          set={(v) => f.majLigne(l.cle, 'pourcentage', v)} />
-                  </td>
-                  <td className="px-2 py-1 text-right font-medium text-texte">{nb(etatKg(l))}</td>
-                  <td className="px-1 py-1">
-                    <button
-                      type="button"
-                      onClick={() => f.retirer(l.cle)}
-                      className="text-attenue-texte hover:text-danger"
-                      aria-label="Retirer"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </td>
-                </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-ink/20 bg-attenue font-semibold">
-              <td className="px-2 py-1.5" colSpan={3}>
-                Total
-              </td>
-              <td className="px-2 py-1.5 text-right tabular-nums">{f.totaux.mouvementees}</td>
-              <td
-                className={cn(
-                  'px-2 py-1.5 text-right tabular-nums',
-                  f.totaux.ecart !== 0 && 'text-danger',
-                )}
-              >
-                {f.totaux.presentes} / {f.entete.bobinesEtage}
-              </td>
-              <td colSpan={2} />
-              <td className="px-2 py-1.5 text-right tabular-nums">{nb(f.totaux.etatKg)}</td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      {/* --- Ajouter une reference qui n'etait pas sur la zone --------- */}
-      {type === 'CHARGE' && (
-        <div>
-          {ajout ? (
-            <div className="flex gap-2">
-              <select
-                onChange={(e) => {
-                  const r = (qCat.data ?? []).find((x) => x.code_reference === e.target.value)
-                  if (r) {
-                    f.ajouter(ligneNeuve(r.code_reference, r.designation,
-                                         r.poids_bobine_kg ?? 0, r.poids_bobine_kg))
-                    setAjout(false)
-                  }
-                }}
-                className="min-h-[34px] flex-1 rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[13px]"
-                defaultValue=""
-              >
-                <option value="">Choisir une référence…</option>
-                {(qCat.data ?? []).map((r) => (
-                  <option key={r.code_reference} value={r.code_reference}>
-                    {r.designation}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={() => setAjout(false)}
-                      className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure px-3 text-[13px]">
-                Annuler
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setAjout(true)}
-              className="inline-flex min-h-[34px] items-center gap-1.5 rounded-[var(--radius-sm)]
-                         border border-bordure px-3 text-[13px] hover:bg-attenue"
-            >
-              <Plus className="size-3.5" />
-              Ajouter une référence
-            </button>
-          )}
-        </div>
-      )}
-
-      {f.totaux.ecart !== 0 && (
-        <Alerte
-          ton="danger"
-          titre={f.totaux.ecart < 0 ? 'Le compte est incomplet' : 'Trop de bobines déclarées'}
-        >
-          {f.entete.bobinesEtage} emplacements à l’entête, {f.totaux.presentes} déclarées —
-          {f.totaux.ecart < 0
-            ? ` il manque ${-f.totaux.ecart} bobines.`
-            : ` ${f.totaux.ecart} de trop.`}{' '}
-          {f.totaux.ecart < 0 && (type === 'CHARGE' || type === 'DECHARGE')
-            ? 'Indiquez ce que vous avez monté dans la colonne des bobines mouvementées — les présentes suivront — ou corrigez le nombre d’emplacements de l’entête.'
-            : 'Les emplacements ne restent jamais à moitié déclarés.'}
-        </Alerte>
-      )}
-
-      {f.envoi.isError && (
-        <Alerte ton="danger" titre="Validation refusée">
-          {(f.envoi.error as Error).message}
-        </Alerte>
-      )}
-
-      {f.envoi.isSuccess && (
-        <Alerte ton="succes" titre="Fiche validée">
-          Le constat est enregistré
-          {f.envoi.data?.mouvement && ` · mouvement ${f.envoi.data.mouvement}`}
-          {f.envoi.data?.correction && ` · correction de stock ${f.envoi.data.correction}`}.
-          La consommation se lit dans le journal, en cumul.
-        </Alerte>
-      )}
-
-      {/* LE SOLDE DU LOT NE COUVRE PAS : ON DEMANDE, ON NE REFUSE PAS.
-          Le magasinier a les bobines dans les mains. Lui opposer un mur le
-          pousse a ne plus saisir du tout, ce qui coute bien plus cher que
-          l'imprecision qu'on voulait eviter. La question est posee une fois,
-          la reponse part avec la fiche et reste au journal. */}
-      {f.lotCourt && (
-        <Alerte ton="alerte" titre="Le solde connu de ce lot ne couvre pas la sortie">
-          <p className="leading-relaxed">
-            Quand une bobine redescend d un metier, personne ne sait de quel lot elle
-            venait : le retour est impute au juge, et les soldes par lot derivent. La
-            matiere est donc peut-etre bien la.
-          </p>
-          <p className="mt-1 leading-relaxed">
-            Le solde du <strong>magasin</strong>, lui, reste verifie — on ne charge jamais
-            plus que ce que le magasin porte.
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={f.envoi.isPending}
-              onClick={() => f.envoi.mutate({ forcerLot: true })}
-              className="inline-flex min-h-[36px] items-center gap-2 rounded-[var(--radius-sm)]
-                         bg-alerte px-3 text-[13px] font-semibold text-surface
-                         disabled:opacity-40"
-            >
-              {f.envoi.isPending && <Loader2 className="size-3.5 animate-spin" />}
-              Charger quand meme
-            </button>
-            <button
-              type="button"
-              onClick={f.oublierLotCourt}
-              className="min-h-[36px] rounded-[var(--radius-sm)] border border-bordure px-3
-                         text-[13px] font-medium"
-            >
-              Corriger la saisie
-            </button>
-          </div>
-        </Alerte>
-      )}
-
-      <QuestionStock f={f} />
-      {v.element}
-
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          disabled={!f.pret || f.envoi.isPending || !!f.stockCourt}
-          onClick={v.valider}
-          className="inline-flex min-h-[40px] items-center gap-2 rounded-[var(--radius-sm)]
-                     bg-primaire px-4 text-[14px] font-semibold text-primaire-texte
-                     disabled:opacity-40"
-        >
-          {f.envoi.isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-          Valider la fiche
-        </button>
-        <span className="text-[12px] tabular-nums text-attenue-texte">
-          <Cog className="mr-1 inline size-3" />
-          {f.totaux.presentes} bobines · {nb(f.totaux.etatKg)} kg constatés
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function Champ({
-  label, v, set, type = 'text',
-}: { label: string; v: string; set: (v: string) => void; type?: string }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[11px] text-attenue-texte">{label}</span>
-      <input
-        type={type}
-        value={v}
-        onChange={(e) => set(e.target.value)}
-        className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[13px]"
-      />
-    </label>
-  )
-}
-
-function Case({
-  v, set, pas = 1, max, desactive,
-}: { v: number; set: (v: number) => void; pas?: number; max?: number; desactive?: boolean }) {
-  return (
-    <input
-      type="number"
-      inputMode="decimal"
-      step={pas}
-      max={max}
-      disabled={desactive}
-      value={v || ''}
-      onChange={(e) => set(Math.min(max ?? Infinity, Number(e.target.value) || 0))}
-      className={cn(
-        'min-h-[30px] w-20 rounded-[3px] border border-bordure bg-fond px-1.5 text-right tabular-nums',
-        desactive && 'opacity-40',
-      )}
-    />
   )
 }

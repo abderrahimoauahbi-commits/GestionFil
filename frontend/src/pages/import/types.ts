@@ -124,7 +124,19 @@ export interface Frais {
   cours_change: number
   montant_dhs: number
   cibles: string[]
+  /** La repartition retenue : celle de la ligne, a defaut celle du type. */
+  methode_repartition: MethodeRepartition
+  /** Celle que le parametrage du type propose. */
+  methode_type: MethodeRepartition
+  /** Ce qui est reparti sur les lignes (masque a qui ne voit pas les montants). */
+  reparti_dhs?: number
 }
+
+export type MethodeRepartition = 'VALEUR' | 'POIDS' | 'QUANTITE' | 'PARTS_EGALES' | 'MANUEL'
+
+/** Un frais inclus dans le cout dont la repartition n'egale pas le montant. */
+export const nonReparti = (f: Frais) =>
+  f.inclus_dans_cout === 1 && f.reparti_dhs !== undefined && Math.abs(f.reparti_dhs - f.montant_dhs) > 0.005
 
 export interface Allocation {
   id_ligne_frais: string
@@ -142,7 +154,7 @@ export interface ReceptionResume extends Record<string, unknown> {
   id_reception: string
   numero_reception: string
   date_reception: string
-  statut: 'BROUILLON' | 'VALIDEE' | 'ANNULEE'
+  statut: 'BROUILLON' | 'A_CONTROLER' | 'VALIDEE' | 'ANNULEE'
   litige: number
   motif_litige: string | null
   date_validation: string | null
@@ -160,13 +172,31 @@ export interface ReceptionResume extends Record<string, unknown> {
 
 export interface Ajustement {
   code_reference: string
-  nature: 'STOCK' | 'CONSOMME'
+  /** RETOUR : un retour fournisseur solde par un avoir (09/10/2026). */
+  nature: 'STOCK' | 'CONSOMME' | 'RETOUR'
   code_magasin: string | null
   quantite_recue_kg: number
   stock_kg: number
   cump_avant?: number | null
   cump_apres?: number | null
   montant_dhs: number
+  date_ajustement?: string
+  /** FRAIS : la cloture ; AVOIR_PRIX / AVOIR_RETOUR : un avoir du fournisseur. */
+  origine?: 'FRAIS' | 'AVOIR_PRIX' | 'AVOIR_RETOUR'
+  numero_piece?: string | null
+  motif?: string | null
+}
+
+/** Un retour fournisseur d'une reception du dossier (`v_retours_import`). */
+export interface RetourImport {
+  id_mouvement: string
+  numero_mouvement: string
+  numero_reception: string
+  date_mouvement: string
+  code_reference: string
+  kg: number
+  /** Deja solde par un avoir pour retour. */
+  solde: boolean
 }
 
 /** Une piece deposee dans le dossier : scan, PDF, photo. */
@@ -223,6 +253,7 @@ export interface DossierComplet {
   pieces: Piece[]
   attendues: PieceAttendue[]
   ajustements: Ajustement[]
+  retours?: RetourImport[]
   engagements?: Engagement[]
 }
 
@@ -259,11 +290,12 @@ export interface ParametreFrais {
   actif: number
 }
 
-export const METHODE_REPARTITION: Record<ParametreFrais['methode_repartition'], string> = {
+export const METHODE_REPARTITION: Record<MethodeRepartition, string> = {
   VALEUR: 'À la valeur',
   POIDS: 'Au poids',
   QUANTITE: 'À la quantité',
   PARTS_EGALES: 'À parts égales',
+  MANUEL: 'Manuelle',
 }
 
 export const LIBELLE_STATUT: Record<StatutDossier, string> = {

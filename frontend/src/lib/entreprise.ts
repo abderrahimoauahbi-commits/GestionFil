@@ -51,7 +51,7 @@ export interface Entreprise {
 export function useEntreprise(): Entreprise {
   const q = useQuery({
     queryKey: ['entreprise'],
-    queryFn: () => api.get<Entreprise>('/api/entreprise'),
+    queryFn: ({ signal }) => api.get<Entreprise>('/api/entreprise', { signal }),
     staleTime: 30 * 60_000,
     // Une identite absente n'empeche pas de travailler : on n'insiste pas.
     retry: false,

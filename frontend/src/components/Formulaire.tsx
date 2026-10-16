@@ -77,6 +77,13 @@ export interface ChampDef {
    * par lot ne vaut que pour une reference suivie par lot.
    */
   actifSi?: { champ: string; raison: string }
+  /**
+   * UN SEUIL SE FIXE AU DROIT DE VALIDER (09/10/2026). La tolerance de pesee
+   * d'un fournisseur dispense de derogation : celle qui prepare la reception ne
+   * la regle pas. Sans le droit, le champ reste visible, grise, et n'est pas
+   * envoye — le serveur le refuserait.
+   */
+  exigeValider?: boolean
 }
 
 /** L'interrupteur dont depend un champ est-il allume ? */
@@ -114,6 +121,8 @@ export function Formulaire({
   const droits = useDroits(module)
   const [donnees, setDonnees] = useState<Record<string, unknown>>({})
   const [manquants, setManquants] = useState<string[]>([])
+  /** Ce que le formulaire montrait en s'ouvrant : rien a enregistrer tant qu'on n'y a pas touche. */
+  const [initiales, setInitiales] = useState('')
 
   useEffect(() => {
     // A la creation, les valeurs par defaut declarees priment sur le vide ; en
@@ -125,6 +134,7 @@ export function Formulaire({
       }
     }
     setDonnees({ ...defauts, ...valeurs })
+    setInitiales(JSON.stringify({ ...defauts, ...valeurs }))
     setManquants([])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(valeurs), creation])
@@ -143,6 +153,7 @@ export function Formulaire({
     // filtre de droits, et c'est la liste `modification` de l'entite, qui ne
     // contient jamais la cle, qui protege reellement du renommage.
     if (c.cleCreation) return creation && droits.peutEcrire
+    if (c.exigeValider && !droits.peutValider) return false
     return droits.modifiable(c.champ)
   }
 
@@ -159,6 +170,14 @@ export function Formulaire({
 
     if (absents.length) {
       setManquants(absents)
+      // LE PREMIER CHAMP MANQUANT SOUS LES YEUX (10/10/2026) : le message tombait
+      // en bas d'une fiche de trente champs, le champ fautif hors de l'ecran,
+      // plus haut. On l'amene et on y place le curseur.
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`ch-${absents[0]}`)
+        el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        el?.focus({ preventScroll: true })
+      })
       return
     }
 
@@ -216,7 +235,11 @@ export function Formulaire({
                     <Lock className="size-3" />
                     {!condition && c.actifSi
                       ? c.actifSi.raison
-                      : c.cleCreation && !creation ? 'non modifiable' : 'lecture seule'}
+                      : c.cleCreation && !creation
+                        ? 'non modifiable'
+                        : c.exigeValider && !droits.peutValider
+                          ? 'fixé par la Direction'
+                          : 'lecture seule'}
                   </span>
                 )}
                 {c.aide && (
@@ -276,6 +299,9 @@ export function Formulaire({
                   max={c.max}
                   disabled={!actif}
                   aria-invalid={manque}
+                  // DES LARGEURS STANDARD (10/10/2026) : un nombre ou une date n'occupe
+                  // pas toute la colonne — le champ dit la taille de ce qu'on y tape.
+                  className={type === 'date' ? 'max-w-[11rem]' : type === 'texte' ? undefined : 'max-w-[12rem] text-right tabular-nums'}
                   value={(valeur as string | number) ?? ''}
                   onChange={(e) => {
                     const t = e.target.value
@@ -325,7 +351,11 @@ export function Formulaire({
       {enfants}
 
       {manquants.length > 0 && (
-        <Alerte ton="alerte">Renseignez les champs obligatoires signales.</Alerte>
+        <Alerte ton="alerte">
+          {/* Le message NOMME les champs : « signales » ne disait pas lesquels. */}
+          {manquants.length === 1 ? 'Champ obligatoire à renseigner : ' : 'Champs obligatoires à renseigner : '}
+          {manquants.map((m) => champs.find((c) => c.champ === m)?.libelle ?? m).join(', ')}.
+        </Alerte>
       )}
       {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 
@@ -340,7 +370,7 @@ export function Formulaire({
           'flex justify-end gap-2',
           avecSections &&
             'sticky bottom-[var(--barre-basse)] z-20 -mx-3 border-t border-bordure bg-fond/95 ' +
-              'px-3 py-2 backdrop-blur-sm sm:-mx-4 sm:px-4 md:bottom-0',
+              'px-3 py-2 backdrop-blur-sm sm:-mx-5 sm:px-5 md:bottom-0',
         )}
       >
         {surAnnuler && (
@@ -348,7 +378,9 @@ export function Formulaire({
             Annuler
           </Bouton>
         )}
-        <Bouton type="submit" chargement={enCours}>
+        {/* ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026). */}
+        <Bouton type="submit" chargement={enCours} disabled={JSON.stringify(donnees) === initiales}
+          title={JSON.stringify(donnees) === initiales ? 'Rien n’a changé' : undefined}>
           {libelleValider}
         </Bouton>
       </div>

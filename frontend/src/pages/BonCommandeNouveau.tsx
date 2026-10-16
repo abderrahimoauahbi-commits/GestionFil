@@ -71,6 +71,7 @@ import {
   type LigneSaisie,
 } from '../composants/GrilleLignes'
 import { TotauxCommande } from '../composants/TotauxCommande'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -145,6 +146,8 @@ export function BonCommandeNouveau() {
    */
   const [mode, setMode] = useState<'PLAN' | 'CATALOGUE'>('PLAN')
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
+  // Un bon en cours de saisie ne se perd pas d'un clic dans le menu (audit v4).
+  const quitter = useGardeSaisie(lignes.length > 0)
   const [erreur, setErreur] = useState<string | null>(null)
   const [aCreer, setACreer] = useState<string | null>(null)
 
@@ -162,11 +165,11 @@ export function BonCommandeNouveau() {
 
   const qFrs = useQuery({
     queryKey: ['fournisseurs-actifs'],
-    queryFn: () => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500'),
+    queryFn: ({ signal }) => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
   })
   const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
   const devise = entete.code_devise || fournisseur?.code_devise || 'MAD'
-  const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
+  const qDevises = useQuery({ queryKey: ['devises'], queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }) })
 
   /**
    * CE QUE LE PLAN RECLAME CHEZ CE FOURNISSEUR.
@@ -302,9 +305,9 @@ export function BonCommandeNouveau() {
     <div>
       <EnTetePage
         titre="Nouveau bon de commande"
-        description="Choisissez le fournisseur : ce que le plan d'achat lui reclame s'affiche aussitot. Tapez pour ajouter une ligne."
+        description="Choisissez le fournisseur : ce que le plan d'achat lui réclame s'affiche aussitôt. Tapez pour ajouter une ligne."
         actions={
-          <Bouton variante="contour" onClick={() => naviguer('/bons-commande')}>
+          <Bouton variante="contour" onClick={() => quitter(() => naviguer('/bons-commande'))}>
             <ArrowLeft />
             Retour
           </Bouton>
@@ -312,7 +315,7 @@ export function BonCommandeNouveau() {
       />
 
       {erreur && (
-        <Alerte ton="danger" titre="Création refusee" className="mb-3">
+        <Alerte ton="danger" titre="Création refusée" className="mb-3">
           {erreur}
         </Alerte>
       )}
@@ -336,7 +339,7 @@ export function BonCommandeNouveau() {
                 Fournisseur
                 <Aide>
                   Changer de fournisseur remet la saisie a zero : la devise, les prix et les
-                  propositions du plan en dependent tous.
+                  propositions du plan en dépendent tous.
                 </Aide>
               </Etiq>
               <Selecteur
@@ -423,7 +426,7 @@ export function BonCommandeNouveau() {
         {!entete.code_fournisseur && (
           <Alerte ton="info">
             Choisissez un fournisseur : ce que le plan d'achat lui reclame s'affichera ici, avec la
-            quantite proposee et le prix.
+            quantité proposée et le prix.
           </Alerte>
         )}
 
@@ -440,6 +443,7 @@ export function BonCommandeNouveau() {
                   pauvre. Deux saisies pour un meme article, c'etait une de
                   trop — elles divergeaient sans que rien ne le signale. */}
               <GrilleLignes
+                controleColisage
                 codeFournisseur={entete.code_fournisseur}
                 devise={devise}
                 lignes={lignes}
@@ -515,7 +519,7 @@ export function BonCommandeNouveau() {
             )}
           </span>
           <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={() => naviguer('/bons-commande')}>
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/bons-commande'))}>
               Annuler
             </Bouton>
             <Bouton
@@ -527,7 +531,7 @@ export function BonCommandeNouveau() {
               disabled={!pret || !droits.peutEcrire}
             >
               <Save />
-              Creer le bon
+              Créer le bon
             </Bouton>
           </div>
         </div>

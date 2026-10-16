@@ -18,7 +18,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, Loader2, Plus, Trash2, X } from 'lucide-react'
-import { Alerte } from '../../composants/ui/base'
+import { Alerte, SaisieNombre } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
 import {
   LIBELLE_ROLE, machinesApi, nb,
@@ -65,6 +65,11 @@ export function EditeurMachine({
   const [lignes, setLignes] = useState<LigneZone[]>(
     machine ? depuisPlan(plan) : [neuve('ETAGE', 1, 0)],
   )
+
+  // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026).
+  const empreinte = (n: string, ls: LigneZone[]) =>
+    JSON.stringify({ n: n.trim(), l: ls.map(({ cle: _cle, ...z }) => z) })
+  const [initiale] = useState(() => empreinte(machine?.nom ?? '', machine ? depuisPlan(plan) : []))
 
   const etages = lignes.filter((l) => l.role === 'ETAGE')
   const total = lignes.reduce((s, l) => s + (l.capacite_bobines || 0), 0)
@@ -115,6 +120,7 @@ export function EditeurMachine({
   })
 
   const pret =
+    (!correction || empreinte(nom, lignes) !== initiale) &&
     nom.trim().length > 0 &&
     (correction || code.trim().length > 0) &&
     lignes.length > 0 &&
@@ -188,8 +194,7 @@ export function EditeurMachine({
                   {l.role === 'ETAGE' && ` ${l.numero_etage}`}
                 </td>
                 <td className="px-1 py-1">
-                  <input
-                    type="number"
+                  <SaisieNombre
                     min={1}
                     value={l.capacite_bobines || ''}
                     onChange={(e) =>

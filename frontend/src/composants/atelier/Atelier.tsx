@@ -213,7 +213,7 @@ function Etabli({ routes }: { routes: React.ReactNode }) {
   /* --- Controles ---------------------------------------------------------- */
   const qControles = useQuery({
     queryKey: ['controles'],
-    queryFn: () => api.get<Controle[]>('/api/controles'),
+    queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }),
     enabled: peut('COCKPIT', 'LIRE'),
     refetchInterval: 5 * 60_000,
     staleTime: 60_000,
@@ -980,7 +980,7 @@ function Accueil({ ouvrirPalette }: { ouvrirPalette: () => void }) {
 function EtatServeur() {
   const sante = useQuery({
     queryKey: ['atelier-sante'],
-    queryFn: () => api.get<{ tables?: number; version?: string }>('/api/sante'),
+    queryFn: ({ signal }) => api.get<{ tables?: number; version?: string }>('/api/sante', { signal }),
     refetchInterval: 30_000,
     retry: false,
     staleTime: 0,

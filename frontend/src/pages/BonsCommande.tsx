@@ -10,7 +10,6 @@
  * n°, date, fournisseur, livraison prevue, statut, montant devise et MAD,
  * % livre, nombre de lignes, statut de livraison.
  */
-import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { FileText, Plus, Printer, Trash2 } from 'lucide-react'
@@ -97,7 +96,7 @@ export function BonsCommande() {
 
   const q = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<Bc[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<Bc[]>('/api/bons-commande', { signal }),
   })
 
   /**
@@ -136,16 +135,6 @@ export function BonsCommande() {
   })
 
   const lignes = q.data ?? []
-
-  const totaux = useMemo(() => {
-    const ouverts = lignes.filter((b) => !['CLOTURE', 'ANNULE'].includes(b.statut))
-    return {
-      ouverts: ouverts.length,
-      engage: ouverts.reduce((s, b) => s + (b.montant_total_mad ?? 0), 0),
-      aValider: lignes.filter((b) => b.statut === 'EN_ATTENTE_VALIDATION').length,
-      brouillons: lignes.filter((b) => b.statut === 'BROUILLON').length,
-    }
-  }, [lignes])
 
   const colonnes: ColonneDT<Bc>[] = [
     {
@@ -287,32 +276,9 @@ export function BonsCommande() {
         }
       />
 
-      {lignes.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-3">
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Engage, bons ouverts</div>
-            <div className="text-lg font-semibold tabular-nums">{fmt.mad(totaux.engage)}</div>
-          </div>
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Bons ouverts</div>
-            <div className="text-lg font-semibold tabular-nums">{totaux.ouverts}</div>
-          </div>
-          {totaux.brouillons > 0 && (
-            <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En brouillon</div>
-              <div className="text-lg font-semibold tabular-nums">{totaux.brouillons}</div>
-            </div>
-          )}
-          {totaux.aValider > 0 && (
-            <div className="rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En attente de validation</div>
-              <div className="text-lg font-semibold tabular-nums text-alerte">
-                {totaux.aValider}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* PAS DE TUILES EN TETE D'UNE LISTE DE TRAVAIL (preference de
+          l'entreprise, audit v4) : les indicateurs vivent au tableau de bord et
+          dans les statistiques ; ici, on traite les lignes. */}
 
       <DataTable<Bc>
           exportable="bons-de-commande"
@@ -327,7 +293,7 @@ export function BonsCommande() {
         placeholderRecherche="N° de bon, fournisseur, statut..."
         titreCarte={(b) => `${b.numero_bc} — ${b.fournisseur_nom}`}
         videTitre="Aucun bon de commande"
-        videDescription="Les bons naissent du plan d'achat, ou se creent a la main."
+        videDescription="Les bons naissent du plan d'achat, ou se creent à la main."
         actions={(b) => (
           <div className="flex justify-end gap-0.5">
             <Bouton
@@ -354,7 +320,12 @@ export function BonsCommande() {
                 issues : on le complete, ou il disparait. Annuler et le laisser
                 en base ne servirait qu'a encombrer la liste d'un document mort
                 dont le numero n'a jamais rien engage. */}
-            {droits.peutEcrire && !['CLOTURE', 'ANNULE'].includes(b.statut) && (
+            {/* ANNULER UN BON ENGAGE EST UN ACTE DE VALIDATION (regle 15,
+                08/10/2026) : le serveur exige VALIDER des que le bon est
+                valide ou envoye. Le bouton ne se montre qu'a qui peut s'en
+                servir ; supprimer un brouillon reste une ecriture. */}
+            {!['CLOTURE', 'ANNULE'].includes(b.statut) &&
+              (SUPPRIMABLES.includes(b.statut) ? droits.peutEcrire : droits.peutValider) && (
               <Bouton
                 variante="discret"
                 taille="icone-xs"
@@ -370,7 +341,7 @@ export function BonsCommande() {
                       : 'Annuler le bon',
                     description: SUPPRIMABLES.includes(b.statut)
                       ? 'Ce bon n’engage rien : il sera EFFACE, sans laisser de trace dans ' +
-                        'la liste ni dans les etats. Ses propositions d’achat reviendront au plan.'
+                        'la liste ni dans les états. Ses propositions d’achat reviendront au plan.'
                       : 'Ses lignes seront annulees et les propositions d’achat qui les ont ' +
                         'produites reviendront au plan. Le bon restera visible, marque annule.',
                     action: () =>

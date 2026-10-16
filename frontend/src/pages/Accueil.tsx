@@ -54,8 +54,10 @@ const TEINTE: Record<string, { fond: string; trait: string }> = {
   GENERAL:    { fond: 'rgb(37 99 235 / .12)',  trait: 'rgb(37 99 235)' },   // bleu
   CATALOGUE:  { fond: 'rgb(124 58 237 / .12)', trait: 'rgb(124 58 237)' },  // violet
   PRODUCTION: { fond: 'rgb(196 161 90 / .18)', trait: 'rgb(163 128 58)' },  // l'or de la marque
+  PLANIFICATION: { fond: 'rgb(217 119 6 / .12)', trait: 'rgb(180 83 9)' },   // ambre
   ACHATS:     { fond: 'rgb(5 150 105 / .12)',  trait: 'rgb(5 150 105)' },   // vert
   STOCK:      { fond: 'rgb(13 148 136 / .12)', trait: 'rgb(13 148 136)' },  // sarcelle
+  ANALYSES:   { fond: 'rgb(79 70 229 / .12)',  trait: 'rgb(67 56 202)' },   // indigo
   FINANCE:    { fond: 'rgb(225 29 72 / .10)',  trait: 'rgb(190 24 62)' },   // grenat
   PARAMETRES: { fond: 'rgb(100 116 139 / .14)', trait: 'rgb(71 85 105)' },  // ardoise
 }
@@ -107,7 +109,7 @@ function Variation({ ecart, base, suffixe }: { ecart: number; base: number; suff
 function TauxDeChange() {
   const qDev = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string; est_pivot: number }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string; est_pivot: number }[]>('/api/devises', { signal }),
   })
   // Le serveur ne relit la banque qu'au plus une fois par demi-heure : un
   // rafraichissement de l'ecran plus frequent ne lui apprendrait rien.
@@ -248,7 +250,7 @@ function TauxDeChange() {
       </div>
       <p className="text-[11px] text-attenue-texte">
         Pour information : le cours de Bank Al-Maghrib ne modifie jamais le taux de l’ERP.{' '}
-        <a href={qBam.data?.url} target="_blank" rel="noreferrer" className="text-primaire hover:underline">
+        <a href={qBam.data?.url} target="_blank" rel="noreferrer" className="text-primaire underline underline-offset-2">
           Source : Bank Al-Maghrib
         </a>
         {qBam.data?.erreur && <span className="text-alerte"> · {qBam.data.erreur} — dernier cours connu affiché</span>}
@@ -276,6 +278,8 @@ interface Evenement {
   detail: string | null
   chemin: string
   par: string | null
+  /** A part du detail depuis le 08/10/2026 : absent quand le compte ne voit pas les montants. */
+  montant_total_mad?: number | null
 }
 
 const TEINTE_CATEGORIE: Record<string, string> = {
@@ -307,7 +311,7 @@ function depuis(iso: string): string {
 function FilActualite() {
   const q = useQuery({
     queryKey: ['actualite'],
-    queryFn: () => api.get<Evenement[]>('/api/actualite'),
+    queryFn: ({ signal }) => api.get<Evenement[]>('/api/actualite', { signal }),
     staleTime: 60_000,
   })
   const evenements = q.data ?? []
@@ -330,7 +334,7 @@ function FilActualite() {
         <p className="rounded-[var(--radius-sm)] border border-bordure bg-surface px-3 py-4
                       text-[13px] text-attenue-texte">
           Rien n'a encore ete enregistre. Le fil se remplira des la premiere
-          reception, le premier mouvement ou le premier bon de commande.
+          réception, le premier mouvement ou le premier bon de commande.
         </p>
       ) : (
         <ol className="flex flex-col gap-1.5">
@@ -353,8 +357,12 @@ function FilActualite() {
                   {e.categorie}
                 </span>
                 <span className="text-[13.5px] font-medium text-texte">{e.titre}</span>
-                {e.detail && (
-                  <span className="text-[12px] text-attenue-texte">{e.detail}</span>
+                {(e.detail || e.montant_total_mad != null) && (
+                  <span className="text-[12px] text-attenue-texte">
+                    {[e.detail, e.montant_total_mad != null ? `${fmt.entier(e.montant_total_mad)} MAD` : null]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
                 )}
                 {/* L'AUTEUR ET LE MOMENT FERMENT LA LIGNE, a droite : ce sont
                     les deux choses qu'on cherche en second, jamais en premier. */}

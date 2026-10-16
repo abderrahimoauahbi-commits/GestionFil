@@ -63,19 +63,19 @@ const NOM_METIER: Record<string, string> = {
   bon_commande: 'bons de commande',
   ligne_bc: 'lignes de bon de commande',
   reception: 'receptions',
-  ligne_reception: 'lignes de reception',
-  archive_reception: 'receptions archivees',
+  ligne_reception: 'lignes de réception',
+  archive_reception: 'réceptions archivees',
   plan_achat: 'propositions d achat',
   fournisseur: 'fournisseurs',
   contact_fournisseur: 'contacts fournisseur',
   couleur_fournisseur: 'correspondances de couleur',
   // Catalogue
-  reference: 'references du catalogue',
+  reference: 'références du catalogue',
   famille: 'familles',
-  categorie_matiere: 'categories de matiere',
+  categorie_matiere: 'catégories de matière',
   couleur: 'couleurs',
-  groupe_equiv: 'groupes d equivalence',
-  reference_groupe_equiv: 'references equivalentes',
+  groupe_equiv: 'groupes d équivalence',
+  reference_groupe_equiv: 'références equivalentes',
   historique_prix: 'releves de prix',
   // Production
   qualite: 'qualites',
@@ -83,7 +83,7 @@ const NOM_METIER: Record<string, string> = {
   recette: 'recettes',
   plan_production: 'plans de production',
   ligne_plan_production: 'lignes de plan',
-  plan_qualite: 'qualites planifiees',
+  plan_qualite: 'qualités planifiees',
   plan_saisonnalite: 'coefficients de saisonnalite',
   besoin_mrp: 'besoins calcules',
   snapshot_mrp: 'archives de calcul',
@@ -99,8 +99,8 @@ const NOM_METIER: Record<string, string> = {
   import_dossiers: 'dossiers d import',
   import_factures: 'factures d import',
   import_facture_lignes: 'lignes de facture d import',
-  import_receptions: 'receptions d import',
-  import_reception_lignes: 'lignes de reception d import',
+  import_receptions: 'réceptions d import',
+  import_reception_lignes: 'lignes de réception d import',
   frais_approche: 'frais d approche',
   // Structure et journal
   magasin: 'magasins',
@@ -187,10 +187,10 @@ export function DialogueSuppression({
     <Dialogue open={ouvert} onOpenChange={(o) => !o && surFermeture()}>
       <DialogueContenu
         titre={`Supprimer ${nom} ?`}
-        description="Ce que l ERP sait de cette ligne avant de la retirer."
+        description="Ce que l’ERP sait de cette ligne avant de la retirer."
       >
         <div className="flex flex-col gap-3 p-4 text-[13px] leading-relaxed">
-          {q.isLoading && <Chargement texte="Recherche de ce qui s appuie dessus…" />}
+          {q.isLoading && <Chargement texte="Recherche de ce qui s’appuie dessus…" />}
 
           {d?.supprimable && (
             <Alerte ton="info">
@@ -219,11 +219,11 @@ export function DialogueSuppression({
                 <p className="text-attenue-texte">
                   Vous pouvez la <strong>mettre de cote</strong> : elle disparait des listes de
                   saisie, et tout ce qui la cite continue de fonctionner. C est le geste juste
-                  pour une matiere qu on ne commande plus.
+                  pour une matière qu’on ne commande plus.
                 </p>
               ) : (
                 <p className="text-attenue-texte">
-                  Pour l effacer, il faut d abord retirer ou rattacher ailleurs ce qui la cite.
+                  Pour l’effacer, il faut d’abord retirer ou rattacher ailleurs ce qui la cité.
                 </p>
               )}
             </>

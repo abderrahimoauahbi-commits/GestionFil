@@ -181,7 +181,6 @@ VALUES
   (gen_random_uuid()::text, 'ASSISTANTE', 'INVENTAIRE', 'ECRIRE', 1),
   (gen_random_uuid()::text, 'MAGASIN', 'INVENTAIRE', 'LIRE', 1),
   (gen_random_uuid()::text, 'MAGASIN', 'INVENTAIRE', 'ECRIRE', 1),
-  (gen_random_uuid()::text, 'MAGASIN', 'INVENTAIRE', 'VALIDER', 1),
   (gen_random_uuid()::text, 'DIRECTION', 'STOCK', 'LIRE', 1),
   (gen_random_uuid()::text, 'DIRECTION', 'STOCK', 'ECRIRE', 1),
   (gen_random_uuid()::text, 'ADMIN', 'STOCK', 'LIRE', 1),

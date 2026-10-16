@@ -28,6 +28,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { OngletsTableauDeBord } from './tableau-de-bord/Onglets'
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -131,7 +132,7 @@ const DOMAINES: { cle: Domaine; libelle: string }[] = [
   { cle: 'ACHATS', libelle: 'Achats' },
   { cle: 'STOCK', libelle: 'Stock' },
   { cle: 'PRODUCTION', libelle: 'Production' },
-  { cle: 'QUALITE', libelle: 'Qualite' },
+  { cle: 'QUALITE', libelle: 'Qualité' },
 ]
 
 interface Tuile {
@@ -174,14 +175,14 @@ export function Cockpit() {
   const droits = useDroits(MODULE)
   const { peut } = useAuth()
 
-  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: () => api.get<Kpi>('/api/cockpit') })
+  const qKpi = useQuery({ queryKey: ['cockpit'], queryFn: ({ signal }) => api.get<Kpi>('/api/cockpit', { signal }) })
   const qCtl = useQuery({
     queryKey: ['controles'],
-    queryFn: () => api.get<Controle[]>('/api/controles'),
+    queryFn: ({ signal }) => api.get<Controle[]>('/api/controles', { signal }),
   })
   const qRisques = useQuery({
     queryKey: ['cockpit-risques'],
-    queryFn: () => api.get<Risque[]>('/api/cockpit/risques'),
+    queryFn: ({ signal }) => api.get<Risque[]>('/api/cockpit/risques', { signal }),
   })
 
   const k = qKpi.data ?? {}
@@ -192,7 +193,7 @@ export function Cockpit() {
   const lisStock = peut('STOCK', 'LIRE')
   const qLots = useQuery({
     queryKey: ['cockpit-lots'],
-    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, number | null>>('/api/cockpit/lots', { signal }),
     enabled: lisStock,
   })
   const nl = (champ: string) => Number(qLots.data?.[champ] ?? 0)
@@ -212,7 +213,7 @@ export function Cockpit() {
     {
       champ: 'nb_bc_a_valider',
       domaine: 'ACHATS',
-      libelle: 'Bons a valider',
+      libelle: 'Bons à valider',
       valeur: n('nb_bc_a_valider'),
       detail: droits.visible('montant_bc_a_valider_mad')
         ? `${fmt.compact(n('montant_bc_a_valider_mad'))} MAD engages`
@@ -247,9 +248,9 @@ export function Cockpit() {
     {
       champ: 'nb_receptions_a_controler',
       domaine: 'QUALITE',
-      libelle: 'Réceptions a controler',
+      libelle: 'Réceptions à contrôler',
       valeur: n('nb_receptions_a_controler'),
-      detail: 'en attente du controle qualité',
+      detail: 'en attente du contrôle qualité',
       ton: 'alerte',
       Icone: ClipboardCheck,
       vers: '/receptions',
@@ -269,9 +270,9 @@ export function Cockpit() {
     {
       champ: 'nb_receptions_a_regulariser',
       domaine: 'STOCK',
-      libelle: 'A regulariser',
+      libelle: 'À régulariser',
       valeur: n('nb_receptions_a_regulariser'),
-      detail: 'bon non envoye : controle bloque',
+      detail: 'bon non envoye : contrôle bloque',
       ton: 'danger',
       Icone: ShieldAlert,
       vers: '/receptions',
@@ -297,7 +298,7 @@ export function Cockpit() {
       domaine: 'QUALITE',
       libelle: 'Lots a moins de 90 j',
       valeur: n('nb_lots_peremption_proche'),
-      detail: 'peremption proche',
+      detail: 'péremption proche',
       ton: 'alerte',
       Icone: Clock,
       vers: '/stock',
@@ -436,13 +437,10 @@ export function Cockpit() {
      pages d'un espace Fiori ou les entrees « Vue d'ensemble / Analyse » d'une
      application Odoo. */
   const { vue: vueUrl } = useParams<{ vue?: string }>()
-  const naviguer = useNavigate()
   const vue: VueCockpit =
     vueUrl === 'analyse' || vueUrl === 'opportunites' || vueUrl === 'matiere'
       ? vueUrl
       : 'situation'
-  const setVue = (v: VueCockpit) =>
-    naviguer(v === 'situation' ? '/tableau-de-bord' : `/tableau-de-bord/${v}`)
 
   const risques = qRisques.data ?? []
   /** Les mois de l'horizon, pris sur la premiere frise : toutes sont alignees. */
@@ -452,7 +450,7 @@ export function Cockpit() {
     <div>
       <EnTetePage
         titre="Poste de travail"
-        description="Ce qui attend une decision, et ce qui menace le plan de production. Tout est recalcule a l'ouverture."
+        description="Ce qui attend une décision, et ce qui menace le plan de production. Tout est recalculé a l'ouverture."
         actions={
           <label className="flex items-center gap-2 text-[12px] text-attenue-texte">
             Domaine
@@ -491,7 +489,7 @@ export function Cockpit() {
         <>
           {mesFiles.length > 0 && (
             <>
-              <TitreBande texte="A traiter" />
+              <TitreBande texte="À traiter" />
               {/* UNE BARRE, PAS DES TUILES.
                   Ni la grille ni la rangee souple ne tenaient. En grille, une
                   file unique s'etirait sur mille quatre cents pixels pour trois
@@ -512,9 +510,9 @@ export function Cockpit() {
           )}
 
           {mesFiles.length === 0 && (
-            <Alerte ton="succes" titre="Rien n'attend de decision">
+            <Alerte ton="succes" titre="Rien n'attend de décision">
               Aucune file en cours pour votre role. Les compteurs reapparaitront des qu'un bon, une
-              reception ou une proposition demandera votre intervention.
+              réception ou une proposition demandera votre intervention.
             </Alerte>
           )}
 
@@ -552,7 +550,7 @@ export function Cockpit() {
           va toujours dans le sens rassurant : un plan revu a la hausse laisse
           les besoins bas, donc la projection haute, donc l'alerte verte. */}
       {n('besoins_perimes') > 0 ? (
-        <Alerte ton="danger" titre="Les alertes reposent sur des besoins perimes">
+        <Alerte ton="danger" titre="Les alertes reposent sur des besoins périmés">
           Le plan, une recette ou une densité a changé depuis le dernier calcul MRP
           {k.besoins_calcules_le
             ? ` du ${fmt.dateHeure(k.besoins_calcules_le as string)}`
@@ -574,14 +572,14 @@ export function Cockpit() {
           le probleme — une vue qu'on parcourt n'est plus une vue qu'on compare.
           Les quatre onglets reprennent l'ordre du classeur : ce qui brule, ce
           que disent les chiffres, ce qu'on pourrait gagner, ou part la matiere. */}
-      <BarreVues vue={vue} surChoix={setVue} />
+      <OngletsTableauDeBord className="mt-6" />
 
       {vue === 'situation' && <CockpitAnalyse vue="situation" />}
 
       {vue === 'analyse' && (
         <>
           <CockpitAnalyse vue="analyse" />
-          <TitreBande texte="Concentration et dependances" />
+          <TitreBande texte="Concentration et dépendances" />
           <Concentration />
         </>
       )}
@@ -590,7 +588,7 @@ export function Cockpit() {
 
       {vue === 'matiere' && (
         <>
-          <TitreBande texte="Ou part la matiere" />
+          <TitreBande texte="Ou part la matière" />
           <TableauDeBord />
         </>
       )}
@@ -744,7 +742,7 @@ export function Cockpit() {
            « nos donnees disent-elles vrai ? », pas a « que faire aujourd'hui ». */}
       {vue === 'matiere' && (
       <>
-      <TitreBande texte="Sante du referentiel" />
+      <TitreBande texte="Santé du référentiel" />
       <Carte repliable="cockpit.2">
         <CarteEntete>
           <CarteTitre>Contrôles métier</CarteTitre>
@@ -761,7 +759,7 @@ export function Cockpit() {
           ) : autres.length === 0 ? (
             <div className="flex items-center gap-2 p-4 text-sm text-succes">
               <CheckCircle2 className="size-4" />
-              Aucune anomalie detectee.
+              Aucune anomalie détectée.
             </div>
           ) : (
             <ul className="divide-y divide-bordure">
@@ -790,52 +788,6 @@ export function Cockpit() {
       </Carte>
       </>
       )}
-    </div>
-  )
-}
-
-/**
- * LA BARRE DES VUES.
- *
- * Quatre entrees, dans l'ordre ou l'on decide : ce qui brule, ce que disent les
- * chiffres, ce qu'on pourrait gagner, ou part la matiere. C'est l'ordre du
- * classeur, et c'est aussi celui des cockpits des grands ERP — on n'ouvre pas
- * un tableau de bord pour tout voir, on l'ouvre avec une question.
- *
- * LE CHOIX SE GARDE dans la session : revenir au poste de travail apres avoir
- * ouvert une reference doit ramener la ou l'on etait, pas au debut.
- */
-function BarreVues({
-  vue,
-  surChoix,
-}: {
-  vue: VueCockpit
-  surChoix: (v: VueCockpit) => void
-}) {
-  const vues: { cle: VueCockpit; libelle: string }[] = [
-    { cle: 'situation', libelle: 'Synthèse' },
-    { cle: 'analyse', libelle: 'Analytique' },
-    { cle: 'opportunites', libelle: 'Opportunités' },
-    { cle: 'matiere', libelle: 'Matière' },
-  ]
-  return (
-    <div className="mb-3 mt-6 flex flex-wrap gap-1 border-b border-bordure">
-      {vues.map((v) => (
-        <button
-          key={v.cle}
-          type="button"
-          onClick={() => surChoix(v.cle)}
-          className={cn(
-            '-mb-px border-b-2 px-3 py-1.5 text-[12.5px] transition-colors',
-            v.cle === vue
-              ? 'border-primaire font-medium text-texte'
-              : 'border-transparent text-attenue-texte hover:text-texte',
-          )}
-          aria-current={v.cle === vue ? 'page' : undefined}
-        >
-          {v.libelle}
-        </button>
-      ))}
     </div>
   )
 }
@@ -1043,7 +995,7 @@ interface StatRole {
  * Pas de troisieme graphique tant qu'aucune sortie de production n'est saisie :
  * un camembert de consommation sur zero mouvement ne montrerait que du vide.
  */
-function TableauDeBord() {
+export function TableauDeBord() {
   const { peut } = useAuth()
   const q = useQuery({
     queryKey: ['stats', 'qualites'],
@@ -1106,9 +1058,9 @@ function TableauDeBord() {
   if (q.isLoading) return <Squelette className="h-56 w-full" />
   if (!couts.length) {
     return (
-      <Alerte ton="info" titre="Pas encore de coût matiere">
+      <Alerte ton="info" titre="Pas encore de coût matière">
         Le cout par metre carre se calcule a partir du CMUP des composants. Il apparaitra des la
-        premiere reception valorisee sur chaque reference de recette.
+        première réception valorisée sur chaque référence de recette.
       </Alerte>
     )
   }
@@ -1116,7 +1068,7 @@ function TableauDeBord() {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <BarresRangees
-        titre="Coût matiere par qualité"
+        titre="Coût matière par qualité"
         sousTitre="CMUP des composants, rapporte au metre carre"
         unite="MAD/m2"
         donnees={couts}
@@ -1124,7 +1076,7 @@ function TableauDeBord() {
       {composition.donnees.length > 0 && (
         <BarresEmpilees
           titre="Ou passe le coût"
-          sousTitre="Les trois roles les plus lourds de la gamme"
+          sousTitre="Les trois rôles les plus lourds de la gamme"
           unite="MAD/m2"
           series={composition.series}
           donnees={composition.donnees}
@@ -1153,20 +1105,20 @@ interface LigneProjetee {
  * Deux questions de direction, cote a cote : sur quelles references l'argent
  * est-il immobilise, et de qui depend-on pour le racheter.
  */
-function Concentration() {
+export function Concentration() {
   const { peut } = useAuth()
   const client = useQueryClient()
   const [calcul, setCalcul] = useState(false)
 
   const qStock = useQuery({
     queryKey: ['stock-projete-cockpit'],
-    queryFn: () => api.get<LigneProjetee[]>('/api/stock/projete?limite=2000'),
+    queryFn: ({ signal }) => api.get<LigneProjetee[]>('/api/stock/projete?limite=2000', { signal }),
     enabled: peut('STOCK', 'LIRE'),
     staleTime: 60_000,
   })
   const qFour = useQuery({
     queryKey: ['fournisseurs-scorecard'],
-    queryFn: () => api.get<Fournisseur[]>('/api/fournisseurs/scorecard'),
+    queryFn: ({ signal }) => api.get<Fournisseur[]>('/api/fournisseurs/scorecard', { signal }),
     enabled: peut('FOURNISSEURS', 'LIRE'),
     staleTime: 5 * 60_000,
   })
@@ -1179,9 +1131,9 @@ function Concentration() {
     try {
       await api.post('/api/classification', {})
       await client.invalidateQueries()
-      toast.success('Classification ABC / XYZ calculee')
+      toast.success('Classification ABC / XYZ calculée')
     } catch (e) {
-      toast.error('Classification refusee', { description: String(e) })
+      toast.error('Classification refusée', { description: String(e) })
     } finally {
       setCalcul(false)
     }
@@ -1204,7 +1156,7 @@ function Concentration() {
           classeCalculee ? undefined : (
             <div className="border-t border-ligne pt-2 text-[11px] text-attenue-texte">
               Les classes A, B et C ne sont pas encore attribuees : la courbe montre la
-              concentration reelle, mais aucune reference ne porte sa classe.
+              concentration réelle, mais aucune référence ne porte sa classe.
               {peut('CATALOGUE', 'ECRIRE') && (
                 <button
                   type="button"
@@ -1243,7 +1195,7 @@ function ChiffresCles() {
 
   const q = useQuery({
     queryKey: ['cockpit'],
-    queryFn: () => api.get<Record<string, number | string | null>>('/api/cockpit'),
+    queryFn: ({ signal }) => api.get<Record<string, number | string | null>>('/api/cockpit', { signal }),
     enabled: peut('COCKPIT', 'LIRE'),
   })
 
@@ -1322,7 +1274,7 @@ function ChiffresCles() {
         />
         <CarteStat
           Icone={ShoppingCart}
-          libelle="A engager"
+          libelle="À engager"
           valeur={fmt.compact(n('budget_a_engager_mad'))}
           unite="MAD"
           precision={`${n('nb_propositions_a_traiter')} proposition(s) · ${fmt.compact(
@@ -1341,17 +1293,17 @@ function ChiffresCles() {
           precision={`${ruptures} rupture(s) · ${critiques} critique(s) · ${attention} en attention`}
           ton={ruptures > 0 ? 'danger' : critiques > 0 ? 'alerte' : 'succes'}
           surClic={() => naviguer('/plan-achat')}
-          aide="Stock + commandes fiables - demande pendant le delai d'approvisionnement."
+          aide="Stock + commandes fiables - demande pendant le délai d'approvisionnement."
         />
         <CarteStat
           Icone={Sparkles}
-          libelle="Economies identifiees"
+          libelle="Économies identifiées"
           valeur={fmt.compact(eco?.economies_total_mad ?? 0)}
           unite="MAD/an"
           precision={`${eco?.nb_opportunites ?? 0} référence(s) au-dessus du prix du groupe`}
           ton={(eco?.economies_total_mad ?? 0) > 0 ? 'succes' : 'neutre'}
           surClic={() => naviguer('/matrice-prix')}
-          aide="A qualite egale : le meme titrage, achete moins cher ailleurs dans le catalogue."
+          aide="A qualité égale : le même titrage, achete moins cher ailleurs dans le catalogue."
         />
       </div>
 
@@ -1391,7 +1343,7 @@ function ChiffresCles() {
       {ok + attention + critiques + ruptures > 0 && (
         <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
           <p className="mb-2 text-[11px] uppercase tracking-wide text-attenue-texte">
-            Etat du catalogue suivi
+            État du catalogue suivi
           </p>
           <BarreRepartition
             parts={[
@@ -1421,12 +1373,12 @@ function ChiffresCles() {
  * donnerait un total faux et ferait croire le catalogue plus propre qu'il
  * n'est. Cette ligne-la est une invitation a completer le catalogue.
  */
-function BlocFamilles() {
+export function BlocFamilles() {
   const naviguer = useNavigate()
   const droits = useDroits('MOUVEMENTS')
   const q = useQuery({
     queryKey: ['stats', 'familles'],
-    queryFn: () => api.get<Record<string, Record<string, unknown>[]>>('/api/stats/familles'),
+    queryFn: ({ signal }) => api.get<Record<string, Record<string, unknown>[]>>('/api/stats/familles', { signal }),
     staleTime: 5 * 60_000,
   })
 

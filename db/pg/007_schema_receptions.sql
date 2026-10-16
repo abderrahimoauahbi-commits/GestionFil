@@ -48,10 +48,28 @@ CREATE TABLE reception (
     -- RG-09 : taux fige a la date de RECEPTION (distinct du taux engage du BC)
     taux_change_reception numeric(9,4)  CHECK (taux_change_reception IS NULL OR taux_change_reception > 0),
 
+    -- L'ARRIVAGE D'IMPORT (ADR-003 D2, 14/10/2026). Une reception est un
+    -- arrivage : un camion, un conteneur, un bon de livraison. Quand il vient
+    -- de l'etranger, il se RATTACHE a un dossier d'import — qui porte la DUM,
+    -- les conteneurs, le regime douanier — sans jamais remplacer la commande :
+    -- le prix de chaque ligne vient de sa ligne de bon.
+    -- La cle etrangere est posee par 018 (import_dossiers nait apres).
+    id_dossier_import   text,
+
     id_utilisateur_reception text NOT NULL REFERENCES utilisateur(id_utilisateur),
     id_utilisateur_controle  text REFERENCES utilisateur(id_utilisateur),
     date_controle       text,
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    -- LA VALEUR DEFINITIVE (regle 6, 08/10/2026) : la facture et ses frais,
+    -- portes au stock a la cloture (domain/facture_locale.rs).
+    montant_facture_mad numeric(18,2),
+    frais_facture_mad   numeric(18,2),
+    -- La facture dans la devise du bon, et son taux (decision 4, audit v4).
+    code_devise_facture text REFERENCES devise(code_devise),
+    montant_facture_devise numeric(18,2),
+    taux_facture        numeric(9,4) CHECK (taux_facture IS NULL OR taux_facture > 0),
+    date_cloture        text,
+    id_utilisateur_cloture text REFERENCES utilisateur(id_utilisateur),
 
     -- B4 regle 2 : le magasinier qui pese n'est pas celui qui libere la marchandise
     CHECK (id_utilisateur_controle IS NULL
@@ -64,6 +82,17 @@ CREATE TABLE reception (
 
 CREATE INDEX ix_reception_bc     ON reception(id_bc);
 CREATE INDEX ix_reception_statut ON reception(statut, date_reception DESC);
+CREATE INDEX ix_reception_dossier_import
+    ON reception(id_dossier_import) WHERE id_dossier_import IS NOT NULL;
+
+-- Le bon ne d'un arrivage sans commande (colonne declaree en 006, module des
+-- achats) : la cle ne peut etre posee qu'ici, ou `reception` existe enfin.
+ALTER TABLE bon_commande
+    ADD CONSTRAINT fk_bc_reception_regularisee
+    FOREIGN KEY (id_reception_regularisee) REFERENCES reception(id_reception);
+
+CREATE INDEX ix_bc_reception_regularisee
+    ON bon_commande(id_reception_regularisee) WHERE id_reception_regularisee IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- ligne_reception
@@ -198,3 +227,33 @@ CREATE TABLE archive_reception (
 
 CREATE INDEX ix_archive_ref  ON archive_reception(code_reference, date_reception DESC);
 CREATE INDEX ix_archive_four ON archive_reception(code_fournisseur, date_reception DESC);
+
+-- -----------------------------------------------------------------------------
+-- reception_ajustements_cmup — ce que la cloture d'une reception locale a fait
+-- au CMUP (regle 6). IMMUABLE (declencheur dans 010_declencheurs.sql).
+--   STOCK      : une ligne par magasin ou la reference restait en stock.
+--   ECART_PRIX : la part qui revenait aux kilos deja sortis, tracee hors CMUP.
+-- -----------------------------------------------------------------------------
+CREATE TABLE reception_ajustements_cmup (
+    id_ajustement       text    NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    id_reception        text    NOT NULL REFERENCES reception(id_reception),
+    code_reference      text    NOT NULL REFERENCES reference(code_reference),
+    nature              text    NOT NULL CHECK (nature IN ('STOCK','ECART_PRIX')),
+    code_magasin        text    REFERENCES magasin(code_magasin),
+    quantite_recue_kg   numeric(18,4) NOT NULL CHECK (quantite_recue_kg >= 0),
+    stock_kg            numeric(18,4) NOT NULL CHECK (stock_kg >= 0),
+    cmup_avant          numeric(18,4),
+    cmup_apres          numeric(18,4),
+    montant_mad         numeric(18,2) NOT NULL,
+    date_ajustement     text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    id_utilisateur      text    NOT NULL REFERENCES utilisateur(id_utilisateur),
+    -- CLOTURE (la facture), AVOIR ou COMPLEMENT (sa correction, motivee).
+    origine             text    NOT NULL DEFAULT 'CLOTURE',
+    numero_piece        text,
+    motif               text,
+    CHECK ((nature = 'STOCK' AND code_magasin IS NOT NULL AND cmup_apres IS NOT NULL)
+        OR (nature = 'ECART_PRIX' AND code_magasin IS NULL)),
+    CONSTRAINT ck_rec_ajust_origine CHECK (origine IN ('CLOTURE','AVOIR','COMPLEMENT')
+        AND (origine = 'CLOTURE' OR length(btrim(COALESCE(motif, ''))) >= 5))
+);
+CREATE INDEX ix_rec_ajust_reception ON reception_ajustements_cmup(id_reception);

@@ -88,7 +88,7 @@ export function Transferts() {
 
   const q = useQuery({
     queryKey: ['transferts'],
-    queryFn: () => api.get<Transfert[]>('/api/transferts'),
+    queryFn: ({ signal }) => api.get<Transfert[]>('/api/transferts', { signal }),
   })
 
   const rafraichir = () => {
@@ -190,7 +190,7 @@ export function Transferts() {
     },
     {
       champ: 'utilisateur',
-      entete: 'Expedie / reçu par',
+      entete: 'Expédié / reçu par',
       secondaire: true,
       rendu: (t) => (
         <div className="text-[12px]">
@@ -226,20 +226,20 @@ export function Transferts() {
         {
           cle: 'BROUILLON',
           libelle: 'En preparation',
-          resume: 'Rien n a bouge',
+          resume: 'Rien n’a bouge',
           compte: comptes.BROUILLON ?? 0,
           ton: 'neutre' as const,
         },
         {
           cle: 'VALIDE',
           libelle: 'En transit',
-          resume: 'Parti, arrivee non constatee',
+          resume: 'Parti, arrivée non constatée',
           compte: comptes.VALIDE ?? 0,
           ton: 'alerte' as const,
         },
         {
           cle: 'TERMINE',
-          libelle: 'Recu',
+          libelle: 'Reçu',
           resume: 'Entre en stock a destination',
           compte: comptes.TERMINE ?? 0,
           ton: 'succes' as const,
@@ -260,7 +260,7 @@ export function Transferts() {
     <div>
       <EnTetePage
         titre="Transferts"
-        description="Un transfert valide genere deux mouvements : sortie du magasin source, entree au destinataire."
+        description="Un transfert valide généré deux mouvements : sortie du magasin source, entrée au destinataire."
         actions={
           droits.peutEcrire && (
             <Bouton taille="icone" title="Nouveau transfert" aria-label="Nouveau transfert" onClick={() => naviguer('/transferts/nouveau')}>              <Plus />            </Bouton>
@@ -340,13 +340,13 @@ export function Transferts() {
                         `Elles ne seront comptees dans aucun magasin tant que quelqu'un ne les ` +
                         `aura pas constatees a ${t.code_magasin_dest}. Le mouvement de sortie ` +
                         `est immuable.`,
-                      libelleConfirmer: 'Expedier',
+                      libelleConfirmer: 'Expédier',
                       action: () => expedier.mutate(t.id_transfert),
                     })
                   }
                 >
                   <Truck />
-                  Expedier
+                  Expédier
                 </Bouton>
               )}
             </div>
@@ -356,10 +356,10 @@ export function Transferts() {
                 variante="contour"
                 taille="sm"
                 onClick={() => naviguer(`/transferts/${t.id_transfert}/bon-reception`)}
-                title="Bon de reception, a remplir au dechargement"
+                title="Bon de réception, a remplir au déchargement"
               >
                 <Printer />
-                Bon de reception
+                Bon de réception
               </Bouton>
               <Bouton
               taille="sm"
@@ -371,13 +371,13 @@ export function Transferts() {
                     `${t.nb_lignes} ligne(s) entreront en stock a ${t.code_magasin_dest}, ` +
                     `valorisees au CMUP fige au depart. A ne faire qu'apres avoir vu la ` +
                     `marchandise sur place.`,
-                  libelleConfirmer: 'Constater la reception',
+                  libelleConfirmer: 'Constater la réception',
                   action: () => receptionner.mutate(t.id_transfert),
                 })
               }
             >
               <PackageCheck />
-              Receptionner
+              Réceptionner
             </Bouton>
             </div>
           ) : t.statut === 'TERMINE' ? (

@@ -8,7 +8,7 @@
  * et « Autre lot… » ouvre la saisie libre, pour un lot qui n'est pas encore en
  * stock (une entree, une regularisation).
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { libelleLot, SANS_LOT } from '../lib/lots'
@@ -30,6 +30,7 @@ export function ChampLot({
   className,
   invalide,
   ariaLabel = 'Lot fournisseur',
+  proposerPlusAncien,
 }: {
   reference: string
   magasin: string
@@ -38,6 +39,12 @@ export function ChampLot({
   className?: string
   invalide?: boolean
   ariaLabel?: string
+  /**
+   * LE PLUS ANCIEN D'ABORD (audit v5, F21) : pour une sortie ou un chargement,
+   * le lot le plus ancien du magasin est propose d'office ; on en choisit un
+   * autre si besoin (l'ecran le signale alors). Jamais pour une entree.
+   */
+  proposerPlusAncien?: boolean
 }) {
   const [libre, setLibre] = useState(false)
   const q = useQuery({
@@ -49,6 +56,10 @@ export function ChampLot({
     enabled: !!reference && !!magasin,
   })
   const lots = [...(q.data ?? [])].sort((a, b) => a.date_premiere_entree.localeCompare(b.date_premiere_entree))
+  const plusAncien = lots.find((x) => x.lot_fournisseur !== SANS_LOT && x.quantite_kg > 0)?.lot_fournisseur
+  useEffect(() => {
+    if (proposerPlusAncien && valeur === '' && !libre && plusAncien) onChange(plusAncien)
+  }, [proposerPlusAncien, valeur, libre, plusAncien, onChange])
   const connu = valeur === '' || valeur === SANS_LOT || lots.some((x) => x.lot_fournisseur === valeur)
   const style = cn(className, invalide && 'border-danger')
 

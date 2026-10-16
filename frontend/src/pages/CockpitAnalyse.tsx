@@ -186,12 +186,12 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
   const droits = useDroits(MODULE)
   const q = useQuery({
     queryKey: ['cockpit-analyse'],
-    queryFn: () => api.get<Analyse>('/api/cockpit/analyse'),
+    queryFn: ({ signal }) => api.get<Analyse>('/api/cockpit/analyse', { signal }),
   })
   // Les compteurs du poste de travail : meme requete, meme cache que les chiffres cles.
   const qc = useQuery({
     queryKey: ['cockpit'],
-    queryFn: () => api.get<Record<string, number | string | null>>('/api/cockpit'),
+    queryFn: ({ signal }) => api.get<Record<string, number | string | null>>('/api/cockpit', { signal }),
   })
   /* LES LOTS, lus sous le module STOCK. Meme cle que l'onglet « Lots » des
      statistiques : un seul appel quand on passe de l'un a l'autre. */
@@ -199,7 +199,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
   const lisStock = peut('STOCK', 'LIRE')
   const ql = useQuery({
     queryKey: ['stats', 'lots'],
-    queryFn: () => api.get<Record<string, unknown>>('/api/stats/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, unknown>>('/api/stats/lots', { signal }),
     enabled: lisStock && vue === 'analyse',
   })
   const tolerances = useTolerancesLot()
@@ -278,7 +278,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             </CarteTitre>
           </CarteEntete>
           <CarteCorps className="p-0">
-            <div className="defilement-x">
+            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
@@ -408,7 +408,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             libelle="Stock Projet"
             valeur={fmt.nombre(nlot('projet_kg'), 0)}
             unite="kg"
-            aide="Lots libres de categorie Projet : ce qui compte pour le plan d'achat."
+            aide="Lots libres de catégorie Projet : ce qui compte pour le plan d'achat."
           />
           <Kpi
             libelle="Restes"
@@ -418,14 +418,14 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             aide={
               nlot('lots_a_basculer') > 0
                 ? `${nlot('lots_a_basculer')} lot(s) Projet passe(s) sous le seuil, a basculer en Restes.`
-                : 'Lots libres de categorie Restes : a ecouler, hors plan.'
+                : 'Lots libres de catégorie Restes : a ecouler, hors plan.'
             }
           />
           <Kpi
             libelle="Lots en dérive de poids"
             valeur={fmt.nombre(nlot('lots_en_derive'), 0)}
             ton={nlot('lots_en_derive') > 0 ? 'alerte' : 'succes'}
-            aide="Lots dont l'ecart cumule de poids depasse la tolerance orange reglee dans les parametres."
+            aide="Lots dont l'écart cumule de poids depasse la tolérance orange reglee dans les paramètres."
           />
           <Kpi
             libelle="Écart moyen par bobine"
@@ -436,7 +436,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             }
             unite={ecartBobine == null ? undefined : '%'}
             ton={tonEcart === 'rouge' ? 'danger' : tonEcart === 'orange' ? 'alerte' : tonEcart === 'vert' ? 'succes' : undefined}
-            aide="Poids pese face au poids catalogue d'une bobine, pondere par les bobines pesees. Les couleurs suivent les tolerances des parametres."
+            aide="Poids pese face au poids catalogue d'une bobine, pondéré par les bobines pesées. Les couleurs suivent les tolérances des paramètres."
           />
         </BlocKpi>
       )}
@@ -444,7 +444,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
       {/* ---- Les cinq graphiques, deux par rangee ------------------------- */}
       <div className="grid gap-3 xl:grid-cols-2">
         <Pareto
-          titre="Concentration de la depense"
+          titre="Concentration de la dépense"
           sousTitre={`Les ${pareto.length} references qui portent le budget, et la part cumulee`}
           unite="MAD de consommation annuelle"
           donnees={pareto}
@@ -483,7 +483,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
         />
 
         <ColonnesTemps
-          titre="Coût matiere par mois"
+          titre="Coût matière par mois"
           sousTitre="Besoin du plan valorise — quand la tresorerie sera sollicitee"
           unite="MAD"
           donnees={d.cout_mensuel.map((m) => ({
@@ -512,14 +512,14 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
 
         {/* ---- Tresorerie : les quatre indicateurs de cycle --------------- */}
         {t && droits.visible('valeur_stock_mad') && (
-          <BlocKpi titre="Cycle de tresorerie" Icone={Landmark}>
+          <BlocKpi titre="Cycle de trésorerie" Icone={Landmark}>
             <Kpi
               libelle="Stock immobilisé"
               valeur={fmt.nombre(t.valeur_stock_mad / 1e6, 2)}
               unite="M MAD"
             />
             <Kpi
-              libelle="Coût matiere annuel"
+              libelle="Coût matière annuel"
               valeur={fmt.nombre(t.cout_matiere_annuel_mad / 1e6, 2)}
               unite="M MAD"
             />
@@ -528,7 +528,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               valeur={fmt.nombre(t.rotation_annuelle, 2)}
               unite="fois / an"
               ton={t.rotation_annuelle < 1 ? 'alerte' : undefined}
-              aide="Coût matière annuel divise par la valeur du stock. Sous 1, le stock represente plus d une annee de consommation."
+              aide="Coût matière annuel divise par la valeur du stock. Sous 1, le stock represente plus d’une année de consommation."
             />
             <Kpi
               libelle="Stock en jours (DIO)"
@@ -540,7 +540,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               libelle="Délai fournisseur (DPO)"
               valeur={fmt.nombre(t.dpo_jours, 0)}
               unite="j"
-              aide="Delais de paiement des fournisseurs, ponderes par le budget annuel de chacun."
+              aide="Délais de paiement des fournisseurs, ponderes par le budget annuel de chacun."
             />
             <Kpi
               libelle="Matière consommée par mois"
@@ -552,7 +552,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               valeur={fmt.nombre(t.ccc_jours, 0)}
               unite="j"
               ton={t.ccc_jours > 90 ? 'danger' : t.ccc_jours > 0 ? 'alerte' : 'succes'}
-              aide="DIO + DSO - DPO. Negatif, le fournisseur finance le cycle."
+              aide="DIO + DSO - DPO. Négatif, le fournisseur finance le cycle."
             />
           </BlocKpi>
         )}
@@ -580,7 +580,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
             </CarteTitre>
           </CarteEntete>
           <CarteCorps className="p-0">
-            <div className="defilement-x">
+            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
@@ -619,7 +619,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                 basculer. Les taire ferait passer une piste pour un acquis. */}
             <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
               Ce montant suppose que l equivalent tient la meme qualite, que le fournisseur suit le
-              volume, et que le delai ne se degrade pas. Il se verifie avant de basculer.
+              volume, et que le délai ne se dégrade pas. Il se vérifie avant de basculer.
               {ind && ind.nb_opportunites > 5 && ` ${ind.nb_opportunites - 5} autres références au-delà du top 5.`}
             </p>
           </CarteCorps>
@@ -637,7 +637,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               </CarteTitre>
             </CarteEntete>
             <CarteCorps className="p-0">
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full text-[13px]">
                   <thead>
                     <tr className="bg-attenue">
@@ -718,7 +718,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
               {d.devises.some((v) => v.code_devise !== 'MAD' && v.part_pct > 60) && (
                 <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
                   Plus de six dixiemes du budget dans une monnaie etrangere : une variation de
-                  change se repercute directement sur le cout matiere.
+                  change se repercute directement sur le coût matière.
                 </p>
               )}
             </CarteCorps>

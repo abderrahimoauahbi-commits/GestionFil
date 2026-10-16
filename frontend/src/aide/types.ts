@@ -41,6 +41,18 @@ export interface Procedure {
   resultat?: string
 }
 
+/**
+ * UN EXEMPLE CHIFFRE (13/10/2026) : une situation, le calcul ligne par ligne,
+ * ce qu'on en retient. Une regle se comprend mieux sur des nombres.
+ */
+export interface Exemple {
+  titre: string
+  situation?: string
+  /** Le calcul, ligne par ligne : ce qu'on lit, la valeur. */
+  calcul?: [string, string][]
+  conclusion?: string
+}
+
 /** Un refus de l'outil, et sa raison. */
 export interface MessageAide {
   message: string
@@ -61,6 +73,8 @@ export interface Sujet {
   /** Le droit necessaire, dit en clair. */
   droits?: string
   procedures?: Procedure[]
+  /** Des exemples chiffres, apres les marches a suivre. */
+  exemples?: Exemple[]
   champs?: ChampAide[]
   /** Les regles de gestion que l'ecran applique. */
   regles?: string[]

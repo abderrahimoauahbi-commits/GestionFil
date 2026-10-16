@@ -61,6 +61,7 @@ import {
   depuisKg,
   facteurVersKg,
   pourChamp, saisieExacte } from '../lib/conditionnement'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -230,6 +231,11 @@ export function TransfertNouveau() {
     observations: '',
   })
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
+  // Un transfert en cours de saisie ne se perd pas d'un clic dans le menu (audit v4).
+  // Un brouillon repris tel quel n'arme pas la garde : seule une modification
+  // l'arme (audit v5, F20).
+  const [lignesReprises, setLignesReprises] = useState<LigneSaisie[] | null>(null)
+  const quitter = useGardeSaisie(lignes.length > 0 && lignes !== lignesReprises)
   const [erreur, setErreur] = useState<string | null>(null)
 
   // --- Reprise d'un brouillon ---------------------------------------------
@@ -247,7 +253,7 @@ export function TransfertNouveau() {
 
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
 
   // Ce que le magasin source a REELLEMENT en stock : on ne transfere pas ce
@@ -301,7 +307,9 @@ export function TransfertNouveau() {
     // Le stock lu doit etre celui de la source du document, pas d'un autre.
     if (entete.code_magasin_source !== d.entete.code_magasin_source || !stockLu) return
     lignesRemplies.current = id ?? null
-    setLignes(d.lignes.map((l) => depuisLigneTransfert(l, parRef.get(l.code_reference))))
+    const reprises = d.lignes.map((l) => depuisLigneTransfert(l, parRef.get(l.code_reference)))
+    setLignesReprises(reprises)
+    setLignes(reprises)
   }, [qDossier.data, id, entete.code_magasin_source, stockLu, parRef])
 
   const statut = qDossier.data?.entete?.statut
@@ -464,8 +472,33 @@ export function TransfertNouveau() {
   const memeMagasin =
     !!entete.code_magasin_source && entete.code_magasin_source === entete.code_magasin_dest
 
+  // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026) : un transfert
+  // repris se compare a ce que le serveur a rendu.
+  const empreinte = (e: typeof entete, ls: LigneSaisie[]) =>
+    JSON.stringify({
+      e: Object.entries(e).map(([k, v]) => [k, String(v ?? '').trim()]).sort(),
+      l: ls.map((l) => [l.code_reference, String(l.qte ?? ''), l.unite, String(l.palettes ?? ''), String(l.bobines ?? ''), JSON.stringify(l.extra ?? {})]),
+    })
+  const dossier = qDossier.data?.entete
+  const inchange =
+    reprise && !!dossier && lignesReprises !== null &&
+    empreinte(entete, lignes) ===
+      empreinte(
+        {
+          ...entete,
+          code_magasin_source: dossier.code_magasin_source ?? '',
+          code_magasin_dest: dossier.code_magasin_dest ?? '',
+          date_transfert: (dossier.date_transfert ?? '').slice(0, 10),
+          responsable: dossier.responsable ?? '',
+          transporteur: dossier.transporteur ?? '',
+          observations: dossier.observations ?? '',
+        },
+        lignesReprises,
+      )
+
   const pret =
     modifiable &&
+    !inchange &&
     !!entete.code_magasin_source &&
     !!entete.code_magasin_dest &&
     !memeMagasin &&
@@ -549,8 +582,8 @@ export function TransfertNouveau() {
         <EnTetePage titre="Transfert" description="Introuvable." />
         <Alerte ton="alerte">
           Ce transfert n'existe pas, ou vous n'y avez pas acces.{' '}
-          <button className="underline" onClick={() => naviguer('/transferts')}>
-            Revenir a la liste
+          <button className="underline" onClick={() => quitter(() => naviguer('/transferts'))}>
+            Revenir à la liste
           </button>
         </Alerte>
       </div>
@@ -567,7 +600,7 @@ export function TransfertNouveau() {
         titre={reprise ? `Transfert ${qDossier.data?.entete.numero_transfert}` : 'Nouveau transfert'}
         description={
           parti
-            ? "Ce transfert est parti : son contenu ne se modifie plus."
+            ? "Ce transfert est parti : son contenu ne se modifié plus."
             : "En-tete et lignes saisis ensemble. Le document ne bouge aucun stock : c'est l'expedition qui sort la marchandise."
         }
         actions={
@@ -592,7 +625,7 @@ export function TransfertNouveau() {
                 Abandonner
               </Bouton>
             )}
-            <Bouton variante="contour" onClick={() => naviguer('/transferts')}>
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/transferts'))}>
               <ArrowLeft />
               Retour
             </Bouton>
@@ -601,7 +634,7 @@ export function TransfertNouveau() {
       />
 
       {parti && (
-        <Alerte ton="info" titre="Document fige" className="mb-3">
+        <Alerte ton="info" titre="Document figé" className="mb-3">
           La marchandise a quitte le magasin source : ses mouvements sont inscrits au grand livre,
           que R03 rend immuable. Un ecart constate a l'arrivee se regularise par un inventaire, pas
           en retouchant le bon.
@@ -664,7 +697,7 @@ export function TransfertNouveau() {
                 </Selecteur>
                 {memeMagasin && (
                   <p className="mt-1 text-[11px] text-danger">
-                    Source et destination doivent differer.
+                    Source et destination doivent différer.
                   </p>
                 )}
               </div>
@@ -687,7 +720,7 @@ export function TransfertNouveau() {
                   id="resp"
                   value={entete.responsable}
                   onChange={(e) => setEntete({ ...entete, responsable: e.target.value })}
-                  placeholder="Qui repond de la marchandise en route"
+                  placeholder="Qui répond de la marchandise en route"
                 />
               </div>
               <div>
@@ -711,7 +744,7 @@ export function TransfertNouveau() {
 
           {!entete.code_magasin_source ? (
             <Alerte ton="info">
-              Choisissez le magasin source : seules ses references en stock pourront etre chargees.
+              Choisissez le magasin source : seules ses références en stock pourront être chargées.
             </Alerte>
           ) : (
             <Carte repliable="transfertnouveau.2">
@@ -797,7 +830,7 @@ export function TransfertNouveau() {
           <span className="text-[13px]">
             {remplies.length === 0 ? (
               <span className="text-attenue-texte">
-                Aucune ligne chargee. Ajoutez une ligne et tapez une référence du stock.
+                Aucune ligne chargée. Ajoutez une ligne et tapez une référence du stock.
               </span>
             ) : (
               <>

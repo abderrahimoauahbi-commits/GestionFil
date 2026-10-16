@@ -13,7 +13,7 @@
  * l'ecran se couvre, le mot de passe le decouvre, et la saisie est intacte.
  *
  * DEVERROUILLER NE PROLONGE PAS LA SESSION. Le serveur verifie le mot de passe
- * sans emettre de nouveau jeton : au bout de quatre heures la session tombe
+ * sans emettre de nouveau jeton : au terme du jeton (huit heures par defaut) la session tombe
  * quoi qu'il arrive. Sinon il suffirait de bouger la souris une fois par heure
  * pour qu'une session vive une semaine.
  *
@@ -38,6 +38,25 @@ export function Verrou() {
   const champ = useRef<HTMLInputElement>(null)
 
   const delai = (moi?.verrou_inactivite_secondes ?? 120) * 1000
+
+  /* LE VERROU EST POSE AU SERVEUR (audit de securite du 13/10/2026). Il ne
+     vivait qu'a l'ecran : un rechargement de la page (F5) rendait la session a
+     n'importe qui. Le serveur refuse desormais tout (423) jusqu'au mot de passe,
+     et l'ecran se rouvre verrouille. */
+  const verrouiller = useCallback(() => {
+    setVerrouille(true)
+    void api.post('/api/auth/verrouiller').catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (moi?.session_verrouillee) setVerrouille(true)
+  }, [moi?.session_verrouillee])
+
+  useEffect(() => {
+    const surVerrou = () => setVerrouille(true)
+    window.addEventListener('gestionfil:verrou', surVerrou)
+    return () => window.removeEventListener('gestionfil:verrou', surVerrou)
+  }, [])
 
   /* --- Le compte a rebours d'inactivite ---------------------------------
      Un seul minuteur, relance a chaque signe de vie. `mousemove` se declenche
@@ -69,7 +88,7 @@ export function Verrou() {
        retour. */
     const retour = () => {
       if (document.visibilityState === 'visible' && Date.now() > echeanceInactivite.current) {
-        setVerrouille(true)
+        verrouiller()
       }
     }
 
@@ -77,7 +96,7 @@ export function Verrou() {
     document.addEventListener('visibilitychange', retour)
 
     const battement = window.setInterval(() => {
-      if (Date.now() > echeanceInactivite.current) setVerrouille(true)
+      if (Date.now() > echeanceInactivite.current) verrouiller()
     }, 1000)
 
     return () => {
@@ -85,7 +104,7 @@ export function Verrou() {
       document.removeEventListener('visibilitychange', retour)
       window.clearInterval(battement)
     }
-  }, [moi, verrouille, delai])
+  }, [moi, verrouille, delai, verrouiller])
 
   /* --- L'echeance absolue de la session ---------------------------------
      Elle court aussi pendant que l'ecran est verrouille : c'est le but. */

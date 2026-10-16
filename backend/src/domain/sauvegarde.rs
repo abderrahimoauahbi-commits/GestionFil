@@ -37,6 +37,9 @@ pub struct Sauvegarde {
     pub chemin: String,
     pub octets: u64,
     pub horodatage: String,
+    /// L'archive des pieces jointes, a cote du dump (audit v4) : la base ne
+    /// porte que leurs references, les fichiers sont sur le disque.
+    pub pieces: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,6 +75,40 @@ fn nom_fichier() -> String {
 /// reste dans la signature pour que l'appelant continue de prouver qu'il tient
 /// une base ouverte — sauvegarder une base a laquelle on ne sait pas se
 /// connecter n'aurait pas de sens.
+/// L'URL SANS SON MOT DE PASSE, et le mot de passe a part (audit v5, T13).
+///
+/// Passe en argument, le mot de passe se lisait dans la liste des processus
+/// (`ps aux`) le temps de la sauvegarde. Les outils PostgreSQL le prennent dans
+/// PGPASSWORD : l'URL leur arrive sans lui. Le mot de passe d'une URL est
+/// encode (%XX) ; PGPASSWORD l'attend en clair.
+pub fn separer_mot_de_passe(url: &str) -> (String, Option<String>) {
+    let Some(schema_fin) = url.find("://") else { return (url.to_string(), None) };
+    let (schema, reste) = url.split_at(schema_fin + 3);
+    let fin_autorite = reste.find('/').unwrap_or(reste.len());
+    let (autorite, chemin) = reste.split_at(fin_autorite);
+    let Some(arobase) = autorite.rfind('@') else { return (url.to_string(), None) };
+    let (identite, hote) = autorite.split_at(arobase);
+    let Some((utilisateur, mdp)) = identite.split_once(':') else { return (url.to_string(), None) };
+    let mut clair = Vec::with_capacity(mdp.len());
+    let octets = mdp.as_bytes();
+    let mut i = 0;
+    while i < octets.len() {
+        if octets[i] == b'%' && i + 2 < octets.len() {
+            if let Ok(v) = u8::from_str_radix(&mdp[i + 1..i + 3], 16) {
+                clair.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        clair.push(octets[i]);
+        i += 1;
+    }
+    (
+        format!("{schema}{utilisateur}{hote}{chemin}"),
+        Some(String::from_utf8_lossy(&clair).into_owned()),
+    )
+}
+
 pub async fn creer(_db: &Db, database_url: &str) -> AppResult<Sauvegarde> {
     let dossier = dossier();
     std::fs::create_dir_all(&dossier)
@@ -91,14 +128,20 @@ pub async fn creer(_db: &Db, database_url: &str) -> AppResult<Sauvegarde> {
     // `--no-owner` et `--no-privileges` : la restauration doit pouvoir se faire
     // sous un autre role que `gestionfil` — typiquement `postgres` lors d'une
     // reprise sur un serveur neuf, ou le role applicatif n'existe pas encore.
-    let sortie = Command::new("pg_dump")
+    let (url_sans, mot_de_passe) = separer_mot_de_passe(database_url);
+    let mut commande = Command::new("pg_dump");
+    commande
         .arg("--format=custom")
         .arg("--compress=6")
         .arg("--no-owner")
         .arg("--no-privileges")
         .arg("--file")
         .arg(&cible)
-        .arg(database_url)
+        .arg(&url_sans);
+    if let Some(m) = mot_de_passe {
+        commande.env("PGPASSWORD", m);
+    }
+    let sortie = commande
         .output()
         .map_err(|e| {
             AppError::Interne(anyhow::anyhow!(
@@ -134,6 +177,7 @@ pub async fn creer(_db: &Db, database_url: &str) -> AppResult<Sauvegarde> {
         chemin: cible.to_string_lossy().into_owned(),
         octets,
         horodatage: maintenant(),
+        pieces: archiver_pieces(&cible),
     })
 }
 
@@ -196,7 +240,53 @@ pub fn purger(_database_url: &str, garder: usize) -> AppResult<usize> {
     for e in existantes.iter().skip(garder) {
         if std::fs::remove_file(dossier.join(&e.fichier)).is_ok() {
             supprimees += 1;
+            // L'archive des pieces part avec son dump.
+            let _ = std::fs::remove_file(dossier.join(format!("{}.pieces.tar", e.fichier)));
         }
     }
     Ok(supprimees)
+}
+
+/// LES PIECES JOINTES SE SAUVEGARDENT AVEC LA BASE (audit v4). Une restauration
+/// rendait des factures et des DUM dont les fichiers n'existaient plus : la
+/// base ne garde que leur chemin. L'archive `<dump>.pieces.tar` est ecrite a
+/// cote du dump ; son echec ne fait pas echouer la sauvegarde de la base, il
+/// est signale.
+pub fn archiver_pieces(dump: &std::path::Path) -> Option<String> {
+    let pieces = std::path::PathBuf::from(std::env::var("GESTIONFIL_PIECES").unwrap_or_else(|_| "pieces".into()));
+    let vide = std::fs::read_dir(&pieces).map(|mut d| d.next().is_none()).unwrap_or(true);
+    if vide {
+        return None;
+    }
+    let cible = std::path::PathBuf::from(format!("{}.pieces.tar", dump.display()));
+    let parent = pieces.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    let nom = pieces.file_name()?.to_os_string();
+    let sortie = Command::new("tar").arg("-cf").arg(&cible).arg("-C").arg(parent).arg(&nom).output();
+    match sortie {
+        Ok(s) if s.status.success() => Some(cible.file_name()?.to_string_lossy().into_owned()),
+        Ok(s) => {
+            tracing::warn!(erreur = %String::from_utf8_lossy(&s.stderr).trim(), "archive des pieces jointes impossible");
+            let _ = std::fs::remove_file(&cible);
+            None
+        }
+        Err(e) => {
+            tracing::warn!(erreur = %e, "tar introuvable : pieces jointes non sauvegardees");
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::separer_mot_de_passe;
+
+    #[test]
+    fn le_mot_de_passe_sort_de_l_url() {
+        let (u, m) = separer_mot_de_passe("postgres://gestionfil:p%40ss%3Aw@127.0.0.1:5432/gestionfil?sslmode=disable");
+        assert_eq!(u, "postgres://gestionfil@127.0.0.1:5432/gestionfil?sslmode=disable");
+        assert_eq!(m.as_deref(), Some("p@ss:w"));
+        let (u, m) = separer_mot_de_passe("postgres://gestionfil@127.0.0.1/gestionfil");
+        assert_eq!(u, "postgres://gestionfil@127.0.0.1/gestionfil");
+        assert!(m.is_none());
+    }
 }

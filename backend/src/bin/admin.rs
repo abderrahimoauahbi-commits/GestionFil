@@ -52,18 +52,24 @@ async fn main() -> Result<()> {
             return restaurer(fichier);
         }
         Some("lister-sauvegardes") => return lister_sauvegardes(),
+        // Ne touche pas la base vivante : restaure a cote, controle, efface.
+        Some("verifier-sauvegarde") => return verifier_sauvegarde(args.get(1).map(String::as_str)).await,
         _ => {}
     }
 
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://gestionfil@127.0.0.1/gestionfil".into());
     let pool = db::connect(&url)
         .await
-        .context("connexion a la base impossible")?;
+        .context("base inaccessible ou non conforme")?;
 
     match args.first().map(String::as_str) {
         Some("definir-mot-de-passe") => {
             let login = args.get(1).context("usage : definir-mot-de-passe <login>")?;
             definir_mot_de_passe(&pool, login).await?;
+        }
+        Some("retirer-2fa") => {
+            let login = args.get(1).context("usage : retirer-2fa <login>")?;
+            retirer_2fa(&pool, login).await?;
         }
         Some("lister-comptes") => lister_comptes(&pool).await?,
         Some("verifier") => verifier(&pool).await?,
@@ -74,12 +80,14 @@ async fn main() -> Result<()> {
             eprintln!("Commandes :");
             eprintln!("  init-config                    Cree le fichier .env avec un secret genere");
             eprintln!("  definir-mot-de-passe <login>   Definit le mot de passe d'un compte");
+            eprintln!("  retirer-2fa <login>            Retire la double authentification (telephone perdu)");
             eprintln!("  lister-comptes                 Liste les comptes et leur etat");
             eprintln!("  verifier                       Execute les controles metier");
             eprintln!();
             eprintln!("  sauvegarder                    Ecrit une copie complete de la base");
             eprintln!("  lister-sauvegardes             Liste les copies disponibles");
             eprintln!("  restaurer <fichier>            Remplace la base par une sauvegarde");
+            eprintln!("  verifier-sauvegarde [fichier]  Restaure a cote, controle, efface (la base vivante n'est pas touchee)");
             eprintln!();
             eprintln!("  diagnostic                     Verifie l'integrite sans rien modifier");
             eprintln!("  reparer                        Reindexe, compacte et reanalyse la base");
@@ -164,6 +172,39 @@ async fn definir_mot_de_passe(pool: &db::Db, login: &str) -> Result<()> {
     Ok(())
 }
 
+/// TELEPHONE PERDU (13/10/2026). La double authentification est obligatoire
+/// pour l'Administrateur et la Direction : elle ne se retire pas depuis
+/// l'ecran. L'exploitant la retire ici, sur le serveur ; a la connexion
+/// suivante, le compte doit la poser de nouveau. Ses sessions ouvertes sont
+/// fermees.
+async fn retirer_2fa(pool: &db::Db, login: &str) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    let n = sqlx::query(
+        "UPDATE utilisateur SET totp_actif = 0, secret_totp = NULL, totp_active_le = NULL,
+                                totp_dernier_pas = NULL
+          WHERE login = $1",
+    )
+    .bind(login)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if n == 0 {
+        bail!("compte inconnu : {login}");
+    }
+    sqlx::query(
+        "UPDATE session_ouverte SET revoquee_le = $2
+          WHERE revoquee_le IS NULL
+            AND id_utilisateur = (SELECT id_utilisateur FROM utilisateur WHERE login = $1)",
+    )
+    .bind(login)
+    .bind(db::maintenant())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    println!("Double authentification retiree pour {login} ; ses sessions sont fermees. Il la reposera a sa prochaine connexion.");
+    Ok(())
+}
+
 async fn lister_comptes(pool: &db::Db) -> Result<()> {
     let comptes: Vec<(String, String, String, i64, String)> = sqlx::query_as(
         "SELECT login, nom, code_role_user, actif, mot_de_passe_hash
@@ -172,7 +213,7 @@ async fn lister_comptes(pool: &db::Db) -> Result<()> {
     .fetch_all(pool)
     .await?;
 
-    println!("{:<12} {:<30} {:<10} {:<8} {}", "LOGIN", "NOM", "ROLE", "ACTIF", "MOT DE PASSE");
+    println!("{:<12} {:<30} {:<10} {:<8} MOT DE PASSE", "LOGIN", "NOM", "ROLE", "ACTIF");
     for (login, nom, role, actif, hash) in comptes {
         let etat = if hash == "!A_DEFINIR!" { "A DEFINIR" } else { "defini" };
         println!(
@@ -194,7 +235,7 @@ async fn verifier(pool: &db::Db) -> Result<()> {
             .await?;
 
     let mut bloquants = 0;
-    println!("{:<6} {:<50} {:<10} {}", "CODE", "CONTROLE", "CRITICITE", "ANOMALIES");
+    println!("{:<6} {:<50} {:<10} ANOMALIES", "CODE", "CONTROLE", "CRITICITE");
     for (code, libelle, criticite, n) in &controles {
         if criticite == "BLOQUANT" && *n > 0 {
             bloquants += n;
@@ -248,7 +289,7 @@ fn lister_sauvegardes() -> Result<()> {
         println!("Aucune sauvegarde. Executer `sauvegarder` pour en creer une.");
         return Ok(());
     }
-    println!("{:<36} {:>12}  {}", "FICHIER", "OCTETS", "DATE");
+    println!("{:<36} {:>12}  DATE", "FICHIER", "OCTETS");
     for s in &liste {
         println!("{:<36} {:>12}  {}", s.fichier, s.octets, s.date);
     }
@@ -293,6 +334,13 @@ fn restaurer(fichier: &str) -> Result<()> {
     //    elle attrape le cas qui compte — un fichier tronque ou d'un autre
     //    format.
     println!("Verification de la sauvegarde...");
+    let (url_sans, mot_de_passe) = sauvegarde::separer_mot_de_passe(&url);
+    // Le mot de passe passe par l'environnement, jamais en argument (T13).
+    let avec_mdp = |c: &mut std::process::Command| {
+        if let Some(m) = &mot_de_passe {
+            c.env("PGPASSWORD", m);
+        }
+    };
     let liste = std::process::Command::new("pg_restore")
         .arg("--list")
         .arg(&source)
@@ -329,11 +377,10 @@ fn restaurer(fichier: &str) -> Result<()> {
     let sql = format!(
         "ALTER DATABASE {base} RENAME TO {ecartee}; CREATE DATABASE {base};"
     );
-    let r = std::process::Command::new("psql")
-        .arg("--set=ON_ERROR_STOP=1")
-        .arg("-c")
-        .arg(&sql)
-        .arg(url_maintenance(&url))
+    let mut commande = std::process::Command::new("psql");
+    commande.arg("--set=ON_ERROR_STOP=1").arg("-c").arg(&sql).arg(url_maintenance(&url_sans));
+    avec_mdp(&mut commande);
+    let r = commande
         .output()
         .context("psql introuvable : installer postgresql-client")?;
     if !r.status.success() {
@@ -346,13 +393,16 @@ fn restaurer(fichier: &str) -> Result<()> {
 
     // 3. La restauration proprement dite.
     println!("Restauration...");
-    let r = std::process::Command::new("pg_restore")
+    let mut commande = std::process::Command::new("pg_restore");
+    commande
         .arg("--no-owner")
         .arg("--no-privileges")
         .arg("--exit-on-error")
         .arg("--dbname")
-        .arg(&url)
-        .arg(&source)
+        .arg(&url_sans)
+        .arg(&source);
+    avec_mdp(&mut commande);
+    let r = commande
         .output()
         .context("pg_restore introuvable")?;
     if !r.status.success() {
@@ -363,11 +413,177 @@ fn restaurer(fichier: &str) -> Result<()> {
         );
     }
 
+    // Une base restauree n'a pas de statistiques : sans ANALYZE, certains ecrans
+    // (supervision) figent pres d'une minute jusqu'au passage de l'autovacuum.
+    let mut analyse = std::process::Command::new("psql");
+    analyse.arg("-q").arg("-c").arg("ANALYZE").arg(&url_sans);
+    avec_mdp(&mut analyse);
+    let _ = analyse.output();
     println!("Base restauree depuis {}", source.display());
+
+    // 4. LES PIECES JOINTES SUIVENT LA BASE (audit v5, T13) : la sauvegarde les
+    //    archive a cote du dump ; sans elles, la base restauree citerait des
+    //    factures et des DUM dont les fichiers n'existent plus. Le dossier
+    //    actuel est mis de cote, comme la base.
+    let archive = PathBuf::from(format!("{}.pieces.tar", source.display()));
+    if archive.exists() {
+        let pieces = PathBuf::from(std::env::var("GESTIONFIL_PIECES").unwrap_or_else(|_| "pieces".into()));
+        let parent = pieces.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
+        if pieces.exists() {
+            let ecarte = parent.join(format!(
+                "{}_remplacees_{horodatage}",
+                pieces.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "pieces".into())
+            ));
+            std::fs::rename(&pieces, &ecarte)
+                .with_context(|| format!("impossible de mettre de cote {}", pieces.display()))?;
+            println!("Pieces jointes actuelles mises de cote sous {}", ecarte.display());
+        }
+        let r = std::process::Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&parent)
+            .output()
+            .context("tar introuvable")?;
+        if !r.status.success() {
+            bail!(
+                "la base est restauree, mais pas les pieces jointes : {}",
+                String::from_utf8_lossy(&r.stderr).trim()
+            );
+        }
+        println!("Pieces jointes restaurees depuis {}", archive.display());
+    } else {
+        println!("Pas d'archive de pieces jointes a cote de cette sauvegarde : le dossier des pieces est inchange.");
+    }
     println!();
     println!("Relancez le serveur. Si le resultat ne convient pas, la base precedente");
     println!("est encore la, sous le nom `{ecartee}`.");
     println!("Quand tout est verifie : DROP DATABASE {ecartee};");
+    Ok(())
+}
+
+/// PROUVER QU'UNE SAUVEGARDE SE RESTAURE, sans toucher la base vivante (10/10/2026).
+///
+/// Une sauvegarde jamais restauree n'est pas une sauvegarde : on ne decouvre un
+/// fichier tronque, un schema incomplet ou un droit manquant (CREATEDB) que le
+/// jour ou l'on en a besoin. Ici, la sauvegarde (la plus recente, ou celle
+/// nommee) est restauree dans une base TEMPORAIRE `<base>_verif_<horodatage>`,
+/// controlee, puis effacee — que le controle reussisse ou non :
+///   1. le schema et les migrations exigees, par le meme controle qu'au
+///      demarrage du serveur (`db::connect`) ;
+///   2. les volumes des tables qui font foi, compares a la base vivante (un
+///      ecart est normal si l'on a saisi depuis la sauvegarde : il est affiche) ;
+///   3. les controles metier se calculent, et C11 (cache = grand livre) est nul.
+/// Lancee chaque semaine par `gestionfil-verif-sauvegarde.timer` sur le serveur.
+async fn verifier_sauvegarde(fichier: Option<&str>) -> Result<()> {
+    use std::path::{Path, PathBuf};
+
+    let dossier = std::env::var("GESTIONFIL_SAUVEGARDES").unwrap_or_else(|_| "sauvegardes".into());
+    let source: PathBuf = match fichier {
+        Some(f) if Path::new(f).is_absolute() || f.contains('/') || f.contains('\\') => PathBuf::from(f),
+        Some(f) => Path::new(&dossier).join(f),
+        None => {
+            let mut liste = sauvegarde::lister(&url_base()).map_err(|e| anyhow::anyhow!("{e}"))?;
+            liste.sort_by(|a, b| a.fichier.cmp(&b.fichier));
+            let derniere = liste.pop().context("aucune sauvegarde a verifier : executer `sauvegarder` d'abord")?;
+            Path::new(&dossier).join(derniere.fichier)
+        }
+    };
+    if !source.exists() {
+        bail!("sauvegarde introuvable : {}", source.display());
+    }
+    println!("Verification de {}", source.display());
+
+    let url = url_base();
+    let (url_sans, mot_de_passe) = sauvegarde::separer_mot_de_passe(&url);
+    let avec_mdp = |c: &mut std::process::Command| {
+        if let Some(m) = &mot_de_passe {
+            c.env("PGPASSWORD", m);
+        }
+    };
+    let horodatage: String = maintenant().chars().filter(|c| c.is_ascii_digit()).take(14).collect();
+    let temporaire = format!("{}_verif_{horodatage}", nom_base());
+    let url_temp_sans = match url_sans.rfind('/') {
+        Some(i) => format!("{}/{temporaire}", &url_sans[..i]),
+        None => bail!("adresse de base illisible"),
+    };
+    let url_temp = match url.rfind('/') {
+        Some(i) => format!("{}/{temporaire}", &url[..i]),
+        None => bail!("adresse de base illisible"),
+    };
+
+    let sql = |requete: &str| -> Result<()> {
+        let mut c = std::process::Command::new("psql");
+        c.arg("--set=ON_ERROR_STOP=1").arg("-q").arg("-c").arg(requete).arg(url_maintenance(&url_sans));
+        avec_mdp(&mut c);
+        let r = c.output().context("psql introuvable : installer postgresql-client")?;
+        if !r.status.success() {
+            bail!("{}", String::from_utf8_lossy(&r.stderr).trim());
+        }
+        Ok(())
+    };
+    sql(&format!("CREATE DATABASE {temporaire}")).map_err(|e| {
+        anyhow::anyhow!(
+            "impossible de creer la base temporaire : {e}\n\
+             Le role de connexion doit pouvoir creer une base (ALTER ROLE ... CREATEDB) : \
+             `restaurer` en a besoin aussi, et echouerait le jour venu."
+        )
+    })?;
+
+    // Le controle lui-meme ; la base temporaire est effacee apres, quoi qu'il arrive.
+    let verdict: Result<()> = async {
+        println!("Restauration dans la base temporaire `{temporaire}`...");
+        let mut c = std::process::Command::new("pg_restore");
+        c.arg("--no-owner").arg("--no-privileges").arg("--exit-on-error").arg("--dbname").arg(&url_temp_sans).arg(&source);
+        avec_mdp(&mut c);
+        let r = c.output().context("pg_restore introuvable : installer postgresql-client")?;
+        if !r.status.success() {
+            bail!("la sauvegarde ne se restaure pas : {}", String::from_utf8_lossy(&r.stderr).trim());
+        }
+
+        let mut analyse = std::process::Command::new("psql");
+        analyse.arg("-q").arg("-c").arg("ANALYZE").arg(&url_temp_sans);
+        avec_mdp(&mut analyse);
+        let _ = analyse.output();
+        println!("Schema et migrations exigees (controle du demarrage)...");
+        let restauree = db::connect(&url_temp).await.context("la base restauree n'est pas servable")?;
+        let vivante = db::connect(&url).await.ok();
+
+        const TABLES: [&str; 8] = [
+            "mouvement", "ligne_mouvement", "audit_log", "reference", "fournisseur",
+            "bon_commande", "reception", "utilisateur",
+        ];
+        println!("{:<18} {:>12} {:>12}", "TABLE", "SAUVEGARDE", "VIVANTE");
+        for t in TABLES {
+            let n: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {t}")).fetch_one(&restauree).await?;
+            let v = match &vivante {
+                Some(p) => sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {t}"))
+                    .fetch_one(p)
+                    .await
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|_| "?".into()),
+                None => "-".into(),
+            };
+            println!("{t:<18} {n:>12} {v:>12}");
+        }
+        let controles: i64 = sqlx::query_scalar("SELECT count(*) FROM v_controles").fetch_one(&restauree).await?;
+        let c11: i64 = sqlx::query_scalar("SELECT COALESCE(max(anomalies), 0)::bigint FROM v_controles WHERE code = 'C11'")
+            .fetch_one(&restauree)
+            .await?;
+        println!("{controles} controles metier calcules ; C11 (cache du stock = grand livre) : {c11}");
+        restauree.close().await;
+        if c11 != 0 {
+            bail!("C11 n'est pas nul dans la sauvegarde : le cache du stock y diverge du grand livre");
+        }
+        Ok(())
+    }
+    .await;
+
+    if let Err(e) = sql(&format!("DROP DATABASE IF EXISTS {temporaire} WITH (FORCE)")) {
+        println!("ATTENTION : la base temporaire `{temporaire}` n'a pas pu etre effacee : {e}");
+    }
+    verdict?;
+    println!("SAUVEGARDE RESTAURABLE : {}", source.display());
     Ok(())
 }
 

@@ -27,7 +27,8 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Save } from 'lucide-react'
+import { ArrowLeft, Save } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
 import { api, ErreurApi } from '../api/client'
 import { ChampLot } from '../composants/ChampLot'
 import { EnTetePage } from '../components/Layout'
@@ -45,6 +46,27 @@ import { Alerte, Bouton, Champ, Selecteur } from '../composants/ui/base'
 import { type Conditionnement, depuisKg, facteurVersKg, pourChamp, saisieExacte } from '../lib/conditionnement'
 import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { PanneRequetes } from '../composants/PanneRequetes'
+
+
+/* REGLE 12 : ajustements et dechets. La sortie production n'est plus qu'un
+   dechet (motif R4 pose par le serveur) ; le retour de production passe par une
+   fiche machine ; le retour fournisseur est un document a part, rattache a sa
+   reception (Achats -> Retours fournisseur, 12/10/2026).
+   REGLE 1 (09/10/2026) : la sortie hors machine (atelier, echantillon, essai,
+   reparation, pret a une autre usine), avec un motif par ligne et un OF libre,
+   et le retour du pret, en nature. */
+const TYPES_SAISIE_LIBRE = [
+  'SORTIE_PROD', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT',
+]
+const LIBELLE_SAISIE: Record<string, string> = {
+  SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)',
+  SORTIE_HORS_MACHINE: 'Sortie hors machine (atelier, échantillon, essai, réparation, prêt)',
+  RETOUR_PRET: 'Retour d’un prêt (fil rendu par une autre usine)',
+}
+/** Les motifs de ligne d'une sortie hors machine ; ils ne servent qu'a elle. */
+const estMotifHorsMachine = (code: string) => code.startsWith('HM_')
 
 interface TypeMvt {
   code_type_mvt: string
@@ -199,6 +221,8 @@ export function MouvementNouveau() {
     responsable: '',
     reference_document: '',
     numero_of: '',
+    /** L'usine du pret et de son retour. */
+    tiers: '',
     observations_globales: '',
   })
   const [lignes, setLignes] = useState<LigneSaisie[]>(() => [ligneVide()])
@@ -216,17 +240,20 @@ export function MouvementNouveau() {
     queryFn: async () => {
       // Le registre n'expose pas les types : ils viennent du referentiel.
       const r = await api.get<TypeMvt[]>('/api/types-mouvement')
-      return r
+      /* SEULS LES TYPES QUI SE SAISISSENT A LA MAIN (06/10/2026) : les autres
+         naissent d'un document (reception, transfert, fusion, fiche machine) et
+         le serveur les refuse ici. */
+      return r.filter((t) => TYPES_SAISIE_LIBRE.includes(t.code_type_mvt))
     },
     retry: false,
   })
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
   const qMotifs = useQuery({
     queryKey: ['motifs-mouvement'],
-    queryFn: () => api.get<{ code_motif: string; libelle: string }[]>('/api/motifs-mouvement'),
+    queryFn: ({ signal }) => api.get<{ code_motif: string; libelle: string }[]>('/api/motifs-mouvement', { signal }),
     retry: false,
   })
 
@@ -241,7 +268,11 @@ export function MouvementNouveau() {
      un stock initial, qui peut entrer sans prix — il prend alors le prix
      catalogue : une colonne a part, que la validation de ligne n'exige pas. */
   const prixGrille = typeActif?.exige_prix === 1
-  const prixOption = !prixGrille && typeActif?.impacte_cmup === 1
+  /* LE PRIX EST IMPOSE (regle 12, 08/10/2026) : toute saisie libre entre ou sort
+     au CMUP en cours, que le serveur applique. Seul le stock d'ouverture peut
+     porter un prix, pour une reference qui n'a encore jamais ete recue. */
+  const prixOption = !prixGrille && typeActif?.code_type_mvt === 'STOCK_INIT'
+  const { moi, peut } = useAuth()
 
   const qMotifsLigne = useQuery({
     queryKey: ['motifs-ligne'],
@@ -250,6 +281,32 @@ export function MouvementNouveau() {
     enabled: exigeMotif,
     retry: false,
   })
+  const horsMachine = typeActif?.code_type_mvt === 'SORTIE_HORS_MACHINE'
+  /* Une sortie hors machine ne propose que ses motifs ; les autres types, jamais eux. */
+  const motifsLigne = (qMotifsLigne.data ?? []).filter((m) =>
+    horsMachine ? estMotifHorsMachine(m.code_motif_ligne) : !estMotifHorsMachine(m.code_motif_ligne),
+  )
+  const pret = entete.code_type_mvt === 'RETOUR_PRET'
+  /* LES PRETS EN COURS : l'usine a qui l'on a prete, ce qu'elle doit rendre. */
+  const qPrets = useQuery({
+    queryKey: ['prets-en-cours'],
+    queryFn: () =>
+      api.get<{ tiers: string; code_reference: string; designation: string; reste_kg: number; jours: number }[]>(
+        '/api/prets-en-cours',
+      ),
+    enabled: pret || horsMachine,
+    retry: false,
+  })
+  const usinesConnues = [...new Set((qPrets.data ?? []).map((p) => p.tiers))]
+  /* LE SEUIL VIENT DU PARAMETRE, comme au serveur (P_DechetSeuilValiderKg). */
+  const qSeuil = useQuery({
+    queryKey: ['parametres'],
+    queryFn: ({ signal }) => api.get<{ code_parametre: string; valeur_courante: string }[]>('/api/parametres', { signal }),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const seuilKg =
+    Number(qSeuil.data?.find((p) => p.code_parametre === 'P_DechetSeuilValiderKg')?.valeur_courante) || 50
 
   /*
    * LE STOCK DU MAGASIN CHOISI, et lui seul.
@@ -343,6 +400,8 @@ export function MouvementNouveau() {
     (l) => l.nature !== 'MARCHANDISE' || !!l.code_reference || l.qte.trim() !== '',
   )
   const horsCatalogue = utiles.filter((l) => l.nature !== 'MARCHANDISE')
+  // Une saisie en cours ne se perd pas d'un clic dans le menu (audit v4).
+  const quitter = useGardeSaisie(utiles.length > 0)
   const nonValidees = utiles.filter((l) => !l.valide)
   const lotsManquants = utiles.filter(
     (l) => suiviDe(l.code_reference) === 1 && !(l.extra?.lot ?? '').trim(),
@@ -386,6 +445,7 @@ export function MouvementNouveau() {
             onChange={poser}
             className={champCellule}
             invalide={!(l.extra?.lot ?? '').trim()}
+            proposerPlusAncien={sortie}
           />
         ) : (
           <span
@@ -459,9 +519,9 @@ export function MouvementNouveau() {
                 aria-label="Motif de la ligne"
               >
                 <option value="">—</option>
-                {(qMotifsLigne.data ?? []).map((m) => (
+                {motifsLigne.map((m) => (
                   <option key={m.code_motif_ligne} value={m.code_motif_ligne}>
-                    {m.code_motif_ligne} · {m.libelle}
+                    {horsMachine ? m.libelle : `${m.code_motif_ligne} · ${m.libelle}`}
                   </option>
                 ))}
               </Selecteur>
@@ -522,6 +582,7 @@ export function MouvementNouveau() {
         responsable: entete.responsable.trim() || null,
         reference_document: entete.reference_document.trim() || null,
         numero_of: entete.numero_of || null,
+        tiers: entete.tiers.trim() || null,
         observations_globales: entete.observations_globales.trim() || null,
         lignes: utiles.map((l) => corpsMouvement(pourEnvoi(l))),
       }),
@@ -551,7 +612,14 @@ export function MouvementNouveau() {
       <EnTetePage
         titre="Saisir un mouvement"
         sous_titre="La quantité est convertie en kilogrammes avant enregistrement, par les paramètres de la référence."
+        actions={
+          <Bouton variante="contour" onClick={() => quitter(() => naviguer('/mouvements'))}>
+            <ArrowLeft />
+            Retour
+          </Bouton>
+        }
       />
+      <PanneRequetes requetes={[['Les types de mouvement', qTypes], ['Les magasins', qMag], ['Les motifs', qMotifs], ['Le stock du magasin', qStock]]} />
       {/* LE FORMULAIRE NE PORTE QUE L'EN-TETE. Les boutons de la grille ne
           declarent pas de type : places dans un formulaire, chacun —
           valider une ligne, en ajouter une — l'aurait soumis. Le bouton du bas
@@ -569,30 +637,36 @@ export function MouvementNouveau() {
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
-              Type de mouvement <span className="text-red-500">*</span>
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-1">
+              Type de mouvement <span className="text-danger">*</span>
             </label>
-            <select
+            <select id="mvt-1"
               required
               value={entete.code_type_mvt}
               onChange={(e) => setEntete({ ...entete, code_type_mvt: e.target.value })}
               className={champ}
             >
               <option value="">—</option>
-              {qTypes.data?.map((t) => (
+              {/* REGLE 12 : l'ajustement demande le droit de valider, le stock
+                  initial est a l'administrateur — l'ecran ne propose que ce que
+                  le serveur acceptera. */}
+              {qTypes.data?.filter((t) =>
+                t.code_type_mvt === 'STOCK_INIT' ? moi?.role === 'ADMIN'
+                  : t.code_type_mvt.startsWith('AJUST_INV') ? peut('INVENTAIRE', 'VALIDER')
+                  : true).map((t) => (
                 <option key={t.code_type_mvt} value={t.code_type_mvt}>
                   {t.signe > 0 ? '+ ' : '− '}
-                  {t.libelle}
+                  {LIBELLE_SAISIE[t.code_type_mvt] ?? t.libelle}
                 </option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
-              Magasin <span className="text-red-500">*</span>
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-2">
+              Magasin <span className="text-danger">*</span>
             </label>
-            <select
+            <select id="mvt-2"
               required
               value={entete.code_magasin}
               onChange={(e) => setEntete({ ...entete, code_magasin: e.target.value })}
@@ -608,10 +682,10 @@ export function MouvementNouveau() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
-              Motif <span className="text-red-500">*</span>
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-3">
+              Motif <span className="text-danger">*</span>
             </label>
-            <select
+            <select id="mvt-3"
               required
               value={entete.code_motif}
               onChange={(e) => setEntete({ ...entete, code_motif: e.target.value })}
@@ -626,25 +700,59 @@ export function MouvementNouveau() {
             </select>
           </div>
 
-          {typeActif?.exige_of === 1 && (
+          {(typeActif?.exige_of === 1 || horsMachine) && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-texte">
-                Numero d ordre de fabrication <span className="text-red-500">*</span>
+              <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-4">
+                Numero d ordre de fabrication {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
               </label>
-              <input
-                required
+              <input id="mvt-4"
+                required={typeActif?.exige_of === 1}
                 value={entete.numero_of}
                 onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
+                placeholder={horsMachine ? 'Facultatif, texte libre' : undefined}
                 className={champ}
               />
             </div>
           )}
 
+          {(horsMachine || pret) && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-5">
+                Usine {pret ? 'qui rend le fil' : 'qui emprunte (pour un prêt)'}
+                {pret && <span className="text-danger"> *</span>}
+              </label>
+              <input id="mvt-5"
+                list="usines-pret"
+                required={pret}
+                value={entete.tiers}
+                onChange={(e) => setEntete({ ...entete, tiers: e.target.value })}
+                placeholder="Nom de l’usine"
+                className={champ}
+              />
+              <datalist id="usines-pret">
+                {usinesConnues.map((u) => (
+                  <option key={u} value={u} />
+                ))}
+              </datalist>
+              {pret && entete.tiers.trim() && (
+                <p className="mt-0.5 text-[11px] text-attenue-texte">
+                  {(qPrets.data ?? []).filter((p) => p.tiers === entete.tiers.trim()).length === 0
+                    ? 'Aucun prêt en cours pour cette usine.'
+                    : 'À rendre : ' +
+                      (qPrets.data ?? [])
+                        .filter((p) => p.tiers === entete.tiers.trim())
+                        .map((p) => `${p.code_reference} ${fmt.nombre(p.reste_kg, 1)} kg`)
+                        .join(' · ')}
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
-              Date du mouvement <span className="text-red-500">*</span>
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-6">
+              Date du mouvement <span className="text-danger">*</span>
             </label>
-            <input
+            <input id="mvt-6"
               type="date"
               required
               max={aujourdhui()}
@@ -653,7 +761,7 @@ export function MouvementNouveau() {
               className={champ}
             />
             <p className="mt-0.5 text-[11px] text-attenue-texte">
-              La date du fait, qui peut differer du jour de saisie. Jamais dans le futur.
+              La date du fait, qui peut différer du jour de saisie. Jamais dans le futur.
             </p>
           </div>
 
@@ -662,33 +770,39 @@ export function MouvementNouveau() {
               souvent pour un chef d'equipe ou un chauffeur, et c'est ce dernier
               qu'on cherche quand un ecart apparait trois jours plus tard. */}
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-7">
               Responsable de la marchandise
             </label>
-            <input
+            <input id="mvt-7"
               value={entete.responsable}
               onChange={(e) => setEntete({ ...entete, responsable: e.target.value })}
-              placeholder="Qui remet ou recoit"
+              placeholder="Qui remet ou reçoit"
               className={champ}
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-texte">
-              Document de reference
+            <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-8">
+              Document de référence
             </label>
-            <input
+            <input id="mvt-8"
               value={entete.reference_document}
               onChange={(e) => setEntete({ ...entete, reference_document: e.target.value })}
               placeholder="N BL, bon de commande, OF..."
               className={champ}
             />
+            {(entete.code_type_mvt === 'SORTIE_PROD' || horsMachine) && (
+              <p className="mt-0.5 text-[11px] text-attenue-texte">
+                Au-delà de {fmt.nombre(seuilKg, 0)} kg sortis le même jour pour une référence (déchets et sorties
+                hors machine cumulés), la sortie demande le droit de valider l’inventaire.
+              </p>
+            )}
           </div>
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-texte">Observations</label>
-          <textarea
+          <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-9">Observations</label>
+          <textarea id="mvt-9"
             rows={2}
             value={entete.observations_globales}
             onChange={(e) => setEntete({ ...entete, observations_globales: e.target.value })}
@@ -778,7 +892,7 @@ export function MouvementNouveau() {
           )}
         </span>
         <div className="flex items-center gap-2">
-          <Bouton type="button" variante="contour" onClick={surFermeture}>
+          <Bouton type="button" variante="contour" onClick={() => quitter(surFermeture)}>
             Annuler
           </Bouton>
           <Bouton
@@ -837,21 +951,21 @@ function EquivalentsDispo({
   )
 
   return (
-    <div className="mt-1 rounded-lg border border-red-300 bg-red-50 p-2 dark:border-red-900 dark:bg-red-950/30">
-      <div className="text-[12px] font-medium text-red-700 dark:text-red-300">
+    <div className="mt-1 rounded-lg border border-danger/40 bg-danger/[0.06] p-2">
+      <div className="text-[12px] font-medium text-danger">
         Stock insuffisant dans le magasin : il manque {fmt.nombre(manque, 0)} kg.
       </div>
 
       {utiles.length === 0 ? (
         <div className="mt-1 text-[11px] text-attenue-texte">
           Aucune reference equivalente ne dispose de stock. La sortie sera refusee (R02) :
-          reduisez la quantite, ou approvisionnez d'abord.
+          reduisez la quantité, ou approvisionnez d'abord.
         </div>
       ) : (
         <>
           <div className="mt-1 text-[11px] text-attenue-texte">
             Ces references sont declarees interchangeables avec celle-ci et ont du stock. Le total
-            est toutes zones confondues : verifiez qu'il est bien dans votre magasin.
+            est toutes zones confondues : vérifiez qu'il est bien dans votre magasin.
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {utiles.map((e) => (

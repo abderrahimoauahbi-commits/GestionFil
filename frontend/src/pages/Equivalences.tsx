@@ -133,12 +133,12 @@ const TON_ALERTE: Record<Groupe['qualification'], 'succes' | 'alerte' | 'danger'
 }
 
 const EXPLICATION: Record<Groupe['qualification'], string> = {
-  ALTERNATIF: 'Vraie alternative : references homogenes chez des fournisseurs distincts.',
-  'MONO-REFERENCE': "Une seule reference : le groupe n'offre aucune alternative.",
+  ALTERNATIF: 'Vraie alternative : références homogenes chez des fournisseurs distincts.',
+  'MONO-REFERENCE': "Une seule référence : le groupe n'offre aucune alternative.",
   'MEME FOURNISSEUR':
-    'Toutes les references viennent du meme fournisseur : elles tombent ensemble, ce n est pas une securite d approvisionnement.',
+    'Toutes les références viennent du meme fournisseur : elles tombent ensemble, ce n est pas une sécurité d approvisionnement.',
   HETEROGENE:
-    'Unite, densite ou categorie differentes : substituer fausserait le calcul kg/m2 de la recette.',
+    'Unite, densité ou catégorie differentes : substituer fausserait le calcul kg/m2 de la recette.',
 }
 
 export function Equivalences() {
@@ -172,7 +172,7 @@ export function Equivalences() {
 
   const qGroupes = useQuery({
     queryKey: ['groupes-equivalence'],
-    queryFn: () => api.get<Groupe[]>('/api/groupes-equivalence'),
+    queryFn: ({ signal }) => api.get<Groupe[]>('/api/groupes-equivalence', { signal }),
   })
 
   const qMembres = useQuery({
@@ -262,8 +262,8 @@ export function Equivalences() {
     mutationFn: (references: string[]) =>
       api.put(`/api/groupes-equivalence/${encodeURIComponent(pointe!)}/ordre`, { references }),
     onSuccess: () => {
-      toast.success('Ordre mis a jour', {
-        description: 'La premiere référence du groupe devient la préférentielle.',
+      toast.success('Ordre mis à jour', {
+        description: 'La première référence du groupe devient la préférentielle.',
       })
       rafraichir()
     },
@@ -282,7 +282,7 @@ export function Equivalences() {
         est_preferentielle: membres.length === 0 ? 1 : 0,
       }),
     onSuccess: () => {
-      toast.success('Reference rattachee au groupe')
+      toast.success('Référence rattachée au groupe')
       setAjout(false)
       rafraichir()
     },
@@ -292,7 +292,7 @@ export function Equivalences() {
   const detacher = useMutation({
     mutationFn: (id: string) => api.delete(`/api/reference-groupes/${id}`),
     onSuccess: () => {
-      toast.success('Reference detachee')
+      toast.success('Référence detachee')
       rafraichir()
     },
     onError: echec,
@@ -457,7 +457,7 @@ export function Equivalences() {
                   {droits.peutEcrire && (
                     <Bouton variante="contour" taille="sm" onClick={() => setAjout(true)}>
                       <Plus />
-                      Rattacher une reference
+                      Rattacher une référence
                     </Bouton>
                   )}
                 </CarteEntete>
@@ -468,10 +468,10 @@ export function Equivalences() {
                     </div>
                   ) : membres.length === 0 ? (
                     <p className="p-4 text-[13px] text-attenue-texte">
-                      Aucune reference rattachee a ce groupe.
+                      Aucune référence rattachée à ce groupe.
                     </p>
                   ) : (
-                    <div className="defilement-x">
+                    <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                     <table className="grille w-full min-w-[46rem] text-[13px] lg:min-w-0">
                       <thead>
                         <tr className="bg-attenue/50 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte">
@@ -546,7 +546,7 @@ export function Equivalences() {
                                       onClick={() => deplacer(i, -1)}
                                       disabled={i === 0 || reordonner.isPending}
                                       aria-label="Monter"
-                                      title="Monter dans l ordre de preference"
+                                      title="Monter dans l’ordre de préférence"
                                     >
                                       <ArrowUp />
                                     </Bouton>
@@ -556,7 +556,7 @@ export function Equivalences() {
                                       onClick={() => deplacer(i, 1)}
                                       disabled={i === membres.length - 1 || reordonner.isPending}
                                       aria-label="Descendre"
-                                      title="Descendre dans l ordre de preference"
+                                      title="Descendre dans l’ordre de préférence"
                                     >
                                       <ArrowDown />
                                     </Bouton>
@@ -566,7 +566,7 @@ export function Equivalences() {
                                       onClick={() => promouvoir(m.code_reference)}
                                       disabled={m.est_preferentielle === 1 || reordonner.isPending}
                                       aria-label="Rendre préférentielle"
-                                      title="Rendre preferentielle"
+                                      title="Rendre préférentielle"
                                     >
                                       <Star />
                                     </Bouton>
@@ -580,7 +580,7 @@ export function Equivalences() {
                                           destructif: true,
                                           libelleConfirmer: 'Detacher',
                                           description:
-                                            "La reference ne sera plus proposee comme substitut des autres membres du groupe. Aucun stock ni mouvement n'est touche.",
+                                            "La référence ne sera plus proposee comme substitut des autres membres du groupe. Aucun stock ni mouvement n'est touche.",
                                           action: () => detacher.mutate(m.id_ref_grp),
                                         })
                                       }
@@ -688,17 +688,15 @@ function BilanGroupes({
         )}
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
           {ORDRE_QUALIF.map((q) => (
-            <div key={q} className="flex gap-2.5">
-              <span className={cn('mt-[6px] size-2 shrink-0 rounded-full', POINT_QUALIF[q])} />
-              <div className="min-w-0">
-                <dt className="text-[13px] font-medium">
-                  {LIBELLE_QUALIF[q]}{' '}
-                  <span className="font-normal tabular-nums text-attenue-texte">
-                    {parQualif[q]}
-                  </span>
-                </dt>
-                <dd className="text-[12px] leading-snug text-attenue-texte">{EXPLICATION[q]}</dd>
-              </div>
+            <div key={q} className="relative min-w-0 pl-[1.125rem]">
+              <dt className="text-[13px] font-medium">
+                <span aria-hidden className={cn('absolute left-0 top-[6px] size-2 rounded-full', POINT_QUALIF[q])} />
+                {LIBELLE_QUALIF[q]}{' '}
+                <span className="font-normal tabular-nums text-attenue-texte">
+                  {parQualif[q]}
+                </span>
+              </dt>
+              <dd className="text-[12px] leading-snug text-attenue-texte">{EXPLICATION[q]}</dd>
             </div>
           ))}
         </dl>
@@ -739,7 +737,7 @@ function PanneauRattachement({
 
   const q = useQuery({
     queryKey: ['catalogue-equiv'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000'),
+    queryFn: ({ signal }) => api.get<RefCatalogue[]>('/api/catalogue?actif=1&limite=2000', { signal }),
   })
 
   const refs = useMemo(() => {
@@ -765,7 +763,7 @@ function PanneauRattachement({
         <div className="mb-2 flex items-center gap-2">
           <Search className="size-3.5 shrink-0 text-attenue-texte" />
           <Champ
-            placeholder="Référence ou designation…"
+            placeholder="Référence ou désignation…"
             value={filtre}
             onChange={(e) => setFiltre(e.target.value)}
             className="h-8"

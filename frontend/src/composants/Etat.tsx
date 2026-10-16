@@ -14,7 +14,7 @@
  * semaines d'intervalle sont indiscernables, et personne ne sait lequel fait foi.
  */
 import { useEffect, useState } from 'react'
-import { Printer } from 'lucide-react'
+import { ArrowLeft, Printer } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { mentionsLegales, useEntreprise } from '../lib/entreprise'
 import { Bouton } from './ui/base'
@@ -74,12 +74,20 @@ export function EtatImprimable({
       {!sansBarre && (
       <div className="sans-impression mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px] text-attenue-texte">
-          Apercu avant impression — format A4, marges de 12 mm.
+          Aperçu avant impression — format A4, marges de 12 mm.
         </p>
-        <Bouton onClick={() => window.print()}>
-          <Printer />
-          Imprimer
-        </Bouton>
+        <div className="flex items-center gap-2">
+          {/* LE RETOUR A L'ECRAN D'OU L'ON VIENT (10/10/2026) : un etat s'ouvre
+              depuis un document ou une liste, il s'y referme. */}
+          <Bouton variante="contour" onClick={() => window.history.back()}>
+            <ArrowLeft />
+            Retour
+          </Bouton>
+          <Bouton onClick={() => window.print()}>
+            <Printer />
+            Imprimer
+          </Bouton>
+        </div>
       </div>
       )}
 

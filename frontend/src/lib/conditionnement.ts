@@ -28,6 +28,8 @@
  * faut le dire, pas inventer un facteur. Un kilo faux se propage en coût de
  * revient faux.
  */
+import { lireNombre } from './nombres.ts'
+
 
 /** Ce que la référence dit de son conditionnement. */
 export interface Conditionnement {
@@ -48,11 +50,15 @@ export interface Colisage {
 
 const VIDE: Colisage = { kg: null, bobines: null, palettes: null }
 
-/** Un nombre utilisable, ou null. Une chaîne vide n'est pas un zéro. */
+/**
+ * Un nombre utilisable, ou null. Une chaîne vide n'est pas un zéro — ni une
+ * chaîne faite d'espaces : elle valait 0 et affichait « 0 bobine, 0 palette »
+ * pour un champ que personne n'avait rempli (T-GF-006, 15/10/2026).
+ */
 function nombre(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null
-  const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'))
-  return Number.isFinite(n) ? n : null
+  const n = typeof v === 'number' ? v : lireNombre(String(v))
+  return n !== null && Number.isFinite(n) ? n : null
 }
 
 /** Les comptes de colis sont entiers : on ne manutentionne pas 3,4 bobines. */
@@ -175,9 +181,13 @@ export function depuisUnite(valeur: unknown, unite: string, c: Conditionnement):
   }
 }
 
-/** Formate un nombre pour un champ de saisie : vide plutôt que « null ». */
+/**
+ * Formate un nombre pour un champ de saisie : vide plutôt que « null » — ou que
+ * « NaN » : une quantité multipliée par un facteur manquant écrivait « NaN »
+ * dans la grille des lignes (T-GF-007, 15/10/2026).
+ */
 export function pourChamp(n: number | null, decimales = 0): string {
-  if (n === null) return ''
+  if (n === null || !Number.isFinite(n)) return ''
   return decimales > 0 ? String(Number(n.toFixed(decimales))) : String(Math.round(n))
 }
 
@@ -189,6 +199,11 @@ export function pourChamp(n: number | null, decimales = 0): string {
  * 2 499,9996 kg — quatre decigrammes perdus a chaque ligne, cumules dans le
  * stock. Une ligne ne part donc dans son unite que si la traduction est
  * exacte ; sinon elle part en kilos, qui sont ce que l'on a pese.
+ *
+ * EXACTE A QUATRE DECIMALES, la precision ou la base GARDE la quantite saisie
+ * (10/10/2026). Jugee a six, 6 kg partaient en 0,012952 palette, la base gardait
+ * 0,0130, qui ne fait plus 6 kg : le retour fournisseur etait refuse par la
+ * contrainte de conversion, sans message comprehensible.
  */
 export function saisieExacte(
   kg: number,
@@ -196,9 +211,73 @@ export function saisieExacte(
   facteur: number | null,
 ): { unite_saisie: string; quantite_saisie: number } {
   if (!facteur) return { unite_saisie: 'kg', quantite_saisie: kg }
-  const q = Number((kg / facteur).toFixed(6))
+  const q = Number((kg / facteur).toFixed(4))
   const refait = Math.round(q * facteur * 10_000) / 10_000
   return Math.abs(refait - kg) < 0.00005
     ? { unite_saisie: unite, quantite_saisie: q }
     : { unite_saisie: 'kg', quantite_saisie: kg }
+}
+
+/** Les seuils du controle de colisage, en % du poids de bobine de la fiche. */
+export interface TolerancesColisage {
+  alerte: number
+  refus: number
+}
+
+export interface VerdictColisage {
+  /** ok, alerte (a verifier) ou incoherent — jamais bloquant : on signale. */
+  niveau: 'ok' | 'alerte' | 'incoherent'
+  message: string | null
+}
+
+/**
+ * KILOS, BOBINES ET PALETTES DOIVENT S'ACCORDER (08/10/2026).
+ *
+ * 4 032 kg, 1 920 bobines et 20 palettes pour un fil de 2,1 kg la bobine et
+ * 336 bobines par palette ne decrivent rien de reel : il faut 6 palettes. Le
+ * raisonnement est celui de la base (`fn_controle_colisage`, controle C43) :
+ *   * le poids moyen d'une bobine ne s'ecarte pas trop de la fiche ;
+ *   * les palettes ne depassent pas le minimum plus une palette entamee, et
+ *     aucune ne porte plus que sa capacite.
+ * Le verdict SIGNALE ; il ne bloque jamais la saisie.
+ */
+export function controleColisage(
+  kgV: unknown,
+  bobinesV: unknown,
+  palettesV: unknown,
+  c: Conditionnement,
+  t: TolerancesColisage,
+): VerdictColisage {
+  const kg = nombre(kgV)
+  const bob = nombre(bobinesV)
+  const pal = nombre(palettesV)
+  const p = poids(c)
+  const pp = parPalette(c)
+  let alerte: string | null = null
+
+  if (bob && bob > 0 && p && kg && kg > 0) {
+    const reel = kg / bob
+    const ecart = ((reel - p) / p) * 100
+    const texte = `${Math.round(bob)} bobines pour ${kg.toLocaleString('fr-FR')} kg font ${reel.toFixed(2)} kg par bobine ; la fiche dit ${p.toFixed(2)} kg (${ecart > 0 ? '+' : ''}${ecart.toFixed(0)} %).`
+    if (Math.abs(ecart) > t.refus) return { niveau: 'incoherent', message: texte }
+    if (Math.abs(ecart) > t.alerte) alerte = texte
+  }
+
+  const beff = bob && bob > 0 ? bob : p && kg ? kg / p : null
+  if (pal && pal > 0 && pp && beff && beff > 0) {
+    const min = Math.ceil(beff / pp - 1e-6)
+    if (pal > min + 1) {
+      return {
+        niveau: 'incoherent',
+        message: `${Math.round(pal)} palettes pour ${Math.round(beff)} bobines : à ${pp} bobines par palette il en faut ${min} (${min + 1} avec une palette entamée). Des colis ont-ils été saisis comme palettes ?`,
+      }
+    }
+    if (beff / pal > pp * (1 + t.refus / 100)) {
+      return {
+        niveau: 'incoherent',
+        message: `${Math.round(beff)} bobines sur ${Math.round(pal)} palette(s), soit ${Math.round(beff / pal)} par palette ; une palette en porte ${pp}. Il en faut au moins ${min}.`,
+      }
+    }
+  }
+  return alerte ? { niveau: 'alerte', message: alerte } : { niveau: 'ok', message: null }
 }

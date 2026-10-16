@@ -1,7 +1,6 @@
 /**
  * Ce que les ecrans du dossier d'importation partagent : l'apercu de cloture,
- * le choix des lignes d'un frais cible, la tuile de chiffre, et trois petites
- * aides de saisie.
+ * la tuile de chiffre, et trois petites aides de saisie.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -9,16 +8,15 @@ import { Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
 import { Alerte, Bouton, Chargement } from '../../composants/ui/base'
-import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { cn, fmt } from '../../lib/utils'
-import type { Frais, Ligne } from './types'
+import { lireNombre } from '../../lib/nombres'
 
 export const echec = (e: unknown) =>
   toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
 
 /** « 12 584,50 » ou « 12584.5 » : les deux se saisissent. */
 export const nombre = (s: string | number | null | undefined) =>
-  Number(String(s ?? '').replace(/\s/g, '').replace(',', '.'))
+  (lireNombre(String(s ?? '')) ?? 0)
 
 /**
  * Tout ce qu'un geste d'import peut changer. Sans dossier, tous les dossiers :
@@ -123,72 +121,30 @@ export function Tuile({
 }
 
 // ============================================================================
-// Frais cible : sur quelles lignes il se repartit
+// Un panneau de la page (audit v5, F20) : la repartition d'un frais et la
+// cloture du dossier se saisissent dans le dossier, plus dans une fenetre.
 // ============================================================================
 
-export function CiblesDialogue({
-  idDossier,
-  frais,
-  lignes,
-  surFermer,
+function Panneau({
+  titre,
+  description,
+  children,
 }: {
-  idDossier: string
-  frais: Frais | null
-  lignes: Ligne[]
-  surFermer: () => void
+  titre: string
+  description?: string
+  children: React.ReactNode
 }) {
-  const rafraichir = useRafraichir(idDossier)
-  const [cibles, setCibles] = useState<string[]>([])
-  useEffect(() => setCibles(frais?.cibles ?? []), [frais])
-
-  const enregistrer = useMutation({
-    mutationFn: (c: string[]) => api.patch(`/api/import/frais/${frais!.id_ligne_frais}`, { cibles: c }),
-    onSuccess: () => {
-      toast.success('Répartition du frais mise à jour')
-      rafraichir()
-      surFermer()
-    },
-    onError: echec,
-  })
-
+  const ref = useRef<HTMLDivElement>(null)
+  // Ouvert depuis un bouton plus haut ou plus bas : on l'amene sous les yeux.
+  useEffect(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), [])
   return (
-    <Dialogue open={!!frais} onOpenChange={(o) => !o && surFermer()}>
-      <DialogueContenu
-        titre={`Répartir « ${frais?.frais_libelle ?? ''} »`}
-        description="Par défaut un frais se répartit sur tout le dossier. Cochez des lignes pour le limiter à elles — les droits de douane d'une pièce en franchise, par exemple."
-      >
-        <div className="max-h-72 space-y-1 overflow-y-auto rounded-[var(--radius)] border border-bordure p-2">
-          {lignes.map((l) => (
-            <label key={l.id_ligne} className="flex items-center gap-2 py-0.5 text-[12.5px]">
-              <input
-                type="checkbox"
-                checked={cibles.includes(l.id_ligne)}
-                onChange={(e) =>
-                  setCibles((c) => (e.target.checked ? [...c, l.id_ligne] : c.filter((x) => x !== l.id_ligne)))
-                }
-              />
-              <span className="min-w-0 truncate">
-                <span className="text-attenue-texte">{l.numero_facture} · </span>
-                {l.type_ligne === 'ERP' ? l.code_reference : l.designation}
-                {l.type_ligne === 'HORS_ERP' && <em className="text-attenue-texte"> (hors ERP)</em>}
-              </span>
-            </label>
-          ))}
-        </div>
-        <div className="mt-4 flex flex-wrap justify-between gap-2">
-          <Bouton variante="contour" onClick={() => enregistrer.mutate([])}>
-            Tout le dossier
-          </Bouton>
-          <div className="flex gap-2">
-            <Bouton variante="contour" onClick={surFermer}>Annuler</Bouton>
-            <Bouton chargement={enregistrer.isPending} disabled={cibles.length === 0}
-              onClick={() => enregistrer.mutate(cibles)}>
-              Répartir sur {cibles.length} ligne(s)
-            </Bouton>
-          </div>
-        </div>
-      </DialogueContenu>
-    </Dialogue>
+    <div ref={ref} className="rounded-[var(--radius)] border border-primaire/40 bg-surface p-4">
+      <div className="mb-3">
+        <div className="text-[14px] font-semibold">{titre}</div>
+        {description && <p className="m-0 mt-0.5 text-[12.5px] text-attenue-texte">{description}</p>}
+      </div>
+      {children}
+    </div>
   )
 }
 
@@ -216,7 +172,7 @@ interface ApercuCloture {
  * La cloture montre d'abord ce qu'elle va faire : le calcul est joue a blanc
  * par le serveur (`simuler`), rien n'est ecrit tant qu'on n'a pas confirme.
  */
-export function ClotureDialogue({
+export function CloturePanneau({
   idDossier,
   ouvert,
   surFermer,
@@ -245,13 +201,12 @@ export function ClotureDialogue({
   })
   const a = qApercu.data
 
+  if (!ouvert) return null
   return (
-    <Dialogue open={ouvert} onOpenChange={(o) => !o && surFermer()}>
-      <DialogueContenu
-        titre="Clôturer le dossier"
-        description="Les frais rejoignent le CUMP du stock encore présent. Après clôture, le dossier ne se modifie plus."
-        className="max-w-3xl"
-      >
+    <Panneau
+      titre="Clôturer le dossier"
+      description="Les frais rejoignent le CUMP du stock encore présent. Après clôture, le dossier ne se modifié plus."
+    >
         {qApercu.isLoading && <Chargement texte="Calcul de la clôture…" />}
         {qApercu.error && (
           <Alerte ton="alerte">
@@ -265,7 +220,7 @@ export function ClotureDialogue({
               <Tuile titre="Déjà consommé" valeur={`${fmt.nombre(a.ecart_consomme_dhs, 2)} DH`} />
               <Tuile titre="Lignes hors ERP" valeur={`${fmt.nombre(a.frais_hors_erp_dhs, 2)} DH`} />
             </div>
-            <div className="defilement-x rounded-[var(--radius)] border border-bordure">
+            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x rounded-[var(--radius)] border border-bordure focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="w-full min-w-[40rem] text-[12.5px]">
                 <thead>
                   <tr className="border-b border-bordure bg-attenue/40 text-[10.5px] uppercase tracking-wider text-attenue-texte">
@@ -317,7 +272,6 @@ export function ClotureDialogue({
             Clôturer et ajuster le CUMP
           </Bouton>
         </div>
-      </DialogueContenu>
-    </Dialogue>
+    </Panneau>
   )
 }

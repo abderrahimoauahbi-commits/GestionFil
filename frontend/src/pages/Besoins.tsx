@@ -156,7 +156,7 @@ export function Besoins() {
 
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<PlanListe[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<PlanListe[]>('/api/plans', { signal }),
   })
 
   // A l'ouverture, on vise le plan qui alimente reellement les achats.
@@ -169,7 +169,7 @@ export function Besoins() {
 
   const qDossier = useQuery({
     queryKey: ['production-besoins', planVise],
-    queryFn: () => api.get<Dossier>(`/api/plans/${planVise}/production-besoins`),
+    queryFn: ({ signal }) => api.get<Dossier>(`/api/plans/${planVise}/production-besoins`, { signal }),
     enabled: !!planVise,
   })
 
@@ -309,7 +309,7 @@ export function Besoins() {
       `besoins-${plan?.libelle ?? 'plan'}`,
       [
         { champ: 'code_reference', entete: 'Code Ref' },
-        { champ: 'designation', entete: 'Designation' },
+        { champ: 'designation', entete: 'Désignation' },
         { champ: 'categorie', entete: 'Catégorie' },
         { champ: 'fournisseur', entete: 'Fournisseur' },
         { champ: 'unite', entete: 'Unité' },
@@ -335,7 +335,7 @@ export function Besoins() {
         <EtatVide
           icone={Factory}
           titre="Aucun plan de production"
-          description="Les besoins matiere se deduisent d'un plan : commencez par en creer un."
+          description="Les besoins matière se deduisent d'un plan : commencez par en créer un."
         />
       </div>
     )
@@ -346,7 +346,7 @@ export function Besoins() {
     <div>
       <EnTetePage
         titre="Production & Besoins"
-        description="m² planifies par qualité, et matiere necessaire par référence, sur les mois de la période."
+        description="m² planifies par qualité, et matière nécessaire par référence, sur les mois de la période."
         actions={
           <>
             {/* Le choix du plan remonte ici : c'est le contexte de TOUT l'ecran,
@@ -370,7 +370,7 @@ export function Besoins() {
                 variante="contour"
                 onClick={() => recalcul.mutate(plan.id_plan)}
                 chargement={recalcul.isPending}
-                title="Reexploser le plan par les recettes figees"
+                title="Reexploser le plan par les recettes figées"
               >
                 <Calculator />
                 Recalculer les besoins
@@ -454,7 +454,7 @@ export function Besoins() {
           {plan.nb_besoins === 0 && (
             <Alerte ton="alerte" titre="Aucun besoin calcule">
               La production est planifiee mais le MRP n'a pas encore tourne. Lancez « Recalculer les
-              besoins » — sans cela, aucune matiere ne sera proposee a l'achat.
+              besoins » — sans cela, aucune matière ne sera proposée a l'achat.
             </Alerte>
           )}
 
@@ -490,12 +490,12 @@ export function Besoins() {
               </span>
             </CarteEntete>
             <CarteCorps className="p-0">
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full text-[12px]">
                   <thead>
                     <tr className="bg-attenue">
                       <th className="sticky left-0 z-10 bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                        Qualite
+                        Qualité
                       </th>
                       <th className="px-2.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap">
                         Poids kg/m²
@@ -562,7 +562,7 @@ export function Besoins() {
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <Package className="size-3.5" />
-                Besoins matiere — kg par reference
+                Besoins matière — kg par référence
                 <Aide>
                   besoin(reference, mois) = (1 + taux de perte) × Σ<sub>qualités</sub> (kg/m² de la
                   composition × m² prevus) — la formule de la feuille Production_Besoins. Le taux de
@@ -581,7 +581,7 @@ export function Besoins() {
                 <Champ
                   value={filtre}
                   onChange={(e) => setFiltre(e.target.value)}
-                  placeholder="Référence, designation, fournisseur..."
+                  placeholder="Référence, fournisseur…"
                   className="h-7 w-56 text-[12px]"
                 />
                 <select
@@ -628,7 +628,7 @@ export function Besoins() {
                 <div className="p-4">
                   <EtatVide
                     icone={AlertTriangle}
-                    titre={filtre ? 'Aucune reference ne correspond' : 'Aucun besoin calcule'}
+                    titre={filtre ? 'Aucune référence ne correspond' : 'Aucun besoin calcule'}
                     description={
                       filtre
                         ? undefined
@@ -637,23 +637,19 @@ export function Besoins() {
                   />
                 </div>
               ) : (
-                <div className="defilement-x" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
                   <table className="grille w-full text-[12px]">
                     <thead className="sticky top-0 z-20">
                       <tr className="bg-attenue">
-                        <th className="sticky left-0 z-10 border-b border-bordure bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                          Reference
-                        </th>
-                        <th className="border-b border-bordure bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                          Categorie
-                        </th>
-                        <th className="hidden border-b border-bordure bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte xl:table-cell">
-                          Fournisseur
+                        {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026) : categorie et
+                            fournisseur passent sous la reference, les mois se resserrent. */}
+                        <th className="sticky left-0 z-10 border-b border-bordure bg-attenue px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
+                          Référence
                         </th>
                         {mois.map((m) => (
                           <th
                             key={m.rang_mois}
-                            className="border-b border-bordure bg-attenue px-2.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap"
+                            className="border-b border-bordure bg-attenue px-1.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap"
                           >
                             {libelleMois(m.annee_mois)}
                           </th>
@@ -669,17 +665,11 @@ export function Besoins() {
                           key={b.code_reference}
                           className="hover:bg-attenue/60"
                         >
-                          <td className="sticky left-0 z-10 bg-surface px-2.5 py-1 whitespace-nowrap">
-                            <span className="font-medium">{b.code_reference}</span>
-                            <span className="ml-1.5 text-[11px] text-attenue-texte">
-                              {b.designation}
-                            </span>
-                          </td>
-                          <td className="px-2.5 py-1 text-attenue-texte whitespace-nowrap">
-                            {b.categorie}
-                          </td>
-                          <td className="hidden px-2.5 py-1 text-attenue-texte whitespace-nowrap xl:table-cell">
-                            {b.fournisseur}
+                          <td className="sticky left-0 z-10 max-w-[15rem] bg-surface px-2 py-1">
+                            <div className="font-medium">{b.code_reference}</div>
+                            <div className="text-[11px] text-attenue-texte">
+                              {[b.categorie, b.fournisseur].filter(Boolean).join(' · ')}
+                            </div>
                           </td>
                           {mois.map((m) => {
                             const v = b.par_mois.get(m.rang_mois) ?? 0
@@ -687,7 +677,7 @@ export function Besoins() {
                               <td
                                 key={m.rang_mois}
                                 className={cn(
-                                  'px-2.5 py-1 text-right tabular-nums',
+                                  'px-1.5 py-1 text-right tabular-nums',
                                   v === 0 && 'text-attenue-texte',
                                 )}
                               >
@@ -701,11 +691,9 @@ export function Besoins() {
                         </tr>
                       ))}
                       <tr className="border-t-2 border-bordure bg-attenue/40 font-semibold">
-                        <td className="sticky left-0 z-10 bg-attenue px-2.5 py-1.5">TOTAL kg</td>
-                        <td />
-                        <td className="hidden xl:table-cell" />
+                        <td className="sticky left-0 z-10 bg-attenue px-2 py-1.5">TOTAL kg</td>
                         {mois.map((m) => (
-                          <td key={m.rang_mois} className="px-2.5 py-1.5 text-right tabular-nums">
+                          <td key={m.rang_mois} className="px-1.5 py-1.5 text-right tabular-nums">
                             {fmt.nombre(
                               besoins.reduce((s, b) => s + (b.par_mois.get(m.rang_mois) ?? 0), 0),
                               1,

@@ -34,7 +34,7 @@ export function useCrud<T>(chemin: string, filtres: Record<string, string> = {})
      tableau, et que `total` soit disponible quand il existe. */
   const brut = useQuery({
     queryKey: cle,
-    queryFn: () => api.get<T[] | Page<T>>(`/api/${chemin}?${params}`),
+    queryFn: ({ signal }) => api.get<T[] | Page<T>>(`/api/${chemin}?${params}`, { signal }),
   })
 
   const paginee = !Array.isArray(brut.data) && brut.data != null
@@ -63,10 +63,10 @@ export function useCrud<T>(chemin: string, filtres: Record<string, string> = {})
       api.post<Record<string, unknown>>(`/api/${chemin}`, donnees),
     onSuccess: () => {
       setErreur(null)
-      setSucces('Enregistrement cree.')
+      setSucces('Enregistrement créé.')
       rafraichir()
     },
-    onError: (e) => setErreur(message(e, 'Creation impossible.')),
+    onError: (e) => setErreur(message(e, 'Création impossible.')),
   })
 
   const modifier = useMutation({

@@ -76,9 +76,12 @@ async fn dossier(
     action: &str,
 ) -> AppResult<(EnteteTransfert, Vec<LigneTransfert>)> {
     let entete: EnteteTransfert = sqlx::query_as(
+        // VERROUILLE (audit v4) : deux expeditions simultanees du meme
+        // transfert lisaient toutes deux BROUILLON.
         "SELECT numero_transfert, date_transfert, code_magasin_source,
                 code_magasin_dest, statut, id_utilisateur
-           FROM transfert WHERE id_transfert = $1",
+           FROM transfert WHERE id_transfert = $1
+            FOR UPDATE",
     )
     .bind(id_transfert)
     .fetch_optional(&mut **tx)

@@ -32,7 +32,7 @@ const CHAPITRES: { titre: string; prefixes: string[] }[] = [
     prefixes: ['/catalogue', '/categories', '/couleurs', '/fournisseurs', '/equivalences', '/referentiels', '/qualites'],
   },
   { titre: 'Achats', prefixes: ['/plan-achat', '/besoins', '/bons-commande'] },
-  { titre: 'Importation', prefixes: ['/import', '/receptions-import'] },
+  { titre: 'Importation', prefixes: ['/import'] },
   { titre: 'Réceptions et stock', prefixes: ['/receptions', '/mouvements', '/transferts', '/stock', '/inventaires'] },
   { titre: 'Analyse', prefixes: ['/statistiques', '/valorisation', '/etats', '/'] },
   { titre: 'Réglages', prefixes: ['/utilisateurs'] },
@@ -96,6 +96,7 @@ export function EtatManuel() {
               il n'a rien a faire sur la feuille. */}
           <span className="print:hidden">
             <Selecteur
+              aria-label="Chapitre"
               value={chapitre}
               onChange={(e) => setChapitre(e.target.value)}
               className="h-7 text-[12px]"
@@ -166,6 +167,25 @@ function FicheImprimee({ sujet }: { sujet: Sujet }) {
               {p.resultat}
             </p>
           ) : null}
+        </Bloc>
+      ))}
+
+      {sujet.exemples?.map((ex) => (
+        <Bloc key={ex.titre} titre={`Exemple — ${ex.titre}`}>
+          {ex.situation ? <p>{ex.situation}</p> : null}
+          {ex.calcul?.length ? (
+            <table className="w-full border-collapse">
+              <tbody>
+                {ex.calcul.map(([libelle, valeur], i) => (
+                  <tr key={i} className="border-b border-neutral-200">
+                    <td className="py-0.5 pr-2">{libelle}</td>
+                    <td className="py-0.5 text-right tabular-nums">{valeur}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+          {ex.conclusion ? <p className="mt-0.5 italic">{ex.conclusion}</p> : null}
         </Bloc>
       ))}
 

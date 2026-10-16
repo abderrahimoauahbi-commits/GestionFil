@@ -5,7 +5,7 @@
 //! cette separation que repose toute la segregation des taches du CDC B4.
 
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
-use crate::domain::{classification, inventaire, mrp, plan_achat, reception, transfert};
+use crate::domain::{classification, facture_locale, inventaire, mrp, plan_achat, reception, transfert};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
@@ -55,7 +55,10 @@ pub async fn generer_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
     let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref()).await?;
-    Ok(Json(serde_json::to_value(r)?))
+    // Le budget total se masque comme les montants estimes (audit du 13/10/2026).
+    let mut v = serde_json::to_value(r)?;
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    Ok(Json(v))
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +70,11 @@ pub struct DemandeConversion {
     /// bon, s'il est du meme fournisseur et encore modifiable.
     #[serde(default)]
     pub cibles: Option<std::collections::HashMap<String, String>>,
+    /// CE QUE L'ACHETEUR CONFIRME SUR LA COMMANDE (14/10/2026), par identifiant
+    /// de proposition : quantite, prix, nb palettes, nb bobines. Absent = la
+    /// valeur du plan. On ajuste sur la commande, pas dans le plan.
+    #[serde(default)]
+    pub ajustements: Option<std::collections::HashMap<String, plan_achat::AjustementLigne>>,
 }
 
 /// Convertit des propositions d'achat en bons de commande.
@@ -81,7 +89,14 @@ pub async fn convertir_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
     user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
-    let r = plan_achat::convertir(&state.db, &user, d.propositions.as_deref(), d.cibles.as_ref()).await?;
+    let r = plan_achat::convertir(
+        &state.db,
+        &user,
+        d.propositions.as_deref(),
+        d.cibles.as_ref(),
+        d.ajustements.as_ref(),
+    )
+    .await?;
     Ok(Json(serde_json::to_value(r)?))
 }
 
@@ -121,14 +136,45 @@ pub async fn receptionner_transfert(
     Ok(Json(serde_json::to_value(r)?))
 }
 
-pub async fn ouvrir_inventaire(
+/// `POST /api/inventaires/{id}/preparer` — les lignes d'un brouillon cree
+/// avant le 13/10/2026, quand la photo attendait le bouton « Ouvrir ». Un
+/// inventaire cree depuis a deja ses lignes.
+pub async fn preparer_inventaire(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::INVENTAIRE, Action::Ecrire).await?;
-    let n = inventaire::ouvrir(&state.db, &user, &id).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let n = inventaire::preparer(&mut tx, &id).await?;
+    tx.commit().await?;
     Ok(Json(json!({ "id_inventaire": id, "lignes_a_compter": n })))
+}
+
+/// `POST /api/inventaires/{id}/valider` — le comptage est fige, par un autre
+/// compte que ceux qui ont compte (13/10/2026).
+pub async fn valider_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+    let numero = inventaire::valider(&state.db, &user, &id).await?;
+    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "statut": "VALIDE" })))
+}
+
+/// `POST /api/inventaires/{id}/renvoyer` — un inventaire valide revient au
+/// comptage, avec un motif (13/10/2026).
+pub async fn renvoyer_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(m): Json<MotifAnnulation>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+    let numero = inventaire::renvoyer(&state.db, &user, &id, &m.motif).await?;
+    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "statut": "BROUILLON" })))
 }
 
 pub async fn cloturer_inventaire(
@@ -139,6 +185,199 @@ pub async fn cloturer_inventaire(
     user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
     let r = inventaire::cloturer(&state.db, &user, &id).await?;
     Ok(Json(serde_json::to_value(r)?))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct FactureReception {
+    pub numero_facture: String,
+    /// Le montant de la marchandise, DANS LA DEVISE DU BON (decision 4 de
+    /// l'audit v4). `montant_facture_mad` reste accepte pour une reception en
+    /// dirhams.
+    pub montant_facture: Option<f64>,
+    pub montant_facture_mad: Option<f64>,
+    /// Le taux de la facture ; a defaut, le cours Bank Al-Maghrib de sa date.
+    pub taux_change: Option<f64>,
+    #[serde(default)]
+    pub confirmer_taux: bool,
+    pub date_facture: Option<String>,
+    /// Les autres receptions que la facture couvre (meme fournisseur).
+    #[serde(default)]
+    pub autres_receptions: Vec<String>,
+    #[serde(default)]
+    pub frais_mad: f64,
+    #[serde(default)]
+    pub simuler: bool,
+    /// Des kilos ont ete rendus : facture nette (kilos gardes) ou brute (regle 3).
+    #[serde(default)]
+    pub facture_nette: Option<bool>,
+}
+
+/// `POST /api/receptions/{id}/cloturer` — la facture du fournisseur arrive :
+/// la valeur provisoire (prix du bon) devient definitive (regle 6). Avec
+/// `simuler`, tout est calcule et rien n'est ecrit : l'apercu avant de signer.
+pub async fn cloturer_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(f): Json<FactureReception>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
+    let montant = f
+        .montant_facture
+        .or(f.montant_facture_mad)
+        .ok_or_else(|| AppError::Invalide("Le montant de la facture est obligatoire.".into()))?;
+    let date = f.date_facture.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(crate::db::aujourdhui);
+    let (devise, taux) = {
+        let mut c = state.db.acquire().await?;
+        let devise = facture_locale::devise_reception(&mut c, &id).await?;
+        // Le taux saisi, sinon le cours Bank Al-Maghrib de la date : meme
+        // controle que les factures d'import (jamais 1 en devise, ecart > 3 %
+        // a confirmer).
+        let saisi = match f.taux_change {
+            Some(t) => Some(t),
+            None if devise == "MAD" => None,
+            None => crate::routes::importation::taux_reference(&mut c, &devise, &date).await?.map(|r| r.valeur),
+        };
+        let objet = format!("La facture {}", f.numero_facture.trim());
+        let taux =
+            crate::routes::importation::controler_taux(&mut c, &objet, &devise, saisi, &date, f.confirmer_taux).await?;
+        (devise, taux)
+    };
+    let mut receptions = vec![id.clone()];
+    receptions.extend(f.autres_receptions.iter().cloned());
+    let facture = facture_locale::FactureLocale {
+        nette: f.facture_nette,
+        numero_facture: f.numero_facture.clone(),
+        receptions,
+        code_devise: devise,
+        montant_devise: montant,
+        taux,
+        frais_mad: f.frais_mad,
+    };
+    let mut v = facture_locale::cloturer(&state.db, &user, &facture, f.simuler).await?;
+    // Les montants de la clôture se masquent comme ceux de la réception.
+    user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
+    Ok(Json(v))
+}
+
+/// `GET /api/receptions/{id}/facture-contexte` — ce que l'ecran de cloture
+/// doit savoir avant la saisie : la devise du bon, le cours de reference, et
+/// les autres receptions validees du fournisseur qu'une meme facture peut
+/// couvrir.
+pub async fn contexte_facture_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Lire).await?;
+    let date = q.get("date").cloned().filter(|d| !d.is_empty()).unwrap_or_else(crate::db::aujourdhui);
+    let mut c = state.db.acquire().await?;
+    let devise = facture_locale::devise_reception(&mut c, &id).await?;
+    let reference = if devise == "MAD" {
+        None
+    } else {
+        crate::routes::importation::taux_reference(&mut c, &devise, &date).await?
+    };
+    let autres: Vec<(String, String, String, f64)> = sqlx::query_as(
+        "SELECT r.id_reception, r.numero_reception, r.date_reception,
+                COALESCE((SELECT sum(a.total_mad) FROM v_archive_reception_courante a
+                            JOIN ligne_reception lr ON lr.id_ligne_reception = a.id_ligne_reception
+                           WHERE lr.id_reception = r.id_reception), 0)::float8
+           FROM reception r
+           JOIN reception moi ON moi.id_reception = $1
+           LEFT JOIN bon_commande bc ON bc.id_bc = r.id_bc
+           LEFT JOIN fournisseur fo ON fo.code_fournisseur = r.code_fournisseur
+          WHERE r.statut = 'VALIDE' AND r.id_reception <> $1
+            AND r.code_fournisseur = moi.code_fournisseur
+            -- LA DEVISE VIENT DES LIGNES (ADR-003 phase A) : sur un arrivage qui
+            -- couvre deux bons, l'en-tete n'en designe aucun, et lire la devise
+            -- du fournisseur proposait de melanger des dollars a des dirhams.
+            AND COALESCE(
+                  (SELECT CASE WHEN count(DISTINCT lr.code_devise) = 1 THEN min(lr.code_devise) END
+                     FROM ligne_reception lr WHERE lr.id_reception = r.id_reception),
+                  bc.code_devise, fo.code_devise, 'MAD') = $2
+          ORDER BY r.date_reception DESC, r.numero_reception
+          LIMIT 50",
+    )
+    .bind(&id)
+    .bind(&devise)
+    .fetch_all(&mut *c)
+    .await?;
+    // LES RETOURS NON SOLDES (regle 3) : l'ecran demande alors si la facture est
+    // nette (kilos gardes) ou brute (un avoir pour retour suivra).
+    let retours: Vec<(String, String, f64)> = sqlx::query_as(
+        "SELECT numero_mouvement, code_reference, kg::float8 FROM v_retours_reception
+          WHERE id_reception = $1 AND NOT solde ORDER BY numero_mouvement, code_reference",
+    )
+    .bind(&id)
+    .fetch_all(&mut *c)
+    .await?;
+    let mut v = json!({
+        "retours": retours.iter().map(|(n, r, kg)| json!({"numero_mouvement": n, "code_reference": r, "kg": kg}))
+            .collect::<Vec<_>>(),
+        "code_devise": devise,
+        "taux_reference": reference.as_ref().map(|r| r.valeur),
+        "source_taux": reference.map(|r| r.source),
+        "receptions": autres.iter().map(|(i, n, d, val)| json!({
+            "id_reception": i, "numero_reception": n, "date_reception": d, "valeur_provisoire_mad": val,
+        })).collect::<Vec<_>>(),
+    });
+    user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CorrectionReception {
+    /// AVOIR de prix (la valeur du stock baisse), AVOIR_RETOUR (rapproche des
+    /// retours, sans effet sur le CMUP) ou COMPLEMENT (elle monte).
+    pub nature: String,
+    /// L'avoir ou le complement peut viser une seule reference.
+    #[serde(default)]
+    pub code_reference: Option<String>,
+    pub numero_piece: String,
+    pub montant_mad: f64,
+    pub motif: String,
+    #[serde(default)]
+    pub simuler: bool,
+}
+
+/// `POST /api/receptions/{id}/avoir` — corriger la valeur d'une reception
+/// cloturee : avoir du fournisseur ou facture complementaire (regle 8). Acte
+/// de validation, motif obligatoire, journalise.
+pub async fn corriger_reception(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(c): Json<CorrectionReception>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::RECEPTIONS, Action::Valider).await?;
+    let mut v = facture_locale::corriger(
+        &state.db, &user, &id, &c.nature, &c.numero_piece, c.montant_mad, &c.motif,
+        c.code_reference.as_deref(), c.simuler,
+    )
+    .await?;
+    user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
+    Ok(Json(v))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct MotifAnnulation {
+    pub motif: String,
+}
+
+/// `POST /api/inventaires/{id}/annuler` — un inventaire ouvert par erreur ou
+/// perime s'abandonne, avec un motif. Acte de validation : il ferme un
+/// comptage que d'autres ont commence.
+pub async fn annuler_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(m): Json<MotifAnnulation>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Valider).await?;
+    let numero = inventaire::annuler(&state.db, &user, &id, &m.motif).await?;
+    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "statut": "ANNULE" })))
 }
 
 pub async fn classifier(
@@ -292,7 +531,7 @@ pub async fn creer_frais_approche(
         Some("VALIDE") => {}
         Some(autre) => {
             return Err(AppError::Invalide(format!(
-                "la reception est en statut {autre} : les frais ne se repartissent que sur une                  reception validee, dont les poids ne bougent plus"
+                "la reception est en statut {autre} : les frais ne se repartissent que sur une reception validee, dont les poids ne bougent plus"
             )))
         }
     }
@@ -321,4 +560,31 @@ pub async fn creer_frais_approche(
 
     tx.commit().await?;
     Ok(Json(serde_json::json!({ "enregistre": true })))
+}
+
+/// Retire un frais d'approche d'un arrivage.
+///
+/// TANT QU'IL N'EST PAS PORTE AU CUMP. Un frais saisi mais pas encore passe au
+/// stock n'est qu'une saisie : la corriger est legitime, et l'y laisser pour
+/// toujours forcerait a inventer un avoir pour une faute de frappe. Porte, il a
+/// bouge une valeur de stock — le declencheur `trg_frais_approche_porte` le
+/// refuse alors, et son message remonte tel quel (ADR-003 phase C).
+pub async fn supprimer_frais_approche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::VALORISATION, Action::Ecrire).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let efface = sqlx::query("DELETE FROM frais_approche WHERE id_frais = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if efface == 0 {
+        return Err(AppError::Introuvable(format!("frais d'approche {id}")));
+    }
+    tx.commit().await?;
+    Ok(Json(serde_json::json!({ "supprime": true })))
 }

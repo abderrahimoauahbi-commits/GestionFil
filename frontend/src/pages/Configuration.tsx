@@ -62,6 +62,7 @@ import { Audit } from './Audit'
 import { ReglageApparence } from '../composants/ReglageApparence'
 import { Referentiels } from './Referentiels'
 import { Utilisateurs } from './Utilisateurs'
+import { ListeRoles } from './Roles'
 
 const MODULE = 'PARAMETRES'
 
@@ -147,8 +148,8 @@ const SECTIONS: Section[] = [
       {
         titre: 'Seuils de couverture',
         intention:
-          "Le statut d'une reference se lit en JOURS DE COUVERTURE, pas en kilos : " +
-          '500 kg sont confortables sur une matiere lente et deja courts sur le fil de chaine.',
+          "Le statut d'une référence se lit en JOURS DE COUVERTURE, pas en kilos : " +
+          '500 kg sont confortables sur une matière lente et déjà courts sur le fil de chaine.',
         codes: ['P_SeuilAlerte', 'P_SeuilCritique', 'P_CouvMinMois', 'P_MargeSecurite'],
       },
       {
@@ -164,14 +165,14 @@ const SECTIONS: Section[] = [
     cle: 'production',
     famille: 'Paramètres de gestion',
     libelle: 'Production',
-    resume: 'Perte matiere, stocks de sécurité, tolerance des recettes',
+    resume: 'Perte matière, stocks de sécurité, tolérance des recettes',
     Icone: Factory,
     blocs: [
       {
-        titre: 'Pertes et tolerances',
+        titre: 'Pertes et tolérances',
         intention:
           'Le taux de perte majore chaque besoin calcule par le MRP. La tolerance de recette ' +
-          "dit de combien la somme des pourcentages d'un role peut s'ecarter de 100 %.",
+          "dit de combien la somme des pourcentages d'un rôle peut s'ecarter de 100 %.",
         codes: ['P_TauxPerte', 'P_ToleranceRecette'],
       },
       {
@@ -184,7 +185,7 @@ const SECTIONS: Section[] = [
       {
         titre: 'Photo de stock initiale',
         intention:
-          "Date de la reprise : avant elle, les quantites viennent de l'inventaire d'ouverture " +
+          "Date de la reprise : avant elle, les quantités viennent de l'inventaire d'ouverture " +
           'et non des mouvements.',
         codes: ['P_DateSaisie'],
       },
@@ -194,13 +195,13 @@ const SECTIONS: Section[] = [
     cle: 'entreprise',
     famille: 'Entreprise',
     libelle: 'Entreprise',
-    resume: 'Identite, pays, devise de reporting',
+    resume: 'Identité, pays, devise de reporting',
     Icone: Building2,
     blocs: [
       {
-        titre: 'Identite',
+        titre: 'Identité',
         intention:
-          "Ces valeurs n'entrent dans aucun calcul : elles figurent sur les etats d'impression " +
+          "Ces valeurs n'entrent dans aucun calcul : elles figurent sur les états d'impression " +
           'et les bons adresses aux fournisseurs.',
         codes: ['P_NomEntreprise', 'P_Secteur', 'P_Pays', 'P_DateCreationERP'],
       },
@@ -208,7 +209,7 @@ const SECTIONS: Section[] = [
         titre: 'Monnaie de référence',
         intention:
           'Toute valorisation est ramenee a cette devise. Elle est verrouillee : la changer ' +
-          'apres coup rendrait faux tout le stock deja valorise.',
+          'apres coup rendrait faux tout le stock déjà valorise.',
         codes: ['P_Devise'],
       },
     ],
@@ -223,15 +224,15 @@ const SECTIONS: Section[] = [
       {
         titre: 'Classement des références',
         intention:
-          'ABC repartit les references par poids financier, XYZ par regularite de consommation. ' +
-          'Les deux servent a doser le stock de securite et la vigilance.',
+          'ABC repartit les références par poids financier, XYZ par regularite de consommation. ' +
+          'Les deux servent a doser le stock de sécurité et la vigilance.',
         codes: ['P_SeuilABCA', 'P_SeuilABCB', 'P_SeuilXYZ_X', 'P_SeuilXYZ_Y'],
       },
       {
         titre: 'Montants et urgence des commandes',
         intention:
           "Le tiering classe l'urgence d'un achat par son montant. Le seuil de validation dit " +
-          'a partir de quand la Direction doit signer.',
+          'à partir de quand la Direction doit signer.',
         codes: [
           'P_SeuilTier1',
           'P_SeuilTier2',
@@ -248,9 +249,9 @@ const SECTIONS: Section[] = [
         codes: ['P_ScoreStrategique', 'P_ScoreStandard', 'P_ScoreSurveiller'],
       },
       {
-        titre: 'Immobilisation et tresorerie',
+        titre: 'Immobilisation et trésorerie',
         intention:
-          'Au-dela du seuil de dormance, un stock qui ne bouge plus est signale. Le delai de ' +
+          'Au-dela du seuil de dormance, un stock qui ne bouge plus est signale. Le délai de ' +
           'paiement sert au previsionnel quand le fournisseur n en declare aucun.',
         codes: ['P_SeuilDormant', 'P_DSODefaut', 'P_DateRefKPI'],
       },
@@ -260,14 +261,14 @@ const SECTIONS: Section[] = [
     cle: 'reception',
     famille: 'Paramètres de gestion',
     libelle: 'Réceptions et OTIF',
-    resume: 'Tolerance de pesee, cible de performance fournisseur',
+    resume: 'Tolérance de pesée, cible de performance fournisseur',
     Icone: PackageCheck,
     blocs: [
       {
-        titre: 'Tolerances au quai',
+        titre: 'Tolérances au quai',
         intention:
           'Au-dela de la tolerance de pesee, la ligne exige une derogation nominative. ' +
-          'La tolerance In-Full dit a partir de quel manque une livraison cesse d etre complete.',
+          'La tolerance In-Full dit à partir de quel manque une livraison cesse d etre complete.',
         codes: ['P_TolerEcartPesee', 'P_TolerInFull'],
       },
       {
@@ -311,14 +312,14 @@ const SECTIONS: Section[] = [
     cle: 'comptes',
     famille: 'Paramètres utilisateurs',
     libelle: 'Utilisateurs et droits',
-    resume: 'Comptes, roles, et la grille module x champ',
+    resume: 'Comptes, rôles, et la grille module x champ',
     Icone: Users,
   },
   {
     cle: 'utilisateurs',
     famille: 'Paramètres utilisateurs',
-    libelle: 'Roles et transitions',
-    resume: "Roles applicatifs et transitions d'etat autorisees",
+    libelle: 'Rôles et permissions',
+    resume: "Rôles, leurs permissions et leurs champs ; transitions d'état",
     Icone: ShieldCheck,
   },
   {
@@ -363,7 +364,7 @@ export function Configuration() {
 
   const q = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<Parametre[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<Parametre[]>('/api/parametres', { signal }),
   })
 
   const parametres = q.data ?? []
@@ -402,7 +403,7 @@ export function Configuration() {
       toast.success(`${n} parametre(s) enregistre(s)`, {
         description:
           'Chaque changement est historise avec son auteur. Rappel : ces valeurs servent de ' +
-          'defaut a la creation et ne modifient rien de deja enregistre.',
+          'defaut a la création et ne modifient rien de déjà enregistre.',
         duration: 8000,
       })
       setBrouillon({})
@@ -430,13 +431,13 @@ export function Configuration() {
     <div>
       <EnTetePage
         titre="Configuration"
-        description="Les réglages qui gouvernent les calculs, et les referentiels sur lesquels ils s appuient."
+        description="Les réglages qui gouvernent les calculs, et les référentiels sur lesquels ils s’appuient."
       />
 
-      <PageAvecRail
+      <PageAvecRail droite
         large
         rail={
-          <RailLateral
+          <RailLateral vertical
             groupes={FAMILLES.map((famille) => ({
               titre: famille,
               entrees: SECTIONS.filter((s) => s.famille === famille).map((s) => ({
@@ -490,7 +491,7 @@ export function Configuration() {
                 ))}
                 {resultats.length === 0 && (
                   <p className="p-4 text-[13px] text-attenue-texte">
-                    Aucun reglage ne correspond.
+                    Aucun réglage ne correspond.
                   </p>
                 )}
               </CarteCorps>
@@ -512,7 +513,12 @@ export function Configuration() {
           ) : section === 'audit' ? (
             <Audit />
           ) : section === 'utilisateurs' ? (
-            <Referentiels cles={['roles-utilisateur', 'transitions']} />
+            /* Les roles se reglent sur leur propre ecran (13/10/2026) ; les
+               transitions d'etat restent un referentiel. */
+            <div className="space-y-4">
+              <ListeRoles />
+              <Referentiels cles={['transitions']} />
+            </div>
           ) : section === 'apparence' ? (
             <ReglageApparence />
           ) : section === 'sauvegardes' ? (
@@ -656,6 +662,7 @@ function LigneReglage({
       <div className="flex w-44 shrink-0 items-center gap-1.5">
         <Champ
           type={typeChamp}
+          aria-label={p.libelle}
           step={p.type_donnee === 'DECIMAL' ? 'any' : undefined}
           value={valeur}
           disabled={!modifiable}
@@ -685,11 +692,11 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
 
   const qDev = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<Devise[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<Devise[]>('/api/devises', { signal }),
   })
   const qTaux = useQuery({
     queryKey: ['taux', pointee],
-    queryFn: () => api.get<Taux[]>(`/api/devises/${encodeURIComponent(pointee!)}/taux`),
+    queryFn: ({ signal }) => api.get<Taux[]>(`/api/devises/${encodeURIComponent(pointee!)}/taux`, { signal }),
     enabled: !!pointee,
   })
 
@@ -701,7 +708,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
       }),
     onSuccess: () => {
       toast.success('Nouveau taux enregistre', {
-        description: 'Le taux précédent est ferme a cette date. Les achats déjà valorises ne bougent pas.',
+        description: 'Le taux précédent est fermé à cette date. Les achats déjà valorisés ne bougent pas.',
       })
       setNouveau({ taux: '', date_debut: '' })
       void qc.invalidateQueries({ queryKey: ['taux'] })
@@ -739,7 +746,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
       <Alerte ton="info">
         Un taux est <strong>date</strong>. Une reception valorisee hier garde le taux d hier, quoi
         qu il arrive ensuite : c est ce qui rend le CMUP reproductible. Ouvrir un nouveau taux
-        ferme automatiquement le precedent, sans jamais le reecrire.
+        ferme automatiquement le précédent, sans jamais le reecrire.
       </Alerte>
 
       <Carte repliable="configuration.3">
@@ -777,7 +784,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
                     <td className="px-2 py-1.5 text-center">{d.symbole ?? '—'}</td>
                     <td className="px-2 py-1.5 text-center">
                       {d.est_pivot === 1 ? (
-                        <Infobulle contenu="Monnaie de reference : son taux vaut 1 par definition">
+                        <Infobulle contenu="Monnaie de référence : son taux vaut 1 par definition">
                           <Badge ton="info">pivot</Badge>
                         </Infobulle>
                       ) : (
@@ -811,7 +818,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
               recherche={false}
               pagination={false}
               videTitre="Aucun taux"
-              videDescription="Cette devise n a jamais eu de cours enregistre."
+              videDescription="Cette devise n’a jamais eu de cours enregistre."
             />
           </CarteCorps>
 
@@ -834,7 +841,7 @@ function SectionDevises({ modifiable }: { modifiable: boolean }) {
                 </div>
                 <div>
                   <Etiq htmlFor="d">
-                    En vigueur a partir du
+                    En vigueur à partir du
                     <Aide>Laisse vide, le taux s'applique immediatement.</Aide>
                   </Etiq>
                   <Champ
@@ -894,8 +901,8 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
 
   const q = useQuery({
     queryKey: ['sauvegardes'],
-    queryFn: () => api.get<{ fichier: string; octets: number; date: string }[]>(
-      '/api/admin/sauvegardes',
+    queryFn: ({ signal }) => api.get<{ fichier: string; octets: number; date: string }[]>(
+      '/api/admin/sauvegardes', { signal }
     ),
   })
 
@@ -921,7 +928,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
           <p className="text-[11px] leading-relaxed text-attenue-texte">
             Ecrit une copie complete et coherente de la base, sans interrompre le travail en
             cours. A faire avant toute operation risquee : import, changement de parametre
-            structurant, reprise de donnees.
+            structurant, reprise de données.
           </p>
         </CarteEntete>
         <CarteCorps className="flex flex-wrap items-center gap-3">
@@ -931,7 +938,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
           </Bouton>
           {!modifiable && (
             <span className="text-[12px] text-attenue-texte">
-              Votre role peut consulter les sauvegardes, pas en declencher.
+              Votre rôle peut consulter les sauvegardes, pas en declencher.
             </span>
           )}
           {retour && <span className="text-[12px] text-texte">{retour}</span>}
@@ -951,7 +958,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
           <p>
             Les <span className="text-texte">dix dernieres</span> sont conservees ; les plus
             anciennes sont effacees automatiquement. Un echec de sauvegarde n empeche jamais le
-            serveur de s arreter — il est journalise.
+            serveur de s’arreter — il est journalisé.
           </p>
           <p className="text-danger">
             Ces copies vivent sur le meme disque que la base. Elles protegent d une fausse
@@ -991,7 +998,7 @@ function SectionSauvegardes({ modifiable }: { modifiable: boolean }) {
                       {s.fichier}
                       {i === 0 && (
                         <span className="ml-2 rounded-[3px] bg-succes/12 px-1.5 py-px text-[10px] font-medium text-succes">
-                          la plus recente
+                          la plus récente
                         </span>
                       )}
                     </td>

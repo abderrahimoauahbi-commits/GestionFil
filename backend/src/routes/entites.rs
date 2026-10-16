@@ -70,6 +70,44 @@ pub async fn lister(
     Ok(Json(crud::lister(&state.db, &user, e, &filtre(params)).await?))
 }
 
+/// LES REGLAGES QUI CHANGENT LE SENS D'UN MAGASIN (audit v4). Declarer un
+/// magasin « quarantaine » change ce que le blocage qualite laisse passer et
+/// ce que le MRP compte ; le retirer du MRP fait racheter son stock. Au simple
+/// droit d'ecrire sur le stock, on le pouvait : il faut VALIDER sur les lots.
+async fn exiger_reglages_sensibles(
+    state: &AppState,
+    user: &Utilisateur,
+    e: &crud::Entite,
+    id: Option<&str>,
+    charge: &Map<String, Value>,
+) -> AppResult<()> {
+    if e.table != "magasin" {
+        return Ok(());
+    }
+    // Seul un CHANGEMENT compte : l'ecran renvoie tous les champs a chaque
+    // modification, et renommer un magasin reste une simple ecriture.
+    let actuel: Option<(i64, i64)> = match id {
+        Some(code) => sqlx::query_as(
+            "SELECT est_quarantaine::bigint, inclure_mrp::bigint FROM magasin WHERE code_magasin = $1",
+        )
+        .bind(code)
+        .fetch_optional(&state.db)
+        .await?,
+        // Un magasin neuf : les valeurs par defaut (ordinaire, compte au MRP).
+        None => Some((0, 1)),
+    };
+    let Some((quarantaine, mrp)) = actuel else { return Ok(()) };
+    let demande = |cle: &str| charge.get(cle).and_then(|v| v.as_i64().or_else(|| v.as_bool().map(i64::from)));
+    let change = demande("est_quarantaine").is_some_and(|v| v != quarantaine)
+        || demande("inclure_mrp").is_some_and(|v| v != mrp);
+    if change {
+        // Une decision de qualite et de stock : le droit de valider les lots
+        // (Direction, administration), comme le blocage d'un lot.
+        user.exiger(&state.db, crate::auth::rbac::module::LOTS, crate::auth::rbac::Action::Valider).await?;
+    }
+    Ok(())
+}
+
 pub async fn creer(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -77,6 +115,7 @@ pub async fn creer(
     Json(charge): Json<Map<String, Value>>,
 ) -> AppResult<Json<Value>> {
     let e = crud::entite(&chemin)?;
+    exiger_reglages_sensibles(&state, &user, e, None, &charge).await?;
     Ok(Json(crud::creer(&state.db, &user, e, &charge).await?))
 }
 
@@ -96,6 +135,7 @@ pub async fn modifier(
     Json(charge): Json<Map<String, Value>>,
 ) -> AppResult<Json<Value>> {
     let e = crud::entite(&chemin)?;
+    exiger_reglages_sensibles(&state, &user, e, Some(&id), &charge).await?;
     Ok(Json(crud::modifier(&state.db, &user, e, &id, &charge).await?))
 }
 
@@ -214,7 +254,7 @@ pub async fn activation(
 
     let crud::Suppression::Logique(colonne) = e.suppression else {
         return Err(AppError::RegleMetier(format!(
-            "« {} » n'a pas d'etat actif/inactif : cette ligne s'efface ou se garde,              il n'y a pas d'entre-deux.",
+            "« {} » n'a pas d'etat actif/inactif : cette ligne s'efface ou se garde, il n'y a pas d'entre-deux.",
             e.chemin
         )));
     };

@@ -21,6 +21,8 @@ Usage :
 
     python charger.py --production            # comptes reels, referentiel a importer
     python charger.py --production --referentiel-fige   # + la photo du 2026-09-02
+    python charger.py --base neuve --socle [--comptes]   # base COMPLETE depuis socle/
+                                                         # (puis python migrer.py --base neuve)
 
 Apres `--production`, le referentiel s'importe depuis le classeur :
     gestionfil-import --simuler      puis      gestionfil-import
@@ -81,6 +83,8 @@ SEEDS = [
     # 5. Les champs declares apres coup, chacun derivant ses propres droits.
     "seed_004_champs_matrice.sql",
     "seed_005_champs_analyse.sql",
+    # 6. Les regles du 08/10/2026 : parametres, droits LOTS, montants declares.
+    "seed_006_regles_2026_10.sql",
 ]
 
 # Ce qui distingue une base de PRODUCTION d'une base de recette : les six
@@ -201,6 +205,55 @@ def jouer(instruction, base, hote, utilisateur, motdepasse):
         os.unlink(chemin)
 
 
+def charger_socle(args, base, hote, utilisateur, motdepasse):
+    """UNE BASE NEUVE ET COMPLETE, depuis le socle (voir socle.py).
+
+    Le socle porte le schema exact d'une base entierement migree et sa
+    configuration ; le journal des migrations les inscrit (mode SOCLE). Les
+    migrations venues apres le socle se jouent ensuite par migrer.py. Avec
+    `--comptes`, les comptes nominatifs et l'identite de l'entreprise
+    (seed_110, seed_120). Le metier vient du classeur (gestionfil-import).
+    """
+    if base == "gestionfil" and "--confirmer-gestionfil" not in args:
+        print("Refus : --socle construit une base NEUVE ; il ne se joue pas sur « gestionfil » "
+              "sans --confirmer-gestionfil.")
+        return 1
+    socle = ICI / "socle"
+    for nom in ("schema.sql", "configuration.sql"):
+        code, err = jouer((socle / nom).read_text(encoding="utf-8"), base, hote, utilisateur, motdepasse)
+        print("  %-30s %s" % ("socle/" + nom, "ok" if code == 0 else "ECHEC"))
+        if code != 0:
+            for l in err.split("\n"):
+                if "ERREUR" in l or "ERROR" in l:
+                    print("      %s" % l.strip())
+            return 1
+    valeurs = []
+    for ligne in (socle / "inclus.txt").read_text(encoding="utf-8").splitlines():
+        if ligne.strip():
+            fichier, emp = ligne.split()
+            valeurs.append("('%s', '%s', 'SOCLE')" % (fichier, emp))
+    code, err = jouer("INSERT INTO migration_appliquee (fichier, empreinte, mode) VALUES %s "
+                      "ON CONFLICT (fichier) DO NOTHING;" % ", ".join(valeurs),
+                      base, hote, utilisateur, motdepasse)
+    print("  %-30s %s" % ("journal (%d migrations)" % len(valeurs), "ok" if code == 0 else "ECHEC"))
+    if code != 0:
+        print("      " + err)
+        return 1
+    if "--comptes" in args:
+        for nom in ("seed_110_comptes_production.sql", "seed_120_entreprise.sql"):
+            code, err = jouer((ICI / nom).read_text(encoding="utf-8"), base, hote, utilisateur, motdepasse)
+            print("  %-30s %s" % (nom, "ok" if code == 0 else "ECHEC"))
+            if code != 0:
+                for l in err.split("\n"):
+                    if "ERREUR" in l or "ERROR" in l:
+                        print("      %s" % l.strip())
+                return 1
+    # LES STATISTIQUES (10/10/2026) : une base remplie d'un coup n'en a pas tant que l'autovacuum n'est pas passe ; la supervision y prenait 46 s au lieu de 1,2 s.
+    jouer("ANALYZE;", base, hote, utilisateur, motdepasse)
+    print("\nSocle charge. Ensuite : python migrer.py --base %s" % base)
+    return 0
+
+
 def main():
     args = sys.argv[1:]
 
@@ -211,6 +264,9 @@ def main():
     hote = option("--hote", "127.0.0.1")
     utilisateur = option("--utilisateur", "postgres")
     motdepasse = option("--motdepasse", os.environ.get("PGPASSWORD", "toor"))
+
+    if "--socle" in args:
+        return charger_socle(args, base, hote, utilisateur, motdepasse)
 
     restant = []
     for nom in FICHIERS:

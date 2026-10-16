@@ -59,10 +59,10 @@ interface LigneAbc {
 type Rapport = 'synthese' | 'abc' | 'fournisseurs' | 'mensuel'
 
 const RAPPORTS: { cle: Rapport; libelle: string; resume: string }[] = [
-  { cle: 'synthese', libelle: 'Synthese patrimoniale', resume: 'Valeur du stock, coût matiere, cycle de tresorerie' },
+  { cle: 'synthese', libelle: 'Synthese patrimoniale', resume: 'Valeur du stock, coût matière, cycle de trésorerie' },
   { cle: 'abc', libelle: 'Concentration de la valeur', resume: 'Répartition par classe ABC et poids des références' },
-  { cle: 'fournisseurs', libelle: 'Engagement par fournisseur', resume: 'Budget annuel et dependance' },
-  { cle: 'mensuel', libelle: 'Coût matiere mensuel', resume: 'Ce que le plan engage, mois par mois' },
+  { cle: 'fournisseurs', libelle: 'Engagement par fournisseur', resume: 'Budget annuel et dépendance' },
+  { cle: 'mensuel', libelle: 'Coût matière mensuel', resume: 'Ce que le plan engage, mois par mois' },
 ]
 
 function Chiffre({
@@ -102,11 +102,11 @@ export function RapportsFinanciers() {
 
   const qAnalyse = useQuery({
     queryKey: ['cockpit-analyse'],
-    queryFn: () => api.get<Analyse>('/api/cockpit/analyse'),
+    queryFn: ({ signal }) => api.get<Analyse>('/api/cockpit/analyse', { signal }),
   })
   const qAbc = useQuery({
     queryKey: ['analyse-abc-xyz'],
-    queryFn: () => api.get<LigneAbc[]>('/api/analyse-abc-xyz'),
+    queryFn: ({ signal }) => api.get<LigneAbc[]>('/api/analyse-abc-xyz', { signal }),
   })
 
   const d = qAnalyse.data
@@ -129,15 +129,18 @@ export function RapportsFinanciers() {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [abc])
 
-  if (qAnalyse.isLoading || qAbc.isLoading) return <Chargement texte="Preparation des rapports…" />
+  if (qAnalyse.isLoading || qAbc.isLoading) return <Chargement texte="Préparation des rapports…" />
 
-  if (!droits.visible('valeur_totale_mad')) {
+  // Le temoin est la valeur du stock, champ DECLARE du module (13/10/2026) :
+  // `valeur_totale_mad` n'existe qu'au module Mouvements, il etait donc masque
+  // ici pour tout le monde, administrateur compris.
+  if (!droits.visible('valeur_mad')) {
     return (
       <div>
         <EnTetePage titre="Rapports financiers" />
         <Alerte ton="info">
           Votre role ne recoit pas les montants : ces rapports n auraient rien a montrer. Les
-          etats de stock et de mouvement restent accessibles en quantites.
+          états de stock et de mouvement restent accessibles en quantités.
         </Alerte>
       </div>
     )
@@ -153,12 +156,13 @@ export function RapportsFinanciers() {
     <div>
       <EnTetePage
         titre="Rapports financiers"
-        sous_titre="Les chiffres matiere de l ERP — ni balance, ni compte de résultat"
+        sous_titre="Les chiffres matière de l’ERP — ni balance, ni compte de résultat"
         actions={
           <>
             <Selecteur
               value={rapport}
               onChange={(e) => setRapport(e.target.value as Rapport)}
+              aria-label="Rapport affiché"
               className="w-64"
             >
               {RAPPORTS.map((r) => (
@@ -187,7 +191,7 @@ export function RapportsFinanciers() {
                 unite="M MAD"
               />
               <Chiffre
-                libelle="Coût matiere annuel"
+                libelle="Coût matière annuel"
                 valeur={fmt.nombre(t.cout_matiere_annuel_mad / 1e6, 2)}
                 unite="M MAD"
                 aide="Besoin du plan en service, valorise au CMUP."
@@ -197,14 +201,14 @@ export function RapportsFinanciers() {
                 valeur={fmt.nombre(t.rotation_annuelle, 2)}
                 unite="fois / an"
                 ton={t.rotation_annuelle < 1 ? 'alerte' : undefined}
-                aide="Sous 1, le stock represente plus d une annee de consommation."
+                aide="Sous 1, le stock represente plus d’une année de consommation."
               />
               <Chiffre
                 libelle="Cycle de conversion"
                 valeur={fmt.nombre(t.ccc_jours, 0)}
                 unite="jours"
                 ton={t.ccc_jours > 90 ? 'danger' : t.ccc_jours > 0 ? 'alerte' : 'succes'}
-                aide="DIO + DSO - DPO. Negatif, le fournisseur finance le cycle."
+                aide="DIO + DSO - DPO. Négatif, le fournisseur finance le cycle."
               />
             </div>
             <Alerte ton="info">
@@ -221,7 +225,7 @@ export function RapportsFinanciers() {
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <PieChart className="size-3.5" />
-                Repartition par classe
+                Répartition par classe
               </CarteTitre>
             </CarteEntete>
             <CarteCorps className="p-0">
@@ -316,7 +320,7 @@ export function RapportsFinanciers() {
               </table>
               <p className="border-t border-bordure px-3 py-2 text-[11px] text-attenue-texte">
                 Une part superieure a 30 % marque une dependance : une defaillance de ce
-                fournisseur toucherait un tiers de l approvisionnement.
+                fournisseur toucherait un tiers de l’approvisionnement.
               </p>
             </CarteCorps>
           </Carte>
@@ -327,7 +331,7 @@ export function RapportsFinanciers() {
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <TrendingUp className="size-3.5" />
-                Cout matiere par mois
+                Coût matière par mois
               </CarteTitre>
             </CarteEntete>
             <CarteCorps className="p-0">
@@ -401,7 +405,7 @@ export function RapportsFinanciers() {
                   { indicateur: 'Coût matière annuel', valeur: t.cout_matiere_annuel_mad, unite: 'MAD' },
                   { indicateur: 'Rotation du stock', valeur: t.rotation_annuelle, unite: 'fois/an' },
                   { indicateur: 'DIO', valeur: t.dio_jours, unite: 'jours' },
-                  { indicateur: 'DSO (parametre)', valeur: t.dso_jours, unite: 'jours' },
+                  { indicateur: 'DSO (paramètre)', valeur: t.dso_jours, unite: 'jours' },
                   { indicateur: 'DPO', valeur: t.dpo_jours, unite: 'jours' },
                   { indicateur: 'Cycle de conversion', valeur: t.ccc_jours, unite: 'jours' },
                 ])
@@ -432,11 +436,11 @@ export function RapportsFinanciers() {
                 ]}
                 lignes={[
                   { i: 'Stock immobilise', v: `${fmt.nombre(t.valeur_stock_mad, 2)} MAD` },
-                  { i: 'Cout matiere annuel', v: `${fmt.nombre(t.cout_matiere_annuel_mad, 2)} MAD` },
+                  { i: 'Cout matière annuel', v: `${fmt.nombre(t.cout_matiere_annuel_mad, 2)} MAD` },
                   { i: 'Rotation du stock', v: `${fmt.nombre(t.rotation_annuelle, 2)} fois/an` },
                   { i: 'Stock en jours (DIO)', v: `${fmt.nombre(t.dio_jours, 0)} j` },
-                  { i: 'Delai client (DSO, parametre)', v: `${fmt.nombre(t.dso_jours, 0)} j` },
-                  { i: 'Delai fournisseur (DPO)', v: `${fmt.nombre(t.dpo_jours, 0)} j` },
+                  { i: 'Délai client (DSO, paramètre)', v: `${fmt.nombre(t.dso_jours, 0)} j` },
+                  { i: 'Délai fournisseur (DPO)', v: `${fmt.nombre(t.dpo_jours, 0)} j` },
                   { i: 'Cycle de conversion (CCC)', v: `${fmt.nombre(t.ccc_jours, 0)} j` },
                 ]}
               />
@@ -444,7 +448,7 @@ export function RapportsFinanciers() {
           )}
 
           <h3 className="mb-1 mt-5 border-b border-neutral-400 pb-0.5 text-[10px] font-bold uppercase tracking-wide">
-            Repartition par classe
+            Répartition par classe
           </h3>
           <TableEtat<[string, { n: number; conso: number; stock: number }]>
             colonnes={[
@@ -475,7 +479,7 @@ export function RapportsFinanciers() {
               />
 
               <h3 className="mb-1 mt-5 border-b border-neutral-400 pb-0.5 text-[10px] font-bold uppercase tracking-wide">
-                Cout matiere par mois
+                Coût matière par mois
               </h3>
               <TableEtat<(typeof d.cout_mensuel)[number]>
                 colonnes={[
@@ -490,7 +494,7 @@ export function RapportsFinanciers() {
 
           <p className="mt-4 text-[9px] text-neutral-600">
             Chiffres matiere issus de l ERP Gestion Fil. Ce document n est ni une balance ni un
-            compte de resultat : la comptabilite generale reste tenue dans son propre logiciel.
+            compte de résultat : la comptabilité générale reste tenue dans son propre logiciel.
           </p>
         </EtatImprimable>
       </div>

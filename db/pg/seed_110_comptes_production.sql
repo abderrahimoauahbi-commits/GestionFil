@@ -45,13 +45,20 @@ VALUES
     ('98c682da-54db-4818-ad5a-4d4d826ae45a', 'DIRECTION',  'Choukri',   '!A_DEFINIR!', 'Chokri Mazari',         NULL,    1),
     ('86a20519-69c4-45aa-aa41-aff9fa88d628', 'DIRECTION',  'Tarik',     '!A_DEFINIR!', 'Tarik Mazari',          NULL,    1),
     ('d5160331-fa19-4141-a47e-9b040a0746fa', 'ASSISTANTE', 'Assistante','!A_DEFINIR!', 'Assistante de gestion', NULL,    1),
-    ('16974041-c279-480c-ad58-db7a5a37fb2a', 'MAGASIN',    'Magasinie', '!A_DEFINIR!', 'Magasinier',            'MP-01', 1)
+    ('16974041-c279-480c-ad58-db7a5a37fb2a', 'MAGASIN',    'Magasinie', '!A_DEFINIR!', 'Magasinier',            NULL,    1)
 ON CONFLICT (id_utilisateur) DO UPDATE SET
     code_role_user    = excluded.code_role_user,
     login             = excluded.login,
     nom               = excluded.nom,
-    magasin_principal = excluded.magasin_principal,
+    -- Rejoue, il ne defait pas le magasin choisi depuis l'ecran des comptes.
+    magasin_principal = COALESCE(utilisateur.magasin_principal, excluded.magasin_principal),
     actif             = excluded.actif;
+
+-- Le magasin principal du magasinier, s'il existe : une base batie depuis le
+-- socle porte les magasins reels (Morocco, Polyfashions), pas MP-01.
+UPDATE utilisateur SET magasin_principal = 'MP-01'
+ WHERE id_utilisateur = '16974041-c279-480c-ad58-db7a5a37fb2a' AND magasin_principal IS NULL
+   AND EXISTS (SELECT 1 FROM magasin WHERE code_magasin = 'MP-01');
 -- Le mot de passe n'est PAS dans la clause de mise a jour : rejouer ce fichier
 -- ne doit pas reinitialiser des mots de passe deja definis.
 

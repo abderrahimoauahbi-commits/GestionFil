@@ -54,9 +54,9 @@ const XYZ = ['X', 'Y', 'Z'] as const
 
 /** Ce que chaque classe veut dire, dit une fois. */
 const SENS_ABC: Record<string, string> = {
-  A: 'Porte l essentiel de la depense — jusqu au seuil parametre, 80 % par defaut',
+  A: 'Porte l essentiel de la depense — jusqu au seuil paramètre, 80 % par defaut',
   B: 'Le palier intermediaire, jusqu a 95 %',
-  C: 'La longue traine : beaucoup de references, peu de valeur',
+  C: 'La longue traine : beaucoup de références, peu de valeur',
 }
 const SENS_XYZ: Record<string, string> = {
   X: 'Demande reguliere : le besoin varie peu d un mois a l autre',
@@ -71,7 +71,7 @@ export function AnalyseAbcXyz() {
 
   const q = useQuery({
     queryKey: ['analyse-abc-xyz'],
-    queryFn: () => api.get<Ligne[]>('/api/analyse-abc-xyz'),
+    queryFn: ({ signal }) => api.get<Ligne[]>('/api/analyse-abc-xyz', { signal }),
   })
 
   const recalculer = useMutation({
@@ -207,7 +207,7 @@ export function AnalyseAbcXyz() {
     <div>
       <EnTetePage
         titre="Analyse ABC / XYZ"
-        sous_titre="Le poids dans la depense croise a la regularite de la demande"
+        sous_titre="Le poids dans la dépense croise à la régularité de la demande"
         actions={
           droits.peutEcrire && (
             <Bouton
@@ -227,7 +227,7 @@ export function AnalyseAbcXyz() {
           {matrice.nonClassees} reference(s) sans consommation ne peuvent pas etre classees en
           XYZ : la regularite se mesure sur un historique, et elles n en ont pas. Elles sont
           rangees en C par convention — zero pour cent de la depense — et regroupees dans la case
-          « non classees ».
+          « non classées ».
         </Alerte>
       )}
 
@@ -247,7 +247,7 @@ export function AnalyseAbcXyz() {
           </CarteTitre>
         </CarteEntete>
         <CarteCorps>
-          <div className="defilement-x">
+          <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
             <table className="w-full min-w-[520px] text-[12px]">
               <thead>
                 <tr>
@@ -360,7 +360,7 @@ export function AnalyseAbcXyz() {
         titreCarte={(l) => l.code_reference}
         exportable="analyse-abc-xyz"
         imprimable="Analyse ABC XYZ"
-        texteVide="Aucune reference dans cette case."
+        texteVide="Aucune référence dans cette case."
       />
     </div>
   )

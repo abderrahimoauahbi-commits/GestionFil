@@ -198,8 +198,8 @@ export function FicheLot() {
         {/* ---- Ce qui demande attention ------------------------------------ */}
         {lot.statut === 'BLOQUE' && (
           <Alerte ton="danger" titre="Lot bloqué par la qualité">
-            Il ne peut ni sortir, ni être transféré, ni chargé sur machine tant qu’un responsable ne l’a pas
-            débloqué.
+            Il ne part plus en production (sortie, chargement machine, fusion) tant qu’il n’est pas
+            débloqué. Il peut revenir d’une machine, aller en quarantaine ou retourner au fournisseur.
             {dernierBlocage?.motif && (
               <>
                 {' '}
@@ -622,7 +622,7 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
   })
   const qLots = useQuery({
     queryKey: ['lots', 'fusion', 'registre', lot.code_reference],
-    queryFn: () => api.get<Lot[]>(`/api/lots?vue=comptable&code_reference=${encodeURIComponent(lot.code_reference)}`),
+    queryFn: ({ signal }) => api.get<Lot[]>(`/api/lots?vue=comptable&code_reference=${encodeURIComponent(lot.code_reference)}`, { signal }),
   })
 
   const couleurCible = magasins.find((m) => m.code_magasin === magasin)?.code_couleur ?? null
@@ -678,8 +678,8 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
           fournisseur et de la même couleur peuvent être fusionnés.
         </p>
         <div className="max-w-xs">
-          <Etiq obligatoire>Magasin</Etiq>
-          <Selecteur
+          <Etiq obligatoire htmlFor="ch-fichelot-1">Magasin</Etiq>
+          <Selecteur id="ch-fichelot-1"
             value={magasin}
             onChange={(e) => {
               setMagasin(e.target.value)
@@ -748,8 +748,8 @@ function Fusion({ lot, magasins }: { lot: Lot; magasins: LieuMagasin[] }) {
         {magasin && candidats.some((c) => !c.raison) && (
           <>
             <label className="flex flex-col gap-1">
-              <Etiq obligatoire>Pourquoi fusionner ?</Etiq>
-              <textarea
+              <Etiq obligatoire htmlFor="ch-fichelot-2">Pourquoi fusionner ?</Etiq>
+              <textarea id="ch-fichelot-2"
                 value={motif}
                 onChange={(e) => setMotif(e.target.value)}
                 rows={2}

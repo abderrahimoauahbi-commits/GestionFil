@@ -53,7 +53,7 @@ const TON_STATUT: Record<string, 'neutre' | 'succes' | 'contour'> = {
 export function Recettes() {
   const q = useQuery({
     queryKey: ['compositions'],
-    queryFn: () => api.get<Ligne[]>('/api/recettes'),
+    queryFn: ({ signal }) => api.get<Ligne[]>('/api/recettes', { signal }),
   })
 
   const lignes = q.data ?? []
@@ -98,7 +98,7 @@ export function Recettes() {
     },
     {
       champ: 'code_role',
-      entete: 'Role BOM',
+      entete: 'Rôle BOM',
       largeur: '130px',
       filtre: 'liste',
       valeurTri: (l) => l.code_role,
@@ -164,12 +164,12 @@ export function Recettes() {
     <div>
       <EnTetePage
         titre="Compositions"
-        description="Toutes les lignes de composition, tous articles confondus : ou telle matiere est-elle employee ?"
+        description="Toutes les lignes de composition, tous articles confondus : ou telle matière est-elle employée ?"
         actions={
           <Bouton variante="contour" asChild>
             <Link to="/qualites">
               <Layers />
-              Modifier une qualite
+              Modifier une qualité
             </Link>
           </Bouton>
         }
@@ -206,17 +206,17 @@ export function Recettes() {
         chargement={q.isLoading}
         erreur={q.error}
         cle={(l) => `${l.code_qualite}|${l.ligne_numero}`}
-        placeholderRecherche="Qualité, référence, designation, role..."
+        placeholderRecherche="Qualité, référence, désignation, rôle..."
         titreCarte={(l) => `${l.code_qualite} · ${l.code_reference}`}
         tailleParDefaut={50}
         hauteurMax="65vh"
         videTitre="Aucune composition"
-        videDescription="Definissez la composition d'une qualite pour qu'elle apparaisse ici."
+        videDescription="Definissez la composition d'une qualité pour qu'elle apparaisse ici."
         videAction={
           <Bouton asChild>
             <Link to="/qualites">
               <Package />
-              Aller aux qualites
+              Aller aux qualités
             </Link>
           </Bouton>
         }

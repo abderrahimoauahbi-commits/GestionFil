@@ -26,7 +26,7 @@ interface Fournisseur extends Record<string, unknown> {
 export function Fournisseurs() {
   const qDev = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
   })
 
   const colonnes: Colonne<Fournisseur>[] = [
@@ -85,7 +85,7 @@ export function Fournisseurs() {
     { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Identité' },
     /* --- Contact ----------------------------------------------------- */
     { champ: 'contact_principal', libelle: 'Contact', section: 'Contact' },
-    { champ: 'telephone', libelle: 'Telephone', section: 'Contact' },
+    { champ: 'telephone', libelle: 'Téléphone', section: 'Contact' },
     { champ: 'email', libelle: 'Email', section: 'Contact' },
     { champ: 'ville', libelle: 'Ville', section: 'Contact' },
     { champ: 'pays', libelle: 'Pays', obligatoire: true, section: 'Contact' },
@@ -130,11 +130,14 @@ export function Fournisseurs() {
     },
     {
       champ: 'tolerance_pesee_pct',
-      libelle: 'Tolerance de pesee (%)',
+      libelle: 'Tolérance de pesée (%)',
       type: 'nombre',
       min: 0,
-      aide: 'Au-dela, une reception exige une derogation nominative.',
+      aide:
+        'Au-dela, une réception exige une derogation nominative. Ce seuil se fixe avec le ' +
+        'droit de valider : celle qui prepare les réceptions ne le règle pas.',
       section: 'Logistique et réception',
+      exigeValider: true,
     },
     /* --- Évaluation -------------------------------------------------- */
     { champ: 'note_globale', libelle: 'Note globale (/100)', type: 'nombre', min: 0, max: 100, section: 'Évaluation' },

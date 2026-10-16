@@ -6,12 +6,17 @@
 
 pub mod classification;
 pub mod cours_bam;
+pub mod decision_machine;
+pub mod facture_fournisseur;
+pub mod facture_locale;
 pub mod importation;
 pub mod inventaire;
 pub mod mrp;
 pub mod plan;
 pub mod plan_achat;
 pub mod reception;
+pub mod retour_fournisseur;
 pub mod sauvegarde;
 pub mod transfert;
+pub mod transitions;
 pub mod unites;

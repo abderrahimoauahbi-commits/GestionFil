@@ -130,3 +130,16 @@ CREATE TABLE modele_droit_champ (
     PRIMARY KEY (code_role_user, module, champ),
     FOREIGN KEY (module, champ) REFERENCES champ_configurable(module, champ) ON DELETE CASCADE
 );
+
+-- -----------------------------------------------------------------------------
+-- Préférences d'affichage, par compte (06/10/2026) — voir la migration
+-- 2026-10-06_preferences_utilisateur.sql. Pas d'audit : aucune donnée métier.
+-- -----------------------------------------------------------------------------
+CREATE TABLE preference_utilisateur (
+    id_utilisateur  text        NOT NULL PRIMARY KEY
+                                REFERENCES utilisateur (id_utilisateur) ON DELETE CASCADE,
+    apparence       jsonb       NOT NULL DEFAULT '{}'::jsonb,
+    fond_image      text,
+    modifie_le      timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_pref_fond_taille CHECK (fond_image IS NULL OR length(fond_image) <= 2000000)
+);

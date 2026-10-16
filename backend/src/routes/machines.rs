@@ -36,10 +36,10 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 
 use super::json::lignes_en_json;
 use super::stock::numeroter;
+use crate::domain::decision_machine as dm;
 
 // =============================================================================
 // LES FORMES RECUES
@@ -84,26 +84,34 @@ pub struct LigneFiche {
     pub kg_mouvementes: Option<f64>,
     #[serde(default)]
     pub nb_palettes: Option<i64>,
-    /// CE QUE LA ZONE PORTE DE CETTE REFERENCE APRES. C'est lui qui fait
-    /// l'etat, avec le pourcentage. Les deux comptes ne se reconcilient pas :
-    /// charger 200 bobines sur un etage qui en porte 300 en laisse 300.
+    /// LE NOMBRE PRESENT, sur un CONSTAT seulement (05/10/2026). Un chargement
+    /// ou un dechargement ne le porte pas : l'etat resultant est le resultat de
+    /// la decision, jamais un second constat.
+    #[serde(default)]
     pub nb_bobines_presentes: i64,
     pub poids_unitaire_kg: Option<f64>,
     pub pourcentage: Option<f64>,
-    /// CHARGER MALGRE UN SOLDE DE LOT INSUFFISANT.
-    ///
-    /// Le lot sert a la tracabilite, pas au comptage : quand une bobine
-    /// redescend d'un metier, personne ne sait de quel lot elle venait, et le
-    /// retour est impute au juge. Les soldes par lot derivent donc, et l'ERP
-    /// finit par refuser un chargement alors que la matiere est bien la.
-    ///
-    /// L'operateur confirme, le mouvement passe, et la trace reste — sans
-    /// quoi un solde force ne se distinguerait plus d'un solde juste.
+    // Le forcage de lot n'existe plus sur une fiche machine (06/10/2026) :
+    // un lot que le magasin ne couvre pas bloque. Un champ envoye est ignore.
     #[serde(default)]
-    pub lot_force: Option<bool>,
-    #[serde(default)]
-    pub motif_lot_force: Option<String>,
     pub total_kg: f64,
+    /// Chargement : le poids retenu par bobine chargee (nominal propose).
+    /// Constat : le poids par bobine, a la place du %.
+    #[serde(default)]
+    pub poids_retenu_kg: Option<f64>,
+    /// Dechargement : le % des bobines retirees (pas de pesee).
+    #[serde(default)]
+    pub pct_retirees: Option<f64>,
+    /// Dechargement : MAGASIN, PERTE, DECHET ou CASSE.
+    #[serde(default)]
+    pub destination: Option<String>,
+    #[serde(default)]
+    pub code_motif: Option<String>,
+    #[serde(default)]
+    pub motif_texte: Option<String>,
+    /// L'effet de l'ecart, quand le motif le laisse au choix.
+    #[serde(default)]
+    pub effet_ecart: Option<String>,
     #[serde(default = "estimation")]
     pub mode_constat: String,
     pub notes: Option<String>,
@@ -132,6 +140,8 @@ pub struct NouvelleFiche {
 #[derive(Deserialize)]
 pub struct Filtre {
     pub code_machine: Option<String>,
+    /// Un seul etage : ses fiches, pas celles de toute la machine.
+    pub code_emplacement: Option<String>,
     pub statut: Option<String>,
     /// Les bornes de periode. Absentes, le cumul court depuis l'origine
     /// jusqu'a l'etat courant.
@@ -287,6 +297,93 @@ pub async fn contenu_machine(
     Ok(Json(v))
 }
 
+/// `GET /api/machines/{code}/mouvements` — LE JOURNAL DES MOUVEMENTS MACHINE
+/// (F22, 09/10/2026), le cote machine isole du grand livre : chaque decision,
+/// ligne par ligne — avant, charge ou retire, apres, ecart, niveau — avec le
+/// mouvement magasin qui en est l'autre moitie et, s'il a ete annule, son
+/// annulation. Les prix n'y sont pas : ce journal compte des kilos.
+pub async fn mouvements_machine(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let etage = q.get("etage").cloned().unwrap_or_default();
+    let lignes = sqlx::query(
+        "SELECT d.id_decision, d.id_fiche, f.numero_fiche, d.nature, d.code_emplacement, e.libelle AS zone,
+                d.date_decision, d.statut, d.est_tete, u.login AS valide_par,
+                l.ligne_numero, l.code_reference, l.lot_fournisseur,
+                l.kg_avant::float8 AS kg_avant, l.nb_mouvementees, l.kg_mouvementes::float8 AS kg_mouvementes,
+                l.destination, l.kg_apres::float8 AS kg_apres, l.ecart_kg::float8 AS ecart_kg,
+                l.effet_ecart, l.niveau_ecart, l.code_motif, l.motif_texte,
+                l.id_mouvement, m.numero_mouvement,
+                a.id_mouvement AS id_annulation, a.numero_mouvement AS numero_annulation
+           FROM machine_decision d
+           JOIN machine_decision_ligne l ON l.id_decision = d.id_decision
+           LEFT JOIN machine_fiche f ON f.id_fiche = d.id_fiche
+           LEFT JOIN machine_emplacement e ON e.code_emplacement = d.code_emplacement
+           LEFT JOIN utilisateur u ON u.id_utilisateur = d.id_utilisateur
+           LEFT JOIN mouvement m ON m.id_mouvement = l.id_mouvement
+           LEFT JOIN mouvement a ON a.id_mouvement_contrepasse = l.id_mouvement
+          WHERE d.code_machine = $1 AND ($2 = '' OR d.code_emplacement = $2)
+          ORDER BY d.date_decision DESC, l.ligne_numero
+          LIMIT 500",
+    )
+    .bind(&code)
+    .bind(&etage)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(crate::routes::json::lignes_en_json(&lignes)))
+}
+
+/// `GET /api/machines/fiches/{id}/retrait-apercu` — AVANT D'ANNULER (F22) :
+/// l'etat auquel l'etage reviendra, et les mouvements magasin qui recevront une
+/// annulation. Les controles (derniere decision, etage inchange, fil rendu
+/// encore au magasin, lot bloque) restent ceux du retrait lui-meme.
+pub async fn apercu_retrait(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let decision: Option<(String, i64)> = sqlx::query_as(
+        "SELECT id_decision, est_tete FROM machine_decision
+          WHERE id_fiche = $1 AND statut = 'ACTIVE' ORDER BY numero_validation DESC LIMIT 1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((id_decision, est_tete)) = decision else {
+        return Ok(Json(json!({ "decision": null })));
+    };
+    let avant = sqlx::query(
+        "SELECT code_reference, lot_fournisseur, nb_bobines, kg::float8 AS kg
+           FROM machine_decision_etat WHERE id_decision = $1 AND moment = 'AVANT'
+          ORDER BY code_reference, lot_fournisseur",
+    )
+    .bind(&id_decision)
+    .fetch_all(&state.db)
+    .await?;
+    let mouvements = sqlx::query(
+        "SELECT m.numero_mouvement, m.code_type_mvt, m.code_magasin,
+                (SELECT sum(lm.quantite_kg) FROM ligne_mouvement lm WHERE lm.id_mouvement = m.id_mouvement)::float8 AS kg
+           FROM mouvement m
+          WHERE m.id_decision_machine = $1 AND m.code_type_mvt IN ('CHARGE_MACHINE', 'RETOUR_MACHINE')
+            AND NOT EXISTS (SELECT 1 FROM mouvement x WHERE x.id_mouvement_contrepasse = m.id_mouvement)
+          ORDER BY m.numero_mouvement",
+    )
+    .bind(&id_decision)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(json!({
+        "decision": id_decision,
+        "derniere": est_tete == 1,
+        "etat_avant": crate::routes::json::lignes_en_json(&avant),
+        "mouvements": crate::routes::json::lignes_en_json(&mouvements),
+    })))
+}
+
 /// `GET /api/machines/consommation` — le cumul, jamais une repartition.
 ///
 ///     consommation = tout ce qui a ete charge - ce qui est revenu - l'etat actuel
@@ -337,12 +434,22 @@ pub async fn lister_fiches(
                 f.nb_bobines_etage, f.numero_of, f.responsable, f.observations,
                 f.date_creation, f.date_validation, f.motif_annulation,
                 (SELECT COUNT(*) FROM machine_fiche_ligne l WHERE l.id_fiche = f.id_fiche)
-                    ::bigint AS nb_lignes
+                    ::bigint AS nb_lignes,
+                -- LA DERNIERE DECISION DE SON ETAGE : la seule qui se devalide
+                -- ou s'annule seule. Les autres se reparent par un constat.
+                (CASE WHEN EXISTS (SELECT 1 FROM machine_decision d
+                                    WHERE d.id_fiche = f.id_fiche AND d.est_tete = 1)
+                      THEN 1 ELSE 0 END)::bigint AS est_tete,
+                (SELECT u.nom FROM machine_decision d
+                   LEFT JOIN utilisateur u ON u.id_utilisateur = d.id_utilisateur
+                  WHERE d.id_fiche = f.id_fiche
+                  ORDER BY d.numero_validation DESC LIMIT 1) AS valide_par
            FROM machine_fiche f
            JOIN machine m ON m.code_machine = f.code_machine
            JOIN machine_emplacement z ON z.code_emplacement = f.code_emplacement
-          WHERE ($1 IS NULL OR f.code_machine = $1)
-            AND ($2 IS NULL OR f.statut = $2)
+          WHERE ($1::text IS NULL OR f.code_machine = $1)
+            AND ($2::text IS NULL OR f.statut = $2)
+            AND ($4::text IS NULL OR f.code_emplacement = $4)
           ORDER BY CASE f.statut WHEN 'BROUILLON' THEN 0 ELSE 1 END,
                    f.date_fiche DESC, f.date_creation DESC
           LIMIT $3",
@@ -350,6 +457,7 @@ pub async fn lister_fiches(
     .bind(&f.code_machine)
     .bind(&f.statut)
     .bind(f.limite.unwrap_or(200).clamp(1, 2000))
+    .bind(&f.code_emplacement)
     .fetch_all(&state.db)
     .await?;
     let mut v = lignes_en_json(&lignes);
@@ -390,13 +498,82 @@ pub async fn lire_fiche(
     .fetch_all(&state.db)
     .await?;
 
+    // L'HISTORIQUE DE LA FICHE (05/10/2026) : chaque decision, l'etat de
+    // l'etage avant et apres la derniere, ses lignes calculees, et le journal.
+    let decisions = sqlx::query(
+        "SELECT d.id_decision, d.numero_validation, d.nature, d.statut, d.est_tete,
+                d.date_decision, d.code_emplacement, u.nom AS auteur,
+                d.date_retrait, d.motif_retrait, ur.nom AS auteur_retrait
+           FROM machine_decision d
+           LEFT JOIN utilisateur u  ON u.id_utilisateur  = d.id_utilisateur
+           LEFT JOIN utilisateur ur ON ur.id_utilisateur = d.id_utilisateur_retrait
+          WHERE d.id_fiche = $1
+          ORDER BY d.numero_validation",
+    )
+    .bind(&id)
+    .fetch_all(&state.db)
+    .await?;
+    let derniere: Option<String> = sqlx::query_scalar(
+        "SELECT id_decision FROM machine_decision WHERE id_fiche = $1
+          ORDER BY numero_validation DESC LIMIT 1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.db)
+    .await?;
+    let etats = sqlx::query(
+        "SELECT s.moment, s.code_reference, r.designation, s.lot_fournisseur, s.nb_bobines,
+                s.pourcentage::float8 AS pourcentage, s.kg::float8 AS kg
+           FROM machine_decision_etat s JOIN reference r ON r.code_reference = s.code_reference
+          WHERE s.id_decision = $1
+          ORDER BY s.moment DESC, r.designation, s.lot_fournisseur",
+    )
+    .bind(&derniere)
+    .fetch_all(&state.db)
+    .await?;
+    let calculees = sqlx::query(
+        "SELECT l.ligne_numero, l.code_reference, r.designation, l.lot_fournisseur,
+                l.nb_avant, l.kg_avant::float8 AS kg_avant, l.nb_mouvementees,
+                l.poids_retenu_kg::float8 AS poids_retenu_kg, l.pct_retirees::float8 AS pct_retirees,
+                l.kg_mouvementes::float8 AS kg_mouvementes, l.destination, l.nb_apres,
+                l.pourcentage_apres::float8 AS pourcentage_apres,
+                l.pourcentage_theorique::float8 AS pourcentage_theorique, l.kg_apres::float8 AS kg_apres,
+                l.ecart_kg::float8 AS ecart_kg, l.effet_ecart, m.libelle AS motif, l.motif_texte
+           FROM machine_decision_ligne l
+           JOIN reference r     ON r.code_reference = l.code_reference
+           JOIN machine_motif m ON m.code_motif = l.code_motif
+          WHERE l.id_decision = $1
+          ORDER BY l.ligne_numero",
+    )
+    .bind(&derniere)
+    .fetch_all(&state.db)
+    .await?;
+    let journal = sqlx::query(
+        "SELECT j.evenement, j.horodatage, j.code_emplacement, j.motif, u.nom AS auteur,
+                j.detail::text AS detail
+           FROM machine_fiche_journal j
+           LEFT JOIN utilisateur u ON u.id_utilisateur = j.id_utilisateur
+          WHERE j.id_fiche = $1
+          ORDER BY j.horodatage",
+    )
+    .bind(&id)
+    .fetch_all(&state.db)
+    .await?;
+
     let mut e = lignes_en_json(&entete);
     let mut l = lignes_en_json(&lignes);
+    let mut c = lignes_en_json(&calculees);
+    let mut s = lignes_en_json(&etats);
     user.masquer(&state.db, module::STOCK, &mut e).await?;
     user.masquer(&state.db, module::STOCK, &mut l).await?;
+    user.masquer(&state.db, module::STOCK, &mut c).await?;
+    user.masquer(&state.db, module::STOCK, &mut s).await?;
     Ok(Json(json!({
         "entete": e.get(0).cloned().unwrap_or(Value::Null),
         "lignes": l,
+        "decisions": lignes_en_json(&decisions),
+        "lignes_decision": c,
+        "etats": s,
+        "journal": lignes_en_json(&journal),
     })))
 }
 
@@ -413,6 +590,7 @@ pub async fn creer_fiche(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
     verifier_entete(&f)?;
+    refuser_conso(f.type_fiche.code())?;
 
     let zone = resoudre_zone(&state.db, &f.code_machine, &f.code_emplacement).await?;
     let precedent = dernier_constat(&state.db, &f.code_emplacement).await?;
@@ -466,16 +644,31 @@ pub async fn remplacer_fiche(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
     verifier_entete(&f)?;
-    exiger_brouillon(&state.db, &id).await?;
+    refuser_conso(f.type_fiche.code())?;
+    resoudre_zone(&state.db, &f.code_machine, &f.code_emplacement).await?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    verrouiller_fiche(&mut tx, &id, &["BROUILLON"]).await?;
+
+    // UNE FICHE DEVALIDEE PEUT CHANGER D'ETAGE (05/10/2026) : c'est le cas de
+    // l'erreur d'emplacement. Le journal garde l'etage d'origine.
+    let (ancien, nb_validations): (String, i64) = sqlx::query_as(
+        "SELECT code_emplacement, nb_validations FROM machine_fiche WHERE id_fiche = $1",
+    )
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if ancien != f.code_emplacement && nb_validations > 0 {
+        dm::journal_changement_etage(&mut tx, &user, &id, &ancien, &f.code_emplacement).await?;
+    }
 
     sqlx::query(
         "UPDATE machine_fiche
             SET date_fiche = COALESCE($2, date_fiche), code_magasin = $3,
                 nb_bobines_etage = $4, nb_palettes = $5, numero_of = $6,
-                responsable = $7, observations = $8
+                responsable = $7, observations = $8,
+                code_machine = $9, code_emplacement = $10
           WHERE id_fiche = $1",
     )
     .bind(&id)
@@ -486,6 +679,8 @@ pub async fn remplacer_fiche(
     .bind(&f.numero_of)
     .bind(f.responsable.trim())
     .bind(&f.observations)
+    .bind(&f.code_machine)
+    .bind(&f.code_emplacement)
     .execute(&mut *tx)
     .await?;
 
@@ -506,9 +701,21 @@ pub async fn supprimer_fiche(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
-    exiger_brouillon(&state.db, &id).await?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    verrouiller_fiche(&mut tx, &id, &["BROUILLON"]).await?;
+    let validee: i64 =
+        sqlx::query_scalar("SELECT nb_validations FROM machine_fiche WHERE id_fiche = $1")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if validee > 0 {
+        return Err(AppError::RegleMetier(
+            "cette fiche a deja ete validee puis devalidee : son historique la retient. \
+             Annulez-la plutot que de la supprimer."
+                .into(),
+        ));
+    }
     sqlx::query("DELETE FROM machine_fiche WHERE id_fiche = $1")
         .bind(&id)
         .execute(&mut *tx)
@@ -518,534 +725,278 @@ pub async fn supprimer_fiche(
 }
 
 // =============================================================================
-// LA VALIDATION — le seul endroit qui ecrit
+// LA DECISION — le seul endroit qui ecrit (modele valide le 05/10/2026)
 // =============================================================================
+//
+// Le calcul et l'ecriture vivent dans `domain::decision_machine`. Ici : les
+// droits, les verrous (fiche puis etage, sans attente), et la transaction.
 
-/// `POST /api/machines/fiches/{id}/valider`
-///
-/// TROIS ECRITURES, EN TOUT OU RIEN :
-///   1. le mouvement, cote magasin seulement, et seulement pour une charge ou
-///      une decharge ;
-///   2. le constat — `machine_etat`, ecrase pour chaque reference touchee ;
-///   3. le cliche COMPLET de la zone, puis la consommation qui en decoule.
+/// La fiche lue dans la transaction, ses lignes saisies, la capacite et le
+/// libelle de son etage.
+async fn charger_decision(
+    tx: &mut sqlx::PgConnection,
+    id: &str,
+) -> AppResult<(dm::FicheDecision, Vec<dm::Saisie>, i64, String)> {
+    type Entete =
+        (String, String, String, String, Option<String>, String, Option<String>, String, i64, i64, String);
+    let e: Entete = sqlx::query_as(
+        "SELECT f.numero_fiche, f.type_fiche, f.code_machine, f.code_emplacement, f.code_magasin,
+                f.date_fiche, f.numero_of, f.responsable, f.nb_validations, z.capacite_bobines, z.libelle
+           FROM machine_fiche f
+           JOIN machine_emplacement z ON z.code_emplacement = f.code_emplacement
+          WHERE f.id_fiche = $1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("fiche {id}")))?;
+    type LigneLue = (
+        String, String, Option<i64>, Option<f64>, Option<f64>, Option<String>, Option<f64>, i64,
+        Option<String>, Option<String>, Option<String>,
+    );
+    let lignes: Vec<LigneLue> = sqlx::query_as(
+        "SELECT code_reference, lot_fournisseur, nb_bobines_mouvementees, poids_retenu_kg::float8,
+                pct_retirees::float8, destination, pourcentage::float8, nb_bobines_presentes,
+                code_motif, motif_texte, effet_ecart
+           FROM machine_fiche_ligne WHERE id_fiche = $1 ORDER BY ligne_numero",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let saisies = lignes
+        .into_iter()
+        .map(|t| dm::Saisie {
+            reference: t.0,
+            lot: t.1,
+            nb_mouvementees: t.2.unwrap_or(0),
+            poids_retenu: t.3,
+            pct_retirees: t.4,
+            destination: t.5,
+            pourcentage: t.6,
+            nb_present: t.7,
+            code_motif: t.8,
+            motif_texte: t.9,
+            effet_ecart: t.10,
+        })
+        .collect();
+    let f = dm::FicheDecision {
+        id_fiche: id.to_string(),
+        numero: e.0,
+        type_fiche: e.1,
+        code_machine: e.2,
+        code_emplacement: e.3,
+        code_magasin: e.4,
+        date_fiche: e.5,
+        numero_of: e.6,
+        responsable: e.7,
+        nb_validations: e.8,
+    };
+    Ok((f, saisies, e.9, e.10))
+}
+
+fn refuser_conso(type_fiche: &str) -> AppResult<()> {
+    if type_fiche == "CONSO" {
+        return Err(AppError::RegleMetier(
+            "la fiche « Consommation » est retiree (05/10/2026) : une perte, un dechet ou une \
+             casse se declare par un dechargement, un ecart par un constat"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// `POST /api/machines/fiches/{id}/apercu` — ce que la validation enregistrera,
+/// ligne par ligne, SANS RIEN ECRIRE : % theorique, % declare, ecart et ce
+/// qu'il compte, et ce qui bloquerait.
+pub async fn apercu_fiche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    let mut tx = state.db.begin().await?;
+    let (f, saisies, capacite, _) = charger_decision(&mut tx, &id).await?;
+    refuser_conso(&f.type_fiche)?;
+    let autorise_rouge = dm::peut_valider_ecart_rouge(&mut tx, &user.role).await?;
+    let privilegie = autorise_rouge;
+    let calc = dm::calculer(&mut tx, &f, &saisies, capacite, privilegie, autorise_rouge).await?;
+    let mut blocages = calc.blocages.clone();
+    if calc.blocages.is_empty() {
+        blocages.extend(dm::controles_complementaires(&mut tx, &f, &calc).await?);
+    }
+    if f.type_fiche == "CHARGE" {
+        if let Some(magasin) = f.code_magasin.as_deref().filter(|m| !m.is_empty()) {
+            let manques = dm::controler_stock(&mut tx, magasin, &calc).await?;
+            if !manques.is_empty() {
+                blocages.push(format!(
+                    "STOCK-INSUFFISANT : chargement bloque — {}.",
+                    manques.join(" ; ")
+                ));
+            }
+        }
+    }
+    let derogations = dm::derogations_possibles(&mut tx, &f, &calc).await?;
+    tx.rollback().await?;
+    Ok(Json(json!({
+        "lignes": calc.lignes,
+        "avant": calc.avant,
+        "apres": calc.apres,
+        "capacite": calc.capacite,
+        "bobines_apres": calc.bobines_apres,
+        "blocages": blocages,
+        "derogations": derogations,
+    })))
+}
+
+/// `POST /api/machines/fiches/{id}/valider` — la decision est prise.
 pub async fn valider_fiche(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
-    Query(q): Query<HashMap<String, String>>,
+    corps: axum::body::Bytes,
 ) -> AppResult<Json<Value>> {
-    // `?corriger=1` : l'operateur a confirme DEUX fois — charger malgre un
-    // stock insuffisant, puis creer le mouvement de correction (01/10/2026).
-    let corriger = matches!(q.get("corriger").map(String::as_str), Some("1" | "true"));
+    let confirme_orange = serde_json::from_slice::<Value>(&corps)
+        .ok()
+        .and_then(|v| v.get("confirme_orange").and_then(Value::as_bool))
+        .unwrap_or(false);
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
-
-    let f = charger_fiche(&state.db, &id).await?;
-    if f.statut != "BROUILLON" {
-        return Err(AppError::RegleMetier(format!(
-            "la fiche {} est {} : seul un brouillon se valide",
-            f.numero,
-            f.statut.to_lowercase()
-        )));
-    }
-
-    let mut lignes = charger_lignes(&state.db, &id).await?;
-    if lignes.is_empty() {
-        return Err(AppError::Invalide("la fiche ne porte aucune ligne".into()));
-    }
-
-    let zone = resoudre_zone(&state.db, &f.code_machine, &f.code_emplacement).await?;
-    let avant = etat_courant(&state.db, &f.code_emplacement).await?;
-
-    // LES EMPLACEMENTS NE SONT JAMAIS A MOITIE DECLARES.
-    //
-    // Une zone de 1344 places porte 1344 bobines — pas « au plus 1344 ». Si Y
-    // en occupe 1000, X en a forcement 344. Le systeme refuse donc le MANQUE
-    // autant que le depassement : c'est ce qui rattrape une ligne oubliee, et
-    // un compte incomplet fausserait toute la consommation qui en decoule.
-    //
-    // LE NOMBRE DE REFERENCE EST CELUI DE L'ENTETE, pas celui du parametrage.
-    // Le magasinier constate le physique ; si sa machine porte 1300 places et
-    // non 1344, c'est le parametrage qui a tort, et il sera corrige plus bas.
-    let mut presentes: HashMap<String, i64> =
-        avant.iter().map(|(k, e)| (k.clone(), e.bobines)).collect();
-    for l in &lignes {
-        presentes.insert(cle(&l.reference, &l.lot), l.presentes);
-    }
-    let total: i64 = presentes.values().sum();
-    let attendu = f.nb_bobines_etage.unwrap_or(zone.capacite);
-
-    // LE COMPTE NE BAISSE PAS SUR UNE CHARGE.
-    //
-    // Etendre une zone de 1300 a 1344 places, c'est y poser 44 bobines de plus :
-    // elles COMPLETENT, elles ne remplacent rien de consomme. L'inverse — passer
-    // de 1344 a 1300 — signifie que 44 bobines ont quitte la zone, et du fil est
-    // parti avec elles. Ce n'est pas un chargement, c'est un dechargement, et le
-    // laisser passer ici ferait disparaitre ce fil dans la consommation sans
-    // qu'aucun magasin le recoive.
-    if f.type_fiche == "CHARGE" && attendu < zone.capacite {
-        return Err(AppError::RegleMetier(format!(
-            "{} porte {} emplacements et la fiche en declare {} : des bobines quittent la zone, cela se fait par un dechargement",
-            zone.libelle, zone.capacite, attendu
-        )));
-    }
-    if f.type_fiche == "DECHARGE" && attendu > zone.capacite {
-        return Err(AppError::RegleMetier(format!(
-            "{} porte {} emplacements et la fiche en declare {} : on n en ajoute pas en dechargeant",
-            zone.libelle, zone.capacite, attendu
-        )));
-    }
-    // UNE MISE A JOUR NE CHANGE QUE LES POURCENTAGES.
-    //
-    // Ni le nombre d'emplacements, ni le compte de chaque reference, ni la
-    // composition. Le nombre de bobines ne baisse que de deux facons : un
-    // DECHARGEMENT — elles quittent la zone avec leur fil — ou une
-    // REDISTRIBUTION entre references de la meme zone, qui se fait par un
-    // chargement puisque des bobines y arrivent. Laisser une simple mise a jour
-    // faire baisser un compte ferait disparaitre du fil sans qu'aucun magasin
-    // le recoive et sans qu'aucun mouvement en garde la trace.
-    if f.type_fiche == "MAJ" {
-        if attendu != zone.capacite {
-            return Err(AppError::RegleMetier(format!(
-                "une mise a jour ne change que les pourcentages : {} porte {} emplacements, la fiche en declare {}",
-                zone.libelle, zone.capacite, attendu
-            )));
-        }
-        for l in &lignes {
-            let av = avant.get(&cle(&l.reference, &l.lot));
-            match av {
-                None => {
-                    return Err(AppError::RegleMetier(format!(
-                        "{} n est pas sur {} : une mise a jour ne pose pas de nouvelle reference, c est un chargement",
-                        l.reference, zone.libelle
-                    )))
-                }
-                Some(e) if e.bobines != l.presentes => {
-                    return Err(AppError::RegleMetier(format!(
-                        "{} porte {} bobines de {} et la fiche en declare {} : une mise a jour ne change que les pourcentages",
-                        zone.libelle, e.bobines, l.reference, l.presentes
-                    )))
-                }
-                _ => {}
-            }
-        }
-        if lignes.len() < avant.len() {
-            return Err(AppError::RegleMetier(
-                "une mise a jour porte toutes les references de la zone : en retirer une ferait disparaitre son fil sans dechargement"
-                    .into(),
-            ));
-        }
-    }
-
-    if total != attendu {
-        let manque = attendu - total;
-        return Err(AppError::RegleMetier(if manque > 0 {
-            format!(
-                "{} porte {} emplacements : il manque {} bobines dans la fiche",
-                zone.libelle, attendu, manque
-            )
-        } else {
-            format!(
-                "{} porte {} emplacements : la fiche en declare {} de trop",
-                zone.libelle, attendu, -manque
-            )
-        }));
-    }
-
-    // --- 0. LE STOCK DU MAGASIN COUVRE-T-IL LE CHARGEMENT ? -----------------
-    //
-    // LA MATIERE EST LA, LE STOCK DIT LE CONTRAIRE. Le magasinier a les
-    // bobines devant lui ; l'ERP, lui, n'en connait pas assez — une reception
-    // oubliee, un retour mal impute. Refuser net le pousserait a ne plus rien
-    // saisir. On refuse donc AVEC LE DETAIL, et l'ecran pose deux questions :
-    // charger quand meme ? creer la correction ? Sans correction, on bloque —
-    // un chargement ne fait jamais du stock negatif en silence.
-    let mut manques: Vec<(usize, f64)> = Vec::new();
-    if f.type_fiche == "CHARGE" {
-        if let Some(magasin) = f.code_magasin.as_deref() {
-            let mut detail = Vec::new();
-            for (i, l) in lignes.iter().enumerate() {
-                let kg = l.kg_mouvementes.unwrap_or(0.0);
-                if kg <= 0.0 {
-                    continue;
-                }
-                let stock: f64 = sqlx::query_scalar(
-                    "SELECT COALESCE((SELECT quantite_kg::float8 FROM stock_magasin
-                                       WHERE code_reference = $1 AND code_magasin = $2), 0)",
-                )
-                .bind(&l.reference)
-                .bind(magasin)
-                .fetch_one(&state.db)
-                .await?;
-                let manque = arrondi_kg(kg - stock);
-                if manque > 0.0005 {
-                    manques.push((i, manque));
-                    detail.push(format!(
-                        "{} (lot {}) : {} kg a charger, {} kg en stock, il manque {} kg",
-                        l.reference, l.lot, arrondi_kg(kg), arrondi_kg(stock), manque
-                    ));
-                }
-            }
-            if !manques.is_empty() && !corriger {
-                return Err(AppError::RegleMetier(format!(
-                    "R02-MAG : stock insuffisant au magasin {magasin} — {}",
-                    detail.join(" ; ")
-                )));
-            }
-        }
-    }
-    // Le lot corrige porte desormais le chargement : son solde n'a pas a
-    // bloquer une seconde fois.
-    for (i, _) in &manques {
-        lignes[*i].lot_force = true;
-        if lignes[*i].motif_lot_force.is_none() {
-            lignes[*i].motif_lot_force =
-                Some("Correction de stock confirmee avant chargement".into());
-        }
-    }
-
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-
-    // --- 0 bis. LA CORRECTION, tracee, avant le chargement --------------------
-    let mut numero_correction: Option<String> = None;
-    if corriger && !manques.is_empty() {
-        let magasin = f.code_magasin.clone().unwrap_or_default();
-        let numero = numeroter(&mut tx, "mouvement", "numero_mouvement", "MVT").await?;
-        let id_mvt = uuid::Uuid::new_v4().to_string();
-        sqlx::query(
-            "INSERT INTO mouvement
-                 (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
-                  code_motif, reference_document, observations_globales, responsable, id_utilisateur)
-             VALUES ($1,$2,$3,'AJUST_INV_POS',$4,'INVENTAIRE',$5,$6,$7,$8)",
-        )
-        .bind(&id_mvt)
-        .bind(&numero)
-        .bind(&f.date_fiche)
-        .bind(&magasin)
-        .bind(&f.numero)
-        .bind(format!(
-            "Correction avant chargement {} : matiere presente physiquement, stock insuffisant. Confirme par l operateur.",
-            f.numero
-        ))
-        .bind(&f.responsable)
-        .bind(&user.id)
-        .execute(&mut *tx)
-        .await?;
-        for (n, (i, manque)) in manques.iter().enumerate() {
-            let l = &lignes[*i];
-            let prix = cmup(&mut tx, &magasin, &l.reference).await?;
-            sqlx::query(
-                "INSERT INTO ligne_mouvement
-                     (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                      lot_fournisseur, code_motif_ligne)
-                 VALUES ($1,$2,$3,$4,$5,$6,'R6')",
-            )
-            .bind(&id_mvt)
-            .bind(n as i64 + 1)
-            .bind(&l.reference)
-            .bind(*manque)
-            .bind(prix)
-            .bind(&l.lot)
-            .execute(&mut *tx)
-            .await?;
-        }
-        numero_correction = Some(numero);
-    }
-
-    // --- 1. LE MOUVEMENT, cote magasin seulement -----------------------------
-    let mut numero_mvt: Option<String> = None;
-    if f.type_fiche == "CHARGE" || f.type_fiche == "DECHARGE" {
-        let magasin = f.code_magasin.clone().ok_or_else(|| {
-            AppError::Invalide("le magasin est requis pour une charge ou une decharge".into())
-        })?;
-        let bougees: Vec<&Ligne> = lignes
-            .iter()
-            .filter(|l| l.kg_mouvementes.unwrap_or(0.0) > 0.0)
-            .collect();
-        if !bougees.is_empty() {
-            numero_mvt = Some(ecrire_mouvement(&mut tx, &user, &f, &magasin, &bougees).await?);
-        }
-    }
-
-    // --- 2. LE CONSTAT -------------------------------------------------------
-    for l in &lignes {
-        poser_etat(&mut tx, &user, &f, l).await?;
-    }
-    // Une ligne tombee a zero quitte la zone : la garder ferait un lot fantome
-    // que chaque cliche suivant recopierait indefiniment.
-    sqlx::query(
-        "DELETE FROM machine_etat
-          WHERE code_emplacement = $1 AND nb_bobines = 0 AND kg = 0",
+    // LE PREMIER QUI VALIDE L'EMPORTE : la fiche, puis l'etage, sans attente.
+    verrouiller_fiche(&mut tx, &id, &["BROUILLON"]).await?;
+    let (f, saisies, capacite, libelle) = charger_decision(&mut tx, &id).await?;
+    refuser_conso(&f.type_fiche)?;
+    // LA MACHINE ET LA ZONE SONT RELUES A LA VALIDATION (F15, 09/10/2026).
+    // Le refus a la creation ne suffisait pas : un brouillon saisi la veille se
+    // validait apres le retrait de la machine ou la desactivation de la zone,
+    // et posait du fil sur un metier hors parc, encore compte au MRP. Seul un
+    // dechargement reste permis : il vide.
+    let (etat_machine, zone_active): (String, i64) = sqlx::query_as(
+        "SELECT m.etat, e.actif::bigint
+           FROM machine_emplacement e JOIN machine m ON m.code_machine = e.code_machine
+          WHERE e.code_emplacement = $1
+            FOR SHARE OF m, e",
     )
     .bind(&f.code_emplacement)
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
-
-    // UN CONSTAT EST UNE ACTIVITE DU LOT : un lot qui tourne sur un metier ne
-    // devient pas « dormant » faute de mouvement de magasin (cahier, regle 3).
-    for l in &lignes {
-        sqlx::query(
-            "UPDATE lot SET date_derniere_activite = $3
-              WHERE code_reference = $1 AND lot_fournisseur = $2",
-        )
-        .bind(&l.reference)
-        .bind(&l.lot)
-        .bind(crate::db::maintenant())
-        .execute(&mut *tx)
-        .await?;
+    if f.type_fiche != "DECHARGE" && (etat_machine == "RETIREE" || zone_active != 1) {
+        return Err(AppError::RegleMetier(format!(
+            "{} : {} — cette fiche ne se valide plus. Annulez le brouillon, ou remettez la machine ou la zone en service d'abord.",
+            libelle,
+            if etat_machine == "RETIREE" { "la machine est retiree du parc" } else { "la zone est desactivee" }
+        )));
     }
-
-    // --- 2 bis. LE PARAMETRAGE SUIT LE CONSTAT -------------------------------
-    //
-    // L'ENTETE FAIT AUTORITE, ET CELA DOIT DURER. Le magasinier compte le
-    // physique : si son etage porte 1344 places la ou le parametrage en annonce
-    // 1300, c'est le parametrage qui a tort, et la validation le corrige.
-    //
-    // Sans ce report, la correction ne tenait que le temps d'une fiche. La
-    // suivante repartait de 1300, le constat en portait 1344, et le meme refus
-    // revenait a chaque chargement — l'utilisateur le voyait « toujours ».
-    if attendu > 0 && attendu != zone.capacite {
-        sqlx::query(
-            "UPDATE machine_emplacement SET capacite_bobines = $2
-              WHERE code_emplacement = $1",
-        )
-        .bind(&f.code_emplacement)
-        .bind(attendu)
-        .execute(&mut *tx)
-        .await?;
-
-        // Une machine porte au moins ce que ses zones portent. Agrandir un
-        // etage sans remonter la machine rendrait son total plus petit que la
-        // somme de ses parties — la regle que `creer_machine` fait respecter a
-        // la declaration doit valoir aussi apres coup.
-        sqlx::query(
-            "UPDATE machine m SET capacite_bobines = z.somme
-               FROM (SELECT code_machine, sum(capacite_bobines) AS somme
-                       FROM machine_emplacement
-                      WHERE code_machine = $1 AND actif = 1
-                      GROUP BY code_machine) z
-              WHERE m.code_machine = z.code_machine
-                AND m.capacite_bobines < z.somme",
-        )
-        .bind(&f.code_machine)
-        .execute(&mut *tx)
-        .await?;
+    // VALIDER UN CHARGEMENT OU UN DECHARGEMENT DEMANDE LE DROIT « VALIDER »
+    // (06/10/2026) : il fait bouger le magasin, comme une contre-passation. Un
+    // constat, qui ne touche que l'etage, reste au droit d'ecrire.
+    if f.type_fiche != "MAJ" {
+        user.exiger(&state.db, module::MOUVEMENTS, Action::Valider).await?;
     }
-
-    // --- 3. LE CLICHE COMPLET, puis la consommation --------------------------
-    //
-    // Le cliche porte TOUTE la zone, y compris les references que la fiche n'a
-    // pas touchees. Sans elles, l'etat d'une date passee serait incomplet : on
-    // saurait ce qui a bouge ce jour-la, pas ce qui etait a cote.
-    let apres = etat_courant_tx(&mut tx, &f.code_emplacement).await?;
-    for e in apres.values() {
-        sqlx::query(
-            "INSERT INTO machine_cliche
-                 (id_fiche, code_emplacement, date_cliche, code_reference, lot_fournisseur,
-                  nb_bobines, poids_unitaire_kg, pourcentage, kg)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-             ON CONFLICT (id_fiche, code_reference, lot_fournisseur) DO NOTHING",
-        )
-        .bind(&id)
-        .bind(&f.code_emplacement)
-        .bind(&f.date_fiche)
-        .bind(&e.reference)
-        .bind(&e.lot)
-        .bind(e.bobines)
-        .bind(e.poids_unitaire)
-        .bind(e.pourcentage)
-        .bind(e.kg)
-        .execute(&mut *tx)
-        .await?;
+    if f.type_fiche != "MAJ" && f.code_magasin.as_deref().unwrap_or("").is_empty() {
+        return Err(AppError::Invalide(
+            "le magasin est requis pour un chargement ou un dechargement".into(),
+        ));
     }
-
-    // ON N'ATTRIBUE PLUS LA CONSOMMATION FICHE PAR FICHE.
-    //
-    // Personne ne sait quel chargement a ete tisse quand. La consommation se
-    // lit en CUMUL — tout ce qui a ete charge, moins ce qui est revenu, moins
-    // l'etat constate — et c'est la vue `v_machine_consommation` qui le fait.
-    //
-    // Ce qu'on ecrit ici n'est donc plus un calcul mais une TRACE : l'etat
-    // d'avant et celui d'apres, par reference et par lot. C'est elle qui permet
-    // d'annuler une fiche validee en restaurant ce qui etait la.
-    for l in &lignes {
-        let av = avant.get(&cle(&l.reference, &l.lot));
-        let (kg_charge, kg_retourne) = match f.type_fiche.as_str() {
-            "CHARGE" => (l.kg_mouvementes.unwrap_or(0.0), 0.0),
-            "DECHARGE" => (0.0, l.kg_mouvementes.unwrap_or(0.0)),
-            _ => (0.0, 0.0),
-        };
-        sqlx::query(
-            "INSERT INTO machine_consommation
-                 (code_machine, code_emplacement, code_reference, lot_fournisseur,
-                  date_constat, date_constat_precedent,
-                  bobines_avant, pourcentage_avant, kg_avant,
-                  kg_charge, kg_retourne,
-                  bobines_apres, pourcentage_apres, poids_unitaire_kg, kg_apres,
-                  numero_of, responsable, id_utilisateur, mode_constat, id_fiche)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
-        )
-        .bind(&f.code_machine)
-        .bind(&f.code_emplacement)
-        .bind(&l.reference)
-        .bind(&l.lot)
-        .bind(&f.date_fiche)
-        .bind(&f.date_constat_precedent)
-        .bind(av.map(|e| e.bobines).unwrap_or(0))
-        .bind(av.and_then(|e| e.pourcentage))
-        .bind(av.map(|e| e.kg).unwrap_or(0.0))
-        .bind(kg_charge)
-        .bind(kg_retourne)
-        .bind(l.presentes)
-        .bind(l.pourcentage)
-        .bind(l.poids_unitaire)
-        .bind(l.total_kg)
-        .bind(&f.numero_of)
-        .bind(&f.responsable)
-        .bind(&user.id)
-        .bind(&l.mode_constat)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    sqlx::query(
-        "UPDATE machine_fiche
-            SET statut = 'VALIDE', id_utilisateur_validation = $2,
-                date_validation = to_char(now() AT TIME ZONE 'UTC',
-                                          'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
-          WHERE id_fiche = $1",
-    )
-    .bind(&id)
-    .bind(&user.id)
-    .execute(&mut *tx)
-    .await?;
-
+    verrouiller_zone(&mut tx, &f.code_emplacement, &libelle).await?;
+    let r = dm::valider(&mut tx, &user, &f, &saisies, capacite, confirme_orange).await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "id_fiche": id,
-        "numero_fiche": f.numero,
-        "statut": "VALIDE",
-        "mouvement": numero_mvt,
-        "correction": numero_correction,
-    })))
+    Ok(Json(r))
 }
 
-/// `POST /api/machines/fiches/{id}/annuler`
-///
-/// ON NE GOMME PAS UNE ERREUR, ON ECRIT QU'ELLE A ETE VUE. Le mouvement est
-/// contre-passe, l'etat revient a ce que le journal de consommation avait
-/// conserve — c'est precisement pour cela qu'il conserve l'etat d'avant.
+/// Annuler ou devalider : le retour controle a l'etat precedent.
+async fn retirer_fiche(
+    state: &AppState,
+    user: &Utilisateur,
+    id: &str,
+    mode: dm::Retrait,
+    motif: &str,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    if motif.trim().chars().count() < 5 {
+        return Err(AppError::Invalide(
+            "le motif doit dire pourquoi (5 caracteres au moins) : sans lui, on efface une \
+             erreur sans l'expliquer"
+                .into(),
+        ));
+    }
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let attendus: &[&str] =
+        if mode == dm::Retrait::Annulation { &["BROUILLON", "VALIDE"] } else { &["VALIDE"] };
+    let statut = verrouiller_fiche(&mut tx, id, attendus).await?;
+    let (f, _, _, libelle) = charger_decision(&mut tx, id).await?;
+    // RETIRER UNE DECISION DEMANDE « VALIDER » (06/10/2026) : ses mouvements
+    // recoivent une annulation. Clore un brouillon reste au droit d'ecrire.
+    if statut == "VALIDE" {
+        user.exiger(&state.db, module::MOUVEMENTS, Action::Valider).await?;
+    }
+
+    // UN BROUILLON N'A RIEN DECIDE : il se clot, sans retour d'etat.
+    if statut == "BROUILLON" {
+        sqlx::query(
+            "UPDATE machine_fiche
+                SET statut = 'ANNULE', motif_annulation = $2,
+                    date_annulation = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+              WHERE id_fiche = $1 AND statut = 'BROUILLON'",
+        )
+        .bind(id)
+        .bind(motif.trim())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO machine_fiche_journal (id_fiche, evenement, code_emplacement, motif, id_utilisateur)
+             VALUES ($1, 'ANNULATION', $2, $3, $4)",
+        )
+        .bind(id)
+        .bind(&f.code_emplacement)
+        .bind(motif.trim())
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(Json(json!({ "id_fiche": id, "statut": "ANNULE" })));
+    }
+
+    verrouiller_zone(&mut tx, &f.code_emplacement, &libelle).await?;
+    let r = dm::retirer(&mut tx, user, &f, mode, motif).await?;
+    tx.commit().await?;
+    Ok(Json(r))
+}
+
+/// `POST /api/machines/fiches/{id}/annuler` — la fiche est close, l'etage
+/// revient a l'etat valide qui precedait sa decision.
 pub async fn annuler_fiche(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
     Json(a): Json<Annulation>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
-    if a.motif.trim().is_empty() {
-        return Err(AppError::Invalide(
-            "une annulation doit dire pourquoi : sans motif, elle sert a faire \
-             disparaitre une erreur sans l expliquer"
-                .into(),
-        ));
-    }
+    retirer_fiche(&state, &user, &id, dm::Retrait::Annulation, &a.motif).await
+}
 
-    let f = charger_fiche(&state.db, &id).await?;
-    if f.statut == "ANNULE" {
-        return Err(AppError::RegleMetier("cette fiche est deja annulee".into()));
-    }
+/// `POST /api/machines/fiches/{id}/devalider` — meme retour d'etat, mais la
+/// fiche revient en BROUILLON : on la corrige (son etage aussi) et on revalide.
+pub async fn devalider_fiche(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(a): Json<Annulation>,
+) -> AppResult<Json<Value>> {
+    retirer_fiche(&state, &user, &id, dm::Retrait::Devalidation, &a.motif).await
+}
 
-    let mut tx = state.db.begin().await?;
-    user.poser_contexte(&mut tx).await?;
-
-    if f.statut == "VALIDE" {
-        let avant = sqlx::query_as::<_, (String, String, i64, Option<f64>, Option<f64>, f64)>(
-            "SELECT code_reference, lot_fournisseur, bobines_avant,
-                    pourcentage_avant::float8, poids_unitaire_kg::float8, kg_avant::float8
-               FROM machine_consommation WHERE id_fiche = $1",
-        )
-        .bind(&id)
-        .fetch_all(&mut *tx)
-        .await?;
-
-        for (reference, lot, bobines, pourcentage, unitaire, kg) in &avant {
-            if *bobines == 0 && *kg == 0.0 {
-                sqlx::query(
-                    "DELETE FROM machine_etat
-                      WHERE code_emplacement = $1 AND code_reference = $2
-                        AND lot_fournisseur = $3",
-                )
-                .bind(&f.code_emplacement)
-                .bind(reference)
-                .bind(lot)
-                .execute(&mut *tx)
-                .await?;
-            } else {
-                sqlx::query(
-                    "INSERT INTO machine_etat
-                         (code_emplacement, code_reference, lot_fournisseur, nb_bobines,
-                          poids_unitaire_kg, pourcentage, date_constat, responsable,
-                          id_utilisateur)
-                     VALUES ($1,$2,$3,$4,$5,COALESCE($6,100),$7,$8,$9)
-                     ON CONFLICT (code_emplacement, code_reference, lot_fournisseur)
-                     DO UPDATE SET nb_bobines = excluded.nb_bobines,
-                                   poids_unitaire_kg = excluded.poids_unitaire_kg,
-                                   pourcentage = excluded.pourcentage,
-                                   date_constat = excluded.date_constat,
-                                   responsable = excluded.responsable",
-                )
-                .bind(&f.code_emplacement)
-                .bind(reference)
-                .bind(lot)
-                .bind(bobines)
-                .bind(unitaire)
-                .bind(pourcentage)
-                .bind(&f.date_fiche)
-                .bind(format!("annulation {}", f.numero))
-                .bind(&user.id)
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
-
-        contre_passer(&mut tx, &user, &f).await?;
-
-        // La consommation de cette fiche est annulee par une ligne miroir : on
-        // n'efface pas, on ecrit l'inverse.
-        sqlx::query(
-            "INSERT INTO machine_consommation
-                 (code_machine, code_emplacement, code_reference, lot_fournisseur,
-                  date_constat, bobines_avant, kg_avant, kg_charge, kg_retourne,
-                  bobines_apres, kg_apres, responsable, id_utilisateur, mode_constat, id_fiche)
-             SELECT code_machine, code_emplacement, code_reference, lot_fournisseur,
-                    to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD'),
-                    bobines_apres, kg_apres, kg_retourne, kg_charge,
-                    bobines_avant, kg_avant, $2, $3, mode_constat, id_fiche
-               FROM machine_consommation
-              WHERE id_fiche = $1 AND responsable <> $2",
-        )
-        .bind(&id)
-        .bind(format!("annulation {}", f.numero))
-        .bind(&user.id)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    sqlx::query(
-        "UPDATE machine_fiche
-            SET statut = 'ANNULE', motif_annulation = $2,
-                date_annulation = to_char(now() AT TIME ZONE 'UTC',
-                                          'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
-          WHERE id_fiche = $1",
+/// `GET /api/machines/motifs` — la matrice des motifs (05/10/2026).
+pub async fn lister_motifs(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT code_motif, type_fiche, libelle, array_to_string(destinations, ',') AS destinations,
+                effet_defaut, array_to_string(effets_permis, ',') AS effets_permis, ordre
+           FROM machine_motif WHERE actif = 1 ORDER BY type_fiche, ordre",
     )
-    .bind(&id)
-    .bind(a.motif.trim())
-    .execute(&mut *tx)
+    .fetch_all(&state.db)
     .await?;
-
-    tx.commit().await?;
-    Ok(Json(json!({ "id_fiche": id, "statut": "ANNULE" })))
+    Ok(Json(lignes_en_json(&lignes)))
 }
 
 // =============================================================================
@@ -1053,54 +1004,7 @@ pub async fn annuler_fiche(
 // =============================================================================
 
 struct Zone {
-    libelle: String,
     capacite: i64,
-}
-
-struct Fiche {
-    numero: String,
-    /// LE NOMBRE D'EMPLACEMENTS CONSTATE, saisi a l'entete. Il fait autorite
-    /// sur le parametrage : c'est lui qui dit combien la zone porte vraiment.
-    nb_bobines_etage: Option<i64>,
-    type_fiche: String,
-    statut: String,
-    code_machine: String,
-    code_emplacement: String,
-    date_fiche: String,
-    date_constat_precedent: Option<String>,
-    code_magasin: Option<String>,
-    numero_of: Option<String>,
-    responsable: String,
-}
-
-struct Ligne {
-    reference: String,
-    lot: String,
-    /// La confirmation de l'operateur : charger malgre un solde de lot court.
-    lot_force: bool,
-    motif_lot_force: Option<String>,
-    mouvementees: Option<i64>,
-    kg_mouvementes: Option<f64>,
-    presentes: i64,
-    poids_unitaire: Option<f64>,
-    pourcentage: Option<f64>,
-    total_kg: f64,
-    mode_constat: String,
-}
-
-struct Etat {
-    reference: String,
-    lot: String,
-    bobines: i64,
-    poids_unitaire: Option<f64>,
-    pourcentage: Option<f64>,
-    kg: f64,
-}
-
-/// Le couple (reference, lot) tient lieu de cle. Le separateur est un
-/// caractere de controle : aucun code de reference ni de lot ne le contient.
-fn cle(reference: &str, lot: &str) -> String {
-    format!("{reference}\u{1}{lot}")
 }
 
 fn verifier_entete(f: &NouvelleFiche) -> AppResult<()> {
@@ -1116,6 +1020,17 @@ fn verifier_entete(f: &NouvelleFiche) -> AppResult<()> {
 }
 
 async fn resoudre_zone(db: &crate::db::Db, machine: &str, zone: &str) -> AppResult<Zone> {
+    // UNE MACHINE RETIREE NE SE CHARGE PLUS (audit v4) : sa zone restait
+    // ouverte aux fiches.
+    let etat: Option<String> = sqlx::query_scalar("SELECT etat FROM machine WHERE code_machine = $1")
+        .bind(machine)
+        .fetch_optional(db)
+        .await?;
+    if etat.as_deref() == Some("RETIREE") {
+        return Err(AppError::RegleMetier(format!(
+            "la machine {machine} est retiree du parc : elle ne porte plus de fiche. Remettez-la en service d'abord"
+        )));
+    }
     sqlx::query_as::<_, (String, i64)>(
         "SELECT libelle, capacite_bobines FROM machine_emplacement
           WHERE code_machine = $1 AND code_emplacement = $2 AND actif = 1",
@@ -1124,7 +1039,7 @@ async fn resoudre_zone(db: &crate::db::Db, machine: &str, zone: &str) -> AppResu
     .bind(zone)
     .fetch_optional(db)
     .await?
-    .map(|(libelle, capacite)| Zone { libelle, capacite })
+    .map(|(_, capacite)| Zone { capacite })
     .ok_or_else(|| AppError::Introuvable(format!("la machine {machine} n a pas de zone {zone}")))
 }
 
@@ -1137,127 +1052,97 @@ async fn dernier_constat(db: &crate::db::Db, zone: &str) -> AppResult<Option<Str
     .await?)
 }
 
-async fn exiger_brouillon(db: &crate::db::Db, id: &str) -> AppResult<()> {
-    let statut: Option<String> =
-        sqlx::query_scalar("SELECT statut FROM machine_fiche WHERE id_fiche = $1")
-            .bind(id)
-            .fetch_optional(db)
-            .await?;
-    match statut.as_deref() {
-        None => Err(AppError::Introuvable(format!("fiche {id}"))),
-        Some("BROUILLON") => Ok(()),
-        Some(s) => Err(AppError::RegleMetier(format!(
-            "cette fiche est {} : elle ne se modifie plus",
-            s.to_lowercase()
-        ))),
+/// LE PREMIER QUI AGIT L'EMPORTE (03/10/2026).
+///
+/// Deux postes peuvent viser la meme fiche au meme instant : deux annulations
+/// lancees depuis la liste, ou un double clic qui part avant que le bouton ne
+/// se grise. Lire le statut AVANT la transaction les laissait passer toutes les
+/// deux, et le magasin etait debite — ou recredite — deux fois. La ligne de la
+/// fiche est donc verrouillee DANS la transaction.
+///
+/// LE SECOND N'ATTEND PAS (`NOWAIT`) : il est refuse sur-le-champ, avec un
+/// message qui dit que la fiche est en cours de modification ailleurs. S'il
+/// revient une fois le premier termine, il lit le statut a jour et apprend ce
+/// qui s'est passe et qui l'a fait.
+///
+/// Renvoie le statut lu sous verrou s'il fait partie de ceux qu'on attend.
+async fn verrouiller_fiche(
+    tx: &mut sqlx::PgConnection,
+    id: &str,
+    attendus: &[&str],
+) -> AppResult<String> {
+    let ligne: Option<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT f.statut, f.numero_fiche, u.nom
+           FROM machine_fiche f
+           LEFT JOIN utilisateur u ON u.id_utilisateur = f.id_utilisateur_validation
+          WHERE f.id_fiche = $1
+            FOR UPDATE OF f NOWAIT",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| {
+        occupe(
+            e,
+            "cette fiche est en cours de modification sur un autre poste : \
+             on ne peut pas la toucher pour l'instant, reessayez dans un moment",
+        )
+    })?;
+    let (statut, numero, valideur) =
+        ligne.ok_or_else(|| AppError::Introuvable(format!("fiche {id}")))?;
+    if attendus.contains(&statut.as_str()) {
+        return Ok(statut);
     }
+    let etat = match statut.as_str() {
+        "VALIDE" => "validee",
+        "ANNULE" => "annulee",
+        autre => return Err(AppError::RegleMetier(format!(
+            "la fiche {numero} est {} : cette action ne s'y applique pas",
+            autre.to_lowercase()
+        ))),
+    };
+    let par = match (statut.as_str(), valideur) {
+        ("VALIDE", Some(nom)) => format!(" par {nom}"),
+        _ => String::new(),
+    };
+    Err(AppError::RegleMetier(format!(
+        "la fiche {numero} est deja {etat}{par} : rechargez la liste pour voir son etat a jour"
+    )))
 }
 
-type FicheBrute = (
-    String, String, String, String, String, String,
-    Option<String>, Option<String>, Option<String>, String, Option<i64>,
-);
-
-async fn charger_fiche(db: &crate::db::Db, id: &str) -> AppResult<Fiche> {
-    sqlx::query_as::<_, FicheBrute>(
-        "SELECT numero_fiche, type_fiche, statut, code_machine, code_emplacement,
-                date_fiche, date_constat_precedent, code_magasin, numero_of, responsable,
-                nb_bobines_etage
-           FROM machine_fiche WHERE id_fiche = $1",
-    )
-    .bind(id)
-    .fetch_optional(db)
-    .await?
-    .map(|t| Fiche {
-        numero: t.0,
-        type_fiche: t.1,
-        statut: t.2,
-        code_machine: t.3,
-        code_emplacement: t.4,
-        date_fiche: t.5,
-        date_constat_precedent: t.6,
-        code_magasin: t.7,
-        numero_of: t.8,
-        responsable: t.9,
-        nb_bobines_etage: t.10,
-    })
-    .ok_or_else(|| AppError::Introuvable(format!("fiche {id}")))
-}
-
-type LigneBrute = (
-    String, String, Option<i64>, Option<f64>, i64, Option<f64>, Option<f64>, f64, String,
-    i64, Option<String>,
-);
-
-async fn charger_lignes(db: &crate::db::Db, id: &str) -> AppResult<Vec<Ligne>> {
-    let l = sqlx::query_as::<_, LigneBrute>(
-        "SELECT code_reference, lot_fournisseur, nb_bobines_mouvementees,
-                kg_mouvementes::float8, nb_bobines_presentes,
-                poids_unitaire_kg::float8, pourcentage::float8, total_kg::float8, mode_constat,
-                lot_force, motif_lot_force
-           FROM machine_fiche_ligne WHERE id_fiche = $1 ORDER BY ligne_numero",
-    )
-    .bind(id)
-    .fetch_all(db)
-    .await?;
-    Ok(l.into_iter()
-        .map(|t| Ligne {
-            reference: t.0,
-            lot: t.1,
-            mouvementees: t.2,
-            kg_mouvementes: t.3,
-            presentes: t.4,
-            poids_unitaire: t.5,
-            pourcentage: t.6,
-            total_kg: t.7,
-            mode_constat: t.8,
-            lot_force: t.9 == 1,
-            motif_lot_force: t.10,
-        })
-        .collect())
-}
-
-type EtatBrut = (String, String, i64, Option<f64>, Option<f64>, f64);
-
-const SQL_ETAT: &str = "SELECT code_reference, lot_fournisseur, nb_bobines,
-        poids_unitaire_kg::float8, pourcentage::float8, kg::float8
-   FROM machine_etat WHERE code_emplacement = $1";
-
-async fn etat_courant(db: &crate::db::Db, zone: &str) -> AppResult<HashMap<String, Etat>> {
-    let l = sqlx::query_as::<_, EtatBrut>(SQL_ETAT)
-        .bind(zone)
-        .fetch_all(db)
-        .await?;
-    Ok(vers_carte(l))
-}
-
-async fn etat_courant_tx(
+/// La zone sous verrou : une seule fiche a la fois la modifie. Toujours prise
+/// APRES la fiche, dans cet ordre. Meme regle que pour la fiche : celui qui
+/// arrive second est refuse sur-le-champ, sans attendre.
+async fn verrouiller_zone(
     tx: &mut sqlx::PgConnection,
     zone: &str,
-) -> AppResult<HashMap<String, Etat>> {
-    let l = sqlx::query_as::<_, EtatBrut>(SQL_ETAT)
+    libelle: &str,
+) -> AppResult<()> {
+    sqlx::query("SELECT 1 FROM machine_emplacement WHERE code_emplacement = $1 FOR UPDATE NOWAIT")
         .bind(zone)
-        .fetch_all(&mut *tx)
-        .await?;
-    Ok(vers_carte(l))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            occupe(
+                e,
+                &format!(
+                    "{libelle} est en cours de modification par une autre fiche : \
+                     on ne peut pas y toucher pour l'instant, reessayez dans un moment"
+                ),
+            )
+        })?;
+    Ok(())
 }
 
-fn vers_carte(l: Vec<EtatBrut>) -> HashMap<String, Etat> {
-    l.into_iter()
-        .map(|t| {
-            (
-                cle(&t.0, &t.1),
-                Etat {
-                    reference: t.0,
-                    lot: t.1,
-                    bobines: t.2,
-                    poids_unitaire: t.3,
-                    pourcentage: t.4,
-                    kg: t.5,
-                },
-            )
-        })
-        .collect()
+/// `55P03` : le verrou est pris par une autre transaction et `NOWAIT` a
+/// refuse d'attendre. C'est un message pour l'utilisateur, pas une panne.
+fn occupe(e: sqlx::Error, message: &str) -> AppError {
+    if let sqlx::Error::Database(d) = &e {
+        if d.code().as_deref() == Some("55P03") {
+            return AppError::RegleMetier(message.to_string());
+        }
+    }
+    e.into()
 }
 
 async fn ecrire_lignes(
@@ -1277,8 +1162,9 @@ async fn ecrire_lignes(
                  (id_fiche, ligne_numero, code_reference, lot_fournisseur,
                   nb_bobines_mouvementees, kg_mouvementes, nb_palettes,
                   nb_bobines_presentes, poids_unitaire_kg, pourcentage, total_kg,
-                  mode_constat, notes, lot_force, motif_lot_force)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+                  mode_constat, notes, lot_force, motif_lot_force,
+                  poids_retenu_kg, pct_retirees, destination, code_motif, motif_texte, effet_ecart)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)",
         )
         .bind(id)
         .bind(i as i64 + 1)
@@ -1297,226 +1183,17 @@ async fn ecrire_lignes(
         // des heures plus tard, et par quelqu'un d'autre : une confirmation
         // qui n'aurait vecu que dans l'appel de creation serait perdue, et le
         // chargement se ferait refuser au dernier moment.
-        .bind(i32::from(l.lot_force.unwrap_or(false)))
-        .bind(l.motif_lot_force.as_deref())
+        // Le forcage de lot n'existe plus sur une fiche machine (06/10/2026).
+        .bind(0_i32)
+        .bind(None::<&str>)
+        .bind(l.poids_retenu_kg.filter(|p| *p > 0.0))
+        .bind(l.pct_retirees)
+        .bind(l.destination.as_deref().filter(|d| !d.is_empty()))
+        .bind(l.code_motif.as_deref().filter(|m| !m.is_empty()))
+        .bind(l.motif_texte.as_deref().map(str::trim).filter(|m| !m.is_empty()))
+        .bind(l.effet_ecart.as_deref().filter(|e| !e.is_empty()))
         .execute(&mut *tx)
         .await?;
-    }
-    Ok(())
-}
-
-async fn poser_etat(
-    tx: &mut sqlx::PgConnection,
-    user: &Utilisateur,
-    f: &Fiche,
-    l: &Ligne,
-) -> AppResult<()> {
-    sqlx::query(
-        "INSERT INTO machine_etat
-             (code_emplacement, code_reference, lot_fournisseur, nb_bobines,
-              poids_unitaire_kg, pourcentage, mode_constat, date_constat,
-              responsable, id_utilisateur)
-         VALUES ($1,$2,$3,$4,$5,COALESCE($6,100),$7,$8,$9,$10)
-         ON CONFLICT (code_emplacement, code_reference, lot_fournisseur)
-         DO UPDATE SET nb_bobines = excluded.nb_bobines,
-                       poids_unitaire_kg = excluded.poids_unitaire_kg,
-                       pourcentage = excluded.pourcentage,
-                       mode_constat = excluded.mode_constat,
-                       date_constat = excluded.date_constat,
-                       responsable = excluded.responsable,
-                       id_utilisateur = excluded.id_utilisateur,
-                       date_maj = to_char(now() AT TIME ZONE 'UTC',
-                                          'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')",
-    )
-    .bind(&f.code_emplacement)
-    .bind(&l.reference)
-    .bind(&l.lot)
-    .bind(l.presentes)
-    .bind(l.poids_unitaire)
-    .bind(l.pourcentage)
-    .bind(&l.mode_constat)
-    .bind(&f.date_fiche)
-    .bind(&f.responsable)
-    .bind(&user.id)
-    .execute(&mut *tx)
-    .await?;
-    Ok(())
-}
-
-/// Le mouvement, cote magasin seulement — il n'y a rien a ecrire en face.
-async fn ecrire_mouvement(
-    tx: &mut sqlx::PgConnection,
-    user: &Utilisateur,
-    f: &Fiche,
-    magasin: &str,
-    lignes: &[&Ligne],
-) -> AppResult<String> {
-    let type_mvt = if f.type_fiche == "CHARGE" {
-        "CHARGE_MACHINE"
-    } else {
-        "RETOUR_MACHINE"
-    };
-    let numero = numeroter(tx, "mouvement", "numero_mouvement", "MVT").await?;
-    let id = uuid::Uuid::new_v4().to_string();
-
-    sqlx::query(
-        "INSERT INTO mouvement
-             (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
-              code_motif, reference_document, numero_of, responsable, id_utilisateur)
-         VALUES ($1,$2,$3,$4,$5,'MACHINE',$6,$7,$8,$9)",
-    )
-    .bind(&id)
-    .bind(&numero)
-    .bind(&f.date_fiche)
-    .bind(type_mvt)
-    .bind(magasin)
-    .bind(&f.numero)
-    .bind(&f.numero_of)
-    .bind(&f.responsable)
-    .bind(&user.id)
-    .execute(&mut *tx)
-    .await?;
-
-    for (i, l) in lignes.iter().enumerate() {
-        // Un retour rentre au magasin au CMUP connu. Sans CMUP nulle part — un
-        // stock de depart jamais achete —, il rentre sans prix : les kilos
-        // reviennent et le CMUP reste vide, il ne fond pas (2026-09-17b).
-        let prix = if type_mvt == "RETOUR_MACHINE" {
-            cmup(&mut *tx, magasin, &l.reference).await?
-        } else {
-            None
-        };
-
-        sqlx::query(
-            "INSERT INTO ligne_mouvement
-                 (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                  lot_fournisseur, nb_bobines, lot_force, motif_lot_force)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        )
-        .bind(&id)
-        .bind(i as i64 + 1)
-        .bind(&l.reference)
-        .bind(arrondi_kg(l.kg_mouvementes.unwrap_or(0.0)))
-        .bind(prix)
-        .bind(&l.lot)
-        .bind(l.mouvementees)
-        .bind(i32::from(l.lot_force))
-        .bind(l.motif_lot_force.as_deref())
-        .execute(&mut *tx)
-        .await?;
-    }
-    Ok(numero)
-}
-
-/// Le cout moyen, du magasin s'il en a un, de la fiche reference sinon.
-async fn cmup(
-    tx: &mut sqlx::PgConnection,
-    magasin: &str,
-    reference: &str,
-) -> AppResult<Option<f64>> {
-    if let Some(Some(p)) = sqlx::query_scalar::<_, Option<f64>>(
-        "SELECT cmup_mad::float8 FROM stock_magasin
-          WHERE code_magasin = $1 AND code_reference = $2",
-    )
-    .bind(magasin)
-    .bind(reference)
-    .fetch_optional(&mut *tx)
-    .await?
-    {
-        return Ok(Some(p));
-    }
-    Ok(sqlx::query_scalar::<_, Option<f64>>(
-        "SELECT cmup_mad::float8 FROM reference WHERE code_reference = $1",
-    )
-    .bind(reference)
-    .fetch_optional(&mut *tx)
-    .await?
-    .flatten())
-}
-
-/// Le miroir du mouvement d'une fiche annulee.
-async fn contre_passer(
-    tx: &mut sqlx::PgConnection,
-    user: &Utilisateur,
-    f: &Fiche,
-) -> AppResult<()> {
-    // SEULS LE CHARGEMENT ET LE RETOUR DE LA FICHE S'ANNULENT. La correction de
-    // stock confirmee avant un chargement (AJUST_INV_POS, meme numero de
-    // document) constatait une matiere bien presente : elle reste. Chaque
-    // mouvement s'inverse dans SON sens — deviner le sens sur la premiere ligne
-    // lue, sans ordre, pouvait annuler la correction comme un chargement.
-    let lignes = sqlx::query_as::<_, (String, Option<String>, f64, Option<f64>, Option<i64>, String)>(
-        "SELECT lm.code_reference, lm.lot_fournisseur, lm.quantite_kg::float8,
-                lm.prix_kg_mad::float8, lm.nb_bobines, mv.code_type_mvt
-           FROM mouvement mv
-           JOIN ligne_mouvement lm ON lm.id_mouvement = mv.id_mouvement
-          WHERE mv.reference_document = $1
-            AND mv.code_type_mvt IN ('CHARGE_MACHINE', 'RETOUR_MACHINE')
-          ORDER BY mv.date_creation, lm.ligne_numero",
-    )
-    .bind(&f.numero)
-    .fetch_all(&mut *tx)
-    .await?;
-    if lignes.is_empty() {
-        return Ok(());
-    }
-    let magasin = f.code_magasin.clone().unwrap_or_default();
-
-    for type_origine in ["CHARGE_MACHINE", "RETOUR_MACHINE"] {
-        let du_type: Vec<_> = lignes.iter().filter(|l| l.5 == type_origine).collect();
-        if du_type.is_empty() {
-            continue;
-        }
-        let inverse = if type_origine == "CHARGE_MACHINE" { "RETOUR_MACHINE" } else { "CHARGE_MACHINE" };
-        let numero = numeroter(tx, "mouvement", "numero_mouvement", "MVT").await?;
-        let id = uuid::Uuid::new_v4().to_string();
-        sqlx::query(
-            "INSERT INTO mouvement
-                 (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif,
-                  reference_document, observations_globales, responsable, id_utilisateur)
-             VALUES ($1,$2,$3,$4,'MACHINE',$5,$6,$7,$8)",
-        )
-        .bind(&id)
-        .bind(&numero)
-        .bind(inverse)
-        .bind(&magasin)
-        .bind(format!("Annulation {}", f.numero))
-        .bind(format!("Annulation de la fiche {}", f.numero))
-        .bind(&f.responsable)
-        .bind(&user.id)
-        .execute(&mut *tx)
-        .await?;
-
-        for (i, (reference, lot, kg, prix, bobines, _)) in du_type.iter().enumerate() {
-            let prix_retour = if inverse == "RETOUR_MACHINE" {
-                match prix {
-                    Some(p) => Some(*p),
-                    None => cmup(&mut *tx, &magasin, reference).await?,
-                }
-            } else {
-                None
-            };
-            // L'annulation remet la matiere la ou elle etait : le solde connu
-            // du lot peut avoir derive entre-temps, ce n'est pas une raison de
-            // refuser de defaire la fiche.
-            sqlx::query(
-                "INSERT INTO ligne_mouvement
-                     (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
-                      lot_fournisseur, nb_bobines, lot_force, motif_lot_force)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            )
-            .bind(&id)
-            .bind(i as i64 + 1)
-            .bind(reference)
-            .bind(kg)
-            .bind(prix_retour)
-            .bind(lot)
-            .bind(bobines)
-            .bind(i64::from(inverse == "CHARGE_MACHINE"))
-            .bind(if inverse == "CHARGE_MACHINE" { Some(format!("Annulation de la fiche {}", f.numero)) } else { None })
-            .execute(&mut *tx)
-            .await?;
-        }
     }
     Ok(())
 }
@@ -1831,11 +1508,37 @@ pub async fn modifier_machine(
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
-    // Les zones retirees — vides, on vient de le verifier.
+    // Les zones retirees — vides, on vient de le verifier. CELLES QUI ONT UN
+    // PASSE SE DESACTIVENT (audit v4) : fiches, decisions, consommation et
+    // etats les citent ; les effacer emportait l'historique, ou echouait.
+    // Seule une zone que personne n'a jamais employee s'efface.
     let gardees: Vec<String> = zones.iter().map(|z| z.code.clone()).collect();
     sqlx::query(
-        "DELETE FROM machine_emplacement
-          WHERE code_machine = $1 AND code_emplacement <> ALL($2)",
+        "UPDATE machine_emplacement e SET actif = 0
+          WHERE e.code_machine = $1 AND e.code_emplacement <> ALL($2) AND e.actif = 1
+            AND (EXISTS (SELECT 1 FROM machine_fiche x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_decision x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_consommation x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_fiche_journal x WHERE x.code_emplacement = e.code_emplacement)
+              OR EXISTS (SELECT 1 FROM machine_cliche x WHERE x.code_emplacement = e.code_emplacement))",
+    )
+    .bind(&code)
+    .bind(&gardees)
+    .execute(&mut *tx)
+    .await?;
+    // Les zones sans passe : leurs lignes d'etat (a zero bobine), puis elles.
+    sqlx::query(
+        "DELETE FROM machine_etat x USING machine_emplacement e
+          WHERE x.code_emplacement = e.code_emplacement
+            AND e.code_machine = $1 AND e.code_emplacement <> ALL($2) AND e.actif = 1",
+    )
+    .bind(&code)
+    .bind(&gardees)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM machine_emplacement e
+          WHERE e.code_machine = $1 AND e.code_emplacement <> ALL($2) AND e.actif = 1",
     )
     .bind(&code)
     .bind(&gardees)
@@ -1940,7 +1643,32 @@ pub async fn changer_etat(
             .await?;
     let (nom, ancien) = machine.ok_or_else(|| AppError::Introuvable(format!("machine {code}")))?;
 
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    // Sous verrou : une fiche ne doit pas se valider entre le controle et le retrait.
+    sqlx::query("SELECT 1 FROM machine WHERE code_machine = $1 FOR UPDATE")
+        .bind(&code)
+        .execute(&mut *tx)
+        .await?;
     if etat == "RETIREE" {
+        // Les brouillons d'abord (F15) : valides apres le retrait, ils poseraient
+        // du fil sur une machine hors parc.
+        let brouillons: Vec<String> = sqlx::query_scalar(
+            "SELECT f.numero_fiche FROM machine_fiche f
+               JOIN machine_emplacement e ON e.code_emplacement = f.code_emplacement
+              WHERE e.code_machine = $1 AND f.statut = 'BROUILLON'
+              ORDER BY 1",
+        )
+        .bind(&code)
+        .fetch_all(&mut *tx)
+        .await?;
+        if !brouillons.is_empty() {
+            return Err(AppError::RegleMetier(format!(
+                "{nom} a encore {} fiche(s) en brouillon ({}) : annulez-les ou validez-les avant de la retirer du parc",
+                brouillons.len(),
+                brouillons.join(", ")
+            )));
+        }
         let bobines: i64 = sqlx::query_scalar(
             "SELECT COALESCE(sum(s.nb_bobines), 0)::bigint
                FROM machine_emplacement e
@@ -1948,7 +1676,7 @@ pub async fn changer_etat(
               WHERE e.code_machine = $1",
         )
         .bind(&code)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
         if bobines > 0 {
             return Err(AppError::RegleMetier(format!(
@@ -1958,8 +1686,6 @@ pub async fn changer_etat(
         }
     }
 
-    let mut tx = state.db.begin().await?;
-    user.poser_contexte(&mut tx).await?;
     sqlx::query(
         "UPDATE machine
             SET etat = $2, motif_etat = NULLIF($3, ''),

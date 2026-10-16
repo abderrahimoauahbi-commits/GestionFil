@@ -9,7 +9,6 @@
  * pesees, ou en est le controle qualite. Le poids et la valorisation ne se
  * fixent qu'a la validation, par la cascade.
  */
-import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { FileText, Plus, Printer, Trash2 } from 'lucide-react'
@@ -33,6 +32,10 @@ interface Reception extends Record<string, unknown> {
   fournisseur_nom: string
   numero_bc: string | null
   id_bc: string | null
+  /* L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier rattache et sa DUM. */
+  id_dossier_import: string | null
+  dossier_numero: string | null
+  numero_dum: string | null
   num_bon_livraison: string | null
   numero_facture: string | null
   transporteur: string | null
@@ -76,44 +79,23 @@ export function Receptions() {
 
   const q = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<Reception[]>('/api/receptions'),
+    queryFn: ({ signal }) => api.get<Reception[]>('/api/receptions', { signal }),
   })
 
   const annuler = useMutation({
     mutationFn: (id: string) => api.put(`/api/receptions/${id}/statut`, { statut: 'ANNULE' }),
     onSuccess: () => {
-      toast.success('Reception annulee')
+      toast.success('Réception annulée')
       void qc.invalidateQueries({ queryKey: ['receptions'] })
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Annulation impossible.'),
   })
 
   const lignes = q.data ?? []
-  const totaux = useMemo(() => {
-    // OTIF = produit des trois criteres, jamais leur moyenne : une livraison a
-    // l'heure mais incomplete ne sert a rien a l'atelier. On ne compte que les
-    // receptions MESURABLES — sans bon de commande, il n'y a pas de promesse a
-    // comparer, et les inclure ferait mentir le taux.
-    const mesurables = lignes.filter(
-      (r) => ['VALIDE', 'CLOTURE'].includes(r.statut) && r.on_time != null,
-    )
-    const otif = mesurables.filter(
-      (r) => r.on_time === 1 && r.in_full !== 0 && r.in_spec !== 0,
-    ).length
-    return {
-      enSaisie: lignes.filter((r) => r.statut === 'BROUILLON').length,
-      aControler: lignes.filter((r) => r.statut === 'A_CONTROLER').length,
-      mesurables: mesurables.length,
-      otif,
-      tauxOtif: mesurables.length ? (otif / mesurables.length) * 100 : null,
-      enRetard: mesurables.filter((r) => (r.retard_jours ?? 0) > 0).length,
-    }
-  }, [lignes])
-
   const colonnes: ColonneDT<Reception>[] = [
     {
       champ: 'numero_reception',
-      entete: 'N° reception',
+      entete: 'N° réception',
       largeur: '160px',
       filtre: 'texte',
       rendu: (r) => (
@@ -143,6 +125,24 @@ export function Receptions() {
           <span className="tabular-nums">{r.numero_bc}</span>
         ) : (
           <span className="text-attenue-texte">hors commande</span>
+        ),
+    },
+    {
+      /* L'ARRIVAGE D'IMPORT (ADR-003 phase A) : quel dossier, et sa DUM. Vide
+         sur un achat local, qui est le cas ordinaire. */
+      champ: 'dossier_numero',
+      entete: "Dossier d'import",
+      largeur: '150px',
+      rendu: (r) =>
+        r.dossier_numero ? (
+          <div className="min-w-0">
+            <div className="truncate tabular-nums">{r.dossier_numero}</div>
+            {r.numero_dum && (
+              <div className="truncate text-[11px] text-attenue-texte">DUM {r.numero_dum}</div>
+            )}
+          </div>
+        ) : (
+          <span className="text-attenue-texte">local</span>
         ),
     },
     {
@@ -279,60 +279,14 @@ export function Receptions() {
         description="Ouvrir une réception pour peser, relever les lots et soumettre au contrôle qualité."
         actions={
           droits.peutEcrire && (
-            <Bouton taille="icone" title="Nouvelle reception" aria-label="Nouvelle réception" onClick={() => naviguer('/receptions/nouvelle')}>              <Plus />            </Bouton>
+            <Bouton taille="icone" title="Nouvelle réception" aria-label="Nouvelle réception" onClick={() => naviguer('/receptions/nouvelle')}>              <Plus />            </Bouton>
           )
         }
       />
 
-      {(totaux.enSaisie > 0 || totaux.aControler > 0 || totaux.mesurables > 0) && (
-        <div className="mb-4 flex flex-wrap gap-3">
-          {totaux.enSaisie > 0 && (
-            <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En saisie</div>
-              <div className="text-lg font-semibold tabular-nums">{totaux.enSaisie}</div>
-            </div>
-          )}
-          {totaux.aControler > 0 && (
-            <div className="rounded-[var(--radius)] border border-alerte bg-alerte/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">En attente de contrôle</div>
-              <div className="text-lg font-semibold tabular-nums text-alerte">
-                {totaux.aControler}
-              </div>
-            </div>
-          )}
-          {totaux.tauxOtif != null && (
-            <div
-              className={cn(
-                'rounded-[var(--radius)] border px-4 py-2.5',
-                totaux.tauxOtif >= 95 ? 'border-succes bg-succes/5' : 'border-alerte bg-alerte/5',
-              )}
-            >
-              <div className="text-[11px] text-attenue-texte">
-                OTIF sur {totaux.mesurables} livraison(s)
-              </div>
-              <div
-                className={cn(
-                  'text-lg font-semibold tabular-nums',
-                  totaux.tauxOtif >= 95 ? 'text-succes' : 'text-alerte',
-                )}
-              >
-                {fmt.nombre(totaux.tauxOtif, 1)} %
-              </div>
-              <div className="text-[11px] text-attenue-texte">
-                {totaux.otif} a l'heure, completes et conformes
-              </div>
-            </div>
-          )}
-          {totaux.enRetard > 0 && (
-            <div className="rounded-[var(--radius)] border border-danger bg-danger/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">Livrees en retard</div>
-              <div className="text-lg font-semibold tabular-nums text-danger">
-                {totaux.enRetard}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* PAS DE TUILES EN TETE D'UNE LISTE DE TRAVAIL (preference de
+          l'entreprise, audit v4) : les indicateurs vivent au tableau de bord et
+          dans les statistiques ; ici, on traite les lignes. */}
 
       <DataTable<Reception>
           exportable="receptions"
@@ -344,10 +298,10 @@ export function Receptions() {
         erreur={q.error}
         cle={(r) => r.id_reception}
         surClic={(r) => naviguer(`/receptions/${r.id_reception}`)}
-        placeholderRecherche="N° de reception, fournisseur, bon de livraison..."
+        placeholderRecherche="N° de réception, fournisseur, BL…"
         titreCarte={(r) => `${r.numero_reception} — ${r.fournisseur_nom}`}
-        videTitre="Aucune reception"
-        videDescription="Une reception se rattache a un bon de commande envoye, ou se saisit librement."
+        videTitre="Aucune réception"
+        videDescription="Une réception se rattache a un bon de commande envoyé, ou se saisit librement."
         actions={(r) => (
           <div className="flex justify-end gap-0.5">
             <Bouton
@@ -355,7 +309,7 @@ export function Receptions() {
               taille="icone-xs"
               onClick={() => ouvrirEtat(`/etats/receptions/${r.id_reception}`)}
               aria-label="Imprimer"
-              title="Imprimer le bon de reception"
+              title="Imprimer le bon de réception"
             >
               <Printer />
             </Bouton>
@@ -364,7 +318,7 @@ export function Receptions() {
               taille="icone-xs"
               onClick={() => naviguer(`/receptions/${r.id_reception}`)}
               aria-label="Ouvrir"
-              title="Ouvrir la reception"
+              title="Ouvrir la réception"
             >
               <FileText />
             </Bouton>
@@ -378,7 +332,7 @@ export function Receptions() {
                     titre: `Annuler ${r.numero_reception} ?`,
                     destructif: true,
                     libelleConfirmer: 'Annuler',
-                    description: "Rien n'est encore entre en stock : la reception sera abandonnee.",
+                    description: "Rien n'est encore entre en stock : la réception sera abandonnee.",
                     action: () => annuler.mutate(r.id_reception),
                   })
                 }

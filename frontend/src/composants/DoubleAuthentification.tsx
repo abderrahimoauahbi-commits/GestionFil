@@ -58,7 +58,8 @@ export function DoubleAuthentification({
     setErreur(null)
     setEnvoi(true)
     try {
-      const r = await api.post<{ secret: string; adresse: string }>('/api/auth/2fa/preparer', {})
+      // Le mot de passe est exige : un poste laisse ouvert ne pose pas de second facteur.
+      const r = await api.post<{ secret: string; adresse: string }>('/api/auth/2fa/preparer', { mot_de_passe: motDePasse })
       setSecret(r.secret)
       setEtape('scan')
       // Le QR se dessine après le rendu du canevas.
@@ -150,6 +151,13 @@ export function DoubleAuthentification({
                   aucune connexion internet nécessaire une fois installée.
                 </p>
               )}
+              {!actif && (
+                <div>
+                  <Etiq htmlFor="ch-doubleauthentification-1">Votre mot de passe</Etiq>
+                  <Champ id="ch-doubleauthentification-1" type="password" autoComplete="current-password" value={motDePasse}
+                    onChange={(e) => setMotDePasse(e.target.value)} />
+                </div>
+              )}
 
               <div className="flex justify-end gap-2">
                 <Bouton variante="contour" onClick={surFermeture}>
@@ -160,7 +168,7 @@ export function DoubleAuthentification({
                     Retirer
                   </Bouton>
                 ) : (
-                  <Bouton onClick={preparer} disabled={envoi}>
+                  <Bouton onClick={preparer} disabled={envoi || !motDePasse}>
                     {envoi && <Loader2 className="mr-1 size-3.5 animate-spin" />}
                     <Smartphone className="mr-1 size-3.5" />
                     Activer
@@ -193,8 +201,8 @@ export function DoubleAuthentification({
               </div>
 
               <div>
-                <Etiq>Le code affiché par l’application</Etiq>
-                <Champ
+                <Etiq htmlFor="ch-doubleauthentification-2">Le code affiché par l’application</Etiq>
+                <Champ id="ch-doubleauthentification-2"
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   inputMode="numeric"
@@ -224,8 +232,8 @@ export function DoubleAuthentification({
                 Sans ce code, votre mot de passe seul ouvrira de nouveau votre compte.
               </Alerte>
               <div>
-                <Etiq>Votre mot de passe</Etiq>
-                <Champ
+                <Etiq htmlFor="ch-doubleauthentification-3">Votre mot de passe</Etiq>
+                <Champ id="ch-doubleauthentification-3"
                   type="password"
                   value={motDePasse}
                   onChange={(e) => setMotDePasse(e.target.value)}

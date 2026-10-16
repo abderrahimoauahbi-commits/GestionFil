@@ -58,11 +58,11 @@ export function QualiteEtat() {
 
   const qQualite = useQuery({
     queryKey: ['qualites'],
-    queryFn: () => api.get<Qualite[]>('/api/qualites?limite=500'),
+    queryFn: ({ signal }) => api.get<Qualite[]>('/api/qualites?limite=500', { signal }),
   })
   const qLignes = useQuery({
     queryKey: ['ligne-qualite', code],
-    queryFn: () => api.get<LigneRole[]>(`/api/qualites/${encodeURIComponent(code!)}/densites`),
+    queryFn: ({ signal }) => api.get<LigneRole[]>(`/api/qualites/${encodeURIComponent(code!)}/densites`, { signal }),
     enabled: !!code,
   })
   const qCompo = useQuery({
@@ -73,7 +73,7 @@ export function QualiteEtat() {
   })
 
   if (qQualite.isLoading || qLignes.isLoading || qCompo.isLoading) {
-    return <Chargement texte="Preparation de la fiche…" />
+    return <Chargement texte="Préparation de la fiche…" />
   }
 
   const brut = qQualite.data
@@ -114,7 +114,7 @@ export function QualiteEtat() {
         <div className="grid grid-cols-2 gap-x-8 gap-y-1">
           <div className="space-y-1">
             <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-              Qualite
+              Qualité
             </div>
             <div className="text-[13px] font-semibold">{q.nom}</div>
             {q.largeur_m != null && (
@@ -154,11 +154,11 @@ export function QualiteEtat() {
     >
       {/* --- Densites par role -------------------------------------------- */}
       <h3 className="mb-1 mt-1 border-b border-neutral-400 pb-0.5 text-[10px] font-bold uppercase tracking-wide">
-        Densites par role
+        Densités par rôle
       </h3>
       <TableEtat<LigneRole>
         colonnes={[
-          { entete: 'Role', valeur: (r) => r.role_libelle ?? r.code_role },
+          { entete: 'Rôle', valeur: (r) => r.role_libelle ?? r.code_role },
           { entete: 'Densité', numerique: true, valeur: (r) => fmt.nombre(r.densite, 4) },
           { entete: 'Unité', valeur: (r) => (r.unite_densite === 'kg_m2' ? 'kg/m²' : 'ml/m²') },
           {
@@ -181,7 +181,7 @@ export function QualiteEtat() {
       </h3>
       <TableEtat<LigneCompo>
         colonnes={[
-          { entete: 'Role', valeur: (l) => l.role_libelle ?? l.code_role },
+          { entete: 'Rôle', valeur: (l) => l.role_libelle ?? l.code_role },
           {
             entete: 'Référence',
             valeur: (l) => (

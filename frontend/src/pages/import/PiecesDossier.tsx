@@ -197,7 +197,7 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
             Aucune pièce. Déposez ici le scan du dossier : facture, DUM, quittance, factures de frais.
           </p>
         ) : (
-          <div className="defilement-x">
+          <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
             <table className="w-full min-w-[48rem] text-[12.5px]">
               <thead>
                 <tr className="border-b border-bordure">

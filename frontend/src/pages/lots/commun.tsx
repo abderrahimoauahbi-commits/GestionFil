@@ -23,7 +23,7 @@ import { Badge, Bouton } from '../../composants/ui/base'
 import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { libelleLot } from '../../lib/lots'
 import { cn } from '../../lib/utils'
-import { MODULE, libelleSeuil, lienFiche, messageErreur, nb, useApresDecision, useBasculerRestes, type Lot } from './modele'
+import { MODULE, MODULE_DECISION, libelleSeuil, lienFiche, messageErreur, nb, useApresDecision, useBasculerRestes, type Lot } from './modele'
 
 export function LienLot({ reference, lot, className }: { reference: string; lot: string; className?: string }) {
   return (
@@ -195,13 +195,12 @@ type Geste = 'bloquer' | 'debloquer' | 'projet' | 'restes' | 'dormant'
  * fiche. Chaque bouton n'apparait que si le geste est possible ET permis :
  * un bouton qui ne peut que refuser apprend seulement a ne plus cliquer.
  *
- * Droits (en attendant les profils « responsable qualite » et « chef
- * d'atelier ») : bloquer, debloquer et trancher un dormant demandent VALIDER
- * sur le stock ; basculer demande ECRIRE.
+ * Droits (regle 5) : bloquer, debloquer et trancher un dormant demandent
+ * VALIDER du module LOTS, ou la Direction ; basculer demande ECRIRE.
  */
 export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boolean }) {
   const { peut } = useAuth()
-  const peutValider = peut(MODULE, 'VALIDER')
+  const peutValider = peut(MODULE_DECISION, 'VALIDER')
   const peutEcrire = peut(MODULE, 'ECRIRE')
   const [geste, setGeste] = useState<Geste | null>(null)
   const apres = useApresDecision()
@@ -316,9 +315,10 @@ export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boole
         titre={`Bloquer le lot ${nom}`}
         consequence={
           <>
-            Le lot ne pourra plus bouger du tout — ni sortie, ni transfert, ni chargement machine — tant
-            qu’un responsable ne l’aura pas débloqué. Il sort des vues Projet et Restes et ne se lit plus
-            qu’en vue comptable.
+            Le lot ne partira plus en production — ni sortie de production, ni chargement machine, ni
+            fusion — tant qu’il ne sera pas débloqué. Il peut encore revenir d’une machine, aller en
+            quarantaine, retourner au fournisseur ou être ajusté à l’inventaire (règle 11). Il sort des
+            vues Projet et Restes et ne se lit plus qu’en vue comptable.
           </>
         }
         motifObligatoire

@@ -33,6 +33,13 @@ pub struct Filtres {
     /// tonnes depuis un magasin qui en tenait une, et seule la regle R02 le
     /// refusait — a l'expedition, une fois tout saisi.
     pub code_magasin: Option<String>,
+    /// LA RECEPTION, pour les frais d'approche d'un arrivage.
+    ///
+    /// Ils se filtraient par `code_reference`, qui portait en fait un
+    /// identifiant de reception : le nom mentait, et un appelant de bonne foi
+    /// y mettait une reference et recevait tout. Le nom juste existe
+    /// maintenant ; l'ancien reste accepte, des paquets deployes l'utilisent.
+    pub id_reception: Option<String>,
 }
 
 impl Filtres {
@@ -103,6 +110,13 @@ pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppRes
                 objet.insert(cle.clone(), v.clone());
             }
         }
+        // La part de l'import dans « a controler » : la tuile mene aux deux
+        // listes, chacune avec son compte (audit v5, F20).
+        let import: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM import_receptions WHERE statut = 'A_CONTROLER'")
+                .fetch_one(&state.db)
+                .await?;
+        objet.insert("nb_receptions_import_a_controler".into(), json!(import));
     }
 
     user.masquer(&state.db, module::COCKPIT, &mut valeur).await?;
@@ -606,17 +620,26 @@ pub async fn substituer_proposition(
 
     let resultat = if let Some((id_cible, qte_cible, _)) = existante {
         let total = arrondi_kg(qte_cible + quantite);
+        // LA CIBLE FUSIONNEE EST FIGEE (audit v4, 08/10/2026). Laissee au
+        // calcul, la generation suivante la supprimait, pendant que l'origine,
+        // ecartee, masquait sa reference : le besoin disparaissait des deux
+        // cotes (PP-1500 D.Bleu 6665-Hs, en rupture, masquee jusqu'a
+        // l'expiration). Figee, elle porte le besoin reporte jusqu'a sa commande.
         sqlx::query(
             "UPDATE plan_achat
                 SET quantite_suggeree_kg = $2,
                     statut = 'EN_REVISION',
                     commentaires = TRIM(COALESCE(commentaires || ' | ', '') ||
-                                        'Fusion du besoin de ' || $3)
+                                        'Fusion du besoin de ' || $3),
+                    figee = 1, id_utilisateur_figement = $4, date_figement = $5,
+                    motif_figement = 'Fusion du besoin de ' || $3
               WHERE id_proposition = $1",
         )
         .bind(&id_cible)
         .bind(total)
         .bind(&code_actuel)
+        .bind(&user.id)
+        .bind(crate::db::maintenant())
         .execute(&mut *tx)
         .await?;
 
@@ -695,7 +718,7 @@ pub async fn supervision(
     State(state): State<AppState>,
     user: Utilisateur,
 ) -> AppResult<Json<Value>> {
-    lister(
+    let Json(mut v) = lister(
         &state,
         &user,
         module::COCKPIT,
@@ -708,7 +731,26 @@ pub async fn supervision(
            LEFT JOIN v_supervision_valeurs v USING (cle)
           ORDER BY s.disponible DESC, s.domaine, s.libelle",
     )
-    .await
+    .await?;
+    // LES INDICATEURS EN DIRHAMS SUIVENT LA VALEUR DU STOCK (regle 16). La
+    // colonne generique `valeur` portait la valeur du stock, le budget
+    // mono-source et les economies a qui ne voit aucun montant.
+    let droits = user.droits(&state.db, module::COCKPIT).await?;
+    if droits.get("valeur_stock_mad") == Some(&rbac::Niveau::Masque) {
+        if let Some(lignes) = v.as_array_mut() {
+            for l in lignes {
+                let en_mad = l.get("unite").and_then(|u| u.as_str()).is_some_and(|u| u.starts_with("MAD"));
+                if en_mad {
+                    if let Some(o) = l.as_object_mut() {
+                        for c in ["valeur", "cible", "vigilance"] {
+                            o.remove(c);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(Json(v))
 }
 
 pub async fn controle_detail(
@@ -744,7 +786,10 @@ pub async fn controle_detail(
     let rows = sqlx::query(&format!("SELECT * FROM {vue}"))
         .fetch_all(&state.db)
         .await?;
-    Ok(Json(lignes_en_json(&rows)))
+    // C12 et C14 listent des prix et des couts : masques comme ailleurs.
+    let mut sortie = lignes_en_json(&rows);
+    user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
+    Ok(Json(sortie))
 }
 
 // Le catalogue et la liste des fournisseurs sont servis par le module
@@ -838,8 +883,12 @@ pub async fn stock_projete(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT * FROM v_stock_projete
-          WHERE ($1 IS NULL OR statut = $1)
+        // LE FIL SUR MACHINE, A COTE : sorti du magasin et pas encore consomme.
+        // Hors du stock physique, mais compte dans le stock projete (regle 9).
+        "SELECT sp.*, COALESCE(sm.kg_sur_machine, 0) AS kg_sur_machine
+           FROM v_stock_projete sp
+           LEFT JOIN v_stock_machine sm ON sm.code_reference = sp.code_reference
+          WHERE ($1 IS NULL OR sp.statut = $1)
           ORDER BY CASE statut
                      WHEN 'RUPTURE'   THEN 1
                      WHEN 'CRITIQUE'  THEN 2
@@ -914,13 +963,138 @@ pub async fn substitutions(
 }
 
 pub async fn plan_achat(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    lister(
+    let Json(mut v) = lister(
         &state,
         &user,
         module::PLAN_ACHAT,
         "SELECT * FROM v_plan_achat",
     )
+    .await?;
+    user.masquer_prix_au_cmup(&state.db, &mut v).await?;
+    Ok(Json(v))
+}
+
+/// `GET /api/plan-achat/stocks-minimums` — LES STOCKS MINIMUMS A REVOIR (regle 9,
+/// 09/10/2026) : ceux qui depassent trois mois du besoin mensuel du plan, avec
+/// une valeur proposee (couverture minimale en mois x besoin mensuel). Les 793 t
+/// de minimums venaient du classeur ; les achats les revoient ici.
+pub async fn stocks_minimums(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    lister(
+        &state,
+        &user,
+        module::PLAN_ACHAT,
+        "SELECT * FROM v_stocks_minimums_a_revoir ORDER BY stock_min_kg - COALESCE(valeur_proposee_kg, 0) DESC",
+    )
     .await
+}
+
+#[derive(Deserialize)]
+pub struct DetailProposition {
+    reference: String,
+}
+
+/// `GET /api/plan-achat/detail?reference=…` — LE CALCUL D'UNE PROPOSITION, pas
+/// a pas (audit v5, F16) : l'acheteur voit d'ou viennent les kilos avant de
+/// commander. Stock du magasin, fil sur machine compte, en-cours (bons a
+/// l'heure, en retard, marchandise au port), demande pendant le delai (dont la
+/// part prolongee au-dela du plan), securite, minimum, MOQ, palette. Le calcul
+/// est celui d'aujourd'hui (v_plan_achat), avec les pieces qui le composent.
+pub async fn detail_proposition(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(q): Query<DetailProposition>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
+    let reference = q.reference.trim();
+    let calcul = sqlx::query(
+        "SELECT pa.code_reference, pa.delai_livraison_jours, pa.classe_abc,
+                pa.stock_mrp_kg::float8 AS stock_mrp_kg, pa.encours_kg::float8 AS encours_kg,
+                pa.residuel_kg::float8 AS residuel_kg, pa.securite_kg::float8 AS securite_kg,
+                pa.sorties_fenetre_kg::float8 AS sorties_fenetre_kg,
+                pa.stock_min_catalogue_kg::float8 AS stock_min_catalogue_kg,
+                pa.besoin_avant_arrondi_kg::float8 AS besoin_avant_arrondi_kg,
+                pa.complement_palette_kg::float8 AS complement_palette_kg,
+                pa.qte_a_commander_kg::float8 AS qte_a_commander_kg, pa.palettes_a_commander,
+                sp.stock_physique_net_kg::float8 AS stock_magasin_net_kg,
+                sp.stock_machine_kg::float8 AS stock_machine_compte_kg,
+                COALESCE(sm.kg_sur_machine, 0)::float8 AS stock_machine_total_kg,
+                sp.stock_reserve_kg::float8 AS stock_reserve_kg,
+                sp.stock_quarantaine_kg::float8 AS stock_quarantaine_kg,
+                sp.demande_delai_kg::float8 AS demande_delai_kg,
+                COALESCE(ef.encours_retarde_kg, 0)::float8 AS encours_retarde_kg,
+                COALESCE(ef.encours_import_kg, 0)::float8 AS encours_port_kg,
+                COALESCE(ef.nb_lignes_retardees, 0) AS nb_lignes_retardees,
+                COALESCE(bh.lead_j, 0)::float8 AS delai_j, COALESCE(bh.couv_j, 0)::float8 AS couverture_j,
+                COALESCE(bh.dem_lead_prolonge_kg, 0)::float8 AS demande_delai_prolongee_kg,
+                COALESCE(bh.sorties_prolongees_kg, 0)::float8 AS sorties_prolongees_kg,
+                r.moq_kg::float8 AS moq_kg,
+                COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'), '1') = '1'
+                    AS retard_compte,
+                COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_MrpInclureStockMachine'), '1') = '1'
+                    AS machine_comptee
+           FROM v_plan_achat pa
+           JOIN v_stock_projete sp ON sp.code_reference = pa.code_reference
+           JOIN reference r ON r.code_reference = pa.code_reference
+           LEFT JOIN v_stock_machine sm ON sm.code_reference = pa.code_reference
+           LEFT JOIN v_encours_fiable ef ON ef.code_reference = pa.code_reference
+           LEFT JOIN v_besoin_horizon bh ON bh.code_reference = pa.code_reference
+          WHERE pa.code_reference = $1",
+    )
+    .bind(reference)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("reference {reference} dans le calcul du plan")))?;
+
+    // Les bons ouverts, et s'ils sont en retard au sens du reglage.
+    let bons = sqlx::query(
+        "SELECT bc.numero_bc, bc.id_bc, lb.date_livraison_prevue, lb.quantite_restante_kg::float8 AS reste_kg,
+                substr(lb.date_livraison_prevue, 1, 10) < to_char(current_date - COALESCE(
+                    (SELECT valeur_courante::int FROM parametre WHERE code_parametre = 'P_RetardBCJours'), 5), 'YYYY-MM-DD')
+                    AS en_retard
+           FROM ligne_bc lb JOIN bon_commande bc ON bc.id_bc = lb.id_bc
+          WHERE lb.code_reference = $1 AND bc.statut IN ('VALIDE', 'ENVOYE', 'LIVRE_PARTIEL')
+            AND lb.statut NOT IN ('ANNULE', 'SOLDE') AND lb.type_ligne = 'MARCHANDISE' AND lb.quantite_restante_kg > 0
+          ORDER BY lb.date_livraison_prevue NULLS LAST, bc.numero_bc",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+    // La marchandise au port : lignes d'import sans bon, dossier engage et non clos.
+    let port = sqlx::query(
+        "SELECT d.numero AS numero_dossier, d.id_dossier, f.numero_facture, fl.reste_kg::float8 AS reste_kg
+           FROM import_facture_lignes fl
+           JOIN import_factures f ON f.id_facture = fl.id_facture
+           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
+          WHERE fl.code_reference = $1 AND d.statut NOT IN ('CLOTURE', 'BROUILLON') AND fl.type_ligne = 'ERP'
+            AND fl.soldee = 0 AND fl.id_ligne_bc IS NULL AND fl.reste_kg > 0
+          ORDER BY d.numero, f.numero_facture",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+    // Le fil sur machine, etage par etage : compte, ou non (lot bloque, constat trop ancien).
+    let machine = sqlx::query(
+        "SELECT e.code_emplacement, e.lot_fournisseur, e.kg::float8 AS kg, substr(e.date_constat, 1, 10) AS date_constat,
+                COALESCE(l.statut, 'LIBRE') = 'BLOQUE' AS lot_bloque,
+                substr(COALESCE(e.date_constat, '1900-01-01'), 1, 10)::date < current_date - COALESCE(
+                    (SELECT valeur_courante::int FROM parametre WHERE code_parametre = 'P_JoursInventMachine'), 30)
+                    AS constat_ancien
+           FROM machine_etat e
+           LEFT JOIN lot l ON l.code_reference = e.code_reference AND l.lot_fournisseur = e.lot_fournisseur
+          WHERE e.code_reference = $1 AND e.kg > 0
+          ORDER BY e.code_emplacement",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = json!({
+        "calcul": lignes_en_json(&[calcul]).get(0).cloned().unwrap_or(Value::Null),
+        "bons": lignes_en_json(&bons),
+        "port": lignes_en_json(&port),
+        "machine": lignes_en_json(&machine),
+    });
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    Ok(Json(v))
 }
 
 /// Les propositions ENREGISTREES, avec leur statut et le bon qu'elles ont produit.
@@ -935,67 +1109,24 @@ pub async fn propositions_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
     let rows = sqlx::query(
-        // `nb_equivalents` et `equivalent_dispo_kg` disent, sans second appel,
-        // si un substitut existe et s'il a du stock. Sans ces deux nombres,
-        // l'ecran devrait interroger l'equivalence reference par reference, et
-        // l'acheteur ne verrait l'alternative qu'apres l'avoir cherchee.
+        // LECTURE SEULE ET RAPIDE (14/10/2026). La liste RECALCULAIT tout le MRP
+        // (v_plan_achat) a chaque ouverture, uniquement pour l'ecart de la
+        // « Protection » — retiree le 14/10. On lit donc la seule table
+        // `plan_achat` : le complement de palette y est desormais fige a la
+        // generation (migration 2026-10-14), les palettes aussi. Les equivalents
+        // et le detail du calcul se chargent A LA DEMANDE (bouton, depliage).
         "SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
                 bc.numero_bc, bc.statut AS statut_bc,
                 ro.designation AS designation_origine,
-                uf.login AS figee_par,
-                -- Le bloc « RISQUES IDENTIFIES » du classeur, joint ici plutot
-                -- que servi par une seconde route : l'acheteur decide sur une
-                -- seule ligne, il ne doit pas croiser deux tableaux pour savoir
-                -- si la reference qu'il commande a une alternative.
+                -- Le bloc « RISQUES IDENTIFIES » du classeur (ABC/XYZ, tier,
+                -- source, action) : une seule jointure, pas une requete par ligne.
                 rs.classe_abc, rs.classe_xyz, rs.tier, rs.risque_source,
-                rs.nb_sources, rs.action_recommandee, rs.budget_annuel_mad,
-                (SELECT COUNT(*) FROM v_equivalence e
-                  WHERE e.code_reference = pa.code_reference)         AS nb_equivalents,
-                (SELECT ROUND(COALESCE(MAX(e.equivalent_stock_kg), 0), 3)
-                   FROM v_equivalence e
-                  WHERE e.code_reference = pa.code_reference
-                    AND e.interchangeable = 1)                        AS equivalent_dispo_kg,
-
-                -- L'ECART se calcule A LA LECTURE, jamais stocke. Le projet
-                -- procede deja ainsi pour le besoin fige d'une ligne de commande
-                -- (cf. convertir() dans domain/plan_achat.rs) : une alerte
-                -- enregistree serait perimee des le recalcul suivant, alors
-                -- qu'une comparaison faite maintenant ne peut pas mentir.
-                (SELECT ROUND(vpa.qte_a_commander_kg, 3) FROM v_plan_achat vpa
-                  WHERE vpa.code_reference = pa.code_reference)       AS quantite_calculee_kg,
-                -- Le complement de palette : ce que l'arrondi a la palette
-                -- pleine ajoute au besoin, pour la seule logistique.
-                (SELECT ROUND(vpa.complement_palette_kg, 3) FROM v_plan_achat vpa
-                  WHERE vpa.code_reference = pa.code_reference)       AS complement_palette_kg,
-                CASE WHEN pa.figee = 1 THEN ROUND(
-                    pa.quantite_suggeree_kg
-                  - COALESCE((SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa
-                               WHERE vpa.code_reference = pa.code_reference), 0), 3)
-                END                                                   AS ecart_calcul_kg,
-                CASE
-                    WHEN pa.figee = 0 THEN NULL
-                    WHEN r.actif = 0 THEN 'REFERENCE_INACTIVE'
-                    WHEN NOT EXISTS (SELECT 1 FROM v_plan_achat vpa
-                                      WHERE vpa.code_reference = pa.code_reference)
-                         THEN 'BESOIN_DISPARU'
-                    -- 2 % de tolerance : un arrondi a la palette cree toujours un
-                    -- petit ecart, et le signaler noierait les vrais.
-                    WHEN ABS(pa.quantite_suggeree_kg
-                           - (SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa
-                               WHERE vpa.code_reference = pa.code_reference))
-                         <= 0.02 * pa.quantite_suggeree_kg THEN 'COHERENTE'
-                    WHEN pa.quantite_suggeree_kg
-                       > (SELECT vpa.qte_a_commander_kg FROM v_plan_achat vpa
-                           WHERE vpa.code_reference = pa.code_reference)
-                         THEN 'SURDIMENSIONNEE'
-                    ELSE 'SOUS_DIMENSIONNEE'
-                END                                                   AS etat_figement
+                rs.nb_sources, rs.action_recommandee, rs.budget_annuel_mad
            FROM plan_achat pa
           LEFT JOIN v_risque_sourcing rs ON rs.code_reference = pa.code_reference
            JOIN reference r    ON r.code_reference     = pa.code_reference
            JOIN fournisseur f  ON f.code_fournisseur   = pa.code_fournisseur
            LEFT JOIN reference ro    ON ro.code_reference = pa.code_reference_origine
-           LEFT JOIN utilisateur uf  ON uf.id_utilisateur = pa.id_utilisateur_figement
            LEFT JOIN bon_commande bc ON bc.id_bc       = pa.id_bc_genere
           ORDER BY CASE pa.urgence WHEN 'TIER 1' THEN 1 WHEN 'TIER 2' THEN 2
                                    WHEN 'TIER 3' THEN 3 ELSE 4 END,
@@ -1005,6 +1136,8 @@ pub async fn propositions_achat(
     .await?;
 
     let mut valeur = lignes_en_json(&rows);
+    // Le prix au CMUP d'abord : `masquer` peut retirer la source du prix.
+    user.masquer_prix_au_cmup(&state.db, &mut valeur).await?;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut valeur).await?;
     Ok(Json(valeur))
 }
@@ -1021,6 +1154,13 @@ pub async fn kpi_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
 
+    // LE CALCUL, UNE FOIS (audit v5, T15) : les quatre blocs lisaient
+    // v_plan_achat sept fois. Une table temporaire, le temps de la lecture.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("CREATE TEMP TABLE pa_kpi ON COMMIT DROP AS SELECT * FROM v_plan_achat")
+        .execute(&mut *tx)
+        .await?;
+
     // Bloc « KPI globaux » et bloc « repartition par statut » de la feuille.
     let globaux = sqlx::query(
         "SELECT
@@ -1035,34 +1175,34 @@ pub async fn kpi_plan_achat(
             (SELECT COUNT(*) FROM v_stock_projete WHERE statut = 'OK')         AS ok,
             (SELECT COUNT(*) FROM v_stock_projete
               WHERE statut <> 'OK' AND classe_abc = 'A')                       AS classe_a_en_alerte,
-            (SELECT COALESCE(ROUND(SUM(montant_estime_mad), 2), 0) FROM v_plan_achat) AS budget_mad,
-            (SELECT COALESCE(ROUND(SUM(qte_a_commander_kg), 2), 0) FROM v_plan_achat) AS quantite_kg,
-            (SELECT COUNT(*) FROM v_plan_achat)                                AS refs_a_commander",
+            (SELECT COALESCE(ROUND(SUM(montant_estime_mad), 2), 0) FROM pa_kpi) AS budget_mad,
+            (SELECT COALESCE(ROUND(SUM(qte_a_commander_kg), 2), 0) FROM pa_kpi) AS quantite_kg,
+            (SELECT COUNT(*) FROM pa_kpi)                                AS refs_a_commander",
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
 
     // Bloc « tiering urgence » : combien de references dans chaque palier.
     let tiering = sqlx::query(
         "SELECT tier, COUNT(*) AS nb, ROUND(SUM(montant_estime_mad), 2) AS montant_mad
-           FROM v_plan_achat GROUP BY tier ORDER BY tier",
+           FROM pa_kpi GROUP BY tier ORDER BY tier",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await?;
 
     // Bloc « risques identifies » : mono-source et exposition par devise.
     let risques = sqlx::query(
         "SELECT 'MONO-SOURCE' AS risque, COUNT(*) AS nb,
                 ROUND(COALESCE(SUM(montant_estime_mad), 0), 2) AS montant_mad
-           FROM v_plan_achat WHERE risque_sourcing = 'MONO-SOURCE'
+           FROM pa_kpi WHERE risque_sourcing = 'MONO-SOURCE'
          UNION ALL
          SELECT 'DEVISE ' || f.code_devise, COUNT(*),
                 ROUND(COALESCE(SUM(pa.montant_estime_mad), 0), 2)
-           FROM v_plan_achat pa
+           FROM pa_kpi pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
           GROUP BY f.code_devise",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await?;
 
     // Bloc « repartition par fournisseur », classe par budget decroissant.
@@ -1074,7 +1214,7 @@ pub async fn kpi_plan_achat(
                 ROUND(SUM(pa.montant_estime_mad), 2)           AS montant_mad,
                 SUM(CASE WHEN pa.tier = 'TIER 1' THEN 1 ELSE 0 END) AS nb_tier1,
                 SUM(CASE WHEN pa.statut = 'RUPTURE' THEN 1 ELSE 0 END) AS nb_ruptures
-           FROM v_plan_achat pa
+           FROM pa_kpi pa
            JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur
           -- REGROUPER SUR LA CLE DU FOURNISSEUR, pas seulement sur le code
           -- porte par le plan : PostgreSQL n'accepte une colonne hors agregat
@@ -1085,7 +1225,7 @@ pub async fn kpi_plan_achat(
           GROUP BY f.code_fournisseur, pa.code_fournisseur
           ORDER BY montant_mad DESC",
     )
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await?;
 
     let mut sortie = json!({
@@ -1097,6 +1237,7 @@ pub async fn kpi_plan_achat(
         "risques": lignes_en_json(&risques),
         "fournisseurs": lignes_en_json(&fournisseurs),
     });
+    tx.commit().await?;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut sortie).await?;
     Ok(Json(sortie))
 }
@@ -1141,6 +1282,68 @@ pub async fn cout_revient(
     Ok(Json(valeur))
 }
 
+#[derive(Deserialize)]
+pub struct PeriodeEcart {
+    du: Option<String>,
+    au: Option<String>,
+}
+
+/// `GET /api/ecarts-prix?du=&au=` — CE QUE LE CMUP N'A PAS PU PORTER (audit
+/// v5, F18) : la part des factures, frais, avoirs et retours qui revenait a des
+/// kilos deja sortis, en local et a l'import. Le detail, et les totaux par
+/// reference et par fournisseur. Montants masques selon les droits.
+pub async fn ecarts_prix(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(p): Query<PeriodeEcart>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::VALORISATION, Action::Lire).await?;
+    let du = p.du.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let au = p.au.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let lignes = sqlx::query(
+        "SELECT circuit, id_ajustement, date_ecart, document, id_document, code_fournisseur, fournisseur_nom,
+                code_reference, designation, origine, numero_piece, motif,
+                quantite_recue_kg::float8 AS quantite_recue_kg, montant_mad::float8 AS montant_mad
+           FROM v_ecart_prix
+          WHERE ($1::text IS NULL OR date_ecart >= $1) AND ($2::text IS NULL OR date_ecart <= $2)
+          ORDER BY date_ecart DESC, document, code_reference
+          LIMIT 2000",
+    )
+    .bind(du)
+    .bind(au)
+    .fetch_all(&state.db)
+    .await?;
+    let par_reference = sqlx::query(
+        "SELECT code_reference, max(designation) AS designation, count(*) AS nb,
+                sum(montant_mad)::float8 AS montant_mad
+           FROM v_ecart_prix
+          WHERE ($1::text IS NULL OR date_ecart >= $1) AND ($2::text IS NULL OR date_ecart <= $2)
+          GROUP BY code_reference ORDER BY abs(sum(montant_mad)) DESC",
+    )
+    .bind(du)
+    .bind(au)
+    .fetch_all(&state.db)
+    .await?;
+    let par_fournisseur = sqlx::query(
+        "SELECT code_fournisseur, max(fournisseur_nom) AS fournisseur_nom, count(*) AS nb,
+                sum(montant_mad)::float8 AS montant_mad
+           FROM v_ecart_prix
+          WHERE ($1::text IS NULL OR date_ecart >= $1) AND ($2::text IS NULL OR date_ecart <= $2)
+          GROUP BY code_fournisseur ORDER BY abs(sum(montant_mad)) DESC",
+    )
+    .bind(du)
+    .bind(au)
+    .fetch_all(&state.db)
+    .await?;
+    let mut v = json!({
+        "lignes": lignes_en_json(&lignes),
+        "par_reference": lignes_en_json(&par_reference),
+        "par_fournisseur": lignes_en_json(&par_fournisseur),
+    });
+    user.masquer(&state.db, module::VALORISATION, &mut v).await?;
+    Ok(Json(v))
+}
+
 /// Les frais d'approche saisis, par reception.
 pub async fn frais_approche(
     State(state): State<AppState>,
@@ -1154,10 +1357,10 @@ pub async fn frais_approche(
            JOIN reception rc ON rc.id_reception = fa.id_reception
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = rc.code_fournisseur
           WHERE ($1 IS NULL OR fa.id_reception = $1)
-          ORDER BY fa.date_frais DESC
+          ORDER BY fa.date_frais DESC, fa.type_frais
           LIMIT $2",
     )
-    .bind(&f.code_reference)
+    .bind(f.id_reception.as_ref().or(f.code_reference.as_ref()))
     .bind(f.limite())
     .fetch_all(&state.db)
     .await?;
@@ -1303,7 +1506,7 @@ pub async fn cockpit_analyse(
            (SELECT ROUND(SUM(GREATEST(sp.stock_physique_net_kg, 0) * sp.cmup_mad)
                          / NULLIF(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * sp.cmup_mad) / 30.0, 0), 1)
               FROM v_stock_projete sp)                                                AS couverture_ponderee_jours,
-           (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM archive_reception
+           (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM v_archive_reception_courante
              WHERE ecart_pct IS NOT NULL)                                             AS ecart_pesee_moyen_pct,
            (SELECT ROUND(COALESCE(SUM(e), 0), 2) FROM (
                 SELECT MAX(economie_annuelle_mad) AS e FROM v_cockpit_economies
@@ -1409,7 +1612,7 @@ pub async fn matrice_prix(
                       / NULLIF(SUM(hp.quantite_achetee_kg), 0), 4) AS prix_moyen_mad,
                 ROUND(SUM(hp.quantite_achetee_kg), 4)    AS quantite_kg,
                 COUNT(*)                                 AS nb_achats
-           FROM historique_prix hp
+           FROM v_historique_prix_courant hp
            JOIN reference r        ON r.code_reference   = hp.code_reference
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = hp.code_fournisseur
           WHERE ($1 IS NULL OR hp.code_reference = $1)
@@ -1454,7 +1657,7 @@ pub async fn historique_prix(
                 bc.numero_bc, rec.numero_reception,
                 LAG(hp.prix_kg_mad) OVER (PARTITION BY hp.code_reference
                                               ORDER BY hp.date_achat) AS prix_precedent_mad
-           FROM historique_prix hp
+           FROM v_historique_prix_courant hp
            JOIN reference   r  ON r.code_reference   = hp.code_reference
            LEFT JOIN fournisseur fo ON fo.code_fournisseur = hp.code_fournisseur
            LEFT JOIN ligne_reception lr ON lr.id_ligne_reception = hp.id_ligne_reception
@@ -1727,7 +1930,8 @@ pub async fn defiger_proposition(
     Ok(Json(json!({ "id_proposition": id, "figee": false })))
 }
 
-/// Ecarte une proposition : elle n'engage rien et ne sera plus reproposee.
+/// Ecarte une proposition : elle n'engage rien et n'est plus reproposee
+/// pendant P_DureeEcartJours (90 j, regle 17), puis le besoin revient.
 pub async fn ignorer_proposition(
     State(state): State<AppState>,
     user: Utilisateur,

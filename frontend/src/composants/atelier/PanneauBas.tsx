@@ -116,7 +116,7 @@ export function PanneauBas({
 function VueJournal() {
   const q = useQuery({
     queryKey: ['atelier-journal'],
-    queryFn: () => api.get<LigneAudit[]>('/api/audit?limite=200'),
+    queryFn: ({ signal }) => api.get<LigneAudit[]>('/api/audit?limite=200', { signal }),
     staleTime: 60_000,
   })
 

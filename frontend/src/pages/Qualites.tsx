@@ -242,30 +242,30 @@ export function Qualites() {
 
   const qQualites = useQuery({
     queryKey: ['qualites'],
-    queryFn: () => api.get<Qualite[]>('/api/qualites'),
+    queryFn: ({ signal }) => api.get<Qualite[]>('/api/qualites', { signal }),
   })
 
   const qRoles = useQuery({
     queryKey: ['roles-bom'],
-    queryFn: () => api.get<RoleBom[]>('/api/roles-bom'),
+    queryFn: ({ signal }) => api.get<RoleBom[]>('/api/roles-bom', { signal }),
     staleTime: 5 * 60_000,
   })
 
   const qParametres = useQuery({
     queryKey: ['parametres'],
-    queryFn: () => api.get<Parametre[]>('/api/parametres'),
+    queryFn: ({ signal }) => api.get<Parametre[]>('/api/parametres', { signal }),
     staleTime: 5 * 60_000,
   })
 
   const qCatalogue = useQuery({
     queryKey: ['catalogue'],
-    queryFn: () => api.get<RefCatalogue[]>('/api/catalogue'),
+    queryFn: ({ signal }) => api.get<RefCatalogue[]>('/api/catalogue', { signal }),
     staleTime: 5 * 60_000,
   })
 
   const qCategories = useQuery({
     queryKey: ['categories'],
-    queryFn: () => api.get<Categorie[]>('/api/categories'),
+    queryFn: ({ signal }) => api.get<Categorie[]>('/api/categories', { signal }),
     staleTime: 5 * 60_000,
   })
 
@@ -292,13 +292,13 @@ export function Qualites() {
   // Chargement des lignes existantes a l'ouverture d'une qualite.
   const qDensites = useQuery({
     queryKey: ['densites', edition],
-    queryFn: () => api.get<DensiteApi[]>(`/api/qualites/${edition}/densites`),
+    queryFn: ({ signal }) => api.get<DensiteApi[]>(`/api/qualites/${edition}/densites`, { signal }),
     enabled: !!edition,
   })
 
   const qComposition = useQuery({
     queryKey: ['composition', edition],
-    queryFn: () => api.get<CompositionApi[]>(`/api/qualites/${edition}/composition`),
+    queryFn: ({ signal }) => api.get<CompositionApi[]>(`/api/qualites/${edition}/composition`, { signal }),
     enabled: !!edition,
   })
 
@@ -438,7 +438,7 @@ export function Qualites() {
       api.delete<{ mode: string; raison?: string }>(`/api/qualites/${code}`),
     onSuccess: (r) => {
       toast.success(
-        r.mode === 'SUPPRESSION' ? 'Qualite supprimee' : 'Qualite cloturee',
+        r.mode === 'SUPPRESSION' ? 'Qualité supprimee' : 'Qualité clôturée',
         { description: r.raison },
       )
       void qc.invalidateQueries({ queryKey: ['qualites'] })
@@ -456,7 +456,7 @@ export function Qualites() {
       description: liee
         ? `${q.nb_lignes_plan} ligne(s) de plan la referencent : ` +
           `elle sera cloturee pour preserver ces liens, pas effacee.`
-        : "Rien ne la reference : elle sera effacee, avec ses densites et sa composition.",
+        : "Rien ne la référence : elle sera effacee, avec ses densites et sa composition.",
       action: () => suppression.mutate(q.code_qualite),
     })
   }
@@ -474,7 +474,7 @@ export function Qualites() {
     const pris = new Set(lignes.map((l) => l.code_role))
     const libre = rolesDisponibles.find((r) => !pris.has(r.code_role))
     if (!libre) {
-      toast.error('Tous les roles BOM sont deja presents dans cette qualite.')
+      toast.error('Tous les rôles BOM sont déjà presents dans cette qualité.')
       return
     }
     setLignes((ls) => [
@@ -528,7 +528,7 @@ export function Qualites() {
     // l'activation.
     const role = lignes[0]?.code_role
     if (!role) {
-      toast.error("Definissez d'abord une densite de role : la composition s'y rattache.")
+      toast.error("Definissez d'abord une densité de rôle : la composition s'y rattache.")
       return
     }
     // Une matiere ne figure qu'une fois dans la qualite : on amorce sur la
@@ -539,7 +539,7 @@ export function Qualites() {
       references.find((r) => domaine.has(r.code_categorie) && !prises.has(r.code_reference)) ??
       references.find((r) => !prises.has(r.code_reference))
     if (!ref) {
-      toast.error('Toutes les references du catalogue sont deja employees par cette qualite.')
+      toast.error('Toutes les références du catalogue sont déjà employées par cette qualité.')
       return
     }
     setComposition((cs) => [
@@ -606,13 +606,46 @@ export function Qualites() {
 
   // Verifications locales : inutile de solliciter le serveur pour les detecter.
   const codeSaisi = entete.code_qualite.trim()
+  // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026) : l'ecran se
+  // compare a ce que le serveur a rendu (ou a une qualite neuve, a la creation).
+  const empreinte = (
+    e: Entete,
+    ls: { code_role: string; densite: unknown; unite_densite: unknown }[],
+    cs: { code_reference: string; code_role: string; pourcentage_composition: unknown; couleur: unknown }[],
+  ) =>
+    JSON.stringify({
+      e: Object.entries(e).map(([k, v]) => [k, String(v ?? '').trim()]).sort(),
+      l: ls.map((x) => [x.code_role, String(x.densite ?? ''), String(x.unite_densite ?? '')]).sort(),
+      c: cs.map((x) => [x.code_reference, x.code_role, String(x.pourcentage_composition ?? ''), String(x.couleur ?? '')]).sort(),
+    })
+  const reference =
+    enCreation || !courante
+      ? empreinte(enteteNeuve(), [], [])
+      : empreinte(
+          {
+            code_qualite: courante.code_qualite,
+            nom: courante.nom,
+            description: courante.description ?? '',
+            statut: courante.statut,
+            marge_securite_pct: String(courante.marge_securite_pct ?? ''),
+            couv_min_mois: String(courante.couv_min_mois ?? ''),
+            taux_perte_pct: String(courante.taux_perte_pct ?? ''),
+            seuil_alerte_jours: String(courante.seuil_alerte_jours ?? ''),
+            seuil_critique_jours: String(courante.seuil_critique_jours ?? ''),
+            stock_securite_jours: String(courante.stock_securite_jours ?? ''),
+          },
+          qDensites.data ?? [],
+          qComposition.data ?? [],
+        )
+  const sansChangement = empreinte(entete, lignes, composition) === reference
+
   const problemes: string[] = []
-  if (!codeSaisi) problemes.push('le code qualite est obligatoire')
+  if (!codeSaisi) problemes.push('le code qualité est obligatoire')
   if (!entete.nom.trim()) problemes.push('le nom est obligatoire')
   if (new Set(lignes.map((l) => l.code_role)).size !== lignes.length)
-    problemes.push('un role apparait deux fois')
+    problemes.push('un rôle apparait deux fois')
   if (lignes.some((l) => l.densite === null || l.densite <= 0))
-    problemes.push('chaque densite doit etre strictement positive')
+    problemes.push('chaque densité doit etre strictement positive')
   if (composition.some((c) => !c.pourcentage_composition || c.pourcentage_composition <= 0))
     problemes.push('chaque ligne de composition doit porter un pourcentage')
   // Tous roles confondus : deux lignes sur la meme matiere additionneraient
@@ -634,7 +667,7 @@ export function Qualites() {
   // La mise en service exige une composition complete : autant le dire avant
   // l'envoi plutot que de laisser le serveur refuser.
   if (entete.statut === 'ACTIF') {
-    if (!composition.length) problemes.push('une qualite active exige une composition')
+    if (!composition.length) problemes.push('une qualité active exige une composition')
     else if (rolesHors100.length)
       problemes.push(
         `R07 : ${rolesHors100.map(([r, s]) => `${libelleRole(r)} a ${fmt.nombre(s, 2)} %`).join(', ')}`,
@@ -644,7 +677,7 @@ export function Qualites() {
     enCreation &&
     qQualites.data?.some((q) => q.code_qualite === codeSaisi.toUpperCase())
   )
-    problemes.push('ce code existe deja')
+    problemes.push('ce code existe déjà')
 
   // ==========================================================================
   // Rendu : liste
@@ -733,7 +766,7 @@ export function Qualites() {
       <div>
         <EnTetePage
           titre="Qualités"
-          description="Densité de matiere par role BOM, exprimee en kg/m² ou ml/m²."
+          description="Densité de matière par rôle BOM, exprimée en kg/m² ou ml/m²."
           actions={
             droits.peutEcrire && (
               <Bouton taille="icone" title="Nouvelle qualité" aria-label="Nouvelle qualité" onClick={ouvrirCreation}>                <Plus />              </Bouton>
@@ -753,13 +786,13 @@ export function Qualites() {
           surClic={ouvrir}
           placeholderRecherche="Code, nom, description..."
           titreCarte={(q) => `${q.code_qualite} — ${q.nom}`}
-          videTitre="Aucune qualite"
-          videDescription="Creez une qualite pour decrire la consommation de matiere par m²."
+          videTitre="Aucune qualité"
+          videDescription="Créez une qualité pour decrire la consommation de matière par m²."
           videAction={
             droits.peutEcrire && (
               <Bouton onClick={ouvrirCreation}>
                 <Plus />
-                Nouvelle qualite
+                Nouvelle qualité
               </Bouton>
             )
           }
@@ -800,7 +833,7 @@ export function Qualites() {
                     onClick={() => demanderSuppression(q)}
                     aria-label="Supprimer"
                     title={
-                      q.nb_lignes_plan > 0 ? 'Cloturer (planifiee ailleurs)' : 'Supprimer'
+                      q.nb_lignes_plan > 0 ? 'Clôturer (planifiee ailleurs)' : 'Supprimer'
                     }
                     className="text-danger hover:bg-danger/10"
                   >
@@ -839,7 +872,7 @@ export function Qualites() {
   const colonnesLignes: ColonneDT<LigneLocale>[] = [
     {
       champ: 'code_role',
-      entete: 'Role BOM',
+      entete: 'Rôle BOM',
       largeur: '40%',
       rendu: (l) => (
         <CelluleEditable
@@ -856,7 +889,7 @@ export function Qualites() {
             .filter((r) => r.code_role === l.code_role || !lignes.some((x) => x.code_role === r.code_role))
             .map((r) => ({ valeur: r.code_role, libelle: `${r.code_role} — ${r.libelle}` }))}
           surValider={(v) => {
-            if (!v) throw new Error('role obligatoire')
+            if (!v) throw new Error('rôle obligatoire')
             majLigne(l.cle, 'code_role', String(v))
           }}
         />
@@ -921,7 +954,7 @@ export function Qualites() {
   const colonnesCompo: ColonneDT<LigneCompo>[] = [
     {
       champ: 'code_role',
-      entete: 'Role BOM',
+      entete: 'Rôle BOM',
       largeur: '190px',
       rendu: (c) => (
         <CelluleEditable
@@ -936,7 +969,7 @@ export function Qualites() {
             libelle: `${l.code_role} — ${libelleRole(l.code_role)}`,
           }))}
           surValider={(v) => {
-            if (!v) throw new Error('role obligatoire')
+            if (!v) throw new Error('rôle obligatoire')
             majCompo(c.cle, 'code_role', String(v))
           }}
         />
@@ -959,7 +992,7 @@ export function Qualites() {
               ? 'transition-colors hover:bg-attenue'
               : 'cursor-default',
           )}
-          title={champModifiable('code_reference') ? 'Choisir une matiere' : undefined}
+          title={champModifiable('code_reference') ? 'Choisir une matière' : undefined}
         >
           <span className="min-w-0 flex-1">
             <span className="font-medium">{c.code_reference}</span>
@@ -1082,7 +1115,7 @@ export function Qualites() {
   return (
     <div>
       <EnTetePage
-        titre={enCreation ? 'Nouvelle qualite' : `Qualite ${entete.code_qualite}`}
+        titre={enCreation ? 'Nouvelle qualité' : `Qualite ${entete.code_qualite}`}
         description={
           enCreation
             ? "Saisissez l'entete puis les lignes de composition ; tout est enregistre en une fois."
@@ -1100,10 +1133,11 @@ export function Qualites() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
-                Enregistrer la qualite
+                Enregistrer la qualité
               </Bouton>
             )}
             {/* ROUVRIR UNE QUALITE CLOSE, plutot que d'en creer une copie
@@ -1113,7 +1147,7 @@ export function Qualites() {
               id={entete.code_qualite}
               statut={entete.statut}
               taille="md"
-              consequence="La composition redeviendra modifiable, et les plans qui s'y appuient devront etre recalcules."
+              consequence="La composition redeviendra modifiable, et les plans qui s'y appuient devront être recalculés."
             />
           </>
         }
@@ -1128,7 +1162,7 @@ export function Qualites() {
       {entete.statut === 'CLOTURE' && (
         <Alerte ton="alerte" className="mb-3">
           Qualite cloturee : elle reste consultable et conserve son historique, mais ne peut plus
-          etre modifiee. Repassez son statut a ACTIF pour la rouvrir.
+          être modifiée. Repassez son statut a ACTIF pour la rouvrir.
         </Alerte>
       )}
 
@@ -1175,7 +1209,7 @@ export function Qualites() {
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <FileText className="size-3.5" />
-                Entete
+                En-tête
               </CarteTitre>
               <div className="flex items-center gap-2 text-[11px] text-attenue-texte">
                 {!enCreation && courante && (
@@ -1203,8 +1237,8 @@ export function Qualites() {
               {/* --- Colonne gauche : identite et description ---------------- */}
               <div className="grid content-start gap-2.5 @lg:grid-cols-2 @3xl:grid-cols-[140px_minmax(0,1fr)_130px]">
                 <div>
-                  <Etiq obligatoire>
-                    Code qualite
+                  <Etiq obligatoire htmlFor="ch-qualites-1">
+                    Code qualité
                     {!enCreation && (
                       <Aide>
                         Le code identifie la qualite dans les compositions et les plans : il ne se
@@ -1212,7 +1246,7 @@ export function Qualites() {
                       </Aide>
                     )}
                   </Etiq>
-                  <Champ
+                  <Champ id="ch-qualites-1"
                     value={entete.code_qualite}
                     onChange={(e) =>
                       setEntete((s) => ({ ...s, code_qualite: e.target.value.toUpperCase() }))
@@ -1224,18 +1258,18 @@ export function Qualites() {
                 </div>
 
                 <div>
-                  <Etiq obligatoire>Nom</Etiq>
-                  <Champ
+                  <Etiq obligatoire htmlFor="ch-qualites-2">Nom</Etiq>
+                  <Champ id="ch-qualites-2"
                     value={entete.nom}
                     onChange={(e) => setEntete((s) => ({ ...s, nom: e.target.value }))}
                     disabled={!champModifiable('nom')}
-                    placeholder="Designation commerciale"
+                    placeholder="Désignation commerciale"
                   />
                 </div>
 
                 <div>
-                  <Etiq>Statut</Etiq>
-                  <Selecteur
+                  <Etiq htmlFor="ch-qualites-3">Statut</Etiq>
+                  <Selecteur id="ch-qualites-3"
                     value={entete.statut}
                     onChange={(e) => setEntete((s) => ({ ...s, statut: e.target.value as Statut }))}
                     disabled={!droits.peutEcrire}
@@ -1247,8 +1281,8 @@ export function Qualites() {
                 </div>
 
                 <div className="sm:col-span-3">
-                  <Etiq>Description</Etiq>
-                  <Zone
+                  <Etiq htmlFor="ch-qualites-4">Description</Etiq>
+                  <Zone id="ch-qualites-4"
                     value={entete.description}
                     onChange={(e) => setEntete((s) => ({ ...s, description: e.target.value }))}
                     disabled={!champModifiable('description')}
@@ -1265,11 +1299,11 @@ export function Qualites() {
               <div className="rounded-[var(--radius-sm)] border border-bordure bg-attenue p-2.5">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                    Parametres de planification
+                    Paramètres de planification
                     <Aide>
                       {enCreation
-                        ? "Recopies des parametres generaux a la creation. Ils n'en dependent plus ensuite : une qualite creee aujourd'hui reste calculable a l'identique si le parametre general change demain."
-                        : 'Figes a la creation de la qualite ; les modifier ici ne touche pas les parametres generaux.'}
+                        ? "Recopies des paramètres generaux a la création. Ils n'en dependent plus ensuite : une qualité créée aujourd'hui reste calculable a l'identique si le paramètre general change demain."
+                        : 'Figes a la création de la qualité ; les modifier ici ne touche pas les paramètres generaux.'}
                     </Aide>
                   </p>
                   {enCreation && (
@@ -1278,7 +1312,7 @@ export function Qualites() {
                       taille="icone-xs"
                       onClick={() => setEntete((s) => ({ ...s, ...valeursGenerales() }))}
                       aria-label="Reprendre les paramètres generaux"
-                      title="Reprendre les parametres generaux"
+                      title="Reprendre les paramètres generaux"
                     >
                       <RotateCcw />
                     </Bouton>
@@ -1287,7 +1321,7 @@ export function Qualites() {
                 <div className="grid grid-cols-2 gap-2">
                   {PARAMETRES_GENERAUX.map(({ champ, libelle, code }) => (
                     <div key={champ}>
-                      <Etiq>
+                      <Etiq htmlFor="ch-qualites-5">
                         {libelle}
                         {enCreation && (
                           <Aide>
@@ -1295,7 +1329,7 @@ export function Qualites() {
                           </Aide>
                         )}
                       </Etiq>
-                      <Champ
+                      <Champ id="ch-qualites-5"
                         type="number"
                         step="any"
                         min={0}
@@ -1335,7 +1369,7 @@ export function Qualites() {
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <Layers className="size-3.5" />
-                Densite par role
+                Densité par rôle
                 <Aide>
                   Les roles exprimes en <strong>ml/m²</strong> consomment de la matiere sans entrer
                   dans le poids commercial du tapis : leur conversion en kg passe par la densite kg/ml
@@ -1372,7 +1406,7 @@ export function Qualites() {
                   tailleParDefaut={500}
                   titreCarte={(l) => libelleRole(l.code_role)}
                   videTitre="Aucune ligne"
-                  videDescription="Une qualite sans ligne consomme zero matiere : le MRP ne generera aucun besoin."
+                  videDescription="Une qualité sans ligne consomme zéro matière : le MRP ne generera aucun besoin."
                   videAction={
                     modifiable && (
                       <Bouton variante="contour" onClick={ajouterLigne}>
@@ -1423,7 +1457,7 @@ export function Qualites() {
                 <Badge
                   key={role}
                   ton={Math.abs(somme - 100) > 0.5 ? 'danger' : 'succes'}
-                  title="R07 : la somme doit valoir 100 % par role, a 0,5 point pres"
+                  title="R07 : la somme doit valoir 100 % par rôle, a 0,5 point pres"
                 >
                   {libelleRole(role)} {fmt.nombre(somme, 2)} %
                 </Badge>
@@ -1439,7 +1473,7 @@ export function Qualites() {
               {modifiable && (
                 <Bouton variante="contour" taille="sm" onClick={ajouterCompo}>
                   <Plus />
-                  Ajouter une matiere
+                  Ajouter une matière
                 </Bouton>
               )}
             </div>
@@ -1458,12 +1492,12 @@ export function Qualites() {
                 tailleParDefaut={500}
                 titreCarte={(c) => `${libelleRole(c.code_role)} · ${c.code_reference}`}
                 videTitre="Aucune composition"
-                videDescription="Une qualite sans composition ne peut pas etre mise en service : le MRP ne saurait quelle matiere consommer."
+                videDescription="Une qualité sans composition ne peut pas être mise en service : le MRP ne saurait quelle matière consommer."
                 videAction={
                   modifiable && (
                     <Bouton variante="contour" onClick={ajouterCompo}>
                       <Plus />
-                      Ajouter une matiere
+                      Ajouter une matière
                     </Bouton>
                   )
                 }
@@ -1477,7 +1511,7 @@ export function Qualites() {
                           onClick={() =>
                             setComposition((cs) => cs.filter((x) => x.cle !== c.cle))
                           }
-                          aria-label="Retirer la matiere"
+                          aria-label="Retirer la matière"
                         >
                           <Trash2 />
                         </Bouton>
@@ -1512,10 +1546,11 @@ export function Qualites() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
-                Enregistrer la qualite
+                Enregistrer la qualité
               </Bouton>
             </div>
           </div>

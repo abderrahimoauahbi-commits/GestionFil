@@ -47,13 +47,13 @@ export function Assistant() {
 
   const qCatalogue = useQuery({
     queryKey: ['assistant-catalogue'],
-    queryFn: () => api.get<{ questions: EntreeCatalogue[] }>('/api/assistant'),
+    queryFn: ({ signal }) => api.get<{ questions: EntreeCatalogue[] }>('/api/assistant', { signal }),
     retry: false,
   })
 
   const qReponse = useQuery({
     queryKey: ['assistant', demande],
-    queryFn: () => api.get<Reponse>(`/api/assistant/${encodeURIComponent(demande as string)}`),
+    queryFn: ({ signal }) => api.get<Reponse>(`/api/assistant/${encodeURIComponent(demande as string)}`, { signal }),
     enabled: demande !== null,
     retry: false,
   })
@@ -71,7 +71,7 @@ export function Assistant() {
   if (qCatalogue.isError) {
     const e = qCatalogue.error as ErreurApi
     return (
-      <Alerte ton="danger" titre="Assistant réserve a la Direction">
+      <Alerte ton="danger" titre="Assistant réserve à la Direction">
         {e?.estNonAutorise
           ? `Votre role (${moi?.role ?? '—'}) n'a pas acces a l'assistant. Il lit des donnees
              consolidees — valorisation, marges fournisseurs, journal — que la grille de droits
@@ -91,7 +91,7 @@ export function Assistant() {
     <div className="flex flex-col gap-3">
       <EnTetePage
         titre="Assistant"
-        description="Questions sur l'etat du systeme — reponses calculees sur vos vues, en lecture seule"
+        description="Questions sur l'état du système — reponses calculées sur vos vues, en lecture seule"
       />
 
       {/* --- Poser une question ------------------------------------------- */}
@@ -107,7 +107,7 @@ export function Assistant() {
           <input
             value={saisie}
             onChange={(e) => setSaisie(e.target.value)}
-            placeholder="Ou en est le stock ? Y a-t-il des anomalies ? Qu'y a-t-il a commander ?"
+            placeholder="Ou en est le stock ? Y a-t-il des anomalies ? Qu'y a-t-il à commander ?"
             className="h-9 w-full rounded-[var(--radius)] border border-champ bg-surface pl-8 pr-3
                        text-[13px] outline-none focus:border-primaire"
           />
@@ -156,7 +156,7 @@ export function Assistant() {
                   className="flex shrink-0 items-center gap-1 rounded-[3px] border border-bordure
                              px-2 py-1 text-[12px] text-texte hover:bg-attenue"
                 >
-                  Ouvrir l'ecran
+                  Ouvrir l'écran
                   <ArrowRight className="size-3.5" />
                 </button>
               </div>
@@ -172,7 +172,7 @@ export function Assistant() {
       {/* --- Le catalogue -------------------------------------------------- */}
       <div className="flex flex-col gap-2">
         <p className="text-[11px] uppercase tracking-wide text-attenue-texte">
-          Ce que je sais repondre
+          Ce que je sais répondre
         </p>
         {parTheme.map(([theme, entrees]) => (
           <div key={theme} className="flex flex-wrap items-center gap-1.5">
@@ -215,7 +215,7 @@ function TableauDetail({ lignes }: { lignes: Record<string, unknown>[] }) {
   const estNombre = (v: unknown) => typeof v === 'number'
 
   return (
-    <div className="defilement-x max-h-80 overflow-y-auto rounded-[3px] border border-bordure">
+    <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x max-h-80 overflow-y-auto rounded-[3px] border border-bordure focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
       <table className="grille w-full text-[12px]">
         <thead className="sticky top-0 bg-attenue">
           <tr>

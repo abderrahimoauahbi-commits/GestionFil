@@ -202,14 +202,14 @@ export function Plans() {
 
   const qPlans = useQuery({
     queryKey: ['plans'],
-    queryFn: () => api.get<Plan[]>('/api/plans'),
+    queryFn: ({ signal }) => api.get<Plan[]>('/api/plans', { signal }),
   })
 
   const courant = enCreation ? undefined : qPlans.data?.find((p) => p.id_plan === edition)
 
   const qEntete = useQuery({
     queryKey: ['plan-entete', edition],
-    queryFn: () => api.get<EnteteApi>(`/api/plans/${edition}/entete`),
+    queryFn: ({ signal }) => api.get<EnteteApi>(`/api/plans/${edition}/entete`, { signal }),
     enabled: !!edition,
   })
 
@@ -315,7 +315,7 @@ export function Plans() {
         },
       ),
     onSuccess: async (r) => {
-      toast.success(r.cree ? 'Plan cree' : 'Plan mis a jour', {
+      toast.success(r.cree ? 'Plan créé' : 'Plan mis à jour', {
         description: `${r.lignes_generees} case(s) deployee(s) · ${fmt.entier(r.m2_total)} m² sur la periode`,
       })
       setErreur(null)
@@ -350,7 +350,7 @@ export function Plans() {
         mrp: `${r.lignes_generees} besoin(s) · ${fmt.nombre(r.total_kg as number, 2)} kg`,
         snapshot: `${r.lignes_figees} ligne(s) archivee(s)`,
       }
-      toast.success(messages[v.chemin] ?? 'Operation effectuee')
+      toast.success(messages[v.chemin] ?? 'Opération effectuee')
       void qc.invalidateQueries({ queryKey: ['plans'] })
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : String(e)),
@@ -365,7 +365,7 @@ export function Plans() {
     mutationFn: (id: string) =>
       api.post<{ lignes_generees: number; m2_total: number }>(`/api/plans/${id}/recalculer`),
     onSuccess: async (r) => {
-      toast.success('Grille recalculee', {
+      toast.success('Grille recalculée', {
         description: `${r.lignes_generees} case(s) · ${fmt.entier(r.m2_total)} m² sur la periode`,
       })
       await qc.invalidateQueries({ queryKey: ['plans'] })
@@ -379,7 +379,7 @@ export function Plans() {
     mutationFn: (id: string) =>
       api.post<{ qualites_liberees: number }>(`/api/plans/${id}/cloturer`),
     onSuccess: (r) => {
-      toast.success('Plan cloture', {
+      toast.success('Plan clôture', {
         description: `${r.qualites_liberees} qualite(s) liberee(s) · ses besoins sortent du plan d'achat`,
       })
       void qc.invalidateQueries({ queryKey: ['plans'] })
@@ -504,7 +504,7 @@ export function Plans() {
       })
     }
     if (!nouvelles.length) {
-      toast.error('Aucune qualite cochee.')
+      toast.error('Aucune qualité cochee.')
       return
     }
     setLignes((ls) => [...ls, ...nouvelles])
@@ -515,12 +515,40 @@ export function Plans() {
 
   // --- Verifications locales --------------------------------------------------
 
+  // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026) : l'ecran se
+  // compare a ce que le serveur a rendu (ou a un plan vide, a la creation).
+  const empreinte = (e: Entete, ls: LigneEntete[], cs: Record<string, number>) =>
+    JSON.stringify({
+      libelle: e.libelle.trim(), scenario: e.scenario_nom.trim(), debut: e.date_debut,
+      horizon: Number(e.mois_horizon), croissance: Number(e.croissance_annuelle_pct || 0),
+      lignes: ls.map((l) => [l.code_qualite, l.m2_base_mensuel]).sort(),
+      coefs: Object.entries(cs).sort(),
+    })
+  const reference = (() => {
+    if (enCreation || !courant) return empreinte(enteteVide(), [], {})
+    const c: Record<string, number> = {}
+    for (const x of qEntete.data?.saisonnalite ?? []) c[`${x.code_qualite}|${x.mois}`] = x.coefficient
+    return empreinte(
+      {
+        id_plan: courant.id_plan, libelle: courant.libelle, scenario_nom: courant.scenario_nom ?? '',
+        date_debut: (courant.date_debut ?? '').slice(0, 7), mois_horizon: courant.mois_horizon ?? 12,
+        croissance_annuelle_pct: String(courant.croissance_annuelle_pct ?? 0),
+      },
+      (qEntete.data?.qualites ?? []).map((q) => ({
+        code_qualite: q.code_qualite, qualite_nom: q.qualite_nom, qualite_statut: q.qualite_statut,
+        nb_composition: q.nb_composition, m2_base_mensuel: q.m2_base_mensuel,
+      })),
+      c,
+    )
+  })()
+  const sansChangement = empreinte(entete, lignes, coefs) === reference
+
   const problemes: string[] = []
-  if (!entete.libelle.trim()) problemes.push('le libelle est obligatoire')
+  if (!entete.libelle.trim()) problemes.push('le libellé est obligatoire')
   if (!/^\d{4}-\d{2}$/.test(entete.date_debut)) problemes.push('le mois de depart est obligatoire')
-  if (!lignes.length) problemes.push('aucune qualite retenue')
+  if (!lignes.length) problemes.push('aucune qualité retenue')
   if (lignes.some((l) => l.m2_base_mensuel === null))
-    problemes.push('chaque qualite doit porter une base mensuelle')
+    problemes.push('chaque qualité doit porter une base mensuelle')
   const trous = lignes.reduce(
     (n, l) =>
       n +
@@ -595,7 +623,7 @@ export function Plans() {
       },
       {
         champ: 'm2_total',
-        entete: 'm² periode',
+        entete: 'm² période',
         numerique: true,
         largeur: '120px',
         rendu: (p) => fmt.entier(p.m2_total),
@@ -607,7 +635,7 @@ export function Plans() {
         largeur: '90px',
         rendu: (p) =>
           p.statut === 'CLOTURE' ? (
-            <span className="text-attenue-texte" title="Un plan cloture n'alimente plus le plan d'achat">
+            <span className="text-attenue-texte" title="Un plan clôture n'alimente plus le plan d'achat">
               hors calcul
             </span>
           ) : (
@@ -627,7 +655,7 @@ export function Plans() {
       <div>
         <EnTetePage
           titre="Plans de production"
-          description="Période glissante : base mensuelle par recette, saisonnalite par mois, croissance au prorata."
+          description="Période glissante : base mensuelle par recette, saisonnalité par mois, croissance au prorata."
           actions={
             droits.peutEcrire && (
               <Bouton taille="icone" title="Nouveau plan" aria-label="Nouveau plan" onClick={ouvrirCreation}>                <Plus />              </Bouton>
@@ -645,7 +673,7 @@ export function Plans() {
           erreur={qPlans.error}
           cle={(p) => p.id_plan}
           surClic={ouvrir}
-          placeholderRecherche="Libelle, scenario, statut..."
+          placeholderRecherche="Libellé, scenario, statut..."
           titreCarte={(p) => `${p.libelle} (v${p.numero_version})`}
           videTitre="Aucun plan"
           videDescription="Un plan valide est la seule source de besoins pour le MRP et le plan d'achat."
@@ -685,15 +713,15 @@ export function Plans() {
                     confirmation.demander({
                       titre: `Cloturer ${p.libelle} ?`,
                       destructif: true,
-                      libelleConfirmer: 'Cloturer',
+                      libelleConfirmer: 'Clôturer',
                       description:
                         "Ses besoins sortiront du plan d'achat et ses recettes redeviendront " +
                         'disponibles pour un autre plan. Le plan reste consultable.',
                       action: () => cloture.mutate(p.id_plan),
                     })
                   }
-                  aria-label="Cloturer"
-                  title="Cloturer"
+                  aria-label="Clôturer"
+                  title="Clôturer"
                   className="text-alerte hover:bg-alerte/10"
                 >
                   <Undo2 />
@@ -707,7 +735,7 @@ export function Plans() {
                     confirmation.demander({
                       titre: `Supprimer ${p.libelle} ?`,
                       destructif: true,
-                      description: "Ce plan n'a jamais ete valide : il sera efface.",
+                      description: "Ce plan n'a jamais été valide : il sera effacé.",
                       action: () => suppression.mutate(p.id_plan),
                     })
                   }
@@ -758,7 +786,7 @@ export function Plans() {
     },
     {
       champ: 'm2_total',
-      entete: 'Total periode',
+      entete: 'Total période',
       numerique: true,
       largeur: '140px',
       valeurTri: (l) => periode.reduce((t, p) => t + m2(l, p.rang, p.mois), 0),
@@ -825,7 +853,7 @@ export function Plans() {
                   id={courant.id_plan}
                   statut={statut}
                   taille="md"
-                  consequence="Les besoins calcules restent, mais devront etre recalcules apres correction."
+                  consequence="Les besoins calcules restent, mais devront être recalculés après correction."
                 />
                 {statut === 'EN_COURS' && (
                   <>
@@ -851,10 +879,11 @@ export function Plans() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
-                Enregistrer entete et grille
+                Enregistrer en-tête et grille
               </Bouton>
             )}
           </>
@@ -871,7 +900,7 @@ export function Plans() {
         <Alerte ton={statut === 'EN_COURS' ? 'info' : 'alerte'} className="mb-3">
           {statut === 'EN_COURS'
             ? "Plan en service : il alimente le MRP et le plan d'achat, et n'est plus modifiable. Creez une nouvelle version pour le reviser."
-            : "Plan cloture : ses besoins sont sortis du plan d'achat et ses recettes ont ete liberees."}
+            : "Plan clôture : ses besoins sont sortis du plan d'achat et ses recettes ont ete liberees."}
         </Alerte>
       )}
 
@@ -888,7 +917,7 @@ export function Plans() {
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <FileText className="size-3.5" />
-              Entete — periode glissante
+              En-tête — période glissante
             </CarteTitre>
             <div className="flex items-center gap-2 text-[11px] text-attenue-texte">
               {courant && (
@@ -917,8 +946,8 @@ export function Plans() {
 
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="lg:col-span-2">
-              <Etiq obligatoire>Libelle</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-plans-1">Libelle</Etiq>
+              <Champ id="ch-plans-1"
                 value={entete.libelle}
                 onChange={(e) => setEntete((s) => ({ ...s, libelle: e.target.value }))}
                 disabled={!champModifiable('libelle')}
@@ -926,8 +955,8 @@ export function Plans() {
               />
             </div>
             <div>
-              <Etiq>Scenario</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-plans-2">Scenario</Etiq>
+              <Champ id="ch-plans-2"
                 value={entete.scenario_nom}
                 onChange={(e) => setEntete((s) => ({ ...s, scenario_nom: e.target.value }))}
                 disabled={!champModifiable('scenario_nom')}
@@ -935,8 +964,8 @@ export function Plans() {
               />
             </div>
             <div>
-              <Etiq obligatoire>Mois de depart</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-plans-3">Mois de depart</Etiq>
+              <Champ id="ch-plans-3"
                 type="month"
                 value={entete.date_debut}
                 onChange={(e) => setEntete((s) => ({ ...s, date_debut: e.target.value }))}
@@ -944,8 +973,8 @@ export function Plans() {
               />
             </div>
             <div>
-              <Etiq>Horizon</Etiq>
-              <Selecteur
+              <Etiq htmlFor="ch-plans-4">Horizon</Etiq>
+              <Selecteur id="ch-plans-4"
                 value={String(entete.mois_horizon)}
                 onChange={(e) =>
                   setEntete((s) => ({ ...s, mois_horizon: Number(e.target.value) }))
@@ -960,11 +989,11 @@ export function Plans() {
               </Selecteur>
             </div>
             <div>
-              <Etiq>
+              <Etiq htmlFor="ch-plans-5">
                 Croissance annuelle %
                 <Aide>Appliquee au prorata des mois ecoules : (1 + taux)^(rang / 12).</Aide>
               </Etiq>
-              <Champ
+              <Champ id="ch-plans-5"
                 type="number"
                 step="any"
                 value={entete.croissance_annuelle_pct}
@@ -976,7 +1005,7 @@ export function Plans() {
               />
             </div>
             <div className="sm:col-span-2 lg:col-span-4">
-              <Etiq>Période couverte</Etiq>
+              <Etiq htmlFor="ch-plans-6">Période couverte</Etiq>
               <div className="flex h-8 items-center gap-2 rounded-[var(--radius)] border border-bordure bg-attenue px-2 text-[12px]">
                 {periode.length > 0 ? (
                   <>
@@ -1025,7 +1054,7 @@ export function Plans() {
           <CarteEntete>
             <CarteTitre className="flex items-center gap-1.5">
               <Layers className="size-3.5" />
-              Qualites produites
+              Qualités produites
               <Aide>
                 Seules apparaissent les qualites <strong>actives</strong> qu'aucun autre plan actif
                 ne produit deja. Clore un plan libere les siennes.
@@ -1039,12 +1068,12 @@ export function Plans() {
                 disabled={!qualitesDisponibles.length}
                 title={
                   qualitesDisponibles.length
-                    ? 'Cocher plusieurs qualites et les ajouter en une fois'
-                    : 'Aucune qualite disponible : toutes sont deja au plan ou sans recette validee libre'
+                    ? 'Cocher plusieurs qualités et les ajouter en une fois'
+                    : 'Aucune qualité disponible : toutes sont déjà au plan ou sans recette validee libre'
                 }
               >
                 <Plus />
-                Choisir des qualites
+                Choisir des qualités
                 {qualitesDisponibles.length > 0 && (
                   <span className="rounded bg-attenue px-1 text-[10px]">
                     {qualitesDisponibles.length}
@@ -1067,8 +1096,8 @@ export function Plans() {
                 pagination={false}
                 tailleParDefaut={500}
                 titreCarte={(l) => `${l.code_qualite} — ${l.qualite_nom}`}
-                videTitre="Aucune qualite retenue"
-                videDescription="Un plan produit des qualites actives : choisissez-en au moins une."
+                videTitre="Aucune qualité retenue"
+                videDescription="Un plan produit des qualités actives : choisissez-en au moins une."
                 actions={
                   modifiable
                     ? (l) => (
@@ -1098,10 +1127,10 @@ export function Plans() {
           <Carte repliable="plans.3">
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
-                Saisonnalite — profil annuel
+                Saisonnalité — profil annuel
                 <Aide>
-                  Douze coefficients par qualite, un par mois de l'annee : c'est un profil qui se
-                  <strong> repete</strong> d'une annee sur l'autre, independamment de la duree du
+                  Douze coefficients par qualité, un par mois de l'année : c'est un profil qui se
+                  <strong> repete</strong> d'une année sur l'autre, independamment de la duree du
                   plan. Coefficient &gt; 1 = mois haut, &lt; 1 = mois bas, 0 = arret de production.
                   La grille est complete : toute case non saisie est amorcee a 1,00.
                 </Aide>
@@ -1131,12 +1160,12 @@ export function Plans() {
               )}
             </CarteEntete>
             <CarteCorps className="p-0">
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full text-[12px]">
                   <thead>
                     <tr className="bg-attenue">
                       <th className="px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                        Mois de l'annee
+                        Mois de l'année
                       </th>
                       {lignes.map((l) => (
                         <th
@@ -1162,7 +1191,7 @@ export function Plans() {
                             {nom}
                             {!couvert && (
                               <span className="ml-1.5 text-[10px] text-attenue-texte">
-                                hors periode
+                                hors période
                               </span>
                             )}
                           </td>
@@ -1220,7 +1249,7 @@ export function Plans() {
                     taille="sm"
                     onClick={() => recalcul.mutate(courant.id_plan)}
                     chargement={recalcul.isPending}
-                    title="Refaire le calcul cote serveur a partir des bases et coefficients enregistres"
+                    title="Refaire le calcul cote serveur à partir des bases et coefficients enregistres"
                   >
                     <RefreshCw />
                     Recalculer
@@ -1229,12 +1258,12 @@ export function Plans() {
               </div>
             </CarteEntete>
             <CarteCorps className="p-0">
-              <div className="defilement-x">
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                 <table className="grille w-full text-[12px]">
                   <thead>
                     <tr className="bg-attenue">
                       <th className="sticky left-0 z-10 bg-attenue px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-                        Qualite
+                        Qualité
                       </th>
                       <th className="bg-attenue px-2.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wider text-attenue-texte whitespace-nowrap">
                         Base / mois
@@ -1341,10 +1370,11 @@ export function Plans() {
               <Bouton
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
-                disabled={problemes.length > 0}
+                disabled={problemes.length > 0 || sansChangement}
+                title={sansChangement ? 'Rien n’a changé' : undefined}
               >
                 <Save />
-                Enregistrer entete et grille
+                Enregistrer en-tête et grille
               </Bouton>
             </div>
           </div>
@@ -1369,7 +1399,7 @@ export function Plans() {
                     coche ? 'border-primaire bg-primaire/5' : 'border-bordure',
                   )}
                 >
-                  <input
+                  <input id="ch-plans-6"
                     type="checkbox"
                     checked={coche}
                     onChange={() => basculerQualite(q.code_qualite)}
@@ -1402,7 +1432,7 @@ export function Plans() {
                 Tout cocher
               </Bouton>
               <Bouton variante="discret" taille="xs" onClick={() => setChoix({})}>
-                Tout decocher
+                Tout décocher
               </Bouton>
               <span className="text-[11px] text-attenue-texte">{nbCoches} selectionnee(s)</span>
             </div>

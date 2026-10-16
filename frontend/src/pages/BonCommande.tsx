@@ -51,6 +51,7 @@ import {
 import { TotauxCommande } from '../composants/TotauxCommande'
 import { facteurVersKg } from '../lib/conditionnement'
 import { auCentime, cn, fmt } from '../lib/utils'
+import { lireNombre } from '../lib/nombres'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -74,6 +75,11 @@ interface Bc extends Record<string, unknown> {
   createur: string | null
   valideur: string | null
   date_validation: string | null
+  /* LE TAUX (regle 10, 09/10/2026) : indicatif en brouillon, engage et justifie a la validation. */
+  taux_du_jour?: number | null
+  date_cours_engage?: string | null
+  source_taux_engage?: 'REFERENCE' | 'SAISI' | null
+  motif_taux_engage?: string | null
 }
 
 interface LigneBc extends Record<string, unknown> {
@@ -195,13 +201,13 @@ export function BonCommande() {
 
   const qBc = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<Bc[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<Bc[]>('/api/bons-commande', { signal }),
   })
   const bc = qBc.data?.find((b) => b.id_bc === id) ?? null
 
   const qLignes = useQuery({
     queryKey: ['lignes-bc', id],
-    queryFn: () => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneBc[]>(`/api/bons-commande/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 
@@ -273,7 +279,7 @@ export function BonCommande() {
       code_devise: bc.code_devise,
     })
   }, [bc?.id_bc, bc?.date_bc, bc?.date_livraison_prevue, bc?.conditions_paiement, bc?.notes, bc?.code_devise])
-  const qDevises = useQuery({ queryKey: ['devises'], queryFn: () => api.get<{ code_devise: string }[]>('/api/devises') })
+  const qDevises = useQuery({ queryKey: ['devises'], queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }) })
 
   const enteteModifie =
     !!bc &&
@@ -286,13 +292,32 @@ export function BonCommande() {
       entete.notes !== (bc.notes ?? '') ||
       entete.code_devise !== bc.code_devise)
 
+  const confirmationTaux = useConfirmation()
+  /* LA VALIDATION D'UN BON EN DEVISE, saisie sur la page (regle 10) : le cours
+     du jour est propose ; un autre taux se retient avec son motif. */
+  const [validation, setValidation] = useState<{ taux: string; motif: string } | null>(null)
   const changerStatut = useMutation({
-    mutationFn: (statut: string) => api.put(`/api/bons-commande/${id}/statut`, { statut }),
-    onSuccess: (_r, statut) => {
+    mutationFn: (c: string | { statut: string; taux_saisi?: number; motif_taux?: string; confirme_taux?: boolean }) =>
+      api.put(`/api/bons-commande/${id}/statut`, typeof c === 'string' ? { statut: c } : c),
+    onSuccess: (_r, c) => {
+      const statut = typeof c === 'string' ? c : c.statut
       toast.success(`Bon passe en ${statut.toLowerCase().replace(/_/g, ' ')}`)
+      setValidation(null)
       rafraichir()
     },
-    onError: echec,
+    onError: (e, c) => {
+      /* Un taux a plus de 3 % du cours BAM se confirme, il ne se refuse pas sec. */
+      if (e instanceof ErreurApi && e.estRegle('TAUX-ECART') && typeof c !== 'string') {
+        confirmationTaux.demander({
+          titre: 'Taux éloigné du cours Bank Al-Maghrib',
+          description: e.messageSansCode,
+          libelleConfirmer: 'Je confirme ce taux',
+          action: () => changerStatut.mutate({ ...c, confirme_taux: true }),
+        })
+        return
+      }
+      echec(e)
+    },
   })
 
   /**
@@ -690,7 +715,7 @@ export function BonCommande() {
     },
     {
       champ: 'quantite_recue_kg',
-      entete: 'Recu / reste',
+      entete: 'Reçu / reste',
       numerique: true,
       largeur: '140px',
       rendu: (l) => (
@@ -792,7 +817,7 @@ export function BonCommande() {
         <Alerte ton="alerte">
           Ce bon n'existe pas, ou vous n'y avez pas acces.{' '}
           <button className="underline" onClick={() => naviguer('/bons-commande')}>
-            Revenir a la liste
+            Revenir à la liste
           </button>
         </Alerte>
       </div>
@@ -803,7 +828,16 @@ export function BonCommande() {
     <div>
       <EnTetePage
         titre={`${bc.numero_bc} — ${bc.fournisseur_nom}`}
-        description={`Cree le ${fmt.date(bc.date_bc)}${bc.createur ? ` par ${bc.createur}` : ''} · taux engage ${fmt.nombre(bc.taux_change_engage, 4)} ${bc.code_devise}/MAD`}
+        description={
+          `Établi le ${fmt.date(bc.date_bc)}${bc.createur ? ` par ${bc.createur}` : ''}` +
+          (bc.code_devise === 'MAD'
+            ? ''
+            : bc.date_validation
+              ? ` · taux engagé ${fmt.nombre(bc.taux_change_engage, 4)} ${bc.code_devise}/MAD` +
+                (bc.date_cours_engage ? ` (cours du ${fmt.date(bc.date_cours_engage)}` : ' (') +
+                (bc.source_taux_engage === 'SAISI' ? ', saisi à la validation)' : ')')
+              : ` · taux indicatif du jour ${bc.taux_du_jour != null ? fmt.nombre(bc.taux_du_jour, 4) : '—'} ${bc.code_devise}/MAD, engagé à la validation`)
+        }
         actions={
           <>
             <Bouton variante="contour" onClick={() => naviguer('/bons-commande')}>
@@ -825,16 +859,20 @@ export function BonCommande() {
                 title={lignes.length ? undefined : 'Un bon sans ligne ne peut pas etre soumis'}
               >
                 <Send />
-                Soumettre a validation
+                Soumettre à validation
               </Bouton>
             )}
             {droits.peutValider && bc.statut === 'EN_ATTENTE_VALIDATION' && (
               <Bouton
-                onClick={() => changerStatut.mutate('VALIDE')}
+                onClick={() =>
+                  bc.code_devise === 'MAD'
+                    ? changerStatut.mutate('VALIDE')
+                    : setValidation({ taux: bc.taux_du_jour != null ? String(bc.taux_du_jour) : '', motif: '' })
+                }
                 disabled={estCreateur || depassePlafond}
                 title={
                   estCreateur
-                    ? 'B4 : vous ne pouvez pas valider un bon que vous avez cree'
+                    ? 'B4 : vous ne pouvez pas valider un bon que vous avez créé'
                     : depassePlafond
                       ? `Montant superieur a votre plafond de ${fmt.mad(plafond ?? 0)}`
                       : undefined
@@ -858,7 +896,7 @@ export function BonCommande() {
               id={id}
               statut={bc.statut}
               taille="md"
-              consequence="Le fournisseur devra etre prevenu si le bon lui est deja parti."
+              consequence="Le fournisseur devra être prevenu si le bon lui est déjà parti."
             />
             {droits.peutEcrire && SUPPRIMABLES.includes(bc.statut) && (
               <Bouton
@@ -871,7 +909,7 @@ export function BonCommande() {
                     libelleConfirmer: 'Supprimer definitivement',
                     description:
                       'Ce bon n’engage rien : il sera EFFACE, sans laisser de trace dans la ' +
-                      'liste ni dans les etats. Ses propositions d’achat reviendront au plan.',
+                      'liste ni dans les états. Ses propositions d’achat reviendront au plan.',
                     action: () => supprimerBon.mutate(),
                   })
                 }
@@ -883,6 +921,66 @@ export function BonCommande() {
           </>
         }
       />
+      {confirmationTaux.element}
+
+      {validation && (
+        <Carte className="mb-3">
+          <CarteEntete>
+            <CarteTitre>Valider le bon : le taux engagé</CarteTitre>
+          </CarteEntete>
+          <CarteCorps className="space-y-2">
+            <p className="m-0 text-[12.5px] text-attenue-texte">
+              Proposé : le taux de référence du jour
+              {bc.taux_du_jour != null ? ` (${fmt.nombre(bc.taux_du_jour, 4)} ${bc.code_devise}/MAD)` : ''}. Un autre
+              taux — celui que la banque confirme — se retient avec son motif. Une fois validé, il est figé sur le bon.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div>
+                <Etiq obligatoire htmlFor="ch-boncommande-1">Taux {bc.code_devise}/MAD</Etiq>
+                <Champ id="ch-boncommande-1"
+                  inputMode="decimal"
+                  className="text-right tabular-nums"
+                  value={validation.taux}
+                  onChange={(e) => setValidation({ ...validation, taux: e.target.value })}
+                />
+              </div>
+              {(lireNombre(validation.taux) ?? 0) !== Number(bc.taux_du_jour ?? NaN) && (
+                <div className="sm:col-span-2">
+                  <Etiq obligatoire htmlFor="ch-boncommande-2">Pourquoi ce taux</Etiq>
+                  <Champ id="ch-boncommande-2"
+                    value={validation.motif}
+                    onChange={(e) => setValidation({ ...validation, motif: e.target.value })}
+                    placeholder="Cours confirmé par la banque, couverture…"
+                  />
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Bouton
+                chargement={changerStatut.isPending}
+                disabled={
+                  !((lireNombre(validation.taux) ?? 0) > 0) ||
+                  ((lireNombre(validation.taux) ?? 0) !== Number(bc.taux_du_jour ?? NaN) &&
+                    validation.motif.trim().length < 5)
+                }
+                onClick={() =>
+                  changerStatut.mutate({
+                    statut: 'VALIDE',
+                    taux_saisi: (lireNombre(validation.taux) ?? 0),
+                    motif_taux: validation.motif.trim() || undefined,
+                  })
+                }
+              >
+                <ShieldCheck />
+                Valider à ce taux
+              </Bouton>
+              <Bouton variante="contour" onClick={() => setValidation(null)}>
+                Annuler
+              </Bouton>
+            </div>
+          </CarteCorps>
+        </Carte>
+      )}
 
       {!modifiable && !['CLOTURE', 'ANNULE'].includes(bc.statut) && (
         <Alerte ton="info" className="mb-3">
@@ -978,7 +1076,7 @@ export function BonCommande() {
                 onChange={(e) => setEntete({ ...entete, conditions_paiement: e.target.value })}
               />
             </div>
-            <div>
+            <div className="lg:col-span-2">
               <Etiq htmlFor="notes">Observations</Etiq>
               <Champ
                 id="notes"
@@ -1081,6 +1179,7 @@ export function BonCommande() {
           <CarteCorps className={modifiable ? 'space-y-3' : 'p-0'}>
             {modifiable && bc ? (
               <GrilleLignes
+                controleColisage
                 codeFournisseur={bc.code_fournisseur}
                 devise={entete.code_devise || bc.code_devise}
                 lignes={nouvelles}
@@ -1112,7 +1211,7 @@ export function BonCommande() {
                 tailleParDefaut={500}
                 titreCarte={(l) => l.code_reference}
                 videTitre="Aucune ligne"
-                videDescription="Ajoutez des references : le plan d'achat vous dira quoi commander."
+                videDescription="Ajoutez des références : le plan d'achat vous dira quoi commander."
               />
             )}
             <TotauxCommande

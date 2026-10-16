@@ -69,7 +69,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'stock',
     titre: 'État des stocks',
     description:
-      'Quantites par magasin, stock projete, couverture et statut. La photo du jour, celle qu on affiche au mur du magasin.',
+      'Quantités par magasin, stock projete, couverture et statut. La photo du jour, celle qu on affiche au mur du magasin.',
     chemin: '/etats/stock',
     module: 'STOCK',
     Icone: Boxes,
@@ -80,7 +80,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'comptage',
     titre: 'Feuille de comptage',
     description:
-      'La liste des references d un magasin avec une colonne VIDE a remplir a la main. C est le document qu on emporte dans les allees, avant de saisir.',
+      'La liste des références d un magasin avec une colonne VIDE a remplir a la main. C est le document qu on emporte dans les allees, avant de saisir.',
     chemin: '/etats/comptage',
     module: 'INVENTAIRE',
     Icone: ClipboardList,
@@ -88,9 +88,9 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'inventaire',
-    titre: 'Proces-verbal d inventaire',
+    titre: 'Procès-verbal d’inventaire',
     description:
-      'Comptage, theorique, ecart et justification, pour un inventaire cloture. Le document qui fait foi.',
+      'Comptage, théorique, écart et justification, pour un inventaire clôture. Le document qui fait foi.',
     chemin: '/etats/inventaire',
     module: 'INVENTAIRE',
     Icone: ClipboardList,
@@ -100,14 +100,14 @@ const ETATS: EtatDisponible[] = [
 
   /* --- Lots ------------------------------------------------------------- */
   /* Une seule page, quatre vues : le parametre choisit (voir EtatLots). La
-     route `etats/lots` est a declarer dans App.tsx, sous le module STOCK. */
+     route `etats/lots` est a declarer dans App.tsx, sous le module LOTS. */
   {
     cle: 'lots-stock',
     titre: 'Stock par lot',
     description:
-      'La vue comptable : chaque lot qui porte du stock, avec sa categorie (Projet ou Restes), son statut, son solde et sa derniere activite.',
+      'La vue comptable : chaque lot qui porte du stock, avec sa catégorie (Projet ou Restes), son statut, son solde et sa dernière activité.',
     chemin: '/etats/lots?vue=stock',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Tags,
     famille: 'Lots',
   },
@@ -115,9 +115,9 @@ const ETATS: EtatDisponible[] = [
     cle: 'lots-dormants',
     titre: 'Lots dormants',
     description:
-      'Les lots qui portent du stock sans activite depuis le delai de dormance. La liste a trancher : reprendre, declasser ou detruire.',
+      'Les lots qui portent du stock sans activité depuis le délai de dormance. La liste a trancher : reprendre, declasser ou detruire.',
     chemin: '/etats/lots?vue=dormants',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Moon,
     famille: 'Lots',
     compte: (d) => (d.lotsDormants ? `${d.lotsDormants} dormant${d.lotsDormants > 1 ? 's' : ''}` : null),
@@ -126,9 +126,9 @@ const ETATS: EtatDisponible[] = [
     cle: 'lots-restes',
     titre: 'Restes',
     description:
-      'Les lots libres de categorie Restes : hors plan d achat, a ecouler en priorite. Avec le seuil qui les a fait basculer.',
+      'Les lots libres de catégorie Restes : hors plan d achat, a ecouler en priorite. Avec le seuil qui les a fait basculer.',
     chemin: '/etats/lots?vue=restes',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Hourglass,
     famille: 'Lots',
     compte: (d) => (d.lotsABasculer ? `${d.lotsABasculer} a basculer` : null),
@@ -137,9 +137,9 @@ const ETATS: EtatDisponible[] = [
     cle: 'lots-ecarts',
     titre: 'Écart de poids par fournisseur',
     description:
-      'Le poids pese d une bobine face au poids catalogue, par fournisseur : ecart moyen, mini, maxi et kilos, avec le niveau de tolerance.',
+      'Le poids pese d une bobine face au poids catalogue, par fournisseur : écart moyen, mini, maxi et kilos, avec le niveau de tolerance.',
     chemin: '/etats/lots?vue=ecarts',
-    module: 'STOCK',
+    module: 'LOTS',
     Icone: Scale,
     famille: 'Lots',
   },
@@ -147,9 +147,9 @@ const ETATS: EtatDisponible[] = [
   /* --- Achats ------------------------------------------------------------ */
   {
     cle: 'plan-achat',
-    titre: 'Plan d achat a engager',
+    titre: 'Plan d’achat à engager',
     description:
-      'Propositions groupees par fournisseur, avec quantites, delais et montants. Le document de la revue d achats.',
+      'Propositions groupees par fournisseur, avec quantités, délais et montants. Le document de la revue d achats.',
     chemin: '/etats/plan-achat',
     module: 'PLAN_ACHAT',
     Icone: ShoppingCart,
@@ -160,7 +160,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'receptions',
     titre: 'Journal des réceptions',
     description:
-      'Receptions de la periode, avec bon de commande, fournisseur, ecarts de pesee et statut qualite.',
+      'Réceptions de la période, avec bon de commande, fournisseur, écarts de pesee et statut qualité.',
     chemin: '/etats/receptions',
     module: 'RECEPTIONS',
     Icone: Package,
@@ -173,7 +173,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'plan-production',
     titre: 'Plan de production',
     description:
-      'Metres carres par qualite et par mois, sur l horizon du plan en service, avec les totaux.',
+      'Metres carres par qualité et par mois, sur l horizon du plan en service, avec les totaux.',
     chemin: '/etats/plan-production',
     module: 'PLANS',
     Icone: Gauge,
@@ -181,9 +181,9 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'besoins',
-    titre: 'Besoins matiere',
+    titre: 'Besoins matière',
     description:
-      'Kilos par reference et par mois, issus de l explosion des recettes. Le document de l acheteur.',
+      'Kilos par référence et par mois, issus de l explosion des recettes. Le document de l acheteur.',
     chemin: '/etats/besoins',
     module: 'MRP',
     Icone: FileSpreadsheet,
@@ -195,7 +195,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'mouvements',
     titre: 'Grand livre des mouvements',
     description:
-      'Entrees et sorties de la periode, avec type, magasin, lot et auteur. Le registre a archiver.',
+      'Entrees et sorties de la période, avec type, magasin, lot et auteur. Le registre a archiver.',
     chemin: '/etats/mouvements',
     module: 'MOUVEMENTS',
     Icone: Truck,
@@ -207,7 +207,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'catalogue',
     titre: 'Catalogue des références',
     description:
-      'La liste complete, avec categorie, unite, fournisseur et politique de reapprovisionnement.',
+      'La liste complete, avec catégorie, unite, fournisseur et politique de reapprovisionnement.',
     chemin: '/etats/catalogue',
     module: 'CATALOGUE',
     Icone: Library,
@@ -226,7 +226,7 @@ const ETATS: EtatDisponible[] = [
     cle: 'categories',
     titre: 'Catégories et familles',
     description:
-      'La nomenclature matiere en arbre : chaque categorie, puis ses familles avec leur titrage. Le document qu on pose devant quelqu un qui doit classer une matiere nouvelle.',
+      'La nomenclature matière en arbre : chaque catégorie, puis ses familles avec leur titrage. Le document qu on pose devant quelqu un qui doit classer une matière nouvelle.',
     chemin: '/etats/categories',
     module: 'CATALOGUE',
     Icone: Library,
@@ -244,9 +244,9 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'couleur',
-    titre: 'Fiche d une couleur',
+    titre: 'Fiche d’une couleur',
     description:
-      'Une couleur, ses codes fournisseur et toutes les references qui la portent, avec leur stock. La page qu on emporte chez le teinturier.',
+      'Une couleur, ses codes fournisseur et toutes les références qui la portent, avec leur stock. La page qu on emporte chez le teinturier.',
     chemin: '/etats/couleur',
     module: 'CATALOGUE',
     Icone: Palette,
@@ -254,9 +254,9 @@ const ETATS: EtatDisponible[] = [
   },
   {
     cle: 'manuel',
-    titre: 'Manuel d utilisation',
+    titre: 'Manuel d’utilisation',
     description:
-      'Toute la documentation de l outil sur papier : chaque ecran, sa procedure, le role de chacun de ses champs et les regles qu il applique. On peut n imprimer qu un chapitre — le stock pour le magasin, les achats pour le bureau.',
+      'Toute la documentation de l outil sur papier : chaque ecran, sa procedure, le rôle de chacun de ses champs et les règles qu il applique. On peut n imprimer qu un chapitre — le stock pour le magasin, les achats pour le bureau.',
     chemin: '/etats/manuel',
     module: 'COCKPIT',
     Icone: BookOpen,
@@ -272,12 +272,12 @@ export function Etats() {
      requete evite un second appel quand on arrive depuis le poste de travail. */
   const q = useQuery({
     queryKey: ['cockpit'],
-    queryFn: () => api.get<Record<string, number>>('/api/cockpit'),
+    queryFn: ({ signal }) => api.get<Record<string, number>>('/api/cockpit', { signal }),
   })
   const k = q.data ?? {}
   const qLots = useQuery({
     queryKey: ['cockpit-lots'],
-    queryFn: () => api.get<Record<string, number | null>>('/api/cockpit/lots'),
+    queryFn: ({ signal }) => api.get<Record<string, number | null>>('/api/cockpit/lots', { signal }),
     enabled: peut('STOCK', 'LIRE'),
   })
   const kl = qLots.data ?? {}
@@ -297,7 +297,7 @@ export function Etats() {
     <div>
       <EnTetePage
         titre="États imprimables"
-        sous_titre="Les documents qui portent sur une situation. Ceux qui suivent un objet s impriment depuis sa fiche."
+        sous_titre="Les documents qui portent sur une situation. Ceux qui suivent un objet s’impriment depuis sa fiche."
       />
 
       <div className="flex flex-col gap-5">

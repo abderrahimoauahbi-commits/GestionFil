@@ -8,6 +8,8 @@ use std::sync::Arc;
 pub struct AppState {
     pub db: Db,
     pub config: Arc<Config>,
+    /// La garde de la connexion (audit de securite du 13/10/2026).
+    pub garde: Arc<crate::auth::garde::Garde>,
 }
 
 impl AppState {
@@ -15,6 +17,7 @@ impl AppState {
         Self {
             db,
             config: Arc::new(config),
+            garde: Arc::new(crate::auth::garde::Garde::new()),
         }
     }
 }

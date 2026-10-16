@@ -56,16 +56,16 @@ export function FeuilleComptage() {
 
   const qListe = useQuery({
     queryKey: ['inventaires'],
-    queryFn: () => api.get<Inventaire[]>('/api/inventaires'),
+    queryFn: ({ signal }) => api.get<Inventaire[]>('/api/inventaires', { signal }),
   })
   const qLignes = useQuery({
     queryKey: ['lignes-inventaire', id],
-    queryFn: () => api.get<LigneAComptage[]>(`/api/inventaires/${id}/lignes`),
+    queryFn: ({ signal }) => api.get<LigneAComptage[]>(`/api/inventaires/${id}/lignes`, { signal }),
     enabled: !!id,
   })
 
   if (qListe.isLoading || qLignes.isLoading) {
-    return <Chargement texte="Preparation de la feuille de comptage…" />
+    return <Chargement texte="Préparation de la feuille de comptage…" />
   }
   const d = qListe.data
   const liste = Array.isArray(d) ? d : ((d as unknown as { lignes?: Inventaire[] })?.lignes ?? [])
@@ -73,12 +73,14 @@ export function FeuilleComptage() {
   if (!inv) return <Alerte ton="danger">Inventaire introuvable.</Alerte>
 
   const lignes = qLignes.data ?? []
-  if (inv.statut === 'BROUILLON' || lignes.length === 0) {
+  // LE BROUILLON EST L'ETAT OU L'ON COMPTE (13/10/2026) : ses lignes sont
+  // preparees a la creation, la feuille s'imprime donc des ce moment.
+  if (lignes.length === 0) {
     return (
       <Alerte ton="info">
-        Cet inventaire n’a pas encore de lignes. Ouvrez-le : c’est l’ouverture qui fige le
-        périmètre à compter — tout le catalogue pour un inventaire global, le stock existant pour
-        un inventaire tournant.
+        Cet inventaire n’a pas de lignes à compter. Un inventaire créé avant le 13/10/2026 les
+        prépare depuis sa page (« Préparer les lignes ») — tout le catalogue pour un inventaire
+        global, le stock existant pour un inventaire tournant.
       </Alerte>
     )
   }
@@ -88,7 +90,7 @@ export function FeuilleComptage() {
   // quand on se reprend, pas le code de la reference.
   const groupes: { matiere: string; lignes: (LigneAComptage & { rang: number })[] }[] = []
   lignes.forEach((l, i) => {
-    const m = l.categorie_libelle ?? 'Sans categorie'
+    const m = l.categorie_libelle ?? 'Sans catégorie'
     const dernier = groupes[groupes.length - 1]
     const ligne = { ...l, rang: i + 1 }
     if (dernier && dernier.matiere === m) dernier.lignes.push(ligne)

@@ -1,29 +1,20 @@
 /**
- * La navigation en barre laterale, repliable et figeable.
+ * La navigation en colonne, toujours ouverte.
  *
- * POURQUOI LATERALE ET NON EN HAUT. Sept modules et vingt-neuf ecrans ne
- * tiennent pas sur une ligne : la barre du haut les repliait en menus
- * deroulants, et il fallait deux clics et une memoire du rangement pour
- * atteindre un ecran. En colonne, tout est visible d'un coup — c'est la seule
- * disposition qui tienne quand le nombre d'ecrans grandit.
+ * TOUT EST VISIBLE D'UN COUP. Sept modules et une trentaine d'ecrans : chaque
+ * module est un intertitre, ses ecrans sont listes dessous, sans accordeon ni
+ * survol. On ne cherche pas un ecran dans un menu replie, on le lit.
  *
- * REPLIEE PAR DEFAUT, OUVERTE AU SURVOL. Repliee elle occupe 56 px et ne montre
- * que les icones des modules ; le pointeur la fait glisser a 248 px avec les
- * libelles. Elle se DEPLOIE AU-DESSUS du contenu au lieu de le pousser : une
- * table de quinze colonnes ne doit pas se reorganiser parce qu'on longe le bord
- * de l'ecran.
+ * JAMAIS REPLIEE (preference du 05/10/2026) : une barre qui se replie cache le
+ * chemin, et une barre qui se deploie au survol passe sur le tableau qu'on lit.
  *
- * LE BOUTON DE FIGEAGE la garde ouverte. Sur un grand ecran on prefere souvent
- * la voir en permanence ; elle pousse alors le contenu, puisque la place existe.
- * Le choix depend de la largeur disponible, pas d'un gout — d'ou un reglage
- * plutot qu'une decision prise a la place de l'utilisateur.
+ * SOMBRE A COTE D'UNE ZONE DE TRAVAIL CLAIRE : le chrome recule, le contenu
+ * avance, et la frontiere se voit sans chercher le filet.
  */
-import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useOuvrirVue } from '../lib/navigation'
-import { ChevronRight, Pin, PinOff } from 'lucide-react'
 import { useApparence } from './Apparence'
-import { estAccessible, MODULES, NAVIGATION, type EntreeNav, type Section } from './Coquille'
+import { entreeCourante, estAccessible, MODULES, NAVIGATION, type EntreeNav } from './Coquille'
 import { useAuth } from '../auth/AuthContext'
 import { useOngletsFacultatif } from './atelier/etat'
 import { MarqueCarree } from './Marque'
@@ -79,13 +70,8 @@ function LienVue({
 
 export function BarreLaterale() {
   const { moi, peut } = useAuth()
-  const { menuFige, disposition, definir } = useApparence()
+  const { disposition, menuMasque } = useApparence()
   const emplacement = useLocation()
-  const [survol, setSurvol] = useState(false)
-  /** Module deplie quand la barre est repliee et qu'on clique son icone. */
-  const [ouvert, setOuvert] = useState<Section | null>(null)
-
-  const ouverte = menuFige || survol
   /* La coquille de bureau change deux choses : la barre y est dans le flux, et
      ses liens ouvrent des onglets. Elle se reconnait a la presence du contexte
      d'onglets. */
@@ -93,47 +79,44 @@ export function BarreLaterale() {
 
   const accessibles = NAVIGATION.filter((e) => estAccessible(e, peut, moi?.role))
 
-  const courante = accessibles.find(
-    (e) =>
-      e.vers === emplacement.pathname ||
-      (e.vers !== '/' && sousChemin(emplacement.pathname, e.vers.split('?')[0])),
-  )
+  const courante = entreeCourante(accessibles, emplacement.pathname)
 
   const tous = MODULES.filter((m) => accessibles.some((e) => e.section === m.id))
-  // Les reglages descendent en pied : on n'y va pas dans le fil du travail,
-  // mais quand quelque chose doit changer. Les melanger aux modules metier les
-  // met au meme rang que le plan d'achat, ce qu'ils ne sont pas.
+  // Les reglages descendent en pied : on n'y va pas dans le fil du travail.
   const modules = tous.filter(
     (m) =>
       m.id !== 'PARAMETRES' &&
       // En disposition mixte, l'entete porte deja les modules : la barre ne
-      // garde que celui ou l'on se trouve, deplie sur ses ecrans.
+      // garde que celui ou l'on se trouve.
       (disposition !== 'mixte' || m.id === courante?.section),
   )
-  const reglages = tous.filter((m) => m.id === 'PARAMETRES')
+  const reglages = accessibles.filter((e) => e.section === 'PARAMETRES')
 
-  /** Un ecran de la liste, avec son etat courant et son eventuel « a venir ». */
+  /** Un ecran de la liste : un trait cobalt a gauche marque celui ou l'on est. */
   const lien = (e: EntreeNav) => {
     const actif = e.vers === courante?.vers
     const contenu = (
       <>
-        <e.Icone className="size-3.5 shrink-0" />
+        <e.Icone
+          className={cn('size-[15px] shrink-0', actif ? 'text-primaire' : 'opacity-70')}
+          strokeWidth={actif ? 2.1 : 1.7}
+        />
         <span className="min-w-0 flex-1 truncate">{e.libelle}</span>
         {e.aVenir && (
-          <span className="shrink-0 rounded-[3px] border border-barre-attenue/40 px-1 text-[9px] text-barre-attenue">
-            a venir
+          <span className="shrink-0 rounded-full border border-barre-attenue/35 px-1.5 text-[9px] uppercase tracking-wide text-barre-attenue">
+            bientôt
           </span>
         )}
       </>
     )
     const classe = cn(
-      'flex items-center gap-2 rounded-[var(--radius-sm)] py-1.5 pl-8 pr-2 text-[12.5px]',
-      'transition-colors',
+      'lien-nav relative flex h-[30px] w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 text-left text-[12.5px]',
+      'transition-colors duration-100',
       actif
-        ? 'bg-barre-actif font-medium text-or'
+        ? 'actif bg-barre-actif font-medium text-barre-texte before:absolute before:-left-2 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-primaire'
         : e.aVenir
-          ? 'cursor-not-allowed text-barre-attenue/50'
-          : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
+          ? 'cursor-not-allowed text-barre-attenue/45'
+          : 'text-barre-attenue hover:bg-barre-actif/70 hover:text-barre-texte',
     )
     if (e.aVenir) {
       return (
@@ -143,7 +126,7 @@ export function BarreLaterale() {
       )
     }
     return (
-      <LienVue key={e.vers + e.libelle} vers={e.vers} className={classe}>
+      <LienVue key={e.vers + e.libelle} vers={e.vers} title={e.resume} className={classe}>
         {contenu}
       </LienVue>
     )
@@ -151,179 +134,79 @@ export function BarreLaterale() {
 
   return (
     <>
-      {/* La gouttiere : elle reserve la place de la barre REPLIEE, ou de la
-          barre entiere quand elle est figee. Sans elle, le contenu passerait
-          sous la barre au lieu de commencer apres. */}
+      {/* La gouttiere reserve la place de la barre, posee en `fixed` dans le
+          navigateur. Dans l'atelier la barre est dans le flux : pas de
+          gouttiere, elle la doublerait. */}
       <div
         className={cn(
-          'sans-impression hidden shrink-0 transition-[width] duration-150 ease-out md:block',
-          menuFige ? 'w-[248px]' : 'w-[56px]',
-          // Dans l'atelier la barre est dans le flux : elle occupe deja sa
-          // place, une gouttiere de plus la doublerait.
-          dansAtelier && 'hidden',
+          'sans-impression hidden shrink-0 transition-[width] duration-300 ease-out md:block',
+          menuMasque ? 'w-0' : 'w-[232px]',
+          dansAtelier && 'md:hidden',
         )}
       />
 
       <aside
-        onMouseEnter={() => setSurvol(true)}
-        onMouseLeave={() => {
-          setSurvol(false)
-          setOuvert(null)
-        }}
         className={cn(
-          'sans-impression hidden flex-col border-r border-barre/40',
-          // LA COLONNE DE NAVIGATION EST SOMBRE, LA ZONE DE TRAVAIL EST CLAIRE.
-          //
-          // Elle etait blanche comme le contenu : rien ne separait « ou je
-          // suis » de « ce que je regarde », et le regard devait chercher le
-          // filet de separation pour savoir ou finissait le menu.
-          //
-          // C'est la disposition des consoles d'administration serieuses —
-          // Gentelella, Fiori, la plupart des ERP — et elle ne tient pas a la
-          // mode : le chrome sombre recule, le contenu clair avance, et la
-          // hierarchie se lit sans y penser. Les jetons `--barre` existaient
-          // deja pour cela et ne servaient nulle part.
-          'bg-barre text-barre-texte transition-[width] duration-150 ease-out md:flex',
-          // POSEE DANS LE FLUX SUR LE BUREAU, EN SURIMPRESSION SUR LE WEB.
-          //
-          // `fixed` la colle aux quatre bords de la fenetre. Dans un
-          // navigateur c'est ce qu'on veut : elle passe par-dessus le contenu
-          // quand elle s'ouvre au survol, sans le decaler. Dans l'application
-          // de bureau, la fenetre porte AUSSI une barre de titre en haut et une
-          // barre d'etat en bas : la barre laterale les recouvrait, mangeant le
-          // menu Fichier et le nom du compte. Vu a la capture.
-          //
-          // Le bureau la met donc dans le flux — sa zone de travail est deja
-          // une rangee flex, la barre y prend simplement sa colonne.
-          dansAtelier
-            ? 'relative shrink-0'
-            : 'fixed bottom-0 left-0 top-0 z-40',
-          ouverte ? 'w-[248px] shadow-xl' : 'w-[56px]',
-          ouverte && dansAtelier && 'absolute bottom-0 left-0 top-0 z-40',
+          'barre-laterale sans-impression hidden w-[232px] flex-col border-r border-black/20 bg-barre text-barre-texte md:flex',
+          // Fixe aux bords de la fenetre dans le navigateur ; dans le flux au
+          // bureau, ou la fenetre a aussi une barre de titre et une barre d'etat
+          // que la barre laterale ne doit pas recouvrir.
+          dansAtelier ? 'relative shrink-0' : 'fixed bottom-0 left-0 top-0 z-40',
+          // LA BARRE GLISSE (06/10/2026) : le bouton de la barre du haut la
+          // fait sortir de l'ecran et revenir ; le contenu reprend la place.
+          'transition-[transform,margin] duration-300 ease-out',
+          menuMasque && (dansAtelier ? '-ml-[232px]' : '-translate-x-full'),
         )}
+        aria-hidden={menuMasque || undefined}
+        inert={menuMasque || undefined}
       >
-        {/* --- Marque et figeage ------------------------------------------ */}
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-barre-attenue/20 px-3">
-          {/* La marque porte le retour a l'accueil : l'entete ne l'affiche plus
-              en disposition laterale, ce lien doit donc exister ici. */}
-          {/* LA MARQUE DE L'ENTREPRISE, PAS DEUX LETTRES. Un carre « GF » ne
-              dit rien a personne : le bloc de la carte de visite se reconnait
-              a 28 px, parce que son texte est horizontal et gros. C'est la
-              seule version du logo qui tienne a cette taille. */}
-          <NavLink
-            to="/"
-            end
-            title="Cockpit"
-            className="grid size-7 shrink-0 place-items-center overflow-hidden rounded-[var(--radius-sm)]"
-          >
+        {/* --- Marque ------------------------------------------------------ */}
+        <NavLink
+          to="/"
+          end
+          className="marque-nav flex h-14 shrink-0 items-center gap-2.5 px-4 transition-opacity hover:opacity-90"
+        >
+          <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[var(--radius-sm)] bg-white/95 ring-1 ring-white/10">
             <MarqueCarree className="size-7 object-contain" />
-          </NavLink>
-          {ouverte && (
-            <>
-              <NavLink to="/" end className="min-w-0 flex-1 truncate text-[13px] font-semibold">
-                Gestion Fil
-              </NavLink>
-              <button
-                type="button"
-                onClick={() => definir({ menuFige: !menuFige })}
-                title={menuFige ? 'Laisser le menu se replier' : 'Garder le menu ouvert'}
-                aria-pressed={menuFige}
-                className={cn(
-                  'grid size-6 shrink-0 place-items-center rounded-[3px] transition-colors',
-                  menuFige
-                    ? 'bg-barre-actif text-or'
-                    : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
-                )}
-              >
-                {menuFige ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
-              </button>
-            </>
-          )}
-        </div>
+          </span>
+          <span className="min-w-0 leading-tight">
+            <span className="block truncate text-[13.5px] font-semibold tracking-[-0.01em]">Gestion Fil</span>
+            <span className="block truncate text-[10.5px] text-barre-attenue">Polyfashions Carpet</span>
+          </span>
+        </NavLink>
 
-        {/* --- Les modules ------------------------------------------------- */}
-        <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-          {modules.map((m) => {
+        {/* --- Les modules, tous ouverts ----------------------------------- */}
+        <nav className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-3 pb-4 pt-2 [scrollbar-width:thin]">
+          {modules.map((m, i) => {
             const ecrans = accessibles.filter((e) => e.section === m.id)
-            const contientCourant = ecrans.some((e) => e.vers === courante?.vers)
-            const deplie = ouverte && (contientCourant || ouvert === m.id)
-
             return (
-              <div key={m.id} className="mb-0.5">
-                <button
-                  type="button"
-                  onClick={() => setOuvert(ouvert === m.id ? null : m.id)}
-                  title={ouverte ? undefined : `${m.libelle} — ${m.resume}`}
-                  className={cn(
-                    'flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-left',
-                    'text-[12.5px] transition-colors',
-                    contientCourant
-                      ? 'font-medium text-barre-texte'
-                      : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
-                  )}
+              /* UN FILET ENTRE LES GROUPES (12/10/2026) : le titre dit le
+                 groupe, le filet dit ou il s'arrete. */
+              <section
+                key={m.id}
+                aria-label={m.libelle}
+                className={cn(i > 0 && 'border-t border-white/[0.06] pt-3')}
+              >
+                <h2
+                  title={m.resume}
+                  className="titre-nav mb-1 flex items-center gap-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-barre-attenue/80"
                 >
-                  <m.Icone className="size-4 shrink-0" strokeWidth={contientCourant ? 2.2 : 1.7} />
-                  {ouverte && (
-                    <>
-                      <span className="min-w-0 flex-1 truncate">{m.libelle}</span>
-                      <ChevronRight
-                        className={cn(
-                          'size-3.5 shrink-0 transition-transform duration-150',
-                          deplie && 'rotate-90',
-                        )}
-                      />
-                    </>
-                  )}
-                  {/* Barre de presence quand la barre est repliee : c'est le
-                      seul indice de la section courante a 56 px. */}
-                  {!ouverte && contientCourant && (
-                    <span className="absolute left-0 h-6 w-[3px] rounded-r bg-primaire" />
-                  )}
-                </button>
-
-                {deplie && <div className="mt-0.5 space-y-0.5">{ecrans.map(lien)}</div>}
-              </div>
+                  {m.libelle}
+                </h2>
+                <div className="space-y-px">{ecrans.map(lien)}</div>
+              </section>
             )
           })}
         </nav>
 
-        {/* --- Pied : reglages et identite --------------------------------- */}
-        <div className="shrink-0 border-t border-barre-attenue/20 p-2">
-          {/* CHAQUE ECRAN PORTE SON PROPRE NOM ET SA PROPRE ICONE.
-              Ce pied affichait ceux du MODULE : deux ecrans de reglages s'y
-              montraient donc avec la meme icone et la meme infobulle,
-              impossibles a distinguer une fois la barre repliee. Et la
-              coloration suivait la SECTION, donc les deux s'allumaient
-              ensemble. Vu a la capture, le jour ou un second ecran est arrive. */}
-          {reglages.map((m) => {
-            const ecrans = accessibles.filter((e) => e.section === m.id)
-            return ecrans.map((e) => {
-              const courant = e.vers === courante?.vers
-              return (
-                <LienVue
-                  key={e.vers}
-                  vers={e.vers}
-                  title={ouverte ? undefined : e.libelle}
-                  className={cn(
-                    'flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-[12.5px]',
-                    'transition-colors',
-                    courant
-                      ? 'bg-barre-actif font-medium text-or'
-                      : 'text-barre-attenue hover:bg-barre-actif hover:text-barre-texte',
-                  )}
-                >
-                  <e.Icone className="size-4 shrink-0" strokeWidth={courant ? 2.2 : 1.7} />
-                  {ouverte && <span className="min-w-0 flex-1 truncate">{e.libelle}</span>}
-                </LienVue>
-              )
-            })
-          })}
-          {ouverte && (
-            <div className="px-2 pt-2 text-[10px] text-barre-attenue">
-              {moi?.login} · {moi?.role}
-            </div>
-          )}
-        </div>
+        {/* --- Pied : les reglages -----------------------------------------
+            L'identite et la deconnexion sont dans la barre du haut : les
+            repeter ici mettait deux fois le meme nom sur l'ecran. */}
+        {reglages.length > 0 && (
+          <div className="shrink-0 space-y-px border-t border-white/[0.06] px-3 py-2.5">
+            {reglages.map(lien)}
+          </div>
+        )}
       </aside>
     </>
   )

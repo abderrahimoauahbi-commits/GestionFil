@@ -51,6 +51,7 @@ export function SelecteurPeriode({
   valeur,
   surChangement,
   compact = false,
+  libelle,
 }: {
   /** Mois disponibles, tries, au format AAAA-MM. */
   mois: string[]
@@ -58,6 +59,8 @@ export function SelecteurPeriode({
   surChangement: (p: Periode) => void
   /** Disposition en colonne, pour un panneau lateral etroit. */
   compact?: boolean
+  /** Dans une barre de filtres : « Période — du » / « au », au meme niveau que les autres champs. */
+  libelle?: string
 }) {
   const raccourcis = useMemo(() => {
     if (mois.length < 2) return []
@@ -72,9 +75,9 @@ export function SelecteurPeriode({
   const actif = valeur.debut !== null || valeur.fin !== null
 
   return (
-    <div className={cn('flex gap-2', compact ? 'flex-col' : 'flex-wrap items-end')}>
+    <div className={cn('flex gap-2', compact ? 'flex-col' : libelle ? 'contents' : 'flex-wrap items-end')}>
       <label className="flex flex-col gap-0.5">
-        <span className="text-[10.5px] text-attenue-texte">Du</span>
+        <span className="text-[10.5px] text-attenue-texte">{libelle ? `${libelle} — du` : 'Du'}</span>
         <select
           value={valeur.debut ?? ''}
           onChange={(e) => surChangement({ ...valeur, debut: e.target.value || null })}
@@ -90,7 +93,7 @@ export function SelecteurPeriode({
       </label>
 
       <label className="flex flex-col gap-0.5">
-        <span className="text-[10.5px] text-attenue-texte">Au</span>
+        <span className="text-[10.5px] text-attenue-texte">{libelle ? 'au' : 'Au'}</span>
         <select
           value={valeur.fin ?? ''}
           onChange={(e) => surChangement({ ...valeur, fin: e.target.value || null })}

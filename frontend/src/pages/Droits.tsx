@@ -30,6 +30,8 @@ interface LigneDroit {
   explicite: number
   niveau_defaut: Niveau
   niveau_modele: Niveau | null
+  /** MODELE : suit le modele du role ; MANUEL : regle a la main (13/10/2026). */
+  origine: 'MODELE' | 'MANUEL' | null
   date_modification: string | null
 }
 
@@ -45,7 +47,7 @@ interface Utilisateur {
 const NIVEAUX: { valeur: Niveau; libelle: string; classe: string }[] = [
   { valeur: 'MASQUE', libelle: 'Masque', classe: 'bg-danger text-danger-texte' },
   { valeur: 'LECTURE', libelle: 'Lecture', classe: 'bg-alerte text-white' },
-  { valeur: 'ECRITURE', libelle: 'Ecriture', classe: 'bg-succes text-white' },
+  { valeur: 'ECRITURE', libelle: 'Écriture', classe: 'bg-succes text-white' },
 ]
 
 export function Droits() {
@@ -61,12 +63,12 @@ export function Droits() {
 
   const qUtilisateurs = useQuery({
     queryKey: ['utilisateurs'],
-    queryFn: () => api.get<Utilisateur[]>('/api/admin/utilisateurs'),
+    queryFn: ({ signal }) => api.get<Utilisateur[]>('/api/admin/utilisateurs', { signal }),
   })
 
   const qDroits = useQuery({
     queryKey: ['droits', id],
-    queryFn: () => api.get<LigneDroit[]>(`/api/admin/utilisateurs/${id}/droits`),
+    queryFn: ({ signal }) => api.get<LigneDroit[]>(`/api/admin/utilisateurs/${id}/droits`, { signal }),
     enabled: !!id,
   })
 
@@ -173,7 +175,7 @@ export function Droits() {
                 disabled={appliquerModele.isPending}
                 title={`Reinitialise le module ${moduleActif} depuis le modele du role ${utilisateur.code_role_user}`}
               >
-                Appliquer le modele du role
+                Appliquer le modèle du rôle
               </Bouton>
             )}
             {peutEcrire && (
@@ -203,7 +205,7 @@ export function Droits() {
       )}
 
       {/* --- Selection du module ------------------------------------------- */}
-      <div className="defilement-x mb-4 -mx-1 flex gap-1 pb-1">
+      <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x mb-4 -mx-1 flex gap-1 pb-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
         {modules.map((m) => {
           const n = Object.keys(modifs).filter((k) => k.startsWith(`${m}.`)).length
           return (
@@ -277,6 +279,11 @@ export function Droits() {
                         <span className="text-texte">{d.libelle}</span>
                         {d.sensible === 1 && <Etiquette ton="ambre">sensible</Etiquette>}
                         {!d.explicite && <Etiquette ton="gris">par defaut</Etiquette>}
+                        {d.origine === 'MANUEL' && (
+                          <Etiquette ton="bleu" title="Réglé à la main : le modèle du rôle ne le change plus">
+                            à la main
+                          </Etiquette>
+                        )}
                       </div>
                       <div className="text-xs text-attenue-texte lg:hidden">{d.champ}</div>
                     </td>

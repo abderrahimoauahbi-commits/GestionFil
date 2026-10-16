@@ -21,7 +21,7 @@
  * Rien ne part au serveur avant le clic final : en-tete, lignes et bon de
  * regularisation partent dans une seule transaction.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, Fragment } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, CheckCheck, Link2, Plus, Save, Trash2, Unlink2, X } from 'lucide-react'
@@ -42,7 +42,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Aide, Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { Aide } from '../composants/ui/surcouches'
 import { ChampReference, chercherCatalogue } from '../composants/ChampReference'
 import { cn, fmt } from '../lib/utils'
 import {
@@ -53,10 +53,12 @@ import {
   facteurVersKg,
   pourChamp,
 } from '../lib/conditionnement'
+import { AvisColisage } from '../composants/AvisColisage'
+import { AvisDerive } from '../composants/AvisDerive'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { PanneRequetes } from '../composants/PanneRequetes'
 
 const MODULE = 'RECEPTIONS'
-/** Au-dela, le controle qualite exigera une derogation motivee (controle C10). */
-const TOLERANCE_PCT = 2
 
 interface LigneAttendue extends Record<string, unknown> {
   id_ligne_bc: string
@@ -75,6 +77,18 @@ interface LigneAttendue extends Record<string, unknown> {
   suivi_lot: number
   /** References que le fournisseur peut legitimement livrer a la place. */
   equivalents_recevables: string | null
+}
+
+/** Un dossier d'import ouvert : ce qui identifie l'arrivage, aucun montant. */
+interface DossierImport {
+  id_dossier: string
+  numero: string
+  numero_bl: string | null
+  numero_dum: string | null
+  conteneurs: string | null
+  date_arrivee: string | null
+  statut: string
+  fournisseurs: string | null
 }
 
 interface RefCatalogue extends Record<string, unknown> {
@@ -155,15 +169,28 @@ export function ReceptionNouvelle() {
   const qc = useQueryClient()
   const naviguer = useNavigate()
 
+  // Le jour, en heure locale (toISOString donnerait la veille apres minuit UTC).
+  const aujourdhui = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
   const [entete, setEntete] = useState({
     code_fournisseur: '',
+    // LA DATE DU FAIT (10/10/2026) : le jour de la livraison, pas celui de la
+    // saisie ; l'entree en stock la prend. Jamais dans le futur.
+    date_reception: aujourdhui(),
     num_bon_livraison: '',
     numero_facture: '',
     transporteur: '',
     nombre_colis: '',
     poids_total_brut_kg: '',
+    // L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier qui porte la DUM et
+    // les conteneurs. Vide = achat local.
+    id_dossier_import: '',
   })
   const [lignes, setLignes] = useState<Ligne[]>([])
+  // Une pesee en cours ne se perd pas d'un clic dans le menu (audit v4).
+  const quitter = useGardeSaisie(lignes.length > 0)
   const [pointee, setPointee] = useState<string | null>(null)
   const [bonAReprendre, setBonAReprendre] = useState('')
   const [horsCommande, setHorsCommande] = useState(false)
@@ -174,14 +201,30 @@ export function ReceptionNouvelle() {
   const qFrs = useQuery({
     queryKey: ['fournisseurs-actifs'],
     queryFn: () =>
-      api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1&limite=500'),
+      api.get<{ code_fournisseur: string; nom: string; tolerance_pesee_pct?: number | null }[]>('/api/fournisseurs?actif=1&limite=500'),
   })
   const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
+  /** Un EXCEDENT au-dela exige une derogation motivee (C10) ; un manque, non. Tolerance du fournisseur (regle 14). */
+  const TOLERANCE_PCT = Number.isFinite(Number(fournisseur?.tolerance_pesee_pct)) && fournisseur?.tolerance_pesee_pct != null
+    ? Number(fournisseur.tolerance_pesee_pct)
+    : 2
 
   const qMag = useQuery({
     queryKey: ['magasins'],
-    queryFn: () => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1'),
+    queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
+
+  /* LES DOSSIERS D'IMPORT OUVERTS (ADR-003 phase A), servis par la route des
+     receptions : le magasinier dit quel conteneur il vide sans avoir a lire
+     les dossiers d'import. */
+  const qDossiersImport = useQuery({
+    queryKey: ['receptions-dossiers-import'],
+    queryFn: ({ signal }) =>
+      api.get<DossierImport[]>('/api/receptions-dossiers-import', { signal }),
+  })
+  const dossierChoisi = (qDossiersImport.data ?? []).find(
+    (d) => d.id_dossier === entete.id_dossier_import,
+  )
   const magasinDefaut = qMag.data?.[0]?.code_magasin ?? 'MP-01'
 
   /**
@@ -310,8 +353,10 @@ export function ReceptionNouvelle() {
         // Les colis attendus pour ce reste : le cariste sait tout de suite
         // combien de places il doit trouver dans l'allee.
         palettes: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).palettes),
-        bobines: pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).bobines),
-        lie: true,
+        // SUIVIE AU LOT, LA BOBINE SE COMPTE (regle 13) : pas de deduction des
+        // kilos, le champ attend le compte du quai.
+        bobines: a.suivi_lot === 1 ? '' : pourChamp(colisAttendus(a.code_reference, a.quantite_restante_kg).bobines),
+        lie: a.suivi_lot !== 1,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -365,8 +410,8 @@ export function ReceptionNouvelle() {
         unite: 'kg',
         colis: '',
         palettes: pourChamp(depuisKg(qte, ref).palettes),
-        bobines: pourChamp(depuisKg(qte, ref).bobines),
-        lie: true,
+        bobines: ref.suivi_lot === 1 ? '' : pourChamp(depuisKg(qte, ref).bobines),
+        lie: ref.suivi_lot !== 1,
         lot: '',
         fabrication: '',
         peremption: '',
@@ -469,6 +514,10 @@ export function ReceptionNouvelle() {
     (l) => Number(l.qte) > 0 && facteurVersKg(l.unite, condDe(l)) === null,
   )
   const sansLot = retenues.filter((l) => l.suivi_lot === 1 && !l.lot.trim())
+  // Les bobines comptees, exigees a la soumission au controle (regle 13).
+  const sansBobines = retenues.filter(
+    (l) => l.suivi_lot === 1 && Number(condDe(l).poids_bobine_kg) > 0 && !(Number(l.bobines) > 0),
+  )
   // Une substitution sans motif serait acceptee par la base mais illisible dans
   // six mois : c'est l'ecran qui exige l'explication, au moment ou on l'a.
   const sansMotif = retenues.filter(
@@ -488,9 +537,11 @@ export function ReceptionNouvelle() {
       ? ((kg - l.reste_kg) / l.reste_kg) * 100
       : null
   }
+  // L'EXCEDENT SEUL (08/10/2026) : un manque est une livraison partielle, le
+  // bon reste LIVRE_PARTIEL. Seul ce qui depasse la tolerance se justifie.
   const horsTolerance = (l: Ligne) => {
     const e = ecartDe(l)
-    return e != null && Math.abs(e) > TOLERANCE_PCT
+    return e != null && e > TOLERANCE_PCT
   }
   // Hors tolerance, la derogation cochee ET motivee : c'est ce que la base exige.
   const sansDerogation = retenues.filter(
@@ -513,6 +564,7 @@ export function ReceptionNouvelle() {
             ? (retenues.find((l) => l.id_bc)?.id_bc ?? undefined)
             : undefined,
         code_fournisseur: entete.code_fournisseur,
+        date_reception: entete.date_reception || undefined,
         num_bon_livraison: entete.num_bon_livraison || undefined,
         numero_facture: entete.numero_facture || undefined,
         transporteur: entete.transporteur || undefined,
@@ -520,6 +572,7 @@ export function ReceptionNouvelle() {
         poids_total_brut_kg: entete.poids_total_brut_kg
           ? Number(entete.poids_total_brut_kg)
           : undefined,
+        id_dossier_import: entete.id_dossier_import || undefined,
         lignes: retenues.map((l) => ({
           // C'est la reference REELLEMENT descendue du camion qui entre en
           // stock, pas celle du bon. Envoyer celle du bon creerait du stock sur
@@ -532,6 +585,11 @@ export function ReceptionNouvelle() {
           ...quantitePourServeur(l),
           quantite_bl_kg: l.qteBl ? Number(l.qteBl) : undefined,
           nb_colis_ligne: l.colis ? Number(l.colis) : undefined,
+          // LE COLISAGE COMPTE SUR LE QUAI part avec la pesee (10/10/2026). Il
+          // s'affichait, et se perdait a l'enregistrement : la soumission au
+          // controle refusait ensuite une ligne « sans bobines comptees ».
+          nb_palettes: Number(l.palettes) > 0 ? Number(l.palettes) : undefined,
+          nb_bobines: Number(l.bobines) > 0 ? Math.round(Number(l.bobines)) : undefined,
           code_magasin_dest: l.magasin,
           lot_fournisseur: l.lot || undefined,
           date_fabrication: l.fabrication || undefined,
@@ -566,14 +624,15 @@ export function ReceptionNouvelle() {
     <div>
       <EnTetePage
         titre="Nouvelle réception"
-        description="Reprenez un ou plusieurs bons du fournisseur, corrigez les pesees, enregistrez l'ensemble en une fois."
+        description="Reprenez un ou plusieurs bons du fournisseur, corrigez les pesées, enregistrez l'ensemble en une fois."
         actions={
-          <Bouton variante="contour" onClick={() => naviguer('/receptions')}>
+          <Bouton variante="contour" onClick={() => quitter(() => naviguer('/receptions'))}>
             <ArrowLeft />
             Retour
           </Bouton>
         }
       />
+      <PanneRequetes requetes={[['Les fournisseurs', qFrs], ['Les magasins', qMag], ['Les lignes attendues', qAtt]]} />
 
       {erreur && (
         <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">
@@ -610,6 +669,19 @@ export function ReceptionNouvelle() {
               </Selecteur>
             </div>
             <div>
+              <Etiq htmlFor="date-rec" obligatoire>
+                Date de réception
+                <Aide>Le jour où la marchandise est arrivée (un BL du samedi saisi le lundi garde le samedi). Jamais dans le futur, jamais avant le bon de commande.</Aide>
+              </Etiq>
+              <Champ
+                id="date-rec"
+                type="date"
+                max={aujourdhui()}
+                value={entete.date_reception}
+                onChange={(e) => setEntete({ ...entete, date_reception: e.target.value })}
+              />
+            </div>
+            <div>
               <Etiq htmlFor="bl">Bon de livraison</Etiq>
               <Champ
                 id="bl"
@@ -635,6 +707,40 @@ export function ReceptionNouvelle() {
                 value={entete.transporteur}
                 onChange={(e) => setEntete({ ...entete, transporteur: e.target.value })}
               />
+            </div>
+            {/* L'ARRIVAGE D'IMPORT (ADR-003 phase A). Le meme geste qu'en local
+                — peser contre des lignes de bon — avec le dossier qui porte la
+                DUM et les conteneurs rattache a l'en-tete. */}
+            <div>
+              <Etiq htmlFor="dossier-import">
+                Dossier d&rsquo;import
+                <Aide>
+                  Pour un conteneur venu de l&rsquo;&eacute;tranger : le dossier qui porte la DUM
+                  et les conteneurs. Les prix restent ceux des bons de commande repris ci-dessous.
+                </Aide>
+              </Etiq>
+              <Selecteur
+                id="dossier-import"
+                value={entete.id_dossier_import}
+                onChange={(e) => setEntete({ ...entete, id_dossier_import: e.target.value })}
+              >
+                <option value="">&mdash; Achat local &mdash;</option>
+                {(qDossiersImport.data ?? []).map((d) => (
+                  <option key={d.id_dossier} value={d.id_dossier}>
+                    {d.numero}
+                    {d.numero_bl ? ` · BL ${d.numero_bl}` : ''}
+                    {d.fournisseurs ? ` · ${d.fournisseurs}` : ''}
+                  </option>
+                ))}
+              </Selecteur>
+              {dossierChoisi && (
+                <p className="mt-1 text-[11.5px] text-attenue-texte">
+                  {dossierChoisi.numero_dum
+                    ? `DUM ${dossierChoisi.numero_dum}`
+                    : 'DUM non saisie'}
+                  {dossierChoisi.conteneurs ? ` · ${dossierChoisi.conteneurs}` : ''}
+                </p>
+              )}
             </div>
             <div>
               <Etiq htmlFor="colis">Nombre de colis</Etiq>
@@ -668,7 +774,7 @@ export function ReceptionNouvelle() {
         {!entete.code_fournisseur ? (
           <Alerte ton="info">
             Choisissez un fournisseur : ses bons en attente de livraison deviendront reprenables,
-            un par un, et leurs lignes s'ajouteront a la grille de saisie.
+            un par un, et leurs lignes s'ajouteront à la grille de saisie.
           </Alerte>
         ) : (
           <>
@@ -716,6 +822,19 @@ export function ReceptionNouvelle() {
                   </div>
                 )}
 
+                {/* SUR LA PAGE, PAS EN FENETRE (audit v5, F20) : un article de
+                    plus au document se saisit dans le document. */}
+                {horsCommande && (
+                  <PanneauHorsCommande
+                    voitPrix={voitPrix}
+                    surFermeture={() => setHorsCommande(false)}
+                    surAjout={(refs) => {
+                      ajouterHorsCommande(refs)
+                      setHorsCommande(false)
+                    }}
+                  />
+                )}
+
                 {bonsRepris.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <span className="text-[11px] text-attenue-texte">Bons repris :</span>
@@ -754,7 +873,7 @@ export function ReceptionNouvelle() {
             <Carte repliable="receptionnouvelle.3">
               <CarteEntete>
                 <CarteTitre>
-                  Lignes de la reception
+                  Lignes de la réception
                   {lignes.length > 0 && ` (${retenues.length}/${lignes.length})`}
                 </CarteTitre>
                 {lignes.length > 0 && (
@@ -772,7 +891,7 @@ export function ReceptionNouvelle() {
                       taille="sm"
                       onClick={() => setLignes((l) => l.map((x) => ({ ...x, retenue: false })))}
                     >
-                      Tout decocher
+                      Tout décocher
                     </Bouton>
                   </div>
                 )}
@@ -783,47 +902,38 @@ export function ReceptionNouvelle() {
                     Reprenez un bon de commande, ou ajoutez un article hors commande.
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    {/* La grille a une largeur PLANCHER : comprimee, le selecteur
-                        d'unite rognait « kg » en « kc ». Sous cette largeur, le
-                        conteneur defile plutot que d'ecraser les colonnes. */}
-                    <table className="w-full min-w-[1180px] text-[13px]">
+                  <div>
+                    {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026) : la ligne principale
+                        porte ce qu'on pese ; colis, lot et magasin passent sur la ligne
+                        complementaire, juste dessous. */}
+                    <table className="w-full text-[13px]">
                       <thead>
                         <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                          <th className="w-10 px-2 py-2" title="Ligne retenue pour cette reception">
+                          <th className="w-10 px-2 py-2" title="Ligne retenue pour cette réception">
                             OK
                           </th>
                           <th className="w-10 px-1 py-2 text-right">#</th>
                           <th className="px-2 py-2 text-left">Référence</th>
-                          <th className="w-32 px-2 py-2 text-left">Bon</th>
-                          <th className="w-24 px-2 py-2 text-right">Reste</th>
+                          <th className="w-36 px-2 py-2 text-left">Bon · reste</th>
                           <th className="w-28 px-2 py-2 text-right">Qte BL</th>
                           <th className="w-32 px-2 py-2 text-right">Qte pesee</th>
                           <th className="w-24 px-2 py-2 text-left">Unité</th>
-                          <th
-                            className="w-40 px-2 py-2 text-center"
-                            title="Palettes et bobines comptees : les trois se repondent"
-                          >
-                            Pal. / Bob.
-                          </th>
-                          <th className="w-24 px-2 py-2 text-right">Écart</th>
-                          <th className="w-32 px-2 py-2 text-left">Lot</th>
-                          <th className="w-28 px-2 py-2 text-left">Magasin</th>
+                          <th className="w-28 px-2 py-2 text-right">Écart</th>
                           <th className="w-10 px-1 py-2"></th>
                         </tr>
                       </thead>
                       <tbody>
                         {lignes.map((l, i) => {
                           const ecart = ecartDe(l)
-                          const hors = ecart != null && Math.abs(ecart) > TOLERANCE_PCT
+                          const hors = ecart != null && ecart > TOLERANCE_PCT
                           const manqueLot = l.retenue && l.suivi_lot === 1 && !l.lot.trim()
                           const manqueQte = l.retenue && !(Number(l.qte) > 0)
                           return (
+                            <Fragment key={l.cle}>
                             <tr
-                              key={l.cle}
                               onClick={() => setPointee(l.cle)}
                               className={cn(
-                                'cursor-pointer border-b border-bordure/60 align-middle',
+                                'cursor-pointer align-middle',
                                 pointee === l.cle && 'bg-primaire/5',
                                 !l.retenue && 'opacity-45',
                               )}
@@ -851,7 +961,7 @@ export function ReceptionNouvelle() {
                                       'h-7',
                                       l.code_recu !== l.code_reference && 'border-alerte',
                                     )}
-                                    aria-label="Référence reellement recue"
+                                    aria-label="Référence reellement reçue"
                                   >
                                     <option value={l.code_reference}>{l.code_reference}</option>
                                     {l.equivalents.map((e) => (
@@ -877,6 +987,9 @@ export function ReceptionNouvelle() {
                                 {l.numero_bc ? (
                                   <div>
                                     <div className="tabular-nums text-[12px]">{l.numero_bc}</div>
+                                    <div className="text-[11px] tabular-nums text-attenue-texte">
+                                      reste {l.reste_kg == null ? '—' : fmt.nombre(l.reste_kg, 0)} kg
+                                    </div>
                                     {(l.retard_jours ?? 0) > 0 && (
                                       <div className="text-[11px] text-danger">
                                         {l.retard_jours} j de retard
@@ -886,9 +999,6 @@ export function ReceptionNouvelle() {
                                 ) : (
                                   <Badge ton="alerte">hors commande</Badge>
                                 )}
-                              </td>
-                              <td className="px-2 py-1 text-right tabular-nums text-attenue-texte">
-                                {l.reste_kg == null ? '—' : fmt.nombre(l.reste_kg, 0)}
                               </td>
                               <td className="px-2 py-1">
                                 <Champ
@@ -942,55 +1052,6 @@ export function ReceptionNouvelle() {
                                   ))}
                                 </Selecteur>
                               </td>
-                              <td className="px-2 py-1">
-                                <div className="flex items-center gap-1">
-                                  <Champ
-                                    type="number"
-                                    min="0"
-                                    value={l.palettes}
-                                    onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="h-7 w-14 text-right tabular-nums"
-                                    placeholder="pal."
-                                    aria-label="Nombre de palettes"
-                                  />
-                                  <Champ
-                                    type="number"
-                                    min="0"
-                                    value={l.bobines}
-                                    onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="h-7 w-16 text-right tabular-nums"
-                                    placeholder="bob."
-                                    aria-label="Nombre de bobines"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      maj(l.cle, 'lie', !l.lie)
-                                    }}
-                                    title={
-                                      l.lie
-                                        ? 'Les trois se repondent — cliquez pour saisir chacun separement'
-                                        : 'Calcul detache — cliquez pour relier les trois'
-                                    }
-                                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                    className={cn(
-                                      'rounded-[var(--radius)] p-1',
-                                      l.lie
-                                        ? 'text-primaire hover:bg-primaire/10'
-                                        : 'text-alerte hover:bg-alerte/10',
-                                    )}
-                                  >
-                                    {l.lie ? (
-                                      <Link2 className="size-3.5" />
-                                    ) : (
-                                      <Unlink2 className="size-3.5" />
-                                    )}
-                                  </button>
-                                </div>
-                              </td>
                               <td
                                 className={cn(
                                   'px-2 py-1 text-right tabular-nums',
@@ -1036,34 +1097,6 @@ export function ReceptionNouvelle() {
                                   </div>
                                 )}
                               </td>
-                              <td className="px-2 py-1">
-                                <div className="flex items-center gap-1">
-                                  <Champ
-                                    value={l.lot}
-                                    onChange={(e) => maj(l.cle, 'lot', e.target.value)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={cn('h-7', manqueLot && 'border-danger')}
-                                    placeholder={l.suivi_lot === 1 ? 'vide : lot interne' : ''}
-                                    title={l.suivi_lot === 1 ? 'Laissé vide, un lot interne sera généré à la validation' : undefined}
-                                    aria-label="Lot fournisseur"
-                                  />
-                                </div>
-                              </td>
-                              <td className="px-2 py-1">
-                                <Selecteur
-                                  value={l.magasin}
-                                  onChange={(e) => maj(l.cle, 'magasin', e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="h-7"
-                                  aria-label="Magasin destinataire"
-                                >
-                                  {(qMag.data ?? []).map((m) => (
-                                    <option key={m.code_magasin} value={m.code_magasin}>
-                                      {m.code_magasin}
-                                    </option>
-                                  ))}
-                                </Selecteur>
-                              </td>
                               <td className="px-1 py-1">
                                 <Bouton
                                   variante="discret"
@@ -1081,6 +1114,112 @@ export function ReceptionNouvelle() {
                                 </Bouton>
                               </td>
                             </tr>
+                          {/* LA LIGNE COMPLEMENTAIRE : colis comptes, lot, magasin. */}
+                          <tr
+                            onClick={() => setPointee(l.cle)}
+                            className={cn(
+                              'cursor-pointer border-b border-bordure/60',
+                              pointee === l.cle && 'bg-primaire/5',
+                              !l.retenue && 'opacity-45',
+                            )}
+                          >
+                            <td colSpan={2} />
+                            <td colSpan={6} className="px-2 pb-2">
+                              <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Palettes / bobines</span>
+
+                                <div className="flex items-center gap-1">
+                                  <Champ
+                                    type="number"
+                                    min="0"
+                                    value={l.palettes}
+                                    onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="h-7 w-14 text-right tabular-nums"
+                                    placeholder="pal."
+                                    aria-label="Nombre de palettes"
+                                  />
+                                  <Champ
+                                    type="number"
+                                    min="0"
+                                    value={l.bobines}
+                                    onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="h-7 w-16 text-right tabular-nums"
+                                    placeholder="bob."
+                                    aria-label="Nombre de bobines"
+                                  />
+                                  <button
+                                    type="button"
+                                    hidden={l.suivi_lot === 1}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      maj(l.cle, 'lie', !l.lie)
+                                    }}
+                                    title={
+                                      l.lie
+                                        ? 'Les trois se repondent — cliquez pour saisir chacun separement'
+                                        : 'Calcul detache — cliquez pour relier les trois'
+                                    }
+                                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                                    className={cn(
+                                      'rounded-[var(--radius)] p-1',
+                                      l.lie
+                                        ? 'text-primaire hover:bg-primaire/10'
+                                        : 'text-alerte hover:bg-alerte/10',
+                                    )}
+                                  >
+                                    {l.lie ? (
+                                      <Link2 className="size-3.5" />
+                                    ) : (
+                                      <Unlink2 className="size-3.5" />
+                                    )}
+                                  </button>
+                                </div>
+                                <AvisColisage className="max-w-[16rem]" kg={kgDe(l)} bobines={l.bobines}
+                                  palettes={l.palettes} cond={condDe(l)} />
+                                {l.suivi_lot === 1 && (
+                                  <AvisDerive className="max-w-[16rem]" kg={kgDe(l)} bobines={l.bobines} cond={condDe(l)} />
+                                )}
+                                </div>
+                                <div className="flex w-44 flex-col gap-0.5">
+                                  <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Lot</span>
+
+                                <div className="flex items-center gap-1">
+                                  <Champ
+                                    value={l.lot}
+                                    onChange={(e) => maj(l.cle, 'lot', e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={cn('h-7', manqueLot && 'border-danger')}
+                                    placeholder={l.suivi_lot === 1 ? 'vide : lot interne' : ''}
+                                    title={l.suivi_lot === 1 ? 'Laissé vide, un lot interne sera généré à la validation' : undefined}
+                                    aria-label="Lot fournisseur"
+                                  />
+                                </div>
+                                </div>
+                                <div className="flex w-36 flex-col gap-0.5">
+                                  <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Magasin</span>
+
+                                <Selecteur
+                                  value={l.magasin}
+                                  onChange={(e) => maj(l.cle, 'magasin', e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="h-7"
+                                  aria-label="Magasin destinataire"
+                                >
+                                  {(qMag.data ?? []).map((m) => (
+                                    <option key={m.code_magasin} value={m.code_magasin}>
+                                      {m.code_magasin}
+                                    </option>
+                                  ))}
+                                </Selecteur>
+                                </div>
+                              </div>
+                            </td>
+                            <td />
+                          </tr>
+                            </Fragment>
                           )
                         })}
                       </tbody>
@@ -1124,6 +1263,11 @@ export function ReceptionNouvelle() {
                 {sansQte.length > 0 && (
                   <span className="text-danger"> — quantite manquante sur {sansQte.length}</span>
                 )}
+                {sansBobines.length > 0 && (
+                  <span className="text-alerte">
+                    {' '}— {sansBobines.length} ligne(s) suivies au lot sans bobines comptées : à compter avant la soumission au contrôle
+                  </span>
+                )}
                 {sansLot.length > 0 && (
                   <span className="text-attenue-texte">
                     {' '}
@@ -1140,7 +1284,7 @@ export function ReceptionNouvelle() {
                 {sansDerogation.length > 0 && (
                   <span className="text-danger">
                     {' '}
-                    — écart hors tolérance ({TOLERANCE_PCT} %) : cochez « Dérogation » et donnez
+                    — excédent au-delà de la tolérance ({TOLERANCE_PCT} %) : cochez « Dérogation » et donnez
                     le motif sur {sansDerogation.map((l) => l.code_recu).join(', ')}
                   </span>
                 )}
@@ -1156,7 +1300,7 @@ export function ReceptionNouvelle() {
             )}
           </span>
           <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={() => naviguer('/receptions')}>
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/receptions'))}>
               Annuler
             </Bouton>
             <Bouton
@@ -1168,22 +1312,12 @@ export function ReceptionNouvelle() {
               disabled={!pret || sansDerogation.length > 0 || !droits.peutEcrire}
             >
               <Save />
-              Enregistrer la reception
+              Enregistrer la réception
             </Bouton>
           </div>
         </div>
       )}
 
-      {horsCommande && (
-        <PanneauHorsCommande
-          voitPrix={voitPrix}
-          surFermeture={() => setHorsCommande(false)}
-          surAjout={(refs) => {
-            ajouterHorsCommande(refs)
-            setHorsCommande(false)
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -1258,8 +1392,8 @@ function PanneauDetail({
         {onglet === 'quantite' && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq>Quantité annoncée au BL (kg)</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-1">Quantité annoncée au BL (kg)</Etiq>
+              <Champ id="ch-receptionnouvelle-1"
                 type="number"
                 step="any"
                 min="0"
@@ -1275,8 +1409,8 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq obligatoire>Quantité pesée (kg)</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-receptionnouvelle-2">Quantité pesée (kg)</Etiq>
+              <Champ id="ch-receptionnouvelle-2"
                 type="number"
                 step="any"
                 min="0.0001"
@@ -1297,11 +1431,11 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq>
+              <Etiq htmlFor="ch-receptionnouvelle-3">
                 Unité de saisie
                 <Aide>Le poids ne change pas : seule son expression change.</Aide>
               </Etiq>
-              <Selecteur value={ligne.unite} onChange={(e) => majUnite(ligne.cle, e.target.value)}>
+              <Selecteur id="ch-receptionnouvelle-3" value={ligne.unite} onChange={(e) => majUnite(ligne.cle, e.target.value)}>
                 <option value="kg">kg</option>
                 {unites.map((u) => (
                   <option key={u} value={u}>
@@ -1311,8 +1445,8 @@ function PanneauDetail({
               </Selecteur>
             </div>
             <div>
-              <Etiq>Nombre de colis</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-4">Nombre de colis</Etiq>
+              <Champ id="ch-receptionnouvelle-4"
                 type="number"
                 min="1"
                 value={ligne.colis}
@@ -1330,8 +1464,8 @@ function PanneauDetail({
             <div className="sm:col-span-2 lg:col-span-4">
               <div className="flex flex-wrap items-end gap-3 rounded-[var(--radius)] border border-bordure bg-fond/40 p-3">
                 <div className="w-28">
-                  <Etiq>Palettes</Etiq>
-                  <Champ
+                  <Etiq htmlFor="ch-receptionnouvelle-5">Palettes</Etiq>
+                  <Champ id="ch-receptionnouvelle-5"
                     type="number"
                     min="0"
                     value={ligne.palettes}
@@ -1340,8 +1474,8 @@ function PanneauDetail({
                   />
                 </div>
                 <div className="w-28">
-                  <Etiq>Bobines</Etiq>
-                  <Champ
+                  <Etiq htmlFor="ch-receptionnouvelle-6">Bobines</Etiq>
+                  <Champ id="ch-receptionnouvelle-6"
                     type="number"
                     min="0"
                     value={ligne.bobines}
@@ -1351,6 +1485,7 @@ function PanneauDetail({
                 </div>
                 <button
                   type="button"
+                  hidden={ligne.suivi_lot === 1}
                   onClick={() => maj(ligne.cle, 'lie', !ligne.lie)}
                   aria-label={ligne.lie ? 'Détacher le calcul' : 'Relier le calcul'}
                   className={cn(
@@ -1376,8 +1511,8 @@ function PanneauDetail({
         {onglet === 'stockage' && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <Etiq obligatoire={ligne.suivi_lot === 1}>Lot fournisseur</Etiq>
-              <Champ
+              <Etiq obligatoire={ligne.suivi_lot === 1} htmlFor="ch-receptionnouvelle-7">Lot fournisseur</Etiq>
+              <Champ id="ch-receptionnouvelle-7"
                 value={ligne.lot}
                 onChange={(e) => maj(ligne.cle, 'lot', e.target.value)}
                 className={cn(ligne.suivi_lot === 1 && !ligne.lot.trim() && 'border-danger')}
@@ -1391,8 +1526,8 @@ function PanneauDetail({
               )}
             </div>
             <div>
-              <Etiq>Magasin destinataire</Etiq>
-              <Selecteur
+              <Etiq htmlFor="ch-receptionnouvelle-8">Magasin destinataire</Etiq>
+              <Selecteur id="ch-receptionnouvelle-8"
                 value={ligne.magasin}
                 onChange={(e) => maj(ligne.cle, 'magasin', e.target.value)}
               >
@@ -1404,16 +1539,16 @@ function PanneauDetail({
               </Selecteur>
             </div>
             <div>
-              <Etiq>Date de fabrication</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-9">Date de fabrication</Etiq>
+              <Champ id="ch-receptionnouvelle-9"
                 type="date"
                 value={ligne.fabrication}
                 onChange={(e) => maj(ligne.cle, 'fabrication', e.target.value)}
               />
             </div>
             <div>
-              <Etiq>Date de peremption</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-10">Date de peremption</Etiq>
+              <Champ id="ch-receptionnouvelle-10"
                 type="date"
                 value={ligne.peremption}
                 onChange={(e) => maj(ligne.cle, 'peremption', e.target.value)}
@@ -1434,24 +1569,24 @@ function PanneauDetail({
               }
             />
             <Info
-              libelle="Reste a livrer"
+              libelle="Reste à livrer"
               valeur={ligne.reste_kg == null ? '—' : `${fmt.nombre(ligne.reste_kg, 0)} kg`}
             />
             {voitPrix && (
               <div>
-                <Etiq>Prix ({ligne.devise ?? 'devise'}/kg)</Etiq>
+                <Etiq htmlFor="ch-receptionnouvelle-11">Prix ({ligne.devise ?? 'devise'}/kg)</Etiq>
                 {ligne.id_ligne_bc ? (
                   <>
                     <div className="mt-1 text-[15px] font-medium tabular-nums">
                       {ligne.prix ? fmt.nombre(Number(ligne.prix), 4) : '—'}
                     </div>
                     <p className="mt-1 text-[11px] text-attenue-texte">
-                      Prix engage du bon : il fait foi, la reception ne le change pas.
+                      Prix engage du bon : il fait foi, la réception ne le change pas.
                     </p>
                   </>
                 ) : (
                   <>
-                    <Champ
+                    <Champ id="ch-receptionnouvelle-11"
                       type="number"
                       step="any"
                       min="0"
@@ -1460,7 +1595,7 @@ function PanneauDetail({
                       className="text-right tabular-nums"
                     />
                     <p className="mt-1 text-[11px] text-attenue-texte">
-                      Portera le bon de regularisation. A defaut, le prix catalogue.
+                      Portera le bon de régularisation. A défaut, le prix catalogue.
                     </p>
                   </>
                 )}
@@ -1470,7 +1605,7 @@ function PanneauDetail({
               <div className="sm:col-span-2 lg:col-span-4">
                 <Alerte ton="alerte">
                   Aucune commande derriere cette ligne. Un bon sera cree en brouillon a
-                  l'enregistrement, et devra etre valide puis envoye avant le controle qualite.
+                  l'enregistrement, et devra être validé puis envoyé avant le controle qualité.
                 </Alerte>
               </div>
             )}
@@ -1480,8 +1615,8 @@ function PanneauDetail({
         {onglet === 'qualite' && (
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Etiq>Statut qualité</Etiq>
-              <Selecteur
+              <Etiq htmlFor="ch-receptionnouvelle-12">Statut qualité</Etiq>
+              <Selecteur id="ch-receptionnouvelle-12"
                 value={ligne.qualite}
                 onChange={(e) => maj(ligne.cle, 'qualite', e.target.value)}
               >
@@ -1491,13 +1626,13 @@ function PanneauDetail({
               </Selecteur>
               {ligne.qualite !== 'CONFORME' && (
                 <p className="mt-1 text-[11px] text-alerte">
-                  Une ligne non conforme doit etre dirigee vers un magasin de quarantaine.
+                  Une ligne non conforme doit être dirigee vers un magasin de quarantaine.
                 </p>
               )}
             </div>
             <div>
-              <Etiq>Observations</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-receptionnouvelle-13">Observations</Etiq>
+              <Champ id="ch-receptionnouvelle-13"
                 value={ligne.notes}
                 onChange={(e) => maj(ligne.cle, 'notes', e.target.value)}
                 placeholder="Emballage abime, couleur douteuse…"
@@ -1508,11 +1643,11 @@ function PanneauDetail({
                 <Alerte ton="alerte" titre="Substitution">
                   Le fournisseur livre <strong>{ligne.code_recu}</strong> a la place de{' '}
                   <strong>{ligne.code_reference}</strong>. Les deux appartiennent au meme groupe
-                  d'equivalence. La ligne de commande sera soldee en kg, et l'ecart restera trace.
+                  d'équivalence. La ligne de commande sera soldee en kg, et l'ecart restera trace.
                 </Alerte>
                 <div className="mt-2">
-                  <Etiq obligatoire>Motif de la substitution</Etiq>
-                  <Champ
+                  <Etiq obligatoire htmlFor="ch-receptionnouvelle-14">Motif de la substitution</Etiq>
+                  <Champ id="ch-receptionnouvelle-14"
                     value={ligne.motif_substitution}
                     onChange={(e) => maj(ligne.cle, 'motif_substitution', e.target.value)}
                     placeholder="Rupture chez le fournisseur, lot disponible…"
@@ -1579,12 +1714,13 @@ function PanneauHorsCommande({
   const retenues = choisies.filter((c) => Number(c.qte) > 0)
 
   return (
-    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
-      <DialogueContenu
-        cote="droite"
-        titre="Article hors commande"
-        description="La marchandise est au quai sans bon derriere elle. Saisissez-la : le bon manquant sera cree."
-      >
+    <div className="rounded-[var(--radius)] border border-primaire/40 bg-primaire/[0.04] p-3">
+        <div className="mb-2">
+          <div className="text-[13px] font-semibold">Article hors commande</div>
+          <p className="m-0 text-[12px] text-attenue-texte">
+            La marchandise est au quai sans bon derrière elle. Saisissez-la : le bon manquant sera créé.
+          </p>
+        </div>
         <ChampReference
           valeur=""
           surChoix={(r) =>
@@ -1653,7 +1789,7 @@ function PanneauHorsCommande({
           ))}
         </div>
 
-        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-bordure pt-3">
           <span className="text-[11px] text-attenue-texte">
             {retenues.length} référence(s) — ajoutées au document, rien n’est enregistré
           </span>
@@ -1672,7 +1808,6 @@ function PanneauHorsCommande({
             </Bouton>
           </div>
         </div>
-      </DialogueContenu>
-    </Dialogue>
+    </div>
   )
 }

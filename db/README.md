@@ -17,10 +17,43 @@ python charger.py --production             # comptes réels, référentiel à im
 ```
 
 Le chargeur joue les fichiers PAR PASSES : les vues se citent en avant, et PostgreSQL
-résout à la création. Une migration s'applique ensuite à part :
+résout à la création.
+
+### Une base neuve et complète : le socle
+
+Les fichiers 001 à 018 décrivent le schéma d'origine ; les lots, les machines, l'import et les
+règles d'octobre n'existent qu'en migrations. Et l'historique des migrations **ne se rejoue pas**
+sur une base vide : plusieurs chargent les données réelles de septembre (catalogue du 16/09, stock
+initial du 18/09, parc machine du 20/09), et les suivantes en dépendent — vingt échecs sur
+quatre-vingt-quinze au 08/10/2026.
+
+Le **socle** (`socle/`) est donc **généré** depuis une copie entièrement migrée :
+`schema.sql` (pg_dump du schéma, propriétaires compris), `configuration.sql` (droits, champs,
+paramètres, types et motifs, transitions, devises, catégories, magasins) et `inclus.txt` (les
+migrations comprises, avec leur empreinte).
 
 ```powershell
-psql -d gestionfil -v ON_ERROR_STOP=1 -f migrations\2026-09-17i_tableau_de_bord.sql
+python charger.py --base neuve --socle --comptes   # socle + comptes nominatifs + entreprise
+python migrer.py --base neuve                      # les migrations postérieures au socle
+python socle.py --depuis gestionfil_p1             # régénérer après de nouvelles migrations
+```
+
+Le schéma d'une base bâtie ainsi est identique à celui de la copie dont le socle vient (vérifié le
+08/10/2026 en comparant les `pg_dump --schema-only` : seules diffèrent les étiquettes de colonnes
+que PostgreSQL ajoute en recréant une vue). Le serveur y démarre. Le métier vient du classeur
+(`gestionfil-import`).
+
+### Le journal des migrations
+
+Depuis `2026-10-08c_journal_migrations.sql`, la table `migration_appliquee` inscrit chaque
+migration (fichier, empreinte SHA-256, mode `JOUEE`, `MARQUEE` ou `SOCLE`). `migrer.py` y lit ce qui
+reste à jouer, s'arrête au premier échec, et refuse une base sans journal plutôt que de tout
+rejouer :
+
+```powershell
+python migrer.py --base gestionfil_essai --marquer-jusqua 2026-10-08c_journal_migrations.sql
+python migrer.py --base gestionfil_essai --lister
+python migrer.py --base gestionfil_essai
 ```
 
 ---
@@ -45,7 +78,7 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37
+├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C54 : migrations)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -53,7 +86,9 @@ db/pg/
 └── charger.py                    chargement par passes
 ```
 
-**51 tables · 36 vues · 51 triggers · 54 index**
+**51 tables · 36 vues · 51 triggers · 54 index** dans les fichiers d'origine ; une base migrée au
+09/10/2026 en compte **96 tables · 132 vues · 242 déclencheurs · 368 index** (le socle en est la
+photographie).
 
 ---
 
@@ -116,6 +151,31 @@ C01–C14 traduisent les contrôles du CDC en requêtes exécutables. C15–C37 
 - **C19** devise catalogue sans taux en vigueur
 - **C20** référence classe A mono-source
 
+C38–C42 (machines) viennent de la migration du 05/10/2026 ; **C43** (colisage incohérent sur un
+document d'achat ouvert, signalé sans bloquer) et **C44** (plus d'un inventaire en cours sur un
+magasin — l'index qui l'interdit n'a pas pu être posé) des migrations du 08/10/2026. **C10** lit
+aussi les réceptions d'import depuis le 08/10 (excédent au-delà de la tolérance du fournisseur sans
+dérogation).
+
+Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal** (ATTENTION), jamais en blocage :
+
+| Code | Ce qu'il signale | Migration |
+|---|---|---|
+| C45 | ligne de bon reçue à la fois en local et à l'import — **dossiers en circuit `FACTURE` seulement** (ADR-003 phase C : pour un dossier basculé en `BON`, ce lien est le chaînon qui relie ses frais à la marchandise) | 08f, recadré par 2026-10-14b |
+| C46 | champ sensible sans ligne dans le modèle de droits d'un rôle | 09a |
+| C47 | fil prêté à une autre usine, non rendu dans le délai (`P_PretJoursAlerte`) | 09d |
+| C48 | chargement : fil chargé déjà consommé, à relire | 09e |
+| C49 | proposition d'achat estimée surtout sur la prolongation du plan | 09k |
+| C50 | moyenne du plan éloignée de plus de 50 % de la consommation réelle | 09k |
+| C51 | référence suivie au lot avec du fil sans lot, à identifier | 09s |
+| C52 | réception validée dont une entrée est contre-passée | 09u |
+| C53 | paiement d'import daté avant le dédouanement (jamais d'acompte, A11) | 10a |
+| C54 | transfert en route depuis plus de `P_TransitJoursAlerte` jours (7) | 10b |
+
+C28 dit désormais ce que fait `P_EncoursRetardInclus` (comptée ou retirée de la couverture) ; C31,
+C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lisent l'état des machines
+(`machine_etat`). Le banc vérifie la liste exacte C01–C54.
+
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 
 ---
@@ -150,4 +210,5 @@ C01–C14 traduisent les contrôles du CDC en requêtes exécutables. C15–C37 
 ## Documentation
 
 - [ADR-001 — Décisions fondatrices](../docs/ADR-001-decisions-fondatrices.md)
+- [ADR-002 — Les 18 règles de gestion du 08/10/2026](../docs/ADR-002-regles-de-gestion-2026-10.md)
 - [Écarts au cahier des charges](../docs/ecarts-cahier-des-charges.md)

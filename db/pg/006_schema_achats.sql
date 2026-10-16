@@ -47,6 +47,14 @@ CREATE TABLE bon_commande (
     conditions_paiement text,
     notes               text,
 
+    -- L'ARRIVAGE QUI A FAIT NAITRE CE BON (ADR-003 D2, 14/10/2026). Plus de
+    -- reception « hors commande » : une marchandise arrivee sans commande fait
+    -- creer le bon qui manque, en BROUILLON, et la reception ne se validera
+    -- qu'une fois ce bon regularise. Un seul bon de regularisation par
+    -- arrivage : les lignes suivantes du meme camion s'y ajoutent.
+    -- La cle etrangere est posee par 007 (reception nait apres).
+    id_reception_regularisee text,
+
     id_utilisateur_creation   text NOT NULL REFERENCES utilisateur(id_utilisateur),
     id_utilisateur_validation text REFERENCES utilisateur(id_utilisateur),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
@@ -170,6 +178,10 @@ CREATE TABLE ligne_bc (
     CONSTRAINT ligne_bc_conversion_coherente
         CHECK (type_ligne <> 'MARCHANDISE'
             OR abs(quantite_commandee_kg - quantite_commandee_unite * facteur_kg) < 0.001),
+    -- LE COLISAGE TEL QUE SAISI (migration 2026-09-24) : NULL pour une ligne
+    -- anterieure, on calcule.
+    nb_palettes_saisi   numeric(18,2) CHECK (nb_palettes_saisi IS NULL OR nb_palettes_saisi >= 0),
+    nb_bobines_saisi    bigint CHECK (nb_bobines_saisi IS NULL OR nb_bobines_saisi >= 0),
     -- On ne peut pas recevoir plus que commande sans avenant
     CHECK (quantite_recue_kg <= quantite_commandee_kg + 0.001)
 );
@@ -190,6 +202,8 @@ CREATE TABLE plan_achat (
     id_proposition      text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     date_generation     text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    -- Quand la proposition a ete ecartee : elle expire au bout de P_DureeEcartJours (regle 17).
+    date_ecartee        text,
     id_plan             text    REFERENCES plan_production(id_plan),
     code_reference      text    NOT NULL REFERENCES reference(code_reference),
 

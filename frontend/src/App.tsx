@@ -1,93 +1,107 @@
+import { lazy } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { Verrou } from './auth/Verrou'
+import { DoubleAuthObligatoire } from './auth/DoubleAuthObligatoire'
 import { FournisseurTheme, useTheme } from './composants/Theme'
 import { FournisseurApparence } from './composants/Apparence'
 import { Coquille } from './composants/Coquille'
 import { Alerte, Chargement } from './composants/ui/base'
 import { FournisseurInfobulle } from './composants/ui/surcouches'
 import { Connexion } from './pages/Connexion'
-import { Cockpit } from './pages/Cockpit'
-import { HistoriquePrix } from './pages/HistoriquePrix'
-import { BonCommandeEtat } from './pages/BonCommandeEtat'
-import { BonMouvement } from './pages/BonMouvement'
-import { Telecharger } from './pages/Telecharger'
-import { GuideUtilisateur } from './pages/GuideUtilisateur'
-import { Chat } from './pages/Chat'
-import { Controles } from './pages/Controles'
-import { Etats } from './pages/Etats'
-import { EtatManuel } from './pages/EtatManuel'
-import { FeuilleComptage } from './pages/FeuilleComptage'
-import {
-  EtatCatalogue,
-  EtatCategories,
-  EtatComptage,
-  EtatCouleur,
-  EtatCouleurs,
-  EtatFournisseurs,
-  EtatMouvements,
-  EtatPlanAchat,
-  EtatStockImprime,
-  EtatLots,
-} from './pages/EtatsListes'
-import {
-  EtatBesoins,
-  EtatInventaire,
-  EtatPlanProduction,
-  EtatReception,
-} from './pages/EtatsDocuments'
-import { AnalyseAbcXyz } from './pages/AnalyseAbcXyz'
-import { CoutRevient } from './pages/CoutRevient'
-import { RapportsFinanciers } from './pages/RapportsFinanciers'
-import { QualiteEtat } from './pages/QualiteEtat'
-import { MatricePrix } from './pages/MatricePrix'
-import { Statistiques } from './pages/Statistiques'
-import { Equivalences } from './pages/Equivalences'
-import { Configuration } from './pages/Configuration'
-import { TransfertNouveau } from './pages/TransfertNouveau'
-import { BonTransfert } from './pages/BonTransfert'
-import { Catalogue } from './pages/Catalogue'
-import { MouvementNouveau } from './pages/MouvementNouveau'
-import { CompleterCatalogue } from './pages/CompleterCatalogue'
-import { Fournisseurs } from './pages/Fournisseurs'
-import { Referentiels } from './pages/Referentiels'
-import { Stock } from './pages/Stock'
-import { Machines } from './pages/Machines'
-import { ParcMachines } from './pages/ParcMachines'
-import { Accueil } from './pages/Accueil'
-import { Mouvements } from './pages/Mouvements'
-import { Transferts } from './pages/Transferts'
-import { Inventaires } from './pages/Inventaires'
-import { Qualites } from './pages/Qualites'
-import { Recettes } from './pages/Recettes'
-import { Plans } from './pages/Plans'
-import { Besoins } from './pages/Besoins'
-import { BonsCommande } from './pages/BonsCommande'
-import { BonCommande } from './pages/BonCommande'
-import { AssistantImport } from './pages/import/AssistantImport'
-import { LecturePiece } from './pages/import/LecturePiece'
-import { DossiersImport } from './pages/import/DossiersImport'
-import { DossierImport } from './pages/import/DossierImport'
-import { FactureImport } from './pages/import/FactureImport'
-import { ReceptionImport } from './pages/import/ReceptionImport'
-import { ReceptionsImport } from './pages/import/ReceptionsImport'
-import { BonCommandeNouveau } from './pages/BonCommandeNouveau'
-import { Receptions } from './pages/Receptions'
-import { Reception } from './pages/Reception'
-import { ReceptionNouvelle } from './pages/ReceptionNouvelle'
-import { PlanAchat } from './pages/PlanAchat'
-import { Utilisateurs } from './pages/Utilisateurs'
-import { Droits } from './pages/Droits'
-import { Valorisation } from './pages/Valorisation'
-import { EtatStock } from './pages/EtatStock'
-import { Lots } from './pages/lots/Lots'
-import { FicheLot } from './pages/lots/FicheLot'
-import { Autorisations } from './pages/lots/Autorisations'
-import { Assistant } from './pages/Assistant'
-import { Audit } from './pages/Audit'
+const HistoriquePrix = lazy(() => import('./pages/HistoriquePrix').then((m) => ({ default: m.HistoriquePrix })))
+const BonCommandeEtat = lazy(() => import('./pages/BonCommandeEtat').then((m) => ({ default: m.BonCommandeEtat })))
+const BonMouvement = lazy(() => import('./pages/BonMouvement').then((m) => ({ default: m.BonMouvement })))
+const Telecharger = lazy(() => import('./pages/Telecharger').then((m) => ({ default: m.Telecharger })))
+const GuideUtilisateur = lazy(() => import('./pages/GuideUtilisateur').then((m) => ({ default: m.GuideUtilisateur })))
+const Chat = lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })))
+const Controles = lazy(() => import('./pages/Controles').then((m) => ({ default: m.Controles })))
+const Etats = lazy(() => import('./pages/Etats').then((m) => ({ default: m.Etats })))
+const EtatManuel = lazy(() => import('./pages/EtatManuel').then((m) => ({ default: m.EtatManuel })))
+const FeuilleComptage = lazy(() => import('./pages/FeuilleComptage').then((m) => ({ default: m.FeuilleComptage })))
+const EtatCatalogue = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCatalogue })))
+const EtatCategories = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCategories })))
+const EtatComptage = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatComptage })))
+const EtatCouleur = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCouleur })))
+const EtatCouleurs = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatCouleurs })))
+const EtatFournisseurs = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatFournisseurs })))
+const EtatMouvements = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatMouvements })))
+const EtatPlanAchat = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatPlanAchat })))
+const EtatStockImprime = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatStockImprime })))
+const EtatLots = lazy(() => import('./pages/EtatsListes').then((m) => ({ default: m.EtatLots })))
+const EtatBesoins = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatBesoins })))
+const EtatInventaire = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatInventaire })))
+const EtatPlanProduction = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatPlanProduction })))
+const EtatReception = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatReception })))
+const AnalyseAbcXyz = lazy(() => import('./pages/AnalyseAbcXyz').then((m) => ({ default: m.AnalyseAbcXyz })))
+const VueEnsemble = lazy(() => import('./pages/tableau-de-bord/VueEnsemble').then((m) => ({ default: m.VueEnsemble })))
+const PageTableauDeBord = lazy(() => import('./pages/tableau-de-bord/Page').then((m) => ({ default: m.PageTableauDeBord })))
+const CoutRevient = lazy(() => import('./pages/CoutRevient').then((m) => ({ default: m.CoutRevient })))
+const RapportsFinanciers = lazy(() => import('./pages/RapportsFinanciers').then((m) => ({ default: m.RapportsFinanciers })))
+const QualiteEtat = lazy(() => import('./pages/QualiteEtat').then((m) => ({ default: m.QualiteEtat })))
+const MatricePrix = lazy(() => import('./pages/MatricePrix').then((m) => ({ default: m.MatricePrix })))
+const Statistiques = lazy(() => import('./pages/Statistiques').then((m) => ({ default: m.Statistiques })))
+const Equivalences = lazy(() => import('./pages/Equivalences').then((m) => ({ default: m.Equivalences })))
+const Configuration = lazy(() => import('./pages/Configuration').then((m) => ({ default: m.Configuration })))
+const TransfertNouveau = lazy(() => import('./pages/TransfertNouveau').then((m) => ({ default: m.TransfertNouveau })))
+const BonTransfert = lazy(() => import('./pages/BonTransfert').then((m) => ({ default: m.BonTransfert })))
+const Catalogue = lazy(() => import('./pages/Catalogue').then((m) => ({ default: m.Catalogue })))
+const MouvementNouveau = lazy(() => import('./pages/MouvementNouveau').then((m) => ({ default: m.MouvementNouveau })))
+const CompleterCatalogue = lazy(() => import('./pages/CompleterCatalogue').then((m) => ({ default: m.CompleterCatalogue })))
+const Fournisseurs = lazy(() => import('./pages/Fournisseurs').then((m) => ({ default: m.Fournisseurs })))
+const Referentiels = lazy(() => import('./pages/Referentiels').then((m) => ({ default: m.Referentiels })))
+const Stock = lazy(() => import('./pages/Stock').then((m) => ({ default: m.Stock })))
+const Machines = lazy(() => import('./pages/Machines').then((m) => ({ default: m.Machines })))
+const MachineEcran = lazy(() => import('./pages/machines/Bureau').then((m) => ({ default: m.MachineEcran })))
+const FicheMachine = lazy(() => import('./pages/machines/Fiche').then((m) => ({ default: m.FicheMachine })))
+const NouvelleFicheMachine = lazy(() => import('./pages/machines/Fiche').then((m) => ({ default: m.NouvelleFicheMachine })))
+const ParcMachines = lazy(() => import('./pages/ParcMachines').then((m) => ({ default: m.ParcMachines })))
+const Accueil = lazy(() => import('./pages/Accueil').then((m) => ({ default: m.Accueil })))
+const Mouvements = lazy(() => import('./pages/Mouvements').then((m) => ({ default: m.Mouvements })))
+const Transferts = lazy(() => import('./pages/Transferts').then((m) => ({ default: m.Transferts })))
+const Inventaires = lazy(() => import('./pages/Inventaires').then((m) => ({ default: m.Inventaires })))
+const InventaireDoc = lazy(() => import('./pages/inventaires/Inventaire').then((m) => ({ default: m.Inventaire })))
+const Qualites = lazy(() => import('./pages/Qualites').then((m) => ({ default: m.Qualites })))
+const Recettes = lazy(() => import('./pages/Recettes').then((m) => ({ default: m.Recettes })))
+const Plans = lazy(() => import('./pages/Plans').then((m) => ({ default: m.Plans })))
+const Besoins = lazy(() => import('./pages/Besoins').then((m) => ({ default: m.Besoins })))
+const BonsCommande = lazy(() => import('./pages/BonsCommande').then((m) => ({ default: m.BonsCommande })))
+const BonCommande = lazy(() => import('./pages/BonCommande').then((m) => ({ default: m.BonCommande })))
+const AssistantImport = lazy(() => import('./pages/import/AssistantImport').then((m) => ({ default: m.AssistantImport })))
+const LecturePiece = lazy(() => import('./pages/import/LecturePiece').then((m) => ({ default: m.LecturePiece })))
+const DossiersImport = lazy(() => import('./pages/import/DossiersImport').then((m) => ({ default: m.DossiersImport })))
+const DossierImport = lazy(() => import('./pages/import/DossierImport').then((m) => ({ default: m.DossierImport })))
+const FactureImport = lazy(() => import('./pages/import/FactureImport').then((m) => ({ default: m.FactureImport })))
+const Retours = lazy(() => import('./pages/retours/Retours').then((m) => ({ default: m.Retours })))
+const Retour = lazy(() => import('./pages/retours/Retour').then((m) => ({ default: m.Retour })))
+const BonCommandeNouveau = lazy(() => import('./pages/BonCommandeNouveau').then((m) => ({ default: m.BonCommandeNouveau })))
+const Receptions = lazy(() => import('./pages/Receptions').then((m) => ({ default: m.Receptions })))
+const FacturesFournisseur = lazy(() =>
+  import('./pages/FacturesFournisseur').then((m) => ({ default: m.FacturesFournisseur })),
+)
+const FactureFournisseur = lazy(() =>
+  import('./pages/FactureFournisseur').then((m) => ({ default: m.FactureFournisseur })),
+)
+const Reception = lazy(() => import('./pages/Reception').then((m) => ({ default: m.Reception })))
+const ReceptionNouvelle = lazy(() => import('./pages/ReceptionNouvelle').then((m) => ({ default: m.ReceptionNouvelle })))
+const PlanAchat = lazy(() => import('./pages/PlanAchat').then((m) => ({ default: m.PlanAchat })))
+const Utilisateurs = lazy(() => import('./pages/Utilisateurs').then((m) => ({ default: m.Utilisateurs })))
+const Droits = lazy(() => import('./pages/Droits').then((m) => ({ default: m.Droits })))
+const Role = lazy(() => import('./pages/Roles').then((m) => ({ default: m.Role })))
+const Valorisation = lazy(() => import('./pages/Valorisation').then((m) => ({ default: m.Valorisation })))
+const EtatStock = lazy(() => import('./pages/EtatStock').then((m) => ({ default: m.EtatStock })))
+const Lots = lazy(() => import('./pages/lots/Lots').then((m) => ({ default: m.Lots })))
+const FicheLot = lazy(() => import('./pages/lots/FicheLot').then((m) => ({ default: m.FicheLot })))
+const Autorisations = lazy(() => import('./pages/lots/Autorisations').then((m) => ({ default: m.Autorisations })))
+const Assistant = lazy(() => import('./pages/Assistant').then((m) => ({ default: m.Assistant })))
+const Audit = lazy(() => import('./pages/Audit').then((m) => ({ default: m.Audit })))
 
+/* LES ECRANS SE CHARGENT A LA DEMANDE (audit v4, P3) : le paquet initial
+   portait les soixante-dix ecrans, 1,6 Mo a lire avant le premier affichage,
+   lourd sur une tablette de magasin. La coquille les attend dans un Suspense
+   et une barriere d'erreur (composants/Coquille.tsx). */
 const client = new QueryClient({
   defaultOptions: {
     queries: {
@@ -108,6 +122,8 @@ function Protege({ children }: { children: React.ReactNode }) {
   const { moi, chargement } = useAuth()
   if (chargement) return <Chargement />
   if (!moi) return <Navigate to="/connexion" replace />
+  // Le role exige la double authentification : rien d'autre avant (13/10/2026).
+  if (moi.totp_requis) return <DoubleAuthObligatoire />
   return <>{children}</>
 }
 
@@ -124,13 +140,21 @@ function ExigeModule({ module, children }: { module: string; children: React.Rea
   return <>{children}</>
 }
 
-/** Les notifications suivent le theme : un toast blanc sur fond sombre eblouit. */
+/** Les notifications suivent le theme : un toast blanc sur fond sombre eblouit.
+ *
+ * EN BAS A DROITE, AU-DESSUS DES BARRES D'ACTIONS (10/10/2026) : posees au ras
+ * du bas, elles recouvraient « Enregistrer », « Creer le bon »… ; en haut a
+ * droite, les boutons d'en-tete (Retour, Devalider). 120 px : sur une page
+ * courte, la barre ne colle pas au bas mais reste a sa place, marge de page
+ * comprise (~95 px, comptage d'inventaire du 11/10). Le message rouge reste. */
 function Notifications() {
   const { resolu } = useTheme()
   return (
     <Toaster
       theme={resolu === 'sombre' ? 'dark' : 'light'}
       position="bottom-right"
+      offset={{ bottom: 120, right: 16 }}
+      mobileOffset={{ bottom: 120 }}
       richColors
       closeButton
       toastOptions={{ style: { fontSize: '0.875rem' } }}
@@ -156,10 +180,13 @@ const ECRANS = (
           derriere une seule porte : chacune se met en signet, se retrouve au
           menu, et s'ouvre dans son propre onglet. C'est l'organisation des
           espaces Fiori et des menus d'application Odoo. */}
+      {/* LA VUE D'ENSEMBLE (06/10/2026) ouvre le tableau de bord ; les autres
+          pages (risques et files, analyse, opportunites, matiere) gardent leur
+          adresse sous /tableau-de-bord/:vue. */}
       <Route path="tableau-de-bord"
-             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+             element={<ExigeModule module="COCKPIT"><VueEnsemble /></ExigeModule>} />
       <Route path="tableau-de-bord/:vue"
-             element={<ExigeModule module="COCKPIT"><Cockpit /></ExigeModule>} />
+             element={<ExigeModule module="COCKPIT"><PageTableauDeBord /></ExigeModule>} />
       <Route path="catalogue" element={<ExigeModule module="CATALOGUE"><Catalogue /></ExigeModule>} />
       <Route path="catalogue/completer" element={<ExigeModule module="CATALOGUE"><CompleterCatalogue /></ExigeModule>} />
       <Route path="stock" element={<ExigeModule module="STOCK"><Stock /></ExigeModule>} />
@@ -171,6 +198,10 @@ const ECRANS = (
           qui n'a que STOCK. Le `Verrou` d'authentification suffit. */}
       <Route path="guide-utilisateur" element={<GuideUtilisateur />} />
       <Route path="machines" element={<ExigeModule module="STOCK"><Machines /></ExigeModule>} />
+      {/* UNE MACHINE, UNE FICHE : chacune son ecran et son adresse, jamais une fenetre surgissante. */}
+      <Route path="machines/fiches/:id" element={<ExigeModule module="STOCK"><FicheMachine /></ExigeModule>} />
+      <Route path="machines/:code" element={<ExigeModule module="STOCK"><MachineEcran /></ExigeModule>} />
+      <Route path="machines/:code/fiche/:type/:zone" element={<ExigeModule module="STOCK"><NouvelleFicheMachine /></ExigeModule>} />
       {/* LE PARC EST DU PARAMETRAGE, pas de l exploitation : module PARAMETRES,
           donc la direction et les super-utilisateurs. */}
       <Route path="parc-machines" element={<ExigeModule module="PARAMETRES"><ParcMachines /></ExigeModule>} />
@@ -179,6 +210,8 @@ const ECRANS = (
       <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />
+      {/* Un inventaire sur sa page, comme un bon (13/10/2026) ; « nouveau » pour la creation. */}
+      <Route path="inventaires/:id" element={<ExigeModule module="INVENTAIRE"><InventaireDoc /></ExigeModule>} />
       <Route path="receptions" element={<ExigeModule module="RECEPTIONS"><Receptions /></ExigeModule>} />
       <Route path="import" element={<ExigeModule module="IMPORT"><DossiersImport /></ExigeModule>} />
       <Route path="import/assistant" element={<ExigeModule module="IMPORT"><AssistantImport /></ExigeModule>} />
@@ -187,8 +220,15 @@ const ECRANS = (
       <Route path="import/:id/factures/:idFacture" element={<ExigeModule module="IMPORT"><FactureImport /></ExigeModule>} />
       {/* La reception d'import est A PART du dossier : sa liste, son ecran, et
           le module RECEPTIONS — le magasinier y a ses droits, sans voir les prix. */}
-      <Route path="receptions-import" element={<ExigeModule module="RECEPTIONS"><ReceptionsImport /></ExigeModule>} />
-      <Route path="receptions-import/:idReception" element={<ExigeModule module="RECEPTIONS"><ReceptionImport /></ExigeModule>} />
+      {/* LA FACTURE FOURNISSEUR, document (ADR-003 phase B) : elle rapproche ce
+          qui a ete commande, pese et facture, puis cloture les arrivages. Le
+          module RECEPTIONS : c'est la meme chaine, et les montants restent
+          masques a qui ne voit pas la valeur du stock. */}
+      <Route path="factures-fournisseur" element={<ExigeModule module="RECEPTIONS"><FacturesFournisseur /></ExigeModule>} />
+      <Route path="factures-fournisseur/:id" element={<ExigeModule module="RECEPTIONS"><FactureFournisseur /></ExigeModule>} />
+      <Route path="retours-fournisseur" element={<ExigeModule module="RECEPTIONS"><Retours /></ExigeModule>} />
+      <Route path="retours-fournisseur/nouveau" element={<ExigeModule module="RECEPTIONS"><Retour /></ExigeModule>} />
+      <Route path="retours-fournisseur/:id" element={<ExigeModule module="RECEPTIONS"><Retour /></ExigeModule>} />
       <Route path="transferts/nouveau" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/modifier" element={<ExigeModule module="MOUVEMENTS"><TransfertNouveau /></ExigeModule>} />
       <Route path="transferts/:id/bon-sortie" element={<ExigeModule module="MOUVEMENTS"><BonTransfert type="sortie" /></ExigeModule>} />
@@ -197,7 +237,7 @@ const ECRANS = (
       <Route path="equivalences" element={<ExigeModule module="CATALOGUE"><Equivalences /></ExigeModule>} />
       <Route path="etats" element={<ExigeModule module="COCKPIT"><Etats /></ExigeModule>} />
       <Route path="etats/stock" element={<ExigeModule module="STOCK"><EtatStockImprime /></ExigeModule>} />
-      <Route path="etats/lots" element={<ExigeModule module="STOCK"><EtatLots /></ExigeModule>} />
+      <Route path="etats/lots" element={<ExigeModule module="LOTS"><EtatLots /></ExigeModule>} />
       <Route path="etats/comptage" element={<ExigeModule module="INVENTAIRE"><EtatComptage /></ExigeModule>} />
       <Route path="etats/plan-achat" element={<ExigeModule module="PLAN_ACHAT"><EtatPlanAchat /></ExigeModule>} />
       {/* Les etats de DOCUMENT portent l'identifiant de leur objet : ils
@@ -262,9 +302,9 @@ const ECRANS = (
       <Route path="etat-stock" element={<ExigeModule module="STOCK"><EtatStock /></ExigeModule>} />
       {/* Les lots (cahier du 02/10/2026) : trois vues de stock, les alertes,
           la fiche de vie et la file des autorisations. */}
-      <Route path="lots" element={<ExigeModule module="STOCK"><Lots /></ExigeModule>} />
-      <Route path="lots/fiche" element={<ExigeModule module="STOCK"><FicheLot /></ExigeModule>} />
-      <Route path="autorisations" element={<ExigeModule module="STOCK"><Autorisations /></ExigeModule>} />
+      <Route path="lots" element={<ExigeModule module="LOTS"><Lots /></ExigeModule>} />
+      <Route path="lots/fiche" element={<ExigeModule module="LOTS"><FicheLot /></ExigeModule>} />
+      <Route path="autorisations" element={<ExigeModule module="LOTS"><Autorisations /></ExigeModule>} />
       <Route path="rapports" element={<ExigeModule module="VALORISATION"><RapportsFinanciers /></ExigeModule>} />
       <Route path="landed-cost" element={<ExigeModule module="VALORISATION"><CoutRevient /></ExigeModule>} />
       <Route path="classification" element={<ExigeModule module="STOCK"><AnalyseAbcXyz /></ExigeModule>} />
@@ -273,6 +313,8 @@ const ECRANS = (
       <Route path="parametres" element={<Navigate to="/configuration" replace />} />
       <Route path="utilisateurs" element={<ExigeModule module="UTILISATEURS"><Utilisateurs /></ExigeModule>} />
       <Route path="utilisateurs/:id/droits" element={<ExigeModule module="UTILISATEURS"><Droits /></ExigeModule>} />
+      {/* Roles et permissions : l'ecran le dit au non-administrateur, le serveur le refuse. */}
+      <Route path="roles/:code" element={<ExigeModule module="UTILISATEURS"><Role /></ExigeModule>} />
   </>
 )
 

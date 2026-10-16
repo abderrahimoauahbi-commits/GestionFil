@@ -32,11 +32,14 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronsUpDown,
+  CornerDownRight,
   Columns3,
   Download,
   Printer,
   Filter,
   Inbox,
+  LayoutGrid,
+  List,
   Search,
   TriangleAlert,
   X,
@@ -110,6 +113,11 @@ interface Props<L> {
   /** Colonne d'actions, toujours rendue en fin de ligne. */
   actions?: (ligne: L) => React.ReactNode
   /**
+   * Un detail deplie SOUS la ligne (null : rien). L'ecran garde l'etat ouvert ;
+   * le tableau ne fait que le poser sur toute la largeur, sans panneau a cote.
+   */
+  detail?: (ligne: L) => React.ReactNode
+  /**
    * Menu au clic droit sur la ligne.
    *
    * Rend des `MenuContextuelElement`. Il DOUBLE des chemins qui existent
@@ -162,6 +170,7 @@ export function DataTable<L extends Record<string, unknown>>({
   cle,
   surClic,
   actions,
+  detail,
   menuContextuel,
   titreCarte,
   recherche = true,
@@ -195,6 +204,24 @@ export function DataTable<L extends Record<string, unknown>>({
   const [filtre, setFiltre] = React.useState('')
   const [filtresColonne, setFiltresColonne] = React.useState<ColumnFiltersState>([])
   const [filtresOuverts, setFiltresOuverts] = React.useState(false)
+  // LISTE OU CARTES (10/10/2026), comme les ERP recents : le choix se garde par
+  // ecran, dans ce navigateur. Sur un ecran etroit, les cartes s'imposent seules.
+  const cleVue = `gestionfil.vue.${exportable ?? imprimable ?? module ?? 'tableau'}`
+  const [vue, setVueEtat] = React.useState<'liste' | 'cartes'>(() => {
+    try {
+      return localStorage.getItem(cleVue) === 'cartes' ? 'cartes' : 'liste'
+    } catch {
+      return 'liste'
+    }
+  })
+  const setVue = (v: 'liste' | 'cartes') => {
+    setVueEtat(v)
+    try {
+      localStorage.setItem(cleVue, v)
+    } catch {
+      /* stockage indisponible : le choix vaut pour la session */
+    }
+  }
 
   const visibles = React.useMemo(
     () => droits.colonnesVisibles(colonnes),
@@ -297,6 +324,39 @@ export function DataTable<L extends Record<string, unknown>>({
   const colonnesFiltrables = serveur ? [] : visibles.filter((c) => c.filtre)
   const nbFiltresActifs = filtresColonne.length
 
+  // PAS DE DEFILEMENT HORIZONTAL (10/10/2026, demande de l'utilisateur) : les
+  // colonnes qui ne tiennent pas dans le cadre passent, avec leur titre, sur une
+  // ligne complementaire sous chaque ligne. Mesure faite a l'ecran reel : les
+  // colonnes secondaires partent d'abord, puis de droite a gauche ; la premiere
+  // ne part jamais. Une autre largeur, d'autres lignes : on repart de toutes.
+  const cadreRef = React.useRef<HTMLDivElement>(null)
+  const tableRef = React.useRef<HTMLTableElement>(null)
+  const [enComplement, setEnComplement] = React.useState<string[]>([])
+  const [largeurCadre, setLargeurCadre] = React.useState(0)
+  React.useEffect(() => {
+    const c = cadreRef.current
+    if (!c || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setLargeurCadre(Math.round(e.contentRect.width)))
+    ro.observe(c)
+    return () => ro.disconnect()
+  }, [chargement, visibles.length])
+  const page = table.getState().pagination?.pageIndex ?? 0
+  React.useLayoutEffect(() => {
+    setEnComplement([])
+  }, [largeurCadre, lignes?.length, visibilite, visibles, page, filtre, filtresColonne])
+  React.useLayoutEffect(() => {
+    const c = cadreRef.current
+    const t = tableRef.current
+    if (!c || !t || c.clientWidth === 0 || t.scrollWidth <= c.clientWidth + 1) return
+    const ids = table.getVisibleLeafColumns().map((col) => col.id).filter((id) => !enComplement.includes(id))
+    if (ids.length <= 2) return
+    const candidats = ids.slice(1)
+    const secondaire = [...candidats].reverse().find(
+      (id) => (table.getColumn(id)?.columnDef.meta as { secondaire?: boolean } | undefined)?.secondaire,
+    )
+    setEnComplement((x) => [...x, secondaire ?? candidats[candidats.length - 1]])
+  }, [enComplement, table])
+
   if (chargement) {
     return (
       <div className="space-y-2">
@@ -323,7 +383,7 @@ export function DataTable<L extends Record<string, unknown>>({
       <EtatVide
         icone={Inbox}
         titre="Aucune colonne visible"
-        description="Vos droits masquent tous les champs de cet ecran."
+        description="Vos droits masquent tous les champs de cet écran."
       />
     )
   }
@@ -356,7 +416,10 @@ export function DataTable<L extends Record<string, unknown>>({
     }
 
   return (
-    <div className="space-y-2">
+    // LA BASCULE SE FAIT SUR LA PLACE DE LA LISTE, PAS SUR CELLE DE LA FENETRE
+    // (audit v4, tablette) : a 768 px, le menu en prend 230 et la table
+    // n'avait plus que 540 px. Conteneur sous 768 px : des cartes.
+    <div className="@container space-y-2">
       {/* --- Barre d'outils ----------------------------------------------
           ELLE RESTE EN HAUT, ET C'EST INDISPENSABLE SUR UNE GRANDE TABLE.
           Sur quatre cents references, l'utilisateur qui veut changer de filtre
@@ -387,7 +450,7 @@ export function DataTable<L extends Record<string, unknown>>({
                 onChange={(e) => setFiltre(e.target.value)}
                 placeholder={placeholderRecherche}
                 aria-label="Rechercher dans la liste"
-                className="w-full pl-8 sm:w-72"
+                className="w-full pl-8 sm:w-80"
               />
             </div>
           )}
@@ -431,13 +494,32 @@ export function DataTable<L extends Record<string, unknown>>({
               {total} ligne{total > 1 ? 's' : ''}
             </span>
 
+            <div className="hidden items-center overflow-hidden rounded-[var(--radius-sm)] border border-bordure @3xl:flex" role="group" aria-label="Affichage">
+              {(['liste', 'cartes'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={vue === v}
+                  aria-label={v === 'liste' ? 'Afficher en liste' : 'Afficher en cartes'}
+                  title={v === 'liste' ? 'Liste' : 'Cartes'}
+                  onClick={() => setVue(v)}
+                  className={cn(
+                    'grid size-7 place-items-center transition-colors',
+                    vue === v ? 'bg-primaire/10 text-primaire' : 'text-attenue-texte hover:bg-attenue hover:text-texte',
+                  )}
+                >
+                  {v === 'liste' ? <List className="size-3.5" /> : <LayoutGrid className="size-3.5" />}
+                </button>
+              ))}
+            </div>
+
             <div className="flex items-center overflow-hidden rounded-[var(--radius-sm)] border border-bordure">
               {visibles.length > 4 && (
                 <Menu>
                   <MenuDeclencheur asChild>
                     <button
                       type="button"
-                      title="Choisir les colonnes affichees"
+                      title="Choisir les colonnes affichées"
                       aria-label="Colonnes"
                       className="grid size-7 place-items-center text-attenue-texte
                                  transition-colors hover:bg-attenue hover:text-texte"
@@ -473,7 +555,7 @@ export function DataTable<L extends Record<string, unknown>>({
                   type="button"
                   disabled={!rangs.length}
                   onClick={() => window.print()}
-                  title="Imprimer la liste telle qu elle est affichee"
+                  title="Imprimer la liste telle qu’elle est affichée"
                   aria-label="Imprimer la liste"
                   className="grid size-7 place-items-center border-l border-bordure
                              text-attenue-texte transition-colors hover:bg-attenue
@@ -574,13 +656,28 @@ export function DataTable<L extends Record<string, unknown>>({
               l'en-tete de societe. Lui donner `zone-impression` posait DEUX
               zones absolues l'une sur l'autre — l'en-tete colle du tableau
               d'ecran venait chevaucher le titre de l'etat. */}
+          {/* LA GRILLE DEFILE DANS SA BOITE (05/10/2026) : c'est ce qui fait tenir
+              l'en-tete colle — `sticky` suit le conteneur qui defile, pas la page.
+              Hauteur par defaut quand l'ecran n'en fixe pas. */}
+          {/* UN TABLEAU QUI DEFILE S'ATTEINT AU CLAVIER (10/10/2026) : avec les vraies
+              donnees, le tableau des besoins debordait, et sa zone de defilement n'etait
+              pas atteignable sans souris (axe, sur une copie de la production). */}
           <div
-            className="defilement-x hidden rounded-lg border border-bordure bg-surface md:block"
+            ref={cadreRef}
+            tabIndex={0}
+            role="region"
+            aria-label="Tableau"
+            className={cn(
+              'cadre-table defilement-x hidden rounded-lg border border-bordure bg-surface',
+              vue === 'liste' && '@3xl:block',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau',
+              !hauteurMax && '@3xl:max-h-[calc(100dvh-12rem)] @3xl:overflow-y-auto',
+            )}
             style={hauteurMax ? { maxHeight: hauteurMax, overflowY: 'auto' } : undefined}
           >
             {/* 13 PX, PAS 12. Le tableau est ce qu'on lit le plus longtemps ;
                 il etait pourtant le texte le plus petit de l'ecran. */}
-            <table className="grille w-full text-[13px]">
+            <table ref={tableRef} className="grille w-full text-[13px]">
               {/* L'en-tete se colle SOUS la barre d'outils : `top-12` la laisse
                   passer, sinon les deux se recouvrent au defilement. */}
               {/* CET EN-TETE NE COLLE PAS, ET CE N'EST PAS FAUTE DE `sticky`.
@@ -600,7 +697,7 @@ export function DataTable<L extends Record<string, unknown>>({
               <thead className="sticky top-0 z-10">
                 {table.getHeaderGroups().map((groupe) => (
                   <tr key={groupe.id} className="bg-attenue">
-                    {groupe.headers.map((entete) => {
+                    {groupe.headers.filter((entete) => !enComplement.includes(entete.column.id)).map((entete) => {
                       const m = meta(entete.column.id)
                       const sens = entete.column.getIsSorted()
                       const filtree = entete.column.getFilterValue() != null
@@ -612,12 +709,13 @@ export function DataTable<L extends Record<string, unknown>>({
                             'bg-attenue px-2.5 py-2 text-left',
                             'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap',
                             m.numerique && 'text-right',
-                            m.secondaire && 'hidden xl:table-cell',
                           )}
                         >
                           {entete.column.getCanSort() ? (
                             <button
                               onClick={entete.column.getToggleSortingHandler()}
+                              // Une colonne sans titre (le depliage) n'avait rien a annoncer (10/10/2026).
+                              aria-label={`Trier par ${typeof entete.column.columnDef.header === 'string' && entete.column.columnDef.header ? entete.column.columnDef.header : entete.column.id}`}
                               className={cn(
                                 'inline-flex items-center gap-1 rounded transition-colors hover:text-texte',
                                 m.numerique && 'flex-row-reverse',
@@ -662,15 +760,16 @@ export function DataTable<L extends Record<string, unknown>>({
                         menuContextuel && 'data-[state=open]:bg-primaire/8',
                       )}
                     >
-                      {rang.getVisibleCells().map((cellule) => {
+                      {rang.getVisibleCells().filter((cellule) => !enComplement.includes(cellule.column.id)).map((cellule) => {
                         const m = meta(cellule.column.id)
                         return (
                           <td
                             key={cellule.id}
                             className={cn(
-                              'px-2.5 align-middle',
+                              // UNE LIGNE PAR RANGEE, comme un tableur : la grille
+                              // defile en largeur plutot que de doubler en hauteur.
+                              'whitespace-nowrap px-2.5 align-middle',
                               m.numerique && 'text-right tabular-nums',
-                              m.secondaire && 'hidden xl:table-cell',
                             )}
                           >
                             {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
@@ -688,17 +787,62 @@ export function DataTable<L extends Record<string, unknown>>({
                     </tr>
                   )
 
-                  if (!menuContextuel) return <React.Fragment key={cle(rang.original)}>{ligne}</React.Fragment>
+                  const largeurLigne = rang.getVisibleCells().length - enComplement.length + (actions ? 1 : 0)
+                  const complement = enComplement.length ? (
+                    <tr>
+                      <td colSpan={largeurLigne} className="px-2.5 pb-1.5 pt-0">
+                        {/* LA FLECHE DE RETOUR A LA LIGNE (12/10/2026) : elle dit que
+                            cette ligne CONTINUE celle du dessus, et n'en est pas une
+                            autre. */}
+                        <div className="flex items-baseline gap-2 text-[12px]">
+                          <CornerDownRight aria-label="suite de la ligne" className="size-3.5 shrink-0 translate-y-0.5 text-attenue-texte" />
+                          <div className="flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-0.5">
+                          {rang.getVisibleCells().filter((cellule) => enComplement.includes(cellule.column.id)).map((cellule) => (
+                            <span key={cellule.id} className="inline-flex items-baseline gap-1.5">
+                              <span className="text-[10.5px] uppercase tracking-[0.05em] text-attenue-texte">
+                                {typeof cellule.column.columnDef.header === 'string' ? cellule.column.columnDef.header : cellule.column.id}
+                              </span>
+                              <span className={cn(meta(cellule.column.id).numerique && 'tabular-nums')}>
+                                {flexRender(cellule.column.columnDef.cell, cellule.getContext())}
+                              </span>
+                            </span>
+                          ))}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null
+                  const deplie = detail?.(rang.original)
+                  const sous = deplie ? (
+                    <tr className="bg-attenue/30">
+                      <td colSpan={largeurLigne} className="px-3 py-2.5">
+                        {deplie}
+                      </td>
+                    </tr>
+                  ) : null
+
+                  if (!menuContextuel)
+                    return (
+                      <React.Fragment key={cle(rang.original)}>
+                        {ligne}
+                        {complement}
+                        {sous}
+                      </React.Fragment>
+                    )
 
                   // `asChild` fait porter le clic droit par le <tr> lui-meme.
                   // Sans lui, Radix inserait un <span> declencheur, que le
                   // navigateur remonterait hors du <tbody> : la ligne se
                   // detacherait du tableau.
                   return (
-                    <MenuContextuel key={cle(rang.original)}>
-                      <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
-                      <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
-                    </MenuContextuel>
+                    <React.Fragment key={cle(rang.original)}>
+                      <MenuContextuel>
+                        <MenuContextuelDeclencheur asChild>{ligne}</MenuContextuelDeclencheur>
+                        <MenuContextuelContenu>{menuContextuel(rang.original)}</MenuContextuelContenu>
+                      </MenuContextuel>
+                      {complement}
+                      {sous}
+                    </React.Fragment>
                   )
                 })}
               </tbody>
@@ -730,10 +874,11 @@ export function DataTable<L extends Record<string, unknown>>({
           )}
 
           {/* --- Cartes : telephone et tablette portrait ------------------ */}
-          <div className="space-y-2 md:hidden">
+          <div className={vue === 'cartes' ? 'grid gap-2 sm:grid-cols-2 2xl:grid-cols-3' : 'space-y-2 @3xl:hidden'}>
             {rangs.map((rang) => (
               <div
                 key={rang.id}
+                role="article"
                 onClick={surClic ? () => surClic(rang.original) : undefined}
                 className={cn(
                   'rounded-lg border border-bordure bg-surface p-3.5 shadow-[var(--ombre-pose)]',
@@ -768,6 +913,10 @@ export function DataTable<L extends Record<string, unknown>>({
                     </div>
                   ))}
                 </dl>
+                {detail && (() => {
+                  const deplie = detail(rang.original)
+                  return deplie ? <div className="mt-3 border-t border-ligne pt-3" onClick={(e) => e.stopPropagation()}>{deplie}</div> : null
+                })()}
               </div>
             ))}
           </div>
@@ -787,7 +936,10 @@ export function DataTable<L extends Record<string, unknown>>({
             className={cn(
               'sticky z-20 -mx-3 flex flex-wrap items-center justify-between gap-3',
               'border-t border-bordure bg-fond px-3 py-2 text-[12px]',
-              'md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0',
+              // Le meme seuil que les cartes (@3xl, la largeur du conteneur) : au
+              // seuil de l'ecran (md), un tableau etroit dans une page large
+              // gardait une barre « de telephone » sous des cartes (audit v5, U18).
+              '@3xl:static @3xl:mx-0 @3xl:border-0 @3xl:bg-transparent @3xl:px-0 @3xl:py-0',
               !avecPagination && 'hidden',
             )}
             style={{ bottom: 'var(--barre-basse, 0px)' }}
@@ -828,7 +980,7 @@ export function DataTable<L extends Record<string, unknown>>({
                   taille="icone"
                   onClick={() => table.firstPage()}
                   disabled={!table.getCanPreviousPage()}
-                  aria-label="Premiere page"
+                  aria-label="Première page"
                 >
                   <ChevronsLeft />
                 </Bouton>

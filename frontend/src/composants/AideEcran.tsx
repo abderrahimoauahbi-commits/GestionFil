@@ -166,6 +166,31 @@ function Fiche({ sujet, surNavigation }: { sujet: Sujet; surNavigation: () => vo
         </section>
       ))}
 
+      {/* LES EXEMPLES CHIFFRES (13/10/2026) : la regle sur des nombres. */}
+      {sujet.exemples?.map((ex, i) => (
+        <section key={`ex-${i}`}>
+          <div className={titreSection}>Exemple — {ex.titre}</div>
+          <div className="space-y-1.5 rounded border border-bordure bg-attenue/20 px-2.5 py-2 text-[12.5px]">
+            {ex.situation && <p className="m-0">{ex.situation}</p>}
+            {ex.calcul && ex.calcul.length > 0 && (
+              <table className="w-full">
+                <tbody>
+                  {ex.calcul.map(([libelle, valeur], j) => (
+                    <tr key={j} className="border-b border-bordure/50 last:border-0">
+                      <td className="py-0.5 pr-2">{libelle}</td>
+                      <td className="py-0.5 text-right font-medium tabular-nums">{valeur}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {ex.conclusion && (
+              <p className="m-0 border-l-2 border-primaire pl-2 text-attenue-texte">{ex.conclusion}</p>
+            )}
+          </div>
+        </section>
+      ))}
+
       {/* LE TABLEAU DES CHAMPS : ce que la personne cherche vraiment quand elle
           hésite devant une case. */}
       {sujet.champs && sujet.champs.length > 0 && (

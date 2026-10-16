@@ -1,0 +1,11 @@
+# Les scripts du serveur Linux gardent leurs fins de ligne Unix, quel que soit
+# le poste qui les extrait : bash refuse un retour chariot en fin de ligne.
+*.sh text eol=lf
+# Lus par systemd, nginx et le python du serveur : un \r final y casse un chemin.
+*.service text eol=lf
+*.conf text eol=lf
+db/pg/migrer.py text eol=lf
+# Les migrations SQL aussi (10/10/2026) : psql sous Linux garde le \r, et une
+# migration qui compare un texte de vue sur plusieurs lignes ne le trouvait plus
+# (2026-10-09j a arrete la publication du 10/10 ; sous Windows, psql le retire).
+db/pg/**/*.sql text eol=lf

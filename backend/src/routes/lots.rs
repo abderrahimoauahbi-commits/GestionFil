@@ -100,7 +100,7 @@ pub async fn lister(
     user: Utilisateur,
     Query(f): Query<FiltreLots>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let vue = f.vue.as_deref().unwrap_or("comptable");
     let condition = match vue {
         "comptable" => "TRUE",
@@ -136,7 +136,7 @@ pub async fn lister(
 
 /// `GET /api/lots/compteurs` — ce que chaque vue contient, pour les onglets.
 pub async fn compteurs(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let row = sqlx::query(
         "SELECT count(*) FILTER (WHERE solde_kg > 0)                                              AS comptable,
                 count(*) FILTER (WHERE solde_kg > 0 AND categorie = 'PROJET' AND statut = 'LIBRE' AND NOT dormant) AS projet,
@@ -166,7 +166,7 @@ pub async fn vie(
     user: Utilisateur,
     Query(c): Query<CleLot>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let lot = sqlx::query("SELECT * FROM v_lot WHERE code_reference = $1 AND lot_fournisseur = $2")
         .bind(&c.reference)
         .bind(&c.lot)
@@ -226,6 +226,15 @@ pub struct DecisionStatut {
     pub motif: String,
 }
 
+/// DECIDER D'UN LOT (regle 5, 08/10/2026) : accorder une derogation, bloquer,
+/// debloquer, trancher un dormant. Ces decisions demandaient STOCK / VALIDER,
+/// que seul l'administrateur detenait : la Direction ne pouvait pas repondre.
+/// L'autorite est le droit VALIDER du module LOTS — la Direction l'a dans la
+/// grille (seed 006) : plus de nom de role ecrit ici (audit v5, T11).
+async fn exiger_decision_lot(state: &AppState, user: &Utilisateur) -> AppResult<()> {
+    user.exiger(&state.db, module::LOTS, Action::Valider).await
+}
+
 /// `POST /api/lots/statut` — BLOCAGE QUALITE (regle 4). Un lot bloque ne bouge
 /// plus du tout : la base refuse le mouvement (LOT-BLOQUE). Seul un
 /// responsable le debloque, avec un motif.
@@ -234,7 +243,7 @@ pub async fn changer_statut(
     user: Utilisateur,
     Json(d): Json<DecisionStatut>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Valider).await?;
+    exiger_decision_lot(&state, &user).await?;
     let motif = texte_requis(&d.motif, "Le motif")?;
     let (nouveau, evt) = match d.action.as_str() {
         "BLOQUER" => ("BLOQUE", "BLOCAGE"),
@@ -278,7 +287,7 @@ pub async fn basculer(
     user: Utilisateur,
     Json(d): Json<DecisionCategorie>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Ecrire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Ecrire).await?;
     let (evt, motif) = match d.categorie.as_str() {
         "RESTES" => ("BASCULEMENT_RESTES", d.motif.clone().filter(|m| !m.trim().is_empty())
             .unwrap_or_else(|| "Lot passe sous le seuil de l'article".into())),
@@ -319,7 +328,7 @@ pub async fn decider_dormant(
     user: Utilisateur,
     Json(d): Json<DecisionDormant>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Valider).await?;
+    exiger_decision_lot(&state, &user).await?;
     let motif = texte_requis(&d.motif, "Le motif")?;
     if !matches!(d.decision.as_str(), "GARDER" | "SOLDER" | "DETRUIRE") {
         return Err(AppError::Invalide(format!("decision inconnue : {}", d.decision)));
@@ -329,6 +338,26 @@ pub async fn decider_dormant(
     let (statut, _, _) = lire_lot(&mut tx, &d.code_reference, &d.lot_fournisseur).await?;
     if statut == "BLOQUE" && d.decision != "GARDER" {
         return Err(AppError::RegleMetier("Ce lot est bloque : la qualite doit d'abord le debloquer.".into()));
+    }
+    // UN LOT QUI TOURNE ENCORE NE SE SOLDE PAS (audit v5, F21) : son fil sur
+    // machine reviendrait au dechargement dans un lot que plus rien ne montre.
+    if d.decision != "GARDER" {
+        let sur_machine: Option<(f64, String)> = sqlx::query_as(
+            "SELECT sum(kg)::float8, string_agg(DISTINCT code_emplacement, ', ')
+               FROM machine_etat WHERE code_reference = $1 AND lot_fournisseur = $2 AND kg > 0
+             HAVING sum(kg) > 0",
+        )
+        .bind(&d.code_reference)
+        .bind(&d.lot_fournisseur)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((kg, etages)) = sur_machine {
+            return Err(AppError::RegleMetier(format!(
+                "LOT-MACHINE : le lot {} porte encore {} kg sur machine ({etages}) : il ne se solde pas. Dechargez-le d'abord, ou gardez-le.",
+                d.lot_fournisseur,
+                arrondi_kg(kg)
+            )));
+        }
     }
     let mut mouvements = Vec::new();
     if d.decision == "GARDER" {
@@ -698,7 +727,7 @@ pub async fn lister_demandes(
     user: Utilisateur,
     Query(f): Query<FiltreDemandes>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let rows = sqlx::query(
         "SELECT d.*, ud.login AS demandeur, uc.login AS decideur
            FROM demande_autorisation d
@@ -725,6 +754,8 @@ pub struct NouvelleDemande {
     pub document: Option<String>,
     pub motif: String,
     pub details: Option<Value>,
+    /// Les kilos que la derogation couvre (LOT_BLOQUE : obligatoire, F17).
+    pub kg: Option<f64>,
 }
 
 /// `POST /api/autorisations` — une demande ROUGE (ou ORANGE tracee), motif
@@ -735,27 +766,33 @@ pub async fn creer_demande(
     user: Utilisateur,
     Json(d): Json<NouvelleDemande>,
 ) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
-    let motif = texte_requis(&d.motif, "Le motif")?;
-    let existante: Option<String> = sqlx::query_scalar(
-        "SELECT id_demande FROM demande_autorisation
-          WHERE statut = 'EN_ATTENTE' AND type_demande = $1
-            AND document IS NOT DISTINCT FROM $2
-            AND lot_fournisseur IS NOT DISTINCT FROM $3 AND code_reference IS NOT DISTINCT FROM $4",
-    )
-    .bind(&d.type_demande)
-    .bind(&d.document)
-    .bind(&d.lot_fournisseur)
-    .bind(&d.code_reference)
-    .fetch_optional(&state.db)
-    .await?;
-    if let Some(id) = existante {
-        return Ok(Json(json!({ "id_demande": id, "reprise": true })));
+    // Demander engage une decision (audit v4 : le droit de lire suffisait) :
+    // le droit d'ecrire sur les lots, ou celui d'ecrire le mouvement refuse —
+    // c'est le magasinier, au chargement, qui bute sur le lot bloque.
+    if user.exiger(&state.db, module::LOTS, Action::Ecrire).await.is_err() {
+        user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
     }
-    let id: String = sqlx::query_scalar(
+    let motif = texte_requis(&d.motif, "Le motif")?;
+    // UNE DEROGATION DE LOT BLOQUE EST BORNEE (audit v5, F17) : elle couvre
+    // les kilos d'une fiche, pas le lot entier.
+    if d.type_demande == "LOT_BLOQUE" && d.document.is_some() && !d.kg.is_some_and(|k| k > 0.0) {
+        return Err(AppError::Invalide(
+            "Une derogation de lot bloque porte les kilos qu'elle couvre.".into(),
+        ));
+    }
+    // UNE SEULE DEMANDE EN ATTENTE (audit v5, U10) : la lecture puis l'ecriture
+    // laissaient deux clics simultanes creer deux demandes. L'index unique
+    // ux_demande_en_attente tranche ; la seconde reprend la premiere.
+    let mut tx = state.db.begin().await?;
+    // Le contexte pose : la demande entre au journal avec son auteur.
+    user.poser_contexte(&mut tx).await?;
+    let cree: Option<String> = sqlx::query_scalar(
         "INSERT INTO demande_autorisation (type_demande, niveau, code_reference, lot_fournisseur, document,
-                                           details, motif, id_demandeur)
-         VALUES ($1, COALESCE($2, 'ROUGE'), $3, $4, $5, $6, $7, $8) RETURNING id_demande",
+                                           details, motif, id_demandeur, kg_autorises)
+         VALUES ($1, COALESCE($2, 'ROUGE'), $3, $4, $5, $6, $7, $8, round($9::numeric, 4))
+         ON CONFLICT (type_demande, COALESCE(document, ''), COALESCE(lot_fournisseur, ''), COALESCE(code_reference, ''))
+            WHERE statut = 'EN_ATTENTE' DO NOTHING
+         RETURNING id_demande",
     )
     .bind(&d.type_demande)
     .bind(&d.niveau)
@@ -765,8 +802,26 @@ pub async fn creer_demande(
     .bind(&d.details)
     .bind(&motif)
     .bind(&user.id)
-    .fetch_one(&state.db)
+    .bind(d.kg)
+    .fetch_optional(&mut *tx)
     .await?;
+    let Some(id) = cree else {
+        let existante: String = sqlx::query_scalar(
+            "SELECT id_demande FROM demande_autorisation
+              WHERE statut = 'EN_ATTENTE' AND type_demande = $1
+                AND document IS NOT DISTINCT FROM $2
+                AND lot_fournisseur IS NOT DISTINCT FROM $3 AND code_reference IS NOT DISTINCT FROM $4",
+        )
+        .bind(&d.type_demande)
+        .bind(&d.document)
+        .bind(&d.lot_fournisseur)
+        .bind(&d.code_reference)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.rollback().await?;
+        return Ok(Json(json!({ "id_demande": existante, "reprise": true })));
+    };
+    tx.commit().await?;
     Ok(Json(json!({ "id_demande": id, "reprise": false })))
 }
 
@@ -805,20 +860,27 @@ pub async fn decider(
             }
         }
         "ACCORDEE" | "REFUSEE" => {
-            user.exiger(&state.db, module::STOCK, Action::Valider).await?;
-            if demandeur == user.id && user.role != "ADMIN" {
+            exiger_decision_lot(&state, &user).await?;
+            // S'autoriser soi-meme : le seul administrateur des comptes (droit
+            // VALIDER des utilisateurs, dans la grille — T11).
+            if demandeur == user.id && user.exiger(&state.db, module::UTILISATEURS, Action::Valider).await.is_err() {
                 return Err(AppError::RegleMetier("On n'autorise pas sa propre demande : un autre responsable doit repondre.".into()));
             }
         }
         x => return Err(AppError::Invalide(format!("decision inconnue : {x}"))),
     }
     let motif = d.motif.clone().filter(|m| !m.trim().is_empty());
-    if d.decision == "REFUSEE" && motif.is_none() {
-        return Err(AppError::Invalide("Un refus s'explique : le motif est obligatoire.".into()));
+    // UN ACCORD S'EXPLIQUE AUSSI (audit v4) : il engage la qualite du tapis.
+    if matches!(d.decision.as_str(), "ACCORDEE" | "REFUSEE")
+        && motif.as_deref().map(|m| m.trim().chars().count()).unwrap_or(0) < 5
+    {
+        return Err(AppError::Invalide(
+            "Une decision s'explique : le motif est obligatoire (cinq caracteres au moins).".into(),
+        ));
     }
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    sqlx::query(
+    let n = sqlx::query(
         "UPDATE demande_autorisation
             SET statut = $2, id_decideur = $3, date_decision = $4, motif_decision = $5
           WHERE id_demande = $1 AND statut = 'EN_ATTENTE'",
@@ -829,7 +891,15 @@ pub async fn decider(
     .bind(maintenant())
     .bind(&motif)
     .execute(&mut *tx)
-    .await?;
+    .await?
+    .rows_affected();
+    // UNE SEULE REPONSE : deux responsables qui repondent en meme temps, le
+    // second trouve la demande deja tranchee.
+    if n == 0 {
+        return Err(AppError::RegleMetier(
+            "Cette demande vient d'etre tranchee par un autre responsable : rechargez la file.".into(),
+        ));
+    }
     // Une derogation accordee laisse aussi sa trace sur la fiche du lot.
     if d.decision == "ACCORDEE" {
         if let (Some(r), Some(l)) = (reference.as_deref(), lot.as_deref()) {
@@ -852,7 +922,7 @@ pub async fn decider(
 
 /// `GET /api/stats/lots` — tout ce que l'analyse lit sur les lots, en un appel.
 pub async fn statistiques(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let db = &state.db;
     let lire = |sql: &'static str| async move {
         sqlx::query(sql).fetch_all(db).await.map(|r| lignes_en_json(&r))
@@ -875,6 +945,11 @@ pub async fn statistiques(State(state): State<AppState>, user: Utilisateur) -> A
     // sont pas declarees dans la grille des champs : elles suivent `valeur_mad`.
     // Qui ne voit pas la valeur du stock ne la lit pas non plus ici.
     let mut droits = user.droits(db, module::STOCK).await?;
+    // Le prix en devise du suivi de conditionnement est declare au catalogue :
+    // les montants masques ailleurs le sont ici aussi.
+    for (champ, niveau) in rbac::sensibles_masques(db, &user.id).await? {
+        droits.entry(champ).or_insert(niveau);
+    }
     if droits.get("valeur_mad") == Some(&rbac::Niveau::Masque) {
         for c in ["projet_mad", "restes_mad", "total_mad"] {
             droits.insert(c.to_string(), rbac::Niveau::Masque);
@@ -886,7 +961,7 @@ pub async fn statistiques(State(state): State<AppState>, user: Utilisateur) -> A
 
 /// `GET /api/cockpit/lots` — les compteurs du poste de travail.
 pub async fn cockpit(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
-    user.exiger(&state.db, module::STOCK, Action::Lire).await?;
+    user.exiger(&state.db, module::LOTS, Action::Lire).await?;
     let r = sqlx::query("SELECT * FROM v_cockpit_lots").fetch_all(&state.db).await?;
     Ok(Json(lignes_en_json(&r).get(0).cloned().unwrap_or(Value::Null)))
 }

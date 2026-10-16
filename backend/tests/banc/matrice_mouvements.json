@@ -1,0 +1,158 @@
+{
+  "_lisez_moi": "LA MATRICE DES MOUVEMENTS (etape 1, 10/10/2026). Artefact controle : le banc (scenario matrice_mouvements) verifie que chaque type de la base y figure avec le meme signe, le meme effet sur le CMUP et les memes exigences, et que les scenarios cites existent. Le document docs/matrice-mouvements.md en est tire par db/pg/matrice.py. Modifier un type de mouvement = modifier ce fichier, sinon le banc echoue.",
+  "types": {
+    "ENTREE_REC": {
+      "signe": 1, "impacte_cmup": 1, "exige_prix": 1, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Validation d'une réception locale (contrôle) ou d'une réception d'import",
+      "cmup": "Moyenne pondérée : (stock × CMUP + kg × prix) ÷ (stock + kg), dans le magasin de destination",
+      "cout": "Prix d'achat en devise × taux ENGAGÉ du bon, 4 décimales (frais d'import ajoutés à la clôture du dossier)",
+      "validation": "Droit VALIDER des réceptions ; le valideur n'est pas l'auteur de la dernière pesée",
+      "reversibilite": "Contre-passation (la valeur sort À SON PRIX, dans son seul magasin) tant que la réception n'est pas clôturée et que le dossier d'import n'est pas dédouané ; ensuite avoir ou retour fournisseur. La réception ne se dévalide qu'après",
+      "banc": ["cmup_chiffre", "reception_cloture_avoir", "reception_devalidee_revalidee", "import"]
+    },
+    "RETOUR_FOURN": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,
+      "origine": "Validation d'un retour fournisseur libre (Achats → Retours fournisseur), par un autre compte que l'auteur",
+      "cmup": "Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts",
+      "cout": "CMUP du magasin au moment de la sortie, corrigé au prix du retour",
+      "validation": "Droit ECRIRE des réceptions pour saisir le retour, VALIDER pour le valider (un autre compte)",
+      "reversibilite": "Aucune : le retour validé est définitif, son mouvement ne se contre-passe pas (RFO-DEFINITIF)",
+      "banc": ["saisie_libre", "retour_cloture_avoirs"]
+    },
+    "STOCK_INIT": {
+      "signe": 1, "impacte_cmup": 1, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Reprise du stock de départ",
+      "cmup": "Moyenne pondérée au prix saisi ; sans prix, prix catalogue converti si le magasin n'a pas encore de CMUP",
+      "cout": "Prix saisi (ou catalogue converti)",
+      "validation": "Droit ECRIRE du stock",
+      "reversibilite": "Contre-passation",
+      "banc": ["saisie_libre"]
+    },
+    "SORTIE_PROD": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 1, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Consommation de production (ordre de fabrication en texte libre)",
+      "cmup": "Inchangé",
+      "cout": "CMUP du magasin au moment de la sortie",
+      "validation": "Droit ECRIRE du stock",
+      "reversibilite": "Contre-passation",
+      "banc": ["stock_jamais_negatif", "contre_passation"]
+    },
+    "RETOUR_PROD": {
+      "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,
+      "origine": "Retour depuis l'atelier",
+      "cmup": "Inchangé (le fil revient au CMUP courant)",
+      "cout": "Sans prix : valorisé au CMUP du magasin",
+      "validation": "Droit ECRIRE du stock",
+      "reversibilite": "Contre-passation",
+      "banc": ["saisie_libre"]
+    },
+    "SORTIE_HORS_MACHINE": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,
+      "origine": "Sortie hors machine : atelier, échantillon, essai, réparation, prêt à une autre usine",
+      "cmup": "Inchangé",
+      "cout": "CMUP du magasin au moment de la sortie",
+      "validation": "Droit ECRIRE du stock ; au-delà de 50 kg cumulés par jour et par référence (déchets compris), droit VALIDER de l'inventaire",
+      "reversibilite": "Contre-passation",
+      "banc": ["sortie_hors_machine", "cmup_chiffre", "concurrence_stock"]
+    },
+    "RETOUR_PRET": {
+      "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Retour en nature d'un prêt à une autre usine",
+      "cmup": "Inchangé (au CMUP en cours)",
+      "cout": "Sans prix : valorisé au CMUP du magasin",
+      "validation": "Droit ECRIRE du stock ; ne rend pas plus que ce qui reste à rendre",
+      "reversibilite": "Contre-passation",
+      "banc": ["sortie_hors_machine"]
+    },
+    "AJUST_INV_POS": {
+      "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,
+      "origine": "Clôture d'inventaire (compté > théorique) ; contre-passation d'une sortie",
+      "cmup": "Inchangé",
+      "cout": "Sans prix : valorisé au CMUP du magasin",
+      "validation": "Droit VALIDER de l'inventaire",
+      "reversibilite": "Aucune : c'est lui la correction (on n'annule pas une annulation, on saisit ce qui manque)",
+      "banc": ["inventaire", "cmup_chiffre", "contre_passation"]
+    },
+    "AJUST_INV_NEG": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,
+      "origine": "Clôture d'inventaire (compté < théorique) ; contre-passation d'une entrée",
+      "cmup": "Inchangé ; une contre-passation d'ENTRÉE retire en plus la valeur de l'entrée à son prix (fn_cmup_annuler_entree)",
+      "cout": "CMUP du magasin au moment de la sortie",
+      "validation": "Droit VALIDER de l'inventaire",
+      "reversibilite": "Aucune : c'est lui la correction",
+      "banc": ["inventaire", "cmup_chiffre"]
+    },
+    "TRANSFERT_SORTIE": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Expédition d'un transfert, au magasin de départ : le fil part EN ROUTE",
+      "cmup": "Inchangé au départ",
+      "cout": "CMUP du départ, FIGÉ sur la ligne de transfert : il voyage avec le fil",
+      "validation": "Droit ECRIRE du stock",
+      "reversibilite": "Pas seule (une moitié de transfert) : annuler le transfert, ou corriger par un inventaire",
+      "banc": ["cmup_chiffre", "atomicite"]
+    },
+    "TRANSFERT_ENTREE": {
+      "signe": 1, "impacte_cmup": 1, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Réception d'un transfert, au magasin d'arrivée",
+      "cmup": "Moyenne pondérée au CMUP FIGÉ AU DÉPART (pas au CMUP du départ le jour de l'arrivée)",
+      "cout": "CMUP figé au départ",
+      "validation": "Droit ECRIRE du stock",
+      "reversibilite": "Pas seule (une moitié de transfert)",
+      "banc": ["cmup_chiffre"]
+    },
+    "FUSION_SORTIE": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 1,
+      "origine": "Fusion de lots : le lot absorbé sort",
+      "cmup": "Inchangé (même magasin, même référence)",
+      "cout": "Sans prix",
+      "validation": "Droit ECRIRE des lots ; fusion autorisée par la référence",
+      "reversibilite": "Pas seule : se défait en entier",
+      "banc": ["lots_autorisations"]
+    },
+    "FUSION_ENTREE": {
+      "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 1,
+      "origine": "Fusion de lots : le lot résultant entre",
+      "cmup": "Inchangé",
+      "cout": "Sans prix",
+      "validation": "Droit ECRIRE des lots",
+      "reversibilite": "Pas seule : se défait en entier",
+      "banc": ["lots_autorisations"]
+    },
+    "CHARGE_MACHINE": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Fiche machine : chargement d'un étage (le fil quitte le magasin)",
+      "cmup": "Inchangé",
+      "cout": "CMUP du magasin au chargement",
+      "validation": "Décision machine (seuils vert / orange / rouge)",
+      "reversibilite": "Par la fiche seulement (dévalider ou annuler la décision tête de l'étage, mouvements ANNUL_* liés)",
+      "banc": ["machine", "machine_surplus", "machine_constat"]
+    },
+    "RETOUR_MACHINE": {
+      "signe": 1, "impacte_cmup": 1, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Fiche machine : retour du fil d'un étage au magasin",
+      "cmup": "Moyenne pondérée au prix du chargement",
+      "cout": "Prix du chargement",
+      "validation": "Décision machine",
+      "reversibilite": "Par la fiche seulement",
+      "banc": ["machine"]
+    },
+    "ANNUL_CHARGE_MACHINE": {
+      "signe": 1, "impacte_cmup": 1, "exige_prix": 1, "exige_of": 0, "exige_motif_ligne": 0, "interne": 1,
+      "origine": "Annulation d'une décision machine : le chargement revient au magasin",
+      "cmup": "Moyenne pondérée au prix du chargement annulé",
+      "cout": "Prix du chargement annulé",
+      "validation": "Auteur de la décision le jour même, ou Direction / Admin",
+      "reversibilite": "Aucune : c'est lui l'annulation",
+      "banc": ["machine"]
+    },
+    "ANNUL_RETOUR_MACHINE": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 1,
+      "origine": "Annulation d'une décision machine : le retour repart sur la machine",
+      "cmup": "Inchangé",
+      "cout": "CMUP du magasin",
+      "validation": "Auteur de la décision le jour même, ou Direction / Admin",
+      "reversibilite": "Aucune : c'est lui l'annulation",
+      "banc": ["machine"]
+    }
+  }
+}

@@ -171,12 +171,12 @@ export function LecturePiece() {
 
   const qDossier = useQuery({
     queryKey: ['import-dossier', idDossier],
-    queryFn: () => api.get<DossierComplet>(`/api/import/dossiers/${idDossier}`),
+    queryFn: ({ signal }) => api.get<DossierComplet>(`/api/import/dossiers/${idDossier}`, { signal }),
     enabled: !!idDossier,
   })
   const qLecture = useQuery({
     queryKey: ['piece-lecture', idPiece],
-    queryFn: () => api.get<Lecture | null>(`/api/import/pieces/${idPiece}/lecture`),
+    queryFn: ({ signal }) => api.get<Lecture | null>(`/api/import/pieces/${idPiece}/lecture`, { signal }),
     enabled: !!idPiece,
   })
 
@@ -418,7 +418,7 @@ export function LecturePiece() {
                 )}
 
                 {doc.lignes && doc.lignes.length > 0 && (
-                  <div className="defilement-x">
+                  <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                     <table className="w-full min-w-[40rem] text-[12px]">
                       <thead>
                         <tr className="border-y border-bordure">
@@ -452,7 +452,7 @@ export function LecturePiece() {
                 )}
 
                 {doc.engagements && doc.engagements.length > 0 && (
-                  <div className="defilement-x">
+                  <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                     <table className="w-full min-w-[36rem] text-[12px]">
                       <thead>
                         <tr className="border-y border-bordure">
@@ -491,7 +491,7 @@ export function LecturePiece() {
                 )}
 
                 {doc.rubriques && doc.rubriques.length > 0 && (
-                  <div className="defilement-x">
+                  <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                     <table className="w-full min-w-[32rem] text-[12px]">
                       <thead>
                         <tr className="border-y border-bordure">

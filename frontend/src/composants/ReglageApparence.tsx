@@ -31,11 +31,11 @@ export function ReglageApparence() {
         <p className="flex items-center gap-1.5 text-[11px] text-attenue-texte">
           <PanelRight className="size-3.5 shrink-0" />
           Les memes reglages s ouvrent en tiroir depuis l icone de la barre du haut, sans quitter
-          l ecran ou l on travaille.
+          l’écran ou l’on travaille.
         </p>
         <Bouton variante="contour" onClick={reinitialiser}>
           <RotateCcw />
-          Valeurs par defaut
+          Valeurs par défaut
         </Bouton>
       </div>
 

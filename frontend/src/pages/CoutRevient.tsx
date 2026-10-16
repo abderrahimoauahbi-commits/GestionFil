@@ -37,7 +37,7 @@ import {
   Etiq,
   Selecteur,
 } from '../composants/ui/base'
-import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
+import { EcartsPrix } from './EcartsPrix'
 import { fmt } from '../components/ui'
 import { cn } from '../lib/utils'
 
@@ -79,7 +79,7 @@ const TYPES = ['FRET', 'DOUANE', 'ASSURANCE', 'MANUTENTION', 'AUTRE'] as const
 /** Ce que chaque cle repartit, et pourquoi elle convient a ce frais. */
 const CLES: { valeur: string; libelle: string; aide: string }[] = [
   { valeur: 'POIDS', libelle: 'Au poids', aide: 'Le fret et la manutention se paient au kilo.' },
-  { valeur: 'VALEUR', libelle: 'A la valeur', aide: 'La douane et l assurance suivent la valeur declaree.' },
+  { valeur: 'VALEUR', libelle: 'À la valeur', aide: 'La douane et l’assurance suivent la valeur déclarée.' },
   { valeur: 'LIGNES', libelle: 'Par ligne', aide: 'Un frais fixe par article : formalites, analyses.' },
 ]
 
@@ -90,11 +90,11 @@ export function CoutRevient() {
 
   const q = useQuery({
     queryKey: ['cout-revient'],
-    queryFn: () => api.get<LigneCout[]>('/api/cout-revient'),
+    queryFn: ({ signal }) => api.get<LigneCout[]>('/api/cout-revient', { signal }),
   })
   const qFrais = useQuery({
     queryKey: ['frais-approche'],
-    queryFn: () => api.get<Frais[]>('/api/frais-approche?limite=200'),
+    queryFn: ({ signal }) => api.get<Frais[]>('/api/frais-approche?limite=200', { signal }),
   })
 
   const lignes = q.data ?? []
@@ -199,7 +199,7 @@ export function CoutRevient() {
     <div>
       <EnTetePage
         titre="Coût de revient complet"
-        sous_titre="Prix d achat plus fret, douane, assurance et manutention, repartis par réception"
+        sous_titre="Prix d’achat plus fret, douane, assurance et manutention, répartis par réception"
         actions={
           droits.peutEcrire && (
             <Bouton taille="icone" title="Saisir un frais" aria-label="Saisir un frais" onClick={() => setSaisie(true)}>              <Plus />            </Bouton>
@@ -207,12 +207,24 @@ export function CoutRevient() {
         }
       />
 
+      {/* LE FRAIS SE SAISIT SUR LA PAGE (audit v5, F20) : un document, pas une fenetre. */}
+      {saisie && (
+        <FormulaireFrais
+          surFermeture={() => setSaisie(false)}
+          surSucces={() => {
+            setSaisie(false)
+            void qc.invalidateQueries({ queryKey: ['frais-approche'] })
+            void qc.invalidateQueries({ queryKey: ['cout-revient'] })
+          }}
+        />
+      )}
+
       {frais.length === 0 && (
-        <Alerte ton="info" titre="Aucun frais d approche saisi" className="mb-3">
+        <Alerte ton="info" titre="Aucun frais d’approche saisi" className="mb-3">
           Le cout de revient affiche est donc egal au prix d achat. Ce n est pas que les frais sont
           nuls — c est qu ils ne sont pas encore enregistres. Ils arrivent en general par la
           facture du transitaire, apres la reception : saisissez-les au fur et a mesure, la
-          repartition se fait toute seule.
+          répartition se fait toute seule.
         </Alerte>
       )}
 
@@ -265,7 +277,7 @@ export function CoutRevient() {
             </CarteTitre>
           </CarteEntete>
           <CarteCorps className="p-0">
-            <div className="defilement-x">
+            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="grille w-full text-[12px]">
                 <thead>
                   <tr className="bg-attenue">
@@ -310,19 +322,10 @@ export function CoutRevient() {
         titreCarte={(l) => `${l.numero_reception} · ${l.code_reference}`}
         exportable="cout-de-revient"
         imprimable="Coût de revient"
-        texteVide="Aucune reception validee."
+        texteVide="Aucune réception validee ou clôturée."
       />
 
-      {saisie && (
-        <FormulaireFrais
-          surFermeture={() => setSaisie(false)}
-          surSucces={() => {
-            setSaisie(false)
-            void qc.invalidateQueries({ queryKey: ['frais-approche'] })
-            void qc.invalidateQueries({ queryKey: ['cout-revient'] })
-          }}
-        />
-      )}
+      <EcartsPrix />
     </div>
   )
 }
@@ -352,13 +355,13 @@ function FormulaireFrais({
 
   const qRecept = useQuery({
     queryKey: ['receptions'],
-    queryFn: () => api.get<{ id_reception: string; numero_reception: string; date_reception: string; fournisseur_nom: string | null; statut: string }[]>(
-      '/api/receptions?limite=200',
+    queryFn: ({ signal }) => api.get<{ id_reception: string; numero_reception: string; date_reception: string; fournisseur_nom: string | null; statut: string }[]>(
+      '/api/receptions?limite=200', { signal }
     ),
   })
   const qDevises = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
   })
 
   const receptions = useMemo(() => {
@@ -375,7 +378,7 @@ function FormulaireFrais({
         taux_change: Number(form.taux_change),
       }),
     onSuccess: () => {
-      toast.success('Frais enregistre', { description: 'Le coût de revient est recalcule.' })
+      toast.success('Frais enregistre', { description: 'Le coût de revient est recalculé.' })
       surSucces()
     },
     onError: (e) => setErreur(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.'),
@@ -384,11 +387,12 @@ function FormulaireFrais({
   const pret = form.id_reception && Number(form.montant_devise) > 0 && Number(form.taux_change) > 0
 
   return (
-    <Dialogue open onOpenChange={(o) => !o && surFermeture()}>
-      <DialogueContenu
-        titre="Saisir un frais d approche"
-        description="Il sera reparti sur les lignes de la réception selon la cle choisie."
-      >
+    <Carte className="mb-3">
+      <CarteEntete>
+        <CarteTitre>Saisir un frais d’approche</CarteTitre>
+        <p className="text-[12px] text-attenue-texte">Il sera réparti sur les lignes de la réception selon la clé choisie.</p>
+      </CarteEntete>
+      <CarteCorps>
         <form
           className="flex flex-col gap-3"
           onSubmit={(e) => {
@@ -400,8 +404,8 @@ function FormulaireFrais({
           {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 
           <div>
-            <Etiq obligatoire>Réception</Etiq>
-            <Selecteur
+            <Etiq obligatoire htmlFor="ch-coutrevient-1">Réception</Etiq>
+            <Selecteur id="ch-coutrevient-1"
               value={form.id_reception}
               onChange={(e) => setForm({ ...form, id_reception: e.target.value })}
             >
@@ -417,8 +421,8 @@ function FormulaireFrais({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Etiq obligatoire>Nature</Etiq>
-              <Selecteur
+              <Etiq obligatoire htmlFor="ch-coutrevient-2">Nature</Etiq>
+              <Selecteur id="ch-coutrevient-2"
                 value={form.type_frais}
                 onChange={(e) => {
                   // La cle par defaut suit la nature : le fret au poids, la
@@ -441,8 +445,8 @@ function FormulaireFrais({
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire>Répartition</Etiq>
-              <Selecteur
+              <Etiq obligatoire htmlFor="ch-coutrevient-3">Répartition</Etiq>
+              <Selecteur id="ch-coutrevient-3"
                 value={form.cle_repartition}
                 onChange={(e) => setForm({ ...form, cle_repartition: e.target.value })}
               >
@@ -460,8 +464,8 @@ function FormulaireFrais({
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <Etiq obligatoire>Montant</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-coutrevient-4">Montant</Etiq>
+              <Champ id="ch-coutrevient-4"
                 type="number"
                 step="0.01"
                 min="0"
@@ -470,8 +474,8 @@ function FormulaireFrais({
               />
             </div>
             <div>
-              <Etiq obligatoire>Devise</Etiq>
-              <Selecteur
+              <Etiq obligatoire htmlFor="ch-coutrevient-5">Devise</Etiq>
+              <Selecteur id="ch-coutrevient-5"
                 value={form.code_devise}
                 onChange={(e) => setForm({ ...form, code_devise: e.target.value })}
               >
@@ -483,8 +487,8 @@ function FormulaireFrais({
               </Selecteur>
             </div>
             <div>
-              <Etiq obligatoire>Taux</Etiq>
-              <Champ
+              <Etiq obligatoire htmlFor="ch-coutrevient-6">Taux</Etiq>
+              <Champ id="ch-coutrevient-6"
                 type="number"
                 step="0.0001"
                 min="0"
@@ -496,16 +500,16 @@ function FormulaireFrais({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Etiq>Libelle</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-coutrevient-7">Libelle</Etiq>
+              <Champ id="ch-coutrevient-7"
                 value={form.libelle}
                 onChange={(e) => setForm({ ...form, libelle: e.target.value })}
                 placeholder="Conteneur 40 pieds Izmir-Casablanca"
               />
             </div>
             <div>
-              <Etiq>Référence externe</Etiq>
-              <Champ
+              <Etiq htmlFor="ch-coutrevient-8">Référence externe</Etiq>
+              <Champ id="ch-coutrevient-8"
                 value={form.reference_externe}
                 onChange={(e) => setForm({ ...form, reference_externe: e.target.value })}
                 placeholder="Facture transitaire, DUM"
@@ -522,7 +526,7 @@ function FormulaireFrais({
             </Bouton>
           </div>
         </form>
-      </DialogueContenu>
-    </Dialogue>
+      </CarteCorps>
+    </Carte>
   )
 }

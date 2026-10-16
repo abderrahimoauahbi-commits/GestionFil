@@ -19,7 +19,8 @@
  * L'export des besoins la posait par une expression reguliere sur le fichier
  * entier : elle transformait aussi « PP-1500 Dtex-1.5 » en « ...1,5 » et
  * coupait les horodatages. Ici une cellule n'est convertie que si la colonne
- * est declaree numerique et que la valeur en est reellement un.
+ * est declaree numerique et que la valeur en est reellement un. Un nombre non
+ * fini (NaN, infini) y donne une cellule vide.
  */
 
 export interface ColonneExport<L> {
@@ -43,8 +44,11 @@ export interface ColonneExport<L> {
 function cellule(v: unknown, numerique: boolean): string {
   if (v == null) return ''
 
-  if (numerique && typeof v === 'number' && Number.isFinite(v)) {
-    return String(v).replace('.', ',')
+  if (numerique && typeof v === 'number') {
+    // Un calcul sans valeur (NaN, division par zero) sortait « NaN » ou
+    // « Infinity » dans Excel : une colonne numerique ne porte qu'un nombre,
+    // ou rien (T-GF-003, 15/10/2026).
+    return Number.isFinite(v) ? String(v).replace('.', ',') : ''
   }
   // Une colonne numerique peut porter du texte : « — » quand la valeur manque,
   // ou un libelle quand le droit masque le chiffre. On ne le convertit pas.

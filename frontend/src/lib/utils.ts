@@ -12,26 +12,33 @@ export function cn(...entrees: ClassValue[]) {
   return twMerge(clsx(entrees))
 }
 
+/**
+ * Un nombre affichable : fini. NaN et l'infini s'affichent « — » comme une
+ * valeur absente — une saisie illisible (« 1,2,3 ») ou une division par zero
+ * ecrivait « NaN » ou « ∞ » a l'ecran (T-GF-009, 15/10/2026).
+ */
+const fini = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
 /** Formatage francais, uniforme dans toute l'application. */
 export const fmt = {
   nombre: (v: unknown, decimales = 2) =>
-    typeof v === 'number'
+    fini(v)
       ? v.toLocaleString('fr-FR', {
           minimumFractionDigits: decimales,
           maximumFractionDigits: decimales,
         })
       : '—',
 
-  entier: (v: unknown) => (typeof v === 'number' ? v.toLocaleString('fr-FR') : '—'),
+  entier: (v: unknown) => (fini(v) ? v.toLocaleString('fr-FR') : '—'),
 
   mad: (v: unknown) =>
-    typeof v === 'number'
+    fini(v)
       ? `${v.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} MAD`
       : '—',
 
   /** Montant compact pour les tuiles : 13 421 922 -> 13,4 M. */
   compact: (v: unknown) => {
-    if (typeof v !== 'number') return '—'
+    if (!fini(v)) return '—'
     if (Math.abs(v) >= 1e6) return `${(v / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} M`
     if (Math.abs(v) >= 1e3) return `${(v / 1e3).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} k`
     return v.toLocaleString('fr-FR', { maximumFractionDigits: 0 })

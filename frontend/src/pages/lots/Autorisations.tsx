@@ -11,8 +11,7 @@
  * validation des bons) : le serveur le refuse, l'ecran ne propose donc pas le
  * bouton, et dit pourquoi.
  *
- * Decider demande le droit VALIDER sur le stock, en attendant les profils
- * « responsable qualite » et « chef d'atelier » [A DEFINIR au cahier].
+ * Decider demande le droit VALIDER du module LOTS, ou la Direction (regle 5).
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -28,7 +27,7 @@ import { Onglet, Onglets, OngletsListe } from '../../composants/ui/surcouches'
 import { libelleLot } from '../../lib/lots'
 import { cn, fmt } from '../../lib/utils'
 import { DecisionMotivee, LienLot } from './commun'
-import { MODULE, STATUTS_DEMANDE, TYPES_DEMANDE, messageErreur, useApresDecision, type Demande } from './modele'
+import { MODULE_DECISION, STATUTS_DEMANDE, TYPES_DEMANDE, messageErreur, useApresDecision, type Demande } from './modele'
 
 type Geste = { demande: Demande; decision: 'ACCORDEE' | 'REFUSEE' | 'ANNULEE' }
 
@@ -43,7 +42,8 @@ function resumeDetails(d: unknown): string {
 
 export function Autorisations() {
   const { moi, peut } = useAuth()
-  const peutDecider = peut(MODULE, 'VALIDER')
+  // Regle 5 : le droit VALIDER des lots, ou la Direction.
+  const peutDecider = peut(MODULE_DECISION, 'VALIDER')
   const apres = useApresDecision()
   const [onglet, setOnglet] = useState('attente')
   const [type, setType] = useState('')
@@ -51,7 +51,7 @@ export function Autorisations() {
 
   const q = useQuery({
     queryKey: ['autorisations'],
-    queryFn: () => api.get<Demande[]>('/api/autorisations'),
+    queryFn: ({ signal }) => api.get<Demande[]>('/api/autorisations', { signal }),
   })
 
   const toutes = useMemo(() => q.data ?? [], [q.data])
@@ -70,7 +70,7 @@ export function Autorisations() {
   const types = useMemo(() => [...new Set(toutes.map((d) => d.type_demande))].sort(), [toutes])
 
   const estAMoi = (d: Demande) => !!moi && d.id_demandeur === moi.id
-  const peutRepondre = (d: Demande) => peutDecider && (!estAMoi(d) || moi?.role === 'ADMIN')
+  const peutRepondre = (d: Demande) => peutDecider && (!estAMoi(d) || peut('UTILISATEURS', 'VALIDER'))
 
   const envoyer = async (g: Geste, motif: string) => {
     await api.post(`/api/autorisations/${encodeURIComponent(g.demande.id_demande)}/decider`, {
@@ -102,7 +102,7 @@ export function Autorisations() {
         <div className="flex flex-wrap items-center gap-2">
           <Onglets value={onglet} onValueChange={setOnglet}>
             <OngletsListe>
-              <Onglet value="attente">
+              <Onglet sansPanneau value="attente">
                 À décider
                 <span
                   className={cn('text-[11px] tabular-nums', enAttente.length ? 'font-semibold text-alerte' : 'text-attenue-texte')}
@@ -110,7 +110,7 @@ export function Autorisations() {
                   {q.data ? enAttente.length : '…'}
                 </span>
               </Onglet>
-              <Onglet value="historique">
+              <Onglet sansPanneau value="historique">
                 Historique
                 <span className="text-[11px] tabular-nums text-attenue-texte">{q.data ? historique.length : '…'}</span>
               </Onglet>
@@ -191,6 +191,12 @@ export function Autorisations() {
                           ) : (
                             <span className="font-mono text-[11.5px]">{libelleLot(d.lot_fournisseur)}</span>
                           ))}
+                        {d.kg_autorises != null && (
+                          <div className="text-[10.5px] tabular-nums text-attenue-texte">
+                            {fmt.nombre(Number(d.kg_autorises), 1)} kg au plus
+                            {d.kg_consommes != null && ` — ${fmt.nombre(Number(d.kg_consommes), 1)} kg employés`}
+                          </div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-2 py-1.5 font-mono text-[11.5px]">{d.document ?? '—'}</td>
                       <td className="whitespace-nowrap px-2 py-1.5">
@@ -237,7 +243,7 @@ export function Autorisations() {
                                 Retirer
                               </Bouton>
                             )}
-                            {peutDecider && estAMoi(d) && moi?.role !== 'ADMIN' && (
+                            {peutDecider && estAMoi(d) && !peut('UTILISATEURS', 'VALIDER') && (
                               <span className="w-full text-right text-[10.5px] text-attenue-texte">
                                 Un autre responsable doit répondre.
                               </span>
@@ -271,20 +277,21 @@ export function Autorisations() {
                 {TYPES_DEMANDE[geste.demande.type_demande] ?? geste.demande.type_demande}
                 {geste.demande.lot_fournisseur && <> — lot {libelleLot(geste.demande.lot_fournisseur)}</>}
                 {geste.demande.code_reference && <> ({geste.demande.code_reference})</>}
+                {geste.demande.kg_autorises != null && <> — {fmt.nombre(Number(geste.demande.kg_autorises), 1)} kg au plus</>}
               </div>
               <div className="mt-1 text-attenue-texte">
                 Demandé par {geste.demande.demandeur ?? '—'} : « {geste.demande.motif} »
               </div>
               <div className="mt-2">
                 {geste.decision === 'ACCORDEE'
-                  ? 'Le document en attente pourra passer. La dérogation est inscrite sur la fiche du lot.'
+                  ? 'Le document en attente pourra passer, une fois. La dérogation est inscrite sur la fiche du lot : dites pourquoi, le motif est obligatoire.'
                   : geste.decision === 'REFUSEE'
                     ? 'Le document en attente reste bloqué. Dites au demandeur pourquoi : le motif est obligatoire.'
                     : 'La demande est retirée de la file ; elle reste dans l’historique.'}
               </div>
             </>
           }
-          motifObligatoire={geste.decision === 'REFUSEE'}
+          motifObligatoire={geste.decision !== 'ANNULEE'}
           destructif={geste.decision === 'REFUSEE'}
           libelleBouton={geste.decision === 'ACCORDEE' ? 'Accorder' : geste.decision === 'REFUSEE' ? 'Refuser' : 'Retirer la demande'}
           envoyer={(motif) => envoyer(geste, motif)}

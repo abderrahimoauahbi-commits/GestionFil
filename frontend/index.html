@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" data-charte="classique">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -19,20 +19,8 @@
 
     <title>Gestion Fil</title>
 
-    <script>
-      // Applique le theme AVANT le premier rendu : sans cela, un utilisateur en
-      // mode sombre voit un eclair blanc a chaque chargement.
-      (function () {
-        try {
-          var choix = localStorage.getItem('gestionfil.theme') || 'systeme'
-          var sombre =
-            choix === 'sombre' ||
-            (choix === 'systeme' &&
-              window.matchMedia('(prefers-color-scheme: dark)').matches)
-          if (sombre) document.documentElement.classList.add('sombre')
-        } catch (e) {}
-      })()
-    </script>
+    <!-- Le theme avant le premier rendu : fichier a part, la CSP refuse les scripts en ligne. -->
+    <script src="/theme-initial.js"></script>
   </head>
   <body>
     <div id="root"></div>

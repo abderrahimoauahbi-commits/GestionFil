@@ -46,6 +46,7 @@ import {
 } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
 import { NATURE_PIECE, type Piece } from './types'
+import { lireNombre } from '../../lib/nombres'
 
 /** Un document en attente : le fichier, sa nature, et de quoi l'afficher. */
 interface Document {
@@ -80,7 +81,7 @@ export function AssistantImport() {
 
   const qDevises = useQuery({
     queryKey: ['devises'],
-    queryFn: () => api.get<{ code_devise: string }[]>('/api/devises'),
+    queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
   })
 
   // Les aperçus tiennent de la mémoire tant que l'onglet vit : on la rend dès
@@ -119,7 +120,7 @@ export function AssistantImport() {
           numero_bl: f.numero_bl.trim() || null,
           conteneurs: f.conteneurs.trim() || null,
           code_devise: f.code_devise,
-          taux_change: Number(f.taux_change.replace(',', '.')),
+          taux_change: (lireNombre(f.taux_change) ?? 0),
           date_arrivee: f.date_arrivee || null,
           notes: f.notes.trim() || null,
         },
@@ -156,7 +157,7 @@ export function AssistantImport() {
   const maj = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF((x) => ({ ...x, [k]: e.target.value }))
 
-  const tauxValide = Number(f.taux_change.replace(',', '.')) > 0
+  const tauxValide = (lireNombre(f.taux_change) ?? 0) > 0
   const doc = documents[pointe]
 
   const manquants = useMemo(() => {
@@ -324,32 +325,32 @@ export function AssistantImport() {
               <CarteCorps className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Etiq>Numéro</Etiq>
-                    <Champ
+                    <Etiq htmlFor="ch-assistantimport-1">Numéro</Etiq>
+                    <Champ id="ch-assistantimport-1"
                       value={f.numero}
                       onChange={maj('numero')}
                       placeholder="laissez vide : 56/26"
                     />
                   </div>
                   <div>
-                    <Etiq>Connaissement (BL)</Etiq>
-                    <Champ value={f.numero_bl} onChange={maj('numero_bl')} placeholder="ISB2023278" />
+                    <Etiq htmlFor="ch-assistantimport-2">Connaissement (BL)</Etiq>
+                    <Champ id="ch-assistantimport-2" value={f.numero_bl} onChange={maj('numero_bl')} placeholder="ISB2023278" />
                   </div>
                   <div>
-                    <Etiq>Conteneurs</Etiq>
-                    <Champ
+                    <Etiq htmlFor="ch-assistantimport-3">Conteneurs</Etiq>
+                    <Champ id="ch-assistantimport-3"
                       value={f.conteneurs}
                       onChange={maj('conteneurs')}
                       placeholder="CMAU4385688"
                     />
                   </div>
                   <div>
-                    <Etiq>Date d'arrivée</Etiq>
-                    <Champ type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} />
+                    <Etiq htmlFor="ch-assistantimport-4">Date d'arrivée</Etiq>
+                    <Champ id="ch-assistantimport-4" type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} />
                   </div>
                   <div>
-                    <Etiq>Devise</Etiq>
-                    <Selecteur value={f.code_devise} onChange={maj('code_devise')}>
+                    <Etiq htmlFor="ch-assistantimport-5">Devise</Etiq>
+                    <Selecteur id="ch-assistantimport-5" value={f.code_devise} onChange={maj('code_devise')}>
                       {(qDevises.data ?? [{ code_devise: 'USD' }]).map((d) => (
                         <option key={d.code_devise} value={d.code_devise}>
                           {d.code_devise}
@@ -358,8 +359,8 @@ export function AssistantImport() {
                     </Selecteur>
                   </div>
                   <div>
-                    <Etiq>Taux de change</Etiq>
-                    <Champ
+                    <Etiq htmlFor="ch-assistantimport-6">Taux de change</Etiq>
+                    <Champ id="ch-assistantimport-6"
                       value={f.taux_change}
                       onChange={maj('taux_change')}
                       placeholder="9,2224"
@@ -368,8 +369,8 @@ export function AssistantImport() {
                   </div>
                 </div>
                 <div>
-                  <Etiq>Notes</Etiq>
-                  <Champ value={f.notes} onChange={maj('notes')} />
+                  <Etiq htmlFor="ch-assistantimport-7">Notes</Etiq>
+                  <Champ id="ch-assistantimport-7" value={f.notes} onChange={maj('notes')} />
                 </div>
 
                 {!tauxValide && (

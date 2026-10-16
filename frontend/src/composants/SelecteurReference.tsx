@@ -118,7 +118,7 @@ export function SelecteurReference({
     <Dialogue open={ouvert} onOpenChange={surOuvert}>
       <DialogueContenu
         cote="droite"
-        titre="Choisir une matiere"
+        titre="Choisir une matière"
         description={`Role ${libelleRole} (${role})`}
         className="max-w-2xl"
       >
@@ -130,7 +130,7 @@ export function SelecteurReference({
               ref={champRef}
               value={recherche}
               onChange={(e) => setRecherche(e.target.value)}
-              placeholder="Code, designation, type, couleur, fournisseur..."
+              placeholder="Code, désignation, type, couleur, fournisseur..."
               className="pl-7 pr-7"
             />
             {recherche && (
@@ -170,12 +170,12 @@ export function SelecteurReference({
             <p className="mt-2 text-[13px] font-medium">
               {limiterAuRole && totalRole === 0
                 ? `Aucune matiere n'est rattachee au role ${libelleRole}`
-                : 'Aucune matiere ne correspond'}
+                : 'Aucune matière ne correspond'}
             </p>
             <p className="mx-auto mt-1 max-w-sm text-[11px] leading-relaxed text-attenue-texte">
               {limiterAuRole && totalRole === 0
-                ? "Le rattachement se declare sur la categorie de matiere, dans Referentiels. En attendant, levez le filtre pour choisir dans tout le catalogue."
-                : 'Affinez la recherche, ou levez le filtre de role.'}
+                ? "Le rattachement se declare sur la catégorie de matière, dans Referentiels. En attendant, levez le filtre pour choisir dans tout le catalogue."
+                : 'Affinez la recherche, ou levez le filtre de rôle.'}
             </p>
             {limiterAuRole && (
               <Bouton variante="contour" className="mt-3" onClick={() => setLimiterAuRole(false)}>
@@ -235,7 +235,7 @@ export function SelecteurReference({
             })}
             {tropNombreux && (
               <p className="pt-1 text-center text-[11px] text-attenue-texte">
-                300 premieres matieres affichees — affinez la recherche pour voir les suivantes.
+                300 premières matières affichées — affinez la recherche pour voir les suivantes.
               </p>
             )}
           </div>

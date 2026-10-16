@@ -53,11 +53,11 @@ export function Telecharger() {
 
   const qPaquets = useQuery({
     queryKey: ['telechargements'],
-    queryFn: () => api.get<Paquet[]>('/api/telechargements'),
+    queryFn: ({ signal }) => api.get<Paquet[]>('/api/telechargements', { signal }),
   })
   const qJournal = useQuery({
     queryKey: ['telechargements-journal'],
-    queryFn: () => api.get<LigneJournal[]>('/api/telechargements/journal'),
+    queryFn: ({ signal }) => api.get<LigneJournal[]>('/api/telechargements/journal', { signal }),
     enabled: peut(MODULE, 'LIRE'),
   })
 
@@ -110,7 +110,7 @@ export function Telecharger() {
 
   return (
     <div>
-      <EnTetePage titre="Télécharger l application" />
+      <EnTetePage titre="Télécharger l’application" />
 
       {paquets.length === 0 ? (
         <Alerte ton="info" titre="Aucun paquet publie">
@@ -152,7 +152,7 @@ export function Telecharger() {
                            transition-[filter] hover:brightness-110"
               >
                 <Download className="size-4" />
-                Telecharger
+                Télécharger
               </a>
             </div>
           ))}
@@ -185,7 +185,7 @@ export function Telecharger() {
                   download={p.fichier}
                   className="text-primaire underline-offset-2 hover:underline"
                 >
-                  Telecharger
+                  Télécharger
                 </a>
               </li>
             ))}

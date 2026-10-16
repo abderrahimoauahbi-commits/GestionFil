@@ -115,11 +115,11 @@ export function MaitreDetail({
 
   const qMaitre = useQuery({
     queryKey: [maitre.route],
-    queryFn: () => api.get<Ligne[]>(`/api/${maitre.route}?actif=1&limite=500`),
+    queryFn: ({ signal }) => api.get<Ligne[]>(`/api/${maitre.route}?actif=1&limite=500`, { signal }),
   })
   const qDetail = useQuery({
     queryKey: [detail.route],
-    queryFn: () => api.get<Ligne[]>(`/api/${detail.route}?limite=1000`),
+    queryFn: ({ signal }) => api.get<Ligne[]>(`/api/${detail.route}?limite=1000`, { signal }),
   })
 
   /*
@@ -398,8 +398,8 @@ export function MaitreDetail({
               </CarteCorps>
             )}
             <CarteCorps className="p-0">
-              <div className="defilement-x">
-                <table className="grille w-full min-w-[40rem] text-[12.5px]">
+              <div tabIndex={0} role="region" aria-label="Lignes" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
+                <table className="grille w-full text-[12.5px]">
                   <thead>
                     <tr className="bg-attenue/50">
                       {detail.colonnes.map((c) => (
@@ -516,6 +516,7 @@ export function MaitreDetail({
                         <td className={td}>
                           <Bouton
                             taille="sm"
+                            aria-label="Ajouter la ligne"
                             disabled={!complet}
                             chargement={creer.isPending}
                             onClick={() => creer.mutate()}

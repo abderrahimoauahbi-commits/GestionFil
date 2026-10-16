@@ -1,7 +1,13 @@
-﻿//! ERP Gestion Fil - serveur HTTP.
+//! ERP Gestion Fil - serveur HTTP.
 //!
 //! Polyfashions Carpet Morocco.
 //! Pilotage des achats, stocks et production de matieres premieres.
+
+// DEUX REMARQUES DE CLIPPY ECARTEES EN CONNAISSANCE DE CAUSE (audit v5, T14) :
+// `!(montant > 0.0)` refuse aussi NaN, ce que `montant <= 0.0` laisserait
+// passer ; et les lignes sqlx se lisent en tuples, dont le type est long par
+// nature.
+#![allow(clippy::neg_cmp_op_on_partial_ord, clippy::type_complexity)]
 
 mod assistant;
 mod auth;
@@ -34,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::connect(&config.database_url)
         .await
-        .context("connexion a la base impossible : verifier DATABASE_URL et que PostgreSQL ecoute")?;
+        .context("demarrage impossible")?;
 
     alerter_si_comptes_non_initialises(&pool).await?;
 
@@ -109,13 +115,29 @@ async fn sauvegarder_a_la_fermeture(pool: &db::Db, database_url: &str) {
     }
 }
 
+/// L'ARRET PROPRE, SUR CTRL+C ET SUR SIGTERM (audit v4). systemd arrete le
+/// service par SIGTERM : seul Ctrl+C etait ecoute, si bien qu'en production le
+/// processus mourait sans finir ses requetes ni ecrire sa sauvegarde de
+/// fermeture.
 async fn arret_gracieux() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
             .expect("impossible d'ecouter Ctrl+C");
     };
-    ctrl_c.await;
+    #[cfg(unix)]
+    let terminer = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("impossible d'ecouter SIGTERM")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminer = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminer => {},
+    }
     tracing::info!("arret demande, fermeture des connexions");
 }
 

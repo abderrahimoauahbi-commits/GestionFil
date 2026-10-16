@@ -27,32 +27,17 @@ $ErrorActionPreference = 'Stop'
 $racine = Split-Path -Parent $MyInvocation.MyCommand.Path
 $back   = Join-Path $racine 'backend'
 $front  = Join-Path $racine 'frontend'
-$base   = Join-Path $racine 'db\gestionfil.db'
 
 function Occupe([int] $port) {
     [bool] (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
 }
 
 # ---------------------------------------------------------------- prerequis
-if (-not (Test-Path $base)) {
-    throw "Base absente. Executer d'abord :`n    cd db; .\build.ps1"
-}
+# LA BASE EST POSTGRESQL (depuis le 04/09/2026) : plus de fichier a verifier ici.
+# Le serveur controle lui-meme au demarrage le schema, les migrations exigees et
+# les comptes sans mot de passe, et le dit dans sa console.
 if (-not (Test-Path (Join-Path $back '.env'))) {
     throw "Configuration absente. Executer d'abord :`n    cd backend; cargo run --bin gestionfil-admin -- init-config"
-}
-
-$sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source
-if ($sqlite) {
-    $refs = & $sqlite $base "SELECT COUNT(*) FROM reference;"
-    if ([int] $refs -eq 0) {
-        Write-Host "Catalogue vide : lancer l'import avec" -ForegroundColor Yellow
-        Write-Host "    cd backend; cargo run --bin gestionfil-import" -ForegroundColor Yellow
-    }
-    $sansMdp = & $sqlite $base "SELECT COUNT(*) FROM utilisateur WHERE actif=1 AND mot_de_passe_hash='!A_DEFINIR!';"
-    if ([int] $sansMdp -gt 0) {
-        Write-Host "$sansMdp compte(s) sans mot de passe :" -ForegroundColor Yellow
-        Write-Host "    cd backend; cargo run --bin gestionfil-admin -- definir-mot-de-passe <login>" -ForegroundColor Yellow
-    }
 }
 
 if (Occupe $PortApi) { throw "Le port $PortApi est deja utilise. Arreter l'autre serveur d'abord." }

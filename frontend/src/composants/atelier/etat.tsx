@@ -76,6 +76,22 @@ const DYNAMIQUES: {
   decrire: (m: RegExpMatchArray) => Descripteur
 }[] = [
   {
+    motif: /^\/machines\/fiches\/[^/]+$/,
+    decrire: () => ({ titre: 'Fiche machine', detail: 'Machines', Icone: FileText }),
+  },
+  {
+    motif: /^\/machines\/([^/]+)\/fiche\/(CHARGE|DECHARGE|MAJ)\/[^/]+$/,
+    decrire: (m) => ({
+      titre: m[2] === 'CHARGE' ? 'Chargement' : m[2] === 'DECHARGE' ? 'Déchargement' : 'Constat',
+      detail: `Machine ${decodeURIComponent(m[1])}`,
+      Icone: FileText,
+    }),
+  },
+  {
+    motif: /^\/machines\/([^/?]+)/,
+    decrire: (m) => ({ titre: `Machine ${decodeURIComponent(m[1])}`, detail: 'Machines', Icone: FileText }),
+  },
+  {
     motif: /^\/transferts\/([^/]+)\/bon-sortie$/,
     decrire: (m) => ({ titre: `Bon de sortie ${m[1]}`, detail: 'Transfert', Icone: FileText }),
   },
@@ -118,14 +134,6 @@ const DYNAMIQUES: {
   {
     motif: /^\/referentiels$/,
     decrire: () => ({ titre: 'Referentiels', detail: 'Paramètres', Icone: Library }),
-  },
-  {
-    motif: /^\/receptions-import\/nouvelle$/,
-    decrire: () => ({ titre: 'Nouvelle réception import', Icone: Package }),
-  },
-  {
-    motif: /^\/receptions-import\/([^/]+)$/,
-    decrire: () => ({ titre: 'Réception import', detail: 'Achats', Icone: Package }),
   },
   {
     motif: /^\/receptions\/nouvelle$/,

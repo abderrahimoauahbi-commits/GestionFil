@@ -69,7 +69,7 @@ export function MatricePrix() {
 
   const q = useQuery({
     queryKey: ['matrice-prix'],
-    queryFn: () => api.get<Case[]>('/api/matrice-prix?limite=2000'),
+    queryFn: ({ signal }) => api.get<Case[]>('/api/matrice-prix?limite=2000', { signal }),
   })
 
   /* Le serveur rend une liste de cases ; le pivot se fait ici, sur les seules
@@ -126,9 +126,9 @@ export function MatricePrix() {
     <div>
       <EnTetePage
         titre="Matrice des prix"
-        sous_titre="Prix moyen pondere par mois — la ligne se lit d un trait, la derive se voit sans la chercher"
+        sous_titre="Prix moyen pondéré par mois — la ligne se lit d’un trait, la dérive se voit sans la chercher"
         actions={
-          <Selecteur value={horizon} onChange={(e) => setHorizon(e.target.value)} className="w-36">
+          <Selecteur aria-label="Période" value={horizon} onChange={(e) => setHorizon(e.target.value)} className="w-44">
             <option value="6">6 derniers mois</option>
             <option value="12">12 derniers mois</option>
             <option value="24">24 derniers mois</option>
@@ -158,7 +158,7 @@ export function MatricePrix() {
           <EtatVide
             icone={Minus}
             titre="Aucun achat sur la période"
-            description="La matrice se remplit a la validation des réceptions."
+            description="La matrice se remplit à la validation des réceptions."
           />
         ) : (
           <>
@@ -181,12 +181,12 @@ export function MatricePrix() {
 
             <Carte>
               <CarteCorps className="p-0">
-                <div className="defilement-x">
+                <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
                   <table className="grille w-full text-[12px]">
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-attenue">
                         <th className="sticky left-0 z-20 bg-attenue px-2.5 py-1.5 text-left font-semibold">
-                          Reference
+                          Référence
                         </th>
                         {mois.map((m) => (
                           <th

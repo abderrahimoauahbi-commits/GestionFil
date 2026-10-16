@@ -499,6 +499,13 @@ pub async fn choisir_modele(
     Json(c): Json<ChoixModele>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PARAMETRES, Action::Ecrire).await?;
+    // Le moteur decide si des donnees partent chez un service exterieur : il se
+    // regle par l'administrateur (audit du 13/10/2026).
+    if user.role != "ADMIN" {
+        return Err(AppError::RegleMetier(
+            "Le choix du moteur de l'assistant revient à l'administrateur.".into(),
+        ));
+    }
 
     let moteur = match c.moteur.to_lowercase().as_str() {
         "claude" | "anthropic" => "claude",

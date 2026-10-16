@@ -9,10 +9,11 @@ mod admin;
 mod assistant;
 mod briefing;
 mod completion;
-mod auth_routes;
+pub(crate) mod auth_routes;
 mod consultation;
 mod devalidation;
 mod entites;
+mod factures;
 mod importation;
 mod lots;
 mod machines;
@@ -21,7 +22,9 @@ mod operations;
 pub mod pieces;
 mod production;
 mod referentiels;
-mod stock;
+mod retours;
+mod roles;
+pub(crate) mod stock;
 mod telechargements;
 
 use crate::state::AppState;
@@ -143,6 +146,7 @@ pub fn router(state: AppState) -> Router {
         // --- Authentification -------------------------------------------------
         .route("/api/auth/connexion", post(auth_routes::connexion))
         .route("/api/auth/moi", get(auth_routes::moi))
+        .route("/api/auth/preferences", get(auth_routes::lire_preferences).put(auth_routes::enregistrer_preferences))
         // Changer SON mot de passe : aucun droit particulier, mais
         // l'ancien mot de passe est exige (voir auth_routes).
         .route("/api/auth/mot-de-passe", post(auth_routes::changer_mot_de_passe))
@@ -155,6 +159,9 @@ pub fn router(state: AppState) -> Router {
         // Le verrou d'inactivite : verifie le mot de passe sans prolonger la
         // session. Voir auth_routes::deverrouiller.
         .route("/api/auth/deverrouiller", post(auth_routes::deverrouiller))
+        // Le verrou et la deconnexion tenus par le serveur (audit du 13/10/2026).
+        .route("/api/auth/verrouiller", post(auth_routes::verrouiller))
+        .route("/api/auth/deconnexion", post(auth_routes::deconnexion))
         // --- Administration ---------------------------------------------------
         .route("/api/admin/utilisateurs",
                get(admin::lister_utilisateurs).post(admin::creer_utilisateur))
@@ -166,7 +173,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/admin/sauvegardes",
              get(admin::lister_sauvegardes).post(admin::sauvegarder))
         .route("/api/admin/champs", get(admin::lister_champs))
-        .route("/api/admin/roles", get(admin::lister_roles))
+        .route("/api/admin/roles", get(admin::lister_roles).post(roles::creer))
+        // Roles et permissions (13/10/2026), reserves a l'Administrateur.
+        .route("/api/admin/roles/{code}",
+               get(roles::lire).put(roles::modifier).delete(roles::supprimer))
         .route("/api/admin/registre", get(entites::registre))
         // --- Referentiels a traitement particulier ----------------------------
         .route("/api/devises", get(referentiels::devises))
@@ -222,6 +232,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plans/{id}/snapshot", post(operations::snapshot_mrp))
         .route("/api/plans/{id}/besoins", get(consultation::besoins_mrp))
         // --- Stock et mouvements ----------------------------------------------
+        // Les retours fournisseur, document libre (12/10/2026).
+        .route("/api/retours-fournisseur", get(retours::lister).post(retours::creer))
+        .route("/api/retours-fournisseur/disponible", get(retours::disponible))
+        .route("/api/retours-fournisseur/{id}",
+               get(retours::lire).put(retours::modifier).delete(retours::supprimer))
+        .route("/api/retours-fournisseur/{id}/valider", post(retours::valider))
         .route("/api/mouvements",
                get(consultation::mouvements).post(stock::creer_mouvement))
         // LE DOCUMENT A COTE DU GRAND LIVRE, pas a sa place. `/api/mouvements`
@@ -245,6 +261,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/import/dossiers/{id}/engagements", post(importation::ajouter_engagement))
         .route("/api/import/engagements/{id}", delete(importation::supprimer_engagement))
         .route("/api/import/dossiers/{id}/cloturer", post(importation::cloturer))
+        .route("/api/import/dossiers/{id}/cout-revient-reel", get(importation::cout_revient_reel))
+        .route("/api/import/dossiers/{id}/avoir", post(importation::avoir))
+        .route("/api/import/factures/{id}/paiements", post(importation::ajouter_paiement))
+        .route("/api/import/paiements/{id}", axum::routing::delete(importation::supprimer_paiement))
+        .route("/api/import/dossiers/{id}/frais-post-cloture", post(importation::frais_post_cloture))
         .route("/api/import/dossiers/{id}/valider", post(importation::valider_dossier))
         .route("/api/import/factures/{id}",
                patch(importation::modifier_facture).delete(importation::supprimer_facture))
@@ -253,8 +274,13 @@ pub fn router(state: AppState) -> Router {
                patch(importation::modifier_ligne).delete(importation::supprimer_ligne))
         .route("/api/import/lignes/{id}/solder", post(importation::solder_ligne))
         .route("/api/import/lignes-bc", get(importation::lignes_bc_ouvertes))
+        // Le taux propose a la saisie d'une facture : cours Bank Al-Maghrib du
+        // jour, a defaut le taux de l'ERP (05/10/2026).
+        .route("/api/import/taux-reference", get(importation::taux_reference_facture))
         .route("/api/import/frais/{id}",
                patch(importation::modifier_frais).delete(importation::supprimer_frais))
+        // La repartition MANUELLE d'un frais (12/10/2026) : le montant de chaque ligne.
+        .route("/api/import/frais/{id}/repartition", put(importation::repartir_frais))
         // La reception est un document A PART : elle ne passe pas par un
         // dossier, et ses lignes peuvent venir de plusieurs.
         // Les pieces du dossier : scans, PDF, photos. La limite de corps est
@@ -267,16 +293,16 @@ pub fn router(state: AppState) -> Router {
                get(pieces::lecture).post(pieces::lire))
         .route("/api/import/pieces/{id}",
                get(pieces::telecharger).delete(pieces::supprimer))
-        .route("/api/import/a-recevoir", get(importation::a_recevoir))
-        .route("/api/import/receptions",
-               get(importation::lister_receptions).post(importation::creer_reception))
-        .route("/api/import/receptions/{id}",
-               get(importation::lire_reception)
-                   .put(importation::modifier_reception)
-                   .delete(importation::supprimer_reception))
-        .route("/api/import/receptions/{id}/valider", post(importation::valider_reception))
+        // LA RECEPTION D'IMPORT N'EST PLUS UN CIRCUIT (ADR-003, 16/10/2026) :
+        // la marchandise importee entre par la RECEPTION UNIFIEE — un arrivage
+        // dont chaque ligne pege a une ligne de bon de commande. Les routes
+        // /api/import/a-recevoir et /api/import/receptions* sont donc retirees.
+        // Leurs handlers restent dans importation.rs, sans appelant : on ne
+        // supprime pas l'historique, on ferme seulement la porte.
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
         .route("/api/machines/consommation", get(machines::journal_consommation))
+        .route("/api/machines/{code}/mouvements", get(machines::mouvements_machine))
+        .route("/api/machines/fiches/{id}/retrait-apercu", get(machines::apercu_retrait))
         .route("/api/machines/fiches",
                get(machines::lister_fiches).post(machines::creer_fiche))
         .route("/api/machines/fiches/{id}",
@@ -285,6 +311,12 @@ pub fn router(state: AppState) -> Router {
                    .delete(machines::supprimer_fiche))
         .route("/api/machines/fiches/{id}/valider", post(machines::valider_fiche))
         .route("/api/machines/fiches/{id}/annuler", post(machines::annuler_fiche))
+        // LES DECISIONS MACHINE (05/10/2026) : l'apercu calcule sans rien
+        // ecrire ; la devalidation ramene l'etage a l'etat precedent et la
+        // fiche en brouillon ; la matrice des motifs nourrit l'ecran.
+        .route("/api/machines/fiches/{id}/apercu", post(machines::apercu_fiche))
+        .route("/api/machines/fiches/{id}/devalider", post(machines::devalider_fiche))
+        .route("/api/machines/motifs", get(machines::lister_motifs))
         // Lire le plan d une machine, ou le corriger. La correction exige
         // PARAMETRES/ECRIRE — la direction et les super-utilisateurs — parce
         // qu une capacite fausse fausse toute la consommation qui en decoule.
@@ -299,6 +331,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/machines/{code}/contenu", get(machines::contenu_machine))
         .route("/api/machines/{code}/zones/{zone}", get(machines::etat_zone))
         .route("/api/mouvements/documents", get(stock::documents_mouvement))
+        .route("/api/prets-en-cours", get(stock::prets_en_cours))
         .route("/api/mouvements/{id}", get(stock::dossier_mouvement))
         // DEFAIRE SANS EFFACER : le grand livre ne se corrige que par son
         // inverse, comme dans tous les ERP depuis trente ans.
@@ -327,8 +360,12 @@ pub fn router(state: AppState) -> Router {
                get(stock::lister_inventaires).post(stock::creer_inventaire))
         .route("/api/inventaires/{id}/lignes",
                get(stock::lignes_inventaire).put(stock::saisir_comptage))
-        .route("/api/inventaires/{id}/ouvrir", post(operations::ouvrir_inventaire))
+        .route("/api/inventaires/{id}", get(stock::lire_inventaire))
+        .route("/api/inventaires/{id}/preparer", post(operations::preparer_inventaire))
+        .route("/api/inventaires/{id}/valider", post(operations::valider_inventaire))
+        .route("/api/inventaires/{id}/renvoyer", post(operations::renvoyer_inventaire))
         .route("/api/inventaires/{id}/cloturer", post(operations::cloturer_inventaire))
+        .route("/api/inventaires/{id}/annuler", post(operations::annuler_inventaire))
         // --- Achats et receptions ---------------------------------------------
         .route("/api/bons-commande",
                get(stock::lister_bc).post(stock::creer_bc))
@@ -348,6 +385,10 @@ pub fn router(state: AppState) -> Router {
         // Sans `{id}` : sert aussi a la creation, quand la reception n'existe pas
         // encore et qu'on vient de designer le bon de commande.
         .route("/api/lignes-attendues", get(stock::lignes_attendues))
+        // Les dossiers d'import ouverts, pour l'en-tete d'un arrivage (ADR-003
+        // phase A). Garde par RECEPTIONS : le magasinier dit quel conteneur il
+        // vide sans avoir a lire les dossiers d'import.
+        .route("/api/receptions-dossiers-import", get(stock::dossiers_import_ouverts))
         .route("/api/receptions/{id}/lignes",
                get(stock::lignes_reception).post(stock::ajouter_ligne_reception))
         .route(
@@ -356,10 +397,24 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/receptions/{id}/statut", put(stock::changer_statut_reception))
         .route("/api/receptions/{id}/valider", post(operations::valider_reception))
+        .route("/api/receptions/{id}/cloturer", post(operations::cloturer_reception))
+        .route("/api/receptions/{id}/facture-contexte", get(operations::contexte_facture_reception))
+        .route("/api/receptions/{id}/avoir", post(operations::corriger_reception))
+        // --- La facture fournisseur, document (ADR-003 phase B) --------------
+        // `a-facturer` AVANT `{id}` : un chemin fixe ne doit pas se faire
+        // prendre pour un identifiant.
+        .route("/api/factures-fournisseur/a-facturer", get(factures::a_facturer))
+        .route("/api/factures-fournisseur",
+               get(factures::lister).post(factures::creer))
+        .route("/api/factures-fournisseur/{id}",
+               get(factures::lire).patch(factures::modifier).delete(factures::supprimer))
+        .route("/api/factures-fournisseur/{id}/valider", post(factures::valider))
         .route("/api/plan-achat", get(consultation::plan_achat))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))
         .route("/api/plan-achat/kpi", get(consultation::kpi_plan_achat))
+        .route("/api/plan-achat/stocks-minimums", get(consultation::stocks_minimums))
+        .route("/api/plan-achat/detail", get(consultation::detail_proposition))
         .route("/api/historique-prix", get(consultation::historique_prix))
         .route("/api/matrice-prix", get(consultation::matrice_prix))
         .route("/api/plan-achat/propositions", get(consultation::propositions_achat))
@@ -378,8 +433,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/risques-sourcing", get(consultation::risques_sourcing))
         .route("/api/analyse-abc-xyz", get(consultation::analyse_abc_xyz))
         .route("/api/cout-revient", get(consultation::cout_revient))
+        .route("/api/ecarts-prix", get(consultation::ecarts_prix))
         .route("/api/frais-approche",
              get(consultation::frais_approche).post(operations::creer_frais_approche))
+        // Un frais se retire tant qu'il n'est pas porte au CUMP (ADR-003 phase C).
+        .route("/api/frais-approche/{id}", delete(operations::supprimer_frais_approche))
         .route("/api/stats/mouvements", get(consultation::stats_mouvements))
         .route("/api/stats/familles", get(consultation::stats_familles))
         .route("/api/stats/prix", get(consultation::stats_prix))
@@ -437,7 +495,39 @@ pub fn router(state: AppState) -> Router {
         .route("/api/{entite}/{id}/retenants", get(entites::retenants))
         .route("/api/{entite}/{id}/activation", post(entites::activation))
         .layer(TraceLayer::new_for_http())
+        // UN DELAI PAR REQUETE (audit v4) : au-dela, le client recoit 408 au
+        // lieu d'attendre une reponse qui ne viendra pas. Cinq minutes par
+        // defaut (GESTIONFIL_DELAI_HTTP_S) : un calcul de plan ou un depot de
+        // piece y tiennent largement.
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            std::time::Duration::from_secs(crate::db::delai_env("GESTIONFIL_DELAI_HTTP_S", 300)),
+        ))
         .layer(cors);
+
+    // LA POLITIQUE DE CONTENU (CSP) ET NOSNIFF, POSES PAR LE SERVEUR LUI-MEME
+    // (audit de securite du 13/10/2026) : derriere nginx comme en direct sur le
+    // poste, sur l'API comme sur les pages. L'interface ne charge rien
+    // d'ailleurs : une injection de script ne pourrait ni s'executer ni envoyer
+    // le jeton hors du serveur. Les styles en ligne restent permis (attributs
+    // `style` des graphiques) ; les scripts, jamais.
+    use axum::http::{header, HeaderValue};
+    use tower_http::set_header::SetResponseHeaderLayer;
+    let en_tetes = |r: Router| {
+        r.layer(SetResponseHeaderLayer::if_not_present(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+                 img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; \
+                 worker-src 'self'; manifest-src 'self'; frame-src 'self' blob:; \
+                 object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
+            ),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+    };
 
     match interface {
         Some(rep) => {
@@ -464,7 +554,7 @@ pub fn router(state: AppState) -> Router {
                 ),
             );
 
-            routeur
+            en_tetes(routeur
                 // LES RESSOURCES CONSTRUITES SE SERVENT A PART, sans repli : un
                 // fichier absent doit repondre 404. Avec le repli general, un
                 // `.js` manquant renverrait la page HTML avec un code 200, et le
@@ -477,13 +567,34 @@ pub fn router(state: AppState) -> Router {
                 // tromper un cache, une sonde ou un service worker.
                 .fallback_service(ServeDir::new(&rep).fallback(ServeFile::new(index)))
                 .layer(axum::middleware::from_fn(nommer_route_inconnue))
-                .with_state(state)
+                .with_state(state))
         }
         None => {
             tracing::info!("aucune interface a servir : API seule");
-            routeur
-                .layer(axum::middleware::from_fn(nommer_route_inconnue))
-                .with_state(state)
+            en_tetes(
+                routeur
+                    .layer(axum::middleware::from_fn(nommer_route_inconnue))
+                    .with_state(state),
+            )
         }
+    }
+}
+
+/// LA DATE DU FAIT d'un document (10/10/2026) : une vraie date AAAA-MM-JJ,
+/// jamais dans le futur — on ne recoit pas demain ce qui n'est pas arrive.
+/// Vide : None (le document prend la date du jour). Commune aux receptions
+/// locales et d'import, a la creation comme a la modification.
+pub fn date_du_fait(d: Option<&str>, quoi: &str) -> crate::error::AppResult<Option<String>> {
+    match d.map(str::trim) {
+        Some(d) if !d.is_empty() => {
+            let jour = chrono::NaiveDate::parse_from_str(d.get(..10).unwrap_or(d), "%Y-%m-%d").map_err(|_| {
+                crate::error::AppError::Invalide(format!("{quoi} invalide : {d} (attendu AAAA-MM-JJ)"))
+            })?;
+            if jour > chrono::Utc::now().date_naive() {
+                return Err(crate::error::AppError::RegleMetier(format!("La {quoi} ne peut pas etre dans le futur.")));
+            }
+            Ok(Some(jour.format("%Y-%m-%d").to_string()))
+        }
+        _ => Ok(None),
     }
 }

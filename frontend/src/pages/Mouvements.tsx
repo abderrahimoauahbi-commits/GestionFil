@@ -100,7 +100,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
 
   const q = useQuery({
     queryKey: ['mouvements-documents', filtreRef],
-    queryFn: () => api.get<DocMouvement[]>(`/api/mouvements/documents?${params}`),
+    queryFn: ({ signal }) => api.get<DocMouvement[]>(`/api/mouvements/documents?${params}`, { signal }),
   })
 
   const colonnes: Colonne<DocMouvement>[] = [
@@ -133,7 +133,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
       entete: 'Total (kg)',
       numerique: true,
       rendu: (d) => (
-        <span className={d.signe > 0 ? 'text-emerald-700' : 'text-alerte'}>
+        <span className={d.signe > 0 ? 'text-succes' : 'text-alerte'}>
           {d.signe > 0 ? '+' : '−'}
           {fmt.nombre(d.quantite_totale_kg, 2)}
         </span>
@@ -199,7 +199,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
     {
       titre: 'Par sens',
       entrees: [
-        { cle: 'ENTREE', libelle: 'Entrees', resume: 'Le stock monte',
+        { cle: 'ENTREE', libelle: 'Entrées', resume: 'Le stock monte',
           compte: comptes.ENTREE ?? 0, ton: 'succes' as const },
         { cle: 'SORTIE', libelle: 'Sorties', resume: 'Le stock descend',
           compte: comptes.SORTIE ?? 0, ton: 'alerte' as const },
@@ -251,7 +251,7 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
           </span>
           <span>
             Solde affiche{' '}
-            <strong className={totalKg >= 0 ? 'text-emerald-700' : 'text-alerte'}>
+            <strong className={totalKg >= 0 ? 'text-succes' : 'text-alerte'}>
               {fmt.nombre(totalKg, 2)} kg
             </strong>
           </span>
@@ -297,7 +297,7 @@ export function Mouvements() {
 
   const qLivre = useQuery({
     queryKey: ['mouvements', filtreRef],
-    queryFn: () => api.get<LigneLivre[]>(`/api/mouvements?${params}`),
+    queryFn: ({ signal }) => api.get<LigneLivre[]>(`/api/mouvements?${params}`, { signal }),
   })
 
   const colonnes: Colonne<LigneLivre>[] = [
@@ -328,7 +328,7 @@ export function Mouvements() {
       entete: 'Quantité (kg)',
       numerique: true,
       rendu: (l) => (
-        <span className={l.signe > 0 ? 'text-emerald-700' : 'text-alerte'}>
+        <span className={l.signe > 0 ? 'text-succes' : 'text-alerte'}>
           {l.signe > 0 ? '+' : '−'}
           {fmt.nombre(l.quantite_kg, 2)}
         </span>
@@ -376,7 +376,7 @@ export function Mouvements() {
       entrees: [
         {
           cle: 'ENTREE',
-          libelle: 'Entrees',
+          libelle: 'Entrées',
           resume: 'Le stock monte',
           compte: comptesMvt.ENTREE ?? 0,
           ton: 'succes' as const,

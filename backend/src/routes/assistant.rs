@@ -305,7 +305,7 @@ const CATALOGUE: &[Question] = &[
         theme: "Inventaire",
         mots: "inventaire comptage ecart compte magasin gel",
         resume: "SELECT COUNT(*) AS total,
-                        COUNT(*) FILTER (WHERE statut = 'EN_COURS')  AS en_cours,
+                        COUNT(*) FILTER (WHERE statut = 'VALIDE')    AS valides,
                         COUNT(*) FILTER (WHERE statut = 'CLOTURE')   AS clotures,
                         COUNT(*) FILTER (WHERE statut = 'BROUILLON') AS brouillons
                  FROM inventaire",
@@ -316,7 +316,7 @@ const CATALOGUE: &[Question] = &[
              ORDER BY date_creation DESC
              LIMIT 20",
         ),
-        gabarit: "{total} inventaire(s) : {brouillons} en preparation, {en_cours} en cours, \
+        gabarit: "{total} inventaire(s) : {brouillons} en comptage, {valides} valide(s), \
                   {clotures} cloture(s).",
         lien: "/inventaires",
     },

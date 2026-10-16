@@ -13,18 +13,18 @@
  * Regenerer efface celles qui n'engagent rien et refait la photo ; celles qui
  * ont produit un bon de commande, et celles qu'on a ecartees, survivent.
  *
- * La quantite proposee integre le stock minimum dynamique (formule F3), le MOQ,
- * le multiple d'achat et l'en-cours fournisseur — ce dernier terme evite de
- * recommander ce qui est deja en route.
+ * La quantite proposee suit le plan de production, et lui seul (10/10/2026 : pas
+ * de stock minimum) : sorties de la fenetre de commande + securite - stock
+ * projete, puis le MOQ, la palette et l'en-cours fournisseur — ce dernier terme
+ * evite de recommander ce qui est deja en route.
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Ban, FileCheck2, Gauge, ListChecks, Lock, LockOpen, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
-import { CelluleEditable } from '../composants/CelluleEditable'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
   Alerte,
@@ -41,6 +41,8 @@ import {
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { DetailCalcul } from './PlanAchatDetail'
+import { useParametreNombre } from '../lib/parametres'
 
 const MODULE = 'PLAN_ACHAT'
 
@@ -63,6 +65,8 @@ interface Proposition extends Record<string, unknown> {
   unite_catalogue: string
   prix_estime_mad?: number
   source_prix?: string
+  /** Estime au CMUP, que ce compte ne voit pas : le prix est a saisir (regle 8). */
+  prix_a_saisir?: boolean
   montant_total_mad?: number
   /* CE QU'ON IRA NEGOCIER, dans la devise du fournisseur. Le montant en
      dirhams ne sert qu'au budget : le bon de commande, lui, se libelle en
@@ -172,37 +176,6 @@ const LIBELLE_STATUT: Record<string, string> = {
   IGNORE: 'Ecartee',
 }
 
-/**
- * Ce que le calcul pense d'une ligne protegee.
- *
- * Proteger n'est pas ignorer : le MRP continue de dire ce qu'il faudrait
- * acheter, et l'ecart se lit ici. Une ligne figee sans ce retour serait une
- * ligne aveugle — l'acheteur croirait tenir un arbitrage encore valable.
- */
-const LIBELLE_FIGEMENT: Record<string, string> = {
-  COHERENTE: 'conforme au calcul',
-  SURDIMENSIONNEE: 'au-dessus du besoin',
-  SOUS_DIMENSIONNEE: 'sous le besoin',
-  BESOIN_DISPARU: 'besoin disparu',
-  REFERENCE_INACTIVE: 'reference inactive',
-}
-
-const TON_FIGEMENT: Record<string, 'succes' | 'alerte' | 'danger' | 'info' | 'neutre'> = {
-  COHERENTE: 'succes',
-  SURDIMENSIONNEE: 'alerte',
-  SOUS_DIMENSIONNEE: 'info',
-  BESOIN_DISPARU: 'danger',
-  REFERENCE_INACTIVE: 'danger',
-}
-
-const MOTIF_FIGEMENT: Record<string, string> = {
-  PRIX_NEGOCIE: 'prix negocie',
-  QUANTITE_AJUSTEE: 'quantite ajustee',
-  LIVRAISON_GROUPEE: 'livraison groupee',
-  DELAI_FOURNISSEUR: 'delai fournisseur',
-  AUTRE: 'arbitrage',
-}
-
 /** Une proposition n'est convertible que tant qu'elle n'engage rien. */
 const convertible = (p: Proposition) =>
   p.statut === 'PROPOSE' || p.statut === 'EN_REVISION' || p.statut === 'VALIDE'
@@ -216,12 +189,12 @@ export function PlanAchat() {
 
   const q = useQuery({
     queryKey: ['plan-achat-propositions'],
-    queryFn: () => api.get<Proposition[]>('/api/plan-achat/propositions'),
+    queryFn: ({ signal }) => api.get<Proposition[]>('/api/plan-achat/propositions', { signal }),
   })
 
   const qKpi = useQuery({
     queryKey: ['plan-achat-kpi'],
-    queryFn: () => api.get<Kpi>('/api/plan-achat/kpi'),
+    queryFn: ({ signal }) => api.get<Kpi>('/api/plan-achat/kpi', { signal }),
   })
 
   const rafraichir = async () => {
@@ -263,7 +236,11 @@ export function PlanAchat() {
   })
 
   const commander = useMutation({
-    mutationFn: (v: { propositions: string[]; cibles: Record<string, string> }) =>
+    mutationFn: (v: {
+      propositions: string[]
+      cibles: Record<string, string>
+      ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>
+    }) =>
       api.post<{
         propositions_converties: number
         bons: { numero_bc: string; code_fournisseur: string; lignes: number; montant_total_mad: number }[]
@@ -280,60 +257,10 @@ export function PlanAchat() {
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Conversion impossible.'),
   })
 
-  const ajuster = useMutation({
-    mutationFn: (v: { id: string; corps: Record<string, unknown> }) =>
-      api.patch<{ figement_nouveau: boolean }>(
-        `/api/plan-achat/propositions/${v.id}`,
-        v.corps,
-      ),
-    onSuccess: async (r) => {
-      toast.success('Proposition ajustee', {
-        description: r.figement_nouveau
-          ? 'Elle est desormais protegee : le prochain recalcul ne l ecrasera plus. ' +
-            "L'ecart avec le calcul reste affiche sur la ligne."
-          : 'Elle ne sort plus telle quelle du calcul.',
-        duration: 8000,
-      })
-      await rafraichir()
-    },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Ajustement impossible.'),
-  })
-
-  /**
-   * Proteger une ligne du prochain recalcul, ou la lui rendre.
-   *
-   * Le MRP ne connait ni le camion a remplir, ni le lot minimum non declare, ni
-   * la remise obtenue au telephone.
-   */
-  const figer = useMutation({
-    mutationFn: (v: { id: string; motif: string }) =>
-      api.post(`/api/plan-achat/propositions/${v.id}/figer`, { motif_figement: v.motif }),
-    onSuccess: async () => {
-      toast.success('Proposition protegee', {
-        description: 'Le recalcul ne la remplacera plus. L ecart avec le calcul reste visible.',
-        duration: 7000,
-      })
-      await rafraichir()
-    },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Protection impossible.'),
-  })
-
-  const defiger = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/plan-achat/propositions/${id}/figer`),
-    onSuccess: async () => {
-      toast.success('Proposition rendue au calcul', {
-        description: 'Le prochain recalcul la remplacera par ce que le MRP dit aujourd hui.',
-        duration: 7000,
-      })
-      await rafraichir()
-    },
-    onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.'),
-  })
-
   const ignorer = useMutation({
     mutationFn: (id: string) => api.post(`/api/plan-achat/propositions/${id}/ignorer`),
     onSuccess: async () => {
-      toast.success('Proposition ecartee')
+      toast.success('Proposition écartée')
       await rafraichir()
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Impossible d’ecarter.'),
@@ -349,7 +276,6 @@ export function PlanAchat() {
     [ouvertes, coches],
   )
 
-  const budgetOuvert = ouvertes.reduce((s, p) => s + (p.montant_total_mad ?? 0), 0)
   const budgetSelection = ouvertes
     .filter((p) => coches[p.id_proposition])
     .reduce((s, p) => s + (p.montant_total_mad ?? 0), 0)
@@ -361,6 +287,9 @@ export function PlanAchat() {
 
   // La proposition dont on examine les equivalents. Null : aucun panneau.
   const [arbitrage, setArbitrage] = useState<Proposition | null>(null)
+  // Les propositions dont le calcul est deplie sous la ligne.
+  const [deplies, setDeplies] = useState<Record<string, boolean>>({})
+  const dureeEcart = useParametreNombre('P_DureeEcartJours', 90)
 
   const substituer = useMutation({
     mutationFn: (v: { id: string; cible: string; motif: string }) =>
@@ -369,10 +298,10 @@ export function PlanAchat() {
         { code_reference_cible: v.cible, motif: v.motif },
       ),
     onSuccess: (r) => {
-      toast.success('Besoin reporte sur la reference equivalente', {
+      toast.success('Besoin reporte sur la référence équivalente', {
         description:
           r.message ??
-          "La proposition passe en revision, et la reference d'origine reste tracee.",
+          "La proposition passe en revision, et la référence d'origine reste tracee.",
         duration: 8000,
       })
       setArbitrage(null)
@@ -384,6 +313,27 @@ export function PlanAchat() {
   })
 
   const colonnes: ColonneDT<Proposition>[] = [
+    {
+      champ: 'calcul',
+      entete: '',
+      largeur: '30px',
+      triable: false,
+      rendu: (p) => (
+        <Bouton
+          variante="discret"
+          taille="icone-xs"
+          className="text-attenue-texte hover:bg-attenue"
+          onClick={(e) => {
+            e.stopPropagation()
+            setDeplies((d) => ({ ...d, [p.id_proposition]: !d[p.id_proposition] }))
+          }}
+          aria-label="Voir le calcul"
+          title="D’où viennent ces kilos : stock, machine, en-cours, demande, sécurité"
+        >
+          {deplies[p.id_proposition] ? <ChevronDown /> : <ChevronRight />}
+        </Bouton>
+      ),
+    },
     {
       champ: 'selection',
       entete: '',
@@ -519,31 +469,20 @@ export function PlanAchat() {
       entete: 'A commander',
       numerique: true,
       largeur: '140px',
+      // LECTURE SEULE DANS LE PLAN (14/10/2026) : la quantite s'ajuste sur la
+      // commande, pas ici — editer dans le plan relancait le calcul a chaque
+      // frappe, lent sur des centaines de lignes.
       rendu: (p) => (
-        <CelluleEditable
-          valeur={p.quantite_suggeree_kg}
-          affichage={
-            <span>
-              <span className="font-medium tabular-nums">
-                {fmt.nombre(p.quantite_suggeree_kg, 0)} kg
-              </span>
-              {p.quantite_suggeree_unite != null && p.unite_catalogue !== 'kg' && (
-                <span className="block text-[11px] text-attenue-texte tabular-nums">
-                  {fmt.nombre(p.quantite_suggeree_unite, 1)} {p.unite_catalogue}
-                </span>
-              )}
+        <span>
+          <span className="font-medium tabular-nums">
+            {fmt.nombre(p.quantite_suggeree_kg, 0)} kg
+          </span>
+          {p.quantite_suggeree_unite != null && p.unite_catalogue !== 'kg' && (
+            <span className="block text-[11px] text-attenue-texte tabular-nums">
+              {fmt.nombre(p.quantite_suggeree_unite, 1)} {p.unite_catalogue}
             </span>
-          }
-          type="nombre"
-          min={0}
-          aligneDroite
-          modifiable={droits.peutEcrire && convertible(p)}
-          surValider={(v) =>
-            v != null &&
-            Number(v) !== p.quantite_suggeree_kg &&
-            ajuster.mutate({ id: p.id_proposition, corps: { quantite_suggeree_kg: Number(v) } })
-          }
-        />
+          )}
+        </span>
       ),
     },
     {
@@ -551,28 +490,15 @@ export function PlanAchat() {
       entete: 'Prix MAD/kg',
       numerique: true,
       largeur: '120px',
-      // LE PRIX SE NEGOCIE, DONC IL SE SAISIT. Il etait seul en lecture au
-      // milieu de colonnes modifiables : l'acheteur qui obtenait un rabais
-      // devait commander au tarif, puis corriger le bon apres coup. Le prix en
-      // devise et le montant suivent, cote serveur.
+      // LE PRIX EN LECTURE : il se negocie et s'ajuste sur la commande, plus
+      // dans le plan. La source (dernier achat / catalogue / cout moyen) reste
+      // affichee pour juger de sa fiabilite.
       rendu: (p) =>
         p.prix_estime_mad == null ? (
-          '—'
+          <span className="text-attenue-texte">—</span>
         ) : (
-          <CelluleEditable
-            valeur={p.prix_estime_mad}
-            type="nombre"
-            min={0}
-            aligneDroite
-            modifiable={droits.peutEcrire && convertible(p)}
-            surValider={(v) =>
-              v != null &&
-              Number(v) !== p.prix_estime_mad &&
-              ajuster.mutate({ id: p.id_proposition, corps: { prix_estime_mad: Number(v) } })
-            }
-            affichage={
           <div>
-            <div className="tabular-nums">{fmt.nombre(p.prix_estime_mad, 3)}</div>
+            <div className="tabular-nums">{p.prix_a_saisir ? '—' : fmt.nombre(p.prix_estime_mad, 3)}</div>
             {/* Le meme prix dans l'unite d'achat : au metre, un prix au kg ne
                 se reconnait pas sur la facture. */}
             {p.unite_catalogue !== 'kg' && p.quantite_suggeree_unite ? (
@@ -581,12 +507,19 @@ export function PlanAchat() {
                 {p.unite_catalogue}
               </div>
             ) : null}
-            {p.source_prix === 'CATALOGUE' && (
+            {/* LA SOURCE DU PRIX (regle 8, 09/10/2026) : le dernier prix d'achat
+                chez ce fournisseur, a defaut le catalogue, en dernier recours le
+                CMUP — que l'on ne voit pas toujours : « prix a saisir ». */}
+            {p.prix_a_saisir ? (
+              <div className="text-[11px] text-alerte">prix à saisir</div>
+            ) : p.source_prix === 'DERNIER_ACHAT' ? (
+              <div className="text-[11px] text-attenue-texte">dernier achat</div>
+            ) : p.source_prix === 'CATALOGUE' ? (
               <div className="text-[11px] text-alerte">catalogue</div>
-            )}
+            ) : p.source_prix === 'CMUP' ? (
+              <div className="text-[11px] text-alerte">coût moyen</div>
+            ) : null}
           </div>
-            }
-          />
         ),
     },
     // LES TROIS COLONNES DU CLASSEUR. Le fournisseur est turc ou indien : le
@@ -664,57 +597,13 @@ export function PlanAchat() {
       secondaire: true,
       rendu: (p) => fmt.date(p.date_besoin_prevue),
     },
-    {
-      // Une ligne protegee sans son ecart serait une ligne aveugle : on saurait
-      // que le calcul ne la touche plus, sans savoir ce qu'il en pense.
-      champ: 'etat_figement',
-      entete: 'Protection',
-      largeur: '190px',
-      filtre: 'liste',
-      rendu: (p) =>
-        !p.figee ? (
-          <span className="text-[11px] text-attenue-texte">suit le calcul</span>
-        ) : (
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-1">
-              <Lock className="size-3 shrink-0 text-primaire" />
-              <Badge ton={TON_FIGEMENT[p.etat_figement ?? ''] ?? 'neutre'}>
-                {LIBELLE_FIGEMENT[p.etat_figement ?? ''] ?? 'protegee'}
-              </Badge>
-            </div>
-            {p.etat_figement === 'BESOIN_DISPARU' ? (
-              <div className="text-[11px] text-danger">
-                le calcul ne demande plus rien sur cette reference
-              </div>
-            ) : p.etat_figement === 'REFERENCE_INACTIVE' ? (
-              <div className="text-[11px] text-danger">référence desactivee au catalogue</div>
-            ) : (
-              p.ecart_calcul_kg != null &&
-              Math.abs(p.ecart_calcul_kg) > 0.001 && (
-                <div className="text-[11px] tabular-nums text-attenue-texte">
-                  calcul {fmt.nombre(p.quantite_calculee_kg ?? 0, 0)} kg ·{' '}
-                  <span className={p.ecart_calcul_kg > 0 ? 'text-alerte' : 'text-info'}>
-                    {p.ecart_calcul_kg > 0 ? '+' : ''}
-                    {fmt.nombre(p.ecart_calcul_kg, 0)} kg
-                  </span>
-                </div>
-              )
-            )}
-            {p.figee_par && (
-              <div className="text-[11px] text-attenue-texte">
-                {MOTIF_FIGEMENT[p.motif_figement ?? ''] ?? p.motif_figement} · {p.figee_par}
-              </div>
-            )}
-          </div>
-        ),
-    },
   ]
 
   return (
     <div>
       <EnTetePage
         titre="Plan d'achat"
-        description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engage avant sa validation."
+        description="Propositions issues du MRP. Convertir ouvre un bon de commande en brouillon : rien n'est engagé avant sa validation."
       />
 
       {/* LES ONGLETS (demandes des 30/09 et 01/10/2026). Le travail se fait en
@@ -774,7 +663,7 @@ export function PlanAchat() {
 
           <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
-              A commander
+              À commander
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
               <span className="text-attenue-texte">Budget total</span>
@@ -831,11 +720,11 @@ export function PlanAchat() {
           <CarteEntete>
             <CarteTitre>Répartition par fournisseur</CarteTitre>
             <span className="text-[11px] text-attenue-texte">
-              classee par budget · un bon de commande sera cree par fournisseur
+              classee par budget · un bon de commande sera créé par fournisseur
             </span>
           </CarteEntete>
           <CarteCorps className="p-0">
-            <div className="defilement-x">
+            <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
               <table className="grille w-full text-[13px]">
                 <thead>
                   <tr className="bg-attenue">
@@ -903,7 +792,7 @@ export function PlanAchat() {
             retirer={(id) => setCoches((c) => ({ ...c, [id]: false }))}
             enCours={commander.isPending}
             ecrire={droits.peutEcrire}
-            envoyer={(cibles) => commander.mutate({ propositions: selection, cibles })}
+            envoyer={(cibles, ajustements) => commander.mutate({ propositions: selection, cibles, ajustements })}
             revenir={() => setOnglet('besoins')}
           />
         </OngletContenu>
@@ -915,18 +804,18 @@ export function PlanAchat() {
             variante="contour"
             onClick={() =>
               confirmation.demander({
-                titre: 'Regenerer les propositions ?',
-                libelleConfirmer: 'Regenerer',
+                titre: 'Régénérer les propositions ?',
+                libelleConfirmer: 'Régénérer',
                 description:
                   'Les propositions ouvertes seront remplacees par un nouveau calcul. Celles ' +
-                  'deja converties en commande, et celles que vous avez ecartees, sont conservees.',
+                  'déjà converties en commande, et celles que vous avez ecartees, sont conservees.',
                 action: () => generer.mutate(),
               })
             }
             chargement={generer.isPending}
           >
             <RefreshCw />
-            Regenerer
+            Régénérer
           </Bouton>
           <Bouton disabled={selection.length === 0} onClick={() => setOnglet('lignes')}>
             Lignes à commander
@@ -937,25 +826,14 @@ export function PlanAchat() {
           </Bouton>
         </div>
       )}
-      {ouvertes.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-3">
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Budget a engager</div>
-            <div className="text-lg font-semibold tabular-nums">{fmt.mad(budgetOuvert)}</div>
-          </div>
-          <div className="rounded-[var(--radius)] border border-bordure bg-surface px-4 py-2.5">
-            <div className="text-[11px] text-attenue-texte">Propositions ouvertes</div>
-            <div className="text-lg font-semibold tabular-nums">{ouvertes.length}</div>
-          </div>
-          {selection.length > 0 && (
-            <div className="rounded-[var(--radius)] border border-primaire bg-primaire/5 px-4 py-2.5">
-              <div className="text-[11px] text-attenue-texte">
-                Selection · {fournisseursSelection} fournisseur(s)
-              </div>
-              <div className="text-lg font-semibold tabular-nums">{fmt.mad(budgetSelection)}</div>
-            </div>
-          )}
-        </div>
+      {/* PAS DE TUILES EN TETE D'UNE LISTE DE TRAVAIL (preference de
+          l'entreprise, audit v4) : les indicateurs vivent au tableau de bord et
+          dans les statistiques ; ici, on traite les lignes. */}
+      {selection.length > 0 && (
+        <p className="mb-3 text-[12.5px] text-attenue-texte">
+          Sélection : <span className="font-semibold text-texte tabular-nums">{fmt.mad(budgetSelection)}</span>
+          {' '}· {fournisseursSelection} fournisseur(s)
+        </p>
       )}
 
       {droits.peutEcrire && ouvertes.length > 0 && (
@@ -970,20 +848,20 @@ export function PlanAchat() {
             Tout cocher ({ouvertes.length})
           </Bouton>
           <Bouton variante="discret" taille="xs" onClick={() => setCoches({})}>
-            Tout decocher
+            Tout décocher
           </Bouton>
           <span className="text-[11px] text-attenue-texte">
-            Un bon de commande sera cree par fournisseur.
+            Un bon de commande sera créé par fournisseur.
           </span>
         </div>
       )}
 
       {surCatalogue > 0 && (
         <div className="mb-4">
-          <Alerte ton="alerte" titre="Prix estimes au catalogue">
-            {surCatalogue} reference(s) n'ont encore fait l'objet d'aucune reception : leur prix
-            vient du catalogue converti en dirhams, pas d'un cout d'achat reel. Le montant est
-            indicatif tant que la valorisation n'a pas demarre.
+          <Alerte ton="alerte" titre="Prix estimés au catalogue">
+            {surCatalogue} reference(s) n'ont encore jamais ete commandees chez leur fournisseur :
+            leur prix vient du catalogue converti en dirhams, pas d'un bon valide. Le montant est
+            indicatif jusqu'à la première commande.
           </Alerte>
         </div>
       )}
@@ -997,16 +875,17 @@ export function PlanAchat() {
         chargement={q.isLoading}
         erreur={q.error}
         cle={(p) => p.id_proposition}
+        detail={(p) => (deplies[p.id_proposition] ? <DetailCalcul reference={p.code_reference} /> : null)}
         titreCarte={(p) => p.code_reference}
         placeholderRecherche="Référence, fournisseur, urgence..."
         tailleParDefaut={50}
         videTitre="Aucune proposition"
-        videDescription="Le stock projete couvre les besoins, ou le MRP n'a pas encore ete calcule."
+        videDescription="Le stock projete couvre les besoins, ou le MRP n'a pas encore ete calculé."
         videAction={
           droits.peutEcrire && (
             <Bouton variante="contour" onClick={() => generer.mutate()}>
               <ShoppingCart />
-              Generer les propositions
+              Générer les propositions
             </Bouton>
           )
         }
@@ -1015,55 +894,18 @@ export function PlanAchat() {
             ? (p) =>
                 convertible(p) ? (
                   <div className="flex justify-end gap-0.5">
-                    {(p.nb_equivalents ?? 0) > 0 && (
-                      <Bouton
-                        variante="discret"
-                        taille="icone-xs"
-                        className={cn(
-                          (p.equivalent_dispo_kg ?? 0) > 0
-                            ? 'text-primaire hover:bg-primaire/10'
-                            : 'text-attenue-texte hover:bg-attenue',
-                        )}
-                        onClick={() => setArbitrage(p)}
-                        aria-label="Equivalents"
-                        title={
-                          (p.equivalent_dispo_kg ?? 0) > 0
-                            ? `Un equivalent a ${fmt.nombre(p.equivalent_dispo_kg, 0)} kg en stock`
-                            : 'Voir les references equivalentes'
-                        }
-                      >
-                        <Repeat />
-                      </Bouton>
-                    )}
-                  {/* Proteger du recalcul, ou rendre la ligne au calcul. */}
-                  <Bouton
-                    variante="discret"
-                    taille="icone-xs"
-                    className={cn(
-                      p.figee ? 'text-primaire hover:bg-primaire/10' : 'text-attenue-texte hover:bg-attenue',
-                    )}
-                    onClick={() =>
-                      p.figee
-                        ? confirmation.demander({
-                            titre: `Rendre ${p.code_reference} au calcul ?`,
-                            description:
-                              'Le prochain recalcul remplacera cette ligne par ce que le MRP dit ' +
-                              'aujourd hui. Votre ajustement sera perdu.',
-                            libelleConfirmer: 'Rendre au calcul',
-                            destructif: true,
-                            action: () => defiger.mutate(p.id_proposition),
-                          })
-                        : figer.mutate({ id: p.id_proposition, motif: 'AUTRE' })
-                    }
-                    aria-label={p.figee ? 'Rendre au calcul' : 'Proteger du recalcul'}
-                    title={
-                      p.figee
-                        ? `Protegee${p.figee_par ? ` par ${p.figee_par}` : ''} — cliquer pour rendre au calcul`
-                        : 'Proteger cette ligne du prochain recalcul'
-                    }
-                  >
-                    {p.figee ? <Lock /> : <LockOpen />}
-                  </Bouton>
+                    {/* Les equivalents se chargent A LA DEMANDE : le bouton est
+                        toujours la, le panneau lit le groupe au clic. */}
+                    <Bouton
+                      variante="discret"
+                      taille="icone-xs"
+                      className="text-attenue-texte hover:bg-attenue"
+                      onClick={() => setArbitrage(p)}
+                      aria-label="Equivalents"
+                      title="Voir les références équivalentes"
+                    >
+                      <Repeat />
+                    </Bouton>
                   <Bouton
                     variante="discret"
                     taille="icone-xs"
@@ -1071,15 +913,16 @@ export function PlanAchat() {
                     onClick={() =>
                       confirmation.demander({
                         titre: `Ecarter ${p.code_reference} ?`,
-                        libelleConfirmer: 'Ecarter',
+                        libelleConfirmer: 'Écarter',
                         description:
-                          'Elle ne sera plus reproposee par les recalculs suivants, et ' +
-                          'n’entrera dans aucune commande.',
+                          `Elle ne sera plus reproposée pendant ${dureeEcart} jours (réglage P_DureeEcartJours) ` +
+                          'et n’entrera dans aucune commande. Passé ce délai, si le besoin existe ' +
+                          'toujours, le calcul la repropose.',
                         action: () => ignorer.mutate(p.id_proposition),
                       })
                     }
-                    aria-label="Ecarter"
-                    title="Ecarter cette proposition"
+                    aria-label="Écarter"
+                    title="Écarter cette proposition"
                   >
                     <Ban />
                   </Bouton>
@@ -1150,12 +993,12 @@ function PanneauEquivalent({
         titre={`Equivalents de ${proposition.code_reference}`}
         description={`Besoin a couvrir : ${fmt.nombre(proposition.quantite_suggeree_kg, 0)} kg`}
       >
-        {q.isLoading && <Chargement texte="Lecture du groupe d équivalence…" />}
+        {q.isLoading && <Chargement texte="Lecture du groupe d’équivalence…" />}
 
         {!q.isLoading && equivalents.length === 0 && (
           <Alerte ton="info">
             Cette reference n'appartient a aucun groupe d'equivalence actif. Rattachez-la depuis
-            l'ecran Equivalences si un substitut existe.
+            l'écran Équivalences si un substitut existe.
           </Alerte>
         )}
 
@@ -1224,7 +1067,7 @@ function PanneauEquivalent({
                     {e.interchangeable === 0 && (
                       <p className="mt-1 text-[11px] text-danger">
                         Unite, densite ou categorie differentes : substituer fausserait le kg/m2
-                        des recettes. Bascule refusee par le serveur.
+                        des recettes. Bascule refusée par le serveur.
                       </p>
                     )}
                   </div>
@@ -1255,7 +1098,7 @@ function PanneauEquivalent({
 
         <div className="sticky bottom-0 -mx-4 mt-4 flex items-center justify-between gap-2 border-t border-bordure bg-surface px-4 pt-3">
           <span className="text-[11px] text-attenue-texte">
-            Le calcul du MRP n'est pas modifie : seule la proposition change de reference.
+            Le calcul du MRP n'est pas modifié : seule la proposition change de référence.
           </span>
           <div className="flex items-center gap-2">
             <Bouton variante="contour" onClick={surFermeture}>
@@ -1300,13 +1143,34 @@ function LignesACommander({
   retirer: (id: string) => void
   enCours: boolean
   ecrire: boolean
-  envoyer: (cibles: Record<string, string>) => void
+  envoyer: (
+    cibles: Record<string, string>,
+    ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>,
+  ) => void
   revenir: () => void
 }) {
   const [cibles, setCibles] = useState<Record<string, string>>({})
+  // L'ACHETEUR AJUSTE SUR LA COMMANDE (14/10/2026), pas dans le plan : quantite,
+  // prix, et le colisage (palettes / bobines) qu'il confirme. Pre-rempli par le
+  // calcul ; ce qu'il envoie fait foi sur le bon.
+  const [aj, setAj] = useState<Record<string, { qte: string; prix: string; pal: string; bob: string }>>({})
+  const defauts = (p: Proposition) => ({
+    qte: p.quantite_suggeree_kg != null ? String(p.quantite_suggeree_kg) : '',
+    prix: p.prix_estime_mad != null ? String(p.prix_estime_mad) : '',
+    pal: p.palettes_a_commander != null ? String(p.palettes_a_commander) : '',
+    bob: '',
+  })
+  const courant = (p: Proposition) => aj[p.id_proposition] ?? defauts(p)
+  const poser = (p: Proposition, champ: 'qte' | 'prix' | 'pal' | 'bob', v: string) =>
+    setAj((a) => ({ ...a, [p.id_proposition]: { ...courant(p), [champ]: v } }))
+  const nn = (s: string) => {
+    const x = Number(s)
+    return Number.isFinite(x) ? x : 0
+  }
+  const montantLigne = (p: Proposition) => nn(courant(p).qte) * nn(courant(p).prix)
   const qBc = useQuery({
     queryKey: ['bons-commande'],
-    queryFn: () => api.get<BcResume[]>('/api/bons-commande'),
+    queryFn: ({ signal }) => api.get<BcResume[]>('/api/bons-commande', { signal }),
   })
   const groupes = useMemo(() => {
     const m = new Map<string, Proposition[]>()
@@ -1328,13 +1192,11 @@ function LignesACommander({
   }
 
   const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
-  const totalMad = lignes.reduce((t, p) => t + (p.montant_total_mad ?? 0), 0)
+  const totalMad = lignes.reduce((t, p) => t + montantLigne(p), 0)
 
   return (
     <div className="space-y-3">
       {groupes.map(([frs, ls]) => {
-        const devise = ls[0].code_devise ?? ''
-        const montantDevise = ls.reduce((t, p) => t + (p.montant_devise ?? 0), 0)
         return (
           <Carte key={frs}>
             <CarteEntete>
@@ -1358,31 +1220,60 @@ function LignesACommander({
               </div>
             </CarteEntete>
             <CarteCorps className="p-0">
-              <div className="defilement-x">
-                <table className="w-full min-w-[44rem] text-[12.5px]">
+              {/* ON AJUSTE ICI, PAS DANS LE PLAN : quantite, prix, palettes,
+                  bobines, pre-remplis par le calcul. Le complement de palette —
+                  les kilos ajoutes pour FERMER la palette — est signale sous le
+                  nombre de palettes. */}
+              <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
+                <table className="w-full min-w-[46rem] text-[12.5px]">
                   <thead>
                     <tr className="border-b border-bordure">
                       <th className={cn(th, 'text-left')}>Référence</th>
-                      <th className={cn(th, 'w-24 text-left')}>Urgence</th>
-                      <th className={cn(th, 'w-32 text-right')}>Quantité</th>
-                      <th className={cn(th, 'w-28 text-right')}>Prix {devise}</th>
-                      <th className={cn(th, 'w-32 text-right')}>Montant {devise}</th>
-                      <th className={cn(th, 'w-36 text-right')}>Montant MAD</th>
+                      <th className={cn(th, 'w-32 text-right')}>Qté (kg)</th>
+                      <th className={cn(th, 'w-28 text-right')}>Prix MAD/kg</th>
+                      <th className={cn(th, 'w-28 text-right')}>Palettes</th>
+                      <th className={cn(th, 'w-24 text-right')}>Bobines</th>
+                      <th className={cn(th, 'w-32 text-right')}>Montant MAD</th>
                       {ecrire && <th className={cn(th, 'w-10')} />}
                     </tr>
                   </thead>
                   <tbody>
-                    {ls.map((p) => (
-                      <tr key={p.id_proposition} className="border-b border-bordure/60">
+                    {ls.map((p) => {
+                      const c = courant(p)
+                      return (
+                      <tr key={p.id_proposition} className="border-b border-bordure/60 align-top">
                         <td className="px-2 py-1.5">
                           <div className="font-medium">{p.code_reference}</div>
                           {p.designation && <div className="text-[11px] text-attenue-texte">{p.designation}</div>}
+                          <Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge>
                         </td>
-                        <td className="px-2 py-1.5"><Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge></td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmt.nombre(p.quantite_suggeree_kg, 0)} kg</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{p.prix_devise == null ? '—' : fmt.nombre(p.prix_devise, 3)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{p.montant_devise == null ? '—' : fmt.nombre(p.montant_devise, 2)}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{p.montant_total_mad == null ? '—' : fmt.mad(p.montant_total_mad)}</td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="any" min="0" value={c.qte} disabled={!ecrire}
+                            onChange={(e) => poser(p, 'qte', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Quantité (kg) pour ${p.code_reference}`} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="any" min="0" value={c.prix} disabled={!ecrire}
+                            onChange={(e) => poser(p, 'prix', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Prix MAD par kg pour ${p.code_reference}`} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="1" min="0" value={c.pal} disabled={!ecrire}
+                            onChange={(e) => poser(p, 'pal', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Palettes pour ${p.code_reference}`} />
+                          {p.complement_palette_kg != null && p.complement_palette_kg > 0 && (
+                            <div className="mt-0.5 text-right text-[10.5px] text-alerte"
+                              title="Arrondi à la palette pleine : ces kilos ferment la palette, ils ne produisent pas">
+                              + {fmt.nombre(p.complement_palette_kg, 0)} kg palette
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Champ type="number" step="1" min="0" value={c.bob} disabled={!ecrire}
+                            placeholder="—" onChange={(e) => poser(p, 'bob', e.target.value)}
+                            className="h-8 text-right tabular-nums" aria-label={`Bobines pour ${p.code_reference}`} />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium tabular-nums">{fmt.mad(montantLigne(p))}</td>
                         {ecrire && (
                           <td className="px-2 py-1.5">
                             <Bouton taille="icone-xs" variante="discret" aria-label={`Retirer ${p.code_reference}`}
@@ -1393,13 +1284,12 @@ function LignesACommander({
                           </td>
                         )}
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                   <tfoot>
                     <tr className="bg-attenue/40 font-semibold">
-                      <td className="px-2 py-1.5" colSpan={4}>{ls.length} ligne(s)</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{fmt.nombre(montantDevise, 2)}</td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{fmt.mad(ls.reduce((t, p) => t + (p.montant_total_mad ?? 0), 0))}</td>
+                      <td className="px-2 py-1.5" colSpan={5}>{ls.length} ligne(s)</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{fmt.mad(ls.reduce((t, p) => t + montantLigne(p), 0))}</td>
                       {ecrire && <td />}
                     </tr>
                   </tfoot>
@@ -1417,7 +1307,27 @@ function LignesACommander({
             <span className="text-attenue-texte"> · {groupes.length} fournisseur(s) · {fmt.mad(totalMad)}</span>
             <span className="text-attenue-texte"> — les bons restent en brouillon, rien n’est engagé.</span>
           </span>
-          <Bouton chargement={enCours} onClick={() => envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)))}>
+          <Bouton
+            chargement={enCours}
+            onClick={() => {
+              // Ce que l'acheteur confirme part sur le bon : qte, prix, palettes,
+              // bobines (meme non modifies : la valeur du plan vaut confirmation).
+              const ajustements: Record<
+                string,
+                { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }
+              > = {}
+              for (const p of lignes) {
+                const c = courant(p)
+                ajustements[p.id_proposition] = {
+                  quantite_kg: c.qte.trim() ? Number(c.qte) : undefined,
+                  prix_mad: c.prix.trim() ? Number(c.prix) : undefined,
+                  nb_palettes: c.pal.trim() ? Math.round(Number(c.pal)) : undefined,
+                  nb_bobines: c.bob.trim() ? Math.round(Number(c.bob)) : undefined,
+                }
+              }
+              envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)), ajustements)
+            }}
+          >
             <FileCheck2 />
             Envoyer au bon de commande
           </Bouton>

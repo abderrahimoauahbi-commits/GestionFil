@@ -283,3 +283,20 @@ magasinier.
 - ADR-002 (règles de gestion 08/10) : CMUP 2 temps, inventaire, import, droits.
 - SAP MM : *Goods Receipt (MIGO)*, *Invoice Receipt (MIRO)*, *delivery costs / planned conditions*.
 - Oracle : *Receiving*, *Landed Cost Management*.
+
+## Suite donnée le 16/10/2026 : l'écran d'import est retiré
+
+Phases A, C et B livrées, `/receptions-import` ne servait plus à rien : tout ce qu'il savait faire, la réception
+unifiée le fait — un arrivage dont chaque ligne pege à une ligne de bon de commande, import ou local.
+
+Retiré, donc, en un seul geste :
+
+- l'écran `frontend/src/pages/import/ReceptionImport.tsx` (1 031 lignes) et sa liste `ReceptionsImport.tsx`, leur
+  entrée de menu, leur aide et leurs exemples, leurs tuiles de tableau de bord ;
+- les routes `/api/import/a-recevoir` et `/api/import/receptions*`, avec les douze handlers et la cascade
+  `valider_reception_dans` qu'elles seules appelaient.
+
+Ce qui reste en base est intact : `import_receptions`, `import_reception_lignes` et le contrôle C45 gardent
+l'historique des dossiers reçus par l'ancien circuit (`circuit_reception = 'FACTURE'`) — on ne supprime pas des
+écritures, on ferme une porte d'entrée. Une reprise de ces dossiers vers le modèle BC → GR reste à faire ; elle
+figure déjà dans les points en attente ci-dessus.

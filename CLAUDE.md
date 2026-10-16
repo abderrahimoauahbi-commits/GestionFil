@@ -180,8 +180,10 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   A → C → B, C étant le préalable de la bascule de l'import : `synchroniser_recu_arrivages` relit les kilos
   d'un dossier depuis ses arrivages validés (recalcul, pas incrément : la facture arrive après le camion),
   l'étanchéité local/import et le contrôle C45 ne visent plus que les dossiers restés en circuit `FACTURE`,
-  et `import_dossiers.circuit_reception` passe à `BON` par défaut (les dossiers déjà ouverts gardent
-  `FACTURE` et finissent dans `/receptions-import`). Les frais d'approche d'un arrivage local vont au CMUP
+  et `import_dossiers.circuit_reception` passe à `BON` par défaut.
+  **Écran `/receptions-import` retiré le 16/10** : la réception d'import n'est plus un circuit, la marchandise
+  importée entre par la réception unifiée ; les routes `/api/import/a-recevoir` et `/api/import/receptions*`
+  n'existent plus. Les frais d'approche d'un arrivage local vont au CMUP
   **chacun selon sa clé** (poids / valeur / parts égales), une fois (`frais_approche.date_portee` les fige),
   journalisés en `origine = 'FRAIS'`.
   **Phase B livrée le 14/10** (`2026-10-14d`, exigée au démarrage) : `facture_fournisseur` +

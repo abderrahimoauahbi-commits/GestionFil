@@ -136,14 +136,6 @@ const DYNAMIQUES: {
     decrire: () => ({ titre: 'Referentiels', detail: 'Paramètres', Icone: Library }),
   },
   {
-    motif: /^\/receptions-import\/nouvelle$/,
-    decrire: () => ({ titre: 'Nouvelle réception import', Icone: Package }),
-  },
-  {
-    motif: /^\/receptions-import\/([^/]+)$/,
-    decrire: () => ({ titre: 'Réception import', detail: 'Achats', Icone: Package }),
-  },
-  {
     motif: /^\/receptions\/nouvelle$/,
     decrire: () => ({ titre: 'Nouvelle réception', Icone: Package }),
   },

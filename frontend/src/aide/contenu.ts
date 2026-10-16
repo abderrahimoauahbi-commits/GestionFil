@@ -522,7 +522,7 @@ export const SUJETS: Sujet[] = [
           'Saisissez les frais globaux : chaque frais se répartit selon son type (valeur, poids) sur tout le dossier ou sur les lignes choisies.',
           'Onglet Liquidation : vérifiez la répartition de chaque frais ligne par ligne ; corrigez les montants si besoin (la douane par nature de référence) — le frais passe alors en répartition manuelle.',
           'Déposez les pièces justificatives.',
-          'Recevez la marchandise depuis Réceptions import.',
+          'Recevez la marchandise depuis Réceptions : un arrivage, dont chaque ligne se rattache à une ligne de bon de commande (ADR-003).',
           'Clôturez le dossier quand tout est reçu.',
         ],
         resultat: 'Le coût de revient est figé et le coût moyen de chaque référence est ajusté.',
@@ -530,7 +530,6 @@ export const SUJETS: Sujet[] = [
     ],
     liens: [
       { route: '/import/assistant', libelle: 'Assistant d’import' },
-      { route: '/receptions-import', libelle: 'Réceptions import' },
     ],
     regles: [
       'La clôture porte les frais aux lots du dossier encore en stock, là où ils sont ; la part sortie va au consommé. Une reclôture à la baisse retire au même prorata.',
@@ -579,53 +578,6 @@ export const SUJETS: Sujet[] = [
     ],
   },
 
-  {
-    route: '/receptions-import',
-    titre: 'Réceptions import',
-    chemin: 'Achats → Réceptions import',
-    objectif: 'Faire entrer en stock la marchandise importée, en pesant ce que le camion apporte.',
-    prerequis: ['Les factures du dossier doivent être saisies : ce sont leurs lignes qu’on reçoit.'],
-    droits: 'Écriture du module Réceptions pour préparer ; validation pour faire entrer en stock.',
-    procedures: [
-      {
-        titre: 'Recevoir un camion',
-        etapes: [
-          'Créez une réception et datez-la.',
-          'Dans la liste des lignes à recevoir — tous dossiers non clos — cochez ce que le camion apporte.',
-          'Saisissez le poids réellement pesé, le nombre de bobines et de palettes, et le magasin.',
-          'Enregistrez : la réception reste un brouillon, rien n’entre en stock.',
-          'Soumettez au contrôle : la pesée ne se modifié plus que par le contrôleur, ou en la rouvrant.',
-          'Le contrôleur — un autre compte que celui qui a pesé — indique la qualité de chaque ligne et valide : la marchandise entre en stock à la valeur facture.',
-        ],
-        resultat: 'Le stock monte, le mouvement d’entrée cite les dossiers concernés, et les lignes de facture sont soldées.',
-      },
-    ],
-    champs: [
-      { nom: 'Date de réception', description: 'La date du déchargement.', obligatoire: true },
-      { nom: 'Quantité reçue (kg)', description: 'Le poids RÉELLEMENT pesé, pas le poids facturé.', obligatoire: true },
-      { nom: 'Magasin', description: 'Le magasin où la marchandise est rangée.', obligatoire: true },
-      { nom: 'Litige', description: 'À cocher quand la livraison présente un écart ou un dommage à documenter.' },
-      { nom: 'Qualité', description: 'Conforme, quarantaine ou non conforme : le verdict du contrôle. Hors « conforme », la ligne va dans un magasin de quarantaine.' },
-    ],
-    regles: [
-      'Une réception est un document À PART : ses lignes peuvent venir de plusieurs dossiers.',
-      'Enregistrer garde un brouillon ; SOUMETTRE la passe au contrôle ; VALIDER fait entrer en stock et fige la réception.',
-      'Celui qui a saisi la réception ne la valide pas (séparation des tâches).',
-      'Une ligne d’un dossier clôturé ne se reçoit plus.',
-      'Un excédent au-delà de la tolérance du fournisseur demande une dérogation motivée sur la ligne ; il n’est plus refusé sec.',
-      'Pour un fil suivi au lot, les bobines se comptent : ni recopiées de la facture, ni déduites des kilos.',
-      'Soumise au contrôle, la pesée est figée : le contrôleur porte la qualité, le magasin, le lot ; pour changer un poids, on rouvre en brouillon.',
-      'Une facture dont une ligne est reçue ne change plus de fournisseur, de devise, de taux ni de montant (IMPORT-FIGEE).',
-      'Avant la DUM, contre-passer l’entrée annule la réception et rend son reste à la facture et au bon.',
-    ],
-    messages: [
-      {
-        message: 'Le dossier … est clôturé : il ne reçoit plus rien.',
-        cause: 'La clôture a fixé le coût moyen. Une entrée après coup fausserait les sorties déjà valorisées.',
-      },
-    ],
-    liens: [{ route: '/import', libelle: 'Dossiers d’import' }],
-  },
   {
     route: '/retours-fournisseur',
     titre: 'Retours fournisseur',
@@ -960,7 +912,6 @@ export const SUJETS: Sujet[] = [
     ],
     liens: [
       { route: '/bons-commande', libelle: 'Bons de commande' },
-      { route: '/receptions-import', libelle: 'Réceptions import' },
     ],
   },
 

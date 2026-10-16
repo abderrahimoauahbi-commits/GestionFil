@@ -293,15 +293,12 @@ pub fn router(state: AppState) -> Router {
                get(pieces::lecture).post(pieces::lire))
         .route("/api/import/pieces/{id}",
                get(pieces::telecharger).delete(pieces::supprimer))
-        .route("/api/import/a-recevoir", get(importation::a_recevoir))
-        .route("/api/import/receptions",
-               get(importation::lister_receptions).post(importation::creer_reception))
-        .route("/api/import/receptions/{id}",
-               get(importation::lire_reception)
-                   .put(importation::modifier_reception)
-                   .delete(importation::supprimer_reception))
-        .route("/api/import/receptions/{id}/statut", put(importation::changer_statut_reception))
-        .route("/api/import/receptions/{id}/valider", post(importation::valider_reception))
+        // LA RECEPTION D'IMPORT N'EST PLUS UN CIRCUIT (ADR-003, 16/10/2026) :
+        // la marchandise importee entre par la RECEPTION UNIFIEE — un arrivage
+        // dont chaque ligne pege a une ligne de bon de commande. Les routes
+        // /api/import/a-recevoir et /api/import/receptions* sont donc retirees.
+        // Leurs handlers restent dans importation.rs, sans appelant : on ne
+        // supprime pas l'historique, on ferme seulement la porte.
         .route("/api/machines", get(machines::lister).post(machines::creer_machine))
         .route("/api/machines/consommation", get(machines::journal_consommation))
         .route("/api/machines/{code}/mouvements", get(machines::mouvements_machine))

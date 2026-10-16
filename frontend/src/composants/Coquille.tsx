@@ -157,7 +157,7 @@ export const MENU_PAR_ROLE: Record<string, string[]> = {
   // (ils arment la barre du bas), puis la consultation et le reste.
   MAGASIN: [
     '/receptions', '/mouvements', '/machines', '/inventaires',
-    '/etat-stock', '/transferts', '/receptions-import', '/retours-fournisseur',
+    '/etat-stock', '/transferts', '/retours-fournisseur',
     '/catalogue', '/chat',
   ],
 }
@@ -208,7 +208,7 @@ const ORDRE_MENU = [
   '/catalogue', '/categories', '/equivalences', '/fournisseurs', '/roles-bom',
   '/qualites', '/recettes', '/besoins',
   '/plans', '/plan-achat', '/stock',
-  '/bons-commande', '/receptions', '/factures-fournisseur', '/import', '/receptions-import', '/retours-fournisseur',
+  '/bons-commande', '/receptions', '/factures-fournisseur', '/import', '/retours-fournisseur',
   '/etat-stock', '/mouvements', '/transferts', '/machines', '/inventaires', '/lots', '/autorisations',
   '/statistiques', '/controles', '/historique-prix', '/matrice-prix',
   '/valorisation', '/landed-cost', '/classification', '/rapports',
@@ -301,18 +301,6 @@ export const NAVIGATION: EntreeNav[] = ([
     Icone: Receipt,
     section: 'ACHATS',
     resume: 'Rapprocher commande, pesée et facture, puis clôturer',
-  },
-  /* LA RECEPTION D'IMPORT RESTE SON PROPRE CIRCUIT jusqu'a la phase C de
-     l'ADR-003 : la chaine des frais d'import ne sait lire que lui. L'arrivage
-     unifie (phase A) couvre le local ; l'import la rejoindra quand les frais
-     sauront lire les arrivages. */
-  {
-    vers: '/receptions-import',
-    libelle: 'Réceptions import',
-    module: 'RECEPTIONS',
-    Icone: PackageCheck,
-    section: 'ACHATS',
-    resume: 'Recevoir les conteneurs d’un dossier d’import',
   },
   {
     vers: '/historique-prix',

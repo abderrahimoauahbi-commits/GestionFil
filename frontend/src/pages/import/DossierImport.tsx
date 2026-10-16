@@ -5,9 +5,10 @@
  *   2. ses frais (TVA, douane, fret, transitaire…), saisis dans le tableau ;
  *   3. les factures qui le composent — chacune s'ouvre sur son ecran.
  *
- * Les receptions n'y sont pas : c'est un document A PART, avec sa propre
- * liste (/receptions-import), qui peut prendre des lignes de plusieurs
- * dossiers. Le dossier n'en voit que l'effet — le recu de chaque facture.
+ * Les receptions n'y sont pas : depuis le 14/10/2026 (ADR-003), la marchandise
+ * importee entre par la RECEPTION UNIFIEE (/receptions), contre un bon de
+ * commande, comme un achat local. Le dossier n'en voit que l'effet — le recu de
+ * chaque facture, relu depuis les arrivages valides.
  *
  * CLOTURE, TOUT EST EN LECTURE SEULE : un dossier clos a servi a corriger le
  * CUMP, le modifier ferait mentir le stock. Le serveur le refuserait de toute

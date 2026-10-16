@@ -32,7 +32,7 @@ const CHAPITRES: { titre: string; prefixes: string[] }[] = [
     prefixes: ['/catalogue', '/categories', '/couleurs', '/fournisseurs', '/equivalences', '/referentiels', '/qualites'],
   },
   { titre: 'Achats', prefixes: ['/plan-achat', '/besoins', '/bons-commande'] },
-  { titre: 'Importation', prefixes: ['/import', '/receptions-import'] },
+  { titre: 'Importation', prefixes: ['/import'] },
   { titre: 'Réceptions et stock', prefixes: ['/receptions', '/mouvements', '/transferts', '/stock', '/inventaires'] },
   { titre: 'Analyse', prefixes: ['/statistiques', '/valorisation', '/etats', '/'] },
   { titre: 'Réglages', prefixes: ['/utilisateurs'] },

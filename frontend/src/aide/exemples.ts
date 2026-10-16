@@ -251,14 +251,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'La clôture est refusée tant qu’un frais est non réparti.',
     },
   ],
-  '/receptions-import': [
-    {
-      titre: 'entrer au prix de la facture',
-      situation: 'Ligne A facturée 2,00 USD/kg au cours 9,70 ; 4 010 kg pesés.',
-      calcul: [['Prix d’entrée', '2,00 × 9,70 = 19,40 MAD/kg']],
-      conclusion: 'Les frais du dossier s’ajoutent au CMUP à la clôture du dossier.',
-    },
-  ],
   '/retours-fournisseur': [
     {
       titre: 'rendre moins cher que le CMUP',

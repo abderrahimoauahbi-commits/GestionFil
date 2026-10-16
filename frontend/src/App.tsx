@@ -74,8 +74,6 @@ const LecturePiece = lazy(() => import('./pages/import/LecturePiece').then((m) =
 const DossiersImport = lazy(() => import('./pages/import/DossiersImport').then((m) => ({ default: m.DossiersImport })))
 const DossierImport = lazy(() => import('./pages/import/DossierImport').then((m) => ({ default: m.DossierImport })))
 const FactureImport = lazy(() => import('./pages/import/FactureImport').then((m) => ({ default: m.FactureImport })))
-const ReceptionImport = lazy(() => import('./pages/import/ReceptionImport').then((m) => ({ default: m.ReceptionImport })))
-const ReceptionsImport = lazy(() => import('./pages/import/ReceptionsImport').then((m) => ({ default: m.ReceptionsImport })))
 const Retours = lazy(() => import('./pages/retours/Retours').then((m) => ({ default: m.Retours })))
 const Retour = lazy(() => import('./pages/retours/Retour').then((m) => ({ default: m.Retour })))
 const BonCommandeNouveau = lazy(() => import('./pages/BonCommandeNouveau').then((m) => ({ default: m.BonCommandeNouveau })))
@@ -222,8 +220,6 @@ const ECRANS = (
       <Route path="import/:id/factures/:idFacture" element={<ExigeModule module="IMPORT"><FactureImport /></ExigeModule>} />
       {/* La reception d'import est A PART du dossier : sa liste, son ecran, et
           le module RECEPTIONS — le magasinier y a ses droits, sans voir les prix. */}
-      <Route path="receptions-import" element={<ExigeModule module="RECEPTIONS"><ReceptionsImport /></ExigeModule>} />
-      <Route path="receptions-import/:idReception" element={<ExigeModule module="RECEPTIONS"><ReceptionImport /></ExigeModule>} />
       {/* LA FACTURE FOURNISSEUR, document (ADR-003 phase B) : elle rapproche ce
           qui a ete commande, pese et facture, puis cloture les arrivages. Le
           module RECEPTIONS : c'est la meme chaine, et les montants restent

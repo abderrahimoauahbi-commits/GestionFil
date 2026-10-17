@@ -114,6 +114,12 @@ impl FromRequestParts<AppState> for Utilisateur {
         let directe = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(a)| a.ip());
         let adresse_ip = crate::routes::auth_routes::adresse_client(&parts.headers, directe);
 
+        // QUI, DANS LE JOURNAL (audit C2, 17/10/2026). La requete en cours porte
+        // desormais l'utilisateur sur chacune de ses lignes, erreur interne comprise :
+        // un « incident A113930C » signale par telephone mene a la personne et a tout
+        // ce que sa requete a fait, pas seulement a la ligne de l'erreur.
+        tracing::Span::current().record("utilisateur", claims.login.as_str());
+
         Ok(Utilisateur {
             id: claims.sub,
             login: claims.login,

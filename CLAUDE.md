@@ -76,6 +76,8 @@ npm run bureau:dev   # fenêtre Tauri
 
 # Tout d'un coup
 .\demarrer.ps1       # compile et lance le backend, puis Vite
+.\verifier.ps1 -Rapide              # clippy, tests Rust, lint, types, build, tests interface (sans base)
+git config core.hooksPath .githooks  # UNE FOIS par clone : verifier.ps1 -Rapide a chaque push
 .\deploiement\fabriquer-paquet.ps1   # paquet pour 03-publier.sh sur le serveur
 ```
 

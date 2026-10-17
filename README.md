@@ -72,6 +72,17 @@ depuis un dossier vide (aucun `.env` lu), joue les scénarios métier de bout en
 sessions, concurrence, déclencheurs, masquage) puis supprime la base. Il ne touche jamais la
 base `gestionfil`. `deploiement/fabriquer-paquet.ps1` l'exige avant de fabriquer un paquet.
 
+### Vérification automatique (17/10/2026)
+
+```powershell
+git config core.hooksPath .githooks   # UNE FOIS par clone
+```
+
+Chaque `git push` rejoue alors `verifier.ps1 -Rapide` — clippy, tests Rust, lint, types, compilation
+et tests de l'interface — et s'arrête au premier échec (`git push --no-verify` pour passer outre).
+Sur GitHub, `.github/workflows/verification.yml` rejoue le tout sous Linux, **banc métier compris**,
+à chaque envoi. Le bout en bout (Playwright + Edge) reste au poste, avant publication.
+
 ---
 
 ## État et décisions

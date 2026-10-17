@@ -1,0 +1,123 @@
+# Integration continue de Gestion Fil (audit C1, 17/10/2026).
+#
+# LE TROU QU'ELLE BOUCHE. Tout l'outillage existait — clippy, tests Rust, eslint,
+# types, tests de l'interface, et surtout le BANC METIER (49 scenarios sur une
+# vraie base) — et rien ne l'executait sans qu'on y pense. Le banc a trouve le
+# 17/10 une erreur interne qu'aucun outil statique ne pouvait voir.
+#
+# POURQUOI SOUS LINUX : la production l'est (Ubuntu, 192.168.1.140). Le poste de
+# developpement est sous Windows ; les deux sont ainsi verifies.
+#
+# CE QUI N'Y EST PAS, ET POURQUOI :
+#   - `cargo fmt --check` : le projet n'utilise pas le formatage automatique
+#     (786 ecarts au 17/10). L'exiger obligerait a reformater tout le code.
+#   - le bout en bout (Playwright + Edge, 24 essais) : il pilote Edge et se joue
+#     sur le poste, avant publication (`fabriquer-paquet.ps1` l'exige).
+#
+# LES MESSAGES NE DEPENDENT PAS DE LA LANGUE DU SERVEUR : `error.rs` traduit les
+# erreurs par leur code SQLSTATE, jamais par leur texte. Un PostgreSQL en anglais
+# rend donc les memes messages qu'en francais.
+#
+# Aucune donnee reelle : la base est jetable, batie depuis le socle par le banc.
+
+name: Vérification
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: banc-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    env:
+      PGPASSWORD: banc-ci
+      CARGO_TERM_COLOR: never
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pg_dump et pg_restore doivent etre de la version du serveur : ceux d'Ubuntu
+      # (16) refusent de sauvegarder un PostgreSQL 18, et le banc verifie qu'une
+      # sauvegarde se restaure (scenario sauvegarde_restaurable).
+      - name: Client PostgreSQL 18
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+               https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
+               | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      # Le socle attribue ses objets a `gestionfil` (OWNER TO) ; aucun script ne
+      # cree ce role, qui existe sur les postes et le serveur.
+      - name: Rôle gestionfil
+        run: psql -h 127.0.0.1 -U postgres -c "CREATE ROLE gestionfil LOGIN PASSWORD 'banc-ci';"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Rust — clippy
+        working-directory: backend
+        run: cargo clippy --all-targets
+
+      - name: Rust — tests unitaires
+        working-directory: backend
+        run: cargo test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Interface — dépendances
+        working-directory: frontend
+        run: npm ci
+
+      - name: Interface — lint et types
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Interface — compilation (vérification de types de référence)
+        working-directory: frontend
+        run: npm run build
+
+      - name: Interface — tests
+        working-directory: frontend
+        run: npm test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Binaires du banc
+        working-directory: backend
+        run: cargo build --bins
+
+      # Le banc bat une base neuve depuis le socle, joue les migrations venues
+      # apres lui — dont `migrations_rejouables`, qui les rejoue une seconde fois —,
+      # lance un serveur d'essai et joue les scenarios metier contre lui.
+      - name: Banc métier
+        run: python backend/tests/banc/banc.py --cible backend/target

@@ -36,8 +36,10 @@ from pathlib import Path
 
 ICI = Path(__file__).resolve().parent
 SOCLE = ICI / "socle"
-PG_DUMP = os.environ.get("PG_DUMP", r"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe")
-PSQL = os.environ.get("PSQL", r"C:\Program Files\PostgreSQL\18\bin\psql.exe")
+# Les outils de Windows s'ils sont la, sinon ceux du PATH (Linux : serveur, CI).
+_BIN_WIN = r"C:\Program Files\PostgreSQL\18\bin"
+PG_DUMP = os.environ.get("PG_DUMP", _BIN_WIN + r"\pg_dump.exe" if os.path.isdir(_BIN_WIN) else "pg_dump")
+PSQL = os.environ.get("PSQL", _BIN_WIN + r"\psql.exe" if os.path.isdir(_BIN_WIN) else "psql")
 
 # La configuration DU SYSTEME : ce qu'une base neuve doit avoir pour que les
 # ecrans, les droits et les regles fonctionnent. Pas les donnees de

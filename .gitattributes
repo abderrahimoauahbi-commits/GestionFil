@@ -9,3 +9,6 @@ db/pg/migrer.py text eol=lf
 # migration qui compare un texte de vue sur plusieurs lignes ne le trouvait plus
 # (2026-10-09j a arrete la publication du 10/10 ; sous Windows, psql le retire).
 db/pg/**/*.sql text eol=lf
+
+# Les crochets git sont des scripts sh : un retour chariot final casse leur premiere ligne sous Linux.
+.githooks/* text eol=lf

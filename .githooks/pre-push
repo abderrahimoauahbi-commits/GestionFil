@@ -1,0 +1,33 @@
+#!/bin/sh
+# Verification avant d'envoyer (audit C1, 17/10/2026).
+#
+# LE TROU QUE CE CROCHET BOUCHE. Tout l'outillage du projet existe — clippy,
+# tests Rust, eslint, types, tests de l'interface — et rien ne l'executait sans
+# qu'on y pense. Ce crochet rejoue `verifier.ps1 -Rapide` a chaque `git push` :
+# une regression ne part plus vers le depot sans avoir ete vue.
+#
+# Le mode rapide saute le banc et le bout en bout (base et serveur d'essai, dix
+# minutes) : ceux-la tournent dans l'integration continue a chaque envoi, et
+# `fabriquer-paquet.ps1` les exige avant toute publication.
+#
+# LA CIBLE DE COMPILATION EST CELLE DU PROJET (backend/target), pas une cible a
+# part : en mode rapide rien ne relie `gestionfil.exe` (ni check, ni clippy, ni
+# les tests unitaires), donc le binaire d'un serveur de developpement en marche
+# n'est pas touche — et le cache est partage, au lieu de plusieurs Go de plus.
+#
+# Activation, une fois par clone :   git config core.hooksPath .githooks
+# Passer outre, en connaissance de cause :   git push --no-verify
+
+racine="$(git rev-parse --show-toplevel)"
+
+if command -v powershell >/dev/null 2>&1; then
+    ps=powershell
+elif command -v pwsh >/dev/null 2>&1; then
+    ps=pwsh
+else
+    echo "pre-push : ni powershell ni pwsh ; verification sautee (lancer verifier.ps1 a la main)." >&2
+    exit 0
+fi
+
+echo "pre-push : verification rapide avant l'envoi (git push --no-verify pour passer outre)."
+exec "$ps" -NoProfile -ExecutionPolicy Bypass -File "$racine/verifier.ps1" -Rapide -Cible "$racine/backend/target"

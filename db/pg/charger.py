@@ -121,7 +121,10 @@ REFERENTIEL_FIGE = ["seed_100_referentiel_reel.sql"]
 # auditer la reprise est de ne pas l'auditer.
 AUDIT = ["014_audit_operations.sql"]
 
-PSQL = os.environ.get("PSQL", r"C:\Program Files\PostgreSQL\18\bin\psql.exe")
+# Le psql de Windows s'il est la, sinon celui du PATH (Linux : serveur, CI).
+# Meme regle que migrer.py.
+_PSQL_WIN = r"C:\Program Files\PostgreSQL\18\bin\psql.exe"
+PSQL = os.environ.get("PSQL", _PSQL_WIN if os.path.exists(_PSQL_WIN) else "psql")
 
 
 def decouper(sql):

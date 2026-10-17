@@ -44,8 +44,13 @@ from pathlib import Path
 ICI = Path(__file__).resolve().parent
 RACINE = ICI.parents[2]
 DB_PG = RACINE / "db" / "pg"
-PSQL = os.environ.get("PSQL", r"C:\Program Files\PostgreSQL\18\bin\psql.exe")
-PG_DUMP = os.environ.get("PG_DUMP", r"C:\Program Files\PostgreSQL\18\bin\pg_dump.exe")
+# Les outils de Windows s'ils sont la, sinon ceux du PATH : le banc tourne aussi
+# sous Linux, dans l'integration continue (audit C1, 17/10/2026).
+_BIN_WIN = r"C:\Program Files\PostgreSQL\18\bin"
+PSQL = os.environ.get("PSQL", _BIN_WIN + r"\psql.exe" if os.path.isdir(_BIN_WIN) else "psql")
+PG_DUMP = os.environ.get("PG_DUMP", _BIN_WIN + r"\pg_dump.exe" if os.path.isdir(_BIN_WIN) else "pg_dump")
+# Les binaires de cargo ne portent `.exe` que sous Windows.
+EXE = ".exe" if os.name == "nt" else ""
 MOT_DE_PASSE = "Banc-Essai-2026!"
 COMPTES = ["admin", "Mohamed", "Choukri", "Tarik", "Assistante", "Magasinie"]
 
@@ -134,8 +139,8 @@ class Infra:
         self.motdepasse = option("--motdepasse", os.environ.get("PGPASSWORD", ""))
         self.port = int(option("--port", "8096"))
         cible = option("--cible", os.environ.get("CARGO_TARGET_DIR", str(RACINE / "backend" / "target")))
-        self.binaire = Path(cible) / "debug" / "gestionfil.exe"
-        self.admin = Path(cible) / "debug" / "gestionfil-admin.exe"
+        self.binaire = Path(cible) / "debug" / f"gestionfil{EXE}"
+        self.admin = Path(cible) / "debug" / f"gestionfil-admin{EXE}"
         self.base = f"gestionfil_banc_{os.getpid()}"
         self.serveur = None
         # L'HORLOGE DU SERVEUR (11/10/2026) : ses sessions sont en UTC (db.rs) ; le banc lisait

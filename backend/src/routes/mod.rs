@@ -494,7 +494,36 @@ pub fn router(state: AppState) -> Router {
         // doit etre declare apres celui qu'il precise, sinon il ne sert jamais.
         .route("/api/{entite}/{id}/retenants", get(entites::retenants))
         .route("/api/{entite}/{id}/activation", post(entites::activation))
-        .layer(TraceLayer::new_for_http())
+        // UNE REQUETE, UN IDENTIFIANT (audit C2, 17/10/2026). Chaque requete recoit
+        // un `x-request-id` — repris de nginx s'il en pose un, sinon tire ici — renvoye
+        // au client et porte par toutes les lignes de journal de la requete, avec la
+        // methode, le chemin et l'utilisateur. Une ligne par reponse dit le statut et
+        // la duree. Le chemin seul, jamais la requete complete : une recherche peut
+        // contenir un nom, un jeton ne doit jamais finir dans un journal.
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &axum::extract::Request| {
+                    let id = req.headers().get("x-request-id").and_then(|v| v.to_str().ok()).unwrap_or("-");
+                    tracing::info_span!(
+                        "requete",
+                        id = %id,
+                        methode = %req.method(),
+                        chemin = %req.uri().path(),
+                        utilisateur = tracing::field::Empty,
+                    )
+                })
+                .on_response(
+                    tower_http::trace::DefaultOnResponse::new()
+                        .level(tracing::Level::INFO)
+                        .latency_unit(tower_http::LatencyUnit::Millis),
+                ),
+        )
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        // Pose AVANT la trace (les couches s'executent de la derniere ajoutee a la
+        // premiere) : le span doit pouvoir lire l'identifiant.
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            tower_http::request_id::MakeRequestUuid,
+        ))
         // UN DELAI PAR REQUETE (audit v4) : au-dela, le client recoit 408 au
         // lieu d'attendre une reponse qui ne viendra pas. Cinq minutes par
         // defaut (GESTIONFIL_DELAI_HTTP_S) : un calcul de plan ou un depot de

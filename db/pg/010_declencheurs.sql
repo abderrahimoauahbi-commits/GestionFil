@@ -870,3 +870,127 @@ CREATE TRIGGER trg_aa_version BEFORE UPDATE ON plan_production
 FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
 CREATE TRIGGER trg_aa_version BEFORE UPDATE ON qualite
 FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+
+
+-- =============================================================================
+-- CLOTURE DE PERIODE (A3, migration 2026-10-17e)
+-- =============================================================================
+-- Recopie de la migration, au caractere pres. Le reglage P_PeriodeCloseJusqua
+-- et le controle C55 restent dans la migration, comme les autres reglages et
+-- controles venus apres C44 : sans le reglage, fn_periode_close_jusqua() rend
+-- NULL et la cloture est inerte — le schema d'origine se charge donc seul.
+
+-- ---- 1. La date metier d'une date du grand livre ----------------------------
+-- STABLE et sans bloc EXCEPTION : elle s'execute a chaque ligne ecrite, et un
+-- bloc EXCEPTION ouvrirait une sous-transaction par ligne. Un format inconnu
+-- rend NULL : la cloture ne tranche pas ce qu'elle ne sait pas lire, d'autres
+-- gardes (trg_mouvement_date_future) s'occupent des dates mal formees.
+CREATE OR REPLACE FUNCTION fn_date_metier(p text) RETURNS date AS $$
+BEGIN
+    IF p ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}' THEN
+        RETURN (p::timestamptz AT TIME ZONE 'Africa/Casablanca')::date;
+    ELSIF p ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN
+        RETURN substr(p, 1, 10)::date;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- La limite courante : NULL si le reglage manque (base anterieure a cette
+-- migration rechargee partiellement) — rien n'est alors refuse.
+CREATE OR REPLACE FUNCTION fn_periode_close_jusqua() RETURNS date AS $$
+    SELECT valeur_courante::date FROM parametre
+     WHERE code_parametre = 'P_PeriodeCloseJusqua' AND actif = 1;
+$$ LANGUAGE sql STABLE;
+
+-- ---- 3. Qui peut clore, et jusqu'ou -----------------------------------------
+CREATE OR REPLACE FUNCTION fn_trg_parametre_cloture() RETURNS trigger AS $$
+DECLARE
+    v_user    text := NULLIF(current_setting('gestionfil.id_utilisateur', true), '');
+    v_role    text;
+    v_nouvelle date := NEW.valeur_courante::date;   -- format deja controle par trg_00_parametre_type
+    v_ancienne date := OLD.valeur_courante::date;
+    v_aujourdhui date := (now() AT TIME ZONE 'Africa/Casablanca')::date;
+BEGIN
+    IF v_nouvelle = v_ancienne THEN
+        RETURN NEW;
+    END IF;
+
+    -- LA DIRECTION, ET L'ADMINISTRATEUR. Sans contexte applicatif (migration,
+    -- script d'administration en psql), la garde s'efface : c'est la convention
+    -- des autres gardes par role (fn_trg_inventaire_separation).
+    IF v_user IS NOT NULL THEN
+        SELECT code_role_user INTO v_role FROM utilisateur WHERE id_utilisateur = v_user;
+        IF v_role IS NULL OR v_role NOT IN ('DIRECTION', 'ADMIN') THEN
+            RAISE EXCEPTION 'PERIODE : clore ou rouvrir une période revient à la direction.';
+        END IF;
+    END IF;
+
+    -- ON NE CLOT PAS LE JOUR MEME. Clore aujourd'hui refuserait les mouvements
+    -- de la journee en cours ; clore demain, ceux de demain sans raison.
+    IF v_nouvelle >= v_aujourdhui THEN
+        RAISE EXCEPTION 'PERIODE : on ne clôt que des jours passés ; le % n''est pas encore terminé.',
+            to_char(v_nouvelle, 'DD/MM/YYYY');
+    END IF;
+
+    -- ROUVRIR EST L'EXCEPTION, ET SE JUSTIFIE. Reculer la date redonne acces a
+    -- des mois arretes : le motif reste dans parametre_historique.
+    IF v_nouvelle < v_ancienne AND length(btrim(COALESCE(NEW.motif_modif, ''))) < 3 THEN
+        RAISE EXCEPTION 'PERIODE : rouvrir la période close jusqu''au % exige un motif.',
+            to_char(v_ancienne, 'DD/MM/YYYY');
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_parametre_cloture
+    BEFORE UPDATE OF valeur_courante ON parametre
+    FOR EACH ROW
+    WHEN (NEW.code_parametre = 'P_PeriodeCloseJusqua')
+    EXECUTE FUNCTION fn_trg_parametre_cloture();
+
+-- ---- 4. Le grand livre refuse d'ecrire dans le passe clos -------------------
+CREATE OR REPLACE FUNCTION fn_trg_mouvement_periode_close() RETURNS trigger AS $$
+DECLARE
+    v_limite date := fn_periode_close_jusqua();
+    v_jour   date := fn_date_metier(NEW.date_mouvement);
+BEGIN
+    IF v_limite IS NOT NULL AND v_jour IS NOT NULL AND v_jour <= v_limite THEN
+        RAISE EXCEPTION 'PERIODE-CLOSE : la période jusqu''au % est close, rien ne s''y écrit plus (mouvement du %). Datez-le après la clôture, ou demandez à la direction de rouvrir la période.',
+            to_char(v_limite, 'DD/MM/YYYY'), to_char(v_jour, 'DD/MM/YYYY');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_mouvement_periode_close
+    BEFORE INSERT ON mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_mouvement_periode_close();
+
+-- LES LIGNES AUSSI. `ligne_mouvement` est immuable en modification et en
+-- suppression (R03), mais une INSERTION sur un en-tete ancien reste possible :
+-- sans cette garde, on pourrait faire entrer du stock dans un mois clos en
+-- greffant une ligne a un mouvement de mars. La garantie vaut quel que soit le
+-- chemin, pas seulement celui des ecrans.
+CREATE OR REPLACE FUNCTION fn_trg_lmvt_periode_close() RETURNS trigger AS $$
+DECLARE
+    v_limite date := fn_periode_close_jusqua();
+    v_jour   date;
+BEGIN
+    IF v_limite IS NULL OR v_limite <= DATE '2000-01-01' THEN
+        RETURN NEW;    -- rien de clos : pas de lecture d'en-tete a chaque ligne
+    END IF;
+    SELECT fn_date_metier(m.date_mouvement) INTO v_jour
+      FROM mouvement m WHERE m.id_mouvement = NEW.id_mouvement;
+    IF v_jour IS NOT NULL AND v_jour <= v_limite THEN
+        RAISE EXCEPTION 'PERIODE-CLOSE : la période jusqu''au % est close ; on n''ajoute pas de ligne à un mouvement du %.',
+            to_char(v_limite, 'DD/MM/YYYY'), to_char(v_jour, 'DD/MM/YYYY');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_lmvt_periode_close
+    BEFORE INSERT ON ligne_mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_periode_close();

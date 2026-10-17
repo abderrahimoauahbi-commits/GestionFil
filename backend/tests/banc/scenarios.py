@@ -723,6 +723,77 @@ def scenario_verrou_optimiste(c, infra):
     verifier(code == 200, f"une modification sans version est refusee : {code} {r}")
 
 
+def scenario_cloture_periode(c, infra):
+    """LA CLOTURE DE PERIODE (A3, 17/10/2026) : la direction clot un mois ; une reception
+    datee de ce mois ne peut plus entrer en stock a sa date, et se signale (C55) au lieu
+    d'attendre qu'on s'y heurte. Rouvrir se justifie. Le magasin ne clot pas."""
+    A, M = "PLA 100 EXT", "Morocco"
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": "FRS-012", "date_bc": "2025-04-01",
+        "lignes": [{"code_reference": A, "unite_commande": "kg", "quantite_commandee_unite": 150, "prix_unitaire_devise": 21}]})
+    id_bc = bc["id_bc"]
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+    c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
+    c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ENVOYE"})
+    lb = c.ok("Choukri", "GET", f"/api/bons-commande/{id_bc}/lignes")
+    lb = lb.get("lignes", lb) if isinstance(lb, dict) else lb
+    r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "date_reception": "2025-04-10",
+        "num_bon_livraison": "BL-CLOTURE", "lignes": [{"code_reference": A, "id_ligne_bc": lb[0]["id_ligne_bc"],
+        "unite_saisie": "kg", "quantite_pesee_unite": 150, "code_magasin_dest": M}]})
+    rid = r["id_reception"]
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+
+    route = "/api/parametres/P_PeriodeCloseJusqua"
+    try:
+        # LE MAGASIN NE CLOT PAS : c'est un arret des comptes, il revient a la direction.
+        # Le RBAC l'arrete deja (pas d'ECRIRE sur PARAMETRES), avant la base.
+        c.refus("Magasinie", "PATCH", route, {"valeur_courante": "2025-04-30"})
+
+        # LA GARDE EN BASE VAUT POUR DEMAIN. Aujourd'hui seules la direction et
+        # l'administration ecrivent les parametres : RBAC et declencheur concordent.
+        # Si l'on accorde un jour cet ECRIRE a l'assistante, pour un autre reglage,
+        # la cloture doit rester a la direction. On le prouve en accordant le droit.
+        infra.sql("INSERT INTO permission (code_role_user, module, action, actif) "
+                  "VALUES ('ASSISTANTE', 'PARAMETRES', 'ECRIRE', 1)")
+        try:
+            c.refus("Assistante", "PATCH", route, {"valeur_courante": "2025-04-30"}, contient="direction")
+        finally:
+            infra.sql("DELETE FROM permission WHERE code_role_user = 'ASSISTANTE' "
+                      "AND module = 'PARAMETRES' AND action = 'ECRIRE'")
+
+        avant = controle(infra, "C55")
+        c.ok("Choukri", "PATCH", route, {"valeur_courante": "2025-04-30", "motif": "arret d'avril 2025"})
+
+        # LE SIGNAL, AVANT LE REFUS : la reception d'avril encore a controler se voit.
+        verifier(controle(infra, "C55") > avant, "C55 ne signale pas la reception restee dans le mois clos")
+
+        # LE GRAND LIVRE REFUSE : valider ferait entrer du stock le 10/04/2025, mois clos.
+        kg_avant = kg(infra, A, M)
+        c.refus("Choukri", "POST", f"/api/receptions/{rid}/valider", contient="PERIODE-CLOSE")
+        # ET LE REFUS NE LAISSE RIEN : ni stock entre, ni reception a moitie validee.
+        verifier(abs(kg(infra, A, M) - kg_avant) < 0.001, "un refus de cloture a quand meme fait entrer du stock")
+        statut = infra.valeur(f"SELECT statut FROM reception WHERE id_reception = '{rid}'")
+        verifier(statut == "A_CONTROLER", f"la reception refusee est passee en {statut}")
+
+        # ROUVRIR EST L'EXCEPTION, ET SE JUSTIFIE.
+        c.refus("Choukri", "PATCH", route, {"valeur_courante": "2025-03-31"}, contient="motif")
+        c.ok("Choukri", "PATCH", route, {"valeur_courante": "2025-03-31", "motif": "BL d'avril retrouve"})
+
+        # Avril rouvert, la reception entre en stock a SA date.
+        c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+        date_mvt = infra.valeur(
+            "SELECT substr(m.date_mouvement, 1, 10) FROM ligne_reception lr JOIN mouvement m "
+            f"ON m.id_mouvement = lr.id_mouvement_genere WHERE lr.id_reception = '{rid}'")
+        verifier(date_mvt == "2025-04-10", f"l'entree en stock est datee {date_mvt} au lieu du 2025-04-10")
+    finally:
+        # TOUJOURS ROUVRIR, meme en echec : une cloture laissee en place ferait tomber
+        # tous les scenarios suivants qui datent un fait dans le passe. Sans contexte
+        # applicatif la garde de role s'efface ; le motif, lui, reste exige.
+        infra.sql("UPDATE parametre SET valeur_courante = '2000-01-01', motif_modif = 'fin du scenario de banc' "
+                  "WHERE code_parametre = 'P_PeriodeCloseJusqua'")
+    verifier(infra.valeur("SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_PeriodeCloseJusqua'")
+             == "2000-01-01", "la periode n'a pas ete rouverte en fin de scenario")
+
+
 def scenario_declencheurs(c, infra):
     """Les invariants en base : grand livre, audit et journal de cloture immuables."""
     for requete, quoi in (
@@ -761,10 +832,20 @@ def scenario_controles_finaux(c, infra):
         verifier(controle(infra, code) == 0, f"{code} non nul a la fin du banc")
     c.ok("Choukri", "GET", "/api/cockpit")
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
+    # LE DERNIER CONTROLE, EN UN SEUL ENDROIT : a relever a chaque controle ajoute
+    # (C55, cloture de periode, le 17/10/2026).
+    dernier = 55
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
-                             "FROM generate_series(1, 54) g EXCEPT SELECT code FROM v_controles) x")
+                             f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
-    verifier(int(infra.valeur("SELECT count(*) FROM v_controles")) == 54, "v_controles porte des doublons")
+    # DEUX QUESTIONS DISTINCTES. L'ancienne verification comparait le total a 54 et
+    # appelait tout ecart « doublons » : l'ajout de C55 l'a fait mentir. Un doublon,
+    # c'est un code present deux fois ; un controle en trop, c'est un autre constat.
+    doublons = infra.valeur("SELECT string_agg(code || ' x' || n, ', ') FROM "
+                            "(SELECT code, count(*) AS n FROM v_controles GROUP BY code HAVING count(*) > 1) d")
+    verifier(not doublons, f"v_controles porte des doublons : {doublons}")
+    total = int(infra.valeur("SELECT count(*) FROM v_controles"))
+    verifier(total == dernier, f"v_controles compte {total} controles, {dernier} attendus : relever `dernier` ?")
 
 
 def scenario_import(c, infra):
@@ -2461,6 +2542,7 @@ SCENARIOS = [
     scenario_inventaire,
     scenario_colisage_signale,
     scenario_verrou_optimiste,
+    scenario_cloture_periode,
     scenario_colisage_ecran_et_base,
     scenario_import,
     scenario_import_coherence,

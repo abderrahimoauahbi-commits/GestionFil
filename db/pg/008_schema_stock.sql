@@ -252,7 +252,9 @@ CREATE TABLE stock_lot (
     UNIQUE (code_reference, code_magasin, lot_fournisseur)
 );
 
--- Index FEFO : sert fn_suggerer_lots_fefo (vue v_lot_fefo)
+-- Index FEFO : sert la vue v_lot_fefo et la liste des lots d'un magasin, que
+-- l'ecran trie dans le meme ordre (frontend/src/lib/fefo.ts). La fonction
+-- fn_suggerer_lots_fefo que ce commentaire citait n'a jamais existe (audit du 17/10/2026).
 CREATE INDEX ix_stock_lot_fefo ON stock_lot(code_reference, code_magasin, date_peremption)
     WHERE quantite_kg > 0;
 

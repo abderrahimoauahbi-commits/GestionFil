@@ -109,6 +109,20 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Audit A2 : le verrou optimiste. `domain::concurrence::exiger_version`
+        // lit `version` sur les six documents a workflow ; sans la colonne,
+        // chaque enregistrement d'un bon ou d'une reception tombe en erreur
+        // interne. Le temoin exige aussi le declencheur : sans lui la colonne
+        // n'avance jamais, et le verrou ne refuserait rien.
+        "2026-10-17d_verrou_optimiste.sql",
+        "SELECT (SELECT count(*) FROM information_schema.columns
+                  WHERE table_schema = 'public' AND column_name = 'version'
+                    AND table_name IN ('bon_commande', 'reception', 'inventaire',
+                                       'transfert', 'plan_production', 'qualite')) = 6
+            AND (SELECT count(*) FROM pg_trigger
+                  WHERE tgname = 'trg_aa_version' AND NOT tgisinternal) = 6",
+    ),
+    (
         // ADR-003 phase B : la facture fournisseur est un document. Sans ses
         // tables, l'ecran et sa validation tombent.
         "2026-10-14d_facture_fournisseur.sql",

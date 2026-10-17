@@ -109,17 +109,46 @@ pub fn separer_mot_de_passe(url: &str) -> (String, Option<String>) {
     )
 }
 
+/// Reserve un nom de sauvegarde libre — ATOMIQUEMENT (17/10/2026).
+///
+/// DEUX DEFAUTS, UN REMEDE. Le nom est horodate a la seconde. Or le serveur
+/// sauvegarde a sa fermeture (`main.rs`), et `03-publier.sh` sauvegarde juste
+/// apres l'avoir arrete : sur une petite base les deux tombaient dans la meme
+/// seconde, la seconde etait REFUSEE, et la publication du 17/10 s'est arretee
+/// la — service coupe 17 s. Et en cherchant, pire : deux sauvegardes lancees
+/// ENSEMBLE verifiaient toutes deux que le nom etait libre, avant que l'une ne
+/// l'ait cree, puis ecrivaient le MEME fichier — deux « succes » pour une seule
+/// sauvegarde, et deux `pg_dump` dans un meme fichier peuvent l'entrelacer.
+///
+/// Le nom se RESERVE donc par une creation exclusive (`create_new`, soit
+/// O_EXCL) : un seul appelant peut gagner un nom ; l'autre attend la seconde
+/// suivante. Le nom garde son format — la liste des sauvegardes le lit, et son
+/// tri reste chronologique. `pg_dump` ecrit ensuite dans le fichier reserve ; s'il
+/// echoue, `creer` le supprime.
+async fn reserver_nom(dossier: &std::path::Path) -> AppResult<PathBuf> {
+    for _ in 0..5 {
+        let cible = dossier.join(nom_fichier());
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&cible) {
+            Ok(_) => return Ok(cible),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+            }
+            Err(e) => {
+                return Err(AppError::Interne(anyhow::anyhow!("reservation du fichier de sauvegarde : {e}")));
+            }
+        }
+    }
+    Err(AppError::Invalide(
+        "cinq sauvegardes sont en cours en meme temps : reessayez dans quelques secondes".into(),
+    ))
+}
+
 pub async fn creer(_db: &Db, database_url: &str) -> AppResult<Sauvegarde> {
     let dossier = dossier();
     std::fs::create_dir_all(&dossier)
         .map_err(|e| AppError::Interne(anyhow::anyhow!("dossier de sauvegarde : {e}")))?;
 
-    let cible = dossier.join(nom_fichier());
-    if cible.exists() {
-        return Err(AppError::Invalide(
-            "une sauvegarde porte deja cet horodatage : reessayez dans une seconde".into(),
-        ));
-    }
+    let cible = reserver_nom(&dossier).await?;
 
     // L'URL passe en ARGUMENT et non par des variables d'environnement
     // separees : elle contient deja l'hote, le port, la base et le mot de

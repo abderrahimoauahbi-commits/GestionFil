@@ -26,6 +26,7 @@
 CREATE TABLE bon_commande (
     id_bc               text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_bc           text    NOT NULL UNIQUE,
     date_bc             text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     code_fournisseur    text    NOT NULL REFERENCES fournisseur(code_fournisseur),

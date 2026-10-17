@@ -57,6 +57,8 @@ const MODULE = 'BONS_COMMANDE'
 
 interface Bc extends Record<string, unknown> {
   id_bc: string
+  /** Compteur de concurrence, incremente par la base a chaque modification (A2). */
+  version?: number
   numero_bc: string
   date_bc: string
   code_fournisseur: string
@@ -359,13 +361,16 @@ export function BonCommande() {
    * deduction. C'est la deduction « absente de la grille, donc a supprimer »
    * qui avait efface une ligne de 36 tonnes sans rien signaler.
    */
+  // Declaree ici parce que `enregistrer` la lit ; l'effet qui la tient a jour
+  // vient plus bas, apres `aEnregistrer` dont il depend.
+  const [versionLue, setVersionLue] = useState<number | undefined>(undefined)
   const enregistrer = useMutation({
     mutationFn: async () => {
       const aCreer = nouvelles.filter((n) => !n.idExistant)
       const aCorriger = nouvelles.filter(
         (n) => n.idExistant && JSON.stringify(corpsLigne(n)) !== initiales.get(n.idExistant),
       )
-      if (enteteModifie) await api.patch(`/api/bons-commande/${id}`, entete)
+      if (enteteModifie) await api.patch(`/api/bons-commande/${id}`, { ...entete, version: versionLue })
       for (const ligne of supprimees) {
         await api.delete(`/api/bons-commande/${id}/lignes/${ligne}`)
       }
@@ -462,6 +467,26 @@ export function BonCommande() {
   const nbAjoutees = nouvelles.filter((n) => !n.idExistant).length
   const aEnregistrer =
     enteteModifie || supprimees.length > 0 || nbAjoutees > 0 || nbModifiees > 0
+
+  /**
+   * LA VERSION SUR LAQUELLE REPOSE LA SAISIE (verrou optimiste, 17/10/2026).
+   *
+   * Elle part avec l'en-tete : si quelqu'un a modifie le bon entre-temps, le
+   * serveur refuse en le nommant, au lieu d'ecraser sa saisie en silence.
+   *
+   * POURQUOI PAS `bc.version` AU MOMENT D'ENREGISTRER. La liste des bons se
+   * relit toute seule (retour sur la fenetre). Envoyer la version du moment
+   * enverrait celle de l'AUTRE, et le serveur croirait la saisie a jour : le
+   * verrou serait desarme sans que personne le voie.
+   *
+   * La regle : tant que rien n'attend d'etre enregistre, il n'y a rien a perdre,
+   * on suit la derniere version — c'est aussi ce qui evite un faux conflit
+   * contre soi-meme apres avoir enregistre ses propres lignes. Des qu'une
+   * modification attend, la version se fige sur celle qu'on a modifiee.
+   */
+  useEffect(() => {
+    if (bc?.version != null && !aEnregistrer) setVersionLue(bc.version)
+  }, [bc?.version, aEnregistrer])
 
   // Les lignes ajoutees s'affichent avec les autres, marquees « nouvelle ».
   // Les voir dans le tableau evite de saisir deux fois la meme reference sans

@@ -7,7 +7,7 @@ Rust + Axum + sqlx. Consomme la base construite par [`db/`](../db/README.md).
 ## Démarrage
 
 ```powershell
-cd db\pg;   python charger.py          # construire la base (schéma + référentiels)
+cd db\pg;   python charger.py --base gestionfil_essai --socle --comptes   # --base obligatoire
 cd ..\backend
 cargo run --bin gestionfil-admin -- init-config   # crée .env avec un secret aléatoire
 cargo run --bin gestionfil-import                 # charge GESTION Fil.xlsx

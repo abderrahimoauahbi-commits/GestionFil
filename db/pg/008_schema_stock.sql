@@ -262,6 +262,7 @@ CREATE INDEX ix_stock_lot_fefo ON stock_lot(code_reference, code_magasin, date_p
 CREATE TABLE transfert (
     id_transfert        text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_transfert    text    NOT NULL UNIQUE,
     date_transfert      text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     code_magasin_source text    NOT NULL REFERENCES magasin(code_magasin),
@@ -346,6 +347,7 @@ CREATE TABLE valorisation_stock (
 CREATE TABLE inventaire (
     id_inventaire       text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_inventaire   text    NOT NULL UNIQUE,
     date_inventaire     text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     type_inventaire     text    NOT NULL CHECK (type_inventaire IN ('GLOBAL','TOURNANT','CIBLE')),

@@ -679,6 +679,50 @@ def scenario_colisage_signale(c, infra):
     verifier(controle(infra, "C43") > avant, "C43 ne signale pas le colisage incoherent")
 
 
+def scenario_verrou_optimiste(c, infra):
+    """Deux saisies concurrentes sur le meme bon : la seconde est refusee, en nommant
+    l'auteur de la premiere, au lieu d'ecraser sa saisie en silence (A2, 17/10/2026)."""
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {
+        "code_fournisseur": FRS,
+        "lignes": [{"code_reference": REF, "unite_commande": "kg",
+                    "quantite_commandee_unite": 100, "prix_unitaire_devise": 10}]})
+    id_bc = bc["id_bc"]
+    brute = infra.valeur(f"SELECT version FROM bon_commande WHERE id_bc = '{id_bc}'")
+    verifier(brute is not None, "la colonne version manque : migration 2026-10-17d non jouee ?")
+    # psql rend du texte : l'API, elle, sert et attend un ENTIER (json.rs serialise
+    # INT4 en nombre). Envoyer "2" serait refuse a la deserialisation, a raison.
+    lue = int(brute)
+
+    # L'assistante et la direction ont toutes deux ouvert le bon a la version `lue`.
+    # L'assistante enregistre la premiere : elle passe.
+    code, r = c.appel("Assistante", "PATCH", f"/api/bons-commande/{id_bc}",
+                      {"notes": "saisie de l'assistante", "version": lue})
+    verifier(code == 200, f"la premiere saisie, a jour, est refusee : {code} {r}")
+    verifier(int(infra.valeur(f"SELECT version FROM bon_commande WHERE id_bc = '{id_bc}'")) == lue + 1,
+             "le declencheur n'a pas incremente la version")
+
+    # La direction enregistre ensuite avec la version qu'elle avait lue, desormais perimee.
+    code, r = c.appel("Choukri", "PATCH", f"/api/bons-commande/{id_bc}",
+                      {"notes": "saisie de la direction", "version": lue})
+    verifier(code == 409, f"une saisie perimee n'est pas refusee : {code} {r}")
+    message = str(r)
+    verifier("modifie" in message, f"le refus ne dit pas que le bon a change : {message}")
+    auteur = infra.valeur("SELECT nom FROM utilisateur WHERE login = 'Assistante'") or ""
+    if auteur:
+        verifier(auteur in message, f"le refus ne nomme pas l'auteur ({auteur}) : {message}")
+
+    # LA SAISIE DE L'ASSISTANTE A SURVECU : c'est tout l'objet du verrou.
+    notes = infra.valeur(f"SELECT notes FROM bon_commande WHERE id_bc = '{id_bc}'")
+    verifier(notes == "saisie de l'assistante",
+             f"la premiere saisie a ete ecrasee malgre le refus : {notes!r}")
+
+    # Un client qui n'envoie pas de version (ecran pas encore a jour, script) continue
+    # de fonctionner : la protection s'applique des que la version est transmise.
+    code, r = c.appel("Assistante", "PATCH", f"/api/bons-commande/{id_bc}",
+                      {"notes": "sans version"})
+    verifier(code == 200, f"une modification sans version est refusee : {code} {r}")
+
+
 def scenario_declencheurs(c, infra):
     """Les invariants en base : grand livre, audit et journal de cloture immuables."""
     for requete, quoi in (
@@ -2416,6 +2460,7 @@ SCENARIOS = [
     scenario_contre_passation,
     scenario_inventaire,
     scenario_colisage_signale,
+    scenario_verrou_optimiste,
     scenario_colisage_ecran_et_base,
     scenario_import,
     scenario_import_coherence,

@@ -17,7 +17,7 @@
 use crate::auth::Utilisateur;
 use crate::db::{arrondi_kg, maintenant};
 use crate::error::{AppError, AppResult};
-use crate::routes::stock::numeroter;
+use crate::domain::numerotation::numeroter;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgConnection;

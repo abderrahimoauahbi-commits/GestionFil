@@ -30,6 +30,7 @@
 CREATE TABLE reception (
     id_reception        text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     numero_reception    text    NOT NULL UNIQUE,
     date_reception      text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_bc               text    REFERENCES bon_commande(id_bc),

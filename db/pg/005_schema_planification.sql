@@ -27,6 +27,7 @@
 CREATE TABLE plan_production (
     id_plan             text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
+    version             integer NOT NULL DEFAULT 1,  -- verrou optimiste (2026-10-17d)
     annee               bigint NOT NULL CHECK (annee BETWEEN 2000 AND 2200),
     numero_version      bigint NOT NULL DEFAULT 1 CHECK (numero_version > 0),
     libelle             text    NOT NULL,

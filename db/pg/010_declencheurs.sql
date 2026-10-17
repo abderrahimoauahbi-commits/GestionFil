@@ -838,3 +838,35 @@ EXECUTE FUNCTION fn_refuser('Figement refuse : cette proposition est deja comman
 -- Portes a la main :
 -- trg_lmvt_appliquer : porte a la main (010b_declencheurs_logique.sql)
 -- trg_parametre_historiser : porte a la main (010b_declencheurs_logique.sql)
+
+
+-- =============================================================================
+-- VERROU OPTIMISTE DES DOCUMENTS A WORKFLOW (A2, migration 2026-10-17d)
+-- =============================================================================
+-- Chaque modification de l'un des six documents qui passent de main en main
+-- incremente sa `version`. Le service compare la version que le client a lue a
+-- celle de la base (`domain/concurrence.rs`) : si quelqu'un est passe entre-temps,
+-- il refuse en le nommant au lieu d'ecraser sa saisie en silence.
+--
+-- La version n'est pas une donnee de saisie : quoi que le client envoie, la
+-- nouvelle est l'ancienne plus un. `trg_aa_` la fait passer avant les declencheurs
+-- metier (PostgreSQL execute les BEFORE par ordre de nom).
+CREATE OR REPLACE FUNCTION fn_trg_version_incrementer() RETURNS trigger AS $$
+BEGIN
+    NEW.version := OLD.version + 1;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON bon_commande
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON reception
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON inventaire
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON transfert
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON plan_production
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();
+CREATE TRIGGER trg_aa_version BEFORE UPDATE ON qualite
+FOR EACH ROW EXECUTE FUNCTION fn_trg_version_incrementer();

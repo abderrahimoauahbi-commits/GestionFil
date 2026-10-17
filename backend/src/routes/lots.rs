@@ -14,7 +14,7 @@
 //! droit VALIDER sur le stock, en attendant ces profils [A DEFINIR].
 
 use super::json::lignes_en_json;
-use super::stock::numeroter;
+use crate::domain::numerotation::numeroter;
 use crate::auth::{rbac, rbac::module, rbac::Action, Utilisateur};
 use crate::db::{arrondi_kg, maintenant};
 use crate::error::{AppError, AppResult};

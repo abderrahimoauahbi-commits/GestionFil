@@ -476,7 +476,7 @@ async fn ouvrir_bon(
 
     // Le meme compteur que la saisie d'un bon (audit v4) : deux conversions
     // simultanees ne se disputent plus un numero.
-    let numero = crate::routes::stock::numeroter(&mut *tx, "bon_commande", "numero_bc", "BC").await?;
+    let numero = crate::domain::numerotation::numeroter(&mut *tx, "bon_commande", "numero_bc", "BC").await?;
 
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(

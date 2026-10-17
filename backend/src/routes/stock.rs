@@ -8,6 +8,8 @@
 use super::json::lignes_en_json;
 use crate::auth::{rbac::module, rbac::Action, Utilisateur};
 use crate::db::{arrondi_kg, maintenant, Db};
+use crate::domain::concurrence::exiger_version;
+use crate::domain::numerotation::numeroter;
 use crate::domain::unites::{self, Unite};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -16,41 +18,6 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-
-/// Numerotation sequentielle par prefixe et par annee.
-pub(crate) async fn numeroter(
-    tx: &mut sqlx::PgConnection,
-    table: &str,
-    colonne: &str,
-    prefixe: &str,
-) -> AppResult<String> {
-    let annee = chrono::Utc::now().format("%Y").to_string();
-    let motif = format!("{prefixe}-{annee}-%");
-    // `length(?1) + 1` : substr est indexe a 1, donc la position `length(prefixe)`
-    // designe le DERNIER caractere du prefixe — le tiret — et non le premier
-    // chiffre. Sans le +1, "BC-2026-0001" donnait "-0001", converti en -1 : le
-    // 2e document repartait a 0000 et le 3e retombait sur 0001, deja pris.
-    //
-    // LE COMPTEUR, PAS LE MAXIMUM (audit v4). Deux saisies simultanees lisaient
-    // le meme MAX et la seconde tombait sur l'unicite. La ligne du compteur est
-    // verrouillee par la transaction du document : la seconde attend, puis
-    // prend le suivant. Le MAX reste le plancher (documents venus d'ailleurs).
-    let sql = format!(
-        "INSERT INTO compteur_numero (cle, valeur)
-         SELECT $3, COALESCE(MAX(CAST(substr({colonne}, length($1) + 1) AS bigint)), 0) + 1
-           FROM {table} WHERE {colonne} LIKE $2
-         ON CONFLICT (cle) DO UPDATE
-            SET valeur = GREATEST(compteur_numero.valeur + 1, excluded.valeur)
-         RETURNING valeur"
-    );
-    let suivant: i64 = sqlx::query_scalar(&sql)
-        .bind(format!("{prefixe}-{annee}-"))
-        .bind(&motif)
-        .bind(format!("{table}.{colonne}.{prefixe}-{annee}"))
-        .fetch_one(&mut *tx)
-        .await?;
-    Ok(format!("{prefixe}-{annee}-{suivant:04}"))
-}
 
 /// Convertit une quantite saisie vers le kg, en refusant tout facteur manquant.
 async fn vers_kg(
@@ -2833,6 +2800,10 @@ pub async fn changer_statut_bc(
 
 #[derive(Debug, Deserialize)]
 pub struct ModifBc {
+    /// Version du document telle que le client l'a lue. Absente, la
+    /// verification de concurrence est sautee (A2, 17/10/2026).
+    pub version: Option<i64>,
+
     pub date_bc: Option<String>,
     pub date_livraison_prevue: Option<String>,
     pub conditions_paiement: Option<String>,
@@ -2868,6 +2839,11 @@ pub async fn modifier_bc(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+
+    // VERROU OPTIMISTE (A2). Si quelqu'un a modifie le document depuis que
+    // ce client l'a lu, on refuse en le nommant plutot que d'ecraser sa
+    // saisie en silence. Le garde verrouille aussi la ligne pour la suite.
+    exiger_version(&mut tx, "bon_commande", "id_bc", &id, b.version, "Ce bon de commande").await?;
 
     let statut: String =
         sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = $1")
@@ -3473,6 +3449,10 @@ pub struct NouvelleReception {
 
 #[derive(Debug, Deserialize)]
 pub struct ModifReception {
+    /// Version du document telle que le client l'a lue. Absente, la
+    /// verification de concurrence est sautee (A2, 17/10/2026).
+    pub version: Option<i64>,
+
     pub num_bon_livraison: Option<String>,
     pub numero_facture: Option<String>,
     pub transporteur: Option<String>,
@@ -3510,6 +3490,11 @@ pub async fn modifier_reception(
     let date = crate::routes::date_du_fait(m.date_reception.as_deref(), "date de reception")?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+
+    // VERROU OPTIMISTE (A2). Si quelqu'un a modifie le document depuis que
+    // ce client l'a lu, on refuse en le nommant plutot que d'ecraser sa
+    // saisie en silence. Le garde verrouille aussi la ligne pour la suite.
+    exiger_version(&mut tx, "reception", "id_reception", &id, m.version, "Cette reception").await?;
 
     let statut: String =
         sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = $1")

@@ -26,7 +26,7 @@
 use crate::auth::Utilisateur;
 use crate::db::arrondi_kg;
 use crate::error::{AppError, AppResult};
-use crate::routes::stock::numeroter;
+use crate::domain::numerotation::numeroter;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;

@@ -38,7 +38,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::json::lignes_en_json;
-use super::stock::numeroter;
+use crate::domain::numerotation::numeroter;
 use crate::domain::decision_machine as dm;
 
 // =============================================================================

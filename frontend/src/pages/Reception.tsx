@@ -56,6 +56,8 @@ import { FraisApproche } from './receptions/FraisApproche'
 const MODULE = 'RECEPTIONS'
 
 interface Reception extends Record<string, unknown> {
+  /** Compteur de concurrence, incremente par la base a chaque modification (A2). */
+  version?: number
   id_reception: string
   numero_reception: string
   date_reception: string
@@ -646,6 +648,18 @@ export function Reception() {
     enteteModifie || supprimees.length > 0 || aCreer.length > 0 || aCorriger.length > 0
 
   /**
+   * LA VERSION SUR LAQUELLE REPOSE LA SAISIE (verrou optimiste, 17/10/2026).
+   * Meme regle que le bon de commande : sans modification en attente, on suit
+   * la derniere version ; des qu'une modification attend, elle se fige. Envoyer
+   * `rec.version` au moment d'enregistrer desarmerait le verrou, la liste se
+   * relisant toute seule.
+   */
+  const [versionLue, setVersionLue] = useState<number | undefined>(undefined)
+  useEffect(() => {
+    if (rec?.version != null && !aEnregistrer) setVersionLue(rec.version)
+  }, [rec?.version, aEnregistrer])
+
+  /**
    * L'EN-TETE ET LES LIGNES PARTENT ENSEMBLE, sur le bouton du bas.
    *
    * Le petit bouton de chaque ligne ne fait que la VALIDER a l'ecran. Rien
@@ -662,6 +676,7 @@ export function Reception() {
     mutationFn: async () => {
       if (enteteModifie) {
         await api.patch(`/api/receptions/${id}`, {
+          version: versionLue,
           num_bon_livraison: entete.num_bon_livraison || undefined,
           numero_facture: entete.numero_facture || undefined,
           transporteur: entete.transporteur || undefined,

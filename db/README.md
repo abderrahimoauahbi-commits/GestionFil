@@ -11,9 +11,9 @@ toute evolution s'y ecrit ET dans un fichier date de `db/pg/migrations/`.
 
 ```powershell
 cd db\pg
-python charger.py                          # base locale : schéma, vues, contrôles, seeds
+python charger.py --base <base> --seeds    # --base OBLIGATOIRE : aucune base par défaut (17/10/2026)
 python charger.py --base gestionfil_essai  # une autre base
-python charger.py --production             # comptes réels, référentiel à importer ensuite
+python charger.py --base <base> --production   # comptes réels, référentiel à importer ensuite
 ```
 
 Le chargeur joue les fichiers PAR PASSES : les vues se citent en avant, et PostgreSQL

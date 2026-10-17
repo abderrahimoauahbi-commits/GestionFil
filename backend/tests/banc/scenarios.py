@@ -794,6 +794,42 @@ def scenario_cloture_periode(c, infra):
              == "2000-01-01", "la periode n'a pas ete rouverte en fin de scenario")
 
 
+COLONNES_DATE_TEXTE = (
+    "FROM information_schema.columns col JOIN information_schema.tables t "
+    "ON t.table_schema = col.table_schema AND t.table_name = col.table_name "
+    "WHERE col.table_schema = 'public' AND t.table_type = 'BASE TABLE' AND col.data_type = 'text' "
+    "AND (col.column_name ~ '^date_' OR col.column_name ~ '_date$')")
+
+
+def scenario_typage_du_temps(c, infra):
+    """A1 (17/10/2026) : les dates sont en TEXTE, heritage de SQLite. Leur conversion de type touche
+    579 lignes de Rust et 945 de SQL ; elle est chiffree, pas faite. En attendant, cette dette ne
+    GROSSIT PLUS : pas une colonne de date en texte de plus, et chacune porte sa contrainte de
+    format ISO (migration 2026-10-17f). Une date mal formee ne peut plus entrer."""
+    # LE CLIQUET : a abaisser a chaque colonne convertie, jamais a relever.
+    plafond = 134
+    n = int(infra.valeur("SELECT count(*) " + COLONNES_DATE_TEXTE))
+    verifier(n <= plafond, f"{n} colonnes de date en texte, plafond {plafond} : une nouvelle colonne de date "
+                           "se cree en `date` ou `timestamptz`, pas en `text`")
+    sans = infra.valeur(
+        "SELECT string_agg(col.table_name || '.' || col.column_name, ', ') " + COLONNES_DATE_TEXTE +
+        " AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conrelid = format('public.%I', col.table_name)::regclass"
+        " AND k.contype = 'c' AND pg_get_constraintdef(k.oid) LIKE '%fn_texte_date_iso(' || col.column_name || ')%')")
+    verifier(not sans, f"colonnes de date en texte sans contrainte de format ISO : {sans}")
+
+    # PAR L'API : une date a la francaise envoyee par un ecran est refusee, pas ecrite.
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {
+        "code_fournisseur": FRS,
+        "lignes": [{"code_reference": REF, "unite_commande": "kg",
+                    "quantite_commandee_unite": 10, "prix_unitaire_devise": 10}]})
+    id_bc = bc["id_bc"]
+    avant = infra.valeur(f"SELECT date_livraison_prevue FROM bon_commande WHERE id_bc = '{id_bc}'")
+    c.refus("Assistante", "PATCH", f"/api/bons-commande/{id_bc}", {"date_livraison_prevue": "17/10/2026"})
+    apres = infra.valeur(f"SELECT date_livraison_prevue FROM bon_commande WHERE id_bc = '{id_bc}'")
+    verifier(apres == avant, f"une date mal formee a ete ecrite : {apres!r}")
+    c.ok("Assistante", "PATCH", f"/api/bons-commande/{id_bc}", {"date_livraison_prevue": "2026-12-15"})
+
+
 def scenario_declencheurs(c, infra):
     """Les invariants en base : grand livre, audit et journal de cloture immuables."""
     for requete, quoi in (
@@ -2543,6 +2579,7 @@ SCENARIOS = [
     scenario_colisage_signale,
     scenario_verrou_optimiste,
     scenario_cloture_periode,
+    scenario_typage_du_temps,
     scenario_colisage_ecran_et_base,
     scenario_import,
     scenario_import_coherence,

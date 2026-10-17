@@ -573,6 +573,51 @@ pub async fn valider(
         _ => Some(avances.join(" · ")),
     };
 
+    // LE DOSSIER NE SE SAISIT PLUS, IL SE DEDUIT (16/10/2026).
+    //
+    // AVANT LE PASSAGE EN VALIDE, ET C'EST IMPERATIF : le dossier d'une
+    // reception validee ne change plus — les frais d'approche se repartissent
+    // sur ses lignes. Ecrire la deduction apres la validation se faisait
+    // refuser (« son dossier d'import ne change plus »), ce que le banc a
+    // revele en portant `scenario_import_coherence` : les essais de bout en
+    // bout ne le voyaient pas, aucun de leurs bons n'ayant de facture d'import. Le magasinier
+    // choisit les BONS de son camion ; c'est la facture d'import qui relie le
+    // bon au dossier. On le lit donc sur les lignes deja pesees, et on l'ecrit
+    // sur l'arrivage pour que la suite de la chaine — frais d'approche vers le
+    // CUMP (`importation::porter`) et cloture — le trouve comme avant.
+    //
+    // Zero dossier : arrivage local, rien a faire. Plusieurs : on NE DEVINE PAS
+    // (un bon ne mene qu'a un dossier dans les donnees, mais aucune contrainte
+    // ne le garantit) ; la colonne reste vide et le cas se voit aux controles
+    // plutot que de rattacher la marchandise au mauvais dossier.
+    let id_dossier_effectif: Option<String> = match &entete.id_dossier_import {
+        Some(d) => Some(d.clone()),
+        None => {
+            let dossiers: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT fi.id_dossier
+                   FROM ligne_reception lr
+                   JOIN import_facture_lignes ifl ON ifl.id_ligne_bc = lr.id_ligne_bc
+                   JOIN import_factures fi ON fi.id_facture = ifl.id_facture
+                  WHERE lr.id_reception = $1",
+            )
+            .bind(id_reception)
+            .fetch_all(&mut *tx)
+            .await?;
+            match dossiers.as_slice() {
+                [unique] => {
+                    sqlx::query("UPDATE reception SET id_dossier_import = $2 WHERE id_reception = $1")
+                        .bind(id_reception)
+                        .bind(unique)
+                        .execute(&mut *tx)
+                        .await?;
+                    Some(unique.clone())
+                }
+                _ => None,
+            }
+        }
+    };
+
+
     // ---- 8. Cloture de la reception ----------------------------------------
     // Le taux de l'entete est celui de la devise du fournisseur a la date de
     // reception (RG-09) ; chaque ligne porte par ailleurs son propre taux.
@@ -627,7 +672,7 @@ pub async fn valider(
     // CUMP definitif — lit pourtant `import_facture_lignes.quantite_recue_kg`.
     // On le relit donc depuis les arrivages, et le dossier passe EN_COURS : de
     // la marchandise est entree, il y a desormais un stock a ajuster.
-    if let Some(id_dossier) = &entete.id_dossier_import {
+    if let Some(id_dossier) = &id_dossier_effectif {
         crate::domain::importation::synchroniser_recu_arrivages(&mut tx, id_dossier).await?;
         sqlx::query(
             "UPDATE import_dossiers SET statut = 'EN_COURS'

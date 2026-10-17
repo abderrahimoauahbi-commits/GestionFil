@@ -28,6 +28,7 @@ import {
   kgDe,
 } from '../../composants/GrilleLignes'
 import { Badge, Bouton, Champ, Etiq, Selecteur } from '../../composants/ui/base'
+import { lireNombre } from '../../lib/nombres'
 import { cn, fmt } from '../../lib/utils'
 
 interface Magasin {
@@ -81,6 +82,47 @@ export function PeseesMobile({
   const [estNouvelle, setEstNouvelle] = useState(false)
   const [ajout, setAjout] = useState(false)
 
+  /*
+   * LES LIGNES ATTENDUES SONT DEJA LA (16/10/2026).
+   *
+   * On ne part plus d'un ecran vide a remplir : une reception n'invente rien,
+   * elle CONSTATE ce qu'un bon de commande attendait. Les lignes des bons
+   * retenus se presentent donc d'emblee, et il ne reste qu'a taper le poids
+   * pese sur la ligne qui existe — sans chercher la reference, sans ouvrir de
+   * feuille. C'est le geste de MIGO contre bon de commande.
+   *
+   * L'ajout libre reste, pour ce qui arrive sans avoir ete commande.
+   */
+  const attendues = useMemo(
+    () =>
+      proposees.filter(
+        (p) => !lignes.some((l) => (l.extra?.id_ligne_bc ?? '') === (p.id_ligne_bc ?? '')),
+      ),
+    [proposees, lignes],
+  )
+
+  /* Taper un poids sur une ligne attendue la fait entrer dans l'arrivage.
+     LE POIDS N'EST JAMAIS PREREMPLI a l'attendu : ce serait valider sans
+     peser. L'attendu reste a cote, comme repere, et sert l'ecart. */
+  const peser = (ref: RefLigne, kgTape: string) => {
+    const nl = depuisReference(ref)
+    const parDefaut = magasins.find((m) => m.est_quarantaine !== 1)?.code_magasin ?? ''
+    setLignes((ls) => [
+      ...ls,
+      {
+        ...nl,
+        // Les colis ne sont pas comptes tant qu'on ne les a pas comptes : les
+        // laisser deduits de l'attendu ferait passer une estimation pour un
+        // denombrement (regle 13, audit v4).
+        qte: kgTape,
+        palettes: '',
+        bobines: '',
+        valide: true,
+        extra: { ...nl.extra, magasin: parDefaut, qualite: 'CONFORME' },
+      },
+    ])
+  }
+
   const ouvrir = (l: LigneSaisie) => {
     setEdite({ ...l, extra: { ...l.extra } })
     setEstNouvelle(false)
@@ -119,7 +161,24 @@ export function PeseesMobile({
 
   return (
     <div className="px-3 py-3">
-      {lignes.length === 0 ? (
+      {attendues.length > 0 && (
+        <section className="mb-3">
+          <h3 className="mb-1.5 text-[13px] font-medium">
+            Attendu sur les bons — tapez le poids pesé
+          </h3>
+          <ul className="divide-y divide-bordure overflow-hidden rounded-[var(--radius)] border border-bordure">
+            {attendues.map((p) => (
+              <LigneAttendue
+                key={p.id_ligne_bc ?? p.code_reference}
+                attendue={p}
+                surPeser={peser}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {lignes.length === 0 && attendues.length === 0 ? (
         <div className="rounded-[var(--radius)] border border-dashed border-bordure px-4 py-10 text-center">
           <Package className="mx-auto mb-2 size-6 text-attenue-texte" />
           <p className="text-[14px] font-medium">Aucune ligne pesée</p>
@@ -168,6 +227,63 @@ export function PeseesMobile({
         />
       )}
     </div>
+  )
+}
+
+/**
+ * UNE LIGNE QUE LE BON ATTEND : identite a gauche, poids a taper a droite.
+ *
+ * UN SEUL BALISAGE pour les deux tailles d'ecran. Au bureau la grille se
+ * deplie en rangee dense que l'on parcourt au clavier (Entree valide la ligne
+ * et passe a la suivante) ; sur telephone elle s'empile en carte. Pas de
+ * tableau a faire defiler lateralement (regle d'ecran du 10/10).
+ */
+function LigneAttendue({
+  attendue,
+  surPeser,
+}: {
+  attendue: RefLigne
+  surPeser: (r: RefLigne, kg: string) => void
+}) {
+  const [kg, setKg] = useState('')
+  const attendu = attendue.qte_a_commander_kg ?? 0
+
+  /* « 1 234,5 » vaut 1234,5 : le poids se tape comme on l'ecrit ici. */
+  const poser = () => {
+    const v = lireNombre(kg)
+    if (v != null && Number.isFinite(v) && v > 0) surPeser(attendue, kg)
+  }
+
+  return (
+    <li className="grid gap-1.5 px-3 py-2.5 md:grid-cols-[1fr_auto_170px] md:items-center md:gap-3">
+      <div className="min-w-0">
+        <div className="truncate text-[14px] font-medium">
+          {attendue.designation ?? attendue.code_reference}
+        </div>
+        <div className="truncate text-[12px] text-attenue-texte">
+          {attendue.code_reference}
+          {attendue.numero_bc && <> · {attendue.numero_bc}</>}
+        </div>
+      </div>
+      <div className="text-[12.5px] tabular-nums text-attenue-texte md:text-right">
+        attendu {fmt.nombre(attendu, 2)} kg
+      </div>
+      <Champ
+        inputMode="decimal"
+        value={kg}
+        placeholder="Poids pesé (kg)"
+        aria-label={`Poids pesé pour ${attendue.code_reference}`}
+        onChange={(e) => setKg(e.target.value)}
+        onBlur={poser}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            poser()
+          }
+        }}
+        className="text-right tabular-nums"
+      />
+    </li>
   )
 }
 

@@ -725,16 +725,31 @@ pub async fn contre_passer(
     // les kilos mais laissait les frais (environ 12,8 k MAD constates a
     // l'audit). Toute correction passe alors par un avoir ou un retour
     // fournisseur. Avant la DUM, la contre-passation reste possible.
+    // LES DEUX CHEMINS D'ENTREE SONT GARDES (17/10/2026). Ce garde-fou ne
+    // remontait que par `import_reception_lignes` — l'ancien circuit. Depuis son
+    // retrait, la marchandise importee entre par un ARRIVAGE, et la regle 8 ne
+    // la couvrait plus : contre-passer l'entree d'un dossier dedouane etait
+    // accepte, ce qui est precisement le cas que la regle existe pour refuser.
+    // Revele par le portage de `scenario_import` sur le chemin unifie.
     let dedouanes: Option<String> = sqlx::query_scalar(
         "SELECT string_agg(DISTINCT d.numero, ', ' ORDER BY d.numero)
-           FROM import_reception_lignes rl
-           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
-           JOIN import_factures f ON f.id_facture = l.id_facture
-           JOIN import_dossiers d ON d.id_dossier = f.id_dossier
-          WHERE rl.id_mouvement = $1
-            AND (d.statut = 'CLOTURE' OR COALESCE(btrim(d.numero_dum), '') <> ''
+           FROM import_dossiers d
+          WHERE (d.statut = 'CLOTURE' OR COALESCE(btrim(d.numero_dum), '') <> ''
                  -- Des frais du dossier au CMUP (regle 5) : quel que soit son statut.
-                 OR EXISTS (SELECT 1 FROM import_ajustements_cump a WHERE a.id_dossier = d.id_dossier))",
+                 OR EXISTS (SELECT 1 FROM import_ajustements_cump a WHERE a.id_dossier = d.id_dossier))
+            AND (
+                 -- Ancien circuit : la ligne de reception d'import porte le mouvement.
+                 EXISTS (SELECT 1
+                           FROM import_reception_lignes rl
+                           JOIN import_facture_lignes l ON l.id_ligne = rl.id_ligne
+                           JOIN import_factures f ON f.id_facture = l.id_facture
+                          WHERE rl.id_mouvement = $1 AND f.id_dossier = d.id_dossier)
+                 -- Arrivage : la ligne pege a une ligne de bon, elle-meme facturee.
+                 OR EXISTS (SELECT 1
+                              FROM ligne_reception lr
+                              JOIN import_facture_lignes l2 ON l2.id_ligne_bc = lr.id_ligne_bc
+                              JOIN import_factures f2 ON f2.id_facture = l2.id_facture
+                             WHERE lr.id_mouvement_genere = $1 AND f2.id_dossier = d.id_dossier))",
     )
     .bind(&id)
     .fetch_one(&mut *tx)
@@ -938,6 +953,43 @@ pub async fn contre_passer(
             .execute(&mut *tx)
             .await?;
     }
+    // L'ARRIVAGE D'IMPORT SE DEFAIT COMME LA RECEPTION D'IMPORT (17/10/2026).
+    //
+    // La boucle qui suit ne connait que l'ANCIEN circuit : elle annule des
+    // `import_receptions` et restatue leurs factures. Depuis que ce circuit a
+    // ete retire, la marchandise importee entre par un ARRIVAGE — et
+    // contre-passer son entree laissait `import_facture_lignes.quantite_recue_kg`
+    // INCHANGEE : la facture affichait des kilos recus pour une marchandise
+    // sortie du stock, et l'arrivage restait VALIDE. Le banc l'a revele en
+    // portant `scenario_import_coherence` sur le chemin unifie.
+    //
+    // LE STATUT DE L'ARRIVAGE NE BOUGE PAS, ET C'EST VOULU. Une reception
+    // VALIDE ne s'annule pas : `transition_statut` n'autorise, depuis VALIDE,
+    // que A_CONTROLER (devalidation) et CLOTURE. Defaire une entree est le
+    // travail de la contre-passation ; rendre la reception modifiable est
+    // celui de la devalidation, qui reste un geste distinct et explicite.
+    // (Une premiere version forcait ANNULE et cassait
+    // `scenario_reception_devalidee_revalidee` : le declencheur de transition
+    // avait raison.)
+    //
+    // Ce qui doit changer, c'est le COMPTE : le dossier d'import relit ses
+    // kilos depuis ce qui tient encore, exactement comme `fn_recaler_lignes_bc`
+    // le fait pour les lignes de bon.
+    let dossiers_arrivage: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT f.id_dossier
+           FROM ligne_reception lr
+           JOIN import_facture_lignes fl ON fl.id_ligne_bc = lr.id_ligne_bc
+           JOIN import_factures f ON f.id_facture = fl.id_facture
+          WHERE lr.id_mouvement_genere = $1 AND lr.id_ligne_bc IS NOT NULL",
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for d in &dossiers_arrivage {
+        crate::domain::importation::synchroniser_recu_arrivages(&mut tx, d).await?;
+        crate::domain::importation::statuer_factures(&mut tx, d).await?;
+    }
+
     for id_reception in &receptions_import {
         sqlx::query(
             "UPDATE import_receptions r SET statut = 'ANNULEE'
@@ -3636,10 +3688,32 @@ pub async fn lignes_attendues(
                 -- camion, on ne navigue pas dans un referentiel.
                 (SELECT string_agg(e.equivalent_reference, ', ') FROM v_equivalence e
                   WHERE e.code_reference = lb.code_reference
-                    AND e.interchangeable = 1)                 AS equivalents_recevables
+                    AND e.interchangeable = 1)                 AS equivalents_recevables,
+                -- LE DOSSIER D'IMPORT SE DEDUIT, IL NE SE CHOISIT PAS (16/10/2026).
+                -- C'est la FACTURE qui relie l'importation au bon de commande et
+                -- a la reception : ligne de bon -> ligne de facture -> facture ->
+                -- dossier. Le magasinier au quai connait son BL et son bon, pas
+                -- le numero de dossier ; le lui faire choisir etait une saisie
+                -- redondante et une source d'erreur.
+                --
+                -- LATERAL avec LIMIT 1 plutot qu'une jointure : une ligne de bon
+                -- peut etre coupee en deux lignes de facture, et une jointure
+                -- simple dedoublerait la ligne attendue dans l'ecran de pesee.
+                -- Le LIMIT est sans perte parce qu'un bon ne mene qu'a un seul
+                -- dossier (verifie sur les 126 bons rattaches de la base).
+                d.id_dossier, d.numero AS dossier_numero,
+                d.numero_dum AS dossier_dum, d.conteneurs AS dossier_conteneurs
            FROM ligne_bc lb
            JOIN bon_commande bc ON bc.id_bc = lb.id_bc
            JOIN reference r ON r.code_reference = lb.code_reference
+           LEFT JOIN LATERAL (
+               SELECT d2.id_dossier, d2.numero, d2.numero_dum, d2.conteneurs
+                 FROM import_facture_lignes ifl
+                 JOIN import_factures fi ON fi.id_facture = ifl.id_facture
+                 JOIN import_dossiers d2 ON d2.id_dossier = fi.id_dossier
+                WHERE ifl.id_ligne_bc = lb.id_ligne_bc
+                LIMIT 1
+           ) d ON true
           -- LE QUAI N'ATTEND QUE DE LA MARCHANDISE. La jointure interne ci-dessus
           -- suffirait aujourd'hui, mais c'est une protection accidentelle : le
           -- jour ou elle passera en jointure externe — comme celle de la fiche du

@@ -79,18 +79,6 @@ interface LigneAttendue extends Record<string, unknown> {
   equivalents_recevables: string | null
 }
 
-/** Un dossier d'import ouvert : ce qui identifie l'arrivage, aucun montant. */
-interface DossierImport {
-  id_dossier: string
-  numero: string
-  numero_bl: string | null
-  numero_dum: string | null
-  conteneurs: string | null
-  date_arrivee: string | null
-  statut: string
-  fournisseurs: string | null
-}
-
 interface RefCatalogue extends Record<string, unknown> {
   code_reference: string
   designation: string
@@ -184,9 +172,6 @@ export function ReceptionNouvelle() {
     transporteur: '',
     nombre_colis: '',
     poids_total_brut_kg: '',
-    // L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier qui porte la DUM et
-    // les conteneurs. Vide = achat local.
-    id_dossier_import: '',
   })
   const [lignes, setLignes] = useState<Ligne[]>([])
   // Une pesee en cours ne se perd pas d'un clic dans le menu (audit v4).
@@ -214,17 +199,10 @@ export function ReceptionNouvelle() {
     queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
 
-  /* LES DOSSIERS D'IMPORT OUVERTS (ADR-003 phase A), servis par la route des
-     receptions : le magasinier dit quel conteneur il vide sans avoir a lire
-     les dossiers d'import. */
-  const qDossiersImport = useQuery({
-    queryKey: ['receptions-dossiers-import'],
-    queryFn: ({ signal }) =>
-      api.get<DossierImport[]>('/api/receptions-dossiers-import', { signal }),
-  })
-  const dossierChoisi = (qDossiersImport.data ?? []).find(
-    (d) => d.id_dossier === entete.id_dossier_import,
-  )
+  /* LE DOSSIER D'IMPORT NE SE CHOISIT PLUS (16/10/2026) : c'est la FACTURE
+     qui relie l'importation au bon de commande et a la reception. Le
+     magasinier retient ses BONS sur la fiche, et le dossier s'en deduit
+     avec sa DUM et ses conteneurs. */
   const magasinDefaut = qMag.data?.[0]?.code_magasin ?? 'MP-01'
 
   /**
@@ -572,7 +550,6 @@ export function ReceptionNouvelle() {
         poids_total_brut_kg: entete.poids_total_brut_kg
           ? Number(entete.poids_total_brut_kg)
           : undefined,
-        id_dossier_import: entete.id_dossier_import || undefined,
         lignes: retenues.map((l) => ({
           // C'est la reference REELLEMENT descendue du camion qui entre en
           // stock, pas celle du bon. Envoyer celle du bon creerait du stock sur
@@ -707,40 +684,6 @@ export function ReceptionNouvelle() {
                 value={entete.transporteur}
                 onChange={(e) => setEntete({ ...entete, transporteur: e.target.value })}
               />
-            </div>
-            {/* L'ARRIVAGE D'IMPORT (ADR-003 phase A). Le meme geste qu'en local
-                — peser contre des lignes de bon — avec le dossier qui porte la
-                DUM et les conteneurs rattache a l'en-tete. */}
-            <div>
-              <Etiq htmlFor="dossier-import">
-                Dossier d&rsquo;import
-                <Aide>
-                  Pour un conteneur venu de l&rsquo;&eacute;tranger : le dossier qui porte la DUM
-                  et les conteneurs. Les prix restent ceux des bons de commande repris ci-dessous.
-                </Aide>
-              </Etiq>
-              <Selecteur
-                id="dossier-import"
-                value={entete.id_dossier_import}
-                onChange={(e) => setEntete({ ...entete, id_dossier_import: e.target.value })}
-              >
-                <option value="">&mdash; Achat local &mdash;</option>
-                {(qDossiersImport.data ?? []).map((d) => (
-                  <option key={d.id_dossier} value={d.id_dossier}>
-                    {d.numero}
-                    {d.numero_bl ? ` · BL ${d.numero_bl}` : ''}
-                    {d.fournisseurs ? ` · ${d.fournisseurs}` : ''}
-                  </option>
-                ))}
-              </Selecteur>
-              {dossierChoisi && (
-                <p className="mt-1 text-[11.5px] text-attenue-texte">
-                  {dossierChoisi.numero_dum
-                    ? `DUM ${dossierChoisi.numero_dum}`
-                    : 'DUM non saisie'}
-                  {dossierChoisi.conteneurs ? ` · ${dossierChoisi.conteneurs}` : ''}
-                </p>
-              )}
             </div>
             <div>
               <Etiq htmlFor="colis">Nombre de colis</Etiq>

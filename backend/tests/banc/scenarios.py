@@ -404,29 +404,17 @@ def scenario_arrivage_unifie(c, infra):
         "quantite": 100, "poids_net_kg": 100, "prix_unitaire_devise": 2.0,
         "lot_fournisseur": "LOT-ARR-1"})
     id_ligne = lig.get("id_ligne") or lig.get("id")
-    # LA FRONTIERE EST GARDEE DANS LES DEUX SENS : le dossier recoit sur son bon, donc sa ligne de
-    # facture ne se propose plus a l'ancien ecran, et le serveur y refuse ses lignes. Une meme
-    # marchandise ne doit jamais pouvoir entrer par deux portes.
-    a_recevoir = c.ok("Magasinie", "GET", "/api/import/a-recevoir")
-    verifier(all(x["id_ligne"] != id_ligne for x in a_recevoir),
-             "la ligne de facture d'un dossier en circuit BON reste a recevoir dans l'ancien ecran")
+    # L'ANCIEN CIRCUIT N'EXISTE PLUS (16/10/2026). La reception d'import n'etait plus
+    # qu'une seconde porte vers la meme marchandise : elle a ete retiree, routes comprises.
+    # On ne garde donc plus une frontiere, on verifie que le mur tient — pour TOUS les
+    # dossiers, basculés ou non.
+    # 405 et non 404 : le serveur renvoie ROUTE_INCONNUE avec un message lisible
+    # plutot qu'un 405 muet (cf. routes/mod.rs).
+    c.refus("Magasinie", "GET", "/api/import/a-recevoir", codes=(404, 405))
     c.refus("Magasinie", "POST", "/api/import/receptions",
             {"date_reception": jour, "lignes": [{"id_ligne": id_ligne, "quantite_recue_kg": 100,
                                                  "code_magasin": MAG, "lot_fournisseur": "LOT-ARR-1"}]},
-            contient="bon de commande")
-    # L'ancien circuit, lui, continue de servir les dossiers ouverts avant la bascule.
-    ancien = dossier_avant_bascule(c, infra, "BANC/AVANT")
-    fac_a = c.ok("Choukri", "POST", f"/api/import/dossiers/{ancien}/factures", {
-        "code_fournisseur": "FRS-001", "numero_facture": "FB-AVANT", "date_facture": jour,
-        "code_devise": "USD", "taux_change": cours, "montant_devise": 200})
-    lig_a = c.ok("Choukri", "POST",
-                 f"/api/import/factures/{fac_a.get('id_facture') or fac_a.get('id')}/lignes",
-                 {"type_ligne": "ERP", "code_reference": "PP-1500 Dtex-Cream 2951-Hs",
-                  "unite": "kg", "quantite": 100, "poids_net_kg": 100,
-                  "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-AVANT-1"})
-    id_lig_a = lig_a.get("id_ligne") or lig_a.get("id")
-    verifier(any(x["id_ligne"] == id_lig_a for x in c.ok("Magasinie", "GET", "/api/import/a-recevoir")),
-             "un dossier d'avant la bascule ne trouve plus ses lignes a recevoir")
+            codes=(404, 405))
 
     verifier(controle(infra, "C11") == 0, "C11 apres l'arrivage unifie")
 
@@ -740,7 +728,16 @@ def scenario_import(c, infra):
     validation, cloture qui porte les frais aux lots du dossier."""
     ref = "PP-1500 Dtex-Cream 2951-Hs"
     aujourdhui = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
-    id_dossier = dossier_avant_bascule(c, infra, "BANC/26")
+    # UN DOSSIER NEUF, DONC EN CIRCUIT BON (ADR-003 phase C) : sa marchandise
+    # entre par l'arrivage unifie, comme celle d'un achat local. L'ancien
+    # circuit d'import a ete retire le 16/10/2026.
+    id_dossier = (lambda d: d.get("id_dossier") or d.get("id"))(
+        c.ok("Choukri", "POST", "/api/import/dossiers",
+             {"numero": "BANC/26", "code_devise": "USD"}))
+    # Un bon en devise ne se valide pas sur un cours de plus de 7 jours.
+    taux_usd_du_jour(infra)
+    id_bc, lignes_bc = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
+    lb = lignes_bc[0]["id_ligne_bc"]
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={aujourdhui}")["reference"]
     verifier(cours and cours > 1, f"pas de cours BAM pour l'USD : {cours}")
     # Le taux 1 en devise est refuse (regle 18).
@@ -751,46 +748,64 @@ def scenario_import(c, infra):
         "code_fournisseur": "FRS-001", "numero_facture": "FB-1", "date_facture": aujourdhui,
         "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
     id_facture = f.get("id_facture") or f.get("id")
-    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
         "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000, "poids_net_kg": 1000,
-        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BANC-1"})
+        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BANC-1", "id_ligne_bc": lb})
+    id_ligne_fact = lig.get("id_ligne") or lig.get("id")
     c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
         "id_frais": "DOUANE", "numero_piece": "DUM-BANC", "montant_devise": 5000, "code_devise": "MAD"})
 
-    ligne = next(x for x in c.ok("Magasinie", "GET", "/api/import/a-recevoir") if x["code_reference"] == ref
-                 and x["numero_dossier"] == "BANC/26")
-    verifier(ligne.get("tolerance_pesee_pct") is not None, "la tolerance du fournisseur ne descend pas a l'ecran")
-    base = {"id_ligne": ligne["id_ligne"], "quantite_recue_kg": 1050, "code_magasin": MAG,
+    # LA RECEPTION PASSE PAR L'ARRIVAGE UNIFIE (16/10/2026).
+    #
+    # L'ecran et les routes de reception d'import ont ete retires : la marchandise
+    # importee entre comme la locale, par un arrivage dont chaque ligne pege a une
+    # ligne de bon de commande. Les regles que l'ancien circuit gardait sont
+    # toutes portees par le chemin unifie — `verifier_ecarts_courants` et
+    # `exiger_bobines_comptees` sont appelees a la soumission ET a la validation
+    # (routes/stock.rs, domain/reception.rs).
+    #
+    # UNE CAPACITE A DISPARU AVEC LE CIRCUIT, et il faut le dire : la regle U4
+    # — « le verdict part avec la validation, d'un bloc » — n'a plus d'objet. La
+    # validation unifiee ne prend AUCUN corps : elle ne peut donc plus modifier
+    # une pesee au passage. Le danger que U4 surveillait est supprime au lieu
+    # d'etre garde.
+    base = {"code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg",
+            "quantite_pesee_unite": 1050, "code_magasin_dest": MAG,
             "lot_fournisseur": "LOT-BANC-1", "nb_bobines": 404}
-    r = c.ok("Magasinie", "POST", "/api/import/receptions", {"date_reception": aujourdhui, "lignes": [base]})
+    entete = {"code_fournisseur": "FRS-001", "num_bon_livraison": "BL-BANC-26"}
+
+    # L'EXCEDENT EST ARRETE DES LA SAISIE (C10), et non plus a la soumission :
+    # l'ancien circuit laissait creer la reception puis refusait de la soumettre.
+    # Le controle arrive plus tot, c'est mieux ; le test suit.
+    c.refus("Magasinie", "POST", "/api/receptions", dict(entete, lignes=[base]),
+            contient="tolerance")
+    motive = dict(base, derogation_ecart=True,
+                  motif_derogation="Accord du fournisseur, avoir a venir")
+    r = c.ok("Magasinie", "POST", "/api/receptions", dict(entete, lignes=[motive]))
     rid = r["id_reception"]
-    c.refus("Magasinie", "PUT", f"/api/import/receptions/{rid}/statut", {"statut": "A_CONTROLER"}, contient="tolérance")
-    # Suivie au lot, la reference se compte en bobines (regle 13).
-    c.ok("Magasinie", "PUT", f"/api/import/receptions/{rid}",
-         {"lignes": [dict(base, nb_bobines=0, derogation_ecart=1, motif_derogation="Accord du fournisseur, avoir a venir")]})
-    c.refus("Magasinie", "PUT", f"/api/import/receptions/{rid}/statut", {"statut": "A_CONTROLER"}, contient="bobines")
-    c.refus("Magasinie", "PUT", f"/api/import/receptions/{rid}",
-            {"lignes": [dict(base, derogation_ecart=1, motif_derogation="ok")]})
-    motive = dict(base, derogation_ecart=1, motif_derogation="Accord du fournisseur, avoir a venir")
-    c.ok("Magasinie", "PUT", f"/api/import/receptions/{rid}", {"lignes": [motive]})
-    c.ok("Magasinie", "PUT", f"/api/import/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
-    # Au controle, la pesee est figee ; le verdict ne l'est pas.
-    c.refus("Choukri", "PUT", f"/api/import/receptions/{rid}", {"lignes": [dict(motive, quantite_recue_kg=1040)]})
-    c.refus("Magasinie", "POST", f"/api/import/receptions/{rid}/valider")
+    lr = c.ok("Magasinie", "GET", f"/api/receptions/{rid}/lignes")[0]["id_ligne_reception"]
+    # Regle 13 : suivie au lot, la reference se compte en bobines. La derogation
+    # leve l'ecart de pesee, elle ne dispense pas du comptage.
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{lr}", {"nb_bobines": 0})
+    c.refus("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"},
+            contient="bobines")
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{lr}", {"nb_bobines": 404})
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+
+    # Segregation des taches : le peseur ne valide pas sa propre pesee.
     avant = kg(infra, ref)
-    # U4 (09/10) : le verdict part avec la validation, d'un bloc. Une pesee changee au passage
-    # fait tout echouer ; rien n'est ecrit.
-    c.refus("Choukri", "POST", f"/api/import/receptions/{rid}/valider",
-            {"reception": {"lignes": [dict(motive, quantite_recue_kg=1040)], "notes": "essai"}}, contient="fig")
-    verifier(infra.valeur(f"SELECT COALESCE(notes, '-') FROM import_receptions WHERE id_reception = '{rid}'") == "-",
-             "une validation refusee a laisse sa saisie ecrite")
-    c.ok("Choukri", "POST", f"/api/import/receptions/{rid}/valider",
-         {"reception": {"lignes": [motive], "notes": "Controle visuel fait au quai"}})
-    verifier(infra.valeur(f"SELECT notes FROM import_receptions WHERE id_reception = '{rid}'") == "Controle visuel fait au quai",
-             "le verdict n'est pas parti avec la validation")
+    c.refus("Magasinie", "POST", f"/api/receptions/{rid}/valider")
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
     verifier(abs(kg(infra, ref) - avant - 1050) < 1e-6, "l'import n'est pas entre en stock")
+    # LE PRIX VIENT DE LA LIGNE DE BON (ADR-003 D2), plus de la ligne de facture
+    # d'import : c'est le peg qui porte l'engagement, donc la valeur d'entree.
+    # Le CMUP d'une premiere entree vaut donc exactement le prix converti de la
+    # ligne recue.
     cm = cmup_magasin(infra, ref)
-    verifier(abs(cm - 2.0 * cours) < 0.01, f"CMUP d'entree attendu {2.0 * cours:.4f} (prix x cours), obtenu {cm}")
+    prix_ligne = float(infra.valeur(
+        f"SELECT prix_kg_mad FROM ligne_reception WHERE id_reception = '{rid}'"))
+    verifier(abs(cm - prix_ligne) < 0.01,
+             f"CMUP d'entree attendu {prix_ligne} (prix de la ligne de bon converti), obtenu {cm}")
 
     # Regle 5 : une DUM saisie ne s'efface pas ; elle se corrige avec un motif, au droit de valider.
     c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"numero_dum": "DUM-BANC-1"})
@@ -800,7 +815,8 @@ def scenario_import(c, infra):
          {"numero_dum": "DUM-BANC-2", "motif_dum": "Faute de frappe sur la serie"})
     refus_sql(infra, f"UPDATE import_dossiers SET numero_dum = NULL WHERE id_dossier = '{id_dossier}'", "IMPORT-DUM")
     # Regle 8 (T7) : dedouanee, l'entree de la reception d'import ne se contre-passe plus.
-    id_mvt = infra.valeur(f"SELECT id_mouvement FROM import_reception_lignes WHERE id_reception = '{rid}' LIMIT 1")
+    id_mvt = infra.valeur(
+        f"SELECT id_mouvement_genere FROM ligne_reception WHERE id_reception = '{rid}' LIMIT 1")
     c.refus("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer",
             {"motif": "Essai : annuler une entree dedouanee"}, contient="dedouane")
 
@@ -808,14 +824,14 @@ def scenario_import(c, infra):
     # se corrige ; incomplete, il est « non reparti » et la cloture le refuse.
     frais = infra.valeur(f"SELECT id_ligne_frais FROM dossier_lignes_frais WHERE id_dossier = '{id_dossier}'")
     c.ok("Choukri", "PUT", f"/api/import/frais/{frais}/repartition",
-         {"montants": [{"id_ligne": ligne["id_ligne"], "montant_dhs": 4000}]})
+         {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 4000}]})
     verifier(infra.valeur(f"SELECT methode_repartition FROM dossier_lignes_frais WHERE id_ligne_frais = '{frais}'") == "MANUEL",
              "la saisie des montants n'a pas passe le frais en repartition manuelle")
     c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True}, contient="non réparti")
     c.refus("Choukri", "PUT", f"/api/import/frais/{frais}/repartition",
-            {"montants": [{"id_ligne": ligne["id_ligne"], "montant_dhs": 6000}]}, contient="plus que")
+            {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 6000}]}, contient="plus que")
     c.ok("Choukri", "PUT", f"/api/import/frais/{frais}/repartition",
-         {"montants": [{"id_ligne": ligne["id_ligne"], "montant_dhs": 5000}]})
+         {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 5000}]})
     # Retour au parametrage : la repartition se recalcule seule.
     c.ok("Choukri", "PATCH", f"/api/import/frais/{frais}", {"methode_repartition": ""})
     verifier(infra.valeur(f"SELECT methode_repartition FROM dossier_lignes_frais WHERE id_ligne_frais = '{frais}'") in (None, ""),
@@ -966,9 +982,6 @@ def scenario_import_sur_arrivage(c, infra):
         "id_ligne_bc": lb})
     id_ligne = lig.get("id_ligne") or lig.get("id")
 
-    # L'ancien ecran ne la propose pas : ce dossier-la se recoit sur son bon.
-    verifier(all(x["id_ligne"] != id_ligne for x in c.ok("Magasinie", "GET", "/api/import/a-recevoir")),
-             "la ligne d'un dossier bascule reste proposee a l'ancien ecran")
 
     # L'ARRIVAGE : un BL, une ligne pegee au bon, le dossier rattache a l'en-tete.
     r = c.ok("Magasinie", "POST", "/api/receptions", {
@@ -1091,53 +1104,91 @@ def scenario_reception_devalidee_revalidee(c, infra):
 
 
 def scenario_import_coherence(c, infra):
-    """Import : une ligne de bon servie par un dossier ne se recoit pas en local ; une facture recue est
-    figee ; avant la DUM, contre-passer l'entree annule la reception et rend facture et bon."""
+    """Import : une ligne de bon servie par un dossier de l'ANCIEN circuit ne se recoit pas en
+    local ; une facture recue est figee ; contre-passer l'entree d'un ARRIVAGE l'annule et rend
+    facture et bon."""
     ref = "PP-1500 Dtex-Bleu 6666-Hs"
     jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
     # Un taux du jour pour l'USD : un bon en devise ne se valide pas sur un taux de plus de 7 jours.
     # PAR LE HELPER, qui ne pose le cours que s'il manque : ferme inconditionnellement, la ligne
     # du jour posee par un autre scenario violait taux_change_check (date_fin > date_debut).
     taux_usd_du_jour(infra)
-    id_bc, lignes = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
-    lb = lignes[0]["id_ligne_bc"]
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={jour}")["reference"]
-    id_dossier = dossier_avant_bascule(c, infra, "BANC/27")
-    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
-        "code_fournisseur": "FRS-001", "numero_facture": "FB-2", "date_facture": jour,
-        "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
-    id_facture = f.get("id_facture") or f.get("id")
-    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
-        "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000, "poids_net_kg": 1000,
-        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BANC-2", "id_ligne_bc": lb})
-    # Etancheite : la ligne de bon servie par le dossier ne se recoit pas en local.
-    c.refus("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "lignes": [{
-        "code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg", "quantite_pesee_unite": 400,
-        "code_magasin_dest": MAG, "lot_fournisseur": "LOT-BANC-2", "nb_bobines": 154}]}, contient="ETANCHEITE")
 
-    ligne = next(x for x in c.ok("Magasinie", "GET", "/api/import/a-recevoir") if x["numero_dossier"] == "BANC/27")
-    r = c.ok("Magasinie", "POST", "/api/import/receptions", {"date_reception": jour, "lignes": [{
-        "id_ligne": ligne["id_ligne"], "quantite_recue_kg": 400, "code_magasin": MAG,
-        "lot_fournisseur": "LOT-BANC-2", "nb_bobines": 154}]})
+    def facture_pegee(id_dossier, numero, id_ligne_bc, lot):
+        """Une facture d'import d'une ligne, rattachee a une ligne de bon. Rend (id_facture, id_ligne)."""
+        f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+            "code_fournisseur": "FRS-001", "numero_facture": numero, "date_facture": jour,
+            "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
+        idf = f.get("id_facture") or f.get("id")
+        lig = c.ok("Choukri", "POST", f"/api/import/factures/{idf}/lignes", {
+            "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000,
+            "poids_net_kg": 1000, "prix_unitaire_devise": 2.0, "lot_fournisseur": lot,
+            "id_ligne_bc": id_ligne_bc})
+        return idf, (lig.get("id_ligne") or lig.get("id"))
+
+    # ---- 1. ETANCHEITE -------------------------------------------------------
+    # Un dossier RESTE en circuit FACTURE garde sa ligne de bon : elle ne se recoit
+    # pas en local. La regle vaut toujours, et c'est elle qu'on eprouve ici.
+    _bc_a, lignes_a = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
+    lb_a = lignes_a[0]["id_ligne_bc"]
+    facture_pegee(dossier_avant_bascule(c, infra, "BANC/27"), "FB-2A", lb_a, "LOT-BANC-2A")
+    c.refus("Magasinie", "POST", "/api/receptions", {
+        "code_fournisseur": "FRS-001", "lignes": [{
+        "code_reference": ref, "id_ligne_bc": lb_a, "unite_saisie": "kg",
+        "quantite_pesee_unite": 400, "code_magasin_dest": MAG,
+        "lot_fournisseur": "LOT-BANC-2A", "nb_bobines": 154}]}, contient="ETANCHEITE")
+
+    # ---- 2. LE CIRCUIT COURANT : l'arrivage unifie ---------------------------
+    # Un dossier NEUF nait en circuit BON : sa marchandise entre par l'arrivage,
+    # sur le bon qui l'a engagee.
+    _bc, lignes = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
+    lb = lignes[0]["id_ligne_bc"]
+    id_dossier = (lambda d: d.get("id_dossier") or d.get("id"))(
+        c.ok("Choukri", "POST", "/api/import/dossiers",
+             {"numero": "BANC/27B", "code_devise": "USD"}))
+    id_facture, id_ligne = facture_pegee(id_dossier, "FB-2B", lb, "LOT-BANC-2B")
+
+    r = c.ok("Magasinie", "POST", "/api/receptions", {
+        "code_fournisseur": "FRS-001", "num_bon_livraison": "BL-BANC-27", "lignes": [{
+            "code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg",
+            "quantite_pesee_unite": 400, "code_magasin_dest": MAG,
+            "lot_fournisseur": "LOT-BANC-2B", "nb_bobines": 154}]})
     rid = r["id_reception"]
-    c.ok("Magasinie", "PUT", f"/api/import/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
-    c.ok("Choukri", "POST", f"/api/import/receptions/{rid}/valider")
-    recu = lambda: float(infra.valeur(f"SELECT quantite_recue_kg FROM import_facture_lignes WHERE id_ligne = '{ligne['id_ligne']}'"))
-    recu_bc = lambda: float(infra.valeur(f"SELECT quantite_recue_kg FROM ligne_bc WHERE id_ligne_bc = '{lb}'"))
-    verifier(abs(recu() - 400) < 1e-6 and abs(recu_bc() - 400) < 1e-6, "la reception n'a pas servi facture et bon")
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+
+    recu = lambda: float(infra.valeur(
+        f"SELECT quantite_recue_kg FROM import_facture_lignes WHERE id_ligne = '{id_ligne}'"))
+    recu_bc = lambda: float(infra.valeur(
+        f"SELECT quantite_recue_kg FROM ligne_bc WHERE id_ligne_bc = '{lb}'"))
+    verifier(abs(recu() - 400) < 1e-6 and abs(recu_bc() - 400) < 1e-6,
+             f"l'arrivage n'a pas servi facture ({recu()}) et bon ({recu_bc()})")
 
     # La facture recue est figee.
-    c.refus("Choukri", "PATCH", f"/api/import/factures/{id_facture}", {"montant_devise": 2100}, contient="IMPORT-FIGEE")
+    c.refus("Choukri", "PATCH", f"/api/import/factures/{id_facture}",
+            {"montant_devise": 2100}, contient="IMPORT-FIGEE")
 
-    # Avant la DUM, contre-passer l'entree annule la reception et rend facture et bon.
-    id_mvt = infra.valeur(f"SELECT id_mouvement FROM import_reception_lignes WHERE id_reception = '{rid}'")
-    c.ok("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer", {"motif": "Erreur de lot, a recevoir de nouveau"})
-    statut = infra.valeur(f"SELECT statut FROM import_receptions WHERE id_reception = '{rid}'")
-    verifier(statut == "ANNULEE", f"la reception d'import reste {statut} apres contre-passation")
-    verifier(abs(recu()) < 1e-6 and abs(recu_bc()) < 1e-6, f"facture {recu()} kg / bon {recu_bc()} kg apres contre-passation")
+    # CONTRE-PASSER L'ENTREE D'UN ARRIVAGE L'ANNULE ET REND TOUT (17/10/2026).
+    # Jusqu'a cette date, la contre-passation ne connaissait que l'ancien circuit :
+    # elle laissait la facture d'import afficher des kilos recus pour une
+    # marchandise sortie du stock, et l'arrivage restait VALIDE.
+    id_mvt = infra.valeur(
+        f"SELECT id_mouvement_genere FROM ligne_reception WHERE id_reception = '{rid}'")
+    c.ok("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer",
+         {"motif": "Erreur de lot, a recevoir de nouveau"})
+    # L'ARRIVAGE RESTE VALIDE, ET C'EST LA REGLE : `transition_statut` n'autorise,
+    # depuis VALIDE, que A_CONTROLER (devalidation) et CLOTURE. Defaire une entree
+    # est le travail de la contre-passation ; rendre la reception modifiable est
+    # celui de la devalidation, qui reste un geste distinct et explicite. Ce qui
+    # change, c'est le COMPTE : la ligne contre-passee ne compte plus.
+    statut = infra.valeur(f"SELECT statut FROM reception WHERE id_reception = '{rid}'")
+    verifier(statut == "VALIDE", f"l'arrivage devrait rester VALIDE, il est {statut}")
+    verifier(abs(recu()) < 1e-6 and abs(recu_bc()) < 1e-6,
+             f"facture {recu()} kg / bon {recu_bc()} kg apres contre-passation")
+
     # Plus rien de recu : la facture se corrige de nouveau.
     c.ok("Choukri", "PATCH", f"/api/import/factures/{id_facture}", {"montant_devise": 2100})
-
 
 def taux_usd_du_jour(infra):
     jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")

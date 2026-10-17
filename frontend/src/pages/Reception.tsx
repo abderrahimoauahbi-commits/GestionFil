@@ -47,7 +47,6 @@ import {
   Champ,
   Chargement,
   Etiq,
-  Selecteur,
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
@@ -134,18 +133,6 @@ interface LigneRec extends Record<string, unknown> {
   densite_kg_ml?: number | null
 }
 
-/** Un dossier d'import ouvert : ce qui identifie l'arrivage, aucun montant. */
-interface DossierImport {
-  id_dossier: string
-  numero: string
-  numero_bl: string | null
-  numero_dum: string | null
-  conteneurs: string | null
-  date_arrivee: string | null
-  statut: string
-  fournisseurs: string | null
-}
-
 interface LigneAttendue extends Record<string, unknown> {
   id_ligne_bc: string
   code_reference: string
@@ -167,6 +154,14 @@ interface LigneAttendue extends Record<string, unknown> {
   densite_kg_ml?: number | null
   date_livraison_prevue: string | null
   retard_jours: number | null
+  /* LE DOSSIER D'IMPORT SE DEDUIT (16/10/2026) : la ligne de bon mene a sa
+     ligne de facture, donc a son dossier, sa DUM et son conteneur. Le
+     magasinier choisit ses BONS, pas un numero de dossier. */
+  id_bc: string
+  id_dossier?: string | null
+  dossier_numero?: string | null
+  dossier_dum?: string | null
+  dossier_conteneurs?: string | null
 }
 
 
@@ -498,22 +493,19 @@ export function Reception() {
   })
 
   /*
-   * LES DOSSIERS D'IMPORT OUVERTS (ADR-003 phase A).
+   * LES BONS DE COMMANDE DE CE CAMION (16/10/2026).
    *
-   * Un arrivage venu de l'etranger se rattache au dossier qui porte sa DUM et
-   * ses conteneurs. La liste est servie par la route des receptions, pas par
-   * celle de l'import : c'est le magasinier qui dit quel conteneur il vide, et
-   * il n'a pas a lire les dossiers d'import pour cela.
+   * On ne demande plus au magasinier quel DOSSIER d'import il vide : il ne le
+   * connait pas. Il connait son BL, son conteneur et ses bons. C'est la
+   * FACTURE qui relie l'importation au bon et a la reception, donc le dossier
+   * se deduit des bons retenus — avec sa DUM et ses conteneurs.
+   *
+   * Liste vide = tous les bons en cours du fournisseur, c'est-a-dire le
+   * comportement d'avant : un camion arrive avec ce qui etait pret.
    */
-  const qDossiers = useQuery({
-    queryKey: ['receptions-dossiers-import'],
-    queryFn: ({ signal }) =>
-      api.get<DossierImport[]>('/api/receptions-dossiers-import', { signal }),
-    enabled: !!modifiable,
-  })
-  const dossierRattache = (qDossiers.data ?? []).find(
-    (d) => d.id_dossier === entete.id_dossier_import,
-  )
+  const [bonsRetenus, setBonsRetenus] = useState<string[]>([])
+  const basculerBon = (id_bc: string) =>
+    setBonsRetenus((b) => (b.includes(id_bc) ? b.filter((x) => x !== id_bc) : [...b, id_bc]))
 
   /*
    * CE QUE LE BON DE COMMANDE ATTEND ENCORE, propose comme references.
@@ -537,6 +529,10 @@ export function Reception() {
     () =>
       (qAttendues.data ?? [])
         .filter((a) => a.quantite_restante_kg > 0.001)
+        // CADRE PAR LES BONS DU CAMION : un fournisseur peut devoir dix bons,
+        // le camion n'en porte qu'un ou deux. Aucun bon retenu = tout, pour ne
+        // pas obliger a cocher avant de peser.
+        .filter((a) => bonsRetenus.length === 0 || bonsRetenus.includes(a.id_bc))
         .map((a) => ({
           code_reference: a.code_reference,
           designation: a.designation,
@@ -556,8 +552,61 @@ export function Reception() {
           qte_a_commander_kg: a.quantite_restante_kg,
           prix_suggere_devise: a.prix_kg_devise,
         })),
-    [qAttendues.data, rec?.code_fournisseur],
+    [qAttendues.data, rec?.code_fournisseur, bonsRetenus],
   )
+
+  /* Les bons que ce fournisseur doit encore, tires des lignes attendues
+     elles-memes : pas d'appel supplementaire pour peupler le choix. */
+  const bonsAttendus = useMemo(() => {
+    const parBon = new Map<
+      string,
+      {
+        id_bc: string
+        numero_bc: string
+        date_livraison_prevue: string | null
+        lignes: number
+        reste_kg: number
+        dossier_numero?: string | null
+        dossier_conteneurs?: string | null
+      }
+    >()
+    for (const a of qAttendues.data ?? []) {
+      if (a.quantite_restante_kg <= 0.001) continue
+      const v = parBon.get(a.id_bc)
+      if (v) {
+        v.lignes += 1
+        v.reste_kg += a.quantite_restante_kg
+      } else {
+        parBon.set(a.id_bc, {
+          id_bc: a.id_bc,
+          numero_bc: a.numero_bc,
+          date_livraison_prevue: a.date_livraison_prevue,
+          lignes: 1,
+          reste_kg: a.quantite_restante_kg,
+          dossier_numero: a.dossier_numero,
+          dossier_conteneurs: a.dossier_conteneurs,
+        })
+      }
+    }
+    return [...parBon.values()]
+  }, [qAttendues.data])
+
+  /* LE DOSSIER DEDUIT des bons retenus. Plusieurs dossiers = on ne devine pas,
+     on les montre tous : le serveur ne rattachera rien plutot que de se
+     tromper, et c'est a l'ecran de le dire. */
+  const dossiersDeduits = useMemo(() => {
+    const vus = new Map<string, { numero: string; dum?: string | null; conteneurs?: string | null }>()
+    for (const a of qAttendues.data ?? []) {
+      if (!a.id_dossier || !a.dossier_numero) continue
+      if (bonsRetenus.length > 0 && !bonsRetenus.includes(a.id_bc)) continue
+      vus.set(a.id_dossier, {
+        numero: a.dossier_numero,
+        dum: a.dossier_dum,
+        conteneurs: a.dossier_conteneurs,
+      })
+    }
+    return [...vus.values()]
+  }, [qAttendues.data, bonsRetenus])
 
   const chercherCatalogue = async (motif: string): Promise<RefLigne[]> => {
     const q = new URLSearchParams({
@@ -1174,60 +1223,6 @@ export function Reception() {
                 className="text-right tabular-nums"
               />
             </div>
-            {/* L'ARRIVAGE D'IMPORT (ADR-003 phase A). Le dossier porte la DUM,
-                les conteneurs et le regime ; il se RATTACHE a l'arrivage et ne
-                remplace pas la commande — le prix de chaque ligne vient
-                toujours de sa ligne de bon. */}
-            <div>
-              <Etiq htmlFor="dossier">
-                Dossier d’import
-                <Aide>
-                  Pour une marchandise venue de l’étranger : le dossier qui porte la DUM et
-                  les conteneurs. Le prix reste celui du bon de commande.
-                </Aide>
-              </Etiq>
-              <Selecteur
-                id="dossier"
-                value={entete.id_dossier_import}
-                disabled={!modifiable}
-                onChange={(e) => setEntete({ ...entete, id_dossier_import: e.target.value })}
-              >
-                <option value="">— Achat local —</option>
-                {(qDossiers.data ?? []).map((d) => (
-                  <option key={d.id_dossier} value={d.id_dossier}>
-                    {d.numero}
-                    {d.numero_bl ? ` · BL ${d.numero_bl}` : ''}
-                    {d.fournisseurs ? ` · ${d.fournisseurs}` : ''}
-                  </option>
-                ))}
-                {/* Le dossier deja rattache n'est plus dans la liste quand il a
-                    ete clos : le montrer quand meme, sinon le champ parait vide
-                    alors que la reception en porte un. */}
-                {entete.id_dossier_import && !dossierRattache && (
-                  <option value={entete.id_dossier_import}>
-                    {rec.dossier_numero ?? 'Dossier clos'}
-                  </option>
-                )}
-              </Selecteur>
-            </div>
-            {(dossierRattache ?? rec.id_dossier_import) && (
-              <div>
-                <Etiq>Douane du dossier</Etiq>
-                <p className="pt-1.5 text-[13px] tabular-nums">
-                  {(dossierRattache?.numero_dum ?? rec.numero_dum) ? (
-                    <>DUM {dossierRattache?.numero_dum ?? rec.numero_dum}</>
-                  ) : (
-                    <span className="text-attenue-texte">DUM non saisie</span>
-                  )}
-                  {(dossierRattache?.conteneurs ?? rec.conteneurs) && (
-                    <span className="text-attenue-texte">
-                      {' · '}
-                      {dossierRattache?.conteneurs ?? rec.conteneurs}
-                    </span>
-                  )}
-                </p>
-              </div>
-            )}
             {rec.code_devise && rec.code_devise !== 'MAD' && (
               <div>
                 <Etiq>
@@ -1241,6 +1236,74 @@ export function Reception() {
               </div>
             )}
           </CarteCorps>
+
+          {/* LES BONS DU CAMION, HORS DE LA GRILLE A 4 COLONNES (16/10/2026).
+              Ces blocs n'ont pas la hauteur d'un champ. Une grille a qui on
+              demande d'aligner des contenus inegaux ne les aligne pas : c'est
+              ce qui donnait l'en-tete de travers. Ils ont donc leur propre
+              rangee, pleine largeur. */}
+          {bonsAttendus.length > 0 && (
+            <CarteCorps className="border-t border-bordure pt-3">
+              <Etiq>
+                Bons de commande de cet arrivage
+                <Aide>
+                  Cochez les bons que ce camion livre : seules leurs lignes seront proposées à la
+                  pesée. Rien de coché = tout ce que le fournisseur doit encore.
+                </Aide>
+              </Etiq>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {bonsAttendus.map((b) => {
+                  const retenu = bonsRetenus.includes(b.id_bc)
+                  return (
+                    <button
+                      key={b.id_bc}
+                      type="button"
+                      disabled={!modifiable}
+                      onClick={() => basculerBon(b.id_bc)}
+                      className={cn(
+                        'rounded-[var(--radius)] border px-3 py-2 text-left text-[13px] transition-colors',
+                        retenu
+                          ? 'border-primaire bg-primaire/10'
+                          : 'border-bordure hover:bg-attenue/40',
+                        !modifiable && 'opacity-60',
+                      )}
+                    >
+                      <div className="font-medium">{b.numero_bc}</div>
+                      <div className="text-[12px] tabular-nums text-attenue-texte">
+                        {b.lignes} ligne{b.lignes > 1 ? 's' : ''} · {fmt.nombre(b.reste_kg, 0)} kg
+                        {' restants'}
+                      </div>
+                      {b.dossier_conteneurs && (
+                        <div className="text-[12px] text-attenue-texte">{b.dossier_conteneurs}</div>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* LE DOSSIER NE SE SAISIT PLUS : il se lit sur les bons retenus. */}
+              <p className="mt-3 text-[13px]">
+                <span className="text-attenue-texte">Dossier d’import déduit : </span>
+                {dossiersDeduits.length === 0 ? (
+                  <span>aucun — achat local</span>
+                ) : (
+                  dossiersDeduits.map((d, i) => (
+                    <span key={d.numero}>
+                      {i > 0 && ', '}
+                      <span className="font-medium tabular-nums">{d.numero}</span>
+                      {d.dum && <span className="text-attenue-texte"> · DUM {d.dum}</span>}
+                      {d.conteneurs && <span className="text-attenue-texte"> · {d.conteneurs}</span>}
+                    </span>
+                  ))
+                )}
+                {dossiersDeduits.length > 1 && (
+                  <span className="ml-1 text-danger">
+                    — plusieurs dossiers : précisez les bons, sinon l’arrivage n’en portera aucun.
+                  </span>
+                )}
+              </p>
+            </CarteCorps>
+          )}
         </Carte>
 
         <Carte repliable="reception.2">

@@ -250,7 +250,20 @@ pub async fn synchroniser_recu_arrivages(tx: &mut PgConnection, id_dossier: &str
                                     JOIN reception r ON r.id_reception = lr.id_reception
                                    WHERE lr.id_ligne_bc = fl2.id_ligne_bc
                                      AND r.id_dossier_import = $1
-                                     AND r.statut IN ('VALIDE', 'CLOTURE')), 0) AS kg
+                                     AND r.statut IN ('VALIDE', 'CLOTURE')
+                                     -- UNE ENTREE CONTRE-PASSEE NE COMPTE PLUS
+                                     -- (17/10/2026), ici comme dans
+                                     -- `fn_recaler_lignes_bc`. Sans cela, defaire
+                                     -- l'entree d'un arrivage laissait la facture
+                                     -- d'import afficher des kilos recus pour une
+                                     -- marchandise sortie du stock : la reception
+                                     -- reste VALIDE — c'est normal, elle se
+                                     -- devalide, elle ne s'annule pas — mais sa
+                                     -- ligne ne doit plus etre comptee.
+                                     AND NOT EXISTS (
+                                           SELECT 1 FROM mouvement inv
+                                            WHERE inv.id_mouvement_contrepasse
+                                                  = lr.id_mouvement_genere)), 0) AS kg
                    FROM import_facture_lignes fl2
                    JOIN import_factures f ON f.id_facture = fl2.id_facture
                   WHERE f.id_dossier = $1 AND fl2.id_ligne_bc IS NOT NULL) n

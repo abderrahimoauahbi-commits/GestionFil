@@ -1,6 +1,7 @@
 import { lazy } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { doitReessayer } from './lib/reessai'
 import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { Verrou } from './auth/Verrou'
@@ -108,12 +109,9 @@ const client = new QueryClient({
       // Les vues de pilotage sont recalculees a chaque appel ; 30 s de cache
       // evitent de marteler le serveur pendant la navigation.
       staleTime: 30_000,
-      retry: (echecs, erreur) => {
-        // Inutile de reessayer un refus de droits ou une regle metier.
-        const statut = (erreur as { statut?: number })?.statut
-        if (statut && statut >= 400 && statut < 500) return false
-        return echecs < 2
-      },
+      // Un refus ou une regle metier ne se reessaie pas ; un 429 de la limitation
+      // de debit, si (lib/reessai.ts, et son test).
+      retry: doitReessayer,
     },
   },
 })

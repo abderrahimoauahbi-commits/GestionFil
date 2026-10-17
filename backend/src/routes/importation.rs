@@ -838,7 +838,7 @@ pub async fn ajouter_ligne(
     .bind(l.nb_palettes)
     .bind(prix)
     .bind(&l.libelle_couleur)
-    .bind(super::stock::remise_valide(l.remise_pct)?)
+    .bind(super::bons_commande::remise_valide(l.remise_pct)?)
     .fetch_one(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;
@@ -887,7 +887,7 @@ pub async fn modifier_ligne(
     .bind(l.nb_palettes)
     .bind(l.prix_unitaire_devise)
     .bind(&l.libelle_couleur)
-    .bind(match l.remise_pct { Some(r) => Some(super::stock::remise_valide(Some(r))?), None => None })
+    .bind(match l.remise_pct { Some(r) => Some(super::bons_commande::remise_valide(Some(r))?), None => None })
     .execute(&mut *tx)
     .await?;
     metier::recalculer_repartition(&mut tx, &id_dossier).await?;

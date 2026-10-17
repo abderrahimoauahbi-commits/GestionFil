@@ -25,6 +25,10 @@ mod referentiels;
 mod retours;
 mod roles;
 pub(crate) mod stock;
+mod transferts;
+mod inventaires;
+mod bons_commande;
+mod receptions;
 mod telechargements;
 
 use crate::state::AppState;
@@ -341,13 +345,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/devalider", get(devalidation::documents_reversibles))
         .route("/api/devalider/{document}/{id}", post(devalidation::devalider))
         .route("/api/transferts",
-               get(stock::lister_transferts).post(stock::creer_transfert))
-        .route("/api/transferts/{id}/lignes", post(stock::ajouter_ligne_transfert))
+               get(transferts::lister_transferts).post(transferts::creer_transfert))
+        .route("/api/transferts/{id}/lignes", post(transferts::ajouter_ligne_transfert))
         .route(
             "/api/transferts/{id}",
-            get(stock::dossier_transfert)
-                .put(stock::modifier_transfert)
-                .delete(stock::annuler_transfert),
+            get(transferts::dossier_transfert)
+                .put(transferts::modifier_transfert)
+                .delete(transferts::annuler_transfert),
         )
         .route("/api/transferts/{id}/expedier", post(operations::expedier_transfert))
         .route(
@@ -357,10 +361,10 @@ pub fn router(state: AppState) -> Router {
         // Alias historique : l'expedition etait appelee « validation ».
         .route("/api/transferts/{id}/valider", post(operations::expedier_transfert))
         .route("/api/inventaires",
-               get(stock::lister_inventaires).post(stock::creer_inventaire))
+               get(inventaires::lister_inventaires).post(inventaires::creer_inventaire))
         .route("/api/inventaires/{id}/lignes",
-               get(stock::lignes_inventaire).put(stock::saisir_comptage))
-        .route("/api/inventaires/{id}", get(stock::lire_inventaire))
+               get(inventaires::lignes_inventaire).put(inventaires::saisir_comptage))
+        .route("/api/inventaires/{id}", get(inventaires::lire_inventaire))
         .route("/api/inventaires/{id}/preparer", post(operations::preparer_inventaire))
         .route("/api/inventaires/{id}/valider", post(operations::valider_inventaire))
         .route("/api/inventaires/{id}/renvoyer", post(operations::renvoyer_inventaire))
@@ -368,34 +372,34 @@ pub fn router(state: AppState) -> Router {
         .route("/api/inventaires/{id}/annuler", post(operations::annuler_inventaire))
         // --- Achats et receptions ---------------------------------------------
         .route("/api/bons-commande",
-               get(stock::lister_bc).post(stock::creer_bc))
+               get(bons_commande::lister_bc).post(bons_commande::creer_bc))
         .route("/api/bons-commande/{id}",
-               patch(stock::modifier_bc).delete(stock::supprimer_bc))
+               patch(bons_commande::modifier_bc).delete(bons_commande::supprimer_bc))
         // Sans `{id}` : la liste sert AUSSI a la creation, quand le bon n'existe
         // pas encore et qu'on vient de choisir le fournisseur.
-        .route("/api/references-commandables", get(stock::references_commandables))
+        .route("/api/references-commandables", get(bons_commande::references_commandables))
         .route("/api/bons-commande/{id}/lignes",
-               get(stock::lignes_bc).post(stock::ajouter_ligne_bc))
+               get(bons_commande::lignes_bc).post(bons_commande::ajouter_ligne_bc))
         .route("/api/bons-commande/{id}/lignes/{ligne}",
-               patch(stock::modifier_ligne_bc).delete(stock::supprimer_ligne_bc))
-        .route("/api/bons-commande/{id}/statut", put(stock::changer_statut_bc))
+               patch(bons_commande::modifier_ligne_bc).delete(bons_commande::supprimer_ligne_bc))
+        .route("/api/bons-commande/{id}/statut", put(bons_commande::changer_statut_bc))
         .route("/api/receptions",
-               get(stock::lister_receptions).post(stock::creer_reception))
-        .route("/api/receptions/{id}", patch(stock::modifier_reception))
+               get(receptions::lister_receptions).post(receptions::creer_reception))
+        .route("/api/receptions/{id}", patch(receptions::modifier_reception))
         // Sans `{id}` : sert aussi a la creation, quand la reception n'existe pas
         // encore et qu'on vient de designer le bon de commande.
-        .route("/api/lignes-attendues", get(stock::lignes_attendues))
+        .route("/api/lignes-attendues", get(receptions::lignes_attendues))
         // Les dossiers d'import ouverts, pour l'en-tete d'un arrivage (ADR-003
         // phase A). Garde par RECEPTIONS : le magasinier dit quel conteneur il
         // vide sans avoir a lire les dossiers d'import.
-        .route("/api/receptions-dossiers-import", get(stock::dossiers_import_ouverts))
+        .route("/api/receptions-dossiers-import", get(receptions::dossiers_import_ouverts))
         .route("/api/receptions/{id}/lignes",
-               get(stock::lignes_reception).post(stock::ajouter_ligne_reception))
+               get(receptions::lignes_reception).post(receptions::ajouter_ligne_reception))
         .route(
             "/api/receptions/{id}/lignes/{ligne}",
-            patch(stock::modifier_ligne_reception).delete(stock::supprimer_ligne_reception),
+            patch(receptions::modifier_ligne_reception).delete(receptions::supprimer_ligne_reception),
         )
-        .route("/api/receptions/{id}/statut", put(stock::changer_statut_reception))
+        .route("/api/receptions/{id}/statut", put(receptions::changer_statut_reception))
         .route("/api/receptions/{id}/valider", post(operations::valider_reception))
         .route("/api/receptions/{id}/cloturer", post(operations::cloturer_reception))
         .route("/api/receptions/{id}/facture-contexte", get(operations::contexte_facture_reception))

@@ -34,6 +34,23 @@
 -- (`domain/reception.rs`). Insérer un arrivage déjà VALIDE n'ajoute donc rien
 -- au stock : il documente ce qui a eu lieu.
 --
+-- UN SIGNAL ATTENDU, ET QU'IL FAUT LAISSER : le contrôle C32 (« réception
+-- valorisée absente de l'historique des prix ») signalera les deux lignes de
+-- cet arrivage. Le prix n'est pas manquant — l'historique porte bien ces deux
+-- achats du 13/07/2024, aux mêmes montants, inscrits à l'époque par l'ancien
+-- circuit. C'est le LIEN qui manque : leur `id_ligne_reception` désigne des
+-- identifiants d'`import_reception_lignes`, une autre table, et pointait donc
+-- déjà dans le vide avant cette reprise.
+--
+-- Ce lien ne se répare pas : `historique_prix` est IMMUABLE (règle R03), parce
+-- qu'il fonde le CMUP. Une migration de rattachement a été écrite puis retirée
+-- le 17/10 — le déclencheur l'a refusée, et il a raison. Créer de nouvelles
+-- entrées dupliquerait l'historique d'achat et fausserait tout prix moyen.
+--
+-- Le signal C32 est donc exact et doit rester. Sa criticité est CRITIQUE — non
+-- bloquante, mais pas anodine : c'est le prix assumé d'une reprise historique,
+-- et il doit rester visible plutôt qu'être effacé.
+--
 -- REJOUABLE : tout est gardé par l'absence de l'arrivage de reprise.
 -- =============================================================================
 

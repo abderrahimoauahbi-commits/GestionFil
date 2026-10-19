@@ -81,6 +81,14 @@ export function Catalogue() {
     queryFn: () =>
       api.get<{ code_couleur_interne: string; libelle: string }[]>('/api/couleurs?actif=1'),
   })
+  const qPos = useQuery({
+    queryKey: ['positions-tarifaires', ''],
+    queryFn: ({ signal }) =>
+      api.get<{ code_sh: string; libelle: string; taux_droit_pct: number }[]>(
+        '/api/positions-tarifaires?actif=1',
+        { signal },
+      ),
+  })
 
   const colonnes: Colonne<Reference>[] = [
     {
@@ -256,6 +264,18 @@ export function Catalogue() {
       section: 'Général',
     },
     { champ: 'actif', libelle: 'Actif', type: 'booleen', defaut: true, section: 'Général' },
+    {
+      champ: 'code_sh',
+      libelle: 'Position tarifaire (SH)',
+      type: 'liste',
+      options: qPos.data?.map((p) => ({
+        valeur: p.code_sh,
+        libelle: `${p.code_sh} — ${p.libelle} (${fmt.nombre(Number(p.taux_droit_pct), 2)} %)`,
+      })),
+      aide: 'La nomenclature douanière de cette matière, et donc son droit d’importation. '
+        + 'Sans elle, les droits attendus d’un dossier d’import ne se calculent pas pour ses lignes.',
+      section: 'Achat',
+    },
     /* --- Paramètres techniques --------------------------------------- */
     { champ: 'type_fil', libelle: 'Nature', section: 'Paramètres techniques' },
     { champ: 'titrage', libelle: 'Titrage', section: 'Paramètres techniques' },

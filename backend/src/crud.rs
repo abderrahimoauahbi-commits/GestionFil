@@ -259,14 +259,31 @@ pub const ENTITES: &[Entite] = &[
         cle_generee: false,
         creation: &[
             "id_frais", "libelle", "categorie", "piece_justificative", "recuperable",
-            "commun", "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+            "commun", "methode_repartition", "inclus_dans_cout", "entre_valeur_douane", "ordre",
+            "actif"],
         modification: &[
             "libelle", "categorie", "piece_justificative", "recuperable", "commun",
-            "methode_repartition", "inclus_dans_cout", "ordre", "actif"],
+            "methode_repartition", "inclus_dans_cout", "entre_valeur_douane", "ordre", "actif"],
         suppression: Suppression::Logique("actif"),
         selection: "c.*, (SELECT COUNT(*) FROM dossier_lignes_frais d
                            WHERE d.id_frais = c.id_frais) AS nb_utilisations",
         tri: "c.ordre",
+    },
+    // LES POSITIONS TARIFAIRES (19/10/2026) : la nomenclature douaniere et son
+    // droit d'importation, que chaque reference designe. Desactivee plutot que
+    // supprimee : une reference, un dossier clos la citent.
+    Entite {
+        chemin: "positions-tarifaires",
+        table: "position_tarifaire",
+        module: "PARAMETRES",
+        cle: "code_sh",
+        cle_generee: false,
+        creation: &["code_sh", "libelle", "taux_droit_pct", "notes", "actif"],
+        modification: &["libelle", "taux_droit_pct", "notes", "actif"],
+        suppression: Suppression::Logique("actif"),
+        selection: "c.*,
+                    (SELECT COUNT(*) FROM reference r WHERE r.code_sh = c.code_sh) AS nb_references",
+        tri: "c.code_sh",
     },
     Entite {
         chemin: "fournisseurs",
@@ -401,7 +418,7 @@ pub const ENTITES: &[Entite] = &[
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
             "couverture_min_mois", "marge_securite_pct", "moq_kg",
-            "multiple_achat_kg", "suivi_lot", "actif"],
+            "multiple_achat_kg", "suivi_lot", "code_sh", "actif"],
         modification: &[
             "code_categorie", "code_fournisseur", "designation", "type_fil",
             "couleur", "origine", "titrage", "code_famille", "code_couleur_interne",
@@ -413,7 +430,7 @@ pub const ENTITES: &[Entite] = &[
             "description_commerciale",
             "code_devise_catalogue", "date_prix_catalogue", "stock_min_kg",
             "couverture_min_mois", "marge_securite_pct", "moq_kg",
-            "multiple_achat_kg", "suivi_lot", "actif",
+            "multiple_achat_kg", "suivi_lot", "code_sh", "actif",
         ],
         suppression: Suppression::Logique("actif"),
         // prix_kg_mad applique la MEME regle que le plan d'achat : le CMUP reel

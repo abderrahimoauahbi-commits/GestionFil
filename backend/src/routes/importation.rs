@@ -303,6 +303,31 @@ pub async fn lire_dossier(
     .fetch_all(db)
     .await?;
 
+    // LES DROITS ATTENDUS (19/10/2026) : par ligne, valeur en douane x taux de
+    // la position tarifaire de sa reference ; par dossier, face aux droits
+    // payes. L'ecart se lit ; il ne bloque rien.
+    let droits_lignes = sqlx::query(
+        "SELECT id_ligne, code_reference, code_sh, libelle_position,
+                taux_droit_pct::float8 AS taux_droit_pct,
+                valeur_dhs::float8 AS valeur_dhs,
+                frais_valeur_douane_dhs::float8 AS frais_valeur_douane_dhs,
+                valeur_douane_dhs::float8 AS valeur_douane_dhs,
+                droits_attendus_dhs::float8 AS droits_attendus_dhs
+           FROM v_import_droits WHERE id_dossier = $1",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+    let droits_dossier = sqlx::query(
+        "SELECT nb_lignes, nb_lignes_sans_position,
+                droits_attendus_dhs::float8 AS droits_attendus_dhs,
+                droits_payes_dhs::float8 AS droits_payes_dhs
+           FROM v_import_droits_dossier WHERE id_dossier = $1",
+    )
+    .bind(&id)
+    .fetch_all(db)
+    .await?;
+
     let pieces = super::pieces::lister_du_dossier(db, &id).await?;
     let attendues = super::pieces::attendues(db, &id).await?;
 
@@ -317,6 +342,8 @@ pub async fn lire_dossier(
         "ajustements": lignes_en_json(&ajustements),
         "retours": lignes_en_json(&retours),
         "engagements": lignes_en_json(&engagements),
+        "droits": lignes_en_json(&droits_lignes),
+        "droits_dossier": lignes_en_json(&droits_dossier).get(0).cloned().unwrap_or(Value::Null),
     });
     user.masquer(db, IMPORT, &mut v).await?;
     Ok(Json(v))
@@ -1014,7 +1041,7 @@ pub struct FraisSaisie {
     methode_repartition: Option<String>,
 }
 
-const METHODES: &[&str] = &["VALEUR", "POIDS", "QUANTITE", "PARTS_EGALES", "MANUEL"];
+const METHODES: &[&str] = &["VALEUR", "POIDS", "QUANTITE", "PARTS_EGALES", "MANUEL", "DROITS"];
 
 /// La methode saisie : vide = celle du type ; sinon une des methodes connues.
 fn methode_saisie(m: &Option<String>) -> AppResult<Option<String>> {

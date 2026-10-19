@@ -47,14 +47,22 @@ CREATE TABLE parametres_frais (
     piece_justificative text,
     recuperable         bigint  NOT NULL DEFAULT 0 CHECK (recuperable IN (0,1)),
     commun              bigint  NOT NULL DEFAULT 1 CHECK (commun IN (0,1)),
+    -- DROITS (19/10/2026) : au prorata des droits attendus de chaque ligne.
     methode_repartition text    NOT NULL DEFAULT 'VALEUR'
-                                CHECK (methode_repartition IN ('VALEUR','POIDS','QUANTITE','PARTS_EGALES')),
+                                CONSTRAINT parametres_frais_methode_check
+                                CHECK (methode_repartition IN ('VALEUR','POIDS','QUANTITE','PARTS_EGALES','DROITS')),
     inclus_dans_cout    bigint  NOT NULL CHECK (inclus_dans_cout IN (0,1)),
+    -- Le frais entre dans la valeur en douane (valeur CAF : fret, assurance),
+    -- qui calcule les droits attendus (19/10/2026).
+    entre_valeur_douane bigint  NOT NULL DEFAULT 0
+                                CONSTRAINT ck_pf_valeur_douane CHECK (entre_valeur_douane IN (0,1)),
     ordre               bigint  NOT NULL DEFAULT 0,
     actif               bigint  NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     -- Un frais recuperable se recupere : le porter au cout de revient le
     -- ferait payer deux fois par la marchandise.
-    CHECK (recuperable = 0 OR inclus_dans_cout = 0)
+    CHECK (recuperable = 0 OR inclus_dans_cout = 0),
+    -- Un frais reparti aux droits n'entre pas dans la valeur qui les calcule.
+    CONSTRAINT ck_pf_droits_circulaire CHECK (NOT (methode_repartition = 'DROITS' AND entre_valeur_douane = 1))
 );
 
 

@@ -101,6 +101,26 @@ CREATE TABLE famille (
 
 
 -- -----------------------------------------------------------------------------
+-- position_tarifaire — la nomenclature douaniere et son droit (19/10/2026)
+-- -----------------------------------------------------------------------------
+-- Migration 2026-10-19a_positions_tarifaires.sql (audit P3), qui pose aussi le
+-- declencheur d'audit (fn_trg_audit_modification, defini en 010).
+CREATE TABLE position_tarifaire (
+    code_sh             text    NOT NULL PRIMARY KEY
+                                CONSTRAINT ck_pt_code CHECK (code_sh ~ '^[0-9]{6,10}$'),
+    libelle             text    NOT NULL CONSTRAINT ck_pt_libelle CHECK (btrim(libelle) <> ''),
+    taux_droit_pct      numeric(7,4) NOT NULL DEFAULT 0
+                                CONSTRAINT ck_pt_taux CHECK (taux_droit_pct <> 'NaN'
+                                                             AND taux_droit_pct >= 0
+                                                             AND taux_droit_pct <= 100),
+    notes               text,
+    actif               bigint  NOT NULL DEFAULT 1 CONSTRAINT ck_pt_actif CHECK (actif IN (0, 1)),
+    -- Un vrai type de date, pas du texte (cliquet A1 du 17/10/2026).
+    date_creation       timestamptz NOT NULL DEFAULT now()
+);
+
+
+-- -----------------------------------------------------------------------------
 CREATE TABLE reference (
     code_reference      text    NOT NULL PRIMARY KEY,
     code_categorie      text    NOT NULL REFERENCES categorie_matiere(code_categorie),
@@ -167,6 +187,8 @@ CREATE TABLE reference (
     actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_utilisateur_creation text REFERENCES utilisateur(id_utilisateur),
+    -- La position tarifaire : le droit d'importation de cette matiere (19/10/2026).
+    code_sh             text CONSTRAINT fk_reference_position REFERENCES position_tarifaire(code_sh),
 
     -- R01 : facteur de conversion obligatoire selon l'unite. Aucun fallback.
     CHECK (unite_catalogue <> 'Bobine'  OR poids_bobine_kg IS NOT NULL),

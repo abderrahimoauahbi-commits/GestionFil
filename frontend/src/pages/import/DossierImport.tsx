@@ -43,6 +43,7 @@ import { Avancement, PastilleStatut } from './DossiersImport'
 import { CloturePanneau, echec, nombre, Tuile, useEnregistrerTout, useRafraichir, type Signaler } from './dialogues'
 import { PiecesDossier } from './PiecesDossier'
 import { EngagementsDossier } from './EngagementsDossier'
+import { DroitsDouane } from './DroitsDouane'
 import {
   LIBELLE_RECEPTION,
   METHODE_REPARTITION,
@@ -225,6 +226,7 @@ export function DossierImport() {
         </OngletContenu>
         <OngletContenu value="liquidation" forceMount className="mt-3 data-[state=inactive]:hidden">
           <LiquidationFrais d={d} ecrire={ecrire} choix={fraisLiquide} setChoix={setFraisLiquide} />
+          <DroitsDouane d={d} />
         </OngletContenu>
         <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
           <FacturesDossier d={d} ecrire={ecrire} />
@@ -885,7 +887,7 @@ function LiquidationFrais({
           {ecrire ? (
             <Selecteur id="liq-methode" className="w-full" value={methodeAffichee}
               onChange={(e) => { setMethode(e.target.value as MethodeRepartition); setSaisie({}) }}>
-              {([...new Set(['VALEUR', 'POIDS', frais.methode_type, 'MANUEL'])] as MethodeRepartition[]).map((m) => (
+              {([...new Set(['VALEUR', 'POIDS', ...(frais.categorie === 'DOUANE' ? ['DROITS'] : []), frais.methode_type, 'MANUEL'])] as MethodeRepartition[]).map((m) => (
                 <option key={m} value={m}>{METHODE_REPARTITION[m]}{m === frais.methode_type ? ' (paramétrage)' : ''}</option>
               ))}
             </Selecteur>

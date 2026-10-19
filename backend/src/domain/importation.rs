@@ -117,6 +117,24 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
     .fetch_all(&mut *tx)
     .await?;
 
+    // LE TAUX DE DROIT DE CHAQUE LIGNE (19/10/2026), en dix-milliemes de point :
+    // 2,5 % vaut 25 000. Absent : la reference n'a pas de position tarifaire
+    // active, et la ligne ne peut pas recevoir sa part d'un frais reparti aux
+    // droits.
+    let taux_droit: std::collections::HashMap<String, i64> = sqlx::query_as::<_, (String, i64)>(
+        "SELECT l.id_ligne, (round(pt.taux_droit_pct, 4) * 10000)::bigint
+           FROM import_facture_lignes l
+           JOIN import_factures f      ON f.id_facture = l.id_facture
+           JOIN reference ref          ON ref.code_reference = l.code_reference
+           JOIN position_tarifaire pt  ON pt.code_sh = ref.code_sh AND pt.actif = 1
+          WHERE f.id_dossier = $1",
+    )
+    .bind(id_dossier)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+
     /// La base d'une ligne pour une methode donnee.
     ///
     /// PARTS_EGALES vaut 1 par ligne : chaque ligne pese autant, et les restes
@@ -157,7 +175,39 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
     .fetch_all(&mut *tx)
     .await?;
 
-    for (id_frais, montant, methode) in &frais {
+    // LES FRAIS REPARTIS AUX DROITS PASSENT EN DERNIER : leur base est la valeur
+    // en douane, qui comprend la part du fret (et de tout frais « valeur en
+    // douane ») que les autres viennent de poser.
+    let (aux_droits, ordinaires): (Vec<_>, Vec<_>) =
+        frais.iter().partition(|(_, _, methode)| methode == "DROITS");
+    let mut valeur_douane: Option<std::collections::HashMap<String, i64>> = None;
+
+    for (id_frais, montant, methode) in ordinaires.into_iter().chain(aux_droits) {
+        if methode == "DROITS" && valeur_douane.is_none() {
+            // Meme definition que la vue v_import_droits : la part des frais
+            // « valeur en douane », hors ceux qui sont eux-memes repartis aux
+            // droits.
+            let frais_vd: std::collections::HashMap<String, i64> = sqlx::query_as::<_, (String, i64)>(
+                "SELECT r.id_article_dossier, (sum(r.montant_alloue_dhs) * 100)::bigint
+                   FROM lignes_frais_repartition r
+                   JOIN dossier_lignes_frais d ON d.id_ligne_frais = r.id_ligne_frais
+                   JOIN parametres_frais p     ON p.id_frais = d.id_frais
+                  WHERE d.id_dossier = $1 AND p.entre_valeur_douane = 1
+                    AND COALESCE(d.methode_repartition, p.methode_repartition) <> 'DROITS'
+                  GROUP BY r.id_article_dossier",
+            )
+            .bind(id_dossier)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect();
+            valeur_douane = Some(
+                lignes
+                    .iter()
+                    .map(|(id, valeur, ..)| (id.clone(), valeur + frais_vd.get(id).copied().unwrap_or(0)))
+                    .collect(),
+            );
+        }
         let cibles: Vec<String> = sqlx::query_scalar(
             "SELECT id_ligne FROM dossier_lignes_frais_cibles WHERE id_ligne_frais = $1",
         )
@@ -170,7 +220,26 @@ pub async fn recalculer_repartition_mode(tx: &mut PgConnection, id_dossier: &str
             .iter()
             .filter(|(id, ..)| cibles.is_empty() || cibles.contains(id))
             .collect();
-        let bases: Vec<i64> = perimetre.iter().map(|l| base(l, methode)).collect();
+        let bases: Vec<i64> = if methode == "DROITS" {
+            // Les droits attendus de chaque ligne : valeur en douane x taux. Une
+            // ligne sans position n'a pas de droit connu ; lui donner zero la
+            // dirait exoneree. Le frais reste alors non reparti, et la cloture
+            // nomme la cause.
+            let Some(vd) = valeur_douane.as_ref() else { continue };
+            let mut b = Vec::with_capacity(perimetre.len());
+            for (id, ..) in &perimetre {
+                match taux_droit.get(id) {
+                    Some(t) => b.push(vd.get(id).copied().unwrap_or(0) * t),
+                    None => break,
+                }
+            }
+            if b.len() < perimetre.len() {
+                continue;
+            }
+            b
+        } else {
+            perimetre.iter().map(|l| base(l, methode)).collect()
+        };
         let total: i64 = bases.iter().sum();
         if total <= 0 {
             // Rien pour le porter encore (aucune ligne saisie) : la cloture le
@@ -642,8 +711,10 @@ pub async fn cloturer_dans(
     recalculer_repartition_mode(tx, id_dossier, post_cloture).await?;
 
     let non_repartis: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT p.libelle || CASE WHEN COALESCE(d.methode_repartition, p.methode_repartition) = 'MANUEL'
-                                  THEN ', répartition manuelle' ELSE '' END,
+        "SELECT p.libelle || CASE COALESCE(d.methode_repartition, p.methode_repartition)
+                                  WHEN 'MANUEL' THEN ', répartition manuelle'
+                                  WHEN 'DROITS' THEN ', réparti aux droits : une ligne visée est sans position tarifaire, ou exonérée partout'
+                                  ELSE '' END,
                 d.montant_dhs::float8
            FROM dossier_lignes_frais d
            JOIN parametres_frais p ON p.id_frais = d.id_frais

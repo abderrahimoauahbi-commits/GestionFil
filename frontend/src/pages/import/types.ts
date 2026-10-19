@@ -132,7 +132,7 @@ export interface Frais {
   reparti_dhs?: number
 }
 
-export type MethodeRepartition = 'VALEUR' | 'POIDS' | 'QUANTITE' | 'PARTS_EGALES' | 'MANUEL'
+export type MethodeRepartition = 'VALEUR' | 'POIDS' | 'QUANTITE' | 'PARTS_EGALES' | 'MANUEL' | 'DROITS'
 
 /** Un frais inclus dans le cout dont la repartition n'egale pas le montant. */
 export const nonReparti = (f: Frais) =>
@@ -255,6 +255,30 @@ export interface DossierComplet {
   ajustements: Ajustement[]
   retours?: RetourImport[]
   engagements?: Engagement[]
+  /** Les droits de douane attendus, par ligne (19/10/2026). */
+  droits?: DroitLigne[]
+  droits_dossier?: DroitsDossier | null
+}
+
+/** Les droits attendus d'une ligne : valeur en douane x taux de sa position. */
+export interface DroitLigne {
+  id_ligne: string
+  code_reference: string | null
+  code_sh: string | null
+  libelle_position: string | null
+  taux_droit_pct: number | null
+  valeur_dhs?: number
+  frais_valeur_douane_dhs?: number
+  valeur_douane_dhs?: number
+  /** NULL : pas de position active, droit inconnu (pas zero). Absent : masque. */
+  droits_attendus_dhs?: number | null
+}
+
+export interface DroitsDossier {
+  nb_lignes: number
+  nb_lignes_sans_position: number
+  droits_attendus_dhs?: number
+  droits_payes_dhs?: number
 }
 
 /** Un engagement d'importation (EI) ouvert en banque, cite par la DUM. */
@@ -296,6 +320,7 @@ export const METHODE_REPARTITION: Record<MethodeRepartition, string> = {
   QUANTITE: 'À la quantité',
   PARTS_EGALES: 'À parts égales',
   MANUEL: 'Manuelle',
+  DROITS: 'Au taux des droits',
 }
 
 export const LIBELLE_STATUT: Record<StatutDossier, string> = {

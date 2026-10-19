@@ -47,10 +47,23 @@ ALTER FUNCTION fn_date_metier(date) OWNER TO gestionfil;
 -- au jour marocain. Le serveur ecrit par lui les colonnes devenues `date` : la
 -- meme regle que la conversion des donnees ci-dessous.
 CREATE OR REPLACE FUNCTION fn_jour_casablanca(text) RETURNS date
-    LANGUAGE sql STABLE AS $$
-    SELECT CASE WHEN NULLIF(btrim($1), '') IS NULL THEN NULL
-                WHEN $1 ~ 'T' THEN (($1)::timestamptz AT TIME ZONE 'Africa/Casablanca')::date
-                ELSE ($1)::date END $$;
+    LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    IF NULLIF(btrim($1), '') IS NULL THEN
+        RETURN NULL;
+    END IF;
+    -- Le format ISO seul : une date a la francaise (17/10/2026) ou a l'americaine
+    -- se lirait selon le reglage du serveur. Refus net, comme la contrainte de
+    -- format qu'elle remplace (2026-10-17f).
+    IF $1 !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}(:?[0-9]{2})?)?)?$' THEN
+        RAISE EXCEPTION 'Date illisible : « % » (format attendu AAAA-MM-JJ).', $1
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF $1 ~ 'T' THEN
+        RETURN (($1)::timestamptz AT TIME ZONE 'Africa/Casablanca')::date;
+    END IF;
+    RETURN ($1)::date;
+END $$;
 ALTER FUNCTION fn_jour_casablanca(text) OWNER TO gestionfil;
 
 -- ---- L'outil : retyper des colonnes en `date`, vues comprises ---------------
@@ -121,7 +134,11 @@ BEGIN
               WHERE conrelid = p_table::regclass AND contype = 'c'
                 AND conkey && v_attnums
     LOOP
-        IF r.conname NOT LIKE 'chk_iso_%' AND r.conname NOT LIKE 'ck_date_%' THEN
+        -- Un controle de FORMAT texte se reconnait a son nom (ck_date_*, chk_iso_*)
+        -- ou a son contenu (une expression reguliere, fn_texte_date_iso) : il ne
+        -- se recree pas.
+        IF r.conname NOT LIKE 'chk_iso_%' AND r.conname NOT LIKE 'ck_date_%'
+           AND r.def !~ ' ~ ' AND r.def !~ 'fn_texte_date_iso' THEN
             v_ctrl := v_ctrl || format('ALTER TABLE %I ADD CONSTRAINT %I %s', p_table, r.conname, r.def);
         END IF;
         EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', p_table, r.conname);

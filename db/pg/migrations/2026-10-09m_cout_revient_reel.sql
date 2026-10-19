@@ -46,7 +46,7 @@ FOR EACH ROW EXECUTE FUNCTION fn_trg_audit_modification();
 -- Le cours BAM du 31/12 d'une annee (le dernier cours connu a cette date).
 CREATE OR REPLACE FUNCTION fn_cours_bam_fin_annee(p_devise text, p_annee int) RETURNS numeric AS $$
     SELECT cours_mad FROM cours_bam
-     WHERE code_devise = p_devise AND date_cours <= p_annee::text || '-12-31'
+     WHERE code_devise = p_devise AND date_cours::text <= p_annee::text || '-12-31'
      ORDER BY date_cours DESC LIMIT 1;
 $$ LANGUAGE sql STABLE;
 ALTER FUNCTION fn_cours_bam_fin_annee(text, int) OWNER TO gestionfil;
@@ -55,7 +55,7 @@ ALTER FUNCTION fn_cours_bam_fin_annee(text, int) OWNER TO gestionfil;
 CREATE OR REPLACE VIEW v_change_paiement AS
 WITH f AS (
     SELECT fa.id_facture, fa.id_dossier, fa.numero_facture, fa.code_devise, fa.taux_change AS cours_ded,
-           substr(COALESCE(NULLIF(btrim(d.date_dum), ''), fa.date_facture), 1, 10) AS date_ded
+           substr(COALESCE(NULLIF(btrim(d.date_dum::text), ''), fa.date_facture::text), 1, 10) AS date_ded
       FROM import_factures fa JOIN import_dossiers d ON d.id_dossier = fa.id_dossier
 )
 SELECT p.id_paiement, f.id_facture, f.id_dossier, f.numero_facture, f.code_devise, f.date_ded, f.cours_ded,
@@ -79,7 +79,7 @@ CREATE OR REPLACE VIEW v_cout_revient_reel AS
 WITH f AS (
     SELECT fa.id_facture, fa.id_dossier, d.numero AS numero_dossier, fa.numero_facture, fa.code_devise,
            fa.montant_devise, fa.taux_change AS cours_ded,
-           substr(COALESCE(NULLIF(btrim(d.date_dum), ''), fa.date_facture), 1, 10) AS date_ded
+           substr(COALESCE(NULLIF(btrim(d.date_dum::text), ''), fa.date_facture::text), 1, 10) AS date_ded
       FROM import_factures fa JOIN import_dossiers d ON d.id_dossier = fa.id_dossier
 ), frais AS (
     SELECT l.id_facture, sum(r.montant_alloue_dhs) AS frais_mad

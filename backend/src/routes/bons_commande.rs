@@ -157,7 +157,7 @@ pub async fn creer_bc(
               date_taux_engage, date_livraison_prevue, conditions_paiement,
               motif_creation, notes, montant_total_devise, montant_total_mad,
               id_utilisateur_creation, date_bc)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,0,$11,
+         VALUES ($1,$2,$3,$4,$5,$6,fn_jour_casablanca($7),$8,$9,$10,0,0,$11,
                  COALESCE(fn_jour_casablanca($12), (now() AT TIME ZONE 'Africa/Casablanca')::date))",
     )
     .bind(&id)
@@ -479,7 +479,7 @@ async fn inserer_ligne_bc(
          VALUES ($1, $2, $3, $4, $5, $6,
                  COALESCE((SELECT r.designation FROM reference r
                             WHERE r.code_reference = $5), $6),
-                 $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, {proposition}, {besoin})"
+                 $7, $8, $9, $10, $11, $12, fn_jour_casablanca($13), $14, $15, $16, {proposition}, {besoin})"
     ))
     .bind(id_ligne)
     .bind(id_bc)
@@ -950,7 +950,7 @@ pub async fn changer_statut_bc(
         sqlx::query(
             "UPDATE bon_commande
                 SET taux_change_engage = CASE WHEN code_devise = 'MAD' THEN taux_change_engage ELSE $3 END,
-                    date_taux_engage = $2, date_cours_engage = $4, source_taux_engage = $5, motif_taux_engage = $6
+                    date_taux_engage = $2, date_cours_engage = fn_jour_casablanca($4), source_taux_engage = $5, motif_taux_engage = $6
               WHERE id_bc = $1",
         )
         .bind(&id)
@@ -1132,7 +1132,7 @@ pub async fn modifier_bc(
     sqlx::query(
         "UPDATE bon_commande
             SET date_bc               = COALESCE(fn_jour_casablanca($2), date_bc),
-                date_livraison_prevue = COALESCE($3, date_livraison_prevue),
+                date_livraison_prevue = COALESCE(fn_jour_casablanca($3), date_livraison_prevue),
                 conditions_paiement   = COALESCE($4, conditions_paiement),
                 notes                 = COALESCE($5, notes),
                 motif_creation        = COALESCE($6, motif_creation),
@@ -1575,7 +1575,7 @@ pub async fn modifier_ligne_bc(
     }
 
     if let Some(d) = &l.date_livraison_prevue {
-        sqlx::query("UPDATE ligne_bc SET date_livraison_prevue = $2 WHERE id_ligne_bc = $1")
+        sqlx::query("UPDATE ligne_bc SET date_livraison_prevue = fn_jour_casablanca($2) WHERE id_ligne_bc = $1")
             .bind(&ligne)
             .bind(d)
             .execute(&mut *tx)

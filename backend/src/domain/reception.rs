@@ -95,7 +95,7 @@ pub async fn valider(
 
     // ---- 1. Entete ----------------------------------------------------------
     let entete: EnteteReception = sqlx::query_as(
-        "SELECT numero_reception, date_reception, statut, id_bc,
+        "SELECT numero_reception, date_reception::text AS date_reception, statut, id_bc,
                 code_fournisseur, id_utilisateur_reception, id_dossier_import
            FROM reception WHERE id_reception = $1",
     )
@@ -127,7 +127,7 @@ pub async fn valider(
     // precisement dans le cas ou elle compte le plus.
     let bons: Vec<BonCouvert> = sqlx::query_as(
         "SELECT DISTINCT bc.id_bc, bc.numero_bc, bc.statut,
-                bc.date_livraison_prevue, bc.id_utilisateur_creation
+                bc.date_livraison_prevue::text AS date_livraison_prevue, bc.id_utilisateur_creation
            FROM bon_commande bc
           WHERE bc.id_bc = $2
              OR bc.id_bc IN (SELECT lb.id_bc
@@ -255,7 +255,7 @@ pub async fn valider(
     // bons du meme fournisseur n'ont pas la meme date, et archiver un retard
     // unique pour toutes les lignes inventerait une avance ici, une faute la.
     let promesses: HashMap<String, Option<String>> = sqlx::query_as::<_, (String, Option<String>)>(
-        "SELECT lb.id_ligne_bc, bc.date_livraison_prevue
+        "SELECT lb.id_ligne_bc, bc.date_livraison_prevue::text
            FROM ligne_reception lr
            JOIN ligne_bc lb     ON lb.id_ligne_bc = lr.id_ligne_bc
            JOIN bon_commande bc ON bc.id_bc = lb.id_bc
@@ -407,7 +407,7 @@ pub async fn valider(
                   total_mad, code_magasin_dest, statut_qualite, ecart_pct,
                   conformite_specifications, conformite_quantite, conformite_delai,
                   jours_retard, date_archive, id_utilisateur_archive, version)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+             VALUES ($1,$2,$3,$4,fn_jour_casablanca($5),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
                      -- Une revalidation ecrit la version suivante (2026-10-08g).
                      (SELECT COALESCE(max(version), 0) + 1 FROM archive_reception WHERE id_ligne_reception = $1))",
         )
@@ -443,7 +443,7 @@ pub async fn valider(
                  (id_ligne_reception, code_reference, code_fournisseur, date_achat,
                   prix_kg_devise, code_devise, taux_change, prix_kg_mad,
                   quantite_achetee_kg, total_mad, date_enregistrement)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             VALUES ($1,$2,$3,fn_jour_casablanca($4),$5,$6,$7,$8,$9,$10,$11)
              -- Revalidee, la ligne garde son entree d'origine (meme prix de bon).
              ON CONFLICT (id_ligne_reception) DO NOTHING",
         )

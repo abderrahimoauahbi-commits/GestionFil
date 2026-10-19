@@ -980,7 +980,7 @@ def scenario_proposition_une_fois(c, infra):
     prop = infra.valeur(
         "INSERT INTO plan_achat (code_reference, quantite_suggeree_kg, code_fournisseur, prix_estime_mad, "
         "source_prix, date_besoin_prevue, urgence) "
-        f"VALUES ('{ref}', 100, '{frs}', 10, 'CATALOGUE', to_char(current_date + 30, 'YYYY-MM-DD'), 'TIER 2') "
+        f"VALUES ('{ref}', 100, '{frs}', 10, 'CATALOGUE', current_date + 30, 'TIER 2') "
         "RETURNING id_proposition")
     ligne = {"code_reference": ref, "unite_commande": "kg", "quantite_commandee_unite": 100,
              "prix_unitaire_devise": 10, "id_proposition": prop}
@@ -1119,7 +1119,7 @@ def scenario_typage_du_temps(c, infra):
     GROSSIT PLUS : pas une colonne de date en texte de plus, et chacune porte sa contrainte de
     format ISO (migration 2026-10-17f). Une date mal formee ne peut plus entrer."""
     # LE CLIQUET : a abaisser a chaque colonne convertie, jamais a relever.
-    plafond = 129  # 19/10 (2026-10-19g) : 5 colonnes passees en date ; le cliquet descend avec elles
+    plafond = 109  # 19/10 : 5 colonnes en date (2026-10-19g), puis 20 (2026-10-19h) ; le cliquet descend avec elles
     n = int(infra.valeur("SELECT count(*) " + COLONNES_DATE_TEXTE))
     verifier(n <= plafond, f"{n} colonnes de date en texte, plafond {plafond} : une nouvelle colonne de date "
                            "se cree en `date` ou `timestamptz`, pas en `text`")
@@ -2339,7 +2339,7 @@ def scenario_gardes_p1(c, infra):
         "code_fournisseur": FRS, "date_livraison_prevue": "",
         "lignes": [{"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 100,
                     "prix_unitaire_devise": 20}]})
-    verifier(infra.valeur(f"SELECT coalesce(date_livraison_prevue, 'NULL') FROM bon_commande "
+    verifier(infra.valeur(f"SELECT coalesce(date_livraison_prevue::text, 'NULL') FROM bon_commande "
                           f"WHERE id_bc = '{bc['id_bc']}'") == "NULL", "la date vide n'est pas devenue NULL")
 
     # La tolerance de pesee : l'assistante corrige la fiche, pas le seuil.

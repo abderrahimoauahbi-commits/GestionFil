@@ -76,7 +76,7 @@ pub async fn lister_dossiers(
     user.exiger(&state.db, IMPORT, Action::Lire).await?;
     let lignes = sqlx::query(
         "SELECT d.id_dossier, d.numero, d.numero_bl, d.conteneurs, d.code_devise, d.taux_change,
-                d.date_arrivee, d.statut, d.date_creation, d.date_cloture,
+                d.date_arrivee::text AS date_arrivee, d.statut, d.date_creation, d.date_cloture,
                 -- Par quel circuit il recoit sa marchandise (ADR-003 phase A) :
                 -- FACTURE pour les dossiers d'avant la bascule, BON depuis.
                 d.circuit_reception,
@@ -173,7 +173,7 @@ pub async fn creer_dossier(
         "INSERT INTO import_dossiers (numero, numero_bl, conteneurs, code_devise, taux_change,
                                       date_arrivee, notes, id_utilisateur_creation,
                                       numero_dum, regime_douanier, date_dum)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, '010'), $11)
+         VALUES ($1, $2, $3, $4, $5, fn_jour_casablanca($6), $7, $8, $9, COALESCE($10, '010'), fn_jour_casablanca($11))
          RETURNING id_dossier",
     )
     .bind(&numero)
@@ -404,9 +404,9 @@ pub async fn modifier_dossier(
         "UPDATE import_dossiers
             SET numero = COALESCE($2, numero), numero_bl = COALESCE($3, numero_bl),
                 conteneurs = COALESCE($4, conteneurs), code_devise = COALESCE($5, code_devise),
-                taux_change = COALESCE($6, taux_change), date_arrivee = COALESCE($7, date_arrivee),
+                taux_change = COALESCE($6, taux_change), date_arrivee = COALESCE(fn_jour_casablanca($7), date_arrivee),
                 notes = COALESCE($8, notes), numero_dum = COALESCE($9, numero_dum),
-                regime_douanier = COALESCE($10, regime_douanier), date_dum = COALESCE($11, date_dum)
+                regime_douanier = COALESCE($10, regime_douanier), date_dum = COALESCE(fn_jour_casablanca($11), date_dum)
           WHERE id_dossier = $1",
     )
     .bind(&id)
@@ -523,8 +523,8 @@ pub(crate) async fn taux_reference(
     date: &str,
 ) -> AppResult<Option<TauxReference>> {
     let bam: Option<(f64, String)> = sqlx::query_as(
-        "SELECT cours_mad::float8, date_cours FROM cours_bam
-          WHERE code_devise = $1 AND date_cours <= substr($2, 1, 10)
+        "SELECT cours_mad::float8, date_cours::text FROM cours_bam
+          WHERE code_devise = $1 AND date_cours <= fn_jour_casablanca($2)
           ORDER BY date_cours DESC LIMIT 1",
     )
     .bind(devise)
@@ -668,7 +668,7 @@ pub async fn creer_facture(
         "INSERT INTO import_factures (id_dossier, code_fournisseur, numero_facture, date_facture,
                                       code_devise, taux_change, montant_devise, nb_palettes,
                                       nb_bobines, id_utilisateur_creation, id_engagement)
-         SELECT d.id_dossier, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, '')
+         SELECT d.id_dossier, $2, $3, fn_jour_casablanca($4), $5, $6, $7, $8, $9, $10, NULLIF($11, '')
            FROM import_dossiers d WHERE d.id_dossier = $1
          RETURNING id_facture",
     )
@@ -706,7 +706,7 @@ pub async fn modifier_facture(
     // taux confirme une fois serait redemande a chaque enregistrement de la
     // facture, pour un nombre de palettes corrige.
     let (devise_av, taux_av, date_av): (String, f64, String) = sqlx::query_as(
-        "SELECT code_devise, taux_change::float8, date_facture FROM import_factures
+        "SELECT code_devise, taux_change::float8, date_facture::text FROM import_factures
           WHERE id_facture = $1 FOR UPDATE",
     )
     .bind(&id)
@@ -729,7 +729,7 @@ pub async fn modifier_facture(
     sqlx::query(
         "UPDATE import_factures
             SET code_fournisseur = COALESCE($2, code_fournisseur),
-                numero_facture = COALESCE($3, numero_facture), date_facture = COALESCE($4, date_facture),
+                numero_facture = COALESCE($3, numero_facture), date_facture = COALESCE(fn_jour_casablanca($4), date_facture),
                 code_devise = COALESCE($5, code_devise), taux_change = COALESCE($6, taux_change),
                 montant_devise = COALESCE($7, montant_devise), nb_palettes = COALESCE($8, nb_palettes),
                 nb_bobines = COALESCE($9, nb_bobines),

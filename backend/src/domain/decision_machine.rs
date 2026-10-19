@@ -881,7 +881,7 @@ async fn poser_etage(
 ) -> AppResult<()> {
     type Ancienne = (String, String, i64, f64, Option<String>, String, Option<String>, Option<String>, Option<String>);
     let anciennes: HashMap<String, Ancienne> = sqlx::query_as::<_, Ancienne>(
-        "SELECT code_reference, lot_fournisseur, nb_bobines, kg::float8, date_constat, mode_constat,
+        "SELECT code_reference, lot_fournisseur, nb_bobines, kg::float8, date_constat::text AS date_constat, mode_constat,
                 responsable, id_utilisateur, id_fiche
            FROM machine_etat WHERE code_emplacement = $1",
     )
@@ -915,7 +915,7 @@ async fn poser_etage(
             "INSERT INTO machine_etat
                  (code_emplacement, code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg,
                   pourcentage, kg, mode_constat, date_constat, responsable, id_utilisateur, id_fiche)
-             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,$8,$9,$10,$11,$12)",
+             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,$8,fn_jour_casablanca($9),$10,$11,$12)",
         )
         .bind(zone)
         .bind(&e.code_reference)

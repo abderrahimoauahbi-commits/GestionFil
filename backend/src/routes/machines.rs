@@ -171,7 +171,7 @@ pub async fn lister(State(state): State<AppState>, user: Utilisateur) -> AppResu
                 COALESCE(SUM(e.nb_bobines), 0)::bigint     AS bobines_presentes,
                 COALESCE(SUM(e.kg), 0)::float8             AS quantite_kg,
                 COUNT(DISTINCT z.code_emplacement)::bigint AS nb_zones,
-                MAX(e.date_constat)                        AS dernier_constat
+                MAX(e.date_constat)::text                  AS dernier_constat
            FROM machine m
            LEFT JOIN machine_emplacement z ON z.code_machine = m.code_machine
            LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
@@ -199,7 +199,7 @@ pub async fn plan(
                 COALESCE(SUM(e.nb_bobines), 0)::bigint AS bobines_presentes,
                 COALESCE(SUM(e.kg), 0)::float8         AS quantite_kg,
                 COUNT(e.code_reference)::bigint        AS nb_lots,
-                MAX(e.date_constat)                    AS dernier_constat
+                MAX(e.date_constat)::text              AS dernier_constat
            FROM machine_emplacement z
            LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
           WHERE z.code_machine = $1
@@ -430,7 +430,7 @@ pub async fn lister_fiches(
     let lignes = sqlx::query(
         "SELECT f.id_fiche, f.numero_fiche, f.type_fiche, f.statut, f.code_machine,
                 m.nom AS machine_nom, f.code_emplacement, z.libelle AS zone,
-                f.date_fiche, f.date_constat_precedent, f.code_magasin,
+                f.date_fiche::text AS date_fiche, f.date_constat_precedent::text AS date_constat_precedent, f.code_magasin,
                 f.nb_bobines_etage, f.numero_of, f.responsable, f.observations,
                 f.date_creation, f.date_validation, f.motif_annulation,
                 (SELECT COUNT(*) FROM machine_fiche_ligne l WHERE l.id_fiche = f.id_fiche)
@@ -607,8 +607,8 @@ pub async fn creer_fiche(
               date_fiche, date_constat_precedent, code_magasin, nb_bobines_etage,
               nb_palettes, numero_of, responsable, observations, id_utilisateur)
          VALUES ($1,$2,$3,'BROUILLON',$4,$5,
-                 COALESCE($6, to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD')),
-                 $7,$8,$9,$10,$11,$12,$13,$14)",
+                 COALESCE(fn_jour_casablanca($6), (now() AT TIME ZONE 'Africa/Casablanca')::date),
+                 fn_jour_casablanca($7),$8,$9,$10,$11,$12,$13,$14)",
     )
     .bind(&id)
     .bind(&numero)
@@ -665,7 +665,7 @@ pub async fn remplacer_fiche(
 
     sqlx::query(
         "UPDATE machine_fiche
-            SET date_fiche = COALESCE($2, date_fiche), code_magasin = $3,
+            SET date_fiche = COALESCE(fn_jour_casablanca($2), date_fiche), code_magasin = $3,
                 nb_bobines_etage = $4, nb_palettes = $5, numero_of = $6,
                 responsable = $7, observations = $8,
                 code_machine = $9, code_emplacement = $10
@@ -741,7 +741,7 @@ async fn charger_decision(
         (String, String, String, String, Option<String>, String, Option<String>, String, i64, i64, String);
     let e: Entete = sqlx::query_as(
         "SELECT f.numero_fiche, f.type_fiche, f.code_machine, f.code_emplacement, f.code_magasin,
-                f.date_fiche, f.numero_of, f.responsable, f.nb_validations, z.capacite_bobines, z.libelle
+                f.date_fiche::text AS date_fiche, f.numero_of, f.responsable, f.nb_validations, z.capacite_bobines, z.libelle
            FROM machine_fiche f
            JOIN machine_emplacement z ON z.code_emplacement = f.code_emplacement
           WHERE f.id_fiche = $1",
@@ -1045,7 +1045,7 @@ async fn resoudre_zone(db: &crate::db::Db, machine: &str, zone: &str) -> AppResu
 
 async fn dernier_constat(db: &crate::db::Db, zone: &str) -> AppResult<Option<String>> {
     Ok(sqlx::query_scalar::<_, Option<String>>(
-        "SELECT MAX(date_constat) FROM machine_etat WHERE code_emplacement = $1",
+        "SELECT MAX(date_constat)::text FROM machine_etat WHERE code_emplacement = $1",
     )
     .bind(zone)
     .fetch_one(db)

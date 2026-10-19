@@ -945,7 +945,7 @@ pub async fn creer_plan(
               seuil_alerte_jours, seuil_critique_jours,
               seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
               id_utilisateur_creation)
-         SELECT $1, $2, $3, $4, $5, $6, $7,
+         SELECT $1, $2, $3, $4, $5, fn_jour_casablanca($6), fn_jour_casablanca($7),
                 (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
                 (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
                 (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte'),
@@ -1191,7 +1191,7 @@ pub async fn enregistrer_plan(
             sqlx::query(
                 "UPDATE plan_production SET
                      libelle = $2, scenario_nom = $3, annee = $4,
-                     date_debut = $5, date_fin = $6, mois_horizon = $7,
+                     date_debut = fn_jour_casablanca($5), date_fin = fn_jour_casablanca($6), mois_horizon = $7,
                      croissance_annuelle_pct = $8,
                      date_modification = $9, id_utilisateur_modification = $10
                   WHERE id_plan = $1",
@@ -1228,7 +1228,7 @@ pub async fn enregistrer_plan(
                       seuil_alerte_jours, seuil_critique_jours,
                       seuil_tier1_mad, seuil_tier2_mad, seuil_tier3_mad,
                       id_utilisateur_creation)
-                 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                 SELECT $1, $2, $3, $4, $5, fn_jour_casablanca($6), fn_jour_casablanca($7), $8, $9,
                         (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_MargeSecurite'),
                         (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_CouvMinMois'),
                         (SELECT CAST(valeur_courante AS numeric)    FROM parametre WHERE code_parametre='P_TauxPerte'),

@@ -72,6 +72,9 @@ EMPREINTES_REMPLACEES: dict[str, set[str]] = {
     "2026-10-09b_supervision_rejouee.sql": {"c765b9b45e73a8e86d900c30dc1bd1d571082b9df001c41ca06f94807b957d86"},
     "2026-10-09d_sortie_hors_machine.sql": {"ff584388a8635bde5e288364114c24c0ef36f3c765fe40997cef470db01c774a"},
     "2026-10-09j_prix_plan_achat.sql": {"913cd8bce990de61598722b6d65d50018cac7e0c4a7bce9c5f9a15cb058c5ef9"},
+    "2026-10-09l_taux_bon_commande.sql": {"20dd13614760b9016716f0d1a75d284ae4df827a162642a998b0e239c9d2277b"},
+    "2026-10-09m_cout_revient_reel.sql": {"a3b0ebadd29528df5ceb8a57ba55a56cd74057017635388fabea9836f084c63a"},
+    "2026-10-09v_historique_prix_revise.sql": {"b44f835bfc0759514a1a845b925d406375ca6bb7ab573bcb995499e52a2e68d6"},
     "2026-10-09n_avoir_import.sql": {"f4e6f92309aab941e9d2798e3343aacd28ae265ffa1750b0adf32e8d0df8e681"},
 }
 

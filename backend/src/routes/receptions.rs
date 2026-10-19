@@ -63,7 +63,7 @@ pub async fn lister_receptions(
                             JOIN bon_commande b2  ON b2.id_bc = lb2.id_bc
                            WHERE l2.id_reception = rc.id_reception)) AS numero_bc,
                 COALESCE(bc.date_bc::text, p.date_bc)                             AS date_bc,
-                COALESCE(bc.date_livraison_prevue, p.date_livraison_prevue) AS date_livraison_prevue,
+                COALESCE(bc.date_livraison_prevue::text, p.date_livraison_prevue) AS date_livraison_prevue,
                 -- L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier rattache,
                 -- et ce qu'il porte de douanier.
                 d.numero AS dossier_numero, d.numero_dum, d.conteneurs,
@@ -87,7 +87,7 @@ pub async fn lister_receptions(
                     AS retard_jours,
 
                 CASE WHEN COALESCE(bc.date_bc::text, p.date_bc) IS NULL
-                       OR COALESCE(bc.date_livraison_prevue, p.date_livraison_prevue) IS NULL
+                       OR COALESCE(bc.date_livraison_prevue::text, p.date_livraison_prevue) IS NULL
                      THEN NULL
                      WHEN substr(rc.date_reception, 1, 10)
                           <= COALESCE(substr(bc.date_livraison_prevue, 1, 10), p.date_livraison_prevue)
@@ -229,7 +229,7 @@ pub async fn modifier_reception(
                 transporteur        = COALESCE($3, transporteur),
                 nombre_colis        = COALESCE($4, nombre_colis),
                 poids_total_brut_kg = COALESCE($5, poids_total_brut_kg),
-                date_reception      = COALESCE($7, date_reception),
+                date_reception      = COALESCE(fn_jour_casablanca($7), date_reception),
                 -- Vide = detacher, absent = ne pas y toucher (cf. ModifReception).
                 id_dossier_import   = CASE WHEN $8::text IS NULL THEN id_dossier_import
                                            WHEN $8 = '' THEN NULL
@@ -313,7 +313,7 @@ pub async fn dossiers_import_ouverts(
                   WHERE f.id_dossier = d.id_dossier) AS fournisseurs
            FROM import_dossiers d
           WHERE d.statut <> 'CLOTURE'
-          ORDER BY COALESCE(d.date_arrivee, d.date_creation) DESC, d.numero DESC
+          ORDER BY COALESCE(d.date_arrivee::text, d.date_creation) DESC, d.numero DESC
           LIMIT 100",
     )
     .fetch_all(&state.db)
@@ -529,7 +529,7 @@ async fn ligne_bc_regularisation(
                       date_taux_engage, date_livraison_prevue, conditions_paiement,
                       motif_creation, notes, montant_total_devise, montant_total_mad,
                       id_utilisateur_creation, id_reception_regularisee)
-                 VALUES ($1,$2,$3,$4,$5,$6, to_char(current_date, 'YYYY-MM-DD'), $7,
+                 VALUES ($1,$2,$3,$4,$5,$6, current_date, $7,
                          'MANUEL', $8, 0, 0, $9, $10)",
             )
             .bind(&id_nouveau)
@@ -587,7 +587,7 @@ async fn ligne_bc_regularisation(
               quantite_commandee_kg, prix_unitaire_devise, code_devise,
               date_livraison_prevue, notes)
          SELECT $1, $2, $3, $4, r.designation, $5, $6, $7, $8, $9, $10,
-                to_char(current_date, 'YYYY-MM-DD'), 'Cree par la reception ' || $11
+                current_date, 'Cree par la reception ' || $11
            FROM reference r WHERE r.code_reference = $4",
     )
     .bind(&id_ligne_bc)
@@ -672,7 +672,7 @@ pub async fn creer_reception(
               poids_total_brut_kg, id_utilisateur_reception, date_reception,
               id_dossier_import)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                 COALESCE($11, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')),
+                 COALESCE(fn_jour_casablanca($11), (now() AT TIME ZONE 'Africa/Casablanca')::date),
                  NULLIF($12, ''))",
     )
     .bind(&id)

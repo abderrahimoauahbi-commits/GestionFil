@@ -109,6 +109,18 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // A1, deuxieme lot (19/10/2026) : vingt colonnes de dates (reception,
+        // fiche machine, livraison prevue, cours BAM…) sont des `date` ; le serveur
+        // les compare a current_date et les ecrit par fn_jour_casablanca.
+        "2026-10-19h_dates_typees_lot2.sql",
+        "SELECT (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'reception'
+                    AND column_name = 'date_reception') = 'date'
+            AND (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'machine_fiche'
+                    AND column_name = 'date_fiche') = 'date'",
+    ),
+    (
         // A1, premier lot (19/10/2026) : date_mouvement, date_bc, date_debut / date_fin
         // des taux et date_derniere_sortie sont des `date` ; le serveur les ecrit par
         // `fn_jour_casablanca`. Sans la migration, toute ecriture de mouvement tombe.

@@ -33,7 +33,7 @@ COMMENT ON COLUMN bon_commande.date_cours_engage IS
 
 -- Le passe : les bons valides l'ont ete au taux de reference du jour de validation.
 UPDATE bon_commande
-   SET source_taux_engage = 'REFERENCE', date_cours_engage = substr(COALESCE(date_taux_engage, date_validation), 1, 10)
+   SET source_taux_engage = 'REFERENCE', date_cours_engage = substr(COALESCE(date_taux_engage, date_validation), 1, 10)::date
  WHERE source_taux_engage IS NULL AND date_validation IS NOT NULL AND code_devise <> 'MAD';
 
 COMMIT;

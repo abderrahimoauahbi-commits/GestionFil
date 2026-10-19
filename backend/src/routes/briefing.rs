@@ -127,7 +127,7 @@ pub async fn briefing(State(state): State<AppState>, user: Utilisateur) -> AppRe
             "SELECT count(*) FROM bon_commande
               WHERE statut IN ('ENVOYE','LIVRE_PARTIEL')
                 AND date_livraison_prevue IS NOT NULL
-                AND date_livraison_prevue < to_char(current_date, 'YYYY-MM-DD')",
+                AND date_livraison_prevue < current_date",
         )
         .await;
         if n > 0 {

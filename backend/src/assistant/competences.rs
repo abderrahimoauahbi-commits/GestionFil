@@ -559,14 +559,14 @@ pub async fn executer(
                         bc.montant_total_mad::float8 AS montant_total_mad,
                         bc.date_livraison_prevue,
                         CASE WHEN bc.date_livraison_prevue IS NOT NULL
-                                  AND bc.date_livraison_prevue < to_char(current_date,'YYYY-MM-DD')
+                                  AND bc.date_livraison_prevue < current_date
                              THEN CAST(current_date - (bc.date_livraison_prevue)::date AS bigint)
                         END AS retard_jours
                    FROM bon_commande bc
                    LEFT JOIN fournisseur f ON f.code_fournisseur = bc.code_fournisseur
                   WHERE bc.statut NOT IN ('SOLDE', 'ANNULE')
                     AND ($1 = false OR (bc.date_livraison_prevue IS NOT NULL
-                         AND bc.date_livraison_prevue < to_char(current_date,'YYYY-MM-DD')))
+                         AND bc.date_livraison_prevue < current_date))
                   ORDER BY bc.date_livraison_prevue NULLS LAST
                   LIMIT 25",
             )

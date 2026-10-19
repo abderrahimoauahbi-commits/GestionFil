@@ -121,20 +121,20 @@ dormant AS (
 -- celui des six precedents. Une comparaison mois a mois serait du bruit.
 prix AS (
     SELECT sum(h.prix_kg_mad * h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                             'YYYY-MM-DD'))
            / NULLIF(sum(h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                             'YYYY-MM-DD')), 0)    AS recent,
            sum(h.prix_kg_mad * h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                            'YYYY-MM-DD')
-                 AND h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
+                 AND h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
                                             'YYYY-MM-DD'))
            / NULLIF(sum(h.quantite_achetee_kg) FILTER (
-               WHERE h.date_achat < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
+               WHERE h.date_achat::text < to_char((now() AT TIME ZONE 'UTC') - interval '6 months',
                                            'YYYY-MM-DD')
-                 AND h.date_achat >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
+                 AND h.date_achat::text >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
                                             'YYYY-MM-DD')), 0)    AS ancien
       FROM historique_prix h
      WHERE h.quantite_achetee_kg > 0 AND h.prix_kg_mad > 0

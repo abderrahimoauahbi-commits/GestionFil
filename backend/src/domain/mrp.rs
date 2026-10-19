@@ -146,7 +146,7 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
              (id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
               taux_perte_applique, quantite_kg, date_calcul, date_reference)
          SELECT id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
-                taux_perte_pct, quantite_kg, $2, $3
+                taux_perte_pct, quantite_kg, $2, fn_jour_casablanca($3)
            FROM v_besoin_mrp_calcule
           WHERE id_plan = $1",
     )

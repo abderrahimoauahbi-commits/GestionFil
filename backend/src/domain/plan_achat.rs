@@ -130,7 +130,7 @@ pub async fn generer(
               palettes_a_commander, complement_palette_kg)
          SELECT $1, $2, pa.code_reference, pa.qte_a_commander_kg,
                 pa.unite_catalogue, pa.qte_a_commander_unite, pa.code_fournisseur,
-                pa.prix_estime_mad, pa.source_prix, pa.date_besoin_prevue, pa.tier,
+                pa.prix_estime_mad, pa.source_prix, pa.date_besoin_prevue::date, pa.tier,
                 pa.risque_sourcing,
                 CASE pa.statut
                     WHEN 'RUPTURE'   THEN 'Commander immediatement'
@@ -512,7 +512,7 @@ async fn ouvrir_bon(
               date_taux_engage, date_livraison_prevue, conditions_paiement,
               motif_creation, montant_total_devise, montant_total_mad,
               id_utilisateur_creation)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'MRP',0,0,$9)",
+         VALUES ($1,$2,$3,$4,$5,$6,fn_jour_casablanca($7),$8,'MRP',0,0,$9)",
     )
     .bind(&id)
     .bind(&numero)

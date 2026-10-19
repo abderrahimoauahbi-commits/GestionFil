@@ -72,6 +72,7 @@ import {
 } from '../composants/GrilleLignes'
 import { TotauxCommande } from '../composants/TotauxCommande'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -282,9 +283,13 @@ export function BonCommandeNouveau() {
     ebauches.length === 0 &&
     sansFacteur.length === 0
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const creer = useMutation({
     mutationFn: () =>
       api.post<{ id_bc: string; numero_bc: string; lignes: number }>('/api/bons-commande', {
+        id_document: idDocument,
         ...entete,
         lignes: pretes.map(corpsLigne),
       }),

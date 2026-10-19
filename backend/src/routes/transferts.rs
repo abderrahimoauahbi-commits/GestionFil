@@ -40,6 +40,11 @@ pub async fn lister_transferts(
 
 #[derive(Debug, Deserialize)]
 pub struct NouveauTransfert {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub code_magasin_source: String,
     pub code_magasin_dest: String,
     pub date_transfert: Option<String>,
@@ -123,12 +128,19 @@ pub async fn creer_transfert(
     Json(t): Json<NouveauTransfert>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    let id = crate::domain::idempotence::identifiant(t.id_document.as_deref())?;
+    if let Some(v) = crate::domain::idempotence::deja_enregistre(
+        &state.db, &crate::domain::idempotence::TRANSFERT, &id, &user.id,
+    )
+    .await?
+    {
+        return Ok(Json(v));
+    }
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
 
     let numero = numeroter(&mut tx, "transfert", "numero_transfert", "TRF").await?;
-    let id = uuid::Uuid::new_v4().to_string();
 
     sqlx::query(
         "INSERT INTO transfert

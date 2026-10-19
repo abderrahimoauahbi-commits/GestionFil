@@ -23,6 +23,7 @@ import { useGardeSaisie } from '../../hooks/useGardeSaisie'
 import { lireNombre } from '../../lib/nombres'
 import { cn, fmt } from '../../lib/utils'
 import { LIBELLE_STATUT_RETOUR, MODULE_RETOURS } from './commun'
+import { nouvelIdentifiant } from '../../lib/identifiant'
 
 interface Disponible {
   code_reference: string
@@ -210,10 +211,13 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
     void qc.invalidateQueries({ queryKey: ['retour-fournisseur', id] })
     void qc.invalidateQueries({ queryKey: ['retours-disponible'] })
   }
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const enregistrer = useMutation({
     mutationFn: () =>
       nouveau
-        ? api.post<{ id_retour: string; numero: string }>('/api/retours-fournisseur', corps())
+        ? api.post<{ id_retour: string; numero: string }>('/api/retours-fournisseur', { ...corps(), id_document: idDocument })
         : api.put<{ id_retour: string; numero: string }>(`/api/retours-fournisseur/${id}`, corps()),
     onSuccess: (r) => {
       toast.success(`Retour ${r.numero} enregistré en brouillon — un autre compte le validera`)

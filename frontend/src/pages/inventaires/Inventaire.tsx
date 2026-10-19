@@ -26,6 +26,7 @@ import { useGardeSaisie } from '../../hooks/useGardeSaisie'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { libelleLot } from '../../lib/lots'
+import { nouvelIdentifiant } from '../../lib/identifiant'
 import {
   LIBELLE_STATUT,
   LotTrouve,
@@ -498,9 +499,12 @@ function NouvelInventaire() {
     queryFn: ({ signal }) => api.get<{ code_magasin: string; nom: string }[]>('/api/magasins?actif=1', { signal }),
   })
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const creer = useMutation({
     mutationFn: () =>
-      api.post<{ id_inventaire: string; numero_inventaire: string; lignes_a_compter: number }>('/api/inventaires', form),
+      api.post<{ id_inventaire: string; numero_inventaire: string; lignes_a_compter: number }>('/api/inventaires', { ...form, id_document: idDocument }),
     onSuccess: (r) => {
       toast.success(`Inventaire ${r.numero_inventaire} créé : ${r.lignes_a_compter} ligne(s) à compter.`)
       void qc.invalidateQueries({ queryKey: ['inventaires'] })

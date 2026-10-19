@@ -132,6 +132,11 @@ pub async fn lister_receptions(
 
 #[derive(Debug, Deserialize)]
 pub struct NouvelleReception {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub id_bc: Option<String>,
     pub code_fournisseur: Option<String>,
     /// LE DOSSIER D'IMPORT DE CET ARRIVAGE (ADR-003 D2). Il porte la DUM, les
@@ -590,6 +595,14 @@ pub async fn creer_reception(
     Json(r): Json<NouvelleReception>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let id = crate::domain::idempotence::identifiant(r.id_document.as_deref())?;
+    if let Some(v) = crate::domain::idempotence::deja_enregistre(
+        &state.db, &crate::domain::idempotence::RECEPTION, &id, &user.id,
+    )
+    .await?
+    {
+        return Ok(Json(v));
+    }
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -632,7 +645,6 @@ pub async fn creer_reception(
     let jour_taux = date.clone().unwrap_or_else(crate::db::aujourdhui);
 
     let numero = numeroter(&mut tx, "reception", "numero_reception", "REC").await?;
-    let id = uuid::Uuid::new_v4().to_string();
 
     sqlx::query(
         "INSERT INTO reception

@@ -3,7 +3,7 @@
  *
  * L'ecran ne propose « Supprimer » qu'en BROUILLON ou EN_ATTENTE_VALIDATION ;
  * au-dela, le numero est parti chez un fournisseur et le bon s'annule. Le
- * serveur tient la meme regle (supprimer_bc, backend/src/routes/stock.rs) et a
+ * serveur tient la meme regle (supprimer_bc, backend/src/routes/bons_commande.rs) et a
  * le dernier mot : le second test lit sa garde et echoue si les deux listes
  * divergent — c'est la promesse ecrite dans statuts.ts.
  *
@@ -22,9 +22,9 @@ test('estSupprimable : brouillon et attente de validation seulement', () => {
 })
 
 test('l\'ecran et le serveur ont la meme liste', () => {
-  const source = readFileSync(new URL('../../backend/src/routes/stock.rs', import.meta.url), 'utf-8')
+  const source = readFileSync(new URL('../../backend/src/routes/bons_commande.rs', import.meta.url), 'utf-8')
   const debut = source.indexOf('pub async fn supprimer_bc(')
-  assert.ok(debut >= 0, 'supprimer_bc introuvable dans stock.rs')
+  assert.ok(debut >= 0, 'supprimer_bc introuvable dans bons_commande.rs')
   const fin = source.indexOf('\npub async fn ', debut + 1)
   const corps = source.slice(debut, fin < 0 ? undefined : fin)
   const garde = corps.split('\n').find((l) => /^\s*if statut != "/.test(l))

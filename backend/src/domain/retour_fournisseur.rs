@@ -41,6 +41,11 @@ pub struct LigneRetourSaisie {
 
 #[derive(Debug, Deserialize)]
 pub struct RetourSaisie {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub code_fournisseur: String,
     pub date_retour: Option<String>,
     pub motif: Option<String>,
@@ -187,8 +192,9 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
             let numero = numeroter(c, "retour_fournisseur", "numero", "RFO").await?;
             let id: String = sqlx::query_scalar(
                 "INSERT INTO retour_fournisseur
-                        (numero, date_retour, code_fournisseur, motif, observations, id_utilisateur_creation)
-                 VALUES ($1, $2, $3, btrim($4), NULLIF(btrim($5), ''), $6)
+                        (numero, date_retour, code_fournisseur, motif, observations, id_utilisateur_creation,
+                         id_retour)
+                 VALUES ($1, $2, $3, btrim($4), NULLIF(btrim($5), ''), $6, $7)
                  RETURNING id_retour",
             )
             .bind(&numero)
@@ -197,6 +203,7 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
             .bind(s.motif.as_deref().unwrap_or(""))
             .bind(&s.observations)
             .bind(&user.id)
+            .bind(crate::domain::idempotence::identifiant(s.id_document.as_deref())?)
             .fetch_one(&mut *c)
             .await?;
             (id, numero)
@@ -269,6 +276,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
     .await?;
     // Le stock, rejuge maintenant : il a pu bouger depuis la saisie.
     let saisie = RetourSaisie {
+        id_document: None,
         code_fournisseur: fournisseur,
         date_retour: Some(date_retour.clone()),
         motif: Some(motif.clone()),

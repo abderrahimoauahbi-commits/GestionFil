@@ -48,6 +48,7 @@ import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
+import { nouvelIdentifiant } from '../lib/identifiant'
 
 
 /* REGLE 12 : ajustements et dechets. La sortie production n'est plus qu'un
@@ -575,9 +576,13 @@ export function MouvementNouveau() {
     },
   })
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const enregistrer = useMutation({
     mutationFn: () =>
       api.post('/api/mouvements', {
+        id_document: idDocument,
         ...entete,
         responsable: entete.responsable.trim() || null,
         reference_document: entete.reference_document.trim() || null,

@@ -57,6 +57,7 @@ import { AvisColisage } from '../composants/AvisColisage'
 import { AvisDerive } from '../composants/AvisDerive'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
+import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'RECEPTIONS'
 
@@ -526,6 +527,9 @@ export function ReceptionNouvelle() {
     (l) => horsTolerance(l) && (!l.derogation || !l.motifDerogation.trim()),
   )
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const creer = useMutation({
     mutationFn: () =>
       api.post<{
@@ -534,6 +538,7 @@ export function ReceptionNouvelle() {
         lignes: number
         numero_bc_regularisation: string | null
       }>('/api/receptions', {
+        id_document: idDocument,
         // Toutes les lignes du meme bon : la reception s'y rattache. Sinon on la
         // laisse sans bon d'entete — chaque ligne garde le sien, et pretendre
         // qu'elle n'en couvre qu'un serait faux.

@@ -42,6 +42,11 @@ pub struct LigneSaisie {
 
 #[derive(Debug, Deserialize)]
 pub struct FactureSaisie {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub numero_facture: String,
     pub code_fournisseur: String,
     #[serde(default)]
@@ -224,6 +229,14 @@ pub async fn creer(
     Json(f): Json<FactureSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let id = crate::domain::idempotence::identifiant(f.id_document.as_deref())?;
+    if let Some(v) = crate::domain::idempotence::deja_enregistre(
+        &state.db, &crate::domain::idempotence::FACTURE, &id, &user.id,
+    )
+    .await?
+    {
+        return Ok(Json(v));
+    }
     if f.numero_facture.trim().is_empty() {
         return Err(AppError::Invalide("Le numero de la facture est obligatoire.".into()));
     }
@@ -260,8 +273,8 @@ pub async fn creer(
         "INSERT INTO facture_fournisseur
              (numero_facture, code_fournisseur, date_facture, code_devise, taux_change,
               montant_devise, frais_devise, facture_nette, id_dossier_import, notes,
-              id_utilisateur_creation)
-         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 0), $8, NULLIF($9, ''), $10, $11)
+              id_utilisateur_creation, id_facture)
+         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 0), $8, NULLIF($9, ''), $10, $11, $12)
          RETURNING id_facture",
     )
     .bind(f.numero_facture.trim())
@@ -275,6 +288,7 @@ pub async fn creer(
     .bind(f.id_dossier_import.as_deref().unwrap_or(""))
     .bind(&f.notes)
     .bind(&user.id)
+    .bind(&id)
     .fetch_one(&mut *tx)
     .await?;
 

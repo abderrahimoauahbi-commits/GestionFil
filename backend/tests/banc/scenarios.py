@@ -723,6 +723,55 @@ def scenario_verrou_optimiste(c, infra):
     verifier(code == 200, f"une modification sans version est refusee : {code} {r}")
 
 
+def scenario_idempotence(c, infra):
+    """LE DOUBLE ENVOI D'UNE CREATION (P3, 19/10/2026) : l'ecran tire l'identifiant du document a
+    l'ouverture du formulaire. Le meme envoi rejoue — le reseau a coupe avant la reponse — rend le
+    meme document, et rien n'est ecrit deux fois : ni un second bon, ni une seconde sortie de stock."""
+    import uuid
+    u = str(uuid.uuid4())
+    corps = {"id_document": u, "code_fournisseur": FRS,
+             "lignes": [{"code_reference": REF, "unite_commande": "kg",
+                         "quantite_commandee_unite": 100, "prix_unitaire_devise": 10}]}
+    avant = int(infra.valeur("SELECT count(*) FROM bon_commande"))
+    a = c.ok("Assistante", "POST", "/api/bons-commande", corps)
+    verifier(a["id_bc"] == u and not a.get("deja_enregistre"),
+             f"l'identifiant de l'ecran n'est pas celui du bon : {a}")
+    b = c.ok("Assistante", "POST", "/api/bons-commande", corps)
+    verifier(b.get("deja_enregistre") is True, f"le rejeu n'est pas reconnu : {b}")
+    for champ in ("id_bc", "numero_bc", "code_devise", "lignes"):
+        verifier(b.get(champ) == a.get(champ), f"le rejeu ne rend pas la meme reponse ({champ}) : {a} / {b}")
+    apres = int(infra.valeur("SELECT count(*) FROM bon_commande"))
+    verifier(apres == avant + 1, f"{apres - avant} bons pour un seul formulaire")
+
+    # Un identifiant deja pris par UN AUTRE compte n'est pas un rejeu : refus, sans le document.
+    r = c.refus("Choukri", "POST", "/api/bons-commande", corps, codes=(409,), contient="autre compte")
+    verifier(a["numero_bc"] not in str(r), f"le refus divulgue le document d'autrui : {r}")
+    # Une cle qui n'est pas un UUID ne devient pas une cle primaire.
+    c.refus("Assistante", "POST", "/api/bons-commande", dict(corps, id_document="BC-2026-0001"),
+            codes=(400, 422), contient="UUID")
+
+    # LE CAS QUI COUTE : une sortie de stock rejouee ne sort pas deux fois.
+    entree_stock(c, REF, 100)
+    s0 = kg(infra, REF)
+    m = str(uuid.uuid4())
+    code, r1 = mouvement(c, "Choukri", "SORTIE_PROD", [(REF, 10)], numero_of="OF-IDEM", id_document=m)
+    verifier(code == 200 and r1.get("id_mouvement") == m, f"sortie refusee : {code} {r1}")
+    code, r2 = mouvement(c, "Choukri", "SORTIE_PROD", [(REF, 10)], numero_of="OF-IDEM", id_document=m)
+    verifier(code == 200 and r2.get("deja_enregistre") is True, f"rejeu de la sortie : {code} {r2}")
+    for champ in ("numero_mouvement", "lignes", "quantite_totale_kg"):
+        verifier(r2.get(champ) == r1.get(champ), f"le rejeu ne rend pas la meme sortie ({champ}) : {r1} / {r2}")
+    s1 = kg(infra, REF)
+    verifier(abs(s1 - (s0 - 10)) < 1e-6, f"stock {s0} -> {s1} : la sortie de 10 kg est passee deux fois")
+
+    # Sans identifiant (scripts, import, anciens ecrans) : comme avant, un document par envoi.
+    n = int(infra.valeur("SELECT count(*) FROM bon_commande"))
+    sans = {k: v for k, v in corps.items() if k != "id_document"}
+    c.ok("Assistante", "POST", "/api/bons-commande", sans)
+    c.ok("Assistante", "POST", "/api/bons-commande", sans)
+    verifier(int(infra.valeur("SELECT count(*) FROM bon_commande")) == n + 2,
+             "sans identifiant, deux envois n'ont pas cree deux bons, comme avant")
+
+
 def scenario_cloture_periode(c, infra):
     """LA CLOTURE DE PERIODE (A3, 17/10/2026) : la direction clot un mois ; une reception
     datee de ce mois ne peut plus entrer en stock a sa date, et se signale (C55) au lieu
@@ -2579,6 +2628,7 @@ SCENARIOS = [
     scenario_colisage_signale,
     scenario_verrou_optimiste,
     scenario_cloture_periode,
+    scenario_idempotence,
     scenario_typage_du_temps,
     scenario_colisage_ecran_et_base,
     scenario_import,

@@ -62,6 +62,11 @@ pub struct LigneMouvement {
 
 #[derive(Debug, Deserialize)]
 pub struct NouveauMouvement {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub code_type_mvt: String,
     pub code_magasin: String,
     pub code_motif: String,
@@ -180,6 +185,14 @@ pub async fn creer_mouvement(
     Json(m): Json<NouveauMouvement>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    let id = crate::domain::idempotence::identifiant(m.id_document.as_deref())?;
+    if let Some(v) = crate::domain::idempotence::deja_enregistre(
+        &state.db, &crate::domain::idempotence::MOUVEMENT, &id, &user.id,
+    )
+    .await?
+    {
+        return Ok(Json(v));
+    }
     if !TYPES_SAISIE_LIBRE.contains(&m.code_type_mvt.as_str()) {
         return Err(AppError::RegleMetier(format!(
             "un mouvement « {} » ne se saisit pas a la main : il nait {}, qui tient sa contrepartie",
@@ -342,7 +355,6 @@ pub async fn creer_mouvement(
     }
 
     let numero = numeroter(&mut tx, "mouvement", "numero_mouvement", "MVT").await?;
-    let id = uuid::Uuid::new_v4().to_string();
 
     // `COALESCE` plutot qu'une requete conditionnelle : la valeur par defaut du
     // schema est l'instant courant, et la reproduire ici la ferait diverger le

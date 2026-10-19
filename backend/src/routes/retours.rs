@@ -178,6 +178,14 @@ pub async fn creer(
     Json(mut s): Json<metier::RetourSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let id = crate::domain::idempotence::identifiant(s.id_document.as_deref())?;
+    if let Some(v) = crate::domain::idempotence::deja_enregistre(
+        &state.db, &crate::domain::idempotence::RETOUR, &id, &user.id,
+    )
+    .await?
+    {
+        return Ok(Json(v));
+    }
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
     retenir_prix(&mut tx, &state, &user, None, &mut s).await?;

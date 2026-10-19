@@ -88,6 +88,11 @@ pub async fn lister_bc(
 
 #[derive(Debug, Deserialize)]
 pub struct NouveauBc {
+    /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
+    /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
+    /// Absent : le serveur en tire un.
+    #[serde(default)]
+    pub id_document: Option<String>,
     pub code_fournisseur: String,
     /// Date du bon. Absente : aujourd'hui. Un bon se saisit parfois apres coup.
     pub date_bc: Option<String>,
@@ -109,6 +114,14 @@ pub async fn creer_bc(
     Json(b): Json<NouveauBc>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
+    let id = crate::domain::idempotence::identifiant(b.id_document.as_deref())?;
+    if let Some(v) = crate::domain::idempotence::deja_enregistre(
+        &state.db, &crate::domain::idempotence::BON_COMMANDE, &id, &user.id,
+    )
+    .await?
+    {
+        return Ok(Json(v));
+    }
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -137,7 +150,6 @@ pub async fn creer_bc(
     })?;
 
     let numero = numeroter(&mut tx, "bon_commande", "numero_bc", "BC").await?;
-    let id = uuid::Uuid::new_v4().to_string();
 
     sqlx::query(
         "INSERT INTO bon_commande

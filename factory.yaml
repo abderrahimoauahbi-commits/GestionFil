@@ -1,0 +1,256 @@
+# Manifest AI Software Factory du projet GestionFil (Executable Schemas v1.0 §3).
+# Installé le 15/10/2026 depuis le brouillon de la Factory, avec l'accord du Factory Owner.
+# Les valeurs WAITING_HUMAN restent des décisions humaines. Aucun secret ici.
+schema_version: '1.0'
+project:
+  id: gestionfil
+  name: GestionFil
+  description: ERP achats, stocks et production de matières premières (fil pour tapis)
+  factory:
+    version: '3.2'
+    minimum_version: '3.2'
+  lifecycle:
+    state: REGISTERED
+    criticality_default: C2
+  stack:
+    languages:
+    - rust
+    - typescript
+    - sql
+    - python
+    frameworks:
+    - axum
+    - sqlx
+    - react
+    - vite
+    - tailwindcss
+    - tauri
+    databases:
+    - postgresql
+    frontend:
+    - react
+    - vite
+    - tailwindcss
+    - pwa
+    backend:
+    - axum
+    - sqlx
+    mobile:
+    - pwa
+    infrastructure:
+    - ubuntu
+    - systemd
+    - nginx
+    build_systems:
+    - cargo
+    - npm
+    test_systems:
+    - cargo-test
+    - node-test
+    - python-bench
+    - playwright
+  capabilities:
+    required:
+    - SOURCE_CONTROL
+    - ISOLATED_WORKSPACE
+    - AGENT_RUNTIME
+    - LANGUAGE_TOOLCHAIN
+    - PACKAGE_MANAGEMENT
+    - BUILD
+    - TEST
+    - LINT
+    - FORMAT
+    - TYPECHECK
+    - BROWSER_TEST
+    - DATABASE_INSPECTION
+    optional:
+    - IDE
+    - SECURITY_SCAN
+    - SECRET_SCAN
+    - DEPENDENCY_AUDIT
+  repositories:
+  - id: main
+    type: git
+    path: .
+    remote: https://github.com/abderrahimoauahbi-commits/GestionFil
+    branch: master
+  paths:
+    status: APPROVED
+    read:
+    - CLAUDE.md
+    - README.md
+    - backend/src/
+    - backend/tests/
+    - backend/Cargo.toml
+    - db/pg/
+    - docs/
+    - frontend/src/
+    - frontend/tests/
+    - frontend/e2e/
+    - frontend/package.json
+    - deploiement/README.md
+    write:
+    - backend/src/
+    - backend/tests/
+    - frontend/src/
+    - frontend/tests/
+    - frontend/e2e/
+    - docs/
+    forbidden:
+    - backend/.env
+    - backend/.env.example
+    - backend/sauvegardes/
+    - .claude/settings.local.json
+    - deploiement/paquet/
+    - frontend/rapport-e2e/
+    - db/pg/seed_100_referentiel_reel.sql
+    - db/pg/seed_110_comptes_production.sql
+    - db/pg/seed_120_entreprise.sql
+    approved: Factory Owner, 15/10/2026 (« valide et tu as la permission continue »)
+  environments:
+  - id: local-dev
+    type: LOCAL
+    allowed: true
+    write_allowed: false
+    data_classification: CONFIDENTIAL
+    notes: 'classification de la base locale : DB_ACCESS_REQUIRED / WAITING_HUMAN'
+  - id: test-disposable
+    type: TEST
+    allowed: true
+    write_allowed: true
+    data_classification: INTERNAL
+  - id: production
+    type: PRODUCTION
+    allowed: false
+    write_allowed: false
+    data_classification: CONFIDENTIAL
+    hosts:
+    - 192.168.1.140
+    - erp-polyfashions.dedyn.io
+    notes: serveur Ubuntu, nginx 80/443, service systemd ; mise à jour Tauri servie par /api/maj
+  agents:
+    required:
+    - architect
+    - planner
+    - backend
+    - frontend
+    - database
+    - security
+    - qa
+    allowed: []
+  tools:
+    required:
+    - git
+    - claude-code
+    - rustc
+    - cargo
+    - node
+    - npm
+    - postgresql-client
+    - playwright
+    allowed:
+    - vscode
+    - rustup
+    - rustfmt
+    - clippy
+    - typescript
+    - msedge
+    - axum
+    - sqlx
+    - react
+    - vite
+    - tailwindcss
+    - tauri
+  skills:
+    required: []
+    allowed: []
+  models:
+    allowed: []
+    preferred: null
+    fallback: null
+  mcp:
+    allowed: []
+    production_write: false
+    production_delete: false
+  security:
+    production_write: false
+    production_delete: false
+    secrets_allowed: false
+    outbound_network_default: false
+    sensitive_data_to_ai: false
+  data:
+    classification: WAITING_HUMAN
+    owners:
+    - WAITING_HUMAN
+    retention_policy: null
+  compliance:
+    frameworks:
+    - WAITING_HUMAN
+  quality:
+    required:
+    - format
+    - lint
+    - typecheck
+    - unit_tests
+    - integration_tests
+    - build
+    - security
+    - dependency_audit
+    - e2e
+    optional:
+    - accessibility
+    - mobile
+    gates:
+      format:
+        command: cargo fmt --check
+        cwd: backend
+      lint:
+        command: npm run lint
+        cwd: frontend
+        also: cargo clippy (backend)
+      typecheck:
+        command: npm run build
+        cwd: frontend
+        note: tsc -b puis vite build
+      unit_tests:
+        command: cargo test --bins
+        cwd: backend
+        also: npm test (frontend)
+      integration_tests:
+        command: python backend/tests/banc/banc.py
+        cwd: .
+        note: base jetable
+      build:
+        command: cargo build --bins
+        cwd: backend
+        also: npm run build (frontend)
+      security:
+        command: null
+        note: aucun outil approuvé (SECRET_SCAN, SECURITY_SCAN)
+      dependency_audit:
+        command: null
+        note: aucun outil approuvé (DEPENDENCY_AUDIT)
+      e2e:
+        command: python e2e/lancer.py
+        cwd: frontend
+        note: Playwright + Edge, base jetable
+      accessibility:
+        command: python e2e/lancer.py
+        cwd: frontend
+        note: '@axe-core/playwright'
+      frontend_unit_tests:
+        command: npm test
+        cwd: frontend
+        note: 'node --test : sans base ni serveur'
+    enforced_before_release: 'deploiement/fabriquer-paquet.ps1 : cargo test, npm test, banc, E2E, npm run build'
+  budgets:
+    token_limit: null
+    cost_limit: WAITING_HUMAN
+    time_limit_minutes: null
+    max_attempts: 3
+  governance:
+    project_owner: WAITING_HUMAN
+    release_approver: WAITING_HUMAN
+    security_owner: WAITING_HUMAN
+    data_owner: WAITING_HUMAN
+    architect: Chief Architect (humain)

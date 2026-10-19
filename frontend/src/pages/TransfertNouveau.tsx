@@ -62,6 +62,7 @@ import {
   facteurVersKg,
   pourChamp, saisieExacte } from '../lib/conditionnement'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -526,11 +527,14 @@ export function TransfertNouveau() {
   const echec = (e: unknown) =>
     setErreur(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.')
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const creer = useMutation({
     mutationFn: () =>
       api.post<{ id_transfert: string; numero_transfert: string; lignes: number }>(
         '/api/transferts',
-        charge(),
+        { ...charge(), id_document: idDocument },
       ),
     onSuccess: (r) => {
       toast.success(`${r.numero_transfert} cree`, {

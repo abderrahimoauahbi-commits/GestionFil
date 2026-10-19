@@ -43,6 +43,7 @@ import {
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { lireNombre } from '../lib/nombres'
+import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'RECEPTIONS'
 
@@ -319,10 +320,13 @@ export function FactureFournisseur() {
     })),
   })
 
+  // L'identifiant du document, tire a l'ouverture : un second envoi du meme
+  // formulaire rend le meme document (audit P3, 19/10/2026).
+  const [idDocument] = useState(nouvelIdentifiant)
   const enregistrer = useMutation({
     mutationFn: async () => {
       if (nouvelle) {
-        const r = await api.post<{ id_facture: string }>('/api/factures-fournisseur', corps())
+        const r = await api.post<{ id_facture: string }>('/api/factures-fournisseur', { ...corps(), id_document: idDocument })
         return r.id_facture
       }
       await api.patch(`/api/factures-fournisseur/${id}`, corps())

@@ -73,8 +73,8 @@ interface LigneAttendue extends Record<string, unknown> {
   quantite_recue_kg: number
   quantite_restante_kg: number
   /** Deja pese sur cette ligne par d'autres receptions en cours (19/10/2026). */
-  en_cours_kg?: number | null
-  en_cours_dans?: string | null
+  /** Le bon est deja en reception ailleurs : qui le tient (une seule reception a la fois, 19/10/2026). */
+  en_reception_dans?: string | null
   prix_kg_devise?: number
   code_devise?: string
   unite_catalogue: string
@@ -108,8 +108,7 @@ interface Ligne {
   numero_bc: string | null
   date_livraison_prevue: string | null
   retard_jours: number | null
-  en_cours_kg?: number | null
-  en_cours_dans?: string | null
+  en_reception_dans?: string | null
   code_reference: string
   designation: string
   reste_kg: number | null
@@ -269,9 +268,9 @@ export function ReceptionNouvelle() {
   /** Bons reprenables, avec ce qu'il reste a en tirer une fois la grille servie. */
   const bonsDisponibles = useMemo(() => {
     const prises = new Set(lignes.map((l) => l.id_ligne_bc).filter(Boolean))
-    const m = new Map<string, { numero: string; restantes: number; total: number }>()
+    const m = new Map<string, { numero: string; restantes: number; total: number; tenu: string | null }>()
     for (const a of attendues) {
-      const e = m.get(a.numero_bc) ?? { numero: a.numero_bc, restantes: 0, total: 0 }
+      const e = m.get(a.numero_bc) ?? { numero: a.numero_bc, restantes: 0, total: 0, tenu: a.en_reception_dans ?? null }
       e.total += 1
       if (!prises.has(a.id_ligne_bc)) e.restantes += 1
       m.set(a.numero_bc, e)
@@ -317,8 +316,7 @@ export function ReceptionNouvelle() {
         numero_bc: a.numero_bc,
         date_livraison_prevue: a.date_livraison_prevue,
         retard_jours: a.retard_jours,
-        en_cours_kg: a.en_cours_kg ?? null,
-        en_cours_dans: a.en_cours_dans ?? null,
+        en_reception_dans: a.en_reception_dans ?? null,
         code_reference: a.code_reference,
         designation: a.designation,
         code_recu: a.code_reference,
@@ -756,8 +754,10 @@ export function ReceptionNouvelle() {
                             : 'Choisir un bon a reprendre…'}
                         </option>
                         {bonsDisponibles.map((b) => (
-                          <option key={b.numero} value={b.numero} disabled={b.restantes === 0}>
-                            {b.numero} — {b.restantes} ligne(s) a reprendre sur {b.total}
+                          // UN BON DEJA EN RECEPTION AILLEURS EST BLOQUE (19/10/2026) : une
+                          // seule reception a la fois par bon ; on dit qui le tient.
+                          <option key={b.numero} value={b.numero} disabled={b.restantes === 0 || !!b.tenu}>
+                            {b.numero} — {b.tenu ? `bloqué : en réception dans ${b.tenu}` : `${b.restantes} ligne(s) a reprendre sur ${b.total}`}
                           </option>
                         ))}
                       </Selecteur>
@@ -951,9 +951,9 @@ export function ReceptionNouvelle() {
                                       </div>
                                     )}
                                     {/* LE SIGNAL : une autre reception pese deja cette ligne. */}
-                                    {(l.en_cours_kg ?? 0) > 0 && (
+                                    {l.en_reception_dans && (
                                       <div className="text-[11px] text-alerte">
-                                        déjà en cours : {fmt.nombre(l.en_cours_kg ?? 0, 0)} kg dans {l.en_cours_dans}
+                                        bon en réception dans {l.en_reception_dans}
                                       </div>
                                     )}
                                   </div>

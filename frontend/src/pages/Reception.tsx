@@ -674,9 +674,13 @@ export function Reception() {
    */
   const enregistrer = useMutation({
     mutationFn: async () => {
+      // LA VERSION S'ENCHAINE (19/10/2026) : en-tete puis lignes, chacun sous le
+      // verrou du document ; chaque reponse rend la version que le suivant presente.
+      let v = versionLue
+      const suivre = (r: { version?: number }) => { v = r.version ?? v }
       if (enteteModifie) {
-        await api.patch(`/api/receptions/${id}`, {
-          version: versionLue,
+        suivre(await api.patch<{ version?: number }>(`/api/receptions/${id}`, {
+          version: v,
           num_bon_livraison: entete.num_bon_livraison || undefined,
           numero_facture: entete.numero_facture || undefined,
           transporteur: entete.transporteur || undefined,
@@ -691,20 +695,21 @@ export function Reception() {
             entete.id_dossier_import !== (rec?.id_dossier_import ?? '')
               ? entete.id_dossier_import
               : undefined,
-        })
+        }))
       }
       for (const ligne of supprimees) {
-        await api.delete(`/api/receptions/${id}/lignes/${ligne}`)
+        suivre(await api.delete<{ version?: number }>(`/api/receptions/${id}/lignes/${ligne}?version=${v ?? ''}`))
       }
       for (const n of aCorriger) {
-        await api.patch(`/api/receptions/${id}/lignes/${n.idExistant}`, corpsReception(n))
+        suivre(await api.patch<{ version?: number }>(`/api/receptions/${id}/lignes/${n.idExistant}`, { ...corpsReception(n), version: v }))
       }
       for (const n of aCreer) {
-        await api.post(`/api/receptions/${id}/lignes`, {
+        suivre(await api.post<{ version?: number }>(`/api/receptions/${id}/lignes`, {
           ...corpsReception(n),
           code_reference: n.code_reference,
           id_ligne_bc: n.extra?.id_ligne_bc,
-        })
+          version: v,
+        }))
       }
       return { crees: aCreer.length, corrigees: aCorriger.length, retirees: supprimees.length }
     },

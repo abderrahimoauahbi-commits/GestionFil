@@ -71,6 +71,20 @@ pub async fn refus(
     }
 }
 
+/// La version a jour d'un document, rendue a l'ecran qui enchaine en-tete puis
+/// lignes : chaque enregistrement presente celle que le precedent a laissee.
+pub async fn version_actuelle(
+    tx: &mut sqlx::PgConnection,
+    table: &str,
+    colonne_id: &str,
+    id: &str,
+) -> AppResult<i64> {
+    Ok(sqlx::query_scalar(&format!("SELECT version::bigint FROM {table} WHERE {colonne_id}::text = $1"))
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?)
+}
+
 /// LA VERSION, OBLIGATOIRE (decision du 19/10/2026) : un ecran qui modifie un
 /// document envoie celle qu'il a lue. Absente, on refuse plutot que d'ecraser
 /// peut-etre la saisie d'un autre.

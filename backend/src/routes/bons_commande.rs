@@ -297,6 +297,10 @@ pub async fn lignes_bc(
 
 #[derive(Debug, Deserialize)]
 pub struct LigneBc {
+    /// LA VERSION DE L'EN-TETE lue par l'ecran (19/10/2026) : une ligne se modifie
+    /// sous le verrou de son document. Ignoree a la creation du document.
+    #[serde(default)]
+    pub version: Option<i64>,
     /// LA PROPOSITION DU PLAN D'ACHAT que l'ecran affichait (19/10/2026). Presente,
     /// c'est elle que la ligne sert — et la base refuse si un autre bon la sert deja
     /// (R-PROP). Absente : rattachement par la reference, comme avant.
@@ -511,6 +515,10 @@ async fn inserer_ligne_bc(
 /// Modification partielle d'une ligne : seuls les champs fournis changent.
 #[derive(Debug, Deserialize)]
 pub struct ModifLigneBc {
+    /// LA VERSION DE L'EN-TETE lue par l'ecran (19/10/2026) : une ligne se modifie
+    /// sous le verrou de son document. Ignoree a la creation du document.
+    #[serde(default)]
+    pub version: Option<i64>,
     pub quantite_commandee_unite: Option<f64>,
     pub prix_unitaire_devise: Option<f64>,
     pub date_livraison_prevue: Option<String>,
@@ -567,6 +575,12 @@ pub async fn ajouter_ligne_bc(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE DOCUMENT SE PREND A LA VERSION LUE, en premiere ecriture : la ligne
+    // se modifie sous le verrou de son en-tete (decision du 19/10/2026).
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "bon_commande", "id_bc", &id, Some(crate::domain::concurrence::exigee(l.version)?), "Ce bon de commande",
+    )
+    .await?;
 
     let (statut, devise): (String, String) =
         sqlx::query_as("SELECT statut, code_devise FROM bon_commande WHERE id_bc = $1")
@@ -591,9 +605,10 @@ pub async fn ajouter_ligne_bc(
     inserer_ligne_bc(&mut tx, &id_ligne, &id, numero, &l, kg, facteur, &devise, false).await?;
 
     recalculer_bc(&mut tx, &id).await?;
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "bon_commande", "id_bc", &id).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({
+    Ok(Json(json!({ "version": version_entete, 
         "id_ligne_bc": id_ligne, "ligne_numero": numero,
         "quantite_commandee_kg": kg, "facteur_kg": facteur
     })))
@@ -603,11 +618,18 @@ pub async fn supprimer_ligne_bc(
     State(state): State<AppState>,
     user: Utilisateur,
     Path((id, ligne)): Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::BONS_COMMANDE, Action::Ecrire).await?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE DOCUMENT SE PREND A LA VERSION LUE, en premiere ecriture : la ligne
+    // se modifie sous le verrou de son en-tete (decision du 19/10/2026).
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "bon_commande", "id_bc", &id, Some(super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?), "Ce bon de commande",
+    )
+    .await?;
 
     let recue: f64 = sqlx::query_scalar(
         "SELECT COALESCE(quantite_recue_kg, 0)::float8 FROM ligne_bc
@@ -643,9 +665,10 @@ pub async fn supprimer_ligne_bc(
         .execute(&mut *tx)
         .await?;
     recalculer_bc(&mut tx, &id).await?;
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "bon_commande", "id_bc", &id).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "supprime": true, "proposition_liberee": liberee > 0 })))
+    Ok(Json(json!({ "version": version_entete,  "supprime": true, "proposition_liberee": liberee > 0 })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1159,8 +1182,9 @@ pub async fn modifier_bc(
         recalculer_bc(&mut tx, &id).await?;
     }
 
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "bon_commande", "id_bc", &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_bc": id, "modifie": true })))
+    Ok(Json(json!({ "version": version_entete,  "id_bc": id, "modifie": true })))
 }
 
 /// Les references commandables aupres du fournisseur du bon, avec leur contexte.
@@ -1414,6 +1438,12 @@ pub async fn modifier_ligne_bc(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE DOCUMENT SE PREND A LA VERSION LUE, en premiere ecriture : la ligne
+    // se modifie sous le verrou de son en-tete (decision du 19/10/2026).
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "bon_commande", "id_bc", &id, Some(crate::domain::concurrence::exigee(l.version)?), "Ce bon de commande",
+    )
+    .await?;
 
     // `Option<String>` POUR LA REFERENCE : une ligne de prestation n'en porte
     // pas. Decodee en `String`, sqlx echouait en erreur interne des qu'on
@@ -1558,9 +1588,10 @@ pub async fn modifier_ligne_bc(
         .await?;
 
     recalculer_bc(&mut tx, &id).await?;
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "bon_commande", "id_bc", &id).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "id_ligne_bc": ligne, "arbitree": true })))
+    Ok(Json(json!({ "version": version_entete,  "id_ligne_bc": ligne, "arbitree": true })))
 }
 
 // ============================================================================

@@ -372,15 +372,19 @@ export function BonCommande() {
       const aCorriger = nouvelles.filter(
         (n) => n.idExistant && JSON.stringify(corpsLigne(n)) !== initiales.get(n.idExistant),
       )
-      if (enteteModifie) await api.patch(`/api/bons-commande/${id}`, { ...entete, version: versionLue })
+      // LA VERSION S'ENCHAINE (19/10/2026) : en-tete puis lignes, chacun sous le
+      // verrou du document ; chaque reponse rend la version que le suivant presente.
+      let v = versionLue
+      const suivre = (r: { version?: number }) => { v = r.version ?? v }
+      if (enteteModifie) suivre(await api.patch<{ version?: number }>(`/api/bons-commande/${id}`, { ...entete, version: v }))
       for (const ligne of supprimees) {
-        await api.delete(`/api/bons-commande/${id}/lignes/${ligne}`)
+        suivre(await api.delete<{ version?: number }>(`/api/bons-commande/${id}/lignes/${ligne}?version=${v ?? ''}`))
       }
       for (const n of aCorriger) {
-        await api.patch(`/api/bons-commande/${id}/lignes/${n.idExistant}`, corpsLigne(n))
+        suivre(await api.patch<{ version?: number }>(`/api/bons-commande/${id}/lignes/${n.idExistant}`, { ...corpsLigne(n), version: v }))
       }
       for (const n of aCreer) {
-        await api.post(`/api/bons-commande/${id}/lignes`, corpsLigne(n))
+        suivre(await api.post<{ version?: number }>(`/api/bons-commande/${id}/lignes`, { ...corpsLigne(n), version: v }))
       }
       return { crees: aCreer.length, corrigees: aCorriger.length, retirees: supprimees.length }
     },

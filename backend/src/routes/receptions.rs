@@ -288,8 +288,9 @@ pub async fn modifier_reception(
         .await?;
     }
 
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "reception", "id_reception", &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_reception": id, "modifie": true })))
+    Ok(Json(json!({ "version": version_entete,  "id_reception": id, "modifie": true })))
 }
 
 /// LES DOSSIERS D'IMPORT OUVERTS, pour l'en-tete d'un arrivage.
@@ -370,20 +371,19 @@ pub async fn lignes_attendues(
     let rows = sqlx::query(
         "SELECT lb.id_ligne_bc, lb.code_reference, lb.designation, lb.unite_commande,
                 lb.quantite_commandee_kg, lb.quantite_recue_kg, lb.quantite_restante_kg,
-                -- LE SIGNAL (19/10/2026) : ce que d'AUTRES receptions en cours pesent
-                -- deja sur cette ligne, et qui les tient. Le magasinier le voit avant
-                -- de peser ; la base refuse au-dela du reste (R-REC).
-                (SELECT SUM(lr2.quantite_stock_kg)::float8
-                   FROM ligne_reception lr2 JOIN reception r2 ON r2.id_reception = lr2.id_reception
-                  WHERE lr2.id_ligne_bc = lb.id_ligne_bc
-                    AND r2.statut IN ('BROUILLON', 'A_CONTROLER')
-                    AND r2.id_reception IS DISTINCT FROM $2) AS en_cours_kg,
+                -- LE SIGNAL (19/10/2026) : le BON est-il deja en reception ailleurs ?
+                -- Une seule reception a la fois par bon (R-REC) : l'ecran le montre
+                -- bloque, avec la reception qui le tient et son auteur.
                 (SELECT string_agg(DISTINCT r2.numero_reception || ' (' || COALESCE(u2.nom, '?') || ')', ', ')
-                   FROM ligne_reception lr2 JOIN reception r2 ON r2.id_reception = lr2.id_reception
+                   FROM ligne_reception lr2
+                   JOIN ligne_bc lb2 ON lb2.id_ligne_bc = lr2.id_ligne_bc
+                   JOIN reception r2 ON r2.id_reception = lr2.id_reception
                    LEFT JOIN utilisateur u2 ON u2.id_utilisateur = r2.id_utilisateur_reception
-                  WHERE lr2.id_ligne_bc = lb.id_ligne_bc
+                  WHERE lb2.id_bc = lb.id_bc
                     AND r2.statut IN ('BROUILLON', 'A_CONTROLER')
-                    AND r2.id_reception IS DISTINCT FROM $2) AS en_cours_dans,
+                    AND r2.id_reception IS DISTINCT FROM $2
+                    -- Ses propres receptions ne bloquent pas le recepteur.
+                    AND r2.id_utilisateur_reception IS DISTINCT FROM $4) AS en_reception_dans,
                 lb.prix_unitaire_devise, lb.prix_kg_devise, lb.code_devise,
                 bc.id_bc, bc.numero_bc, bc.date_bc, bc.date_livraison_prevue, bc.statut AS statut_bc,
                 r.unite_catalogue, r.suivi_lot, r.densite_kg_ml, r.poids_bobine_kg,
@@ -444,6 +444,7 @@ pub async fn lignes_attendues(
     .bind(&id_bc)
     .bind(&id_reception)
     .bind(&fournisseur)
+    .bind(&user.id)
     .fetch_all(&state.db)
     .await?;
 
@@ -917,6 +918,10 @@ pub async fn lignes_reception(
 
 #[derive(Debug, Deserialize)]
 pub struct LigneReception {
+    /// LA VERSION DE L'EN-TETE lue par l'ecran (19/10/2026) : une ligne se modifie
+    /// sous le verrou de son document. Ignoree a la creation du document.
+    #[serde(default)]
+    pub version: Option<i64>,
     pub code_reference: String,
     pub id_ligne_bc: Option<String>,
     pub unite_saisie: String,
@@ -966,6 +971,12 @@ pub async fn ajouter_ligne_reception(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE DOCUMENT SE PREND A LA VERSION LUE, en premiere ecriture : la ligne
+    // se modifie sous le verrou de son en-tete (decision du 19/10/2026).
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "reception", "id_reception", &id, Some(crate::domain::concurrence::exigee(l.version)?), "Cette reception",
+    )
+    .await?;
 
     let (statut, numero_reception, fournisseur, jour_reception): (String, String, String, String) =
         sqlx::query_as(
@@ -1095,6 +1106,7 @@ pub async fn ajouter_ligne_reception(
     .execute(&mut *tx)
     .await?;
 
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "reception", "id_reception", &id).await?;
     tx.commit().await?;
 
     // Le prix et le taux se masquent dans la reponse aussi.
@@ -1104,7 +1116,11 @@ pub async fn ajouter_ligne_reception(
         "taux_change": taux
     });
     user.masquer(&state.db, module::RECEPTIONS, &mut v).await?;
-    Ok(Json(v))
+    Ok(Json({
+        let mut v = v;
+        v["version"] = json!(version_entete);
+        v
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1220,11 +1236,18 @@ pub async fn supprimer_ligne_reception(
     State(state): State<AppState>,
     user: Utilisateur,
     Path((id, ligne)): Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE DOCUMENT SE PREND A LA VERSION LUE, en premiere ecriture : la ligne
+    // se modifie sous le verrou de son en-tete (decision du 19/10/2026).
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "reception", "id_reception", &id, Some(super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?), "Cette reception",
+    )
+    .await?;
 
     let statut: String = sqlx::query_scalar("SELECT statut FROM reception WHERE id_reception = $1")
         .bind(&id)
@@ -1247,9 +1270,10 @@ pub async fn supprimer_ligne_reception(
     if res.rows_affected() == 0 {
         return Err(AppError::Introuvable(format!("ligne {ligne}")));
     }
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "reception", "id_reception", &id).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "supprime": true })))
+    Ok(Json(json!({ "version": version_entete,  "supprime": true })))
 }
 
 /// Le refus commun : au controle, on renvoie, on ne corrige pas.
@@ -1270,6 +1294,10 @@ const PESEE_FIGEE: &str = "Au controle, la pesee est figee : celui qui valide n'
 /// en retirant la ligne et en la ressaisissant, ce que l'ecran sait faire.
 #[derive(Debug, Deserialize)]
 pub struct ModifLigneReception {
+    /// LA VERSION DE L'EN-TETE lue par l'ecran (19/10/2026) : une ligne se modifie
+    /// sous le verrou de son document. Ignoree a la creation du document.
+    #[serde(default)]
+    pub version: Option<i64>,
     /// La derogation a l'ecart de pesee, posee ou retiree sur une ligne existante
     /// (F11, 09/10/2026) : le message de refus la demandait, rien ne la posait.
     #[serde(default)]
@@ -1373,6 +1401,12 @@ pub async fn modifier_ligne_reception(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE DOCUMENT SE PREND A LA VERSION LUE, en premiere ecriture : la ligne
+    // se modifie sous le verrou de son en-tete (decision du 19/10/2026).
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "reception", "id_reception", &id, Some(crate::domain::concurrence::exigee(m.version)?), "Cette reception",
+    )
+    .await?;
 
     // Les declencheurs de la base veillent toujours : ecart de pesee hors
     // tolerance sans derogation, ligne non conforme dirigee hors quarantaine.
@@ -1423,9 +1457,10 @@ pub async fn modifier_ligne_reception(
     .execute(&mut *tx)
     .await?;
 
+    let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "reception", "id_reception", &id).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({
+    Ok(Json(json!({ "version": version_entete, 
         "id_ligne_reception": ligne,
         "quantite_stock_kg": kg,
         "facteur_kg": facteur

@@ -338,12 +338,12 @@ def scenario_arrivage_unifie(c, infra):
 
     # UNE LIGNE SANS PEG fait naitre le bon qui manquait, en BROUILLON — UN SEUL pour l'arrivage,
     # meme si deux lignes arrivent sans commande.
-    c.ok("Magasinie", "POST", f"/api/receptions/{rid}/lignes", {
+    c.ok("Magasinie", "POST", f"/api/receptions/{rid}/lignes", V(infra, "reception", "id_reception", rid, {
         "code_reference": REF, "unite_saisie": "kg", "quantite_pesee_unite": 40,
-        "code_magasin_dest": MAG})
-    c.ok("Magasinie", "POST", f"/api/receptions/{rid}/lignes", {
+        "code_magasin_dest": MAG}))
+    c.ok("Magasinie", "POST", f"/api/receptions/{rid}/lignes", V(infra, "reception", "id_reception", rid, {
         "code_reference": REF2, "unite_saisie": "kg", "quantite_pesee_unite": 15,
-        "code_magasin_dest": MAG})
+        "code_magasin_dest": MAG}))
     regul = infra.sql("SELECT id_bc, numero_bc, statut FROM bon_commande "
                       f"WHERE id_reception_regularisee = '{rid}'")
     verifier(len(regul) == 1, f"{len(regul)} bon(s) de regularisation pour un seul arrivage : {regul}")
@@ -1005,34 +1005,35 @@ def scenario_proposition_une_fois(c, infra):
 
 
 def scenario_reception_en_cours(c, infra):
-    """DEUX RECEPTIONS SUR LA MEME LIGNE DE BON (decision du 19/10/2026, « signal et refus ») :
-    la seconde pesee de la meme ligne est refusee en nommant la premiere ; l'ecran la signale au
-    choix des lignes ; une derogation motivee la laisse passer, et ce qui est alors recu au-dela
-    de la commande se signale (C58)."""
-    id_bc, lignes = bon_envoye(c, [(REF, 100, 20.0)])
-    lb = lignes[0]["id_ligne_bc"]
-    ligne = {"code_reference": REF, "id_ligne_bc": lb, "unite_saisie": "kg",
-             "quantite_pesee_unite": 100, "code_magasin_dest": MAG}
+    """UN BON, UN SEUL RECEPTEUR A LA FOIS (decision du 19/10/2026) : une reception se controle a
+    l'oeil, deux personnes ne tiennent pas le meme bon. Le meme recepteur peut en tenir plusieurs
+    receptions ; un AUTRE est refuse — meme sur une autre ligne, meme avec une derogation — et
+    l'ecran montre le bon bloque ; libre de nouveau une fois ses receptions validees."""
+    id_bc, lignes = bon_envoye(c, [(REF, 100, 20.0), (REF2, 50, 20.0)])
+    l1, l2 = lignes[0]["id_ligne_bc"], lignes[1]["id_ligne_bc"]
+    def ligne(lb, ref, kg):
+        return {"code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg",
+                "quantite_pesee_unite": kg, "code_magasin_dest": MAG}
     r1 = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-1",
-                                                      "lignes": [ligne]})
-    # Le signal : l'autre ecran voit la ligne deja en cours, avec la reception qui la tient.
+                                                      "lignes": [ligne(l1, REF, 100)]})
+    # Le signal : le bon apparait tenu par la premiere reception.
     att = c.ok("Choukri", "GET", f"/api/lignes-attendues?code_fournisseur={FRS}")
-    a = next(x for x in att if x["id_ligne_bc"] == lb)
-    verifier((a.get("en_cours_kg") or 0) >= 100 and r1["numero_reception"] in (a.get("en_cours_dans") or ""),
-             f"la ligne n'est pas signalee en cours : {a}")
-    # Le refus : la meme ligne pesee une seconde fois.
+    a = next(x for x in att if x["id_ligne_bc"] == l2)
+    verifier(r1["numero_reception"] in (a.get("en_reception_dans") or ""), f"le bon n'est pas signale tenu : {a}")
+    # Le meme recepteur peut ouvrir une seconde reception sur son bon (un second camion).
+    r_meme = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-1B",
+                                                         "lignes": [ligne(l2, REF2, 10)]})
+    c.ok("Magasinie", "PUT", f"/api/receptions/{r_meme['id_reception']}/statut", {"statut": "ANNULE"})
+    # Le refus : un AUTRE recepteur sur le meme bon, meme sur une autre ligne, meme avec une derogation.
     r = c.refus("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
-                                                      "lignes": [ligne]}, codes=(422,), contient="R-REC")
-    verifier(r1["numero_reception"] in str(r), f"le refus ne nomme pas la reception en cours : {r}")
-    # Avec une derogation motivee, elle passe — et se signale une fois recue (C58).
-    r2 = c.ok("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
-                                                    "lignes": [dict(ligne, derogation_ecart=True,
-                                                                    motif_derogation="Second camion confirme")]})
-    for rid in (r1["id_reception"], r2["id_reception"]):
-        c.ok("Magasinie" if rid == r1["id_reception"] else "Choukri", "PUT", f"/api/receptions/{rid}/statut",
-             {"statut": "A_CONTROLER"})
-        c.ok("Mohamed" if rid == r2["id_reception"] else "Choukri", "POST", f"/api/receptions/{rid}/valider")
-    verifier(controle(infra, "C58") >= 1, "C58 ne signale pas la ligne recue deux fois")
+                "lignes": [dict(ligne(l2, REF2, 50), derogation_ecart=True, motif_derogation="essai")]},
+                codes=(422,), contient="R-REC")
+    verifier(r1["numero_reception"] in str(r), f"le refus ne nomme pas la reception qui tient le bon : {r}")
+    # La premiere validee, le bon est libre.
+    c.ok("Magasinie", "PUT", f"/api/receptions/{r1['id_reception']}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{r1['id_reception']}/valider")
+    c.ok("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
+                                               "lignes": [ligne(l2, REF2, 50)]})
 
 
 def scenario_cloture_periode(c, infra):
@@ -1261,10 +1262,10 @@ def scenario_import(c, infra):
     lr = c.ok("Magasinie", "GET", f"/api/receptions/{rid}/lignes")[0]["id_ligne_reception"]
     # Regle 13 : suivie au lot, la reference se compte en bobines. La derogation
     # leve l'ecart de pesee, elle ne dispense pas du comptage.
-    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{lr}", {"nb_bobines": 0})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{lr}", V(infra, "reception", "id_reception", rid, {"nb_bobines": 0}))
     c.refus("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"},
             contient="bobines")
-    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{lr}", {"nb_bobines": 404})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{lr}", V(infra, "reception", "id_reception", rid, {"nb_bobines": 404}))
     c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
 
     # Segregation des taches : le peseur ne valide pas sa propre pesee.
@@ -1409,7 +1410,8 @@ def scenario_audit_montants(c, infra):
     lignes = c.ok("Assistante", "GET", f"/api/bons-commande/{bc['id_bc']}/lignes")
     lignes = lignes.get("lignes", lignes) if isinstance(lignes, dict) else lignes
     id_ligne = lignes[0]["id_ligne_bc"]
-    c.ok("Assistante", "PATCH", f"/api/bons-commande/{bc['id_bc']}/lignes/{id_ligne}", {"prix_unitaire_devise": 21.5})
+    c.ok("Assistante", "PATCH", f"/api/bons-commande/{bc['id_bc']}/lignes/{id_ligne}",
+         V(infra, "bon_commande", "id_bc", bc["id_bc"], {"prix_unitaire_devise": 21.5}))
     trace = infra.sql(
         "SELECT a.anciennes_valeurs, a.nouvelles_valeurs, u.login FROM audit_log a "
         "LEFT JOIN utilisateur u ON u.id_utilisateur = a.id_utilisateur "
@@ -1561,7 +1563,7 @@ def scenario_reception_devalidee_revalidee(c, infra):
     id_ligne = infra.valeur(f"SELECT id_ligne_reception FROM ligne_reception WHERE id_reception = '{rid}'")
     c.ok("Choukri", "PUT", f"/api/receptions/{rid}/statut", {"statut": "BROUILLON", "motif": "Pesee a refaire au magasin"})
     c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{id_ligne}",
-         {"unite_saisie": "kg", "quantite_pesee_unite": 590})
+         V(infra, "reception", "id_reception", rid, {"unite_saisie": "kg", "quantite_pesee_unite": 590}))
     c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
     c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
     verifier(abs(kg(infra) - avant - 590) < 1e-6, "la revalidation n'a pas refait l'entree a 590 kg")
@@ -1896,21 +1898,21 @@ def scenario_controle_reception(c, infra):
     ligne = infra.valeur(f"SELECT id_ligne_reception FROM ligne_reception WHERE id_reception = '{rid}'")
     c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
     # Au controle : la pesee est figee, la qualite non.
-    c.refus("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 980},
+    c.refus("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", V(infra, "reception", "id_reception", rid, {"quantite_pesee_unite": 980}),
             contient="figee")
-    c.ok("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"statut_qualite": "CONFORME"})
+    c.ok("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", V(infra, "reception", "id_reception", rid, {"statut_qualite": "CONFORME"}))
     # Le renvoi exige un motif.
     c.refus("Choukri", "PUT", f"/api/receptions/{rid}/statut", {"statut": "BROUILLON"}, contient="corriger")
     c.ok("Choukri", "PUT", f"/api/receptions/{rid}/statut", {"statut": "BROUILLON", "motif": "Repeser : 980 kg au BL"})
     verifier(infra.valeur(f"SELECT motif_renvoi FROM reception WHERE id_reception = '{rid}'") == "Repeser : 980 kg au BL",
              "le motif du renvoi n'est pas garde")
     # Un excedent au-dela de la tolerance se pose avec sa derogation, sur la ligne existante.
-    c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 1100})
+    c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", V(infra, "reception", "id_reception", rid, {"quantite_pesee_unite": 1100}))
     c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}",
-         {"quantite_pesee_unite": 1100, "derogation_ecart": True, "motif_derogation": "Excedent accepte par l'acheteur"})
-    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 980, "derogation_ecart": False})
+         V(infra, "reception", "id_reception", rid, {"quantite_pesee_unite": 1100, "derogation_ecart": True, "motif_derogation": "Excedent accepte par l'acheteur"}))
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", V(infra, "reception", "id_reception", rid, {"quantite_pesee_unite": 980, "derogation_ecart": False}))
     # Choukri corrige lui-meme en brouillon : il devient le dernier peseur et ne valide plus.
-    c.ok("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", {"quantite_pesee_unite": 981})
+    c.ok("Choukri", "PATCH", f"/api/receptions/{rid}/lignes/{ligne}", V(infra, "reception", "id_reception", rid, {"quantite_pesee_unite": 981}))
     c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
     c.refus("Choukri", "POST", f"/api/receptions/{rid}/valider", contient="pese")
     c.ok("Mohamed", "POST", f"/api/receptions/{rid}/valider")

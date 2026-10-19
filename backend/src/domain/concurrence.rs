@@ -13,25 +13,22 @@
 //! on refuse, EN NOMMANT QUI ET QUAND. Un refus qui dit « quelqu'un a modifie
 //! cette fiche » sans dire qui n'aide personne a rattraper sa saisie.
 //!
-//! POURQUOI UN GARDE PLUTOT QU'UN `AND version = $n` DANS CHAQUE `UPDATE`.
-//! Trois raisons. Un seul comportement, donc un seul message a maintenir. Les
-//! handlers qui font plusieurs `UPDATE` dans la meme transaction — `modifier_bc`
-//! en fait trois — sont couverts par une seule verification. Et surtout, le
-//! garde prend le verrou de ligne (`FOR UPDATE`) : entre la lecture de la
-//! version et l'ecriture, plus personne ne passe. Ce n'est donc pas seulement
-//! optimiste, c'est juste.
+//! L'ECRITURE PORTE LA CONDITION (decision du 19/10/2026). Le test se fait
+//! dans l'ecriture elle-meme, pas par une lecture prealable :
+//! `UPDATE … WHERE id = $1 AND version = $2`. Une ligne touchee : c'est passe ;
+//! aucune : quelqu'un est passe avant. Un seul aller-retour, aucun instant entre
+//! le test et l'ecriture, et PostgreSQL tient la ligne jusqu'a la fin de la
+//! transaction. Les fiches (crud.rs) mettent la condition dans leur `UPDATE` /
+//! `DELETE` meme ; les documents, qui ecrivent en-tete puis lignes, la mettent
+//! dans leur PREMIERE ecriture — ce module —, qui tient l'en-tete pour la suite.
 
 use crate::error::{AppError, AppResult};
 
-/// Refuse la modification si le document a change depuis sa lecture.
+/// Prend le document a la version lue, par une ecriture conditionnelle.
 ///
-/// `version_lue` vient du client. **Absente, la verification est sautee** : les
-/// appelants internes (cascades de `domain/`, scripts d'administration, import)
-/// ne la fournissent pas, et les ecrans qui ne l'envoient pas encore continuent
-/// de fonctionner. La protection s'applique des que le client la transmet.
-///
-/// La ligne est verrouillee au passage : la suite de la transaction travaille
-/// sur un document que personne d'autre ne peut modifier.
+/// Premiere ecriture de la transaction : elle tient l'en-tete jusqu'au bout, et
+/// les lignes enregistrees ensuite sont couvertes. `version_lue` absente : rien
+/// a verifier (appelants internes : cascades, administration, import).
 pub async fn exiger_version(
     tx: &mut sqlx::PgConnection,
     table: &str,
@@ -43,29 +40,35 @@ pub async fn exiger_version(
     let Some(attendue) = version_lue else {
         return Ok(());
     };
-
-    // LE NOM DE LA TABLE N'EST JAMAIS DE LA SAISIE. Il vient d'un litteral du
-    // code appelant, jamais d'une requete HTTP : ces deux identifiants sont
-    // interpoles, les valeurs restent liees.
-    // `::bigint` : la colonne est un `integer` (INT4) et sqlx exige une
-    // correspondance EXACTE — lire un INT4 en `i64` echoue a l'execution, en
-    // « erreur interne », jamais a la compilation. Le scenario de banc
-    // `verrou_optimiste` l'a trouve le 17/10 ; aucun des 47 autres ne passait
-    // de version, donc aucun n'empruntait ce chemin.
-    // `::text` : la cle d'un referentiel n'est pas toujours du texte (le mois
-    // d'une saison est un entier, 19/10/2026) ; l'identifiant arrive du chemin,
-    // donc en texte. Les tables visees sont petites : le parcours est negligeable.
-    let sql = format!("SELECT version::bigint FROM {table} WHERE {colonne_id}::text = $1 FOR UPDATE");
-    let actuelle: Option<i64> = sqlx::query_scalar(&sql).bind(id).fetch_optional(&mut *tx).await?;
-
-    let actuelle = actuelle
-        .ok_or_else(|| AppError::Introuvable(format!("{quoi} introuvable.")))?;
-
-    if actuelle == attendue {
+    // LE NOM DE LA TABLE N'EST JAMAIS DE LA SAISIE : un litteral du code appelant.
+    // `::text` : la cle n'est pas toujours du texte (le mois d'une saison).
+    let sql = format!("UPDATE {table} SET version = version WHERE {colonne_id}::text = $1 AND version = $2");
+    let touchees = sqlx::query(&sql).bind(id).bind(attendue).execute(&mut *tx).await?.rows_affected();
+    if touchees == 1 {
         return Ok(());
     }
+    Err(refus(tx, table, colonne_id, id, quoi).await)
+}
 
-    Err(AppError::Conflit(message_conflit(tx, table, id, quoi).await))
+/// Aucune ligne touchee par une ecriture conditionnelle : supprimee, ou modifiee
+/// par quelqu'un — on le dit, en nommant qui et quand. Calcule seulement en cas
+/// d'echec.
+pub async fn refus(
+    tx: &mut sqlx::PgConnection,
+    table: &str,
+    colonne_id: &str,
+    id: &str,
+    quoi: &str,
+) -> AppError {
+    let existe = sqlx::query_scalar::<_, i32>(&format!("SELECT 1 FROM {table} WHERE {colonne_id}::text = $1"))
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await;
+    match existe {
+        Ok(Some(_)) => AppError::Conflit(message_conflit(tx, table, id, quoi).await),
+        Ok(None) => AppError::Introuvable(format!("{quoi} introuvable.")),
+        Err(e) => e.into(),
+    }
 }
 
 /// LA VERSION, OBLIGATOIRE (decision du 19/10/2026) : un ecran qui modifie un

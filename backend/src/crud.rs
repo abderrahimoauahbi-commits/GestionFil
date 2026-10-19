@@ -13,7 +13,7 @@
 
 use crate::auth::{rbac::Action, Utilisateur};
 use crate::db::{maintenant, Db};
-use crate::domain::concurrence::exiger_version;
+use crate::domain::concurrence::refus;
 use crate::error::{AppError, AppResult};
 use crate::routes::json::lignes_en_json;
 use serde_json::{json, Map, Value};
@@ -874,7 +874,7 @@ pub async fn modifier(
     let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
     let sql = format!(
         "UPDATE {} AS c SET {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) AS p
-          WHERE c.{}::text = $2 RETURNING c.version::bigint",
+          WHERE c.{}::text = $2 AND c.version = $3 RETURNING c.version::bigint",
         e.table,
         set.join(", "),
         e.table,
@@ -883,18 +883,20 @@ pub async fn modifier(
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    // LE VERROU OPTIMISTE (decision du 19/10/2026) : la fiche n'a pas change
-    // depuis que l'ecran l'a lue. Elle reste verrouillee jusqu'a la fin.
-    exiger_version(&mut tx, e.table, e.cle, id, Some(version), &format!("La fiche {id}")).await?;
 
     // LA NOUVELLE VERSION REVIENT A L'ECRAN : celui qui corrige deux fois de
     // suite la meme fiche (une reference depuis un bon) la presente ensuite.
-    let nouvelle: i64 = sqlx::query_scalar(&sql)
+    // LE VERROU EST DANS L'ECRITURE (decision du 19/10/2026) : `AND version = $3`.
+    // Aucune ligne touchee : la fiche a change depuis que l'ecran l'a lue.
+    let nouvelle: Option<i64> = sqlx::query_scalar(&sql)
         .bind(charge_jsonb(&champs))
         .bind(id)
+        .bind(version)
         .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| AppError::Introuvable(format!("{} {id}", e.chemin)))?;
+        .await?;
+    let Some(nouvelle) = nouvelle else {
+        return Err(refus(&mut tx, e.table, e.cle, id, &format!("La fiche {id}")).await);
+    };
     tx.commit().await?;
 
     Ok(json!({
@@ -938,10 +940,6 @@ pub async fn supprimer(
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    // On ne supprime pas une fiche qu'un autre vient de modifier sans l'avoir vue.
-    if !matches!(e.suppression, Suppression::Interdite) {
-        exiger_version(&mut tx, e.table, e.cle, id, Some(version), &format!("La fiche {id}")).await?;
-    }
 
     let sql = match e.suppression {
         Suppression::Interdite => {
@@ -966,11 +964,13 @@ pub async fn supprimer(
         // La desactivation reste possible, mais comme un acte a part : on met
         // `actif` a zero. Retirer et desactiver ne sont pas la meme decision.
         Suppression::Logique(_) | Suppression::Physique => {
-            format!("DELETE FROM {} WHERE {} = $1", e.table, e.cle)
+            // On ne supprime pas une fiche qu'un autre vient de modifier sans
+            // l'avoir vue : la version lue est dans la condition.
+            format!("DELETE FROM {} WHERE {}::text = $1 AND version = $2", e.table, e.cle)
         }
     };
 
-    let res = match sqlx::query(&sql).bind(id).execute(&mut *tx).await {
+    let res = match sqlx::query(&sql).bind(id).bind(version).execute(&mut *tx).await {
         Ok(r) => r,
         // 23503 : violation de cle etrangere. Quelque chose s'appuie sur cette
         // ligne. Le message brut de PostgreSQL ne veut rien dire pour qui
@@ -1008,7 +1008,7 @@ pub async fn supprimer(
         Err(autre) => return Err(autre.into()),
     };
     if res.rows_affected() == 0 {
-        return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
+        return Err(refus(&mut tx, e.table, e.cle, id, &format!("La fiche {id}")).await);
     }
     tx.commit().await?;
 

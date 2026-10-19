@@ -708,7 +708,9 @@ def scenario_verrou_optimiste(c, infra):
     code, r = c.appel("Assistante", "PATCH", f"/api/bons-commande/{id_bc}",
                       {"notes": "saisie de l'assistante", "version": lue})
     verifier(code == 200, f"la premiere saisie, a jour, est refusee : {code} {r}")
-    verifier(int(infra.valeur(f"SELECT version FROM bon_commande WHERE id_bc = '{id_bc}'")) == lue + 1,
+    # La version AVANCE (de 2 : l'ecriture conditionnelle qui prend le bon, puis son
+    # en-tete) ; seule compte qu'une version lue avant ne vaille plus.
+    verifier(int(infra.valeur(f"SELECT version FROM bon_commande WHERE id_bc = '{id_bc}'")) > lue,
              "le declencheur n'a pas incremente la version")
 
     # La direction enregistre ensuite avec la version qu'elle avait lue, desormais perimee.

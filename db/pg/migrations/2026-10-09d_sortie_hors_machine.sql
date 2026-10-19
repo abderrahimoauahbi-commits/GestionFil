@@ -64,7 +64,7 @@ CREATE OR REPLACE VIEW v_prets_en_cours AS
 WITH flux AS (
     SELECT m.tiers, lm.code_reference,
            CASE WHEN m.code_type_mvt = 'RETOUR_PRET' THEN -lm.quantite_kg ELSE lm.quantite_kg END AS kg,
-           CASE WHEN m.code_type_mvt = 'SORTIE_HORS_MACHINE' THEN m.date_mouvement END AS date_pret,
+           CASE WHEN m.code_type_mvt = 'SORTIE_HORS_MACHINE' THEN m.date_mouvement::text END AS date_pret,
            CASE WHEN m.code_type_mvt = 'SORTIE_HORS_MACHINE'
                 THEN lm.quantite_kg * COALESCE(lm.prix_kg_mad, 0) END AS valeur_pretee_mad
       FROM mouvement m

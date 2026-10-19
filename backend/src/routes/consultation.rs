@@ -2080,7 +2080,7 @@ pub async fn mouvements(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
     let rows = sqlx::query(
-        "SELECT m.numero_mouvement, m.date_mouvement, m.code_type_mvt, m.code_magasin,
+        "SELECT m.numero_mouvement, m.date_mouvement::text AS date_mouvement, m.code_type_mvt, m.code_magasin,
                 m.code_motif, m.reference_document, m.numero_of, u.login AS utilisateur,
                 lm.ligne_numero, lm.code_reference, lm.quantite_kg, lm.prix_kg_mad,
                 lm.total_mad, lm.lot_fournisseur, tm.signe

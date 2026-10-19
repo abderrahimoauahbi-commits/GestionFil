@@ -382,7 +382,7 @@ pub async fn decider_dormant(
             sqlx::query(
                 "INSERT INTO mouvement (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
                                         code_motif, reference_document, observations_globales, id_utilisateur)
-                 VALUES ($1, $2, $3, 'AJUST_INV_NEG', $4, 'INVENTAIRE', $5, $6, $7)",
+                 VALUES ($1, $2, fn_jour_casablanca($3), 'AJUST_INV_NEG', $4, 'INVENTAIRE', $5, $6, $7)",
             )
             .bind(&id)
             .bind(&numero)
@@ -569,7 +569,7 @@ async fn deplacer_entre_lots(
         sqlx::query(
             "INSERT INTO mouvement (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
                                     code_motif, reference_document, observations_globales, id_utilisateur)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+             VALUES ($1, $2, fn_jour_casablanca($3), $4, $5, $6, $7, $8, $9)",
         )
         .bind(&id)
         .bind(&numero)

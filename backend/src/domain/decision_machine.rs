@@ -980,7 +980,7 @@ async fn ecrire_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin, code_motif,
               reference_document, numero_of, responsable, id_utilisateur, id_decision_machine)
-         VALUES ($1,$2,$3,$4,$5,'MACHINE',$6,$7,$8,$9,$10)",
+         VALUES ($1,$2,fn_jour_casablanca($3),$4,$5,'MACHINE',$6,$7,$8,$9,$10)",
     )
     .bind(&id)
     .bind(&numero)

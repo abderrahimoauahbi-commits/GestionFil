@@ -158,7 +158,7 @@ pub async fn creer_bc(
               motif_creation, notes, montant_total_devise, montant_total_mad,
               id_utilisateur_creation, date_bc)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,0,$11,
-                 COALESCE($12, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')))",
+                 COALESCE(fn_jour_casablanca($12), (now() AT TIME ZONE 'Africa/Casablanca')::date))",
     )
     .bind(&id)
     .bind(&numero)
@@ -850,7 +850,7 @@ pub async fn changer_statut_bc(
         // lui, reste celui de sa facture (cours BAM du jour).
         let (devise_bc, date_taux): (String, Option<String>) = sqlx::query_as(
             "SELECT bc.code_devise,
-                    (SELECT t.date_debut FROM taux_change t
+                    (SELECT t.date_debut::text FROM taux_change t
                       WHERE t.code_devise = bc.code_devise
                         AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
                         AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
@@ -1131,7 +1131,7 @@ pub async fn modifier_bc(
 
     sqlx::query(
         "UPDATE bon_commande
-            SET date_bc               = COALESCE($2, date_bc),
+            SET date_bc               = COALESCE(fn_jour_casablanca($2), date_bc),
                 date_livraison_prevue = COALESCE($3, date_livraison_prevue),
                 conditions_paiement   = COALESCE($4, conditions_paiement),
                 notes                 = COALESCE($5, notes),
@@ -1613,7 +1613,7 @@ pub(crate) async fn taux_au(
         "SELECT taux::float8 FROM (
              SELECT 1.0::numeric AS taux, '9999' AS date_debut FROM devise WHERE code_devise = $1 AND est_pivot = 1
              UNION ALL
-             SELECT taux, date_debut FROM taux_change
+             SELECT taux, date_debut::text AS date_debut FROM taux_change
               WHERE code_devise = $1 AND $2 >= substr(date_debut, 1, 10)
                 AND (date_fin IS NULL OR $2 < substr(date_fin, 1, 10))) t
           ORDER BY date_debut DESC LIMIT 1",

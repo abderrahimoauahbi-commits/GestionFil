@@ -48,7 +48,7 @@ ALTER TABLE reception_ajustements_cmup ADD CONSTRAINT ck_rec_ajust_origine
 
 -- Les retours d'une reception et ce qui les solde.
 CREATE OR REPLACE VIEW v_retours_reception AS
-SELECT r.id_reception, r.numero_reception, m.id_mouvement, m.numero_mouvement, m.date_mouvement,
+SELECT r.id_reception, r.numero_reception, m.id_mouvement, m.numero_mouvement, m.date_mouvement::text AS date_mouvement,
        lm.code_reference, round(sum(lm.quantite_kg), 4) AS kg,
        EXISTS (SELECT 1 FROM reception_ajustements_cmup a
                 WHERE a.nature = 'RETOUR' AND a.id_mouvement_retour = m.id_mouvement) AS solde

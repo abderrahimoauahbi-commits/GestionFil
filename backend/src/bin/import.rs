@@ -876,7 +876,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt,
                   code_magasin, code_motif, reference_document, id_utilisateur, est_initial)
-             VALUES ($1, 'MVT-INIT-XLSX-0001', $2, 'STOCK_INIT', 'MP-01', 'INIT',
+             VALUES ($1, 'MVT-INIT-XLSX-0001', fn_jour_casablanca($2), 'STOCK_INIT', 'MP-01', 'INIT',
                      'Reprise GESTION Fil.xlsx', $3, 1)",
         )
         .bind(&id_mvt)

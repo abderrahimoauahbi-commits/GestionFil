@@ -310,7 +310,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
                   code_motif, reference_document, observations_globales, id_utilisateur)
-             VALUES ($1, $2, $3, 'RETOUR_FOURN', $4, 'RETOUR_FOUR', $5, $6, $7)",
+             VALUES ($1, $2, fn_jour_casablanca($3), 'RETOUR_FOURN', $4, 'RETOUR_FOUR', $5, $6, $7)",
         )
         .bind(&id_mvt)
         .bind(&numero_mvt)

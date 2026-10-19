@@ -64,7 +64,15 @@ EMPREINTES_REMPLACEES: dict[str, set[str]] = {
     # 14/10/2026 (ADR-003 phase C) : 'FRAIS' entre dans ck_rec_ajust_origine. Corrige
     # DANS CETTE migration parce qu'elle se rejoue : rejouee sur une base qui porte
     # deja des ajustements 'FRAIS', l'ancienne liste echouait sur ses propres lignes.
-    "2026-10-09g_avoirs_retours.sql": {"30cc67b5115c101cffeb9443e9e87641656793e534307d225972668ac60f7518"},
+    "2026-10-09g_avoirs_retours.sql": {"30cc67b5115c101cffeb9443e9e87641656793e534307d225972668ac60f7518",
+                                       "12382d93eecb689607bccf2801a11271be52d779ed37b9b135cbe40dd50994c3"},
+    # 19/10/2026 (A1, dates en vrai type, 2026-10-19g) : ces migrations se rejouent ;
+    # elles lisent desormais date_mouvement / date_bc en texte (::text), ce qui vaut
+    # avant comme apres la conversion de type.
+    "2026-10-09b_supervision_rejouee.sql": {"c765b9b45e73a8e86d900c30dc1bd1d571082b9df001c41ca06f94807b957d86"},
+    "2026-10-09d_sortie_hors_machine.sql": {"ff584388a8635bde5e288364114c24c0ef36f3c765fe40997cef470db01c774a"},
+    "2026-10-09j_prix_plan_achat.sql": {"913cd8bce990de61598722b6d65d50018cac7e0c4a7bce9c5f9a15cb058c5ef9"},
+    "2026-10-09n_avoir_import.sql": {"f4e6f92309aab941e9d2798e3343aacd28ae265ffa1750b0adf32e8d0df8e681"},
 }
 
 

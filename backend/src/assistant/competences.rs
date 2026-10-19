@@ -555,7 +555,7 @@ pub async fn executer(
         "commandes_en_cours" => {
             let retard = args.get("en_retard").and_then(Value::as_bool).unwrap_or(false);
             let rows = sqlx::query(
-                "SELECT bc.numero_bc, bc.date_bc, bc.statut, f.nom AS fournisseur_nom,
+                "SELECT bc.numero_bc, bc.date_bc::text AS date_bc, bc.statut, f.nom AS fournisseur_nom,
                         bc.montant_total_mad::float8 AS montant_total_mad,
                         bc.date_livraison_prevue,
                         CASE WHEN bc.date_livraison_prevue IS NOT NULL
@@ -599,7 +599,7 @@ pub async fn executer(
         "mouvements_recents" => {
             let code = args.get("code_reference").and_then(Value::as_str).map(str::trim);
             let rows = sqlx::query(
-                "SELECT m.numero_mouvement, m.date_mouvement, m.code_type_mvt,
+                "SELECT m.numero_mouvement, m.date_mouvement::text AS date_mouvement, m.code_type_mvt,
                         tm.libelle AS type_libelle, tm.signe, mg.nom AS magasin_nom,
                         m.responsable, u.login AS saisi_par,
                         ROUND(COALESCE(SUM(l.quantite_kg), 0), 2)::float8 AS quantite_totale_kg,

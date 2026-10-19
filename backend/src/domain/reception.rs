@@ -318,7 +318,7 @@ pub async fn valider(
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt,
                   code_magasin, code_motif, reference_document, id_utilisateur)
-             VALUES ($1, $2, $3, 'ENTREE_REC', $4, 'RECEPTION', $5, $6)",
+             VALUES ($1, $2, fn_jour_casablanca($3), 'ENTREE_REC', $4, 'RECEPTION', $5, $6)",
         )
         .bind(&id_mouvement)
         .bind(&numero_mouvement)

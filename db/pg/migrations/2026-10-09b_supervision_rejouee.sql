@@ -100,7 +100,7 @@ rotation AS (
       JOIN ligne_mouvement lm ON lm.id_mouvement = m.id_mouvement
       JOIN reference r ON r.code_reference = lm.code_reference
      WHERE t.signe = -1
-       AND m.date_mouvement >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
+       AND m.date_mouvement::text >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
                                        'YYYY-MM-DD')
 ),
 -- LE STOCK DORMANT : ce qui n'a pas bouge depuis soixante jours. Il ne se
@@ -111,7 +111,7 @@ dormant AS (
                    SELECT 1 FROM ligne_mouvement lm
                      JOIN mouvement m ON m.id_mouvement = lm.id_mouvement
                     WHERE lm.code_reference = e.code_reference
-                      AND m.date_mouvement >= to_char(
+                      AND m.date_mouvement::text >= to_char(
                           (now() AT TIME ZONE 'UTC') - interval '60 days', 'YYYY-MM-DD'))
            ), 0)                                                  AS dormant_mad,
            NULLIF(sum(e.valeur_mad), 0)                           AS total_mad

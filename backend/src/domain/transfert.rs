@@ -140,7 +140,7 @@ async fn ouvrir_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, code_type_mvt, code_magasin,
               code_motif, reference_document, id_utilisateur, date_mouvement)
-         VALUES ($1, $2, $3, $4, 'TRANSFERT', $5, $6, $7)"
+         VALUES ($1, $2, $3, $4, 'TRANSFERT', $5, $6, fn_jour_casablanca($7))"
     } else {
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, code_type_mvt, code_magasin,

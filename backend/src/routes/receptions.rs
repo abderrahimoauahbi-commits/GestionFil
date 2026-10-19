@@ -62,7 +62,7 @@ pub async fn lister_receptions(
                             JOIN ligne_bc lb2     ON lb2.id_ligne_bc = l2.id_ligne_bc
                             JOIN bon_commande b2  ON b2.id_bc = lb2.id_bc
                            WHERE l2.id_reception = rc.id_reception)) AS numero_bc,
-                COALESCE(bc.date_bc, p.date_bc)                             AS date_bc,
+                COALESCE(bc.date_bc::text, p.date_bc)                             AS date_bc,
                 COALESCE(bc.date_livraison_prevue, p.date_livraison_prevue) AS date_livraison_prevue,
                 -- L'ARRIVAGE D'IMPORT (ADR-003 phase A) : le dossier rattache,
                 -- et ce qu'il porte de douanier.
@@ -86,7 +86,7 @@ pub async fn lister_receptions(
                      AS bigint)
                     AS retard_jours,
 
-                CASE WHEN COALESCE(bc.date_bc, p.date_bc) IS NULL
+                CASE WHEN COALESCE(bc.date_bc::text, p.date_bc) IS NULL
                        OR COALESCE(bc.date_livraison_prevue, p.date_livraison_prevue) IS NULL
                      THEN NULL
                      WHEN substr(rc.date_reception, 1, 10)
@@ -386,7 +386,7 @@ pub async fn lignes_attendues(
                     AND r2.statut IN ('BROUILLON', 'A_CONTROLER')
                     AND r2.id_reception IS DISTINCT FROM $2) AS en_cours_dans,
                 lb.prix_unitaire_devise, lb.prix_kg_devise, lb.code_devise,
-                bc.id_bc, bc.numero_bc, bc.date_bc, bc.date_livraison_prevue, bc.statut AS statut_bc,
+                bc.id_bc, bc.numero_bc, bc.date_bc::text AS date_bc, bc.date_livraison_prevue, bc.statut AS statut_bc,
                 r.unite_catalogue, r.suivi_lot, r.densite_kg_ml, r.poids_bobine_kg,
                 r.bobines_par_palette, r.bobines_par_lot,
                 -- Deja saisie sur CETTE reception : montrer plutot que masquer,

@@ -365,7 +365,7 @@ pub async fn creer_mouvement(
               code_motif, reference_document, numero_of, observations_globales,
               responsable, id_utilisateur, tiers)
          VALUES ($1,$2,
-                 COALESCE($3, to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')),
+                 COALESCE(fn_jour_casablanca($3), (now() AT TIME ZONE 'Africa/Casablanca')::date),
                  $4,$5,$6,$7,$8,$9,$10,$11,$12)",
     )
     .bind(&id)
@@ -497,7 +497,7 @@ const TOTAUX_MOUVEMENT: &str = "
 
 /// Les colonnes d'entete, communes a la liste et au dossier.
 const ENTETE_MOUVEMENT: &str = "
-    m.id_mouvement, m.numero_mouvement, m.date_mouvement, m.date_creation,
+    m.id_mouvement, m.numero_mouvement, m.date_mouvement::text AS date_mouvement, m.date_creation,
     m.code_type_mvt, tm.libelle AS type_libelle, tm.signe, tm.couleur,
     m.code_magasin, mg.nom AS magasin_nom,
     m.code_motif, mo.libelle AS motif_libelle,
@@ -562,8 +562,8 @@ pub async fn documents_mouvement(
             AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM ligne_mouvement l
                                               WHERE l.id_mouvement   = m.id_mouvement
                                                 AND l.code_reference = $3))
-            AND ($4::text IS NULL OR m.date_mouvement >= $4)
-            AND ($5::text IS NULL OR m.date_mouvement <= $5)
+            AND ($4::text IS NULL OR m.date_mouvement >= fn_jour_casablanca($4))
+            AND ($5::text IS NULL OR m.date_mouvement <= fn_jour_casablanca($5))
           ORDER BY m.date_mouvement DESC, m.numero_mouvement DESC
           LIMIT $6"
     );
@@ -784,7 +784,7 @@ pub async fn contre_passer(
               code_motif, reference_document, observations_globales,
               id_utilisateur, id_mouvement_contrepasse, motif_contrepassation)
          VALUES ($1, $2,
-                 to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),
+                 (now() AT TIME ZONE 'Africa/Casablanca')::date,
                  $3, $4, 'CONTREPASSATION', $5, $6, $7, $8, $9)",
     )
     .bind(&id_inverse)

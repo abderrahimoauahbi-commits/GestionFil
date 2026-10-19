@@ -126,8 +126,7 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
                JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
               WHERE tm.signe = -1
                 AND m.code_type_mvt = 'SORTIE_PROD'
-                AND m.date_mouvement >= to_char((now() AT TIME ZONE 'UTC') - interval '12 months',
-                                                'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                AND m.date_mouvement >= ((now() AT TIME ZONE 'Africa/Casablanca') - interval '12 months')::date
               GROUP BY lm.code_reference, mois
              UNION ALL
              SELECT bm.code_reference, bm.annee_mois, SUM(bm.quantite_kg)

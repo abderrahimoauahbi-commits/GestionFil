@@ -109,6 +109,16 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // A1, premier lot (19/10/2026) : date_mouvement, date_bc, date_debut / date_fin
+        // des taux et date_derniere_sortie sont des `date` ; le serveur les ecrit par
+        // `fn_jour_casablanca`. Sans la migration, toute ecriture de mouvement tombe.
+        "2026-10-19g_dates_typees_lot1.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_jour_casablanca')
+            AND (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'mouvement'
+                    AND column_name = 'date_mouvement') = 'date'",
+    ),
+    (
         // Decision du 19/10/2026 : le verrou optimiste sur les 17 referentiels.
         // `crud::modifier` et `crud::supprimer` lisent `version` : sans la
         // colonne, toute fiche refuserait de s'enregistrer.

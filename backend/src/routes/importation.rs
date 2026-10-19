@@ -990,7 +990,7 @@ pub async fn lignes_bc_ouvertes(
     let fournisseur = q.get("fournisseur")
         .ok_or_else(|| AppError::Invalide("Paramètre fournisseur obligatoire.".into()))?;
     let lignes = sqlx::query(
-        "SELECT lb.id_ligne_bc, b.numero_bc, b.date_bc, b.statut AS statut_bc, lb.ligne_numero,
+        "SELECT lb.id_ligne_bc, b.numero_bc, b.date_bc::text AS date_bc, b.statut AS statut_bc, lb.ligne_numero,
                 lb.code_reference, r.designation, r.code_couleur, lb.quantite_commandee_kg,
                 lb.quantite_restante_kg, lb.prix_kg_devise, lb.code_devise
            FROM ligne_bc lb

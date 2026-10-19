@@ -1119,7 +1119,7 @@ def scenario_typage_du_temps(c, infra):
     GROSSIT PLUS : pas une colonne de date en texte de plus, et chacune porte sa contrainte de
     format ISO (migration 2026-10-17f). Une date mal formee ne peut plus entrer."""
     # LE CLIQUET : a abaisser a chaque colonne convertie, jamais a relever.
-    plafond = 134
+    plafond = 129  # 19/10 (2026-10-19g) : 5 colonnes passees en date ; le cliquet descend avec elles
     n = int(infra.valeur("SELECT count(*) " + COLONNES_DATE_TEXTE))
     verifier(n <= plafond, f"{n} colonnes de date en texte, plafond {plafond} : une nouvelle colonne de date "
                            "se cree en `date` ou `timestamptz`, pas en `text`")
@@ -2002,11 +2002,11 @@ def scenario_taux_bon(c, infra):
              f"taux saisi mal enregistre : {ligne}")
 
     # Regle 18 (T7) : un taux de reference de plus de 7 jours ne valide pas un bon en devise.
-    infra.sql("UPDATE taux_change SET date_debut = to_char(current_date - 10, 'YYYY-MM-DD') "
+    infra.sql("UPDATE taux_change SET date_debut = current_date - 10 "
               "WHERE code_devise = 'USD' AND date_fin IS NULL")
     b3 = bon_soumis()
     c.refus("Choukri", "PUT", f"/api/bons-commande/{b3}/statut", {"statut": "VALIDE"}, contient="7")
-    infra.sql("UPDATE taux_change SET date_fin = to_char(current_date, 'YYYY-MM-DD') "
+    infra.sql("UPDATE taux_change SET date_fin = current_date "
               "WHERE code_devise = 'USD' AND date_fin IS NULL")
     taux_usd_du_jour(infra)
 

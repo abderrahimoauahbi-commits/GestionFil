@@ -269,6 +269,33 @@ pub async fn convertir(
     // COMMANDE et IGNORE sont exclues — l'une engage deja, l'autre a ete ecartee.
     // `= ANY($1)` et non des `?` a la SQLite ; quantites et prix en `::float8`,
     // sans quoi le decodage des NUMERIC echouait. « Commander » ne marchait pas.
+    // UNE PROPOSITION DEJA COMMANDEE N'EST PLUS ECARTEE EN SILENCE (19/10/2026) :
+    // celui qui la demande l'a vue ouverte sur son ecran, un autre l'a commandee
+    // entre-temps. On le lui dit, avec le bon, au lieu de convertir le reste
+    // comme si de rien n'etait.
+    if let Some(ids) = propositions.filter(|i| !i.is_empty()) {
+        let prises: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT pa.code_reference, b.numero_bc
+               FROM plan_achat pa
+               LEFT JOIN bon_commande b ON b.id_bc = pa.id_bc_genere
+              WHERE pa.id_proposition = ANY($1) AND pa.statut = 'COMMANDE'
+              ORDER BY pa.code_reference",
+        )
+        .bind(ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        if !prises.is_empty() {
+            let liste: Vec<String> = prises
+                .iter()
+                .map(|(r, b)| format!("{r} ({})", b.as_deref().unwrap_or("bon inconnu")))
+                .collect();
+            return Err(AppError::RegleMetier(format!(
+                "R-PROP : deja commandee(s) par un autre bon : {}. Rafraichissez le plan d'achat.",
+                liste.join(", ")
+            )));
+        }
+    }
+
     let ouvertes: Vec<(String, String, f64, f64, Option<String>, Option<i64>)> = match propositions {
         Some(ids) if !ids.is_empty() => {
             sqlx::query_as(

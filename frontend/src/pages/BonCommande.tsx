@@ -249,9 +249,11 @@ export function BonCommande() {
 
   /** Corriger la fiche de la reference depuis la commande, comme a la creation. */
   const corrigerReference = useMutation({
-    mutationFn: ({ code, champ, valeur }: { code: string; champ: string; valeur: string }) =>
-      api.patch(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur }),
-    onSuccess: () => {
+    mutationFn: ({ code, champ, valeur, version }: { code: string; champ: string; valeur: string; version?: number | null }) =>
+      api.patch<{ version: number }>(`/api/catalogue/${encodeURIComponent(code)}`, { [champ]: valeur, version }),
+    onSuccess: (r, v) => {
+      // La fiche a change de version : la correction suivante presentera la nouvelle.
+      setNouvelles((ls) => ls.map((l) => (l.code_reference === v.code ? { ...l, version_reference: r.version } : l)))
       toast.success('Fiche de la référence corrigée')
       void qc.invalidateQueries({ queryKey: ['refs-plan'] })
     },
@@ -1213,8 +1215,8 @@ export function BonCommande() {
                 setMode={setMode}
                 proposees={proposees}
                 chercherCatalogue={chercherCatalogue}
-                surCorrection={(code, champ, valeur) =>
-                  corrigerReference.mutate({ code, champ, valeur })
+                surCorrection={(code, champ, valeur, version) =>
+                  corrigerReference.mutate({ code, champ, valeur, version })
                 }
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
                 validationLocale

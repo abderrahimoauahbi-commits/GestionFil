@@ -552,7 +552,8 @@ export function TransfertNouveau() {
   // LA MODIFICATION REMPLACE TOUTES LES LIGNES : le serveur recoit le document
   // entier, il n'y a rien a reconcilier ligne par ligne.
   const enregistrer = useMutation({
-    mutationFn: () => api.put<{ lignes: number }>(`/api/transferts/${id}`, charge()),
+    mutationFn: () =>
+      api.put<{ lignes: number }>(`/api/transferts/${id}`, { ...charge(), version: qDossier.data?.entete.version }),
     onSuccess: (r) => {
       toast.success(`${qDossier.data?.entete.numero_transfert} mis a jour`, {
         description: `${r.lignes} ligne(s). Le document reste en preparation.`,
@@ -565,7 +566,7 @@ export function TransfertNouveau() {
   })
 
   const abandonner = useMutation({
-    mutationFn: () => api.delete(`/api/transferts/${id}`),
+    mutationFn: () => api.delete(`/api/transferts/${id}?version=${qDossier.data?.entete.version ?? ''}`),
     onSuccess: () => {
       toast.success('Transfert abandonne', {
         description:

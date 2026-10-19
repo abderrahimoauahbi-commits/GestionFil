@@ -52,7 +52,10 @@ pub async fn exiger_version(
     // « erreur interne », jamais a la compilation. Le scenario de banc
     // `verrou_optimiste` l'a trouve le 17/10 ; aucun des 47 autres ne passait
     // de version, donc aucun n'empruntait ce chemin.
-    let sql = format!("SELECT version::bigint FROM {table} WHERE {colonne_id} = $1 FOR UPDATE");
+    // `::text` : la cle d'un referentiel n'est pas toujours du texte (le mois
+    // d'une saison est un entier, 19/10/2026) ; l'identifiant arrive du chemin,
+    // donc en texte. Les tables visees sont petites : le parcours est negligeable.
+    let sql = format!("SELECT version::bigint FROM {table} WHERE {colonne_id}::text = $1 FOR UPDATE");
     let actuelle: Option<i64> = sqlx::query_scalar(&sql).bind(id).fetch_optional(&mut *tx).await?;
 
     let actuelle = actuelle
@@ -63,6 +66,15 @@ pub async fn exiger_version(
     }
 
     Err(AppError::Conflit(message_conflit(tx, table, id, quoi).await))
+}
+
+/// LA VERSION, OBLIGATOIRE (decision du 19/10/2026) : un ecran qui modifie un
+/// document envoie celle qu'il a lue. Absente, on refuse plutot que d'ecraser
+/// peut-etre la saisie d'un autre.
+pub fn exigee(v: Option<i64>) -> AppResult<i64> {
+    v.ok_or_else(|| {
+        AppError::Invalide("Version du document manquante : rechargez-le avant d'enregistrer.".into())
+    })
 }
 
 /// Le message du refus, qui nomme l'auteur et l'heure du changement.

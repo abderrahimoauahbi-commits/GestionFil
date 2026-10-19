@@ -64,6 +64,7 @@ interface Groupe extends Record<string, unknown> {
 /** Un rattachement brut : c'est lui qui existe meme quand le groupe est seul. */
 interface Rattachement extends Record<string, unknown> {
   id_ref_grp: string
+  version: number
   code_reference: string
   code_groupe_equiv: string
   priorite: number
@@ -290,7 +291,8 @@ export function Equivalences() {
   })
 
   const detacher = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/reference-groupes/${id}`),
+    mutationFn: ({ id, version }: { id: string; version: number }) =>
+      api.delete(`/api/reference-groupes/${id}?version=${version}`),
     onSuccess: () => {
       toast.success('Référence detachee')
       rafraichir()
@@ -581,7 +583,7 @@ export function Equivalences() {
                                           libelleConfirmer: 'Detacher',
                                           description:
                                             "La référence ne sera plus proposee comme substitut des autres membres du groupe. Aucun stock ni mouvement n'est touche.",
-                                          action: () => detacher.mutate(m.id_ref_grp),
+                                          action: () => detacher.mutate({ id: m.id_ref_grp, version: m.version }),
                                         })
                                       }
                                       aria-label="Detacher"

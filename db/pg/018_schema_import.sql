@@ -40,6 +40,8 @@
 --     autres methodes existent parce qu'un fret se repartit parfois au poids,
 --     et qu'une formalite se partage a parts egales.
 CREATE TABLE parametres_frais (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     id_frais            text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     categorie           text    NOT NULL

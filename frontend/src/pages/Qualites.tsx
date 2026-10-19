@@ -68,6 +68,7 @@ type Statut = 'BROUILLON' | 'ACTIF' | 'CLOTURE'
 type Unite = 'kg_m2' | 'ml_m2'
 
 interface Qualite extends Record<string, unknown> {
+  version: number
   code_qualite: string
   nom: string
   description: string | null
@@ -178,6 +179,8 @@ interface LigneLocale extends Record<string, unknown> {
 
 interface Entete {
   code_qualite: string
+  /** La version lue (verrou optimiste, 19/10/2026) ; absente a la creation. */
+  version?: number
   nom: string
   description: string
   statut: Statut
@@ -354,6 +357,7 @@ export function Qualites() {
     setEnCreation(false)
     setEntete({
       code_qualite: q.code_qualite,
+      version: q.version,
       nom: q.nom,
       description: q.description ?? '',
       statut: q.statut,
@@ -393,6 +397,7 @@ export function Qualites() {
         '/api/qualites',
         {
           code_qualite: entete.code_qualite.trim().toUpperCase(),
+          version: enCreation ? null : entete.version,
           nom: entete.nom.trim(),
           description: entete.description.trim() || null,
           statut: entete.statut,
@@ -434,8 +439,8 @@ export function Qualites() {
   })
 
   const suppression = useMutation({
-    mutationFn: (code: string) =>
-      api.delete<{ mode: string; raison?: string }>(`/api/qualites/${code}`),
+    mutationFn: ({ code, version }: { code: string; version: number }) =>
+      api.delete<{ mode: string; raison?: string }>(`/api/qualites/${code}?version=${version}`),
     onSuccess: (r) => {
       toast.success(
         r.mode === 'SUPPRESSION' ? 'Qualité supprimee' : 'Qualité clôturée',
@@ -457,7 +462,7 @@ export function Qualites() {
         ? `${q.nb_lignes_plan} ligne(s) de plan la referencent : ` +
           `elle sera cloturee pour preserver ces liens, pas effacee.`
         : "Rien ne la référence : elle sera effacee, avec ses densites et sa composition.",
-      action: () => suppression.mutate(q.code_qualite),
+      action: () => suppression.mutate({ code: q.code_qualite, version: q.version }),
     })
   }
 

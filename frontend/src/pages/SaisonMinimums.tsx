@@ -22,12 +22,14 @@ import { lireNombre } from '../lib/nombres'
 
 interface Saison {
   mois: number
+  version: number
   libelle: string
   coefficient: number
 }
 
 interface Minimum {
   code_reference: string
+  version: number
   designation: string
   stock_min_kg: number
   couverture_min_mois: number | null
@@ -54,7 +56,10 @@ export function SaisonMinimums() {
   const enregistrerSaison = useMutation({
     mutationFn: async () => {
       for (const [mois, v] of Object.entries(brouillon)) {
-        await api.patch(`/api/saisons/${mois}`, { coefficient: (lireNombre(v) ?? 0) })
+        await api.patch(`/api/saisons/${mois}`, {
+          coefficient: (lireNombre(v) ?? 0),
+          version: qSaison.data?.find((s) => s.mois === Number(mois))?.version,
+        })
       }
     },
     onSuccess: () => {
@@ -66,7 +71,7 @@ export function SaisonMinimums() {
   })
   const appliquer = useMutation({
     mutationFn: (m: Minimum) =>
-      api.patch(`/api/catalogue/${encodeURIComponent(m.code_reference)}`, { stock_min_kg: m.valeur_proposee_kg }),
+      api.patch(`/api/catalogue/${encodeURIComponent(m.code_reference)}`, { stock_min_kg: m.valeur_proposee_kg, version: m.version }),
     onSuccess: (_r, m) => {
       toast.success(`${m.code_reference} : stock minimum ramené à ${fmt.nombre(m.valeur_proposee_kg ?? 0, 0)} kg`)
       void qc.invalidateQueries({ queryKey: ['stocks-minimums'] })

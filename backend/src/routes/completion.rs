@@ -154,7 +154,7 @@ pub async fn completion(
     user.exiger(db, module::CATALOGUE, crate::auth::rbac::Action::Lire).await?;
 
     let refs = sqlx::query(
-        "SELECT r.code_reference, r.code_categorie, r.code_fournisseur, r.designation,
+        "SELECT r.code_reference, r.version, r.code_categorie, r.code_fournisseur, r.designation,
                 COALESCE(r.couleur, '')  AS couleur,
                 COALESCE(r.titrage, '')  AS titrage,
                 r.code_famille, r.code_couleur_interne,

@@ -128,24 +128,49 @@ pub async fn lire(
     Ok(Json(crud::lire(&state.db, &user, e, &id).await?))
 }
 
+/// LA VERSION LUE PAR L'ECRAN, OBLIGATOIRE (decision du 19/10/2026).
+///
+/// Sans elle, le serveur ne peut pas savoir si la fiche a change depuis que
+/// l'ecran l'a affichee : la modification ecraserait peut-etre celle d'un
+/// autre, en silence. Les outils d'administration et d'import n'en ont pas
+/// besoin — ils ecrivent en base, pas par cette route.
+pub(crate) fn version_exigee(v: Option<&Value>) -> AppResult<i64> {
+    v.and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())))
+        .ok_or_else(|| {
+            AppError::Invalide(
+                "Version de la fiche manquante : rechargez-la avant d'enregistrer.".into(),
+            )
+        })
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct VersionLue {
+    pub version: Option<String>,
+}
+
 pub async fn modifier(
     State(state): State<AppState>,
     user: Utilisateur,
     Path((chemin, id)): Path<(String, String)>,
-    Json(charge): Json<Map<String, Value>>,
+    Json(mut charge): Json<Map<String, Value>>,
 ) -> AppResult<Json<Value>> {
     let e = crud::entite(&chemin)?;
+    // La version n'est pas un champ de la fiche : on la retire avant que la
+    // liste blanche des colonnes ne la refuse.
+    let version = version_exigee(charge.remove("version").as_ref())?;
     exiger_reglages_sensibles(&state, &user, e, Some(&id), &charge).await?;
-    Ok(Json(crud::modifier(&state.db, &user, e, &id, &charge).await?))
+    Ok(Json(crud::modifier(&state.db, &user, e, &id, version, &charge).await?))
 }
 
 pub async fn supprimer(
     State(state): State<AppState>,
     user: Utilisateur,
     Path((chemin, id)): Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<VersionLue>,
 ) -> AppResult<Json<Value>> {
     let e = crud::entite(&chemin)?;
-    Ok(Json(crud::supprimer(&state.db, &user, e, &id).await?))
+    let version = version_exigee(q.version.map(Value::String).as_ref())?;
+    Ok(Json(crud::supprimer(&state.db, &user, e, &id, version).await?))
 }
 
 /// `GET /api/{entite}/{id}/retenants` — CE QUI EMPECHE D'EFFACER, AVANT D'ESSAYER.

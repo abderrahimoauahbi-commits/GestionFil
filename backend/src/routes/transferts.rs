@@ -40,6 +40,10 @@ pub async fn lister_transferts(
 
 #[derive(Debug, Deserialize)]
 pub struct NouveauTransfert {
+    /// LA VERSION LUE PAR L'ECRAN (verrou optimiste, 19/10/2026) : obligatoire
+    /// pour modifier un document existant, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
     /// L'IDENTIFIANT TIRE PAR L'ECRAN a l'ouverture du formulaire (audit P3,
     /// 19/10/2026) : le meme envoi rejoue rend le meme document, pas un second.
     /// Absent : le serveur en tire un.
@@ -292,6 +296,7 @@ pub async fn modifier_transfert(
     Json(t): Json<NouveauTransfert>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    let version = crate::domain::concurrence::exigee(t.version)?;
 
     // La conversion se fait AVANT d'ouvrir la transaction : une unite sans
     // facteur doit echouer en nommant sa reference, pas apres avoir efface les
@@ -312,6 +317,10 @@ pub async fn modifier_transfert(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "transfert", "id_transfert", &id, Some(version), "Ce transfert",
+    )
+    .await?;
 
     let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = $1")
         .bind(&id)
@@ -373,9 +382,15 @@ pub async fn modifier_transfert(
         total_kg += kg;
     }
 
+    // La version a jour : l'ecran reste ouvert et la presentera au prochain enregistrement.
+    let version: i64 = sqlx::query_scalar("SELECT version::bigint FROM transfert WHERE id_transfert = $1")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(Json(json!({
         "id_transfert": id,
+        "version": version,
         "lignes": converties.len(),
         "quantite_totale_kg": arrondi_kg(total_kg)
     })))
@@ -390,11 +405,17 @@ pub async fn annuler_transfert(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "transfert", "id_transfert", &id, Some(version), "Ce transfert",
+    )
+    .await?;
 
     let statut: String = sqlx::query_scalar("SELECT statut FROM transfert WHERE id_transfert = $1")
         .bind(&id)

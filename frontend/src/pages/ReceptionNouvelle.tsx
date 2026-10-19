@@ -72,6 +72,9 @@ interface LigneAttendue extends Record<string, unknown> {
   quantite_commandee_kg: number
   quantite_recue_kg: number
   quantite_restante_kg: number
+  /** Deja pese sur cette ligne par d'autres receptions en cours (19/10/2026). */
+  en_cours_kg?: number | null
+  en_cours_dans?: string | null
   prix_kg_devise?: number
   code_devise?: string
   unite_catalogue: string
@@ -105,6 +108,8 @@ interface Ligne {
   numero_bc: string | null
   date_livraison_prevue: string | null
   retard_jours: number | null
+  en_cours_kg?: number | null
+  en_cours_dans?: string | null
   code_reference: string
   designation: string
   reste_kg: number | null
@@ -312,6 +317,8 @@ export function ReceptionNouvelle() {
         numero_bc: a.numero_bc,
         date_livraison_prevue: a.date_livraison_prevue,
         retard_jours: a.retard_jours,
+        en_cours_kg: a.en_cours_kg ?? null,
+        en_cours_dans: a.en_cours_dans ?? null,
         code_reference: a.code_reference,
         designation: a.designation,
         code_recu: a.code_reference,
@@ -941,6 +948,12 @@ export function ReceptionNouvelle() {
                                     {(l.retard_jours ?? 0) > 0 && (
                                       <div className="text-[11px] text-danger">
                                         {l.retard_jours} j de retard
+                                      </div>
+                                    )}
+                                    {/* LE SIGNAL : une autre reception pese deja cette ligne. */}
+                                    {(l.en_cours_kg ?? 0) > 0 && (
+                                      <div className="text-[11px] text-alerte">
+                                        déjà en cours : {fmt.nombre(l.en_cours_kg ?? 0, 0)} kg dans {l.en_cours_dans}
                                       </div>
                                     )}
                                   </div>

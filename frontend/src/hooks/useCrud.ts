@@ -81,8 +81,10 @@ export function useCrud<T>(chemin: string, filtres: Record<string, string> = {})
   })
 
   const supprimer = useMutation({
-    mutationFn: (id: string) =>
-      api.delete<{ mode?: string }>(`/api/${chemin}/${encodeURIComponent(id)}`),
+    mutationFn: ({ id, version }: { id: string; version: unknown }) =>
+      api.delete<{ mode?: string }>(
+        `/api/${chemin}/${encodeURIComponent(id)}?version=${encodeURIComponent(String(version ?? ''))}`,
+      ),
     onSuccess: (r) => {
       setErreur(null)
       setSucces(

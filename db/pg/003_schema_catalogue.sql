@@ -7,6 +7,8 @@
 -- fournisseur
 -- -----------------------------------------------------------------------------
 CREATE TABLE fournisseur (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_fournisseur    text    NOT NULL PRIMARY KEY,
     nom                 text    NOT NULL,
     contact_principal   text,
@@ -71,6 +73,8 @@ CREATE UNIQUE INDEX ux_contact_principal
 -- C'est ce qui permet de chiffrer une couleur jamais achetee.
 -- -----------------------------------------------------------------------------
 CREATE TABLE couleur (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_couleur_interne text    NOT NULL PRIMARY KEY,
     libelle              text    NOT NULL,
     classe_teinture      text    CHECK (classe_teinture IS NULL
@@ -89,6 +93,8 @@ CREATE TABLE couleur (
 -- famille et de meme couleur sont le meme fil, chez deux vendeurs differents.
 -- -----------------------------------------------------------------------------
 CREATE TABLE famille (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_famille    text    NOT NULL PRIMARY KEY,
     libelle         text    NOT NULL,
     code_categorie  text    REFERENCES categorie_matiere(code_categorie),
@@ -106,6 +112,8 @@ CREATE TABLE famille (
 -- Migration 2026-10-19a_positions_tarifaires.sql (audit P3), qui pose aussi le
 -- declencheur d'audit (fn_trg_audit_modification, defini en 010).
 CREATE TABLE position_tarifaire (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_sh             text    NOT NULL PRIMARY KEY
                                 CONSTRAINT ck_pt_code CHECK (code_sh ~ '^[0-9]{6,10}$'),
     libelle             text    NOT NULL CONSTRAINT ck_pt_libelle CHECK (btrim(libelle) <> ''),
@@ -122,6 +130,8 @@ CREATE TABLE position_tarifaire (
 
 -- -----------------------------------------------------------------------------
 CREATE TABLE reference (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_reference      text    NOT NULL PRIMARY KEY,
     code_categorie      text    NOT NULL REFERENCES categorie_matiere(code_categorie),
     code_fournisseur    text    NOT NULL REFERENCES fournisseur(code_fournisseur),
@@ -209,6 +219,8 @@ CREATE INDEX ix_ref_reference_fournisseur ON reference(reference_fournisseur)
 -- groupe_equiv  (substitution, CDC F8)
 -- -----------------------------------------------------------------------------
 CREATE TABLE groupe_equiv (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     code_groupe_equiv   text    NOT NULL PRIMARY KEY,
     libelle             text    NOT NULL,
     description         text,
@@ -219,6 +231,8 @@ CREATE TABLE groupe_equiv (
 -- reference_groupe_equiv
 -- -----------------------------------------------------------------------------
 CREATE TABLE reference_groupe_equiv (
+    -- Verrou optimiste (2026-10-19c) : avance quand une donnee saisie change.
+    version integer NOT NULL DEFAULT 1,
     id_ref_grp          text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,
     code_reference      text    NOT NULL REFERENCES reference(code_reference),

@@ -508,7 +508,7 @@ export function Catalogue() {
           module={MODULE}
           chemin="catalogue"
           serveur
-          actionsExtra={(r) => <SupprimerDefinitivement reference={r.code_reference} />}
+          actionsExtra={(r) => <SupprimerDefinitivement reference={r.code_reference} version={r.version} />}
           cle="code_reference"
           colonnes={colonnes}
           champs={champs}
@@ -542,7 +542,7 @@ interface Usages {
  * une action qui echouera est pire que ne pas la proposer. Le serveur les
  * recompte de son cote — l'ecran informe, il n'autorise pas.
  */
-function SupprimerDefinitivement({ reference }: { reference: string }) {
+function SupprimerDefinitivement({ reference, version }: { reference: string; version: unknown }) {
   const client = useQueryClient()
   const confirmation = useConfirmation()
 
@@ -575,7 +575,9 @@ function SupprimerDefinitivement({ reference }: { reference: string }) {
       libelleConfirmer: 'Supprimer definitivement',
       action: async () => {
         try {
-          await api.delete(`/api/catalogue/${encodeURIComponent(reference)}/definitivement`)
+          await api.delete(
+            `/api/catalogue/${encodeURIComponent(reference)}/definitivement?version=${encodeURIComponent(String(version ?? ''))}`,
+          )
           await client.invalidateQueries()
           toast.success(`${reference} supprimee.`)
         } catch (e) {

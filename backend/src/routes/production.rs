@@ -90,6 +90,10 @@ pub struct LigneComposition {
 #[derive(Debug, Deserialize)]
 pub struct DocumentQualite {
     pub code_qualite: String,
+    /// LA VERSION LUE PAR L'ECRAN (verrou optimiste, 19/10/2026) : obligatoire
+    /// pour modifier un document existant, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
     pub nom: String,
     pub description: Option<String>,
     pub statut: Option<String>,
@@ -227,6 +231,11 @@ pub async fn enregistrer_qualite(
         .execute(&mut *tx)
         .await?;
     } else {
+        crate::domain::concurrence::exiger_version(
+            &mut tx, "qualite", "code_qualite", code,
+            Some(crate::domain::concurrence::exigee(d.version)?), "Cette qualite",
+        )
+        .await?;
         sqlx::query(
             "UPDATE qualite SET
                  nom = $2, description = $3,
@@ -471,11 +480,17 @@ pub async fn supprimer_qualite(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::QUALITES, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code, Some(version), "Cette qualite",
+    )
+    .await?;
 
     let plans: i64 = sqlx::query_scalar(
         "SELECT (SELECT COUNT(*) FROM ligne_plan_production WHERE code_qualite = $1)
@@ -588,9 +603,11 @@ pub async fn modifier_qualite(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
-    Json(charge): Json<Map<String, Value>>,
+    Json(mut charge): Json<Map<String, Value>>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::QUALITES, Action::Ecrire).await?;
+    // La version lue (verrou optimiste, 19/10/2026) n'est pas un champ de la qualite.
+    let version = super::entites::version_exigee(charge.remove("version").as_ref())?;
     let retenus = user
         .filtrer_ecriture(&state.db, module::QUALITES, &charge)
         .await?;
@@ -611,6 +628,10 @@ pub async fn modifier_qualite(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code, Some(version), "Cette qualite",
+    )
+    .await?;
 
     let sql = format!(
         "UPDATE qualite AS c SET {} FROM jsonb_populate_record(NULL::qualite, $2::jsonb) AS p
@@ -700,6 +721,9 @@ pub struct Densite {
     pub code_role: String,
     pub densite: f64,
     pub unite_densite: String,
+    /// La version de la QUALITE lue par l'ecran (verrou optimiste, 19/10/2026).
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 /// Cree ou met a jour la densite d'un role. Une seule route pour les deux :
@@ -723,6 +747,12 @@ pub async fn definir_densite(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // UNE DENSITE EST UNE LIGNE DE LA QUALITE : c'est l'en-tete qui se verrouille.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code,
+        Some(crate::domain::concurrence::exigee(d.version)?), "Cette qualite",
+    )
+    .await?;
 
     sqlx::query(
         "INSERT INTO ligne_qualite
@@ -752,11 +782,18 @@ pub async fn supprimer_densite(
     State(state): State<AppState>,
     user: Utilisateur,
     Path((code, role)): Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::QUALITES, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // UNE DENSITE EST UNE LIGNE DE LA QUALITE : c'est l'en-tete qui se verrouille.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "qualite", "code_qualite", &code, Some(version), "Cette qualite",
+    )
+    .await?;
 
     // Retirer une densite utilisee par une recette validee rendrait le MRP
     // incalculable sur cette qualite.
@@ -957,6 +994,10 @@ pub struct CoefSaison {
 pub struct DocumentPlan {
     /// Absent = creation.
     pub id_plan: Option<String>,
+    /// LA VERSION LUE PAR L'ECRAN (verrou optimiste, 19/10/2026) : obligatoire
+    /// pour modifier un document existant, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
     pub libelle: String,
     pub scenario_nom: Option<String>,
     /// Mois de depart de la periode glissante, au format AAAA-MM ou AAAA-MM-JJ.
@@ -1142,6 +1183,11 @@ pub async fn enregistrer_plan(
     // --- Entete --------------------------------------------------------------
     let (id, cree) = match d.id_plan.as_deref().filter(|s| !s.is_empty()) {
         Some(id) => {
+            crate::domain::concurrence::exiger_version(
+                &mut tx, "plan_production", "id_plan", id,
+                Some(crate::domain::concurrence::exigee(d.version)?), "Ce plan",
+            )
+            .await?;
             sqlx::query(
                 "UPDATE plan_production SET
                      libelle = $2, scenario_nom = $3, annee = $4,
@@ -1301,10 +1347,16 @@ pub async fn enregistrer_plan(
         .execute(&mut *tx)
         .await?;
 
+    // La version a jour : l'ecran reste ouvert et la presentera au prochain enregistrement.
+    let version: i64 = sqlx::query_scalar("SELECT version::bigint FROM plan_production WHERE id_plan = $1")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     Ok(Json(json!({
         "id_plan": id,
+        "version": version,
         "cree": cree,
         "date_debut": depart.to_string(),
         "date_fin": date_fin.to_string(),
@@ -1629,11 +1681,17 @@ pub async fn supprimer_plan(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLANS, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(serde_json::Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "plan_production", "id_plan", &id, Some(version), "Ce plan",
+    )
+    .await?;
 
     let statut: String = sqlx::query_scalar("SELECT statut FROM plan_production WHERE id_plan = $1")
         .bind(&id)

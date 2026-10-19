@@ -37,6 +37,15 @@ def controle(infra, code):
     return int(infra.valeur(f"SELECT anomalies FROM v_controles WHERE code = '{code}'"))
 
 
+def V(infra, table, cle, valeur, corps):
+    """Le corps d'une modification, avec la version de la fiche telle qu'un ecran l'aurait lue.
+
+    Depuis le 19/10/2026 la version est obligatoire pour modifier une fiche ou un document :
+    sans elle, le serveur refuse (il ne peut pas savoir si l'on ecrase la saisie d'un autre)."""
+    v = infra.valeur(f"SELECT version FROM {table} WHERE {cle}::text = '{valeur}'")
+    return dict(corps, version=int(v))
+
+
 def refus_sql(infra, requete, contient):
     """La base doit refuser la requete, et pour la raison attendue (un refus quelconque ne prouve rien)."""
     try:
@@ -363,7 +372,7 @@ def scenario_arrivage_unifie(c, infra):
              "un dossier neuf ne nait pas sur le circuit du bon de commande")
     infra.sql("UPDATE import_dossiers SET numero_dum = '123 010 26 456789', "
               f"conteneurs = 'MSCU1234567' WHERE id_dossier = '{id_dossier}'")
-    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": id_dossier})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", V(infra, "reception", "id_reception", rid, {"id_dossier_import": id_dossier}))
     vue = next(x for x in c.ok("Choukri", "GET", "/api/receptions") if x["id_reception"] == rid)
     verifier(vue.get("dossier_numero") == "BANC/ARRIVAGE"
              and vue.get("numero_dum") == "123 010 26 456789",
@@ -373,10 +382,10 @@ def scenario_arrivage_unifie(c, infra):
     verifier(any(d["id_dossier"] == id_dossier for d in ouverts),
              "le dossier ouvert ne descend pas a l'ecran du magasinier")
     # Vide = detacher ; c'est le seul moyen de reparer un rattachement errone.
-    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": ""})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", V(infra, "reception", "id_reception", rid, {"id_dossier_import": ""}))
     verifier(infra.valeur("SELECT COALESCE(id_dossier_import, '-') FROM reception "
                           f"WHERE id_reception = '{rid}'") == "-", "le dossier ne se detache pas")
-    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": id_dossier})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", V(infra, "reception", "id_reception", rid, {"id_dossier_import": id_dossier}))
 
     # UN DOSSIER CLOS NE RECOIT PLUS D'ARRIVAGE : sa valeur est deja portee au CUMP.
     clos = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/CLOS", "code_devise": "USD"})
@@ -385,7 +394,7 @@ def scenario_arrivage_unifie(c, infra):
               "date_cloture = to_char(current_date, 'YYYY-MM-DD'), "
               "id_utilisateur_cloture = (SELECT id_utilisateur FROM utilisateur WHERE login = 'Choukri') "
               f"WHERE id_dossier = '{id_clos}'")
-    c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}", {"id_dossier_import": id_clos}, contient="clos")
+    c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}", V(infra, "reception", "id_reception", rid, {"id_dossier_import": id_clos}), contient="clos")
 
     # L'ANCIEN CIRCUIT EST FERME AUX DOSSIERS NES DEPUIS LA BASCULE : une meme marchandise ne doit
     # pas pouvoir entrer par deux portes.
@@ -717,11 +726,13 @@ def scenario_verrou_optimiste(c, infra):
     verifier(notes == "saisie de l'assistante",
              f"la premiere saisie a ete ecrasee malgre le refus : {notes!r}")
 
-    # Un client qui n'envoie pas de version (ecran pas encore a jour, script) continue
-    # de fonctionner : la protection s'applique des que la version est transmise.
+    # SANS VERSION, REFUSE (decision du 19/10/2026) : le serveur ne peut pas savoir si
+    # cette modification ecrase celle d'un autre. Rien n'est ecrit.
     code, r = c.appel("Assistante", "PATCH", f"/api/bons-commande/{id_bc}",
                       {"notes": "sans version"})
-    verifier(code == 200, f"une modification sans version est refusee : {code} {r}")
+    verifier(code == 400 and "version" in str(r).lower(), f"une modification sans version passe : {code} {r}")
+    verifier(infra.valeur(f"SELECT notes FROM bon_commande WHERE id_bc = '{id_bc}'") == "saisie de l'assistante",
+             "une modification sans version a ete ecrite")
 
 
 def scenario_idempotence(c, infra):
@@ -791,7 +802,7 @@ def scenario_droits_douane(c, infra):
          {"code_sh": "5609000000", "libelle": "Articles en fils", "taux_droit_pct": "17.5"})
     c.refus("Choukri", "POST", "/api/positions-tarifaires",
             {"code_sh": "54.02", "libelle": "mal ecrit", "taux_droit_pct": 1}, codes=(400, 409, 422))
-    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(a)}", {"code_sh": "5402200000"})
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(a)}", V(infra, "reference", "code_reference", a, {"code_sh": "5402200000"}))
 
     d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/DRT", "code_devise": "MAD"})
     id_dossier = d.get("id_dossier") or d.get("id")
@@ -836,7 +847,7 @@ def scenario_droits_douane(c, infra):
              f"la douane aux droits devrait rester non repartie : {douane}")
 
     # B recoit sa position : les droits se calculent, la douane suit les droits.
-    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(b)}", {"code_sh": "5609000000"})
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(b)}", V(infra, "reference", "code_reference", b, {"code_sh": "5609000000"}))
     c.ok("Choukri", "PATCH", f"/api/import/frais/{id_douane}", {"methode_repartition": "DROITS"})
     vu = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
     droits = {l["id_ligne"]: l for l in vu["droits"]}
@@ -855,7 +866,7 @@ def scenario_droits_douane(c, infra):
              f"repartition aux droits : {pa} / {pb}")
 
     # Un frais reparti aux droits ne peut entrer dans la valeur qui les calcule.
-    c.refus("Choukri", "PATCH", "/api/types-frais/FRET", {"methode_repartition": "DROITS"},
+    c.refus("Choukri", "PATCH", "/api/types-frais/FRET", V(infra, "parametres_frais", "id_frais", "FRET", {"methode_repartition": "DROITS"}),
             codes=(400,), contient="ck_pf_droits_circulaire")
 
 
@@ -898,6 +909,128 @@ def scenario_etiquettes(c, infra):
     c.ok("Magasinie", "PUT", f"/api/receptions/{r2['id_reception']}/statut", {"statut": "ANNULE"})
     c.refus("Magasinie", "POST", f"/api/receptions/{r2['id_reception']}/etiquettes", {"nature": "BOBINE"},
             codes=(422,), contient="annulee")
+
+
+def scenario_verrou_referentiels(c, infra):
+    """LE VERROU SUR TOUTES LES TABLES DE BASE (decision du 19/10/2026) : une fiche de
+    referentiel et un document se modifient ou se suppriment avec la version lue ; perimee,
+    refus en 409 ; absente, refus en 400. Ce que le SYSTEME ecrit (le CMUP d'une reference a
+    chaque reception) ne rend pas la fiche perimee : pas de faux conflit."""
+    ref = urllib.parse.quote(REF2)
+    lue = int(infra.valeur(f"SELECT version FROM reference WHERE code_reference = '{REF2}'"))
+
+    # Une reception validee reecrit le CMUP de la reference : la fiche ne devient pas perimee.
+    entree_stock(c, REF2, 50, prix=31.0)
+    apres = int(infra.valeur(f"SELECT version FROM reference WHERE code_reference = '{REF2}'"))
+    verifier(apres == lue, f"le CMUP recalcule a fait avancer la version ({lue} -> {apres}) : faux conflit")
+
+    # Deux saisies sur la meme fiche, ouvertes a la meme version.
+    r = c.ok("Assistante", "PATCH", f"/api/catalogue/{ref}", {"reference_fournisseur": "BANC-A", "version": lue})
+    verifier(r.get("version") == lue + 1, f"la nouvelle version n'est pas rendue a l'ecran : {r}")
+    refus = c.refus("Choukri", "PATCH", f"/api/catalogue/{ref}", {"reference_fournisseur": "BANC-B", "version": lue},
+                    codes=(409,))
+    verifier("modifi" in str(refus).lower(), f"le refus ne dit pas que la fiche a change : {refus}")
+    verifier(infra.valeur(f"SELECT reference_fournisseur FROM reference WHERE code_reference = '{REF2}'") == "BANC-A",
+             "la premiere saisie a ete ecrasee")
+    # Sans version : refuse, rien d'ecrit.
+    c.refus("Choukri", "PATCH", f"/api/catalogue/{ref}", {"reference_fournisseur": "BANC-C"}, codes=(400,),
+            contient="version")
+
+    # La suppression aussi : une couleur creee, modifiee par un autre, ne s'efface pas a l'aveugle.
+    c.ok("Choukri", "POST", "/api/couleurs", {"code_couleur_interne": "CBANC", "libelle": "Couleur du banc"})
+    v = int(infra.valeur("SELECT version FROM couleur WHERE code_couleur_interne = 'CBANC'"))
+    c.ok("Assistante", "PATCH", "/api/couleurs/CBANC", {"libelle": "Couleur du banc, revue", "version": v})
+    c.refus("Choukri", "DELETE", f"/api/couleurs/CBANC?version={v}", codes=(409,))
+    c.refus("Choukri", "DELETE", "/api/couleurs/CBANC", codes=(400,), contient="version")
+    c.ok("Choukri", "DELETE", f"/api/couleurs/CBANC?version={v + 1}")
+
+    # Un document : le transfert se modifie en entier (en-tete et lignes) avec sa version.
+    t = c.ok("Magasinie", "POST", "/api/transferts", {
+        "code_magasin_source": MAG, "code_magasin_dest": "Polyfashions",
+        "lignes": [{"code_reference": REF, "quantite_saisie": 10, "unite_saisie": "kg"}]})
+    tid = t["id_transfert"]
+    vt = int(infra.valeur(f"SELECT version FROM transfert WHERE id_transfert = '{tid}'"))
+    corps = {"code_magasin_source": MAG, "code_magasin_dest": "Polyfashions",
+             "lignes": [{"code_reference": REF, "quantite_saisie": 12, "unite_saisie": "kg"}]}
+    r = c.ok("Magasinie", "PUT", f"/api/transferts/{tid}", dict(corps, version=vt))
+    verifier(r.get("version", 0) > vt, f"la version du transfert n'est pas rendue : {r}")
+    c.refus("Choukri", "PUT", f"/api/transferts/{tid}", dict(corps, version=vt), codes=(409,))
+    c.refus("Choukri", "PUT", f"/api/transferts/{tid}", corps, codes=(400,), contient="version")
+    c.refus("Choukri", "DELETE", f"/api/transferts/{tid}?version={vt}", codes=(409,))
+    c.ok("Magasinie", "DELETE", f"/api/transferts/{tid}?version={r['version']}")
+
+    # Une qualite : la supprimer avec une version perimee est refuse, et rien ne bouge.
+    q, vq = infra.sql("SELECT code_qualite, version FROM qualite ORDER BY code_qualite LIMIT 1")[0]
+    c.refus("Choukri", "DELETE", f"/api/qualites/{q}?version={int(vq) - 1}", codes=(409,))
+    c.refus("Choukri", "DELETE", f"/api/qualites/{q}", codes=(400,), contient="version")
+    verifier(infra.valeur(f"SELECT count(*) FROM qualite WHERE code_qualite = '{q}'") == "1",
+             "la qualite a disparu malgre le refus")
+
+
+def scenario_proposition_une_fois(c, infra):
+    """UNE PROPOSITION D'ACHAT NE SE COMMANDE QU'UNE FOIS (decision du 19/10/2026, « signal et
+    refus ») : deux personnes preparent des bons a partir du meme plan. La seconde qui commande la
+    meme proposition est refusee en nommant le bon et son auteur, par l'ecran du bon comme par la
+    conversion du plan ; ce qui passerait sans lien au plan se signale (C57)."""
+    # Une proposition ouverte, comme le calcul du plan d'achat la produit (le banc seul n'a pas
+    # toujours de besoin a couvrir).
+    ref, frs = REF, FRS
+    prop = infra.valeur(
+        "INSERT INTO plan_achat (code_reference, quantite_suggeree_kg, code_fournisseur, prix_estime_mad, "
+        "source_prix, date_besoin_prevue, urgence) "
+        f"VALUES ('{ref}', 100, '{frs}', 10, 'CATALOGUE', to_char(current_date + 30, 'YYYY-MM-DD'), 'TIER 2') "
+        "RETURNING id_proposition")
+    ligne = {"code_reference": ref, "unite_commande": "kg", "quantite_commandee_unite": 100,
+             "prix_unitaire_devise": 10, "id_proposition": prop}
+
+    # L'assistante commande la proposition depuis son ecran.
+    a = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": frs, "lignes": [ligne]})
+    verifier(infra.valeur(f"SELECT statut FROM plan_achat WHERE id_proposition = '{prop}'") == "COMMANDE",
+             "la proposition n'est pas passee COMMANDE")
+    # La direction, dont l'ecran l'affichait encore, la commande a son tour : refus, avec le bon.
+    r = c.refus("Choukri", "POST", "/api/bons-commande", {"code_fournisseur": frs, "lignes": [ligne]},
+                codes=(422,), contient="R-PROP")
+    verifier(a["numero_bc"] in str(r), f"le refus ne nomme pas le bon qui la sert : {r}")
+    # Par la conversion du plan d'achat : refus aussi, plus d'ecart silencieux.
+    c.refus("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [prop]},
+            codes=(422,), contient="R-PROP")
+    # Deux lignes du MEME bon pour la meme proposition (deux dates) : une seule commande, acceptee.
+    c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": frs, "lignes": [
+        dict(ligne, id_proposition=None), dict(ligne, id_proposition=None)]})
+
+    # Ce qui passe sans lien au plan se SIGNALE : la meme reference sur deux bons ouverts.
+    verifier(controle(infra, "C57") >= 1, "C57 ne signale pas la reference commandee deux fois")
+
+
+def scenario_reception_en_cours(c, infra):
+    """DEUX RECEPTIONS SUR LA MEME LIGNE DE BON (decision du 19/10/2026, « signal et refus ») :
+    la seconde pesee de la meme ligne est refusee en nommant la premiere ; l'ecran la signale au
+    choix des lignes ; une derogation motivee la laisse passer, et ce qui est alors recu au-dela
+    de la commande se signale (C58)."""
+    id_bc, lignes = bon_envoye(c, [(REF, 100, 20.0)])
+    lb = lignes[0]["id_ligne_bc"]
+    ligne = {"code_reference": REF, "id_ligne_bc": lb, "unite_saisie": "kg",
+             "quantite_pesee_unite": 100, "code_magasin_dest": MAG}
+    r1 = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-1",
+                                                      "lignes": [ligne]})
+    # Le signal : l'autre ecran voit la ligne deja en cours, avec la reception qui la tient.
+    att = c.ok("Choukri", "GET", f"/api/lignes-attendues?code_fournisseur={FRS}")
+    a = next(x for x in att if x["id_ligne_bc"] == lb)
+    verifier((a.get("en_cours_kg") or 0) >= 100 and r1["numero_reception"] in (a.get("en_cours_dans") or ""),
+             f"la ligne n'est pas signalee en cours : {a}")
+    # Le refus : la meme ligne pesee une seconde fois.
+    r = c.refus("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
+                                                      "lignes": [ligne]}, codes=(422,), contient="R-REC")
+    verifier(r1["numero_reception"] in str(r), f"le refus ne nomme pas la reception en cours : {r}")
+    # Avec une derogation motivee, elle passe — et se signale une fois recue (C58).
+    r2 = c.ok("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
+                                                    "lignes": [dict(ligne, derogation_ecart=True,
+                                                                    motif_derogation="Second camion confirme")]})
+    for rid in (r1["id_reception"], r2["id_reception"]):
+        c.ok("Magasinie" if rid == r1["id_reception"] else "Choukri", "PUT", f"/api/receptions/{rid}/statut",
+             {"statut": "A_CONTROLER"})
+        c.ok("Mohamed" if rid == r2["id_reception"] else "Choukri", "POST", f"/api/receptions/{rid}/valider")
+    verifier(controle(infra, "C58") >= 1, "C58 ne signale pas la ligne recue deux fois")
 
 
 def scenario_cloture_periode(c, infra):
@@ -1001,10 +1134,12 @@ def scenario_typage_du_temps(c, infra):
                     "quantite_commandee_unite": 10, "prix_unitaire_devise": 10}]})
     id_bc = bc["id_bc"]
     avant = infra.valeur(f"SELECT date_livraison_prevue FROM bon_commande WHERE id_bc = '{id_bc}'")
-    c.refus("Assistante", "PATCH", f"/api/bons-commande/{id_bc}", {"date_livraison_prevue": "17/10/2026"})
+    c.refus("Assistante", "PATCH", f"/api/bons-commande/{id_bc}",
+            V(infra, "bon_commande", "id_bc", id_bc, {"date_livraison_prevue": "17/10/2026"}))
     apres = infra.valeur(f"SELECT date_livraison_prevue FROM bon_commande WHERE id_bc = '{id_bc}'")
     verifier(apres == avant, f"une date mal formee a ete ecrite : {apres!r}")
-    c.ok("Assistante", "PATCH", f"/api/bons-commande/{id_bc}", {"date_livraison_prevue": "2026-12-15"})
+    c.ok("Assistante", "PATCH", f"/api/bons-commande/{id_bc}",
+         V(infra, "bon_commande", "id_bc", id_bc, {"date_livraison_prevue": "2026-12-15"}))
 
 
 def scenario_declencheurs(c, infra):
@@ -1047,7 +1182,7 @@ def scenario_controles_finaux(c, infra):
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
     # LE DERNIER CONTROLE, EN UN SEUL ENDROIT : a relever a chaque controle ajoute
     # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10).
-    dernier = 56
+    dernier = 58
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
                              f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
@@ -1392,8 +1527,8 @@ def scenario_lots_autorisations(c, infra):
     # Le magasin : renommer reste une ecriture, la quarantaine une decision.
     # L'assistante ecrit sur le stock sans valider les lots.
     m = c.ok("Assistante", "GET", "/api/magasins/Polyfashions")
-    c.ok("Assistante", "PATCH", "/api/magasins/Polyfashions", {"nom": m["nom"], "est_quarantaine": m["est_quarantaine"]})
-    c.refus("Assistante", "PATCH", "/api/magasins/Polyfashions", {"est_quarantaine": 1}, codes=(403,))
+    c.ok("Assistante", "PATCH", "/api/magasins/Polyfashions", V(infra, "magasin", "code_magasin", "Polyfashions", {"nom": m["nom"], "est_quarantaine": m["est_quarantaine"]}))
+    c.refus("Assistante", "PATCH", "/api/magasins/Polyfashions", V(infra, "magasin", "code_magasin", "Polyfashions", {"est_quarantaine": 1}), codes=(403,))
 
 
 def scenario_reception_devalidee_revalidee(c, infra):
@@ -2206,25 +2341,25 @@ def scenario_gardes_p1(c, infra):
 
     # La tolerance de pesee : l'assistante corrige la fiche, pas le seuil.
     tol = infra.valeur(f"SELECT tolerance_pesee_pct FROM fournisseur WHERE code_fournisseur = '{FRS}'")
-    c.ok("Assistante", "PATCH", f"/api/fournisseurs/{FRS}", {"telephone": "0539000000", "tolerance_pesee_pct": tol})
-    c.refus("Assistante", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": 10}, contient="valider")
-    c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": 3})
+    c.ok("Assistante", "PATCH", f"/api/fournisseurs/{FRS}", V(infra, "fournisseur", "code_fournisseur", FRS, {"telephone": "0539000000", "tolerance_pesee_pct": tol}))
+    c.refus("Assistante", "PATCH", f"/api/fournisseurs/{FRS}", V(infra, "fournisseur", "code_fournisseur", FRS, {"tolerance_pesee_pct": 10}), contient="valider")
+    c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", V(infra, "fournisseur", "code_fournisseur", FRS, {"tolerance_pesee_pct": 3}))
     verifier(int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'fournisseur' "
                               "AND nouvelles_valeurs LIKE '%tolerance_pesee_pct%'")) >= 1,
              "le changement de tolerance n'est pas au journal")
-    c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", {"tolerance_pesee_pct": tol})
+    c.ok("Choukri", "PATCH", f"/api/fournisseurs/{FRS}", V(infra, "fournisseur", "code_fournisseur", FRS, {"tolerance_pesee_pct": tol}))
     verifier(controle(infra, "C46") == 0, "un champ sensible n'a pas de ligne dans le modele de droits")
     # Regle 8 : le prix d'une proposition est d'abord le dernier prix d'achat chez ce fournisseur.
     bon_envoye(c, [(REF, 100, 20.0)])
     dernier = infra.valeur(f"SELECT fn_dernier_prix_achat_mad('{REF}', '{FRS}')")
     verifier(dernier is not None and abs(float(dernier) - 20) < 0.001, f"dernier prix d'achat : {dernier} au lieu de 20")
     # Regle 9 : la saison se regle (Direction), les stocks minimums a revoir se listent.
-    c.ok("Choukri", "PATCH", "/api/saisons/1", {"coefficient": 0.7})
+    c.ok("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 0.7}))
     verifier(abs(float(infra.valeur("SELECT coefficient FROM saison_mois WHERE mois = 1")) - 0.7) < 1e-9,
              "le coefficient de janvier n'est pas enregistre")
-    c.refus("Magasinie", "PATCH", "/api/saisons/1", {"coefficient": 2})
-    c.refus("Choukri", "PATCH", "/api/saisons/1", {"coefficient": 0})
-    c.ok("Choukri", "PATCH", "/api/saisons/1", {"coefficient": 1})
+    c.refus("Magasinie", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 2}))
+    c.refus("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 0}))
+    c.ok("Choukri", "PATCH", "/api/saisons/1", V(infra, "saison_mois", "mois", 1, {"coefficient": 1}))
     c.ok("Assistante", "GET", "/api/plan-achat/stocks-minimums")
     verifier(int(infra.valeur("SELECT count(*) FROM v_controles WHERE code IN ('C49', 'C50')")) == 2,
              "les controles C49 et C50 manquent")
@@ -2531,7 +2666,7 @@ def scenario_reception_date_du_fait(c, infra):
     verifier(abs(taux() - 9.7) < 1e-9, f"livraison du 05/03/2025 au taux {taux()} au lieu du cours du 01/03 (9,70)")
     verifier(abs(prix() - 19.4) < 1e-9, f"prix {prix()} MAD/kg au lieu de 19,40")
     # La date corrigee au 20/03 : le cours du 12/03 s'applique.
-    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", {"date_reception": "2025-03-20"})
+    c.ok("Magasinie", "PATCH", f"/api/receptions/{rid}", V(infra, "reception", "id_reception", rid, {"date_reception": "2025-03-20"}))
     verifier(abs(taux() - 9.5) < 1e-9 and abs(prix() - 19.0) < 1e-9,
              f"date corrigee au 20/03 : taux {taux()}, prix {prix()} au lieu de 9,50 et 19,00")
     # Validee, la livraison entre en stock au 20/03/2025, et son lot avec elle : le lot
@@ -2759,6 +2894,9 @@ SCENARIOS = [
     scenario_idempotence,
     scenario_droits_douane,
     scenario_etiquettes,
+    scenario_verrou_referentiels,
+    scenario_proposition_une_fois,
+    scenario_reception_en_cours,
     scenario_typage_du_temps,
     scenario_colisage_ecran_et_base,
     scenario_import,

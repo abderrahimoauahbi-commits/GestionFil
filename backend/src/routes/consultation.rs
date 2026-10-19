@@ -983,7 +983,10 @@ pub async fn stocks_minimums(State(state): State<AppState>, user: Utilisateur) -
         &state,
         &user,
         module::PLAN_ACHAT,
-        "SELECT * FROM v_stocks_minimums_a_revoir ORDER BY stock_min_kg - COALESCE(valeur_proposee_kg, 0) DESC",
+        // La version de la fiche : appliquer la proposition la modifie (verrou, 19/10/2026).
+        "SELECT v.*, r.version FROM v_stocks_minimums_a_revoir v
+           JOIN reference r ON r.code_reference = v.code_reference
+          ORDER BY v.stock_min_kg - COALESCE(v.valeur_proposee_kg, 0) DESC",
     )
     .await
 }

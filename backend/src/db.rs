@@ -109,6 +109,17 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Decision du 19/10/2026 : le verrou optimiste sur les 17 referentiels.
+        // `crud::modifier` et `crud::supprimer` lisent `version` : sans la
+        // colonne, toute fiche refuserait de s'enregistrer.
+        "2026-10-19c_verrou_referentiels.sql",
+        "SELECT (SELECT count(*) FROM pg_trigger
+                  WHERE tgname = 'trg_aa_version' AND NOT tgisinternal) >= 23
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'version')",
+    ),
+    (
         // Audit P3 : les etiquettes de lot. Generer et scanner lisent
         // `etiquette_lot` et `v_etiquette_lot`.
         "2026-10-19b_etiquettes_lot.sql",
@@ -142,7 +153,9 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
                     AND table_name IN ('bon_commande', 'reception', 'inventaire',
                                        'transfert', 'plan_production', 'qualite')) = 6
             AND (SELECT count(*) FROM pg_trigger
-                  WHERE tgname = 'trg_aa_version' AND NOT tgisinternal) = 6",
+                  WHERE tgname = 'trg_aa_version' AND NOT tgisinternal
+                    AND tgrelid::regclass::text IN ('bon_commande', 'reception', 'inventaire',
+                                                    'transfert', 'plan_production', 'qualite')) = 6",
     ),
     (
         // ADR-003 phase B : la facture fournisseur est un document. Sans ses

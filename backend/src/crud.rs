@@ -13,6 +13,7 @@
 
 use crate::auth::{rbac::Action, Utilisateur};
 use crate::db::{maintenant, Db};
+use crate::domain::concurrence::exiger_version;
 use crate::error::{AppError, AppResult};
 use crate::routes::json::lignes_en_json;
 use serde_json::{json, Map, Value};
@@ -859,6 +860,7 @@ pub async fn modifier(
     user: &Utilisateur,
     e: &Entite,
     id: &str,
+    version: i64,
     charge: &Map<String, Value>,
 ) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
@@ -872,7 +874,7 @@ pub async fn modifier(
     let set: Vec<String> = champs.iter().map(|(n, _)| format!("{n} = p.{n}")).collect();
     let sql = format!(
         "UPDATE {} AS c SET {} FROM jsonb_populate_record(NULL::{}, $1::jsonb) AS p
-          WHERE c.{}::text = $2",
+          WHERE c.{}::text = $2 RETURNING c.version::bigint",
         e.table,
         set.join(", "),
         e.table,
@@ -881,19 +883,23 @@ pub async fn modifier(
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // LE VERROU OPTIMISTE (decision du 19/10/2026) : la fiche n'a pas change
+    // depuis que l'ecran l'a lue. Elle reste verrouillee jusqu'a la fin.
+    exiger_version(&mut tx, e.table, e.cle, id, Some(version), &format!("La fiche {id}")).await?;
 
-    let res = sqlx::query(&sql)
+    // LA NOUVELLE VERSION REVIENT A L'ECRAN : celui qui corrige deux fois de
+    // suite la meme fiche (une reference depuis un bon) la presente ensuite.
+    let nouvelle: i64 = sqlx::query_scalar(&sql)
         .bind(charge_jsonb(&champs))
         .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    if res.rows_affected() == 0 {
-        return Err(AppError::Introuvable(format!("{} {id}", e.chemin)));
-    }
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("{} {id}", e.chemin)))?;
     tx.commit().await?;
 
     Ok(json!({
         e.cle: id,
+        "version": nouvelle,
         "champs_modifies": champs.iter().map(|(n, _)| n).collect::<Vec<_>>(),
     }))
 }
@@ -921,11 +927,21 @@ async fn retenue_par(db: &Db, contrainte: Option<&str>) -> Option<String> {
     .flatten()
 }
 
-pub async fn supprimer(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResult<Value> {
+pub async fn supprimer(
+    db: &Db,
+    user: &Utilisateur,
+    e: &Entite,
+    id: &str,
+    version: i64,
+) -> AppResult<Value> {
     user.exiger(db, e.module, Action::Ecrire).await?;
 
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // On ne supprime pas une fiche qu'un autre vient de modifier sans l'avoir vue.
+    if !matches!(e.suppression, Suppression::Interdite) {
+        exiger_version(&mut tx, e.table, e.cle, id, Some(version), &format!("La fiche {id}")).await?;
+    }
 
     let sql = match e.suppression {
         Suppression::Interdite => {

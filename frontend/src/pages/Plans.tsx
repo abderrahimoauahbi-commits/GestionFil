@@ -85,6 +85,7 @@ const MOIS_LONG = [
 type Statut = 'BROUILLON' | 'SIMULATION' | 'EN_COURS' | 'CLOTURE'
 
 interface Plan extends Record<string, unknown> {
+  version: number
   id_plan: string
   annee: number
   numero_version: number
@@ -142,6 +143,8 @@ interface LigneEntete extends Record<string, unknown> {
 
 interface Entete {
   id_plan: string | null
+  /** La version lue (verrou optimiste, 19/10/2026) ; absente a la creation. */
+  version?: number
   libelle: string
   scenario_nom: string
   /** Mois de depart, format AAAA-MM (champ <input type="month">). */
@@ -263,6 +266,7 @@ export function Plans() {
     setEnCreation(false)
     setEntete({
       id_plan: p.id_plan,
+      version: p.version,
       libelle: p.libelle,
       scenario_nom: p.scenario_nom ?? '',
       date_debut: (p.date_debut ?? '').slice(0, 7),
@@ -290,10 +294,11 @@ export function Plans() {
 
   const enregistrement = useMutation({
     mutationFn: () =>
-      api.put<{ id_plan: string; cree: boolean; lignes_generees: number; m2_total: number }>(
+      api.put<{ id_plan: string; version: number; cree: boolean; lignes_generees: number; m2_total: number }>(
         '/api/plans',
         {
           id_plan: enCreation ? null : entete.id_plan,
+          version: enCreation ? null : entete.version,
           libelle: entete.libelle.trim(),
           scenario_nom: entete.scenario_nom.trim() || null,
           date_debut: entete.date_debut,
@@ -325,8 +330,9 @@ export function Plans() {
       if (enCreation) {
         setEdition(r.id_plan)
         setEnCreation(false)
-        setEntete((s) => ({ ...s, id_plan: r.id_plan }))
       }
+      // La version a jour : le plan reste ouvert, le prochain enregistrement la presente.
+      setEntete((s) => ({ ...s, id_plan: r.id_plan, version: r.version }))
     },
     onError: (e) => setErreur(e instanceof ErreurApi ? e.message : String(e)),
   })
@@ -390,7 +396,7 @@ export function Plans() {
   })
 
   const suppression = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/plans/${id}`),
+    mutationFn: ({ id, version }: { id: string; version: number }) => api.delete(`/api/plans/${id}?version=${version}`),
     onSuccess: () => {
       toast.success('Plan supprime')
       void qc.invalidateQueries({ queryKey: ['plans'] })
@@ -736,7 +742,7 @@ export function Plans() {
                       titre: `Supprimer ${p.libelle} ?`,
                       destructif: true,
                       description: "Ce plan n'a jamais été valide : il sera effacé.",
-                      action: () => suppression.mutate(p.id_plan),
+                      action: () => suppression.mutate({ id: p.id_plan, version: p.version }),
                     })
                   }
                   aria-label="Supprimer"

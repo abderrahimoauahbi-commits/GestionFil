@@ -407,11 +407,19 @@ pub async fn supprimer_reference_definitivement(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::CATALOGUE, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // Le verrou optimiste (19/10/2026) : on n'efface pas une fiche qu'un autre
+    // vient de modifier sans l'avoir vue.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "reference", "code_reference", &code, Some(version), &format!("La référence {code}"),
+    )
+    .await?;
 
     let retenants: [(&str, &str); 7] = [
         ("ligne_mouvement", "mouvement(s) de stock"),

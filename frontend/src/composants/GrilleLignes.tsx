@@ -74,6 +74,8 @@ export interface RefLigne extends Record<string, unknown> {
   bobines_par_lot?: number | null
   densite_kg_ml?: number | null
   reference_fournisseur?: string | null
+  version_reference?: number | null
+  id_proposition?: string | null
   couleur?: string | null
   code_couleur?: string | null
   stock_projete_kg?: number | null
@@ -105,6 +107,10 @@ export interface LigneSaisie {
    */
   idExistant?: string
   nature: Nature
+  /** La version de la fiche de la reference, pour la corriger depuis le document (19/10/2026). */
+  version_reference?: number | null
+  /** La proposition du plan d'achat que la ligne sert : la base refuse qu'un second bon la serve (R-PROP). */
+  id_proposition?: string | null
   /** Vide sur une ligne libre ou une prestation. */
   code_reference: string
   /** Ce qui nomme la ligne : la designation du catalogue, ou l'intitule saisi. */
@@ -262,6 +268,7 @@ export function depuisLigneEnregistree(
        c'est le sens meme de l'avoir enregistre. */
     nb_palettes?: number | null
     nb_bobines?: number | null
+    version_reference?: number | null
   },
   fiche?: RefLigne,
 ): LigneSaisie {
@@ -283,6 +290,7 @@ export function depuisLigneEnregistree(
     cond,
     unite_catalogue: fiche?.unite_catalogue ?? 'kg',
     fournisseur_habituel: fiche?.code_fournisseur ?? null,
+    version_reference: l.version_reference ?? fiche?.version_reference ?? null,
     suggere_kg: null,
     // RELU EN KILOS. La base garde la quantite dans l'unite commandee ; la
     // grille, elle, saisit toujours des kilos. La conversion se fait donc a la
@@ -353,6 +361,8 @@ export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {
     cond: c,
     unite_catalogue: r.unite_catalogue ?? 'kg',
     fournisseur_habituel: r.code_fournisseur ?? null,
+    version_reference: r.version_reference ?? null,
+    id_proposition: r.id_proposition ?? null,
     suggere_kg: kg > 0 ? kg : null,
     // CE QUE LE PLAN RECLAME EST DEJA UN POIDS : on le reprend tel quel, sans
     // le traduire dans l'unite de commande. C'est cette traduction qui faisait
@@ -462,6 +472,7 @@ export function corpsLigne(l: LigneSaisie) {
         nb_bobines: nombre(l.bobines, true),
         prix_unitaire_devise: Number((Number(l.prix) * facteur).toFixed(DECIMALES_PRIX)),
         remise_pct: Number(l.remise || 0) || 0,
+        id_proposition: l.id_proposition ?? undefined,
       }
     : {
         type_ligne: l.nature,
@@ -496,7 +507,7 @@ export interface ProprietesGrille {
   /** Les references deja posees ailleurs sur le document. */
   dejaPrises?: Set<string>
   /** Corriger la fiche de la reference depuis la commande. */
-  surCorrection?: (code: string, champ: string, valeur: string) => void
+  surCorrection?: (code: string, champ: string, valeur: string, version?: number | null) => void
   /** La valeur d'origine d'un champ fournisseur, pour ne remonter que le change. */
   valeurOrigine?: (code: string, champ: string) => string
   surCreerReference?: (motif: string) => void
@@ -1218,7 +1229,7 @@ export function GrilleLignes(props: ProprietesGrille) {
                                   const v = e.target.value.trim()
                                   const initial = valeurOrigine?.(l.code_reference, champ) ?? ''
                                   if (v !== initial && l.code_reference && surCorrection) {
-                                    surCorrection(l.code_reference, champ, v)
+                                    surCorrection(l.code_reference, champ, v, l.version_reference)
                                   }
                                 }}
                                 className="h-9"

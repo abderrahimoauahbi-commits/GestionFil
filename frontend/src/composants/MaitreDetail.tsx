@@ -107,8 +107,8 @@ export function MaitreDetail({
   const droits = useDroits(module)
   const qc = useQueryClient()
   const [pointe, setPointe] = useState<string | null>(null)
-  const [detailASupprimer, setDetailASupprimer] = useState<{ id: string; nom: string } | null>(null)
-  const [maitreASupprimer, setMaitreASupprimer] = useState<{ id: string; nom: string } | null>(null)
+  const [detailASupprimer, setDetailASupprimer] = useState<{ id: string; nom: string; version: unknown } | null>(null)
+  const [maitreASupprimer, setMaitreASupprimer] = useState<{ id: string; nom: string; version: unknown } | null>(null)
   const [nouvelle, setNouvelle] = useState<Record<string, string>>({})
   const [nouveauMaitre, setNouveauMaitre] = useState<Record<string, string>>({})
   const [filtre, setFiltre] = useState('')
@@ -344,6 +344,7 @@ export function MaitreDetail({
                       setMaitreASupprimer({
                         id: String(courant[maitre.cle]),
                         nom: maitre.libelle(courant),
+                        version: courant.version,
                       })
                     }
                   >
@@ -366,7 +367,7 @@ export function MaitreDetail({
                         onChange={(e) =>
                           modifierMaitre.mutate({
                             id: String(courant[maitre.cle]),
-                            patch: { [c.champ]: e.target.value || null },
+                            patch: { [c.champ]: e.target.value || null, version: courant.version },
                           })
                         }
                       >
@@ -387,7 +388,7 @@ export function MaitreDetail({
                           if (v !== String(courant[c.champ] ?? '')) {
                             modifierMaitre.mutate({
                               id: String(courant[maitre.cle]),
-                              patch: { [c.champ]: v || null },
+                              patch: { [c.champ]: v || null, version: courant.version },
                             })
                           }
                         }}
@@ -424,7 +425,7 @@ export function MaitreDetail({
                                   value={String(l[c.champ] ?? '')}
                                   disabled={!ecrire || c.cleCreation}
                                   onChange={(e) =>
-                                    modifier.mutate({ id, patch: { [c.champ]: e.target.value || null } })
+                                    modifier.mutate({ id, patch: { [c.champ]: e.target.value || null, version: l.version } })
                                   }
                                 >
                                   <option value="">—</option>
@@ -444,7 +445,7 @@ export function MaitreDetail({
                                   onBlur={(e) => {
                                     const v = e.target.value.trim()
                                     if (v !== String(l[c.champ] ?? '')) {
-                                      modifier.mutate({ id, patch: { [c.champ]: v || null } })
+                                      modifier.mutate({ id, patch: { [c.champ]: v || null, version: l.version } })
                                     }
                                   }}
                                 />
@@ -467,6 +468,7 @@ export function MaitreDetail({
                                   setDetailASupprimer({
                                     id,
                                     nom: String(l[detail.colonnes[0].champ] ?? id),
+                                    version: l.version,
                                   })
                                 }
                               >
@@ -539,6 +541,7 @@ export function MaitreDetail({
         surFermeture={() => setDetailASupprimer(null)}
         entite={detail.route}
         id={detailASupprimer?.id ?? ''}
+        version={detailASupprimer?.version}
         libelle={detailASupprimer ? `${detail.unite} « ${detailASupprimer.nom} »` : undefined}
       />
 
@@ -547,6 +550,7 @@ export function MaitreDetail({
         surFermeture={() => setMaitreASupprimer(null)}
         entite={maitre.route}
         id={maitreASupprimer?.id ?? ''}
+        version={maitreASupprimer?.version}
         libelle={maitreASupprimer ? `${maitre.unite} « ${maitreASupprimer.nom} »` : undefined}
         surSucces={() => setPointe(null)}
       />

@@ -485,6 +485,33 @@ pub async fn valider(
 
         // ---- 6. Soldes du bon de commande, en kg ---------------------------
         if let Some(id_ligne_bc) = &l.id_ligne_bc {
+            // DEUX RECEPTIONS SUR LA MEME LIGNE (19/10/2026) : la ligne est
+            // verrouillee, et une pesee qui depasse ce qui reste — au-dela de la
+            // tolerance, sans derogation — est refusee. Elle etait plafonnee en
+            // silence : le stock entrait deux fois, le bon se disait solde.
+            let (reste, tol, derogation, numero_bc): (f64, f64, i64, String) = sqlx::query_as(
+                "SELECT lb.quantite_restante_kg::float8,
+                        fn_tolerance_pesee($2)::float8,
+                        (SELECT derogation_ecart FROM ligne_reception
+                          WHERE id_ligne_reception = $3)::bigint,
+                        (SELECT numero_bc FROM bon_commande WHERE id_bc = lb.id_bc)
+                   FROM ligne_bc lb
+                  WHERE lb.id_ligne_bc = $1
+                    FOR UPDATE OF lb",
+            )
+            .bind(id_ligne_bc)
+            .bind(id_reception)
+            .bind(&l.id_ligne_reception)
+            .fetch_one(&mut *tx)
+            .await?;
+            if derogation == 0 && l.quantite_stock_kg > reste * (1.0 + tol / 100.0) + 0.0005 {
+                return Err(AppError::RegleMetier(format!(
+                    "R-REC : {} kg pesés sur une ligne du bon {numero_bc} dont il ne reste que {} kg                      à recevoir (tolérance {} %) : une autre réception l'a déjà reçue.                      Une dérogation motivée est requise.",
+                    arrondi_kg(l.quantite_stock_kg),
+                    arrondi_kg(reste),
+                    tol
+                )));
+            }
             sqlx::query(
                 // LA TOLERANCE DE PESEE PASSE (06/10/2026) : 1 015 kg pesés pour
                 // 1 000 commandés, admis a ±2 %, faisaient echouer la validation sur

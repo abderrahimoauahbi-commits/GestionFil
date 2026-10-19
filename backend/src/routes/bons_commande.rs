@@ -241,6 +241,8 @@ pub async fn lignes_bc(
                 -- couleur — « 7612 », « CB-1426 » — et le titrage, qui est chez
                 -- nous la FAMILLE : « 2900-DTEX », « 1200-DENIERS-SHRINK ».
                 r.code_couleur, r.code_famille,
+                -- La version de la fiche, pour la corriger depuis le bon (verrou, 19/10).
+                r.version AS version_reference,
                 r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot,
                 -- Ce que le FOURNISSEUR lit sur le document : sa description
                 -- commerciale en anglais, pas notre code interne.
@@ -295,6 +297,11 @@ pub async fn lignes_bc(
 
 #[derive(Debug, Deserialize)]
 pub struct LigneBc {
+    /// LA PROPOSITION DU PLAN D'ACHAT que l'ecran affichait (19/10/2026). Presente,
+    /// c'est elle que la ligne sert — et la base refuse si un autre bon la sert deja
+    /// (R-PROP). Absente : rattachement par la reference, comme avant.
+    #[serde(default)]
+    pub id_proposition: Option<String>,
     /// `MARCHANDISE` (defaut) ou `SERVICE`. Absent : de la marchandise.
     #[serde(default)]
     pub type_ligne: Option<String>,
@@ -443,9 +450,10 @@ async fn inserer_ligne_bc(
 ) -> AppResult<()> {
     let (proposition, besoin) = if rattacher_au_plan {
         (
-            "(SELECT pa.id_proposition FROM plan_achat pa
+            "COALESCE($17::text, (SELECT pa.id_proposition FROM plan_achat pa
                 WHERE pa.code_reference = $5
-                  AND pa.statut IN ('PROPOSE','EN_REVISION','VALIDE') LIMIT 1)",
+                  AND pa.statut IN ('PROPOSE','EN_REVISION','VALIDE')
+                ORDER BY pa.id_proposition LIMIT 1))",
             // NULL et non zero sur une prestation : le CHECK de la table exige
             // qu'elle ne porte aucun besoin, et un zero serait un besoin.
             "CASE WHEN $5 IS NULL THEN NULL
@@ -453,7 +461,8 @@ async fn inserer_ligne_bc(
                                   WHERE bp.code_reference = $5), 0) END",
         )
     } else {
-        ("NULL", "NULL")
+        // $17 est toujours lie : sans rattachement au plan, il ne sert pas.
+        ("NULLIF($17::text, $17::text)", "NULL")
     };
 
     sqlx::query(&format!(
@@ -493,6 +502,7 @@ async fn inserer_ligne_bc(
     .bind(l.nb_palettes)
     .bind(l.nb_bobines)
     .bind(remise_valide(l.remise_pct)?)
+    .bind(l.id_proposition.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -1078,7 +1088,11 @@ pub async fn modifier_bc(
     // VERROU OPTIMISTE (A2). Si quelqu'un a modifie le document depuis que
     // ce client l'a lu, on refuse en le nommant plutot que d'ecraser sa
     // saisie en silence. Le garde verrouille aussi la ligne pour la suite.
-    exiger_version(&mut tx, "bon_commande", "id_bc", &id, b.version, "Ce bon de commande").await?;
+    exiger_version(
+        &mut tx, "bon_commande", "id_bc", &id,
+        Some(crate::domain::concurrence::exigee(b.version)?), "Ce bon de commande",
+    )
+    .await?;
 
     let statut: String =
         sqlx::query_scalar("SELECT statut FROM bon_commande WHERE id_bc = $1")
@@ -1250,6 +1264,7 @@ pub async fn references_commandables(
 
     let sql_commandables = format!(
         "SELECT r.code_reference, r.designation, r.unite_catalogue, r.prix_catalogue,
+                r.version AS version_reference,
                 r.code_devise_catalogue, r.classe_abc, r.moq_kg, r.multiple_achat_kg,
                 -- LE CONDITIONNEMENT VOYAGE AVEC LA SUGGESTION.
                 --
@@ -1276,6 +1291,13 @@ pub async fn references_commandables(
                 -- Le minimum vient du plan d'achat : c'est lui qui applique la
                 -- formule F3 (couverture, marge, classe ABC), pas la vue stock.
                 pa.stock_min_kg,
+                -- La proposition que la ligne servira : meme regle que le serveur au
+                -- rattachement. L'ecran la renvoie ; la base refuse si un autre bon
+                -- l'a deja prise entre-temps (R-PROP, 19/10/2026).
+                (SELECT p.id_proposition FROM plan_achat p
+                  WHERE p.code_reference = r.code_reference
+                    AND p.statut IN ('PROPOSE','EN_REVISION','VALIDE')
+                  ORDER BY p.id_proposition LIMIT 1) AS id_proposition,
                 pa.qte_a_commander_kg, pa.qte_a_commander_unite, pa.tier,
 
                 -- Prix propose, TOUJOURS renseigne, dans la devise du bon.

@@ -371,19 +371,20 @@ pub async fn lignes_attendues(
     let rows = sqlx::query(
         "SELECT lb.id_ligne_bc, lb.code_reference, lb.designation, lb.unite_commande,
                 lb.quantite_commandee_kg, lb.quantite_recue_kg, lb.quantite_restante_kg,
-                -- LE SIGNAL (19/10/2026) : le BON est-il deja en reception ailleurs ?
-                -- Une seule reception a la fois par bon (R-REC) : l'ecran le montre
-                -- bloque, avec la reception qui le tient et son auteur.
-                (SELECT string_agg(DISTINCT r2.numero_reception || ' (' || COALESCE(u2.nom, '?') || ')', ', ')
-                   FROM ligne_reception lr2
-                   JOIN ligne_bc lb2 ON lb2.id_ligne_bc = lr2.id_ligne_bc
-                   JOIN reception r2 ON r2.id_reception = lr2.id_reception
-                   LEFT JOIN utilisateur u2 ON u2.id_utilisateur = r2.id_utilisateur_reception
-                  WHERE lb2.id_bc = lb.id_bc
+                -- LE SIGNAL (19/10/2026) : ce que d'AUTRES receptions en cours pesent
+                -- deja sur cette ligne, et qui les tient. Le magasinier le voit avant
+                -- de peser ; la base refuse au-dela du reste (R-REC).
+                (SELECT SUM(lr2.quantite_stock_kg)::float8
+                   FROM ligne_reception lr2 JOIN reception r2 ON r2.id_reception = lr2.id_reception
+                  WHERE lr2.id_ligne_bc = lb.id_ligne_bc
                     AND r2.statut IN ('BROUILLON', 'A_CONTROLER')
-                    AND r2.id_reception IS DISTINCT FROM $2
-                    -- Ses propres receptions ne bloquent pas le recepteur.
-                    AND r2.id_utilisateur_reception IS DISTINCT FROM $4) AS en_reception_dans,
+                    AND r2.id_reception IS DISTINCT FROM $2) AS en_cours_kg,
+                (SELECT string_agg(DISTINCT r2.numero_reception || ' (' || COALESCE(u2.nom, '?') || ')', ', ')
+                   FROM ligne_reception lr2 JOIN reception r2 ON r2.id_reception = lr2.id_reception
+                   LEFT JOIN utilisateur u2 ON u2.id_utilisateur = r2.id_utilisateur_reception
+                  WHERE lr2.id_ligne_bc = lb.id_ligne_bc
+                    AND r2.statut IN ('BROUILLON', 'A_CONTROLER')
+                    AND r2.id_reception IS DISTINCT FROM $2) AS en_cours_dans,
                 lb.prix_unitaire_devise, lb.prix_kg_devise, lb.code_devise,
                 bc.id_bc, bc.numero_bc, bc.date_bc, bc.date_livraison_prevue, bc.statut AS statut_bc,
                 r.unite_catalogue, r.suivi_lot, r.densite_kg_ml, r.poids_bobine_kg,
@@ -444,7 +445,6 @@ pub async fn lignes_attendues(
     .bind(&id_bc)
     .bind(&id_reception)
     .bind(&fournisseur)
-    .bind(&user.id)
     .fetch_all(&state.db)
     .await?;
 

@@ -1005,35 +1005,34 @@ def scenario_proposition_une_fois(c, infra):
 
 
 def scenario_reception_en_cours(c, infra):
-    """UN BON, UN SEUL RECEPTEUR A LA FOIS (decision du 19/10/2026) : une reception se controle a
-    l'oeil, deux personnes ne tiennent pas le meme bon. Le meme recepteur peut en tenir plusieurs
-    receptions ; un AUTRE est refuse — meme sur une autre ligne, meme avec une derogation — et
-    l'ecran montre le bon bloque ; libre de nouveau une fois ses receptions validees."""
-    id_bc, lignes = bon_envoye(c, [(REF, 100, 20.0), (REF2, 50, 20.0)])
-    l1, l2 = lignes[0]["id_ligne_bc"], lignes[1]["id_ligne_bc"]
-    def ligne(lb, ref, kg):
-        return {"code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg",
-                "quantite_pesee_unite": kg, "code_magasin_dest": MAG}
+    """DEUX RECEPTIONS SUR LA MEME LIGNE DE BON (decision du 19/10/2026, « signal et refus ») :
+    la seconde pesee de la meme ligne est refusee en nommant la premiere ; l'ecran la signale au
+    choix des lignes ; une derogation motivee la laisse passer, et ce qui est alors recu au-dela
+    de la commande se signale (C58)."""
+    id_bc, lignes = bon_envoye(c, [(REF, 100, 20.0)])
+    lb = lignes[0]["id_ligne_bc"]
+    ligne = {"code_reference": REF, "id_ligne_bc": lb, "unite_saisie": "kg",
+             "quantite_pesee_unite": 100, "code_magasin_dest": MAG}
     r1 = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-1",
-                                                      "lignes": [ligne(l1, REF, 100)]})
-    # Le signal : le bon apparait tenu par la premiere reception.
+                                                      "lignes": [ligne]})
+    # Le signal : l'autre ecran voit la ligne deja en cours, avec la reception qui la tient.
     att = c.ok("Choukri", "GET", f"/api/lignes-attendues?code_fournisseur={FRS}")
-    a = next(x for x in att if x["id_ligne_bc"] == l2)
-    verifier(r1["numero_reception"] in (a.get("en_reception_dans") or ""), f"le bon n'est pas signale tenu : {a}")
-    # Le meme recepteur peut ouvrir une seconde reception sur son bon (un second camion).
-    r_meme = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-1B",
-                                                         "lignes": [ligne(l2, REF2, 10)]})
-    c.ok("Magasinie", "PUT", f"/api/receptions/{r_meme['id_reception']}/statut", {"statut": "ANNULE"})
-    # Le refus : un AUTRE recepteur sur le meme bon, meme sur une autre ligne, meme avec une derogation.
+    a = next(x for x in att if x["id_ligne_bc"] == lb)
+    verifier((a.get("en_cours_kg") or 0) >= 100 and r1["numero_reception"] in (a.get("en_cours_dans") or ""),
+             f"la ligne n'est pas signalee en cours : {a}")
+    # Le refus : la meme ligne pesee une seconde fois.
     r = c.refus("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
-                "lignes": [dict(ligne(l2, REF2, 50), derogation_ecart=True, motif_derogation="essai")]},
-                codes=(422,), contient="R-REC")
-    verifier(r1["numero_reception"] in str(r), f"le refus ne nomme pas la reception qui tient le bon : {r}")
-    # La premiere validee, le bon est libre.
-    c.ok("Magasinie", "PUT", f"/api/receptions/{r1['id_reception']}/statut", {"statut": "A_CONTROLER"})
-    c.ok("Choukri", "POST", f"/api/receptions/{r1['id_reception']}/valider")
-    c.ok("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
-                                               "lignes": [ligne(l2, REF2, 50)]})
+                                                      "lignes": [ligne]}, codes=(422,), contient="R-REC")
+    verifier(r1["numero_reception"] in str(r), f"le refus ne nomme pas la reception en cours : {r}")
+    # Avec une derogation motivee, elle passe — et se signale une fois recue (C58).
+    r2 = c.ok("Choukri", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-EC-2",
+                                                    "lignes": [dict(ligne, derogation_ecart=True,
+                                                                    motif_derogation="Second camion confirme")]})
+    for rid in (r1["id_reception"], r2["id_reception"]):
+        c.ok("Magasinie" if rid == r1["id_reception"] else "Choukri", "PUT", f"/api/receptions/{rid}/statut",
+             {"statut": "A_CONTROLER"})
+        c.ok("Mohamed" if rid == r2["id_reception"] else "Choukri", "POST", f"/api/receptions/{rid}/valider")
+    verifier(controle(infra, "C58") >= 1, "C58 ne signale pas la ligne recue deux fois")
 
 
 def scenario_cloture_periode(c, infra):

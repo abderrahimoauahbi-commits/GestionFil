@@ -1119,7 +1119,7 @@ def scenario_typage_du_temps(c, infra):
     GROSSIT PLUS : pas une colonne de date en texte de plus, et chacune porte sa contrainte de
     format ISO (migration 2026-10-17f). Une date mal formee ne peut plus entrer."""
     # LE CLIQUET : a abaisser a chaque colonne convertie, jamais a relever.
-    plafond = 109  # 19/10 : 5 colonnes en date (2026-10-19g), puis 20 (2026-10-19h) ; le cliquet descend avec elles
+    plafond = 93  # 19/10 : 5 colonnes en date (2026-10-19g), puis 20 (2026-10-19h), puis 16 (2026-10-19i) ; le cliquet descend avec elles
     n = int(infra.valeur("SELECT count(*) " + COLONNES_DATE_TEXTE))
     verifier(n <= plafond, f"{n} colonnes de date en texte, plafond {plafond} : une nouvelle colonne de date "
                            "se cree en `date` ou `timestamptz`, pas en `text`")

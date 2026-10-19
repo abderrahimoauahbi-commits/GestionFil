@@ -425,7 +425,7 @@ pub async fn creer_mouvement(
                   nb_bobines, nb_palettes,
                   lot_fournisseur, date_fabrication, date_peremption,
                   code_motif_ligne, numero_of)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,fn_jour_casablanca($12),fn_jour_casablanca($13),$14,$15)",
         )
         .bind(&id)
         .bind((i + 1) as i64)

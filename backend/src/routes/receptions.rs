@@ -800,7 +800,7 @@ pub async fn creer_reception(
                   derogation_ecart, id_utilisateur_derogation, motif_derogation,
                   nb_palettes_saisi, nb_bobines_saisi)
              SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13,
-                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+                    $14, $15, $16, $17, fn_jour_casablanca($18), fn_jour_casablanca($19), $20, $21, $22, $23, $24,
                     $25, $26, $27, $28, $29
                FROM reference r WHERE r.code_reference = $5",
         )
@@ -1071,7 +1071,7 @@ pub async fn ajouter_ligne_reception(
               substitution_acceptee, motif_substitution,
               nb_palettes_saisi, nb_bobines_saisi)
          SELECT $1, $2, $3, $4, $5, r.designation, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
+                $15, fn_jour_casablanca($16), fn_jour_casablanca($17), $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
            FROM reference r WHERE r.code_reference = $5",
     )
     .bind(&id_ligne)
@@ -1422,8 +1422,8 @@ pub async fn modifier_ligne_reception(
              nb_palettes_saisi  = COALESCE($15, nb_palettes_saisi),
              nb_bobines_saisi   = COALESCE($16, nb_bobines_saisi),
              lot_fournisseur    = COALESCE(NULLIF(TRIM($9), ''), lot_fournisseur),
-             date_fabrication   = COALESCE(NULLIF(TRIM($10), ''), date_fabrication),
-             date_peremption    = COALESCE(NULLIF(TRIM($11), ''), date_peremption),
+             date_fabrication   = COALESCE(fn_jour_casablanca($10), date_fabrication),
+             date_peremption    = COALESCE(fn_jour_casablanca($11), date_peremption),
              statut_qualite     = COALESCE(NULLIF(TRIM($12), ''), statut_qualite),
              code_magasin_dest  = COALESCE(NULLIF(TRIM($13), ''), code_magasin_dest),
              notes              = COALESCE(NULLIF(TRIM($14), ''), notes),

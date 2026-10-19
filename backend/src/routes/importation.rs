@@ -1294,7 +1294,7 @@ pub async fn ajouter_paiement(
     let id: String = sqlx::query_scalar(
         "INSERT INTO paiement_facture_import (id_facture, date_paiement, montant_devise, montant_mad,
                                               reference_banque, notes, id_utilisateur)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id_paiement",
+         VALUES ($1, fn_jour_casablanca($2), $3, $4, $5, $6, $7) RETURNING id_paiement",
     )
     .bind(&id_facture)
     .bind(&date)
@@ -1676,7 +1676,7 @@ pub async fn ajouter_engagement(
         "INSERT INTO import_engagements
                 (id_dossier, numero_ei, banque, date_ei, quantite_kg, montant_devise,
                  code_devise, notes, id_utilisateur_creation, code_fournisseur)
-         VALUES ($1, $2, $3, $4, $5, $6,
+         VALUES ($1, $2, $3, fn_jour_casablanca($4), $5, $6,
                  COALESCE($7, (SELECT code_devise FROM fournisseur WHERE code_fournisseur = $10),
                           (SELECT code_devise FROM import_dossiers WHERE id_dossier = $1)),
                  $8, $9, $10)

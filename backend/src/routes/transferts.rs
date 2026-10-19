@@ -151,7 +151,7 @@ pub async fn creer_transfert(
              (id_transfert, numero_transfert, code_magasin_source, code_magasin_dest,
               id_utilisateur, responsable, transporteur, observations, date_transfert)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
-                 COALESCE($9, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')))",
+                 COALESCE(fn_jour_casablanca($9), (now() AT TIME ZONE 'Africa/Casablanca')::date))",
     )
     .bind(&id)
     .bind(&numero)
@@ -340,7 +340,7 @@ pub async fn modifier_transfert(
         "UPDATE transfert
             SET code_magasin_source = $2, code_magasin_dest = $3,
                 responsable = $4, transporteur = $5, observations = $6,
-                date_transfert = COALESCE($7, date_transfert)
+                date_transfert = COALESCE(fn_jour_casablanca($7), date_transfert)
           WHERE id_transfert = $1",
     )
     .bind(&id)

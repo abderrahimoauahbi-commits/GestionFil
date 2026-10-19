@@ -274,7 +274,7 @@ pub async fn creer(
              (numero_facture, code_fournisseur, date_facture, code_devise, taux_change,
               montant_devise, frais_devise, facture_nette, id_dossier_import, notes,
               id_utilisateur_creation, id_facture)
-         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 0), $8, NULLIF($9, ''), $10, $11, $12)
+         VALUES ($1, $2, fn_jour_casablanca($3), $4, $5, $6, COALESCE($7, 0), $8, NULLIF($9, ''), $10, $11, $12)
          RETURNING id_facture",
     )
     .bind(f.numero_facture.trim())
@@ -373,7 +373,7 @@ pub async fn modifier(
 
     sqlx::query(
         "UPDATE facture_fournisseur
-            SET numero_facture = $2, date_facture = $3, code_devise = $4, taux_change = $5,
+            SET numero_facture = $2, date_facture = fn_jour_casablanca($3), code_devise = $4, taux_change = $5,
                 montant_devise = $6, frais_devise = COALESCE($7, 0), facture_nette = $8,
                 id_dossier_import = NULLIF($9, ''), notes = $10
           WHERE id_facture = $1",

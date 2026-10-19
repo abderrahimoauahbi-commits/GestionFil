@@ -194,7 +194,7 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
                 "INSERT INTO retour_fournisseur
                         (numero, date_retour, code_fournisseur, motif, observations, id_utilisateur_creation,
                          id_retour)
-                 VALUES ($1, $2, $3, btrim($4), NULLIF(btrim($5), ''), $6, $7)
+                 VALUES ($1, fn_jour_casablanca($2), $3, btrim($4), NULLIF(btrim($5), ''), $6, $7)
                  RETURNING id_retour",
             )
             .bind(&numero)
@@ -211,7 +211,7 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
         Some(id) => {
             let numero: String = sqlx::query_scalar(
                 "UPDATE retour_fournisseur
-                    SET date_retour = $2, code_fournisseur = $3, motif = btrim($4), observations = NULLIF(btrim($5), '')
+                    SET date_retour = fn_jour_casablanca($2), code_fournisseur = $3, motif = btrim($4), observations = NULLIF(btrim($5), '')
                   WHERE id_retour = $1
               RETURNING numero",
             )
@@ -249,7 +249,7 @@ pub fn porter_au_stock(delta_c: i64, cmup_avant: f64, reste_kg: f64) -> (i64, i6
 /// du stock restant.
 pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppResult<Value> {
     let entete: Option<(String, String, String, String, String, Option<String>, String)> = sqlx::query_as(
-        "SELECT numero, statut, code_fournisseur, motif, date_retour, observations, id_utilisateur_creation
+        "SELECT numero, statut, code_fournisseur, motif, date_retour::text, observations, id_utilisateur_creation
            FROM retour_fournisseur WHERE id_retour = $1 FOR UPDATE",
     )
     .bind(id)

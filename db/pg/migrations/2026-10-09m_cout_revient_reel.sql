@@ -59,7 +59,7 @@ WITH f AS (
       FROM import_factures fa JOIN import_dossiers d ON d.id_dossier = fa.id_dossier
 )
 SELECT p.id_paiement, f.id_facture, f.id_dossier, f.numero_facture, f.code_devise, f.date_ded, f.cours_ded,
-       p.date_paiement, p.montant_devise, p.montant_mad, p.cours_paiement,
+       p.date_paiement::text AS date_paiement, p.montant_devise, p.montant_mad, p.cours_paiement,
        substr(f.date_ded, 1, 4)::int AS annee_ded,
        substr(p.date_paiement, 1, 4)::int AS annee_paiement,
        CASE WHEN substr(p.date_paiement, 1, 4) > substr(f.date_ded, 1, 4)

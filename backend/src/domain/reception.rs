@@ -337,7 +337,7 @@ pub async fn valider(
                      (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad,
                       quantite_saisie, unite_saisie, facteur_conversion,
                       lot_fournisseur, date_fabrication, date_peremption, statut_qualite, nb_bobines)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, fn_jour_casablanca($10), fn_jour_casablanca($11), $12, $13)",
             )
             .bind(&id_mouvement)
             .bind((i + 1) as i64)

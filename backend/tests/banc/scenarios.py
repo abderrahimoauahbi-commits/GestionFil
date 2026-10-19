@@ -9,6 +9,7 @@ Magasinie (MAGASIN), admin (ADMIN). Fournisseur FRS-011 (MAD), references
 PLA 100 CHE et PLA 50 CHE (sans suivi de lot), magasins Morocco et Polyfashions.
 """
 import time
+import urllib.parse
 import urllib.request
 
 from banc import MOT_DE_PASSE, PSQL, Echec, verifier
@@ -772,6 +773,133 @@ def scenario_idempotence(c, infra):
              "sans identifiant, deux envois n'ont pas cree deux bons, comme avant")
 
 
+def scenario_droits_douane(c, infra):
+    """LES DROITS DE DOUANE CALCULES (P3, 19/10/2026) : chaque reference designe sa position
+    tarifaire ; les droits attendus d'une ligne sont sa valeur en douane (valeur facture + sa part
+    du fret, qui entre dans la valeur CAF) x le taux de sa position. Une douane repartie « au taux
+    des droits » charge chaque ligne au prorata de ses droits, et non de sa valeur : le fil a 2,5 %
+    ne porte plus la douane de l'accessoire a 17,5 %. Une ligne sans position bloque cette
+    repartition — la cloture le dit — au lieu de la croire exoneree."""
+    refs = [r[0] for r in infra.sql("SELECT code_reference FROM reference WHERE actif = 1 "
+                                    "AND code_fournisseur = 'FRS-001' ORDER BY code_reference LIMIT 2")]
+    verifier(len(refs) == 2, f"deux references FRS-001 attendues dans le socle : {refs}")
+    a, b = refs
+    # Le referentiel, par l'API generique, comme l'ecran Parametres.
+    c.ok("Choukri", "POST", "/api/positions-tarifaires",
+         {"code_sh": "5402200000", "libelle": "Fils de polypropylene", "taux_droit_pct": "2.5"})
+    c.ok("Choukri", "POST", "/api/positions-tarifaires",
+         {"code_sh": "5609000000", "libelle": "Articles en fils", "taux_droit_pct": "17.5"})
+    c.refus("Choukri", "POST", "/api/positions-tarifaires",
+            {"code_sh": "54.02", "libelle": "mal ecrit", "taux_droit_pct": 1}, codes=(400, 409, 422))
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(a)}", {"code_sh": "5402200000"})
+
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/DRT", "code_devise": "MAD"})
+    id_dossier = d.get("id_dossier") or d.get("id")
+    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-DRT", "code_devise": "MAD",
+        "date_facture": infra.valeur("SELECT to_char(now() AT TIME ZONE 'Africa/Casablanca', 'YYYY-MM-DD')"),
+        "taux_change": 1, "montant_devise": 20000})
+    id_facture = fac.get("id_facture") or fac.get("id")
+    # Deux lignes de meme valeur, 10 000 DH chacune : a la valeur, elles porteraient la meme douane.
+    la = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+        "type_ligne": "ERP", "code_reference": a, "unite": "kg", "quantite": 1000,
+        "poids_net_kg": 1000, "prix_unitaire_devise": 10})
+    lb = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+        "type_ligne": "ERP", "code_reference": b, "unite": "kg", "quantite": 500,
+        "poids_net_kg": 500, "prix_unitaire_devise": 20})
+    ia, ib = la.get("id_ligne") or la.get("id"), lb.get("id_ligne") or lb.get("id")
+    # Le fret, 2 000 DH reparti au poids (2/3 sur A, 1/3 sur B), entre dans la valeur en douane.
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
+        "id_frais": "FRET", "numero_piece": "FRET-DRT", "montant_devise": 2000, "code_devise": "MAD",
+        "methode_repartition": "POIDS"})
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
+        "id_frais": "DOUANE", "numero_piece": "DUM-DRT", "montant_devise": 2500, "code_devise": "MAD"})
+    id_douane = f.get("id_ligne_frais") or f.get("id")
+    verifier(id_douane, f"la ligne de frais n'a pas d'identifiant : {f}")
+
+    def part(ligne):
+        v = infra.valeur("SELECT montant_alloue_dhs FROM lignes_frais_repartition "
+                         f"WHERE id_ligne_frais = '{id_douane}' AND id_article_dossier = '{ligne}'")
+        return float(v) if v is not None else None
+
+    # A la valeur (le parametrage) : moitie-moitie.
+    verifier(part(ia) == 1250 and part(ib) == 1250, f"a la valeur : {part(ia)} / {part(ib)}")
+
+    # B n'a pas encore de position : aux droits, la douane ne se repartit pas, et la cloture le dit.
+    c.ok("Choukri", "PATCH", f"/api/import/frais/{id_douane}", {"methode_repartition": "DROITS"})
+    verifier(part(ia) is None and part(ib) is None, "une douane aux droits s'est repartie malgre une ligne sans position")
+    vu = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
+    verifier(vu["droits_dossier"]["nb_lignes_sans_position"] == 1, f"ligne sans position : {vu['droits_dossier']}")
+    verifier(controle(infra, "C56") >= 1, "C56 ne signale pas la ligne sans position")
+    douane = next(x for x in vu["frais"] if x["id_ligne_frais"] == id_douane)
+    verifier(douane["methode_repartition"] == "DROITS" and abs(douane.get("reparti_dhs", 0)) < 0.001,
+             f"la douane aux droits devrait rester non repartie : {douane}")
+
+    # B recoit sa position : les droits se calculent, la douane suit les droits.
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(b)}", {"code_sh": "5609000000"})
+    c.ok("Choukri", "PATCH", f"/api/import/frais/{id_douane}", {"methode_repartition": "DROITS"})
+    vu = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
+    droits = {l["id_ligne"]: l for l in vu["droits"]}
+    # Valeur en douane : A 10 000 + 1 333,33 de fret ; B 10 000 + 666,67.
+    va, vb = droits[ia]["valeur_douane_dhs"], droits[ib]["valeur_douane_dhs"]
+    verifier(abs(va - 11333.33) < 0.006 and abs(vb - 10666.67) < 0.006, f"valeurs en douane : {va} / {vb}")
+    da, db = droits[ia]["droits_attendus_dhs"], droits[ib]["droits_attendus_dhs"]
+    verifier(abs(da - 283.33) < 0.006 and abs(db - 1866.67) < 0.006, f"droits attendus : {da} / {db}")
+    tot = vu["droits_dossier"]
+    verifier(abs(tot["droits_attendus_dhs"] - 2150.00) < 0.006 and abs(tot["droits_payes_dhs"] - 2500) < 0.006,
+             f"attendus / payes : {tot}")
+    # Les 2 500 DH payes, au prorata des droits : 283,33 / 2 150 et 1 866,67 / 2 150.
+    pa, pb = part(ia), part(ib)
+    verifier(abs(pa + pb - 2500) < 0.001, f"la douane n'est pas entierement repartie : {pa} + {pb}")
+    verifier(abs(pa - 2500 * 283.333333 / 2150) < 0.02 and abs(pb - 2500 * 1866.666667 / 2150) < 0.02,
+             f"repartition aux droits : {pa} / {pb}")
+
+    # Un frais reparti aux droits ne peut entrer dans la valeur qui les calcule.
+    c.refus("Choukri", "PATCH", "/api/types-frais/FRET", {"methode_repartition": "DROITS"},
+            codes=(400,), contient="ck_pf_droits_circulaire")
+
+
+def scenario_etiquettes(c, infra):
+    """LES ETIQUETTES DE LOT (P3, 19/10/2026) : a la reception, une etiquette code-barres par bobine
+    (colisage compte sur le quai) ; generer deux fois ne double rien ; le scan relit en base la
+    reference et le lot ; une etiquette ne se modifie pas."""
+    import re
+    id_bc, lignes = bon_envoye(c, [(REF, 100, 20.0)])
+    rid = reception_validee(c, id_bc, lignes, [100], nb_bobines=4, lot_fournisseur="LOT-ETQ")
+    p = c.ok("Magasinie", "POST", f"/api/receptions/{rid}/etiquettes", {"nature": "BOBINE"})
+    e = p["etiquettes"]
+    verifier(len(e) == 4, f"4 bobines comptees, {len(e)} etiquettes")
+    verifier(all(re.fullmatch(r"E[0-9]{9}", x["code"]) for x in e), f"codes mal formes : {[x['code'] for x in e]}")
+    verifier([x["rang"] for x in e] == [1, 2, 3, 4] and all(x["nombre"] == 4 for x in e), f"rangs : {e}")
+    verifier(all(abs(x["poids_kg"] - 25) < 1e-6 for x in e), f"poids moyen attendu 25 kg : {e}")
+    verifier(e[0]["code"] < e[-1]["code"], "les codes ne se suivent pas dans l'ordre des rangs")
+
+    # Generer de nouveau : les memes etiquettes, aucune de plus (celles deja collees resteraient sans double).
+    p2 = c.ok("Magasinie", "POST", f"/api/receptions/{rid}/etiquettes", {"nature": "BOBINE"})
+    verifier([x["code"] for x in p2["etiquettes"]] == [x["code"] for x in e], "une seconde generation a fabrique d'autres codes")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM etiquette_lot e JOIN ligne_reception l USING (id_ligne_reception) "
+                              f"WHERE l.id_reception = '{rid}'")) == 4, "des etiquettes en double en base")
+
+    # Le scan : la douchette tape en minuscules — la base retrouve reference et lot.
+    lu = c.ok("Magasinie", "GET", f"/api/etiquettes/{e[2]['code'].lower()}")
+    verifier(lu["code_reference"] == REF and lu["lot_fournisseur"] == "LOT-ETQ" and lu["rang"] == 3,
+             f"le scan ne relit pas la bonne marchandise : {lu}")
+    c.refus("Magasinie", "GET", "/api/etiquettes/E999999999", codes=(404,))
+
+    # Collee sur la bobine, une etiquette ne change plus.
+    refus_sql(infra, f"UPDATE etiquette_lot SET rang = 9 WHERE code = '{e[0]['code']}'", "R-ETQ")
+
+    # Une reception annulee n'a rien a etiqueter.
+    id_bc2, lignes2 = bon_envoye(c, [(REF, 5, 20.0)])
+    r2 = c.ok("Magasinie", "POST", "/api/receptions", {
+        "id_bc": id_bc2, "num_bon_livraison": "BL-ETQ-ANNULE",
+        "lignes": [{"code_reference": REF, "id_ligne_bc": lignes2[0]["id_ligne_bc"], "unite_saisie": "kg",
+                    "quantite_pesee_unite": 5, "code_magasin_dest": MAG, "nb_bobines": 1}]})
+    c.ok("Magasinie", "PUT", f"/api/receptions/{r2['id_reception']}/statut", {"statut": "ANNULE"})
+    c.refus("Magasinie", "POST", f"/api/receptions/{r2['id_reception']}/etiquettes", {"nature": "BOBINE"},
+            codes=(422,), contient="annulee")
+
+
 def scenario_cloture_periode(c, infra):
     """LA CLOTURE DE PERIODE (A3, 17/10/2026) : la direction clot un mois ; une reception
     datee de ce mois ne peut plus entrer en stock a sa date, et se signale (C55) au lieu
@@ -918,8 +1046,8 @@ def scenario_controles_finaux(c, infra):
     c.ok("Choukri", "GET", "/api/cockpit")
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
     # LE DERNIER CONTROLE, EN UN SEUL ENDROIT : a relever a chaque controle ajoute
-    # (C55, cloture de periode, le 17/10/2026).
-    dernier = 55
+    # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10).
+    dernier = 56
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
                              f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
@@ -2629,6 +2757,8 @@ SCENARIOS = [
     scenario_verrou_optimiste,
     scenario_cloture_periode,
     scenario_idempotence,
+    scenario_droits_douane,
+    scenario_etiquettes,
     scenario_typage_du_temps,
     scenario_colisage_ecran_et_base,
     scenario_import,

@@ -36,6 +36,7 @@ const EtatBesoins = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ d
 const EtatInventaire = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatInventaire })))
 const EtatPlanProduction = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatPlanProduction })))
 const EtatReception = lazy(() => import('./pages/EtatsDocuments').then((m) => ({ default: m.EtatReception })))
+const EtiquettesReception = lazy(() => import('./pages/EtiquettesReception').then((m) => ({ default: m.EtiquettesReception })))
 const AnalyseAbcXyz = lazy(() => import('./pages/AnalyseAbcXyz').then((m) => ({ default: m.AnalyseAbcXyz })))
 const VueEnsemble = lazy(() => import('./pages/tableau-de-bord/VueEnsemble').then((m) => ({ default: m.VueEnsemble })))
 const PageTableauDeBord = lazy(() => import('./pages/tableau-de-bord/Page').then((m) => ({ default: m.PageTableauDeBord })))
@@ -242,6 +243,8 @@ const ECRANS = (
           s'ouvrent depuis la ligne, pas depuis un selecteur. Le segment reste
           optionnel pour que l'adresse nue propose encore le choix. */}
       <Route path="etats/receptions/:id" element={<ExigeModule module="RECEPTIONS"><EtatReception /></ExigeModule>} />
+      {/* Les etiquettes de lot a code-barres (19/10/2026) : une par bobine ou par palette. */}
+      <Route path="etats/receptions/:id/etiquettes" element={<ExigeModule module="RECEPTIONS"><EtiquettesReception /></ExigeModule>} />
       {/* La feuille qu'on emporte POUR compter, distincte du proces-verbal qui
           confronte APRES coup le compte au theorique. */}
       <Route path="etats/inventaire/:id/comptage" element={<ExigeModule module="INVENTAIRE"><FeuilleComptage /></ExigeModule>} />

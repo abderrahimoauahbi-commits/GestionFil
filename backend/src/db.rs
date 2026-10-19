@@ -109,6 +109,28 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Audit P3 : les etiquettes de lot. Generer et scanner lisent
+        // `etiquette_lot` et `v_etiquette_lot`.
+        "2026-10-19b_etiquettes_lot.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.views
+                         WHERE table_schema = 'public' AND table_name = 'v_etiquette_lot')",
+    ),
+    (
+        // Audit P3 : les positions tarifaires. La repartition des frais d'un
+        // dossier d'import (`domain::importation`) lit `position_tarifaire` et
+        // `parametres_frais.entre_valeur_douane` ; sans elles, tout recalcul
+        // d'un dossier tombe en erreur interne.
+        "2026-10-19a_positions_tarifaires.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'parametres_frais'
+                           AND column_name = 'entre_valeur_douane')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'reference'
+                           AND column_name = 'code_sh')
+            AND EXISTS (SELECT 1 FROM information_schema.views
+                         WHERE table_schema = 'public' AND table_name = 'v_import_droits_dossier')",
+    ),
+    (
         // Audit A2 : le verrou optimiste. `domain::concurrence::exiger_version`
         // lit `version` sur les six documents a workflow ; sans la colonne,
         // chaque enregistrement d'un bon ou d'une reception tombe en erreur

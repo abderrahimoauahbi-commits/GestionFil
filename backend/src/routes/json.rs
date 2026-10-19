@@ -89,6 +89,25 @@ pub fn ligne_en_json(row: &PgRow) -> Value {
                     .map(Value::from)
                     .unwrap_or(Value::Null),
 
+                // LES VRAIS TYPES DE DATE (19/10/2026). Le schema herite tient
+                // ses dates en texte ISO ; les colonnes nouvelles naissent en
+                // `timestamptz` ou `date` (cliquet A1, scenario typage_du_temps).
+                // Sans ces cas, elles tombaient dans le repli texte et
+                // ressortaient a `null`, sans erreur. Meme forme que le texte
+                // ISO deja servi : l'interface n'a pas a distinguer.
+                "TIMESTAMPTZ" => row
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>(i)
+                    .map(|d| Value::from(d.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()))
+                    .unwrap_or(Value::Null),
+                "TIMESTAMP" => row
+                    .try_get::<chrono::NaiveDateTime, _>(i)
+                    .map(|d| Value::from(d.format("%Y-%m-%dT%H:%M:%S%.3f").to_string()))
+                    .unwrap_or(Value::Null),
+                "DATE" => row
+                    .try_get::<chrono::NaiveDate, _>(i)
+                    .map(|d| Value::from(d.format("%Y-%m-%d").to_string()))
+                    .unwrap_or(Value::Null),
+
                 _ => row
                     .try_get::<String, _>(i)
                     .map(Value::from)

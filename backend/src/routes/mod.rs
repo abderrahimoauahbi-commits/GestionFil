@@ -15,6 +15,7 @@ mod devalidation;
 mod entites;
 mod factures;
 mod importation;
+mod etiquettes;
 mod lots;
 mod machines;
 pub(crate) mod json;
@@ -400,6 +401,10 @@ pub fn router(state: AppState) -> Router {
             patch(receptions::modifier_ligne_reception).delete(receptions::supprimer_ligne_reception),
         )
         .route("/api/receptions/{id}/statut", put(receptions::changer_statut_reception))
+        // Les etiquettes de lot a code-barres (audit P3, 19/10/2026).
+        .route("/api/receptions/{id}/etiquettes",
+               get(etiquettes::lister).post(etiquettes::generer))
+        .route("/api/etiquettes/{code}", get(etiquettes::lire))
         .route("/api/receptions/{id}/valider", post(operations::valider_reception))
         .route("/api/receptions/{id}/cloturer", post(operations::cloturer_reception))
         .route("/api/receptions/{id}/facture-contexte", get(operations::contexte_facture_reception))

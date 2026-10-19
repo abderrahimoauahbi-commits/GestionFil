@@ -17,7 +17,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Save, Send, ShieldCheck, Undo2 } from 'lucide-react'
+import { ArrowLeft, Save, Send, ShieldCheck, Tags, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
@@ -961,6 +961,17 @@ export function Reception() {
               <ArrowLeft />
               Retour
             </Bouton>
+            {/* LES ETIQUETTES DE LOT (19/10/2026) : a coller au quai, des la pesee. */}
+            {rec.statut !== 'ANNULE' && lignes.length > 0 && (
+              <Bouton
+                variante="contour"
+                onClick={() => naviguer(`/etats/receptions/${encodeURIComponent(rec.id_reception)}/etiquettes`)}
+                title="Une étiquette code-barres par bobine ou par palette"
+              >
+                <Tags />
+                Étiquettes
+              </Bouton>
+            )}
             {/* Le bouton « Peser des lignes » est parti avec son panneau : on
                 ajoute une ligne dans la grille, comme sur un bon de commande. */}
             {droits.peutEcrire && rec.statut === 'BROUILLON' && (

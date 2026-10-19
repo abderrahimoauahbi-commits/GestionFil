@@ -29,6 +29,7 @@ import {
   RAISONS_SURPLUS, TON_ECART,
 } from './noyau'
 import { useFiche } from './useFiche'
+import { ChampScan } from '../../composants/ChampScan'
 import { useValiderFiche } from './Questions'
 import { DemandesDerogation } from './Derogation'
 
@@ -474,6 +475,7 @@ function FicheMobile({
         )}
       </div>
 
+      {type === 'CHARGE' && f.entete.magasin && <ChampScan surLecture={f.scanner} />}
       {type === 'CHARGE' && (
         <button
           type="button"

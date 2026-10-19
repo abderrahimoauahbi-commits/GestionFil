@@ -26,6 +26,7 @@ import { useOuvrirVue } from '../../lib/navigation'
 import { cn } from '../../lib/utils'
 import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import { ChampLot } from '../../composants/ChampLot'
+import { ChampScan } from '../../composants/ChampScan'
 import { SaisieNombre } from '../../composants/ui/base'
 import {
   cheminMachine, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, fmtInstant, LIBELLE_DESTINATION,
@@ -913,6 +914,9 @@ export function FicheBureau({
       </div>
 
       {/* --- Ajouter une reference qui n'etait pas sur l'etage (chargement) -- */}
+      {type === 'CHARGE' && f.entete.magasin && (
+        <ChampScan surLecture={f.scanner} className="mb-2 max-w-md" />
+      )}
       {type === 'CHARGE' && (
         <div>
           {ajout ? (

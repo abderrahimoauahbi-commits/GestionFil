@@ -19,8 +19,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { SANS_LOT } from '../../lib/lots'
+import type { EtiquetteLue } from '../../composants/ChampScan'
 import {
-  corpsFiche, depuisEtat, destinationsDe, estimer, lignesAEnvoyer, machinesApi,
+  corpsFiche, depuisEtat, destinationsDe, estimer, ligneNeuve, lignesAEnvoyer, machinesApi,
   type Apercu, type LigneSaisie, type Motif, type TypeFiche, type Zone,
 } from './noyau'
 
@@ -139,6 +140,31 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
 
   function ajouter(l: LigneSaisie) {
     setLignes((ls) => [...ls, { ...l, cle: `${l.code_reference}|${l.lot_fournisseur}|${ls.length}` }])
+  }
+
+  /**
+   * LE SCAN D'UNE ETIQUETTE DE LOT (19/10/2026), au chargement : la reference et
+   * le lot viennent de l'etiquette, plus du clavier. Une bobine compte pour une ;
+   * une palette pour son nombre de bobines au catalogue. La ligne de cette
+   * reference et de ce lot recoit le compte, ou nait.
+   */
+  function scanner(e: EtiquetteLue): string | void {
+    if (type !== 'CHARGE') return 'Le scan d’étiquette sert au chargement de la machine.'
+    if (e.statut_reception === 'ANNULE') return `Étiquette ${e.code} : sa réception est annulée.`
+    const n = e.nature === 'BOBINE' ? 1 : Number(e.bobines_par_palette ?? 0)
+    if (!(n > 0)) {
+      return `Palette ${e.code} : le catalogue ne dit pas combien de bobines elle porte. Scannez ses bobines.`
+    }
+    const lot = e.lot_fournisseur ?? SANS_LOT
+    const l = lignes.find((x) => x.code_reference === e.code_reference && x.lot_fournisseur === lot)
+    if (l) majLigne(l.cle, 'mouvementees', l.mouvementees + n)
+    else {
+      ajouter({
+        ...ligneNeuve(e.code_reference, e.designation ?? e.code_reference, e.poids_bobine_kg ?? 0, e.poids_bobine_kg),
+        lot_fournisseur: lot,
+        mouvementees: n,
+      })
+    }
   }
 
   const envoyees = useMemo(() => lignesAEnvoyer(type, lignes), [type, lignes])
@@ -291,7 +317,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     zone, changerZone, motifs, motifDe,
     stockCourt, avertissements,
     etat: qEtat, entete, setEntete, lignes, setLignes, envoyees,
-    majLigne, retirer, ajouter, totaux,
+    majLigne, retirer, ajouter, scanner, totaux,
     calculer, apercu: apercuAJour ? apercu!.resultat : null, apercuPerime: !!apercu && !apercuAJour,
     envoi, pret, peutValider, manque,
     reamorcer: () => setAmorcee(null),

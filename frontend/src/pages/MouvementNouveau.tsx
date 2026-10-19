@@ -31,6 +31,7 @@ import { ArrowLeft, Save } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { api, ErreurApi } from '../api/client'
 import { ChampLot } from '../composants/ChampLot'
+import { ChampScan, type EtiquetteLue } from '../composants/ChampScan'
 import { EnTetePage } from '../components/Layout'
 import { chercherCatalogue as chercherAuCatalogue } from '../composants/ChampReference'
 import {
@@ -579,6 +580,40 @@ export function MouvementNouveau() {
   // L'identifiant du document, tire a l'ouverture : un second envoi du meme
   // formulaire rend le meme document (audit P3, 19/10/2026).
   const [idDocument] = useState(nouvelIdentifiant)
+  /** Une etiquette scannee : la ligne de sa reference et de son lot, ou une nouvelle. */
+  const surEtiquette = (e: EtiquetteLue): string | void => {
+    if (e.statut_reception === 'ANNULE') return `Étiquette ${e.code} : sa réception est annulée.`
+    const lot = e.lot_fournisseur ?? ''
+    const champ = e.nature === 'BOBINE' ? 'bobines' : 'palettes'
+    const compter = (l: LigneSaisie): LigneSaisie => ({
+      ...l,
+      unite: 'kg',
+      // DETACHEE : le compte vient des etiquettes, pas de la formule.
+      lie: false,
+      qte: pourChamp(Number(l.qte || 0) + (e.poids_kg ?? 0), 4),
+      [champ]: String(Number(l[champ] || 0) + 1),
+    })
+    majLignes((prev) => {
+      const i = prev.findIndex(
+        (l) => !l.valide && l.code_reference === e.code_reference && (l.extra?.lot ?? '') === lot,
+      )
+      if (i >= 0) return prev.map((l, k) => (k === i ? compter(l) : l))
+      const base = depuisReference({
+        code_reference: e.code_reference,
+        designation: e.designation ?? e.code_reference,
+        unite_catalogue: e.unite_catalogue ?? 'kg',
+        poids_bobine_kg: e.poids_bobine_kg,
+        bobines_par_palette: e.bobines_par_palette,
+        bobines_par_lot: e.bobines_par_lot,
+        densite_kg_ml: e.densite_kg_ml,
+      })
+      const neuve = compter({ ...base, qte: '', palettes: '', bobines: '', extra: { ...(base.extra ?? {}), lot } })
+      // La ligne vide qui attend en bas de grille prend la place.
+      const vide = prev.findIndex((l) => !l.code_reference && !l.qte)
+      return vide >= 0 ? prev.map((l, k) => (k === vide ? neuve : l)) : [...prev, neuve]
+    })
+  }
+
   const enregistrer = useMutation({
     mutationFn: () =>
       api.post('/api/mouvements', {
@@ -828,6 +863,11 @@ export function MouvementNouveau() {
             stock d'un autre magasin — ou celui d'un autre ecran de stock —
             reviendrait dans la liste. Aucune reference proposee ne porte de
             fournisseur, il n'est donc compare a rien d'autre. */}
+        {/* LE SCAN D'UNE ETIQUETTE DE LOT (19/10/2026) : reference et lot lus sur
+            la bobine, plus tapes. Les kilos sont ceux de la pesee de reception
+            (moyenne par bobine ou palette) : la ligne reste a valider, on les
+            corrige si la balance dit autre chose. */}
+        {entete.code_magasin && <ChampScan surLecture={surEtiquette} className="max-w-md" />}
         <GrilleLignes
           codeFournisseur={`MVT:${entete.code_magasin}`}
           devise="MAD"

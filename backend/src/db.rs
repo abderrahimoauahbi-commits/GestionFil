@@ -663,6 +663,27 @@ async fn verifier_schema(pool: &Db) -> anyhow::Result<()> {
         );
     }
 
+    // LE TEMPS EST TYPE (A1, 20/10/2026) : plus une colonne de date en texte. Une
+    // migration qui en recreerait une — copiee d'un ancien fichier — rouvrirait
+    // les dates mal formees et les comparaisons de chaines : refus de demarrer,
+    // en la nommant. Une colonne de date nait en `date` ou `timestamptz`.
+    let dates_texte: Option<String> = sqlx::query_scalar(
+        "SELECT string_agg(c.table_name || '.' || c.column_name, ', ' ORDER BY 1)
+           FROM information_schema.columns c
+           JOIN information_schema.tables t
+             ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+          WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+            AND c.data_type = 'text'
+            AND (c.column_name ~ '^date_' OR c.column_name ~ '_date$')",
+    )
+    .fetch_one(pool)
+    .await?;
+    if let Some(liste) = dates_texte {
+        anyhow::bail!(
+            "colonne(s) de date en texte : {liste}. Une date se declare en `date` (un jour) ou `timestamptz` (un instant) ; voir 2026-10-20a_horodatages_types.sql"
+        );
+    }
+
     Ok(())
 }
 

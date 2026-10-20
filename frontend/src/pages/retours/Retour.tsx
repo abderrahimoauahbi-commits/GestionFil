@@ -392,7 +392,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                     .filter(([, v]) => illisible(v)).map(([nom]) => nom)
                   return (
                     <div key={l.cle}
-                      className="grid grid-cols-2 items-end gap-2 p-2 md:grid-cols-4 xl:grid-cols-[9rem_minmax(12rem,1fr)_10rem_7rem_7rem_6rem_13rem_2rem]">
+                      className="grid grid-cols-2 items-end gap-2 p-2 md:grid-cols-6 2xl:grid-cols-[9rem_minmax(14rem,1fr)_16rem_7rem_7rem_6rem_14rem_2rem]">
                       <div>
                         {i === 0 && <Etiq htmlFor={`rfo-mag-${l.cle}`}>Magasin</Etiq>}
                         <Selecteur id={`rfo-mag-${l.cle}`} className="h-8 w-full" aria-label="Magasin" value={l.code_magasin}
@@ -401,7 +401,9 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                           {magasins.map((m) => <option key={m} value={m}>{m}</option>)}
                         </Selecteur>
                       </div>
-                      <div className="col-span-2 md:col-span-1">
+                      {/* Sous 1536 px, deux rangees : la reference et le lot ont la place de
+                          leur libelle (constat e2e du 20/10/2026 : 221 px pour 307 demandes). */}
+                      <div className="col-span-2 md:col-span-3 2xl:col-span-1">
                         {i === 0 && <Etiq>Référence</Etiq>}
                         <Selecteur className="h-8 w-full" aria-label="Référence" value={l.code_reference} disabled={!l.code_magasin}
                           onChange={(e) => choisirReference(l, e.target.value)}>
@@ -409,7 +411,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                           {refs.map(([c, d]) => <option key={c} value={c}>{c}{d ? ` — ${d}` : ''}</option>)}
                         </Selecteur>
                       </div>
-                      <div className="col-span-2 md:col-span-1">
+                      <div className="col-span-2 2xl:col-span-1">
                         {i === 0 && <Etiq>Lot</Etiq>}
                         <Selecteur className="h-8 w-full" aria-label="Lot" value={l.lot} disabled={lots.length === 0}
                           onChange={(e) => maj(l.cle, { lot: e.target.value })}>
@@ -439,7 +441,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                         <Champ className="h-8 text-right" inputMode="numeric" aria-label="Bobines"
                           value={l.bobines} onChange={(e) => maj(l.cle, { bobines: e.target.value })} />
                       </div>
-                      <div className="col-span-2 md:col-span-1">
+                      <div className="col-span-2 2xl:col-span-1">
                         {i === 0 && <Etiq>Motif</Etiq>}
                         <Selecteur className="h-8 w-full" aria-label="Motif de la ligne" value={l.motif}
                           onChange={(e) => maj(l.cle, { motif: e.target.value })}>

@@ -211,8 +211,27 @@ export async function mesurer(page: Page): Promise<Constat[]> {
         })
         continue
       }
+      // HORS DE LA ZONE QUI DEFILE (20/10/2026) : remonte au-dessus du cadre de la
+      // page, l'element est coupe par lui, pas recouvert — la barre du haut, qui
+      // est a cet endroit de la fenetre, n'y est pour rien.
+      let zone = b.parentElement
+      while (zone && zone !== document.body && !/(auto|scroll)/.test(getComputedStyle(zone).overflowY))
+        zone = zone.parentElement
+      if (zone && zone !== document.body) {
+        const rz = zone.getBoundingClientRect()
+        const cy = r.top + r.height / 2
+        if (cy < rz.top || cy > rz.bottom) continue
+      }
       if (r.top >= 0 && r.bottom <= vh) {
         const dessus = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+        // SOUS UNE BARRE COLLEE (20/10/2026) : le bandeau de la page en haut, la
+        // barre « Enregistrer » en bas. La page defilee, un champ passe dessous :
+        // c'est le defilement, pas un defaut — on l'atteint en defilant.
+        let colle = false
+        for (let x: Element | null = dessus; x && x !== document.body; x = x.parentElement) {
+          if (/^(sticky|fixed)$/.test(getComputedStyle(x).position)) { colle = true; break }
+        }
+        if (colle) continue
         if (dessus && !b.contains(dessus) && !dessus.contains(b)) {
           // Candidat seulement : verifie ensuite par un essai de clic (verifierMasques).
           const ref = String(out.length)

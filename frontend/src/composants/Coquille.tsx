@@ -797,7 +797,11 @@ export function Coquille() {
       )}
 
       {/* --- Contenu ------------------------------------------------------ */}
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      {/* LA MARGE DE DEFILEMENT (20/10/2026) : le bandeau de la page colle en haut,
+          la barre « Enregistrer » d'une fiche colle en bas. Sans elle, un champ
+          atteint au clavier (ou par le navigateur) s'arretait SOUS l'une ou
+          l'autre — present, mais cache et pas cliquable (constat e2e). */}
+      <main className="min-h-0 flex-1 overflow-y-auto scroll-pt-28 scroll-pb-20">
         <div
           // Pas de largeur maximale : une table de quinze colonnes se lit
           // mieux etalee que centree entre deux marges vides. La densite

@@ -34,6 +34,12 @@ async function statutReception(page: Page, id: string) {
 
 /** Choisir l'option d'une liste par une partie de son libelle, comme on la lit. */
 async function choisirOption(liste: Locator, motif: RegExp) {
+  // LA LISTE PEUT ARRIVER APRES LE CHAMP (20/10/2026) : les types de frais se
+  // chargent a part ; lue trop tot, elle ne portait que « Nouveau frais… ».
+  await expect
+    .poll(async () => (await liste.locator('option').allTextContents()).some((l) => motif.test(l)), { timeout: 10_000 })
+    .toBe(true)
+    .catch(() => undefined)
   const libelles = await liste.locator('option').allTextContents()
   const libelle = libelles.find((l) => motif.test(l))
   expect(libelle, `aucune option ${motif} dans ${JSON.stringify(libelles)}`).toBeTruthy()

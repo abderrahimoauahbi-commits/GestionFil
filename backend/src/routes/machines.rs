@@ -937,7 +937,7 @@ async fn retirer_fiche(
         sqlx::query(
             "UPDATE machine_fiche
                 SET statut = 'ANNULE', motif_annulation = $2,
-                    date_annulation = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                    date_annulation = now()
               WHERE id_fiche = $1 AND statut = 'BROUILLON'",
         )
         .bind(id)
@@ -1408,7 +1408,7 @@ pub async fn creer_machine(
         "INSERT INTO machine (code_machine, nom, capacite_bobines, nb_etages,
                               code_atelier, notes, etat, date_etat)
          VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',
-                 to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'))",
+                 now())",
     )
     .bind(&code)
     .bind(m.nom.trim())
@@ -1689,8 +1689,7 @@ pub async fn changer_etat(
     sqlx::query(
         "UPDATE machine
             SET etat = $2, motif_etat = NULLIF($3, ''),
-                date_etat = to_char(now() AT TIME ZONE 'UTC',
-                                    'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                date_etat = now()
           WHERE code_machine = $1",
     )
     .bind(&code)

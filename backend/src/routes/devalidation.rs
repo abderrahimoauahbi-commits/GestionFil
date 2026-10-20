@@ -271,7 +271,7 @@ pub async fn devalider(
         "INSERT INTO audit_log (table_concernee, operation, id_enregistrement,
                                 anciennes_valeurs, nouvelles_valeurs,
                                 id_utilisateur, adresse_ip, session_id, date_operation)
-         VALUES ($1, 'DEVALIDATION', $2, $3, $4, $5, $6, $7, $8)",
+         VALUES ($1, 'DEVALIDATION', $2, $3, $4, $5, $6, $7, fn_instant($8))",
     )
     .bind(r.table)
     .bind(&id)

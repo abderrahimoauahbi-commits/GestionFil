@@ -234,7 +234,7 @@ pub async fn saisir_comptage(
         let res = sqlx::query(
             "UPDATE ligne_inventaire li
                 SET quantite_comptee_kg = $3, motif_ecart = $4, statut_ligne = 'COMPTE',
-                    id_utilisateur_comptage = $5, date_comptage = $6,
+                    id_utilisateur_comptage = $5, date_comptage = fn_instant($6),
                     nb_bobines_comptees = $9, nb_palettes_comptees = $10,
                     quantite_theorique_kg = CASE
                         WHEN li.lot_fournisseur IS NULL THEN
@@ -305,7 +305,7 @@ pub async fn saisir_comptage(
                                  COALESCE((SELECT sl.quantite_kg FROM stock_lot sl
                                             WHERE sl.code_reference = $3 AND sl.code_magasin = $4
                                               AND sl.lot_fournisseur = $5), 0),
-                                 $6, $7, 'COMPTE', $8, $9,
+                                 $6, $7, 'COMPTE', $8, fn_instant($9),
                                  COALESCE((SELECT sl.nb_bobines FROM stock_lot sl
                                             WHERE sl.code_reference = $3 AND sl.code_magasin = $4
                                               AND sl.lot_fournisseur = $5), 0),

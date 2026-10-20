@@ -188,7 +188,7 @@ pub async fn valider(db: &Db, user: &Utilisateur, id_inventaire: &str) -> AppRes
     exiger_comptage_complet(&mut tx, id_inventaire).await?;
     sqlx::query(
         "UPDATE inventaire
-            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = $3
+            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = fn_instant($3)
           WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
@@ -274,7 +274,7 @@ pub async fn annuler(db: &Db, user: &Utilisateur, id_inventaire: &str, motif: &s
     sqlx::query(
         "UPDATE inventaire
             SET statut = 'ANNULE', motif_annulation = $2,
-                id_utilisateur_annulation = $3, date_annulation = $4
+                id_utilisateur_annulation = $3, date_annulation = fn_instant($4)
           WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
@@ -438,7 +438,7 @@ pub async fn cloturer(
     }
 
     sqlx::query(
-        "UPDATE stock_magasin SET date_dernier_inventaire = $2 WHERE code_magasin = $1",
+        "UPDATE stock_magasin SET date_dernier_inventaire = fn_instant($2) WHERE code_magasin = $1",
     )
     .bind(&magasin)
     .bind(&horodatage)
@@ -448,7 +448,7 @@ pub async fn cloturer(
     // date_cloture est renseignee explicitement : le CHECK de la table l'exige,
     // et le trigger AFTER du CDC ne pouvait pas le faire.
     sqlx::query(
-        "UPDATE inventaire SET statut = 'CLOTURE', date_cloture = $2 WHERE id_inventaire = $1",
+        "UPDATE inventaire SET statut = 'CLOTURE', date_cloture = fn_instant($2) WHERE id_inventaire = $1",
     )
     .bind(id_inventaire)
     .bind(&horodatage)

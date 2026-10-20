@@ -391,7 +391,7 @@ def scenario_arrivage_unifie(c, infra):
     clos = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/CLOS", "code_devise": "USD"})
     id_clos = clos.get("id_dossier") or clos.get("id")
     infra.sql("UPDATE import_dossiers SET statut = 'CLOTURE', "
-              "date_cloture = to_char(current_date, 'YYYY-MM-DD'), "
+              "date_cloture = now(), "
               "id_utilisateur_cloture = (SELECT id_utilisateur FROM utilisateur WHERE login = 'Choukri') "
               f"WHERE id_dossier = '{id_clos}'")
     c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}", V(infra, "reception", "id_reception", rid, {"id_dossier_import": id_clos}), contient="clos")
@@ -1119,7 +1119,7 @@ def scenario_typage_du_temps(c, infra):
     GROSSIT PLUS : pas une colonne de date en texte de plus, et chacune porte sa contrainte de
     format ISO (migration 2026-10-17f). Une date mal formee ne peut plus entrer."""
     # LE CLIQUET : a abaisser a chaque colonne convertie, jamais a relever.
-    plafond = 93  # 19/10 : 5 colonnes en date (2026-10-19g), puis 20 (2026-10-19h), puis 16 (2026-10-19i) ; le cliquet descend avec elles
+    plafond = 0  # 19/10 : 5 colonnes en date (2026-10-19g), puis 20 (2026-10-19h), puis 16 (2026-10-19i) ; 20/10 : les 93 horodatages (2026-10-20a) ; le cliquet descend avec elles
     n = int(infra.valeur("SELECT count(*) " + COLONNES_DATE_TEXTE))
     verifier(n <= plafond, f"{n} colonnes de date en texte, plafond {plafond} : une nouvelle colonne de date "
                            "se cree en `date` ou `timestamptz`, pas en `text`")
@@ -2097,7 +2097,7 @@ def scenario_plan_detail(c, infra):
         c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
         verifier(infra.valeur(f"SELECT count(*) FROM plan_achat WHERE code_reference = '{ref_prop}' "
                               "AND statut = 'PROPOSE'") == "0", "une proposition ecartee revient au calcul suivant")
-        infra.sql(f"UPDATE plan_achat SET date_ecartee = to_char(current_date - 100, 'YYYY-MM-DD') "
+        infra.sql(f"UPDATE plan_achat SET date_ecartee = now() - interval '100 days' "
                   f"WHERE id_proposition = '{id_prop}'")
         c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
         verifier(infra.valeur(f"SELECT count(*) FROM plan_achat WHERE code_reference = '{ref_prop}' "

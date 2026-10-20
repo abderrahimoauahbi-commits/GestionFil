@@ -361,7 +361,7 @@ pub async fn decider_dormant(
     }
     let mut mouvements = Vec::new();
     if d.decision == "GARDER" {
-        sqlx::query("UPDATE lot SET date_derniere_activite = $3 WHERE code_reference = $1 AND lot_fournisseur = $2")
+        sqlx::query("UPDATE lot SET date_derniere_activite = fn_instant($3) WHERE code_reference = $1 AND lot_fournisseur = $2")
             .bind(&d.code_reference)
             .bind(&d.lot_fournisseur)
             .bind(maintenant())
@@ -882,7 +882,7 @@ pub async fn decider(
     user.poser_contexte(&mut tx).await?;
     let n = sqlx::query(
         "UPDATE demande_autorisation
-            SET statut = $2, id_decideur = $3, date_decision = $4, motif_decision = $5
+            SET statut = $2, id_decideur = $3, date_decision = fn_instant($4), motif_decision = $5
           WHERE id_demande = $1 AND statut = 'EN_ATTENTE'",
     )
     .bind(&id)

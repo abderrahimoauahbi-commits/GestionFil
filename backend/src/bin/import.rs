@@ -818,7 +818,7 @@ async fn importer(pool: &db::Db, chemin: &str, simuler: bool) -> Result<Rapport>
         // Mise en service : declenche les controles R07 (somme = 100 % par role),
         // roles avec densite, et densite_kg_ml presente pour les roles en ml/m2.
         let activation = sqlx::query(
-            "UPDATE qualite SET statut = 'ACTIF', date_modification = $2,
+            "UPDATE qualite SET statut = 'ACTIF', date_modification = fn_instant($2),
                                 id_utilisateur_modification = $3
               WHERE code_qualite = $1 AND statut <> 'ACTIF'",
         )

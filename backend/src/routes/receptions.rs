@@ -313,7 +313,7 @@ pub async fn dossiers_import_ouverts(
                   WHERE f.id_dossier = d.id_dossier) AS fournisseurs
            FROM import_dossiers d
           WHERE d.statut <> 'CLOTURE'
-          ORDER BY COALESCE(d.date_arrivee::text, d.date_creation) DESC, d.numero DESC
+          ORDER BY COALESCE(d.date_arrivee::text, fn_iso(d.date_creation)) DESC, d.numero DESC
           LIMIT 100",
     )
     .fetch_all(&state.db)
@@ -529,7 +529,7 @@ async fn ligne_bc_regularisation(
                       date_taux_engage, date_livraison_prevue, conditions_paiement,
                       motif_creation, notes, montant_total_devise, montant_total_mad,
                       id_utilisateur_creation, id_reception_regularisee)
-                 VALUES ($1,$2,$3,$4,$5,$6, current_date, $7,
+                 VALUES ($1,$2,$3,$4,$5,fn_instant($6), current_date, $7,
                          'MANUEL', $8, 0, 0, $9, $10)",
             )
             .bind(&id_nouveau)
@@ -1208,7 +1208,7 @@ pub async fn changer_statut_reception(
         let motif = motif_de_renvoi(s.motif.as_deref())?;
         sqlx::query(
             "UPDATE reception SET motif_renvoi = $2, id_utilisateur_renvoi = $3,
-                    date_renvoi = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                    date_renvoi = now()
               WHERE id_reception = $1",
         )
         .bind(&id)

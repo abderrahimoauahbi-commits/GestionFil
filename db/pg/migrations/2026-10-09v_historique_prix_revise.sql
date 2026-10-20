@@ -54,7 +54,8 @@ SELECT h.id_histo_prix, h.id_ligne_reception, h.code_reference, h.code_fournisse
        COALESCE(r.quantite_achetee_kg, h.quantite_achetee_kg)::numeric(18,4) AS quantite_achetee_kg,
        COALESCE(r.total_mad, h.total_mad)::numeric(18,2) AS total_mad,
        h.conditions,
-       COALESCE(r.date_enregistrement, h.date_enregistrement) AS date_enregistrement,
+       to_char(COALESCE(r.date_enregistrement, h.date_enregistrement)::timestamptz AT TIME ZONE 'UTC',
+               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS date_enregistrement,
        COALESCE(r.version, 1) AS version
   FROM historique_prix h
   LEFT JOIN LATERAL (SELECT * FROM historique_prix_revision x

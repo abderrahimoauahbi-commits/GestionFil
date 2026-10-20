@@ -528,8 +528,7 @@ pub async fn choisir_modele(
     for (code, valeur) in [("P_AssistantMoteur", moteur), ("P_AssistantModele", &c.modele)] {
         sqlx::query(
             "UPDATE parametre SET valeur_courante = $2,
-                    date_derniere_modif = to_char(now() AT TIME ZONE 'UTC',
-                                                  'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),
+                    date_derniere_modif = now(),
                     id_utilisateur_modif = $3
               WHERE code_parametre = $1",
         )

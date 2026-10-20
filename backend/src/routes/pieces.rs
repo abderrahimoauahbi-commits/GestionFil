@@ -394,7 +394,7 @@ pub async fn lecture(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Lire).await?;
     let ligne = sqlx::query(
-        "SELECT l.resultat, l.duree_s::float8 AS duree_s, l.date_lecture, u.login AS lu_par
+        "SELECT l.resultat, l.duree_s::float8 AS duree_s, fn_iso(l.date_lecture) AS date_lecture, u.login AS lu_par
            FROM piece_lecture l
            LEFT JOIN utilisateur u ON u.id_utilisateur = l.id_utilisateur
           WHERE l.id_piece = $1",
@@ -482,7 +482,7 @@ pub async fn lire(
          ON CONFLICT (id_piece) DO UPDATE
             SET resultat = excluded.resultat, duree_s = excluded.duree_s,
                 id_utilisateur = excluded.id_utilisateur,
-                date_lecture = to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')",
+                date_lecture = now()",
     )
     .bind(&id)
     .bind(&corps)

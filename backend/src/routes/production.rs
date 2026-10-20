@@ -245,7 +245,7 @@ pub async fn enregistrer_qualite(
                  seuil_alerte_jours   = COALESCE($7, seuil_alerte_jours),
                  seuil_critique_jours = COALESCE($8, seuil_critique_jours),
                  stock_securite_jours = COALESCE($9, stock_securite_jours),
-                 date_modification = $10,
+                 date_modification = fn_instant($10),
                  id_utilisateur_modification = $11
               WHERE code_qualite = $1",
         )
@@ -392,10 +392,10 @@ pub async fn enregistrer_qualite(
         sqlx::query(
             "UPDATE qualite SET
                  statut = $2,
-                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, $3) END,
+                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, fn_instant($3)) END,
                  id_utilisateur_cloture = CASE WHEN $2 = 'CLOTURE'
                                                THEN COALESCE(id_utilisateur_cloture, $4) END,
-                 date_modification = $3, id_utilisateur_modification = $4
+                 date_modification = fn_instant($3), id_utilisateur_modification = $4
               WHERE code_qualite = $1",
         )
         .bind(code)
@@ -523,8 +523,8 @@ pub async fn supprimer_qualite(
     }
 
     let res = sqlx::query(
-        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = $2,
-                            id_utilisateur_cloture = $3, date_modification = $2,
+        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = fn_instant($2),
+                            id_utilisateur_cloture = $3, date_modification = fn_instant($2),
                             id_utilisateur_modification = $3
           WHERE code_qualite = $1 AND statut <> 'CLOTURE'",
     )
@@ -677,7 +677,7 @@ pub async fn cloturer_qualite(
 
     // `actif` est desormais CALCULE depuis le statut : l'ecrire est refuse.
     let res = sqlx::query(
-        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = $2, id_utilisateur_cloture = $3
+        "UPDATE qualite SET statut = 'CLOTURE', date_cloture = fn_instant($2), id_utilisateur_cloture = $3
           WHERE code_qualite = $1 AND statut <> 'CLOTURE'",
     )
     .bind(&code)
@@ -1193,7 +1193,7 @@ pub async fn enregistrer_plan(
                      libelle = $2, scenario_nom = $3, annee = $4,
                      date_debut = fn_jour_casablanca($5), date_fin = fn_jour_casablanca($6), mois_horizon = $7,
                      croissance_annuelle_pct = $8,
-                     date_modification = $9, id_utilisateur_modification = $10
+                     date_modification = fn_instant($9), id_utilisateur_modification = $10
                   WHERE id_plan = $1",
             )
             .bind(id)
@@ -1266,7 +1266,7 @@ pub async fn enregistrer_plan(
     for b in &bases {
         sqlx::query(
             "INSERT INTO plan_qualite (id_plan, code_qualite, m2_base_mensuel, date_figee)
-             VALUES ($1, $2, $3, $4)",
+             VALUES ($1, $2, $3, fn_instant($4))",
         )
         .bind(&id)
         .bind(&b.code_qualite)
@@ -1467,7 +1467,7 @@ pub async fn recalculer_plan(
 
     let total: f64 = cases.iter().map(|c| c.m2_prevus).sum();
     sqlx::query(
-        "UPDATE plan_production SET m2_total_annuel = $2, date_modification = $3,
+        "UPDATE plan_production SET m2_total_annuel = $2, date_modification = fn_instant($3),
                                     id_utilisateur_modification = $4
           WHERE id_plan = $1",
     )
@@ -1511,9 +1511,9 @@ pub async fn cloturer_plan(
 
     // Le trigger trg_transition_plan verifie que la transition est declaree.
     sqlx::query(
-        "UPDATE plan_production SET statut = 'CLOTURE', date_cloture = $2,
+        "UPDATE plan_production SET statut = 'CLOTURE', date_cloture = fn_instant($2),
                                     id_utilisateur_cloture = $3,
-                                    date_modification = $2, id_utilisateur_modification = $3
+                                    date_modification = fn_instant($2), id_utilisateur_modification = $3
           WHERE id_plan = $1",
     )
     .bind(&id)
@@ -1644,9 +1644,9 @@ pub async fn changer_statut_plan(
         // R08 : le trigger refuse la mise en service si une qualite planifiee n'a
         // pas sa recette figee. Le message renvoye guide vers /figer-recettes.
         sqlx::query(
-            "UPDATE plan_production SET statut = 'EN_COURS', date_validation = $2,
+            "UPDATE plan_production SET statut = 'EN_COURS', date_validation = fn_instant($2),
                                         id_utilisateur_validation = $3,
-                                        date_modification = $2,
+                                        date_modification = fn_instant($2),
                                         id_utilisateur_modification = $3
               WHERE id_plan = $1",
         )
@@ -1659,10 +1659,10 @@ pub async fn changer_statut_plan(
         sqlx::query(
             "UPDATE plan_production SET
                  statut = $2,
-                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, $3) END,
+                 date_cloture = CASE WHEN $2 = 'CLOTURE' THEN COALESCE(date_cloture, fn_instant($3)) END,
                  id_utilisateur_cloture = CASE WHEN $2 = 'CLOTURE'
                                                THEN COALESCE(id_utilisateur_cloture, $4) END,
-                 date_modification = $3, id_utilisateur_modification = $4
+                 date_modification = fn_instant($3), id_utilisateur_modification = $4
               WHERE id_plan = $1",
         )
         .bind(&id)

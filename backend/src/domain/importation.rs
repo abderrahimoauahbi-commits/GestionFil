@@ -399,7 +399,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     }
     sqlx::query(
         "UPDATE import_dossiers
-            SET statut = 'CLOTURE', id_utilisateur_cloture = $2, date_cloture = $3
+            SET statut = 'CLOTURE', id_utilisateur_cloture = $2, date_cloture = fn_instant($3)
           WHERE id_dossier = $1",
     )
     .bind(id_dossier)
@@ -515,7 +515,7 @@ async fn porter(
             // Le CUMP est celui du MAGASIN : divise par tout ce qu'il porte.
             let apres = arrondi_kg((avant + (*part_c as f64 / 100.0) / q).max(0.0));
             sqlx::query(
-                "UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4
+                "UPDATE stock_magasin SET cmup_mad = $3, date_maj = fn_instant($4)
                   WHERE code_reference = $1 AND code_magasin = $2",
             )
             .bind(code_reference)
@@ -579,7 +579,7 @@ async fn porter(
                                       FROM stock_magasin sm
                                      WHERE sm.code_reference = $1 AND sm.quantite_kg > 0
                                        AND sm.cmup_mad IS NOT NULL),
-                        date_dernier_cmup = $2
+                        date_dernier_cmup = fn_instant($2)
                   WHERE code_reference = $1",
             )
             .bind(code_reference)

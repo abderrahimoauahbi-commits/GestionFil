@@ -345,7 +345,7 @@ pub async fn valider(db: &Db, user: &Utilisateur, id_facture: &str, simuler: boo
                     SET statut = 'CLOTURE', numero_facture = $2,
                         montant_facture_mad = $3, frais_facture_mad = 0,
                         code_devise_facture = $4, montant_facture_devise = $5, taux_facture = $6,
-                        date_cloture = $7, id_utilisateur_cloture = $8
+                        date_cloture = fn_instant($7), id_utilisateur_cloture = $8
                   WHERE id_reception = $1",
             )
             .bind(id)
@@ -393,7 +393,7 @@ pub async fn valider(db: &Db, user: &Utilisateur, id_facture: &str, simuler: boo
     if !simuler {
         sqlx::query(
             "UPDATE facture_fournisseur
-                SET statut = 'VALIDEE', id_utilisateur_validation = $2, date_validation = $3
+                SET statut = 'VALIDEE', id_utilisateur_validation = $2, date_validation = fn_instant($3)
               WHERE id_facture = $1",
         )
         .bind(id_facture)

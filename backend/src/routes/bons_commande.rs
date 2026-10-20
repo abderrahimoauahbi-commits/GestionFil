@@ -157,7 +157,7 @@ pub async fn creer_bc(
               date_taux_engage, date_livraison_prevue, conditions_paiement,
               motif_creation, notes, montant_total_devise, montant_total_mad,
               id_utilisateur_creation, date_bc)
-         VALUES ($1,$2,$3,$4,$5,$6,fn_jour_casablanca($7),$8,$9,$10,0,0,$11,
+         VALUES ($1,$2,$3,$4,$5,fn_instant($6),fn_jour_casablanca($7),$8,$9,$10,0,0,$11,
                  COALESCE(fn_jour_casablanca($12), (now() AT TIME ZONE 'Africa/Casablanca')::date))",
     )
     .bind(&id)
@@ -950,7 +950,7 @@ pub async fn changer_statut_bc(
         sqlx::query(
             "UPDATE bon_commande
                 SET taux_change_engage = CASE WHEN code_devise = 'MAD' THEN taux_change_engage ELSE $3 END,
-                    date_taux_engage = $2, date_cours_engage = fn_jour_casablanca($4), source_taux_engage = $5, motif_taux_engage = $6
+                    date_taux_engage = fn_instant($2), date_cours_engage = fn_jour_casablanca($4), source_taux_engage = $5, motif_taux_engage = $6
               WHERE id_bc = $1",
         )
         .bind(&id)
@@ -988,7 +988,7 @@ pub async fn changer_statut_bc(
 
         sqlx::query(
             "UPDATE bon_commande
-                SET statut = 'VALIDE', date_validation = $2, id_utilisateur_validation = $3
+                SET statut = 'VALIDE', date_validation = fn_instant($2), id_utilisateur_validation = $3
               WHERE id_bc = $1",
         )
         .bind(&id)
@@ -999,7 +999,7 @@ pub async fn changer_statut_bc(
     } else {
         let date_envoi = if s.statut == "ENVOYE" { Some(maintenant()) } else { None };
         sqlx::query(
-            "UPDATE bon_commande SET statut = $2, date_envoi = COALESCE($3, date_envoi)
+            "UPDATE bon_commande SET statut = $2, date_envoi = COALESCE(fn_instant($3), date_envoi)
               WHERE id_bc = $1",
         )
         .bind(&id)
@@ -1165,7 +1165,7 @@ pub async fn modifier_bc(
         .await?
         .ok_or_else(|| AppError::RegleMetier(format!("Aucun taux de change en vigueur pour {devise}.")))?;
         sqlx::query(
-            "UPDATE bon_commande SET code_devise = $2, taux_change_engage = $3, date_taux_engage = $4
+            "UPDATE bon_commande SET code_devise = $2, taux_change_engage = $3, date_taux_engage = fn_instant($4)
               WHERE id_bc = $1 AND code_devise <> $2",
         )
         .bind(&id)

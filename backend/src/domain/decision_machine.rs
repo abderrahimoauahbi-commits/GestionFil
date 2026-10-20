@@ -1171,7 +1171,7 @@ pub async fn valider(
     let passee = sqlx::query(
         "UPDATE machine_fiche
             SET statut = 'VALIDE', id_utilisateur_validation = $2, nb_validations = $3,
-                date_validation = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                date_validation = now()
           WHERE id_fiche = $1 AND statut = 'BROUILLON'",
     )
     .bind(&f.id_fiche)
@@ -1198,7 +1198,7 @@ pub async fn valider(
         }
         for ((reference, lot), kg) in &par_lot {
             sqlx::query(
-                "UPDATE demande_autorisation SET date_consommation = $2, kg_consommes = $5
+                "UPDATE demande_autorisation SET date_consommation = fn_instant($2), kg_consommes = $5
                   WHERE id_demande = (SELECT id_demande FROM demande_autorisation
                                        WHERE type_demande = 'LOT_BLOQUE' AND statut = 'ACCORDEE' AND document = $1
                                          AND code_reference = $3 AND lot_fournisseur = $4
@@ -1258,7 +1258,7 @@ pub async fn retirer(
 ) -> AppResult<Value> {
     let action = if mode == Retrait::Annulation { "annulee" } else { "devalidee" };
     let decision: Option<(String, i64, String, Option<String>, String, Option<String>)> = sqlx::query_as(
-        "SELECT id_decision, est_tete, date_decision, id_utilisateur, nature, id_decision_precedente
+        "SELECT id_decision, est_tete, fn_iso(date_decision), id_utilisateur, nature, id_decision_precedente
            FROM machine_decision
           WHERE id_fiche = $1 AND statut = 'ACTIVE'
           ORDER BY numero_validation DESC LIMIT 1",
@@ -1278,9 +1278,9 @@ pub async fn retirer(
     // 1. ELLE N'A SERVI DE BASE A AUCUNE AUTRE DECISION.
     if est_tete != 1 {
         let suivante: Option<(Option<String>, String)> = sqlx::query_as(
-            "SELECT f.numero_fiche, d.date_decision
+            "SELECT f.numero_fiche, fn_iso(d.date_decision)
                FROM machine_decision d LEFT JOIN machine_fiche f ON f.id_fiche = d.id_fiche
-              WHERE d.code_emplacement = $1 AND d.statut = 'ACTIVE' AND d.date_decision > $2
+              WHERE d.code_emplacement = $1 AND d.statut = 'ACTIVE' AND d.date_decision > fn_instant($2)
               ORDER BY d.date_decision LIMIT 1",
         )
         .bind(&f.code_emplacement)
@@ -1501,7 +1501,7 @@ pub async fn retirer(
     sqlx::query(
         "UPDATE machine_decision
             SET statut = $2, est_tete = 0, motif_retrait = $3, id_utilisateur_retrait = $4,
-                date_retrait = to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                date_retrait = clock_timestamp()
           WHERE id_decision = $1",
     )
     .bind(&id_decision)
@@ -1522,7 +1522,7 @@ pub async fn retirer(
         sqlx::query(
             "UPDATE machine_fiche
                 SET statut = 'ANNULE', motif_annulation = $2,
-                    date_annulation = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                    date_annulation = now()
               WHERE id_fiche = $1 AND statut = 'VALIDE'",
         )
         .bind(&f.id_fiche)

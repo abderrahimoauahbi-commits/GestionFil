@@ -109,6 +109,16 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // A1, horodatages (20/10/2026) : les 93 dernieres colonnes de date en
+        // texte sont des `timestamptz`. Le serveur les ecrit par fn_instant ou
+        // now() et les lit par fn_iso, le meme texte ISO qu'avant.
+        "2026-10-20a_horodatages_types.sql",
+        "SELECT to_regprocedure('fn_instant(text)') IS NOT NULL
+            AND (SELECT data_type FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'bon_commande'
+                    AND column_name = 'date_validation') = 'timestamp with time zone'",
+    ),
+    (
         // A1, troisieme lot (19/10/2026) : seize colonnes de jour encore vides
         // (fabrication et peremption, retour, facture fournisseur, frais,
         // engagement, paiement, transfert, valorisation, constat machine) sont

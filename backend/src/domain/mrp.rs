@@ -85,7 +85,7 @@ pub async fn figer_recettes(db: &Db, user: &Utilisateur, id_plan: &str) -> AppRe
         )));
     }
 
-    let res = sqlx::query("UPDATE plan_qualite SET date_figee = $2 WHERE id_plan = $1")
+    let res = sqlx::query("UPDATE plan_qualite SET date_figee = fn_instant($2) WHERE id_plan = $1")
         .bind(id_plan)
         .bind(maintenant())
         .execute(&mut *tx)
@@ -146,7 +146,7 @@ pub async fn calculer(db: &Db, user: &Utilisateur, id_plan: &str) -> AppResult<R
              (id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
               taux_perte_applique, quantite_kg, date_calcul, date_reference)
          SELECT id_plan, mois, rang_mois, annee_mois, code_reference, quantite_brute_kg,
-                taux_perte_pct, quantite_kg, $2, fn_jour_casablanca($3)
+                taux_perte_pct, quantite_kg, fn_instant($2), fn_jour_casablanca($3)
            FROM v_besoin_mrp_calcule
           WHERE id_plan = $1",
     )
@@ -185,7 +185,7 @@ pub async fn prendre_snapshot(db: &Db, user: &Utilisateur, id_plan: &str) -> App
         "INSERT INTO snapshot_mrp
              (date_snapshot, id_plan, code_reference, mois, rang_mois, annee_mois,
               quantite_besoin_kg, stock_projete_kg, statut_couleur)
-         SELECT $2, bm.id_plan, bm.code_reference, bm.mois, bm.rang_mois, bm.annee_mois,
+         SELECT fn_instant($2), bm.id_plan, bm.code_reference, bm.mois, bm.rang_mois, bm.annee_mois,
                 bm.quantite_kg, sp.stock_projete_kg, sp.statut
            FROM besoin_mrp bm
            LEFT JOIN v_stock_projete sp ON sp.code_reference = bm.code_reference

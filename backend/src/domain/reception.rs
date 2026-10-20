@@ -407,7 +407,7 @@ pub async fn valider(
                   total_mad, code_magasin_dest, statut_qualite, ecart_pct,
                   conformite_specifications, conformite_quantite, conformite_delai,
                   jours_retard, date_archive, id_utilisateur_archive, version)
-             VALUES ($1,$2,$3,$4,fn_jour_casablanca($5),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+             VALUES ($1,$2,$3,$4,fn_jour_casablanca($5),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,fn_instant($22),$23,
                      -- Une revalidation ecrit la version suivante (2026-10-08g).
                      (SELECT COALESCE(max(version), 0) + 1 FROM archive_reception WHERE id_ligne_reception = $1))",
         )
@@ -443,7 +443,7 @@ pub async fn valider(
                  (id_ligne_reception, code_reference, code_fournisseur, date_achat,
                   prix_kg_devise, code_devise, taux_change, prix_kg_mad,
                   quantite_achetee_kg, total_mad, date_enregistrement)
-             VALUES ($1,$2,$3,fn_jour_casablanca($4),$5,$6,$7,$8,$9,$10,$11)
+             VALUES ($1,$2,$3,fn_jour_casablanca($4),$5,$6,$7,$8,$9,$10,fn_instant($11))
              -- Revalidee, la ligne garde son entree d'origine (meme prix de bon).
              ON CONFLICT (id_ligne_reception) DO NOTHING",
         )
@@ -654,7 +654,7 @@ pub async fn valider(
         "UPDATE reception
             SET statut = 'VALIDE',
                 id_utilisateur_controle = $2,
-                date_controle = $3,
+                date_controle = fn_instant($3),
                 taux_change_reception = $4
           WHERE id_reception = $1",
     )

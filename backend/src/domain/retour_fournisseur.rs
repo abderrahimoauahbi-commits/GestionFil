@@ -364,7 +364,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
                 None => (None, 0, 0),
             };
             if stock_c != 0 {
-                sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4 WHERE code_reference = $1 AND code_magasin = $2")
+                sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = fn_instant($4) WHERE code_reference = $1 AND code_magasin = $2")
                     .bind(reference)
                     .bind(magasin)
                     .bind(cmup_apres)
@@ -377,7 +377,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
                                           FROM stock_magasin sm
                                          WHERE sm.code_reference = $1 AND sm.quantite_kg > 0
                                            AND sm.cmup_mad IS NOT NULL),
-                            date_dernier_cmup = $2
+                            date_dernier_cmup = fn_instant($2)
                       WHERE code_reference = $1",
                 )
                 .bind(reference)
@@ -405,7 +405,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
     }
     sqlx::query(
         "UPDATE retour_fournisseur
-            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = $3
+            SET statut = 'VALIDE', id_utilisateur_validation = $2, date_validation = fn_instant($3)
           WHERE id_retour = $1",
     )
     .bind(id)

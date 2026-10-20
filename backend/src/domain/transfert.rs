@@ -244,7 +244,7 @@ pub async fn expedier(
     sqlx::query(
         "UPDATE transfert
             SET statut = 'VALIDE',
-                date_sortie = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+                date_sortie = now()
           WHERE id_transfert = $1",
     )
     .bind(id_transfert)
@@ -328,7 +328,7 @@ pub async fn receptionner(
         "UPDATE transfert
             SET statut = 'TERMINE',
                 id_utilisateur_reception = $2,
-                date_reception_dest = $3
+                date_reception_dest = fn_instant($3)
           WHERE id_transfert = $1",
     )
     .bind(id_transfert)

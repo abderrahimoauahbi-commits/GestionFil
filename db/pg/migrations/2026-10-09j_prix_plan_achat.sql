@@ -31,7 +31,7 @@ RETURNS numeric AS $$
      WHERE lb.code_reference = p_reference AND bc.code_fournisseur = p_fournisseur
        AND lb.type_ligne = 'MARCHANDISE' AND lb.prix_kg_devise > 0
        AND bc.statut IN ('VALIDE', 'ENVOYE', 'LIVRE_PARTIEL', 'CLOTURE')
-     ORDER BY COALESCE(bc.date_validation, bc.date_bc::text) DESC, lb.ligne_numero
+     ORDER BY COALESCE(to_char(bc.date_validation::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), bc.date_bc::text) DESC, lb.ligne_numero
      LIMIT 1;
 $$ LANGUAGE sql STABLE;
 ALTER FUNCTION fn_dernier_prix_achat_mad(text, text) OWNER TO gestionfil;

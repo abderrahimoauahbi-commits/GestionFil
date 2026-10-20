@@ -107,7 +107,7 @@ async fn message_conflit(
     quoi: &str,
 ) -> String {
     let dernier: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT u.nom, a.date_operation
+        "SELECT u.nom, fn_iso(a.date_operation)
            FROM audit_log a
            LEFT JOIN utilisateur u ON u.id_utilisateur = a.id_utilisateur
           WHERE a.table_concernee = $1 AND a.id_enregistrement = $2

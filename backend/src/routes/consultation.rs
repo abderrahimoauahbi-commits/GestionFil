@@ -631,7 +631,7 @@ pub async fn substituer_proposition(
                     statut = 'EN_REVISION',
                     commentaires = TRIM(COALESCE(commentaires || ' | ', '') ||
                                         'Fusion du besoin de ' || $3),
-                    figee = 1, id_utilisateur_figement = $4, date_figement = $5,
+                    figee = 1, id_utilisateur_figement = $4, date_figement = fn_instant($5),
                     motif_figement = 'Fusion du besoin de ' || $3
               WHERE id_proposition = $1",
         )
@@ -1787,7 +1787,7 @@ pub async fn modifier_proposition(
                 quantite_mrp_kg = COALESCE(quantite_mrp_kg, quantite_suggeree_kg),
                 figee                   = 1,
                 id_utilisateur_figement = COALESCE(id_utilisateur_figement, $5),
-                date_figement           = COALESCE(date_figement, $6),
+                date_figement           = COALESCE(date_figement, fn_instant($6)),
                 motif_figement          = COALESCE(motif_figement, $7)
           WHERE id_proposition = $1",
     )
@@ -1869,7 +1869,7 @@ pub async fn figer_proposition(
         "UPDATE plan_achat
             SET figee = 1,
                 id_utilisateur_figement = $2,
-                date_figement           = $3,
+                date_figement           = fn_instant($3),
                 motif_figement          = $4,
                 commentaires            = COALESCE($5, commentaires),
                 quantite_mrp_kg         = COALESCE(quantite_mrp_kg, quantite_suggeree_kg)

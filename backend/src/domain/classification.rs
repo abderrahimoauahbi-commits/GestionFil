@@ -193,7 +193,7 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
         }
         sqlx::query(
             "UPDATE reference
-                SET classe_abc = $2, classe_xyz = $3, date_dernier_abc = $4
+                SET classe_abc = $2, classe_xyz = $3, date_dernier_abc = fn_instant($4)
               WHERE code_reference = $1",
         )
         .bind(code)

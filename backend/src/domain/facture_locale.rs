@@ -294,7 +294,7 @@ pub(crate) async fn appliquer(
             // Le CMUP est celui du MAGASIN : la valeur ajoutee se divise par
             // tout ce qu'il porte de la reference.
             let apres = arrondi_kg((avant + (p_c as f64 / 100.0) / q).max(0.0));
-            sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = $4 WHERE code_reference = $1 AND code_magasin = $2")
+            sqlx::query("UPDATE stock_magasin SET cmup_mad = $3, date_maj = fn_instant($4) WHERE code_reference = $1 AND code_magasin = $2")
                 .bind(code_reference)
                 .bind(magasin)
                 .bind(apres)
@@ -350,7 +350,7 @@ pub(crate) async fn appliquer(
                                       FROM stock_magasin sm
                                      WHERE sm.code_reference = $1 AND sm.quantite_kg > 0
                                        AND sm.cmup_mad IS NOT NULL),
-                        date_dernier_cmup = $2
+                        date_dernier_cmup = fn_instant($2)
                   WHERE code_reference = $1",
             )
             .bind(code_reference)
@@ -546,7 +546,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
             "UPDATE reception
                 SET statut = 'CLOTURE', numero_facture = $2, montant_facture_mad = $3, frais_facture_mad = $4,
                     code_devise_facture = $5, montant_facture_devise = $6, taux_facture = $7,
-                    date_cloture = $8, id_utilisateur_cloture = $9
+                    date_cloture = fn_instant($8), id_utilisateur_cloture = $9
               WHERE id_reception = $1",
         )
         .bind(id)
@@ -626,7 +626,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, f: &FactureLocale, simuler: b
             }
             // PORTE UNE FOIS. Sans cette marque, une re-cloture apres
             // devalidation ajouterait les memes frais une seconde fois.
-            sqlx::query("UPDATE frais_approche SET date_portee = $2 WHERE id_frais = $1")
+            sqlx::query("UPDATE frais_approche SET date_portee = fn_instant($2) WHERE id_frais = $1")
                 .bind(id_frais)
                 .bind(&horodatage)
                 .execute(&mut *tx)

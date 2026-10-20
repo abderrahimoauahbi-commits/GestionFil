@@ -371,12 +371,14 @@ function PanneauEtat({
       api.patch(`/api/machines/${encodeURIComponent(machine.code_machine)}/etat`, {
         etat,
         motif: motif.trim() || null,
+        version: machine.version,
       }),
     onSuccess: apres,
   })
 
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/machines/${encodeURIComponent(machine.code_machine)}`),
+    mutationFn: () =>
+      api.delete(`/api/machines/${encodeURIComponent(machine.code_machine)}?version=${machine.version}`),
     onSuccess: apres,
   })
 

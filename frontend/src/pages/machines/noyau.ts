@@ -38,6 +38,8 @@ export interface Machine {
   etat: string
   motif_etat: string | null
   date_etat: string | null
+  /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
+  version: number
 }
 
 /**
@@ -415,6 +417,8 @@ export interface MachineSaisie {
   nom: string
   notes?: string | null
   zones: ZoneSaisie[]
+  /** Exigee a la correction (verrou optimiste) ; ignoree a la declaration. */
+  version?: number
 }
 
 export const LIBELLE_ROLE: Record<RoleZone, string> = {

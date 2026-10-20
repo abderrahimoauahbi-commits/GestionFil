@@ -27,6 +27,53 @@ use std::collections::HashMap;
 // est consideree comme recue, et un excedent au-dela demande une derogation.
 
 // ============================================================================
+// 0. Le verrou optimiste (groupe 3, decision du 20/10/2026)
+// ============================================================================
+//
+// Le dossier et ses factures portent une `version`. Ce qui modifie une facture
+// ou ses lignes prend la version de la FACTURE ; tout le reste (en-tete, frais,
+// engagements, paiements, pieces, cloture, avoir) celle du DOSSIER — comme les
+// lignes d'un bon passent par son en-tete. La prise est la PREMIERE ecriture de
+// la transaction (domain/concurrence.rs) : elle tient l'en-tete jusqu'au bout,
+// et fait avancer sa version (fn_trg_version_document, 2026-10-20c).
+//
+// LE DOSSIER CLOS. `fn_trg_import_dossier_garde` refuse toute ecriture d'un
+// dossier clos, la prise sous verrou comprise. Ce qui reste permis apres la
+// cloture (frais post-cloture, avoir, paiements, pieces) prend alors la ligne
+// par `SELECT … AND version = $2 FOR UPDATE` : meme test, meme verrou jusqu'a la
+// fin de la transaction, mais la version n'avance pas — l'en-tete d'un dossier
+// clos est fige, il n'y a rien a perimer.
+
+/// Prend le dossier a la version lue. `None` : appel interne, rien a verifier.
+pub async fn prendre_dossier(tx: &mut PgConnection, id_dossier: &str, version_lue: Option<i64>) -> AppResult<()> {
+    // Clos ou non, la meme ecriture conditionnelle : la garde du dossier clos
+    // laisse passer une ecriture qui ne change que la version (2026-10-20c).
+    crate::domain::concurrence::exiger_version(
+        tx, "import_dossiers", "id_dossier", id_dossier, version_lue, "Ce dossier",
+    )
+    .await
+}
+
+/// Prend la facture d'import a la version lue. Une facture d'un dossier clos ne
+/// se modifie plus : la base le refuse a la prise meme (`fn_trg_import_verrou`).
+pub async fn prendre_facture(tx: &mut PgConnection, id_facture: &str, version_lue: Option<i64>) -> AppResult<()> {
+    crate::domain::concurrence::exiger_version(
+        tx, "import_factures", "id_facture", id_facture, version_lue, "Cette facture",
+    )
+    .await
+}
+
+/// La version a jour du dossier, que l'ecran presentera a l'enregistrement suivant.
+pub async fn version_dossier(tx: &mut PgConnection, id_dossier: &str) -> AppResult<i64> {
+    crate::domain::concurrence::version_actuelle(tx, "import_dossiers", "id_dossier", id_dossier).await
+}
+
+/// La version a jour d'une facture d'import.
+pub async fn version_facture(tx: &mut PgConnection, id_facture: &str) -> AppResult<i64> {
+    crate::domain::concurrence::version_actuelle(tx, "import_factures", "id_facture", id_facture).await
+}
+
+// ============================================================================
 // 1. La repartition
 // ============================================================================
 
@@ -389,10 +436,20 @@ pub async fn statuer_factures(tx: &mut PgConnection, id_dossier: &str) -> AppRes
 ///     sur un metier) n'est plus au stock valorise, on ne la revalorise pas.
 ///
 /// `simuler` fait tout le calcul et annule : c'est l'apercu avant de signer.
-pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bool) -> AppResult<Value> {
+///
+/// `version_lue` : celle que l'ecran a lue avec le dossier (verrou optimiste) ;
+/// `None` pour l'apercu, qui n'ecrit rien.
+pub async fn cloturer(
+    db: &Db,
+    user: &Utilisateur,
+    id_dossier: &str,
+    simuler: bool,
+    version_lue: Option<i64>,
+) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let resultat = cloturer_dans(&mut tx, user, id_dossier, false, simuler).await?;
+    prendre_dossier(&mut tx, id_dossier, version_lue).await?;
+    let mut resultat = cloturer_dans(&mut tx, user, id_dossier, false, simuler).await?;
     if simuler {
         tx.rollback().await?;
         return Ok(resultat);
@@ -407,6 +464,7 @@ pub async fn cloturer(db: &Db, user: &Utilisateur, id_dossier: &str, simuler: bo
     .bind(maintenant())
     .execute(&mut *tx)
     .await?;
+    resultat["version"] = json!(version_dossier(&mut tx, id_dossier).await?);
     tx.commit().await?;
     Ok(resultat)
 }
@@ -825,6 +883,7 @@ pub async fn avoir(
     motif: &str,
     code_reference: Option<&str>,
     simuler: bool,
+    version_lue: Option<i64>,
 ) -> AppResult<Value> {
     if !matches!(nature, "AVOIR_PRIX" | "AVOIR_RETOUR") {
         return Err(AppError::Invalide(format!("nature inconnue : {nature} (AVOIR_PRIX ou AVOIR_RETOUR)")));
@@ -838,6 +897,9 @@ pub async fn avoir(
     }
     let mut tx = db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La version lue d'abord (verrou optimiste) : un avoir saisi sur un dossier
+    // que quelqu'un vient de changer se refuse en le nommant.
+    prendre_dossier(&mut tx, id_dossier, version_lue).await?;
     let (numero, statut): (String, String) =
         sqlx::query_as("SELECT numero, statut FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
             .bind(id_dossier)
@@ -944,12 +1006,14 @@ pub async fn avoir(
                 "retours": retours.iter().map(|(_, n, r, kg)| json!({"numero_mouvement": n, "code_reference": r, "kg": kg}))
                     .collect::<Vec<_>>() })
     };
+    let version = version_dossier(&mut tx, id_dossier).await?;
     if simuler {
         tx.rollback().await?;
     } else {
         tx.commit().await?;
     }
     let mut r = resultat;
+    r["version"] = json!(version);
     r["id_dossier"] = json!(id_dossier);
     r["numero"] = json!(numero);
     r["nature"] = json!(nature);

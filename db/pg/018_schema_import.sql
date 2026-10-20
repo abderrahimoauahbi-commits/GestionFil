@@ -429,8 +429,10 @@ BEGIN
         RETURN OLD;
     END IF;
     -- La devalidation (CLOTURE -> EN_COURS, migration 2026-09-30) est le seul
-    -- geste admis sur un dossier clos : elle le rend modifiable.
-    IF OLD.statut = 'CLOTURE' AND NEW.statut IS DISTINCT FROM 'EN_COURS' THEN
+    -- geste admis sur un dossier clos : elle le rend modifiable. La prise sous
+    -- verrou (ne change que la version, 2026-10-20c) passe aussi.
+    IF OLD.statut = 'CLOTURE' AND NEW.statut IS DISTINCT FROM 'EN_COURS'
+       AND (to_jsonb(NEW) - 'version') IS DISTINCT FROM (to_jsonb(OLD) - 'version') THEN
         RAISE EXCEPTION 'Dossier cloture : il ne se modifie plus.' USING ERRCODE = 'check_violation';
     END IF;
     RETURN NEW;

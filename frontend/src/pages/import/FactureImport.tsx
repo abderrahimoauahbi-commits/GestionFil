@@ -378,18 +378,33 @@ export function FactureImport() {
         taux_confirme: tauxConfirmeOk,
       }
       let id = idFacture
+      // LE VERROU OPTIMISTE (20/10/2026). La facture et ses lignes passent par
+      // la version de la FACTURE, lue avec ce que l'ecran affiche (le formulaire
+      // se recharge avec elle) ; chaque reponse rend celle que l'enregistrement
+      // suivant presente. Une facture nouvelle se cree sous la version du DOSSIER.
+      type AvecVersion = { version?: number }
+      let v = facture?.version
+      const suivre = (r: AvecVersion) => {
+        v = r.version ?? v
+      }
       if (nouvelle) {
-        id = (await api.post<{ id_facture: string }>(`/api/import/dossiers/${idDossier}/factures`, corpsEntete)).id_facture
+        const r = await api.post<{ id_facture: string; version?: number }>(`/api/import/dossiers/${idDossier}/factures`, {
+          ...corpsEntete,
+          version: d?.dossier.version,
+        })
+        id = r.id_facture
+        v = r.version
         creeeRef.current = id
       } else if (enteteModifie) {
-        await api.patch(`/api/import/factures/${id}`, corpsEntete)
+        suivre(await api.patch<AvecVersion>(`/api/import/factures/${id}`, { ...corpsEntete, version: v }))
       }
       // Les suppressions d'abord : une ligne retiree ne doit pas bloquer le
       // controle des totaux des suivantes.
-      for (const l of lignesModifiees.filter((x) => x.supprimee)) await api.delete(`/api/import/lignes/${l.id_ligne}`)
+      for (const l of lignesModifiees.filter((x) => x.supprimee))
+        suivre(await api.delete<AvecVersion>(`/api/import/lignes/${l.id_ligne}?version=${v ?? ''}`))
       for (const l of lignesModifiees.filter((x) => !x.supprimee)) {
-        if (l.id_ligne) await api.patch(`/api/import/lignes/${l.id_ligne}`, corpsLigne(l))
-        else await api.post(`/api/import/factures/${id}/lignes`, corpsLigne(l))
+        if (l.id_ligne) suivre(await api.patch<AvecVersion>(`/api/import/lignes/${l.id_ligne}`, { ...corpsLigne(l), version: v }))
+        else suivre(await api.post<AvecVersion>(`/api/import/factures/${id}/lignes`, { ...corpsLigne(l), version: v }))
       }
       return id
     },
@@ -410,13 +425,17 @@ export function FactureImport() {
   })
 
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/import/factures/${idFacture}`),
+    mutationFn: () => api.delete(`/api/import/factures/${idFacture}?version=${facture?.version ?? ''}`),
     onSuccess: () => {
       toast.success('Facture supprimée')
       rafraichir()
       ouvrir(`/import/${idDossier}?onglet=factures`)
     },
-    onError: echec,
+    // Un refus (409 compris) relit la facture : ses changements s'affichent.
+    onError: (e) => {
+      echec(e)
+      rafraichir()
+    },
   })
 
   if (q.isLoading) return <Chargement texte="Lecture de la facture…" />

@@ -51,6 +51,10 @@ pub struct RetourSaisie {
     pub motif: Option<String>,
     pub observations: Option<String>,
     pub lignes: Vec<LigneRetourSaisie>,
+    /// La version lue avec le brouillon (verrou optimiste, groupe 3, 20/10/2026) :
+    /// exigee a la modification, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 fn lot_de(l: &LigneRetourSaisie) -> Option<String> {
@@ -227,7 +231,8 @@ pub async fn enregistrer(c: &mut PgConnection, user: &Utilisateur, id: Option<&s
         }
     };
     poser_lignes(c, &id, s).await?;
-    Ok(json!({ "id_retour": id, "numero": numero, "statut_retour": "BROUILLON" }))
+    let version = crate::domain::concurrence::version_actuelle(c, "retour_fournisseur", "id_retour", &id).await?;
+    Ok(json!({ "id_retour": id, "numero": numero, "statut_retour": "BROUILLON", "version": version }))
 }
 
 /// La sortie au prix du retour, en centimes : ce que le stock restant porte
@@ -277,6 +282,7 @@ pub async fn valider(c: &mut PgConnection, user: &Utilisateur, id: &str) -> AppR
     // Le stock, rejuge maintenant : il a pu bouger depuis la saisie.
     let saisie = RetourSaisie {
         id_document: None,
+        version: None,
         code_fournisseur: fournisseur,
         date_retour: Some(date_retour.clone()),
         motif: Some(motif.clone()),

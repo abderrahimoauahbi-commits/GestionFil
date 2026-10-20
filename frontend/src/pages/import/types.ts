@@ -51,10 +51,14 @@ export interface Dossier {
   numero_dum: string | null
   regime_douanier: string
   date_dum: string | null
+  /** Verrou optimiste (20/10/2026) : renvoyee a chaque enregistrement du dossier et de ce qui en depend. */
+  version?: number
 }
 
 export interface Facture {
   id_facture: string
+  /** Verrou optimiste (20/10/2026) : la facture et ses lignes l'envoient. */
+  version?: number
   code_fournisseur: string
   fournisseur_nom: string
   numero_facture: string

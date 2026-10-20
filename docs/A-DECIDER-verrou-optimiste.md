@@ -77,13 +77,33 @@ celles-là, pour toute écriture : modification et suppression.
 
 ## Restent hors du verrou, et pourquoi
 
-- **Les lignes d'un bon et d'une réception.** Elles s'enregistrent par des routes à part, qui ne
-  vérifient pas la version de l'en-tête. Les y soumettre demande de revoir l'ordre
-  d'enregistrement de ces deux écrans (en-tête puis lignes) : **à décider**.
 - **Le comptage d'inventaire.** Plusieurs compteurs saisissent en même temps des lignes
   différentes ; un verrou sur l'en-tête les bloquerait entre eux. Il n'y a pas de route qui
   modifie l'en-tête d'un inventaire.
 - **Le réordonnancement d'un groupe d'équivalences** : une action d'ensemble sur plusieurs
   rattachements, non verrouillée.
-- **Le groupe 3** (paramètres, utilisateurs, dossiers d'import, factures, retours, machines) : à
-  lister, comme prévu.
+- **Les utilisateurs** : seul l'administrateur les modifie ; le mot de passe a sa route (décision
+  du 20/10/2026).
+- **Les fiches de saisie machine** : leur verrou est la fiche puis l'étage (`FOR UPDATE NOWAIT`),
+  et seule la décision tête se retire (décision du 20/10/2026).
+
+## Les lignes d'un bon et d'une réception (19/10/2026)
+
+Option 1 retenue : chaque route de ligne prend l'en-tête sous condition de version et renvoie la
+nouvelle ; l'écran enchaîne les versions (`suivre()`).
+
+## Le groupe 3 (décision du 20/10/2026)
+
+Migration `2026-10-20c_verrou_groupe3.sql`, exigée au démarrage :
+
+- **Documents à lignes** — dossiers d'import, factures d'import, factures fournisseur, retours
+  fournisseur, machine et ses zones : déclencheur `fn_trg_version_document`, la version avance à
+  CHAQUE écriture, y compris la prise sous verrou qui précède l'enregistrement des lignes. Seule
+  exception : une écriture du système qui ne change que des colonnes calculées
+  (`import_factures.statut_reception`). Les frais, engagements, paiements, pièces et la clôture
+  d'un dossier passent par le verrou du dossier ; une facture d'import et ses lignes par celui de
+  la facture.
+- **Le paramètre** (une ligne) : `fn_trg_version_si_saisie`, comme les référentiels ; l'écran de
+  configuration fige la version à la première frappe.
+- Les validations (facture, retour) ne demandent pas la version : leur changement de statut est
+  déjà gardé par la base et le verrou de ligne.

@@ -87,6 +87,8 @@ interface LigneLue {
 
 interface Entete {
   id_facture: string
+  /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
+  version: number
   numero_facture: string
   code_fournisseur: string
   fournisseur_nom: string
@@ -169,6 +171,11 @@ export function FactureFournisseur() {
     queryFn: ({ signal }) =>
       api.get<{ entete: Entete; lignes: LigneLue[] }>(`/api/factures-fournisseur/${id}`, { signal }),
     enabled: !nouvelle,
+    // Un brouillon en cours de saisie ne se relit pas sous les doigts : la
+    // version relue passerait pour celle de la saisie et le verrou ne verrait
+    // plus l'ecriture concurrente.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   const lue = qFacture.data
   const statut = lue?.entete.statut ?? 'BROUILLON'
@@ -329,7 +336,7 @@ export function FactureFournisseur() {
         const r = await api.post<{ id_facture: string }>('/api/factures-fournisseur', { ...corps(), id_document: idDocument })
         return r.id_facture
       }
-      await api.patch(`/api/factures-fournisseur/${id}`, corps())
+      await api.patch(`/api/factures-fournisseur/${id}`, { ...corps(), version: lue?.entete.version })
       return id
     },
     onSuccess: (idFacture) => {
@@ -362,7 +369,7 @@ export function FactureFournisseur() {
   })
 
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/factures-fournisseur/${id}`),
+    mutationFn: () => api.delete(`/api/factures-fournisseur/${id}?version=${lue?.entete.version ?? ''}`),
     onSuccess: () => {
       toast.success('Brouillon supprimé')
       void qc.invalidateQueries({ queryKey: ['factures-fournisseur'] })

@@ -108,6 +108,7 @@ export function EditeurMachine({
           numero_etage: l.role === 'ETAGE' ? l.numero_etage : null,
           capacite_bobines: l.capacite_bobines,
         })),
+        version: machine?.version,
       }
       return correction ? machinesApi.corriger(machine!.code_machine, corps)
                         : machinesApi.declarer(corps)

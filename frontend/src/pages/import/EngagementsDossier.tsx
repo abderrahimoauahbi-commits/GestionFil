@@ -19,7 +19,7 @@ import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Selecteur } from '../../composants/ui/base'
 import { cn, fmt } from '../../lib/utils'
-import { echec, nombre, useRafraichir, type Signaler } from './dialogues'
+import { nombre, useRafraichir, useVersionDossier, type Signaler } from './dialogues'
 import type { DossierComplet, Engagement, Facture } from './types'
 
 const VIDE = { code_fournisseur: '', code_devise: '', numero_ei: '', banque: '', date_ei: '', quantite_kg: '', montant_devise: '', notes: '' }
@@ -72,9 +72,12 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
     d.factures.find((f) => f.code_fournisseur === code)?.code_devise ??
     ''
 
+  // Verrou optimiste : l'engagement passe par la version du dossier, l'imputation
+  // par celle de la facture.
+  const version = useVersionDossier()
   const ajouter = useMutation({
-    mutationFn: () =>
-      api.post(`/api/import/dossiers/${d.dossier.id_dossier}/engagements`, {
+    mutationFn: async () =>
+      version.suivre(await api.post(`/api/import/dossiers/${d.dossier.id_dossier}/engagements`, {
         code_fournisseur: n.code_fournisseur || null,
         code_devise: n.code_devise || null,
         numero_ei: n.numero_ei,
@@ -83,32 +86,37 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
         quantite_kg: n.quantite_kg ? nombre(n.quantite_kg) : null,
         montant_devise: n.montant_devise ? nombre(n.montant_devise) : null,
         notes: n.notes || null,
-      }),
+        version: version.lire(),
+      })),
     onSuccess: () => {
       toast.success(`Engagement ${n.numero_ei.replace(/\s/g, '')} rattaché au dossier`)
       setN((x) => ({ ...VIDE, code_fournisseur: x.code_fournisseur, code_devise: x.code_devise }))
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const retirer = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/import/engagements/${id}`),
+    mutationFn: async (id: string) =>
+      version.suivre(await api.delete(`/api/import/engagements/${id}?version=${version.lire() ?? ''}`)),
     onSuccess: () => {
       toast.success('Engagement retiré — ses factures n’ont plus d’engagement')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const imputer = useMutation({
     mutationFn: (v: { facture: string; engagement: string }) =>
-      api.patch(`/api/import/factures/${v.facture}`, { id_engagement: v.engagement }),
+      api.patch(`/api/import/factures/${v.facture}`, {
+        id_engagement: v.engagement,
+        version: d.factures.find((f) => f.id_facture === v.facture)?.version,
+      }),
     onSuccess: () => {
       toast.success('Imputation de la facture enregistrée')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const maj = (k: keyof typeof VIDE) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>

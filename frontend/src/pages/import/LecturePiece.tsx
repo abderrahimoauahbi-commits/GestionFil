@@ -31,7 +31,7 @@ import {
 import { useDroits } from '../../auth/AuthContext'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
-import { echec, useRafraichir } from './dialogues'
+import { echec, useRafraichir, useVersionSuivie } from './dialogues'
 import type { DossierComplet } from './types'
 
 // ---------------------------------------------------------------------------
@@ -174,6 +174,8 @@ export function LecturePiece() {
     queryFn: ({ signal }) => api.get<DossierComplet>(`/api/import/dossiers/${idDossier}`, { signal }),
     enabled: !!idDossier,
   })
+  // L'engagement rattache passe par la version du dossier (verrou optimiste).
+  const version = useVersionSuivie(qDossier.data?.dossier.version, false, rafraichir)
   const qLecture = useQuery({
     queryKey: ['piece-lecture', idPiece],
     queryFn: ({ signal }) => api.get<Lecture | null>(`/api/import/pieces/${idPiece}/lecture`, { signal }),
@@ -223,20 +225,23 @@ export function LecturePiece() {
   const engagementsDuDossier = new Set((d?.engagements ?? []).map((e) => e.numero_ei))
 
   const rattacher = useMutation({
-    mutationFn: (ei: Bloc) =>
-      api.post(`/api/import/dossiers/${idDossier}/engagements`, {
-        numero_ei: String(ei.numero_ei?.valeur ?? ''),
-        banque: ei.banque?.valeur ?? null,
-        date_ei: ei.date_ei?.valeur ?? null,
-        quantite_kg: typeof ei.quantite_kg?.valeur === 'number' ? ei.quantite_kg.valeur : null,
-        montant_devise: typeof ei.montant_devise?.valeur === 'number' ? ei.montant_devise.valeur : null,
-        code_devise: ei.code_devise?.valeur ?? null,
-      }),
+    mutationFn: async (ei: Bloc) =>
+      version.suivre(
+        await api.post(`/api/import/dossiers/${idDossier}/engagements`, {
+          numero_ei: String(ei.numero_ei?.valeur ?? ''),
+          banque: ei.banque?.valeur ?? null,
+          date_ei: ei.date_ei?.valeur ?? null,
+          quantite_kg: typeof ei.quantite_kg?.valeur === 'number' ? ei.quantite_kg.valeur : null,
+          montant_devise: typeof ei.montant_devise?.valeur === 'number' ? ei.montant_devise.valeur : null,
+          code_devise: ei.code_devise?.valeur ?? null,
+          version: version.lire(),
+        }),
+      ),
     onSuccess: (_r, ei) => {
       toast.success(`Engagement ${ei.numero_ei?.valeur} rattaché au dossier`)
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   if (!d) return <div className="p-4 text-attenue-texte">Chargement…</div>

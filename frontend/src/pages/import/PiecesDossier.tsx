@@ -27,7 +27,7 @@ import {
 import { useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
-import { echec, useRafraichir } from './dialogues'
+import { echec, useRafraichir, useVersionDossier } from './dialogues'
 import {
   NATURE_PIECE,
   SAISIE_ASSISTEE_VISIBLE,
@@ -59,6 +59,9 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
   const champFichier = useRef<HTMLInputElement>(null)
   const [nature, setNature] = useState<Piece['nature']>('AUTRE')
   const [survol, setSurvol] = useState(false)
+  // Une piece passe par la version du dossier (verrou optimiste), chaque depot
+  // presentant celle que le precedent a laissee.
+  const version = useVersionDossier()
 
   const deposer = useMutation({
     mutationFn: async (fichiers: File[]) => {
@@ -66,11 +69,14 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
       for (const f of fichiers) {
         const donnees = new FormData()
         donnees.append('nature', nature)
+        donnees.append('version', String(version.lire() ?? ''))
         donnees.append('fichier', f)
         resultats.push(
-          await api.envoyerFichier<{ doublon?: boolean; message?: string }>(
-            `/api/import/dossiers/${idDossier}/pieces`,
-            donnees,
+          version.suivre(
+            await api.envoyerFichier<{ doublon?: boolean; message?: string; version?: number }>(
+              `/api/import/dossiers/${idDossier}/pieces`,
+              donnees,
+            ),
           ),
         )
       }
@@ -83,16 +89,17 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
       if (neufs > 0) toast.success(`${neufs} document(s) déposé(s)`)
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const supprimer = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/import/pieces/${id}`),
+    mutationFn: async (id: string) =>
+      version.suivre(await api.delete(`/api/import/pieces/${id}?version=${version.lire() ?? ''}`)),
     onSuccess: () => {
       toast.success('Pièce retirée')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   /** Ouvre la piece dans un onglet, puis rend la memoire. */

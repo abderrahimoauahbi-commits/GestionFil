@@ -110,6 +110,16 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Verrou optimiste, groupe 3 (20/10/2026) : le serveur ecrit sous
+        // condition de version les dossiers et factures d'import, factures et
+        // retours fournisseur, parametres, machines.
+        "2026-10-20c_verrou_groupe3.sql",
+        "SELECT count(*) = 6 FROM information_schema.columns
+          WHERE table_schema = 'public' AND column_name = 'version'
+            AND table_name IN ('import_dossiers', 'import_factures', 'facture_fournisseur',
+                               'retour_fournisseur', 'parametre', 'machine')",
+    ),
+    (
         // Le jour de Casablanca (20/10/2026) : le serveur accepte un fait du
         // jour marocain ; la regle C06 en base doit compter le meme jour.
         "2026-10-20b_jour_casablanca.sql",

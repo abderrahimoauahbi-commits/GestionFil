@@ -77,6 +77,8 @@ interface Parametre extends Record<string, unknown> {
   modifiable_par: string | null
   verrouille: number
   date_derniere_modif: string
+  /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
+  version: number
 }
 
 interface Devise extends Record<string, unknown> {
@@ -385,6 +387,15 @@ export function Configuration() {
     return m
   }, [parametres])
 
+  // LA VERSION EST CELLE DU DEBUT DE LA SAISIE (groupe 3, 20/10/2026) : figee a
+  // la premiere frappe, elle ne suit pas une relecture de la liste. Si quelqu'un
+  // regle le meme parametre entre-temps, l'enregistrement est refuse en le nommant.
+  const [versions, setVersions] = useState<Record<string, number>>({})
+  const saisir = (code: string, v: string) => {
+    setBrouillon((b) => ({ ...b, [code]: v }))
+    setVersions((x) => (code in x ? x : { ...x, [code]: parCode.get(code)?.version ?? 1 }))
+  }
+
   const modifies = Object.entries(brouillon).filter(
     ([code, v]) => parCode.get(code)?.valeur_courante !== v,
   )
@@ -395,6 +406,7 @@ export function Configuration() {
         await api.patch(`/api/parametres/${code}`, {
           valeur_courante: valeur,
           motif: 'Modification depuis l ecran de configuration',
+          version: versions[code] ?? parCode.get(code)?.version,
         })
       }
       return modifies.length
@@ -407,6 +419,7 @@ export function Configuration() {
         duration: 8000,
       })
       setBrouillon({})
+      setVersions({})
       void qc.invalidateQueries({ queryKey: ['parametres'] })
     },
     onError: (e) =>
@@ -485,7 +498,7 @@ export function Configuration() {
                     valeur={brouillon[p.code_parametre] ?? p.valeur_courante}
                     modifiable={droits.peutEcrire && p.verrouille === 0}
                     surChangement={(v) =>
-                      setBrouillon((b) => ({ ...b, [p.code_parametre]: v }))
+                      saisir(p.code_parametre, v)
                     }
                   />
                 ))}
@@ -546,7 +559,7 @@ export function Configuration() {
                           valeur={brouillon[p.code_parametre] ?? p.valeur_courante}
                           modifiable={droits.peutEcrire && p.verrouille === 0}
                           surChangement={(v) =>
-                            setBrouillon((br) => ({ ...br, [p.code_parametre]: v }))
+                            saisir(p.code_parametre, v)
                           }
                         />
                       ))}
@@ -572,7 +585,7 @@ export function Configuration() {
                         valeur={brouillon[p.code_parametre] ?? p.valeur_courante}
                         modifiable={droits.peutEcrire && p.verrouille === 0}
                         surChangement={(v) =>
-                          setBrouillon((br) => ({ ...br, [p.code_parametre]: v }))
+                          saisir(p.code_parametre, v)
                         }
                       />
                     ))}
@@ -592,7 +605,7 @@ export function Configuration() {
             <span className="text-alerte"> — rien n est encore enregistré.</span>
           </span>
           <div className="flex items-center gap-2">
-            <Bouton variante="contour" onClick={() => setBrouillon({})}>
+            <Bouton variante="contour" onClick={() => { setBrouillon({}); setVersions({}) }}>
               <RotateCcw />
               Annuler
             </Bouton>

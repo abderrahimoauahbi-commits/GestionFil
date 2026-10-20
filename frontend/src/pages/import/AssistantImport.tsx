@@ -113,7 +113,7 @@ export function AssistantImport() {
 
   const creer = useMutation({
     mutationFn: async () => {
-      const dossier = await api.post<{ id_dossier: string; numero: string }>(
+      const dossier = await api.post<{ id_dossier: string; numero: string; version?: number }>(
         '/api/import/dossiers',
         {
           numero: f.numero.trim() || null,
@@ -129,15 +129,20 @@ export function AssistantImport() {
       // échoue ne défait pas le dossier — on le dit, et il reste à charger.
       let deposes = 0
       const refuses: string[] = []
+      // Chaque depot passe par la version du dossier (verrou optimiste) et rend
+      // la suivante : le dossier ne fait que naitre, personne d'autre n'y touche.
+      let version = dossier.version
       for (const d of documents) {
         const donnees = new FormData()
         donnees.append('nature', d.nature)
+        donnees.append('version', String(version ?? ''))
         donnees.append('fichier', d.fichier)
         try {
-          const r = await api.envoyerFichier<{ doublon?: boolean }>(
+          const r = await api.envoyerFichier<{ doublon?: boolean; version?: number }>(
             `/api/import/dossiers/${dossier.id_dossier}/pieces`,
             donnees,
           )
+          version = r.version ?? version
           if (!r.doublon) deposes += 1
         } catch {
           refuses.push(d.fichier.name)

@@ -96,7 +96,7 @@ pub async fn lire(State(state): State<AppState>, user: Utilisateur, Path(id): Pa
     user.exiger(&state.db, module::RECEPTIONS, Action::Lire).await?;
     let entete = sqlx::query(
         "SELECT r.id_retour, r.numero AS numero_retour, r.statut AS statut_retour, r.date_retour,
-                r.code_fournisseur, fo.nom AS fournisseur_nom, r.motif, r.observations,
+                r.code_fournisseur, fo.nom AS fournisseur_nom, r.motif, r.observations, r.version,
                 uc.login AS saisi_par, r.id_utilisateur_creation, r.date_creation,
                 uv.login AS valide_par, r.date_validation,
                 (SELECT COALESCE(sum(round(l.quantite_kg * l.prix_kg_mad, 2)), 0)
@@ -202,8 +202,14 @@ pub async fn modifier(
     Json(mut s): Json<metier::RetourSaisie>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let version = crate::domain::concurrence::exigee(s.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La premiere ecriture prend le retour a la version lue (groupe 3, 20/10/2026).
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "retour_fournisseur", "id_retour", &id, Some(version), "Ce retour",
+    )
+    .await?;
     retenir_prix(&mut tx, &state, &user, Some(&id), &mut s).await?;
     let v = metier::enregistrer(&mut tx, &user, Some(&id), &s).await?;
     tx.commit().await?;
@@ -211,17 +217,25 @@ pub async fn modifier(
 }
 
 /// `DELETE /api/retours-fournisseur/{id}` — un brouillon seulement (la base).
-pub async fn supprimer(State(state): State<AppState>, user: Utilisateur, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn supprimer(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<super::entites::VersionLue>,
+) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    let n = sqlx::query("DELETE FROM retour_fournisseur WHERE id_retour = $1")
+    // L'ecriture conditionnelle : supprime seulement la version lue.
+    let n = sqlx::query("DELETE FROM retour_fournisseur WHERE id_retour = $1 AND version = $2")
         .bind(&id)
+        .bind(version)
         .execute(&mut *tx)
         .await?
         .rows_affected();
     if n == 0 {
-        return Err(AppError::Introuvable(format!("retour {id}")));
+        return Err(crate::domain::concurrence::refus(&mut tx, "retour_fournisseur", "id_retour", &id, "Ce retour").await);
     }
     tx.commit().await?;
     Ok(Json(json!({ "supprime": id })))

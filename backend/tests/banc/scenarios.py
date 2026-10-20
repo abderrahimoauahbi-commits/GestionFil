@@ -46,6 +46,27 @@ def V(infra, table, cle, valeur, corps):
     return dict(corps, version=int(v))
 
 
+def vv(infra, table, cle, valeur):
+    """La version d'une fiche ou d'un document, pour une suppression (`?version=`)."""
+    return int(infra.valeur(f"SELECT version FROM {table} WHERE {cle}::text = '{valeur}'"))
+
+
+def VD(infra, id_dossier, corps=None):
+    """Le corps d'un enregistrement sur un dossier d'import, avec la version du DOSSIER (verrou du
+    20/10/2026) : son en-tete, ses frais, engagements, paiements, pieces, sa cloture, sa validation."""
+    return V(infra, "import_dossiers", "id_dossier", id_dossier, corps or {})
+
+
+def VF(infra, id_facture, corps=None):
+    """Le corps d'un enregistrement sur une facture d'import ou ses lignes : la version de la FACTURE."""
+    return V(infra, "import_factures", "id_facture", id_facture, corps or {})
+
+
+def vd(infra, id_dossier):
+    """La version du dossier d'import, pour une suppression (`?version=`)."""
+    return int(infra.valeur(f"SELECT version FROM import_dossiers WHERE id_dossier = '{id_dossier}'"))
+
+
 def refus_sql(infra, requete, contient):
     """La base doit refuser la requete, et pour la raison attendue (un refus quelconque ne prouve rien)."""
     try:
@@ -267,10 +288,10 @@ def scenario_saisie_libre(c, infra):
     prix = float(infra.valeur(f"SELECT prix_kg_mad FROM ligne_retour_fournisseur WHERE id_retour = '{b['id_retour']}'"))
     verifier(abs(prix - cm) < 0.0001, f"prix propose {prix} au lieu du CMUP {cm}")
     # Les achats le corrigent : 30 kg rendus a 5 DH de moins que le CMUP.
-    c.ok("Choukri", "PUT", f"/api/retours-fournisseur/{b['id_retour']}", {"code_fournisseur": "FRS-001",
+    c.ok("Choukri", "PUT", f"/api/retours-fournisseur/{b['id_retour']}", V(infra, "retour_fournisseur", "id_retour", b['id_retour'], {"code_fournisseur": "FRS-001",
          "motif": "Defaut de teinte", "lignes": [{"code_reference": REF2, "lot_fournisseur": lot, "code_magasin": MAG,
                                                   "quantite_kg": 30, "prix_kg_mad": round(cm - 5, 4),
-                                                  "code_motif_ligne": "R1"}]})
+                                                  "code_motif_ligne": "R1"}]}))
     avant = kg(infra, REF2)
     c.refus("Magasinie", "POST", f"/api/retours-fournisseur/{b['id_retour']}/valider", codes=(403, 422))
     v = c.ok("Mohamed", "POST", f"/api/retours-fournisseur/{b['id_retour']}/valider")
@@ -280,7 +301,7 @@ def scenario_saisie_libre(c, infra):
              f"retour a {round(cm - 5, 4)} : CMUP {cmup_magasin(infra, REF2)} au lieu de {attendu}")
     verifier(abs(v["montant_avoir_mad"] - round(30 * round(cm - 5, 4), 2)) < 0.01, f"montant de l'avoir : {v}")
     c.refus("Choukri", "POST", f"/api/retours-fournisseur/{b['id_retour']}/valider")
-    c.refus("Choukri", "DELETE", f"/api/retours-fournisseur/{b['id_retour']}")
+    c.refus("Choukri", "DELETE", f"/api/retours-fournisseur/{b['id_retour']}?version={vv(infra, 'retour_fournisseur', 'id_retour', b['id_retour'])}")
     # Valide, il est definitif : son mouvement ne se contre-passe pas.
     id_mvt_retour = infra.valeur(f"SELECT id_mouvement FROM ligne_retour_fournisseur WHERE id_retour = '{b['id_retour']}'")
     c.refus("Choukri", "POST", f"/api/mouvements/{id_mvt_retour}/contre-passer",
@@ -291,7 +312,7 @@ def scenario_saisie_libre(c, infra):
                           "prix_kg_mad": 10, "code_motif_ligne": "R2"}]})
     verifier(abs(kg(infra, REF2) - avant + 30) < 1e-6, "un brouillon de retour a sorti du stock")
     c.refus("Choukri", "POST", f"/api/retours-fournisseur/{b2['id_retour']}/valider", contient="saisi")
-    c.ok("Choukri", "DELETE", f"/api/retours-fournisseur/{b2['id_retour']}")
+    c.ok("Choukri", "DELETE", f"/api/retours-fournisseur/{b2['id_retour']}?version={vv(infra, 'retour_fournisseur', 'id_retour', b2['id_retour'])}")
     # Le prix d'une sortie ou d'une entree libre est le CMUP, jamais une saisie.
     verifier(controle(infra, "C11") == 0, "C11 apres la saisie libre")
 
@@ -405,14 +426,14 @@ def scenario_arrivage_unifie(c, infra):
     # jour existe deja au referentiel : on le LIT, comme le scenario import.
     jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={jour}")["reference"]
-    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-ARRIVAGE", "date_facture": jour,
-        "code_devise": "USD", "taux_change": cours, "montant_devise": 200})
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 200}))
     id_facture = fac.get("id_facture") or fac.get("id")
-    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
         "type_ligne": "ERP", "code_reference": "PP-1500 Dtex-Cream 2951-Hs", "unite": "kg",
         "quantite": 100, "poids_net_kg": 100, "prix_unitaire_devise": 2.0,
-        "lot_fournisseur": "LOT-ARR-1"})
+        "lot_fournisseur": "LOT-ARR-1"}))
     id_ligne = lig.get("id_ligne") or lig.get("id")
     # L'ANCIEN CIRCUIT N'EXISTE PLUS (16/10/2026). La reception d'import n'etait plus
     # qu'une seconde porte vers la meme marchandise : elle a ete retiree, routes comprises.
@@ -569,7 +590,9 @@ def scenario_facture_document(c, infra):
     refus_sql(infra, f"DELETE FROM ligne_facture_fournisseur WHERE id_facture = '{idf}'", "FACTURE-FIGEE")
     refus_sql(infra, f"UPDATE facture_fournisseur SET taux_change = 2 WHERE id_facture = '{idf}'",
               "FACTURE-FIGEE")
-    c.refus("Choukri", "DELETE", f"/api/factures-fournisseur/{idf}", contient="CUMP")
+    c.refus("Choukri", "DELETE",
+            f"/api/factures-fournisseur/{idf}?version={vv(infra, 'facture_fournisseur', 'id_facture', idf)}",
+            contient="CUMP")
 
     # UNE REFERENCE SE FACTURE D'UN BLOC : deux pesees de la meme reference ne se coupent pas en
     # deux factures — la valeur provisoire et les lots se tiennent par reference.
@@ -586,11 +609,11 @@ def scenario_facture_document(c, infra):
     c.refus("Choukri", "POST", f"/api/factures-fournisseur/{partielle['id_facture']}/valider",
             {"simuler": True}, contient="FACTURE-BLOC")
     # Complete, elle passe — et solde l'arrivage.
-    c.ok("Choukri", "PATCH", f"/api/factures-fournisseur/{partielle['id_facture']}", {
+    c.ok("Choukri", "PATCH", f"/api/factures-fournisseur/{partielle['id_facture']}", V(infra, "facture_fournisseur", "id_facture", partielle['id_facture'], {
         "numero_facture": "FF-BANC-2", "code_fournisseur": FRS,
         "lignes": [{"id_ligne_reception": x["id_ligne_reception"],
                     "quantite_facturee_kg": x["quantite_stock_kg"], "prix_kg_devise": 40.0}
-                   for x in attente2]})
+                   for x in attente2]}))
     c.ok("Choukri", "POST", f"/api/factures-fournisseur/{partielle['id_facture']}/valider",
          {"simuler": False})
     verifier(infra.valeur(f"SELECT statut FROM reception WHERE id_reception = '{rid2}'") == "CLOTURE",
@@ -737,6 +760,105 @@ def scenario_verrou_optimiste(c, infra):
              "une modification sans version a ete ecrite")
 
 
+def scenario_verrou_groupe3(c, infra):
+    """Le verrou optimiste du groupe 3 (decision du 20/10/2026) : deux reglages simultanes d'un
+    parametre, deux enregistrements simultanes d'un retour fournisseur. Le second est refuse en
+    409 et n'ecrase rien ; la reponse du premier rend la version suivante."""
+    # LE PARAMETRE. La periode close, laissee ouverte (2000-01-01 : rien de clos).
+    route = "/api/parametres/P_PeriodeCloseJusqua"
+    lue = vv(infra, "parametre", "code_parametre", "P_PeriodeCloseJusqua")
+    r = c.ok("Choukri", "PATCH", route, {"valeur_courante": "2000-01-01", "motif": "verrou : premiere saisie",
+                                         "version": lue})
+    verifier(r.get("version") == lue + 1, f"le reglage ne rend pas la version suivante : {r}")
+    code, r = c.appel("Choukri", "PATCH", route, {"valeur_courante": "2000-01-01",
+                                                  "motif": "verrou : saisie perimee", "version": lue})
+    verifier(code == 409, f"un reglage perime n'est pas refuse : {code} {r}")
+    verifier(infra.valeur("SELECT motif_modif FROM parametre WHERE code_parametre = 'P_PeriodeCloseJusqua'")
+             == "verrou : premiere saisie", "le reglage perime a ecrase le premier")
+
+    # LE RETOUR, document a lignes : la version avance a chaque enregistrement, lignes comprises.
+    entree_stock(c, REF, 20)
+    dispo = next(x for x in c.ok("Choukri", "GET", "/api/retours-fournisseur/disponible") if x["quantite_kg"] >= 2)
+    ligne = {"code_reference": dispo["code_reference"], "code_magasin": dispo["code_magasin"],
+             "lot_fournisseur": dispo["lot_fournisseur"], "quantite_kg": 1, "code_motif_ligne": "R1"}
+    b = c.ok("Choukri", "POST", "/api/retours-fournisseur", {"code_fournisseur": "FRS-001", "motif": "Verrou",
+                                                            "lignes": [ligne]})
+    lue = b["version"]
+    r = c.ok("Choukri", "PUT", f"/api/retours-fournisseur/{b['id_retour']}",
+             {"code_fournisseur": "FRS-001", "motif": "Verrou", "lignes": [dict(ligne, quantite_kg=2)], "version": lue})
+    verifier(r.get("version", 0) > lue, f"un enregistrement de lignes n'avance pas la version : {r}")
+    code, r = c.appel("Choukri", "PUT", f"/api/retours-fournisseur/{b['id_retour']}",
+                      {"code_fournisseur": "FRS-001", "motif": "Verrou", "lignes": [ligne], "version": lue})
+    verifier(code == 409, f"une saisie perimee du retour n'est pas refusee : {code} {r}")
+    kg = float(infra.valeur(f"SELECT sum(quantite_kg) FROM ligne_retour_fournisseur WHERE id_retour = '{b['id_retour']}'"))
+    verifier(abs(kg - 2) < 1e-9, f"la saisie perimee a ecrase les lignes : {kg} kg")
+    code, r = c.appel("Choukri", "DELETE", f"/api/retours-fournisseur/{b['id_retour']}?version={lue}")
+    verifier(code == 409, f"une suppression perimee n'est pas refusee : {code} {r}")
+    c.ok("Choukri", "DELETE",
+         f"/api/retours-fournisseur/{b['id_retour']}?version={vv(infra, 'retour_fournisseur', 'id_retour', b['id_retour'])}")
+
+
+def scenario_verrou_import(c, infra):
+    """Le verrou optimiste des dossiers d'import et de leurs factures (decision du 20/10/2026) :
+    deux enregistrements concurrents sur un dossier, le second refuse en 409 en nommant l'auteur ;
+    une ligne de facture presentee avec une version perimee de la facture, refusee ; rien d'ecrit."""
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/VERROU", "code_devise": "MAD"})
+    id_dossier = d.get("id_dossier") or d.get("id")
+    verifier(d.get("version") is not None, f"la creation ne rend pas la version du dossier : {d}")
+    lue = vd(infra, id_dossier)
+
+    # Deux personnes ont ouvert le dossier a la version `lue`. La premiere enregistre : elle passe,
+    # et la reponse rend la version suivante, que son ecran presentera ensuite.
+    code, r = c.appel("Assistante", "PATCH", f"/api/import/dossiers/{id_dossier}",
+                      {"notes": "saisie de l'assistante", "version": lue})
+    verifier(code == 200, f"la premiere saisie, a jour, est refusee : {code} {r}")
+    verifier(isinstance(r, dict) and r.get("version") == vd(infra, id_dossier) and r["version"] > lue,
+             f"la reponse ne rend pas la version a jour : {r}")
+    # La seconde arrive avec la version lue avant : refusee, en nommant l'auteur.
+    code, r = c.appel("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}",
+                      {"notes": "saisie de la direction", "version": lue})
+    verifier(code == 409, f"une saisie perimee du dossier n'est pas refusee : {code} {r}")
+    auteur = infra.valeur("SELECT nom FROM utilisateur WHERE login = 'Assistante'") or ""
+    if auteur:
+        verifier(auteur in str(r), f"le refus ne nomme pas l'auteur ({auteur}) : {r}")
+    verifier(infra.valeur(f"SELECT notes FROM import_dossiers WHERE id_dossier = '{id_dossier}'")
+             == "saisie de l'assistante", "la premiere saisie du dossier a ete ecrasee")
+    # Ce qui depend du dossier passe par sa version : un frais presente a la version perimee, refuse.
+    nb_frais = lambda: int(infra.valeur(f"SELECT count(*) FROM dossier_lignes_frais WHERE id_dossier = '{id_dossier}'"))
+    code, r = c.appel("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais",
+                      {"id_frais": "DOUANE", "numero_piece": "VERROU", "montant_devise": 100,
+                       "code_devise": "MAD", "version": lue})
+    verifier(code == 409 and nb_frais() == 0, f"un frais sur un dossier perime est passe : {code} {r}")
+    # Sans version, refuse aussi : le serveur ne peut pas savoir ce qu'il ecraserait.
+    code, r = c.appel("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"notes": "sans version"})
+    verifier(code == 400 and "version" in str(r).lower(), f"une modification sans version passe : {code} {r}")
+
+    # LA FACTURE ET SES LIGNES passent par la version de la FACTURE.
+    jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-VERROU", "date_facture": jour,
+        "code_devise": "MAD", "taux_change": 1, "montant_devise": 1000}))
+    id_facture = f.get("id_facture") or f.get("id")
+    lue_f = int(infra.valeur(f"SELECT version FROM import_factures WHERE id_facture = '{id_facture}'"))
+    verifier(f.get("version") == lue_f, f"la creation de la facture ne rend pas sa version : {f}")
+    # Quelqu'un corrige l'en-tete de la facture : sa version avance.
+    c.ok("Assistante", "PATCH", f"/api/import/factures/{id_facture}", {"nb_palettes": 2, "version": lue_f})
+    # Une ligne presentee avec la version d'avant : refusee, rien d'ecrit.
+    nb_lignes = lambda: int(infra.valeur(f"SELECT count(*) FROM import_facture_lignes WHERE id_facture = '{id_facture}'"))
+    code, r = c.appel("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+        "type_ligne": "ERP", "code_reference": REF, "unite": "kg", "quantite": 100, "poids_net_kg": 100,
+        "prix_unitaire_devise": 10, "version": lue_f})
+    verifier(code == 409, f"une ligne sur une facture perimee n'est pas refusee : {code} {r}")
+    verifier(nb_lignes() == 0, "la ligne refusee a ete ecrite")
+    # A jour, elle passe, et la reponse rend la version suivante de la facture.
+    r = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
+        "type_ligne": "ERP", "code_reference": REF, "unite": "kg", "quantite": 100, "poids_net_kg": 100,
+        "prix_unitaire_devise": 10}))
+    verifier(nb_lignes() == 1 and r.get("version") == int(infra.valeur(
+        f"SELECT version FROM import_factures WHERE id_facture = '{id_facture}'")),
+        f"la ligne a jour ne passe pas ou ne rend pas la version : {r}")
+
+
 def scenario_idempotence(c, infra):
     """LE DOUBLE ENVOI D'UNE CREATION (P3, 19/10/2026) : l'ecran tire l'identifiant du document a
     l'ouverture du formulaire. Le meme envoi rejoue — le reseau a coupe avant la reponse — rend le
@@ -808,25 +930,25 @@ def scenario_droits_douane(c, infra):
 
     d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/DRT", "code_devise": "MAD"})
     id_dossier = d.get("id_dossier") or d.get("id")
-    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-DRT", "code_devise": "MAD",
         "date_facture": infra.valeur("SELECT to_char(now() AT TIME ZONE 'Africa/Casablanca', 'YYYY-MM-DD')"),
-        "taux_change": 1, "montant_devise": 20000})
+        "taux_change": 1, "montant_devise": 20000}))
     id_facture = fac.get("id_facture") or fac.get("id")
     # Deux lignes de meme valeur, 10 000 DH chacune : a la valeur, elles porteraient la meme douane.
-    la = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+    la = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
         "type_ligne": "ERP", "code_reference": a, "unite": "kg", "quantite": 1000,
-        "poids_net_kg": 1000, "prix_unitaire_devise": 10})
-    lb = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+        "poids_net_kg": 1000, "prix_unitaire_devise": 10}))
+    lb = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
         "type_ligne": "ERP", "code_reference": b, "unite": "kg", "quantite": 500,
-        "poids_net_kg": 500, "prix_unitaire_devise": 20})
+        "poids_net_kg": 500, "prix_unitaire_devise": 20}))
     ia, ib = la.get("id_ligne") or la.get("id"), lb.get("id_ligne") or lb.get("id")
     # Le fret, 2 000 DH reparti au poids (2/3 sur A, 1/3 sur B), entre dans la valeur en douane.
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", VD(infra, id_dossier, {
         "id_frais": "FRET", "numero_piece": "FRET-DRT", "montant_devise": 2000, "code_devise": "MAD",
-        "methode_repartition": "POIDS"})
-    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
-        "id_frais": "DOUANE", "numero_piece": "DUM-DRT", "montant_devise": 2500, "code_devise": "MAD"})
+        "methode_repartition": "POIDS"}))
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", VD(infra, id_dossier, {
+        "id_frais": "DOUANE", "numero_piece": "DUM-DRT", "montant_devise": 2500, "code_devise": "MAD"}))
     id_douane = f.get("id_ligne_frais") or f.get("id")
     verifier(id_douane, f"la ligne de frais n'a pas d'identifiant : {f}")
 
@@ -839,7 +961,7 @@ def scenario_droits_douane(c, infra):
     verifier(part(ia) == 1250 and part(ib) == 1250, f"a la valeur : {part(ia)} / {part(ib)}")
 
     # B n'a pas encore de position : aux droits, la douane ne se repartit pas, et la cloture le dit.
-    c.ok("Choukri", "PATCH", f"/api/import/frais/{id_douane}", {"methode_repartition": "DROITS"})
+    c.ok("Choukri", "PATCH", f"/api/import/frais/{id_douane}", VD(infra, id_dossier, {"methode_repartition": "DROITS"}))
     verifier(part(ia) is None and part(ib) is None, "une douane aux droits s'est repartie malgre une ligne sans position")
     vu = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
     verifier(vu["droits_dossier"]["nb_lignes_sans_position"] == 1, f"ligne sans position : {vu['droits_dossier']}")
@@ -850,7 +972,7 @@ def scenario_droits_douane(c, infra):
 
     # B recoit sa position : les droits se calculent, la douane suit les droits.
     c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(b)}", V(infra, "reference", "code_reference", b, {"code_sh": "5609000000"}))
-    c.ok("Choukri", "PATCH", f"/api/import/frais/{id_douane}", {"methode_repartition": "DROITS"})
+    c.ok("Choukri", "PATCH", f"/api/import/frais/{id_douane}", VD(infra, id_dossier, {"methode_repartition": "DROITS"}))
     vu = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
     droits = {l["id_ligne"]: l for l in vu["droits"]}
     # Valeur en douane : A 10 000 + 1 333,33 de fret ; B 10 000 + 666,67.
@@ -1058,7 +1180,7 @@ def scenario_cloture_periode(c, infra):
     try:
         # LE MAGASIN NE CLOT PAS : c'est un arret des comptes, il revient a la direction.
         # Le RBAC l'arrete deja (pas d'ECRIRE sur PARAMETRES), avant la base.
-        c.refus("Magasinie", "PATCH", route, {"valeur_courante": "2025-04-30"})
+        c.refus("Magasinie", "PATCH", route, V(infra, "parametre", "code_parametre", "P_PeriodeCloseJusqua", {"valeur_courante": "2025-04-30"}))
 
         # LA GARDE EN BASE VAUT POUR DEMAIN. Aujourd'hui seules la direction et
         # l'administration ecrivent les parametres : RBAC et declencheur concordent.
@@ -1067,13 +1189,13 @@ def scenario_cloture_periode(c, infra):
         infra.sql("INSERT INTO permission (code_role_user, module, action, actif) "
                   "VALUES ('ASSISTANTE', 'PARAMETRES', 'ECRIRE', 1)")
         try:
-            c.refus("Assistante", "PATCH", route, {"valeur_courante": "2025-04-30"}, contient="direction")
+            c.refus("Assistante", "PATCH", route, V(infra, "parametre", "code_parametre", "P_PeriodeCloseJusqua", {"valeur_courante": "2025-04-30"}), contient="direction")
         finally:
             infra.sql("DELETE FROM permission WHERE code_role_user = 'ASSISTANTE' "
                       "AND module = 'PARAMETRES' AND action = 'ECRIRE'")
 
         avant = controle(infra, "C55")
-        c.ok("Choukri", "PATCH", route, {"valeur_courante": "2025-04-30", "motif": "arret d'avril 2025"})
+        c.ok("Choukri", "PATCH", route, V(infra, "parametre", "code_parametre", "P_PeriodeCloseJusqua", {"valeur_courante": "2025-04-30", "motif": "arret d'avril 2025"}))
 
         # LE SIGNAL, AVANT LE REFUS : la reception d'avril encore a controler se voit.
         verifier(controle(infra, "C55") > avant, "C55 ne signale pas la reception restee dans le mois clos")
@@ -1087,8 +1209,8 @@ def scenario_cloture_periode(c, infra):
         verifier(statut == "A_CONTROLER", f"la reception refusee est passee en {statut}")
 
         # ROUVRIR EST L'EXCEPTION, ET SE JUSTIFIE.
-        c.refus("Choukri", "PATCH", route, {"valeur_courante": "2025-03-31"}, contient="motif")
-        c.ok("Choukri", "PATCH", route, {"valeur_courante": "2025-03-31", "motif": "BL d'avril retrouve"})
+        c.refus("Choukri", "PATCH", route, V(infra, "parametre", "code_parametre", "P_PeriodeCloseJusqua", {"valeur_courante": "2025-03-31"}), contient="motif")
+        c.ok("Choukri", "PATCH", route, V(infra, "parametre", "code_parametre", "P_PeriodeCloseJusqua", {"valeur_courante": "2025-03-31", "motif": "BL d'avril retrouve"}))
 
         # Avril rouvert, la reception entre en stock a SA date.
         c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
@@ -1216,19 +1338,19 @@ def scenario_import(c, infra):
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={aujourdhui}")["reference"]
     verifier(cours and cours > 1, f"pas de cours BAM pour l'USD : {cours}")
     # Le taux 1 en devise est refuse (regle 18).
-    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-0", "date_facture": aujourdhui,
-        "code_devise": "USD", "taux_change": 1, "montant_devise": 2000})
-    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+        "code_devise": "USD", "taux_change": 1, "montant_devise": 2000}), contient="taux 1")
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-1", "date_facture": aujourdhui,
-        "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 2000}))
     id_facture = f.get("id_facture") or f.get("id")
-    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
         "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000, "poids_net_kg": 1000,
-        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BANC-1", "id_ligne_bc": lb})
+        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BANC-1", "id_ligne_bc": lb}))
     id_ligne_fact = lig.get("id_ligne") or lig.get("id")
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
-        "id_frais": "DOUANE", "numero_piece": "DUM-BANC", "montant_devise": 5000, "code_devise": "MAD"})
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", VD(infra, id_dossier, {
+        "id_frais": "DOUANE", "numero_piece": "DUM-BANC", "montant_devise": 5000, "code_devise": "MAD"}))
 
     # LA RECEPTION PASSE PAR L'ARRIVAGE UNIFIE (16/10/2026).
     #
@@ -1283,11 +1405,11 @@ def scenario_import(c, infra):
              f"CMUP d'entree attendu {prix_ligne} (prix de la ligne de bon converti), obtenu {cm}")
 
     # Regle 5 : une DUM saisie ne s'efface pas ; elle se corrige avec un motif, au droit de valider.
-    c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"numero_dum": "DUM-BANC-1"})
-    c.refus("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"numero_dum": ""}, contient="efface")
-    c.refus("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", {"numero_dum": "DUM-BANC-2"}, contient="pourquoi")
+    c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", VD(infra, id_dossier, {"numero_dum": "DUM-BANC-1"}))
+    c.refus("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", VD(infra, id_dossier, {"numero_dum": ""}), contient="efface")
+    c.refus("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", VD(infra, id_dossier, {"numero_dum": "DUM-BANC-2"}), contient="pourquoi")
     c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}",
-         {"numero_dum": "DUM-BANC-2", "motif_dum": "Faute de frappe sur la serie"})
+         VD(infra, id_dossier, {"numero_dum": "DUM-BANC-2", "motif_dum": "Faute de frappe sur la serie"}))
     refus_sql(infra, f"UPDATE import_dossiers SET numero_dum = NULL WHERE id_dossier = '{id_dossier}'", "IMPORT-DUM")
     # Regle 8 (T7) : dedouanee, l'entree de la reception d'import ne se contre-passe plus.
     id_mvt = infra.valeur(
@@ -1299,16 +1421,16 @@ def scenario_import(c, infra):
     # se corrige ; incomplete, il est « non reparti » et la cloture le refuse.
     frais = infra.valeur(f"SELECT id_ligne_frais FROM dossier_lignes_frais WHERE id_dossier = '{id_dossier}'")
     c.ok("Choukri", "PUT", f"/api/import/frais/{frais}/repartition",
-         {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 4000}]})
+         VD(infra, id_dossier, {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 4000}]}))
     verifier(infra.valeur(f"SELECT methode_repartition FROM dossier_lignes_frais WHERE id_ligne_frais = '{frais}'") == "MANUEL",
              "la saisie des montants n'a pas passe le frais en repartition manuelle")
     c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True}, contient="non réparti")
     c.refus("Choukri", "PUT", f"/api/import/frais/{frais}/repartition",
-            {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 6000}]}, contient="plus que")
+            VD(infra, id_dossier, {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 6000}]}), contient="plus que")
     c.ok("Choukri", "PUT", f"/api/import/frais/{frais}/repartition",
-         {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 5000}]})
+         VD(infra, id_dossier, {"montants": [{"id_ligne": id_ligne_fact, "montant_dhs": 5000}]}))
     # Retour au parametrage : la repartition se recalcule seule.
-    c.ok("Choukri", "PATCH", f"/api/import/frais/{frais}", {"methode_repartition": ""})
+    c.ok("Choukri", "PATCH", f"/api/import/frais/{frais}", VD(infra, id_dossier, {"methode_repartition": ""}))
     verifier(infra.valeur(f"SELECT methode_repartition FROM dossier_lignes_frais WHERE id_ligne_frais = '{frais}'") in (None, ""),
              "le frais n'est pas revenu au parametrage")
 
@@ -1316,23 +1438,24 @@ def scenario_import(c, infra):
     ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True})
     verifier(abs(ap["ecart_stock_dhs"] - 5000) < 0.01 and abs(ap["ecart_consomme_dhs"]) < 0.01,
              f"frais attendus 5 000 au stock, obtenus {ap['ecart_stock_dhs']} / {ap['ecart_consomme_dhs']}")
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": False})
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", VD(infra, id_dossier, {"simuler": False}))
     verifier(abs(cmup_magasin(infra, ref) - (cm + 5000 / kg(infra, ref))) < 0.0002, "les frais n'ont pas rejoint le CMUP")
 
     # Regle 5 : clos, le dossier est fige et ne se rouvre plus ; une facture tardive passe en
     # frais post-cloture, repartie sur le stock restant sans rouvrir le dossier.
-    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
-        "id_frais": "DOUANE", "numero_piece": "TARDIF", "montant_devise": 1000, "code_devise": "MAD"})
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", VD(infra, id_dossier, {
+        "id_frais": "DOUANE", "numero_piece": "TARDIF", "montant_devise": 1000, "code_devise": "MAD"}),
+        contient="clotur")
     c.refus("Choukri", "POST", f"/api/devalider/dossiers-import/{id_dossier}", {"motif": "Essai de reouverture"})
     tardif = {"id_frais": "DOUANE", "numero_piece": "TARDIF", "montant_devise": 1000, "code_devise": "MAD"}
-    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture", dict(tardif))
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture", VD(infra, id_dossier, dict(tardif)))
     cm = cmup_magasin(infra, ref)
     ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture",
               dict(tardif, motif="Facture du transitaire arrivee apres la cloture", simuler=True))
     verifier(abs(ap["ecart_stock_dhs"] - 1000) < 0.01, f"post-cloture : {ap['ecart_stock_dhs']} au stock au lieu de 1 000")
     verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-6, "l'apercu du frais post-cloture a ecrit")
     c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais-post-cloture",
-         dict(tardif, motif="Facture du transitaire arrivee apres la cloture"))
+         VD(infra, id_dossier, dict(tardif, motif="Facture du transitaire arrivee apres la cloture")))
     verifier(abs(cmup_magasin(infra, ref) - (cm + 1000 / kg(infra, ref))) < 0.0002, "le frais post-cloture n'a pas rejoint le CMUP")
     verifier(infra.valeur(f"SELECT statut FROM import_dossiers WHERE id_dossier = '{id_dossier}'") == "CLOTURE",
              "le frais post-cloture a rouvert le dossier")
@@ -1343,11 +1466,11 @@ def scenario_import(c, infra):
     cours_ded = float(infra.valeur(f"SELECT taux_change FROM import_factures WHERE id_facture = '{id_facture}'"))
     jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
     paiement = {"date_paiement": jour, "montant_devise": 100, "montant_mad": round(100 * bam, 2)}
-    c.refus("Magasinie", "POST", f"/api/import/factures/{id_facture}/paiements", paiement, codes=(403,))
+    c.refus("Magasinie", "POST", f"/api/import/factures/{id_facture}/paiements", VD(infra, id_dossier, paiement), codes=(403,))
     c.refus("Choukri", "POST", f"/api/import/factures/{id_facture}/paiements",
-            dict(paiement, montant_devise=10_000_000, montant_mad=10_000_000 * bam), contient="passerait")
+            VD(infra, id_dossier, dict(paiement, montant_devise=10_000_000, montant_mad=10_000_000 * bam)), contient="passerait")
     cm = cmup_magasin(infra, ref)
-    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/paiements", paiement)
+    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/paiements", VD(infra, id_dossier, paiement))
     verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "le paiement a touche le CMUP")
     cr = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}/cout-revient-reel")
     ligne = next(x for x in cr["factures"] if x["id_facture"] == id_facture)
@@ -1358,23 +1481,24 @@ def scenario_import(c, infra):
     # accepte, mais signale a la saisie et par C53 ; supprime, le signal tombe.
     veille = infra.valeur("SELECT to_char(current_date - 1, 'YYYY-MM-DD')")
     r = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/paiements",
-             dict(paiement, date_paiement=veille, taux_confirme=True))
+             VD(infra, id_dossier, dict(paiement, date_paiement=veille, taux_confirme=True)))
     verifier(any("C53" in a for a in r.get("avis", [])), f"pas d'avis pour un paiement avant le dedouanement : {r}")
     verifier(int(infra.valeur(f"SELECT count(*) FROM v_ctl_c53 WHERE id_paiement = '{r['id_paiement']}'")) == 1,
              "C53 ne voit pas le paiement avant le dedouanement")
-    c.ok("Choukri", "DELETE", f"/api/import/paiements/{r['id_paiement']}")
+    c.ok("Choukri", "DELETE", f"/api/import/paiements/{r['id_paiement']}?version={vd(infra, id_dossier)}")
     verifier(controle(infra, "C53") == 0, "C53 garde un paiement supprime")
 
     # Regle 3 (09/10) : l'avoir d'import. De prix : la valeur baisse au CMUP du stock restant.
     avoir = {"nature": "AVOIR_PRIX", "numero_piece": "AV-BANC-1", "montant_mad": 500,
              "motif": "Remise pour non-conformite gardee"}
-    c.refus("Magasinie", "POST", f"/api/import/dossiers/{id_dossier}/avoir", avoir, codes=(403,))
-    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", dict(avoir, motif="non"))
+    c.refus("Magasinie", "POST", f"/api/import/dossiers/{id_dossier}/avoir", VD(infra, id_dossier, avoir), codes=(403,))
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", VD(infra, id_dossier, dict(avoir, motif="non")),
+            contient="motif")
     cm = cmup_magasin(infra, ref)
     ap = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", dict(avoir, simuler=True))
     verifier(abs(ap["ecart_stock_dhs"] + 500) < 0.01, f"avoir de prix : {ap['ecart_stock_dhs']} au stock au lieu de -500")
     verifier(abs(cmup_magasin(infra, ref) - cm) < 1e-9, "l'apercu de l'avoir a ecrit")
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", avoir)
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/avoir", VD(infra, id_dossier, avoir))
     verifier(abs(cmup_magasin(infra, ref) - (cm - 500 / kg(infra, ref))) < 0.0002, "l'avoir de prix n'a pas baisse le CMUP")
     # Un nouvel avoir ne rejoue pas les frais : la cloture ne lit que les FRAIS.
     nb_frais = infra.valeur(f"SELECT count(*) FROM import_ajustements_cump WHERE id_dossier = '{id_dossier}' AND origine = 'FRAIS'")
@@ -1446,16 +1570,16 @@ def scenario_import_sur_arrivage(c, infra):
     verifier(infra.valeur("SELECT circuit_reception FROM import_dossiers "
                           f"WHERE id_dossier = '{id_dossier}'") == "BON",
              "un dossier neuf ne nait pas sur le circuit du bon de commande")
-    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-ARR", "date_facture": jour,
-        "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 2000}))
     id_facture = fac.get("id_facture") or fac.get("id")
     # LA LIGNE DE FACTURE SE RATTACHE A UN BON, meme deja recu : la facture arrive apres le camion,
     # et l'etancheite ne vise plus que les dossiers restes sur l'ancien circuit.
-    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", {
+    lig = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
         "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000,
         "poids_net_kg": 1000, "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-ARR-IMP",
-        "id_ligne_bc": lb})
+        "id_ligne_bc": lb}))
     id_ligne = lig.get("id_ligne") or lig.get("id")
 
 
@@ -1487,8 +1611,8 @@ def scenario_import_sur_arrivage(c, infra):
         "id_dossier_import": id_dossier,
         "lignes": [{"code_reference": ref, "unite_saisie": "kg", "quantite_pesee_unite": 5,
                     "code_magasin_dest": mag, "lot_fournisseur": "LOT-ARR-IMP", "nb_bobines": 2}]})
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", {
-        "id_frais": "DOUANE", "numero_piece": "DUM-ARR", "montant_devise": 7500, "code_devise": "MAD"})
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/frais", VD(infra, id_dossier, {
+        "id_frais": "DOUANE", "numero_piece": "DUM-ARR", "montant_devise": 7500, "code_devise": "MAD"}))
     c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": True},
             contient="brouillon")
     # On l'ABANDONNE, on ne la supprime pas : le numero a ete attribue, et un trou dans la
@@ -1501,7 +1625,7 @@ def scenario_import_sur_arrivage(c, infra):
     verifier(abs(ap["ecart_stock_dhs"] - 7500) < 0.01 and abs(ap["ecart_consomme_dhs"]) < 0.01,
              f"frais attendus 7 500 au stock, obtenus {ap['ecart_stock_dhs']} / {ap['ecart_consomme_dhs']}")
     verifier(abs(cmup_magasin(infra, ref, mag) - cm) < 1e-6, "l'apercu de la cloture a ecrit")
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", {"simuler": False})
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/cloturer", VD(infra, id_dossier, {"simuler": False}))
     verifier(abs(cmup_magasin(infra, ref, mag) - (cm + 7500 / stock)) < 0.0002,
              f"les frais du dossier n'ont pas rejoint le CMUP de l'arrivage ({cmup_magasin(infra, ref, mag)})")
     verifier(infra.valeur("SELECT code_magasin FROM import_ajustements_cump "
@@ -1593,14 +1717,14 @@ def scenario_import_coherence(c, infra):
 
     def facture_pegee(id_dossier, numero, id_ligne_bc, lot):
         """Une facture d'import d'une ligne, rattachee a une ligne de bon. Rend (id_facture, id_ligne)."""
-        f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+        f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
             "code_fournisseur": "FRS-001", "numero_facture": numero, "date_facture": jour,
-            "code_devise": "USD", "taux_change": cours, "montant_devise": 2000})
+            "code_devise": "USD", "taux_change": cours, "montant_devise": 2000}))
         idf = f.get("id_facture") or f.get("id")
-        lig = c.ok("Choukri", "POST", f"/api/import/factures/{idf}/lignes", {
+        lig = c.ok("Choukri", "POST", f"/api/import/factures/{idf}/lignes", VF(infra, idf, {
             "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 1000,
             "poids_net_kg": 1000, "prix_unitaire_devise": 2.0, "lot_fournisseur": lot,
-            "id_ligne_bc": id_ligne_bc})
+            "id_ligne_bc": id_ligne_bc}))
         return idf, (lig.get("id_ligne") or lig.get("id"))
 
     # ---- 1. ETANCHEITE -------------------------------------------------------
@@ -1643,7 +1767,7 @@ def scenario_import_coherence(c, infra):
 
     # La facture recue est figee.
     c.refus("Choukri", "PATCH", f"/api/import/factures/{id_facture}",
-            {"montant_devise": 2100}, contient="IMPORT-FIGEE")
+            VF(infra, id_facture, {"montant_devise": 2100}), contient="IMPORT-FIGEE")
 
     # CONTRE-PASSER L'ENTREE D'UN ARRIVAGE L'ANNULE ET REND TOUT (17/10/2026).
     # Jusqu'a cette date, la contre-passation ne connaissait que l'ancien circuit :
@@ -1664,7 +1788,7 @@ def scenario_import_coherence(c, infra):
              f"facture {recu()} kg / bon {recu_bc()} kg apres contre-passation")
 
     # Plus rien de recu : la facture se corrige de nouveau.
-    c.ok("Choukri", "PATCH", f"/api/import/factures/{id_facture}", {"montant_devise": 2100})
+    c.ok("Choukri", "PATCH", f"/api/import/factures/{id_facture}", VF(infra, id_facture, {"montant_devise": 2100}))
 
 def taux_usd_du_jour(infra):
     jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
@@ -1747,10 +1871,10 @@ def scenario_machine(c, infra):
     #    d'abord le retrait (il se validerait ensuite sur une machine hors parc).
     f5 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 0,
                         "pourcentage": 0, "code_motif": "MJ_ORDINAIRE"}])
-    c.refus("Choukri", "PATCH", "/api/machines/BANC1/etat", {"etat": "RETIREE", "motif": "Fin du banc"},
+    c.refus("Choukri", "PATCH", "/api/machines/BANC1/etat", V(infra, "machine", "code_machine", "BANC1", {"etat": "RETIREE", "motif": "Fin du banc"}),
             contient="brouillon")
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{f5}/annuler", {"motif": "Essai du banc"})
-    c.ok("Choukri", "PATCH", "/api/machines/BANC1/etat", {"etat": "RETIREE", "motif": "Fin du banc"})
+    c.ok("Choukri", "PATCH", "/api/machines/BANC1/etat", V(infra, "machine", "code_machine", "BANC1", {"etat": "RETIREE", "motif": "Fin du banc"}))
     c.refus("Magasinie", "POST", "/api/machines/fiches", {
         "type_fiche": "CHARGE", "code_machine": "BANC1", "code_emplacement": zone, "date_fiche": jour,
         "code_magasin": MAG, "responsable": "Banc", "lignes": []}, contient="retiree")
@@ -2060,14 +2184,15 @@ def scenario_plan_detail(c, infra):
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={aujourdhui}")["reference"]
     dossier = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/PORT", "code_devise": "USD"})
     id_dossier = dossier.get("id_dossier") or dossier.get("id")
-    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", {
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-PORT", "date_facture": aujourdhui,
-        "code_devise": "USD", "taux_change": cours, "montant_devise": 600})
-    c.ok("Choukri", "POST", f"/api/import/factures/{f.get('id_facture') or f.get('id')}/lignes", {
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 600}))
+    id_fac_port = f.get("id_facture") or f.get("id")
+    c.ok("Choukri", "POST", f"/api/import/factures/{id_fac_port}/lignes", VF(infra, id_fac_port, {
         "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 300, "poids_net_kg": 300,
-        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-PORT-1"})
+        "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-PORT-1"}))
     verifier(abs(au_port() - avant) < 1e-6, "un dossier d'import en brouillon compte dans l'en-cours")
-    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/valider")
+    c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/valider", VD(infra, id_dossier))
     verifier(abs(au_port() - avant - 300) < 1e-6, f"le dossier engage ne compte pas au port : {au_port() - avant}")
 
     infra.sql("UPDATE parametre SET valeur_courante = '1' WHERE code_parametre = 'P_EncoursRetardInclus'")
@@ -2279,9 +2404,10 @@ def scenario_import_bon_envoye(c, infra):
     aujourdhui = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
     cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={aujourdhui}")["reference"]
     d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/BON", "code_devise": "USD"})
-    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{d.get('id_dossier') or d.get('id')}/factures", {
+    id_dossier_bon = d.get("id_dossier") or d.get("id")
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier_bon}/factures", VD(infra, id_dossier_bon, {
         "code_fournisseur": "FRS-001", "numero_facture": "FB-BON", "date_facture": aujourdhui,
-        "code_devise": "USD", "taux_change": cours, "montant_devise": 200})
+        "code_devise": "USD", "taux_change": cours, "montant_devise": 200}))
     id_facture = f.get("id_facture") or f.get("id")
     brouillon = c.ok("Assistante", "POST", "/api/bons-commande", {
         "code_fournisseur": "FRS-001",
@@ -2289,14 +2415,14 @@ def scenario_import_bon_envoye(c, infra):
     ligne_brouillon = infra.valeur(f"SELECT id_ligne_bc FROM ligne_bc WHERE id_bc = '{brouillon['id_bc']}'")
     base = {"type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 100, "poids_net_kg": 100,
             "prix_unitaire_devise": 2.0, "lot_fournisseur": "LOT-BON-1"}
-    c.refus("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", dict(base, id_ligne_bc=ligne_brouillon),
+    c.refus("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, dict(base, id_ligne_bc=ligne_brouillon)),
             contient="IMPORT-BC")
     id_bc, lignes = bon_envoye(c, [(ref, 100, 2.0)], frs="FRS-001")
     autre = infra.valeur("SELECT code_reference FROM reference WHERE actif = 1 AND code_reference <> "
                          f"'{ref}' ORDER BY code_reference LIMIT 1")
     c.refus("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes",
-            dict(base, code_reference=autre, id_ligne_bc=lignes[0]["id_ligne_bc"]), contient="porte la reference")
-    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", dict(base, id_ligne_bc=lignes[0]["id_ligne_bc"]))
+            VF(infra, id_facture, dict(base, code_reference=autre, id_ligne_bc=lignes[0]["id_ligne_bc"])), contient="porte la reference")
+    c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, dict(base, id_ligne_bc=lignes[0]["id_ligne_bc"])))
     # Servie en local, une ligne ne se propose plus a la facturation.
     id_bc2, lignes2 = bon_envoye(c, [(ref, 100, 2.0)], frs="FRS-001")
     reception_validee(c, id_bc2, lignes2, [100], lot_fournisseur="LOT-BON-2", nb_bobines=38)
@@ -2866,7 +2992,7 @@ def scenario_securite(c, infra):
                          "code_motif_ligne": "R1"}]})
     prix = float(infra.valeur(f"SELECT prix_kg_mad FROM ligne_retour_fournisseur WHERE id_retour = '{r['id_retour']}'"))
     verifier(abs(prix - 999.0) > 0.01, "le magasinier a impose le prix du retour")
-    c.ok("Magasinie", "DELETE", f"/api/retours-fournisseur/{r['id_retour']}")
+    c.ok("Magasinie", "DELETE", f"/api/retours-fournisseur/{r['id_retour']}?version={vv(infra, 'retour_fournisseur', 'id_retour', r['id_retour'])}")
     # 7. Les types de mouvement se reglent sous Parametres : plus par le magasinier.
     c.ok("Magasinie", "GET", "/api/types-mouvement")
     c.refus("Magasinie", "POST", "/api/types-mouvement", {"code_type_mvt": "PIRATE", "libelle": "Pirate", "signe": 1},
@@ -2893,6 +3019,8 @@ SCENARIOS = [
     scenario_inventaire,
     scenario_colisage_signale,
     scenario_verrou_optimiste,
+    scenario_verrou_import,
+    scenario_verrou_groupe3,
     scenario_cloture_periode,
     scenario_idempotence,
     scenario_droits_douane,

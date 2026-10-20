@@ -39,6 +39,8 @@ interface RetourDoc {
     id_retour: string
     numero_retour: string
     statut_retour: 'BROUILLON' | 'VALIDE'
+    /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
+    version: number
     date_retour: string
     code_fournisseur: string
     fournisseur_nom: string
@@ -110,6 +112,9 @@ export function Retour() {
     queryKey: ['retour-fournisseur', id],
     queryFn: ({ signal }) => api.get<RetourDoc>(`/api/retours-fournisseur/${id}`, { signal }),
     enabled: !!id,
+    // Un brouillon en cours de saisie ne se relit pas sous les doigts (verrou).
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
   if (id && q.isLoading) return <Chargement texte="Lecture du retour…" />
   if (id && !q.data) return <Alerte ton="alerte">Retour introuvable.</Alerte>
@@ -218,7 +223,10 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
     mutationFn: () =>
       nouveau
         ? api.post<{ id_retour: string; numero: string }>('/api/retours-fournisseur', { ...corps(), id_document: idDocument })
-        : api.put<{ id_retour: string; numero: string }>(`/api/retours-fournisseur/${id}`, corps()),
+        : api.put<{ id_retour: string; numero: string }>(`/api/retours-fournisseur/${id}`, {
+            ...corps(),
+            version: doc?.retour.version,
+          }),
     onSuccess: (r) => {
       toast.success(`Retour ${r.numero} enregistré en brouillon — un autre compte le validera`)
       rafraichir()
@@ -235,7 +243,7 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
     onError: echec,
   })
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/retours-fournisseur/${id}`),
+    mutationFn: () => api.delete(`/api/retours-fournisseur/${id}?version=${doc?.retour.version ?? ''}`),
     onSuccess: () => {
       toast.success('Brouillon supprimé')
       rafraichir()

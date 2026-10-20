@@ -167,7 +167,7 @@ pub async fn lister(State(state): State<AppState>, user: Utilisateur) -> AppResu
     user.exiger(&state.db, module::STOCK, Action::Lire).await?;
     let lignes = sqlx::query(
         "SELECT m.code_machine, m.nom, m.capacite_bobines, m.nb_etages, m.code_atelier,
-                m.notes, m.actif, m.etat, m.motif_etat, m.date_etat,
+                m.notes, m.actif, m.etat, m.motif_etat, m.date_etat, m.version,
                 COALESCE(SUM(e.nb_bobines), 0)::bigint     AS bobines_presentes,
                 COALESCE(SUM(e.kg), 0)::float8             AS quantite_kg,
                 COUNT(DISTINCT z.code_emplacement)::bigint AS nb_zones,
@@ -176,7 +176,7 @@ pub async fn lister(State(state): State<AppState>, user: Utilisateur) -> AppResu
            LEFT JOIN machine_emplacement z ON z.code_machine = m.code_machine
            LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
           GROUP BY m.code_machine, m.nom, m.capacite_bobines, m.nb_etages,
-                   m.code_atelier, m.notes, m.actif, m.etat, m.motif_etat, m.date_etat
+                   m.code_atelier, m.notes, m.actif, m.etat, m.motif_etat, m.date_etat, m.version
           ORDER BY m.nom",
     )
     .fetch_all(&state.db)
@@ -1238,6 +1238,10 @@ pub struct MachineSaisie {
     pub code_atelier: Option<String>,
     pub notes: Option<String>,
     pub zones: Vec<ZoneSaisie>,
+    /// La version lue avec la machine (verrou optimiste, groupe 3, 20/10/2026) :
+    /// exigee a la modification, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 /// Une zone validee, prete a etre ecrite.
@@ -1505,8 +1509,15 @@ pub async fn modifier_machine(
         }
     }
 
+    let version = crate::domain::concurrence::exigee(m.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La premiere ecriture prend la machine a la version lue : deux corrections
+    // simultanees de ses zones, la seconde est refusee en nommant la premiere.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "machine", "code_machine", &code, Some(version), "Cette machine",
+    )
+    .await?;
 
     // Les zones retirees — vides, on vient de le verifier. CELLES QUI ONT UN
     // PASSE SE DESACTIVENT (audit v4) : fiches, decisions, consommation et
@@ -1577,12 +1588,14 @@ pub async fn modifier_machine(
     .execute(&mut *tx)
     .await?;
 
+    let version = crate::domain::concurrence::version_actuelle(&mut tx, "machine", "code_machine", &code).await?;
     tx.commit().await?;
     Ok(Json(json!({
         "code_machine": code,
         "capacite_bobines": capacite,
         "nb_etages": nb_etages,
         "zones": zones.len(),
+        "version": version,
     })))
 }
 
@@ -1591,6 +1604,9 @@ pub struct ChangementEtat {
     /// ACTIVE, PANNE, SOMMEIL ou RETIREE.
     pub etat: String,
     pub motif: Option<String>,
+    /// La version lue avec la machine (groupe 3, 20/10/2026).
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 /// `PATCH /api/machines/{code}/etat` — declarer une machine en panne, en
@@ -1643,13 +1659,15 @@ pub async fn changer_etat(
             .await?;
     let (nom, ancien) = machine.ok_or_else(|| AppError::Introuvable(format!("machine {code}")))?;
 
+    let version = crate::domain::concurrence::exigee(c.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
-    // Sous verrou : une fiche ne doit pas se valider entre le controle et le retrait.
-    sqlx::query("SELECT 1 FROM machine WHERE code_machine = $1 FOR UPDATE")
-        .bind(&code)
-        .execute(&mut *tx)
-        .await?;
+    // Sous verrou, a la version lue : une fiche ne doit pas se valider entre le
+    // controle et le retrait, et deux changements d'etat ne s'ecrasent pas.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "machine", "code_machine", &code, Some(version), "Cette machine",
+    )
+    .await?;
     if etat == "RETIREE" {
         // Les brouillons d'abord (F15) : valides apres le retrait, ils poseraient
         // du fil sur une machine hors parc.
@@ -1697,10 +1715,12 @@ pub async fn changer_etat(
     .bind(&motif)
     .execute(&mut *tx)
     .await?;
+    let version = crate::domain::concurrence::version_actuelle(&mut tx, "machine", "code_machine", &code).await?;
     tx.commit().await?;
 
     Ok(Json(json!({
         "code_machine": code,
+        "version": version,
         "etat_precedent": ancien,
         "etat": etat,
         "motif": if motif.is_empty() { Value::Null } else { Value::from(motif) },
@@ -1721,9 +1741,11 @@ pub async fn supprimer_machine(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(code): Path<String>,
+    Query(q): Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PARAMETRES, Action::Ecrire)
         .await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
 
     let code = code.trim().to_uppercase();
     let nom: Option<(String,)> =
@@ -1763,6 +1785,10 @@ pub async fn supprimer_machine(
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "machine", "code_machine", &code, Some(version), "Cette machine",
+    )
+    .await?;
     sqlx::query("DELETE FROM machine_emplacement WHERE code_machine = $1")
         .bind(&code)
         .execute(&mut *tx)

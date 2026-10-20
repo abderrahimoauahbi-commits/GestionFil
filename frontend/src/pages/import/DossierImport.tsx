@@ -40,7 +40,18 @@ import { Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '.
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
 import { Avancement, PastilleStatut } from './DossiersImport'
-import { CloturePanneau, echec, nombre, Tuile, useEnregistrerTout, useRafraichir, type Signaler } from './dialogues'
+import {
+  CloturePanneau,
+  echec,
+  FournirVersionDossier,
+  nombre,
+  Tuile,
+  useEnregistrerTout,
+  useRafraichir,
+  useVersionDossier,
+  useVersionSuivie,
+  type Signaler,
+} from './dialogues'
 import { PiecesDossier } from './PiecesDossier'
 import { EngagementsDossier } from './EngagementsDossier'
 import { DroitsDouane } from './DroitsDouane'
@@ -79,26 +90,28 @@ export function DossierImport() {
     queryFn: ({ signal }) => api.get<DossierComplet>(`/api/import/dossiers/${id}`, { signal }),
     enabled: !!id,
   })
+  // La version du dossier, suivie d'un enregistrement a l'autre (verrou optimiste).
+  const version = useVersionSuivie(q.data?.dossier.version, tout.aEnregistrer.length > 0, rafraichir)
 
   /* LE CYCLE DE VIE DU DOSSIER, sur son ecran (demande du 30/09/2026) :
      valider le brouillon, le supprimer tant qu'il n'est que brouillon,
      cloturer, devalider une cloture. */
   const valider = useMutation({
-    mutationFn: () => api.post(`/api/import/dossiers/${id}/valider`),
+    mutationFn: async () => version.suivre(await api.post(`/api/import/dossiers/${id}/valider`, { version: version.lire() })),
     onSuccess: () => {
       toast.success('Dossier validé — il est en cours')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
   const supprimer = useMutation({
-    mutationFn: () => api.delete(`/api/import/dossiers/${id}`),
+    mutationFn: () => api.delete(`/api/import/dossiers/${id}?version=${version.lire() ?? ''}`),
     onSuccess: () => {
       toast.success('Brouillon supprimé')
       rafraichir()
       ouvrir('/import')
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   if (q.isLoading) return <Chargement texte="Lecture du dossier…" />
@@ -110,6 +123,7 @@ export function DossierImport() {
   const ecrire = droits.peutEcrire && !clos
 
   return (
+    <FournirVersionDossier valeur={version}>
     <div className="space-y-3">
       <EnTetePage
         titre={`Dossier ${dossier.numero}`}
@@ -251,6 +265,7 @@ export function DossierImport() {
 
       {confirmation.element}
     </div>
+    </FournirVersionDossier>
   )
 }
 
@@ -294,6 +309,7 @@ function Informations({
   d, ecrire, valider, signaler,
 }: { d: DossierComplet; ecrire: boolean; valider: boolean; signaler?: Signaler }) {
   const rafraichir = useRafraichir(d.dossier.id_dossier)
+  const version = useVersionDossier()
   const { dossier } = d
   const initial = () => ({
     numero: dossier.numero,
@@ -316,18 +332,21 @@ function Informations({
   const modifie = JSON.stringify(f) !== JSON.stringify(initial())
 
   const enregistrer = useMutation({
-    mutationFn: () =>
-      api.patch(`/api/import/dossiers/${dossier.id_dossier}`, {
-        ...f,
-        motif_dum: dumChangee ? motifDum.trim() : undefined,
-        date_arrivee: f.date_arrivee || null,
-        date_dum: f.date_dum || null,
-      }),
+    mutationFn: async () =>
+      version.suivre(
+        await api.patch<{ version?: number }>(`/api/import/dossiers/${dossier.id_dossier}`, {
+          ...f,
+          motif_dum: dumChangee ? motifDum.trim() : undefined,
+          date_arrivee: f.date_arrivee || null,
+          date_dum: f.date_dum || null,
+          version: version.lire(),
+        }),
+      ),
     onSuccess: () => {
       toast.success('Dossier enregistré')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
   const maj = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setF((x) => ({ ...x, [k]: e.target.value }))
@@ -420,6 +439,7 @@ function FraisDossier({
   const saisie = ecrire || postCloture
   const idDossier = d.dossier.id_dossier
   const rafraichir = useRafraichir(idDossier)
+  const version = useVersionDossier()
   const confirmation = useConfirmation()
   const vide = { id_frais: '', libelle: '', numero_piece: '', code_devise: 'MAD', cours_change: '1', montant_devise: '' }
   const [n, setN] = useState(vide)
@@ -468,6 +488,7 @@ function FraisDossier({
     code_devise: n.code_devise,
     cours_change: n.code_devise === 'MAD' ? 1 : nombre(n.cours_change),
     taux_confirme: confirme === true,
+    version: version.lire(),
   })
   const apercuPostCloture = useMutation({
     mutationFn: () =>
@@ -479,13 +500,15 @@ function FraisDossier({
     onError: echec,
   })
   const ajouter = useMutation({
-    mutationFn: (confirme?: boolean) =>
-      postCloture
-        ? api.post(`/api/import/dossiers/${idDossier}/frais-post-cloture`, {
-            ...corpsFrais(confirme),
-            motif: motifPost.trim(),
-          })
-        : api.post(`/api/import/dossiers/${idDossier}/frais`, corpsFrais(confirme)),
+    mutationFn: async (confirme?: boolean) =>
+      version.suivre(
+        postCloture
+          ? await api.post(`/api/import/dossiers/${idDossier}/frais-post-cloture`, {
+              ...corpsFrais(confirme),
+              motif: motifPost.trim(),
+            })
+          : await api.post(`/api/import/dossiers/${idDossier}/frais`, corpsFrais(confirme)),
+      ),
     onSuccess: () => {
       if (postCloture) {
         toast.success('Frais post-clôture enregistré — réparti sur le stock restant du dossier')
@@ -516,25 +539,27 @@ function FraisDossier({
         })
         return
       }
-      echec(e)
+      version.echec(e)
     },
   })
   // La repartition d'un frais : celle du parametrage par defaut, modifiable.
   const changerMethode = useMutation({
-    mutationFn: (x: { id: string; methode: string }) => api.patch(`/api/import/frais/${x.id}`, { methode_repartition: x.methode }),
+    mutationFn: async (x: { id: string; methode: string }) =>
+      version.suivre(await api.patch(`/api/import/frais/${x.id}`, { methode_repartition: x.methode, version: version.lire() })),
     onSuccess: () => {
       toast.success('Répartition du frais changée')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
   const supprimer = useMutation({
-    mutationFn: (idFrais: string) => api.delete(`/api/import/frais/${idFrais}`),
+    mutationFn: async (idFrais: string) =>
+      version.suivre(await api.delete(`/api/import/frais/${idFrais}?version=${version.lire() ?? ''}`)),
     onSuccess: () => {
       toast.success('Frais supprimé — répartition recalculée')
       rafraichir()
     },
-    onError: echec,
+    onError: version.echec,
   })
 
   const inclus = d.frais.filter((f) => f.inclus_dans_cout === 1).reduce((t, f) => t + f.montant_dhs, 0)
@@ -767,6 +792,7 @@ function LiquidationFrais({
 }: { d: DossierComplet; ecrire: boolean; choix: string; setChoix: (idFrais: string) => void }) {
   const idDossier = d.dossier.id_dossier
   const rafraichir = useRafraichir(idDossier)
+  const version = useVersionDossier()
   const inclus = d.frais.filter((f) => f.inclus_dans_cout === 1)
   const frais = inclus.find((f) => f.id_ligne_frais === choix) ?? inclus[0]
   const toutes = d.lignes
@@ -830,13 +856,17 @@ function LiquidationFrais({
         const corps: Record<string, unknown> = {}
         if (ciblesModifiees) corps.cibles = cochees.size === d.factures.length ? [] : [...visees]
         if (methodeModifiee && !montantsModifies) corps.methode_repartition = methode === frais!.methode_type ? '' : methode
-        await api.patch(`/api/import/frais/${frais!.id_ligne_frais}`, corps)
+        corps.version = version.lire()
+        version.suivre(await api.patch(`/api/import/frais/${frais!.id_ligne_frais}`, corps))
       }
       // Aucune facture cochee : le frais reste a repartir (manuel, sans montant).
       if (montantsModifies || cochees.size === 0) {
-        await api.put(`/api/import/frais/${frais!.id_ligne_frais}/repartition`, {
-          montants: toutes.filter((l) => visees.has(l.id_ligne)).map((l) => ({ id_ligne: l.id_ligne, montant_dhs: nombre(valeur(l.id_ligne)) })),
-        })
+        version.suivre(
+          await api.put(`/api/import/frais/${frais!.id_ligne_frais}/repartition`, {
+            montants: toutes.filter((l) => visees.has(l.id_ligne)).map((l) => ({ id_ligne: l.id_ligne, montant_dhs: nombre(valeur(l.id_ligne)) })),
+            version: version.lire(),
+          }),
+        )
       }
     },
     onSuccess: () => {
@@ -851,7 +881,8 @@ function LiquidationFrais({
       rafraichir()
     },
     // Le depassement est refuse ici, avec son message ; le serveur le refuse aussi.
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Opération impossible.'),
+    onError: (e: unknown) =>
+      e instanceof ErreurApi ? version.echec(e) : toast.error(e instanceof Error ? e.message : 'Opération impossible.'),
   })
 
   if (!frais) {

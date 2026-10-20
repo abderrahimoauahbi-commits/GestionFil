@@ -72,6 +72,10 @@ pub struct FactureSaisie {
     pub confirmer_taux: bool,
     #[serde(default)]
     pub lignes: Vec<LigneSaisie>,
+    /// La version lue avec la facture (verrou optimiste, groupe 3, 20/10/2026) :
+    /// exigee a la modification, ignoree a la creation.
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 /// La devise d'une facture : celle qu'on dit, sinon celle du fournisseur.
@@ -355,8 +359,15 @@ pub async fn modifier(
         (devise, taux)
     };
 
+    let version = crate::domain::concurrence::exigee(f.version)?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    // La premiere ecriture prend la facture a la version lue : deux personnes
+    // sur le meme brouillon, la seconde est refusee en nommant la premiere.
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "facture_fournisseur", "id_facture", &id, Some(version), "Cette facture",
+    )
+    .await?;
 
     let statut: String =
         sqlx::query_scalar("SELECT statut FROM facture_fournisseur WHERE id_facture = $1 FOR UPDATE")
@@ -392,8 +403,10 @@ pub async fn modifier(
     .await?;
 
     poser_lignes(&mut tx, &id, &f.lignes).await?;
+    let version =
+        crate::domain::concurrence::version_actuelle(&mut tx, "facture_fournisseur", "id_facture", &id).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "id_facture": id, "lignes": f.lignes.len() })))
+    Ok(Json(json!({ "id_facture": id, "lignes": f.lignes.len(), "version": version })))
 }
 
 /// `DELETE /api/factures-fournisseur/{id}` — un brouillon seulement.
@@ -405,10 +418,16 @@ pub async fn supprimer(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(id): Path<String>,
+    Query(q): Query<super::entites::VersionLue>,
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::RECEPTIONS, Action::Ecrire).await?;
+    let version = super::entites::version_exigee(q.version.map(Value::String).as_ref())?;
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
+    crate::domain::concurrence::exiger_version(
+        &mut tx, "facture_fournisseur", "id_facture", &id, Some(version), "Cette facture",
+    )
+    .await?;
     let statut: String =
         sqlx::query_scalar("SELECT statut FROM facture_fournisseur WHERE id_facture = $1 FOR UPDATE")
             .bind(&id)

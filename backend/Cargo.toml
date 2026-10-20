@@ -58,6 +58,9 @@ rand = "0.8"
 
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+# Le jour de Casablanca (20/10/2026) : l'heure du Maroc change au Ramadan, un
+# decalage fixe serait faux une partie de l'annee.
+chrono-tz = "0.10"
 
 # Lecture du classeur GESTION Fil.xlsx (import de reprise)
 calamine = "0.26"

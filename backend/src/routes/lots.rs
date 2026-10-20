@@ -386,7 +386,7 @@ pub async fn decider_dormant(
             )
             .bind(&id)
             .bind(&numero)
-            .bind(chrono::Utc::now().format("%Y-%m-%d").to_string())
+            .bind(crate::db::aujourdhui())
             .bind(&magasin)
             .bind(format!("LOT {}", d.lot_fournisseur))
             .bind(format!("{} du lot dormant {} : {motif}", if d.decision == "SOLDER" { "Solde" } else { "Destruction" }, d.lot_fournisseur))
@@ -561,7 +561,7 @@ async fn deplacer_entre_lots(
     reference_doc: &str,
     observations: &str,
 ) -> AppResult<Vec<String>> {
-    let jour = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let jour = crate::db::aujourdhui();
     let mut numeros = Vec::new();
     for (type_mvt, entree) in [("FUSION_SORTIE", false), ("FUSION_ENTREE", true)] {
         let numero = numeroter(&mut *tx, "mouvement", "numero_mouvement", "MVT").await?;

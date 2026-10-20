@@ -53,10 +53,11 @@ pub type Db = PgPool;
 
 pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
     let options = PgConnectOptions::from_str(database_url)?
-        // Le fuseau de la SESSION, pas celui du serveur. Toutes les dates du
-        // schema sont du texte ISO-8601 en UTC (ADR-001 D-11) : un serveur
-        // regle sur Europe/Paris ferait rendre a `current_date` une date
-        // decalee d'un jour pendant deux heures chaque nuit.
+        // Le fuseau de la SESSION, pas celui du serveur : CASABLANCA (decision
+        // du 20/10/2026). `current_date` est ainsi le jour de l'usine, entre
+        // minuit et 1 h comme le reste du temps (en UTC, c'etait la veille).
+        // Les instants (`timestamptz`) ne dependent d'aucun fuseau ; le serveur
+        // les sert en ISO UTC par fn_iso et routes/json.rs.
         //
         // L'ENCODAGE DU CLIENT EST FORCE EN UTF-8. Sans cela, libpq prend celui
         // du systeme : sous Windows c'est WIN1252, et un tiret cadratin ou un
@@ -65,7 +66,7 @@ pub async fn connect(database_url: &str) -> anyhow::Result<Db> {
         // probleme, l'outil d'import lance depuis un poste de developpement si.
         // Un encodage qui depend de la machine qui lance l'outil n'est pas un
         // reglage, c'est un piege.
-        .options([("timezone", "UTC"), ("client_encoding", "UTF8")])
+        .options([("timezone", "Africa/Casablanca"), ("client_encoding", "UTF8")])
         // DES DELAIS, POUR QU'UNE REQUETE NE FIGE PAS L'ERP (audit v4). Une
         // requete emballee ou une transaction oubliee tenaient une connexion et
         // ses verrous indefiniment : seize connexions, et l'application se
@@ -108,6 +109,13 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// une fois jouee (la derniere colonne qu'elle ajoute). A completer a chaque
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
+    (
+        // Le jour de Casablanca (20/10/2026) : le serveur accepte un fait du
+        // jour marocain ; la regle C06 en base doit compter le meme jour.
+        "2026-10-20b_jour_casablanca.sql",
+        "SELECT pg_get_triggerdef(oid) ~ 'Africa/Casablanca' FROM pg_trigger
+          WHERE tgname = 'trg_mouvement_date_future'",
+    ),
     (
         // A1, horodatages (20/10/2026) : les 93 dernieres colonnes de date en
         // texte sont des `timestamptz`. Le serveur les ecrit par fn_instant ou
@@ -692,9 +700,36 @@ pub fn dans_secondes(secondes: i64) -> String {
         .to_string()
 }
 
-/// Date calendaire du jour, format base.
+/// LE JOUR EST CELUI DE CASABLANCA (decision du 20/10/2026) : l'usine, les
+/// postes et la base y vivent. Un fait saisi a 0 h 30 heure du Maroc est du
+/// jour, pas de la veille comme en UTC. Les INSTANTS, eux, restent en UTC
+/// (`maintenant`), le type `timestamptz` ne depend d'aucun fuseau.
+pub fn jour_casablanca() -> chrono::NaiveDate {
+    jour_casablanca_de(chrono::Utc::now())
+}
+
+fn jour_casablanca_de(instant: chrono::DateTime<chrono::Utc>) -> chrono::NaiveDate {
+    instant.with_timezone(&chrono_tz::Africa::Casablanca).date_naive()
+}
+
+#[cfg(test)]
+mod tests_jour {
+    use super::jour_casablanca_de;
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    #[test]
+    fn minuit_et_demi_au_maroc_est_deja_le_lendemain() {
+        // 23 h 30 UTC le 19/10 = 0 h 30 a Casablanca (UTC+1) le 20/10.
+        let i = Utc.with_ymd_and_hms(2026, 10, 19, 23, 30, 0).unwrap();
+        assert_eq!(jour_casablanca_de(i), NaiveDate::from_ymd_opt(2026, 10, 20).unwrap());
+        let midi = Utc.with_ymd_and_hms(2026, 10, 19, 12, 0, 0).unwrap();
+        assert_eq!(jour_casablanca_de(midi), NaiveDate::from_ymd_opt(2026, 10, 19).unwrap());
+    }
+}
+
+/// Date calendaire du jour (Casablanca), format base.
 pub fn aujourdhui() -> String {
-    chrono::Utc::now().format("%Y-%m-%d").to_string()
+    jour_casablanca().format("%Y-%m-%d").to_string()
 }
 
 /// Arrondi a 4 decimales : quantites en kg et CMUP (ADR-001 D-10).

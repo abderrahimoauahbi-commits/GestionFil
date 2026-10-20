@@ -302,7 +302,7 @@ pub async fn creer_mouvement(
                       WHERE mv.code_type_mvt IN ('SORTIE_PROD', 'SORTIE_HORS_MACHINE')
                         AND lm.code_reference = $1
                         AND substr(mv.date_mouvement, 1, 10)
-                            = COALESCE($2, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'))
+                            = COALESCE($2, to_char(current_date, 'YYYY-MM-DD'))
                         AND mv.id_mouvement_contrepasse IS NULL
                         AND NOT EXISTS (SELECT 1 FROM mouvement c WHERE c.id_mouvement_contrepasse = mv.id_mouvement)",
                 )

@@ -628,7 +628,7 @@ pub fn date_du_fait(d: Option<&str>, quoi: &str) -> crate::error::AppResult<Opti
             let jour = chrono::NaiveDate::parse_from_str(d.get(..10).unwrap_or(d), "%Y-%m-%d").map_err(|_| {
                 crate::error::AppError::Invalide(format!("{quoi} invalide : {d} (attendu AAAA-MM-JJ)"))
             })?;
-            if jour > chrono::Utc::now().date_naive() {
+            if jour > crate::db::jour_casablanca() {
                 return Err(crate::error::AppError::RegleMetier(format!("La {quoi} ne peut pas etre dans le futur.")));
             }
             Ok(Some(jour.format("%Y-%m-%d").to_string()))

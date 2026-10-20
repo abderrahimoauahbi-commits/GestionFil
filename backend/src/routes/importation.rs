@@ -140,7 +140,7 @@ const DOSSIER_CLOS: &str = "Le dossier est cloture : il est fige. Une facture ta
 
 /// Le numero suivant, au format du classeur : « 06/26 ».
 async fn prochain_numero(tx: &mut sqlx::PgConnection) -> AppResult<String> {
-    let annee = chrono::Utc::now().format("%y").to_string();
+    let annee = crate::db::jour_casablanca().format("%y").to_string();
     let rang: i64 = sqlx::query_scalar(
         "SELECT COALESCE(max(split_part(numero, '/', 1)::bigint), 0) + 1
            FROM import_dossiers WHERE numero ~ ('^[0-9]+/' || $1 || '$')",

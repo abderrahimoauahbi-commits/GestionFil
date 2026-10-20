@@ -16,7 +16,7 @@ pub(crate) async fn numeroter(
     colonne: &str,
     prefixe: &str,
 ) -> AppResult<String> {
-    let annee = chrono::Utc::now().format("%Y").to_string();
+    let annee = crate::db::jour_casablanca().format("%Y").to_string();
     let motif = format!("{prefixe}-{annee}-%");
     // `length(?1) + 1` : substr est indexe a 1, donc la position `length(prefixe)`
     // designe le DERNIER caractere du prefixe — le tiret — et non le premier

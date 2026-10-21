@@ -452,8 +452,8 @@ pub async fn composition_qualite(
                         COALESCE(r.cmup_mad, ROUND(r.prix_catalogue_kg * COALESCE((
                             SELECT t.taux FROM taux_change t
                              WHERE t.code_devise = r.code_devise_catalogue
-                               AND to_char(current_date, 'YYYY-MM-DD') >= t.date_debut
-                               AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') <= t.date_fin)
+                               AND current_date >= t.date_debut
+                               AND (t.date_fin IS NULL OR current_date < t.date_fin)
                              ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_kg_mad,
                         CASE WHEN r.cmup_mad IS NOT NULL THEN 'CMUP' ELSE 'CATALOGUE' END AS source_prix
                    FROM reference r) px ON px.code_reference = rc.code_reference
@@ -1388,7 +1388,7 @@ pub async fn recalculer_plan(
     user.poser_contexte(&mut tx).await?;
 
     let (statut, date_debut, horizon, croissance): (String, String, i64, f64) = sqlx::query_as(
-        "SELECT statut, date_debut, mois_horizon, croissance_annuelle_pct::float8
+        "SELECT statut, date_debut::text, mois_horizon, croissance_annuelle_pct::float8
            FROM plan_production WHERE id_plan = $1",
     )
     .bind(&id)

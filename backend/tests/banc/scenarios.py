@@ -1089,6 +1089,10 @@ def scenario_verrou_referentiels(c, infra):
     c.refus("Choukri", "DELETE", f"/api/qualites/{q}", codes=(400,), contient="version")
     verifier(infra.valeur(f"SELECT count(*) FROM qualite WHERE code_qualite = '{q}'") == "1",
              "la qualite a disparu malgre le refus")
+    # SA COMPOSITION S'OUVRE (21/10/2026) : elle comparait le jour du taux, devenu une `date`, a du
+    # texte — « erreur interne » a chaque fiche ouverte, et aucun scenario ne l'appelait.
+    compo = c.ok("Choukri", "GET", f"/api/qualites/{q}/composition")
+    verifier(compo is not None, f"la composition de la qualite {q} ne s'ouvre pas")
 
 
 def scenario_proposition_une_fois(c, infra):

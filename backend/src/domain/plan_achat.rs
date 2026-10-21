@@ -300,7 +300,7 @@ pub async fn convertir(
         Some(ids) if !ids.is_empty() => {
             sqlx::query_as(
                 "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
-                        prix_estime_mad::float8, date_besoin_prevue, palettes_a_commander
+                        prix_estime_mad::float8, date_besoin_prevue::text, palettes_a_commander
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
                     AND id_proposition = ANY($1)
@@ -313,7 +313,7 @@ pub async fn convertir(
         _ => {
             sqlx::query_as(
                 "SELECT id_proposition, code_fournisseur, quantite_suggeree_kg::float8,
-                        prix_estime_mad::float8, date_besoin_prevue, palettes_a_commander
+                        prix_estime_mad::float8, date_besoin_prevue::text, palettes_a_commander
                    FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
                   ORDER BY code_fournisseur, code_reference",

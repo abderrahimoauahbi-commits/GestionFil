@@ -280,7 +280,7 @@ pub async fn contexte_facture_reception(
         crate::routes::importation::taux_reference(&mut c, &devise, &date).await?
     };
     let autres: Vec<(String, String, String, f64)> = sqlx::query_as(
-        "SELECT r.id_reception, r.numero_reception, r.date_reception,
+        "SELECT r.id_reception, r.numero_reception, r.date_reception::text,
                 COALESCE((SELECT sum(a.total_mad) FROM v_archive_reception_courante a
                             JOIN ligne_reception lr ON lr.id_ligne_reception = a.id_ligne_reception
                            WHERE lr.id_reception = r.id_reception), 0)::float8

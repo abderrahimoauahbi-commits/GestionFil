@@ -60,6 +60,28 @@ CREATE TRIGGER trg_lmvt_of_requis
 BEFORE INSERT ON ligne_mouvement FOR EACH ROW
 EXECUTE FUNCTION fn_trg_lmvt_of_requis();
 
+-- La consommation directe ne vaut que pour un article en mode DIRECTE : le fil
+-- sort par les fiches machine (decision du 21/10/2026, migration 2026-10-21c).
+CREATE OR REPLACE FUNCTION fn_trg_lmvt_conso_directe() RETURNS trigger AS $$
+DECLARE
+    v_type text;
+    v_mode text;
+BEGIN
+    SELECT code_type_mvt INTO v_type FROM mouvement WHERE id_mouvement = NEW.id_mouvement;
+    IF v_type = 'CONSO_DIRECTE' THEN
+        SELECT mode_consommation INTO v_mode FROM reference WHERE code_reference = NEW.code_reference;
+        IF COALESCE(v_mode, 'MACHINE') <> 'DIRECTE' THEN
+            RAISE EXCEPTION 'CONSO-DIRECTE : % est en mode de consommation MACHINE : le fil sort par les fiches machine, pas par une consommation directe.', NEW.code_reference;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_lmvt_conso_directe
+BEFORE INSERT ON ligne_mouvement FOR EACH ROW
+EXECUTE FUNCTION fn_trg_lmvt_conso_directe();
+
 CREATE OR REPLACE FUNCTION fn_trg_lmvt_motif_requis() RETURNS trigger AS $$
 BEGIN
     IF NEW.code_motif_ligne IS NULL

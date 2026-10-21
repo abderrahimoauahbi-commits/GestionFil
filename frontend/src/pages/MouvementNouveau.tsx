@@ -58,12 +58,17 @@ import { nouvelIdentifiant } from '../lib/identifiant'
    reception (Achats -> Retours fournisseur, 12/10/2026).
    REGLE 1 (09/10/2026) : la sortie hors machine (atelier, echantillon, essai,
    reparation, pret a une autre usine), avec un motif par ligne et un OF libre,
-   et le retour du pret, en nature. */
+   et le retour du pret, en nature.
+   CONSOMMATION DIRECTE (21/10/2026) : la matiere qui ne va pas sur machine
+   (fiche article en mode DIRECTE : jute, latex, SBR, plastique, cuir) sort au
+   CMUP, sans seuil, avec un ordre ou un plan facultatif. */
 const TYPES_SAISIE_LIBRE = [
-  'SORTIE_PROD', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'AJUST_INV_POS', 'AJUST_INV_NEG', 'STOCK_INIT',
+  'SORTIE_PROD', 'CONSO_DIRECTE', 'SORTIE_HORS_MACHINE', 'RETOUR_PRET', 'AJUST_INV_POS', 'AJUST_INV_NEG',
+  'STOCK_INIT',
 ]
 const LIBELLE_SAISIE: Record<string, string> = {
   SORTIE_PROD: 'Déchet (rebut, chute non réutilisable)',
+  CONSO_DIRECTE: 'Consommation directe (jute, latex, SBR, plastique, cuir…)',
   SORTIE_HORS_MACHINE: 'Sortie hors machine (atelier, échantillon, essai, réparation, prêt)',
   RETOUR_PRET: 'Retour d’un prêt (fil rendu par une autre usine)',
 }
@@ -91,6 +96,8 @@ interface StockMagasin {
   bobines_par_palette: number | null
   bobines_par_lot: number | null
   densite_kg_ml: number | null
+  /** MACHINE (sort par les fiches machine) ou DIRECTE (consommation directe). */
+  mode_consommation?: string | null
 }
 
 /**
@@ -289,6 +296,10 @@ export function MouvementNouveau() {
     horsMachine ? estMotifHorsMachine(m.code_motif_ligne) : !estMotifHorsMachine(m.code_motif_ligne),
   )
   const pret = entete.code_type_mvt === 'RETOUR_PRET'
+  /* LA CONSOMMATION DIRECTE ne vaut que pour un article en mode DIRECTE : le fil
+     sort par les fiches machine. Le serveur et la base le refusent ; l'ecran ne
+     propose que les articles DIRECTE et signale une ligne qui ne l'est pas. */
+  const consoDirecte = entete.code_type_mvt === 'CONSO_DIRECTE'
   /* LES PRETS EN COURS : l'usine a qui l'on a prete, ce qu'elle doit rendre. */
   const qPrets = useQuery({
     queryKey: ['prets-en-cours'],
@@ -358,6 +369,7 @@ export function MouvementNouveau() {
     () =>
       [...stockPar.values()]
         .filter((s) => s.quantite_kg > 0.001)
+        .filter((s) => !consoDirecte || s.mode_consommation === 'DIRECTE')
         .map((s) => ({
           code_reference: s.code_reference,
           designation: s.designation,
@@ -370,7 +382,7 @@ export function MouvementNouveau() {
           // ici, c'est le disponible du magasin, et c'est ce qu'il faut lire.
           statut_stock: `${fmt.nombre(s.quantite_kg, 0)} kg en magasin`,
         })),
-    [stockPar],
+    [stockPar, consoDirecte],
   )
 
   /**
@@ -409,6 +421,9 @@ export function MouvementNouveau() {
     (l) => suiviDe(l.code_reference) === 1 && !(l.extra?.lot ?? '').trim(),
   )
   const motifsManquants = exigeMotif ? utiles.filter((l) => !l.extra?.motif_ligne) : []
+  const enModeMachine = consoDirecte
+    ? utiles.filter((l) => l.code_reference && stockPar.get(l.code_reference)?.mode_consommation === 'MACHINE')
+    : []
   const totalKg = utiles.reduce((s, l) => s + (kgDe(l) ?? 0), 0)
 
   /** Ce que les lignes demandent, par reference — la meme peut revenir, un lot par ligne. */
@@ -642,7 +657,9 @@ export function MouvementNouveau() {
             ? `${lotsManquants.length} ligne(s) sans lot : la référence est suivie par lot.`
             : motifsManquants.length > 0
               ? `${motifsManquants.length} ligne(s) sans motif : ce type de mouvement l’exige.`
-              : null
+              : enModeMachine.length > 0
+                ? `${enModeMachine[0].code_reference} est en mode de consommation MACHINE : le fil sort par les fiches machine, pas par une consommation directe.`
+                : null
 
   const champ =
     'w-full rounded-lg border border-champ px-3 py-2 text-sm outline-none focus:border-anneau'
@@ -683,7 +700,17 @@ export function MouvementNouveau() {
             <select id="mvt-1"
               required
               value={entete.code_type_mvt}
-              onChange={(e) => setEntete({ ...entete, code_type_mvt: e.target.value })}
+              onChange={(e) => {
+                const code_type_mvt = e.target.value
+                /* Une consommation directe est une consommation de production :
+                   le motif d'en-tete s'en deduit tant qu'on n'en a pas choisi. */
+                const code_motif =
+                  code_type_mvt === 'CONSO_DIRECTE' && !entete.code_motif &&
+                  qMotifs.data?.some((m) => m.code_motif === 'PRODUCTION')
+                    ? 'PRODUCTION'
+                    : entete.code_motif
+                setEntete({ ...entete, code_type_mvt, code_motif })
+              }}
               className={champ}
             >
               <option value="">—</option>
@@ -740,16 +767,17 @@ export function MouvementNouveau() {
             </select>
           </div>
 
-          {(typeActif?.exige_of === 1 || horsMachine) && (
+          {(typeActif?.exige_of === 1 || horsMachine || consoDirecte) && (
             <div>
               <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-4">
-                Numero d ordre de fabrication {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
+                {consoDirecte ? 'Ordre / plan' : 'Numero d ordre de fabrication'}{' '}
+                {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
               </label>
               <input id="mvt-4"
                 required={typeActif?.exige_of === 1}
                 value={entete.numero_of}
                 onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
-                placeholder={horsMachine ? 'Facultatif, texte libre' : undefined}
+                placeholder={horsMachine || consoDirecte ? 'Facultatif, texte libre' : undefined}
                 className={champ}
               />
             </div>
@@ -835,6 +863,12 @@ export function MouvementNouveau() {
               <p className="mt-0.5 text-[11px] text-attenue-texte">
                 Au-delà de {fmt.nombre(seuilKg, 0)} kg sortis le même jour pour une référence (déchets et sorties
                 hors machine cumulés), la sortie demande le droit de valider l’inventaire.
+              </p>
+            )}
+            {consoDirecte && (
+              <p className="mt-0.5 text-[11px] text-attenue-texte">
+                Sans seuil, au CMUP du magasin : seuls les articles en mode de consommation « Directe » (fiche
+                article) sortent ainsi. Le fil sort par les fiches machine.
               </p>
             )}
           </div>

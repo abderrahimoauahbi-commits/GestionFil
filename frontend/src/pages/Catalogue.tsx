@@ -411,6 +411,21 @@ export function Catalogue() {
       section: 'Gestion des lots',
     },
     {
+      champ: 'mode_consommation',
+      libelle: 'Mode de consommation',
+      type: 'liste',
+      defaut: 'MACHINE',
+      options: [
+        { valeur: 'MACHINE', libelle: 'Machine — sort par les fiches machine' },
+        { valeur: 'DIRECTE', libelle: 'Directe — consommée sans machine' },
+      ],
+      aide:
+        'Comment cette matière sort du magasin. Machine : le fil se charge sur les machines et sort par leurs ' +
+        'fiches. Directe : jute, latex, SBR, plastique, simili cuir… se consomment sans machine et sortent par ' +
+        'une « Consommation directe », au CMUP du magasin, sans le seuil des déchets.',
+      section: 'Conditionnement et stockage',
+    },
+    {
       champ: 'stock_min_kg',
       libelle: 'Stock minimum (kg)',
       type: 'nombre',

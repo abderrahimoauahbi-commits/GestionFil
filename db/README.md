@@ -78,7 +78,7 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C59 : migrations)
+├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C60 : migrations)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -109,6 +109,9 @@ Ce que la base refuse, quel que soit le chemin d'appel — y compris une correct
 | B4-4 · créateur BC ≠ valideur BC | `CHECK` sur `bon_commande` |
 | B4-2 · peseur ≠ contrôleur | `CHECK` sur `reception` |
 | Transitions d'états | table `transition_statut` + trigger par entité — **aucune transition arrière** |
+| Bon soumis figé (21/10/2026) | au contrôle et en attente de validation, ni en-tête ni lignes ne bougent ; en demande de prix, seuls prix et remise (`trg_ligne_bc_figee`, `trg_bc_entete_figee` — la validation écrit encore taux, montants, valideur) |
+| Une ligne par référence sur un bon (21/10/2026) | `trg_ligne_bc_une_par_reference` refuse une seconde ligne de marchandise active (ni annulée ni soldée) ; le serveur augmente la ligne existante ; les doublons anciens se signalent (C60) |
+| Une ligne de réception par lot (21/10/2026) | `trg_ligne_reception_un_lot` : même réception, même ligne de bon, même référence, même lot (vide compris) = une ligne ; le serveur additionne |
 | Audit | journal alimenté sur paramètres, prix, droits, engagements |
 
 Un rôle BOM sans densité sur la qualité **bloque la validation de la recette** plutôt que de produire un besoin nul en silence.
@@ -176,10 +179,11 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C57 | référence sur plusieurs bons ouverts, dont un sert le plan d'achat | 19d |
 | C58 | ligne de bon reçue au-delà de sa commande et de la tolérance | 19e |
 | C59 | bon en attente de validation dont une ligne a un prix confirmé (demande de prix) différent du prix d'avant — prix nets, remise déduite | 21b |
+| C60 | même référence sur plusieurs lignes de marchandise actives (ni annulées ni soldées) d'un bon non annulé — doublon d'avant la règle « une ligne par référence », qui ne bloque rien | 21d |
 
 C28 dit désormais ce que fait `P_EncoursRetardInclus` (comptée ou retirée de la couverture) ; C31,
 C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lisent l'état des machines
-(`machine_etat`). Le banc vérifie la liste exacte C01–C59.
+(`machine_etat`). Le banc vérifie la liste exacte C01–C60.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

@@ -819,6 +819,9 @@ pub async fn stock(
         "SELECT sm.*, r.designation, r.unite_catalogue, r.suivi_lot,
                 r.poids_bobine_kg, r.bobines_par_palette, r.bobines_par_lot,
                 r.densite_kg_ml,
+                -- La saisie d'une consommation directe ne propose que les
+                -- articles en mode DIRECTE (21/10/2026).
+                r.mode_consommation,
                 m.nom AS magasin_nom, m.inclure_mrp
            FROM stock_magasin sm
            JOIN reference r ON r.code_reference = sm.code_reference

@@ -65,6 +65,7 @@ import {
   depuisReference,
   estEbauche,
   estPrete,
+  fusionnerParReference,
   kgDe,
   ligneVide,
   totalDe,
@@ -293,11 +294,16 @@ export function BonCommandeNouveau() {
       api.post<{ id_bc: string; numero_bc: string; lignes: number }>('/api/bons-commande', {
         id_document: idDocument,
         ...entete,
-        lignes: pretes.map(corpsLigne),
+        // UNE LIGNE PAR REFERENCE (21/10/2026) : la reference saisie deux fois
+        // part en une ligne, quantites additionnees (le serveur fait de meme).
+        lignes: fusionnerParReference(pretes).lignes.map(corpsLigne),
       }),
     onSuccess: (r) => {
+      const fusions = fusionnerParReference(pretes).fusions
       toast.success(`${r.numero_bc} cree`, {
-        description: `${r.lignes} ligne(s) · brouillon, rien n'est encore engage.`,
+        description:
+          `${r.lignes} ligne(s) · brouillon, rien n'est encore engage.` +
+          (fusions.length ? ` Une ligne par référence : ${fusions.join(' ; ')}.` : ''),
       })
       void qc.invalidateQueries({ queryKey: ['bons-commande'] })
       void qc.invalidateQueries({ queryKey: ['plan-achat-propositions'] })
@@ -465,6 +471,7 @@ export function BonCommandeNouveau() {
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
                 surCreerReference={setACreer}
                 avecRemise
+                fusionParReference
               />
               {/* LES MEMES TOTAUX QU'EN MODIFICATION : brut, remise, net HT. Pas
                   d'equivalent en dirhams ici — le taux n'est engage qu'a la

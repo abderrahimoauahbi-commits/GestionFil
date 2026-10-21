@@ -22,7 +22,9 @@ import {
   type ProprietesGrille,
   type RefLigne,
   UNITES_LIBRES,
+  autreLigneMemeReference,
   depuisReference,
+  fondreLigne,
   estEbauche,
   estPrete,
   kgDe,
@@ -71,6 +73,7 @@ export function GrilleLignesMobile({
   referenceFigee = false,
   unitesAutorisees,
   doublonsReference = false,
+  fusionParReference = false,
   libelles,
   poidsBobine,
   controleColisage = false,
@@ -78,7 +81,7 @@ export function GrilleLignesMobile({
   const [ouverte, setOuverte] = useState<string | null>(null)
   const ligne = lignes.find((l) => l.cle === ouverte) ?? null
 
-  const prises = doublonsReference
+  const prises = doublonsReference || fusionParReference
     ? new Set<string>()
     : (dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean)))
 
@@ -271,7 +274,15 @@ export function GrilleLignesMobile({
           surCorrection={surCorrection}
           valeurOrigine={valeurOrigine}
           surValider={() => {
-            maj(ligne.cle, { valide: true })
+            /* UNE LIGNE PAR REFERENCE (bon de commande, 21/10/2026) : la ligne
+               qui repete une reference se fond dans celle qui la porte. */
+            const i = fusionParReference && !ligne.idExistant ? autreLigneMemeReference(lignes, ligne) : -1
+            if (i >= 0) {
+              const cible = lignes[i].cle
+              setLignes((ls) =>
+                ls.filter((x) => x.cle !== ligne.cle).map((x) => (x.cle === cible ? fondreLigne(x, ligne) : x)),
+              )
+            } else maj(ligne.cle, { valide: true })
             setOuverte(null)
           }}
           surEnregistrer={surEnregistrerLigne ? () => surEnregistrerLigne(ligne) : undefined}

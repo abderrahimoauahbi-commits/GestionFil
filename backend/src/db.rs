@@ -110,6 +110,22 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Bon fige en attente de validation, une ligne par reference sur un bon,
+        // une ligne de reception par lot, tuiles du circuit, C60 (21/10/2026).
+        "2026-10-21d_bons_receptions_regles.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ligne_bc_une_par_reference')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ligne_reception_un_lot')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_bc_entete_figee')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_ctl_c60')",
+    ),
+    (
+        // La consommation directe (21/10/2026) : mode de consommation de la
+        // fiche article, type CONSO_DIRECTE, garantie en base.
+        "2026-10-21c_consommation_directe.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lmvt_conso_directe')
+            AND EXISTS (SELECT 1 FROM type_mouvement WHERE code_type_mvt = 'CONSO_DIRECTE')",
+    ),
+    (
         // Le bon de commande passe par un controle et une demande de prix
         // (21/10/2026) : nouveaux etats, prix d'avant la demande, C59.
         "2026-10-21b_bc_demande_prix.sql",

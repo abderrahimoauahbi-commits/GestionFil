@@ -382,21 +382,24 @@ async function receptionner(e: Extract<Evenement, { type: 'RECEPTION' }>) {
     const bons = p.getByRole('combobox', { name: 'Bon de commande' })
     await choisirOption(bons, new RegExp(b.numero_bc))
     await p.getByRole('button', { name: 'Reprendre les lignes' }).click()
-    const pesees = champNombre(p, 'Quantité pesée, en kilos')
-    await expect(pesees).toHaveCount(e.lignes.length, { timeout: 15_000 })
+    // LE TABLEAU DU HAUT SE LIT, LA SAISIE EST EN BAS (21/10/2026) : on pointe chaque
+    // ligne d'un clic, puis on saisit dans le detail de la ligne, sous le tableau.
+    const retenir = p.getByRole('checkbox', { name: /^Retenir / })
+    await expect(retenir).toHaveCount(e.lignes.length, { timeout: 15_000 })
     for (const [i, l] of e.lignes.entries()) {
-      // La ligne et sa ligne complementaire (colis, lot, magasin) depuis le 10/10/2026.
-      const ligne = pesees.nth(i).locator('xpath=ancestor::tr[1] | ancestor::tr[1]/following-sibling::tr[1]')
+      await retenir.nth(i).locator('xpath=ancestor::tr[1]/td[3]').click()
+      await p.getByRole('button', { name: 'Quantité', exact: true }).click()
       // Peser et compter sont deux gestes : on detache le calcul, sinon compter
       // les bobines recalculerait la pesee (ou l'inverse).
-      const detacher = ligne.getByRole('button', { name: 'Détacher le calcul' }).first()
+      const detacher = p.getByRole('button', { name: 'Détacher le calcul' }).first()
       if (await detacher.isVisible().catch(() => false)) await detacher.click()
-      await taper(champNombre(p, 'Quantité du bon de livraison, en kilos').nth(i), fr(l.bl, 1))
-      await taper(pesees.nth(i), fr(l.pese, 2))
+      await taper(champNombre(p, 'Quantité du bon de livraison, en kilos'), fr(l.bl, 1))
+      await taper(champNombre(p, 'Quantité pesée, en kilos'), fr(l.pese, 2))
       const bob = bobinesComptees(l.ref, l.pese, e.id)
-      if (bob) await taper(champNombre(ligne, 'Nombre de bobines').first(), String(bob))
-      if (parCode.get(l.ref)?.suivi_lot === 1) await p.getByLabel('Lot fournisseur').nth(i).fill(l.lot)
-      await p.getByRole('combobox', { name: 'Magasin destinataire' }).nth(i).selectOption(l.magasin)
+      if (bob) await taper(champNombre(p, 'Nombre de bobines'), String(bob))
+      if (parCode.get(l.ref)?.suivi_lot === 1) await p.getByLabel('Lot fournisseur').fill(l.lot)
+      await p.getByRole('button', { name: 'Stockage', exact: true }).click()
+      await p.getByRole('combobox', { name: 'Magasin destinataire' }).selectOption(l.magasin)
     }
     await p.getByRole('button', { name: /^Enregistrer la r[ée]ception$/ }).click()
     await expect(p).toHaveURL(/\/receptions\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {

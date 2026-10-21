@@ -194,6 +194,11 @@ CREATE TABLE reference (
     date_dernier_cmup   text,
 
     suivi_lot           bigint NOT NULL DEFAULT 0 CHECK (suivi_lot IN (0,1)),
+    -- MACHINE : sort par les fiches machine (le fil) ; DIRECTE : se consomme sans machine
+    -- (jute, latex, SBR, plastique, simili cuir), par CONSO_DIRECTE (21/10/2026).
+    mode_consommation   text   NOT NULL DEFAULT 'MACHINE'
+                        CONSTRAINT reference_mode_consommation_check
+                        CHECK (mode_consommation IN ('MACHINE', 'DIRECTE')),
     actif               bigint NOT NULL DEFAULT 1 CHECK (actif IN (0,1)),
     date_creation       text    NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     id_utilisateur_creation text REFERENCES utilisateur(id_utilisateur),

@@ -18,7 +18,7 @@ CIBLE = RACINE / "docs" / "matrice-mouvements.md"
 
 GROUPES = [
     ("Achats", ["ENTREE_REC", "RETOUR_FOURN", "STOCK_INIT"]),
-    ("Production et sorties", ["SORTIE_PROD", "RETOUR_PROD", "SORTIE_HORS_MACHINE", "RETOUR_PRET"]),
+    ("Production et sorties", ["SORTIE_PROD", "CONSO_DIRECTE", "RETOUR_PROD", "SORTIE_HORS_MACHINE", "RETOUR_PRET"]),
     ("Inventaire et corrections", ["AJUST_INV_POS", "AJUST_INV_NEG"]),
     ("Transferts (le fil en route entre les deux)", ["TRANSFERT_SORTIE", "TRANSFERT_ENTREE"]),
     ("Lots", ["FUSION_SORTIE", "FUSION_ENTREE"]),

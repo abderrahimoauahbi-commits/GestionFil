@@ -134,9 +134,13 @@ fn normaliser_date_mouvement(v: &Option<String>) -> Option<String> {
 // REGLE 1 (arbitrage du 09/10/2026) : la sortie hors machine — consommation
 // d'atelier, echantillon, essai, reparation, pret a une autre usine — et le
 // retour du pret, en nature.
+// CONSOMMATION DIRECTE (decision du 21/10/2026) : la matiere qui ne se charge
+// pas sur machine (jute, latex, SBR, plastique, simili cuir — fiche article en
+// mode DIRECTE) sort au CMUP du magasin, sans le seuil des dechets.
 pub(crate) const TYPES_SAISIE_LIBRE: &[&str] = &[
     "SORTIE_PROD",
     "SORTIE_HORS_MACHINE",
+    "CONSO_DIRECTE",
     "RETOUR_PRET",
     "AJUST_INV_POS",
     "AJUST_INV_NEG",
@@ -234,12 +238,36 @@ pub async fn creer_mouvement(
     // une sortie production sans seuil ni droit, sur un OF jamais verifie : 61 t
     // de fil pouvaient sortir ainsi. Elle devient la sortie hors machine, avec un
     // motif par ligne et le meme seuil que le dechet (regle 1, 09/10/2026).
+    // Depuis le 21/10/2026, la matiere qui se consomme sans machine a sa propre
+    // sortie, la consommation directe ; le fil, lui, sort par les fiches machine.
     if m.code_type_mvt == "SORTIE_PROD" && m.nature_sortie.as_deref() == Some("CONSOMMATION") {
         return Err(AppError::RegleMetier(
-            "La consommation hors machine se saisit desormais en « Sortie hors machine », avec \
-             un motif par ligne (atelier, echantillon, essai, reparation, pret)."
+            "Une consommation se saisit en « Consommation directe » pour un article en mode DIRECTE \
+             (jute, latex, SBR, plastique, cuir) ; le fil sort par les fiches machine. Une sortie \
+             ponctuelle (echantillon, essai, reparation, pret) se saisit en « Sortie hors machine »."
                 .into(),
         ));
+    }
+    // LA CONSOMMATION DIRECTE NE VAUT QUE POUR UN ARTICLE EN MODE DIRECTE
+    // (decision du 21/10/2026). La base le garantit (trg_lmvt_conso_directe) ;
+    // le service le dit avant, en nommant chaque reference refusee.
+    if m.code_type_mvt == "CONSO_DIRECTE" {
+        let codes: Vec<String> = converties.iter().map(|(l, _, _)| l.code_reference.clone()).collect();
+        let machine: Vec<String> = sqlx::query_scalar(
+            "SELECT code_reference FROM reference
+              WHERE code_reference = ANY($1) AND mode_consommation <> 'DIRECTE'
+              ORDER BY code_reference",
+        )
+        .bind(&codes)
+        .fetch_all(&state.db)
+        .await?;
+        if !machine.is_empty() {
+            return Err(AppError::RegleMetier(format!(
+                "{} : mode de consommation MACHINE (fiche article) : le fil sort par les fiches machine, \
+                 pas par une consommation directe.",
+                machine.join(", ")
+            )));
+        }
     }
     let tiers = m.tiers.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
     if m.code_type_mvt == "SORTIE_HORS_MACHINE" {

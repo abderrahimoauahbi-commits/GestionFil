@@ -470,6 +470,8 @@ INSERT INTO champ_configurable (module, champ, libelle, niveau_defaut, sensible,
  -- MASQUE : sa tuile disparaitrait sans un mot, et l'on chercherait longtemps.
  ('COCKPIT','nb_propositions_a_traiter',  'Propositions d''achat a traiter', 'LECTURE', 0,150),
  ('COCKPIT','nb_bc_en_preparation',       'Bons en preparation',        'LECTURE', 0,160),
+ ('COCKPIT','nb_bc_au_controle',          'Bons au controle',           'LECTURE', 0,165),
+ ('COCKPIT','nb_bc_demande_prix',         'Demandes de prix en attente', 'LECTURE', 0,166),
  ('COCKPIT','nb_bc_a_valider',            'Bons a valider',             'LECTURE', 0,170),
  ('COCKPIT','montant_bc_a_valider_mad',   'Montant a valider (MAD)',    'LECTURE', 1,180),
  ('COCKPIT','nb_bc_a_envoyer',            'Bons a envoyer',             'LECTURE', 0,190),

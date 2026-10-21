@@ -1014,7 +1014,14 @@ SELECT
     (SELECT COUNT(*) FROM v_controles WHERE criticite = 'CRITIQUE' AND anomalies > 0)
         AS nb_controles_critiques,
     (SELECT COUNT(*) FROM alerte WHERE statut = 'OUVERTE')
-        AS nb_alertes_ouvertes;
+        AS nb_alertes_ouvertes,
+
+    -- Les deux attentes du circuit du bon (migration 2026-10-21d) : en fin de
+    -- vue, la ou CREATE OR REPLACE VIEW les a ajoutees.
+    (SELECT COUNT(*) FROM bon_commande WHERE statut = 'EN_CONTROLE')
+        AS nb_bc_au_controle,
+    (SELECT COUNT(*) FROM bon_commande WHERE statut = 'DEMANDE_PRIX')
+        AS nb_bc_demande_prix;
 
 -- -----------------------------------------------------------------------------
 -- v_risque_mensuel

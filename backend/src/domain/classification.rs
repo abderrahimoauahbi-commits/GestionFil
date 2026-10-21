@@ -125,7 +125,13 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
                JOIN mouvement      m  ON m.id_mouvement   = lm.id_mouvement
                JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
               WHERE tm.signe = -1
-                AND m.code_type_mvt = 'SORTIE_PROD'
+                -- LES MEMES SORTIES QUE v_conso_reelle, qui sert l'ABC : dechets,
+                -- consommation directe (21/10/2026), sorties hors machine sauf le
+                -- pret ; une sortie contre-passee n'a pas eu lieu.
+                AND (m.code_type_mvt IN ('SORTIE_PROD', 'CONSO_DIRECTE')
+                     OR (m.code_type_mvt = 'SORTIE_HORS_MACHINE'
+                         AND COALESCE(lm.code_motif_ligne, '') <> 'HM_PRET'))
+                AND NOT EXISTS (SELECT 1 FROM mouvement c WHERE c.id_mouvement_contrepasse = m.id_mouvement)
                 AND m.date_mouvement >= ((now() AT TIME ZONE 'Africa/Casablanca') - interval '12 months')::date
               GROUP BY lm.code_reference, mois
              UNION ALL

@@ -225,6 +225,10 @@ pub struct BonGenere {
 pub struct ResultatConversion {
     pub bons: Vec<BonGenere>,
     pub propositions_converties: i64,
+    /// UNE LIGNE PAR REFERENCE (21/10/2026) : les propositions dont la reference
+    /// etait deja sur le bon vise, et dont la quantite s'est ajoutee a sa ligne
+    /// (prix de la ligne existante conserve). Un message par fusion.
+    pub fusions: Vec<String>,
 }
 
 /// Convertit des propositions d'achat en bons de commande, un par fournisseur.
@@ -334,6 +338,7 @@ pub async fn convertir(
     }
 
     let mut converties = 0i64;
+    let mut fusions: Vec<String> = Vec::new();
     // (fournisseur, id_bc) dans l'ordre d'ouverture. On retient l'identifiant
     // rendu par l'insertion plutot que de le rechercher ensuite : deux bons du
     // meme fournisseur ouverts le meme jour seraient indiscernables.
@@ -361,7 +366,9 @@ pub async fn convertir(
                                 "Le bon {numero} est d'un autre fournisseur ({frs}) : il ne recoit pas les lignes de {fournisseur}."
                             )));
                         }
-                        if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
+                        // LE BROUILLON SEUL (21/10/2026) : au controle, en demande
+                        // de prix ou en attente de validation, le bon est fige.
+                        if statut != "BROUILLON" {
                             return Err(AppError::RegleMetier(format!(
                                 "Le bon {numero} est {statut} : il ne se complete plus. Choisissez un brouillon ou un nouveau bon."
                             )));
@@ -413,6 +420,51 @@ pub async fn convertir(
             .and_then(|a| a.nb_palettes)
             .or(if qte_ajustee.is_none() { *palettes_plan } else { None });
         let bobines_final = aj.and_then(|a| a.nb_bobines);
+
+        // UNE LIGNE PAR REFERENCE (21/10/2026). Le bon vise porte deja la
+        // reference : sa ligne s'augmente de la quantite convertie, au lieu d'en
+        // ouvrir une seconde. Le prix est celui de la ligne existante — il a pu
+        // etre negocie ; la reponse le dit.
+        let (code_ref, numero_bc): (String, String) = sqlx::query_as(
+            "SELECT pa.code_reference, bc.numero_bc FROM plan_achat pa, bon_commande bc
+              WHERE pa.id_proposition = $1 AND bc.id_bc = $2",
+        )
+        .bind(id_prop)
+        .bind(&id_bc)
+        .fetch_one(&mut *tx)
+        .await?;
+        if let Some((existante, rang)) =
+            crate::routes::bons_commande::ligne_meme_reference(&mut tx, &id_bc, &code_ref).await?
+        {
+            crate::routes::bons_commande::augmenter_ligne_bc(
+                &mut tx,
+                &existante,
+                &crate::routes::bons_commande::AjoutLigne {
+                    kg: qte_final,
+                    unite: None,
+                    quantite_unite: None,
+                    palettes: palettes_final.map(|p| p as f64),
+                    bobines: bobines_final,
+                    id_proposition: Some(id_prop),
+                },
+            )
+            .await?;
+            sqlx::query(
+                "UPDATE plan_achat SET statut = 'COMMANDE', id_bc_genere = $2, figee = 0
+                  WHERE id_proposition = $1",
+            )
+            .bind(id_prop)
+            .bind(&id_bc)
+            .execute(&mut *tx)
+            .await?;
+            fusions.push(format!(
+                "{code_ref} : {} kg ajoutes a la ligne {rang} du bon {numero_bc}, qui la portait deja ; \
+                 le prix de cette ligne est conserve.",
+                crate::db::arrondi_kg(qte_final)
+            ));
+            converties += 1;
+            continue;
+        }
 
         // L'UNITE DE LA PROPOSITION (21/10/2026) : kg, ou l'unite du catalogue
         // (ml) avec son facteur, celui que le plan a applique. Les kilos se
@@ -508,7 +560,7 @@ pub async fn convertir(
     }
 
     tx.commit().await?;
-    Ok(ResultatConversion { bons, propositions_converties: converties })
+    Ok(ResultatConversion { bons, propositions_converties: converties, fusions })
 }
 
 /// Ouvre un bon de commande en brouillon pour un fournisseur.

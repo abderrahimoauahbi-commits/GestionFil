@@ -178,14 +178,36 @@ pub async fn creer_bc(
 
     // --- Lignes saisies avec l'entete ---------------------------------------
     let mut posees = 0i64;
-    for (i, l) in b.lignes.iter().flatten().enumerate() {
+    let mut fusions: Vec<String> = Vec::new();
+    for l in b.lignes.iter().flatten() {
         valider_ligne_bc(l)?;
         let (kg, facteur) = poids_ligne_bc(&state.db, l).await?;
+        // UNE LIGNE PAR REFERENCE (21/10/2026) : la meme reference saisie deux
+        // fois fait une seule ligne, dont la quantite s'additionne.
+        if let (false, Some(code)) = (l.sans_reference(), l.code_reference.as_deref()) {
+            if let Some((existante, numero)) = ligne_meme_reference(&mut tx, &id, code).await? {
+                augmenter_ligne_bc(
+                    &mut tx,
+                    &existante,
+                    &AjoutLigne {
+                        kg,
+                        unite: Some(&l.unite_commande),
+                        quantite_unite: Some(l.quantite_commandee_unite),
+                        palettes: l.nb_palettes,
+                        bobines: l.nb_bobines,
+                        id_proposition: l.id_proposition.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+                    },
+                )
+                .await?;
+                fusions.push(message_fusion(code, numero));
+                continue;
+            }
+        }
         inserer_ligne_bc(
             &mut tx,
             &uuid::Uuid::new_v4().to_string(),
             &id,
-            (i + 1) as i64,
+            posees + 1,
             l,
             kg,
             facteur,
@@ -218,7 +240,7 @@ pub async fn creer_bc(
     tx.commit().await?;
     Ok(Json(json!({
         "id_bc": id, "numero_bc": numero, "code_devise": devise,
-        "taux_change_engage": taux, "lignes": posees
+        "taux_change_engage": taux, "lignes": posees, "fusions": fusions
     })))
 }
 
@@ -544,18 +566,22 @@ pub struct ModifLigneBc {
     pub remise_pct: Option<f64>,
 }
 
-/// LES ETATS OU LE BON SE PREPARE ENCORE, et ou tout se modifie (lignes et
-/// en-tete). Au controle, le bon est fige ; en demande de prix, seuls le prix et
-/// la remise des lignes bougent (decision du 21/10/2026) — la base tient la meme
-/// regle (`trg_ligne_bc_figee`).
+/// L'ETAT OU LE BON SE PREPARE ENCORE, et ou tout se modifie (lignes et
+/// en-tete) : le brouillon, et lui seul. Au controle et en attente de validation,
+/// le bon est fige ; en demande de prix, seuls le prix et la remise des lignes
+/// bougent (decisions du 21/10/2026) — la base tient la meme regle
+/// (`trg_ligne_bc_figee`, `trg_bc_entete_figee`).
 fn se_modifie(statut: &str) -> bool {
-    matches!(statut, "BROUILLON" | "EN_ATTENTE_VALIDATION")
+    statut == "BROUILLON"
 }
 
 /// Le refus qui dit QUOI FAIRE, selon l'etat du bon.
 fn refus_modification(statut: &str) -> AppError {
     AppError::RegleMetier(match statut {
         "EN_CONTROLE" => "Le bon est au controle : il ne se modifie pas. Renvoyez-le en brouillon pour le corriger.".into(),
+        "EN_ATTENTE_VALIDATION" => "Le bon attend sa validation : il ne se modifie plus. Renvoyez-le en brouillon \
+                                    (avec un motif) pour le corriger, ou annulez-le."
+            .into(),
         "DEMANDE_PRIX" => "Le bon est en demande de prix : seuls le prix et la remise des lignes se modifient. \
                            Pour les quantites, les references ou l'en-tete, renvoyez-le en brouillon."
             .into(),
@@ -578,6 +604,95 @@ pub(crate) async fn recalculer_bc(tx: &mut sqlx::PgConnection, id: &str) -> AppR
     .execute(&mut *tx)
     .await?;
     Ok(())
+}
+
+/// UNE LIGNE PAR REFERENCE SUR UN BON (decision du 21/10/2026).
+///
+/// La ligne de marchandise ACTIVE (ni annulee ni soldee) qui porte deja cette
+/// reference sur ce bon, verrouillee : c'est elle qu'on augmente au lieu d'en
+/// ouvrir une seconde. La base refuse le doublon (`trg_ligne_bc_une_par_reference`).
+pub(crate) async fn ligne_meme_reference(
+    tx: &mut sqlx::PgConnection,
+    id_bc: &str,
+    code_reference: &str,
+) -> AppResult<Option<(String, i64)>> {
+    Ok(sqlx::query_as(
+        "SELECT id_ligne_bc, ligne_numero FROM ligne_bc
+          WHERE id_bc = $1 AND code_reference = $2 AND type_ligne = 'MARCHANDISE'
+            AND statut NOT IN ('ANNULE', 'SOLDE')
+          ORDER BY ligne_numero LIMIT 1 FOR UPDATE",
+    )
+    .bind(id_bc)
+    .bind(code_reference)
+    .fetch_optional(&mut *tx)
+    .await?)
+}
+
+/// Ce qu'on ajoute a une ligne existante : des kilos (toujours), la quantite
+/// dans l'unite saisie (quand c'est celle de la ligne, elle s'ajoute telle
+/// quelle), le colisage saisi, et la proposition du plan qu'elle sert.
+pub(crate) struct AjoutLigne<'a> {
+    pub kg: f64,
+    pub unite: Option<&'a str>,
+    pub quantite_unite: Option<f64>,
+    pub palettes: Option<f64>,
+    pub bobines: Option<i64>,
+    pub id_proposition: Option<&'a str>,
+}
+
+/// AUGMENTE la ligne existante de ce qu'on voulait ajouter.
+///
+/// LA QUANTITE dans l'unite de la ligne : additionnee telle quelle si l'ajout est
+/// dans la meme unite, sinon reconvertie depuis les kilos ; les kilos se deduisent
+/// de la quantite, comme a la saisie (la base exige l'egalite au gramme pres).
+///
+/// LE COLISAGE SUIT, comme dans la grille : saisi des deux cotes, il s'additionne ;
+/// saisi d'un seul cote, l'autre se deduit des kilos par les parametres de la
+/// reference ; saisi nulle part, il reste deduit (NULL).
+///
+/// LE PRIX ET LA REMISE NE BOUGENT PAS : ceux de la ligne existante font foi.
+pub(crate) async fn augmenter_ligne_bc(
+    tx: &mut sqlx::PgConnection,
+    id_ligne_bc: &str,
+    a: &AjoutLigne<'_>,
+) -> AppResult<()> {
+    let unite_qte = "ROUND(CASE WHEN $3::text = lb.unite_commande AND $4::numeric IS NOT NULL
+                                THEN lb.quantite_commandee_unite + $4::numeric
+                                ELSE (lb.quantite_commandee_kg + $2::numeric) / lb.facteur_kg END, 4)";
+    sqlx::query(&format!(
+        "UPDATE ligne_bc lb
+            SET quantite_commandee_unite = {unite_qte},
+                quantite_commandee_kg    = ROUND({unite_qte} * lb.facteur_kg, 4),
+                nb_palettes_saisi = CASE WHEN lb.nb_palettes_saisi IS NULL AND $5::numeric IS NULL THEN NULL
+                    ELSE ROUND(COALESCE(lb.nb_palettes_saisi,
+                                        lb.quantite_commandee_kg / NULLIF(r.poids_bobine_kg * r.bobines_par_palette, 0))
+                               + COALESCE($5::numeric,
+                                          $2::numeric / NULLIF(r.poids_bobine_kg * r.bobines_par_palette, 0)), 2) END,
+                nb_bobines_saisi = CASE WHEN lb.nb_bobines_saisi IS NULL AND $6::bigint IS NULL THEN NULL
+                    ELSE ROUND(COALESCE(lb.nb_bobines_saisi::numeric, lb.quantite_commandee_kg / NULLIF(r.poids_bobine_kg, 0))
+                               + COALESCE($6::numeric, $2::numeric / NULLIF(r.poids_bobine_kg, 0)))::bigint END,
+                id_proposition = COALESCE(lb.id_proposition, $7::text)
+           FROM reference r
+          WHERE lb.id_ligne_bc = $1 AND r.code_reference = lb.code_reference"
+    ))
+    .bind(id_ligne_bc)
+    .bind(a.kg)
+    .bind(a.unite)
+    .bind(a.quantite_unite)
+    .bind(a.palettes)
+    .bind(a.bobines)
+    .bind(a.id_proposition)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
+/// Le message qui dit ce qui s'est passe quand une ligne a ete fondue.
+fn message_fusion(code: &str, numero: i64) -> String {
+    format!(
+        "{code} etait deja sur la ligne {numero} : la quantite s'y ajoute (une ligne par reference). \
+         Le prix et la remise de cette ligne sont conserves."
+    )
 }
 
 pub async fn ajouter_ligne_bc(
@@ -610,6 +725,40 @@ pub async fn ajouter_ligne_bc(
             .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
     if !se_modifie(&statut) {
         return Err(refus_modification(&statut));
+    }
+
+    // UNE LIGNE PAR REFERENCE (21/10/2026) : la reference deja sur le bon voit
+    // sa ligne augmentee, au lieu d'en ouvrir une seconde.
+    if let (false, Some(code)) = (l.sans_reference(), l.code_reference.as_deref()) {
+        if let Some((existante, numero)) = ligne_meme_reference(&mut tx, &id, code).await? {
+            augmenter_ligne_bc(
+                &mut tx,
+                &existante,
+                &AjoutLigne {
+                    kg,
+                    unite: Some(&l.unite_commande),
+                    quantite_unite: Some(l.quantite_commandee_unite),
+                    palettes: l.nb_palettes,
+                    bobines: l.nb_bobines,
+                    id_proposition: l.id_proposition.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+                },
+            )
+            .await?;
+            // Toucher a la quantite, c'est arbitrer : la ligne cesse de suivre le plan.
+            sqlx::query("UPDATE ligne_bc SET arbitree = 1 WHERE id_ligne_bc = $1")
+                .bind(&existante)
+                .execute(&mut *tx)
+                .await?;
+            recalculer_bc(&mut tx, &id).await?;
+            let version_entete =
+                crate::domain::concurrence::version_actuelle(&mut tx, "bon_commande", "id_bc", &id).await?;
+            tx.commit().await?;
+            return Ok(Json(json!({ "version": version_entete,
+                "id_ligne_bc": existante, "ligne_numero": numero, "fusionnee": true,
+                "message": message_fusion(code, numero),
+                "quantite_ajoutee_kg": kg, "facteur_kg": facteur
+            })));
+        }
     }
 
     let numero: i64 = sqlx::query_scalar(
@@ -658,8 +807,9 @@ pub async fn supprimer_ligne_bc(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("ligne {ligne}")))?;
-    // Au controle et en demande de prix, les lignes sont figees (21/10/2026).
-    if matches!(statut_bc.as_str(), "EN_CONTROLE" | "DEMANDE_PRIX") {
+    // Au controle, en demande de prix et en attente de validation, les lignes
+    // sont figees (21/10/2026).
+    if matches!(statut_bc.as_str(), "EN_CONTROLE" | "DEMANDE_PRIX" | "EN_ATTENTE_VALIDATION") {
         return Err(refus_modification(&statut_bc));
     }
     if recue > 0.0 {
@@ -772,16 +922,17 @@ pub async fn supprimer_bc(
         ));
     }
 
-    // Au controle ou en demande de prix, ses lignes sont figees : il revient
-    // d'abord en brouillon (avec son motif), ou il s'annule.
-    if matches!(statut.as_str(), "EN_CONTROLE" | "DEMANDE_PRIX") {
+    // Au controle, en demande de prix ou en attente de validation, ses lignes
+    // sont figees (21/10/2026) : il revient d'abord en brouillon (avec son
+    // motif), ou il s'annule.
+    if matches!(statut.as_str(), "EN_CONTROLE" | "DEMANDE_PRIX" | "EN_ATTENTE_VALIDATION") {
         return Err(AppError::RegleMetier(
-            "Ce bon est au controle ou en demande de prix : renvoyez-le en brouillon pour le supprimer, \
-             ou annulez-le."
+            "Ce bon est au controle, en demande de prix ou en attente de validation : renvoyez-le en \
+             brouillon pour le supprimer, ou annulez-le."
                 .into(),
         ));
     }
-    if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
+    if statut != "BROUILLON" {
         return Err(AppError::RegleMetier(format!(
             "ce bon est {} : il a engage l'entreprise et ne se supprime plus. Annulez-le — la trace restera.",
             statut.to_lowercase().replace('_', " ")
@@ -921,9 +1072,10 @@ pub async fn changer_statut_bc(
             return Ok(Json(json!({ "id_bc": id, "statut": s.statut })));
         }
         ("EN_CONTROLE" | "DEMANDE_PRIX" | "EN_ATTENTE_VALIDATION", "BROUILLON") => {
-            // L'acheteur doit savoir quoi corriger. Le retrait d'un bon en attente
-            // de validation garde son ancienne liberte (motif facultatif).
-            if actuel != "EN_ATTENTE_VALIDATION" && !motif_lisible {
+            // L'acheteur doit savoir quoi corriger — y compris depuis l'attente de
+            // validation, ou le bon est desormais fige (21/10/2026) : le renvoi
+            // est le seul chemin vers une correction.
+            if !motif_lisible {
                 return Err(AppError::Invalide(
                     "Dites pourquoi le bon revient en brouillon : l'acheteur doit savoir quoi corriger.".into(),
                 ));

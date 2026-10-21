@@ -19,7 +19,7 @@
  */
 import { useMemo, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { ArrowLeft, Check, Package, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, Package, Pencil, Plus, Scale, Search, Trash2 } from 'lucide-react'
 import {
   type LigneSaisie,
   type RefLigne,
@@ -81,6 +81,8 @@ export function PeseesMobile({
   const [edite, setEdite] = useState<LigneSaisie | null>(null)
   const [estNouvelle, setEstNouvelle] = useState(false)
   const [ajout, setAjout] = useState(false)
+  /* Ce qu'une pesee du meme lot vient d'additionner, dit une fois. */
+  const [fusion, setFusion] = useState<string | null>(null)
 
   /*
    * LES LIGNES ATTENDUES SONT DEJA LA (16/10/2026).
@@ -101,28 +103,6 @@ export function PeseesMobile({
     [proposees, lignes],
   )
 
-  /* Taper un poids sur une ligne attendue la fait entrer dans l'arrivage.
-     LE POIDS N'EST JAMAIS PREREMPLI a l'attendu : ce serait valider sans
-     peser. L'attendu reste a cote, comme repere, et sert l'ecart. */
-  const peser = (ref: RefLigne, kgTape: string) => {
-    const nl = depuisReference(ref)
-    const parDefaut = magasins.find((m) => m.est_quarantaine !== 1)?.code_magasin ?? ''
-    setLignes((ls) => [
-      ...ls,
-      {
-        ...nl,
-        // Les colis ne sont pas comptes tant qu'on ne les a pas comptes : les
-        // laisser deduits de l'attendu ferait passer une estimation pour un
-        // denombrement (regle 13, audit v4).
-        qte: kgTape,
-        palettes: '',
-        bobines: '',
-        valide: true,
-        extra: { ...nl.extra, magasin: parDefaut, qualite: 'CONFORME' },
-      },
-    ])
-  }
-
   const ouvrir = (l: LigneSaisie) => {
     setEdite({ ...l, extra: { ...l.extra } })
     setEstNouvelle(false)
@@ -141,12 +121,51 @@ export function PeseesMobile({
     setEstNouvelle(false)
   }
 
+  /*
+   * UNE LIGNE PAR REFERENCE ET PAR LOT (21/10/2026). Une NOUVELLE pesee de la
+   * meme ligne de bon (ou de la meme reference hors commande) et du meme lot
+   * s'ADDITIONNE a la ligne qui le porte deja : poids, colis, palettes,
+   * bobines, poids annonce. Un autre lot fait une autre ligne. Le serveur fait
+   * de meme, et la base refuse le doublon.
+   */
+  const cleLot = (l: LigneSaisie) =>
+    `${l.extra?.id_ligne_bc || l.code_reference}|${(l.extra?.lot ?? '').trim()}`
+  const additionner = (a: string | undefined, b: string | undefined) => {
+    const x = lireNombre(a ?? '')
+    const y = lireNombre(b ?? '')
+    return x == null && y == null ? '' : String(Number(((x ?? 0) + (y ?? 0)).toFixed(4)))
+  }
   const valider = () => {
     if (!edite) return
     const fige: LigneSaisie = { ...edite, valide: true }
-    setLignes((ls) =>
-      estNouvelle ? [...ls, fige] : ls.map((x) => (x.cle === fige.cle ? fige : x)),
-    )
+    const meme = estNouvelle ? lignes.find((x) => cleLot(x) === cleLot(fige)) : undefined
+    if (meme) {
+      setLignes((ls) =>
+        ls.map((x) =>
+          x.cle !== meme.cle
+            ? x
+            : {
+                ...x,
+                qte: additionner(x.qte, fige.qte),
+                palettes: additionner(x.palettes, fige.palettes),
+                bobines: additionner(x.bobines, fige.bobines),
+                extra: {
+                  ...x.extra,
+                  bl: additionner(x.extra?.bl, fige.extra?.bl),
+                  colis: additionner(x.extra?.colis, fige.extra?.colis),
+                },
+              },
+        ),
+      )
+      setFusion(
+        `${fige.code_reference} : même lot que la ligne ${lignes.indexOf(meme) + 1}, la pesée s’y ajoute (une ligne par lot).`,
+      )
+    } else {
+      setFusion(null)
+      setLignes((ls) =>
+        estNouvelle ? [...ls, fige] : ls.map((x) => (x.cle === fige.cle ? fige : x)),
+      )
+    }
     fermer()
   }
 
@@ -163,19 +182,27 @@ export function PeseesMobile({
     <div className="px-3 py-3">
       {attendues.length > 0 && (
         <section className="mb-3">
+          {/* EN LECTURE (21/10/2026) : ce qui est attendu se lit ici ; la
+              pesee se saisit en bas, dans la feuille qu'ouvre un toucher. */}
           <h3 className="mb-1.5 text-[13px] font-medium">
-            Attendu sur les bons — tapez le poids pesé
+            Attendu sur les bons — touchez une ligne pour la peser
           </h3>
           <ul className="divide-y divide-bordure overflow-hidden rounded-[var(--radius)] border border-bordure">
             {attendues.map((p) => (
               <LigneAttendue
                 key={p.id_ligne_bc ?? p.code_reference}
                 attendue={p}
-                surPeser={peser}
+                surPeser={() => ouvrirNouvelle(p)}
               />
             ))}
           </ul>
         </section>
+      )}
+
+      {fusion && (
+        <p className="mb-2 rounded-[var(--radius)] border border-alerte/40 bg-alerte/5 px-3 py-2 text-[12.5px]">
+          {fusion}
+        </p>
       )}
 
       {lignes.length === 0 && attendues.length === 0 ? (
@@ -243,46 +270,34 @@ function LigneAttendue({
   surPeser,
 }: {
   attendue: RefLigne
-  surPeser: (r: RefLigne, kg: string) => void
+  surPeser: () => void
 }) {
-  const [kg, setKg] = useState('')
   const attendu = attendue.qte_a_commander_kg ?? 0
-
-  /* « 1 234,5 » vaut 1234,5 : le poids se tape comme on l'ecrit ici. */
-  const poser = () => {
-    const v = lireNombre(kg)
-    if (v != null && Number.isFinite(v) && v > 0) surPeser(attendue, kg)
-  }
-
   return (
-    <li className="grid gap-1.5 px-3 py-2.5 md:grid-cols-[1fr_auto_170px] md:items-center md:gap-3">
-      <div className="min-w-0">
-        <div className="truncate text-[14px] font-medium">
-          {attendue.designation ?? attendue.code_reference}
+    <li>
+      <button
+        type="button"
+        onClick={surPeser}
+        aria-label={`Peser ${attendue.code_reference}`}
+        className="grid w-full gap-1.5 px-3 py-2.5 text-left transition-colors hover:bg-attenue/40 md:grid-cols-[1fr_auto_auto] md:items-center md:gap-3"
+      >
+        <div className="min-w-0">
+          <div className="truncate text-[14px] font-medium">
+            {attendue.designation ?? attendue.code_reference}
+          </div>
+          <div className="truncate text-[12px] text-attenue-texte">
+            {attendue.code_reference}
+            {attendue.numero_bc && <> · {attendue.numero_bc}</>}
+          </div>
         </div>
-        <div className="truncate text-[12px] text-attenue-texte">
-          {attendue.code_reference}
-          {attendue.numero_bc && <> · {attendue.numero_bc}</>}
+        <div className="text-[12.5px] tabular-nums text-attenue-texte md:text-right">
+          attendu {fmt.nombre(attendu, 2)} kg
         </div>
-      </div>
-      <div className="text-[12.5px] tabular-nums text-attenue-texte md:text-right">
-        attendu {fmt.nombre(attendu, 2)} kg
-      </div>
-      <Champ
-        inputMode="decimal"
-        value={kg}
-        placeholder="Poids pesé (kg)"
-        aria-label={`Poids pesé pour ${attendue.code_reference}`}
-        onChange={(e) => setKg(e.target.value)}
-        onBlur={poser}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            poser()
-          }
-        }}
-        className="text-right tabular-nums"
-      />
+        <span className="inline-flex items-center gap-1 text-[12.5px] font-medium text-primaire">
+          <Scale className="size-4" />
+          Peser
+        </span>
+      </button>
     </li>
   )
 }
@@ -779,7 +794,7 @@ function PropositionRef({
                 {ref_.numero_bc}
               </span>
             )}
-            {deja && <Badge ton="info">déjà saisie</Badge>}
+            {deja && <Badge ton="info">déjà saisie — même lot : s’ajoute</Badge>}
             {horsCommande && <Badge ton="neutre">hors commande</Badge>}
           </div>
           <div className="truncate text-[12px] text-attenue-texte">{ref_.designation}</div>

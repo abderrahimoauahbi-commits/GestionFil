@@ -56,6 +56,7 @@ import {
   corpsLigne,
   depuisLigneEnregistree,
   estPrete,
+  fusionnerParReference,
   kgDe,
   totalDe,
   type LigneSaisie,
@@ -429,8 +430,11 @@ export function BonCommande() {
   const [versionLue, setVersionLue] = useState<number | undefined>(undefined)
   const enregistrer = useMutation({
     mutationFn: async () => {
-      const aCreer = nouvelles.filter((n) => !n.idExistant)
-      const aCorriger = nouvelles.filter(
+      // UNE LIGNE PAR REFERENCE (21/10/2026) : une ligne qui repete une reference
+      // part fondue dans celle qui la porte (le serveur fait de meme).
+      const fondues = fusionnerParReference(nouvelles).lignes
+      const aCreer = fondues.filter((n) => !n.idExistant)
+      const aCorriger = fondues.filter(
         (n) => n.idExistant && JSON.stringify(corpsLigne(n)) !== initiales.get(n.idExistant),
       )
       // LA VERSION S'ENCHAINE (19/10/2026) : en-tete puis lignes, chacun sous le
@@ -650,9 +654,10 @@ export function BonCommande() {
   const estNouvelle = (l: LigneBc) =>
     nouvelles.some((n) => n.cle === l.id_ligne_bc && !n.idExistant)
 
-  const modifiable =
-    !!droits.peutEcrire &&
-    (bc?.statut === 'BROUILLON' || bc?.statut === 'EN_ATTENTE_VALIDATION')
+  /* LE BROUILLON SEUL SE MODIFIE (21/10/2026) : au controle, en demande de prix
+     et en attente de validation, le bon est fige — le serveur et la base le
+     tiennent aussi. Pour corriger, on le renvoie en brouillon. */
+  const modifiable = !!droits.peutEcrire && bc?.statut === 'BROUILLON'
   /*
    * ON N'AMORCE QUE SUR UN SUCCES, jamais sur « plus en chargement ».
    *
@@ -1049,7 +1054,7 @@ export function BonCommande() {
                 </Bouton>
               </>
             )}
-            {droits.peutEcrire && ['EN_CONTROLE', 'DEMANDE_PRIX'].includes(bc.statut) && (
+            {droits.peutEcrire && ['EN_CONTROLE', 'DEMANDE_PRIX', 'EN_ATTENTE_VALIDATION'].includes(bc.statut) && (
               <>
                 <Bouton variante="contour" onClick={() => setMotifAction({ cible: 'BROUILLON', motif: '' })}>
                   <CornerUpLeft />
@@ -1263,7 +1268,15 @@ export function BonCommande() {
           Demande de prix sautée{bc.controleur ? ` par ${bc.controleur}` : ''} : {bc.motif_saut_demande_prix}
         </Alerte>
       )}
-      {!modifiable && !['CLOTURE', 'ANNULE', 'EN_CONTROLE', 'DEMANDE_PRIX'].includes(bc.statut) && (
+      {bc.statut === 'EN_ATTENTE_VALIDATION' && (
+        <Alerte ton="info" className="mb-3">
+          Bon en attente de validation : il est figé, en-tête et lignes. La direction le valide ;
+          pour corriger une quantité, une référence ou un prix, renvoyez-le en brouillon avec un
+          motif — il repassera par le contrôle.
+        </Alerte>
+      )}
+      {!modifiable &&
+        !['CLOTURE', 'ANNULE', 'EN_CONTROLE', 'DEMANDE_PRIX', 'EN_ATTENTE_VALIDATION'].includes(bc.statut) && (
         <Alerte ton="info" className="mb-3">
           Bon {(LIBELLE[bc.statut] ?? bc.statut).toLowerCase()} : les lignes sont figees. Seules les
           receptions le font encore evoluer.
@@ -1600,6 +1613,7 @@ export function BonCommande() {
                 valeurOrigine={(code, champ) => (parPlan.get(code)?.[champ] as string) ?? ''}
                 validationLocale
                 avecRemise
+                fusionParReference
                 surSupprimerLigne={retirerLigne}
               />
             ) : (

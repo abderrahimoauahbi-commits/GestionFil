@@ -572,6 +572,29 @@ async fn ligne_bc_regularisation(
         })?,
     };
 
+    // UNE LIGNE PAR REFERENCE SUR LE BON (21/10/2026) : un second lot de la meme
+    // matiere, arrive sans commande dans le meme camion, augmente la ligne du bon
+    // de regularisation au lieu d'en ouvrir une seconde.
+    if let Some((existante, _)) =
+        super::bons_commande::ligne_meme_reference(&mut *tx, &id_bc, code_reference).await?
+    {
+        super::bons_commande::augmenter_ligne_bc(
+            &mut *tx,
+            &existante,
+            &super::bons_commande::AjoutLigne {
+                kg: quantite_kg,
+                unite: Some(unite_saisie),
+                quantite_unite: Some(quantite_unite),
+                palettes: None,
+                bobines: None,
+                id_proposition: None,
+            },
+        )
+        .await?;
+        recalculer_bc(&mut *tx, &id_bc).await?;
+        return Ok(existante);
+    }
+
     let rang: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(ligne_numero), 0) + 1 FROM ligne_bc WHERE id_bc = $1",
     )
@@ -702,7 +725,8 @@ pub async fn creer_reception(
     );
 
     let mut posees = 0i64;
-    for (i, l) in r.lignes.iter().flatten().enumerate() {
+    let mut fusions: Vec<String> = Vec::new();
+    for l in r.lignes.iter().flatten() {
         if l.quantite_pesee_unite <= 0.0 {
             return Err(AppError::Invalide(format!(
                 "{} : la quantite pesee doit etre strictement positive",
@@ -740,6 +764,18 @@ pub async fn creer_reception(
                 .await?,
             ),
         };
+
+        // UNE LIGNE PAR REFERENCE ET PAR LOT (21/10/2026) : la meme pesee du meme
+        // lot, saisie deux fois, fait une seule ligne.
+        if let Some((_, numero_fondu)) =
+            fusionner_ligne_reception(&mut tx, &id, id_ligne_bc.as_deref(), l, kg, &user.id).await?
+        {
+            fusions.push(format!(
+                "{} : meme lot que la ligne {numero_fondu}, les pesees sont additionnees.",
+                l.code_reference
+            ));
+            continue;
+        }
 
         // Prix et taux viennent de la ligne du bon, jamais du catalogue : c'est
         // le prix ENGAGE qui sera paye, et le relire ailleurs ouvrirait un ecart
@@ -811,7 +847,7 @@ pub async fn creer_reception(
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(&id)
         .bind(&id_ligne_bc)
-        .bind((i + 1) as i64)
+        .bind(posees + 1)
         .bind(&l.code_reference)
         .bind(&l.unite_saisie)
         .bind(facteur)
@@ -855,7 +891,7 @@ pub async fn creer_reception(
     tx.commit().await?;
     Ok(Json(json!({
         "id_reception": id, "numero_reception": numero,
-        "code_fournisseur": fournisseur, "lignes": posees,
+        "code_fournisseur": fournisseur, "lignes": posees, "fusions": fusions,
         "bc_regularisation": bc_regularisation.as_ref().map(|(i, _)| i),
         "numero_bc_regularisation": bc_regularisation.as_ref().map(|(_, n)| n)
     })))
@@ -950,6 +986,104 @@ pub struct LigneReception {
     pub motif_substitution: Option<String>,
 }
 
+/// UNE LIGNE PAR REFERENCE ET PAR LOT (decision du 21/10/2026).
+///
+/// La meme reference, sur la meme ligne de bon, du meme lot fournisseur (le lot
+/// vide compte pour un lot), deja pesee sur cette reception : la pesee s'y
+/// ADDITIONNE — poids, poids annonce au BL, colis, palettes, bobines. Deux lots
+/// restent deux lignes : c'est la tracabilite du lot. La base refuse le doublon
+/// (`trg_ligne_reception_un_lot`) ; les regles de quantite (C10, R-REC) jugent
+/// la ligne fondue comme elles jugeraient une saisie.
+///
+/// UN LOT N'A QU'UN MAGASIN ET QU'UN STATUT QUALITE : une seconde pesee du meme
+/// lot qui les contredit est refusee en le disant, plutot que de deplacer en
+/// silence ce qui etait deja pese.
+///
+/// Rend la ligne fondue (identifiant, numero), ou None s'il n'y en avait pas.
+#[allow(clippy::too_many_arguments)]
+async fn fusionner_ligne_reception(
+    tx: &mut sqlx::PgConnection,
+    id_reception: &str,
+    id_ligne_bc: Option<&str>,
+    l: &LigneReception,
+    kg: f64,
+    id_utilisateur: &str,
+) -> AppResult<Option<(String, i64)>> {
+    let lot = l.lot_fournisseur.as_deref().map(str::trim).unwrap_or("");
+    let existante: Option<(String, i64, String, String)> = sqlx::query_as(
+        "SELECT id_ligne_reception, ligne_numero, code_magasin_dest, statut_qualite
+           FROM ligne_reception
+          WHERE id_reception = $1 AND id_ligne_bc IS NOT DISTINCT FROM $2
+            AND code_reference = $3 AND COALESCE(btrim(lot_fournisseur), '') = $4
+          ORDER BY ligne_numero LIMIT 1 FOR UPDATE",
+    )
+    .bind(id_reception)
+    .bind(id_ligne_bc)
+    .bind(&l.code_reference)
+    .bind(lot)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((id_ligne, numero, magasin, qualite)) = existante else {
+        return Ok(None);
+    };
+    let nom_lot = if lot.is_empty() { "sans numero".to_string() } else { lot.to_string() };
+    if l.code_magasin_dest.trim() != magasin
+        || l.statut_qualite.as_deref().unwrap_or("CONFORME") != qualite
+    {
+        return Err(AppError::RegleMetier(format!(
+            "{} (lot {nom_lot}) est deja pese sur la ligne {numero}, vers {magasin} en {qualite} : un lot ne va \
+             qu'a un magasin, avec un statut qualite. Corrigez cette ligne, ou saisissez l'autre partie sous \
+             son propre lot.",
+            l.code_reference
+        )));
+    }
+    let derog = l.derogation_ecart.unwrap_or(false);
+    let unite_qte = "ROUND(CASE WHEN $2::text = lr.unite_saisie THEN lr.quantite_pesee_unite + $3::numeric
+                                ELSE (lr.quantite_stock_kg + $4::numeric) / lr.facteur_kg END, 4)";
+    let somme = |col: &str, p: &str, t: &str| {
+        format!("CASE WHEN lr.{col} IS NULL AND {p}::{t} IS NULL THEN NULL ELSE COALESCE(lr.{col}, 0) + COALESCE({p}::{t}, 0) END")
+    };
+    sqlx::query(&format!(
+        "UPDATE ligne_reception lr
+            SET quantite_pesee_unite = {unite_qte},
+                quantite_stock_kg    = ROUND({unite_qte} * lr.facteur_kg, 4),
+                -- LE RESTE DU BON AU MOMENT DE LA PESEE, comme a la saisie : sur un
+                -- bon de regularisation, la ligne vient d'etre augmentee d'autant.
+                quantite_commandee_kg = COALESCE((SELECT NULLIF(lb.quantite_restante_kg, 0) FROM ligne_bc lb
+                                                   WHERE lb.id_ligne_bc = lr.id_ligne_bc), lr.quantite_commandee_kg),
+                quantite_bl_kg    = {bl},
+                nb_colis_ligne    = {colis},
+                nb_palettes_saisi = {palettes},
+                nb_bobines_saisi  = {bobines},
+                derogation_ecart  = GREATEST(lr.derogation_ecart, $9::bigint),
+                id_utilisateur_derogation = CASE WHEN $9::bigint = 1 AND lr.derogation_ecart = 0 THEN $10
+                                                 ELSE lr.id_utilisateur_derogation END,
+                motif_derogation  = CASE WHEN $9::bigint = 1 AND lr.derogation_ecart = 0 THEN $11
+                                         ELSE lr.motif_derogation END,
+                notes             = COALESCE(lr.notes, NULLIF(btrim($12), ''))
+          WHERE lr.id_ligne_reception = $1",
+        bl = somme("quantite_bl_kg", "$5", "numeric"),
+        colis = somme("nb_colis_ligne", "$6", "bigint"),
+        palettes = somme("nb_palettes_saisi", "$7", "numeric"),
+        bobines = somme("nb_bobines_saisi", "$8", "bigint"),
+    ))
+    .bind(&id_ligne)
+    .bind(&l.unite_saisie)
+    .bind(l.quantite_pesee_unite)
+    .bind(kg)
+    .bind(l.quantite_bl_kg)
+    .bind(l.nb_colis_ligne)
+    .bind(l.nb_palettes)
+    .bind(l.nb_bobines)
+    .bind(i64::from(derog))
+    .bind(if derog { Some(id_utilisateur) } else { None })
+    .bind(&l.motif_derogation)
+    .bind(&l.notes)
+    .execute(&mut *tx)
+    .await?;
+    Ok(Some((id_ligne, numero)))
+}
+
 pub async fn ajouter_ligne_reception(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1030,6 +1164,24 @@ pub async fn ajouter_ligne_reception(
             .await?
         }
     };
+
+    // UNE LIGNE PAR REFERENCE ET PAR LOT (21/10/2026) : la meme pesee du meme
+    // lot s'ajoute a la ligne qui le porte deja.
+    if let Some((id_fondue, numero)) =
+        fusionner_ligne_reception(&mut tx, &id, Some(&id_ligne_bc), &l, kg, &user.id).await?
+    {
+        let version_entete =
+            crate::domain::concurrence::version_actuelle(&mut tx, "reception", "id_reception", &id).await?;
+        tx.commit().await?;
+        return Ok(Json(json!({
+            "version": version_entete, "id_ligne_reception": id_fondue, "ligne_numero": numero,
+            "fusionnee": true, "quantite_ajoutee_kg": kg,
+            "message": format!(
+                "{} : meme lot deja pese sur la ligne {numero}, la pesee s'y ajoute (une ligne par lot).",
+                l.code_reference
+            )
+        })));
+    }
 
     // Prix et devise viennent de la ligne du bon : c'est le prix ENGAGE qui
     // sera paye. Le RESTE a livrer, pas le total commande : un bon livre en

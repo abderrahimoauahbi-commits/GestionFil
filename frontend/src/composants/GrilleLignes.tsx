@@ -24,6 +24,7 @@
  *   negocie au millieme.
  */
 import { Fragment } from 'react'
+import { toast } from 'sonner'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { Check, Link2, Pencil, Plus, Trash2, Unlink2 } from 'lucide-react'
 import { Badge, Bouton, Champ, Selecteur } from './ui/base'
@@ -250,6 +251,10 @@ export const condDe = (r: RefLigne): Conditionnement => ({
   densite_kg_ml: r.densite_kg_ml,
 })
 
+/** Un colisage enregistre egal au calcul (ou absent) : rien n'a ete constate a part. */
+const memeColis = (saisi: number | null | undefined, calcule: number | null) =>
+  saisi == null || (calcule != null && Math.abs(Number(saisi) - calcule) < 0.005)
+
 export function depuisLigneEnregistree(
   l: {
     id_ligne_bc: string
@@ -349,10 +354,6 @@ export const unitesDe = (l: LigneSaisie): string[] => {
   if (facteurVersKg('ml', l.cond)) u.push('ml')
   return u
 }
-
-/** Un colisage enregistre egal au calcul (ou absent) : rien n'a ete constate a part. */
-const memeColis = (saisi: number | null | undefined, calcule: number | null) =>
-  saisi == null || (calcule != null && Math.abs(Number(saisi) - calcule) < 0.005)
 
 /** Une reference retenue remplit la ligne. */
 export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {
@@ -492,6 +493,67 @@ export function corpsLigne(l: LigneSaisie) {
       }
 }
 
+/**
+ * UNE LIGNE PAR REFERENCE SUR UN BON DE COMMANDE (decision du 21/10/2026).
+ *
+ * Deux lignes de la meme reference sur un meme bon n'ont pas d'utilite : la
+ * seconde AUGMENTE la premiere. Les kilos s'additionnent ; palettes et bobines
+ * suivent le lien de la ligne gardee — liee, elles se deduisent du nouveau
+ * poids ; detachee, les colis comptes s'additionnent. Le prix et la remise de
+ * la ligne gardee font foi (le serveur fait de meme).
+ */
+export function fondreLigne(garde: LigneSaisie, ajout: LigneSaisie): LigneSaisie {
+  const kg = (kgDe(garde) ?? 0) + (kgDe(ajout) ?? 0)
+  const colis = (l: LigneSaisie) => {
+    const r = depuisKg(kgDe(l) ?? 0, l.cond)
+    return {
+      palettes: l.palettes.trim() !== '' ? Number(l.palettes) : r.palettes,
+      bobines: l.bobines.trim() !== '' ? Number(l.bobines) : r.bobines,
+    }
+  }
+  const somme = (x: number | null, y: number | null) => (x == null || y == null ? null : x + y)
+  const r = depuisKg(kg, garde.cond)
+  const a = colis(garde)
+  const b = colis(ajout)
+  return {
+    ...garde,
+    qte: pourChamp(kg, 4),
+    palettes: garde.lie ? pourChamp(r.palettes) : pourChamp(somme(a.palettes, b.palettes), 2),
+    bobines: garde.lie ? pourChamp(r.bobines) : pourChamp(somme(a.bobines, b.bobines)),
+    id_proposition: garde.id_proposition ?? ajout.id_proposition ?? null,
+  }
+}
+
+/** L'index de l'AUTRE ligne de marchandise qui porte deja la reference de `l`, ou -1. */
+export const autreLigneMemeReference = (lignes: LigneSaisie[], l: LigneSaisie) =>
+  l.nature !== 'MARCHANDISE' || !l.code_reference
+    ? -1
+    : lignes.findIndex(
+        (x) => x.cle !== l.cle && x.nature === 'MARCHANDISE' && x.code_reference === l.code_reference,
+      )
+
+/**
+ * Fond chaque ligne dans la premiere de sa reference. La ligne gardee est celle
+ * DEJA ENREGISTREE quand il y en a une : c'est elle qui se corrige en base, la
+ * nouvelle n'y part jamais. Deux lignes deja en base (doublon d'avant la regle,
+ * signale par C60) ne se fondent pas ici : il faudrait en supprimer une.
+ */
+export function fusionnerParReference(lignes: LigneSaisie[]): { lignes: LigneSaisie[]; fusions: string[] } {
+  const sortie: LigneSaisie[] = []
+  const fusions: string[] = []
+  for (const l of lignes) {
+    const i = autreLigneMemeReference(sortie, l)
+    if (i < 0 || (sortie[i].idExistant && l.idExistant)) {
+      sortie.push(l)
+      continue
+    }
+    const [garde, ajout] = !sortie[i].idExistant && l.idExistant ? [l, sortie[i]] : [sortie[i], l]
+    sortie[i] = fondreLigne(garde, ajout)
+    fusions.push(`${l.code_reference} : quantité ajoutée à la ligne ${i + 1}`)
+  }
+  return { lignes: sortie, fusions }
+}
+
 const cellule = 'px-1.5 py-1 align-top'
 
 export interface ProprietesGrille {
@@ -581,6 +643,13 @@ export interface ProprietesGrille {
   unitesAutorisees?: string[]
   /** La meme reference peut revenir sur plusieurs lignes — un lot par ligne. */
   doublonsReference?: boolean
+  /**
+   * UNE LIGNE PAR REFERENCE, BON DE COMMANDE SEULEMENT (21/10/2026). Une
+   * reference deja presente reste choisissable ; la ligne qui la repete se
+   * FOND dans la premiere quand on la valide (quantite additionnee). Sans cette
+   * propriete, la grille garde son comportement (mouvements, transferts).
+   */
+  fusionParReference?: boolean
   /** Les libelles des colonnes « reference » et « unite », de la recherche et de l'aide. */
   libelles?: { reference?: string; unite?: string; recherche?: string; aide?: string }
   /**
@@ -642,16 +711,36 @@ export function GrilleLignes(props: ProprietesGrille) {
   referenceFigee = false,
   unitesAutorisees,
   doublonsReference = false,
+  fusionParReference = false,
   libelles,
   poidsBobine,
   controleColisage = false,
   } = props
-  const prises = doublonsReference
+  const prises = doublonsReference || fusionParReference
     ? new Set<string>()
     : (dejaPrises ?? new Set(lignes.map((l) => l.code_reference).filter(Boolean)))
+  /* La reference deja sur le document, quand elle se fond : la suggestion le dit. */
+  const presentes = new Set(fusionParReference ? lignes.map((l) => l.code_reference).filter(Boolean) : [])
+
 
   const maj = (cle: string, patch: Partial<LigneSaisie>) =>
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
+
+  /* VALIDER UNE LIGNE QUI REPETE UNE REFERENCE LA FOND dans la ligne qui la
+     porte deja (bon de commande, 21/10/2026) : la quantite s'y ajoute. */
+  const basculerValidation = (l: LigneSaisie) => {
+    if (fusionParReference && !l.valide && !l.idExistant) {
+      const i = autreLigneMemeReference(lignes, l)
+      if (i >= 0) {
+        setLignes((ls) =>
+          ls.filter((x) => x.cle !== l.cle).map((x) => (x.cle === lignes[i].cle ? fondreLigne(x, l) : x)),
+        )
+        toast.info(`${l.code_reference} était déjà ligne ${i + 1} : la quantité s’y ajoute.`)
+        return
+      }
+    }
+    maj(l.cle, { valide: !l.valide })
+  }
 
   /**
    * LES TROIS EXPRESSIONS SE REPONDENT — kilos, palettes, bobines.
@@ -733,6 +822,9 @@ export function GrilleLignes(props: ProprietesGrille) {
             : undefined,
       ton: suggere > 0 ? 'primaire' : r.statut_stock === 'RUPTURE' ? 'alerte' : 'neutre',
       desactivee: prises.has(r.code_reference),
+      ...(presentes.has(r.code_reference)
+        ? { mention: 'déjà sur le bon : s’ajoute', ton: 'alerte' as const }
+        : {}),
       charge: r,
     }
   }
@@ -888,6 +980,12 @@ export function GrilleLignes(props: ProprietesGrille) {
                               </button>
                             )}
                           </div>
+                          {fusionParReference && !l.idExistant && autreLigneMemeReference(lignes, l) >= 0 && (
+                            <div className="text-[11px] text-alerte">
+                              Déjà ligne {autreLigneMemeReference(lignes, l) + 1} : cette quantité s’y
+                              ajoutera (une ligne par référence).
+                            </div>
+                          )}
                           {ecart != null && Math.abs(ecart) > 0.5 && (
                             <div className="text-[11px] text-alerte">
                               {ecart > 0 ? '+' : ''}
@@ -1061,7 +1159,7 @@ export function GrilleLignes(props: ProprietesGrille) {
                                   : 'Complétez la référence, la quantité et le prix'
                                 : 'Valider cette ligne — elle partira avec « Enregistrer »'
                           }
-                          onClick={() => maj(l.cle, { valide: !l.valide })}
+                          onClick={() => basculerValidation(l)}
                         >
                           {verrou ? <Pencil /> : <Check />}
                         </Bouton>

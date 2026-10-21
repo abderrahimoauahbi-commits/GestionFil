@@ -30,12 +30,21 @@
     },
     "SORTIE_PROD": {
       "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 1, "exige_motif_ligne": 0, "interne": 0,
-      "origine": "Consommation de production (ordre de fabrication en texte libre)",
+      "origine": "Déchet de production : rebut, chute non réutilisable (motif R4 imposé ; ordre de fabrication en texte libre)",
       "cmup": "Inchangé",
       "cout": "CMUP du magasin au moment de la sortie",
-      "validation": "Droit ECRIRE du stock",
+      "validation": "Droit ECRIRE du stock ; au-delà de 50 kg cumulés par jour et par référence (sorties hors machine comprises), droit VALIDER de l'inventaire",
       "reversibilite": "Contre-passation",
-      "banc": ["stock_jamais_negatif", "contre_passation"]
+      "banc": ["stock_jamais_negatif", "contre_passation", "saisie_libre"]
+    },
+    "CONSO_DIRECTE": {
+      "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
+      "origine": "Consommation directe d'une matière qui ne va pas sur machine (jute, latex, SBR, plastique, simili cuir : fiche article en mode DIRECTE) ; ordre ou plan facultatif, en texte libre",
+      "cmup": "Inchangé",
+      "cout": "CMUP du magasin au moment de la sortie",
+      "validation": "Droit ECRIRE du stock, sans seuil ; refusée par la base pour un article en mode MACHINE (le fil sort par les fiches machine)",
+      "reversibilite": "Contre-passation",
+      "banc": ["consommation_directe"]
     },
     "RETOUR_PROD": {
       "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,

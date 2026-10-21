@@ -76,6 +76,10 @@ CREATE INDEX ix_bc_statut      ON bon_commande(statut, date_bc DESC);
 -- -----------------------------------------------------------------------------
 -- ligne_bc
 -- -----------------------------------------------------------------------------
+-- UNE LIGNE DE MARCHANDISE ACTIVE PAR REFERENCE ET PAR BON, et un bon soumis fige
+-- (decisions du 21/10/2026) : declencheurs trg_ligne_bc_une_par_reference,
+-- trg_ligne_bc_figee et trg_bc_entete_figee, migration 2026-10-21d ; C60 signale
+-- les doublons d'avant la regle.
 CREATE TABLE ligne_bc (
     id_ligne_bc         text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,

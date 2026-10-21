@@ -92,6 +92,8 @@ INSERT INTO type_mouvement (code_type_mvt, libelle, signe, exige_prix, impacte_c
     ('TRANSFERT_ENTREE', 'Transfert - entree',       1, 0, 1, 0, 0, '#0ea5e9'),
     ('AJUST_INV_POS',    'Ajustement inventaire +',  1, 0, 0, 0, 1, '#a855f7'),
     ('SORTIE_PROD',      'Sortie production',       -1, 0, 0, 1, 0, '#f59e0b'),
+    -- La matiere qui ne va pas sur machine (fiche en mode DIRECTE), sans seuil (21/10/2026).
+    ('CONSO_DIRECTE',    'Consommation directe',    -1, 0, 0, 0, 0, '#b45309'),
     ('RETOUR_FOURN',     'Retour fournisseur',      -1, 0, 0, 0, 1, '#ef4444'),
     ('TRANSFERT_SORTIE', 'Transfert - sortie',      -1, 0, 0, 0, 0, '#0ea5e9'),
     ('AJUST_INV_NEG',    'Ajustement inventaire -', -1, 0, 0, 0, 1, '#a855f7');

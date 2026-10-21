@@ -272,6 +272,197 @@ def scenario_bon_demande_prix(c, infra):
     c.ok("Assistante", "PUT", f"/api/bons-commande/{b3['id_bc']}/statut", {"statut": "ANNULE"})
 
 
+def scenario_bon_fige_validation(c, infra):
+    """A (decision du 21/10/2026) : un bon EN ATTENTE DE VALIDATION est fige, comme au controle — ni
+    son en-tete, ni ses lignes (quantite, prix, ajout, retrait), par l'API comme par la base ; il ne se
+    supprime plus. Restent : le renvoi en brouillon (motif obligatoire, qui efface le controle),
+    l'annulation, et ce que la VALIDATION ecrit elle-meme (taux, montants, valideur)."""
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [
+        {"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 120, "prix_unitaire_devise": 20}]})
+    id_bc = bc["id_bc"]
+    statut = f"/api/bons-commande/{id_bc}/statut"
+    soumettre_bc(c, id_bc)
+    l1 = c.ok("Assistante", "GET", f"/api/bons-commande/{id_bc}/lignes")[0]["id_ligne_bc"]
+    ligne1 = f"/api/bons-commande/{id_bc}/lignes/{l1}"
+
+    def entete(corps):
+        return V(infra, "bon_commande", "id_bc", id_bc, corps)
+
+    # L'API : quantite, prix, ajout, retrait de ligne, en-tete, suppression du bon.
+    c.refus("Assistante", "PATCH", ligne1, entete({"quantite_commandee_unite": 150}), contient="validation")
+    c.refus("Assistante", "PATCH", ligne1, entete({"prix_unitaire_devise": 19}), contient="validation")
+    c.refus("Assistante", "POST", f"/api/bons-commande/{id_bc}/lignes", entete({
+        "code_reference": REF2, "unite_commande": "kg", "quantite_commandee_unite": 10,
+        "prix_unitaire_devise": 22}), contient="validation")
+    c.refus("Assistante", "DELETE", f"{ligne1}?version={vv(infra, 'bon_commande', 'id_bc', id_bc)}",
+            contient="validation")
+    c.refus("Assistante", "PATCH", f"/api/bons-commande/{id_bc}", entete({"notes": "retouche"}), contient="validation")
+    c.refus("Assistante", "DELETE", f"/api/bons-commande/{id_bc}", contient="brouillon")
+    # La base tient la meme regle.
+    refus_sql(infra, f"UPDATE ligne_bc SET prix_unitaire_devise = 19 WHERE id_ligne_bc = '{l1}'", "BC-FIGE")
+    refus_sql(infra, f"UPDATE bon_commande SET notes = 'retouche' WHERE id_bc = '{id_bc}'", "BC-FIGE")
+    refus_sql(infra, f"DELETE FROM ligne_bc WHERE id_ligne_bc = '{l1}'", "BC-FIGE")
+
+    # Le renvoi en brouillon : motif obligatoire, le controle est efface — puis la correction passe.
+    c.refus("Assistante", "PUT", statut, {"statut": "BROUILLON"}, contient="pourquoi")
+    c.ok("Assistante", "PUT", statut, {"statut": "BROUILLON", "motif": "Quantite a revoir (banc)"})
+    ctl, motif = infra.sql(f"SELECT id_utilisateur_controle IS NULL, motif_renvoi FROM bon_commande "
+                           f"WHERE id_bc = '{id_bc}'")[0]
+    verifier(ctl == "t" and motif == "Quantite a revoir (banc)", f"renvoi mal trace : controle efface {ctl}, {motif}")
+    c.ok("Assistante", "PATCH", ligne1, entete({"quantite_commandee_unite": 150}))
+
+    # Resoumis, le bon se valide : la validation ecrit taux, montants et valideur sans heurter le gel.
+    soumettre_bc(c, id_bc)
+    c.ok("Choukri", "PUT", statut, {"statut": "VALIDE"})
+    st, montant, valideur = infra.sql(
+        f"SELECT b.statut, b.montant_total_mad, u.login FROM bon_commande b "
+        f"JOIN utilisateur u ON u.id_utilisateur = b.id_utilisateur_validation WHERE b.id_bc = '{id_bc}'")[0]
+    verifier(st == "VALIDE" and abs(float(montant) - 3000) < 0.01 and valideur == "Choukri",
+             f"validation mal ecrite : {st}, {montant}, {valideur}")
+
+    # L'annulation reste ouverte depuis l'attente de validation.
+    b2 = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [
+        {"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 30, "prix_unitaire_devise": 20}]})
+    soumettre_bc(c, b2["id_bc"])
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{b2['id_bc']}/statut", {"statut": "ANNULE"})
+    verifier(infra.valeur(f"SELECT statut FROM bon_commande WHERE id_bc = '{b2['id_bc']}'") == "ANNULE",
+             "le bon en attente de validation ne s'annule pas")
+
+
+def scenario_bon_une_ligne_par_reference(c, infra):
+    """C (decision du 21/10/2026) : UNE LIGNE PAR REFERENCE sur un bon. La meme reference saisie deux
+    fois a la creation, ajoutee par la route, ou convertie depuis le plan d'achat vers un bon existant
+    AUGMENTE la ligne qui la porte (prix de cette ligne conserve). La base refuse une seconde ligne
+    active ; une ligne annulee ne compte pas ; un doublon d'avant la regle ne bloque rien et se
+    SIGNALE (C60)."""
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [
+        {"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 100, "prix_unitaire_devise": 20},
+        {"code_reference": REF2, "unite_commande": "kg", "quantite_commandee_unite": 50, "prix_unitaire_devise": 22},
+        {"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 30, "prix_unitaire_devise": 25}]})
+    id_bc = bc["id_bc"]
+
+    def lignes():
+        return {r[0]: (float(r[1]), float(r[2]), int(r[3])) for r in infra.sql(
+            f"SELECT code_reference, quantite_commandee_kg, prix_unitaire_devise, count(*) OVER (PARTITION BY code_reference) "
+            f"FROM ligne_bc WHERE id_bc = '{id_bc}' AND statut <> 'ANNULE'")}
+
+    l = lignes()
+    verifier(len(l) == 2 and l[REF] == (130.0, 20.0, 1) and bc.get("fusions"),
+             f"creation : la reference saisie deux fois devait faire une ligne de 130 kg a 20 : {l} {bc.get('fusions')}")
+
+    # La route d'ajout augmente la ligne existante, au prix de cette ligne.
+    r = c.ok("Assistante", "POST", f"/api/bons-commande/{id_bc}/lignes", V(infra, "bon_commande", "id_bc", id_bc, {
+        "code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 20, "prix_unitaire_devise": 30}))
+    l = lignes()
+    verifier(r.get("fusionnee") and l[REF] == (150.0, 20.0, 1), f"ajout : ligne non augmentee : {r} {l}")
+    total = float(infra.valeur(f"SELECT montant_total_devise FROM bon_commande WHERE id_bc = '{id_bc}'"))
+    verifier(abs(total - (150 * 20 + 50 * 22)) < 0.01, f"total du bon non recalcule apres la fusion : {total}")
+
+    # La conversion du plan vers ce bon : la proposition s'ajoute a la ligne de REF2, prix conserve.
+    infra.sql(f"DELETE FROM plan_achat WHERE code_reference = '{REF2}' AND statut IN ('PROPOSE','EN_REVISION','VALIDE')")
+    prop = infra.valeur(
+        "INSERT INTO plan_achat (code_reference, quantite_suggeree_kg, code_fournisseur, prix_estime_mad, "
+        "source_prix, date_besoin_prevue, urgence) "
+        f"VALUES ('{REF2}', 40, '{FRS}', 10, 'CATALOGUE', current_date + 30, 'TIER 2') RETURNING id_proposition")
+    r = c.ok("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [prop], "cibles": {FRS: id_bc}})
+    l = lignes()
+    verifier(r.get("fusions") and l[REF2] == (90.0, 22.0, 1) and len(l) == 2,
+             f"conversion : la proposition devait s'ajouter a la ligne de {REF2} (90 kg a 22) : {r} {l}")
+    st, bon = infra.sql(f"SELECT statut, id_bc_genere FROM plan_achat WHERE id_proposition = '{prop}'")[0]
+    verifier(st == "COMMANDE" and bon == id_bc, f"proposition fondue mal rattachee : {st} {bon}")
+
+    # La base refuse une seconde ligne active ; une ligne annulee ne compte pas.
+    inserer = ("INSERT INTO ligne_bc (id_bc, ligne_numero, code_reference, unite_commande, facteur_kg, "
+               "quantite_commandee_unite, quantite_commandee_kg, prix_unitaire_devise, code_devise) "
+               f"VALUES ('{id_bc}', 9, '{REF}', 'kg', 1, 5, 5, 20, 'MAD')")
+    refus_sql(infra, inserer, "BC-UNE-LIGNE")
+    infra.sql(f"UPDATE ligne_bc SET statut = 'ANNULE' WHERE id_bc = '{id_bc}' AND code_reference = '{REF}'")
+    infra.sql(inserer)
+
+    # Un doublon d'AVANT la regle (le declencheur suspendu le temps de le poser) : signale par C60,
+    # sans rien bloquer — sa ligne se corrige toujours.
+    avant = controle(infra, "C60")
+    infra.sql("ALTER TABLE ligne_bc DISABLE TRIGGER trg_ligne_bc_une_par_reference")
+    try:
+        infra.sql(inserer.replace(", 9, ", ", 10, "))
+    finally:
+        infra.sql("ALTER TABLE ligne_bc ENABLE TRIGGER trg_ligne_bc_une_par_reference")
+    verifier(controle(infra, "C60") == avant + 1, f"C60 ne signale pas le doublon ancien ({avant} -> {controle(infra, 'C60')})")
+    numero = bc["numero_bc"]
+    verifier(int(infra.valeur(f"SELECT nb_lignes FROM v_ctl_c60 WHERE numero_bc = '{numero}'")) == 2,
+             "v_ctl_c60 ne detaille pas le bon")
+    l10 = infra.valeur(f"SELECT id_ligne_bc FROM ligne_bc WHERE id_bc = '{id_bc}' AND ligne_numero = 10")
+    c.ok("Assistante", "PATCH", f"/api/bons-commande/{id_bc}/lignes/{l10}",
+         V(infra, "bon_commande", "id_bc", id_bc, {"prix_unitaire_devise": 21}))
+    # Le bon annule, le signal tombe.
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ANNULE"})
+    verifier(controle(infra, "C60") == avant, "C60 vise encore un bon annule")
+
+
+def scenario_reception_une_ligne_par_lot(c, infra):
+    """D (decision du 21/10/2026) : UNE LIGNE DE RECEPTION PAR REFERENCE ET PAR LOT. La meme ligne de bon,
+    du meme lot, pesee deux fois — a la creation ou par la route d'ajout — fait UNE ligne, pesees,
+    bobines et poids annonce additionnes ; un autre lot fait une autre ligne. Un meme lot ne va pas a
+    deux magasins. La base refuse le doublon. Hors commande, deux lots de la meme matiere font une
+    seule ligne au bon de regularisation (C). Les regles de quantite ne changent pas."""
+    id_bc, lignes_bc = bon_envoye(c, [(REF, 300, 20.0)])
+    lb = lignes_bc[0]["id_ligne_bc"]
+    base = {"code_reference": REF, "id_ligne_bc": lb, "unite_saisie": "kg", "code_magasin_dest": MAG}
+    r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc, "num_bon_livraison": "BL-LOT", "lignes": [
+        dict(base, quantite_pesee_unite=100, lot_fournisseur="L-A", nb_bobines=10, quantite_bl_kg=100),
+        dict(base, quantite_pesee_unite=50, lot_fournisseur="L-A", nb_bobines=5, quantite_bl_kg=50),
+        dict(base, quantite_pesee_unite=60, lot_fournisseur="L-B")]})
+    rid = r["id_reception"]
+
+    def lignes():
+        return {x[0]: (float(x[1]), x[2], x[3]) for x in infra.sql(
+            f"SELECT lot_fournisseur, quantite_stock_kg, nb_bobines_saisi, quantite_bl_kg FROM ligne_reception "
+            f"WHERE id_reception = '{rid}'")}
+
+    l = lignes()
+    verifier(len(l) == 2 and l["L-A"][0] == 150 and l["L-A"][1] == "15" and float(l["L-A"][2]) == 150
+             and l["L-B"][0] == 60 and r.get("fusions"),
+             f"creation : le meme lot devait faire une ligne (150 kg, 15 bobines, 150 kg au BL) : {l} {r}")
+
+    # La route d'ajout : le meme lot s'additionne, un autre lot fait une ligne.
+    def ajouter(corps):
+        return c.ok("Magasinie", "POST", f"/api/receptions/{rid}/lignes",
+                    V(infra, "reception", "id_reception", rid, corps))
+    a = ajouter(dict(base, quantite_pesee_unite=40, lot_fournisseur="L-B"))
+    verifier(a.get("fusionnee") and lignes()["L-B"][0] == 100, f"ajout du meme lot non additionne : {a} {lignes()}")
+    ajouter(dict(base, quantite_pesee_unite=20, lot_fournisseur="L-C"))
+    verifier(len(lignes()) == 3, f"un autre lot devait faire une ligne : {lignes()}")
+    # Un lot ne va qu'a un magasin.
+    c.refus("Magasinie", "POST", f"/api/receptions/{rid}/lignes", V(infra, "reception", "id_reception", rid,
+            dict(base, quantite_pesee_unite=5, lot_fournisseur="L-C", code_magasin_dest="Polyfashions")),
+            contient="magasin")
+    # La base refuse le doublon, et la correction d'un lot qui en creerait un.
+    refus_sql(infra, f"UPDATE ligne_reception SET lot_fournisseur = 'L-A' WHERE id_reception = '{rid}' "
+                     f"AND lot_fournisseur = 'L-C'", "REC-UNE-LIGNE")
+    lc = infra.valeur(f"SELECT id_ligne_reception FROM ligne_reception WHERE id_reception = '{rid}' AND lot_fournisseur = 'L-C'")
+    c.refus("Magasinie", "PATCH", f"/api/receptions/{rid}/lignes/{lc}",
+            V(infra, "reception", "id_reception", rid, {"lot_fournisseur": "L-A"}), contient="lot")
+
+    # Les regles de quantite et la validation ne changent pas : 270 kg entrent.
+    avant = kg(infra)
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+    verifier(abs(kg(infra) - avant - 270) < 0.001, f"stock : {kg(infra) - avant} kg entres au lieu de 270")
+
+    # Hors commande : deux lots de la meme matiere, une seule ligne au bon de regularisation.
+    h = c.ok("Choukri", "POST", "/api/receptions", {"code_fournisseur": FRS, "num_bon_livraison": "BL-HORS-LOT",
+        "lignes": [{"code_reference": REF2, "unite_saisie": "kg", "quantite_pesee_unite": q, "lot_fournisseur": lot,
+                    "code_magasin_dest": MAG, "prix_kg_devise": 20} for q, lot in ((30, "H-1"), (12, "H-2"))]})
+    regul = infra.sql(f"SELECT count(*), sum(quantite_commandee_kg) FROM ligne_bc WHERE id_bc = "
+                      f"(SELECT id_bc FROM bon_commande WHERE id_reception_regularisee = '{h['id_reception']}')")[0]
+    verifier(int(regul[0]) == 1 and float(regul[1]) == 42,
+             f"le bon de regularisation devait porter une ligne de 42 kg : {regul}")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM ligne_reception WHERE id_reception = '{h['id_reception']}'")) == 2,
+             "deux lots hors commande devaient rester deux lignes de reception")
+    # Le brouillon de regularisation et sa reception ne servent plus : on les retire.
+    c.ok("Choukri", "PUT", f"/api/receptions/{h['id_reception']}/statut", {"statut": "ANNULE"})
+
+
 def scenario_reception_cloture_avoir(c, infra):
     """Reception 3-en-1, cloture par facture sur les lots de la reception, avoir, pas de devalidation."""
     avant = kg(infra)
@@ -695,8 +886,15 @@ def scenario_facture_document(c, infra):
 
     # UNE REFERENCE SE FACTURE D'UN BLOC : deux pesees de la meme reference ne se coupent pas en
     # deux factures — la valeur provisoire et les lots se tiennent par reference.
-    id_bc2, lignes2 = bon_envoye(c, [(REF, 100, 40.0), (REF, 50, 40.0)])
-    rid2 = reception_validee(c, id_bc2, lignes2, [100, 50])
+    # Deux LOTS de la meme ligne de bon (une ligne par reference sur le bon, une ligne de
+    # reception par lot : decisions du 21/10/2026).
+    id_bc2, lignes2 = bon_envoye(c, [(REF, 150, 40.0)])
+    rid2 = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc2, "num_bon_livraison": "BL-BANC", "lignes": [
+        {"code_reference": REF, "id_ligne_bc": lignes2[0]["id_ligne_bc"], "unite_saisie": "kg",
+         "quantite_pesee_unite": q, "code_magasin_dest": MAG, "lot_fournisseur": lot}
+        for q, lot in ((100, "FB-1"), (50, "FB-2"))]})["id_reception"]
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid2}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid2}/valider")
     attente2 = [x for x in c.ok("Choukri", "GET", f"/api/factures-fournisseur/a-facturer?fournisseur={FRS}")
                 if x["id_reception"] == rid2]
     verifier(len(attente2) == 2, f"{len(attente2)} pesee(s) sur le second arrivage au lieu de 2")
@@ -1221,9 +1419,12 @@ def scenario_proposition_une_fois(c, infra):
     # Par la conversion du plan d'achat : refus aussi, plus d'ecart silencieux.
     c.refus("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [prop]},
             codes=(422,), contient="R-PROP")
-    # Deux lignes du MEME bon pour la meme proposition (deux dates) : une seule commande, acceptee.
-    c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": frs, "lignes": [
+    # Deux lignes du MEME bon pour la meme reference : acceptees, et fondues en une seule
+    # (une ligne par reference, 21/10/2026).
+    b = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": frs, "lignes": [
         dict(ligne, id_proposition=None), dict(ligne, id_proposition=None)]})
+    verifier(int(infra.valeur(f"SELECT count(*) FROM ligne_bc WHERE id_bc = '{b['id_bc']}'")) == 1,
+             "la meme reference saisie deux fois devait faire une ligne")
 
     # Ce qui passe sans lien au plan se SIGNALE : la meme reference sur deux bons ouverts.
     verifier(controle(infra, "C57") >= 1, "C57 ne signale pas la reference commandee deux fois")
@@ -1409,8 +1610,9 @@ def scenario_controles_finaux(c, infra):
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
     # LE DERNIER CONTROLE, EN UN SEUL ENDROIT : a relever a chaque controle ajoute
     # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10 ;
-    # C59, prix confirme a la demande de prix, le 21/10).
-    dernier = 59
+    # C59, prix confirme a la demande de prix, le 21/10 ; C60, meme reference sur deux lignes d'un bon,
+    # le 21/10).
+    dernier = 60
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
                              f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
@@ -2110,6 +2312,56 @@ def scenario_sortie_hors_machine(c, infra):
     verifier(infra.valeur("SELECT count(*) FROM v_prets_en_cours WHERE tiers = 'Usine du banc'") == "0",
              "le pret rendu reste en cours")
     verifier(controle(infra, "C11") == 0 and controle(infra, "C47") == 0, "C11 ou C47 apres les sorties hors machine")
+
+
+def scenario_consommation_directe(c, infra):
+    """CONSOMMATION DIRECTE (decision du 21/10/2026) : la fiche article porte un mode de consommation.
+    Un article DIRECTE sort 120 kg en un jour par le magasinier (sans seuil, au CMUP, stock et grand
+    livre a jour) ; un article MACHINE est refuse par le service ET par la base ; la sortie se
+    contre-passe ; un dechet de 60 kg garde son seuil."""
+    directe, machine = REF, REF2
+    # Le mode se regle sur la fiche article (CRUD du catalogue, droit ECRIRE).
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(directe)}",
+         V(infra, "reference", "code_reference", directe, {"mode_consommation": "DIRECTE"}))
+    verifier(infra.valeur(f"SELECT mode_consommation FROM reference WHERE code_reference = '{directe}'") == "DIRECTE",
+             "le mode DIRECTE n'est pas enregistre sur la fiche")
+    verifier(infra.valeur(f"SELECT mode_consommation FROM reference WHERE code_reference = '{machine}'") == "MACHINE",
+             "un article neuf devrait etre en mode MACHINE")
+    entree_stock(c, directe, 300)
+    avant, cm = kg(infra, directe), cmup_magasin(infra, directe)
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 120)], numero_of="Plan semaine 43")
+    verifier(code == 200, f"consommation directe de 120 kg refusee au magasinier : {code} {r}")
+    id_mvt = r["id_mouvement"]
+    verifier(abs(avant - kg(infra, directe) - 120) < 1e-6, f"stock apres la consommation : {kg(infra, directe)}")
+    prix = float(infra.valeur(f"SELECT prix_kg_mad FROM ligne_mouvement WHERE id_mouvement = '{id_mvt}'"))
+    verifier(abs(prix - cm) < 0.0001, f"la consommation sort a {prix}, pas au CMUP {cm}")
+    verifier(abs(cmup_magasin(infra, directe) - cm) < 0.0001, "la consommation a touche le CMUP")
+    verifier(infra.valeur(f"SELECT numero_of FROM mouvement WHERE id_mouvement = '{id_mvt}'") == "Plan semaine 43",
+             "l'ordre / plan n'est pas garde")
+    verifier(controle(infra, "C11") == 0, "C11 apres la consommation directe")
+    conso = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle "
+                               f"WHERE code_reference = '{directe}'"))
+    verifier(conso >= 120 - 1e-6, f"la consommation directe ne compte pas dans v_conso_reelle : {conso}")
+    # Un article MACHINE : refuse par le service, avec un message clair...
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(machine, 10)])
+    verifier(code == 422 and "fiches machine" in str(r), f"consommation directe d'un article MACHINE : {code} {r}")
+    # ... et par la base, si un chemin contournait le service.
+    refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif, "
+                     "id_utilisateur) "
+                     f"SELECT 'banc-cd', 'MVT-BANC-CD', 'CONSO_DIRECTE', '{MAG}', 'PRODUCTION', id_utilisateur "
+                     "FROM utilisateur WHERE login = 'Magasinie'; "
+                     "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg) "
+                     f"VALUES ('banc-cd', 1, '{machine}', 1)", "CONSO-DIRECTE")
+    # La sortie se contre-passe : le stock revient, elle ne compte plus comme consommation.
+    c.ok("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer", {"motif": "Erreur de saisie du banc"})
+    verifier(abs(kg(infra, directe) - avant) < 1e-6, "le stock n'est pas revenu apres la contre-passation")
+    apres = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle "
+                               f"WHERE code_reference = '{directe}'"))
+    verifier(abs(conso - apres - 120) < 1e-6, f"la consommation contre-passee compte encore : {conso} -> {apres}")
+    # Le dechet garde son seuil, meme sur un article DIRECTE.
+    code, r = mouvement(c, "Magasinie", "SORTIE_PROD", [(directe, 60)], numero_of="OF-BANC")
+    verifier(code == 422 and "ce jour" in str(r), f"dechet de 60 kg accepte au magasinier : {code} {r}")
+    verifier(controle(infra, "C11") == 0, "C11 apres la contre-passation")
 
 
 def scenario_controle_reception(c, infra):
@@ -3151,6 +3403,9 @@ def scenario_securite(c, infra):
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
+    scenario_bon_fige_validation,
+    scenario_bon_une_ligne_par_reference,
+    scenario_reception_une_ligne_par_lot,
     scenario_reception_cloture_avoir,
     scenario_ecart_pesee,
     scenario_reception_devalidee_revalidee,
@@ -3187,6 +3442,7 @@ SCENARIOS = [
     scenario_concurrence_numerotation,
     scenario_gardes_p1,
     scenario_sortie_hors_machine,
+    scenario_consommation_directe,
     scenario_controle_reception,
     scenario_retour_cloture_avoirs,
     scenario_taux_bon,

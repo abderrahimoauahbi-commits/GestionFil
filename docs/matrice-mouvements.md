@@ -16,6 +16,7 @@ des besoins, pour son magasin de destination.
 | `RETOUR_FOURN` | − | Sortie au prix du retour : la différence avec le CMUP va au stock restant du magasin (jamais sous zéro), le reste au journal des écarts | CMUP du magasin au moment de la sortie, corrigé au prix du retour | motif de ligne | Aucune : le retour validé est définitif, son mouvement ne se contre-passe pas (RFO-DEFINITIF) |
 | `STOCK_INIT` | + | Moyenne pondérée au prix saisi ; sans prix, prix catalogue converti si le magasin n'a pas encore de CMUP | Prix saisi (ou catalogue converti) | — | Contre-passation |
 | `SORTIE_PROD` | − | Inchangé | CMUP du magasin au moment de la sortie | OF | Contre-passation |
+| `CONSO_DIRECTE` | − | Inchangé | CMUP du magasin au moment de la sortie | — | Contre-passation |
 | `RETOUR_PROD` | + | Inchangé (le fil revient au CMUP courant) | Sans prix : valorisé au CMUP du magasin | motif de ligne | Contre-passation |
 | `SORTIE_HORS_MACHINE` | − | Inchangé | CMUP du magasin au moment de la sortie | motif de ligne | Contre-passation |
 | `RETOUR_PRET` | + | Inchangé (au CMUP en cours) | Sans prix : valorisé au CMUP du magasin | — | Contre-passation |
@@ -67,13 +68,23 @@ des besoins, pour son magasin de destination.
 
 ### `SORTIE_PROD`
 
-- **Origine** : Consommation de production (ordre de fabrication en texte libre)
+- **Origine** : Déchet de production : rebut, chute non réutilisable (motif R4 imposé ; ordre de fabrication en texte libre)
 - **Sens** : sortie (−) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé
 - **Coût de la ligne** : CMUP du magasin au moment de la sortie
-- **Validation** : Droit ECRIRE du stock
+- **Validation** : Droit ECRIRE du stock ; au-delà de 50 kg cumulés par jour et par référence (sorties hors machine comprises), droit VALIDER de l'inventaire
 - **Réversibilité** : Contre-passation
-- **Prouvé par le banc** : `stock_jamais_negatif`, `contre_passation`
+- **Prouvé par le banc** : `stock_jamais_negatif`, `contre_passation`, `saisie_libre`
+
+### `CONSO_DIRECTE`
+
+- **Origine** : Consommation directe d'une matière qui ne va pas sur machine (jute, latex, SBR, plastique, simili cuir : fiche article en mode DIRECTE) ; ordre ou plan facultatif, en texte libre
+- **Sens** : sortie (−) dans le magasin du mouvement ; le stock du lot suit
+- **CMUP** : Inchangé
+- **Coût de la ligne** : CMUP du magasin au moment de la sortie
+- **Validation** : Droit ECRIRE du stock, sans seuil ; refusée par la base pour un article en mode MACHINE (le fil sort par les fiches machine)
+- **Réversibilité** : Contre-passation
+- **Prouvé par le banc** : `consommation_directe`
 
 ### `RETOUR_PROD`
 

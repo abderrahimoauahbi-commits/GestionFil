@@ -250,12 +250,16 @@ export function PlanAchat() {
       api.post<{
         propositions_converties: number
         bons: { numero_bc: string; code_fournisseur: string; lignes: number; montant_total_mad: number }[]
+        /** Une ligne par reference (21/10/2026) : les quantites ajoutees a une ligne deja la. */
+        fusions?: string[]
       }>('/api/plan-achat/commander', v),
     onSuccess: async (r) => {
       toast.success(`Lignes envoyées : ${r.bons.map((b) => b.numero_bc).join(', ')}`, {
-        description: `${r.propositions_converties} proposition(s) converties · ${fmt.mad(
-          r.bons.reduce((s, b) => s + b.montant_total_mad, 0),
-        )}`,
+        description:
+          `${r.propositions_converties} proposition(s) converties · ${fmt.mad(
+            r.bons.reduce((s, b) => s + b.montant_total_mad, 0),
+          )}` + (r.fusions?.length ? ` · ${r.fusions.join(' ')}` : ''),
+        duration: r.fusions?.length ? 12000 : undefined,
       })
       setCoches({})
       await rafraichir()
@@ -1215,7 +1219,8 @@ function LignesACommander({
   }, [lignes])
   const ouverts = (frs: string) =>
     (qBc.data ?? []).filter(
-      (b) => b.code_fournisseur === frs && (b.statut === 'BROUILLON' || b.statut === 'EN_ATTENTE_VALIDATION'),
+      // LE BROUILLON SEUL se complete (21/10/2026) : un bon soumis est fige.
+      (b) => b.code_fournisseur === frs && b.statut === 'BROUILLON',
     )
 
   if (lignes.length === 0) {

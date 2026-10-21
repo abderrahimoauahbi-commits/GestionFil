@@ -39,6 +39,7 @@ import {
   Clock,
   FileCheck2,
   FileClock,
+  FileSearch,
   Moon,
   Lock,
   PackageX,
@@ -48,6 +49,7 @@ import {
   ShieldCheck,
   TrendingDown,
   Truck,
+  MessagesSquare,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth, useDroits } from '../auth/AuthContext'
@@ -209,6 +211,31 @@ export function Cockpit() {
       Icone: FileClock,
       vers: '/plan-achat',
       actionnable: peut('PLAN_ACHAT', 'ECRIRE'),
+    },
+    /* LES DEUX ATTENTES DU CIRCUIT DU BON (21/10/2026) : le controle par un
+       autre compte, puis la reponse du fournisseur a la demande de prix. Le
+       clic ouvre la liste filtree sur le statut. */
+    {
+      champ: 'nb_bc_au_controle',
+      domaine: 'ACHATS',
+      libelle: 'Bons au contrôle',
+      valeur: n('nb_bc_au_controle'),
+      detail: 'quantités et fournisseur à vérifier',
+      ton: 'alerte',
+      Icone: FileSearch,
+      vers: '/bons-commande?statut=EN_CONTROLE',
+      actionnable: peut('BONS_COMMANDE', 'LIRE'),
+    },
+    {
+      champ: 'nb_bc_demande_prix',
+      domaine: 'ACHATS',
+      libelle: 'Demandes de prix en attente',
+      valeur: n('nb_bc_demande_prix'),
+      detail: 'réponse du fournisseur à saisir',
+      ton: 'alerte',
+      Icone: MessagesSquare,
+      vers: '/bons-commande?statut=DEMANDE_PRIX',
+      actionnable: peut('BONS_COMMANDE', 'LIRE'),
     },
     {
       champ: 'nb_bc_a_valider',

@@ -98,6 +98,9 @@ CREATE INDEX ix_bc_reception_regularisee
 -- -----------------------------------------------------------------------------
 -- ligne_reception
 -- -----------------------------------------------------------------------------
+-- UNE LIGNE PAR LIGNE DE BON, REFERENCE ET LOT (decision du 21/10/2026) : le meme
+-- lot pese deux fois s'additionne ; declencheur trg_ligne_reception_un_lot,
+-- migration 2026-10-21d.
 CREATE TABLE ligne_reception (
     id_ligne_reception  text    NOT NULL PRIMARY KEY
                                 DEFAULT gen_random_uuid()::text,

@@ -11,8 +11,8 @@
  * % livre, nombre de lignes, statut de livraison.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { FileText, Plus, Printer, Trash2 } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { FileText, Plus, Printer, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { useOuvrirVue } from '../lib/navigation'
 import { api, ErreurApi } from '../api/client'
@@ -138,7 +138,12 @@ export function BonsCommande() {
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : 'Annulation impossible.'),
   })
 
-  const lignes = q.data ?? []
+  /* LE FILTRE PAR STATUT VIENT DE L'ADRESSE (21/10/2026) : les tuiles du tableau
+     de bord (« Bons au contrôle », « Demandes de prix en attente ») ouvrent la
+     liste deja filtree, comme `/lots?vue=…`. On le retire d'un clic. */
+  const [params, setParams] = useSearchParams()
+  const filtreStatut = params.get('statut')
+  const lignes = (q.data ?? []).filter((b) => !filtreStatut || b.statut === filtreStatut)
 
   const colonnes: ColonneDT<Bc>[] = [
     {
@@ -280,6 +285,24 @@ export function BonsCommande() {
         }
       />
 
+      {filtreStatut && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
+          <span className="text-attenue-texte">Filtré sur le statut</span>
+          <Badge ton={TON[filtreStatut] ?? 'neutre'}>{LIBELLE[filtreStatut] ?? filtreStatut}</Badge>
+          <Bouton
+            variante="discret"
+            taille="sm"
+            onClick={() => {
+              params.delete('statut')
+              setParams(params, { replace: true })
+            }}
+          >
+            <X />
+            Tous les bons
+          </Bouton>
+        </div>
+      )}
+
       {/* PAS DE TUILES EN TETE D'UNE LISTE DE TRAVAIL (preference de
           l'entreprise, audit v4) : les indicateurs vivent au tableau de bord et
           dans les statistiques ; ici, on traite les lignes. */}
@@ -329,9 +352,10 @@ export function BonsCommande() {
                 valide ou envoye. Le bouton ne se montre qu'a qui peut s'en
                 servir ; supprimer un brouillon reste une ecriture. */}
             {!['CLOTURE', 'ANNULE'].includes(b.statut) &&
-              // Au controle ou en demande de prix, le bon n'engage pas encore :
-              // l'annuler reste une ecriture, comme pour un brouillon (21/10/2026).
-              (SUPPRIMABLES.includes(b.statut) || ['EN_CONTROLE', 'DEMANDE_PRIX'].includes(b.statut)
+              // Au controle, en demande de prix ou en attente de validation, le bon
+              // n'engage pas encore : l'annuler reste une ecriture (21/10/2026).
+              (SUPPRIMABLES.includes(b.statut) ||
+              ['EN_CONTROLE', 'DEMANDE_PRIX', 'EN_ATTENTE_VALIDATION'].includes(b.statut)
                 ? droits.peutEcrire
                 : droits.peutValider) && (
               <Bouton

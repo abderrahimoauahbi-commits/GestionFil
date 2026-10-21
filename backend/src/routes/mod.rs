@@ -28,7 +28,7 @@ mod roles;
 pub(crate) mod stock;
 mod transferts;
 mod inventaires;
-mod bons_commande;
+pub(crate) mod bons_commande;
 mod receptions;
 mod telechargements;
 

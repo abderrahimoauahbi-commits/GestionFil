@@ -78,7 +78,7 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C56 : migrations)
+├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C59 : migrations)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -173,10 +173,13 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C54 | transfert en route depuis plus de `P_TransitJoursAlerte` jours (7) | 10b |
 | C55 | document non validé (réception, inventaire, transfert) daté d'une période close (`P_PeriodeCloseJusqua`) | 17e |
 | C56 | ligne d'un dossier d'import ouvert dont la référence n'a pas de position tarifaire active : ses droits attendus ne se calculent pas | 19a |
+| C57 | référence sur plusieurs bons ouverts, dont un sert le plan d'achat | 19d |
+| C58 | ligne de bon reçue au-delà de sa commande et de la tolérance | 19e |
+| C59 | bon en attente de validation dont une ligne a un prix confirmé (demande de prix) différent du prix d'avant — prix nets, remise déduite | 21b |
 
 C28 dit désormais ce que fait `P_EncoursRetardInclus` (comptée ou retirée de la couverture) ; C31,
 C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lisent l'état des machines
-(`machine_etat`). Le banc vérifie la liste exacte C01–C56.
+(`machine_etat`). Le banc vérifie la liste exacte C01–C59.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

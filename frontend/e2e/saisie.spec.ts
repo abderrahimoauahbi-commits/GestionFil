@@ -3,8 +3,10 @@
  * les vrais roles, puis relus au serveur. Le nombre tape « 1 234,5 » doit etre
  * enregistre 1234,5 — ni 12345, ni 1,2345, ni vide.
  *
- * Les parcours s'enchainent comme au bureau : l'assistante cree le bon, la
- * direction le valide et l'envoie, le magasin le receptionne.
+ * Les parcours s'enchainent comme au bureau : l'assistante cree le bon et
+ * l'envoie au controle, la direction le controle, saisit la reponse du
+ * fournisseur a la demande de prix, le valide et l'envoie, le magasin le
+ * receptionne.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { attendu, consigner, lireApi, mesurer, saisir, session, type Constat } from './outils'
@@ -140,16 +142,37 @@ test('bon de commande : l’assistante le crée, au format français', async ({ 
   expect(Number(lignes[0].prix_unitaire_devise)).toBeCloseTo(3.75, 4)
   expect(Number(lignes[0].remise_pct)).toBeCloseTo(2.5, 4)
 
-  await page.getByRole('button', { name: /Soumettre [aà] validation/ }).click()
-  await expect(page.getByText('A valider').or(page.getByText('En attente'))).toBeVisible()
+  // LE CIRCUIT DU 21/10/2026 : le bon part au controle, pas directement a la direction.
+  await page.getByRole('button', { name: /Envoyer au contr[oô]le/ }).click()
+  await expect(page.getByText('Au contrôle', { exact: true })).toBeVisible()
   expect(veille.erreurs).toEqual([])
   await page.context().close()
 })
 
-test('bon de commande : la direction le valide à un autre taux, puis l’envoie', async ({ browser }, info) => {
+test('bon de commande : la direction le contrôle, saisit la réponse du fournisseur, le valide à un autre taux, puis l’envoie', async ({ browser }, info) => {
   test.skip(!idBc, 'pas de bon créé')
   const { page, veille } = await session(browser, info, 'Choukri')
   await page.goto(`/bons-commande/${idBc}`)
+  // Le controle par un autre compte que le createur, puis la demande de prix.
+  await page.getByRole('button', { name: /Contr[oô]l[ée] : demande de prix/ }).click()
+  await expect(page.getByText('Réponse du fournisseur')).toBeVisible()
+  // La reponse du fournisseur, tapee au format francais : le prix confirme
+  // remplace celui de la ligne, le prix d'avant reste pour l'ecart.
+  await saisir(page.getByRole('textbox', { name: 'Prix confirmé ligne 1' }), '3,8')
+  await page.getByRole('button', { name: 'Enregistrer la réponse' }).click()
+  await expect
+    .poll(async () => {
+      const r = await lireApi<{ lignes?: Record<string, number>[] } | Record<string, number>[]>(
+        page,
+        `/api/bons-commande/${idBc}/lignes`,
+      )
+      const l = (Array.isArray(r) ? r : (r.lignes ?? []))[0]
+      return [Number(l.prix_unitaire_devise), Number(l.prix_unitaire_avant_demande), Number(l.quantite_commandee_kg)]
+    })
+    .toEqual([3.8, 3.75, 1234.5])
+  await page.getByRole('button', { name: 'Soumettre à validation', exact: true }).click()
+  // L'ecart se signale a la direction, il ne bloque pas.
+  await expect(page.getByText('1 écart(s) de prix')).toBeVisible()
   await page.getByRole('button', { name: 'Valider', exact: true }).click()
   const taux = page.locator('input[inputmode=decimal]').first()
   await saisir(taux, '10,05')
@@ -173,7 +196,7 @@ test('bon de commande : la direction le valide à un autre taux, puis l’envoie
   expect(entete.motif_taux_engage).toBe('Taux confirmé par la banque')
 
   await page.getByRole('button', { name: 'Envoyer au fournisseur' }).click()
-  await expect(page.getByText('Envoye').first()).toBeVisible()
+  await expect(page.getByText(/^Envoy[ée]$/).first()).toBeVisible()
   expect(veille.erreurs).toEqual([])
   await page.context().close()
 })

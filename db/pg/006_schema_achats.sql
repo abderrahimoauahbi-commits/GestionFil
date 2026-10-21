@@ -39,7 +39,8 @@ CREATE TABLE bon_commande (
     montant_total_mad   numeric(18,2)    CHECK (montant_total_mad IS NULL OR montant_total_mad >= 0),
 
     statut              text    NOT NULL DEFAULT 'BROUILLON'
-                                CHECK (statut IN ('BROUILLON','EN_ATTENTE_VALIDATION','VALIDE','ENVOYE','LIVRE_PARTIEL','CLOTURE','ANNULE')),
+                                -- EN_CONTROLE et DEMANDE_PRIX : le controle et la demande de prix (migration 2026-10-21b).
+                                CHECK (statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION','VALIDE','ENVOYE','LIVRE_PARTIEL','CLOTURE','ANNULE')),
     motif_creation      text    NOT NULL DEFAULT 'MRP'
                                 CHECK (motif_creation IN ('MRP','OPPORTUNITE_PRIX','ANTICIPATION_RISQUE','MANUEL')),
 
@@ -65,7 +66,7 @@ CREATE TABLE bon_commande (
     CHECK (id_utilisateur_validation IS NULL
            OR id_utilisateur_validation <> id_utilisateur_creation),
     -- Un BC au-dela de BROUILLON/EN_ATTENTE est necessairement valide et trace
-    CHECK (statut IN ('BROUILLON','EN_ATTENTE_VALIDATION','ANNULE')
+    CHECK (statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION','ANNULE')
            OR (id_utilisateur_validation IS NOT NULL AND date_validation IS NOT NULL))
 );
 

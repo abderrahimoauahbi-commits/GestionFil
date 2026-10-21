@@ -51,6 +51,8 @@ interface Bc extends Record<string, unknown> {
 
 const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
   BROUILLON: 'neutre',
+  EN_CONTROLE: 'alerte',
+  DEMANDE_PRIX: 'info',
   EN_ATTENTE_VALIDATION: 'alerte',
   VALIDE: 'info',
   ENVOYE: 'info',
@@ -71,7 +73,9 @@ const TON_LIVRAISON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'd
 
 const LIBELLE: Record<string, string> = {
   BROUILLON: 'Brouillon',
-  EN_ATTENTE_VALIDATION: 'A valider',
+  EN_CONTROLE: 'Au contrôle',
+  DEMANDE_PRIX: 'Demande de prix',
+  EN_ATTENTE_VALIDATION: 'En attente de validation',
   VALIDE: 'Valide',
   ENVOYE: 'Envoye',
   LIVRE_PARTIEL: 'Livre partiel',
@@ -221,7 +225,7 @@ export function BonsCommande() {
       numerique: true,
       largeur: '130px',
       rendu: (b) => {
-        if (['BROUILLON', 'EN_ATTENTE_VALIDATION', 'ANNULE'].includes(b.statut)) {
+        if (['BROUILLON', 'EN_CONTROLE', 'DEMANDE_PRIX', 'EN_ATTENTE_VALIDATION', 'ANNULE'].includes(b.statut)) {
           return <span className="text-attenue-texte">—</span>
         }
         const pct = b.pct_livre ?? 0
@@ -325,7 +329,11 @@ export function BonsCommande() {
                 valide ou envoye. Le bouton ne se montre qu'a qui peut s'en
                 servir ; supprimer un brouillon reste une ecriture. */}
             {!['CLOTURE', 'ANNULE'].includes(b.statut) &&
-              (SUPPRIMABLES.includes(b.statut) ? droits.peutEcrire : droits.peutValider) && (
+              // Au controle ou en demande de prix, le bon n'engage pas encore :
+              // l'annuler reste une ecriture, comme pour un brouillon (21/10/2026).
+              (SUPPRIMABLES.includes(b.statut) || ['EN_CONTROLE', 'DEMANDE_PRIX'].includes(b.statut)
+                ? droits.peutEcrire
+                : droits.peutValider) && (
               <Bouton
                 variante="discret"
                 taille="icone-xs"

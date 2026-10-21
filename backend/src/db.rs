@@ -110,6 +110,17 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Le bon de commande passe par un controle et une demande de prix
+        // (21/10/2026) : nouveaux etats, prix d'avant la demande, C59.
+        "2026-10-21b_bc_demande_prix.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'ligne_bc'
+                           AND column_name = 'prix_unitaire_avant_demande')
+            AND EXISTS (SELECT 1 FROM transition_statut
+                         WHERE entite = 'bon_commande' AND statut_source = 'EN_CONTROLE'
+                           AND statut_cible = 'DEMANDE_PRIX')",
+    ),
+    (
         // Les indicateurs du plan d'achat, figes a la generation (21/10/2026).
         "2026-10-21a_indicateurs_plan_achat.sql",
         "SELECT to_regclass('public.plan_achat_indicateurs') IS NOT NULL",

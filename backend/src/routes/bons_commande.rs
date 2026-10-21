@@ -33,7 +33,7 @@ pub async fn lister_bc(
                 -- portaient en pied de page. Les recopier sur le bon les figerait ;
                 -- on les lit, on ne les stocke pas.
                 f.incoterm, f.tolerance_pesee_pct, f.palettes_par_conteneur,
-                uc.login AS createur, uv.login AS valideur,
+                uc.login AS createur, uv.login AS valideur, uk.login AS controleur,
                 -- LE TAUX DU JOUR (regle 10) : indicatif tant que le bon n'est pas
                 -- valide ; c'est lui qui sera propose a la validation.
                 (SELECT t.taux::float8 FROM taux_change t
@@ -58,7 +58,7 @@ pub async fn lister_bc(
                              WHERE l.id_bc = bc.id_bc), 1)
                 END AS pct_livre,
                 CASE
-                    WHEN bc.statut IN ('BROUILLON','EN_ATTENTE_VALIDATION','ANNULE') THEN 'SANS OBJET'
+                    WHEN bc.statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION','ANNULE') THEN 'SANS OBJET'
                     WHEN (SELECT COALESCE(SUM(l.quantite_restante_kg), 0) FROM ligne_bc l
                            WHERE l.id_bc = bc.id_bc) <= 0.001 THEN 'COMPLET'
                     WHEN (SELECT COALESCE(SUM(l.quantite_recue_kg), 0) FROM ligne_bc l
@@ -74,6 +74,7 @@ pub async fn lister_bc(
            JOIN fournisseur f  ON f.code_fournisseur = bc.code_fournisseur
            LEFT JOIN utilisateur uc ON uc.id_utilisateur = bc.id_utilisateur_creation
            LEFT JOIN utilisateur uv ON uv.id_utilisateur = bc.id_utilisateur_validation
+           LEFT JOIN utilisateur uk ON uk.id_utilisateur = bc.id_utilisateur_controle
           WHERE ($1 IS NULL OR bc.statut = $1)
           ORDER BY bc.date_bc DESC LIMIT 200",
     )
@@ -543,6 +544,25 @@ pub struct ModifLigneBc {
     pub remise_pct: Option<f64>,
 }
 
+/// LES ETATS OU LE BON SE PREPARE ENCORE, et ou tout se modifie (lignes et
+/// en-tete). Au controle, le bon est fige ; en demande de prix, seuls le prix et
+/// la remise des lignes bougent (decision du 21/10/2026) — la base tient la meme
+/// regle (`trg_ligne_bc_figee`).
+fn se_modifie(statut: &str) -> bool {
+    matches!(statut, "BROUILLON" | "EN_ATTENTE_VALIDATION")
+}
+
+/// Le refus qui dit QUOI FAIRE, selon l'etat du bon.
+fn refus_modification(statut: &str) -> AppError {
+    AppError::RegleMetier(match statut {
+        "EN_CONTROLE" => "Le bon est au controle : il ne se modifie pas. Renvoyez-le en brouillon pour le corriger.".into(),
+        "DEMANDE_PRIX" => "Le bon est en demande de prix : seuls le prix et la remise des lignes se modifient. \
+                           Pour les quantites, les references ou l'en-tete, renvoyez-le en brouillon."
+            .into(),
+        _ => format!("Un bon de commande {statut} ne peut plus etre modifie."),
+    })
+}
+
 /// Recalcule les totaux de l'entete a partir des lignes.
 pub(crate) async fn recalculer_bc(tx: &mut sqlx::PgConnection, id: &str) -> AppResult<()> {
     sqlx::query(
@@ -588,10 +608,8 @@ pub async fn ajouter_ligne_bc(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
-    if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
-        return Err(AppError::RegleMetier(format!(
-            "Un bon de commande {statut} ne peut plus etre modifie."
-        )));
+    if !se_modifie(&statut) {
+        return Err(refus_modification(&statut));
     }
 
     let numero: i64 = sqlx::query_scalar(
@@ -631,14 +649,19 @@ pub async fn supprimer_ligne_bc(
     )
     .await?;
 
-    let recue: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(quantite_recue_kg, 0)::float8 FROM ligne_bc
-          WHERE id_ligne_bc = $1",
+    let (recue, statut_bc): (f64, String) = sqlx::query_as(
+        "SELECT COALESCE(l.quantite_recue_kg, 0)::float8, b.statut
+           FROM ligne_bc l JOIN bon_commande b ON b.id_bc = l.id_bc
+          WHERE l.id_ligne_bc = $1",
     )
     .bind(&ligne)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Introuvable(format!("ligne {ligne}")))?;
+    // Au controle et en demande de prix, les lignes sont figees (21/10/2026).
+    if matches!(statut_bc.as_str(), "EN_CONTROLE" | "DEMANDE_PRIX") {
+        return Err(refus_modification(&statut_bc));
+    }
     if recue > 0.0 {
         return Err(AppError::RegleMetier(
             "Cette ligne a deja fait l'objet d'une reception : elle ne peut plus etre supprimee.".into(),
@@ -683,6 +706,11 @@ pub struct StatutBc {
     /// Le taux saisi s'ecarte de plus de 3 % du cours BAM, et c'est voulu.
     #[serde(default)]
     pub confirme_taux: bool,
+    /// LE MOTIF D'UN RENVOI EN BROUILLON (depuis le controle ou la demande de
+    /// prix) ou d'une demande de prix SAUTEE (21/10/2026). Ecrit sur le bon,
+    /// donc au journal du changement de statut.
+    #[serde(default)]
+    pub motif: Option<String>,
 }
 
 /// `DELETE /api/bons-commande/{id}` — la vraie suppression d'un bon non engage.
@@ -744,6 +772,15 @@ pub async fn supprimer_bc(
         ));
     }
 
+    // Au controle ou en demande de prix, ses lignes sont figees : il revient
+    // d'abord en brouillon (avec son motif), ou il s'annule.
+    if matches!(statut.as_str(), "EN_CONTROLE" | "DEMANDE_PRIX") {
+        return Err(AppError::RegleMetier(
+            "Ce bon est au controle ou en demande de prix : renvoyez-le en brouillon pour le supprimer, \
+             ou annulez-le."
+                .into(),
+        ));
+    }
     if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
         return Err(AppError::RegleMetier(format!(
             "ce bon est {} : il a engage l'entreprise et ne se supprime plus. Annulez-le — la trace restera.",
@@ -815,6 +852,98 @@ pub async fn changer_statut_bc(
         &state.db, &user, module::BONS_COMMANDE, "bon_commande", &actuel, &s.statut,
     )
     .await?;
+
+    // LE CONTROLE ET LA DEMANDE DE PRIX (decision du 21/10/2026). La base tient
+    // les memes gardes (trg_transition_bc, trg_bc_separation_taches) ; ici, le
+    // message metier et les colonnes qui accompagnent chaque pas.
+    let motif = s.motif.as_deref().map(str::trim).filter(|m| !m.is_empty()).map(String::from);
+    let motif_lisible = motif.as_ref().is_some_and(|m| m.chars().count() >= 5);
+    match (actuel.as_str(), s.statut.as_str()) {
+        ("BROUILLON", "EN_CONTROLE") => {
+            let lignes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ligne_bc WHERE id_bc = $1")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await?;
+            if lignes == 0 {
+                return Err(AppError::RegleMetier("Un bon sans ligne ne part pas au controle.".into()));
+            }
+            sqlx::query("UPDATE bon_commande SET statut = 'EN_CONTROLE' WHERE id_bc = $1")
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Ok(Json(json!({ "id_bc": id, "statut": s.statut })));
+        }
+        ("EN_CONTROLE", "DEMANDE_PRIX" | "EN_ATTENTE_VALIDATION") => {
+            // UN AUTRE REGARD que celui de l'auteur, comme a la validation ; le
+            // superviseur en est dispense pour la meme raison (22/09/2026).
+            if createur == user.id && user.role != "ADMIN" {
+                return Err(AppError::RegleMetier(
+                    "B4 regle 4 : vous ne pouvez pas controler un bon de commande que vous avez cree. \
+                     Un autre compte doit verifier quantites et fournisseur."
+                        .into(),
+                ));
+            }
+            let saut = s.statut == "EN_ATTENTE_VALIDATION";
+            if saut && !motif_lisible {
+                return Err(AppError::Invalide(
+                    "Sauter la demande de prix demande un motif (prix sous contrat, achat local…).".into(),
+                ));
+            }
+            sqlx::query(
+                "UPDATE bon_commande
+                    SET statut = $2, id_utilisateur_controle = $3, date_controle = fn_instant($4),
+                        date_demande_prix = CASE WHEN $2 = 'DEMANDE_PRIX' THEN fn_instant($4) ELSE date_demande_prix END,
+                        motif_saut_demande_prix = $5
+                  WHERE id_bc = $1",
+            )
+            .bind(&id)
+            .bind(&s.statut)
+            .bind(&user.id)
+            .bind(maintenant())
+            .bind(if saut { motif.as_deref() } else { None })
+            .execute(&mut *tx)
+            .await?;
+            if !saut {
+                // LE PRIX D'AVANT LA DEMANDE : celui du plan ou de la saisie. Pose
+                // une fois — un bon renvoye puis redemande garde son prix d'origine.
+                sqlx::query(
+                    "UPDATE ligne_bc
+                        SET prix_unitaire_avant_demande = COALESCE(prix_unitaire_avant_demande, prix_unitaire_devise),
+                            remise_pct_avant_demande = COALESCE(remise_pct_avant_demande, remise_pct)
+                      WHERE id_bc = $1 AND statut <> 'ANNULE'",
+                )
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            return Ok(Json(json!({ "id_bc": id, "statut": s.statut })));
+        }
+        ("EN_CONTROLE" | "DEMANDE_PRIX" | "EN_ATTENTE_VALIDATION", "BROUILLON") => {
+            // L'acheteur doit savoir quoi corriger. Le retrait d'un bon en attente
+            // de validation garde son ancienne liberte (motif facultatif).
+            if actuel != "EN_ATTENTE_VALIDATION" && !motif_lisible {
+                return Err(AppError::Invalide(
+                    "Dites pourquoi le bon revient en brouillon : l'acheteur doit savoir quoi corriger.".into(),
+                ));
+            }
+            // Le controle est a refaire : le bon repassera par un second regard.
+            sqlx::query(
+                "UPDATE bon_commande
+                    SET statut = 'BROUILLON', motif_renvoi = COALESCE($2, motif_renvoi),
+                        id_utilisateur_controle = NULL, date_controle = NULL, motif_saut_demande_prix = NULL
+                  WHERE id_bc = $1",
+            )
+            .bind(&id)
+            .bind(motif.as_deref())
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(Json(json!({ "id_bc": id, "statut": s.statut })));
+        }
+        _ => {}
+    }
 
     if s.statut == "VALIDE" {
         // B4 regle 4 : la separation des taches. Un declencheur de la base la
@@ -1123,10 +1252,8 @@ pub async fn modifier_bc(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| AppError::Introuvable(format!("bon de commande {id}")))?;
-    if statut != "BROUILLON" && statut != "EN_ATTENTE_VALIDATION" {
-        return Err(AppError::RegleMetier(format!(
-            "Un bon de commande {statut} ne peut plus etre modifie."
-        )));
+    if !se_modifie(&statut) {
+        return Err(refus_modification(&statut));
     }
 
     sqlx::query(
@@ -1474,10 +1601,25 @@ pub async fn modifier_ligne_bc(
         .await?
         .ok_or_else(|| AppError::Introuvable(format!("ligne {ligne}")))?;
 
-    if statut_bc != "BROUILLON" && statut_bc != "EN_ATTENTE_VALIDATION" {
-        return Err(AppError::RegleMetier(format!(
-            "Un bon de commande {statut_bc} ne peut plus etre modifie."
-        )));
+    // LA REPONSE DU FOURNISSEUR (demande de prix, 21/10/2026) : seuls le prix et
+    // la remise de la ligne se saisissent. Le prix d'avant reste sur la ligne
+    // (`prix_unitaire_avant_demande`) pour signaler l'ecart (C59).
+    let reponse_prix = statut_bc == "DEMANDE_PRIX";
+    if reponse_prix {
+        if l.code_reference.is_some()
+            || l.unite_commande.is_some()
+            || l.quantite_commandee_unite.is_some()
+            || l.nb_palettes.is_some()
+            || l.nb_bobines.is_some()
+            || l.date_livraison_prevue.is_some()
+        {
+            return Err(refus_modification(&statut_bc));
+        }
+        if l.prix_unitaire_devise.is_none() && l.remise_pct.is_none() {
+            return Err(AppError::Invalide("Saisissez le prix confirme par le fournisseur.".into()));
+        }
+    } else if !se_modifie(&statut_bc) {
+        return Err(refus_modification(&statut_bc));
     }
 
     // LA REFERENCE ET L'UNITE SE TRAITENT AVANT LA QUANTITE : elles changent
@@ -1594,6 +1736,13 @@ pub async fn modifier_ligne_bc(
         .bind(&ligne)
         .execute(&mut *tx)
         .await?;
+    if reponse_prix {
+        sqlx::query("UPDATE ligne_bc SET date_reponse_prix = fn_instant($2) WHERE id_ligne_bc = $1")
+            .bind(&ligne)
+            .bind(maintenant())
+            .execute(&mut *tx)
+            .await?;
+    }
 
     recalculer_bc(&mut tx, &id).await?;
     let version_entete = crate::domain::concurrence::version_actuelle(&mut tx, "bon_commande", "id_bc", &id).await?;

@@ -68,7 +68,8 @@ const REVERSIBLES: &[Reversible] = &[
         module: "BONS_COMMANDE",
         depuis: &["VALIDE", "ENVOYE"],
         vers: "BROUILLON",
-        effacer: &["id_utilisateur_validation", "date_validation", "date_envoi"],
+        // Revenu en brouillon, le bon repasse par le controle (21/10/2026).
+        effacer: &["id_utilisateur_validation", "date_validation", "date_envoi", "id_utilisateur_controle", "date_controle", "motif_saut_demande_prix"],
         document_mouvements: None,
         // UN BON DEJA SERVI NE REDEVIENT PAS BROUILLON. La marchandise est
         // arrivee ; le bon en est la preuve, et l'effacer laisserait une

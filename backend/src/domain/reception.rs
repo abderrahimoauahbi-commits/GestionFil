@@ -148,7 +148,7 @@ pub async fn valider(
     if let Some(b) = bons.iter().find(|b| {
         matches!(
             b.statut.as_str(),
-            "BROUILLON" | "EN_ATTENTE_VALIDATION" | "VALIDE" | "ANNULE"
+            "BROUILLON" | "EN_CONTROLE" | "DEMANDE_PRIX" | "EN_ATTENTE_VALIDATION" | "VALIDE" | "ANNULE"
         )
     }) {
         return Err(AppError::RegleMetier(format!(

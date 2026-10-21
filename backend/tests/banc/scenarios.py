@@ -4,7 +4,7 @@ Les scenarios du banc (voir banc.py). Chacun part d'un etat qu'il cree
 lui-meme — un bon, une reception, du stock — et verifie, par l'API comme un
 utilisateur et par SQL comme un controleur, que les regles tiennent.
 
-Comptes (seed_110) : Assistante (ASSISTANTE), Choukri et Mohamed (DIRECTION),
+Comptes (seed_110) : Assistante (ASSISTANTE), Choukri, Mohamed et Tarik (DIRECTION),
 Magasinie (MAGASIN), admin (ADMIN). Fournisseur FRS-011 (MAD), references
 PLA 100 CHE et PLA 50 CHE (sans suivi de lot), magasins Morocco et Polyfashions.
 """
@@ -77,6 +77,15 @@ def refus_sql(infra, requete, contient):
     raise Echec(f"la base a accepte : {requete[:120]}")
 
 
+def soumettre_bc(c, id_bc, auteur="Assistante", controleur="Tarik", motif="Prix sous contrat (banc)"):
+    """Le circuit du 21/10/2026 jusqu'a la direction : l'acheteur envoie son bon au controle, un autre
+    compte le controle et SAUTE la demande de prix, avec son motif (le prix n'est pas l'objet du
+    scenario ; scenario_bon_demande_prix prouve la demande elle-meme)."""
+    c.ok(auteur, "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "EN_CONTROLE"})
+    c.ok(controleur, "PUT", f"/api/bons-commande/{id_bc}/statut",
+         {"statut": "EN_ATTENTE_VALIDATION", "motif": motif})
+
+
 def bon_envoye(c, lignes, frs=FRS, date_bc=None):
     """Un bon saisi par l'assistante, valide par la Direction, envoye. Rend (id_bc, lignes du bon)."""
     bc = c.ok("Assistante", "POST", "/api/bons-commande", {
@@ -85,7 +94,7 @@ def bon_envoye(c, lignes, frs=FRS, date_bc=None):
                     "prix_unitaire_devise": p} for r, q, p in lignes],
     })
     id_bc = bc["id_bc"]
-    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+    soumettre_bc(c, id_bc)
     c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
     c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ENVOYE"})
     lignes = c.ok("Choukri", "GET", f"/api/bons-commande/{id_bc}/lignes")
@@ -165,12 +174,102 @@ def scenario_bon_segregation(c, infra):
         "lignes": [{"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 500,
                     "prix_unitaire_devise": 20}]})
     id_bc = bc["id_bc"]
-    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+    soumettre_bc(c, id_bc)
     c.refus("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
     c.refus("Magasinie", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
     c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
     c.ok("Choukri", "POST", f"/api/devalider/bons-commande/{id_bc}", {"motif": "Essai du banc : retour en brouillon"})
     c.refus("Assistante", "DELETE", f"/api/bons-commande/{id_bc}", contient="annulez")
+
+
+def scenario_bon_demande_prix(c, infra):
+    """LE CONTROLE ET LA DEMANDE DE PRIX (decision du 21/10/2026, logique SAP). L'acheteur envoie son
+    bon au controle ; un AUTRE compte le controle (le createur est refuse) et le renvoie en brouillon
+    avec un motif, ou passe en demande de prix. En demande de prix seuls le prix et la remise des
+    lignes se saisissent — la quantite est refusee, par l'API et par la base ; le prix d'avant reste
+    sur la ligne et l'ecart se SIGNALE (C59) sans bloquer la validation. La demande se saute avec un
+    motif obligatoire, trace sur le bon."""
+    bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [
+        {"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 300, "prix_unitaire_devise": 20},
+        {"code_reference": REF2, "unite_commande": "kg", "quantite_commandee_unite": 100, "prix_unitaire_devise": 22}]})
+    id_bc, numero = bc["id_bc"], bc["numero_bc"]
+    statut = f"/api/bons-commande/{id_bc}/statut"
+    lignes = c.ok("Assistante", "GET", f"/api/bons-commande/{id_bc}/lignes")
+    l1, l2 = (x["id_ligne_bc"] for x in sorted(lignes, key=lambda x: x["ligne_numero"]))
+    ligne1 = f"/api/bons-commande/{id_bc}/lignes/{l1}"
+
+    def entete(corps):
+        return V(infra, "bon_commande", "id_bc", id_bc, corps)
+
+    # La soumission directe n'existe plus : un bon passe par le controle.
+    c.refus("Assistante", "PUT", statut, {"statut": "EN_ATTENTE_VALIDATION"})
+    c.ok("Assistante", "PUT", statut, {"statut": "EN_CONTROLE"})
+    # Au controle, le bon est fige : ni ligne, ni en-tete.
+    c.refus("Assistante", "PATCH", ligne1, entete({"prix_unitaire_devise": 21}), contient="controle")
+    c.refus("Assistante", "PATCH", f"/api/bons-commande/{id_bc}", entete({"notes": "retouche"}), contient="controle")
+    # Le createur ne controle pas son propre bon (B4) ; le renvoi exige un motif.
+    c.refus("Assistante", "PUT", statut, {"statut": "DEMANDE_PRIX"}, contient="controler")
+    c.refus("Tarik", "PUT", statut, {"statut": "BROUILLON"}, contient="pourquoi")
+    c.ok("Tarik", "PUT", statut, {"statut": "BROUILLON", "motif": "Quantite a revoir avec le plan"})
+    verifier(infra.valeur(f"SELECT motif_renvoi FROM bon_commande WHERE id_bc = '{id_bc}'")
+             == "Quantite a revoir avec le plan", "le motif du renvoi n'est pas garde sur le bon")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM audit_log WHERE table_concernee = 'bon_commande' "
+                              f"AND id_enregistrement = '{id_bc}' AND nouvelles_valeurs::jsonb ->> 'motif_renvoi' "
+                              f"= 'Quantite a revoir avec le plan'")) >= 1, "le renvoi et son motif manquent au journal")
+
+    # Second passage : controle par un autre compte, demande de prix.
+    c.ok("Assistante", "PUT", statut, {"statut": "EN_CONTROLE"})
+    c.ok("Tarik", "PUT", statut, {"statut": "DEMANDE_PRIX"})
+    # Quantite figee (API et base), suppression de ligne refusee ; le prix se saisit.
+    c.refus("Assistante", "PATCH", ligne1, entete({"quantite_commandee_unite": 350}), contient="demande de prix")
+    c.refus("Assistante", "DELETE", f"{ligne1}?version={vv(infra, 'bon_commande', 'id_bc', id_bc)}",
+            contient="demande de prix")
+    refus_sql(infra, f"UPDATE ligne_bc SET quantite_commandee_unite = 400, quantite_commandee_kg = 400 "
+                     f"WHERE id_ligne_bc = '{l1}'", "demande de prix")
+    c.ok("Assistante", "PATCH", ligne1, entete({"prix_unitaire_devise": 21.5}))
+    c.ok("Assistante", "PATCH", f"/api/bons-commande/{id_bc}/lignes/{l2}", entete({"prix_unitaire_devise": 22}))
+    avant, confirme, repondu, qte = infra.sql(
+        f"SELECT prix_unitaire_avant_demande, prix_unitaire_devise, date_reponse_prix IS NOT NULL, "
+        f"quantite_commandee_kg FROM ligne_bc WHERE id_ligne_bc = '{l1}'")[0]
+    verifier(float(avant) == 20 and float(confirme) == 21.5 and repondu == "t" and float(qte) == 300,
+             f"reponse du fournisseur mal portee : avant {avant}, confirme {confirme}, repondu {repondu}, {qte} kg")
+    total = float(infra.valeur(f"SELECT montant_total_devise FROM bon_commande WHERE id_bc = '{id_bc}'"))
+    verifier(abs(total - (300 * 21.5 + 100 * 22)) < 0.01, f"total du bon non recalcule au prix confirme : {total}")
+
+    # Soumis a la direction : l'ecart se signale (C59), une ligne sur deux.
+    c.ok("Assistante", "PUT", statut, {"statut": "EN_ATTENTE_VALIDATION"})
+    ecart = infra.sql(f"SELECT ligne_numero, ecart_pct FROM v_ctl_c59 WHERE numero_bc = '{numero}'")
+    verifier(len(ecart) == 1 and abs(float(ecart[0][1]) - 7.5) < 0.01, f"C59 attendu sur la ligne 1 (+7,5 %) : {ecart}")
+    verifier(controle(infra, "C59") >= 1, "C59 absent de v_controles")
+    # Le signal ne bloque pas : la direction valide.
+    c.ok("Choukri", "PUT", statut, {"statut": "VALIDE"})
+    verifier(int(infra.valeur(f"SELECT count(*) FROM v_ctl_c59 WHERE numero_bc = '{numero}'")) == 0,
+             "C59 vise encore un bon valide")
+
+    # Le saut de la demande de prix : motif obligatoire, trace sur le bon, controleur nomme.
+    b2 = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [
+        {"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 50, "prix_unitaire_devise": 20}]})
+    st2 = f"/api/bons-commande/{b2['id_bc']}/statut"
+    c.ok("Assistante", "PUT", st2, {"statut": "EN_CONTROLE"})
+    c.refus("Tarik", "PUT", st2, {"statut": "EN_ATTENTE_VALIDATION"}, contient="motif")
+    c.ok("Tarik", "PUT", st2, {"statut": "EN_ATTENTE_VALIDATION", "motif": "Prix sous contrat annuel"})
+    motif, controleur = infra.sql(
+        f"SELECT b.motif_saut_demande_prix, u.login FROM bon_commande b "
+        f"JOIN utilisateur u ON u.id_utilisateur = b.id_utilisateur_controle WHERE b.id_bc = '{b2['id_bc']}'")[0]
+    verifier(motif == "Prix sous contrat annuel" and controleur == "Tarik", f"saut mal trace : {motif}, {controleur}")
+    c.ok("Choukri", "PUT", st2, {"statut": "VALIDE"})
+
+    # La base tient les memes gardes : saut sans motif, controle par le createur.
+    b3 = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": FRS, "lignes": [
+        {"code_reference": REF, "unite_commande": "kg", "quantite_commandee_unite": 40, "prix_unitaire_devise": 20}]})
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{b3['id_bc']}/statut", {"statut": "EN_CONTROLE"})
+    refus_sql(infra, f"UPDATE bon_commande SET statut = 'EN_ATTENTE_VALIDATION', id_utilisateur_controle = "
+                     f"(SELECT id_utilisateur FROM utilisateur WHERE login = 'Tarik') WHERE id_bc = '{b3['id_bc']}'",
+              "BC-SAUT")
+    refus_sql(infra, f"UPDATE bon_commande SET statut = 'DEMANDE_PRIX', id_utilisateur_controle = "
+                     f"id_utilisateur_creation WHERE id_bc = '{b3['id_bc']}'", "controler")
+    # Un bon au controle s'annule comme un brouillon.
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{b3['id_bc']}/statut", {"statut": "ANNULE"})
 
 
 def scenario_reception_cloture_avoir(c, infra):
@@ -1169,7 +1268,7 @@ def scenario_cloture_periode(c, infra):
     bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": "FRS-012", "date_bc": "2025-04-01",
         "lignes": [{"code_reference": A, "unite_commande": "kg", "quantite_commandee_unite": 150, "prix_unitaire_devise": 21}]})
     id_bc = bc["id_bc"]
-    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+    soumettre_bc(c, id_bc)
     c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
     c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ENVOYE"})
     lb = c.ok("Choukri", "GET", f"/api/bons-commande/{id_bc}/lignes")
@@ -1309,8 +1408,9 @@ def scenario_controles_finaux(c, infra):
     c.ok("Choukri", "GET", "/api/cockpit")
     # LA LISTE EXACTE (audit v5, U16) : « au moins 40 » laissait passer un controle perdu.
     # LE DERNIER CONTROLE, EN UN SEUL ENDROIT : a relever a chaque controle ajoute
-    # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10).
-    dernier = 58
+    # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10 ;
+    # C59, prix confirme a la demande de prix, le 21/10).
+    dernier = 59
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
                              f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
@@ -2105,7 +2205,7 @@ def scenario_taux_bon(c, infra):
             "code_fournisseur": "FRS-001",
             "lignes": [{"code_reference": ref, "unite_commande": "kg", "quantite_commandee_unite": 100,
                         "prix_unitaire_devise": 2.0}]})
-        c.ok("Assistante", "PUT", f"/api/bons-commande/{bc['id_bc']}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+        soumettre_bc(c, bc['id_bc'])
         return bc["id_bc"]
 
     # Au cours propose : source REFERENCE, date du cours posee.
@@ -2798,7 +2898,7 @@ def scenario_reception_date_du_fait(c, infra):
     bc = c.ok("Assistante", "POST", "/api/bons-commande", {"code_fournisseur": "FRS-012", "date_bc": "2025-03-01",
         "lignes": [{"code_reference": A, "unite_commande": "kg", "quantite_commandee_unite": 200, "prix_unitaire_devise": 21}]})
     id_bc = bc["id_bc"]
-    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "EN_ATTENTE_VALIDATION"})
+    soumettre_bc(c, id_bc)
     c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
     c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ENVOYE"})
     lb = c.ok("Choukri", "GET", f"/api/bons-commande/{id_bc}/lignes")
@@ -3050,6 +3150,7 @@ def scenario_securite(c, infra):
 
 SCENARIOS = [
     scenario_bon_segregation,
+    scenario_bon_demande_prix,
     scenario_reception_cloture_avoir,
     scenario_ecart_pesee,
     scenario_reception_devalidee_revalidee,

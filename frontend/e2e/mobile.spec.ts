@@ -45,12 +45,15 @@ async function creerReceptionBrouillon(): Promise<string> {
   expect(rBc.ok(), `bon : ${rBc.status()} ${await rBc.text()}`).toBeTruthy()
   const idBc = (await rBc.json()).id_bc as string
 
-  for (const [t, statut] of [
-    [tAss, 'EN_ATTENTE_VALIDATION'],
-    [tDir, 'VALIDE'],
-    [tDir, 'ENVOYE'],
+  // Le circuit du 21/10/2026 : controle par un autre compte, demande de prix
+  // sautee avec son motif (le prix n'est pas l'objet de ce test).
+  for (const [t, statut, motif] of [
+    [tAss, 'EN_CONTROLE', undefined],
+    [tDir, 'EN_ATTENTE_VALIDATION', 'Prix sous contrat (e2e)'],
+    [tDir, 'VALIDE', undefined],
+    [tDir, 'ENVOYE', undefined],
   ] as const) {
-    const r = await ctx.put(`/api/bons-commande/${idBc}/statut`, { headers: entete(t), data: { statut } })
+    const r = await ctx.put(`/api/bons-commande/${idBc}/statut`, { headers: entete(t), data: { statut, motif } })
     expect(r.ok(), `statut ${statut} : ${r.status()} ${await r.text()}`).toBeTruthy()
   }
 

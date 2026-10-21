@@ -821,7 +821,7 @@ WITH bc_agg AS (
            COUNT(*)                                    AS nb_bc,
            ROUND(COALESCE(SUM(montant_total_mad), 0), 2) AS montant_total_mad
     FROM bon_commande
-    WHERE statut NOT IN ('BROUILLON','ANNULE')
+    WHERE statut NOT IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','ANNULE')
     GROUP BY code_fournisseur
 ),
 rec_agg AS (
@@ -994,7 +994,7 @@ SELECT
        JOIN ligne_bc lb        ON lb.id_ligne_bc  = lr.id_ligne_bc
        JOIN bon_commande bc    ON bc.id_bc        = lb.id_bc
       WHERE rc.statut IN ('BROUILLON','A_CONTROLER')
-        AND bc.statut IN ('BROUILLON','EN_ATTENTE_VALIDATION','VALIDE'))
+        AND bc.statut IN ('BROUILLON','EN_CONTROLE','DEMANDE_PRIX','EN_ATTENTE_VALIDATION','VALIDE'))
         AS nb_receptions_a_regulariser,
 
     -- Stock

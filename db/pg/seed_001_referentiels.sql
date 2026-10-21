@@ -213,7 +213,15 @@ INSERT INTO transition_statut (entite, statut_source, statut_cible, role_requis,
     ('plan_production','SIMULATION','CLOTURE',   'PLANIF',   'Abandon du scenario'),
 
     -- G2 Bon de commande
-    ('bon_commande','BROUILLON',            'EN_ATTENTE_VALIDATION','ACHAT',    'Soumission a validation'),
+    -- Controle et demande de prix (2026-10-21b) : plus de soumission directe.
+    ('bon_commande','BROUILLON',            'EN_CONTROLE',          'ACHAT',    'Envoi au controle'),
+    ('bon_commande','EN_CONTROLE',          'BROUILLON',            'ACHAT',    'Renvoi pour correction (motif)'),
+    ('bon_commande','EN_CONTROLE',          'DEMANDE_PRIX',         'ACHAT',    'Controle fait (autre compte que le createur) : demande de prix'),
+    ('bon_commande','EN_CONTROLE',          'EN_ATTENTE_VALIDATION','ACHAT',    'Controle fait, demande de prix sautee (motif)'),
+    ('bon_commande','EN_CONTROLE',          'ANNULE',               'ACHAT',    'Abandon'),
+    ('bon_commande','DEMANDE_PRIX',         'EN_ATTENTE_VALIDATION','ACHAT',    'Reponse du fournisseur saisie : soumission a validation'),
+    ('bon_commande','DEMANDE_PRIX',         'BROUILLON',            'ACHAT',    'Renvoi pour correction (motif)'),
+    ('bon_commande','DEMANDE_PRIX',         'ANNULE',               'ACHAT',    'Abandon'),
     ('bon_commande','BROUILLON',            'ANNULE',               'ACHAT',    'Abandon'),
     ('bon_commande','EN_ATTENTE_VALIDATION','BROUILLON',            'ACHAT',    'Renvoi pour correction'),
     ('bon_commande','EN_ATTENTE_VALIDATION','VALIDE',               'DIRECTION','Validation (createur <> valideur)'),

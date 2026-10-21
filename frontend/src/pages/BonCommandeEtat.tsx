@@ -30,6 +30,11 @@
  *
  * ET LE MONTANT ENGAGE ? Il est a l'ecran du bon, ou il sert : a la saisie, a
  * l'arbitrage, a la validation. Il n'est pas sur le papier qu'on envoie.
+ *
+ * LA DEMANDE DE PRIX (21/10/2026) est le MEME document, titre « Demande de
+ * prix » : memes colonnes, meme pied de page, toujours sans prix ni montant, et
+ * la mention qu'il n'engage pas — c'est une demande d'offre, pas une commande.
+ * On l'ouvre par `?document=demande-prix`.
  */
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
@@ -101,6 +106,7 @@ function bobinesDe(l: LigneBc): number | null {
 export function BonCommandeEtat() {
   const { id } = useParams<{ id: string }>()
   const auto = useParamVue('imprimer') === '1'
+  const demandePrix = useParamVue('document') === 'demande-prix'
 
   const qBc = useQuery({
     queryKey: ['bons-commande'],
@@ -122,7 +128,9 @@ export function BonCommandeEtat() {
     .filter((l) => l.type_ligne !== 'SERVICE')
     .sort((a, b) => a.ligne_numero - b.ligne_numero)
 
-  const valide = bc.statut !== 'BROUILLON'
+  // Au controle et en demande de prix, le bon n'est pas plus engage qu'un
+  // brouillon : son bon de commande imprime porte la mention « DRAFT ».
+  const valide = !['BROUILLON', 'EN_CONTROLE', 'DEMANDE_PRIX'].includes(bc.statut)
 
   // Le total des palettes : c'est le chiffre du transitaire, et celui que
   // portaient tous les bons d'archive en bas de page.
@@ -139,7 +147,13 @@ export function BonCommandeEtat() {
 
   return (
     <div>
-      {!valide && (
+      {demandePrix && (
+        <Alerte ton="info" className="sans-impression mb-3">
+          Demande de prix : le document ne porte ni prix ni montant, et n’engage pas l’entreprise.
+          La réponse du fournisseur se saisit sur le bon, ligne par ligne.
+        </Alerte>
+      )}
+      {!valide && !demandePrix && (
         <Alerte ton="alerte" className="sans-impression mb-3">
           Ce bon est encore en brouillon. Le document portera la mention « DRAFT » : il se relit,
           il ne s’envoie pas.
@@ -153,9 +167,15 @@ export function BonCommandeEtat() {
       )}
 
       <EtatImprimable
-        titre="PURCHASE ORDER"
+        titre={demandePrix ? 'DEMANDE DE PRIX — REQUEST FOR QUOTATION' : 'PURCHASE ORDER'}
         reference={bc.numero_bc}
-        sousTitre={valide ? undefined : 'DRAFT — do not send'}
+        sousTitre={
+          demandePrix
+            ? 'Sans valeur d’engagement — not a purchase order'
+            : valide
+              ? undefined
+              : 'DRAFT — do not send'
+        }
         auto={auto}
         enTete={
           <div className="grid grid-cols-2 gap-x-8 gap-y-1">
@@ -167,17 +187,26 @@ export function BonCommandeEtat() {
             </div>
             <div className="space-y-1">
               <div className="mb-1 text-[9px] font-bold uppercase tracking-wide text-neutral-600">
-                Order
+                {demandePrix ? 'Request' : 'Order'}
               </div>
               {/* LA DATE DE COMMANDE EST CELLE DE LA VALIDATION (regle 10,
                   09/10/2026) : le jour ou l'entreprise s'engage. Le brouillon
                   garde sa date d'etablissement, en second. */}
-              <Champ libelle="Order date" valeur={fmt.date(String(bc.date_validation ?? bc.date_bc))} />
-              <Champ libelle="Order N°" valeur={bc.numero_bc} />
-              {bc.date_validation ? (
+              {demandePrix ? (
+                <>
+                  <Champ libelle="Request date" valeur={fmt.date(String(bc.date_demande_prix ?? bc.date_bc))} />
+                  <Champ libelle="Request N°" valeur={bc.numero_bc} />
+                </>
+              ) : (
+                <>
+                  <Champ libelle="Order date" valeur={fmt.date(String(bc.date_validation ?? bc.date_bc))} />
+                  <Champ libelle="Order N°" valeur={bc.numero_bc} />
+                </>
+              )}
+              {bc.date_validation && !demandePrix ? (
                 <div className="text-[9px] text-neutral-600">Prepared on {fmt.date(bc.date_bc)}</div>
               ) : null}
-              {bc.code_devise && bc.code_devise !== 'MAD' && bc.date_validation ? (
+              {bc.code_devise && bc.code_devise !== 'MAD' && bc.date_validation && !demandePrix ? (
                 <div className="text-[9px] text-neutral-600">
                   Rate {fmt.nombre(Number(bc.taux_change_engage), 4)} MAD/{String(bc.code_devise)}
                   {bc.date_cours_engage ? ` (${fmt.date(String(bc.date_cours_engage))})` : ''}
@@ -189,7 +218,11 @@ export function BonCommandeEtat() {
       >
         {/* « New order » ouvrait chacun des 109 bons d'archive. C'est la phrase
             que le correspondant cherche en haut du message. */}
-        <div className="mb-2 text-[11px] font-semibold">New order</div>
+        <div className="mb-2 text-[11px] font-semibold">
+          {demandePrix
+            ? 'Request for quotation — please send us your best price and delivery terms for the goods below.'
+            : 'New order'}
+        </div>
 
         <TableEtat<LigneBc>
           colonnes={[

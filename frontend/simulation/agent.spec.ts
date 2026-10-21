@@ -274,9 +274,10 @@ async function creerBon(e: Extract<Evenement, { type: 'BC' }>) {
     if (lignes.length !== e.lignes.length) throw new Error(`bon ${id} : ${lignes.length} ligne(s) au lieu de ${e.lignes.length}`)
   } else await aller(p, `/bons-commande/${id}`, login)
   const b = await bon(p, id)
+  // Le circuit du 21/10/2026 : le bon part au controle (la direction le controle a la validation).
   if (b?.statut === 'BROUILLON') {
-    await p.getByRole('button', { name: /Soumettre [aà] validation/ }).click()
-    await attendre(async () => (await bon(p, id))?.statut, (s) => s !== 'BROUILLON', 'soumission du bon')
+    await p.getByRole('button', { name: /Envoyer au contr[oô]le/ }).click()
+    await attendre(async () => (await bon(p, id))?.statut, (s) => s !== 'BROUILLON', 'envoi du bon au contrôle')
   }
   return `${b?.numero_bc} ${e.fournisseur} ${e.lignes.length} ligne(s), ${fr(e.lignes.reduce((s, l) => s + l.kg, 0), 0)} kg`
 }
@@ -288,6 +289,13 @@ async function validerBon(e: Extract<Evenement, { type: 'BC_VALIDER' }>) {
   if (!id) throw new Error(`bon ${e.bc} absent du journal`)
   await aller(p, `/bons-commande/${id}`, login)
   let b = (await bon(p, id))!
+  // LE CONTROLE, PAR UN AUTRE COMPTE : le prix vient du classeur, la demande de prix se saute.
+  if (b.statut === 'EN_CONTROLE') {
+    await p.getByRole('button', { name: 'Sauter la demande de prix' }).click()
+    await p.locator('#ch-boncommande-motif').fill('Prix du classeur (reprise de l’historique)')
+    await p.getByRole('button', { name: 'Soumettre à validation sans demande de prix' }).click()
+    b = await attendre(async () => (await bon(p, id))!, (x) => x.statut === 'EN_ATTENTE_VALIDATION', 'contrôle du bon')
+  }
   if (b.statut === 'EN_ATTENTE_VALIDATION') {
     await p.getByRole('button', { name: 'Valider', exact: true }).click()
     const taux = p.locator('#ch-boncommande-1')

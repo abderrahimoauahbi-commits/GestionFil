@@ -20,7 +20,7 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
+import { ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -124,6 +124,8 @@ interface Equivalent extends Record<string, unknown> {
 
 /** Le plan d'achat est une LECTURE DU STOCK : ces colonnes disent pourquoi. */
 interface Kpi {
+  /** Le moment du calcul : a la generation du plan (21/10/2026), pas a l'ouverture. */
+  calcule_le?: string
   globaux: {
     refs_en_alerte: number
     ruptures: number
@@ -380,26 +382,6 @@ export function PlanAchat() {
         ),
     },
     {
-      champ: 'risque_source',
-      entete: 'Source',
-      largeur: '128px',
-      // C'est la colonne qui manquait : elle dit si un ennui chez ce
-      // fournisseur arrete la ligne, ou si une alternative existe.
-      rendu: (p) =>
-        !p.risque_source ? (
-          <span className="text-attenue-texte">—</span>
-        ) : p.risque_source === 'MONO_SOURCE' ? (
-          <span className="inline-flex items-center gap-1 rounded-[3px] bg-danger/12 px-1.5 py-px text-[11px] font-medium text-danger">
-            <AlertTriangle className="size-3" />
-            mono-source
-          </span>
-        ) : (
-          <span className="text-[11px] text-succes">
-            {p.nb_sources} sources
-          </span>
-        ),
-    },
-    {
       champ: 'action_recommandee',
       entete: 'Action',
       secondaire: true,
@@ -644,6 +626,11 @@ export function PlanAchat() {
           <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-attenue-texte">
               Situation du stock
+              {qKpi.data?.calcule_le && (
+                <span className="ml-1 font-normal normal-case tracking-normal">
+                  · calculée le {fmt.dateHeure(qKpi.data.calcule_le)}
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
               <span className="text-attenue-texte">Références en alerte</span>

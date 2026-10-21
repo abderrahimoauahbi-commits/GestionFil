@@ -2232,6 +2232,38 @@ def scenario_plan_detail(c, infra):
         verifier(infra.valeur(f"SELECT count(*) FROM plan_achat WHERE code_reference = '{ref_prop}' "
                               "AND statut = 'PROPOSE'") == "1", "l'ecart expire ne rend pas la proposition")
 
+    # LES INDICATEURS SE CALCULENT A LA GENERATION (21/10/2026) : l'ecran les lit, dates.
+    kpi = c.ok("Choukri", "GET", "/api/plan-achat/kpi")
+    verifier(kpi.get("calcule_le") and kpi.get("globaux") is not None, f"indicateurs sans date ou vides : {kpi}")
+    liste = c.ok("Choukri", "GET", "/api/plan-achat/propositions")
+    verifier(liste and "classe_abc" in liste[0] and "risque_source" not in liste[0],
+             "la liste du plan d'achat relit encore le risque (il est au detail)")
+    verifier("risque" in c.ok("Choukri", "GET", f"/api/plan-achat/detail?reference={quote(ref_detail)}"),
+             "le detail d'une ligne ne rend pas le risque d'approvisionnement")
+
+    # LA PROPOSITION DEVIENT UNE LIGNE DE BON AVEC SON PRIX ET SON UNITE (21/10/2026) : le
+    # prix en devise du plan, tel quel, quand c'est la devise du bon — pas le prix MAD
+    # redivise par le taux du bon.
+    conv = infra.sql("SELECT pa.id_proposition FROM plan_achat pa "
+                     "JOIN fournisseur f ON f.code_fournisseur = pa.code_fournisseur "
+                     "WHERE pa.statut = 'PROPOSE' AND pa.code_devise = f.code_devise AND pa.prix_devise > 0 "
+                     "ORDER BY pa.code_reference LIMIT 1")
+    verifier(bool(conv), "aucune proposition dans la devise de son fournisseur : la conversion n'est pas essayee")
+    if conv:
+        id_conv = conv[0][0]
+        c.ok("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [id_conv]})
+        ligne = infra.sql("SELECT lb.prix_unitaire_devise, lb.facteur_kg, lb.unite_commande, pa.prix_devise, "
+                          "pa.unite_saisie, lb.quantite_commandee_kg, pa.quantite_suggeree_kg "
+                          "FROM ligne_bc lb JOIN plan_achat pa ON pa.id_proposition = lb.id_proposition "
+                          f"WHERE lb.id_proposition = '{id_conv}'")
+        verifier(bool(ligne), "la proposition convertie n'a pas de ligne de bon")
+        pu, facteur, unite, pdev, u_pa, kg_bc, kg_pa = ligne[0]
+        verifier(abs(float(pu) - float(pdev) * float(facteur)) < 1e-6,
+                 f"prix de la ligne {pu} au lieu du prix en devise de la proposition {pdev} x {facteur}")
+        verifier(unite == (u_pa if u_pa and u_pa != "kg" and float(facteur) != 1 else "kg"),
+                 f"unite de la ligne {unite}, proposition en {u_pa}")
+        verifier(abs(float(kg_bc) - float(kg_pa)) < 0.01, f"kilos de la ligne {kg_bc} au lieu de {kg_pa}")
+
 
 def scenario_derogation_bornee(c, infra):
     """F17 (09/10) : la derogation d'un lot bloque couvre les kilos d'une fiche, pas plus ; elle tombe

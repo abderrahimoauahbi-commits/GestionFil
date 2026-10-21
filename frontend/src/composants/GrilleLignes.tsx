@@ -305,10 +305,14 @@ export function depuisLigneEnregistree(
     // poids. Recalculer d'office effacerait ce qu'on avait constate.
     palettes: l.nb_palettes != null ? String(l.nb_palettes) : pourChamp(colis.palettes),
     bobines: l.nb_bobines != null ? String(l.nb_bobines) : pourChamp(colis.bobines),
-    // DETACHEE DES QU'UN COLISAGE A ETE ENREGISTRE : quelqu'un a constate un
-    // compte que la regle ne sait pas deviner. Relier d'office recalculerait
-    // les deux autres champs et effacerait ce constat a la premiere frappe.
-    lie: l.nb_palettes == null && l.nb_bobines == null,
+    // DETACHEE SEULEMENT SI LE COLISAGE ENREGISTRE N'EST PAS CELUI DU POIDS :
+    // quelqu'un a constate un compte que la regle ne sait pas deviner (une
+    // palette entamee). Relier recalculerait les deux autres champs et
+    // effacerait ce constat a la premiere frappe. Mais un colisage QUI EST
+    // celui du poids (le plan d'achat l'enregistre en creant la ligne) reste
+    // lie : sinon, rouvert, le bon ne convertissait plus kg, bobines et
+    // palettes (constat du 21/10/2026).
+    lie: memeColis(l.nb_palettes, colis.palettes) && memeColis(l.nb_bobines, colis.bobines),
     remise: l.remise_pct ? String(Number(l.remise_pct)) : '',
     prix:
       l.prix_unitaire_devise == null
@@ -345,6 +349,10 @@ export const unitesDe = (l: LigneSaisie): string[] => {
   if (facteurVersKg('ml', l.cond)) u.push('ml')
   return u
 }
+
+/** Un colisage enregistre egal au calcul (ou absent) : rien n'a ete constate a part. */
+const memeColis = (saisi: number | null | undefined, calcule: number | null) =>
+  saisi == null || (calcule != null && Math.abs(Number(saisi) - calcule) < 0.005)
 
 /** Une reference retenue remplit la ligne. */
 export function depuisReference(r: RefLigne, cle?: string): LigneSaisie {

@@ -393,22 +393,37 @@ pub async fn convertir(
         // plan, et les palettes calculees. Le plan ne sert qu'a choisir ; la
         // decision se prend ici, sur la commande (14/10/2026).
         let aj = ajustements.and_then(|m| m.get(id_prop));
-        let qte_final = aj.and_then(|a| a.quantite_kg).filter(|q| *q > 0.0).unwrap_or(*qte_kg);
-        let prix_final = aj.and_then(|a| a.prix_mad).filter(|p| *p >= 0.0).unwrap_or(*prix_mad);
-        let palettes_final = aj.and_then(|a| a.nb_palettes).or(*palettes_plan);
+        let qte_ajustee = aj.and_then(|a| a.quantite_kg).filter(|q| *q > 0.0);
+        let qte_final = qte_ajustee.unwrap_or(*qte_kg);
+        // LE PRIX DE LA PROPOSITION, PAS UN PRIX RECALCULE (21/10/2026). Le prix
+        // MAD redivise par le taux du bon donnait 3,3395 USD pour une proposition
+        // a 3,38 USD. Sans ajustement de l'acheteur, la ligne reprend le prix en
+        // DEVISE de la proposition quand c'est la devise du bon ; sinon (bon en
+        // MAD, ou autre devise), le prix MAD au taux du bon.
+        let prix_ajuste = aj.and_then(|a| a.prix_mad).filter(|p| *p >= 0.0);
+        let prix_mad_final = prix_ajuste.unwrap_or(*prix_mad);
+        // Les palettes du plan valent pour SA quantite : une quantite ajustee
+        // sans palettes saisies laisse la grille les deduire du poids.
+        let palettes_final = aj
+            .and_then(|a| a.nb_palettes)
+            .or(if qte_ajustee.is_none() { *palettes_plan } else { None });
         let bobines_final = aj.and_then(|a| a.nb_bobines);
 
-        // La commande se passe en kg : c'est l'unite du besoin, et la seule dont
-        // le facteur vaut 1 pour toute reference.
+        // L'UNITE DE LA PROPOSITION (21/10/2026) : kg, ou l'unite du catalogue
+        // (ml) avec son facteur, celui que le plan a applique. Les kilos se
+        // deduisent de la quantite dans l'unite : la base exige l'egalite.
         sqlx::query(
             "INSERT INTO ligne_bc
                  (id_bc, ligne_numero, code_reference, designation, unite_commande,
                   facteur_kg, quantite_commandee_unite, quantite_commandee_kg,
                   prix_unitaire_devise, code_devise, date_livraison_prevue,
                   id_proposition, besoin_kg_origine, nb_palettes_saisi, nb_bobines_saisi)
-             SELECT $1, $2, pa.code_reference, r.designation, 'kg',
-                    1.0, $5::numeric, $5::numeric,
-                    ROUND($6::numeric / $3::numeric, 6), bc.code_devise, pa.date_besoin_prevue,
+             SELECT $1, $2, pa.code_reference, r.designation, u.unite,
+                    u.facteur, q.unite_qte, ROUND(q.unite_qte * u.facteur, 4),
+                    ROUND(CASE WHEN $9::boolean AND pa.code_devise = bc.code_devise AND pa.prix_devise > 0
+                               THEN pa.prix_devise
+                               ELSE $6::numeric / $3::numeric END * u.facteur, 6),
+                    bc.code_devise, pa.date_besoin_prevue,
                     pa.id_proposition,
                     COALESCE((SELECT b.besoin_12m_kg FROM v_besoin_12m b
                                WHERE b.code_reference = pa.code_reference), 0),
@@ -416,6 +431,17 @@ pub async fn convertir(
                FROM plan_achat pa
                JOIN reference r  ON r.code_reference = pa.code_reference
                JOIN bon_commande bc ON bc.id_bc = $1
+              CROSS JOIN LATERAL (
+                    SELECT CASE WHEN pa.unite_saisie IS NULL OR pa.unite_saisie = 'kg'
+                                  OR COALESCE(pa.quantite_suggeree_unite, 0) <= 0
+                                  OR COALESCE(pa.quantite_suggeree_kg, 0) <= 0
+                                THEN 'kg' ELSE pa.unite_saisie END AS unite,
+                           CASE WHEN pa.unite_saisie IS NULL OR pa.unite_saisie = 'kg'
+                                  OR COALESCE(pa.quantite_suggeree_unite, 0) <= 0
+                                  OR COALESCE(pa.quantite_suggeree_kg, 0) <= 0
+                                THEN 1.0
+                                ELSE ROUND(pa.quantite_suggeree_kg / pa.quantite_suggeree_unite, 6) END AS facteur) u
+              CROSS JOIN LATERAL (SELECT ROUND($5::numeric / u.facteur, 4) AS unite_qte) q
               WHERE pa.id_proposition = $4",
         )
         .bind(&id_bc)
@@ -423,9 +449,10 @@ pub async fn convertir(
         .bind(taux)
         .bind(id_prop)
         .bind(qte_final)
-        .bind(prix_final)
+        .bind(prix_mad_final)
         .bind(palettes_final)
         .bind(bobines_final)
+        .bind(prix_ajuste.is_none())
         .execute(&mut *tx)
         .await?;
 

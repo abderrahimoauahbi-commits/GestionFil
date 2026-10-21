@@ -110,6 +110,11 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Les indicateurs du plan d'achat, figes a la generation (21/10/2026).
+        "2026-10-21a_indicateurs_plan_achat.sql",
+        "SELECT to_regclass('public.plan_achat_indicateurs') IS NOT NULL",
+    ),
+    (
         // Verrou optimiste, groupe 3 (20/10/2026) : le serveur ecrit sous
         // condition de version les dossiers et factures d'import, factures et
         // retours fournisseur, parametres, machines.

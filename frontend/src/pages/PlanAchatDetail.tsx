@@ -47,6 +47,9 @@ interface Calcul {
 
 interface Detail {
   calcul: Calcul
+  /** Le risque d'approvisionnement, lu ici et non dans la liste (21/10/2026). */
+  risque: { risque_source: string | null; nb_sources: number | null; action_recommandee: string | null;
+            tier: string | null; budget_annuel_mad: number | null } | null
   bons: { numero_bc: string; date_livraison_prevue: string | null; reste_kg: number; en_retard: boolean }[]
   port: { numero_dossier: string; numero_facture: string; reste_kg: number }[]
   machine: { code_emplacement: string; lot_fournisseur: string | null; kg: number; date_constat: string | null; lot_bloque: boolean; constat_ancien: boolean }[]
@@ -118,6 +121,24 @@ export function DetailCalcul({ reference }: { reference: string }) {
       </div>
 
       <div className="min-w-0 space-y-3">
+        {q.data.risque && (
+          <div>
+            <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte">
+              Risque d’approvisionnement
+            </p>
+            <p>
+              {q.data.risque.risque_source === 'MONO_SOURCE'
+                ? 'Une seule source'
+                : q.data.risque.nb_sources != null
+                  ? `${q.data.risque.nb_sources} sources`
+                  : (q.data.risque.risque_source ?? '—')}
+              {q.data.risque.tier && <span className="text-attenue-texte"> · {q.data.risque.tier}</span>}
+            </p>
+            {q.data.risque.action_recommandee && (
+              <p className="text-attenue-texte">{q.data.risque.action_recommandee}</p>
+            )}
+          </div>
+        )}
         {q.data.bons.length > 0 && (
           <div>
             <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte">Bons ouverts</p>

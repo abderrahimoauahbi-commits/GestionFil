@@ -55,6 +55,9 @@ pub async fn generer_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Ecrire).await?;
     let r = plan_achat::generer(&state.db, &user, p.id_plan.as_deref()).await?;
+    // Les indicateurs se calculent ICI, une fois, et l'ecran les lit ensuite
+    // (21/10/2026 : 4 a 7 s a chaque ouverture quand il les recalculait).
+    crate::routes::consultation::figer_kpi_plan_achat(&state.db, &user).await?;
     // Le budget total se masque comme les montants estimes (audit du 13/10/2026).
     let mut v = serde_json::to_value(r)?;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;

@@ -1341,6 +1341,14 @@ pub async fn references_commandables(
                                 AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut, 1, 10)
                                 AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin, 1, 10))
                               ORDER BY t.date_debut DESC LIMIT 1), 1.0), 4)) AS prix_mad_suggere,
+                -- LE PRIX EN DEVISE DE LA PROPOSITION, tel quel, quand c'est la
+                -- devise du bon (21/10/2026) : le prix MAD redivise par le taux
+                -- du jour ne rendait pas le prix negocie (3,3395 pour 3,38 USD).
+                CASE WHEN pa.prix_devise > 0
+                      AND pa.devise = COALESCE((SELECT bc.code_devise FROM bon_commande bc WHERE bc.id_bc = $1),
+                                               f.code_devise)
+                     THEN ROUND(pa.prix_devise, 6)
+                     ELSE
                 ROUND(COALESCE(pa.prix_estime_mad, r.cmup_mad,
                          r.prix_catalogue_kg * COALESCE((
                              SELECT t.taux FROM taux_change t
@@ -1354,7 +1362,7 @@ pub async fn references_commandables(
                       -- la requete entiere echouait en 500, donc l'ecran de
                       -- creation d'un bon n'affichait AUCUNE reference — sans
                       -- un mot expliquant pourquoi.
-                      / $3::numeric, 6) AS prix_suggere_devise,
+                      / $3::numeric, 6) END AS prix_suggere_devise,
                 -- LA SOURCE SUIT L'ORDRE DU COALESCE (audit du 13/10/2026) : elle
                 -- annoncait « CATALOGUE » pour un prix qui etait le CMUP, et le
                 -- masquage du CMUP ne le reconnaissait donc pas.

@@ -1090,8 +1090,19 @@ pub async fn detail_proposition(
     .bind(reference)
     .fetch_all(&state.db)
     .await?;
+    // LE RISQUE D'APPROVISIONNEMENT, ici et non dans la liste (21/10/2026) :
+    // une seule reference, la vue ne coute plus a l'ouverture du plan.
+    let risque = sqlx::query(
+        "SELECT risque_source, nb_sources, action_recommandee, tier,
+                budget_annuel_mad::float8 AS budget_annuel_mad
+           FROM v_risque_sourcing WHERE code_reference = $1",
+    )
+    .bind(reference)
+    .fetch_optional(&state.db)
+    .await?;
     let mut v = json!({
         "calcul": lignes_en_json(&[calcul]).get(0).cloned().unwrap_or(Value::Null),
+        "risque": risque.map(|r| lignes_en_json(&[r]).get(0).cloned().unwrap_or(Value::Null)).unwrap_or(Value::Null),
         "bons": lignes_en_json(&bons),
         "port": lignes_en_json(&port),
         "machine": lignes_en_json(&machine),
@@ -1118,15 +1129,18 @@ pub async fn propositions_achat(
         // `plan_achat` : le complement de palette y est desormais fige a la
         // generation (migration 2026-10-14), les palettes aussi. Les equivalents
         // et le detail du calcul se chargent A LA DEMANDE (bouton, depliage).
+        //
+        // SANS LE RISQUE (21/10/2026) : la jointure a v_risque_sourcing coutait
+        // 270 ms de preparation a elle seule, sur 300 — la liste s'ouvrait en
+        // 1 a 2 s. La classe ABC/XYZ est celle de la fiche (figee au calcul de
+        // classification), l'action recommandee celle de la proposition (figee
+        // a la generation). Le risque d'approvisionnement (sources, budget) se
+        // lit au DETAIL de la ligne, une reference a la fois.
         "SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
                 bc.numero_bc, bc.statut AS statut_bc,
                 ro.designation AS designation_origine,
-                -- Le bloc « RISQUES IDENTIFIES » du classeur (ABC/XYZ, tier,
-                -- source, action) : une seule jointure, pas une requete par ligne.
-                rs.classe_abc, rs.classe_xyz, rs.tier, rs.risque_source,
-                rs.nb_sources, rs.action_recommandee, rs.budget_annuel_mad
+                r.classe_abc, r.classe_xyz
            FROM plan_achat pa
-          LEFT JOIN v_risque_sourcing rs ON rs.code_reference = pa.code_reference
            JOIN reference r    ON r.code_reference     = pa.code_reference
            JOIN fournisseur f  ON f.code_fournisseur   = pa.code_fournisseur
            LEFT JOIN reference ro    ON ro.code_reference = pa.code_reference_origine
@@ -1157,27 +1171,56 @@ pub async fn kpi_plan_achat(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
 
+    // LUS, PAS RECALCULES (21/10/2026) : le calcul prenait 4 a 7 s a chaque
+    // ouverture (toute la projection de stock, replanifiee pour chaque compte).
+    // Il se fait a la generation du plan (`figer_kpi_plan_achat`) ; l'ecran lit
+    // le dernier, avec sa date. Aucun encore : on le calcule une fois ici.
+    let fige: Option<(Value, String)> = sqlx::query_as(
+        "SELECT valeurs, fn_iso(date_calcul) FROM plan_achat_indicateurs ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_optional(&state.db)
+    .await?;
+    let (mut sortie, date_calcul) = match fige {
+        Some(x) => x,
+        None => figer_kpi_plan_achat(&state.db, &user).await?,
+    };
+    if let Some(o) = sortie.as_object_mut() {
+        o.insert("calcule_le".into(), Value::from(date_calcul));
+    }
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut sortie).await?;
+    Ok(Json(sortie))
+}
+
+/// Calcule les indicateurs du plan d'achat et les enregistre ; rend les valeurs
+/// (non masquees) et la date. Appele a la generation du plan.
+pub async fn figer_kpi_plan_achat(db: &crate::db::Db, user: &Utilisateur) -> AppResult<(Value, String)> {
     // LE CALCUL, UNE FOIS (audit v5, T15) : les quatre blocs lisaient
     // v_plan_achat sept fois. Une table temporaire, le temps de la lecture.
-    let mut tx = state.db.begin().await?;
+    let mut tx = db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
     sqlx::query("CREATE TEMP TABLE pa_kpi ON COMMIT DROP AS SELECT * FROM v_plan_achat")
+        .execute(&mut *tx)
+        .await?;
+
+    // La projection de stock, UNE fois aussi : chaque compte la replanifiait.
+    sqlx::query("CREATE TEMP TABLE sp_kpi ON COMMIT DROP AS SELECT statut, sur_stock, classe_abc FROM v_stock_projete")
         .execute(&mut *tx)
         .await?;
 
     // Bloc « KPI globaux » et bloc « repartition par statut » de la feuille.
     let globaux = sqlx::query(
         "SELECT
-            (SELECT COUNT(*) FROM v_stock_projete WHERE statut <> 'OK')        AS refs_en_alerte,
-            (SELECT COUNT(*) FROM v_stock_projete WHERE statut = 'RUPTURE')    AS ruptures,
-            (SELECT COUNT(*) FROM v_stock_projete WHERE statut = 'CRITIQUE')   AS critiques,
+            (SELECT COUNT(*) FROM sp_kpi WHERE statut <> 'OK')        AS refs_en_alerte,
+            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'RUPTURE')    AS ruptures,
+            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'CRITIQUE')   AS critiques,
             -- Le sur-stock n'est PAS un statut : c'est un second axe, compte a
             -- part. Le placer dans l'echelle interceptait 72 references sur 124
             -- et eteignait la couche logique.
-            (SELECT COUNT(*) FROM v_stock_projete WHERE sur_stock = 1)         AS sur_stock,
-            (SELECT COUNT(*) FROM v_stock_projete WHERE statut = 'ATTENTION')  AS attention,
-            (SELECT COUNT(*) FROM v_stock_projete WHERE statut = 'OK')         AS ok,
-            (SELECT COUNT(*) FROM v_stock_projete
-              WHERE statut <> 'OK' AND classe_abc = 'A')                       AS classe_a_en_alerte,
+            (SELECT COUNT(*) FROM sp_kpi WHERE sur_stock = 1)         AS sur_stock,
+            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'ATTENTION')  AS attention,
+            (SELECT COUNT(*) FROM sp_kpi WHERE statut = 'OK')         AS ok,
+            (SELECT COUNT(*) FROM sp_kpi
+              WHERE statut <> 'OK' AND classe_abc = 'A')              AS classe_a_en_alerte,
             (SELECT COALESCE(ROUND(SUM(montant_estime_mad), 2), 0) FROM pa_kpi) AS budget_mad,
             (SELECT COALESCE(ROUND(SUM(qte_a_commander_kg), 2), 0) FROM pa_kpi) AS quantite_kg,
             (SELECT COUNT(*) FROM pa_kpi)                                AS refs_a_commander",
@@ -1231,7 +1274,7 @@ pub async fn kpi_plan_achat(
     .fetch_all(&mut *tx)
     .await?;
 
-    let mut sortie = json!({
+    let sortie = json!({
         // Une seule ligne : on la sort du tableau pour que l'ecran lise
         // `globaux.budget_mad` et non `globaux[0].budget_mad`.
         "globaux": lignes_en_json(std::slice::from_ref(&globaux))
@@ -1240,9 +1283,16 @@ pub async fn kpi_plan_achat(
         "risques": lignes_en_json(&risques),
         "fournisseurs": lignes_en_json(&fournisseurs),
     });
+    let date: String = sqlx::query_scalar(
+        "INSERT INTO plan_achat_indicateurs (valeurs, id_utilisateur) VALUES ($1, $2)
+         RETURNING fn_iso(date_calcul)",
+    )
+    .bind(&sortie)
+    .bind(&user.id)
+    .fetch_one(&mut *tx)
+    .await?;
     tx.commit().await?;
-    user.masquer(&state.db, module::PLAN_ACHAT, &mut sortie).await?;
-    Ok(Json(sortie))
+    Ok((sortie, date))
 }
 
 /// L'analyse ABC / XYZ, reference par reference.

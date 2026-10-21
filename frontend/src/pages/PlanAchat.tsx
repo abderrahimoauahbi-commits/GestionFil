@@ -20,7 +20,7 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, X } from 'lucide-react'
+import { ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, Link2, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, Unlink2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -41,6 +41,7 @@ import {
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { depuisBobines, depuisKg, depuisPalettes, pourChamp, type Conditionnement } from '../lib/conditionnement'
 import { DetailCalcul } from './PlanAchatDetail'
 import { useParametreNombre } from '../lib/parametres'
 
@@ -75,6 +76,9 @@ interface Proposition extends Record<string, unknown> {
   prix_devise?: number | null
   montant_devise?: number | null
   taux_devise?: number | null
+  /** Le conditionnement de la fiche : la boite « Commander » lie kg, palettes et bobines. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
   palettes_a_commander?: number | null
   /** Ce que l'arrondi a la palette pleine ajoute au besoin (kg). */
   complement_palette_kg?: number | null
@@ -241,7 +245,7 @@ export function PlanAchat() {
     mutationFn: (v: {
       propositions: string[]
       cibles: Record<string, string>
-      ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>
+      ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; prix_devise?: number; nb_palettes?: number; nb_bobines?: number }>
     }) =>
       api.post<{
         propositions_converties: number
@@ -1123,6 +1127,16 @@ interface BcResume {
  * bon du meme fournisseur encore en brouillon — on complete au lieu d'en
  * ouvrir un second. Rien n'est engage : le bon reste a valider.
  */
+/** Une ligne de la boite « Commander », telle que l'acheteur la confirme. */
+interface Saisie {
+  qte: string
+  prix: string
+  pal: string
+  bob: string
+  /** Kg, palettes et bobines se recalculent ensemble. */
+  lie: boolean
+}
+
 function LignesACommander({
   lignes, retirer, enCours, ecrire, envoyer, revenir,
 }: {
@@ -1132,7 +1146,7 @@ function LignesACommander({
   ecrire: boolean
   envoyer: (
     cibles: Record<string, string>,
-    ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }>,
+    ajustements: Record<string, { quantite_kg?: number; prix_mad?: number; prix_devise?: number; nb_palettes?: number; nb_bobines?: number }>,
   ) => void
   revenir: () => void
 }) {
@@ -1140,21 +1154,56 @@ function LignesACommander({
   // L'ACHETEUR AJUSTE SUR LA COMMANDE (14/10/2026), pas dans le plan : quantite,
   // prix, et le colisage (palettes / bobines) qu'il confirme. Pre-rempli par le
   // calcul ; ce qu'il envoie fait foi sur le bon.
-  const [aj, setAj] = useState<Record<string, { qte: string; prix: string; pal: string; bob: string }>>({})
-  const defauts = (p: Proposition) => ({
-    qte: p.quantite_suggeree_kg != null ? String(p.quantite_suggeree_kg) : '',
-    prix: p.prix_estime_mad != null ? String(p.prix_estime_mad) : '',
-    pal: p.palettes_a_commander != null ? String(p.palettes_a_commander) : '',
-    bob: '',
+  //
+  // KG, PALETTES, BOBINES LIES (21/10/2026), comme dans la grille du bon : on
+  // saisit l'un, les deux autres suivent ; le lien se detache ligne par ligne
+  // (une palette entamee ne se deduit d'aucun poids). LE PRIX DANS LA DEVISE de
+  // la proposition, celle qu'on negocie ; en MAD si elle est en MAD. Le
+  // complement de palette n'est jamais impose : la quantite est celle du plan.
+  const [aj, setAj] = useState<Record<string, Saisie>>({})
+  const condDeP = (p: Proposition): Conditionnement => ({
+    poids_bobine_kg: p.poids_bobine_kg, bobines_par_palette: p.bobines_par_palette,
   })
+  const enDevise = (p: Proposition) =>
+    !!p.code_devise && p.code_devise !== 'MAD' && p.prix_devise != null && p.prix_devise > 0
+  const defauts = (p: Proposition): Saisie => {
+    const colis = depuisKg(p.quantite_suggeree_kg ?? '', condDeP(p))
+    return {
+      qte: p.quantite_suggeree_kg != null ? String(p.quantite_suggeree_kg) : '',
+      prix: enDevise(p)
+        ? String(p.prix_devise)
+        : p.prix_estime_mad != null ? String(p.prix_estime_mad) : '',
+      pal: p.palettes_a_commander != null ? String(p.palettes_a_commander) : pourChamp(colis.palettes),
+      bob: pourChamp(colis.bobines),
+      lie: true,
+    }
+  }
   const courant = (p: Proposition) => aj[p.id_proposition] ?? defauts(p)
   const poser = (p: Proposition, champ: 'qte' | 'prix' | 'pal' | 'bob', v: string) =>
-    setAj((a) => ({ ...a, [p.id_proposition]: { ...courant(p), [champ]: v } }))
+    setAj((a) => {
+      const c = courant(p)
+      if (champ === 'prix' || !c.lie) return { ...a, [p.id_proposition]: { ...c, [champ]: v } }
+      const cond = condDeP(p)
+      const r = champ === 'pal' ? depuisPalettes(v, cond) : champ === 'bob' ? depuisBobines(v, cond) : depuisKg(v, cond)
+      return {
+        ...a,
+        [p.id_proposition]: {
+          ...c,
+          qte: champ === 'qte' ? v : pourChamp(r.kg, 2),
+          pal: champ === 'pal' ? v : pourChamp(r.palettes),
+          bob: champ === 'bob' ? v : pourChamp(r.bobines),
+        },
+      }
+    })
+  const basculerLien = (p: Proposition) =>
+    setAj((a) => ({ ...a, [p.id_proposition]: { ...courant(p), lie: !courant(p).lie } }))
   const nn = (s: string) => {
-    const x = Number(s)
+    const x = Number(String(s).replace(/\s/g, '').replace(',', '.'))
     return Number.isFinite(x) ? x : 0
   }
-  const montantLigne = (p: Proposition) => nn(courant(p).qte) * nn(courant(p).prix)
+  /** Le montant en MAD : un prix en devise passe au taux de la proposition. */
+  const montantLigne = (p: Proposition) =>
+    nn(courant(p).qte) * nn(courant(p).prix) * (enDevise(p) ? (p.taux_devise || 1) : 1)
   const qBc = useQuery({
     queryKey: ['bons-commande'],
     queryFn: ({ signal }) => api.get<BcResume[]>('/api/bons-commande', { signal }),
@@ -1217,7 +1266,7 @@ function LignesACommander({
                     <tr className="border-b border-bordure">
                       <th className={cn(th, 'text-left')}>Référence</th>
                       <th className={cn(th, 'w-32 text-right')}>Qté (kg)</th>
-                      <th className={cn(th, 'w-28 text-right')}>Prix MAD/kg</th>
+                      <th className={cn(th, 'w-28 text-right')}>Prix / kg</th>
                       <th className={cn(th, 'w-28 text-right')}>Palettes</th>
                       <th className={cn(th, 'w-24 text-right')}>Bobines</th>
                       <th className={cn(th, 'w-32 text-right')}>Montant MAD</th>
@@ -1235,14 +1284,28 @@ function LignesACommander({
                           <Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge>
                         </td>
                         <td className="px-2 py-1.5">
-                          <Champ type="number" step="any" min="0" value={c.qte} disabled={!ecrire}
-                            onChange={(e) => poser(p, 'qte', e.target.value)}
-                            className="h-8 text-right tabular-nums" aria-label={`Quantité (kg) pour ${p.code_reference}`} />
+                          <div className="flex items-center gap-1">
+                            <Bouton taille="icone-xs" variante="discret" disabled={!ecrire}
+                              onClick={() => basculerLien(p)}
+                              aria-label={c.lie ? 'Détacher kg, palettes et bobines' : 'Relier kg, palettes et bobines'}
+                              title={c.lie
+                                ? 'Liés : la saisie de l’un recalcule les deux autres. Cliquer pour détacher.'
+                                : 'Détachés : chaque champ se saisit seul. Cliquer pour relier.'}>
+                              {c.lie ? <Link2 /> : <Unlink2 />}
+                            </Bouton>
+                            <Champ type="number" step="any" min="0" value={c.qte} disabled={!ecrire}
+                              onChange={(e) => poser(p, 'qte', e.target.value)}
+                              className="h-8 text-right tabular-nums" aria-label={`Quantité (kg) pour ${p.code_reference}`} />
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
                           <Champ type="number" step="any" min="0" value={c.prix} disabled={!ecrire}
                             onChange={(e) => poser(p, 'prix', e.target.value)}
-                            className="h-8 text-right tabular-nums" aria-label={`Prix MAD par kg pour ${p.code_reference}`} />
+                            className="h-8 text-right tabular-nums"
+                            aria-label={`Prix ${enDevise(p) ? p.code_devise : 'MAD'} par kg pour ${p.code_reference}`} />
+                          <div className="mt-0.5 text-right text-[10.5px] text-attenue-texte">
+                            {enDevise(p) ? `${p.code_devise}/kg` : 'MAD/kg'}
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
                           <Champ type="number" step="1" min="0" value={c.pal} disabled={!ecrire}
@@ -1301,15 +1364,17 @@ function LignesACommander({
               // bobines (meme non modifies : la valeur du plan vaut confirmation).
               const ajustements: Record<
                 string,
-                { quantite_kg?: number; prix_mad?: number; nb_palettes?: number; nb_bobines?: number }
+                { quantite_kg?: number; prix_mad?: number; prix_devise?: number; nb_palettes?: number; nb_bobines?: number }
               > = {}
               for (const p of lignes) {
                 const c = courant(p)
                 ajustements[p.id_proposition] = {
-                  quantite_kg: c.qte.trim() ? Number(c.qte) : undefined,
-                  prix_mad: c.prix.trim() ? Number(c.prix) : undefined,
-                  nb_palettes: c.pal.trim() ? Math.round(Number(c.pal)) : undefined,
-                  nb_bobines: c.bob.trim() ? Math.round(Number(c.bob)) : undefined,
+                  quantite_kg: c.qte.trim() ? nn(c.qte) : undefined,
+                  // Le prix part dans la devise ou il a ete saisi.
+                  prix_mad: c.prix.trim() && !enDevise(p) ? nn(c.prix) : undefined,
+                  prix_devise: c.prix.trim() && enDevise(p) ? nn(c.prix) : undefined,
+                  nb_palettes: c.pal.trim() ? Math.round(nn(c.pal)) : undefined,
+                  nb_bobines: c.bob.trim() ? Math.round(nn(c.bob)) : undefined,
                 }
               }
               envoyer(Object.fromEntries(Object.entries(cibles).filter(([, v]) => v)), ajustements)

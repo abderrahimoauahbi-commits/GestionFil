@@ -2251,15 +2251,22 @@ def scenario_plan_detail(c, infra):
     verifier(bool(conv), "aucune proposition dans la devise de son fournisseur : la conversion n'est pas essayee")
     if conv:
         id_conv = conv[0][0]
-        c.ok("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [id_conv]})
+        # Comme la boite « Commander » l'envoie : la quantite, le prix DANS LA DEVISE de la
+        # proposition (ici negocie un centime au-dessus), le colisage.
+        kg_pa, pdev_pa = infra.sql(f"SELECT quantite_suggeree_kg, prix_devise FROM plan_achat "
+                                   f"WHERE id_proposition = '{id_conv}'")[0]
+        negocie = round(float(pdev_pa) + 0.01, 4)
+        c.ok("Choukri", "POST", "/api/plan-achat/commander", {
+            "propositions": [id_conv],
+            "ajustements": {id_conv: {"quantite_kg": float(kg_pa), "prix_devise": negocie}}})
         ligne = infra.sql("SELECT lb.prix_unitaire_devise, lb.facteur_kg, lb.unite_commande, pa.prix_devise, "
                           "pa.unite_saisie, lb.quantite_commandee_kg, pa.quantite_suggeree_kg "
                           "FROM ligne_bc lb JOIN plan_achat pa ON pa.id_proposition = lb.id_proposition "
                           f"WHERE lb.id_proposition = '{id_conv}'")
         verifier(bool(ligne), "la proposition convertie n'a pas de ligne de bon")
         pu, facteur, unite, pdev, u_pa, kg_bc, kg_pa = ligne[0]
-        verifier(abs(float(pu) - float(pdev) * float(facteur)) < 1e-6,
-                 f"prix de la ligne {pu} au lieu du prix en devise de la proposition {pdev} x {facteur}")
+        verifier(abs(float(pu) - negocie * float(facteur)) < 1e-6,
+                 f"prix de la ligne {pu} au lieu du prix negocie en devise {negocie} x {facteur}")
         verifier(unite == (u_pa if u_pa and u_pa != "kg" and float(facteur) != 1 else "kg"),
                  f"unite de la ligne {unite}, proposition en {u_pa}")
         verifier(abs(float(kg_bc) - float(kg_pa)) < 0.01, f"kilos de la ligne {kg_bc} au lieu de {kg_pa}")

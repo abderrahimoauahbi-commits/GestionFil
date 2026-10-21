@@ -1139,7 +1139,9 @@ pub async fn propositions_achat(
         "SELECT pa.*, r.designation, r.unite_catalogue, f.nom AS fournisseur_nom,
                 bc.numero_bc, bc.statut AS statut_bc,
                 ro.designation AS designation_origine,
-                r.classe_abc, r.classe_xyz
+                r.classe_abc, r.classe_xyz,
+                -- Le conditionnement : la boite « Commander » lie kg, palettes et bobines.
+                r.poids_bobine_kg::float8 AS poids_bobine_kg, r.bobines_par_palette
            FROM plan_achat pa
            JOIN reference r    ON r.code_reference     = pa.code_reference
            JOIN fournisseur f  ON f.code_fournisseur   = pa.code_fournisseur

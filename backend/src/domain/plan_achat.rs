@@ -247,6 +247,10 @@ pub struct ResultatConversion {
 pub struct AjustementLigne {
     pub quantite_kg: Option<f64>,
     pub prix_mad: Option<f64>,
+    /// LE PRIX DANS LA DEVISE DE LA PROPOSITION, au kg (21/10/2026) : la boite
+    /// « Commander » le saisit dans la devise du fournisseur, comme on negocie.
+    #[serde(default)]
+    pub prix_devise: Option<f64>,
     pub nb_palettes: Option<i64>,
     pub nb_bobines: Option<i64>,
 }
@@ -401,6 +405,7 @@ pub async fn convertir(
         // DEVISE de la proposition quand c'est la devise du bon ; sinon (bon en
         // MAD, ou autre devise), le prix MAD au taux du bon.
         let prix_ajuste = aj.and_then(|a| a.prix_mad).filter(|p| *p >= 0.0);
+        let prix_devise_ajuste = aj.and_then(|a| a.prix_devise).filter(|p| *p >= 0.0);
         let prix_mad_final = prix_ajuste.unwrap_or(*prix_mad);
         // Les palettes du plan valent pour SA quantite : une quantite ajustee
         // sans palettes saisies laisse la grille les deduire du poids.
@@ -420,7 +425,13 @@ pub async fn convertir(
                   id_proposition, besoin_kg_origine, nb_palettes_saisi, nb_bobines_saisi)
              SELECT $1, $2, pa.code_reference, r.designation, u.unite,
                     u.facteur, q.unite_qte, ROUND(q.unite_qte * u.facteur, 4),
-                    ROUND(CASE WHEN $9::boolean AND pa.code_devise = bc.code_devise AND pa.prix_devise > 0
+                    ROUND(CASE WHEN $10::numeric IS NOT NULL AND pa.code_devise = bc.code_devise
+                               THEN $10::numeric
+                               -- Saisi dans la devise de la proposition, autre que celle du
+                               -- bon : en MAD au taux de la proposition, puis au taux du bon.
+                               WHEN $10::numeric IS NOT NULL
+                               THEN $10::numeric * COALESCE(NULLIF(pa.taux_devise, 0), 1) / $3::numeric
+                               WHEN $9::boolean AND pa.code_devise = bc.code_devise AND pa.prix_devise > 0
                                THEN pa.prix_devise
                                ELSE $6::numeric / $3::numeric END * u.facteur, 6),
                     bc.code_devise, pa.date_besoin_prevue,
@@ -453,6 +464,7 @@ pub async fn convertir(
         .bind(palettes_final)
         .bind(bobines_final)
         .bind(prix_ajuste.is_none())
+        .bind(prix_devise_ajuste)
         .execute(&mut *tx)
         .await?;
 

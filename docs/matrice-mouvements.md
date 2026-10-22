@@ -17,6 +17,7 @@ des besoins, pour son magasin de destination.
 | `STOCK_INIT` | + | Moyenne pondérée au prix saisi ; sans prix, prix catalogue converti si le magasin n'a pas encore de CMUP | Prix saisi (ou catalogue converti) | — | Contre-passation |
 | `SORTIE_PROD` | − | Inchangé | CMUP du magasin au moment de la sortie | OF | Contre-passation |
 | `CONSO_DIRECTE` | − | Inchangé | CMUP du magasin au moment de la sortie | — | Contre-passation |
+| `RETOUR_CONSO` | + | Inchangé (la matière revient au CMUP courant) | Sans prix saisi : valorisé au CMUP du magasin | — | Contre-passation (et la sortie ne se contre-passe pas tant qu'un retour de son OF en dépend) |
 | `RETOUR_PROD` | + | Inchangé (le fil revient au CMUP courant) | Sans prix : valorisé au CMUP du magasin | motif de ligne | Contre-passation |
 | `SORTIE_HORS_MACHINE` | − | Inchangé | CMUP du magasin au moment de la sortie | motif de ligne | Contre-passation |
 | `RETOUR_PRET` | + | Inchangé (au CMUP en cours) | Sans prix : valorisé au CMUP du magasin | — | Contre-passation |
@@ -84,7 +85,17 @@ des besoins, pour son magasin de destination.
 - **Coût de la ligne** : CMUP du magasin au moment de la sortie
 - **Validation** : Droit ECRIRE du stock, sans seuil ; refusée par la base pour un article en mode MACHINE (le fil sort par les fiches machine)
 - **Réversibilité** : Contre-passation
-- **Prouvé par le banc** : `consommation_directe`
+- **Prouvé par le banc** : `consommation_directe`, `fiche_hors_machine`
+
+### `RETOUR_CONSO`
+
+- **Origine** : Retour au magasin d'une matière hors machine (fiche article en mode DIRECTE) non consommée par l'OF qui l'avait sortie (fiche hors machine, 22/10/2026) ; consommation de l'OF = sorti − rendu
+- **Sens** : entrée (+) dans le magasin du mouvement ; le stock du lot suit
+- **CMUP** : Inchangé (la matière revient au CMUP courant)
+- **Coût de la ligne** : Sans prix saisi : valorisé au CMUP du magasin
+- **Validation** : Droit ECRIRE du stock ; l'OF (lien) est obligatoire ; refusé par la base pour un article en mode MACHINE et au-delà de ce que l'OF a sorti de cette référence, non encore rendu
+- **Réversibilité** : Contre-passation (et la sortie ne se contre-passe pas tant qu'un retour de son OF en dépend)
+- **Prouvé par le banc** : `fiche_hors_machine`
 
 ### `RETOUR_PROD`
 

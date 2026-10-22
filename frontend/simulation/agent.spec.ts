@@ -4,7 +4,15 @@
  * direction ouvre les cours, l'assistante cree les bons, la direction les
  * valide au cours du jour et les envoie, le magasin receptionne a la date du
  * bon de livraison et charge les machines, la direction valide les controles,
- * sort les matieres de l'atelier et cloture l'inventaire. Aucune ecriture ne
+ * sort les matieres de l'atelier et cloture l'inventaire.
+ *
+ * LES ORDRES DE FABRICATION (22/10/2026) : la direction cree et lance chaque
+ * mois un OF par machine (/ordres-fabrication) ; les fiches machine le
+ * CHOISISSENT (constat et chargement), une ligne sur deux sur sa voie quand la
+ * largeur du metier est connue ; les matieres en mode DIRECTE sortent sur un OF
+ * par la fiche hors machine (/fiche-hors-machine), et une partie revient parfois
+ * au magasin ; la direction clot l'OF quand ses etages ont eu leur constat
+ * suivant. La reprise repere un OF par son numero. Aucune ecriture ne
  * passe par l'API : l'API ne sert qu'a relire, comme un utilisateur relit
  * l'ecran.
  *
@@ -18,14 +26,26 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test'
-import { construirePlan, FIL, MATIERES_HORS_MACHINE, type Evenement, type Machine, type RefCatalogue } from './plan'
+import {
+  construirePlan, FIL, MATIERES_HORS_MACHINE, type Evenement, type Machine, type QualitePlan, type RefCatalogue,
+} from './plan'
 
 const MDP = process.env.SIM_MDP ?? 'Simulation-2026!'
-const DOSSIER = join(process.cwd(), 'rapport-simulation')
+/** Le dossier du journal : rapport-simulation, ou un autre pour un essai sur une base jetable. */
+const DOSSIER = process.env.SIM_DOSSIER || join(process.cwd(), 'rapport-simulation')
 const JOURNAL = join(DOSSIER, 'journal.json')
 const SANS_LOT = 'SANS-LOT'
 /** S'arreter apres N evenements (essai) ; 0 = jusqu'au bout. */
 const LIMITE = Number(process.env.SIM_LIMITE ?? 0)
+/**
+ * UNE FENETRE, pour un essai court (22/10/2026) : seuls les evenements dates
+ * entre SIM_DEPUIS et SIM_JUSQUA (AAAA-MM-JJ, inclus), et des seuls types de
+ * SIM_TYPES (separes par des virgules), se jouent. Le plan reste entier : les
+ * identifiants ne changent pas.
+ */
+const DEPUIS = process.env.SIM_DEPUIS ?? ''
+const JUSQUA = process.env.SIM_JUSQUA ?? ''
+const TYPES = new Set((process.env.SIM_TYPES ?? '').split(',').map((t) => t.trim()).filter(Boolean))
 
 interface Journal {
   fait: Record<string, string>
@@ -187,6 +207,7 @@ async function cliquer(page: Page, bouton: Locator) {
 
 let catalogue: RefCatalogue[] = []
 const parCode = new Map<string, RefCatalogue>()
+const machinesParCode = new Map<string, Machine>()
 
 interface LotStock {
   code_reference: string
@@ -441,6 +462,9 @@ interface LigneEtage {
   nb_bobines: number
   kg: number
   pourcentage: number | null
+  /** L'OF que la ligne sert et sa voie (22/10/2026). */
+  numero_of?: string | null
+  largeur_voie_m?: number | null
 }
 interface FicheListe {
   id_fiche: string
@@ -448,12 +472,24 @@ interface FicheListe {
   statut: string
   type_fiche: string
   numero_of: string | null
+  date_fiche: string | null
 }
 const RESPONSABLES = ['Hassan Benali', 'Youssef Amrani', 'Rachid Mernissi', 'Said Ouazzani']
 
-async function ficheFaite(p: Page, machine: string, zone: string, of: string) {
-  const f = await lire<FicheListe[]>(p, `/api/machines/fiches?code_machine=${machine}&code_emplacement=${zone}`)
-  return f.find((x) => x.numero_of === of && x.statut === 'VALIDE')
+/**
+ * LA FICHE DEJA FAITE (reprise apres un arret). Avec un vrai OF, le constat et le
+ * chargement d'un passage portent le meme numero : on les distingue par leur type
+ * et leur date. Le plan d'avant les OF les distinguait par un texte SIM-…-C / -CH.
+ */
+const fichesValidees = (p: Page, machine: string, zone: string) =>
+  lire<FicheListe[]>(
+    p,
+    `/api/machines/fiches?code_machine=${encodeURIComponent(machine)}&code_emplacement=${encodeURIComponent(zone)}&statut=VALIDE&limite=2000`,
+  )
+async function ficheFaite(p: Page, machine: string, zone: string, type: 'MAJ' | 'CHARGE', date: string, of: string) {
+  return (await fichesValidees(p, machine, zone)).find(
+    (x) => x.type_fiche === type && (x.date_fiche ?? '').slice(0, 10) === date && (x.numero_of ?? '') === of,
+  )
 }
 
 /** Apercu, puis validation, puis le bandeau de succes ; tout blocage s'arrete la, en clair. */
@@ -470,28 +506,62 @@ async function validerFiche(p: Page) {
   return texte.match(/consommation ([\d\s ,]+) kg/)?.[1]?.trim() ?? '?'
 }
 
-async function entete(p: Page, date: string, of: string, responsable: string, magasin?: string) {
+const echapper = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * L'OF EN LIEN (22/10/2026) : on le CHOISIT dans la liste des OF prevus ou lances,
+ * comme l'atelier (« OF-SIM-202609-CRM1 · 8F (lancé) »). Il ne se tape plus.
+ */
+async function choisirOf(liste: Locator, numero: string) {
+  const motif = new RegExp(`^${echapper(numero)} ·`)
+  await expect(liste.locator('option').filter({ hasText: motif })).toHaveCount(1, { timeout: 15_000 })
+  await choisirOption(liste, motif)
+}
+
+/** L'entete d'une fiche machine : date, magasin, OF (choisi) et responsable. */
+async function entete(p: Page, date: string, of: string | undefined, responsable: string, magasin?: string) {
   await p.getByLabel('Date', { exact: true }).fill(date)
   if (magasin) await p.getByLabel(/^Magasin d.origine/).selectOption(magasin)
-  await p.getByLabel('Ordre de fabrication').fill(of)
+  if (of) await choisirOf(p.getByRole('combobox', { name: 'Ordre de fabrication', exact: true }), of)
   await p.getByLabel('Responsable').fill(responsable)
 }
+
+/** Les cases numeriques d'une ligne, hors la largeur de la voie (colonne OF · voie). */
+const casesDe = (ligne: Locator) => ligne.locator('input[inputmode=decimal]:not([aria-label="Largeur de la voie (m)"])')
+
+/** Les voies plausibles sur un metier (m) : une bande etroite, une moyenne, une large. */
+const VOIES = [1.2, 1.4, 2.1, 0.8]
 
 async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
   const login = 'Magasinie'
   const p = await session(login)
   const alea = hasardDe(e.id)
   const responsable = RESPONSABLES[Math.floor(alea() * RESPONSABLES.length)]
-  const ofConstat = `SIM-${e.date}-${e.zone}-C`
-  const ofCharge = `SIM-${e.date}-${e.zone}-CH`
+  // L'OF du mois de la machine ; un plan sans qualite (aucun OF possible) laisse
+  // la fiche sans OF.
+  const ofLien = e.of
+  // Une fiche a taper choisit son OF parmi les ouverts ; deja faite (reprise), l'OF a pu etre clos depuis.
+  const exigerOfOuvert = async () => {
+    if (ofLien && !(await lire<{ numero: string }[]>(p, '/api/machines/of-ouverts')).some((o) => o.numero === ofLien))
+      throw new Error(`l'OF ${ofLien} n'est ni prévu ni lancé : la fiche ne peut pas le choisir`)
+  }
+  const largeur = machinesParCode.get(e.machine)?.largeur ?? null
   const compte: string[] = []
+  // L'ETAGE A DEJA DES FICHES PLUS RECENTES : ce passage est fait (reprise sans
+  // journal). Son etat d'aujourd'hui ne dit rien de celui de ce jour-la.
+  if ((await fichesValidees(p, e.machine, e.zone)).some((x) => (x.date_fiche ?? '').slice(0, 10) > e.date))
+    return `déjà fait (l'étage a des fiches postérieures au ${jjmmaaaa(e.date)})`
 
-  // 1. LE CONSTAT : ce qui reste sur l'etage depuis le dernier chargement.
+  // 1. LE CONSTAT : ce qui reste sur l'etage depuis le dernier chargement. Il porte
+  //    l'OF du mois : au changement d'OF, c'est la frontiere, et le serveur range
+  //    l'ecart de la periode sous l'OF sortant.
   let etat = (await lire<LigneEtage[]>(p, `/api/machines/${e.machine}/zones/${e.zone}`)).filter((l) => l.nb_bobines > 0)
   let garde: LigneEtage | undefined
-  if (etat.length && !(await ficheFaite(p, e.machine, e.zone, ofConstat))) {
+  if (etat.length && !(await ficheFaite(p, e.machine, e.zone, 'MAJ', e.date, ofLien ?? ''))) {
+    const sortant = [...new Set(etat.map((l) => l.numero_of).filter(Boolean))].join(', ')
+    await exigerOfOuvert()
     await aller(p, `/machines/${e.machine}/fiche/MAJ/${e.zone}`, login)
-    await entete(p, e.date, ofConstat, responsable)
+    await entete(p, e.date, ofLien, responsable)
     const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'Présentes' }) })
     const lignes = grille.locator('tbody tr')
     await expect(lignes).toHaveCount(etat.length, { timeout: 15_000 })
@@ -503,19 +573,23 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
     for (let i = 0; i < etat.length; i++) {
       const ligne = lignes.nth(i)
       const lot = ((await ligne.locator('td').nth(1).textContent()) ?? '').trim()
-      const cases = ligne.locator('input[inputmode=decimal]')
+      const cases = casesDe(ligne)
       if (garde && lot === garde.lot_fournisseur) await taper(cases.nth(1), fr((garde.pourcentage ?? 100) * (0.35 + alea() * 0.25), 1))
       else await taper(cases.nth(0), '0')
       await ligne.getByLabel('Précision du motif').fill('Constat de production')
     }
-    compte.push(`constat ${await validerFiche(p)} kg consommés`)
+    const conso = await validerFiche(p)
+    compte.push(`constat ${conso} kg consommés${sortant && sortant !== ofLien ? ` (période de ${sortant})` : ''}`)
   }
 
-  // 2. LE CHARGEMENT : deux ou trois fils du magasin le mieux pourvu, lot le plus ancien d'abord.
-  if (!(await ficheFaite(p, e.machine, e.zone, ofCharge))) {
+  // 2. LE CHARGEMENT : deux ou trois fils du magasin le mieux pourvu, lot le plus ancien d'abord ;
+  //    une ligne sur deux sur sa voie quand la largeur du metier est connue.
+  if (!(await ficheFaite(p, e.machine, e.zone, 'CHARGE', e.date, ofLien ?? ''))) {
     etat = (await lire<LigneEtage[]>(p, `/api/machines/${e.machine}/zones/${e.zone}`)).filter((l) => l.nb_bobines > 0)
     const occupees = etat.reduce((s, l) => s + l.nb_bobines, 0)
     const surEtage = new Set(etat.map((l) => l.code_reference))
+    // La largeur deja prise par les voies des lignes restees sur l'etage.
+    let largeurLibre = largeur ? largeur - etat.reduce((s, l) => s + Number(l.largeur_voie_m ?? 0), 0) : 0
     const stocks = await Promise.all(['Polyfashions', 'Morocco'].map(async (m) => ({ m, lots: await lots(p, m) })))
     const fil = (l: LotStock) => FIL.includes(parCode.get(l.code_reference)?.code_categorie ?? '') && (l.poids_bobine_kg ?? 0) > 0
     const total = (s: { lots: LotStock[] }) => s.lots.filter(fil).reduce((t, l) => t + l.quantite_kg, 0)
@@ -528,19 +602,25 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
       .filter((c) => c.lot && Math.floor(c.lot.quantite_kg / (c.poids * 1.01)) >= 40)
       .sort((a, b) => b.lot.quantite_kg - a.lot.quantite_kg)
     let places = e.capacite - occupees
-    const choix: { r: string; lot: string; bobines: number }[] = []
+    const choix: { r: string; lot: string; bobines: number; voie?: number }[] = []
     for (const c of candidats.slice(0, 8).sort(() => alea() - 0.5)) {
       if (choix.length >= 2 + Math.floor(alea() * 2) || places < 40) break
+      // LA VOIE : sa capacite en bobines (etage / largeur x voie, a l'entier
+      // inferieur) borne le chargement de la ligne, comme le magasinier la lit.
+      const voie = largeur && alea() < 0.5 ? VOIES.find((v) => v <= largeurLibre + 1e-9 && alea() < 0.7) : undefined
+      const capVoie = voie && largeur ? Math.floor((e.capacite / largeur) * voie) : Infinity
       const voulu = 150 + Math.floor(alea() * 300)
-      const bobines = Math.min(voulu, Math.floor(c.lot.quantite_kg / (c.poids * 1.01)), places)
+      const bobines = Math.min(voie ? capVoie : voulu, Math.floor(c.lot.quantite_kg / (c.poids * 1.01)), places)
       if (bobines < 40) continue
-      choix.push({ r: c.r, lot: c.lot.lot_fournisseur, bobines })
+      choix.push({ r: c.r, lot: c.lot.lot_fournisseur, bobines, ...(voie ? { voie } : {}) })
       places -= bobines
+      if (voie) largeurLibre -= voie
     }
     if (!choix.length) compte.push('rien à charger (pas de fil en stock)')
     else {
+      await exigerOfOuvert()
       await aller(p, `/machines/${e.machine}/fiche/CHARGE/${e.zone}`, login)
-      await entete(p, e.date, ofCharge, responsable, magasin)
+      await entete(p, e.date, ofLien, responsable, magasin)
       const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'À charger' }) })
       for (const c of choix) {
         await p.getByRole('button', { name: 'Ajouter une référence' }).click()
@@ -549,13 +629,16 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
         await liste.selectOption(c.r)
         const ligne = grille.locator('tbody tr').last()
         await ligne.getByRole('combobox', { name: 'Lot fournisseur' }).selectOption(c.lot)
-        await taper(ligne.locator('input[inputmode=decimal]').nth(0), String(c.bobines))
+        if (c.voie) await taper(ligne.getByRole('textbox', { name: 'Largeur de la voie (m)' }), fr(c.voie, 2))
+        await taper(casesDe(ligne).nth(0), String(c.bobines))
       }
       await validerFiche(p)
-      compte.push(`chargé ${choix.map((c) => `${c.bobines} bob. ${c.r}`).join(', ')} depuis ${magasin}`)
+      compte.push(
+        `chargé ${choix.map((c) => `${c.bobines} bob. ${c.r}${c.voie ? ` (voie ${fr(c.voie, 2)} m)` : ''}`).join(', ')} depuis ${magasin}`,
+      )
     }
   }
-  return compte.join(' ; ') || 'déjà fait'
+  return (compte.join(' ; ') || 'déjà fait') + (ofLien ? ` — ${ofLien}` : '')
 }
 
 /** Les valeurs d'attribut passent par des guillemets : on echappe ce qui les casserait. */
@@ -563,22 +646,207 @@ function CSS_escape(v: string) {
   return v.replace(/["\\]/g, '\\$&')
 }
 
-// --- Les sorties d'atelier --------------------------------------------------
+// --- Les ordres de fabrication (22/10/2026) -------------------------------------
+
+interface OfApi {
+  id_of: string
+  numero: string
+  statut: string
+  code_qualite: string
+  metrage_m2: number
+  date_of: string
+  date_fin_prevue: string | null
+  kg_prevu: number
+  kg_reel: number
+  kg_conso_fil: number
+  kg_hors_machine: number
+}
+interface OfOuvert {
+  id_of: string
+  numero: string
+  statut: string
+}
+/** L'OF d'un numero : le numero est unique, c'est lui qui rend la reprise sure. */
+const ofParNumero = async (p: Page, numero: string) =>
+  (await lire<OfApi[]>(p, '/api/ordres-fabrication')).find((o) => o.numero === numero)
+const ofsOuverts = (p: Page) => lire<OfOuvert[]>(p, '/api/machines/of-ouverts')
+
+/**
+ * LA PLANIFICATION CREE L'OF ET LE LANCE (droit PLANS en ecriture : la direction).
+ * Un OF dont tous les usages sont deja saisis — l'historique d'avant les OF, ou les
+ * fiches portaient un texte SIM-… — est sans objet : on ne le cree pas apres coup.
+ */
+async function creerOf(e: Extract<Evenement, { type: 'OF' }>) {
+  const login = 'Mohamed'
+  const p = await session(login)
+  let of = await ofParNumero(p, e.numero)
+  if (!of) {
+    if (e.usages.length && e.usages.every((u) => journal.fait[u])) return 'sans objet (ses fiches sont déjà saisies, sans OF)'
+    await aller(p, '/ordres-fabrication/nouveau', login)
+    await p.locator('#of-numero').fill(e.numero)
+    await p.locator('#of-date').fill(e.date)
+    await p.locator('#of-fin').fill(e.fin)
+    await expect(p.locator(`#of-qualite option[value="${CSS_escape(e.qualite)}"]`)).toHaveCount(1, { timeout: 15_000 })
+    await p.locator('#of-qualite').selectOption(e.qualite)
+    await p.locator('#of-metrage').fill(String(e.metrage))
+    await p.locator('#of-notes').fill(`Simulation : la production du mois sur ${e.machine}.`)
+    await p.getByRole('button', { name: 'Créer', exact: true }).click()
+    await expect(p).toHaveURL(/\/ordres-fabrication\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {
+      throw new Error(`OF non créé : ${await messageAffiche(p)}`)
+    })
+    of = await ofParNumero(p, e.numero)
+    // Ce qui est enregistre doit etre ce qui a ete tape.
+    if (!of || of.code_qualite !== e.qualite || Math.abs(Number(of.metrage_m2) - e.metrage) > 0.01
+        || String(of.date_of).slice(0, 10) !== e.date || String(of.date_fin_prevue ?? '').slice(0, 10) !== e.fin)
+      throw new Error(`OF ${e.numero} mal enregistré : ${JSON.stringify(of).slice(0, 300)}`)
+  }
+  if (of.statut === 'PREVU') {
+    if (!p.url().endsWith(of.id_of)) await aller(p, `/ordres-fabrication/${of.id_of}`, login)
+    await p.getByRole('button', { name: 'Lancer', exact: true }).click()
+    of = await attendre(async () => (await ofParNumero(p, e.numero))!, (x) => x.statut === 'LANCE', `lancement de l'OF ${e.numero}`)
+  }
+  return `${e.numero} ${e.qualite}, ${fr(e.metrage, 0)} m², jusqu'au ${jjmmaaaa(e.fin)} : ${of.statut}`
+}
+
+/** La cloture : un acte de validation (droit PLANS VALIDER), par la direction. */
+async function cloreOf(e: Extract<Evenement, { type: 'OF_CLOTURE' }>) {
+  const login = 'Choukri'
+  const p = await session(login)
+  let of = await ofParNumero(p, e.numero)
+  if (!of) return 'sans objet (OF jamais créé)'
+  if (of.statut === 'CLOTURE' || of.statut === 'ANNULE') return `${e.numero} déjà ${of.statut}`
+  await aller(p, `/ordres-fabrication/${of.id_of}`, login)
+  if (of.statut === 'PREVU') throw new Error(`OF ${e.numero} jamais lancé : on ne clôture pas un OF prévu`)
+  await p.getByRole('button', { name: 'Clôturer', exact: true }).click()
+  await confirmerSi(p, 'Clôturer', 5_000)
+  of = await attendre(async () => (await ofParNumero(p, e.numero))!, (x) => x.statut === 'CLOTURE', `clôture de l'OF ${e.numero}`)
+  return `${e.numero} clôturé : réel ${fr(Number(of.kg_reel), 1)} kg (fil ${fr(Number(of.kg_conso_fil), 1)}, hors machine ${fr(Number(of.kg_hors_machine), 1)}), prévu ${fr(Number(of.kg_prevu), 1)} kg`
+}
+
+// --- Les sorties hors machine ---------------------------------------------------
 
 interface MouvementListe {
   numero_of: string | null
+  code_type_mvt?: string
+  code_magasin?: string
+  id_mouvement_contrepasse?: string | null
+  quantite_totale_kg?: number
 }
 
-async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
+/** La matiere se consomme-t-elle sans machine (fiche article en mode DIRECTE) ? */
+const directe = (ref: string) => parCode.get(ref)?.mode_consommation === 'DIRECTE'
+
+/** Les documents d'un jour, d'un type et d'un magasin (pour la reprise). */
+const documentsDu = (p: Page, date: string, type: string, magasin: string) =>
+  lire<MouvementListe[]>(
+    p,
+    `/api/mouvements/documents?depuis=${date}&jusqu_a=${date}T23:59:59&code_type_mvt=${type}&code_magasin=${encodeURIComponent(magasin)}&limite=500`,
+  )
+
+/**
+ * LA FICHE HORS MACHINE (/fiche-hors-machine) : date, responsable, magasin, OF,
+ * puis une carte par ligne — sens, reference, lot, kilos. Le magasinier la tape ;
+ * elle enregistre la consommation directe (sortie) ou son retour, sur l'OF.
+ */
+async function ficheHorsMachine(
+  sens: 'SORTIE' | 'RETOUR',
+  date: string,
+  magasin: string,
+  of: OfOuvert,
+  lignes: { r: string; lot?: string; kg: number }[],
+  responsable: string,
+) {
+  const login = 'Magasinie'
+  const p = await session(login)
+  await aller(p, '/fiche-hors-machine', login)
+  await p.getByLabel('Date', { exact: true }).fill(date)
+  await p.getByLabel('Responsable', { exact: true }).fill(responsable)
+  await p.getByLabel(/^Magasin/).selectOption(magasin)
+  await choisirOf(p.getByRole('combobox', { name: 'Ordre de fabrication', exact: true }), of.numero)
+  const cartes = p.locator('div.grid').filter({ has: p.getByRole('combobox', { name: 'Sens' }) })
+  for (const [i, l] of lignes.entries()) {
+    if (i > 0) await p.getByRole('button', { name: sens === 'SORTIE' ? 'Une sortie' : 'Un retour au magasin' }).click()
+    const carte = cartes.nth(i)
+    if (sens === 'RETOUR') await carte.getByRole('combobox', { name: 'Sens' }).selectOption('RETOUR')
+    const ref = carte.getByRole('combobox', { name: 'Référence', exact: true })
+    await expect(ref.locator(`option[value="${CSS_escape(l.r)}"]`)).toHaveCount(1, { timeout: 15_000 })
+    await ref.selectOption(l.r)
+    if (l.lot) {
+      // La liste des lots du magasin ; un lot epuise depuis se tape (« Autre lot… »).
+      const liste = carte.getByRole('combobox', { name: 'Lot fournisseur' })
+      await expect(liste.locator('option').first()).not.toHaveText('Lecture des lots…', { timeout: 15_000 })
+      if (await liste.locator(`option[value="${CSS_escape(l.lot)}"]`).count()) await liste.selectOption(l.lot)
+      else {
+        await liste.selectOption('__autre__')
+        await carte.getByRole('textbox', { name: 'Lot fournisseur' }).fill(l.lot)
+      }
+    }
+    await taper(carte.getByRole('textbox', { name: 'Quantité (kg)' }), fr(l.kg, 1))
+  }
+  const enregistrer = p.getByRole('button', { name: 'Enregistrer', exact: true })
+  if (!(await enregistrer.isEnabled())) {
+    const manque = (await enregistrer.locator('xpath=following-sibling::span[1]').textContent().catch(() => '')) ?? ''
+    throw new Error(`fiche hors machine incomplète : ${manque.trim() || 'bouton Enregistrer inactif'}`)
+  }
+  await enregistrer.click()
+  await expect(p.getByText('Fiche enregistrée').or(p.getByText('Enregistrement refusé'))).toBeVisible({ timeout: 30_000 })
+  if (await p.getByText('Enregistrement refusé').isVisible())
+    throw new Error(`fiche hors machine refusée : ${await messageAffiche(p)}`)
+  // Relu au serveur : le mouvement est la, sur l'OF, avec les kilos tapes.
+  const type = sens === 'SORTIE' ? 'CONSO_DIRECTE' : 'RETOUR_CONSO'
+  const total = lignes.reduce((s, l) => s + +l.kg.toFixed(1), 0)
+  await attendre(
+    () => documentsDu(p, date, type, magasin),
+    (ds) => ds.some((d) => d.numero_of === of.numero && Math.abs(Number(d.quantite_totale_kg ?? 0) - total) < 0.01),
+    `${type} de ${fr(total, 1)} kg sur ${of.numero}`,
+  )
+}
+
+/** La sortie d'atelier d'avant (matieres non DIRECTE, ou sans OF) : l'ecran des mouvements. */
+async function sortieAtelier(date: string, magasin: string, of: string, lignes: { r: string; lot?: string; kg: number }[]) {
   // Au-dela de 50 kg par jour et par reference, la sortie demande la direction (regle 1).
   const login = 'Choukri'
   const p = await session(login)
+  await aller(p, '/mouvements/nouveau', login)
+  await p.getByRole('combobox', { name: /^Type de mouvement/ }).selectOption({ label: '− Sortie hors machine (atelier, échantillon, essai, réparation, prêt)' })
+  await p.getByRole('combobox', { name: /^Magasin/ }).first().selectOption(magasin)
+  await p.locator('#mvt-6').fill(date)
+  await p.getByRole('textbox', { name: /ordre de fabrication/i }).fill(`${of} atelier finition`)
+  await choisirOption(p.getByRole('combobox', { name: /^Motif/ }).first(), /Sortie hors machine/)
+  for (const [i, l] of lignes.entries()) {
+    if (i > 0) await p.getByRole('button', { name: 'Ajouter une ligne' }).click()
+    await choisirReference(p, l.r)
+    await taper(champNombre(p, 'Quantité en kilos').last(), String(l.kg))
+    await choisirOption(p.getByRole('combobox', { name: 'Motif de la ligne' }).last(), /atelier/i)
+    if (l.lot) {
+      const lot = p.locator('tbody select').filter({ has: p.locator('option', { hasText: 'Choisir un lot' }) }).last()
+      await choisirOption(lot, new RegExp(echapper(l.lot)))
+    }
+    await p.getByRole('button', { name: 'Valider la ligne' }).last().click()
+  }
+  await p.getByRole('button', { name: 'Enregistrer le mouvement' }).click()
+  await expect(p).toHaveURL(/\/mouvements$/, { timeout: 30_000 }).catch(async () => {
+    throw new Error(`sortie non enregistrée : ${await messageAffiche(p)}`)
+  })
+}
+
+/**
+ * LES MATIERES HORS MACHINE, EN FIN DE MOIS. Celles en mode DIRECTE sortent sur
+ * l'OF du plan (fiche hors machine, par le magasinier) ; les autres — et toutes,
+ * si l'OF n'est pas ouvert — gardent la sortie d'atelier.
+ */
+async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
+  const p = await session('Choukri')
   const alea = hasardDe(e.id)
+  const responsable = RESPONSABLES[Math.floor(alea() * RESPONSABLES.length)]
   const bilan: string[] = []
   for (const magasin of ['Polyfashions', 'Morocco']) {
-    const of = `SIM-${e.date}-${magasin}`
-    const deja = await lire<MouvementListe[]>(p, `/api/mouvements/documents?depuis=${e.date}&jusqu_a=${e.date}T23:59:59&limite=500`)
-    if (deja.some((m) => (m.numero_of ?? '').startsWith(of))) continue
+    const ofAtelier = `SIM-${e.date}-${magasin}`
+    const ofNumero = e.of?.[magasin]
+    const of = ofNumero ? (await ofsOuverts(p)).find((o) => o.numero === ofNumero) : undefined
+    const faitAtelier = (await documentsDu(p, e.date, 'SORTIE_HORS_MACHINE', magasin)).some((m) => (m.numero_of ?? '').startsWith(ofAtelier))
+    const faitOf = !!of && (await documentsDu(p, e.date, 'CONSO_DIRECTE', magasin)).some((m) => m.numero_of === of.numero)
+    if (faitAtelier && (faitOf || !of)) continue
     const tous = (await lots(p, magasin)).filter((l) => MATIERES_HORS_MACHINE.includes(parCode.get(l.code_reference)?.code_categorie ?? ''))
     // LE STOCK DU MAGASIN fait foi pour une matiere non suivie au lot : une sortie
     // sans lot ne diminue pas les soldes par lot, qui la surestimeraient.
@@ -594,30 +862,66 @@ async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
       })
       .filter((l) => l.kg >= 20)
     if (!lignes.length) continue
-    await aller(p, '/mouvements/nouveau', login)
-    await p.getByRole('combobox', { name: /^Type de mouvement/ }).selectOption({ label: '− Sortie hors machine (atelier, échantillon, essai, réparation, prêt)' })
-    await p.getByRole('combobox', { name: /^Magasin/ }).first().selectOption(magasin)
-    await p.locator('#mvt-6').fill(e.date)
-    await p.getByRole('textbox', { name: /ordre de fabrication/i }).fill(`${of} atelier finition`)
-    await choisirOption(p.getByRole('combobox', { name: /^Motif/ }).first(), /Sortie hors machine/)
-    for (const [i, l] of lignes.entries()) {
-      if (i > 0) await p.getByRole('button', { name: 'Ajouter une ligne' }).click()
-      await choisirReference(p, l.r)
-      await taper(champNombre(p, 'Quantité en kilos').last(), String(l.kg))
-      await choisirOption(p.getByRole('combobox', { name: 'Motif de la ligne' }).last(), /atelier/i)
-      if (l.lot) {
-        const lot = p.locator('tbody select').filter({ has: p.locator('option', { hasText: 'Choisir un lot' }) }).last()
-        await choisirOption(lot, new RegExp(l.lot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-      }
-      await p.getByRole('button', { name: 'Valider la ligne' }).last().click()
+    const surOf = of ? lignes.filter((l) => directe(l.r)) : []
+    const atelier = lignes.filter((l) => !surOf.includes(l))
+    if (surOf.length && !faitOf) {
+      await ficheHorsMachine('SORTIE', e.date, magasin, of!, surOf, responsable)
+      // Pour le retour eventuel : l'OF, et ce qui est sorti de chaque reference (lot, kilos).
+      journal.ids[`${e.id}|${magasin}`] = of!.id_of
+      for (const l of surOf) journal.ids[`${e.id}|${magasin}|${l.r}`] = JSON.stringify({ lot: l.lot ?? '', kg: l.kg })
+      sauver()
+      bilan.push(`${magasin}, OF ${of!.numero} : ${surOf.map((l) => `${l.kg} kg ${l.r}`).join(', ')}`)
     }
-    await p.getByRole('button', { name: 'Enregistrer le mouvement' }).click()
-    await expect(p).toHaveURL(/\/mouvements$/, { timeout: 30_000 }).catch(async () => {
-      throw new Error(`sortie non enregistrée : ${await messageAffiche(p)}`)
-    })
-    bilan.push(`${magasin} : ${lignes.map((l) => `${l.kg} kg ${l.r}`).join(', ')}`)
+    if (atelier.length && !faitAtelier) {
+      await sortieAtelier(e.date, magasin, ofAtelier, atelier)
+      bilan.push(`${magasin}, atelier : ${atelier.map((l) => `${l.kg} kg ${l.r}`).join(', ')}`)
+    }
   }
   return bilan.join(' ; ') || 'rien à sortir'
+}
+
+interface BilanHorsMachine {
+  code_reference: string
+  kg_sorti: number
+  kg_rendu: number
+  reste_kg: number
+}
+
+/** LE RESTE REVIENT AU MAGASIN : une partie d'une reference sortie sur l'OF, sur le meme OF. */
+async function retourHm(e: Extract<Evenement, { type: 'RETOUR_HM' }>) {
+  const p = await session('Magasinie')
+  const alea = hasardDe(e.id)
+  const responsable = RESPONSABLES[Math.floor(alea() * RESPONSABLES.length)]
+  const bilan: string[] = []
+  for (const magasin of Object.keys(e.of).sort()) {
+    const idOf = journal.ids[`${e.sortie}|${magasin}`]
+    if (!idOf) continue // rien de DIRECTE n'est sorti sur l'OF dans ce magasin
+    const of = (await ofsOuverts(p)).find((o) => o.id_of === idOf)
+    if (!of) {
+      bilan.push(`${magasin} : l'OF n'est plus ouvert, rien ne se rend`)
+      continue
+    }
+    if ((await documentsDu(p, e.date, 'RETOUR_CONSO', magasin)).some((m) => m.numero_of === of.numero)) {
+      bilan.push(`${magasin} : déjà rendu`)
+      continue
+    }
+    const restes = await lire<BilanHorsMachine[]>(p, `/api/machines/of-ouverts/${encodeURIComponent(idOf)}/hors-machine`)
+    // Seules les references sorties de CE magasin s'y rendent, jamais plus que ce qui en est sorti.
+    const possibles = restes
+      .map((b) => {
+        const sortie = journal.ids[`${e.sortie}|${magasin}|${b.code_reference}`]
+        const s = sortie ? (JSON.parse(sortie) as { lot: string; kg: number }) : undefined
+        return { b, s, max: s ? Math.min(Number(b.reste_kg), s.kg) : 0 }
+      })
+      .filter((x) => x.max >= 20)
+    if (!possibles.length) continue
+    const { b, s, max } = possibles[Math.floor(alea() * possibles.length)]
+    const kg = Math.floor(max * (0.1 + alea() * 0.2))
+    if (kg < 2) continue
+    await ficheHorsMachine('RETOUR', e.date, magasin, of, [{ r: b.code_reference, lot: s?.lot || undefined, kg }], responsable)
+    bilan.push(`${magasin}, OF ${of.numero} : ${kg} kg ${b.code_reference} rendus`)
+  }
+  return bilan.join(' ; ') || 'rien à rendre'
 }
 
 // --- L'import (fournisseurs etrangers) ----------------------------------------
@@ -962,19 +1266,29 @@ test('simulation de janvier 2024 à aujourd’hui', async ({ browser }, info) =>
   const p = await session('Mohamed')
   catalogue = await lire<RefCatalogue[]>(p, '/api/catalogue?actif=1&limite=5000')
   for (const r of catalogue) parCode.set(r.code_reference, r)
-  const parc = await lire<{ code_machine: string; etat: string }[]>(p, '/api/machines')
+  const parc = await lire<{ code_machine: string; etat: string; largeur_m: number | null }[]>(p, '/api/machines')
   const machines: Machine[] = []
   for (const m of parc.filter((x) => x.etat === 'ACTIVE').sort((a, b) => a.code_machine.localeCompare(b.code_machine))) {
     const zones = await lire<{ code_emplacement: string; role: string; capacite_bobines: number }[]>(p, `/api/machines/${m.code_machine}`)
-    machines.push({
+    const machine: Machine = {
       code: m.code_machine,
+      largeur: m.largeur_m == null ? null : Number(m.largeur_m),
       zones: zones.filter((z) => z.role === 'ETAGE').map((z) => ({ code: z.code_emplacement, capacite: Number(z.capacite_bobines) })),
-    })
+    }
+    machines.push(machine)
+    machinesParCode.set(machine.code, machine)
   }
+  // Les qualites qu'un OF peut viser : celles du referentiel, non cloturees.
+  const qualites = await lire<QualitePlan[]>(p, '/api/ordres-fabrication/qualites')
   const aujourdhui = new Date().toISOString().slice(0, 10)
-  const plan = construirePlan(catalogue, machines, aujourdhui)
-  const restant = plan.filter((e) => !journal.fait[e.id])
-  tracer(`plan : ${plan.length} événements, ${plan.length - restant.length} déjà faits, ${restant.length} à saisir`)
+  const plan = construirePlan(catalogue, machines, aujourdhui, qualites)
+  const dansFenetre = (e: Evenement) =>
+    (!DEPUIS || e.date >= DEPUIS) && (!JUSQUA || e.date <= JUSQUA) && (!TYPES.size || TYPES.has(e.type))
+  const restant = plan.filter((e) => !journal.fait[e.id] && dansFenetre(e))
+  tracer(
+    `plan : ${plan.length} événements (${plan.filter((e) => e.type === 'OF').length} OF), ${Object.keys(journal.fait).length} déjà faits, ${restant.length} à saisir`
+      + (DEPUIS || JUSQUA || TYPES.size ? ` — fenêtre ${DEPUIS || '…'} → ${JUSQUA || '…'}${TYPES.size ? `, types ${[...TYPES].join(',')}` : ''}` : ''),
+  )
   writeFileSync(join(DOSSIER, 'plan.json'), JSON.stringify(plan, null, 1))
 
   let n = 0
@@ -994,6 +1308,9 @@ test('simulation de janvier 2024 à aujourd’hui', async ({ browser }, info) =>
         : e.type === 'IMPORT_CLOTURE' ? await importCloture(e)
         : e.type === 'MACHINE' ? await machine(e)
         : e.type === 'SORTIE' ? await sortir(e)
+        : e.type === 'RETOUR_HM' ? await retourHm(e)
+        : e.type === 'OF' ? await creerOf(e)
+        : e.type === 'OF_CLOTURE' ? await cloreOf(e)
         : await inventorier(e)
       journal.fait[e.id] = r
       sauver()

@@ -96,6 +96,11 @@ pub struct NouveauMouvement {
     /// L'usine qui emprunte et rend (pret HM_PRET, RETOUR_PRET ; regle 1, 09/10/2026).
     #[serde(default)]
     pub tiers: Option<String>,
+    /// L'OF (lien) d'une consommation directe ou de son retour (22/10/2026). Le
+    /// `numero_of` texte en prend le numero ; sans lui, il reste le texte libre
+    /// d'avant. Une consommation directe sans OF passe, signalee (C62).
+    #[serde(default)]
+    pub id_of: Option<String>,
     pub lignes: Vec<LigneMouvement>,
 }
 
@@ -141,6 +146,9 @@ pub(crate) const TYPES_SAISIE_LIBRE: &[&str] = &[
     "SORTIE_PROD",
     "SORTIE_HORS_MACHINE",
     "CONSO_DIRECTE",
+    // LE RETOUR AU MAGASIN DE LA MATIERE HORS MACHINE (decision du 22/10/2026) :
+    // le reste revient ; consommation de l'OF = sorti - rendu.
+    "RETOUR_CONSO",
     "RETOUR_PRET",
     "AJUST_INV_POS",
     "AJUST_INV_NEG",
@@ -251,7 +259,8 @@ pub async fn creer_mouvement(
     // LA CONSOMMATION DIRECTE NE VAUT QUE POUR UN ARTICLE EN MODE DIRECTE
     // (decision du 21/10/2026). La base le garantit (trg_lmvt_conso_directe) ;
     // le service le dit avant, en nommant chaque reference refusee.
-    if m.code_type_mvt == "CONSO_DIRECTE" {
+    let hors_machine = matches!(m.code_type_mvt.as_str(), "CONSO_DIRECTE" | "RETOUR_CONSO");
+    if hors_machine {
         let codes: Vec<String> = converties.iter().map(|(l, _, _)| l.code_reference.clone()).collect();
         let machine: Vec<String> = sqlx::query_scalar(
             "SELECT code_reference FROM reference
@@ -262,13 +271,55 @@ pub async fn creer_mouvement(
         .fetch_all(&state.db)
         .await?;
         if !machine.is_empty() {
-            return Err(AppError::RegleMetier(format!(
-                "{} : mode de consommation MACHINE (fiche article) : le fil sort par les fiches machine, \
-                 pas par une consommation directe.",
-                machine.join(", ")
-            )));
+            return Err(AppError::RegleMetier(if m.code_type_mvt == "RETOUR_CONSO" {
+                format!(
+                    "{} : mode de consommation MACHINE (fiche article) : le fil revient par le dechargement \
+                     d'une fiche machine, pas par un retour de consommation directe.",
+                    machine.join(", ")
+                )
+            } else {
+                format!(
+                    "{} : mode de consommation MACHINE (fiche article) : le fil sort par les fiches machine, \
+                     pas par une consommation directe.",
+                    machine.join(", ")
+                )
+            }));
         }
     }
+    // L'OF EN LIEN (22/10/2026) : prevu ou lance. Le texte `numero_of` en prend
+    // le numero, pour les ecrans et l'historique. Un retour nomme toujours l'OF
+    // qui avait sorti la matiere ; une sortie sans OF passe, signalee (C62).
+    let id_of = m.id_of.as_deref().map(str::trim).filter(|o| !o.is_empty()).map(str::to_string);
+    if id_of.is_some() && !hors_machine {
+        return Err(AppError::Invalide(
+            "l'OF en lien ne se pose que sur une consommation directe ou son retour".into(),
+        ));
+    }
+    if m.code_type_mvt == "RETOUR_CONSO" && id_of.is_none() {
+        return Err(AppError::Invalide(
+            "un retour de consommation directe nomme l'OF qui avait sorti la matiere".into(),
+        ));
+    }
+    let numero_of = match &id_of {
+        Some(o) => {
+            let of: Option<(String, String)> =
+                sqlx::query_as("SELECT numero, statut FROM ordre_fabrication WHERE id_of = $1")
+                    .bind(o)
+                    .fetch_optional(&state.db)
+                    .await?;
+            match of {
+                None => return Err(AppError::Invalide(format!("ordre de fabrication inconnu : {o}"))),
+                Some((numero, statut)) if statut != "PREVU" && statut != "LANCE" => {
+                    return Err(AppError::RegleMetier(format!(
+                        "l'OF {numero} est {} : la matiere se sort ou se rend sur un OF prevu ou lance",
+                        statut.to_lowercase()
+                    )))
+                }
+                Some((numero, _)) => Some(numero),
+            }
+        }
+        None => m.numero_of.clone(),
+    };
     let tiers = m.tiers.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string);
     if m.code_type_mvt == "SORTIE_HORS_MACHINE" {
         for (l, _, _) in &converties {
@@ -391,10 +442,10 @@ pub async fn creer_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
               code_motif, reference_document, numero_of, observations_globales,
-              responsable, id_utilisateur, tiers)
+              responsable, id_utilisateur, tiers, id_of)
          VALUES ($1,$2,
                  COALESCE(fn_jour_casablanca($3), (now() AT TIME ZONE 'Africa/Casablanca')::date),
-                 $4,$5,$6,$7,$8,$9,$10,$11,$12)",
+                 $4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
     )
     .bind(&id)
     .bind(&numero)
@@ -403,11 +454,12 @@ pub async fn creer_mouvement(
     .bind(&m.code_magasin)
     .bind(&m.code_motif)
     .bind(&m.reference_document)
-    .bind(&m.numero_of)
+    .bind(&numero_of)
     .bind(&m.observations_globales)
     .bind(m.responsable.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(&user.id)
     .bind(&tiers)
+    .bind(&id_of)
     .execute(&mut *tx)
     .await?;
 
@@ -420,7 +472,7 @@ pub async fn creer_mouvement(
     // reference jamais recue n'a pas de CMUP : on n'y fait pas entrer de kilos
     // a la main — sauf le stock d'ouverture, au prix catalogue a defaut.
     let entree =
-        matches!(m.code_type_mvt.as_str(), "AJUST_INV_POS" | "RETOUR_PROD" | "STOCK_INIT" | "RETOUR_PRET");
+        matches!(m.code_type_mvt.as_str(), "AJUST_INV_POS" | "RETOUR_PROD" | "STOCK_INIT" | "RETOUR_PRET" | "RETOUR_CONSO");
     let mut prix_imposes: Vec<Option<f64>> = Vec::with_capacity(converties.len());
     for (l, _, _) in &converties {
         // LE CMUP DU MAGASIN, qui fait foi (U7, 09/10/2026) ; celui de la fiche
@@ -475,7 +527,7 @@ pub async fn creer_mouvement(
         } else {
             l.code_motif_ligne.clone()
         })
-        .bind(l.numero_of.clone().or_else(|| m.numero_of.clone()))
+        .bind(l.numero_of.clone().or_else(|| numero_of.clone()))
         .execute(&mut *tx)
         .await?;
     }
@@ -529,7 +581,7 @@ const ENTETE_MOUVEMENT: &str = "
     m.code_type_mvt, tm.libelle AS type_libelle, tm.signe, tm.couleur,
     m.code_magasin, mg.nom AS magasin_nom,
     m.code_motif, mo.libelle AS motif_libelle,
-    m.reference_document, m.numero_of, m.observations_globales,
+    m.reference_document, m.numero_of, m.id_of, m.observations_globales,
     m.responsable, m.est_initial, u.login AS saisi_par,
     CAST((substr(m.date_creation, 1, 10))::date
        - (substr(m.date_mouvement, 1, 10))::date AS bigint) AS jours_de_retard_saisie,

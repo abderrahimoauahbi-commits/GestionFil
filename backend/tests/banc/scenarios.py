@@ -1602,6 +1602,138 @@ def scenario_masquage(c, infra):
     verifier(any(b.get("montant_total_mad") for b in bons), "l'assistante ne lit plus le montant de ses bons")
 
 
+def scenario_of_cycle(c, infra):
+    """L'ORDRE DE FABRICATION (lot A, 22/10/2026) : numero genere OF-AAAA-NNNN ou saisi (unique), cycle
+    PREVU -> LANCE -> CLOTURE garde en base, version perimee refusee, en-tete fige a la cloture ; le PREVU
+    (metrage x recette x perte) ; la consommation REELLE : ecarts machine attribues a l'OF DE LA PERIODE
+    (decision active seulement, correction a part, dechet a part), hors machine sorti - rendu, une sortie
+    contre-passee ne compte plus ; v_qualite_consommation ; C61 a la cloture."""
+    qualite, perte = infra.sql(
+        "SELECT q.code_qualite, q.taux_perte_pct FROM qualite q "
+        "WHERE EXISTS (SELECT 1 FROM v_recette_calculee rc WHERE rc.code_qualite = q.code_qualite AND rc.kg_m2 > 0) "
+        "ORDER BY q.code_qualite LIMIT 1")[0]
+    annee = infra.valeur("SELECT to_char(now() AT TIME ZONE 'Africa/Casablanca', 'YYYY')")
+
+    # 1. Numero genere, numero saisi, numero en double refuse.
+    of = c.ok("Choukri", "POST", "/api/ordres-fabrication", {"code_qualite": qualite, "metrage_m2": 1000})
+    id_of = of["id_of"]
+    verifier(of["numero"].startswith(f"OF-{annee}-") and of["statut"] == "PREVU", f"numero / statut a la creation : {of}")
+    saisi = f"PROD-BANC-{int(time.time())}"
+    of2 = c.ok("Choukri", "POST", "/api/ordres-fabrication", {"numero": saisi, "code_qualite": qualite, "metrage_m2": 50})
+    verifier(of2["numero"] == saisi, f"le numero de l'ERP Production n'est pas garde : {of2}")
+    c.refus("Choukri", "POST", "/api/ordres-fabrication", {"numero": saisi, "code_qualite": qualite, "metrage_m2": 5},
+            contient="existe déjà")
+    c.refus("Choukri", "POST", "/api/ordres-fabrication", {"code_qualite": qualite, "metrage_m2": 0}, codes=(400,))
+    # Un OF ne nait pas lance (garde en base).
+    refus_sql(infra, f"INSERT INTO ordre_fabrication (numero, code_qualite, metrage_m2, statut) "
+                     f"VALUES ('OF-BANC-LANCE', '{qualite}', 1, 'LANCE')", "OF-CYCLE")
+
+    # 2. Le prevu : metrage x kg/m2 de la recette x (1 + perte de la qualite), calcule a part.
+    attendu = float(infra.valeur(f"SELECT round(sum(1000 * kg_m2 * (1 + {perte} / 100.0)), 4) "
+                                 f"FROM v_recette_calculee WHERE code_qualite = '{qualite}' AND kg_m2 IS NOT NULL"))
+    lu = c.ok("Choukri", "GET", f"/api/ordres-fabrication/{id_of}")
+    verifier(abs(float(lu["kg_prevu"]) - attendu) < 0.01, f"prevu {lu['kg_prevu']} au lieu de {attendu}")
+    verifier(float(lu["kg_reel"]) == 0, f"un OF neuf a deja du reel : {lu['kg_reel']}")
+
+    # 3. Modifier : version exigee, version perimee refusee, bonne version acceptee.
+    c.refus("Choukri", "PATCH", f"/api/ordres-fabrication/{id_of}", {"metrage_m2": 1200}, codes=(400,))
+    v = vv(infra, "ordre_fabrication", "id_of", id_of)
+    c.ok("Choukri", "PATCH", f"/api/ordres-fabrication/{id_of}", {"version": v, "metrage_m2": 1200})
+    c.refus("Choukri", "PATCH", f"/api/ordres-fabrication/{id_of}", {"version": v, "metrage_m2": 900}, codes=(409,))
+    c.ok("Choukri", "PATCH", f"/api/ordres-fabrication/{id_of}", V(infra, "ordre_fabrication", "id_of", id_of, {"metrage_m2": 1000}))
+
+    # 4. Le cycle : PREVU -> CLOTURE refuse par la base ; PREVU -> LANCE.
+    c.refus("Choukri", "PUT", f"/api/ordres-fabrication/{id_of}/statut",
+            V(infra, "ordre_fabrication", "id_of", id_of, {"statut": "CLOTURE"}), codes=(422,), contient="OF-CYCLE")
+    c.ok("Choukri", "PUT", f"/api/ordres-fabrication/{id_of}/statut",
+         V(infra, "ordre_fabrication", "id_of", id_of, {"statut": "LANCE"}))
+
+    # 5. Le fil : une decision ACTIVE dont la periode appartenait a l'OF (20 kg consommes, 3 kg de
+    # dechet, 7 kg de correction), une decision RETIREE (100 kg, ne compte pas), une ligne d'un autre OF.
+    # Posees en SQL, declencheurs suspendus : le lot A lit les decisions, il ne les ecrit pas.
+    ref_fil = infra.valeur(f"SELECT code_reference FROM v_recette_calculee WHERE code_qualite = '{qualite}' "
+                           "AND kg_m2 IS NOT NULL ORDER BY kg_m2 DESC, code_reference LIMIT 1")
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCOF", "nom": "Machine OF du banc",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 100}]})
+    zone = "BANCOF-E1"
+
+    def ligne(dec, n, ecart, effet, motif, of_periode, mouvementes=0, destination="NULL"):
+        return ("INSERT INTO machine_decision_ligne (id_decision, ligne_numero, code_reference, lot_fournisseur, "
+                "poids_nominal_kg, nb_avant, kg_avant, nb_mouvementees, kg_mouvementes, destination, nb_apres, kg_apres, "
+                "ecart_kg, effet_ecart, code_motif, id_of_periode) "
+                f"VALUES ('{dec}', {n}, '{ref_fil}', 'LOT-OF', 2.5, 40, 100, 0, {mouvementes}, {destination}, 10, 25, "
+                f"{ecart}, '{effet}', '{motif}', '{of_periode}');")
+
+    infra.sql(
+        "BEGIN; SET LOCAL session_replication_role = replica; "
+        "INSERT INTO machine_decision (id_decision, nature, code_machine, code_emplacement, est_tete, statut) "
+        f"VALUES ('banc-of-d1', 'DEPART', 'BANCOF', '{zone}', 0, 'ACTIVE'), "
+        f"       ('banc-of-d2', 'DEPART', 'BANCOF', '{zone}', 0, 'ACTIVE'); "
+        "INSERT INTO machine_decision (id_decision, nature, code_machine, code_emplacement, est_tete, statut, "
+        "date_retrait, motif_retrait) "
+        f"VALUES ('banc-of-d3', 'DEPART', 'BANCOF', '{zone}', 0, 'RETIREE', now(), 'banc'); "
+        + ligne("banc-of-d1", 1, 20, "CONSOMMATION", "MJ_ORDINAIRE", id_of)
+        + ligne("banc-of-d1", 2, 3, "DECHET", "MJ_DPC", id_of)
+        + ligne("banc-of-d1", 3, 7, "CONSOMMATION", "MJ_CORRECTION", id_of)
+        + ligne("banc-of-d2", 1, 4, "CONSOMMATION", "DE_DECHET", id_of, mouvementes=5, destination="'DECHET'")
+        + ligne("banc-of-d2", 2, 11, "CONSOMMATION", "MJ_ORDINAIRE", of2["id_of"])
+        + ligne("banc-of-d3", 1, 100, "CONSOMMATION", "MJ_ORDINAIRE", id_of)
+        + " COMMIT;")
+
+    def conso(ref):
+        r = infra.sql(f"SELECT kg_conso_fil, kg_dechet, kg_autre_ecart, kg_hors_machine, kg_reel, kg_prevu "
+                      f"FROM v_of_consommation WHERE id_of = '{id_of}' AND code_reference = '{ref}'")
+        return tuple(float(x) for x in r[0]) if r else None
+
+    fil, dechet, autre, _, reel, prevu_ref = conso(ref_fil)
+    verifier(fil == 24 and reel == 24, f"reel fil attendu 24 kg (20 + 4, correction et decision retiree exclues) : {fil} / {reel}")
+    verifier(dechet == 8, f"dechet attendu 8 kg (3 d'ecart + 5 decharges au dechet) : {dechet}")
+    verifier(autre == 7, f"la correction (7 kg) doit se totaliser a part : {autre}")
+    verifier(prevu_ref > 0, "la reference de recette n'a pas de prevu")
+
+    # 6. Hors machine : 50 kg sortis sur l'OF, 10 kg rendus ; une seconde sortie contre-passee ne compte plus.
+    directe = REF
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(directe)}",
+         V(infra, "reference", "code_reference", directe, {"mode_consommation": "DIRECTE"}))
+    entree_stock(c, directe, 200)
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 50)], id_of=id_of)
+    verifier(code == 200, f"consommation directe sur l'OF refusee : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 10)], id_of=id_of)
+    verifier(code == 200, f"retour au magasin sur l'OF refuse : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 30)], id_of=id_of)
+    verifier(code == 200, f"seconde consommation directe refusee : {code} {r}")
+    c.ok("Choukri", "POST", f"/api/mouvements/{r['id_mouvement']}/contre-passer", {"motif": "Erreur de saisie (banc OF)"})
+    hm = conso(directe)
+    verifier(hm is not None and hm[3] == 40 and hm[4] == 40,
+             f"hors machine attendu 40 kg (50 sortis - 10 rendus, la sortie contre-passee exclue) : {hm}")
+    detail = c.ok("Choukri", "GET", f"/api/ordres-fabrication/{id_of}/consommation")
+    verifier({d["code_reference"] for d in detail} >= {ref_fil, directe}, f"consommation par reference incomplete : {detail}")
+    lu = c.ok("Choukri", "GET", f"/api/ordres-fabrication/{id_of}")
+    verifier(abs(float(lu["kg_reel"]) - 64) < 1e-6, f"reel de l'OF attendu 64 kg (24 fil + 40 hors machine) : {lu['kg_reel']}")
+
+    # 7. Par qualite et par mois : l'OF y est, l'OF annule n'y est pas.
+    c.ok("Choukri", "PUT", f"/api/ordres-fabrication/{of2['id_of']}/statut",
+         V(infra, "ordre_fabrication", "id_of", of2["id_of"], {"statut": "ANNULE"}))
+    mois = lu["date_of"][:7]
+    q = c.ok("Choukri", "GET", f"/api/ordres-fabrication/consommation-qualites?qualite={urllib.parse.quote(qualite)}&du={mois}&au={mois}")
+    verifier(len(q) == 1 and float(q[0]["kg_reel"]) >= 64 - 1e-6, f"v_qualite_consommation : {q}")
+    verifier(int(infra.valeur(f"SELECT count(*) FROM v_qualite_consommation WHERE code_qualite = '{qualite}' "
+                              f"AND kg_conso_fil >= 11 AND kg_reel = kg_conso_fil + kg_hors_machine")) >= 1,
+             "v_qualite_consommation incoherente")
+
+    # 8. La cloture : C61 signale l'ecart (64 kg face au prevu de 1000 m2), l'en-tete est fige,
+    # aucun retour arriere.
+    avant = controle(infra, "C61")
+    c.ok("Choukri", "PUT", f"/api/ordres-fabrication/{id_of}/statut",
+         V(infra, "ordre_fabrication", "id_of", id_of, {"statut": "CLOTURE"}))
+    verifier(controle(infra, "C61") == avant + 1, f"C61 ne signale pas l'OF cloture hors seuil ({avant} -> {controle(infra, 'C61')})")
+    c.refus("Choukri", "PATCH", f"/api/ordres-fabrication/{id_of}",
+            V(infra, "ordre_fabrication", "id_of", id_of, {"metrage_m2": 10}), codes=(422,))
+    refus_sql(infra, f"UPDATE ordre_fabrication SET metrage_m2 = 10 WHERE id_of = '{id_of}'", "OF-FIGE")
+    c.refus("Choukri", "PUT", f"/api/ordres-fabrication/{id_of}/statut",
+            V(infra, "ordre_fabrication", "id_of", id_of, {"statut": "LANCE"}), codes=(422,), contient="OF-CYCLE")
+
+
 def scenario_controles_finaux(c, infra):
     """Apres tout le banc : cache = grand livre, stock lot = stock magasin, tableau de bord en 200."""
     for code in ("C11", "C15", "C45"):
@@ -1611,8 +1743,8 @@ def scenario_controles_finaux(c, infra):
     # LE DERNIER CONTROLE, EN UN SEUL ENDROIT : a relever a chaque controle ajoute
     # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10 ;
     # C59, prix confirme a la demande de prix, le 21/10 ; C60, meme reference sur deux lignes d'un bon,
-    # le 21/10).
-    dernier = 60
+    # le 21/10 ; C61, OF cloture hors seuil, C62-C63 hors machine et voies, C64 OF au-dela du plan, le 22/10).
+    dernier = 64
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
                              f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
@@ -2364,6 +2496,261 @@ def scenario_consommation_directe(c, infra):
     verifier(controle(infra, "C11") == 0, "C11 apres la contre-passation")
 
 
+def of_banc(infra, numero):
+    """Un OF PREVU pose en base (le cycle de l'OF a son propre scenario, of_cycle). Rend son id."""
+    qualite = infra.valeur("SELECT code_qualite FROM qualite ORDER BY code_qualite LIMIT 1")
+    infra.sql(f"INSERT INTO ordre_fabrication (numero, code_qualite, metrage_m2) "
+              f"VALUES ('{numero}', '{qualite}', 100) ON CONFLICT (numero) DO NOTHING")
+    return infra.valeur(f"SELECT id_of FROM ordre_fabrication WHERE numero = '{numero}'")
+
+
+def scenario_machine_of_voie(c, infra):
+    """L'OF SUR LA MACHINE (lot C, 22/10/2026) : la largeur de la machine se declare ; la fiche choisit
+    son OF, la ligne sa voie ; 1 344 / 4,20 x 1,20 = 384 bobines ; au-dela, un SIGNAL (apercu et C63),
+    jamais un blocage ; LA REGLE DE FRONTIERE : un constat qui change l'OF range l'ecart sous l'OF
+    sortant (id_of_periode) et pose l'OF nouveau sur l'etage ; la devalidation rend l'OF d'avant."""
+    ref, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-OF-VOIE"
+    jour = taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 1100, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [1100], lot_fournisseur=lot, nb_bobines=420)
+    x1, x2 = of_banc(infra, "OF-BANC-X1"), of_banc(infra, "OF-BANC-X2")
+
+    # 1. La largeur de la machine : declaree, gardee par une correction qui ne la dit pas, jamais negative.
+    zones = [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 1344}]
+    c.refus("Choukri", "POST", "/api/machines", {"code_machine": "BANCVOIE", "nom": "Machine OF", "largeur_m": -1,
+                                                 "zones": zones}, codes=(400,))
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCVOIE", "nom": "Machine OF", "largeur_m": 4.2,
+                                              "zones": zones})
+    verifier(infra.valeur("SELECT largeur_m FROM machine WHERE code_machine = 'BANCVOIE'") == "4.200",
+             "la largeur de la machine n'est pas enregistree")
+    c.ok("Choukri", "PUT", "/api/machines/BANCVOIE",
+         V(infra, "machine", "code_machine", "BANCVOIE", {"nom": "Machine OF du banc", "zones": zones}))
+    verifier(infra.valeur("SELECT largeur_m FROM machine WHERE code_machine = 'BANCVOIE'") == "4.200",
+             "une correction sans largeur a efface la largeur")
+    zone = "BANCVOIE-E1"
+
+    def fiche(type_fiche, lignes, id_of=None):
+        return c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANCVOIE", "code_emplacement": zone, "date_fiche": jour,
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "id_of": id_of,
+            "lignes": lignes})["id_fiche"]
+
+    # 2. Le chargement pour X1, voie de 1,20 m : 384 bobines, aucun signal ; premier chargement sans
+    #    ecart -> pas d'OF de periode.
+    f1 = fiche("CHARGE", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 384,
+                           "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION",
+                           "largeur_voie_m": 1.2}], id_of=x1)
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/apercu", {})
+    l0 = ap["lignes"][0]
+    verifier(l0.get("bobines_voie") == 384, f"bobines de la voie : {l0.get('bobines_voie')} au lieu de 384")
+    verifier(l0.get("numero_of") == "OF-BANC-X1" and l0.get("id_of_periode") is None,
+             f"premier chargement : OF {l0.get('numero_of')}, periode {l0.get('id_of_periode')}")
+    verifier(not ap["blocages"] and not ap.get("signaux"), f"chargement de la voie : {ap['blocages']} {ap.get('signaux')}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {})
+    verifier(infra.valeur(f"SELECT numero_of FROM machine_fiche WHERE id_fiche = '{f1}'") == "OF-BANC-X1",
+             "le numero d'OF texte n'est plus rempli (historique)")
+    etat = infra.sql(f"SELECT id_of, largeur_voie_m FROM machine_etat WHERE code_emplacement = '{zone}'")
+    verifier(etat == [[x1, "1.200"]], f"l'etage ne sert pas X1 sur 1,20 m : {etat}")
+
+    # 3. Une bobine de plus : au-dela de la voie. SIGNALE a l'apercu, pas bloque ; validee, C63 la compte.
+    c63 = controle(infra, "C63")
+    f2 = fiche("CHARGE", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 1,
+                           "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f2}/apercu", {})
+    verifier(not ap["blocages"], f"une voie depassee ne bloque pas : {ap['blocages']}")
+    verifier(any("385" in s and "384" in s for s in ap.get("signaux") or []), f"voie depassee non signalee : {ap.get('signaux')}")
+    verifier(ap["lignes"][0].get("numero_of") == "OF-BANC-X1", "une fiche sans OF ne garde pas l'OF de la ligne")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f2}/valider", {})
+    verifier(controle(infra, "C63") == c63 + 1, f"C63 ne compte pas la voie depassee ({c63} -> {controle(infra, 'C63')})")
+
+    # 4. LA REGLE DE FRONTIERE : un constat pour X2 (la fiche change l'OF). 385 bobines a 50 % : l'ecart
+    #    mesure la periode de X1, il est range sous X1 ; l'etage sert X2 ensuite.
+    f3 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 385,
+                        "pourcentage": 50, "code_motif": "MJ_ORDINAIRE"}], id_of=x2)
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f3}/apercu", {})
+    l0 = ap["lignes"][0]
+    verifier(l0.get("numero_of_periode") == "OF-BANC-X1" and l0.get("numero_of") == "OF-BANC-X2",
+             f"apercu de la frontiere : periode {l0.get('numero_of_periode')}, nouveau {l0.get('numero_of')}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f3}/valider", {})
+    ligne = infra.sql("SELECT l.id_of, l.id_of_periode, l.ecart_kg FROM machine_decision_ligne l "
+                      "JOIN machine_decision d ON d.id_decision = l.id_decision "
+                      f"WHERE d.id_fiche = '{f3}' AND d.statut = 'ACTIVE'")
+    verifier(len(ligne) == 1 and ligne[0][0] == x2 and ligne[0][1] == x1 and float(ligne[0][2]) > 400,
+             f"l'ecart n'est pas range sous l'OF sortant : {ligne}")
+    verifier(infra.valeur(f"SELECT id_of FROM machine_etat WHERE code_emplacement = '{zone}'") == x2,
+             "apres le constat, l'etage ne sert pas X2")
+    if infra.valeur("SELECT to_regclass('public.v_of_consommation') IS NOT NULL") == "t":
+        conso = float(infra.valeur(f"SELECT COALESCE(sum(kg_conso_fil), 0) FROM v_of_consommation WHERE id_of = '{x1}'"))
+        verifier(abs(conso - float(ligne[0][2])) < 0.01, f"la consommation de X1 n'est pas l'ecart de sa periode : {conso}")
+
+    # 5. Devalider le constat (decision tete) : l'etage revient a X1, sa voie comprise.
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f3}/devalider", {"motif": "Essai du banc : retour a X1"})
+    etat = infra.sql(f"SELECT id_of, largeur_voie_m FROM machine_etat WHERE code_emplacement = '{zone}'")
+    verifier(etat == [[x1, "1.200"]], f"la devalidation n'a pas rendu l'OF d'avant : {etat}")
+
+    # 6. PREMIER CHARGEMENT AVEC ECART (fil charge deja consomme) : seul l'OF pour lequel on charge a pu le
+    #    consommer -> l'OF de la periode est l'OF nouveau. Apercu seulement.
+    f4 = fiche("CHARGE", [{"code_reference": ref, "lot_fournisseur": "LOT-OF-NEUF", "nb_bobines_mouvementees": 10,
+                           "poids_retenu_kg": 2.6, "pourcentage": 50, "code_motif": "CH_PRODUCTION"}], id_of=x2)
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/apercu", {})
+    l0 = ap["lignes"][0]
+    verifier(l0.get("numero_of_periode") == "OF-BANC-X2" and l0.get("ecart_kg", 0) > 0,
+             f"premier chargement avec ecart : periode {l0.get('numero_of_periode')}, ecart {l0.get('ecart_kg')}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/annuler", {"motif": "Essai du banc"})
+    verifier(controle(infra, "C11") == 0, "C11 apres le parcours OF et voie")
+
+
+def scenario_fiche_hors_machine(c, infra):
+    """LA FICHE HORS MACHINE (lot C, 22/10/2026) : la sortie (CONSO_DIRECTE) porte l'OF en lien ; le reste
+    revient au magasin (RETOUR_CONSO) au CMUP, sans toucher le CMUP ; jamais plus que ce que l'OF a sorti
+    (base) ; la sortie ne se contre-passe pas sous un retour ; la consommation reelle deduit le retour ; une
+    sortie sans OF passe, signalee (C62)."""
+    directe, machine = REF, REF2
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(directe)}",
+         V(infra, "reference", "code_reference", directe, {"mode_consommation": "DIRECTE"}))
+    entree_stock(c, directe, 300)
+    x = of_banc(infra, "OF-BANC-HM")
+    numero = "OF-BANC-HM"
+    conso0 = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle WHERE code_reference = '{directe}'"))
+
+    # 1. La sortie sur l'OF : le lien, et son numero dans le texte d'historique.
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 100)], id_of=x)
+    verifier(code == 200, f"sortie sur l'OF refusee : {code} {r}")
+    sortie = r["id_mouvement"]
+    verifier(infra.sql(f"SELECT id_of, numero_of FROM mouvement WHERE id_mouvement = '{sortie}'") == [[x, numero]],
+             "la sortie ne porte pas l'OF (lien et numero)")
+
+    # 2. Le retour : 30 kg reviennent au CMUP du magasin, le CMUP ne bouge pas.
+    stock, cm = kg(infra, directe), cmup_magasin(infra, directe)
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 30)], motif="RETOUR_PROD", id_of=x)
+    verifier(code == 200, f"retour de 30 kg refuse : {code} {r}")
+    verifier(abs(kg(infra, directe) - stock - 30) < 1e-6, "le retour n'est pas rentre au magasin")
+    verifier(abs(cmup_magasin(infra, directe) - cm) < 0.0001, "le retour a touche le CMUP")
+    prix = float(infra.valeur(f"SELECT prix_kg_mad FROM ligne_mouvement WHERE id_mouvement = '{r['id_mouvement']}'"))
+    verifier(abs(prix - cm) < 0.0001, f"le retour n'entre pas au CMUP : {prix} / {cm}")
+    bilan = c.ok("Magasinie", "GET", f"/api/machines/of-ouverts/{x}/hors-machine")
+    verifier([(b["kg_sorti"], b["kg_rendu"], b["reste_kg"]) for b in bilan] == [(100, 30, 70)],
+             f"bilan de l'OF : {bilan}")
+    conso1 = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle WHERE code_reference = '{directe}'"))
+    verifier(abs(conso1 - conso0 - 70) < 1e-6, f"la consommation reelle ne deduit pas le retour : {conso0} -> {conso1}")
+
+    # 3. Ce que la base refuse : rendre plus que sorti ; un retour sans OF ; un article MACHINE.
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 80)], motif="RETOUR_PROD", id_of=x)
+    verifier(code == 422 and "RETOUR-CONSO" in str(r), f"retour au-dela de la sortie accepte : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 5)], motif="RETOUR_PROD")
+    verifier(code == 400 and "OF" in str(r), f"retour sans OF accepte : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(machine, 1)], motif="RETOUR_PROD", id_of=x)
+    verifier(code == 422 and "MACHINE" in str(r), f"retour d'un article MACHINE accepte : {code} {r}")
+    refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif, "
+                     f"id_utilisateur, id_of) SELECT 'banc-rc', 'MVT-BANC-RC', 'RETOUR_CONSO', '{MAG}', 'RETOUR_PROD', "
+                     f"id_utilisateur, '{x}' FROM utilisateur WHERE login = 'Magasinie'; "
+                     "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg) "
+                     f"VALUES ('banc-rc', 1, '{directe}', 71)", "RETOUR-CONSO")
+    # 4. La sortie ne se contre-passe pas tant qu'un retour de son OF en depend.
+    c.refus("Choukri", "POST", f"/api/mouvements/{sortie}/contre-passer", {"motif": "Essai du banc : sortie rendue"},
+            contient="retour")
+
+    # 5. Une sortie sans OF passe, signalee (C62).
+    c62 = controle(infra, "C62")
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 5)])
+    verifier(code == 200, f"sortie sans OF refusee : {code} {r}")
+    verifier(controle(infra, "C62") == c62 + 1, f"C62 ne signale pas la sortie sans OF ({c62} -> {controle(infra, 'C62')})")
+    verifier(controle(infra, "C11") == 0, "C11 apres la fiche hors machine")
+
+
+def scenario_of_semaine(c, infra):
+    """UNE SEMAINE SIMULEE SUR UNE MACHINE DE 4,20 M (22/10/2026) : deux OF cote a cote, X1 (qualite Q1,
+    voie 1,20 m = 384 bobines) et X2 (qualite Q2, voie 3,00 m = 960 bobines) ; des constats, dont un
+    changement d'OF (X1 -> X3) dont l'ecart reste a X1 ; de la colle sortie puis rendue. La consommation par
+    OF et par qualite doit valoir le calcul fait a la main :
+      X1 = 299,52 + 299,52 kg de fil + 80 kg de colle ; X2 = 499,2 + 499,2 kg de fil + 50 kg de colle ;
+      X3 = 299,52 kg de fil ; Q1 = X1 + X3, Q2 = X2."""
+    fil_a, fil_b, colle = "PP-1500 Dtex-L.Beige 44377-Hs", "PP-1500 Dtex-Cream 2951-Hs", REF
+    jour = taux_usd_du_jour(infra)
+    for ref, lot, kg_recu, bobines in ((fil_a, "LOT-SEM-A", 1000, 385), (fil_b, "LOT-SEM-B", 2500, 962)):
+        id_bc, lignes = bon_envoye(c, [(ref, kg_recu, 2.0)], frs="FRS-001")
+        reception_validee(c, id_bc, lignes, [kg_recu], lot_fournisseur=lot, nb_bobines=bobines)
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(colle)}",
+         V(infra, "reference", "code_reference", colle, {"mode_consommation": "DIRECTE"}))
+    entree_stock(c, colle, 300)
+    q1, q2 = [l[0] for l in infra.sql("SELECT code_qualite FROM qualite ORDER BY code_qualite LIMIT 2")]
+
+    def stats(q):
+        r = infra.sql("SELECT COALESCE(sum(kg_conso_fil), 0), COALESCE(sum(kg_hors_machine), 0) "
+                      f"FROM v_qualite_consommation WHERE code_qualite = '{q}'")[0]
+        return float(r[0]), float(r[1])
+    avant = {q1: stats(q1), q2: stats(q2)}
+
+    ofs = {}
+    for numero, q, m2 in (("OF-SEM-X1", q1, 500), ("OF-SEM-X2", q2, 1200), ("OF-SEM-X3", q1, 400)):
+        ofs[numero] = c.ok("Choukri", "POST", "/api/ordres-fabrication",
+                           {"numero": numero, "code_qualite": q, "metrage_m2": m2})["id_of"]
+    x1, x2, x3 = ofs["OF-SEM-X1"], ofs["OF-SEM-X2"], ofs["OF-SEM-X3"]
+
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCSEM", "nom": "Machine de la semaine", "largeur_m": 4.2,
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 1344}]})
+    zone = "BANCSEM-E1"
+
+    def fiche(type_fiche, lignes, id_of=None):
+        f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANCSEM", "code_emplacement": zone, "date_fiche": jour,
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "id_of": id_of,
+            "lignes": lignes})["id_fiche"]
+        ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/apercu", {})
+        verifier(not ap["blocages"], f"{type_fiche} bloquee : {ap['blocages']}")
+        c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/valider", {})
+        return f, ap
+
+    def constat(pct_a, pct_b, of_a=None):
+        return fiche("MAJ", [
+            {"code_reference": fil_a, "lot_fournisseur": "LOT-SEM-A", "nb_bobines_presentes": 384,
+             "pourcentage": pct_a, "code_motif": "MJ_ORDINAIRE", "id_of": of_a},
+            {"code_reference": fil_b, "lot_fournisseur": "LOT-SEM-B", "nb_bobines_presentes": 960,
+             "pourcentage": pct_b, "code_motif": "MJ_ORDINAIRE"}])
+
+    # Jour 1 : les deux voies se chargent, chacune pour son OF ; le magasinier lit le nombre de bobines.
+    _, ap = fiche("CHARGE", [{"code_reference": fil_a, "lot_fournisseur": "LOT-SEM-A", "nb_bobines_mouvementees": 384,
+                              "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION",
+                              "largeur_voie_m": 1.2}], id_of=x1)
+    verifier(ap["lignes"][0].get("bobines_voie") == 384, f"voie 1,20 m : {ap['lignes'][0].get('bobines_voie')}")
+    _, ap = fiche("CHARGE", [{"code_reference": fil_b, "lot_fournisseur": "LOT-SEM-B", "nb_bobines_mouvementees": 960,
+                              "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION",
+                              "largeur_voie_m": 3.0}], id_of=x2)
+    verifier(ap["lignes"][0].get("bobines_voie") == 960, f"voie 3,00 m : {ap['lignes'][0].get('bobines_voie')}")
+    verifier(not ap.get("signaux"), f"l'etage plein (384 + 960) est signale : {ap.get('signaux')}")
+    # Jour 2 : constat, A a 70 %, B a 80 %.
+    constat(70, 80)
+    # Jour 3 : la voie A passe a X3 (frontiere) ; l'ecart de A appartient encore a X1.
+    f3, ap = constat(40, 60, of_a=x3)
+    la = next(l for l in ap["lignes"] if l["code_reference"] == fil_a)
+    verifier(la.get("numero_of_periode") == "OF-SEM-X1" and la.get("numero_of") == "OF-SEM-X3",
+             f"frontiere : periode {la.get('numero_of_periode')}, nouveau {la.get('numero_of')}")
+    # Jour 5 : A a 10 % sous X3 ; B inchange.
+    constat(10, 60)
+    # La colle : 100 kg sortis pour X1, 20 rendus ; 50 kg pour X2.
+    for type_mvt, q, of in (("CONSO_DIRECTE", 100, x1), ("RETOUR_CONSO", 20, x1), ("CONSO_DIRECTE", 50, x2)):
+        code, r = mouvement(c, "Magasinie", type_mvt, [(colle, q)], id_of=of,
+                            motif="RETOUR_PROD" if type_mvt == "RETOUR_CONSO" else "PRODUCTION")
+        verifier(code == 200, f"{type_mvt} {q} kg refuse : {code} {r}")
+
+    # Le resultat, par OF puis par qualite, contre le calcul a la main.
+    attendu = {x1: (599.04, 80), x2: (998.4, 50), x3: (299.52, 0)}
+    for of, (fil, hm) in attendu.items():
+        b = infra.sql(f"SELECT kg_conso_fil, kg_hors_machine, kg_reel FROM v_of_bilan WHERE id_of = '{of}'")[0]
+        verifier(abs(float(b[0]) - fil) < 0.01 and abs(float(b[1]) - hm) < 0.01 and abs(float(b[2]) - fil - hm) < 0.01,
+                 f"OF {of} : fil {b[0]} (attendu {fil}), hors machine {b[1]} (attendu {hm}), reel {b[2]}")
+        conso = c.ok("Mohamed", "GET", f"/api/ordres-fabrication/{of}/consommation")
+        verifier(conso is not None, f"consommation de l'OF {of} illisible")
+    for q, (fil, hm) in ((q1, (898.56, 80)), (q2, (998.4, 50))):
+        apres = stats(q)
+        verifier(abs(apres[0] - avant[q][0] - fil) < 0.01 and abs(apres[1] - avant[q][1] - hm) < 0.01,
+                 f"qualite {q} : fil +{apres[0] - avant[q][0]:.2f} (attendu {fil}), hors machine "
+                 f"+{apres[1] - avant[q][1]:.2f} (attendu {hm})")
+    reste = float(infra.valeur(f"SELECT sum(kg) FROM machine_etat WHERE code_emplacement = '{zone}'"))
+    verifier(abs(reste - (998.4 * 0.10 + 2496 * 0.60)) < 0.01, f"reste sur la machine : {reste}")
+    verifier(controle(infra, "C11") == 0, "C11 apres la semaine")
+
+
 def scenario_controle_reception(c, infra):
     """Regle 4 (09/10) : au controle la pesee est figee ; le controleur renvoie au magasinier avec un
     motif ; celui qui a pese en dernier ne valide pas ; les corrections sont au journal ; la derogation
@@ -2848,6 +3235,13 @@ def scenario_migrations_rejouables(c, infra):
             infra.psql(infra.base, "-q", "-f", str(f))
         except RuntimeError as e:
             raise Echec(f"{f.name} ne se rejoue pas : {str(e)[-300:]}")
+    # Rejouee seule, une migration ancienne remet ses vues d'alors (09k : v_besoin_horizon sans les OF) ;
+    # celles qui les ont redefinies depuis se rejouent apres elle, comme migrer.py les jouerait.
+    for nom in ("2026-10-22c_besoin_of.sql",):
+        try:
+            infra.psql(infra.base, "-q", "-f", str(dossier / nom))
+        except RuntimeError as e:
+            raise Echec(f"{nom} ne se rejoue pas apres les migrations du 09/10 : {str(e)[-300:]}")
     apres = (infra.valeur("SELECT count(*) FROM v_controles"), infra.valeur("SELECT count(*) FROM ligne_mouvement"))
     verifier(avant == apres, f"le rejeu a change les controles ou le grand livre : {avant} -> {apres}")
 
@@ -3400,6 +3794,160 @@ def scenario_securite(c, infra):
     verifier("script-src 'self'" in csp and "object-src 'none'" in csp, f"politique de contenu absente : {csp!r}")
 
 
+def scenario_besoin_of(c, infra):
+    """LE BESOIN AU-DELA DU PLAN (lot B des OF, 22/10/2026) : les OF consomment le plan.
+    Par qualite et mois, m2 retenus = OF + max(0, plan - OF) ; un OF n'est jamais compte deux fois.
+    Sans OF, le besoin est celui du plan ; un OF au-dessus du plan du mois augmente le besoin de
+    l'excedent et se signale (C64) ; sous le plan, il ne change rien ; hors plan, il ajoute tout son
+    besoin ; CLOTURE ou ANNULE, il ne compte plus ; LANCE avec une consommation attribuee, il ne
+    compte que son reste."""
+    from urllib.parse import quote
+    mois = lambda n: infra.valeur(f"SELECT to_char(date_trunc('month', current_date) + interval '{n} month', 'YYYY-MM')")
+
+    # Un plan en service et son MRP : celui du banc s'il existe (plan_detail), sinon le sien.
+    id_plan = infra.valeur("SELECT id_plan FROM plan_production WHERE statut = 'EN_COURS'")
+    if not id_plan:
+        qualite = infra.valeur("SELECT q.code_qualite FROM qualite q WHERE q.statut = 'ACTIF' "
+                               "AND EXISTS (SELECT 1 FROM v_recette_calculee r WHERE r.code_qualite = q.code_qualite "
+                               "AND r.kg_m2 > 0) ORDER BY 1 LIMIT 1")
+        plan = c.ok("Choukri", "PUT", "/api/plans", {
+            "libelle": "Plan du banc (OF)", "date_debut": mois(0), "mois_horizon": 12, "croissance_annuelle_pct": 0,
+            "saisonnalite": [{"code_qualite": qualite, "mois": m, "coefficient": 1} for m in range(1, 13)],
+            "qualites": [{"code_qualite": qualite, "m2_base_mensuel": 20000}]})
+        id_plan = plan["id_plan"]
+        c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "SIMULATION"})
+        c.ok("Choukri", "POST", f"/api/plans/{id_plan}/figer-recettes", {})
+        c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "EN_COURS"})
+    c.ok("Choukri", "POST", f"/api/plans/{id_plan}/mrp", {})
+
+    def besoin(ref):
+        v = infra.sql(f"SELECT besoin_12m_kg, besoin_plan_12m_kg, besoin_au_dela_12m_kg FROM v_besoin_12m "
+                      f"WHERE code_reference = '{ref}'")
+        return tuple(float(x) for x in v[0]) if v else (0.0, 0.0, 0.0)
+
+    # SANS OF : les references qu'aucun OF ne touche ont le besoin du plan, rien au-dela.
+    ecarts = infra.valeur("SELECT count(*) FROM v_besoin_12m b WHERE NOT EXISTS (SELECT 1 FROM v_besoin_of o "
+                          "WHERE o.code_reference = b.code_reference) AND (b.besoin_au_dela_12m_kg <> 0 "
+                          "OR b.besoin_plan_12m_kg <> b.besoin_12m_kg)")
+    verifier(ecarts == "0", f"{ecarts} reference(s) sans OF ont un besoin different de celui du plan")
+    if infra.valeur("SELECT count(*) FROM ordre_fabrication WHERE statut IN ('PREVU', 'LANCE')") == "0":
+        verifier(infra.valeur("SELECT count(*) FROM v_besoin_of_mois") == "0", "un ajustement des OF sans aucun OF")
+        ecart_plan = infra.valeur(
+            "SELECT abs(COALESCE((SELECT sum(quantite_kg) FROM v_besoin_mois), 0) - COALESCE((SELECT sum(bm.quantite_kg) "
+            "FROM besoin_mrp bm JOIN plan_production p USING (id_plan) WHERE p.statut = 'EN_COURS' "
+            "AND bm.annee_mois >= to_char(current_date, 'YYYY-MM')), 0))")
+        verifier(float(ecart_plan) < 0.01, f"sans OF, le besoin combine s'ecarte du MRP de {ecart_plan} kg")
+
+    # Une qualite du plan, un mois a venir (le mois courant se proratise a l'horizon), une reference.
+    q, m, p_m2 = infra.sql(
+        f"SELECT lpp.code_qualite, lpp.annee_mois, sum(lpp.m2_prevus) FROM ligne_plan_production lpp "
+        f"WHERE lpp.id_plan = '{id_plan}' AND lpp.m2_prevus > 0 AND lpp.annee_mois > '{mois(0)}' "
+        "AND NOT EXISTS (SELECT 1 FROM v_of_mois o WHERE o.code_qualite = lpp.code_qualite "
+        "AND o.annee_mois = lpp.annee_mois) "
+        "GROUP BY 1, 2 ORDER BY 2, 1 LIMIT 1")[0]
+    p_m2 = float(p_m2)
+    ref, k = infra.sql(f"SELECT code_reference, sum(kg_m2) FROM v_recette_calculee WHERE code_qualite = '{q}' "
+                       "AND kg_m2 > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 1")[0]
+    k = float(k)
+    perte_q = float(infra.valeur(f"SELECT COALESCE(taux_perte_pct, 0) FROM qualite WHERE code_qualite = '{q}'"))
+    perte_p = float(infra.valeur(f"SELECT COALESCE(taux_perte_pct, 0) FROM plan_production WHERE id_plan = '{id_plan}'"))
+    avant = besoin(ref)
+    c64 = controle(infra, "C64")
+
+    # AU-DESSUS DU PLAN DU MOIS : l'excedent s'ajoute, tout entier au-dela du plan ; C64 le signale.
+    debut, fin = infra.sql(f"SELECT '{m}-01', to_char(('{m}-01'::date + interval '1 month')::date - 1, 'YYYY-MM-DD')")[0]
+    id_of = infra.valeur(
+        "INSERT INTO ordre_fabrication (numero, date_of, date_fin_prevue, code_qualite, metrage_m2) "
+        f"VALUES ('OF-BANC-B1', '{debut}', '{fin}', '{q}', {p_m2 + 500}) RETURNING id_of")
+    attendu = (p_m2 + 500) * k * (1 + perte_q / 100) - p_m2 * k * (1 + perte_p / 100)
+    apres = besoin(ref)
+    verifier(abs(apres[0] - avant[0] - attendu) < 0.05,
+             f"OF au-dessus du plan : besoin {avant[0]} -> {apres[0]}, {attendu:.4f} kg attendus en plus")
+    verifier(abs(apres[2] - avant[2] - 500 * k * (1 + perte_q / 100)) < 0.05,
+             f"OF au-dessus du plan : au-dela {avant[2]} -> {apres[2]}, {500 * k * (1 + perte_q / 100):.4f} attendus")
+    verifier(controle(infra, "C64") == c64 + 1, f"C64 ne signale pas l'OF au-dela du plan ({c64} -> {controle(infra, 'C64')})")
+    detail = c.ok("Choukri", "GET", "/api/controles/c64")
+    verifier(any(d.get("code_qualite") == q and d.get("annee_mois") == m and "OF-BANC-B1" in (d.get("ofs") or "")
+                 for d in detail), f"le detail de C64 ne nomme pas l'OF : {detail}")
+    # La fiche de la reference : la decomposition et l'OF qui pese sur elle.
+    fiche = c.ok("Choukri", "GET", f"/api/stock/besoin?reference={quote(ref)}")
+    verifier(abs(fiche["synthese"]["besoin_au_dela_12m_kg"] - apres[2]) < 0.01, f"fiche du besoin : {fiche['synthese']}")
+    verifier(any(o["numero"] == "OF-BANC-B1" for o in fiche["of"]), f"la fiche ne liste pas l'OF : {fiche['of']}")
+    verifier(any(x["annee_mois"] == m and x["besoin_au_dela_kg"] > 0 for x in fiche["mois"]),
+             f"la fiche ne montre pas le mois au-dela du plan : {fiche['mois']}")
+    sp = infra.sql(f"SELECT besoin_12m_kg, besoin_plan_12m_kg, besoin_au_dela_12m_kg FROM v_stock_projete "
+                   f"WHERE code_reference = '{ref}'")
+    if sp:
+        verifier(abs(float(sp[0][2]) - apres[2]) < 0.01 and abs(float(sp[0][0]) - apres[0]) < 0.01,
+                 f"le stock projete ne lit pas le besoin combine : {sp[0]} contre {apres}")
+
+    # SOUS LE PLAN : le plan non couvert compte, le besoin du mois ne change pas (aux pertes pres).
+    infra.sql(f"UPDATE ordre_fabrication SET metrage_m2 = {p_m2 - 100} WHERE id_of = '{id_of}'")
+    attendu = (p_m2 - 100) * k * (perte_q - perte_p) / 100
+    sous = besoin(ref)
+    verifier(abs(sous[0] - avant[0] - attendu) < 0.05, f"OF sous le plan : besoin {avant[0]} -> {sous[0]}")
+    verifier(abs(sous[2] - avant[2]) < 0.001, f"OF sous le plan : un au-dela apparait ({sous[2]})")
+    verifier(controle(infra, "C64") == c64, "C64 signale un OF qui tient dans le plan")
+
+    # CLOTURE : il ne compte plus.
+    infra.sql(f"UPDATE ordre_fabrication SET statut = 'LANCE' WHERE id_of = '{id_of}'")
+    infra.sql(f"UPDATE ordre_fabrication SET statut = 'CLOTURE', date_cloture = now() WHERE id_of = '{id_of}'")
+    verifier(abs(besoin(ref)[0] - avant[0]) < 0.001, "un OF cloture compte encore dans le besoin")
+
+    # HORS PLAN : une qualite que le plan ne porte pas ajoute tout son besoin, au-dela du plan.
+    hors = infra.sql(
+        "SELECT r.code_qualite, r.code_reference, sum(r.kg_m2) FROM v_recette_calculee r "
+        "JOIN qualite q ON q.code_qualite = r.code_qualite AND q.statut = 'ACTIF' "
+        f"WHERE r.kg_m2 > 0 AND NOT EXISTS (SELECT 1 FROM plan_qualite pq WHERE pq.id_plan = '{id_plan}' "
+        "AND pq.code_qualite = r.code_qualite) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 1")
+    if hors:
+        q2, ref2, k2 = hors[0][0], hors[0][1], float(hors[0][2])
+        perte_q2 = float(infra.valeur(f"SELECT COALESCE(taux_perte_pct, 0) FROM qualite WHERE code_qualite = '{q2}'"))
+        avant2 = besoin(ref2)
+        id_of2 = infra.valeur(
+            "INSERT INTO ordre_fabrication (numero, date_of, date_fin_prevue, code_qualite, metrage_m2) "
+            f"VALUES ('OF-BANC-B2', '{debut}', '{fin}', '{q2}', 1000) RETURNING id_of")
+        apres2 = besoin(ref2)
+        verifier(abs(apres2[0] - avant2[0] - 1000 * k2 * (1 + perte_q2 / 100)) < 0.05,
+                 f"OF hors plan : besoin {avant2[0]} -> {apres2[0]}")
+        verifier(abs(apres2[2] - avant2[2] - 1000 * k2 * (1 + perte_q2 / 100)) < 0.05,
+                 "OF hors plan : son besoin n'est pas tout entier au-dela du plan")
+        # ANNULE : il ne compte plus.
+        infra.sql(f"UPDATE ordre_fabrication SET statut = 'ANNULE' WHERE id_of = '{id_of2}'")
+        verifier(abs(besoin(ref2)[0] - avant2[0]) < 0.001, "un OF annule compte encore dans le besoin")
+
+    # LANCE AVEC UNE CONSOMMATION ATTRIBUEE : seul son reste compte. Une consommation directe portant
+    # l'OF, sur un article DIRECTE de sa recette (sans lot), retire exactement ce qu'elle a sorti.
+    q3 = infra.valeur(f"SELECT code_qualite FROM v_recette_calculee WHERE code_reference = '{REF}' AND kg_m2 > 0 "
+                      "ORDER BY 1 LIMIT 1")
+    if q3:
+        mode = infra.valeur(f"SELECT mode_consommation FROM reference WHERE code_reference = '{REF}'")
+        infra.sql(f"UPDATE reference SET mode_consommation = 'DIRECTE' WHERE code_reference = '{REF}'")
+        entree_stock(c, REF, 100)
+        id_of3 = infra.valeur(
+            "INSERT INTO ordre_fabrication (numero, date_of, date_fin_prevue, code_qualite, metrage_m2) "
+            f"VALUES ('OF-BANC-B3', '{debut}', '{fin}', '{q3}', 50000) RETURNING id_of")
+        infra.sql(f"UPDATE ordre_fabrication SET statut = 'LANCE' WHERE id_of = '{id_of3}'")
+        prevu = float(infra.valeur(f"SELECT sum(kg_prevu) FROM v_besoin_of WHERE id_of = '{id_of3}' "
+                                   f"AND code_reference = '{REF}'"))
+        verifier(prevu > 20, f"le prevu de l'OF pour {REF} est trop faible pour l'essai : {prevu}")
+        lance = besoin(REF)
+        infra.sql("INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif, "
+                  "id_utilisateur, id_of) "
+                  f"SELECT 'banc-of-b3', 'MVT-BANC-OF-B3', 'CONSO_DIRECTE', '{MAG}', 'PRODUCTION', id_utilisateur, "
+                  f"'{id_of3}' FROM utilisateur WHERE login = 'Magasinie'; "
+                  "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg) "
+                  f"VALUES ('banc-of-b3', 1, '{REF}', 20)")
+        conso = besoin(REF)
+        verifier(abs(lance[0] - conso[0] - 20) < 0.001,
+                 f"OF lance : 20 kg consommes, le besoin passe de {lance[0]} a {conso[0]}")
+        reste = float(infra.valeur(f"SELECT sum(kg_reste) FROM v_besoin_of WHERE id_of = '{id_of3}' "
+                                   f"AND code_reference = '{REF}'"))
+        verifier(abs(reste - (prevu - 20)) < 0.001, f"reste de l'OF {reste}, {prevu - 20} attendus")
+        infra.sql(f"UPDATE ordre_fabrication SET statut = 'ANNULE' WHERE id_of = '{id_of3}'")
+        infra.sql(f"UPDATE reference SET mode_consommation = '{mode}' WHERE code_reference = '{REF}'")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -3443,10 +3991,15 @@ SCENARIOS = [
     scenario_gardes_p1,
     scenario_sortie_hors_machine,
     scenario_consommation_directe,
+    scenario_of_cycle,
+    scenario_machine_of_voie,
+    scenario_fiche_hors_machine,
+    scenario_of_semaine,
     scenario_controle_reception,
     scenario_retour_cloture_avoirs,
     scenario_taux_bon,
     scenario_plan_detail,
+    scenario_besoin_of,
     scenario_derogation_bornee,
     scenario_machine_constat,
     scenario_lots_vivants,

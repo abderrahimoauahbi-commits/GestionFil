@@ -82,6 +82,15 @@ CREATE TRIGGER trg_lmvt_conso_directe
 BEFORE INSERT ON ligne_mouvement FOR EACH ROW
 EXECUTE FUNCTION fn_trg_lmvt_conso_directe();
 
+-- LE RETOUR D'UNE CONSOMMATION DIRECTE (22/10/2026) : un article DIRECTE, un OF
+-- (mouvement.id_of, socle 2026-10-22a), et jamais plus que ce que cet OF a sorti
+-- de cette reference et pas encore rendu ; la sortie ne se contre-passe pas tant
+-- qu'un retour en depend. Definis dans db/pg/migrations/2026-10-22d_of_machines_hors_machine.sql
+-- (ils citent l'OF, absent des fichiers d'origine) : fn_of_conso_directe_reste,
+-- fn_trg_lmvt_retour_conso (trg_lmvt_retour_conso, BEFORE INSERT ON ligne_mouvement),
+-- fn_trg_mouvement_conso_rendue (trg_mouvement_conso_rendue, BEFORE INSERT ON mouvement),
+-- et fn_bobines_voie(capacite, largeur_machine, largeur_voie) = floor(capacite x voie / largeur).
+
 CREATE OR REPLACE FUNCTION fn_trg_lmvt_motif_requis() RETURNS trigger AS $$
 BEGIN
     IF NEW.code_motif_ligne IS NULL

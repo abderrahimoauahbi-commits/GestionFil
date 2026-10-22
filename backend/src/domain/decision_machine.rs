@@ -45,6 +45,27 @@ pub struct Saisie {
     pub code_motif: Option<String>,
     pub motif_texte: Option<String>,
     pub effet_ecart: Option<String>,
+    /// L'OF que la ligne servira apres la decision : celui de la ligne, a
+    /// defaut celui de la fiche. Vide : la ligne garde l'OF de son etat
+    /// (22/10/2026).
+    pub id_of: Option<String>,
+    /// La voie de la ligne (largeur en metres). Vide : celle de son etat.
+    pub largeur_voie_m: Option<f64>,
+}
+
+/// LE NOMBRE DE BOBINES D'UNE VOIE (22/10/2026) : capacite de l'etage / largeur
+/// de la machine x largeur de la voie, ENTIER ARRONDI A L'INFERIEUR — une bobine
+/// ne se coupe pas. 1 344 / 4,20 x 1,20 = 384. Une aide au magasinier, JAMAIS
+/// une consommation. Meme calcul en base (`fn_bobines_voie`) et a l'ecran
+/// (`bobinesVoie`, noyau.ts). Le millionieme absorbe l'erreur du flottant
+/// (1 344 x 1,2 / 4,2 = 383,99999…).
+pub fn bobines_voie(capacite: i64, largeur_machine: Option<f64>, largeur_voie: Option<f64>) -> Option<i64> {
+    let lm = largeur_machine.filter(|l| *l > 0.0)?;
+    let lv = largeur_voie.filter(|l| *l > 0.0)?;
+    if capacite <= 0 {
+        return None;
+    }
+    Some(((capacite as f64) * lv / lm + 1e-6).floor() as i64)
 }
 
 /// Les raisons d'une consommation au-dela de ce que portait la ligne, a un
@@ -60,6 +81,10 @@ pub struct EtatLigne {
     pub poids_unitaire_kg: Option<f64>,
     pub pourcentage: Option<f64>,
     pub kg: f64,
+    /// L'OF que la ligne sert (22/10/2026).
+    pub id_of: Option<String>,
+    /// Sa voie, en metres : une information pour le magasinier.
+    pub largeur_voie_m: Option<f64>,
 }
 
 /// Une ligne calculee : ce que la decision fera, et ce qui sera fige.
@@ -90,6 +115,16 @@ pub struct Calculee {
     pub effet_ecart: String,
     pub code_motif: String,
     pub motif_texte: Option<String>,
+    /// LA REGLE DE FRONTIERE (22/10/2026). `id_of` : l'OF que la ligne sert
+    /// apres ce constat. `id_of_periode` : celui qu'elle servait AVANT — l'ecart
+    /// mesure la periode qui se termine, il appartient a l'OF sortant.
+    pub id_of: Option<String>,
+    pub numero_of: Option<String>,
+    pub id_of_periode: Option<String>,
+    pub numero_of_periode: Option<String>,
+    pub largeur_voie_m: Option<f64>,
+    /// Le nombre de bobines que tient la voie (aide au magasinier).
+    pub bobines_voie: Option<i64>,
     #[serde(skip)]
     pub lot_force: bool,
     #[serde(skip)]
@@ -105,6 +140,10 @@ pub struct Calcul {
     pub bobines_apres: i64,
     /// Ce qui bloque la validation, dit en clair. Vide : la decision passe.
     pub blocages: Vec<String>,
+    /// CE QUI SE SIGNALE SANS BLOQUER (22/10/2026) : une ligne au-dela de la
+    /// capacite de sa voie, des voies plus larges, ensemble, que la machine (C63).
+    pub signaux: Vec<String>,
+    pub largeur_machine: Option<f64>,
 }
 
 /// La fiche, telle que le calcul en a besoin.
@@ -117,6 +156,8 @@ pub struct FicheDecision {
     pub code_magasin: Option<String>,
     pub date_fiche: String,
     pub numero_of: Option<String>,
+    /// La largeur de la machine, d'ou le nombre de bobines d'une voie.
+    pub largeur_machine: Option<f64>,
     pub responsable: String,
     pub nb_validations: i64,
 }
@@ -140,24 +181,43 @@ fn pct_moyen(kg: f64, nb: i64, nominal: f64) -> Option<f64> {
 }
 
 pub async fn etat_etage(c: &mut sqlx::PgConnection, zone: &str) -> AppResult<Vec<EtatLigne>> {
-    let l = sqlx::query_as::<_, (String, String, i64, Option<f64>, Option<f64>, f64)>(
+    let l = sqlx::query_as::<_, LigneEtatLue>(
         "SELECT code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg::float8,
-                pourcentage::float8, kg::float8
+                pourcentage::float8, kg::float8, id_of, largeur_voie_m::float8
            FROM machine_etat WHERE code_emplacement = $1
           ORDER BY code_reference, lot_fournisseur",
     )
     .bind(zone)
     .fetch_all(&mut *c)
     .await?;
-    Ok(l.into_iter()
-        .map(|t| EtatLigne {
-            code_reference: t.0,
-            lot_fournisseur: t.1,
-            nb_bobines: t.2,
-            poids_unitaire_kg: t.3,
-            pourcentage: t.4,
-            kg: t.5,
-        })
+    Ok(l.into_iter().map(etat_lu).collect())
+}
+
+type LigneEtatLue = (String, String, i64, Option<f64>, Option<f64>, f64, Option<String>, Option<f64>);
+
+fn etat_lu(t: LigneEtatLue) -> EtatLigne {
+    EtatLigne {
+        code_reference: t.0,
+        lot_fournisseur: t.1,
+        nb_bobines: t.2,
+        poids_unitaire_kg: t.3,
+        pourcentage: t.4,
+        kg: t.5,
+        id_of: t.6,
+        largeur_voie_m: t.7,
+    }
+}
+
+/// Les numeros des OF cites, pour les dire en clair.
+async fn numeros_of(c: &mut sqlx::PgConnection, ids: Vec<String>) -> AppResult<HashMap<String, String>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(sqlx::query_as::<_, (String, String)>("SELECT id_of, numero FROM ordre_fabrication WHERE id_of = ANY($1)")
+        .bind(ids)
+        .fetch_all(&mut *c)
+        .await?
+        .into_iter()
         .collect())
 }
 
@@ -322,7 +382,19 @@ pub async fn calculer(
             continue;
         }
 
+        // L'OF ET LA VOIE (22/10/2026) : ceux de la ligne saisie (l'OF de la
+        // fiche par defaut), sinon ceux que la ligne avait sur l'etage — un
+        // constat qui ne dit rien de l'OF ne le change pas.
+        let of_avant = e.and_then(|e| e.id_of.clone());
+        let of_nouveau = s.id_of.clone().filter(|o| !o.is_empty()).or_else(|| of_avant.clone());
+        let voie = s.largeur_voie_m.filter(|v| *v > 0.0).or_else(|| e.and_then(|e| e.largeur_voie_m));
         let mut calc = Calculee {
+            id_of: of_nouveau,
+            numero_of: None,
+            id_of_periode: None,
+            numero_of_periode: None,
+            largeur_voie_m: voie,
+            bobines_voie: bobines_voie(capacite, f.largeur_machine, voie),
             ligne_numero: i as i64 + 1,
             code_reference: s.reference.clone(),
             lot_fournisseur: s.lot.clone(),
@@ -558,7 +630,52 @@ pub async fn calculer(
             }
         }
 
+        // LA REGLE DE FRONTIERE (decision du 22/10/2026). L'ecart mesure la
+        // periode qui se termine : il appartient a l'OF que la ligne servait
+        // AVANT ce constat, l'OF sortant — jamais a celui qui commence.
+        // PREMIER CHARGEMENT (aucune ligne sur l'etage) : il n'y a pas de periode
+        // precedente. Sans ecart, rien n'est a attribuer : NULL. Avec un ecart
+        // (du fil qu'on charge deja consomme, saisie decalee), seul l'OF pour
+        // lequel on charge a pu le consommer : l'OF nouveau.
+        calc.id_of_periode = match e {
+            Some(_) => of_avant,
+            None if calc.ecart_kg.abs() >= 0.0005 => calc.id_of.clone(),
+            None => None,
+        };
+
         lignes.push(calc);
+    }
+
+    // Les numeros des OF, pour l'apercu : l'OF de la periode et l'OF nouveau.
+    let ids: Vec<String> = lignes
+        .iter()
+        .flat_map(|l| [l.id_of.clone(), l.id_of_periode.clone()])
+        .flatten()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let numeros = numeros_of(c, ids).await?;
+    // UN OF CHOISI SUR LA FICHE EST PREVU OU LANCE au moment de la decision :
+    // un brouillon saisi la veille ne s'attache pas a un OF cloture depuis.
+    let choisis: Vec<String> = saisies.iter().filter_map(|s| s.id_of.clone()).collect();
+    if !choisis.is_empty() {
+        let fermes: Vec<(String, String)> = sqlx::query_as(
+            "SELECT numero, statut FROM ordre_fabrication
+              WHERE id_of = ANY($1) AND statut NOT IN ('PREVU', 'LANCE') ORDER BY numero",
+        )
+        .bind(&choisis)
+        .fetch_all(&mut *c)
+        .await?;
+        for (numero, statut) in fermes {
+            blocages.push(format!(
+                "l'OF {numero} est {} : choisissez un OF prevu ou lance",
+                statut.to_lowercase()
+            ));
+        }
+    }
+    for l in lignes.iter_mut() {
+        l.numero_of = l.id_of.as_ref().and_then(|o| numeros.get(o).cloned());
+        l.numero_of_periode = l.id_of_periode.as_ref().and_then(|o| numeros.get(o).cloned());
     }
 
     // L'ETAT RESULTANT : les lignes non touchees restent telles quelles.
@@ -577,6 +694,8 @@ pub async fn calculer(
                     poids_unitaire_kg: Some(l.poids_nominal_kg),
                     pourcentage: pct_moyen(l.kg_apres, l.nb_apres, l.poids_nominal_kg),
                     kg: l.kg_apres,
+                    id_of: l.id_of.clone(),
+                    largeur_voie_m: l.largeur_voie_m,
                 },
             );
         }
@@ -591,7 +710,50 @@ pub async fn calculer(
             bobines_apres - capacite
         ));
     }
-    Ok(Calcul { lignes, avant, apres, capacite, bobines_apres, blocages })
+    let signaux = signaux_voies(&apres, capacite, f.largeur_machine);
+    Ok(Calcul { lignes, avant, apres, capacite, bobines_apres, blocages, signaux, largeur_machine: f.largeur_machine })
+}
+
+/// LES VOIES DE L'ETAGE APRES LA DECISION, jugees sans bloquer (C63) : une
+/// ligne au-dela de la capacite de sa voie ; des voies plus larges, ensemble,
+/// que la machine. Une voie se reconnait a son OF et a sa largeur (deux
+/// references du meme OF sur 1,20 m font une seule voie) — meme regle que
+/// `v_ctl_c63`.
+pub fn signaux_voies(apres: &[EtatLigne], capacite: i64, largeur_machine: Option<f64>) -> Vec<String> {
+    let mut signaux = Vec::new();
+    for e in apres {
+        if let Some(n) = bobines_voie(capacite, largeur_machine, e.largeur_voie_m) {
+            if e.nb_bobines > n {
+                signaux.push(format!(
+                    "{} (lot {}) : {} bobines sur une voie de {} m qui en tient {n}",
+                    e.code_reference,
+                    e.lot_fournisseur,
+                    e.nb_bobines,
+                    e.largeur_voie_m.unwrap_or_default()
+                ));
+            }
+        }
+    }
+    if let Some(lm) = largeur_machine.filter(|l| *l > 0.0) {
+        let mut voies: Vec<(Option<&str>, i64)> = Vec::new();
+        for e in apres {
+            if let Some(v) = e.largeur_voie_m.filter(|v| *v > 0.0) {
+                // Au millimetre : la colonne a trois decimales.
+                let cle = (e.id_of.as_deref(), (v * 1000.0).round() as i64);
+                if !voies.contains(&cle) {
+                    voies.push(cle);
+                }
+            }
+        }
+        let somme: i64 = voies.iter().map(|v| v.1).sum();
+        if somme > (lm * 1000.0).round() as i64 {
+            signaux.push(format!(
+                "les voies de l'etage font ensemble {} m pour une machine de {lm} m",
+                somme as f64 / 1000.0
+            ));
+        }
+    }
+    signaux
 }
 
 /// LE STOCK NE DEVIENT JAMAIS NEGATIF. Un chargement que le magasin ne couvre
@@ -843,8 +1005,8 @@ async fn ecrire_etats(
         sqlx::query(
             "INSERT INTO machine_decision_etat
                  (id_decision, moment, code_reference, lot_fournisseur, nb_bobines,
-                  poids_unitaire_kg, pourcentage, kg)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                  poids_unitaire_kg, pourcentage, kg, id_of, largeur_voie_m)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
         )
         .bind(id_decision)
         .bind(moment)
@@ -854,6 +1016,8 @@ async fn ecrire_etats(
         .bind(e.poids_unitaire_kg)
         .bind(e.pourcentage)
         .bind(arrondi_kg(e.kg))
+        .bind(&e.id_of)
+        .bind(e.largeur_voie_m)
         .execute(&mut *c)
         .await?;
     }
@@ -914,8 +1078,9 @@ async fn poser_etage(
         sqlx::query(
             "INSERT INTO machine_etat
                  (code_emplacement, code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg,
-                  pourcentage, kg, mode_constat, date_constat, responsable, id_utilisateur, id_fiche)
-             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,$8,fn_jour_casablanca($9),$10,$11,$12)",
+                  pourcentage, kg, mode_constat, date_constat, responsable, id_utilisateur, id_fiche,
+                  id_of, largeur_voie_m)
+             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,$8,fn_jour_casablanca($9),$10,$11,$12,$13,$14)",
         )
         .bind(zone)
         .bind(&e.code_reference)
@@ -929,6 +1094,10 @@ async fn poser_etage(
         .bind(resp_l)
         .bind(util_l)
         .bind(fiche_l)
+        // L'OF ET LA VOIE SONT CEUX DE L'ETAT POSE (22/10/2026) : la decision les
+        // donne, le retrait rend ceux d'avant.
+        .bind(&e.id_of)
+        .bind(e.largeur_voie_m)
         .execute(&mut *c)
         .await?;
     }
@@ -1131,9 +1300,9 @@ pub async fn valider(
                   nb_avant, kg_avant, nb_mouvementees, poids_retenu_kg, pct_retirees, kg_mouvementes,
                   destination, nb_apres, pourcentage_apres, kg_apres, ecart_kg, effet_ecart,
                   code_motif, motif_texte, cmup_mad, id_mouvement, pourcentage_theorique,
-                  niveau_ecart)
+                  niveau_ecart, id_of, id_of_periode, largeur_voie_m)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-                     round($22::numeric, 2), $23)",
+                     round($22::numeric, 2), $23, $24, $25, $26)",
         )
         .bind(&id_decision)
         .bind(l.ligne_numero)
@@ -1159,6 +1328,11 @@ pub async fn valider(
         .bind(l.pourcentage_theorique)
         // Le niveau est archive : il dit ce qui a ete juge, meme si les seuils changent.
         .bind(&l.niveau_ecart)
+        // LA REGLE DE FRONTIERE, archivee : l'OF nouveau, et l'OF de la periode
+        // mesuree, a qui l'ecart appartient (22/10/2026).
+        .bind(&l.id_of)
+        .bind(&l.id_of_periode)
+        .bind(l.largeur_voie_m)
         .execute(&mut *c)
         .await?;
     }
@@ -1238,6 +1412,7 @@ pub async fn valider(
         "mouvement": numero_mvt,
         // + 0.0 : un « -0 » n'a rien a faire a l'ecran.
         "consomme_kg": arrondi_kg(consomme) + 0.0,
+        "signaux": calc.signaux,
     }))
 }
 
@@ -1392,24 +1567,18 @@ pub async fn retirer(
         )));
     }
 
-    // 5. L'ETAGE REVIENT A L'ETAT AVANT.
-    let avant: Vec<EtatLigne> = sqlx::query_as::<_, (String, String, i64, Option<f64>, Option<f64>, f64)>(
+    // 5. L'ETAGE REVIENT A L'ETAT AVANT — OF et voie compris (22/10/2026) :
+    // l'etat archive les porte.
+    let avant: Vec<EtatLigne> = sqlx::query_as::<_, LigneEtatLue>(
         "SELECT code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg::float8,
-                pourcentage::float8, kg::float8
+                pourcentage::float8, kg::float8, id_of, largeur_voie_m::float8
            FROM machine_decision_etat WHERE id_decision = $1 AND moment = 'AVANT'",
     )
     .bind(&id_decision)
     .fetch_all(&mut *c)
     .await?
     .into_iter()
-    .map(|t| EtatLigne {
-        code_reference: t.0,
-        lot_fournisseur: t.1,
-        nb_bobines: t.2,
-        poids_unitaire_kg: t.3,
-        pourcentage: t.4,
-        kg: t.5,
-    })
+    .map(etat_lu)
     .collect();
     poser_etage(
         c,
@@ -1572,7 +1741,43 @@ pub async fn journal_changement_etage(
 
 #[cfg(test)]
 mod tests {
-    use super::{niveau_ecart, SeuilsEcart};
+    use super::{bobines_voie, niveau_ecart, signaux_voies, EtatLigne, SeuilsEcart};
+
+    fn ligne(of: &str, voie: f64, nb: i64) -> EtatLigne {
+        EtatLigne {
+            code_reference: format!("R-{of}-{nb}"),
+            lot_fournisseur: "L".into(),
+            nb_bobines: nb,
+            poids_unitaire_kg: Some(2.5),
+            pourcentage: Some(100.0),
+            kg: nb as f64 * 2.5,
+            id_of: Some(of.into()),
+            largeur_voie_m: Some(voie),
+        }
+    }
+
+    #[test]
+    fn bobines_de_la_voie_a_l_entier_inferieur() {
+        // L'exemple du 22/10/2026 : CRM1, 4,20 m, 1 344 bobines, voie de 1,20 m.
+        assert_eq!(bobines_voie(1344, Some(4.20), Some(1.20)), Some(384));
+        assert_eq!(bobines_voie(1344, Some(4.20), Some(3.00)), Some(960));
+        assert_eq!(bobines_voie(1344, Some(4.20), Some(1.25)), Some(400));
+        assert_eq!(bobines_voie(1344, Some(4.20), Some(1.21)), Some(387)); // 387,2 -> 387
+        assert_eq!(bobines_voie(1344, None, Some(1.20)), None);
+        assert_eq!(bobines_voie(1344, Some(4.20), None), None);
+    }
+
+    #[test]
+    fn voies_signalees_jamais_bloquees() {
+        // 1,20 m tient 384 bobines : 385 se signale ; deux references du meme OF
+        // sur 1,20 m font une seule voie ; 1,20 + 3,10 > 4,20 se signale.
+        let ok = vec![ligne("X1", 1.20, 200), ligne("X1", 1.20, 184), ligne("X2", 3.00, 900)];
+        assert!(signaux_voies(&ok, 1344, Some(4.20)).is_empty());
+        let trop = vec![ligne("X1", 1.20, 385)];
+        assert_eq!(signaux_voies(&trop, 1344, Some(4.20)).len(), 1);
+        let large = vec![ligne("X1", 1.20, 10), ligne("X2", 3.10, 10)];
+        assert_eq!(signaux_voies(&large, 1344, Some(4.20)).len(), 1);
+    }
 
     fn seuils() -> SeuilsEcart {
         SeuilsEcart { vert_kg: 10.0, vert_pct: 1.0, rouge_kg: 50.0, rouge_pct: 5.0 }

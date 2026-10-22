@@ -94,6 +94,8 @@ INSERT INTO type_mouvement (code_type_mvt, libelle, signe, exige_prix, impacte_c
     ('SORTIE_PROD',      'Sortie production',       -1, 0, 0, 1, 0, '#f59e0b'),
     -- La matiere qui ne va pas sur machine (fiche en mode DIRECTE), sans seuil (21/10/2026).
     ('CONSO_DIRECTE',    'Consommation directe',    -1, 0, 0, 0, 0, '#b45309'),
+    -- Son retour au magasin, sur le meme OF, borne a ce que l'OF a sorti (22/10/2026).
+    ('RETOUR_CONSO',     'Retour de consommation directe', 1, 0, 0, 0, 0, '#0d9488'),
     ('RETOUR_FOURN',     'Retour fournisseur',      -1, 0, 0, 0, 1, '#ef4444'),
     ('TRANSFERT_SORTIE', 'Transfert - sortie',      -1, 0, 0, 0, 0, '#0ea5e9'),
     ('AJUST_INV_NEG',    'Ajustement inventaire -', -1, 0, 0, 0, 1, '#a855f7');
@@ -251,7 +253,13 @@ INSERT INTO transition_statut (entite, statut_source, statut_cible, role_requis,
     ('inventaire','BROUILLON','EN_COURS','MAGASIN',  'Photo du stock theorique'),
     ('inventaire','BROUILLON','ANNULE',  'MAGASIN',  'Abandon'),
     ('inventaire','EN_COURS', 'CLOTURE', 'DIRECTION','Cloture : genere les ajustements'),
-    ('inventaire','EN_COURS', 'ANNULE',  'DIRECTION','Abandon du comptage');
+    ('inventaire','EN_COURS', 'ANNULE',  'DIRECTION','Abandon du comptage'),
+
+    -- Ordre de fabrication (22/10/2026, migration 2026-10-22b)
+    ('ordre_fabrication','PREVU','LANCE',   'PLANIF',   'Lancement : l''atelier produit'),
+    ('ordre_fabrication','LANCE','CLOTURE', 'DIRECTION','Cloture : la consommation est arretee'),
+    ('ordre_fabrication','PREVU','ANNULE',  'DIRECTION','Abandon avant lancement'),
+    ('ordre_fabrication','LANCE','ANNULE',  'DIRECTION','Abandon en cours');
 
 
 -- Parametres cites dans la structure demandee et absents de la base.

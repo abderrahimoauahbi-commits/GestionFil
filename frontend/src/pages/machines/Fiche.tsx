@@ -29,7 +29,7 @@ import { ChampLot } from '../../composants/ChampLot'
 import { ChampScan } from '../../composants/ChampScan'
 import { SaisieNombre } from '../../composants/ui/base'
 import {
-  cheminMachine, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, fmtInstant, LIBELLE_DESTINATION,
+  bobinesVoie, cheminMachine, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, fmtInstant, LIBELLE_DESTINATION,
   LIBELLE_EFFET, LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue,
   type Apercu, type Destination, type Fiche, type FicheDetail, type LigneSaisie, type Machine,
   type TypeFiche, type Zone,
@@ -38,6 +38,7 @@ import {
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
 import { DemandesDerogation } from './Derogation'
+import { ChoixOF } from '../../composants/ChoixOF'
 
 interface RefCat {
   code_reference: string
@@ -351,7 +352,7 @@ function DetailFiche({ d, machine, zones }: { d: FicheDetail; machine: Machine; 
           {e.type_fiche !== 'MAJ' && (
             <Info t={e.type_fiche === 'CHARGE' ? 'Magasin d’origine' : 'Magasin de retour'} v={e.code_magasin ?? '—'} />
           )}
-          <Info t="Ordre de fabrication" v={e.numero_of || '—'} />
+          <Info t="Ordre de fabrication" v={e.numero_of_lien || e.numero_of || '—'} />
           <Info t="Validée le" v={active ? `${fmtInstant(active.date_decision)} par ${active.auteur ?? '—'}` : '—'} />
           <Info t="Consommation retenue" v={d.lignes_decision.length ? `${nb(consomme, 1)} kg` : '—'} fort />
           {e.observations && <Info t="Observations" v={e.observations} large />}
@@ -506,7 +507,15 @@ function TableEtat({ lignes }: { lignes: FicheDetail['etats'] }) {
         {lignes.map((l, i) => (
           <tr key={i} className="border-t border-bordure">
             <td className="max-w-[16rem] truncate py-1.5 pr-2">{l.designation}</td>
-            <td className="py-1.5 pr-2 font-mono text-[11px]">{l.lot_fournisseur}</td>
+            <td className="py-1.5 pr-2 font-mono text-[11px]">
+              {l.lot_fournisseur}
+              {(l.numero_of || l.largeur_voie_m != null) && (
+                <div className="font-sans text-[10px] text-attenue-texte">
+                  {l.numero_of ?? ''}{l.numero_of && l.largeur_voie_m != null ? ' · ' : ''}
+                  {l.largeur_voie_m != null ? `voie ${nb(l.largeur_voie_m, 2)} m` : ''}
+                </div>
+              )}
+            </td>
             <td className="py-1.5 pr-2 text-right">{l.nb_bobines}</td>
             <td className="py-1.5 pr-2 text-right">{l.pourcentage != null ? `${nb(l.pourcentage, 1)} %` : '—'}</td>
             <td className="py-1.5 text-right">{nb(l.kg)}</td>
@@ -554,6 +563,7 @@ export function TableApercu({
             <th className="py-1 pr-2 text-right">% théorique</th>
             <th className="py-1 pr-2 text-right">Écart</th>
             <th className="py-1 pr-2 text-left">Compte comme</th>
+            <th className="py-1 pr-2 text-left" title="L’écart appartient à l’OF de la période qui se termine (l’OF sortant)">OF de la période → nouveau</th>
             {motifs && <th className="py-1 text-left">Motif</th>}
           </tr>
         </thead>
@@ -580,6 +590,16 @@ export function TableApercu({
               </td>
               <td className={cn('py-1 pr-2', l.effet_ecart === 'NON_QUALIFIE' || l.effet_ecart === 'REGULARISATION' ? 'text-alerte' : 'text-attenue-texte')}>
                 {LIBELLE_EFFET[l.effet_ecart] ?? l.effet_ecart}
+              </td>
+              <td className="py-1 pr-2 text-attenue-texte">
+                {/* LA REGLE DE FRONTIERE (22/10/2026) : l'ecart est range sous l'OF de la periode. */}
+                <span className={cn(l.numero_of_periode && 'font-medium text-texte')}>{l.numero_of_periode ?? '—'}</span>
+                {(l.numero_of ?? null) !== (l.numero_of_periode ?? null) && <> → {l.numero_of ?? '—'}</>}
+                {l.largeur_voie_m != null && (
+                  <div className="text-[10px]">
+                    voie {nb(l.largeur_voie_m, 2)} m{l.bobines_voie != null && ` · ${l.bobines_voie} bobines`}
+                  </div>
+                )}
               </td>
               {motifs && (
                 <td className="py-1 text-attenue-texte">
@@ -678,6 +698,55 @@ export function FicheBureau({
     )
   }
 
+  /** L'OF DE LA LIGNE ET SA VOIE (22/10/2026). Le nombre de bobines de la voie
+      est une AIDE au magasinier — jamais une consommation : il est propose au
+      chargement, et un depassement se signale sans bloquer. Une fonction, pas
+      un composant (le focus se perdrait a chaque frappe). */
+  const ofEtVoie = (l: LigneSaisie, nbApres: number, touchee: boolean) => {
+    const cap = bobinesVoie(zone.capacite_bobines, machine.largeur_m, l.largeur_voie)
+    const depasse = cap != null && touchee && nbApres > cap
+    return (
+      <div className="flex w-44 flex-col gap-1">
+        <ChoixOF
+          valeur={l.id_of ?? ''}
+          onChange={(id) => f.majLigne(l.cle, 'id_of', id)}
+          vide={f.entete.id_of ? 'OF de la fiche' : l.avant_numero_of ? `garde ${l.avant_numero_of}` : '— aucun OF —'}
+          ariaLabel="OF de la ligne"
+          className="min-h-[28px] w-44 px-1 text-[11px]"
+        />
+        <div className="flex items-center gap-1">
+          <SaisieNombre
+            min={0}
+            step={0.01}
+            value={l.largeur_voie || ''}
+            onChange={(ev) => f.majLigne(l.cle, 'largeur_voie', Math.max(0, Number(ev.target.value) || 0))}
+            placeholder="voie"
+            aria-label="Largeur de la voie (m)"
+            className="min-h-[26px] w-16 rounded-[3px] border border-bordure bg-fond px-1.5 text-right text-[11px] tabular-nums"
+          />
+          <span className="text-[10.5px] text-attenue-texte">m</span>
+          {type === 'CHARGE' && cap != null && cap > l.avant_bobines && l.mouvementees === 0 && (
+            <button
+              type="button"
+              onClick={() => f.majLigne(l.cle, 'mouvementees', cap - l.avant_bobines)}
+              className="text-[10.5px] font-medium text-primaire underline-offset-2 hover:underline"
+              title="Proposer de charger la voie jusqu’à sa capacité"
+            >
+              charger {cap - l.avant_bobines}
+            </button>
+          )}
+        </div>
+        {cap != null ? (
+          <div className={cn('text-[10.5px]', depasse ? 'text-alerte' : 'text-attenue-texte')}>
+            {cap} bobines pour cette voie{depasse && ` — ${nbApres} prévues, au-delà`}
+          </div>
+        ) : l.largeur_voie && !machine.largeur_m ? (
+          <div className="text-[10.5px] text-attenue-texte">largeur de la machine inconnue</div>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-3">
       {/* --- L'entete ---------------------------------------------------- */}
@@ -724,7 +793,18 @@ export function FicheBureau({
             </select>
           </label>
         )}
-        <Champ label="Ordre de fabrication" v={f.entete.of} set={(v) => f.setEntete({ ...f.entete, of: v })} />
+        {/* L'OF EN LIEN (22/10/2026) : la fiche le choisit, il sert de defaut a ses
+            lignes. Jamais impose par la machine. Le numero reste dans le texte
+            d'historique. */}
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-attenue-texte">Ordre de fabrication</span>
+          <ChoixOF
+            valeur={f.entete.id_of}
+            inconnu={f.entete.of || null}
+            vide={f.entete.of && !f.entete.id_of ? `${f.entete.of} (texte ancien)` : '— l’OF de chaque ligne —'}
+            onChange={(id, numero) => f.setEntete({ ...f.entete, id_of: id, of: id ? numero : f.entete.of })}
+          />
+        </label>
         <Champ label="Responsable" v={f.entete.responsable} set={(v) => f.setEntete({ ...f.entete, responsable: v })} />
       </div>
 
@@ -735,6 +815,7 @@ export function FicheBureau({
             <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
               <th className="px-2 py-1.5 text-left">Référence</th>
               <th className="px-2 py-1.5 text-left">Lot</th>
+              <th className="px-2 py-1.5 text-left" title="L’OF que la ligne servira, et sa voie (largeur) : le nombre de bobines à manipuler">OF · voie</th>
               <th className="px-2 py-1.5 text-right">Avant</th>
               {type === 'CHARGE' && (
                 <>
@@ -798,6 +879,7 @@ export function FicheBureau({
                       />
                     )}
                   </td>
+                  <td className="px-1 py-1">{ofEtVoie(l, e.nbApres, touchee)}</td>
                   <td className="whitespace-nowrap px-2 py-1 text-right text-attenue-texte">
                     {l.avant_bobines} · {l.avant_pourcentage != null ? `${nb(l.avant_pourcentage, 1)} %` : '—'}
                     <div className="text-[10.5px]">{nb(l.avant_kg, 1)} kg</div>
@@ -897,7 +979,7 @@ export function FicheBureau({
           </tbody>
           <tfoot>
             <tr className="border-t-2 border-ink/20 bg-attenue font-semibold">
-              <td className="px-2 py-1.5" colSpan={type === 'DECHARGE' ? 7 : type === 'CHARGE' ? 6 : 5}>
+              <td className="px-2 py-1.5" colSpan={type === 'DECHARGE' ? 8 : type === 'CHARGE' ? 7 : 6}>
                 Étage après : <span className={cn('tabular-nums', f.totaux.apres > f.totaux.places && 'text-danger')}>
                   {f.totaux.apres} / {f.totaux.places} places
                 </span>
@@ -967,6 +1049,13 @@ export function FicheBureau({
             Aperçu — ce que la validation enregistrera
           </div>
           <TableApercu type={type} lignes={f.apercu.lignes} designations={designations} />
+          {(f.apercu.signaux ?? []).length > 0 && (
+            <Alerte ton="alerte" titre="À vérifier (n’empêche pas la validation)" className="mt-2">
+              <ul className="list-disc space-y-1 pl-4">
+                {(f.apercu.signaux ?? []).map((x) => <li key={x}>{x}</li>)}
+              </ul>
+            </Alerte>
+          )}
           {f.apercu.blocages.length > 0 && (
             <Alerte ton="danger" titre={f.stockCourt ? (f.stockCourt.startsWith('LOT') ? 'Chargement bloqué : ce lot n’est pas au magasin en quantité suffisante' : 'Chargement bloqué : stock insuffisant au magasin') : 'La décision ne peut pas être validée'} className="mt-2">
               <ul className="list-disc space-y-1 pl-4">

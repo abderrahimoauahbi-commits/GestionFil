@@ -110,6 +110,14 @@ GROUP BY pp.id_plan, lpp.rang_mois, lpp.mois, lpp.annee_mois, rc.code_reference;
 -- mois, elle couvre l'horizon du plan en service, quel qu'il soit. Le renommer
 -- toucherait le service Rust et six ecrans ; la correction du calcul, elle, ne
 -- pouvait pas attendre.
+--
+-- LES OF CONSOMMENT LE PLAN (22/10/2026, migration 2026-10-22c_besoin_of.sql) :
+-- par qualite et mois, besoin = OF retenus (PREVU, LANCE ; leur reste) +
+-- max(0, plan - OF). La vue ci-dessous est celle du plan seul ; la definition
+-- en service ajoute l'ajustement des OF (v_besoin_of_mois, fn_besoin_of_mois)
+-- et deux colonnes, besoin_plan_12m_kg et besoin_au_dela_12m_kg (reprises par
+-- v_stock_projete). v_besoin_horizon recoit l'ajustement sans changer de
+-- colonnes ; sa part au-dela du plan est dans v_besoin_horizon_of.
 DROP VIEW IF EXISTS v_besoin_12m CASCADE;
 CREATE VIEW v_besoin_12m AS
 -- -----------------------------------------------------------------------------

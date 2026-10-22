@@ -5,7 +5,8 @@
  *   magasin net + machine comptee + en-cours − demande pendant le delai
  *     = stock projete (residuel : jamais sous zero)
  *   besoin = sorties de la couverture + securite − residuel
- *            (le plan de production seul : pas de stock minimum, 10/10/2026)
+ *            (le plan de production et les OF : pas de stock minimum, 10/10/2026 ;
+ *             les OF consomment le plan, ce qui le depasse se montre, 22/10/2026)
  *   puis le MOQ du fournisseur, puis la palette complete.
  *
  * Le calcul est celui d'aujourd'hui : une proposition generee hier peut en
@@ -15,6 +16,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { Chargement } from '../composants/ui/base'
 import { cn, fmt } from '../lib/utils'
+import { BesoinReference } from '../composants/BesoinOf'
 
 interface Calcul {
   delai_livraison_jours: number | null
@@ -29,6 +31,9 @@ interface Calcul {
   nb_lignes_retardees: number
   demande_delai_kg: number
   demande_delai_prolongee_kg: number
+  /** La part de la demande que les OF ajoutent au plan (22/10/2026). */
+  demande_delai_au_dela_kg?: number
+  sorties_au_dela_kg?: number
   residuel_kg: number
   sorties_fenetre_kg: number
   sorties_prolongees_kg: number
@@ -101,12 +106,18 @@ export function DetailCalcul({ reference }: { reference: string }) {
             )}
             {c.encours_port_kg > 0 && <Ligne signe="+" libelle="Marchandise au port" valeur={c.encours_port_kg} />}
             <Ligne signe="−" libelle="Demande pendant le délai" valeur={c.demande_delai_kg}
-              note={c.demande_delai_prolongee_kg > 0 ? `dont ${kg(c.demande_delai_prolongee_kg)} kg au-delà de la fin du plan` : undefined} />
+              note={[
+                c.demande_delai_prolongee_kg > 0 ? `dont ${kg(c.demande_delai_prolongee_kg)} kg au-delà de la fin du plan` : '',
+                (c.demande_delai_au_dela_kg ?? 0) > 0.5 ? `dont ${kg(c.demande_delai_au_dela_kg)} kg d’OF au-delà du plan` : '',
+              ].filter(Boolean).join(' ; ') || undefined} />
             <Ligne signe="=" libelle="Stock projeté à l’arrivée" valeur={projete} fort
               note={projete < 0 ? 'rupture avant l’arrivée : compté zéro' : undefined} />
             <tr><td colSpan={4} className="h-2" /></tr>
             <Ligne libelle="Sorties de la couverture" valeur={c.sorties_fenetre_kg}
-              note={c.sorties_prolongees_kg > 0 ? `dont ${kg(c.sorties_prolongees_kg)} kg prolongés` : undefined} />
+              note={[
+                c.sorties_prolongees_kg > 0 ? `dont ${kg(c.sorties_prolongees_kg)} kg prolongés` : '',
+                (c.sorties_au_dela_kg ?? 0) > 0.5 ? `dont ${kg(c.sorties_au_dela_kg)} kg d’OF au-delà du plan` : '',
+              ].filter(Boolean).join(' ; ') || undefined} />
             <Ligne signe="+" libelle="Sécurité" valeur={c.securite_kg} />
             <Ligne signe="−" libelle="Stock projeté retenu" valeur={c.residuel_kg} />
             {(c.moq_kg ?? 0) > 0 && <Ligne libelle="Minimum de commande (MOQ)" valeur={c.moq_kg ?? 0} />}
@@ -121,6 +132,7 @@ export function DetailCalcul({ reference }: { reference: string }) {
       </div>
 
       <div className="min-w-0 space-y-3">
+        <BesoinReference reference={reference} compact />
         {q.data.risque && (
           <div>
             <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte">

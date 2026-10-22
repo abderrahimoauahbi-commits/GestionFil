@@ -51,6 +51,7 @@ const TransfertNouveau = lazy(() => import('./pages/TransfertNouveau').then((m) 
 const BonTransfert = lazy(() => import('./pages/BonTransfert').then((m) => ({ default: m.BonTransfert })))
 const Catalogue = lazy(() => import('./pages/Catalogue').then((m) => ({ default: m.Catalogue })))
 const MouvementNouveau = lazy(() => import('./pages/MouvementNouveau').then((m) => ({ default: m.MouvementNouveau })))
+const FicheHorsMachine = lazy(() => import('./pages/FicheHorsMachine').then((m) => ({ default: m.FicheHorsMachine })))
 const CompleterCatalogue = lazy(() => import('./pages/CompleterCatalogue').then((m) => ({ default: m.CompleterCatalogue })))
 const Fournisseurs = lazy(() => import('./pages/Fournisseurs').then((m) => ({ default: m.Fournisseurs })))
 const Referentiels = lazy(() => import('./pages/Referentiels').then((m) => ({ default: m.Referentiels })))
@@ -68,6 +69,8 @@ const InventaireDoc = lazy(() => import('./pages/inventaires/Inventaire').then((
 const Qualites = lazy(() => import('./pages/Qualites').then((m) => ({ default: m.Qualites })))
 const Recettes = lazy(() => import('./pages/Recettes').then((m) => ({ default: m.Recettes })))
 const Plans = lazy(() => import('./pages/Plans').then((m) => ({ default: m.Plans })))
+const OrdresFabrication = lazy(() => import('./pages/OrdresFabrication').then((m) => ({ default: m.OrdresFabrication })))
+const OrdreFabrication = lazy(() => import('./pages/OrdreFabrication').then((m) => ({ default: m.OrdreFabrication })))
 const Besoins = lazy(() => import('./pages/Besoins').then((m) => ({ default: m.Besoins })))
 const BonsCommande = lazy(() => import('./pages/BonsCommande').then((m) => ({ default: m.BonsCommande })))
 const BonCommande = lazy(() => import('./pages/BonCommande').then((m) => ({ default: m.BonCommande })))
@@ -206,6 +209,8 @@ const ECRANS = (
       <Route path="parc-machines" element={<ExigeModule module="PARAMETRES"><ParcMachines /></ExigeModule>} />
       <Route path="mouvements" element={<ExigeModule module="MOUVEMENTS"><Mouvements /></ExigeModule>} />
       <Route path="mouvements/nouveau" element={<ExigeModule module="MOUVEMENTS"><MouvementNouveau /></ExigeModule>} />
+      {/* La fiche hors machine (22/10/2026) : une saisie simplifiee, pas un document de plus. */}
+      <Route path="fiche-hors-machine" element={<ExigeModule module="MOUVEMENTS"><FicheHorsMachine /></ExigeModule>} />
       <Route path="mouvements/:id" element={<ExigeModule module="MOUVEMENTS"><BonMouvement /></ExigeModule>} />
       <Route path="transferts" element={<ExigeModule module="MOUVEMENTS"><Transferts /></ExigeModule>} />
       <Route path="inventaires" element={<ExigeModule module="INVENTAIRE"><Inventaires /></ExigeModule>} />
@@ -293,6 +298,8 @@ const ECRANS = (
       <Route path="qualites" element={<ExigeModule module="QUALITES"><Qualites /></ExigeModule>} />
       <Route path="recettes" element={<ExigeModule module="RECETTES"><Recettes /></ExigeModule>} />
       <Route path="plans" element={<ExigeModule module="PLANS"><Plans /></ExigeModule>} />
+      <Route path="ordres-fabrication" element={<ExigeModule module="PLANS"><OrdresFabrication /></ExigeModule>} />
+      <Route path="ordres-fabrication/:id" element={<ExigeModule module="PLANS"><OrdreFabrication /></ExigeModule>} />
       <Route path="besoins" element={<ExigeModule module="MRP"><Besoins /></ExigeModule>} />
       <Route path="plan-achat" element={<ExigeModule module="PLAN_ACHAT"><PlanAchat /></ExigeModule>} />
       <Route path="bons-commande" element={<ExigeModule module="BONS_COMMANDE"><BonsCommande /></ExigeModule>} />

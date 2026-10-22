@@ -40,6 +40,8 @@ export interface Machine {
   date_etat: string | null
   /** La version lue (verrou optimiste, groupe 3, 20/10/2026). */
   version: number
+  /** La largeur en metres (CRM1 : 4,20), facultative (22/10/2026). */
+  largeur_m?: number | null
 }
 
 /**
@@ -91,6 +93,10 @@ export interface LigneEtat {
   date_constat: string
   responsable: string | null
   poids_catalogue_kg: number | null
+  /** L'OF que la ligne sert, et sa voie (22/10/2026). */
+  id_of?: string | null
+  numero_of?: string | null
+  largeur_voie_m?: number | null
 }
 
 /** CONSO reste lisible pour les anciennes fiches ; on n'en cree plus. */
@@ -110,6 +116,8 @@ export interface Fiche {
   date_fiche: string
   code_magasin: string | null
   numero_of: string | null
+  /** L'OF choisi (lien), defaut des lignes (22/10/2026). */
+  id_of?: string | null
   responsable: string
   observations: string | null
   nb_lignes: number
@@ -156,6 +164,15 @@ export interface LigneCalculee {
   effet_ecart: string
   code_motif: string
   motif_texte: string | null
+  /** LA REGLE DE FRONTIERE (22/10/2026) : l'OF nouveau, et l'OF de la periode
+      mesuree — l'OF sortant, a qui l'ecart appartient. */
+  id_of?: string | null
+  numero_of?: string | null
+  id_of_periode?: string | null
+  numero_of_periode?: string | null
+  largeur_voie_m?: number | null
+  /** Bobines que tient la voie : une aide, jamais une consommation. */
+  bobines_voie?: number | null
 }
 
 /** La couleur d'un niveau d'ecart machine, en classes de theme. */
@@ -170,6 +187,9 @@ export interface Apercu {
   capacite: number
   bobines_apres: number
   blocages: string[]
+  /** Ce qui se signale sans bloquer : les voies (C63, 22/10/2026). */
+  signaux?: string[]
+  largeur_machine?: number | null
   /** Les lots bloques qu'une derogation debloquerait (audit v4). */
   derogations?: import('./Derogation').DerogationPossible[]
 }
@@ -198,8 +218,9 @@ export interface LigneConso {
 
 /** Le detail d'une fiche : ses lignes, ses decisions, son journal. */
 export interface FicheDetail {
-  entete: Fiche & { nb_validations: number; capacite_bobines: number; date_creation?: string | null }
-  lignes: (LigneEnvoi & { designation: string; poids_catalogue_kg: number | null })[]
+  entete: Fiche & { nb_validations: number; capacite_bobines: number; date_creation?: string | null
+                    largeur_m?: number | null; numero_of_lien?: string | null }
+  lignes: (LigneEnvoi & { designation: string; poids_catalogue_kg: number | null; numero_of?: string | null })[]
   decisions: {
     numero_validation: number
     statut: 'ACTIVE' | 'RETIREE' | 'ANNULEE'
@@ -213,7 +234,8 @@ export interface FicheDetail {
   }[]
   lignes_decision: (LigneCalculee & { designation: string; motif: string })[]
   etats: { moment: 'AVANT' | 'APRES'; code_reference: string; designation: string; lot_fournisseur: string
-           nb_bobines: number; pourcentage: number | null; kg: number }[]
+           nb_bobines: number; pourcentage: number | null; kg: number
+           numero_of?: string | null; largeur_voie_m?: number | null }[]
   journal: { evenement: string; horodatage: string; code_emplacement: string | null; motif: string | null
              auteur: string | null; detail: string | null }[]
 }
@@ -231,6 +253,9 @@ export interface LigneEnvoi {
   code_motif?: string | null
   motif_texte?: string | null
   effet_ecart?: string | null
+  /** L'OF de la ligne (vide : celui de la fiche) et sa voie en metres (22/10/2026). */
+  id_of?: string | null
+  largeur_voie_m?: number | null
   /** Pose seulement apres un refus R02-LOT confirme par l'operateur. */
   lot_force?: boolean
   motif_lot_force?: string
@@ -267,6 +292,40 @@ export interface LigneSaisie {
   avant_pourcentage: number | null
   avant_kg: number
   avant_date: string | null
+  /** L'OF de la ligne : vide = celui de la fiche, a defaut celui qu'elle sert deja (22/10/2026). */
+  id_of?: string
+  /** La voie, en metres (0 : aucune). */
+  largeur_voie?: number
+  /** L'OF que la ligne sert avant la decision (son numero), pour l'ecran. */
+  avant_numero_of?: string | null
+}
+
+/**
+ * LE NOMBRE DE BOBINES D'UNE VOIE (22/10/2026) : capacite de l'etage / largeur
+ * de la machine x largeur de la voie, ENTIER ARRONDI A L'INFERIEUR — une bobine
+ * ne se coupe pas. 1 344 / 4,20 x 1,20 = 384. Une aide au magasinier, JAMAIS une
+ * consommation. Meme calcul que le serveur (`decision_machine::bobines_voie`) et
+ * la base (`fn_bobines_voie`) ; le millionieme absorbe l'erreur du flottant.
+ */
+export function bobinesVoie(
+  capacite: number | null | undefined,
+  largeurMachine: number | null | undefined,
+  largeurVoie: number | null | undefined,
+): number | null {
+  if (!capacite || capacite <= 0 || !largeurMachine || largeurMachine <= 0 || !largeurVoie || largeurVoie <= 0) return null
+  return Math.floor((capacite * largeurVoie) / largeurMachine + 1e-6)
+}
+
+/** Un OF qu'une fiche peut choisir : prevu ou lance. */
+export interface OfOuvert {
+  id_of: string
+  numero: string
+  statut: 'PREVU' | 'LANCE'
+  code_qualite: string
+  qualite_nom: string | null
+  date_of: string
+  date_fin_prevue: string | null
+  metrage_m2: number
 }
 
 // =============================================================================
@@ -377,6 +436,8 @@ export const machinesApi = {
       etat_avant?: { code_reference: string; lot_fournisseur: string; nb_bobines: number; kg: number }[]
       mouvements?: { numero_mouvement: string; code_type_mvt: string; code_magasin: string; kg: number }[]
     }>(`/api/machines/fiches/${idFiche}/retrait-apercu`),
+  /** Les OF qu'une fiche peut choisir : prevus et lances (22/10/2026). */
+  ofOuverts: () => api.get<OfOuvert[]>('/api/machines/of-ouverts'),
   consommation: (code?: string) =>
     api.get<LigneConso[]>(
       `/api/machines/consommation${code ? `?code_machine=${encodeURIComponent(code)}` : ''}`,
@@ -416,6 +477,8 @@ export interface MachineSaisie {
   code_machine?: string
   nom: string
   notes?: string | null
+  /** En metres ; `null` l'efface (22/10/2026). */
+  largeur_m?: number | null
   zones: ZoneSaisie[]
   /** Exigee a la correction (verrou optimiste) ; ignoree a la declaration. */
   version?: number
@@ -442,7 +505,7 @@ export function corpsFiche(
   type: TypeFiche,
   machine: string,
   zone: string,
-  entete: { date: string; magasin: string; responsable: string; of: string; observations: string },
+  entete: { date: string; magasin: string; responsable: string; of: string; id_of?: string; observations: string },
   lignes: LigneSaisie[],
 ) {
   return {
@@ -452,6 +515,8 @@ export function corpsFiche(
     date_fiche: entete.date,
     code_magasin: type === 'MAJ' ? null : entete.magasin || null,
     numero_of: entete.of || null,
+    /* L'OF EN LIEN (22/10/2026) : le serveur en pose le numero dans `numero_of`. */
+    id_of: entete.id_of || null,
     responsable: entete.responsable,
     observations: entete.observations || null,
     lignes: lignesAEnvoyer(type, lignes).map((l): LigneEnvoi => ({
@@ -466,6 +531,8 @@ export function corpsFiche(
       code_motif: l.code_motif || null,
       motif_texte: l.motif_texte.trim() || null,
       effet_ecart: l.effet_ecart || null,
+      id_of: l.id_of || null,
+      largeur_voie_m: l.largeur_voie && l.largeur_voie > 0 ? l.largeur_voie : null,
     })),
   }
 }
@@ -568,6 +635,9 @@ export function depuisEtat(e: LigneEtat, type: TypeFiche): LigneSaisie {
     avant_pourcentage: e.pourcentage,
     avant_kg: e.kg,
     avant_date: e.date_constat,
+    id_of: '',
+    largeur_voie: e.largeur_voie_m ?? 0,
+    avant_numero_of: e.numero_of ?? null,
   }
 }
 
@@ -598,6 +668,9 @@ export function ligneNeuve(
     avant_pourcentage: null,
     avant_kg: 0,
     avant_date: null,
+    id_of: '',
+    largeur_voie: 0,
+    avant_numero_of: null,
   }
 }
 

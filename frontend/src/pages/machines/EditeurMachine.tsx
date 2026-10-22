@@ -62,14 +62,20 @@ export function EditeurMachine({
 
   const [code, setCode] = useState(machine?.code_machine ?? '')
   const [nom, setNom] = useState(machine?.nom ?? '')
+  /* LA LARGEUR DE LA MACHINE (22/10/2026), en metres, facultative : d'elle vient
+     le nombre de bobines d'une voie (capacite de l'etage / largeur x voie). */
+  const [largeur, setLargeur] = useState<string>(machine?.largeur_m != null ? String(machine.largeur_m) : '')
   const [lignes, setLignes] = useState<LigneZone[]>(
     machine ? depuisPlan(plan) : [neuve('ETAGE', 1, 0)],
   )
 
   // ENREGISTRER NE S'ACTIVE QU'APRES UN CHANGEMENT (10/10/2026).
-  const empreinte = (n: string, ls: LigneZone[]) =>
-    JSON.stringify({ n: n.trim(), l: ls.map(({ cle: _cle, ...z }) => z) })
-  const [initiale] = useState(() => empreinte(machine?.nom ?? '', machine ? depuisPlan(plan) : []))
+  const empreinte = (n: string, ls: LigneZone[], lg: string) =>
+    JSON.stringify({ n: n.trim(), l: ls.map(({ cle: _cle, ...z }) => z), lg: lg.trim() })
+  const [initiale] = useState(() =>
+    empreinte(machine?.nom ?? '', machine ? depuisPlan(plan) : [], machine?.largeur_m != null ? String(machine.largeur_m) : ''))
+  const largeurLue = largeur.trim() === '' ? null : Number(largeur)
+  const largeurValide = largeurLue === null || (Number.isFinite(largeurLue) && largeurLue > 0 && largeurLue < 1000)
 
   const etages = lignes.filter((l) => l.role === 'ETAGE')
   const total = lignes.reduce((s, l) => s + (l.capacite_bobines || 0), 0)
@@ -103,6 +109,7 @@ export function EditeurMachine({
       const corps = {
         code_machine: code.trim().toUpperCase(),
         nom: nom.trim(),
+        largeur_m: largeurLue,
         zones: lignes.map((l) => ({
           role: l.role,
           numero_etage: l.role === 'ETAGE' ? l.numero_etage : null,
@@ -121,7 +128,8 @@ export function EditeurMachine({
   })
 
   const pret =
-    (!correction || empreinte(nom, lignes) !== initiale) &&
+    (!correction || empreinte(nom, lignes, largeur) !== initiale) &&
+    largeurValide &&
     nom.trim().length > 0 &&
     (correction || code.trim().length > 0) &&
     lignes.length > 0 &&
@@ -175,6 +183,22 @@ export function EditeurMachine({
             className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure bg-fond
                        px-2 text-[13px]"
           />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-attenue-texte">Largeur (m)</span>
+          <SaisieNombre
+            min={0}
+            step={0.01}
+            value={largeur}
+            onChange={(e) => setLargeur(e.target.value)}
+            placeholder="4,20"
+            aria-invalid={!largeurValide || undefined}
+            className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure bg-fond
+                       px-2 text-right text-[13px] tabular-nums"
+          />
+          <span className="text-[11px] text-attenue-texte">
+            Facultative. Sert à dire combien de bobines tient une voie : bobines de l’étage ÷ largeur × voie.
+          </span>
         </label>
       </div>
 

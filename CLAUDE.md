@@ -196,9 +196,18 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   deux factures, et l'arrivage ne se clôture que quand tout est facturé. Écrans `/factures-fournisseur`.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
-- `db/README.md` — invariants, vues, contrôles C01–C59 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, C55 période close au 17/10, C56 ligne d'import sans position tarifaire au 19/10, C57–C58 proposition et réception en double au 19/10, C59 écart au prix confirmé de la demande de prix au 21/10, tous des signaux).
+- `db/README.md` — invariants, vues, contrôles C01–C64 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, C55 période close au 17/10, C56 ligne d'import sans position tarifaire au 19/10, C57–C58 proposition et réception en double au 19/10, C59 écart au prix confirmé de la demande de prix au 21/10, C60 ligne de bon en double au 21/10, C61–C64 OF au 22/10, tous des signaux).
 - Audit P3 du 19/10/2026 : création idempotente (`id_document` tiré par l'écran, `domain/idempotence.rs`) ; positions tarifaires, valeur en douane et répartition « au taux des droits » (`2026-10-19a`) ; étiquettes de lot Code 128 et scan (`2026-10-19b`, `routes/etiquettes.rs`, `lib/code128.ts`, `composants/ChampScan.tsx`). Une colonne de date nouvelle naît en `timestamptz`/`date` (cliquet A1) — `routes/json.rs` les sérialise.
-- `docs/matrice-mouvements.md` — matrice des 18 types de mouvement (CONSO_DIRECTE le 21/10) (sens, CMUP, coût, validation, réversibilité), générée par `python db/pg/matrice.py` depuis `backend/tests/banc/matrice_mouvements.json`, que le banc vérifie contre la base : modifier un type = modifier ce fichier.
+- `docs/matrice-mouvements.md` — matrice des 19 types de mouvement (CONSO_DIRECTE le 21/10, RETOUR_CONSO le 22/10) (sens, CMUP, coût, validation, réversibilité), générée par `python db/pg/matrice.py` depuis `backend/tests/banc/matrice_mouvements.json`, que le banc vérifie contre la base : modifier un type = modifier ce fichier.
 - Règles de gestion validées le 08/10/2026 : migrations `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 14) puis `2026-10-08b_audit_v4.sql` (corrections de l'audit v4), les deux exigées au démarrage ; `seed_006_regles_2026_10.sql` en porte les référentiels pour une base neuve. Le colisage incohérent se SIGNALE, il ne bloque jamais.
 - Arbitrages du 09/10/2026 (audit v5) : `docs/ADR-002` section « Arbitrages du 09/10/2026 » (A1–A11) ; migrations `2026-10-09a` à `2026-10-09za`, puis `2026-10-10a` (A1 et A11 tranchés le 10/10 : prêt toujours rendu, jamais d'acompte avant dédouanement → C53), toutes exigées au démarrage. Une migration déjà appliquée corrigée après coup se déclare dans `EMPREINTES_REMPLACEES` (`db/pg/migrer.py`), sinon `--verifier` arrête la publication.
 - `deploiement/README.md` — serveur, migrations en production, sauvegardes, assistant.
+- `docs/A-DECIDER-of-supply-chain.md` — **l'OF Supply Chain, livré le 22/10** (`2026-10-22a` à `22d`, exigées au
+  démarrage) : l'ordre de fabrication (date, qualité, métrage, PRÉVU → LANCÉ → CLÔTURÉ / ANNULÉ) **prévoit, oriente et
+  analyse, il ne déplace jamais le stock**. Les fiches machine portent l'OF (fiche, ligne, état de l'étage) et une voie
+  (bobines = capacité de l'étage / largeur de la machine × voie, entier, au-delà un signal C63) ; **l'écart d'un constat
+  appartient à l'OF sortant** (`machine_decision_ligne.id_of_periode`). Hors machine : `/fiche-hors-machine`,
+  CONSO_DIRECTE sur l'OF puis RETOUR_CONSO du reste. Consommation par OF et par qualité : `v_of_consommation`,
+  `v_of_bilan`, `v_qualite_consommation`. Besoin = OF retenus (reste) + plan non couvert (`fn_besoin_of_mois`, en aval
+  du MRP, `mrp.rs` inchangé) : colonnes « au-delà du plan » du stock projeté et du plan d'achat, `GET /api/stock/besoin`.
+  Pas de fiche de production (abandonnée, viendra de l'ERP de production).

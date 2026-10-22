@@ -78,7 +78,7 @@ db/pg/
 ├── 010_declencheurs.sql          invariants (voir plus bas)
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
-├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C60 : migrations)
+├── 012_controles.sql             contrôles métier C01–C37, C43, C44 (C38–C42, C45–C64 : migrations)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, couvertures, économies
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -112,6 +112,9 @@ Ce que la base refuse, quel que soit le chemin d'appel — y compris une correct
 | Bon soumis figé (21/10/2026) | au contrôle et en attente de validation, ni en-tête ni lignes ne bougent ; en demande de prix, seuls prix et remise (`trg_ligne_bc_figee`, `trg_bc_entete_figee` — la validation écrit encore taux, montants, valideur) |
 | Une ligne par référence sur un bon (21/10/2026) | `trg_ligne_bc_une_par_reference` refuse une seconde ligne de marchandise active (ni annulée ni soldée) ; le serveur augmente la ligne existante ; les doublons anciens se signalent (C60) |
 | Une ligne de réception par lot (21/10/2026) | `trg_ligne_reception_un_lot` : même réception, même ligne de bon, même référence, même lot (vide compris) = une ligne ; le serveur additionne |
+| Cycle de l'OF (22/10/2026) | `trg_ordre_fabrication_cycle` : PRÉVU → LANCÉ → CLÔTURÉ, ANNULÉ depuis PRÉVU ou LANCÉ (`transition_statut`, entité `ordre_fabrication`) ; en-tête figé une fois clôturé ou annulé ; un OF naît PRÉVU |
+| Retour de consommation directe (22/10/2026) | `trg_lmvt_retour_conso` : `RETOUR_CONSO` seulement pour un article en mode DIRECTE, avec l'OF (`mouvement.id_of`), et jamais plus que ce que cet OF a sorti de la référence et pas encore rendu (`fn_of_conso_directe_reste`) ; `trg_mouvement_conso_rendue` refuse de contre-passer une sortie dont un retour dépend. Entrée au CMUP du magasin, sans effet sur le CMUP |
+| Règle de frontière machine (22/10/2026) | chaque ligne de décision archive `id_of` (l'OF que la ligne sert après le constat) et `id_of_periode` (celui qu'elle servait avant : l'écart lui appartient) ; l'état archivé (`machine_decision_etat`) porte l'OF et la voie, d'où le retour exact à la dévalidation |
 | Audit | journal alimenté sur paramètres, prix, droits, engagements |
 
 Un rôle BOM sans densité sur la qualité **bloque la validation de la recette** plutôt que de produire un besoin nul en silence.
@@ -128,13 +131,20 @@ Un rôle BOM sans densité sur la qualité **bloque la validation de la recette*
 | `v_stock_disponible` | stock agrégé par référence, hors magasins `inclure_mrp = 0` |
 | `v_encours_bc` | reliquat des BC envoyés |
 | `v_stock_min_dynamique` | stock minimum F3 (max de 4 sécurités) |
-| `v_stock_projete` | `stock + en-cours − besoins`, statut et jours de couverture |
+| `v_stock_projete` | `stock + en-cours − besoins`, statut et jours de couverture ; le besoin décomposé : `besoin_plan_12m_kg`, `besoin_au_dela_12m_kg` (22c) |
 | `v_plan_achat` | quantité à commander (MOQ + multiple), tiering, sourcing, prix tracé |
 | `v_cockpit_stock` | KPI en un seul balayage |
 | `v_substitution_dispo` | alternatives disponibles sur rupture |
 | `v_fournisseur_scorecard` | conformité, ponctualité, OTIF, écart de pesée |
 | `v_stock_dormant` | références sans mouvement au-delà de `P_SeuilDormant` |
 | `v_lot_fefo` | proposition d'allocation FEFO |
+| `v_of_consommation` | par OF et par référence : prévu (métrage × recette × (1 + perte de la qualité), étalon de comparaison) ; réel fil = écarts `CONSOMMATION` des décisions machine **actives** dont `id_of_periode` est l'OF (corrections `MJ_CORRECTION` exclues) ; déchet / perte / casse = écarts de cet effet + bobines déchargées vers cette destination ; autres écarts (non qualifié, régularisation, erreur de saisie, correction) à part ; hors machine = `CONSO_DIRECTE` − `RETOUR_CONSO` portant l'OF, contre-passés exclus (22b) |
+| `v_of_bilan` / `v_qualite_consommation` | les mêmes totaux par OF, puis par qualité et mois de l'OF (OF annulés exclus), écart réel − prévu |
+| `v_of_mois` / `v_besoin_of_qualite` | les OF retenus (PRÉVU, LANCÉ) mois par mois, au prorata des jours entre leur date et leur fin prévue (sans fin : le mois de leur date) ; par qualité et mois, m² du plan en service, m² des OF, part du plan couverte, part des OF au-delà du plan (22c) |
+| `v_besoin_of` | par OF, référence et mois : prévu (métrage × recette × (1 + perte de la qualité)), consommation déjà attribuée (écarts machine à effet consommation hors `MJ_CORRECTION`, déchet, perte, casse des décisions actives dont `id_of_periode` est l'OF, bobines déchargées au déchet / à la perte / à la casse, `CONSO_DIRECTE` − `RETOUR_CONSO` portant l'OF, contre-passés exclus) imputée aux mois les plus anciens d'abord, reste jamais négatif, parts liée au plan / au-delà ; un mois écoulé pèse sur le mois courant (22c) |
+| `v_besoin_of_mois` (`fn_besoin_of_mois`) | **les OF consomment le plan** : par référence et mois ≥ courant, la part du besoin MRP couverte par des OF (retirée, au prorata de la recette), le reste des OF dans le plan et au-delà. Une fonction plpgsql, opaque au planificateur : dépliée, elle portait la planification de `v_plan_achat` à des secondes. Vide sans OF (22c) |
+| `v_besoin_mois` | le besoin combiné par référence, mois et **origine** (`PLAN` / `AU_DELA_PLAN`) — la traçabilité de « OF + plan non couvert » (22c) |
+| `v_besoin_12m` / `v_besoin_horizon` / `v_besoin_horizon_of` | le plan (`besoin_mrp`) + l'ajustement des OF ; `v_besoin_12m` ajoute `besoin_plan_12m_kg`, `besoin_au_dela_12m_kg` ; `v_besoin_horizon` garde ses colonnes (2026-10-09k doit se rejouer), la part au-delà du plan du délai et de la couverture est dans `v_besoin_horizon_of` (`dem_lead_au_dela_kg`, `sorties_au_dela_kg`). Sans OF, valeurs identiques à avant (vérifié ligne à ligne le 22/10/2026). Le reste d'un OF compte en entier sur les jours qui restent du mois courant ; le plan, lui, au prorata (22c) |
 
 ---
 
@@ -180,10 +190,14 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C58 | ligne de bon reçue au-delà de sa commande et de la tolérance | 19e |
 | C59 | bon en attente de validation dont une ligne a un prix confirmé (demande de prix) différent du prix d'avant — prix nets, remise déduite | 21b |
 | C60 | même référence sur plusieurs lignes de marchandise actives (ni annulées ni soldées) d'un bon non annulé — doublon d'avant la règle « une ligne par référence », qui ne bloque rien | 21d |
+| C61 | OF clôturé dont la consommation réelle (fil + hors machine) s'écarte du prévu (métrage × recette) de plus de `P_EcartOfPct` (15 %) | 22b |
+| C62 | consommation directe sans OF (non contre-passée) : elle n'est attribuée à aucune qualité — l'écran des mouvements la laisse passer, la fiche hors machine exige l'OF | 22d |
+| C63 | sur l'état courant des étages : ligne qui porte plus de bobines que sa voie n'en tient (`fn_bobines_voie`), ou voies d'un même étage plus larges, ensemble, que la machine (une voie = un OF et une largeur) | 22d |
+| C64 | qualité et mois où les OF retenus (PRÉVU, LANCÉ) dépassent le plan de production en service : le besoin augmente de l'excédent, c'est voulu ; on le montre (`v_ctl_c64` : m² du plan, des OF, au-delà, les OF) | 22c |
 
 C28 dit désormais ce que fait `P_EncoursRetardInclus` (comptée ou retirée de la couverture) ; C31,
 C32 et le coût de revient gardent les réceptions clôturées ; C35 et C36 lisent l'état des machines
-(`machine_etat`). Le banc vérifie la liste exacte C01–C60.
+(`machine_etat`). Le banc vérifie la liste exacte C01–C64.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

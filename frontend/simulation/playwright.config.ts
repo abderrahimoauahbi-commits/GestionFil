@@ -8,7 +8,9 @@ import { defineConfig } from '@playwright/test'
 export default defineConfig({
   testDir: '.',
   testMatch: 'agent.spec.ts',
-  outputDir: '../rapport-simulation/resultats',
+  // Un essai sur une base jetable (SIM_DOSSIER) garde ses traces a part : Playwright
+  // vide ce dossier a chaque passage.
+  outputDir: process.env.SIM_DOSSIER ? `${process.env.SIM_DOSSIER}/resultats` : '../rapport-simulation/resultats',
   timeout: 0,
   expect: { timeout: 15_000 },
   workers: 1,

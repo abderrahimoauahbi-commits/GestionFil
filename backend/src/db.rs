@@ -110,6 +110,47 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // L'OF, lot C (22/10/2026) : OF et voie sur l'etat archive des decisions,
+        // nombre de bobines d'une voie, retour de consommation directe
+        // (RETOUR_CONSO, borne en base), C62 et C63.
+        "2026-10-22d_of_machines_hors_machine.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_decision_etat' AND column_name = 'id_of')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_lmvt_retour_conso')
+            AND EXISTS (SELECT 1 FROM type_mouvement WHERE code_type_mvt = 'RETOUR_CONSO')
+            AND to_regclass('public.v_ctl_c63') IS NOT NULL",
+    ),
+    (
+        // L'OF, lot B (22/10/2026) : le besoin au-dela du plan. Les OF retenus
+        // consomment le plan (v_besoin_of_mois, v_besoin_mois) ; besoin du plan /
+        // au-dela du plan sur v_besoin_12m, v_stock_projete, v_besoin_horizon_of ;
+        // l'ajustement dans v_besoin_horizon ; C64.
+        "2026-10-22c_besoin_of.sql",
+        "SELECT to_regclass('public.v_besoin_of_mois') IS NOT NULL
+            AND to_regclass('public.v_besoin_horizon_of') IS NOT NULL
+            AND to_regclass('public.v_ctl_c64') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'v_stock_projete' AND column_name = 'besoin_au_dela_12m_kg')
+            AND EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'v_besoin_horizon'
+                                                 AND definition LIKE '%v_besoin_of_mois%')",
+    ),
+    (
+        // L'OF, lot A (22/10/2026) : cycle garde en base, consommation reelle
+        // par OF et par qualite (v_of_consommation, v_qualite_consommation), C61.
+        "2026-10-22b_of_consommation.sql",
+        "SELECT to_regclass('public.v_of_consommation') IS NOT NULL
+            AND to_regclass('public.v_qualite_consommation') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ordre_fabrication_cycle')",
+    ),
+    (
+        // L'OF Supply Chain, le socle (22/10/2026) : ordre_fabrication, largeur
+        // des machines, OF et voie sur les fiches, etats, decisions, mouvements.
+        "2026-10-22a_ordre_fabrication_socle.sql",
+        "SELECT to_regclass('public.ordre_fabrication') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_decision_ligne' AND column_name = 'id_of_periode')",
+    ),
+    (
         // Bon fige en attente de validation, une ligne par reference sur un bon,
         // une ligne de reception par lot, tuiles du circuit, C60 (21/10/2026).
         "2026-10-21d_bons_receptions_regles.sql",

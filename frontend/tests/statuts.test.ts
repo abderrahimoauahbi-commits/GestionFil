@@ -1,8 +1,8 @@
 /**
  * OU UN BON S'EFFACE, ET OU IL S'ANNULE (src/lib/statuts.ts).
  *
- * L'ecran ne propose « Supprimer » qu'en BROUILLON ou EN_ATTENTE_VALIDATION ;
- * au-dela, le numero est parti chez un fournisseur et le bon s'annule. Le
+ * L'ecran ne propose « Supprimer » qu'en BROUILLON (un bon en validation est fige
+ * depuis le 21/10/2026) ; au-dela, le numero est parti chez un fournisseur et le bon s'annule. Le
  * serveur tient la meme regle (supprimer_bc, backend/src/routes/bons_commande.rs) et a
  * le dernier mot : le second test lit sa garde et echoue si les deux listes
  * divergent — c'est la promesse ecrite dans statuts.ts.
@@ -14,10 +14,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { SUPPRIMABLES, estSupprimable } from '../src/lib/statuts.ts'
 
-test('estSupprimable : brouillon et attente de validation seulement', () => {
+test('estSupprimable : brouillon seulement', () => {
   assert.equal(estSupprimable('BROUILLON'), true)
-  assert.equal(estSupprimable('EN_ATTENTE_VALIDATION'), true)
-  for (const statut of ['VALIDE', 'ANNULE', 'RECU', 'CLOTURE', '', 'brouillon', ' BROUILLON'])
+  for (const statut of ['EN_ATTENTE_VALIDATION', 'EN_CONTROLE', 'DEMANDE_PRIX', 'VALIDE', 'ANNULE', 'RECU', 'CLOTURE', '', 'brouillon', ' BROUILLON'])
     assert.equal(estSupprimable(statut), false, statut)
 })
 

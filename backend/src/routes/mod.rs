@@ -28,6 +28,7 @@ mod roles;
 pub(crate) mod stock;
 mod transferts;
 mod inventaires;
+mod ordres_fabrication;
 pub(crate) mod bons_commande;
 mod receptions;
 mod telechargements;
@@ -236,6 +237,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plans/{id}/mrp", post(operations::calculer_mrp))
         .route("/api/plans/{id}/snapshot", post(operations::snapshot_mrp))
         .route("/api/plans/{id}/besoins", get(consultation::besoins_mrp))
+        // Les ordres de fabrication (22/10/2026) : cycle et consommation réelle.
+        .route("/api/ordres-fabrication",
+               get(ordres_fabrication::lister).post(ordres_fabrication::creer))
+        .route("/api/ordres-fabrication/qualites", get(ordres_fabrication::qualites))
+        .route("/api/ordres-fabrication/consommation-qualites",
+               get(ordres_fabrication::consommation_qualites))
+        .route("/api/ordres-fabrication/{id}",
+               get(ordres_fabrication::lire).patch(ordres_fabrication::modifier))
+        .route("/api/ordres-fabrication/{id}/statut", put(ordres_fabrication::changer_statut))
+        .route("/api/ordres-fabrication/{id}/consommation", get(ordres_fabrication::consommation))
         // --- Stock et mouvements ----------------------------------------------
         // Les retours fournisseur, document libre (12/10/2026).
         .route("/api/retours-fournisseur", get(retours::lister).post(retours::creer))
@@ -322,6 +333,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/machines/fiches/{id}/apercu", post(machines::apercu_fiche))
         .route("/api/machines/fiches/{id}/devalider", post(machines::devalider_fiche))
         .route("/api/machines/motifs", get(machines::lister_motifs))
+        // Les OF qu'une fiche (machine ou hors machine) peut choisir (22/10/2026).
+        .route("/api/machines/of-ouverts", get(machines::of_ouverts))
+        .route("/api/machines/of-ouverts/{id}/hors-machine", get(machines::of_hors_machine))
         // Lire le plan d une machine, ou le corriger. La correction exige
         // PARAMETRES/ECRIRE — la direction et les super-utilisateurs — parce
         // qu une capacite fausse fausse toute la consommation qui en decoule.
@@ -459,6 +473,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stock", get(consultation::stock))
         .route("/api/etat-stock", get(consultation::etat_stock))
         .route("/api/stock/projete", get(consultation::stock_projete))
+        // Le besoin d'une reference, plan / au-dela du plan, et ses OF (22/10/2026).
+        .route("/api/stock/besoin", get(consultation::besoin_reference))
         .route("/api/stock/dormant", get(consultation::stock_dormant))
         .route("/api/stock/lots", get(consultation::lots))
         // Le registre des lots (02/10/2026) : vues, fiche de vie, decisions.

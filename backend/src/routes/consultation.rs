@@ -1033,6 +1033,10 @@ pub async fn detail_proposition(
                 COALESCE(bh.lead_j, 0)::float8 AS delai_j, COALESCE(bh.couv_j, 0)::float8 AS couverture_j,
                 COALESCE(bh.dem_lead_prolonge_kg, 0)::float8 AS demande_delai_prolongee_kg,
                 COALESCE(bh.sorties_prolongees_kg, 0)::float8 AS sorties_prolongees_kg,
+                -- Les OF au-dela du plan (lot B, 22/10/2026) : la part de la demande
+                -- et des sorties que le plan seul n'aurait pas demandee.
+                COALESCE(bo.dem_lead_au_dela_kg, 0)::float8 AS demande_delai_au_dela_kg,
+                COALESCE(bo.sorties_au_dela_kg, 0)::float8 AS sorties_au_dela_kg,
                 r.moq_kg::float8 AS moq_kg,
                 COALESCE((SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'), '1') = '1'
                     AS retard_compte,
@@ -1044,6 +1048,7 @@ pub async fn detail_proposition(
            LEFT JOIN v_stock_machine sm ON sm.code_reference = pa.code_reference
            LEFT JOIN v_encours_fiable ef ON ef.code_reference = pa.code_reference
            LEFT JOIN v_besoin_horizon bh ON bh.code_reference = pa.code_reference
+           LEFT JOIN v_besoin_horizon_of bo ON bo.code_reference = pa.code_reference
           WHERE pa.code_reference = $1",
     )
     .bind(reference)
@@ -1111,6 +1116,87 @@ pub async fn detail_proposition(
         "machine": lignes_en_json(&machine),
     });
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    Ok(Json(v))
+}
+
+/// `GET /api/stock/besoin?reference=…` — LE BESOIN D'UNE REFERENCE, DECOMPOSE
+/// (lot B des OF, 22/10/2026) : besoin lie au plan, besoin au-dela du plan, mois
+/// par mois, et les OF qui pesent sur la reference (prevu, deja consomme, reste,
+/// part au-dela du plan). Le calcul est celui des vues du besoin
+/// (`v_besoin_mois`, `v_besoin_of`) : le stock projete et le plan d'achat le
+/// lisent tel quel. Lisible depuis le stock comme depuis le plan d'achat.
+pub async fn besoin_reference(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(q): Query<DetailProposition>,
+) -> AppResult<Json<Value>> {
+    let module = if user.exiger(&state.db, module::STOCK, Action::Lire).await.is_ok() {
+        module::STOCK
+    } else {
+        user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
+        module::PLAN_ACHAT
+    };
+    let reference = q.reference.trim();
+    let synthese = sqlx::query(
+        "SELECT r.code_reference, r.designation,
+                COALESCE(b.besoin_12m_kg, 0)::float8          AS besoin_12m_kg,
+                COALESCE(b.besoin_plan_12m_kg, 0)::float8     AS besoin_plan_12m_kg,
+                COALESCE(b.besoin_au_dela_12m_kg, 0)::float8  AS besoin_au_dela_12m_kg,
+                COALESCE(bh.dem_lead_kg, 0)::float8           AS demande_delai_kg,
+                COALESCE(bo.dem_lead_au_dela_kg, 0)::float8   AS demande_delai_au_dela_kg,
+                COALESCE(bh.sorties_prevues_kg, 0)::float8    AS sorties_prevues_kg,
+                COALESCE(bo.sorties_au_dela_kg, 0)::float8    AS sorties_au_dela_kg
+           FROM reference r
+           LEFT JOIN v_besoin_12m b ON b.code_reference = r.code_reference
+           LEFT JOIN v_besoin_horizon bh ON bh.code_reference = r.code_reference
+           LEFT JOIN v_besoin_horizon_of bo ON bo.code_reference = r.code_reference
+          WHERE r.code_reference = $1",
+    )
+    .bind(reference)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Introuvable(format!("reference {reference}")))?;
+
+    // Mois par mois : le plan (dont la part tenue par des OF), l'au-dela.
+    let mois = sqlx::query(
+        "SELECT annee_mois,
+                COALESCE(sum(quantite_kg) FILTER (WHERE origine = 'PLAN'), 0)::float8         AS besoin_plan_kg,
+                COALESCE(sum(dont_of_kg)  FILTER (WHERE origine = 'PLAN'), 0)::float8         AS dont_of_kg,
+                COALESCE(sum(quantite_kg) FILTER (WHERE origine = 'AU_DELA_PLAN'), 0)::float8 AS besoin_au_dela_kg
+           FROM v_besoin_mois
+          WHERE code_reference = $1
+          GROUP BY annee_mois
+          ORDER BY annee_mois",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+
+    // Les OF qui pesent sur la reference : un par ligne, leurs mois sommes.
+    let ofs = sqlx::query(
+        "SELECT id_of, numero, code_qualite, statut,
+                to_char(date_of, 'YYYY-MM-DD') AS date_of,
+                to_char(date_fin_prevue, 'YYYY-MM-DD') AS date_fin_prevue,
+                metrage_m2::float8 AS metrage_m2,
+                sum(kg_prevu)::float8          AS kg_prevu,
+                sum(kg_consomme)::float8       AS kg_consomme,
+                sum(kg_reste)::float8          AS kg_reste,
+                sum(kg_reste_au_dela)::float8  AS kg_reste_au_dela
+           FROM v_besoin_of
+          WHERE code_reference = $1
+          GROUP BY id_of, numero, code_qualite, statut, date_of, date_fin_prevue, metrage_m2
+          ORDER BY date_of, numero",
+    )
+    .bind(reference)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut v = json!({
+        "synthese": lignes_en_json(&[synthese]).get(0).cloned().unwrap_or(Value::Null),
+        "mois": lignes_en_json(&mois),
+        "of": lignes_en_json(&ofs),
+    });
+    user.masquer(&state.db, module, &mut v).await?;
     Ok(Json(v))
 }
 

@@ -190,6 +190,9 @@ export function ParcMachines() {
                       {m.nb_etages > 0 && (
                         <span className="text-[11px]"> · {m.nb_etages} ét.</span>
                       )}
+                      {m.largeur_m != null && (
+                        <span className="text-[11px]"> · {nb(m.largeur_m, 2)} m</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right">{nb(m.capacite_bobines, 0)}</td>
                     <td className="px-3 py-2 text-right">
@@ -293,6 +296,9 @@ export function ParcMachines() {
                       {m.nb_zones}
                       {m.nb_etages > 0 && (
                         <span className="text-attenue-texte"> · {m.nb_etages} ét.</span>
+                      )}
+                      {m.largeur_m != null && (
+                        <span className="text-attenue-texte"> · {nb(m.largeur_m, 2)} m</span>
                       )}
                     </dd>
                   </div>

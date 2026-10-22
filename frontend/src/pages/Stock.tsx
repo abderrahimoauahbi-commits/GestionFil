@@ -40,6 +40,8 @@ import {
   MenuContextuelTitre,
 } from '../composants/ui/surcouches'
 import { useOuvrirVue } from '../lib/navigation'
+import { BesoinReference } from '../composants/BesoinOf'
+import { Bouton } from '../composants/ui/base'
 
 const MODULE = 'STOCK'
 
@@ -54,6 +56,9 @@ interface LigneProjete {
   /** Ce que le calcul compte du fil sur machine (constat recent, lot non bloque, reglage). */
   stock_machine_kg?: number
   besoin_12m_kg: number
+  /** Le besoin se decompose (22/10/2026) : la part du plan, la part des OF au-dela du plan. */
+  besoin_plan_12m_kg?: number
+  besoin_au_dela_12m_kg?: number
   stock_projete_kg: number
   jours_couverture: number | null
   /** Bornes de l'echelle logique, servies par la vue : la jauge s'y gradue. */
@@ -311,6 +316,8 @@ export function Stock() {
   const [filtre, setFiltre] = useState('')
   const [recherche, setRecherche] = useState('')
   const filtres = useFiltres(CHAMPS_FILTRABLES)
+  // La reference ouverte : son besoin decompose et ses OF, en haut de la liste.
+  const [ouverte, setOuverte] = useState<string | null>(null)
 
   // Un seul appel, sans filtre serveur : le jeu tient largement en memoire, et
   // le garder entier permet de compter chaque statut sans quatre requetes.
@@ -549,6 +556,27 @@ export function Stock() {
       rendu: (l) => (l.besoin_12m_kg == null ? '—' : fmt.nombre(l.besoin_12m_kg, 1)),
     },
     {
+      champ: 'besoin_plan_12m_kg',
+      entete: 'dont plan',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) => (l.besoin_plan_12m_kg == null ? '—' : fmt.nombre(l.besoin_plan_12m_kg, 1)),
+    },
+    {
+      /* LES OF AU-DELA DU PLAN (22/10/2026) : ce que les ordres de fabrication
+         demandent en plus du plan du mois. Un clic sur la ligne dit lesquels. */
+      champ: 'besoin_au_dela_12m_kg',
+      entete: 'Au-delà du plan',
+      numerique: true,
+      secondaire: true,
+      rendu: (l) =>
+        !l.besoin_au_dela_12m_kg ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <span className="font-medium text-alerte">{fmt.nombre(l.besoin_au_dela_12m_kg, 1)}</span>
+        ),
+    },
+    {
       champ: 'delai_livraison_jours',
       entete: 'Délai (j)',
       numerique: true,
@@ -637,11 +665,23 @@ export function Stock() {
             {lignes.length} reference(s) sur {toutes.length} apres filtrage.
           </div>
         )}
+        {ouverte && (
+          <section className="mb-3 rounded-md border border-bordure bg-surface p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-[13px] font-semibold">Besoin de {ouverte}</h2>
+              <Bouton variante="discret" taille="sm" className="ml-auto" onClick={() => setOuverte(null)}>
+                Fermer
+              </Bouton>
+            </div>
+            <BesoinReference reference={ouverte} />
+          </section>
+        )}
         <TableDroits
           exportable="etat-des-stocks"
           imprimable="État des stocks"
           module={MODULE}
           menuContextuel={(l) => <ActionsLigne ligne={l} ouvrir={ouvrir} />}
+          surClic={(l) => setOuverte((o) => (o === l.code_reference ? null : l.code_reference))}
           colonnes={colonnes}
           lignes={lignes}
           chargement={q.isLoading}

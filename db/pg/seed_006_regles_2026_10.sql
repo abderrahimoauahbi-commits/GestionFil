@@ -25,7 +25,10 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
   ('P_MachineEcartRougeKg',  'Ecart machine : rouge au-dela de (kg)', '50', 'DECIMAL', 'kg', 'Le seuil rouge est le plus grand de ce poids et du pourcentage rouge de la ligne.', 'MACHINE', 'DIRECTION'),
   ('P_MachineEcartRougePct', 'Ecart machine : rouge au-dela de (%)',  '5',  'DECIMAL', '%',  'Pourcentage du poids de la ligne.', 'MACHINE', 'DIRECTION'),
   ('P_DechetSeuilValiderKg', 'Dechet : seuil de validation (kg)', '50', 'DECIMAL', 'kg',
-   'Au-dela, un dechet saisi a la main demande le droit de valider l''inventaire, comme un ajustement negatif.', 'STOCK', 'DIRECTION')
+   'Au-dela, un dechet saisi a la main demande le droit de valider l''inventaire, comme un ajustement negatif.', 'STOCK', 'DIRECTION'),
+  -- 22/10/2026 (migration 2026-10-22b) : le signal C61.
+  ('P_EcartOfPct', 'OF : ecart reel / prevu signale', '15', 'DECIMAL', '%',
+   'Un OF cloture dont la consommation reelle s''ecarte du prevu (metrage x recette) de plus de ce pourcentage est signale (C61). Signal seulement.', 'PROD', 'DIRECTION')
 ON CONFLICT (code_parametre) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

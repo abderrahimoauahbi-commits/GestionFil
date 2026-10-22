@@ -45,6 +45,7 @@ import {
 } from '../composants/GrilleLignes'
 import { Alerte, Bouton, Champ, Selecteur } from '../composants/ui/base'
 import { type Conditionnement, depuisKg, facteurVersKg, pourChamp, saisieExacte } from '../lib/conditionnement'
+import { ChoixOF } from '../composants/ChoixOF'
 import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
@@ -230,6 +231,8 @@ export function MouvementNouveau() {
     responsable: '',
     reference_document: '',
     numero_of: '',
+    /** L'OF en lien d'une consommation directe (22/10/2026) ; `numero_of` reste le texte libre d'avant. */
+    id_of: '',
     /** L'usine du pret et de son retour. */
     tiers: '',
     observations_globales: '',
@@ -637,6 +640,7 @@ export function MouvementNouveau() {
         responsable: entete.responsable.trim() || null,
         reference_document: entete.reference_document.trim() || null,
         numero_of: entete.numero_of || null,
+        id_of: consoDirecte && entete.id_of ? entete.id_of : null,
         tiers: entete.tiers.trim() || null,
         observations_globales: entete.observations_globales.trim() || null,
         lignes: utiles.map((l) => corpsMouvement(pourEnvoi(l))),
@@ -770,16 +774,29 @@ export function MouvementNouveau() {
           {(typeActif?.exige_of === 1 || horsMachine || consoDirecte) && (
             <div>
               <label className="mb-1 block text-sm font-medium text-texte" htmlFor="mvt-4">
-                {consoDirecte ? 'Ordre / plan' : 'Numero d ordre de fabrication'}{' '}
+                {consoDirecte ? 'Ordre de fabrication' : 'Numero d ordre de fabrication'}{' '}
                 {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
               </label>
-              <input id="mvt-4"
-                required={typeActif?.exige_of === 1}
-                value={entete.numero_of}
-                onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
-                placeholder={horsMachine || consoDirecte ? 'Facultatif, texte libre' : undefined}
-                className={champ}
-              />
+              {/* L'OF EN LIEN (22/10/2026) : la consommation directe se range sous un
+                  OF, donc sous une qualite. Sans OF elle passe, mais elle est
+                  signalee (C62) ; le texte libre reste pour l'ancien usage. */}
+              {consoDirecte && (
+                <ChoixOF
+                  valeur={entete.id_of}
+                  onChange={(id, numero) => setEntete({ ...entete, id_of: id, numero_of: id ? numero : '' })}
+                  vide="— aucun OF (signalé) —"
+                  className="mb-1 w-full"
+                />
+              )}
+              {!(consoDirecte && entete.id_of) && (
+                <input id="mvt-4"
+                  required={typeActif?.exige_of === 1}
+                  value={entete.numero_of}
+                  onChange={(e) => setEntete({ ...entete, numero_of: e.target.value })}
+                  placeholder={consoDirecte ? 'ou ordre / plan en texte libre (ancien)' : horsMachine ? 'Facultatif, texte libre' : undefined}
+                  className={champ}
+                />
+              )}
             </div>
           )}
 

@@ -52,7 +52,9 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
   /* LE BROUILLON DEJA CREE : remplace a chaque apercu, jamais duplique. */
   const brouillon = useRef<string | null>(idFiche ?? null)
 
-  const [entete, setEntete] = useState({ date: aujourdHui(), magasin: '', responsable: '', of: '', observations: '' })
+  /* `id_of` : l'OF choisi (lien, 22/10/2026), defaut des lignes ; `of` garde son
+     numero (le texte d'avant, pour l'historique). */
+  const [entete, setEntete] = useState({ date: aujourdHui(), magasin: '', responsable: '', of: '', id_of: '', observations: '' })
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
   const [amorcee, setAmorcee] = useState<string | null>(null)
 
@@ -72,6 +74,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
         magasin: f.entete.code_magasin ?? '',
         responsable: f.entete.responsable,
         of: f.entete.numero_of ?? '',
+        id_of: f.entete.id_of ?? '',
         observations: f.entete.observations ?? '',
       })
       for (const l of f.lignes) {
@@ -94,6 +97,8 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
           code_motif: l.code_motif ?? '',
           motif_texte: l.motif_texte ?? '',
           effet_ecart: l.effet_ecart ?? '',
+          id_of: l.id_of ?? '',
+          largeur_voie: l.largeur_voie_m != null ? Number(l.largeur_voie_m) : (i >= 0 ? base[i].largeur_voie ?? 0 : 0),
         }
         if (i >= 0) base[i] = repris
         else base.push(repris)

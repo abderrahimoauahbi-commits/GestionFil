@@ -7,7 +7,7 @@ use crate::db::{arrondi_kg, maintenant};
 use crate::domain::numerotation::numeroter;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -20,7 +20,8 @@ pub async fn lister_inventaires(
         "SELECT i.*, u.login AS responsable, v.login AS valide_par,
                 (SELECT COUNT(*) FROM ligne_inventaire l WHERE l.id_inventaire = i.id_inventaire) AS nb_lignes,
                 (SELECT COUNT(*) FROM ligne_inventaire l
-                  WHERE l.id_inventaire = i.id_inventaire AND l.statut_ligne = 'A_TRAITER') AS nb_a_compter
+                  WHERE l.id_inventaire = i.id_inventaire AND l.statut_ligne = 'A_TRAITER') AS nb_a_compter,
+                (SELECT COUNT(*) FROM inventaire_reference s WHERE s.id_inventaire = i.id_inventaire) AS nb_references
            FROM inventaire i
            LEFT JOIN utilisateur u ON u.id_utilisateur = i.id_utilisateur_responsable
            LEFT JOIN utilisateur v ON v.id_utilisateur = i.id_utilisateur_validation
@@ -40,6 +41,13 @@ pub struct NouvelInventaire {
     pub id_document: Option<String>,
     pub code_magasin: String,
     pub type_inventaire: String,
+    /// LA LISTE D'UN TOURNANT OU D'UN CIBLE (decision du 23/10/2026,
+    /// 2026-10-24b) : les references a compter, validees par cet envoi meme —
+    /// pour un tournant, la proposition retouchee a l'ecran. Absente : l'inventaire
+    /// nait sans ligne, et gele tout le magasin jusqu'a ce que sa liste soit
+    /// validee sur sa page. Refusee pour un global.
+    #[serde(default)]
+    pub references: Option<Vec<String>>,
 }
 
 pub async fn creer_inventaire(
@@ -93,13 +101,36 @@ pub async fn creer_inventaire(
     .execute(&mut *tx)
     .await?;
     // Les lignes a compter, tout de suite (13/10/2026) : plus d'etape « ouvrir ».
-    let n = crate::domain::inventaire::preparer(&mut tx, &id).await?;
+    // Un TOURNANT ou un CIBLE compte SA LISTE (2026-10-24b) : validee par cet
+    // envoi, puis preparee ; sans liste, il attend la sienne (aucune ligne).
+    let choisies: Vec<String> = i.references.clone().unwrap_or_default();
+    let mut avis_liste: Option<String> = None;
+    let n = if i.type_inventaire == "GLOBAL" {
+        if choisies.iter().any(|r| !r.trim().is_empty()) {
+            return Err(AppError::Invalide(
+                "un inventaire global compte tout le magasin : il ne prend pas de liste de références".into(),
+            ));
+        }
+        crate::domain::inventaire::preparer(&mut tx, &id).await?
+    } else if choisies.is_empty() {
+        avis_liste = Some(format!(
+            "L'inventaire {numero} n'a encore aucune référence choisie : tout le magasin est gelé jusqu'à la validation de sa liste, sur sa page."
+        ));
+        0
+    } else {
+        crate::domain::inventaire::choisir_references(&mut tx, &user.id, &id, &choisies)
+            .await?
+            .lignes_a_compter
+    };
 
     // LE MAGASIN EST DESORMAIS GELE (23/10/2026) — tout entier pour un GLOBAL,
     // ses references comptees pour un TOURNANT ou un CIBLE (2026-10-24a) : ce
     // qui etait en route et touche le gel n'entrera plus avant la cloture. On
     // le dit, sans bloquer.
-    let avis = documents_en_route(&mut tx, &id, &i.code_magasin).await?;
+    let mut avis = documents_en_route(&mut tx, &id, &i.code_magasin).await?;
+    if let Some(a) = avis_liste {
+        avis.insert(0, a);
+    }
 
     tx.commit().await?;
     Ok(Json(json!({
@@ -167,8 +198,8 @@ async fn documents_en_route(
 ///
 /// L'ETENDUE SELON LE TYPE (2026-10-24a, `v_inventaire_gel`, meme regle que les
 /// declencheurs) : `etendue_gel` = MAGASIN (un GLOBAL, ou un tournant / cible
-/// encore sans ligne) ou REFERENCES (un TOURNANT ou un CIBLE : ses seules
-/// references, dans `references_gelees`).
+/// encore sans liste, 2026-10-24b) ou REFERENCES (un TOURNANT ou un CIBLE : les
+/// references de sa liste, dans `references_gelees`).
 pub async fn inventaires_ouverts(
     State(state): State<AppState>,
     _user: Utilisateur,
@@ -185,6 +216,116 @@ pub async fn inventaires_ouverts(
     Ok(Json(lignes_en_json(&rows)))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct FiltreCandidats {
+    pub magasin: String,
+}
+
+/// `GET /api/inventaires/candidats?magasin=…` — LES REFERENCES EN STOCK DANS LE
+/// MAGASIN, pour choisir la liste d'un tournant ou d'un cible (decision du
+/// 23/10/2026, `v_inventaire_candidat`, 2026-10-24b) : famille, categorie, classe
+/// ABC de la fiche (absente : C, `sans_classe`), dernier comptage dans ce magasin,
+/// periode de la classe et `du` — la PROPOSITION du tournant. Les periodes des
+/// parametres viennent avec, pour que l'ecran dise la regle.
+pub async fn candidats_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Query(f): Query<FiltreCandidats>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Lire).await?;
+    let rows = sqlx::query(
+        "SELECT c.code_reference, c.designation, c.code_famille, c.famille_libelle,
+                c.code_categorie, c.categorie_libelle, c.classe_abc, c.classe_retenue, c.sans_classe,
+                c.stock_kg::float8 AS stock_kg, c.dernier_comptage, c.periode_jours, c.jours_depuis, c.du
+           FROM v_inventaire_candidat c
+          WHERE c.code_magasin = $1
+          ORDER BY c.du DESC, c.classe_retenue, c.categorie_libelle NULLS LAST,
+                   c.code_famille NULLS LAST, c.code_reference",
+    )
+    .bind(&f.magasin)
+    .fetch_all(&state.db)
+    .await?;
+    let (a, b, c): (i32, i32, i32) = sqlx::query_as(
+        "SELECT fn_comptage_tournant_jours('A'), fn_comptage_tournant_jours('B'), fn_comptage_tournant_jours('C')",
+    )
+    .fetch_one(&state.db)
+    .await?;
+    let mut candidats = lignes_en_json(&rows);
+    user.masquer(&state.db, module::INVENTAIRE, &mut candidats).await?;
+    Ok(Json(json!({
+        "periodes": { "A": a, "B": b, "C": c },
+        "candidats": candidats,
+    })))
+}
+
+/// `GET /api/inventaires/{id}/references` — la liste d'un inventaire (2026-10-24b),
+/// avec ce qui aide a la relire : designation, famille, classe, stock du magasin,
+/// dernier comptage.
+pub async fn references_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Lire).await?;
+    let rows = sqlx::query(
+        "SELECT s.code_reference, s.origine, s.classe_abc AS classe_au_choix, s.dernier_comptage AS dernier_au_choix,
+                s.date_ajout, u.login AS ajoute_par,
+                r.designation, r.code_famille, f.libelle AS famille_libelle,
+                r.code_categorie, cat.libelle AS categorie_libelle,
+                r.classe_abc, COALESCE(r.classe_abc, 'C') AS classe_retenue, (r.classe_abc IS NULL) AS sans_classe,
+                c.stock_kg::float8 AS stock_kg, c.dernier_comptage, c.periode_jours, c.jours_depuis, c.du
+           FROM inventaire_reference s
+           JOIN inventaire i ON i.id_inventaire = s.id_inventaire
+           JOIN reference r ON r.code_reference = s.code_reference
+           LEFT JOIN famille f ON f.code_famille = r.code_famille
+           LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
+           LEFT JOIN utilisateur u ON u.id_utilisateur = s.id_utilisateur
+           LEFT JOIN v_inventaire_candidat c ON c.code_magasin = i.code_magasin
+                                            AND c.code_reference = s.code_reference
+          WHERE s.id_inventaire = $1
+          ORDER BY cat.libelle NULLS LAST, r.code_famille NULLS LAST, s.code_reference",
+    )
+    .bind(&id)
+    .fetch_all(&state.db)
+    .await?;
+    let mut valeur = lignes_en_json(&rows);
+    user.masquer(&state.db, module::INVENTAIRE, &mut valeur).await?;
+    Ok(Json(valeur))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListeReferences {
+    pub references: Vec<String>,
+}
+
+/// `PUT /api/inventaires/{id}/references` — VALIDER LA LISTE d'un tournant ou d'un
+/// cible en brouillon, avant ses lignes, puis les preparer (2026-10-24b). La liste
+/// remplace la precedente ; une fois les lignes preparees, elle est figee.
+pub async fn choisir_references_inventaire(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(id): Path<String>,
+    Json(l): Json<ListeReferences>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::INVENTAIRE, Action::Ecrire).await?;
+    let mut tx = state.db.begin().await?;
+    user.poser_contexte(&mut tx).await?;
+    let r = crate::domain::inventaire::choisir_references(&mut tx, &user.id, &id, &l.references).await?;
+    let magasin: String = sqlx::query_scalar("SELECT code_magasin FROM inventaire WHERE id_inventaire = $1")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
+    // Ce qui etait en route et touche desormais le gel : un avis, pas un blocage.
+    let avis = documents_en_route(&mut tx, &id, &magasin).await?;
+    tx.commit().await?;
+    Ok(Json(json!({
+        "id_inventaire": id,
+        "references_choisies": r.references_choisies,
+        "lignes_a_compter": r.lignes_a_compter,
+        "avis": avis,
+    })))
+}
+
 /// `GET /api/inventaires/{id}` — l'en-tete d'un inventaire, pour sa page.
 pub async fn lire_inventaire(
     State(state): State<AppState>,
@@ -198,10 +339,13 @@ pub async fn lire_inventaire(
                 (SELECT COUNT(*) FROM ligne_inventaire l
                   WHERE l.id_inventaire = i.id_inventaire AND l.statut_ligne = 'A_TRAITER') AS nb_a_compter,
                 EXISTS (SELECT 1 FROM ligne_inventaire l
-                         WHERE l.id_inventaire = i.id_inventaire AND l.id_utilisateur_comptage = $2) AS j_ai_compte
+                         WHERE l.id_inventaire = i.id_inventaire AND l.id_utilisateur_comptage = $2) AS j_ai_compte,
+                (SELECT COUNT(*) FROM inventaire_reference s WHERE s.id_inventaire = i.id_inventaire) AS nb_references,
+                us.login AS selection_par
            FROM inventaire i
            LEFT JOIN utilisateur u ON u.id_utilisateur = i.id_utilisateur_responsable
            LEFT JOIN utilisateur v ON v.id_utilisateur = i.id_utilisateur_validation
+           LEFT JOIN utilisateur us ON us.id_utilisateur = i.id_utilisateur_selection
            LEFT JOIN magasin mg ON mg.code_magasin = i.code_magasin
           WHERE i.id_inventaire = $1",
     )
@@ -418,6 +562,28 @@ pub async fn saisir_comptage(
         // cloture l'ajuste comme les autres, et le lot entre au stock par lot.
         // Seulement pour une reference suivie, dans le magasin de l'inventaire.
         let lot_saisi = c.lot_fournisseur.as_deref().map(str::trim).filter(|l| !l.is_empty());
+        // UNE REFERENCE HORS DE LA LISTE d'un tournant ou d'un cible (2026-10-24b) :
+        // refusee, dite clairement — l'inventaire ne compte que ce qu'il a choisi.
+        // La base le garde aussi (INV-SELECTION sur `ligne_inventaire`).
+        if res.rows_affected() == 0 {
+            let hors_liste: Option<(String, String)> = sqlx::query_as(
+                "SELECT i.numero_inventaire, i.type_inventaire FROM inventaire i
+                  WHERE i.id_inventaire = $1 AND i.type_inventaire IN ('TOURNANT', 'CIBLE')
+                    AND NOT EXISTS (SELECT 1 FROM inventaire_reference s
+                                     WHERE s.id_inventaire = i.id_inventaire AND s.code_reference = $2)",
+            )
+            .bind(&id)
+            .bind(&c.code_reference)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some((numero, type_inv)) = hors_liste {
+                return Err(AppError::RegleMetier(format!(
+                    "INV-SELECTION : la référence {} n'est pas dans la liste de l'inventaire {numero} ({}) : il ne compte que les références choisies. Comptez-la dans un autre inventaire.",
+                    c.code_reference,
+                    if type_inv == "TOURNANT" { "tournant" } else { "ciblé" }
+                )));
+            }
+        }
         if res.rows_affected() == 0 {
             if let Some(lot) = lot_saisi {
                 let admis: bool = sqlx::query_scalar(

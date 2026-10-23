@@ -972,7 +972,7 @@ export const SUJETS: Sujet[] = [
       {
         titre: 'Mener un inventaire',
         etapes: [
-          'Nouvel inventaire : choisissez le magasin et le type. Les lignes à compter se préparent tout de suite (la photo du stock).',
+          'Nouvel inventaire : choisissez le magasin et le type. Global : les lignes à compter se préparent tout de suite (la photo du stock). Tournant ou ciblé : composez d’abord sa liste (procédure suivante), puis « Valider la liste et créer ».',
           'L’inventaire s’ouvre sur sa page : l’en-tête en haut, les lignes de comptage en dessous. Imprimez la feuille de comptage si besoin.',
           'Brouillon : saisissez les quantités comptées dans le tableau — une allée entière — puis « Enregistrer le comptage ».',
           'Relisez les écarts ; au-delà de la tolérance, un motif est obligatoire.',
@@ -980,6 +980,16 @@ export const SUJETS: Sujet[] = [
           'Clôturer et ajuster : les écarts passent au stock en mouvements d’ajustement.',
         ],
         resultat: 'Le stock théorique rejoint le stock réel, et l’ajustement laisse une trace au grand livre.',
+      },
+      {
+        titre: 'Composer la liste d’un tournant ou d’un ciblé',
+        etapes: [
+          'Ciblé : ajoutez les références à compter par recherche (code ou désignation), ou une famille / une catégorie entière (ses références qui ont du stock dans ce magasin) ; retirez celles qui ne servent pas (✕).',
+          'Tournant : la liste arrive PROPOSÉE — les références en stock dues selon leur classe ABC (jamais comptées dans ce magasin, ou pas depuis 30 jours pour A, 90 pour B, 180 pour C ou sans classe). Retirez, ajoutez par recherche ; « Reprendre la proposition » revient au calcul.',
+          '« Valider la liste et créer » (ou, sur un inventaire encore sans ligne, « Valider la liste et préparer les lignes ») : seules ces références ont des lignes, et seules elles sont gelées.',
+          'Une fois les lignes préparées, la liste est figée : pour compter une autre liste, annulez l’inventaire et créez-en un autre.',
+        ],
+        resultat: 'Le comptage porte sur la liste validée ; le reste du magasin continue de vivre.',
       },
       {
         titre: 'Recompter après validation',
@@ -1001,7 +1011,9 @@ export const SUJETS: Sujet[] = [
     ],
     regles: [
       'Les références sous suivi de lot se comptent AU LOT, pas en total abstrait.',
-      'Pendant l’inventaire, ce qu’il compte est gelé (la base refuse le mouvement) : tout le magasin pour un global ; pour un tournant ou un ciblé, ses seules références (un tournant ou un ciblé encore sans ligne gèle tout le magasin). Seuls passent les ajustements de sa clôture.',
+      'Pendant l’inventaire, ce qu’il compte est gelé (la base refuse le mouvement) : tout le magasin pour un global ; pour un tournant ou un ciblé, les seules références de sa liste (un tournant ou un ciblé encore sans référence choisie gèle tout le magasin). Seuls passent les ajustements de sa clôture.',
+      'Un tournant ou un ciblé ne se prépare pas et ne se valide pas sans liste ; une référence hors de sa liste trouvée au comptage est refusée (même un lot trouvé) : comptez-la dans un autre inventaire.',
+      'Les périodes du tournant sont des paramètres : P_ComptageTournantA, P_ComptageTournantB, P_ComptageTournantC (jours). La classe est celle de la fiche article (classification ABC) ; sans classe, la référence est traitée comme C. Le dernier comptage est la dernière ligne comptée de la référence dans un inventaire clôturé du magasin.',
       'Des bobines comptées sans pesée se convertissent au poids d’une bobine de leur lot, sinon de la fiche article ; sans aucun poids, il faut saisir les kilos.',
       'Un seul inventaire ouvert (brouillon ou validé) par magasin ; le contrôle C44 signale une base qui en porte deux.',
       'Celui qui a compté ne valide pas (l’Administrateur dispensé) : la base le refuse.',

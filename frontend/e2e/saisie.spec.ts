@@ -48,6 +48,18 @@ async function choisirOption(liste: Locator, motif: RegExp) {
   await liste.selectOption({ label: libelle! })
 }
 
+/** Ajoute une reference a la liste d'un inventaire tournant ou cible, par recherche (2026-10-24b). */
+async function ajouterALaListe(page: Page, ref: string) {
+  if (await page.getByRole('button', { name: `Retirer ${ref}`, exact: true }).count()) return
+  const champ = page.getByRole('combobox', { name: 'Ajouter une référence à compter' })
+  await champ.click()
+  await champ.pressSequentially(ref, { delay: 20 })
+  const option = page.getByRole('listbox').getByRole('option').filter({ hasText: ref }).first()
+  await expect(option).toBeVisible({ timeout: 15_000 })
+  await option.click()
+  await expect(page.getByRole('button', { name: `Retirer ${ref}`, exact: true })).toBeVisible()
+}
+
 /** La premiere proposition de la liste deroulante « Référence de la ligne ». */
 async function choisirReference(page: Page, motif: string) {
   const ref = page.getByRole('combobox', { name: 'Référence de la ligne' }).last()
@@ -475,7 +487,11 @@ test('inventaire : Choukri compte Polyfashions (−2,25 kg justifié), Mohamed v
   await page.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
   await page.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption('Polyfashions')
   await page.getByRole('combobox', { name: /^Type/ }).last().selectOption('TOURNANT')
-  await page.getByRole('button', { name: /^Cr[ée]er$/ }).click()
+  // LA LISTE DU TOURNANT (2026-10-24b) : la proposition arrive ; notre reference s'y ajoute par
+  // recherche si elle n'est pas due, et la liste se valide avec la creation.
+  await expect(page.getByText(/Proposition : \d+ référence/)).toBeVisible({ timeout: 15_000 })
+  await ajouterALaListe(page, refRecue)
+  await page.getByRole('button', { name: /^Valider la liste et cr[ée]er$/ }).click()
   // L'inventaire cree s'ouvre sur SA page (13/10/2026), ses lignes deja preparees.
   await expect(page).toHaveURL(/\/inventaires\/[0-9a-f-]{36}$/)
   const inv = { id_inventaire: page.url().split('/').pop()! }
@@ -528,6 +544,44 @@ test('inventaire : Choukri compte Polyfashions (−2,25 kg justifié), Mohamed v
   await expect.poll(totalRef).toBeCloseTo(avant - 2.25, 4)
   expect(autre.veille.erreurs).toEqual([])
   await autre.page.context().close()
+  await page.context().close()
+})
+
+test('inventaire ciblé : Choukri choisit une famille et une référence, la liste fait les lignes, puis l’annule', async ({ browser }, info) => {
+  test.skip(!refRecue, 'pas de référence reçue')
+  const { page, veille } = await session(browser, info, 'Choukri')
+  await page.goto('/inventaires')
+  await page.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
+  await page.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption('Morocco')
+  await page.getByRole('combobox', { name: /^Type/ }).last().selectOption('CIBLE')
+  // Sans liste, pas de creation.
+  await expect(page.getByRole('button', { name: /^Valider la liste et cr[ée]er$/ })).toBeDisabled()
+  // Une famille entiere (la premiere qui a du stock ici), puis une reference par recherche.
+  const famille = page.getByRole('combobox', { name: 'Famille à ajouter' })
+  await expect.poll(async () => famille.locator('option').count(), { timeout: 15_000 }).toBeGreaterThan(1)
+  await famille.selectOption({ index: 1 })
+  await page.getByRole('button', { name: 'Ajouter la famille' }).click()
+  await ajouterALaListe(page, refRecue)
+  const retirer = page.getByRole('button', { name: /^Retirer / })
+  const choisies = (await retirer.evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')!.replace('Retirer ', ''))))
+  expect(choisies, 'la liste du ciblé').toContain(refRecue)
+  consigner(info, 'saisie : liste d’un inventaire ciblé', [...veille.constats, ...(await mesurer(page))])
+  await page.getByRole('button', { name: /^Valider la liste et cr[ée]er$/ }).click()
+  await expect(page).toHaveURL(/\/inventaires\/[0-9a-f-]{36}$/)
+  const id = page.url().split('/').pop()!
+  // Relu au serveur : la liste est celle de l'ecran, les lignes n'en sortent pas.
+  const liste = await lireApi<{ code_reference: string }[]>(page, `/api/inventaires/${id}/references`)
+  expect(liste.map((r) => r.code_reference).sort()).toEqual([...choisies].sort())
+  const lignes = await lireApi<{ code_reference: string }[]>(page, `/api/inventaires/${id}/lignes`)
+  expect(lignes.length, 'aucune ligne préparée').toBeGreaterThan(0)
+  expect(lignes.filter((l) => !choisies.includes(l.code_reference)), 'ligne hors de la liste').toEqual([])
+  await expect(page.getByText(/Références choisies \(\d+\)/)).toBeVisible()
+  // Annule : le magasin se libere pour la suite.
+  await page.getByRole('button', { name: 'Annuler', exact: true }).first().click()
+  await saisir(page.locator('#motif-action'), 'Essai de liste ciblée (e2e)')
+  await page.getByRole('dialog').getByRole('button', { name: /^Annuler l.inventaire$/ }).click()
+  await expect.poll(async () => (await lireApi<{ statut: string }>(page, `/api/inventaires/${id}`)).statut).toBe('ANNULE')
+  expect(veille.erreurs).toEqual([])
   await page.context().close()
 })
 

@@ -1277,7 +1277,15 @@ async function inventorier(e: Extract<Evenement, { type: 'INVENTAIRE' }>) {
     await p.getByRole('button', { name: 'Nouvel inventaire' }).first().click()
     await p.getByRole('combobox', { name: 'Magasin *', exact: true }).selectOption(e.magasin)
     await p.locator('#type').selectOption('TOURNANT')
-    await p.getByRole('button', { name: /^Cr[ée]er$/ }).click()
+    // LA LISTE DU TOURNANT (2026-10-24b) : la proposition selon la classe ABC, validee telle
+    // quelle ; vide (tout compte recemment), la premiere categorie en stock la remplace.
+    await expect(p.getByText(/Proposition : \d+ référence/)).toBeVisible({ timeout: 30_000 })
+    const creer = p.getByRole('button', { name: /^Valider la liste et cr[ée]er$/ })
+    if (await creer.isDisabled()) {
+      await p.getByRole('combobox', { name: 'Catégorie à ajouter' }).selectOption({ index: 1 })
+      await p.getByRole('button', { name: 'Ajouter la catégorie' }).click()
+    }
+    await creer.click()
     inv = (await attendre(ouverts, (l) => l.some((i) => i.statut === 'BROUILLON'), 'création de l’inventaire')).find((i) => i.statut === 'BROUILLON')!
   }
   const valideur = await session('Mohamed')

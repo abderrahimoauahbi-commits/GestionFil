@@ -1132,10 +1132,11 @@ def scenario_inventaire_gel(c, infra):
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{fiche}/valider", {})
     verifier(abs(kg(infra, REF, M) - (stock_m - 5 + 50 + 30 - 10)) < 1e-6, f"apres cloture : {kg(infra, REF, M)}")
 
-    # --- UN CIBLE NE GELE QUE SES REFERENCES (2026-10-24a) : celles de ses lignes, le stock existant
-    #     de P. REF (en stock) est gelee ; REF2, sans stock dans P, n'est pas comptee : elle entre.
+    # --- UN CIBLE NE GELE QUE SES REFERENCES (2026-10-24a) : celles de SA LISTE (2026-10-24b).
+    #     REF (choisie) est gelee ; REF2, non choisie, entre librement.
     c65_avant = controle(infra, "C65")
-    inv2 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE"})
+    inv2 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE",
+                                                         "references": [REF]})
     iid2, num2 = inv2["id_inventaire"], inv2["numero_inventaire"]
     try:
         refs2 = {l[0] for l in infra.sql(f"SELECT DISTINCT code_reference FROM ligne_inventaire WHERE id_inventaire = '{iid2}'")}
@@ -1173,12 +1174,13 @@ def scenario_inventaire_gel(c, infra):
                         motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
     verifier(code == 200, f"sortie apres la cloture du cible refusee : {code} {r}")
 
-    # --- L'annulation degele aussi.
+    # --- Un tournant SANS LISTE gele tout le magasin (defaut prudent, 2026-10-24b) ; l'annulation degele.
     inv3 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "TOURNANT"})
     try:
-        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF2, 1)], mag=P,
                             motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
-        verifier(code == 422 and inv3["numero_inventaire"] in str(r) and REF in str(r), f"sortie sur P gele : {code} {r}")
+        verifier(code == 422 and inv3["numero_inventaire"] in str(r) and "sans référence choisie" in str(r),
+                 f"sortie sur P gele par un tournant sans liste : {code} {r}")
     finally:
         c.ok("Choukri", "POST", f"/api/inventaires/{inv3['id_inventaire']}/annuler", {"motif": "Fin du banc du gel"})
     code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
@@ -1203,7 +1205,8 @@ def scenario_inventaire_poids_lot(c, infra):
     c.ok("Choukri", "POST", "/api/lots/conditionnement", {
         "code_reference": ref, "lot_fournisseur": lot, "poids_bobine_kg": poids_lot,
         "motif": "Pesee du lot pour le banc de l'inventaire"})
-    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE"})
+    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE",
+                                                        "references": [ref]})
     iid = inv["id_inventaire"]
     try:
         theo = infra.valeur("SELECT poids_unitaire_theorique_kg FROM ligne_inventaire "
@@ -1228,6 +1231,207 @@ def scenario_inventaire_poids_lot(c, infra):
             {"code_reference": ref, "code_magasin": P, "lot_fournisseur": lot}]}, codes=(400,), contient="bobines")
     finally:
         c.ok("Choukri", "POST", f"/api/inventaires/{iid}/annuler", {"motif": "Fin du banc du poids du lot"})
+
+
+def compter_au_theorique(c, iid, mag):
+    """Compte toutes les lignes d'un inventaire a leur theorique (par la Magasiniere)."""
+    lignes = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}/lignes")
+    c.ok("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": [
+        {"code_reference": l["code_reference"], "code_magasin": mag, "lot_fournisseur": l.get("lot_fournisseur"),
+         "quantite_comptee_kg": float(l["quantite_theorique_kg"] or 0)} for l in lignes]})
+    return lignes
+
+
+def scenario_inventaire_cible_liste(c, infra):
+    """UN CIBLE COMPTE LES REFERENCES CHOISIES (decision du 23/10/2026, 2026-10-24b). Sans liste : aucune
+    ligne ne se prepare, il ne se valide pas, la base refuse une ligne greffee, et il gele tout le magasin.
+    Avec deux references choisies : deux lignes seulement, le gel ne porte que sur elles (une troisieme
+    reference du magasin sort librement), une reference non choisie est refusee au comptage (sans lot
+    comme lot trouve), la liste est figee une fois les lignes preparees, un global ne prend pas de
+    liste. A la cloture, la date du dernier inventaire ne se pose que sur les references comptees."""
+    P = "Polyfashions"
+    # (Pas PLA 80 CHE : cmup_chiffre la veut sans stock.)
+    a, b, libre = "PLA 65 CHE", "PLA 45 EXT", "PLA 140 CHE"
+    ref_lot = "PP-1500 Dtex-L.Beige 44377-Hs"
+    for r, frs in ((a, FRS), (b, "FRS-012"), (libre, FRS)):
+        id_bc, lignes = bon_envoye(c, [(r, 50, 20.0)], frs=frs)
+        reception_validee(c, id_bc, lignes, [50], mag=P)
+
+    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE"})
+    iid, num = inv["id_inventaire"], inv["numero_inventaire"]
+    try:
+        verifier(inv["lignes_a_compter"] == 0 and any("aucune référence choisie" in x for x in inv.get("avis", [])),
+                 f"un cible sans liste a des lignes, ou ne le dit pas : {inv}")
+        # Sans liste : rien ne se prepare, rien ne se valide, la base refuse une ligne.
+        c.refus("Choukri", "POST", f"/api/inventaires/{iid}/preparer", codes=(422,), contient="aucune référence choisie")
+        c.refus("Choukri", "PUT", f"/api/inventaires/{iid}/references", {"references": []},
+                codes=(422,), contient="au moins une référence")
+        refus_sql(infra, "INSERT INTO ligne_inventaire (id_inventaire, code_reference, code_magasin, quantite_theorique_kg) "
+                         f"VALUES ('{iid}', '{a}', '{P}', 0)", "choisissez et validez sa liste")
+        # (refus_sql : un fragment sans accent, la sortie de psql n'est pas lue en UTF-8.)
+        refus_sql(infra, f"UPDATE inventaire SET statut = 'VALIDE' WHERE id_inventaire = '{iid}'",
+                  "il ne se valide pas")
+        # Sans liste, le defaut prudent : tout le magasin est gele.
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(libre, 1)], mag=P,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 422 and num in str(r) and "sans référence choisie" in str(r),
+                 f"un cible sans liste ne gele pas tout le magasin : {code} {r}")
+
+        # La liste : deux references (doublon ignore), une reference inconnue refusee d'abord.
+        c.refus("Choukri", "PUT", f"/api/inventaires/{iid}/references", {"references": [a, "REF-INCONNUE-BANC"]},
+                codes=(400,), contient="REF-INCONNUE-BANC")
+        r = c.ok("Choukri", "PUT", f"/api/inventaires/{iid}/references", {"references": [a, b, a]})
+        verifier(r["references_choisies"] == 2 and r["lignes_a_compter"] == 2, f"liste du cible : {r}")
+        refs = sorted(l[0] for l in infra.sql(f"SELECT code_reference FROM ligne_inventaire WHERE id_inventaire = '{iid}'"))
+        verifier(refs == sorted([a, b]), f"lignes du cible : {refs}")
+        sel = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}/references")
+        verifier(sorted(x["code_reference"] for x in sel) == sorted([a, b])
+                 and all(x["origine"] == "CHOIX" for x in sel), f"liste lue : {sel}")
+        tete = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}")
+        verifier(tete["nb_references"] == 2 and tete["selection_par"] == "Choukri" and tete["date_selection"],
+                 f"en-tete sans la liste : {tete}")
+        # Figee une fois les lignes preparees, en base comme a l'API.
+        c.refus("Choukri", "PUT", f"/api/inventaires/{iid}/references", {"references": [a, b, libre]},
+                codes=(422,), contient="figée")
+        refus_sql(infra, "INSERT INTO inventaire_reference (id_inventaire, code_reference, origine) "
+                         f"VALUES ('{iid}', '{libre}', 'CHOIX')", "est fig")
+
+        # Le gel : les deux references, pas la troisieme.
+        ouverts = c.ok("Magasinie", "GET", "/api/inventaires/ouverts")
+        o = next((x for x in ouverts if x["numero_inventaire"] == num), None)
+        verifier(o is not None and o["etendue_gel"] == "REFERENCES" and sorted(o["references_gelees"]) == sorted([a, b]),
+                 f"gel du cible : {o}")
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(libre, 1)], mag=P,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 200, f"la reference non choisie ne sort pas : {code} {r}")
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(a, 1)], mag=P,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 422 and a in str(r) and num in str(r), f"la reference choisie sort : {code} {r}")
+
+        # Une reference non choisie trouvee au comptage : refusee, sans lot comme lot trouve.
+        c.refus("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": [
+            {"code_reference": libre, "code_magasin": P, "quantite_comptee_kg": 5}]},
+            codes=(422,), contient="pas dans la liste")
+        c.refus("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": [
+            {"code_reference": ref_lot, "code_magasin": P, "lot_fournisseur": "LOT-HORS-LISTE",
+             "quantite_comptee_kg": 5}]}, codes=(422,), contient="pas dans la liste")
+        refus_sql(infra, "INSERT INTO ligne_inventaire (id_inventaire, code_reference, code_magasin, quantite_theorique_kg) "
+                         f"VALUES ('{iid}', '{libre}', '{P}', 0)", "pas dans la liste")
+
+        # Comptage, validation, cloture.
+        compter_au_theorique(c, iid, P)
+        c.ok("Choukri", "POST", f"/api/inventaires/{iid}/valider")
+        c.ok("Choukri", "POST", f"/api/inventaires/{iid}/cloturer")
+        dates = dict(infra.sql("SELECT code_reference, COALESCE(date_dernier_inventaire::text, '') FROM stock_magasin "
+                               f"WHERE code_magasin = '{P}' AND code_reference IN ('{a}', '{b}', '{libre}')"))
+        verifier(dates[a] and dates[b] and dates[libre] < dates[a],
+                 f"date du dernier inventaire posee hors des references comptees : {dates}")
+    finally:
+        if infra.valeur(f"SELECT statut FROM inventaire WHERE id_inventaire = '{iid}'") in ("BROUILLON", "VALIDE"):
+            c.appel("Choukri", "POST", f"/api/inventaires/{iid}/annuler", {"motif": "Fin du banc du cible (echec)"})
+
+    # Un global ne prend pas de liste : a la creation, ni en base.
+    c.refus("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "GLOBAL",
+                                                    "references": [a]}, codes=(400,), contient="global")
+    glob = infra.valeur("SELECT id_inventaire FROM inventaire WHERE type_inventaire = 'GLOBAL' LIMIT 1")
+    if glob is None:  # le scenario joue seul : un global, annule aussitot
+        glob = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "GLOBAL"})["id_inventaire"]
+        c.ok("Choukri", "POST", f"/api/inventaires/{glob}/annuler", {"motif": "Global du banc du cible"})
+    refus_sql(infra, "INSERT INTO inventaire_reference (id_inventaire, code_reference, origine) "
+                     f"VALUES ('{glob}', '{a}', 'CHOIX')", "global")
+    verifier(not c.ok("Magasinie", "GET", "/api/inventaires/ouverts"), "un inventaire reste ouvert apres le banc du cible")
+
+
+def scenario_inventaire_tournant_abc(c, infra):
+    """LE TOURNANT PROPOSE SELON LA CLASSE ABC (decision du 23/10/2026, 2026-10-24b). Une reference en stock
+    est due si elle n'a jamais ete comptee dans le magasin, ou depuis au moins P_ComptageTournantA / B / C
+    jours selon sa classe (sans classe : C). Les parametres sont respectes (A et C a 0 jour : comptees
+    aujourd'hui, elles sont dues ; B a 90 : non). La proposition se retouche (retirer, ajouter), puis se
+    valide : rien n'est prepare avant, et la liste validee fait les lignes et le gel."""
+    M = MAG
+    ra, rb, rsans, rjamais = "PLA 140 CHE", "PLA 35 CHE", "PLA 45 CHE", "PLA 35 EXT"
+    for r in (ra, rb, rsans):
+        entree_stock(c, r, 40, mag=M)
+    infra.sql(f"UPDATE reference SET classe_abc = 'A' WHERE code_reference = '{ra}'")
+    infra.sql(f"UPDATE reference SET classe_abc = 'B' WHERE code_reference = '{rb}'")
+    infra.sql(f"UPDATE reference SET classe_abc = NULL WHERE code_reference = '{rsans}'")
+    # Les trois comptees aujourd'hui (un cible), puis une quatrieme entre en stock sans comptage.
+    cib = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": M, "type_inventaire": "CIBLE",
+                                                        "references": [ra, rb, rsans]})
+    compter_au_theorique(c, cib["id_inventaire"], M)
+    c.ok("Choukri", "POST", f"/api/inventaires/{cib['id_inventaire']}/valider")
+    c.ok("Choukri", "POST", f"/api/inventaires/{cib['id_inventaire']}/cloturer")
+    id_bc, lignes = bon_envoye(c, [(rjamais, 30, 20.0)], frs="FRS-012")
+    reception_validee(c, id_bc, lignes, [30], mag=M)
+    jamais_compte = infra.valeur(
+        "SELECT count(*) FROM ligne_inventaire li JOIN inventaire i ON i.id_inventaire = li.id_inventaire "
+        f"WHERE i.statut = 'CLOTURE' AND i.code_magasin = '{M}' AND li.code_reference = '{rjamais}' "
+        "AND li.quantite_comptee_kg IS NOT NULL") == "0"
+
+    def periode(classe, jours, motif):
+        code = f"P_ComptageTournant{classe}"
+        c.ok("Choukri", "PATCH", f"/api/parametres/{code}",
+             V(infra, "parametre", "code_parametre", code, {"valeur_courante": str(jours), "motif": motif}))
+
+    def cand():
+        r = c.ok("Magasinie", "GET", f"/api/inventaires/candidats?magasin={urllib.parse.quote(M)}")
+        return r["periodes"], {x["code_reference"]: x for x in r["candidats"]}
+
+    # Les defauts : comptees aujourd'hui, aucune n'est due.
+    per, cs = cand()
+    verifier(per == {"A": 30, "B": 90, "C": 180}, f"periodes par defaut : {per}")
+    verifier(all(not cs[r]["du"] for r in (ra, rb, rsans)),
+             f"comptees aujourd'hui mais dues : {[cs[r] for r in (ra, rb, rsans)]}")
+    verifier(cs[rsans]["sans_classe"] and cs[rsans]["classe_retenue"] == "C" and cs[rsans]["periode_jours"] == 180,
+             f"sans classe, pas traitee comme C : {cs[rsans]}")
+    if jamais_compte:
+        verifier(cs[rjamais]["du"] and cs[rjamais]["dernier_comptage"] is None, f"jamais comptee, pas due : {cs[rjamais]}")
+
+    inv = None
+    try:
+        periode("A", 0, "Banc : classe A due chaque jour")
+        periode("C", 0, "Banc : classe C due chaque jour")
+        per, cs = cand()
+        verifier(per == {"A": 0, "B": 90, "C": 0}, f"periodes lues : {per}")
+        verifier(cs[ra]["du"] and not cs[rb]["du"] and cs[rsans]["du"],
+                 f"proposition hors des parametres : A {cs[ra]['du']}, B {cs[rb]['du']}, sans classe {cs[rsans]['du']}")
+        verifier(cs[ra]["jours_depuis"] == 0 and cs[rb]["periode_jours"] == 90, f"jours : {cs[ra]}, {cs[rb]}")
+
+        # Le tournant nait sans liste : rien n'est prepare avant la validation de la proposition.
+        inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": M, "type_inventaire": "TOURNANT"})
+        iid = inv["id_inventaire"]
+        verifier(inv["lignes_a_compter"] == 0, f"tournant prepare sans liste validee : {inv}")
+        c.refus("Choukri", "POST", f"/api/inventaires/{iid}/preparer", codes=(422,), contient="aucune référence choisie")
+        # La proposition retouchee : sans la reference jamais comptee, avec la B ajoutee a la main.
+        proposees = [r for r, x in cs.items() if x["du"]]
+        verifier(ra in proposees and rsans in proposees and rb not in proposees, f"proposition : {proposees}")
+        liste = [r for r in proposees if r != rjamais] + [rb]
+        r = c.ok("Choukri", "PUT", f"/api/inventaires/{iid}/references", {"references": liste})
+        verifier(r["references_choisies"] == len(liste) and r["lignes_a_compter"] > 0, f"liste du tournant : {r}")
+        origines = dict(infra.sql(f"SELECT code_reference, origine FROM inventaire_reference WHERE id_inventaire = '{iid}'"))
+        verifier(origines.get(ra) == "PROPOSITION" and origines.get(rsans) == "PROPOSITION"
+                 and origines.get(rb) == "CHOIX" and rjamais not in origines, f"origines : {origines}")
+        classe = infra.valeur(f"SELECT classe_abc FROM inventaire_reference WHERE id_inventaire = '{iid}' "
+                              f"AND code_reference = '{ra}'")
+        verifier(classe == "A", f"classe notee au choix : {classe}")
+        hors = infra.valeur("SELECT count(*) FROM ligne_inventaire li WHERE li.id_inventaire = "
+                            f"'{iid}' AND NOT EXISTS (SELECT 1 FROM inventaire_reference s "
+                            "WHERE s.id_inventaire = li.id_inventaire AND s.code_reference = li.code_reference)")
+        verifier(hors == "0", f"{hors} ligne(s) hors de la liste")
+        # Le gel suit la liste : la reference retiree sort, l'ajoutee non.
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(rjamais, 1)], mag=M,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 200, f"la reference retiree de la proposition ne sort pas : {code} {r}")
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(rb, 1)], mag=M,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 422 and rb in str(r), f"la reference ajoutee n'est pas gelee : {code} {r}")
+    finally:
+        if inv and infra.valeur(f"SELECT statut FROM inventaire WHERE id_inventaire = '{inv['id_inventaire']}'") \
+                in ("BROUILLON", "VALIDE"):
+            c.ok("Choukri", "POST", f"/api/inventaires/{inv['id_inventaire']}/annuler", {"motif": "Fin du banc du tournant"})
+        periode("A", 30, "Banc : retour au defaut")
+        periode("C", 180, "Banc : retour au defaut")
+    verifier(not c.ok("Magasinie", "GET", "/api/inventaires/ouverts"), "un inventaire reste ouvert apres le banc du tournant")
 
 
 def scenario_colisage_signale(c, infra):
@@ -4472,6 +4676,8 @@ SCENARIOS = [
     scenario_inventaire,
     scenario_inventaire_gel,
     scenario_inventaire_poids_lot,
+    scenario_inventaire_cible_liste,
+    scenario_inventaire_tournant_abc,
     scenario_colisage_signale,
     scenario_verrou_optimiste,
     scenario_verrou_import,

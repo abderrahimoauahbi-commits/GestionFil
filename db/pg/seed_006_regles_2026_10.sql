@@ -28,7 +28,14 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
    'Au-dela, un dechet saisi a la main demande le droit de valider l''inventaire, comme un ajustement negatif.', 'STOCK', 'DIRECTION'),
   -- 22/10/2026 (migration 2026-10-22b) : le signal C61.
   ('P_EcartOfPct', 'OF : ecart reel / prevu signale', '15', 'DECIMAL', '%',
-   'Un OF cloture dont la consommation reelle s''ecarte du prevu (metrage x recette) de plus de ce pourcentage est signale (C61). Signal seulement.', 'PROD', 'DIRECTION')
+   'Un OF cloture dont la consommation reelle s''ecarte du prevu (metrage x recette) de plus de ce pourcentage est signale (C61). Signal seulement.', 'PROD', 'DIRECTION'),
+  -- 23/10/2026 (migration 2026-10-24b) : la proposition de l'inventaire tournant, par classe ABC.
+  ('P_ComptageTournantA', 'Inventaire tournant : classe A comptee tous les', '30', 'ENTIER', 'jours',
+   'Une reference de classe A en stock est proposee au tournant si elle n''a pas ete comptee dans ce magasin depuis ce nombre de jours (ou jamais).', 'STOCK', 'DIRECTION'),
+  ('P_ComptageTournantB', 'Inventaire tournant : classe B comptee tous les', '90', 'ENTIER', 'jours',
+   'Une reference de classe B en stock est proposee au tournant si elle n''a pas ete comptee dans ce magasin depuis ce nombre de jours (ou jamais).', 'STOCK', 'DIRECTION'),
+  ('P_ComptageTournantC', 'Inventaire tournant : classe C comptee tous les', '180', 'ENTIER', 'jours',
+   'Une reference de classe C - ou sans classe ABC - en stock est proposee au tournant si elle n''a pas ete comptee dans ce magasin depuis ce nombre de jours (ou jamais).', 'STOCK', 'DIRECTION')
 ON CONFLICT (code_parametre) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

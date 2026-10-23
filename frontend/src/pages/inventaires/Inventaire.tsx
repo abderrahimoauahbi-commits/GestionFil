@@ -9,10 +9,15 @@
  *              touché le stock ; « Renvoyer au comptage » le rouvre, motif à
  *              l'appui ;
  *   CLÔTURÉ    droit Valider : les écarts passent au stock.
+ *
+ * UN TOURNANT OU UN CIBLÉ COMPTE SA LISTE (23/10/2026, 2026-10-24b) : choisie
+ * (ciblé) ou proposée selon la classe ABC puis retouchée (tournant), et VALIDÉE
+ * avant la préparation des lignes — à la création, ou ici tant que
+ * l'inventaire n'a aucune ligne (`selection.tsx`). Ensuite elle est figée.
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ClipboardCheck, ClipboardList, Printer, RotateCcw, Save, ShieldCheck, Undo2, XCircle } from 'lucide-react'
+import { ArrowLeft, ClipboardCheck, ClipboardList, ListChecks, Printer, RotateCcw, Save, ShieldCheck, Undo2, XCircle } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
@@ -41,6 +46,14 @@ import {
   type LigneVue,
   type Saisie,
 } from './comptage'
+import {
+  LIBELLE_TYPE,
+  SelectionReferences,
+  empreinteListe,
+  proposition,
+  useCandidats,
+  type Choix,
+} from './selection'
 
 interface EnTeteInventaire {
   id_inventaire: string
@@ -59,12 +72,21 @@ interface EnTeteInventaire {
   nb_lignes: number
   nb_a_compter: number
   j_ai_compte: boolean
+  nb_references?: number
+  date_selection?: string | null
+  selection_par?: string | null
 }
 
-const LIBELLE_TYPE: Record<string, string> = {
-  GLOBAL: 'Global — tout le catalogue',
-  TOURNANT: 'Tournant — le stock existant',
-  CIBLE: 'Ciblé — le stock existant',
+/** Une référence de la liste enregistrée (`GET /api/inventaires/{id}/references`). */
+interface ReferenceChoisie extends Choix {
+  origine: 'PROPOSITION' | 'CHOIX' | 'REPRISE'
+  ajoute_par: string | null
+}
+
+const LIBELLE_ORIGINE: Record<string, string> = {
+  PROPOSITION: 'proposée',
+  CHOIX: 'ajoutée',
+  REPRISE: 'reprise des lignes',
 }
 
 const echec = (e: unknown) => toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
@@ -104,15 +126,38 @@ function DocumentInventaire({ id }: { id: string }) {
     queryFn: ({ signal }) => api.get<LigneInv[]>(`/api/inventaires/${id}/lignes`, { signal }),
   })
   const inv = qInv.data
+  /** Un tournant ou un ciblé : il compte sa liste (2026-10-24b). */
+  const parListe = !!inv && inv.type_inventaire !== 'GLOBAL'
+  const qSel = useQuery({
+    queryKey: ['inventaire-references', id],
+    enabled: parListe,
+    queryFn: ({ signal }) => api.get<ReferenceChoisie[]>(`/api/inventaires/${id}/references`, { signal }),
+  })
 
   const rafraichir = () => {
     void qc.invalidateQueries({ queryKey: ['inventaires'] })
     void qc.invalidateQueries({ queryKey: ['inventaire', id] })
     void qc.invalidateQueries({ queryKey: ['lignes-inventaire', id] })
+    void qc.invalidateQueries({ queryKey: ['inventaire-references', id] })
   }
 
   const brouillonInv = inv?.statut === 'BROUILLON'
   const saisissable = brouillonInv && droits.peutEcrire
+
+  /**
+   * LA LISTE SE CHOISIT ICI tant que le tournant ou le ciblé n'a aucune ligne :
+   * celle du serveur si elle existe, sinon la proposition (tournant) ou rien
+   * (ciblé). Rien n'est enregistré avant « Valider la liste ».
+   */
+  const aChoisir = parListe && brouillonInv && inv?.nb_lignes === 0
+  const qCand = useCandidats(inv?.code_magasin, aChoisir)
+  const [listeLocale, setListeLocale] = useState<Choix[] | null>(null)
+  const listeServeur: Choix[] = qSel.data ?? []
+  const listeDepart: Choix[] =
+    listeServeur.length > 0 ? listeServeur : inv?.type_inventaire === 'TOURNANT' ? proposition(qCand.data) : []
+  const liste = listeLocale ?? listeDepart
+  const listeChangee = listeServeur.length === 0 || empreinteListe(liste) !== empreinteListe(listeServeur)
+  const listeTouchee = aChoisir && listeLocale !== null && empreinteListe(listeLocale) !== empreinteListe(listeDepart)
 
   /** Chaque ligne avec sa saisie courante et ce qu'on en calcule. */
   const vues = useMemo<LigneVue[]>(
@@ -131,7 +176,7 @@ function DocumentInventaire({ id }: { id: string }) {
   )
   const modifiees = vues.filter((v) => v.modifiee)
   const enErreur = modifiees.filter((v) => v.analyse.erreurs.length > 0)
-  const quitter = useGardeSaisie(modifiees.length > 0)
+  const quitter = useGardeSaisie(modifiees.length > 0 || listeTouchee)
 
   /** Lignes enregistrées hors tolérance sans motif : elles bloquent la validation. */
   const injustifiees = (qLignes.data ?? []).filter(
@@ -178,6 +223,22 @@ function DocumentInventaire({ id }: { id: string }) {
     mutationFn: (c: { code_reference: string; code_magasin: string; lot_fournisseur: string; quantite_comptee_kg: number }) =>
       api.put(`/api/inventaires/${id}/lignes`, { comptages: [c] }),
     onSuccess: rafraichir,
+    onError: echec,
+  })
+
+  /** Valider la liste (tournant, ciblé), puis préparer ses lignes : un seul envoi. */
+  const validerListe = useMutation({
+    mutationFn: (codes: string[]) =>
+      api.put<{ references_choisies: number; lignes_a_compter: number; avis?: string[] }>(
+        `/api/inventaires/${id}/references`,
+        { references: codes },
+      ),
+    onSuccess: (r) => {
+      toast.success(`Liste validée : ${r.references_choisies} référence(s), ${r.lignes_a_compter} ligne(s) à compter.`)
+      for (const a of r.avis ?? []) toast.warning(a, { duration: 12000 })
+      setListeLocale(null)
+      rafraichir()
+    },
     onError: echec,
   })
 
@@ -340,6 +401,16 @@ function DocumentInventaire({ id }: { id: string }) {
           />
           <Info libelle="Clôturé le" valeur={inv.date_cloture ? fmt.date(inv.date_cloture) : '—'} />
           <Info libelle="Statut" valeur={LIBELLE_STATUT[inv.statut] ?? inv.statut} />
+          {parListe && (
+            <Info
+              libelle="Liste validée"
+              valeur={
+                inv.date_selection
+                  ? `${inv.nb_references ?? 0} réf. · ${inv.selection_par ?? '—'} · ${fmt.date(inv.date_selection)}`
+                  : 'pas encore'
+              }
+            />
+          )}
         </CarteCorps>
       </Carte>
 
@@ -355,7 +426,7 @@ function DocumentInventaire({ id }: { id: string }) {
           comptage » le rouvre si un recomptage s’impose.
         </Alerte>
       )}
-      {brouillonInv && inv.nb_lignes === 0 && (
+      {brouillonInv && inv.nb_lignes === 0 && !parListe && (
         <Alerte ton="alerte" titre="Lignes à préparer">
           Cet inventaire a été créé avant que ses lignes ne se préparent à la création.{' '}
           {droits.peutEcrire && (
@@ -372,11 +443,86 @@ function DocumentInventaire({ id }: { id: string }) {
         </Alerte>
       )}
 
+      {/* --- La liste d'un tournant ou d'un ciblé (2026-10-24b) --------------- */}
+      {aChoisir && (
+        <Carte>
+          <CarteEntete>
+            <CarteTitre>
+              {inv.type_inventaire === 'TOURNANT' ? 'La proposition à retoucher' : 'Les références à compter'}
+            </CarteTitre>
+          </CarteEntete>
+          <CarteCorps className="space-y-3">
+            {listeServeur.length === 0 ? (
+              <Alerte ton="alerte">
+                Cet inventaire n’a encore aucune référence choisie : <strong>tout le magasin est gelé</strong> jusqu’à
+                la validation de sa liste. Validez-la : seules ses références seront comptées et gelées.
+              </Alerte>
+            ) : (
+              <Alerte ton="info">
+                La liste validée n’a donné aucune ligne (ses lots ne sont pas en stock ici) : retouchez-la et
+                validez-la de nouveau, ou comptez les lots trouvés en rayon.
+              </Alerte>
+            )}
+            <SelectionReferences
+              type={inv.type_inventaire}
+              candidats={qCand.data}
+              chargement={qCand.isLoading || qSel.isLoading}
+              liste={liste}
+              changer={setListeLocale}
+              desactive={!droits.peutEcrire}
+            />
+            {droits.peutEcrire && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Bouton
+                  variante="contour"
+                  disabled={listeLocale === null || validerListe.isPending}
+                  onClick={() => setListeLocale(null)}
+                >
+                  <Undo2 />
+                  Annuler les modifications
+                </Bouton>
+                <Bouton
+                  chargement={validerListe.isPending}
+                  disabled={liste.length === 0 || !listeChangee}
+                  title={liste.length === 0 ? 'Choisissez au moins une référence.' : undefined}
+                  onClick={() => validerListe.mutate(liste.map((c) => c.code_reference))}
+                >
+                  <ListChecks />
+                  Valider la liste et préparer les lignes
+                </Bouton>
+              </div>
+            )}
+          </CarteCorps>
+        </Carte>
+      )}
+      {parListe && !aChoisir && listeServeur.length > 0 && (
+        <details className="rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2 text-[12.5px]">
+          <summary className="cursor-pointer select-none font-medium">
+            Références choisies ({listeServeur.length}) — seules elles sont comptées et gelées
+          </summary>
+          <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Références choisies">
+            {(qSel.data ?? []).map((r) => (
+              <li
+                key={r.code_reference}
+                className="rounded-[var(--radius-sm)] border border-bordure px-1.5 py-0.5 font-mono text-[11.5px]"
+                title={`${r.designation ?? ''} — ${LIBELLE_ORIGINE[r.origine] ?? r.origine}${r.ajoute_par ? ` par ${r.ajoute_par}` : ''}`}
+              >
+                {r.code_reference}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       {/* --- Les lignes ------------------------------------------------------ */}
-      {saisissable && (
+      {saisissable && !aChoisir && (
         <LotTrouve
           magasin={inv.code_magasin}
-          references={[...new Set((qLignes.data ?? []).map((l) => l.code_reference))]}
+          references={
+            parListe
+              ? listeServeur.map((c) => c.code_reference)
+              : [...new Set((qLignes.data ?? []).map((l) => l.code_reference))]
+          }
           enCours={ajouterLot.isPending}
           ajouter={(c) => ajouterLot.mutateAsync({ ...c, code_magasin: inv.code_magasin })}
         />
@@ -493,6 +639,20 @@ function NouvelInventaire() {
   const qc = useQueryClient()
   const droits = useDroits(MODULE)
   const [form, setForm] = useState({ code_magasin: '', type_inventaire: 'GLOBAL' })
+  /** Tournant, ciblé : la liste (null = la proposition du tournant, pas encore retouchée). */
+  const parListe = form.type_inventaire !== 'GLOBAL'
+  const qCand = useCandidats(form.code_magasin, parListe)
+  const [listeLocale, setListeLocale] = useState<Choix[] | null>(null)
+  const listeDepart: Choix[] = form.type_inventaire === 'TOURNANT' ? proposition(qCand.data) : []
+  const liste = listeLocale ?? listeDepart
+  const quitter = useGardeSaisie(
+    parListe && listeLocale !== null && empreinteListe(listeLocale) !== empreinteListe(listeDepart),
+  )
+  /** Changer de magasin ou de type repart de la proposition (ou d'une liste vide). */
+  const changerForm = (f: typeof form) => {
+    setForm(f)
+    setListeLocale(null)
+  }
 
   const qMag = useQuery({
     queryKey: ['magasins'],
@@ -504,7 +664,12 @@ function NouvelInventaire() {
   const [idDocument] = useState(nouvelIdentifiant)
   const creer = useMutation({
     mutationFn: () =>
-      api.post<{ id_inventaire: string; numero_inventaire: string; lignes_a_compter: number; avis?: string[] }>('/api/inventaires', { ...form, id_document: idDocument }),
+      api.post<{ id_inventaire: string; numero_inventaire: string; lignes_a_compter: number; avis?: string[] }>('/api/inventaires', {
+        ...form,
+        id_document: idDocument,
+        // La liste validée par cet envoi (2026-10-24b) ; un global n'en a pas.
+        references: parListe ? liste.map((c) => c.code_reference) : undefined,
+      }),
     onSuccess: (r) => {
       toast.success(`Inventaire ${r.numero_inventaire} créé : ${r.lignes_a_compter} ligne(s) à compter.`)
       /* CE QUI ETAIT EN ROUTE VERS LE MAGASIN, desormais gele (23/10/2026) : un
@@ -522,15 +687,24 @@ function NouvelInventaire() {
     <div className="space-y-4">
       <EnTetePage
         titre="Nouvel inventaire"
-        description="Ses lignes se préparent à la création : la photo du stock du magasin."
+        description={
+          parListe
+            ? 'Ses lignes se préparent à la création, pour les seules références de sa liste.'
+            : 'Ses lignes se préparent à la création : la photo du stock du magasin.'
+        }
         actions={
           <>
-            <Bouton variante="contour" onClick={() => naviguer('/inventaires')}>
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/inventaires'))}>
               <ArrowLeft />
               Inventaires
             </Bouton>
-            <Bouton chargement={creer.isPending} disabled={!form.code_magasin} onClick={() => creer.mutate()}>
-              Créer
+            <Bouton
+              chargement={creer.isPending}
+              disabled={!form.code_magasin || (parListe && liste.length === 0)}
+              title={parListe && form.code_magasin && liste.length === 0 ? 'Choisissez au moins une référence.' : undefined}
+              onClick={() => creer.mutate()}
+            >
+              {parListe ? 'Valider la liste et créer' : 'Créer'}
             </Bouton>
           </>
         }
@@ -538,7 +712,7 @@ function NouvelInventaire() {
       <Alerte ton="alerte">
         Dès la création, ce que l’inventaire compte est gelé jusqu’à sa clôture ou son annulation (sorties,
         réceptions, transferts, fiches machine) : tout le magasin pour un inventaire global ; pour un tournant
-        ou un ciblé, ses seules références — les autres références du magasin bougent librement.
+        ou un ciblé, les seules références de sa liste — les autres références du magasin bougent librement.
       </Alerte>
       <Carte>
         <CarteEntete>
@@ -549,7 +723,7 @@ function NouvelInventaire() {
             <Etiq htmlFor="mag" obligatoire>
               Magasin
             </Etiq>
-            <Selecteur id="mag" value={form.code_magasin} onChange={(e) => setForm({ ...form, code_magasin: e.target.value })}>
+            <Selecteur id="mag" value={form.code_magasin} onChange={(e) => changerForm({ ...form, code_magasin: e.target.value })}>
               <option value="">—</option>
               {qMag.data?.map((m) => (
                 <option key={m.code_magasin} value={m.code_magasin}>
@@ -563,11 +737,12 @@ function NouvelInventaire() {
               Type
               <Aide>
                 Global : toutes les références actives du catalogue, avec un théorique à zéro là où la base ne
-                connaît pas de stock. C’est le seul qui découvre une marchandise ignorée. Tournant et ciblé :
-                seulement les références déjà en stock dans ce magasin.
+                connaît pas de stock. C’est le seul qui découvre une marchandise ignorée. Ciblé : les références
+                que vous choisissez (recherche, famille, catégorie). Tournant : les références dues selon leur
+                classe ABC, proposées puis retouchées. Tournant et ciblé ne comptent et ne gèlent que leur liste.
               </Aide>
             </Etiq>
-            <Selecteur id="type" value={form.type_inventaire} onChange={(e) => setForm({ ...form, type_inventaire: e.target.value })}>
+            <Selecteur id="type" value={form.type_inventaire} onChange={(e) => changerForm({ ...form, type_inventaire: e.target.value })}>
               <option value="GLOBAL">{LIBELLE_TYPE.GLOBAL}</option>
               <option value="TOURNANT">{LIBELLE_TYPE.TOURNANT}</option>
               <option value="CIBLE">{LIBELLE_TYPE.CIBLE}</option>
@@ -575,6 +750,28 @@ function NouvelInventaire() {
           </div>
         </CarteCorps>
       </Carte>
+      {parListe && (
+        <Carte>
+          <CarteEntete>
+            <CarteTitre>
+              {form.type_inventaire === 'TOURNANT' ? 'La proposition à retoucher' : 'Les références à compter'}
+            </CarteTitre>
+          </CarteEntete>
+          <CarteCorps>
+            {form.code_magasin ? (
+              <SelectionReferences
+                type={form.type_inventaire}
+                candidats={qCand.data}
+                chargement={qCand.isLoading}
+                liste={liste}
+                changer={setListeLocale}
+              />
+            ) : (
+              <p className="text-[12.5px] text-attenue-texte">Choisissez d’abord le magasin.</p>
+            )}
+          </CarteCorps>
+        </Carte>
+      )}
     </div>
   )
 }

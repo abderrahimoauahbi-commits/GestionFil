@@ -103,12 +103,12 @@ export function phraseGel(inventaires: Gel[], nommer = false): string | null {
       const ou = nommer ? `le magasin ${i.magasin_nom ?? i.code_magasin}` : 'ce magasin'
       const nom = `Inventaire ${i.numero_inventaire} (${TYPE[i.type_inventaire] ?? i.type_inventaire.toLowerCase()})`
       if (i.etendue_gel !== 'REFERENCES') {
-        const sansLigne = i.type_inventaire !== 'GLOBAL' ? ', encore sans ligne,' : ''
+        const sansLigne = i.type_inventaire !== 'GLOBAL' ? ', encore sans référence choisie,' : ''
         return `${nom} ouvert sur ${ou}${sansLigne} : aucun mouvement jusqu’à sa clôture.`
       }
       const refs = i.touchees ?? []
       if (refs.length === 0)
-        return `${nom} ouvert sur ${ou} : ses ${i.references_gelees.length} référence(s) comptée(s) y sont gelées jusqu’à sa clôture ; les autres bougent librement.`
+        return `${nom} ouvert sur ${ou} : les ${i.references_gelees.length} référence(s) de sa liste y sont gelées jusqu’à sa clôture ; les autres bougent librement.`
       return refs.length === 1
         ? `${nom} ouvert sur ${ou} : la référence ${refs[0]} y est gelée jusqu’à sa clôture.`
         : `${nom} ouvert sur ${ou} : les références ${liste(refs)} y sont gelées jusqu’à sa clôture.`

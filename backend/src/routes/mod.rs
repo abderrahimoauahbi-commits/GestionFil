@@ -384,6 +384,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/inventaires/{id}/lignes",
                get(inventaires::lignes_inventaire).put(inventaires::saisir_comptage))
         .route("/api/inventaires/ouverts", get(inventaires::inventaires_ouverts))
+        .route("/api/inventaires/candidats", get(inventaires::candidats_inventaire))
+        .route("/api/inventaires/{id}/references",
+               get(inventaires::references_inventaire).put(inventaires::choisir_references_inventaire))
         .route("/api/inventaires/{id}", get(inventaires::lire_inventaire))
         .route("/api/inventaires/{id}/preparer", post(operations::preparer_inventaire))
         .route("/api/inventaires/{id}/valider", post(operations::valider_inventaire))

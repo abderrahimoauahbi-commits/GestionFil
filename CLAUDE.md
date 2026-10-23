@@ -221,4 +221,7 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   à l'inventaire par `mouvement.id_inventaire` ; `GET /api/inventaires/ouverts`, bandeau sur les écrans) — étendue par
   type depuis `2026-10-24a` : GLOBAL = tout le magasin, TOURNANT/CIBLE = ses seules références (celles de ses lignes ;
   sans ligne, tout le magasin), `v_inventaire_gel` ; théorique d'une ligne d'inventaire au poids du lot (bobines comptées
-  → kg par `fn_lot_poids_bobine`), C43 et la dérive du lot restant à la fiche article.
+  → kg par `fn_lot_poids_bobine`), C43 et la dérive du lot restant à la fiche article ; depuis `2026-10-24b`, un TOURNANT
+  ou un CIBLÉ compte et gèle SA LISTE validée avant ses lignes (`inventaire_reference` ; ciblé choisi par recherche /
+  famille / catégorie, tournant proposé par `v_inventaire_candidat` selon la classe ABC et P_ComptageTournantA/B/C),
+  sans liste ni préparation ni validation (INV-SELECTION).

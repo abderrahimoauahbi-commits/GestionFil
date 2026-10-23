@@ -1045,8 +1045,8 @@ CREATE TRIGGER trg_lmvt_periode_close
 -- =============================================================================
 -- INVENTAIRE OUVERT : LE GEL (decision du 23/10/2026, migrations 2026-10-23g et 2026-10-24a)
 -- =============================================================================
--- Recopie des migrations (23g sections 1 a 4, 24a sections 1 a 4), sans les
--- OWNER TO. Le controle C65 reste dans les migrations, comme les autres
+-- Recopie des migrations (23g sections 1 a 4, 24a sections 1 a 4, 24b sections
+-- 3 a 6 — la liste d'un tournant ou d'un cible), sans les OWNER TO. Le controle C65 reste dans les migrations, comme les autres
 -- controles venus apres C44. Tant qu'un inventaire du magasin est ouvert
 -- (BROUILLON ou VALIDE) : un GLOBAL gele tout le magasin ; un TOURNANT ou un
 -- CIBLE gele ses seules references (celles de ses lignes, a l'instant du
@@ -1069,18 +1069,22 @@ CREATE OR REPLACE FUNCTION fn_inventaire_ouvert(p_magasin text) RETURNS text AS 
 $$ LANGUAGE sql STABLE;
 
 -- ---- 2b. L'étendue du gel d'un inventaire ---------------------------------------
--- Vrai : le gel porte sur ses références ; faux : sur tout le magasin.
+-- Vrai : le gel porte sur ses références (un tournant ou un ciblé qui a sa liste,
+-- 2026-10-24b) ; faux : sur tout le magasin (un global, ou un tournant / ciblé sans liste).
 CREATE OR REPLACE FUNCTION fn_inventaire_gel_par_reference(p_id text) RETURNS boolean AS $$
     SELECT COALESCE(
         (SELECT i.type_inventaire IN ('TOURNANT', 'CIBLE')
-                AND EXISTS (SELECT 1 FROM ligne_inventaire li WHERE li.id_inventaire = i.id_inventaire)
+                AND EXISTS (SELECT 1 FROM inventaire_reference s WHERE s.id_inventaire = i.id_inventaire)
            FROM inventaire i WHERE i.id_inventaire = p_id),
         false);
 $$ LANGUAGE sql STABLE;
 
--- La référence est-elle comptée par cet inventaire (l'une de ses lignes, tout lot) ?
+-- La référence est-elle comptée par cet inventaire : choisie, ou sur l'une de ses
+-- lignes (les lignes sont dans la liste ; l'union est la prudence).
 CREATE OR REPLACE FUNCTION fn_inventaire_compte_reference(p_id text, p_reference text) RETURNS boolean AS $$
-    SELECT EXISTS (SELECT 1 FROM ligne_inventaire li
+    SELECT EXISTS (SELECT 1 FROM inventaire_reference s
+                    WHERE s.id_inventaire = p_id AND s.code_reference = p_reference)
+        OR EXISTS (SELECT 1 FROM ligne_inventaire li
                     WHERE li.id_inventaire = p_id AND li.code_reference = p_reference);
 $$ LANGUAGE sql STABLE;
 
@@ -1090,14 +1094,14 @@ CREATE OR REPLACE FUNCTION fn_inventaire_type_libelle(p_type text) RETURNS text 
                        WHEN 'CIBLE' THEN 'ciblé' ELSE lower(COALESCE(p_type, '?')) END;
 $$ LANGUAGE sql IMMUTABLE;
 
--- Le gel du magasin entier : un global, ou un tournant / ciblé encore sans ligne.
+-- Le gel du magasin entier : un global, ou un tournant / ciblé encore sans liste.
 CREATE OR REPLACE FUNCTION fn_inventaire_ouvert_message(p_id text) RETURNS text AS $$
     SELECT 'INVENTAIRE-OUVERT : l''inventaire ' || i.numero_inventaire
            || ' (' || fn_inventaire_type_libelle(i.type_inventaire) || ')'
            || ' est ouvert sur le magasin ' || i.code_magasin
            || CASE i.statut WHEN 'VALIDE' THEN ' (comptage validé, à clôturer)' ELSE ' (en comptage)' END
            || CASE WHEN i.type_inventaire IN ('TOURNANT', 'CIBLE')
-                   THEN ', encore sans aucune ligne (tout le magasin est gelé)'
+                   THEN ', encore sans référence choisie (tout le magasin est gelé jusqu''à la validation de sa liste)'
                    ELSE '' END
            || ' : aucun mouvement de stock jusqu''à sa clôture ou son annulation.'
       FROM inventaire i WHERE i.id_inventaire = p_id;
@@ -1225,5 +1229,95 @@ DROP TRIGGER IF EXISTS trg_01_lmvt_inventaire_ouvert ON ligne_mouvement;
 CREATE TRIGGER trg_01_lmvt_inventaire_ouvert
     BEFORE INSERT ON ligne_mouvement
     FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_inventaire_ouvert();
+
+-- ---- 5. La liste d'un tournant ou d'un ciblé (2026-10-24b) --------------------
+-- Elle se choisit en brouillon, avant les lignes ; un global n'en a pas.
+CREATE OR REPLACE FUNCTION fn_trg_inventaire_reference_garde() RETURNS trigger AS $$
+DECLARE
+    v_id  text := COALESCE(NEW.id_inventaire, OLD.id_inventaire);
+    v_inv record;
+BEGIN
+    SELECT numero_inventaire, type_inventaire, statut INTO v_inv
+      FROM inventaire WHERE id_inventaire = v_id;
+    IF NOT FOUND THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RAISE EXCEPTION 'INV-SELECTION : inventaire % introuvable.', v_id;
+    END IF;
+    IF v_inv.type_inventaire NOT IN ('TOURNANT', 'CIBLE') THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % est global : il compte tout le magasin, il ne choisit pas ses références.',
+            v_inv.numero_inventaire;
+    END IF;
+    IF v_inv.statut <> 'BROUILLON' THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % est % : sa liste de références ne change plus.',
+            v_inv.numero_inventaire, lower(v_inv.statut);
+    END IF;
+    IF EXISTS (SELECT 1 FROM ligne_inventaire WHERE id_inventaire = v_id) THEN
+        RAISE EXCEPTION 'INV-SELECTION : les lignes de l''inventaire % sont préparées : sa liste de références est figée (pour compter une autre liste, annulez-le et créez-en un autre).',
+            v_inv.numero_inventaire;
+    END IF;
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_inventaire_reference_garde
+    BEFORE INSERT OR UPDATE OR DELETE ON inventaire_reference
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_inventaire_reference_garde();
+
+-- (Son journal d'audit, `trg_audit_modification`, reste dans la migration :
+-- `fn_trg_audit_modification` n'existe que par les migrations 2026-10-08d et suivantes.)
+
+-- Les lignes d'un tournant ou d'un ciblé : des références de sa liste.
+CREATE OR REPLACE FUNCTION fn_trg_ligne_inventaire_selection() RETURNS trigger AS $$
+DECLARE
+    v_inv record;
+BEGIN
+    SELECT numero_inventaire, type_inventaire INTO v_inv
+      FROM inventaire WHERE id_inventaire = NEW.id_inventaire;
+    IF v_inv.type_inventaire IN ('TOURNANT', 'CIBLE')
+       AND NOT EXISTS (SELECT 1 FROM inventaire_reference s
+                        WHERE s.id_inventaire = NEW.id_inventaire
+                          AND s.code_reference = NEW.code_reference) THEN
+        IF NOT EXISTS (SELECT 1 FROM inventaire_reference s WHERE s.id_inventaire = NEW.id_inventaire) THEN
+            RAISE EXCEPTION 'INV-SELECTION : l''inventaire % (%) n''a aucune référence choisie : choisissez et validez sa liste avant de préparer ses lignes.',
+                v_inv.numero_inventaire, fn_inventaire_type_libelle(v_inv.type_inventaire);
+        END IF;
+        RAISE EXCEPTION 'INV-SELECTION : la référence % n''est pas dans la liste de l''inventaire % (%) : un inventaire tournant ou ciblé ne compte que les références choisies à sa préparation. Comptez-la dans un autre inventaire.',
+            NEW.code_reference, v_inv.numero_inventaire, fn_inventaire_type_libelle(v_inv.type_inventaire);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_ligne_inventaire_selection
+    BEFORE INSERT OR UPDATE OF code_reference, id_inventaire ON ligne_inventaire
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_ligne_inventaire_selection();
+
+-- Sans liste, pas de validation ; le type ne change plus une fois liste ou lignes posées.
+CREATE OR REPLACE FUNCTION fn_trg_inventaire_selection_validation() RETURNS trigger AS $$
+BEGIN
+    IF NEW.type_inventaire IS DISTINCT FROM OLD.type_inventaire
+       AND (EXISTS (SELECT 1 FROM inventaire_reference WHERE id_inventaire = OLD.id_inventaire)
+            OR EXISTS (SELECT 1 FROM ligne_inventaire WHERE id_inventaire = OLD.id_inventaire)) THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % a sa liste ou ses lignes : son type ne change plus.',
+            OLD.numero_inventaire;
+    END IF;
+    IF NEW.statut = 'VALIDE' AND OLD.statut = 'BROUILLON'
+       AND NEW.type_inventaire IN ('TOURNANT', 'CIBLE')
+       AND NOT EXISTS (SELECT 1 FROM inventaire_reference WHERE id_inventaire = NEW.id_inventaire) THEN
+        RAISE EXCEPTION 'INV-SELECTION : l''inventaire % (%) n''a aucune référence choisie : il ne se valide pas.',
+            NEW.numero_inventaire, fn_inventaire_type_libelle(NEW.type_inventaire);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_inventaire_selection_validation
+    BEFORE UPDATE OF statut, type_inventaire ON inventaire
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_inventaire_selection_validation();
+-- (`fn_comptage_tournant_jours`, `v_inventaire_candidat` — la proposition du
+-- tournant — et les parametres P_ComptageTournantA/B/C restent dans la migration
+-- 2026-10-24b.)
 
 -- (La vue `v_inventaire_gel`, lue par les écrans, reste dans la migration 2026-10-24a.)

@@ -110,6 +110,17 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // La liste d'un inventaire tournant ou cible (decision du 23/10/2026) :
+        // inventaire_reference, proposition ABC du tournant (v_inventaire_candidat,
+        // P_ComptageTournantA/B/C), lignes et gel limites aux references choisies.
+        "2026-10-24b_inventaire_references_choisies.sql",
+        "SELECT to_regclass('public.inventaire_reference') IS NOT NULL
+            AND to_regclass('public.v_inventaire_candidat') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'inventaire' AND column_name = 'date_selection')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_ligne_inventaire_selection')",
+    ),
+    (
         // Le gel selon le type d'inventaire (decision du 23/10/2026) : GLOBAL gele
         // le magasin, TOURNANT et CIBLE leurs seules references ; v_inventaire_gel
         // (lue par /api/inventaires/ouverts) ; C65 a la meme etendue ; theorique

@@ -156,12 +156,14 @@ machine de 4,20 m (`scenario_of_semaine`) : deux OF côte à côte (voies 1,20 m
 3,00 m = 960), un changement d'OF, de la colle sortie puis rendue — la consommation par OF et par
 qualité y vaut le calcul fait à la main.
 
-Points restés à confirmer après la réalisation :
+Points confirmés par l'utilisateur le 23/10/2026 (tels que livrés) :
 - un OF **clôturé** ne couvre plus le plan de son mois : ce plan redevient « non couvert » ;
 - un OF clôturé refuse toute sortie ou tout retour hors machine ;
 - les kilos **déchargés vers le déchet, la perte ou la casse** comptent dans le déchet, la perte ou la
   casse de l'OF de la période ;
 - un OF placé dans un mois que le plan ne couvre pas s'ajoute à l'extrapolation de l'horizon.
+- l'écart d'un constat peut être rangé sous l'OF sortant même déjà clôturé (pas de refus) ;
+- simulation : les matières hors machine sont calées sur le métrage de l'OF et la recette.
 
 ## 7. Ce que les données existantes donnent déjà (preuves, base de saisie, 22/10/2026)
 

@@ -21,6 +21,10 @@ pub async fn lister_transferts(
                 (SELECT COUNT(*) FROM ligne_transfert l WHERE l.id_transfert = t.id_transfert) AS nb_lignes,
                 (SELECT ROUND(COALESCE(SUM(l.quantite_kg), 0), 3) FROM ligne_transfert l
                   WHERE l.id_transfert = t.id_transfert) AS quantite_totale_kg,
+                -- Ses references, pour lire le gel d'un inventaire tournant ou
+                -- cible, qui ne porte que sur elles (2026-10-24a).
+                (SELECT COALESCE(jsonb_agg(DISTINCT l.code_reference), '[]'::jsonb)
+                   FROM ligne_transfert l WHERE l.id_transfert = t.id_transfert) AS references,
                 -- Depuis combien de jours la marchandise roule-t-elle ? Au-dela
                 -- de quelques jours sur un transfert interne, c'est qu'on a
                 -- oublie de constater l'arrivee.

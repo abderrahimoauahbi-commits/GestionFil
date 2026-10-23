@@ -25,7 +25,7 @@ import { Alerte, Badge, Bouton, Chargement } from '../composants/ui/base'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { fmt } from '../lib/utils'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
-import { phraseGel, useInventairesOuverts } from '../lib/inventairesOuverts'
+import { gelsTouches, phraseGel, useInventairesOuverts } from '../lib/inventairesOuverts'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -43,6 +43,8 @@ interface Transfert extends Record<string, unknown> {
   date_reception_dest: string | null
   quantite_totale_kg: number
   jours_en_transit: number | null
+  /** Ses references : un inventaire tournant ou cible ne gele qu'elles (2026-10-24a). */
+  references?: string[] | null
 }
 
 /**
@@ -104,9 +106,12 @@ export function Transferts() {
 
   /* LES MAGASINS GELES PAR UN INVENTAIRE OUVERT (23/10/2026) : ni depart du
      magasin source, ni arrivee au destinataire tant qu'il est ouvert (la base
-     refuse, INVENTAIRE-OUVERT). */
+     refuse, INVENTAIRE-OUVERT) — tout le magasin pour un global, ses seules
+     references pour un tournant ou un cible (2026-10-24a) : le transfert n'est
+     arrete que s'il en porte une. */
   const ouverts = useInventairesOuverts().data ?? []
-  const gelDe = (mag: string) => phraseGel(ouverts.filter((i) => i.code_magasin === mag), true)
+  const gelDe = (mag: string, refs: string[] | null | undefined) =>
+    phraseGel(gelsTouches(ouverts, [mag], (refs ?? []).map((reference) => ({ magasin: mag, reference }))), true)
 
   /** Etape 1, au magasin SOURCE : la marchandise part. */
   const expedier = useMutation({
@@ -340,8 +345,8 @@ export function Transferts() {
               {droits.peutValider && (
                 <Bouton
                   taille="sm"
-                  disabled={t.nb_lignes === 0 || !!gelDe(t.code_magasin_source)}
-                  title={gelDe(t.code_magasin_source) ?? undefined}
+                  disabled={t.nb_lignes === 0 || !!gelDe(t.code_magasin_source, t.references)}
+                  title={gelDe(t.code_magasin_source, t.references) ?? undefined}
                   chargement={expedier.isPending}
                   onClick={() =>
                     confirmation.demander({
@@ -374,8 +379,8 @@ export function Transferts() {
               </Bouton>
               <Bouton
               taille="sm"
-              disabled={!!gelDe(t.code_magasin_dest)}
-              title={gelDe(t.code_magasin_dest) ?? undefined}
+              disabled={!!gelDe(t.code_magasin_dest, t.references)}
+              title={gelDe(t.code_magasin_dest, t.references) ?? undefined}
               chargement={receptionner.isPending}
               onClick={() =>
                 confirmation.demander({

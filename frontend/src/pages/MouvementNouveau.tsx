@@ -52,7 +52,7 @@ import { cn, fmt } from '../lib/utils'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
-import { phraseGel, useInventaireOuvert } from '../lib/inventairesOuverts'
+import { phraseGel, useGelInventaire } from '../lib/inventairesOuverts'
 import { nouvelIdentifiant } from '../lib/identifiant'
 
 
@@ -665,8 +665,12 @@ export function MouvementNouveau() {
   })
 
   /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la base refuse,
-     l'ecran le dit avant la saisie. */
-  const gel = useInventaireOuvert(entete.code_magasin)
+     l'ecran le dit avant la saisie. Un global gele tout le magasin ; un
+     tournant ou un cible, ses seules references (2026-10-24a). */
+  const gel = useGelInventaire(
+    [entete.code_magasin],
+    lignes.map((l) => ({ magasin: entete.code_magasin, reference: l.code_reference })),
+  )
   const bloquant =
     gel.length > 0
       ? phraseGel(gel)

@@ -65,7 +65,7 @@ import { useLotsSurGrille } from '../hooks/useConditionnementLots'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { nouvelIdentifiant } from '../lib/identifiant'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
-import { useInventaireOuvert } from '../lib/inventairesOuverts'
+import { useGelInventaire } from '../lib/inventairesOuverts'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -323,8 +323,16 @@ export function TransfertNouveau() {
   const parti = reprise && !!statut && statut !== 'BROUILLON'
   /* UN MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : le brouillon
      s'enregistre (il ne bouge aucun stock), mais ni l'expedition depuis la
-     source ni l'arrivee a destination ne passeront avant la cloture. */
-  const gel = useInventaireOuvert(entete.code_magasin_source, entete.code_magasin_dest)
+     source ni l'arrivee a destination ne passeront avant la cloture — tout le
+     magasin pour un global, ses seules references pour un tournant ou un cible
+     (2026-10-24a). */
+  const gel = useGelInventaire(
+    [entete.code_magasin_source, entete.code_magasin_dest],
+    lignes.flatMap((l) => [
+      { magasin: entete.code_magasin_source, reference: l.code_reference },
+      { magasin: entete.code_magasin_dest, reference: l.code_reference },
+    ]),
+  )
   const modifiable = !parti && droits.peutEcrire
 
   const disponibles = useMemo(

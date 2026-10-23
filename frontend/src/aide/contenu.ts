@@ -1001,7 +1001,8 @@ export const SUJETS: Sujet[] = [
     ],
     regles: [
       'Les références sous suivi de lot se comptent AU LOT, pas en total abstrait.',
-      'L’écart se lit à l’heure du comptage : chaque ligne reprend le stock du moment où elle est comptée ; ce qui entre ou sort ensuite reste acquis. Le magasin n’est pas gelé.',
+      'Pendant l’inventaire, ce qu’il compte est gelé (la base refuse le mouvement) : tout le magasin pour un global ; pour un tournant ou un ciblé, ses seules références (un tournant ou un ciblé encore sans ligne gèle tout le magasin). Seuls passent les ajustements de sa clôture.',
+      'Des bobines comptées sans pesée se convertissent au poids d’une bobine de leur lot, sinon de la fiche article ; sans aucun poids, il faut saisir les kilos.',
       'Un seul inventaire ouvert (brouillon ou validé) par magasin ; le contrôle C44 signale une base qui en porte deux.',
       'Celui qui a compté ne valide pas (l’Administrateur dispensé) : la base le refuse.',
       'Validé, le comptage ne se modifie plus, au serveur comme en base ; seul « Renvoyer au comptage » le rouvre.',

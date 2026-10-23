@@ -996,11 +996,14 @@ def scenario_inventaire(c, infra):
 
 
 def scenario_inventaire_gel(c, infra):
-    """INVENTAIRE OUVERT = MAGASIN GELE (decision du 23/10/2026, 2026-10-23g) : pendant l'inventaire,
-    sortie, reception, transfert entrant et sortant, chargement machine, contre-passation, ligne
-    greffee en SQL sont refuses avec le numero de l'inventaire ; le magasin voisin reste libre ; la
-    cloture ecrit ses ajustements (rattaches a l'inventaire, et seulement eux) ; apres elle tout
-    repasse ; l'annulation d'un inventaire degele aussi."""
+    """INVENTAIRE OUVERT = GEL (decisions du 23/10/2026, 2026-10-23g et 2026-10-24a). Un GLOBAL gele
+    tout le magasin : sortie, reception, transfert entrant et sortant, chargement machine,
+    contre-passation, ligne greffee en SQL sont refuses avec le numero de l'inventaire ; le magasin
+    voisin reste libre ; la cloture ecrit ses ajustements (rattaches a l'inventaire, et seulement
+    eux) ; apres elle tout repasse. Un CIBLE ne gele que ses references : la sienne est refusee (le
+    message nomme l'inventaire et la reference), une autre reference du meme magasin entre
+    librement ; /api/inventaires/ouverts le dit ; C65 ne compte pas ce mouvement libre apres la
+    cloture du cible. L'annulation degele aussi."""
     M, P = MAG, "Polyfashions"
     ref_lot, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-GEL-1"
     # Les sorties par la Direction : le banc en a deja fait plus de 50 kg ce jour sur REF, et
@@ -1044,21 +1047,23 @@ def scenario_inventaire_gel(c, infra):
              "code_qualite": qualite}]})["id_fiche"]
 
     # --- L'inventaire s'ouvre : il dit ce qui est en route, sans bloquer.
-    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": M, "type_inventaire": "TOURNANT"})
+    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": M, "type_inventaire": "GLOBAL"})
     iid, num = inv["id_inventaire"], inv["numero_inventaire"]
     try:
         avis = " ".join(inv.get("avis") or [])
         verifier(num_entrant and num_entrant in avis, f"l'avis ne nomme pas le transfert en route {num_entrant} : {avis}")
         verifier("Réception" in avis, f"l'avis ne nomme pas la reception en cours : {avis}")
         ouverts = c.ok("Magasinie", "GET", "/api/inventaires/ouverts")
-        verifier(any(o["code_magasin"] == M and o["numero_inventaire"] == num for o in ouverts),
-                 f"/api/inventaires/ouverts ne voit pas {num} : {ouverts}")
+        verifier(any(o["code_magasin"] == M and o["numero_inventaire"] == num and o["etendue_gel"] == "MAGASIN"
+                     and o["references_gelees"] == [] for o in ouverts),
+                 f"/api/inventaires/ouverts ne voit pas {num} gelant tout le magasin : {ouverts}")
         stock_m = kg(infra, REF, M)
 
         # --- Gele : tout chemin qui ecrit du stock dans M est refuse, avec le numero.
         code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 2)], mag=M,
                             motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
-        verifier(code == 422 and "INVENTAIRE-OUVERT" in str(r) and num in str(r), f"sortie sur M gele : {code} {r}")
+        verifier(code == 422 and "INVENTAIRE-OUVERT" in str(r) and num in str(r) and "(global)" in str(r),
+                 f"sortie sur M gele : {code} {r}")
         c.refus("Choukri", "POST", f"/api/receptions/{rid}/valider", codes=(422,), contient="INVENTAIRE-OUVERT")
         c.refus("Magasinie", "POST", f"/api/transferts/{t_entrant['id_transfert']}/receptionner",
                 codes=(422,), contient="INVENTAIRE-OUVERT")
@@ -1127,19 +1132,102 @@ def scenario_inventaire_gel(c, infra):
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{fiche}/valider", {})
     verifier(abs(kg(infra, REF, M) - (stock_m - 5 + 50 + 30 - 10)) < 1e-6, f"apres cloture : {kg(infra, REF, M)}")
 
-    # --- L'annulation degele aussi.
+    # --- UN CIBLE NE GELE QUE SES REFERENCES (2026-10-24a) : celles de ses lignes, le stock existant
+    #     de P. REF (en stock) est gelee ; REF2, sans stock dans P, n'est pas comptee : elle entre.
+    c65_avant = controle(infra, "C65")
     inv2 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE"})
+    iid2, num2 = inv2["id_inventaire"], inv2["numero_inventaire"]
+    try:
+        refs2 = {l[0] for l in infra.sql(f"SELECT DISTINCT code_reference FROM ligne_inventaire WHERE id_inventaire = '{iid2}'")}
+        verifier(REF in refs2 and REF2 not in refs2, f"lignes du cible inattendues : {sorted(refs2)}")
+        ouverts = c.ok("Magasinie", "GET", "/api/inventaires/ouverts")
+        o2 = next((o for o in ouverts if o["numero_inventaire"] == num2), None)
+        verifier(o2 is not None and o2["etendue_gel"] == "REFERENCES" and o2["type_inventaire"] == "CIBLE"
+                 and set(o2["references_gelees"]) == refs2, f"/api/inventaires/ouverts pour le cible : {o2}")
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 422 and "INVENTAIRE-OUVERT" in str(r) and num2 in str(r) and REF in str(r),
+                 f"sortie de la reference comptee sur P : {code} {r}")
+        # La garantie est en base : une ligne de REF greffee a un ancien en-tete de P.
+        ancien_p = infra.valeur(f"SELECT id_mouvement FROM mouvement WHERE code_magasin = '{P}' "
+                                "AND code_type_mvt = 'SORTIE_HORS_MACHINE' ORDER BY date_creation DESC LIMIT 1")
+        refus_sql(infra, "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg) "
+                         f"VALUES ('{ancien_p}', 98, '{REF}', 1)", f"{REF} est compt")
+        avant_ref2 = kg(infra, REF2, P)
+        entree_stock(c, REF2, 20, mag=P)
+        verifier(abs(kg(infra, REF2, P) - avant_ref2 - 20) < 1e-6, "la reference libre n'est pas entree dans P")
+        # Le magasin entier n'est pas gele : M (inventaire clos) et P (hors REF) bougent.
+        # Comptage au theorique, validation, cloture : le mouvement libre de REF2 n'est pas un C65.
+        lignes2 = c.ok("Magasinie", "GET", f"/api/inventaires/{iid2}/lignes")
+        c.ok("Magasinie", "PUT", f"/api/inventaires/{iid2}/lignes", {"comptages": [
+            {"code_reference": l["code_reference"], "code_magasin": P, "lot_fournisseur": l.get("lot_fournisseur"),
+             "quantite_comptee_kg": float(l["quantite_theorique_kg"] or 0)} for l in lignes2]})
+        c.ok("Choukri", "POST", f"/api/inventaires/{iid2}/valider")
+        c.ok("Choukri", "POST", f"/api/inventaires/{iid2}/cloturer")
+        verifier(controle(infra, "C65") == c65_avant,
+                 f"C65 compte un mouvement d'une reference que le cible ne comptait pas ({controle(infra, 'C65')})")
+    finally:
+        if infra.valeur(f"SELECT statut FROM inventaire WHERE id_inventaire = '{iid2}'") in ("BROUILLON", "VALIDE"):
+            c.appel("Choukri", "POST", f"/api/inventaires/{iid2}/annuler", {"motif": "Fin du banc du gel (echec)"})
+    code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
+                        motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+    verifier(code == 200, f"sortie apres la cloture du cible refusee : {code} {r}")
+
+    # --- L'annulation degele aussi.
+    inv3 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "TOURNANT"})
     try:
         code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
                             motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
-        verifier(code == 422 and inv2["numero_inventaire"] in str(r), f"sortie sur P gele : {code} {r}")
+        verifier(code == 422 and inv3["numero_inventaire"] in str(r) and REF in str(r), f"sortie sur P gele : {code} {r}")
     finally:
-        c.ok("Choukri", "POST", f"/api/inventaires/{inv2['id_inventaire']}/annuler", {"motif": "Fin du banc du gel"})
+        c.ok("Choukri", "POST", f"/api/inventaires/{inv3['id_inventaire']}/annuler", {"motif": "Fin du banc du gel"})
     code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
                         motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
     verifier(code == 200, f"sortie apres annulation refusee : {code} {r}")
     verifier(not c.ok("Magasinie", "GET", "/api/inventaires/ouverts"), "un inventaire reste ouvert apres le banc du gel")
     verifier(controle(infra, "C11") == 0 and controle(infra, "C44") == 0, "C11 ou C44 apres le banc du gel")
+
+
+def scenario_inventaire_poids_lot(c, infra):
+    """LE THEORIQUE D'UN INVENTAIRE AU POIDS DU LOT (decision du 23/10/2026, 2026-10-24a) : la ligne d'un
+    lot dont le poids de bobine differe de la fiche article porte le poids DU LOT
+    (poids_unitaire_theorique_kg), la feuille de comptage le donne, et des bobines comptees sans kilos se
+    convertissent a ce poids, pas a celui de la fiche. Sans kilos ni bobines : refuse."""
+    ref, lot, P = "PP-1500 Dtex-Cream 2951-Hs", "LOT-INVP-1", "Polyfashions"
+    id_bc, lignes = bon_envoye(c, [(ref, 400, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [400], mag=P, lot_fournisseur=lot, nb_bobines=160)
+    # La fiche apres la reception (qui suit aussi le conditionnement de la fiche article).
+    fiche = float(infra.valeur(f"SELECT poids_bobine_kg FROM reference WHERE code_reference = '{ref}'"))
+    # Le lot pese 20 % de plus que la fiche : une correction, pour ne dependre d'aucune mesure.
+    poids_lot = round(fiche * 1.2, 4)
+    c.ok("Choukri", "POST", "/api/lots/conditionnement", {
+        "code_reference": ref, "lot_fournisseur": lot, "poids_bobine_kg": poids_lot,
+        "motif": "Pesee du lot pour le banc de l'inventaire"})
+    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE"})
+    iid = inv["id_inventaire"]
+    try:
+        theo = infra.valeur("SELECT poids_unitaire_theorique_kg FROM ligne_inventaire "
+                            f"WHERE id_inventaire = '{iid}' AND code_reference = '{ref}' AND lot_fournisseur = '{lot}'")
+        verifier(theo is not None and abs(float(theo) - poids_lot) < 1e-6,
+                 f"ligne preparee au poids {theo}, le lot pese {poids_lot} (fiche {fiche})")
+        feuille = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}/lignes")
+        l = next(x for x in feuille if x["code_reference"] == ref and x.get("lot_fournisseur") == lot)
+        verifier(abs(float(l["poids_bobine_lot_kg"]) - poids_lot) < 1e-6 and abs(float(l["poids_bobine_kg"]) - fiche) < 1e-6,
+                 f"feuille de comptage : lot {l.get('poids_bobine_lot_kg')}, fiche {l.get('poids_bobine_kg')}")
+        # 150 bobines comptees, sans pesee : 150 x poids du lot.
+        c.ok("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": [
+            {"code_reference": ref, "code_magasin": P, "lot_fournisseur": lot, "nb_bobines": 150,
+             "motif_ecart": "Comptage en bobines (banc)"}]})
+        compte = infra.sql("SELECT quantite_comptee_kg, poids_unitaire_theorique_kg, nb_bobines_comptees FROM ligne_inventaire "
+                           f"WHERE id_inventaire = '{iid}' AND code_reference = '{ref}' AND lot_fournisseur = '{lot}'")[0]
+        attendu = round(150 * poids_lot, 4)
+        verifier(abs(float(compte[0]) - attendu) < 1e-4 and abs(float(compte[0]) - 150 * fiche) > 1
+                 and compte[2] == "150",
+                 f"150 bobines comptees : {compte[0]} kg, {attendu} attendus au poids du lot (fiche : {150 * fiche})")
+        c.refus("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": [
+            {"code_reference": ref, "code_magasin": P, "lot_fournisseur": lot}]}, codes=(400,), contient="bobines")
+    finally:
+        c.ok("Choukri", "POST", f"/api/inventaires/{iid}/annuler", {"motif": "Fin du banc du poids du lot"})
 
 
 def scenario_colisage_signale(c, infra):
@@ -4383,6 +4471,7 @@ SCENARIOS = [
     scenario_contre_passation,
     scenario_inventaire,
     scenario_inventaire_gel,
+    scenario_inventaire_poids_lot,
     scenario_colisage_signale,
     scenario_verrou_optimiste,
     scenario_verrou_import,

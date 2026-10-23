@@ -44,7 +44,7 @@ import {
 } from '../lib/conditionnement'
 import { lireNombre } from '../lib/nombres'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
-import { phraseGel, useInventaireOuvert } from '../lib/inventairesOuverts'
+import { phraseGel, useGelInventaire } from '../lib/inventairesOuverts'
 import { nouvelIdentifiant } from '../lib/identifiant'
 import { cn, fmt } from '../lib/utils'
 
@@ -166,8 +166,13 @@ export function FicheHorsMachine() {
 
   const utiles = lignes.filter((l) => l.code_reference && kgDe(l) > 0)
 
-  /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la base refuse. */
-  const gel = useInventaireOuvert(entete.magasin)
+  /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la base refuse. Un
+     global gele tout le magasin ; un tournant ou un cible, ses seules references
+     (2026-10-24a) : le gel ne touche alors que si une ligne en porte une. */
+  const gel = useGelInventaire(
+    [entete.magasin],
+    lignes.map((l) => ({ magasin: entete.magasin, reference: l.code_reference })),
+  )
 
   /** CE QUI MANQUE, dit en clair : la premiere chose qui empeche d'enregistrer. */
   const manque = ((): string | null => {

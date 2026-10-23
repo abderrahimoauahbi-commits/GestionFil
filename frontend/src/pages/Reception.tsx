@@ -25,7 +25,7 @@ import { useToleranceFournisseur } from '../lib/lots'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
-import { phraseGel, useInventaireOuvert } from '../lib/inventairesOuverts'
+import { phraseGel, useGelInventaire } from '../lib/inventairesOuverts'
 import { ClotureFacture, CorrectionFacture } from './ReceptionCloture'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
@@ -640,8 +640,13 @@ export function Reception() {
 
   const lignes = qLignes.data ?? []
   /* UN MAGASIN DE DESTINATION GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la
-     validation, qui fait entrer le stock, sera refusee par la base. */
-  const gel = useInventaireOuvert(...new Set(lignes.map((l) => l.code_magasin_dest)))
+     validation, qui fait entrer le stock, sera refusee par la base — tout le
+     magasin pour un global, ses seules references pour un tournant ou un cible
+     (2026-10-24a). */
+  const gel = useGelInventaire(
+    lignes.map((l) => l.code_magasin_dest),
+    lignes.map((l) => ({ magasin: l.code_magasin_dest, reference: l.code_reference })),
+  )
 
   /* CE QUI PARTIRA A L'ENREGISTREMENT, calcule a partir de la grille seule. */
   const aCreer = nouvelles.filter((n) => !n.idExistant)

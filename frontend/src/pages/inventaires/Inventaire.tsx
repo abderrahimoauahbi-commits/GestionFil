@@ -123,11 +123,11 @@ function DocumentInventaire({ id }: { id: string }) {
         return {
           ligne,
           saisie,
-          analyse: analyser(ligne, saisie, tolMotif),
+          analyse: analyser(ligne, saisie, tolMotif, saisissable),
           modifiee: empreinte(saisie) !== empreinte(serveur),
         }
       }),
-    [qLignes.data, brouillon, tolMotif],
+    [qLignes.data, brouillon, tolMotif, saisissable],
   )
   const modifiees = vues.filter((v) => v.modifiee)
   const enErreur = modifiees.filter((v) => v.analyse.erreurs.length > 0)
@@ -536,8 +536,9 @@ function NouvelInventaire() {
         }
       />
       <Alerte ton="alerte">
-        Dès la création, le magasin est gelé : aucun mouvement n’y entre ni n’en sort (sorties, réceptions,
-        transferts, fiches machine) jusqu’à la clôture ou l’annulation de l’inventaire.
+        Dès la création, ce que l’inventaire compte est gelé jusqu’à sa clôture ou son annulation (sorties,
+        réceptions, transferts, fiches machine) : tout le magasin pour un inventaire global ; pour un tournant
+        ou un ciblé, ses seules références — les autres références du magasin bougent librement.
       </Alerte>
       <Carte>
         <CarteEntete>

@@ -20,7 +20,7 @@ import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { SANS_LOT } from '../../lib/lots'
 import type { EtiquetteLue } from '../../composants/ChampScan'
-import { phraseGel, useInventaireOuvert } from '../../lib/inventairesOuverts'
+import { phraseGel, useGelInventaire } from '../../lib/inventairesOuverts'
 import {
   corpsFiche, depuisEtat, destinationsDe, estimer, ligneNeuve, lignesAEnvoyer, machinesApi,
   type Apercu, type LigneSaisie, type Motif, type TypeFiche, type Zone,
@@ -301,12 +301,23 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
   /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026). Un chargement sort
      du magasin ; un dechargement n'y rentre que pour la destination MAGASIN.
      La base refuse le mouvement (INVENTAIRE-OUVERT) ; l'ecran le dit avant. */
-  const gel = useInventaireOuvert(type !== 'MAJ' ? entete.magasin : null)
+  /* Un global gele tout le magasin ; un tournant ou un cible, ses seules
+     references (2026-10-24a) : seules comptent les lignes qui touchent le
+     magasin (tout chargement, un dechargement vers le magasin). */
   const versMagasin = (l: LigneSaisie) => {
     const d = destinationsDe(motifDe(l.code_motif))
     return (l.destination || (d.length === 1 ? d[0] : '')) === 'MAGASIN'
   }
-  const gelBloque = gel.length > 0 && (type === 'CHARGE' || (type === 'DECHARGE' && envoyees.some(versMagasin)))
+  const touchentMagasin = type === 'CHARGE' ? envoyees : type === 'DECHARGE' ? envoyees.filter(versMagasin) : []
+  // Un gel du magasin entier se dit des le choix du magasin, mais ne bloque un
+  // dechargement que s'il renvoie au magasin ; un gel par reference, s'il touche.
+  const gel = useGelInventaire(
+    [type !== 'MAJ' ? entete.magasin : null],
+    touchentMagasin.map((l) => ({ magasin: entete.magasin, reference: l.code_reference })),
+  )
+  const gelBloque =
+    gel.length > 0 &&
+    (type === 'CHARGE' || (type === 'DECHARGE' && touchentMagasin.length > 0))
 
   /** CE QUI MANQUE ENCORE, dit en clair : la premiere chose qui empeche l'apercu. */
   const manque = ((): string | null => {

@@ -58,7 +58,7 @@ import { AvisDerive } from '../composants/AvisDerive'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
-import { useInventaireOuvert } from '../lib/inventairesOuverts'
+import { useGelInventaire } from '../lib/inventairesOuverts'
 import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'RECEPTIONS'
@@ -631,8 +631,13 @@ export function ReceptionNouvelle() {
      s'y ouvre ; le tableau du haut ne fait que la montrer. */
   const ligneP = lignes.find((l) => l.cle === pointee) ?? lignes[0] ?? null
   /* UN MAGASIN DE DESTINATION GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la
-     pesee s'enregistre (rien n'entre en stock), la validation sera refusee. */
-  const gel = useInventaireOuvert(...new Set(lignes.map((l) => l.magasin)))
+     pesee s'enregistre (rien n'entre en stock), la validation sera refusee —
+     tout le magasin pour un global, ses seules references pour un tournant ou
+     un cible (2026-10-24a). */
+  const gel = useGelInventaire(
+    lignes.map((l) => l.magasin),
+    lignes.map((l) => ({ magasin: l.magasin, reference: l.code_reference })),
+  )
 
   return (
     <div>

@@ -1043,13 +1043,16 @@ CREATE TRIGGER trg_lmvt_periode_close
     FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_periode_close();
 
 -- =============================================================================
--- INVENTAIRE OUVERT : LE MAGASIN EST GELE (decision du 23/10/2026, migration 2026-10-23g)
+-- INVENTAIRE OUVERT : LE GEL (decision du 23/10/2026, migrations 2026-10-23g et 2026-10-24a)
 -- =============================================================================
--- Recopie de la migration (sections 1 a 4), sans les OWNER TO. Le controle C65
--- reste dans la migration, comme les autres controles venus apres C44. Tant
--- qu'un inventaire du magasin est ouvert (BROUILLON ou VALIDE), aucun mouvement
--- n'y entre ni n'en sort ; seuls passent les ajustements de sa cloture,
--- rattaches par `mouvement.id_inventaire` (domain/inventaire.rs::cloturer).
+-- Recopie des migrations (23g sections 1 a 4, 24a sections 1 a 4), sans les
+-- OWNER TO. Le controle C65 reste dans les migrations, comme les autres
+-- controles venus apres C44. Tant qu'un inventaire du magasin est ouvert
+-- (BROUILLON ou VALIDE) : un GLOBAL gele tout le magasin ; un TOURNANT ou un
+-- CIBLE gele ses seules references (celles de ses lignes, a l'instant du
+-- mouvement) — sans aucune ligne, tout le magasin. Seuls passent les
+-- ajustements de sa cloture, rattaches par `mouvement.id_inventaire`
+-- (domain/inventaire.rs::cloturer).
 -- Sur les fichiers d'origine seuls (statut EN_COURS de 008), la garde est inerte :
 -- les etats BROUILLON / VALIDE viennent de 2026-10-13b.
 
@@ -1065,16 +1068,54 @@ CREATE OR REPLACE FUNCTION fn_inventaire_ouvert(p_magasin text) RETURNS text AS 
      ORDER BY date_creation LIMIT 1;
 $$ LANGUAGE sql STABLE;
 
--- Le message, en un seul endroit : en-tête et ligne disent la même chose.
-CREATE OR REPLACE FUNCTION fn_inventaire_ouvert_message(p_id text) RETURNS text AS $$
-    SELECT 'INVENTAIRE-OUVERT : l''inventaire ' || numero_inventaire
-           || ' est ouvert sur le magasin ' || code_magasin
-           || CASE statut WHEN 'VALIDE' THEN ' (comptage validé, à clôturer)' ELSE ' (en comptage)' END
-           || ' : aucun mouvement de stock jusqu''à sa clôture ou son annulation.'
-      FROM inventaire WHERE id_inventaire = p_id;
+-- ---- 2b. L'étendue du gel d'un inventaire ---------------------------------------
+-- Vrai : le gel porte sur ses références ; faux : sur tout le magasin.
+CREATE OR REPLACE FUNCTION fn_inventaire_gel_par_reference(p_id text) RETURNS boolean AS $$
+    SELECT COALESCE(
+        (SELECT i.type_inventaire IN ('TOURNANT', 'CIBLE')
+                AND EXISTS (SELECT 1 FROM ligne_inventaire li WHERE li.id_inventaire = i.id_inventaire)
+           FROM inventaire i WHERE i.id_inventaire = p_id),
+        false);
 $$ LANGUAGE sql STABLE;
 
--- ---- 3. L'en-tête -----------------------------------------------------------
+-- La référence est-elle comptée par cet inventaire (l'une de ses lignes, tout lot) ?
+CREATE OR REPLACE FUNCTION fn_inventaire_compte_reference(p_id text, p_reference text) RETURNS boolean AS $$
+    SELECT EXISTS (SELECT 1 FROM ligne_inventaire li
+                    WHERE li.id_inventaire = p_id AND li.code_reference = p_reference);
+$$ LANGUAGE sql STABLE;
+
+-- ---- 2c. Les messages ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_inventaire_type_libelle(p_type text) RETURNS text AS $$
+    SELECT CASE p_type WHEN 'GLOBAL' THEN 'global' WHEN 'TOURNANT' THEN 'tournant'
+                       WHEN 'CIBLE' THEN 'ciblé' ELSE lower(COALESCE(p_type, '?')) END;
+$$ LANGUAGE sql IMMUTABLE;
+
+-- Le gel du magasin entier : un global, ou un tournant / ciblé encore sans ligne.
+CREATE OR REPLACE FUNCTION fn_inventaire_ouvert_message(p_id text) RETURNS text AS $$
+    SELECT 'INVENTAIRE-OUVERT : l''inventaire ' || i.numero_inventaire
+           || ' (' || fn_inventaire_type_libelle(i.type_inventaire) || ')'
+           || ' est ouvert sur le magasin ' || i.code_magasin
+           || CASE i.statut WHEN 'VALIDE' THEN ' (comptage validé, à clôturer)' ELSE ' (en comptage)' END
+           || CASE WHEN i.type_inventaire IN ('TOURNANT', 'CIBLE')
+                   THEN ', encore sans aucune ligne (tout le magasin est gelé)'
+                   ELSE '' END
+           || ' : aucun mouvement de stock jusqu''à sa clôture ou son annulation.'
+      FROM inventaire i WHERE i.id_inventaire = p_id;
+$$ LANGUAGE sql STABLE;
+
+-- Le gel d'une référence : un tournant ou un ciblé qui la compte.
+CREATE OR REPLACE FUNCTION fn_inventaire_ouvert_message(p_id text, p_reference text) RETURNS text AS $$
+    SELECT 'INVENTAIRE-OUVERT : la référence ' || p_reference
+           || ' est comptée par l''inventaire ' || i.numero_inventaire
+           || ' (' || fn_inventaire_type_libelle(i.type_inventaire) || ')'
+           || ' ouvert sur le magasin ' || i.code_magasin
+           || CASE i.statut WHEN 'VALIDE' THEN ' (comptage validé, à clôturer)' ELSE ' (en comptage)' END
+           || ' : aucun mouvement de cette référence dans ce magasin jusqu''à sa clôture ou son annulation'
+           || ' (les autres références du magasin restent libres).'
+      FROM inventaire i WHERE i.id_inventaire = p_id;
+$$ LANGUAGE sql STABLE;
+
+-- ---- 3. L'en-tête : refusé seulement pour un gel du magasin entier ----------------
 CREATE OR REPLACE FUNCTION fn_trg_mouvement_inventaire_ouvert() RETURNS trigger AS $$
 DECLARE
     v_ouvert text;
@@ -1104,16 +1145,16 @@ BEGIN
         RETURN NEW;
     END IF;
 
+    -- L'en-tête ne porte pas de référence : un gel par référence (tournant, ciblé)
+    -- se juge sur chaque ligne (section 4).
     v_ouvert := fn_inventaire_ouvert(NEW.code_magasin);
-    IF v_ouvert IS NOT NULL THEN
+    IF v_ouvert IS NOT NULL AND NOT fn_inventaire_gel_par_reference(v_ouvert) THEN
         RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert);
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- « trg_01_ » : juste après la normalisation des dates (trg_00_date_vide), avant
--- les autres refus — sur un magasin gelé, c'est le gel qu'on doit lire.
 DROP TRIGGER IF EXISTS trg_01_mouvement_inventaire_ouvert ON mouvement;
 CREATE TRIGGER trg_01_mouvement_inventaire_ouvert
     BEFORE INSERT ON mouvement
@@ -1122,7 +1163,7 @@ CREATE TRIGGER trg_01_mouvement_inventaire_ouvert
 -- ---- 4. Les lignes : la garantie ---------------------------------------------
 -- `ligne_mouvement` est la seule écriture qui touche le stock (trg_lmvt_appliquer).
 -- Une ligne greffée à un en-tête écrit avant l'ouverture de l'inventaire serait
--- passée sans cette garde.
+-- passée sans cette garde. Pour un gel par référence, c'est ici seulement qu'il se juge.
 CREATE OR REPLACE FUNCTION fn_trg_lmvt_inventaire_ouvert() RETURNS trigger AS $$
 DECLARE
     v_magasin text;
@@ -1144,7 +1185,15 @@ BEGIN
     END IF;
 
     IF v_inv_mvt IS DISTINCT FROM v_ouvert THEN
-        RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert);
+        -- UN MOUVEMENT ORDINAIRE. Gel du magasin entier : refusé. Gel par
+        -- référence : refusé si l'inventaire compte cette référence, à l'instant.
+        IF NOT fn_inventaire_gel_par_reference(v_ouvert) THEN
+            RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert);
+        END IF;
+        IF fn_inventaire_compte_reference(v_ouvert, NEW.code_reference) THEN
+            RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert, NEW.code_reference);
+        END IF;
+        RETURN NEW;
     END IF;
 
     -- L'AJUSTEMENT DE LA CLÔTURE : chaque ligne est un écart de l'inventaire,
@@ -1176,3 +1225,5 @@ DROP TRIGGER IF EXISTS trg_01_lmvt_inventaire_ouvert ON ligne_mouvement;
 CREATE TRIGGER trg_01_lmvt_inventaire_ouvert
     BEFORE INSERT ON ligne_mouvement
     FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_inventaire_ouvert();
+
+-- (La vue `v_inventaire_gel`, lue par les écrans, reste dans la migration 2026-10-24a.)

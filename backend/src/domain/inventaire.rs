@@ -93,13 +93,21 @@ pub async fn preparer(tx: &mut sqlx::PgConnection, id_inventaire: &str) -> AppRe
     // lot refuserait a la cloture. Depuis le 01/10/2026 les fils sont suivis
     // au lot : un lot trouve en rayon se saisit au comptage, qui lui ouvre sa
     // ligne (theorique zero) — voir `saisir_comptage`.
+    //
+    // LE POIDS D'UNE BOBINE FIGE SUR LA LIGNE EST CELUI DU LOT (2026-10-24a) :
+    // `fn_lot_poids_bobine`, le lot sinon la fiche article, jamais 1. C'est lui
+    // qui convertit les bobines comptees ; le comptage le relit a son heure.
+    //
+    // CE QUE GELE L'INVENTAIRE (2026-10-24a) : un GLOBAL, tout le magasin ; un
+    // TOURNANT ou un CIBLE, les references de ces lignes (et d'un lot trouve
+    // au comptage, des qu'il a sa ligne). Sans aucune ligne, tout le magasin.
     let global = type_inventaire == "GLOBAL";
     let res = sqlx::query(
         "INSERT INTO ligne_inventaire
              (id_inventaire, code_reference, code_magasin, lot_fournisseur, quantite_theorique_kg,
               nb_bobines_theorique, poids_unitaire_theorique_kg)
          SELECT $1, sl.code_reference, sl.code_magasin, sl.lot_fournisseur, sl.quantite_kg,
-                sl.nb_bobines, NULLIF(r.poids_bobine_kg, 0)
+                sl.nb_bobines, fn_lot_poids_bobine(sl.code_reference, sl.lot_fournisseur)
            FROM stock_lot sl
            JOIN reference r ON r.code_reference = sl.code_reference AND r.suivi_lot = 1
           WHERE sl.code_magasin = $2 AND sl.quantite_kg > 0
@@ -291,8 +299,10 @@ pub async fn annuler(db: &Db, user: &Utilisateur, id_inventaire: &str, motif: &s
 /// Cloture l'inventaire et genere les mouvements d'ajustement.
 ///
 /// LE MAGASIN EST GELE PENDANT L'INVENTAIRE (decision du 23/10/2026, garde en
-/// base, migration 2026-10-23g) : de l'ouverture a la cloture ou a l'annulation,
-/// aucun mouvement n'y entre ni n'en sort. Seuls passent les ajustements ecrits
+/// base, migrations 2026-10-23g et 2026-10-24a) : de l'ouverture a la cloture ou
+/// a l'annulation, aucun mouvement n'y entre ni n'en sort — tout le magasin pour
+/// un GLOBAL, les seules references de ses lignes pour un TOURNANT ou un CIBLE
+/// (tout le magasin s'il n'a aucune ligne). Seuls passent les ajustements ecrits
 /// ici, rattaches a l'inventaire par `mouvement.id_inventaire` ; la base verifie
 /// que chaque ligne est un ecart de cet inventaire. Le theorique lu au comptage
 /// (`saisir_comptage`, regle 10) ne bouge donc plus jusqu'a la cloture.

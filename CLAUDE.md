@@ -218,4 +218,7 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   **qualité explicite** sur la consommation directe, son retour et le chargement machine (`2026-10-23b` : celle de l'OF,
   sinon obligatoire ; `code_qualite_periode` sur la décision, même frontière que l'OF) ; **inventaire ouvert = magasin
   gelé** (`2026-10-23g` : `INVENTAIRE-OUVERT` sur toute ligne de mouvement du magasin, sauf les ajustements rattachés
-  à l'inventaire par `mouvement.id_inventaire` ; `GET /api/inventaires/ouverts`, bandeau sur les écrans).
+  à l'inventaire par `mouvement.id_inventaire` ; `GET /api/inventaires/ouverts`, bandeau sur les écrans) — étendue par
+  type depuis `2026-10-24a` : GLOBAL = tout le magasin, TOURNANT/CIBLE = ses seules références (celles de ses lignes ;
+  sans ligne, tout le magasin), `v_inventaire_gel` ; théorique d'une ligne d'inventaire au poids du lot (bobines comptées
+  → kg par `fn_lot_poids_bobine`), C43 et la dérive du lot restant à la fiche article.

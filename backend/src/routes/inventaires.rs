@@ -95,9 +95,11 @@ pub async fn creer_inventaire(
     // Les lignes a compter, tout de suite (13/10/2026) : plus d'etape « ouvrir ».
     let n = crate::domain::inventaire::preparer(&mut tx, &id).await?;
 
-    // LE MAGASIN EST DESORMAIS GELE (23/10/2026) : ce qui etait en route vers
-    // lui n'y entrera plus avant la cloture. On le dit, sans bloquer.
-    let avis = documents_en_route(&mut tx, &i.code_magasin).await?;
+    // LE MAGASIN EST DESORMAIS GELE (23/10/2026) — tout entier pour un GLOBAL,
+    // ses references comptees pour un TOURNANT ou un CIBLE (2026-10-24a) : ce
+    // qui etait en route et touche le gel n'entrera plus avant la cloture. On
+    // le dit, sans bloquer.
+    let avis = documents_en_route(&mut tx, &id, &i.code_magasin).await?;
 
     tx.commit().await?;
     Ok(Json(json!({
@@ -107,23 +109,37 @@ pub async fn creer_inventaire(
 
 /// Les documents qui attendent d'entrer dans un magasin : transferts expedies vers
 /// lui, receptions pas encore validees qui y deposent. Sur un magasin gele par un
-/// inventaire, leur arrivee sera refusee jusqu'a la cloture (2026-10-23g).
-async fn documents_en_route(tx: &mut sqlx::PgConnection, magasin: &str) -> AppResult<Vec<String>> {
+/// inventaire, leur arrivee sera refusee jusqu'a la cloture (2026-10-23g) — pour
+/// un TOURNANT ou un CIBLE, seulement s'ils portent une reference comptee
+/// (2026-10-24a, meme regle que la base).
+async fn documents_en_route(
+    tx: &mut sqlx::PgConnection,
+    id_inventaire: &str,
+    magasin: &str,
+) -> AppResult<Vec<String>> {
     let transferts: Vec<String> = sqlx::query_scalar(
-        "SELECT numero_transfert FROM transfert
-          WHERE code_magasin_dest = $1 AND statut = 'VALIDE'
-          ORDER BY numero_transfert",
+        "SELECT t.numero_transfert FROM transfert t
+          WHERE t.code_magasin_dest = $1 AND t.statut = 'VALIDE'
+            AND (NOT fn_inventaire_gel_par_reference($2)
+                 OR EXISTS (SELECT 1 FROM ligne_transfert l
+                             WHERE l.id_transfert = t.id_transfert
+                               AND fn_inventaire_compte_reference($2, l.code_reference)))
+          ORDER BY t.numero_transfert",
     )
     .bind(magasin)
+    .bind(id_inventaire)
     .fetch_all(&mut *tx)
     .await?;
     let receptions: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT r.numero_reception FROM reception r
            JOIN ligne_reception l ON l.id_reception = r.id_reception
           WHERE l.code_magasin_dest = $1 AND r.statut IN ('BROUILLON', 'A_CONTROLER')
+            AND (NOT fn_inventaire_gel_par_reference($2)
+                 OR fn_inventaire_compte_reference($2, l.code_reference))
           ORDER BY r.numero_reception",
     )
     .bind(magasin)
+    .bind(id_inventaire)
     .fetch_all(&mut *tx)
     .await?;
     let mut avis = Vec::new();
@@ -142,23 +158,27 @@ async fn documents_en_route(tx: &mut sqlx::PgConnection, magasin: &str) -> AppRe
     Ok(avis)
 }
 
-/// `GET /api/inventaires/ouverts` — les magasins geles par un inventaire ouvert
+/// `GET /api/inventaires/ouverts` — ce que gelent les inventaires ouverts
 /// (23/10/2026). Lu par les ecrans qui ecrivent du stock (mouvement, fiche hors
 /// machine, reception, transfert, fiche machine) pour le dire AVANT la saisie.
 /// Tout compte authentifie : le magasinier qui saisit une sortie n'a pas
 /// forcement le module Inventaire, et le gel le concerne. La base refuse de
 /// toute facon (INVENTAIRE-OUVERT) ; ceci n'est que l'avertissement.
+///
+/// L'ETENDUE SELON LE TYPE (2026-10-24a, `v_inventaire_gel`, meme regle que les
+/// declencheurs) : `etendue_gel` = MAGASIN (un GLOBAL, ou un tournant / cible
+/// encore sans ligne) ou REFERENCES (un TOURNANT ou un CIBLE : ses seules
+/// references, dans `references_gelees`).
 pub async fn inventaires_ouverts(
     State(state): State<AppState>,
     _user: Utilisateur,
 ) -> AppResult<Json<Value>> {
     let rows = sqlx::query(
-        "SELECT i.id_inventaire, i.numero_inventaire, i.code_magasin, mg.nom AS magasin_nom,
-                i.statut, i.type_inventaire, i.date_creation
-           FROM inventaire i
-           LEFT JOIN magasin mg ON mg.code_magasin = i.code_magasin
-          WHERE i.statut IN ('BROUILLON', 'VALIDE')
-          ORDER BY i.code_magasin",
+        "SELECT g.id_inventaire, g.numero_inventaire, g.code_magasin, mg.nom AS magasin_nom,
+                g.statut, g.type_inventaire, g.date_creation, g.etendue_gel, g.references_gelees
+           FROM v_inventaire_gel g
+           LEFT JOIN magasin mg ON mg.code_magasin = g.code_magasin
+          ORDER BY g.code_magasin",
     )
     .fetch_all(&state.db)
     .await?;
@@ -210,8 +230,15 @@ pub async fn lignes_inventaire(
         // sans rappeler l'allee. Et elle suit l'ORDRE DU MAGASIN — la matiere,
         // puis la famille — parce qu'on parcourt une allee de polypropylene, pas
         // une liste alphabetique de codes.
+        //
+        // LE CONDITIONNEMENT DU LOT (2026-10-24a) : `poids_bobine_kg` et
+        // `bobines_par_palette` restent ceux de la fiche article ; ceux du lot
+        // de la ligne viennent a cote, et l'ecran convertit au lot, sinon a la
+        // fiche (`conditionnementDuLot`) — comme le serveur au comptage.
         "SELECT li.*, r.designation, r.unite_catalogue,
                 r.poids_bobine_kg, r.bobines_par_palette,
+                lo.poids_bobine_kg::float8 AS poids_bobine_lot_kg,
+                lo.bobines_par_palette AS bobines_par_palette_lot,
                 r.code_categorie, cat.libelle AS categorie_libelle,
                 r.code_famille, r.reference_fournisseur,
                 f.nom AS fournisseur_nom
@@ -219,6 +246,8 @@ pub async fn lignes_inventaire(
            JOIN reference r ON r.code_reference = li.code_reference
            LEFT JOIN categorie_matiere cat ON cat.code_categorie = r.code_categorie
            LEFT JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
+           LEFT JOIN lot lo ON lo.code_reference = li.code_reference
+                           AND lo.lot_fournisseur = li.lot_fournisseur
           WHERE li.id_inventaire = $1
           ORDER BY cat.libelle NULLS LAST, r.code_famille NULLS LAST, li.code_reference",
     )
@@ -235,7 +264,12 @@ pub async fn lignes_inventaire(
 pub struct Comptage {
     pub code_reference: String,
     pub code_magasin: String,
-    pub quantite_comptee_kg: f64,
+    /// Les kilos comptes (peses). ABSENTS, les bobines comptees les donnent, au
+    /// poids d'une bobine DU LOT de la ligne, sinon de la fiche article
+    /// (`fn_lot_poids_bobine`, 2026-10-24a) ; sans ce poids, le comptage est
+    /// refuse — jamais un facteur 1.
+    #[serde(default)]
+    pub quantite_comptee_kg: Option<f64>,
     /// Obligatoire pour une reference sous suivi de lot : c'est le lot qu'on
     /// compte, pas la reference.
     pub lot_fournisseur: Option<String>,
@@ -281,7 +315,37 @@ pub async fn saisir_comptage(
     let horodatage = maintenant();
     let mut n = 0usize;
     for c in &lot.comptages {
-        if c.quantite_comptee_kg < 0.0 {
+        // LES KILOS, PESES OU DEDUITS DES BOBINES AU POIDS DU LOT (2026-10-24a).
+        // On compte des bobines ; sans pesee, le poids d'une bobine du lot de la
+        // ligne (sinon de la fiche article) les convertit. Aucun poids connu : on
+        // refuse plutot que de compter une bobine pour un kilo.
+        let quantite_kg = match (c.quantite_comptee_kg, c.nb_bobines) {
+            (Some(q), _) => q,
+            (None, Some(b)) => {
+                let poids: Option<f64> = sqlx::query_scalar(
+                    "SELECT fn_lot_poids_bobine($1, $2)::float8",
+                )
+                .bind(&c.code_reference)
+                .bind(&c.lot_fournisseur)
+                .fetch_one(&mut *tx)
+                .await?;
+                let poids = poids.filter(|p| *p > 0.0).ok_or_else(|| {
+                    AppError::RegleMetier(format!(
+                        "{}{} : aucun poids de bobine (ni sur le lot, ni sur la fiche article) — saisissez les kilos comptes.",
+                        c.code_reference,
+                        c.lot_fournisseur.as_ref().map(|l| format!(" (lot {l})")).unwrap_or_default()
+                    ))
+                })?;
+                b as f64 * poids
+            }
+            (None, None) => {
+                return Err(AppError::Invalide(format!(
+                    "{} : saisissez les kilos comptes, ou les bobines.",
+                    c.code_reference
+                )))
+            }
+        };
+        if quantite_kg < 0.0 || c.nb_bobines.is_some_and(|b| b < 0) {
             return Err(AppError::Invalide(
                 "une quantite comptee ne peut pas etre negative".into(),
             ));
@@ -296,14 +360,18 @@ pub async fn saisir_comptage(
         // entre ou sorti depuis. Chaque ligne reprend donc, a l'instant ou on la
         // compte, le stock que le grand livre porte a cet instant (le cache en
         // est le reflet, controle C11). L'ecart = compte - theorique de cet
-        // instant. Depuis le 23/10/2026 le magasin est GELE tant que
-        // l'inventaire est ouvert (garde en base, 2026-10-23g) : ce theorique
-        // ne bouge plus jusqu'a la cloture.
+        // instant. Depuis le 23/10/2026 ce que l'inventaire compte est GELE
+        // tant qu'il est ouvert (garde en base, 2026-10-23g ; par reference
+        // pour un tournant ou un cible, 2026-10-24a) : ce theorique ne bouge
+        // plus jusqu'a la cloture.
         let res = sqlx::query(
             "UPDATE ligne_inventaire li
                 SET quantite_comptee_kg = $3, motif_ecart = $4, statut_ligne = 'COMPTE',
                     id_utilisateur_comptage = $5, date_comptage = fn_instant($6),
                     nb_bobines_comptees = $9, nb_palettes_comptees = $10,
+                    -- Le poids d'une bobine DU LOT, a l'heure du comptage
+                    -- (2026-10-24a) : celui qui a converti les bobines.
+                    poids_unitaire_theorique_kg = fn_lot_poids_bobine(li.code_reference, li.lot_fournisseur),
                     quantite_theorique_kg = CASE
                         WHEN li.lot_fournisseur IS NULL THEN
                             COALESCE((SELECT sm.quantite_kg FROM stock_magasin sm
@@ -333,7 +401,7 @@ pub async fn saisir_comptage(
         )
         .bind(&id)
         .bind(&c.code_reference)
-        .bind(arrondi_kg(c.quantite_comptee_kg))
+        .bind(arrondi_kg(quantite_kg))
         .bind(&c.motif_ecart)
         .bind(&user.id)
         .bind(&horodatage)
@@ -378,14 +446,14 @@ pub async fn saisir_comptage(
                                             WHERE sl.code_reference = $3 AND sl.code_magasin = $4
                                               AND sl.lot_fournisseur = $5), 0),
                                  $10, $11,
-                                 (SELECT NULLIF(poids_bobine_kg, 0) FROM reference WHERE code_reference = $3))",
+                                 fn_lot_poids_bobine($3, $5))",
                     )
                     .bind(uuid::Uuid::new_v4().to_string())
                     .bind(&id)
                     .bind(&c.code_reference)
                     .bind(&c.code_magasin)
                     .bind(lot)
-                    .bind(arrondi_kg(c.quantite_comptee_kg))
+                    .bind(arrondi_kg(quantite_kg))
                     .bind(c.motif_ecart.clone().or_else(|| Some("Lot trouvé au comptage".into())))
                     .bind(&user.id)
                     .bind(&horodatage)

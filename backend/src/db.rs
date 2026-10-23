@@ -110,6 +110,16 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Le gel selon le type d'inventaire (decision du 23/10/2026) : GLOBAL gele
+        // le magasin, TOURNANT et CIBLE leurs seules references ; v_inventaire_gel
+        // (lue par /api/inventaires/ouverts) ; C65 a la meme etendue ; theorique
+        // d'une ligne d'inventaire au poids du lot.
+        "2026-10-24a_inventaire_gel_par_reference.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_inventaire_gel_par_reference')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_inventaire_ouvert_message' AND pronargs = 2)
+            AND to_regclass('public.v_inventaire_gel') IS NOT NULL",
+    ),
+    (
         // Inventaire ouvert = magasin gele (decision du 23/10/2026) : aucun
         // mouvement tant qu'un inventaire du magasin est ouvert ; la cloture
         // rattache ses ajustements par `mouvement.id_inventaire`. C65.

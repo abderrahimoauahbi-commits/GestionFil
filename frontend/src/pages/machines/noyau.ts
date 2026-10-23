@@ -97,6 +97,9 @@ export interface LigneEtat {
   id_of?: string | null
   numero_of?: string | null
   largeur_voie_m?: number | null
+  /** La qualite que la ligne sert (23/10/2026) : celle de son OF, ou choisie sans OF. */
+  code_qualite?: string | null
+  qualite_nom?: string | null
 }
 
 /** CONSO reste lisible pour les anciennes fiches ; on n'en cree plus. */
@@ -118,6 +121,8 @@ export interface Fiche {
   numero_of: string | null
   /** L'OF choisi (lien), defaut des lignes (22/10/2026). */
   id_of?: string | null
+  /** La qualite par defaut des lignes, sans OF (23/10/2026). */
+  code_qualite?: string | null
   responsable: string
   observations: string | null
   nb_lignes: number
@@ -173,6 +178,9 @@ export interface LigneCalculee {
   largeur_voie_m?: number | null
   /** Bobines que tient la voie : une aide, jamais une consommation. */
   bobines_voie?: number | null
+  /** LA QUALITE, MEME FRONTIERE (23/10/2026) : la nouvelle, et celle de la periode, a qui l'ecart appartient. */
+  code_qualite?: string | null
+  code_qualite_periode?: string | null
 }
 
 /** La couleur d'un niveau d'ecart machine, en classes de theme. */
@@ -220,7 +228,9 @@ export interface LigneConso {
 export interface FicheDetail {
   entete: Fiche & { nb_validations: number; capacite_bobines: number; date_creation?: string | null
                     largeur_m?: number | null; numero_of_lien?: string | null }
-  lignes: (LigneEnvoi & { designation: string; poids_catalogue_kg: number | null; numero_of?: string | null })[]
+  lignes: (LigneEnvoi & { designation: string; poids_catalogue_kg: number | null; numero_of?: string | null
+                         /** Le poids d'une bobine du lot (23/10/2026). */
+                         poids_lot_kg?: number | null })[]
   decisions: {
     numero_validation: number
     statut: 'ACTIVE' | 'RETIREE' | 'ANNULEE'
@@ -235,7 +245,8 @@ export interface FicheDetail {
   lignes_decision: (LigneCalculee & { designation: string; motif: string })[]
   etats: { moment: 'AVANT' | 'APRES'; code_reference: string; designation: string; lot_fournisseur: string
            nb_bobines: number; pourcentage: number | null; kg: number
-           numero_of?: string | null; largeur_voie_m?: number | null }[]
+           numero_of?: string | null; largeur_voie_m?: number | null
+           code_qualite?: string | null; qualite_nom?: string | null }[]
   journal: { evenement: string; horodatage: string; code_emplacement: string | null; motif: string | null
              auteur: string | null; detail: string | null }[]
 }
@@ -256,6 +267,8 @@ export interface LigneEnvoi {
   /** L'OF de la ligne (vide : celui de la fiche) et sa voie en metres (22/10/2026). */
   id_of?: string | null
   largeur_voie_m?: number | null
+  /** La qualite de la ligne (vide : celle de la fiche, de l'OF ou de l'etat) — 23/10/2026. */
+  code_qualite?: string | null
   /** Pose seulement apres un refus R02-LOT confirme par l'operateur. */
   lot_force?: boolean
   motif_lot_force?: string
@@ -298,6 +311,11 @@ export interface LigneSaisie {
   largeur_voie?: number
   /** L'OF que la ligne sert avant la decision (son numero), pour l'ecran. */
   avant_numero_of?: string | null
+  /** LA QUALITE de la ligne (23/10/2026) : vide = celle de la fiche, a defaut celle qu'elle sert deja. */
+  code_qualite?: string
+  /** La qualite que la ligne sert avant la decision. */
+  avant_code_qualite?: string | null
+  avant_qualite_nom?: string | null
 }
 
 /**
@@ -505,7 +523,8 @@ export function corpsFiche(
   type: TypeFiche,
   machine: string,
   zone: string,
-  entete: { date: string; magasin: string; responsable: string; of: string; id_of?: string; observations: string },
+  entete: { date: string; magasin: string; responsable: string; of: string; id_of?: string; code_qualite?: string
+            observations: string },
   lignes: LigneSaisie[],
 ) {
   return {
@@ -517,6 +536,8 @@ export function corpsFiche(
     numero_of: entete.of || null,
     /* L'OF EN LIEN (22/10/2026) : le serveur en pose le numero dans `numero_of`. */
     id_of: entete.id_of || null,
+    /* LA QUALITE PAR DEFAUT DES LIGNES (23/10/2026), quand la fiche ne sert pas d'OF. */
+    code_qualite: entete.id_of ? null : entete.code_qualite || null,
     responsable: entete.responsable,
     observations: entete.observations || null,
     lignes: lignesAEnvoyer(type, lignes).map((l): LigneEnvoi => ({
@@ -533,6 +554,7 @@ export function corpsFiche(
       effet_ecart: l.effet_ecart || null,
       id_of: l.id_of || null,
       largeur_voie_m: l.largeur_voie && l.largeur_voie > 0 ? l.largeur_voie : null,
+      code_qualite: l.code_qualite || null,
     })),
   }
 }
@@ -638,6 +660,9 @@ export function depuisEtat(e: LigneEtat, type: TypeFiche): LigneSaisie {
     id_of: '',
     largeur_voie: e.largeur_voie_m ?? 0,
     avant_numero_of: e.numero_of ?? null,
+    code_qualite: '',
+    avant_code_qualite: e.code_qualite ?? null,
+    avant_qualite_nom: e.qualite_nom ?? null,
   }
 }
 
@@ -671,6 +696,9 @@ export function ligneNeuve(
     id_of: '',
     largeur_voie: 0,
     avant_numero_of: null,
+    code_qualite: '',
+    avant_code_qualite: null,
+    avant_qualite_nom: null,
   }
 }
 

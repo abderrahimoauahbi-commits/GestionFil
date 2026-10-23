@@ -27,6 +27,7 @@ import { cn } from '../../lib/utils'
 import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import { ChampLot } from '../../composants/ChampLot'
 import { ChampScan } from '../../composants/ChampScan'
+import { AvisInventaireOuvert } from '../../composants/AvisInventaireOuvert'
 import { SaisieNombre } from '../../composants/ui/base'
 import {
   bobinesVoie, cheminMachine, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, fmtInstant, LIBELLE_DESTINATION,
@@ -38,7 +39,7 @@ import {
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
 import { DemandesDerogation } from './Derogation'
-import { ChoixOF } from '../../composants/ChoixOF'
+import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts } from '../../composants/ChoixOF'
 
 interface RefCat {
   code_reference: string
@@ -630,6 +631,7 @@ export function FicheBureau({
 }) {
   const ouvrir = useOuvrirVue()
   const f = useFiche(machine.code_machine, zone, type, idFiche)
+  const ofs = useOfOuverts()
   const v = useValiderFiche(f)
   const [ajout, setAjout] = useState(false)
   const tolerances = useTolerancesLot()
@@ -702,6 +704,32 @@ export function FicheBureau({
       est une AIDE au magasinier — jamais une consommation : il est propose au
       chargement, et un depassement se signale sans bloquer. Une fonction, pas
       un composant (le focus se perdrait a chaque frappe). */
+  /** LA QUALITE DE LA LIGNE (23/10/2026) : celle de son OF (de la ligne, de la
+      fiche, ou celui qu'elle sert deja), affichee ; sans OF, au chargement, elle
+      se choisit — obligatoire. Au dechargement et au constat, celle de l'etat. */
+  const qualiteLigne = (l: LigneSaisie) => {
+    const idOf = l.id_of || f.entete.id_of
+    const imposee = idOf
+      ? (qualiteDeLOf(ofs.data, idOf) ?? '…')
+      : l.avant_numero_of
+        ? (l.avant_qualite_nom ?? l.avant_code_qualite ?? '…')
+        : type !== 'CHARGE'
+          ? (l.avant_qualite_nom ?? l.avant_code_qualite ?? 'sans qualité')
+          : null
+    return (
+      <ChoixQualite
+        valeur={l.code_qualite ?? ''}
+        onChange={(q) => f.majLigne(l.cle, 'code_qualite', q)}
+        imposee={imposee}
+        vide={f.entete.code_qualite ? `qualité de la fiche (${f.entete.code_qualite})`
+          : l.avant_code_qualite ? `garde ${l.avant_qualite_nom ?? l.avant_code_qualite}` : 'Qualité (obligatoire)…'}
+        invalide={imposee == null && !l.code_qualite && !f.entete.code_qualite && !l.avant_code_qualite}
+        ariaLabel="Qualité de la ligne"
+        className="min-h-[28px] w-44 px-1 text-[11px]"
+      />
+    )
+  }
+
   const ofEtVoie = (l: LigneSaisie, nbApres: number, touchee: boolean) => {
     const cap = bobinesVoie(zone.capacite_bobines, machine.largeur_m, l.largeur_voie)
     const depasse = cap != null && touchee && nbApres > cap
@@ -714,6 +742,7 @@ export function FicheBureau({
           ariaLabel="OF de la ligne"
           className="min-h-[28px] w-44 px-1 text-[11px]"
         />
+        {qualiteLigne(l)}
         <div className="flex items-center gap-1">
           <SaisieNombre
             min={0}
@@ -749,6 +778,7 @@ export function FicheBureau({
 
   return (
     <div className="flex flex-col gap-3">
+      {toucheMagasin && <AvisInventaireOuvert inventaires={f.gel} />}
       {/* --- L'entete ---------------------------------------------------- */}
       <div className="grid grid-cols-2 gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3 lg:grid-cols-5">
         {idFiche ? (
@@ -802,9 +832,24 @@ export function FicheBureau({
             valeur={f.entete.id_of}
             inconnu={f.entete.of || null}
             vide={f.entete.of && !f.entete.id_of ? `${f.entete.of} (texte ancien)` : '— l’OF de chaque ligne —'}
-            onChange={(id, numero) => f.setEntete({ ...f.entete, id_of: id, of: id ? numero : f.entete.of })}
+            onChange={(id, numero) =>
+              f.setEntete({ ...f.entete, id_of: id, of: id ? numero : f.entete.of, code_qualite: id ? '' : f.entete.code_qualite })
+            }
           />
         </label>
+        {/* LA QUALITE DE LA FICHE (23/10/2026) : le defaut des lignes d'un
+            chargement sans OF ; avec un OF, la sienne. */}
+        {type === 'CHARGE' && (
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-attenue-texte">Qualité (sans OF)</span>
+            <ChoixQualite
+              valeur={f.entete.code_qualite}
+              onChange={(q) => f.setEntete({ ...f.entete, code_qualite: q })}
+              imposee={f.entete.id_of ? (qualiteDeLOf(ofs.data, f.entete.id_of) ?? '…') : null}
+              vide="— la qualité de chaque ligne —"
+            />
+          </div>
+        )}
         <Champ label="Responsable" v={f.entete.responsable} set={(v) => f.setEntete({ ...f.entete, responsable: v })} />
       </div>
 
@@ -815,7 +860,7 @@ export function FicheBureau({
             <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
               <th className="px-2 py-1.5 text-left">Référence</th>
               <th className="px-2 py-1.5 text-left">Lot</th>
-              <th className="px-2 py-1.5 text-left" title="L’OF que la ligne servira, et sa voie (largeur) : le nombre de bobines à manipuler">OF · voie</th>
+              <th className="px-2 py-1.5 text-left" title="L’OF que la ligne servira, sa qualité, et sa voie (largeur) : le nombre de bobines à manipuler">OF · qualité · voie</th>
               <th className="px-2 py-1.5 text-right">Avant</th>
               {type === 'CHARGE' && (
                 <>

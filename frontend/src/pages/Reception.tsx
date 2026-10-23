@@ -24,6 +24,8 @@ import { useAuth, useDroits } from '../auth/AuthContext'
 import { useToleranceFournisseur } from '../lib/lots'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
+import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
+import { phraseGel, useInventaireOuvert } from '../lib/inventairesOuverts'
 import { ClotureFacture, CorrectionFacture } from './ReceptionCloture'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
@@ -637,6 +639,9 @@ export function Reception() {
       entete.id_dossier_import !== (rec.id_dossier_import ?? ''))
 
   const lignes = qLignes.data ?? []
+  /* UN MAGASIN DE DESTINATION GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la
+     validation, qui fait entrer le stock, sera refusee par la base. */
+  const gel = useInventaireOuvert(...new Set(lignes.map((l) => l.code_magasin_dest)))
 
   /* CE QUI PARTIRA A L'ENREGISTREMENT, calcule a partir de la grille seule. */
   const aCreer = nouvelles.filter((n) => !n.idExistant)
@@ -1029,9 +1034,11 @@ export function Reception() {
                     action: () => valider.mutate(),
                   })
                 }}
-                disabled={estPeseur}
+                disabled={estPeseur || gel.length > 0}
                 title={
-                  estPeseur
+                  gel.length > 0
+                    ? (phraseGel(gel, true) ?? undefined)
+                    : estPeseur
                     ? 'B4 : vous avez pesé ou corrigé cette réception — un autre la valide'
                     : 'Entree en stock, CMUP, archive et historique de prix'
                 }
@@ -1060,6 +1067,10 @@ export function Reception() {
           </>
         }
       />
+
+      {(rec.statut === 'BROUILLON' || rec.statut === 'A_CONTROLER') && (
+        <AvisInventaireOuvert inventaires={gel} nommer className="mb-3" />
+      )}
 
       {renvoi !== null && (
         <Carte className="mb-3">

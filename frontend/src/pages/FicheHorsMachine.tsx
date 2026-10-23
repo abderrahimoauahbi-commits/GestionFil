@@ -13,8 +13,18 @@
  *     sans effet sur le CMUP, jamais plus que ce que l'OF a sorti de cette
  *     reference — la base le garantit.
  *
- * CONSOMMATION DE L'OF = SORTI - RENDU. L'OF est obligatoire ici ; le serveur
- * accepte une sortie sans OF (l'ecran des mouvements), mais la signale (C62).
+ * CONSOMMATION DE L'OF = SORTI - RENDU.
+ *
+ * LA QUALITE EXPLICITE (23/10/2026) : « quand on choisit un OF ou non, on doit
+ * explicitement definir la qualite ». Avec un OF, c'est la sienne, affichee ;
+ * sans OF, elle est obligatoire (le serveur et la base la refusent absente), et
+ * un retour sans OF est borne par ce que la qualite a sorti sans OF.
+ *
+ * PALETTES, BOBINES, KILOS LIES (23/10/2026) : on tape dans une case, les deux
+ * autres suivent, avec le conditionnement DU LOT choisi (sinon de la fiche
+ * article). La case tapee garde sa valeur ; les bobines sont entieres ; rien
+ * n'est arrondi a la palette pleine. Facteur manquant : seule la case des
+ * kilos. Les kilos partent au serveur — l'unite canonique.
  *
  * Deux sens, donc au plus deux mouvements, chacun avec son identifiant tire a
  * l'ouverture : renvoyer la fiche apres une panne ne double rien.
@@ -27,7 +37,14 @@ import { api, ErreurApi } from '../api/client'
 import { EnTetePage } from '../composants/Coquille'
 import { Alerte, Bouton, SaisieNombre } from '../composants/ui/base'
 import { ChampLot } from '../composants/ChampLot'
-import { ChoixOF, useOfOuverts } from '../composants/ChoixOF'
+import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts } from '../composants/ChoixOF'
+import { useConditionnementsLots } from '../hooks/useConditionnementLots'
+import {
+  type ChampColis, type Colisage, type Conditionnement, conditionnementDuLot, depuisChamp, facteurVersKg, pourChamp,
+} from '../lib/conditionnement'
+import { lireNombre } from '../lib/nombres'
+import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
+import { phraseGel, useInventaireOuvert } from '../lib/inventairesOuverts'
 import { nouvelIdentifiant } from '../lib/identifiant'
 import { cn, fmt } from '../lib/utils'
 
@@ -38,7 +55,9 @@ interface Ligne {
   sens: Sens
   code_reference: string
   lot: string
-  kg: number
+  /** La case tapee (kilos, palettes ou bobines) et sa valeur : les deux autres s'en deduisent. */
+  saisiePar: ChampColis
+  valeur: string
 }
 
 interface StockMagasin {
@@ -47,6 +66,8 @@ interface StockMagasin {
   quantite_kg: number
   suivi_lot: number | null
   mode_consommation?: string | null
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
 }
 
 interface Magasin {
@@ -65,7 +86,9 @@ interface BilanOf {
 
 const aujourdhui = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Casablanca' })
 let compteur = 0
-const ligneVide = (sens: Sens = 'SORTIE'): Ligne => ({ cle: `h${++compteur}`, sens, code_reference: '', lot: '', kg: 0 })
+const ligneVide = (sens: Sens = 'SORTIE'): Ligne => ({
+  cle: `h${++compteur}`, sens, code_reference: '', lot: '', saisiePar: 'quantite', valeur: '',
+})
 
 const LIBELLE_SENS: Record<Sens, string> = { SORTIE: 'Sortie (consommée)', RETOUR: 'Retour au magasin' }
 
@@ -74,7 +97,7 @@ const champ = 'min-h-[34px] rounded-[var(--radius-sm)] border border-bordure bg-
 export function FicheHorsMachine() {
   const naviguer = useNavigate()
   const qc = useQueryClient()
-  const [entete, setEntete] = useState({ date: aujourdhui(), responsable: '', magasin: '', id_of: '' })
+  const [entete, setEntete] = useState({ date: aujourdhui(), responsable: '', magasin: '', id_of: '', code_qualite: '' })
   const [lignes, setLignes] = useState<Ligne[]>(() => [ligneVide()])
   const [ids, setIds] = useState(() => ({ sortie: nouvelIdentifiant(), retour: nouvelIdentifiant() }))
   const [resultat, setResultat] = useState<string[] | null>(null)
@@ -89,14 +112,22 @@ export function FicheHorsMachine() {
       api.get<StockMagasin[]>(`/api/stock?code_magasin=${encodeURIComponent(entete.magasin)}&limite=2000`, { signal }),
     enabled: !!entete.magasin,
   })
+  /* CE QUE L'OF — ou, sans OF, la qualite — a deja sorti et rendu : ce qu'un retour peut encore rendre. */
   const qBilan = useQuery({
-    queryKey: ['of-hors-machine', entete.id_of],
+    queryKey: ['of-hors-machine', entete.id_of, entete.id_of ? '' : entete.code_qualite],
     queryFn: ({ signal }) =>
-      api.get<BilanOf[]>(`/api/machines/of-ouverts/${encodeURIComponent(entete.id_of)}/hors-machine`, { signal }),
-    enabled: !!entete.id_of,
+      api.get<BilanOf[]>(
+        entete.id_of
+          ? `/api/machines/of-ouverts/${encodeURIComponent(entete.id_of)}/hors-machine`
+          : `/api/machines/qualites/${encodeURIComponent(entete.code_qualite)}/hors-machine`,
+        { signal },
+      ),
+    enabled: !!entete.id_of || !!entete.code_qualite,
   })
   const ofs = useOfOuverts()
   const ofChoisi = (ofs.data ?? []).find((o) => o.id_of === entete.id_of)
+  /** Ce qui porte la consommation : l'OF, ou a defaut la qualite. */
+  const porteur = entete.id_of ? 'l’OF' : 'la qualité (sans OF)'
 
   /* LES ARTICLES EN MODE DIRECTE SEULEMENT : le fil sort par les fiches machine. */
   const articles = useMemo(() => {
@@ -111,36 +142,58 @@ export function FicheHorsMachine() {
   const article = (code: string) => articles.find((a) => a.code_reference === code)
   const bilan = (code: string) => (qBilan.data ?? []).find((b) => b.code_reference === code)
 
+  /* LE CONDITIONNEMENT DE LA LIGNE : celui de son lot, sinon de la fiche article. */
+  const { condLot } = useConditionnementsLots(lignes.filter((l) => l.lot.trim()).map((l) => l.code_reference))
+  const condDe = (l: Ligne): Conditionnement => {
+    const a = article(l.code_reference)
+    return conditionnementDuLot(
+      { poids_bobine_kg: a?.poids_bobine_kg ?? null, bobines_par_palette: a?.bobines_par_palette ?? null },
+      condLot(l.code_reference, l.lot),
+    )
+  }
+  /** Les trois cases de la ligne : celle tapee telle quelle, les deux autres deduites. */
+  const colisDe = (l: Ligne): Colisage => depuisChamp(l.saisiePar, l.valeur, condDe(l))
+  /** Les kilos de la ligne : l'unite canonique, ce qui part au serveur. */
+  const kgDe = (l: Ligne): number => {
+    const k = l.saisiePar === 'quantite' ? lireNombre(l.valeur) : colisDe(l).kg
+    return k !== null && Number.isFinite(k) && k > 0 ? Math.round(k * 10_000) / 10_000 : 0
+  }
+
   function maj(cle: string, patch: Partial<Ligne>) {
     setResultat(null)
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, ...patch } : l)))
   }
 
-  const utiles = lignes.filter((l) => l.code_reference && l.kg > 0)
+  const utiles = lignes.filter((l) => l.code_reference && kgDe(l) > 0)
+
+  /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la base refuse. */
+  const gel = useInventaireOuvert(entete.magasin)
 
   /** CE QUI MANQUE, dit en clair : la premiere chose qui empeche d'enregistrer. */
   const manque = ((): string | null => {
+    if (gel.length > 0) return phraseGel(gel)
     if (!entete.date) return 'Indiquez la date.'
     if (!entete.responsable.trim()) return 'Indiquez le responsable.'
     if (!entete.magasin) return 'Choisissez le magasin.'
-    if (!entete.id_of) return 'Choisissez l’ordre de fabrication : la consommation se range sous son OF.'
+    if (!entete.id_of && !entete.code_qualite)
+      return 'Choisissez l’ordre de fabrication, ou sans OF la qualité : toute consommation de fabrication nomme sa qualité.'
     if (utiles.length === 0) return 'Saisissez au moins une ligne (référence et quantité).'
     for (const l of utiles) {
       const a = article(l.code_reference)
       const qui = a?.designation ?? l.code_reference
       if (a?.suivi_lot === 1 && !l.lot.trim()) return `Indiquez le lot de ${qui} : la référence est suivie par lot.`
-      if (l.sens === 'SORTIE' && a && l.kg > a.quantite_kg + 1e-6)
-        return `${qui} : ${fmt.nombre(l.kg, 2)} kg à sortir, ${fmt.nombre(a.quantite_kg, 2)} kg au magasin.`
+      if (l.sens === 'SORTIE' && a && kgDe(l) > a.quantite_kg + 1e-6)
+        return `${qui} : ${fmt.nombre(kgDe(l), 2)} kg à sortir, ${fmt.nombre(a.quantite_kg, 2)} kg au magasin.`
     }
-    // UN RETOUR NE REND PAS PLUS QUE L'OF N'A SORTI de cette reference (la base le garantit aussi).
+    // UN RETOUR NE REND PAS PLUS QUE L'OF (sans OF : la qualite) N'A SORTI de cette reference (la base le garantit aussi).
     const rendus = new Map<string, number>()
     for (const l of utiles.filter((x) => x.sens === 'RETOUR'))
-      rendus.set(l.code_reference, (rendus.get(l.code_reference) ?? 0) + l.kg)
+      rendus.set(l.code_reference, (rendus.get(l.code_reference) ?? 0) + kgDe(l))
     for (const [code, kg] of rendus) {
       const reste = bilan(code)?.reste_kg ?? 0
       if (kg > reste + 1e-6) {
         const qui = article(code)?.designation ?? code
-        return `${qui} : ${fmt.nombre(kg, 2)} kg rendus, l’OF n’en a sorti que ${fmt.nombre(reste, 2)} kg non encore rendus.`
+        return `${qui} : ${fmt.nombre(kg, 2)} kg rendus, ${porteur} n’en a sorti que ${fmt.nombre(reste, 2)} kg non encore rendus.`
       }
     }
     return null
@@ -159,14 +212,22 @@ export function FicheHorsMachine() {
           code_motif: sens === 'SORTIE' ? 'PRODUCTION' : 'RETOUR_PROD',
           date_mouvement: entete.date,
           responsable: entete.responsable.trim(),
-          id_of: entete.id_of,
-          observations_globales: `Fiche hors machine${ofChoisi ? ` · OF ${ofChoisi.numero}` : ''}`,
-          lignes: ls.map((l) => ({
-            code_reference: l.code_reference,
-            quantite_saisie: l.kg,
-            unite_saisie: 'kg',
-            lot_fournisseur: l.lot.trim() || null,
-          })),
+          id_of: entete.id_of || null,
+          // Avec un OF, la base pose sa qualite ; sans OF, celle choisie.
+          code_qualite: entete.id_of ? null : entete.code_qualite,
+          observations_globales: `Fiche hors machine${ofChoisi ? ` · OF ${ofChoisi.numero}` : ` · qualité ${entete.code_qualite}`}`,
+          lignes: ls.map((l) => {
+            const colis = colisDe(l)
+            return {
+              code_reference: l.code_reference,
+              // LES KILOS, unite canonique ; les colis comptes les accompagnent.
+              quantite_saisie: kgDe(l),
+              unite_saisie: 'kg',
+              nb_bobines: colis.bobines != null && colis.bobines > 0 ? colis.bobines : null,
+              nb_palettes: colis.palettes != null && colis.palettes > 0 ? colis.palettes : null,
+              lot_fournisseur: l.lot.trim() || null,
+            }
+          }),
         })
         faits.push(`${sens === 'SORTIE' ? 'Sortie' : 'Retour'} ${r.numero_mouvement}`)
       }
@@ -193,9 +254,10 @@ export function FicheHorsMachine() {
           </Bouton>
         }
       />
+      <AvisInventaireOuvert inventaires={gel} />
 
       {/* --- L'entete ---------------------------------------------------------- */}
-      <div className="grid grid-cols-1 gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3 sm:grid-cols-2 lg:grid-cols-5">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-attenue-texte">Date</span>
           <input type="date" value={entete.date} onChange={(e) => setEntete({ ...entete, date: e.target.value })} className={champ} />
@@ -215,10 +277,18 @@ export function FicheHorsMachine() {
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-attenue-texte">Ordre de fabrication <span className="text-danger">*</span></span>
-          <ChoixOF valeur={entete.id_of} onChange={(id) => setEntete({ ...entete, id_of: id })}
-                   vide="Choisir l’OF…" invalide={!entete.id_of} />
+          <span className="text-[11px] text-attenue-texte">Ordre de fabrication</span>
+          <ChoixOF valeur={entete.id_of} onChange={(id) => setEntete({ ...entete, id_of: id, code_qualite: id ? '' : entete.code_qualite })}
+                   vide="— aucun OF : choisir la qualité —" />
         </label>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-attenue-texte">
+            Qualité {!entete.id_of && <span className="text-danger">*</span>}
+          </span>
+          <ChoixQualite valeur={entete.code_qualite} onChange={(q) => setEntete({ ...entete, code_qualite: q })}
+                        imposee={entete.id_of ? (qualiteDeLOf(ofs.data, entete.id_of) ?? '…') : null}
+                        invalide={!entete.id_of && !entete.code_qualite} className="w-full" />
+        </div>
       </div>
 
       {/* --- Les lignes : une carte par ligne, sans defilement horizontal ------- */}
@@ -226,8 +296,15 @@ export function FicheHorsMachine() {
         {lignes.map((l) => {
           const a = article(l.code_reference)
           const b = bilan(l.code_reference)
+          const cond = condDe(l)
+          const colis = colisDe(l)
+          /* FACTEUR MANQUANT : seule la case des kilos (jamais un facteur 1). */
+          const parBobine = facteurVersKg('Bobine', cond) !== null
+          const parPalette = facteurVersKg('Palette', cond) !== null
+          const vue = (champ: ChampColis, calcule: number | null, decimales = 0) =>
+            l.saisiePar === champ ? l.valeur : pourChamp(calcule, decimales)
           return (
-            <div key={l.cle} className="grid grid-cols-1 gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-2 sm:grid-cols-[11rem_1fr_11rem_8rem_auto] sm:items-start">
+            <div key={l.cle} className="grid grid-cols-1 gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-2 sm:grid-cols-[11rem_1fr_11rem_auto] sm:items-start">
               <select value={l.sens} onChange={(e) => maj(l.cle, { sens: e.target.value as Sens })}
                       aria-label="Sens" className={cn(champ, l.sens === 'RETOUR' && 'border-primaire')}>
                 <option value="SORTIE">{LIBELLE_SENS.SORTIE}</option>
@@ -244,7 +321,7 @@ export function FicheHorsMachine() {
                 {a && (
                   <span className="text-[11px] text-attenue-texte">
                     {fmt.nombre(a.quantite_kg, 2)} kg au magasin
-                    {entete.id_of && b && ` · OF : ${fmt.nombre(b.kg_sorti, 2)} kg sortis, ${fmt.nombre(b.kg_rendu, 2)} rendus`}
+                    {b && ` · ${entete.id_of ? 'OF' : 'qualité sans OF'} : ${fmt.nombre(b.kg_sorti, 2)} kg sortis, ${fmt.nombre(b.kg_rendu, 2)} rendus`}
                   </span>
                 )}
               </div>
@@ -255,16 +332,44 @@ export function FicheHorsMachine() {
               ) : (
                 <span className="min-h-[34px] py-2 text-[12px] text-attenue-texte">lot</span>
               )}
-              <div className="flex items-center gap-1">
-                <SaisieNombre min={0} step={0.1} value={l.kg || ''} aria-label="Quantité (kg)"
-                              onChange={(e) => maj(l.cle, { kg: Math.max(0, Number(e.target.value) || 0) })}
-                              className={cn(champ, 'w-full text-right tabular-nums')} />
-                <span className="text-[12px] text-attenue-texte">kg</span>
-              </div>
               <button type="button" aria-label="Retirer la ligne" onClick={() => setLignes((ls) => ls.filter((x) => x.cle !== l.cle))}
                       className="min-h-[34px] px-2 text-attenue-texte hover:text-danger">
                 <Trash2 className="size-4" />
               </button>
+              {/* ↳ LA QUANTITE : palettes, bobines, kilos lies par le conditionnement du lot. */}
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-4">
+                <span className="text-[12px] text-attenue-texte">↳</span>
+                <label className="flex items-center gap-1">
+                  <SaisieNombre min={0} step={1} value={vue('palettes', colis.palettes)} aria-label="Palettes"
+                                disabled={!parPalette} title={parPalette ? undefined : 'Ni le lot ni la fiche article ne disent les bobines par palette'}
+                                onChange={(e) => maj(l.cle, { saisiePar: 'palettes', valeur: e.target.value })}
+                                className={cn(champ, 'w-20 text-right tabular-nums')} />
+                  <span className="text-[12px] text-attenue-texte">palettes</span>
+                </label>
+                <label className="flex items-center gap-1">
+                  <SaisieNombre min={0} step={1} value={vue('bobines', colis.bobines)} aria-label="Bobines"
+                                disabled={!parBobine} title={parBobine ? undefined : 'Ni le lot ni la fiche article ne disent le poids d’une bobine'}
+                                onChange={(e) => {
+                                  /* UNE BOBINE NE SE COUPE PAS : un entier. */
+                                  const n = lireNombre(e.target.value)
+                                  maj(l.cle, { saisiePar: 'bobines', valeur: n === null ? '' : String(Math.max(0, Math.round(n))) })
+                                }}
+                                className={cn(champ, 'w-24 text-right tabular-nums')} />
+                  <span className="text-[12px] text-attenue-texte">bobines</span>
+                </label>
+                <label className="flex items-center gap-1">
+                  <SaisieNombre min={0} step={0.1} value={vue('quantite', colis.kg, 3)} aria-label="Quantité (kg)"
+                                onChange={(e) => maj(l.cle, { saisiePar: 'quantite', valeur: e.target.value })}
+                                className={cn(champ, 'w-28 text-right tabular-nums')} />
+                  <span className="text-[12px] text-attenue-texte">kg</span>
+                </label>
+                {l.lot && cond.poids_bobine_kg != null && (
+                  <span className="text-[11px] text-attenue-texte">
+                    lot : {fmt.nombre(Number(cond.poids_bobine_kg), 3)} kg la bobine
+                    {cond.bobines_par_palette != null && `, ${cond.bobines_par_palette} par palette`}
+                  </span>
+                )}
+              </div>
             </div>
           )
         })}
@@ -280,10 +385,10 @@ export function FicheHorsMachine() {
         </div>
       </div>
 
-      {entete.id_of && (qBilan.data ?? []).length > 0 && (
+      {(entete.id_of || entete.code_qualite) && (qBilan.data ?? []).length > 0 && (
         <div className="rounded-[var(--radius)] border border-bordure bg-surface p-3 text-[12.5px]">
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-attenue-texte">
-            Déjà sur cet OF — consommation = sorti − rendu
+            {entete.id_of ? 'Déjà sur cet OF' : 'Déjà sur cette qualité, sans OF'} — consommation = sorti − rendu
           </div>
           <ul className="m-0 list-none space-y-0.5 p-0 tabular-nums">
             {(qBilan.data ?? []).map((b) => (

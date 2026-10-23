@@ -95,8 +95,74 @@ pub async fn creer_inventaire(
     // Les lignes a compter, tout de suite (13/10/2026) : plus d'etape « ouvrir ».
     let n = crate::domain::inventaire::preparer(&mut tx, &id).await?;
 
+    // LE MAGASIN EST DESORMAIS GELE (23/10/2026) : ce qui etait en route vers
+    // lui n'y entrera plus avant la cloture. On le dit, sans bloquer.
+    let avis = documents_en_route(&mut tx, &i.code_magasin).await?;
+
     tx.commit().await?;
-    Ok(Json(json!({ "id_inventaire": id, "numero_inventaire": numero, "lignes_a_compter": n })))
+    Ok(Json(json!({
+        "id_inventaire": id, "numero_inventaire": numero, "lignes_a_compter": n, "avis": avis,
+    })))
+}
+
+/// Les documents qui attendent d'entrer dans un magasin : transferts expedies vers
+/// lui, receptions pas encore validees qui y deposent. Sur un magasin gele par un
+/// inventaire, leur arrivee sera refusee jusqu'a la cloture (2026-10-23g).
+async fn documents_en_route(tx: &mut sqlx::PgConnection, magasin: &str) -> AppResult<Vec<String>> {
+    let transferts: Vec<String> = sqlx::query_scalar(
+        "SELECT numero_transfert FROM transfert
+          WHERE code_magasin_dest = $1 AND statut = 'VALIDE'
+          ORDER BY numero_transfert",
+    )
+    .bind(magasin)
+    .fetch_all(&mut *tx)
+    .await?;
+    let receptions: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT r.numero_reception FROM reception r
+           JOIN ligne_reception l ON l.id_reception = r.id_reception
+          WHERE l.code_magasin_dest = $1 AND r.statut IN ('BROUILLON', 'A_CONTROLER')
+          ORDER BY r.numero_reception",
+    )
+    .bind(magasin)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut avis = Vec::new();
+    if !transferts.is_empty() {
+        avis.push(format!(
+            "Transfert(s) en route vers ce magasin : {}. Leur arrivée sera refusée jusqu'à la clôture de l'inventaire.",
+            transferts.join(", ")
+        ));
+    }
+    if !receptions.is_empty() {
+        avis.push(format!(
+            "Réception(s) en cours vers ce magasin : {}. Leur validation sera refusée jusqu'à la clôture de l'inventaire.",
+            receptions.join(", ")
+        ));
+    }
+    Ok(avis)
+}
+
+/// `GET /api/inventaires/ouverts` — les magasins geles par un inventaire ouvert
+/// (23/10/2026). Lu par les ecrans qui ecrivent du stock (mouvement, fiche hors
+/// machine, reception, transfert, fiche machine) pour le dire AVANT la saisie.
+/// Tout compte authentifie : le magasinier qui saisit une sortie n'a pas
+/// forcement le module Inventaire, et le gel le concerne. La base refuse de
+/// toute facon (INVENTAIRE-OUVERT) ; ceci n'est que l'avertissement.
+pub async fn inventaires_ouverts(
+    State(state): State<AppState>,
+    _user: Utilisateur,
+) -> AppResult<Json<Value>> {
+    let rows = sqlx::query(
+        "SELECT i.id_inventaire, i.numero_inventaire, i.code_magasin, mg.nom AS magasin_nom,
+                i.statut, i.type_inventaire, i.date_creation
+           FROM inventaire i
+           LEFT JOIN magasin mg ON mg.code_magasin = i.code_magasin
+          WHERE i.statut IN ('BROUILLON', 'VALIDE')
+          ORDER BY i.code_magasin",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&rows)))
 }
 
 /// `GET /api/inventaires/{id}` — l'en-tete d'un inventaire, pour sa page.
@@ -230,7 +296,9 @@ pub async fn saisir_comptage(
         // entre ou sorti depuis. Chaque ligne reprend donc, a l'instant ou on la
         // compte, le stock que le grand livre porte a cet instant (le cache en
         // est le reflet, controle C11). L'ecart = compte - theorique de cet
-        // instant ; ce qui bouge ensuite reste acquis. Pas de gel du magasin.
+        // instant. Depuis le 23/10/2026 le magasin est GELE tant que
+        // l'inventaire est ouvert (garde en base, 2026-10-23g) : ce theorique
+        // ne bouge plus jusqu'a la cloture.
         let res = sqlx::query(
             "UPDATE ligne_inventaire li
                 SET quantite_comptee_kg = $3, motif_ecart = $4, statut_ligne = 'COMPTE',

@@ -134,6 +134,96 @@ export function depuisKg(valeur: unknown, c: Conditionnement): Colisage {
   return { ...r, kg: n }
 }
 
+/** Le champ qu'on vient de taper : il commande, les deux autres suivent. */
+export type ChampColis = 'quantite' | 'palettes' | 'bobines'
+
+/** Le colisage déduit du champ tapé, selon le conditionnement donné. */
+export function depuisChamp(source: ChampColis, valeur: unknown, c: Conditionnement): Colisage {
+  return source === 'palettes' ? depuisPalettes(valeur, c) : source === 'bobines' ? depuisBobines(valeur, c) : depuisKg(valeur, c)
+}
+
+/**
+ * CHAQUE LOT A SON CONDITIONNEMENT (23/10/2026).
+ *
+ * « Si un lot a une modification des poids de bobine, tout sera faux, et même
+ * pour les nb palettes. » Le poids d'une bobine et les bobines par palette sont
+ * mesurés à la réception de CHAQUE lot (et se corrigent sur la fiche du lot) :
+ * dès qu'un lot est choisi, c'est son conditionnement qui convertit. Un facteur
+ * que le lot ne porte pas reste celui de la fiche article ; aucun des deux, et
+ * la conversion n'a pas lieu — seule la case des kilos reste, jamais un facteur
+ * 1. Même règle au serveur (`unites::charger_pour_lot`) et en base
+ * (`fn_lot_poids_bobine`, `fn_lot_bobines_palette`).
+ */
+export interface ConditionnementLot {
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+}
+
+export function conditionnementDuLot(
+  reference: Conditionnement,
+  lot?: ConditionnementLot | null,
+): Conditionnement {
+  if (!lot) return reference
+  const p = nombre(lot.poids_bobine_kg)
+  const n = nombre(lot.bobines_par_palette)
+  return {
+    ...reference,
+    poids_bobine_kg: p !== null && p > 0 ? p : reference.poids_bobine_kg,
+    bobines_par_palette: n !== null && n > 0 ? n : reference.bobines_par_palette,
+  }
+}
+
+/** Ce qu'une ligne de saisie doit porter pour suivre le conditionnement de son lot. */
+export interface LigneColisLot {
+  code_reference: string
+  cond: Conditionnement
+  /** Le conditionnement de la fiche article, gardé quand celui d'un lot le remplace. */
+  condReference?: Conditionnement
+  qte: string
+  palettes: string
+  bobines: string
+  lie: boolean
+  /** Le dernier champ tapé : c'est lui qui commande quand le conditionnement change. */
+  saisiePar?: ChampColis
+  extra?: Record<string, string>
+}
+
+/**
+ * LA LIGNE PREND LE CONDITIONNEMENT DE SON LOT, une fois par lot choisi.
+ *
+ * Le champ tapé en dernier garde sa valeur — trois palettes restent trois
+ * palettes, un poids pesé reste ce poids — et les deux autres se recalculent
+ * avec les facteurs du lot. Une ligne détachée garde ses trois valeurs. Sans
+ * lot, ou lot inconnu du registre (une entrée), la fiche article.
+ */
+export function appliquerConditionnementLot<T extends LigneColisLot>(l: T, lot: string, lotCond?: ConditionnementLot | null): T {
+  const e = l.extra ?? {}
+  const base = e.cond_ref === l.code_reference && l.condReference ? l.condReference : l.cond
+  const cle = lot.trim()
+    ? `${l.code_reference}|${lot.trim()}|${lotCond?.poids_bobine_kg ?? ''}|${lotCond?.bobines_par_palette ?? ''}`
+    : `${l.code_reference}|`
+  if (e.cond_lot === cle && e.cond_ref === l.code_reference) return l
+  const cond = lot.trim() ? conditionnementDuLot(base, lotCond) : base
+  // RIEN NE CHANGE (le lot porte les facteurs de la fiche) : la ligne reste la
+  // meme — un brouillon relu ne passe pas pour modifie.
+  const memeCond =
+    nombre(cond.poids_bobine_kg) === nombre(l.cond.poids_bobine_kg) &&
+    nombre(cond.bobines_par_palette) === nombre(l.cond.bobines_par_palette)
+  if (memeCond) return l
+  const n: T = { ...l, cond, condReference: base, extra: { ...e, cond_lot: cle, cond_ref: l.code_reference } }
+  if (!l.lie) return n
+  const source = l.saisiePar ?? 'quantite'
+  const valeur = source === 'palettes' ? l.palettes : source === 'bobines' ? l.bobines : l.qte
+  if (String(valeur ?? '').trim() === '') return n
+  const r = depuisChamp(source, valeur, cond)
+  return {
+    ...n,
+    qte: source === 'quantite' ? l.qte : pourChamp(r.kg, 2),
+    palettes: source === 'palettes' ? l.palettes : pourChamp(r.palettes),
+    bobines: source === 'bobines' ? l.bobines : pourChamp(r.bobines),
+  }
+}
+
 /**
  * Le facteur d'une unité de manutention vers le kilo, ou null.
  *

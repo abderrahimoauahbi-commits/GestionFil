@@ -931,10 +931,16 @@ pub async fn lots(
         "SELECT sl.code_reference, r.designation, r.poids_bobine_kg::float8 AS poids_bobine_kg,
                 sl.code_magasin, mg.nom AS magasin_nom, mg.type AS magasin_type,
                 sl.lot_fournisseur, sl.code_couleur, sl.quantite_kg, sl.nb_bobines,
-                sl.prix_entree_mad, sl.date_premiere_entree, sl.date_fabrication, sl.date_peremption
+                sl.prix_entree_mad, sl.date_premiere_entree, sl.date_fabrication, sl.date_peremption,
+                -- LE CONDITIONNEMENT DU LOT (23/10/2026) : ce qui convertit ses
+                -- palettes, bobines et kilos ; a defaut, celui de la fiche article.
+                COALESCE(lo.poids_bobine_kg, r.poids_bobine_kg)::float8 AS poids_bobine_lot_kg,
+                COALESCE(lo.bobines_par_palette, r.bobines_par_palette)  AS bobines_par_palette_lot,
+                lo.origine_poids_bobine, lo.origine_bobines_palette
            FROM stock_lot sl
            JOIN magasin mg ON mg.code_magasin = sl.code_magasin
            JOIN reference r ON r.code_reference = sl.code_reference
+           LEFT JOIN lot lo ON lo.code_reference = sl.code_reference AND lo.lot_fournisseur = sl.lot_fournisseur
           WHERE sl.quantite_kg > 0
             AND ($1::text IS NULL OR sl.code_reference = $1)
             AND ($3::text IS NULL OR sl.code_magasin = $3)

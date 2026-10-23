@@ -123,6 +123,11 @@ pub struct LigneFiche {
     /// magasinier (le nombre de bobines a manipuler), jamais une consommation.
     #[serde(default)]
     pub largeur_voie_m: Option<f64>,
+    /// LA QUALITE QUE LA LIGNE SERT (23/10/2026) : vide, celle de la fiche ;
+    /// avec un OF, celle de l'OF (le calcul refuse une autre) ; sans OF, elle est
+    /// obligatoire au chargement.
+    #[serde(default)]
+    pub code_qualite: Option<String>,
 }
 
 fn estimation() -> String {
@@ -143,6 +148,9 @@ pub struct NouvelleFiche {
     /// `numero_of` texte en prend le numero, pour l'historique.
     #[serde(default)]
     pub id_of: Option<String>,
+    /// La qualite par defaut des lignes, quand la fiche ne sert pas d'OF (23/10/2026).
+    #[serde(default)]
+    pub code_qualite: Option<String>,
     pub responsable: String,
     pub observations: Option<String>,
     #[serde(default)]
@@ -250,11 +258,14 @@ pub async fn etat_zone(
                 e.mode_constat, e.date_constat, e.responsable,
                 r.poids_bobine_kg::float8   AS poids_catalogue_kg,
                 -- L'OF que la ligne sert et sa voie (22/10/2026).
-                e.id_of, o.numero AS numero_of, e.largeur_voie_m::float8 AS largeur_voie_m
+                e.id_of, o.numero AS numero_of, e.largeur_voie_m::float8 AS largeur_voie_m,
+                -- La qualite que la ligne sert (23/10/2026) : la sienne, a defaut celle de son OF.
+                COALESCE(e.code_qualite, o.code_qualite) AS code_qualite, q.nom AS qualite_nom
            FROM machine_etat e
            JOIN machine_emplacement z ON z.code_emplacement = e.code_emplacement
            JOIN reference r ON r.code_reference = e.code_reference
            LEFT JOIN ordre_fabrication o ON o.id_of = e.id_of
+           LEFT JOIN qualite q ON q.code_qualite = COALESCE(e.code_qualite, o.code_qualite)
           WHERE z.code_machine = $1 AND e.code_emplacement = $2
           ORDER BY r.designation, e.lot_fournisseur",
     )
@@ -296,12 +307,14 @@ pub async fn contenu_machine(
                 e.mode_constat, e.date_constat, e.responsable,
                 r.poids_bobine_kg::float8   AS poids_catalogue_kg,
                 c.libelle                   AS couleur,
-                e.id_of, o.numero AS numero_of, e.largeur_voie_m::float8 AS largeur_voie_m
+                e.id_of, o.numero AS numero_of, e.largeur_voie_m::float8 AS largeur_voie_m,
+                COALESCE(e.code_qualite, o.code_qualite) AS code_qualite, q.nom AS qualite_nom
            FROM machine_emplacement z
            LEFT JOIN machine_etat e ON e.code_emplacement = z.code_emplacement
            LEFT JOIN reference r ON r.code_reference = e.code_reference
            LEFT JOIN couleur c ON c.code_couleur_interne = r.code_couleur_interne
            LEFT JOIN ordre_fabrication o ON o.id_of = e.id_of
+           LEFT JOIN qualite q ON q.code_qualite = COALESCE(e.code_qualite, o.code_qualite)
           WHERE z.code_machine = $1
           -- LES ZONES VIDES RESTENT DANS LA LISTE. Un etage sans fil est une
           -- information : c'est la qu'il faut charger. Le filtrer donnerait un
@@ -339,7 +352,10 @@ pub async fn mouvements_machine(
                 l.id_mouvement, m.numero_mouvement,
                 a.id_mouvement AS id_annulation, a.numero_mouvement AS numero_annulation,
                 -- L'ecart appartient a l'OF de la periode, l'OF sortant (22/10/2026).
-                l.id_of, onv.numero AS numero_of, l.id_of_periode, opr.numero AS numero_of_periode
+                l.id_of, onv.numero AS numero_of, l.id_of_periode, opr.numero AS numero_of_periode,
+                -- La qualite nouvelle et celle de la periode, a qui l'ecart appartient (23/10/2026).
+                COALESCE(l.code_qualite, onv.code_qualite) AS code_qualite,
+                COALESCE(l.code_qualite_periode, opr.code_qualite) AS code_qualite_periode
            FROM machine_decision d
            JOIN machine_decision_ligne l ON l.id_decision = d.id_decision
            LEFT JOIN ordre_fabrication onv ON onv.id_of = l.id_of
@@ -382,7 +398,7 @@ pub async fn apercu_retrait(
     };
     let avant = sqlx::query(
         "SELECT s.code_reference, s.lot_fournisseur, s.nb_bobines, s.kg::float8 AS kg,
-                s.id_of, o.numero AS numero_of
+                s.id_of, o.numero AS numero_of, COALESCE(s.code_qualite, o.code_qualite) AS code_qualite
            FROM machine_decision_etat s LEFT JOIN ordre_fabrication o ON o.id_of = s.id_of
           WHERE s.id_decision = $1 AND s.moment = 'AVANT'
           ORDER BY s.code_reference, s.lot_fournisseur",
@@ -501,7 +517,8 @@ pub async fn lire_fiche(
     let entete = sqlx::query(
         "SELECT f.*, m.nom AS machine_nom, z.libelle AS zone, z.capacite_bobines,
                 m.largeur_m::float8 AS largeur_m,
-                (SELECT o.numero FROM ordre_fabrication o WHERE o.id_of = f.id_of) AS numero_of_lien
+                (SELECT o.numero FROM ordre_fabrication o WHERE o.id_of = f.id_of) AS numero_of_lien,
+                (SELECT q.nom FROM qualite q WHERE q.code_qualite = f.code_qualite) AS qualite_nom
            FROM machine_fiche f
            JOIN machine m ON m.code_machine = f.code_machine
            JOIN machine_emplacement z ON z.code_emplacement = f.code_emplacement
@@ -516,10 +533,13 @@ pub async fn lire_fiche(
 
     let lignes = sqlx::query(
         "SELECT l.*, r.designation, r.poids_bobine_kg::float8 AS poids_catalogue_kg,
-                o.numero AS numero_of
+                -- Le poids d'une bobine DU LOT (23/10/2026) : le defaut d'un chargement.
+                fn_lot_poids_bobine(l.code_reference, l.lot_fournisseur)::float8 AS poids_lot_kg,
+                o.numero AS numero_of, q.nom AS qualite_nom
            FROM machine_fiche_ligne l
            JOIN reference r ON r.code_reference = l.code_reference
            LEFT JOIN ordre_fabrication o ON o.id_of = l.id_of
+           LEFT JOIN qualite q ON q.code_qualite = l.code_qualite
           WHERE l.id_fiche = $1
           ORDER BY l.ligne_numero",
     )
@@ -552,9 +572,11 @@ pub async fn lire_fiche(
     let etats = sqlx::query(
         "SELECT s.moment, s.code_reference, r.designation, s.lot_fournisseur, s.nb_bobines,
                 s.pourcentage::float8 AS pourcentage, s.kg::float8 AS kg,
-                s.id_of, o.numero AS numero_of, s.largeur_voie_m::float8 AS largeur_voie_m
+                s.id_of, o.numero AS numero_of, s.largeur_voie_m::float8 AS largeur_voie_m,
+                COALESCE(s.code_qualite, o.code_qualite) AS code_qualite, q.nom AS qualite_nom
            FROM machine_decision_etat s JOIN reference r ON r.code_reference = s.code_reference
            LEFT JOIN ordre_fabrication o ON o.id_of = s.id_of
+           LEFT JOIN qualite q ON q.code_qualite = COALESCE(s.code_qualite, o.code_qualite)
           WHERE s.id_decision = $1
           ORDER BY s.moment DESC, r.designation, s.lot_fournisseur",
     )
@@ -570,7 +592,9 @@ pub async fn lire_fiche(
                 l.pourcentage_theorique::float8 AS pourcentage_theorique, l.kg_apres::float8 AS kg_apres,
                 l.ecart_kg::float8 AS ecart_kg, l.effet_ecart, m.libelle AS motif, l.motif_texte,
                 l.niveau_ecart, l.largeur_voie_m::float8 AS largeur_voie_m,
-                l.id_of, onv.numero AS numero_of, l.id_of_periode, opr.numero AS numero_of_periode
+                l.id_of, onv.numero AS numero_of, l.id_of_periode, opr.numero AS numero_of_periode,
+                COALESCE(l.code_qualite, onv.code_qualite) AS code_qualite,
+                COALESCE(l.code_qualite_periode, opr.code_qualite) AS code_qualite_periode
            FROM machine_decision_ligne l
            JOIN reference r     ON r.code_reference = l.code_reference
            JOIN machine_motif m ON m.code_motif = l.code_motif
@@ -641,10 +665,10 @@ pub async fn creer_fiche(
         "INSERT INTO machine_fiche
              (id_fiche, numero_fiche, type_fiche, statut, code_machine, code_emplacement,
               date_fiche, date_constat_precedent, code_magasin, nb_bobines_etage,
-              nb_palettes, numero_of, responsable, observations, id_utilisateur, id_of)
+              nb_palettes, numero_of, responsable, observations, id_utilisateur, id_of, code_qualite)
          VALUES ($1,$2,$3,'BROUILLON',$4,$5,
                  COALESCE(fn_jour_casablanca($6), (now() AT TIME ZONE 'Africa/Casablanca')::date),
-                 fn_jour_casablanca($7),$8,$9,$10,$11,$12,$13,$14,$15)",
+                 fn_jour_casablanca($7),$8,$9,$10,$11,$12,$13,$14,$15,$16)",
     )
     .bind(&id)
     .bind(&numero)
@@ -661,6 +685,7 @@ pub async fn creer_fiche(
     .bind(&f.observations)
     .bind(&user.id)
     .bind(&id_of)
+    .bind(qualite_saisie(&f.code_qualite))
     .execute(&mut *tx)
     .await?;
 
@@ -706,7 +731,7 @@ pub async fn remplacer_fiche(
             SET date_fiche = COALESCE(fn_jour_casablanca($2), date_fiche), code_magasin = $3,
                 nb_bobines_etage = $4, nb_palettes = $5, numero_of = $6,
                 responsable = $7, observations = $8,
-                code_machine = $9, code_emplacement = $10, id_of = $11
+                code_machine = $9, code_emplacement = $10, id_of = $11, code_qualite = $12
           WHERE id_fiche = $1",
     )
     .bind(&id)
@@ -720,6 +745,7 @@ pub async fn remplacer_fiche(
     .bind(&f.code_machine)
     .bind(&f.code_emplacement)
     .bind(&id_of)
+    .bind(qualite_saisie(&f.code_qualite))
     .execute(&mut *tx)
     .await?;
 
@@ -778,12 +804,12 @@ async fn charger_decision(
 ) -> AppResult<(dm::FicheDecision, Vec<dm::Saisie>, i64, String)> {
     type Entete = (
         String, String, String, String, Option<String>, String, Option<String>, String, i64, i64, String,
-        Option<String>, Option<f64>,
+        Option<String>, Option<f64>, Option<String>,
     );
     let e: Entete = sqlx::query_as(
         "SELECT f.numero_fiche, f.type_fiche, f.code_machine, f.code_emplacement, f.code_magasin,
                 f.date_fiche::text AS date_fiche, f.numero_of, f.responsable, f.nb_validations, z.capacite_bobines, z.libelle,
-                f.id_of, m.largeur_m::float8
+                f.id_of, m.largeur_m::float8, f.code_qualite
            FROM machine_fiche f
            JOIN machine_emplacement z ON z.code_emplacement = f.code_emplacement
            JOIN machine m ON m.code_machine = z.code_machine
@@ -795,18 +821,19 @@ async fn charger_decision(
     .ok_or_else(|| AppError::Introuvable(format!("fiche {id}")))?;
     type LigneLue = (
         String, String, Option<i64>, Option<f64>, Option<f64>, Option<String>, Option<f64>, i64,
-        Option<String>, Option<String>, Option<String>, Option<String>, Option<f64>,
+        Option<String>, Option<String>, Option<String>, Option<String>, Option<f64>, Option<String>,
     );
     let lignes: Vec<LigneLue> = sqlx::query_as(
         "SELECT code_reference, lot_fournisseur, nb_bobines_mouvementees, poids_retenu_kg::float8,
                 pct_retirees::float8, destination, pourcentage::float8, nb_bobines_presentes,
-                code_motif, motif_texte, effet_ecart, id_of, largeur_voie_m::float8
+                code_motif, motif_texte, effet_ecart, id_of, largeur_voie_m::float8, code_qualite
            FROM machine_fiche_ligne WHERE id_fiche = $1 ORDER BY ligne_numero",
     )
     .bind(id)
     .fetch_all(&mut *tx)
     .await?;
     let of_fiche = e.11.clone();
+    let qualite_fiche = e.13.clone();
     let saisies = lignes
         .into_iter()
         .map(|t| dm::Saisie {
@@ -824,6 +851,8 @@ async fn charger_decision(
             // L'OF DE LA LIGNE, A DEFAUT CELUI DE LA FICHE (22/10/2026).
             id_of: t.11.or_else(|| of_fiche.clone()),
             largeur_voie_m: t.12,
+            // LA QUALITE DE LA LIGNE, A DEFAUT CELLE DE LA FICHE (23/10/2026).
+            code_qualite: t.13.or_else(|| qualite_fiche.clone()),
         })
         .collect();
     let f = dm::FicheDecision {
@@ -934,6 +963,55 @@ pub async fn of_hors_machine(
     .fetch_all(&state.db)
     .await?;
     Ok(Json(lignes_en_json(&lignes)))
+}
+
+/// `GET /api/machines/qualites` — LES QUALITES QU'UNE CONSOMMATION PEUT SERVIR
+/// sans OF (23/10/2026) : toutes, sauf les qualites cloturees.
+pub async fn qualites_ouvertes(State(state): State<AppState>, user: Utilisateur) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT code_qualite, nom AS qualite_nom FROM qualite
+          WHERE statut IS DISTINCT FROM 'CLOTURE'
+          ORDER BY code_qualite",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&lignes)))
+}
+
+/// `GET /api/machines/qualites/{code}/hors-machine` — CE QUE LA QUALITE A SORTI
+/// ET RENDU SANS OF des matieres hors machine, par reference (23/10/2026) : ce
+/// qu'un retour sans OF peut encore rendre (la base le borne de meme,
+/// `fn_qualite_conso_directe_reste`). Contre-passes exclus.
+pub async fn qualite_hors_machine(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(code): Path<String>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::MOUVEMENTS, Action::Lire).await?;
+    let lignes = sqlx::query(
+        "SELECT lm.code_reference, r.designation,
+                COALESCE(sum(lm.quantite_kg) FILTER (WHERE m.code_type_mvt = 'CONSO_DIRECTE'), 0)::float8 AS kg_sorti,
+                COALESCE(sum(lm.quantite_kg) FILTER (WHERE m.code_type_mvt = 'RETOUR_CONSO'), 0)::float8 AS kg_rendu,
+                fn_qualite_conso_directe_reste($1, lm.code_reference)::float8 AS reste_kg
+           FROM mouvement m
+           JOIN ligne_mouvement lm ON lm.id_mouvement = m.id_mouvement
+           JOIN reference r ON r.code_reference = lm.code_reference
+          WHERE m.id_of IS NULL AND m.code_qualite = $1
+            AND m.code_type_mvt IN ('CONSO_DIRECTE', 'RETOUR_CONSO')
+            AND NOT EXISTS (SELECT 1 FROM mouvement c WHERE c.id_mouvement_contrepasse = m.id_mouvement)
+          GROUP BY lm.code_reference, r.designation
+          ORDER BY r.designation",
+    )
+    .bind(&code)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(lignes_en_json(&lignes)))
+}
+
+/// Une qualite saisie : vide = aucune.
+fn qualite_saisie(q: &Option<String>) -> Option<&str> {
+    q.as_deref().map(str::trim).filter(|q| !q.is_empty())
 }
 
 fn refuser_conso(type_fiche: &str) -> AppResult<()> {
@@ -1309,8 +1387,8 @@ async fn ecrire_lignes(
                   nb_bobines_presentes, poids_unitaire_kg, pourcentage, total_kg,
                   mode_constat, notes, lot_force, motif_lot_force,
                   poids_retenu_kg, pct_retirees, destination, code_motif, motif_texte, effet_ecart,
-                  id_of, largeur_voie_m)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)",
+                  id_of, largeur_voie_m, code_qualite)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)",
         )
         .bind(id)
         .bind(i as i64 + 1)
@@ -1340,6 +1418,7 @@ async fn ecrire_lignes(
         .bind(l.effet_ecart.as_deref().filter(|e| !e.is_empty()))
         .bind(l.id_of.as_deref().filter(|o| !o.is_empty()))
         .bind(l.largeur_voie_m.filter(|v| *v > 0.0))
+        .bind(qualite_saisie(&l.code_qualite))
         .execute(&mut *tx)
         .await?;
     }

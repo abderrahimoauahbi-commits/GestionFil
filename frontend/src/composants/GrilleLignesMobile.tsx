@@ -108,6 +108,7 @@ export function GrilleLignesMobile({
         return {
           ...l,
           valide: false,
+          saisiePar: source,
           qte: source === 'quantite' ? valeur : pourChamp(r.kg, 2),
           palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
           bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),

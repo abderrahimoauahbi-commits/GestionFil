@@ -504,9 +504,12 @@ function NouvelInventaire() {
   const [idDocument] = useState(nouvelIdentifiant)
   const creer = useMutation({
     mutationFn: () =>
-      api.post<{ id_inventaire: string; numero_inventaire: string; lignes_a_compter: number }>('/api/inventaires', { ...form, id_document: idDocument }),
+      api.post<{ id_inventaire: string; numero_inventaire: string; lignes_a_compter: number; avis?: string[] }>('/api/inventaires', { ...form, id_document: idDocument }),
     onSuccess: (r) => {
       toast.success(`Inventaire ${r.numero_inventaire} créé : ${r.lignes_a_compter} ligne(s) à compter.`)
+      /* CE QUI ETAIT EN ROUTE VERS LE MAGASIN, desormais gele (23/10/2026) : un
+         avis, pas un blocage. */
+      for (const a of r.avis ?? []) toast.warning(a, { duration: 12000 })
       void qc.invalidateQueries({ queryKey: ['inventaires'] })
       naviguer(`/inventaires/${r.id_inventaire}`, { replace: true })
     },
@@ -532,6 +535,10 @@ function NouvelInventaire() {
           </>
         }
       />
+      <Alerte ton="alerte">
+        Dès la création, le magasin est gelé : aucun mouvement n’y entre ni n’en sort (sorties, réceptions,
+        transferts, fiches machine) jusqu’à la clôture ou l’annulation de l’inventaire.
+      </Alerte>
       <Carte>
         <CarteEntete>
           <CarteTitre>L’inventaire</CarteTitre>

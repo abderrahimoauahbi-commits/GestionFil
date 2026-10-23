@@ -26,6 +26,7 @@ import { useConfirmation } from '../../composants/ui/surcouches'
 import { couleurEcart, libelleLot, useTolerancesLot } from '../../lib/lots'
 import { cn, fmt } from '../../lib/utils'
 import { ActionsLot, BadgeCategorie, BadgeStatut, LienLot } from './commun'
+import { ConditionnementLot, type MesureConditionnement } from './ConditionnementLot'
 import {
   EVENEMENTS,
   MODULE,
@@ -81,6 +82,8 @@ interface Vie {
   magasins: LieuMagasin[]
   machines: LieuMachine[]
   evenements: Evenement[]
+  /** Le journal du conditionnement du lot (23/10/2026). */
+  conditionnement?: MesureConditionnement[]
 }
 
 /** Une ligne de `/api/stock/lots` : le stock d'un lot dans un magasin. */
@@ -340,6 +343,9 @@ export function FicheLot() {
             {voitValeur && <Info libelle="Valeur">{fmt.mad(lot.valeur_mad)}</Info>}
           </CarteCorps>
         </Carte>
+
+        {/* ---- Son conditionnement (23/10/2026) ------------------------------ */}
+        {!auKilo && <ConditionnementLot lot={lot} historique={q.data.conditionnement ?? []} />}
 
         {/* ---- Ou est le lot ------------------------------------------------- */}
         <div className="grid gap-3 lg:grid-cols-2">

@@ -336,6 +336,10 @@ pub fn router(state: AppState) -> Router {
         // Les OF qu'une fiche (machine ou hors machine) peut choisir (22/10/2026).
         .route("/api/machines/of-ouverts", get(machines::of_ouverts))
         .route("/api/machines/of-ouverts/{id}/hors-machine", get(machines::of_hors_machine))
+        // La qualite explicite (23/10/2026) : les qualites ouvertes, et ce
+        // qu'une qualite a sorti et rendu sans OF.
+        .route("/api/machines/qualites", get(machines::qualites_ouvertes))
+        .route("/api/machines/qualites/{code}/hors-machine", get(machines::qualite_hors_machine))
         // Lire le plan d une machine, ou le corriger. La correction exige
         // PARAMETRES/ECRIRE — la direction et les super-utilisateurs — parce
         // qu une capacite fausse fausse toute la consommation qui en decoule.
@@ -379,6 +383,7 @@ pub fn router(state: AppState) -> Router {
                get(inventaires::lister_inventaires).post(inventaires::creer_inventaire))
         .route("/api/inventaires/{id}/lignes",
                get(inventaires::lignes_inventaire).put(inventaires::saisir_comptage))
+        .route("/api/inventaires/ouverts", get(inventaires::inventaires_ouverts))
         .route("/api/inventaires/{id}", get(inventaires::lire_inventaire))
         .route("/api/inventaires/{id}/preparer", post(operations::preparer_inventaire))
         .route("/api/inventaires/{id}/valider", post(operations::valider_inventaire))
@@ -486,6 +491,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/lots/dormant", post(lots::decider_dormant))
         .route("/api/lots/fusion", post(lots::fusionner))
         .route("/api/lots/identifier", post(lots::identifier))
+        // Chaque lot a son conditionnement (23/10/2026) : lu par les ecrans de
+        // saisie, corrige sur la fiche du lot.
+        .route("/api/lots/conditionnement", get(lots::conditionnements).post(lots::corriger_conditionnement))
         .route("/api/autorisations", get(lots::lister_demandes).post(lots::creer_demande))
         .route("/api/autorisations/{id}/decider", post(lots::decider))
         .route("/api/stats/lots", get(lots::statistiques))

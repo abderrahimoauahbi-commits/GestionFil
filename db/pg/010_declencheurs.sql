@@ -90,6 +90,22 @@ EXECUTE FUNCTION fn_trg_lmvt_conso_directe();
 -- fn_trg_lmvt_retour_conso (trg_lmvt_retour_conso, BEFORE INSERT ON ligne_mouvement),
 -- fn_trg_mouvement_conso_rendue (trg_mouvement_conso_rendue, BEFORE INSERT ON mouvement),
 -- et fn_bobines_voie(capacite, largeur_machine, largeur_voie) = floor(capacite x voie / largeur).
+--
+-- LA QUALITE EXPLICITE (23/10/2026, migration 2026-10-23b_qualite_explicite.sql) :
+-- trg_mouvement_qualite (BEFORE INSERT ON mouvement) — une consommation directe ou
+-- son retour porte la qualite de son OF, sans OF une qualite obligatoire ; les
+-- autres mouvements n'en portent pas. Le retour sans OF est borne par la qualite
+-- (fn_qualite_conso_directe_reste) : fn_trg_lmvt_retour_conso et
+-- fn_trg_mouvement_conso_rendue y sont redefinies. Machine : trg_machine_etat_qualite,
+-- trg_machine_decision_etat_qualite (fn_trg_machine_qualite_of) et
+-- trg_machine_decision_ligne_qualite (fn_trg_mdl_qualite : qualite nouvelle et de la
+-- periode coherentes avec leurs OF, obligatoire sur une ligne de chargement).
+--
+-- LE CONDITIONNEMENT DU LOT (23/10/2026, migration 2026-10-23a_lot_conditionnement.sql) :
+-- trg_10_lot_conditionnement_naissance (BEFORE INSERT ON lot : la fiche article),
+-- fn_lot_conditionnement_reception (appelee par le service a la validation d'une
+-- reception), fn_lot_poids_bobine / fn_lot_bobines_palette (le lot, sinon la fiche),
+-- journal immuable lot_conditionnement_journal (trg_lot_conditionnement_journal_immuable).
 
 CREATE OR REPLACE FUNCTION fn_trg_lmvt_motif_requis() RETURNS trigger AS $$
 BEGIN
@@ -1025,3 +1041,138 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_lmvt_periode_close
     BEFORE INSERT ON ligne_mouvement
     FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_periode_close();
+
+-- =============================================================================
+-- INVENTAIRE OUVERT : LE MAGASIN EST GELE (decision du 23/10/2026, migration 2026-10-23g)
+-- =============================================================================
+-- Recopie de la migration (sections 1 a 4), sans les OWNER TO. Le controle C65
+-- reste dans la migration, comme les autres controles venus apres C44. Tant
+-- qu'un inventaire du magasin est ouvert (BROUILLON ou VALIDE), aucun mouvement
+-- n'y entre ni n'en sort ; seuls passent les ajustements de sa cloture,
+-- rattaches par `mouvement.id_inventaire` (domain/inventaire.rs::cloturer).
+-- Sur les fichiers d'origine seuls (statut EN_COURS de 008), la garde est inerte :
+-- les etats BROUILLON / VALIDE viennent de 2026-10-13b.
+
+-- ---- 1. L'ajustement porte son inventaire --------------------------------------
+ALTER TABLE mouvement ADD COLUMN IF NOT EXISTS id_inventaire text REFERENCES inventaire(id_inventaire);
+CREATE INDEX IF NOT EXISTS ix_mouvement_inventaire ON mouvement(id_inventaire) WHERE id_inventaire IS NOT NULL;
+
+-- ---- 2. L'inventaire ouvert d'un magasin ---------------------------------------
+-- Au plus un (ux_inventaire_ouvert, 2026-10-13b) ; LIMIT 1 si l'index manquait.
+CREATE OR REPLACE FUNCTION fn_inventaire_ouvert(p_magasin text) RETURNS text AS $$
+    SELECT id_inventaire FROM inventaire
+     WHERE code_magasin = p_magasin AND statut IN ('BROUILLON', 'VALIDE')
+     ORDER BY date_creation LIMIT 1;
+$$ LANGUAGE sql STABLE;
+
+-- Le message, en un seul endroit : en-tête et ligne disent la même chose.
+CREATE OR REPLACE FUNCTION fn_inventaire_ouvert_message(p_id text) RETURNS text AS $$
+    SELECT 'INVENTAIRE-OUVERT : l''inventaire ' || numero_inventaire
+           || ' est ouvert sur le magasin ' || code_magasin
+           || CASE statut WHEN 'VALIDE' THEN ' (comptage validé, à clôturer)' ELSE ' (en comptage)' END
+           || ' : aucun mouvement de stock jusqu''à sa clôture ou son annulation.'
+      FROM inventaire WHERE id_inventaire = p_id;
+$$ LANGUAGE sql STABLE;
+
+-- ---- 3. L'en-tête -----------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_trg_mouvement_inventaire_ouvert() RETURNS trigger AS $$
+DECLARE
+    v_ouvert text;
+    v_inv    record;
+BEGIN
+    -- UN MOUVEMENT RATTACHÉ À UN INVENTAIRE n'est qu'un ajustement de sa clôture.
+    IF NEW.id_inventaire IS NOT NULL THEN
+        SELECT numero_inventaire, code_magasin, statut INTO v_inv
+          FROM inventaire WHERE id_inventaire = NEW.id_inventaire;
+        IF NEW.code_type_mvt NOT IN ('AJUST_INV_POS', 'AJUST_INV_NEG')
+           OR v_inv.code_magasin IS DISTINCT FROM NEW.code_magasin
+           OR v_inv.statut IS DISTINCT FROM 'VALIDE' THEN
+            RAISE EXCEPTION 'INVENTAIRE-OUVERT : seul un ajustement (AJUST_INV_POS / AJUST_INV_NEG) du magasin de l''inventaire %, écrit à sa clôture, se rattache à lui (mouvement %, magasin %, inventaire %).',
+                COALESCE(v_inv.numero_inventaire, NEW.id_inventaire), NEW.code_type_mvt, NEW.code_magasin,
+                lower(COALESCE(v_inv.statut, 'introuvable'));
+        END IF;
+        -- Un seul ajustement vivant par sens : un second appliquerait deux fois
+        -- les écarts. Après une dévalidation, les premiers sont contre-passés.
+        IF EXISTS (SELECT 1 FROM mouvement m
+                    WHERE m.id_inventaire = NEW.id_inventaire
+                      AND m.code_type_mvt = NEW.code_type_mvt
+                      AND NOT EXISTS (SELECT 1 FROM mouvement c
+                                       WHERE c.id_mouvement_contrepasse = m.id_mouvement)) THEN
+            RAISE EXCEPTION 'INVENTAIRE-OUVERT : les ajustements % de l''inventaire % sont déjà écrits.',
+                NEW.code_type_mvt, v_inv.numero_inventaire;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    v_ouvert := fn_inventaire_ouvert(NEW.code_magasin);
+    IF v_ouvert IS NOT NULL THEN
+        RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- « trg_01_ » : juste après la normalisation des dates (trg_00_date_vide), avant
+-- les autres refus — sur un magasin gelé, c'est le gel qu'on doit lire.
+DROP TRIGGER IF EXISTS trg_01_mouvement_inventaire_ouvert ON mouvement;
+CREATE TRIGGER trg_01_mouvement_inventaire_ouvert
+    BEFORE INSERT ON mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_mouvement_inventaire_ouvert();
+
+-- ---- 4. Les lignes : la garantie ---------------------------------------------
+-- `ligne_mouvement` est la seule écriture qui touche le stock (trg_lmvt_appliquer).
+-- Une ligne greffée à un en-tête écrit avant l'ouverture de l'inventaire serait
+-- passée sans cette garde.
+CREATE OR REPLACE FUNCTION fn_trg_lmvt_inventaire_ouvert() RETURNS trigger AS $$
+DECLARE
+    v_magasin text;
+    v_inv_mvt text;
+    v_signe   integer;
+    v_ouvert  text;
+    v_ecarts  bigint;
+    v_deja    bigint;
+BEGIN
+    SELECT m.code_magasin, m.id_inventaire, tm.signe
+      INTO v_magasin, v_inv_mvt, v_signe
+      FROM mouvement m
+      JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
+     WHERE m.id_mouvement = NEW.id_mouvement;
+
+    v_ouvert := fn_inventaire_ouvert(v_magasin);
+    IF v_ouvert IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    IF v_inv_mvt IS DISTINCT FROM v_ouvert THEN
+        RAISE EXCEPTION '%', fn_inventaire_ouvert_message(v_ouvert);
+    END IF;
+
+    -- L'AJUSTEMENT DE LA CLÔTURE : chaque ligne est un écart de l'inventaire,
+    -- même référence, même lot, même sens, même quantité — et pas plus de fois
+    -- que l'inventaire n'en porte.
+    SELECT count(*) INTO v_ecarts
+      FROM ligne_inventaire li
+     WHERE li.id_inventaire = v_ouvert
+       AND li.code_reference = NEW.code_reference
+       AND li.lot_fournisseur IS NOT DISTINCT FROM NEW.lot_fournisseur
+       AND sign(li.ecart_kg) = v_signe
+       AND abs(abs(li.ecart_kg) - NEW.quantite_kg) < 0.00005;
+    SELECT count(*) INTO v_deja
+      FROM ligne_mouvement lm
+     WHERE lm.id_mouvement = NEW.id_mouvement
+       AND lm.code_reference = NEW.code_reference
+       AND lm.lot_fournisseur IS NOT DISTINCT FROM NEW.lot_fournisseur
+       AND abs(lm.quantite_kg - NEW.quantite_kg) < 0.00005;
+    IF v_ecarts > v_deja THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'INVENTAIRE-OUVERT : % kg de % (%) ne correspond à aucun écart restant de l''inventaire % : un ajustement ne porte que les écarts du comptage.',
+        NEW.quantite_kg, NEW.code_reference, COALESCE('lot ' || NEW.lot_fournisseur, 'sans lot'),
+        (SELECT numero_inventaire FROM inventaire WHERE id_inventaire = v_ouvert);
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_01_lmvt_inventaire_ouvert ON ligne_mouvement;
+CREATE TRIGGER trg_01_lmvt_inventaire_ouvert
+    BEFORE INSERT ON ligne_mouvement
+    FOR EACH ROW EXECUTE FUNCTION fn_trg_lmvt_inventaire_ouvert();

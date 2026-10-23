@@ -685,6 +685,17 @@ pub async fn valider(
     // fiche article mise a jour — sauf mesure aberrante, gardee mais ecartee.
     // Apres les mouvements : ils ont deja fige l'ancien poids, contre lequel
     // l'ecart de la livraison se lit.
+    //
+    // CHAQUE LOT A SON CONDITIONNEMENT (23/10/2026) : le lot recu prend le poids
+    // d'une bobine (kilos / bobines comptees) et les bobines par palette
+    // (bobines / palettes entieres) de ses receptions validees ; a defaut, il
+    // garde la fiche article qu'il a prise a sa naissance. AVANT la mise a jour
+    // de la fiche : le garde-fou de 50 % juge contre la fiche d'avant.
+    sqlx::query("SELECT fn_lot_conditionnement_reception($1, $2)")
+        .bind(id_reception)
+        .bind(&user.id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("SELECT fn_suivi_conditionnement('RECEPTION', $1, $2)")
         .bind(id_reception)
         .bind(&user.id)

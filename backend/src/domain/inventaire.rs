@@ -290,10 +290,12 @@ pub async fn annuler(db: &Db, user: &Utilisateur, id_inventaire: &str, motif: &s
 
 /// Cloture l'inventaire et genere les mouvements d'ajustement.
 ///
-/// L'ECART SE LIT A L'HEURE DU COMPTAGE (regle 10, 08/10/2026). Chaque ligne a
-/// recu, au moment ou elle a ete comptee, le theorique du stock a cet instant
-/// (`saisir_comptage`) : les mouvements faits apres le comptage restent
-/// acquis et ne sont pas recomptes. Le magasin n'est pas gele.
+/// LE MAGASIN EST GELE PENDANT L'INVENTAIRE (decision du 23/10/2026, garde en
+/// base, migration 2026-10-23g) : de l'ouverture a la cloture ou a l'annulation,
+/// aucun mouvement n'y entre ni n'en sort. Seuls passent les ajustements ecrits
+/// ici, rattaches a l'inventaire par `mouvement.id_inventaire` ; la base verifie
+/// que chaque ligne est un ecart de cet inventaire. Le theorique lu au comptage
+/// (`saisir_comptage`, regle 10) ne bouge donc plus jusqu'a la cloture.
 pub async fn cloturer(
     db: &Db,
     user: &Utilisateur,
@@ -379,10 +381,12 @@ pub async fn cloturer(
         // SQLite — deux horloges et deux troncatures a la milliseconde, donc un
         // refus intermittent pour datation dans le futur.
         sqlx::query(
+            // `id_inventaire` RATTACHE L'AJUSTEMENT A SON INVENTAIRE : c'est ce
+            // qui le laisse passer sur un magasin gele (2026-10-23g).
             "INSERT INTO mouvement
                  (id_mouvement, numero_mouvement, code_type_mvt,
-                  code_magasin, code_motif, reference_document, id_utilisateur)
-             VALUES ($1, $2, $3, $4, 'INVENTAIRE', $5, $6)",
+                  code_magasin, code_motif, reference_document, id_utilisateur, id_inventaire)
+             VALUES ($1, $2, $3, $4, 'INVENTAIRE', $5, $6, $7)",
         )
         .bind(&id_mouvement)
         .bind(&numero_mouvement)
@@ -390,6 +394,7 @@ pub async fn cloturer(
         .bind(&magasin)
         .bind(&numero)
         .bind(&user.id)
+        .bind(id_inventaire)
         .execute(&mut *tx)
         .await?;
 

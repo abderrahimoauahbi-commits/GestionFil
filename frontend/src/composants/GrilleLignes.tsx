@@ -35,6 +35,7 @@ import { GrilleLignesMobile } from './GrilleLignesMobile'
 import { couleurEcart } from '../lib/lots'
 import { AvisColisage } from './AvisColisage'
 import {
+  type ChampColis,
   type Conditionnement,
   depuisBobines,
   depuisKg,
@@ -116,8 +117,12 @@ export interface LigneSaisie {
   code_reference: string
   /** Ce qui nomme la ligne : la designation du catalogue, ou l'intitule saisi. */
   intitule: string
-  /** Le conditionnement de la reference, fige au moment du choix. */
+  /** Le conditionnement de la reference, fige au moment du choix — celui du LOT des qu'un lot est choisi (23/10/2026). */
   cond: Conditionnement
+  /** Le conditionnement de la fiche article, garde quand celui d'un lot le remplace (`appliquerConditionnementLot`). */
+  condReference?: Conditionnement
+  /** Le dernier des trois champs tape (kilos, palettes, bobines) : il commande quand le conditionnement change. */
+  saisiePar?: ChampColis
   unite_catalogue: string
   fournisseur_habituel: string | null
   /** Ce que le plan reclamait, pour afficher l'ecart si l'on s'en ecarte. */
@@ -780,6 +785,7 @@ export function GrilleLignes(props: ProprietesGrille) {
               : depuisKg(valeur, l.cond)
         return {
           ...l,
+          saisiePar: source,
           qte: source === 'quantite' ? valeur : pourChamp(r.kg, 2),
           palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
           bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),

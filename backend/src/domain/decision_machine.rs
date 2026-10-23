@@ -51,6 +51,10 @@ pub struct Saisie {
     pub id_of: Option<String>,
     /// La voie de la ligne (largeur en metres). Vide : celle de son etat.
     pub largeur_voie_m: Option<f64>,
+    /// LA QUALITE QUE LA LIGNE SERVIRA (23/10/2026) : celle de la ligne, a
+    /// defaut celle de la fiche. Avec un OF, elle doit etre la sienne ; sans OF,
+    /// elle est obligatoire au chargement. Vide : celle de l'etat.
+    pub code_qualite: Option<String>,
 }
 
 /// LE NOMBRE DE BOBINES D'UNE VOIE (22/10/2026) : capacite de l'etage / largeur
@@ -85,6 +89,9 @@ pub struct EtatLigne {
     pub id_of: Option<String>,
     /// Sa voie, en metres : une information pour le magasinier.
     pub largeur_voie_m: Option<f64>,
+    /// La qualite que la ligne sert (23/10/2026) : celle de son OF, ou choisie
+    /// sans OF au chargement.
+    pub code_qualite: Option<String>,
 }
 
 /// Une ligne calculee : ce que la decision fera, et ce qui sera fige.
@@ -125,6 +132,11 @@ pub struct Calculee {
     pub largeur_voie_m: Option<f64>,
     /// Le nombre de bobines que tient la voie (aide au magasinier).
     pub bobines_voie: Option<i64>,
+    /// LA QUALITE, MEME FRONTIERE QUE L'OF (23/10/2026) : `code_qualite`, celle
+    /// que la ligne sert apres ce constat ; `code_qualite_periode`, celle qu'elle
+    /// servait avant — l'ecart lui appartient.
+    pub code_qualite: Option<String>,
+    pub code_qualite_periode: Option<String>,
     #[serde(skip)]
     pub lot_force: bool,
     #[serde(skip)]
@@ -182,10 +194,12 @@ fn pct_moyen(kg: f64, nb: i64, nominal: f64) -> Option<f64> {
 
 pub async fn etat_etage(c: &mut sqlx::PgConnection, zone: &str) -> AppResult<Vec<EtatLigne>> {
     let l = sqlx::query_as::<_, LigneEtatLue>(
-        "SELECT code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg::float8,
-                pourcentage::float8, kg::float8, id_of, largeur_voie_m::float8
-           FROM machine_etat WHERE code_emplacement = $1
-          ORDER BY code_reference, lot_fournisseur",
+        "SELECT e.code_reference, e.lot_fournisseur, e.nb_bobines, e.poids_unitaire_kg::float8,
+                e.pourcentage::float8, e.kg::float8, e.id_of, e.largeur_voie_m::float8,
+                COALESCE(e.code_qualite, o.code_qualite) AS code_qualite
+           FROM machine_etat e LEFT JOIN ordre_fabrication o ON o.id_of = e.id_of
+          WHERE e.code_emplacement = $1
+          ORDER BY e.code_reference, e.lot_fournisseur",
     )
     .bind(zone)
     .fetch_all(&mut *c)
@@ -193,7 +207,7 @@ pub async fn etat_etage(c: &mut sqlx::PgConnection, zone: &str) -> AppResult<Vec
     Ok(l.into_iter().map(etat_lu).collect())
 }
 
-type LigneEtatLue = (String, String, i64, Option<f64>, Option<f64>, f64, Option<String>, Option<f64>);
+type LigneEtatLue = (String, String, i64, Option<f64>, Option<f64>, f64, Option<String>, Option<f64>, Option<String>);
 
 fn etat_lu(t: LigneEtatLue) -> EtatLigne {
     EtatLigne {
@@ -205,6 +219,7 @@ fn etat_lu(t: LigneEtatLue) -> EtatLigne {
         kg: t.5,
         id_of: t.6,
         largeur_voie_m: t.7,
+        code_qualite: t.8,
     }
 }
 
@@ -325,6 +340,27 @@ pub async fn calculer(
     let mut blocages = Vec::new();
     let mut lignes = Vec::new();
     let mut vues = std::collections::HashSet::new();
+    // LA QUALITE DE CHAQUE OF CITE (23/10/2026), par la fiche ou par l'etage.
+    let ids_of: Vec<String> = saisies
+        .iter()
+        .filter_map(|s| s.id_of.clone())
+        .chain(avant.iter().filter_map(|e| e.id_of.clone()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let qualite_of: HashMap<String, (String, String)> = if ids_of.is_empty() {
+        HashMap::new()
+    } else {
+        sqlx::query_as::<_, (String, String, String)>(
+            "SELECT id_of, numero, code_qualite FROM ordre_fabrication WHERE id_of = ANY($1)",
+        )
+        .bind(&ids_of)
+        .fetch_all(&mut *c)
+        .await?
+        .into_iter()
+        .map(|(id, numero, q)| (id, (numero, q)))
+        .collect()
+    };
 
     if saisies.is_empty() {
         blocages.push("la fiche ne porte aucune ligne".into());
@@ -352,19 +388,19 @@ pub async fn calculer(
         let declare = (f.type_fiche == "CHARGE" && nominal_etage.is_none())
             .then(|| s.poids_retenu.filter(|p| *p > 0.0))
             .flatten();
+        // A DEFAUT, LE POIDS D'UNE BOBINE DU LOT (23/10/2026), puis la fiche article.
         let nominal: Option<f64> = match nominal_etage.or(declare) {
             Some(p) => Some(p),
-            None => sqlx::query_scalar::<_, Option<f64>>(
-                "SELECT poids_bobine_kg::float8 FROM reference WHERE code_reference = $1",
-            )
-            .bind(&s.reference)
-            .fetch_optional(&mut *c)
-            .await?
-            .flatten()
-            .filter(|p| *p > 0.0),
+            None => sqlx::query_scalar::<_, Option<f64>>("SELECT fn_lot_poids_bobine($1, $2)::float8")
+                .bind(&s.reference)
+                .bind(&s.lot)
+                .fetch_optional(&mut *c)
+                .await?
+                .flatten()
+                .filter(|p| *p > 0.0),
         };
         let Some(nominal) = nominal else {
-            blocages.push(format!("{lib} : la reference n'a pas de poids nominal de bobine au catalogue"));
+            blocages.push(format!("{lib} : ni le lot ni la fiche article ne portent le poids d'une bobine"));
             continue;
         };
 
@@ -388,7 +424,35 @@ pub async fn calculer(
         let of_avant = e.and_then(|e| e.id_of.clone());
         let of_nouveau = s.id_of.clone().filter(|o| !o.is_empty()).or_else(|| of_avant.clone());
         let voie = s.largeur_voie_m.filter(|v| *v > 0.0).or_else(|| e.and_then(|e| e.largeur_voie_m));
+        // LA QUALITE (23/10/2026). Avec un OF, la sienne : une autre saisie est
+        // refusee. Sans OF : au chargement, celle que la ligne dit (a defaut, celle
+        // de l'etat) — obligatoire ; au dechargement et au constat, celle de
+        // l'etat : seul un OF nouveau la change.
+        let qualite_avant = e.and_then(|e| e.code_qualite.clone());
+        let qualite_saisie = s.code_qualite.clone().filter(|q| !q.trim().is_empty());
+        let qualite_nouvelle = match of_nouveau.as_ref().and_then(|o| qualite_of.get(o)) {
+            Some((numero, q)) => {
+                if f.type_fiche == "CHARGE" && qualite_saisie.as_ref().is_some_and(|x| x != q) {
+                    blocages.push(format!(
+                        "{lib} : la qualite {} ne correspond pas a l'OF {numero}, qui produit la qualite {q}",
+                        qualite_saisie.clone().unwrap_or_default()
+                    ));
+                    continue;
+                }
+                Some(q.clone())
+            }
+            None if f.type_fiche == "CHARGE" => qualite_saisie.or_else(|| qualite_avant.clone()),
+            None => qualite_avant.clone(),
+        };
+        if f.type_fiche == "CHARGE" && qualite_nouvelle.is_none() {
+            blocages.push(format!(
+                "{lib} : indiquez la qualite que sert ce chargement (sans OF, elle est obligatoire)"
+            ));
+            continue;
+        }
         let mut calc = Calculee {
+            code_qualite: qualite_nouvelle,
+            code_qualite_periode: None,
             id_of: of_nouveau,
             numero_of: None,
             id_of_periode: None,
@@ -642,6 +706,14 @@ pub async fn calculer(
             None if calc.ecart_kg.abs() >= 0.0005 => calc.id_of.clone(),
             None => None,
         };
+        // LA QUALITE DE LA PERIODE, MEME FRONTIERE (23/10/2026) : celle que la
+        // ligne servait avant ce constat ; au premier chargement, seulement s'il y
+        // a un ecart, celle pour laquelle on charge.
+        calc.code_qualite_periode = match e {
+            Some(_) => qualite_avant,
+            None if calc.ecart_kg.abs() >= 0.0005 => calc.code_qualite.clone(),
+            None => None,
+        };
 
         lignes.push(calc);
     }
@@ -696,6 +768,7 @@ pub async fn calculer(
                     kg: l.kg_apres,
                     id_of: l.id_of.clone(),
                     largeur_voie_m: l.largeur_voie_m,
+                    code_qualite: l.code_qualite.clone(),
                 },
             );
         }
@@ -1005,8 +1078,8 @@ async fn ecrire_etats(
         sqlx::query(
             "INSERT INTO machine_decision_etat
                  (id_decision, moment, code_reference, lot_fournisseur, nb_bobines,
-                  poids_unitaire_kg, pourcentage, kg, id_of, largeur_voie_m)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+                  poids_unitaire_kg, pourcentage, kg, id_of, largeur_voie_m, code_qualite)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
         )
         .bind(id_decision)
         .bind(moment)
@@ -1018,6 +1091,7 @@ async fn ecrire_etats(
         .bind(arrondi_kg(e.kg))
         .bind(&e.id_of)
         .bind(e.largeur_voie_m)
+        .bind(&e.code_qualite)
         .execute(&mut *c)
         .await?;
     }
@@ -1079,8 +1153,8 @@ async fn poser_etage(
             "INSERT INTO machine_etat
                  (code_emplacement, code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg,
                   pourcentage, kg, mode_constat, date_constat, responsable, id_utilisateur, id_fiche,
-                  id_of, largeur_voie_m)
-             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,$8,fn_jour_casablanca($9),$10,$11,$12,$13,$14)",
+                  id_of, largeur_voie_m, code_qualite)
+             VALUES ($1,$2,$3,$4,$5,COALESCE($6,0),$7,$8,fn_jour_casablanca($9),$10,$11,$12,$13,$14,$15)",
         )
         .bind(zone)
         .bind(&e.code_reference)
@@ -1098,6 +1172,9 @@ async fn poser_etage(
         // donne, le retrait rend ceux d'avant.
         .bind(&e.id_of)
         .bind(e.largeur_voie_m)
+        // LA QUALITE AUSSI (23/10/2026) : la decision la donne, le retrait rend
+        // celle d'avant.
+        .bind(&e.code_qualite)
         .execute(&mut *c)
         .await?;
     }
@@ -1300,9 +1377,9 @@ pub async fn valider(
                   nb_avant, kg_avant, nb_mouvementees, poids_retenu_kg, pct_retirees, kg_mouvementes,
                   destination, nb_apres, pourcentage_apres, kg_apres, ecart_kg, effet_ecart,
                   code_motif, motif_texte, cmup_mad, id_mouvement, pourcentage_theorique,
-                  niveau_ecart, id_of, id_of_periode, largeur_voie_m)
+                  niveau_ecart, id_of, id_of_periode, largeur_voie_m, code_qualite, code_qualite_periode)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-                     round($22::numeric, 2), $23, $24, $25, $26)",
+                     round($22::numeric, 2), $23, $24, $25, $26, $27, $28)",
         )
         .bind(&id_decision)
         .bind(l.ligne_numero)
@@ -1333,6 +1410,10 @@ pub async fn valider(
         .bind(&l.id_of)
         .bind(&l.id_of_periode)
         .bind(l.largeur_voie_m)
+        // LA QUALITE, MEME FRONTIERE (23/10/2026) : la nouvelle, et celle de la
+        // periode, a qui l'ecart appartient.
+        .bind(&l.code_qualite)
+        .bind(&l.code_qualite_periode)
         .execute(&mut *c)
         .await?;
     }
@@ -1570,9 +1651,11 @@ pub async fn retirer(
     // 5. L'ETAGE REVIENT A L'ETAT AVANT — OF et voie compris (22/10/2026) :
     // l'etat archive les porte.
     let avant: Vec<EtatLigne> = sqlx::query_as::<_, LigneEtatLue>(
-        "SELECT code_reference, lot_fournisseur, nb_bobines, poids_unitaire_kg::float8,
-                pourcentage::float8, kg::float8, id_of, largeur_voie_m::float8
-           FROM machine_decision_etat WHERE id_decision = $1 AND moment = 'AVANT'",
+        "SELECT s.code_reference, s.lot_fournisseur, s.nb_bobines, s.poids_unitaire_kg::float8,
+                s.pourcentage::float8, s.kg::float8, s.id_of, s.largeur_voie_m::float8,
+                COALESCE(s.code_qualite, o.code_qualite) AS code_qualite
+           FROM machine_decision_etat s LEFT JOIN ordre_fabrication o ON o.id_of = s.id_of
+          WHERE s.id_decision = $1 AND s.moment = 'AVANT'",
     )
     .bind(&id_decision)
     .fetch_all(&mut *c)
@@ -1753,6 +1836,7 @@ mod tests {
             kg: nb as f64 * 2.5,
             id_of: Some(of.into()),
             largeur_voie_m: Some(voie),
+            code_qualite: None,
         }
     }
 

@@ -20,6 +20,7 @@ import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { SANS_LOT } from '../../lib/lots'
 import type { EtiquetteLue } from '../../composants/ChampScan'
+import { phraseGel, useInventaireOuvert } from '../../lib/inventairesOuverts'
 import {
   corpsFiche, depuisEtat, destinationsDe, estimer, ligneNeuve, lignesAEnvoyer, machinesApi,
   type Apercu, type LigneSaisie, type Motif, type TypeFiche, type Zone,
@@ -54,7 +55,10 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
 
   /* `id_of` : l'OF choisi (lien, 22/10/2026), defaut des lignes ; `of` garde son
      numero (le texte d'avant, pour l'historique). */
-  const [entete, setEntete] = useState({ date: aujourdHui(), magasin: '', responsable: '', of: '', id_of: '', observations: '' })
+  /* `code_qualite` : la qualite par defaut des lignes quand la fiche ne sert pas d'OF (23/10/2026). */
+  const [entete, setEntete] = useState({
+    date: aujourdHui(), magasin: '', responsable: '', of: '', id_of: '', code_qualite: '', observations: '',
+  })
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
   const [amorcee, setAmorcee] = useState<string | null>(null)
 
@@ -75,11 +79,13 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
         responsable: f.entete.responsable,
         of: f.entete.numero_of ?? '',
         id_of: f.entete.id_of ?? '',
+        code_qualite: f.entete.code_qualite ?? '',
         observations: f.entete.observations ?? '',
       })
       for (const l of f.lignes) {
         const i = base.findIndex((b) => b.code_reference === l.code_reference && b.lot_fournisseur === l.lot_fournisseur)
-        const nominal = l.poids_catalogue_kg ?? 0
+        // Une ligne neuve reprise : le poids d'une bobine DU LOT, sinon la fiche (23/10/2026).
+        const nominal = l.poids_lot_kg ?? l.poids_catalogue_kg ?? 0
         const repris: LigneSaisie = {
           ...(i >= 0 ? base[i] : {
             cle: `${l.code_reference}${l.lot_fournisseur}`, code_reference: l.code_reference,
@@ -99,6 +105,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
           effet_ecart: l.effet_ecart ?? '',
           id_of: l.id_of ?? '',
           largeur_voie: l.largeur_voie_m != null ? Number(l.largeur_voie_m) : (i >= 0 ? base[i].largeur_voie ?? 0 : 0),
+          code_qualite: l.code_qualite ?? '',
         }
         if (i >= 0) base[i] = repris
         else base.push(repris)
@@ -115,11 +122,57 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     setAmorcee(null)
   }
 
+  /* LES LOTS DU MAGASIN D'ORIGINE, pour le FIFO et pour LE POIDS D'UNE BOBINE DU
+     LOT (23/10/2026) : une ligne neuve chargee prend le poids de son lot, sinon
+     celui de la fiche article. */
+  const qLots = useQuery({
+    queryKey: ['stock-lots-magasin', entete.magasin],
+    queryFn: () =>
+      api.get<{ code_reference: string; lot_fournisseur: string; date_premiere_entree: string
+                poids_bobine_lot_kg?: number | null }[]>(
+        `/api/stock/lots?code_magasin=${encodeURIComponent(entete.magasin)}&limite=5000`,
+      ),
+    enabled: type === 'CHARGE' && !!entete.magasin,
+  })
+  const poidsDuLot = (reference: string, lot: string): number | null => {
+    const p = (qLots.data ?? []).find((x) => x.code_reference === reference && x.lot_fournisseur === lot)?.poids_bobine_lot_kg
+    return p != null && p > 0 ? Number(p) : null
+  }
+  /** Une ligne NEUVE au chargement prend le poids d'une bobine de son lot (le nominal propose). */
+  const auPoidsDuLot = (n: LigneSaisie): LigneSaisie => {
+    if (type !== 'CHARGE' || n.avant_bobines > 0) return n
+    const p = poidsDuLot(n.code_reference, n.lot_fournisseur)
+    return p === null ? n : { ...n, poids_retenu: p, poids_unitaire: p }
+  }
+  /* LES LOTS LUS APRES LE CHOIX DU LOT : une ligne neuve dont le poids n'a pas ete
+     touche (il vaut encore celui de la fiche) prend celui de son lot. */
+  useEffect(() => {
+    if (type !== 'CHARGE' || !qLots.data) return
+    setLignes((ls) => {
+      let change = false
+      const n = ls.map((l) => {
+        if (l.avant_bobines > 0 || !l.lot_fournisseur || l.poids_retenu !== (l.poids_catalogue ?? l.poids_retenu)) return l
+        const r = auPoidsDuLot(l)
+        if (r.poids_retenu === l.poids_retenu) return l
+        change = true
+        if (!r.pourcentage_saisi) {
+          const t = estimer('CHARGE', r).theorique
+          if (t != null) r.pourcentage = arrondi2(t)
+        }
+        return r
+      })
+      return change ? n : ls
+    })
+    // Seule l'arrivee des lots relance ce calage ; les saisies passent par majLigne.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qLots.data, type])
+
   function majLigne<K extends keyof LigneSaisie>(cleLigne: string, champ: K, v: LigneSaisie[K]) {
     setLignes((ls) =>
       ls.map((l) => {
         if (l.cle !== cleLigne) return l
-        const n: LigneSaisie = { ...l, [champ]: v }
+        let n: LigneSaisie = { ...l, [champ]: v }
+        if (champ === 'lot_fournisseur') n = auPoidsDuLot(n)
         if (champ === 'pourcentage') n.pourcentage_saisi = true
         // UN MOTIF QUI N'ADMET QU'UNE DESTINATION LA POSE ; changer de motif
         // efface un effet devenu sans objet.
@@ -130,7 +183,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
         }
         // AU CHARGEMENT, le % de la ligne apres est PROPOSE : le % theorique,
         // tant que l'operateur ne l'a pas saisi lui-meme.
-        if (type === 'CHARGE' && !n.pourcentage_saisi && (champ === 'mouvementees' || champ === 'poids_retenu')) {
+        if (type === 'CHARGE' && !n.pourcentage_saisi && (champ === 'mouvementees' || champ === 'poids_retenu' || champ === 'lot_fournisseur')) {
           const t = estimer('CHARGE', n).theorique
           if (t != null) n.pourcentage = arrondi2(t)
         }
@@ -144,7 +197,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
   }
 
   function ajouter(l: LigneSaisie) {
-    setLignes((ls) => [...ls, { ...l, cle: `${l.code_reference}|${l.lot_fournisseur}|${ls.length}` }])
+    setLignes((ls) => [...ls, { ...auPoidsDuLot(l), cle: `${l.code_reference}|${l.lot_fournisseur}|${ls.length}` }])
   }
 
   /**
@@ -245,11 +298,22 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     ? (apercu!.resultat.blocages.find((b) => b.startsWith('STOCK-INSUFFISANT') || b.startsWith('LOT-INSUFFISANT')) ?? null)
     : null
 
+  /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026). Un chargement sort
+     du magasin ; un dechargement n'y rentre que pour la destination MAGASIN.
+     La base refuse le mouvement (INVENTAIRE-OUVERT) ; l'ecran le dit avant. */
+  const gel = useInventaireOuvert(type !== 'MAJ' ? entete.magasin : null)
+  const versMagasin = (l: LigneSaisie) => {
+    const d = destinationsDe(motifDe(l.code_motif))
+    return (l.destination || (d.length === 1 ? d[0] : '')) === 'MAGASIN'
+  }
+  const gelBloque = gel.length > 0 && (type === 'CHARGE' || (type === 'DECHARGE' && envoyees.some(versMagasin)))
+
   /** CE QUI MANQUE ENCORE, dit en clair : la premiere chose qui empeche l'apercu. */
   const manque = ((): string | null => {
     if (!zone) return 'Choisissez l’étage.'
     if (!entete.responsable.trim()) return 'Indiquez le responsable.'
     if (type !== 'MAJ' && !entete.magasin) return 'Choisissez le magasin.'
+    if (gelBloque) return phraseGel(gel)
     if (envoyees.length === 0)
       return type === 'MAJ' ? 'Aucune ligne.' : `Indiquez le nombre de bobines ${type === 'CHARGE' ? 'à charger' : 'à retirer'}.`
     for (const l of envoyees) {
@@ -259,6 +323,12 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
       const m = motifDe(l.code_motif)
       if (m && !m.effet_defaut && !l.effet_ecart) return `Dites comment compte l’écart de ${qui} (${m.libelle}).`
       if (type === 'CHARGE' && !(l.poids_retenu > 0)) return `Indiquez le poids par bobine de ${qui}.`
+      /* LA QUALITE EXPLICITE (23/10/2026) : un chargement sert la qualite de son OF
+         (celui de la ligne, de la fiche, ou celui que la ligne sert deja) ; sans OF,
+         elle se choisit. */
+      if (type === 'CHARGE' && !l.id_of && !entete.id_of && !l.avant_numero_of
+          && !l.code_qualite && !entete.code_qualite && !l.avant_code_qualite)
+        return `Indiquez la qualité que sert ${qui} : sans OF, elle est obligatoire.`
       if (type === 'DECHARGE' && !l.destination && destinationsDe(m).length !== 1)
         return `Choisissez la destination de ${qui}.`
       if (type === 'MAJ' && l.presentes < 0) return `Le nombre de bobines présentes de ${qui} est négatif.`
@@ -276,15 +346,6 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
   const droitValider = type === 'MAJ' ? peut('MOUVEMENTS', 'ECRIRE') : peut('MOUVEMENTS', 'VALIDER')
   const peutValider = droitValider && pret && apercuAJour && apercu!.resultat.blocages.length === 0
 
-  /* LES LOTS DU MAGASIN D'ORIGINE, pour le FIFO. */
-  const qLots = useQuery({
-    queryKey: ['stock-lots-magasin', entete.magasin],
-    queryFn: () =>
-      api.get<{ code_reference: string; lot_fournisseur: string; date_premiere_entree: string }[]>(
-        `/api/stock/lots?code_magasin=${encodeURIComponent(entete.magasin)}&limite=5000`,
-      ),
-    enabled: type === 'CHARGE' && !!entete.magasin,
-  })
 
   /**
    * CE QUI MERITE UNE CONFIRMATION AVANT DE VALIDER : le melange de lots d'une
@@ -324,7 +385,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     etat: qEtat, entete, setEntete, lignes, setLignes, envoyees,
     majLigne, retirer, ajouter, scanner, totaux,
     calculer, apercu: apercuAJour ? apercu!.resultat : null, apercuPerime: !!apercu && !apercuAJour,
-    envoi, pret, peutValider, manque,
+    envoi, pret, peutValider, manque, gel,
     reamorcer: () => setAmorcee(null),
   }
 }

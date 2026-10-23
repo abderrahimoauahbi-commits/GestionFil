@@ -196,7 +196,7 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   deux factures, et l'arrivage ne se clôture que quand tout est facturé. Écrans `/factures-fournisseur`.
 - `docs/ecarts-cahier-des-charges.md` — traçabilité cahier des charges → implémentation, points
   en attente de décision métier.
-- `db/README.md` — invariants, vues, contrôles C01–C64 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, C55 période close au 17/10, C56 ligne d'import sans position tarifaire au 19/10, C57–C58 proposition et réception en double au 19/10, C59 écart au prix confirmé de la demande de prix au 21/10, C60 ligne de bon en double au 21/10, C61–C64 OF au 22/10, tous des signaux).
+- `db/README.md` — invariants, vues, contrôles C01–C65 (C38–C42 machines au 05/10 ; C43 colisage incohérent au 08/10 ; C45–C52 au 09/10, C53–C54 au 10/10, C55 période close au 17/10, C56 ligne d'import sans position tarifaire au 19/10, C57–C58 proposition et réception en double au 19/10, C59 écart au prix confirmé de la demande de prix au 21/10, C60 ligne de bon en double au 21/10, C61–C64 OF au 22/10, C65 mouvement daté pendant un inventaire au 23/10, tous des signaux).
 - Audit P3 du 19/10/2026 : création idempotente (`id_document` tiré par l'écran, `domain/idempotence.rs`) ; positions tarifaires, valeur en douane et répartition « au taux des droits » (`2026-10-19a`) ; étiquettes de lot Code 128 et scan (`2026-10-19b`, `routes/etiquettes.rs`, `lib/code128.ts`, `composants/ChampScan.tsx`). Une colonne de date nouvelle naît en `timestamptz`/`date` (cliquet A1) — `routes/json.rs` les sérialise.
 - `docs/matrice-mouvements.md` — matrice des 19 types de mouvement (CONSO_DIRECTE le 21/10, RETOUR_CONSO le 22/10) (sens, CMUP, coût, validation, réversibilité), générée par `python db/pg/matrice.py` depuis `backend/tests/banc/matrice_mouvements.json`, que le banc vérifie contre la base : modifier un type = modifier ce fichier.
 - Règles de gestion validées le 08/10/2026 : migrations `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 14) puis `2026-10-08b_audit_v4.sql` (corrections de l'audit v4), les deux exigées au démarrage ; `seed_006_regles_2026_10.sql` en porte les référentiels pour une base neuve. Le colisage incohérent se SIGNALE, il ne bloque jamais.
@@ -211,3 +211,11 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
   `v_of_bilan`, `v_qualite_consommation`. Besoin = OF retenus (reste) + plan non couvert (`fn_besoin_of_mois`, en aval
   du MRP, `mrp.rs` inchangé) : colonnes « au-delà du plan » du stock projeté et du plan d'achat, `GET /api/stock/besoin`.
   Pas de fiche de production (abandonnée, viendra de l'ERP de production).
+- Décisions du 23/10/2026 : **le conditionnement est par lot** (`2026-10-23a` : `lot.poids_bobine_kg`,
+  `lot.bobines_par_palette`, mesurés à la réception, corrigés par `POST /api/lots/conditionnement` ; toute conversion sur
+  un lot passe par `fn_lot_poids_bobine` / `fn_lot_bobines_palette`, `unites::charger_pour_lot`,
+  `conditionnementDuLot`) ; saisie liée palettes ↔ bobines ↔ kg sur les mouvements et la fiche hors machine ;
+  **qualité explicite** sur la consommation directe, son retour et le chargement machine (`2026-10-23b` : celle de l'OF,
+  sinon obligatoire ; `code_qualite_periode` sur la décision, même frontière que l'OF) ; **inventaire ouvert = magasin
+  gelé** (`2026-10-23g` : `INVENTAIRE-OUVERT` sur toute ligne de mouvement du magasin, sauf les ajustements rattachés
+  à l'inventaire par `mouvement.id_inventaire` ; `GET /api/inventaires/ouverts`, bandeau sur les écrans).

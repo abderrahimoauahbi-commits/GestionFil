@@ -57,6 +57,8 @@ import { AvisColisage } from '../composants/AvisColisage'
 import { AvisDerive } from '../composants/AvisDerive'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
+import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
+import { useInventaireOuvert } from '../lib/inventairesOuverts'
 import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'RECEPTIONS'
@@ -628,6 +630,9 @@ export function ReceptionNouvelle() {
   /* LA SAISIE EST EN BAS (21/10/2026) : la ligne pointee, a defaut la premiere,
      s'y ouvre ; le tableau du haut ne fait que la montrer. */
   const ligneP = lignes.find((l) => l.cle === pointee) ?? lignes[0] ?? null
+  /* UN MAGASIN DE DESTINATION GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la
+     pesee s'enregistre (rien n'entre en stock), la validation sera refusee. */
+  const gel = useInventaireOuvert(...new Set(lignes.map((l) => l.magasin)))
 
   return (
     <div>
@@ -642,6 +647,7 @@ export function ReceptionNouvelle() {
         }
       />
       <PanneRequetes requetes={[['Les fournisseurs', qFrs], ['Les magasins', qMag], ['Les lignes attendues', qAtt]]} />
+      <AvisInventaireOuvert inventaires={gel} nommer className="mb-3" />
 
       {erreur && (
         <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">

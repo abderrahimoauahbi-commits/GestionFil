@@ -165,6 +165,26 @@ Points confirmés par l'utilisateur le 23/10/2026 (tels que livrés) :
 - l'écart d'un constat peut être rangé sous l'OF sortant même déjà clôturé (pas de refus) ;
 - simulation : les matières hors machine sont calées sur le métrage de l'OF et la recette.
 
+## 6 quinquies. Décisions du 23/10/2026 — réalisées (migrations `2026-10-23a`, `2026-10-23b`)
+
+- **Chaque lot a son conditionnement** (`lot.poids_bobine_kg`, `lot.bobines_par_palette`, origine et
+  date) : mesuré à la réception (kilos / bobines, bobines / palettes entières), sinon la fiche article ;
+  corrigé sur la fiche du lot (droit VALIDER sur les lots, motif, journal `lot_conditionnement_journal`).
+  Toute conversion palettes ↔ bobines ↔ kilos sur un lot prend son conditionnement (base, serveur,
+  écrans) ; la fiche machine propose le poids d'une bobine du lot.
+- **Saisie liée palettes / bobines / kilos** sur l'écran des mouvements (grille commune) et la fiche hors
+  machine, selon le conditionnement du lot choisi.
+- **La qualité explicite** : consommation directe et retour — avec un OF, sa qualité ; sans OF,
+  obligatoire (base). Machine — qualité sur chaque ligne de chargement (celle de l'OF, sinon
+  obligatoire), sur l'état, et sur la ligne de décision : qualité nouvelle et **qualité de la période**
+  (même frontière que l'OF). Les statistiques par qualité comptent aussi le sans OF ; l'historique sans
+  qualité y est « Non attribué » ; C62 ne compte plus que lui.
+
+Défauts retenus (à confirmer) : sorties hors machine ordinaires et déchets sans qualité ; retour sans OF
+borné par la qualité ; au déchargement et au constat, la qualité vient de l'état (ou de l'OF nouveau) ;
+correction du conditionnement au droit VALIDER des lots ; une mesure de réception n'écrase jamais une
+correction manuelle ; garde-fou de 50 % comme pour la fiche article.
+
 ## 7. Ce que les données existantes donnent déjà (preuves, base de saisie, 22/10/2026)
 
 | Fait | Preuve |

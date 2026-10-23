@@ -61,8 +61,11 @@ import {
   depuisKg,
   facteurVersKg,
   pourChamp, saisieExacte } from '../lib/conditionnement'
+import { useLotsSurGrille } from '../hooks/useConditionnementLots'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { nouvelIdentifiant } from '../lib/identifiant'
+import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
+import { useInventaireOuvert } from '../lib/inventairesOuverts'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -237,6 +240,9 @@ export function TransfertNouveau() {
   // l'arme (audit v5, F20).
   const [lignesReprises, setLignesReprises] = useState<LigneSaisie[] | null>(null)
   const quitter = useGardeSaisie(lignes.length > 0 && lignes !== lignesReprises)
+  /* CHAQUE LOT A SON CONDITIONNEMENT (23/10/2026) : le lot qui part convertit
+     ses palettes, bobines et kilos avec SES facteurs ; le serveur aussi. */
+  useLotsSurGrille(lignes, setLignes)
   const [erreur, setErreur] = useState<string | null>(null)
 
   // --- Reprise d'un brouillon ---------------------------------------------
@@ -315,6 +321,10 @@ export function TransfertNouveau() {
 
   const statut = qDossier.data?.entete?.statut
   const parti = reprise && !!statut && statut !== 'BROUILLON'
+  /* UN MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : le brouillon
+     s'enregistre (il ne bouge aucun stock), mais ni l'expedition depuis la
+     source ni l'arrivee a destination ne passeront avant la cloture. */
+  const gel = useInventaireOuvert(entete.code_magasin_source, entete.code_magasin_dest)
   const modifiable = !parti && droits.peutEcrire
 
   const disponibles = useMemo(
@@ -645,6 +655,14 @@ export function TransfertNouveau() {
           en retouchant le bon.
         </Alerte>
       )}
+
+      {!parti || statut === 'VALIDE' ? (
+        <AvisInventaireOuvert
+          inventaires={parti ? gel.filter((i) => i.code_magasin === entete.code_magasin_dest) : gel}
+          nommer
+          className="mb-3"
+        />
+      ) : null}
 
       {erreur && (
         <Alerte ton="danger" titre="Enregistrement refusé" className="mb-3">

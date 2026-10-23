@@ -110,6 +110,40 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Inventaire ouvert = magasin gele (decision du 23/10/2026) : aucun
+        // mouvement tant qu'un inventaire du magasin est ouvert ; la cloture
+        // rattache ses ajustements par `mouvement.id_inventaire`. C65.
+        "2026-10-23g_inventaire_gel.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'mouvement' AND column_name = 'id_inventaire')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_01_lmvt_inventaire_ouvert')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_01_mouvement_inventaire_ouvert')
+            AND to_regclass('public.v_ctl_c65') IS NOT NULL",
+    ),
+    (
+        // La qualite explicite (23/10/2026) : sur la consommation directe et son
+        // retour (avec ou sans OF), sur les lignes machine (nouvelle et de la
+        // periode), statistiques par qualite sans OF, C62 au sens nouveau.
+        "2026-10-23b_qualite_explicite.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_decision_ligne' AND column_name = 'code_qualite_periode')
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'machine_fiche_ligne' AND column_name = 'code_qualite')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mouvement_qualite')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_qualite_conso_directe_reste')",
+    ),
+    (
+        // Chaque lot a son conditionnement (23/10/2026) : poids d'une bobine et
+        // bobines par palette du lot, mesures a la reception, corriges sur la
+        // fiche du lot ; conversions au lot.
+        "2026-10-23a_lot_conditionnement.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'lot' AND column_name = 'date_conditionnement')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_lot_conditionnement_reception')
+            AND EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'fn_lot_poids_bobine')
+            AND to_regclass('public.lot_conditionnement_journal') IS NOT NULL",
+    ),
+    (
         // L'OF, lot C (22/10/2026) : OF et voie sur l'etat archive des decisions,
         // nombre de bobines d'une voie, retour de consommation directe
         // (RETOUR_CONSO, borne en base), C62 et C63.

@@ -55,6 +55,14 @@ export interface Lot extends Record<string, unknown> {
   alerte_derive: 'VERT' | 'ORANGE' | 'ROUGE' | null
   /** Absent quand la grille de droits masque les montants. */
   valeur_mad?: number | null
+  /** LE CONDITIONNEMENT DU LOT (23/10/2026) : ce qui convertit ses palettes, bobines et kilos. */
+  poids_bobine_kg?: number | null
+  bobines_par_palette?: number | null
+  /** RECEPTION, HISTORIQUE, MOUVEMENT, FICHE_ARTICLE ou CORRECTION. */
+  origine_poids_bobine?: string | null
+  origine_bobines_palette?: string | null
+  date_conditionnement?: string | null
+  bobines_par_palette_catalogue?: number | null
 }
 
 export interface Compteurs {

@@ -28,9 +28,23 @@ pub(crate) async fn vers_kg(
     quantite: f64,
     unite: &str,
 ) -> AppResult<(f64, f64)> {
+    vers_kg_lot(db, code_reference, None, quantite, unite).await
+}
+
+/// LA MEME CONVERSION POUR UN LOT (23/10/2026) : le poids d'une bobine et les
+/// bobines par palette DU LOT, sinon ceux de la fiche article. L'ecran convertit
+/// avec le meme conditionnement (`conditionnementDuLot`) : sans cela, trois
+/// palettes affichees a l'ecran ne feraient pas les memes kilos au grand livre.
+pub(crate) async fn vers_kg_lot(
+    db: &Db,
+    code_reference: &str,
+    lot: Option<&str>,
+    quantite: f64,
+    unite: &str,
+) -> AppResult<(f64, f64)> {
     let u = Unite::depuis(unite)
         .ok_or_else(|| AppError::Invalide(format!("unite inconnue : {unite}")))?;
-    let facteurs = unites::charger(db, code_reference).await?;
+    let facteurs = unites::charger_pour_lot(db, code_reference, lot).await?;
     let facteur = facteurs.facteur(u)?;
     Ok((arrondi_kg(quantite * facteur), facteur))
 }
@@ -98,9 +112,14 @@ pub struct NouveauMouvement {
     pub tiers: Option<String>,
     /// L'OF (lien) d'une consommation directe ou de son retour (22/10/2026). Le
     /// `numero_of` texte en prend le numero ; sans lui, il reste le texte libre
-    /// d'avant. Une consommation directe sans OF passe, signalee (C62).
+    /// d'avant. Sans OF, la qualite est obligatoire (23/10/2026).
     #[serde(default)]
     pub id_of: Option<String>,
+    /// LA QUALITE SERVIE (23/10/2026) par une consommation directe ou son
+    /// retour : celle de l'OF quand il y en a un (la base la pose, et refuse une
+    /// autre) ; OBLIGATOIRE sans OF. Les autres mouvements n'en portent pas.
+    #[serde(default)]
+    pub code_qualite: Option<String>,
     pub lignes: Vec<LigneMouvement>,
 }
 
@@ -238,8 +257,14 @@ pub async fn creer_mouvement(
     // doit echouer avant toute ecriture, avec un message qui nomme la reference.
     let mut converties = Vec::with_capacity(m.lignes.len());
     for l in &m.lignes {
-        let (kg, facteur) =
-            vers_kg(&state.db, &l.code_reference, l.quantite_saisie, &l.unite_saisie).await?;
+        let (kg, facteur) = vers_kg_lot(
+            &state.db,
+            &l.code_reference,
+            l.lot_fournisseur.as_deref(),
+            l.quantite_saisie,
+            &l.unite_saisie,
+        )
+        .await?;
         converties.push((l, kg, facteur));
     }
     // L'ANCIENNE « CONSOMMATION HORS MACHINE » (decision 5 de l'audit v4) etait
@@ -287,17 +312,26 @@ pub async fn creer_mouvement(
         }
     }
     // L'OF EN LIEN (22/10/2026) : prevu ou lance. Le texte `numero_of` en prend
-    // le numero, pour les ecrans et l'historique. Un retour nomme toujours l'OF
-    // qui avait sorti la matiere ; une sortie sans OF passe, signalee (C62).
+    // le numero, pour les ecrans et l'historique. Sans OF, la sortie et son
+    // retour nomment la qualite qu'ils servent (23/10/2026).
     let id_of = m.id_of.as_deref().map(str::trim).filter(|o| !o.is_empty()).map(str::to_string);
     if id_of.is_some() && !hors_machine {
         return Err(AppError::Invalide(
             "l'OF en lien ne se pose que sur une consommation directe ou son retour".into(),
         ));
     }
-    if m.code_type_mvt == "RETOUR_CONSO" && id_of.is_none() {
+    // LA QUALITE (23/10/2026) : avec un OF, la sienne ; sans OF, obligatoire.
+    // La base le garantit aussi (trg_mouvement_qualite) ; le service le dit avant.
+    let code_qualite = m.code_qualite.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_string);
+    if code_qualite.is_some() && !hors_machine {
         return Err(AppError::Invalide(
-            "un retour de consommation directe nomme l'OF qui avait sorti la matiere".into(),
+            "la qualite ne se pose que sur une consommation directe ou son retour".into(),
+        ));
+    }
+    if hors_machine && id_of.is_none() && code_qualite.is_none() {
+        return Err(AppError::RegleMetier(
+            "QUALITE-OBLIGATOIRE : sans OF, une consommation directe ou son retour nomme la qualite qu'elle sert."
+                .into(),
         ));
     }
     let numero_of = match &id_of {
@@ -307,6 +341,19 @@ pub async fn creer_mouvement(
                     .bind(o)
                     .fetch_optional(&state.db)
                     .await?;
+            if let Some(q) = &code_qualite {
+                let du_of: Option<String> =
+                    sqlx::query_scalar("SELECT code_qualite FROM ordre_fabrication WHERE id_of = $1")
+                        .bind(o)
+                        .fetch_optional(&state.db)
+                        .await?;
+                if du_of.as_deref().is_some_and(|d| d != q) {
+                    return Err(AppError::RegleMetier(format!(
+                        "QUALITE-OF : la qualite {q} ne correspond pas a l'OF choisi, qui produit la qualite {}.",
+                        du_of.unwrap_or_default()
+                    )));
+                }
+            }
             match of {
                 None => return Err(AppError::Invalide(format!("ordre de fabrication inconnu : {o}"))),
                 Some((numero, statut)) if statut != "PREVU" && statut != "LANCE" => {
@@ -442,10 +489,10 @@ pub async fn creer_mouvement(
         "INSERT INTO mouvement
              (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin,
               code_motif, reference_document, numero_of, observations_globales,
-              responsable, id_utilisateur, tiers, id_of)
+              responsable, id_utilisateur, tiers, id_of, code_qualite)
          VALUES ($1,$2,
                  COALESCE(fn_jour_casablanca($3), (now() AT TIME ZONE 'Africa/Casablanca')::date),
-                 $4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+                 $4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
     )
     .bind(&id)
     .bind(&numero)
@@ -460,6 +507,7 @@ pub async fn creer_mouvement(
     .bind(&user.id)
     .bind(&tiers)
     .bind(&id_of)
+    .bind(&code_qualite)
     .execute(&mut *tx)
     .await?;
 
@@ -582,6 +630,7 @@ const ENTETE_MOUVEMENT: &str = "
     m.code_magasin, mg.nom AS magasin_nom,
     m.code_motif, mo.libelle AS motif_libelle,
     m.reference_document, m.numero_of, m.id_of, m.observations_globales,
+    m.code_qualite, (SELECT q.nom FROM qualite q WHERE q.code_qualite = m.code_qualite) AS qualite_nom,
     m.responsable, m.est_initial, u.login AS saisi_par,
     CAST((substr(m.date_creation, 1, 10))::date
        - (substr(m.date_mouvement, 1, 10))::date AS bigint) AS jours_de_retard_saisie,

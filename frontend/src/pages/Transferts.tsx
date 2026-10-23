@@ -24,6 +24,8 @@ import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { Alerte, Badge, Bouton, Chargement } from '../composants/ui/base'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { fmt } from '../lib/utils'
+import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
+import { phraseGel, useInventairesOuverts } from '../lib/inventairesOuverts'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -99,6 +101,12 @@ export function Transferts() {
 
   const echec = (e: unknown) =>
     toast.error(e instanceof ErreurApi ? e.message : 'Opération impossible.')
+
+  /* LES MAGASINS GELES PAR UN INVENTAIRE OUVERT (23/10/2026) : ni depart du
+     magasin source, ni arrivee au destinataire tant qu'il est ouvert (la base
+     refuse, INVENTAIRE-OUVERT). */
+  const ouverts = useInventairesOuverts().data ?? []
+  const gelDe = (mag: string) => phraseGel(ouverts.filter((i) => i.code_magasin === mag), true)
 
   /** Etape 1, au magasin SOURCE : la marchandise part. */
   const expedier = useMutation({
@@ -268,6 +276,8 @@ export function Transferts() {
         }
       />
 
+      <AvisInventaireOuvert inventaires={ouverts} nommer className="mb-3" />
+
       {(comptes.VALIDE ?? 0) > 0 && (
         <Alerte ton="alerte" titre="Marchandise en transit" className="mb-3">
           {comptes.VALIDE} transfert(s) ont quitte leur magasin source sans que l arrivee ait ete
@@ -330,7 +340,8 @@ export function Transferts() {
               {droits.peutValider && (
                 <Bouton
                   taille="sm"
-                  disabled={t.nb_lignes === 0}
+                  disabled={t.nb_lignes === 0 || !!gelDe(t.code_magasin_source)}
+                  title={gelDe(t.code_magasin_source) ?? undefined}
                   chargement={expedier.isPending}
                   onClick={() =>
                     confirmation.demander({
@@ -363,6 +374,8 @@ export function Transferts() {
               </Bouton>
               <Bouton
               taille="sm"
+              disabled={!!gelDe(t.code_magasin_dest)}
+              title={gelDe(t.code_magasin_dest) ?? undefined}
               chargement={receptionner.isPending}
               onClick={() =>
                 confirmation.demander({

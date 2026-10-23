@@ -79,7 +79,7 @@ des besoins, pour son magasin de destination.
 
 ### `CONSO_DIRECTE`
 
-- **Origine** : Consommation directe d'une matière qui ne va pas sur machine (jute, latex, SBR, plastique, simili cuir : fiche article en mode DIRECTE) ; ordre ou plan facultatif, en texte libre
+- **Origine** : Consommation directe d'une matière qui ne va pas sur machine (jute, latex, SBR, plastique, simili cuir : fiche article en mode DIRECTE) ; OF facultatif : avec lui, la qualité de l'OF ; sans lui, la qualité est obligatoire (23/10/2026)
 - **Sens** : sortie (−) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé
 - **Coût de la ligne** : CMUP du magasin au moment de la sortie
@@ -89,7 +89,7 @@ des besoins, pour son magasin de destination.
 
 ### `RETOUR_CONSO`
 
-- **Origine** : Retour au magasin d'une matière hors machine (fiche article en mode DIRECTE) non consommée par l'OF qui l'avait sortie (fiche hors machine, 22/10/2026) ; consommation de l'OF = sorti − rendu
+- **Origine** : Retour au magasin d'une matière hors machine (fiche article en mode DIRECTE) non consommée par l'OF — ou, sans OF, la qualité (23/10/2026) — qui l'avait sortie (fiche hors machine, 22/10/2026) ; consommation = sorti − rendu
 - **Sens** : entrée (+) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé (la matière revient au CMUP courant)
 - **Coût de la ligne** : Sans prix saisi : valorisé au CMUP du magasin

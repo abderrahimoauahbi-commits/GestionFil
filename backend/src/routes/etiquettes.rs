@@ -168,8 +168,11 @@ pub async fn lire(
         "SELECT code, nature, rang, nombre, poids_kg::float8 AS poids_kg,
                 code_reference, designation, lot_fournisseur, code_magasin_dest,
                 numero_reception, statut_reception, date_reception,
-                unite_catalogue, poids_bobine_kg::float8 AS poids_bobine_kg,
-                bobines_par_palette::float8 AS bobines_par_palette,
+                -- LE CONDITIONNEMENT DU LOT DE L'ETIQUETTE (23/10/2026) : une palette
+                -- scannee compte les bobines de SON lot ; a defaut, la fiche article.
+                unite_catalogue,
+                COALESCE(fn_lot_poids_bobine(code_reference, lot_fournisseur), poids_bobine_kg)::float8 AS poids_bobine_kg,
+                COALESCE(fn_lot_bobines_palette(code_reference, lot_fournisseur), bobines_par_palette)::float8 AS bobines_par_palette,
                 bobines_par_lot::float8 AS bobines_par_lot,
                 densite_kg_ml::float8 AS densite_kg_ml, suivi_lot
            FROM v_etiquette_lot WHERE code = $1",

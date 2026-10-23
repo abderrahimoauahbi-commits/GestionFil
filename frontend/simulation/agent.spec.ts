@@ -621,6 +621,14 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
       await exigerOfOuvert()
       await aller(p, `/machines/${e.machine}/fiche/CHARGE/${e.zone}`, login)
       await entete(p, e.date, ofLien, responsable, magasin)
+      // UN CHARGEMENT SANS OF NOMME SA QUALITE (23/10/2026) : la premiere qualite ouverte,
+      // la base refusant une ligne de chargement sans qualite.
+      if (!ofLien) {
+        const liste = p.getByRole('combobox', { name: 'Qualité', exact: true })
+        const options = (await liste.locator('option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).filter(Boolean)
+        if (!options.length) throw new Error('aucune qualité ouverte : un chargement sans OF ne peut pas nommer sa qualité')
+        await liste.selectOption(options[0])
+      }
       const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'À charger' }) })
       for (const c of choix) {
         await p.getByRole('button', { name: 'Ajouter une référence' }).click()

@@ -995,6 +995,153 @@ def scenario_inventaire(c, infra):
     verifier(controle(infra, "C44") == 0, "C44 : deux inventaires ouverts")
 
 
+def scenario_inventaire_gel(c, infra):
+    """INVENTAIRE OUVERT = MAGASIN GELE (decision du 23/10/2026, 2026-10-23g) : pendant l'inventaire,
+    sortie, reception, transfert entrant et sortant, chargement machine, contre-passation, ligne
+    greffee en SQL sont refuses avec le numero de l'inventaire ; le magasin voisin reste libre ; la
+    cloture ecrit ses ajustements (rattaches a l'inventaire, et seulement eux) ; apres elle tout
+    repasse ; l'annulation d'un inventaire degele aussi."""
+    M, P = MAG, "Polyfashions"
+    ref_lot, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-GEL-1"
+    # Les sorties par la Direction : le banc en a deja fait plus de 50 kg ce jour sur REF, et
+    # au-dela la sortie demande le droit de valider l'inventaire (regle du seuil de dechet).
+    jour = taux_usd_du_jour(infra)
+
+    # --- Avant l'inventaire : des documents en route vers M, ou qui en partiront.
+    entree_stock(c, REF, 200, mag=M)
+    entree_stock(c, REF, 100, mag=P)
+    id_bc, lignes = bon_envoye(c, [(ref_lot, 100, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [100], lot_fournisseur=lot, nb_bobines=40)
+    code, sortie = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 3)], mag=M,
+                             motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+    verifier(code == 200, f"sortie avant l'inventaire refusee : {sortie}")
+    # Un transfert P -> M expedie (en route), un transfert M -> P en brouillon.
+    t_entrant = c.ok("Magasinie", "POST", "/api/transferts", {
+        "code_magasin_source": P, "code_magasin_dest": M,
+        "lignes": [{"code_reference": REF, "quantite_saisie": 30, "unite_saisie": "kg"}]})
+    c.ok("Magasinie", "POST", f"/api/transferts/{t_entrant['id_transfert']}/expedier")
+    num_entrant = infra.valeur(f"SELECT numero_transfert FROM transfert WHERE id_transfert = '{t_entrant['id_transfert']}'")
+    t_sortant = c.ok("Magasinie", "POST", "/api/transferts", {
+        "code_magasin_source": M, "code_magasin_dest": P,
+        "lignes": [{"code_reference": REF, "quantite_saisie": 10, "unite_saisie": "kg"}]})
+    # Une reception soumise au controle, vers M.
+    id_bc2, lignes2 = bon_envoye(c, [(REF, 50, 20.0)])
+    r = c.ok("Magasinie", "POST", "/api/receptions", {"id_bc": id_bc2, "num_bon_livraison": "BL-GEL", "lignes": [
+        {"code_reference": REF, "id_ligne_bc": lignes2[0]["id_ligne_bc"], "unite_saisie": "kg",
+         "quantite_pesee_unite": 50, "code_magasin_dest": M}]})
+    rid = r["id_reception"]
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    # Une fiche machine de chargement depuis M, en brouillon. Un chargement nomme la qualite qu'il
+    # sert (2026-10-23b) : la premiere qualite active.
+    qualite = infra.valeur("SELECT code_qualite FROM qualite WHERE statut = 'ACTIF' ORDER BY code_qualite LIMIT 1")
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCG", "nom": "Machine du gel",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    fiche = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+        "type_fiche": "CHARGE", "code_machine": "BANCG", "code_emplacement": "BANCG-E1", "date_fiche": jour,
+        "code_magasin": M, "responsable": "Banc", "lignes": [
+            {"code_reference": ref_lot, "lot_fournisseur": lot, "nb_bobines_mouvementees": 10,
+             "poids_retenu_kg": 2.5, "pourcentage": 100, "code_motif": "CH_PRODUCTION",
+             "code_qualite": qualite}]})["id_fiche"]
+
+    # --- L'inventaire s'ouvre : il dit ce qui est en route, sans bloquer.
+    inv = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": M, "type_inventaire": "TOURNANT"})
+    iid, num = inv["id_inventaire"], inv["numero_inventaire"]
+    try:
+        avis = " ".join(inv.get("avis") or [])
+        verifier(num_entrant and num_entrant in avis, f"l'avis ne nomme pas le transfert en route {num_entrant} : {avis}")
+        verifier("Réception" in avis, f"l'avis ne nomme pas la reception en cours : {avis}")
+        ouverts = c.ok("Magasinie", "GET", "/api/inventaires/ouverts")
+        verifier(any(o["code_magasin"] == M and o["numero_inventaire"] == num for o in ouverts),
+                 f"/api/inventaires/ouverts ne voit pas {num} : {ouverts}")
+        stock_m = kg(infra, REF, M)
+
+        # --- Gele : tout chemin qui ecrit du stock dans M est refuse, avec le numero.
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 2)], mag=M,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 422 and "INVENTAIRE-OUVERT" in str(r) and num in str(r), f"sortie sur M gele : {code} {r}")
+        c.refus("Choukri", "POST", f"/api/receptions/{rid}/valider", codes=(422,), contient="INVENTAIRE-OUVERT")
+        c.refus("Magasinie", "POST", f"/api/transferts/{t_entrant['id_transfert']}/receptionner",
+                codes=(422,), contient="INVENTAIRE-OUVERT")
+        c.refus("Magasinie", "POST", f"/api/transferts/{t_sortant['id_transfert']}/expedier",
+                codes=(422,), contient="INVENTAIRE-OUVERT")
+        c.refus("Magasinie", "POST", f"/api/machines/fiches/{fiche}/valider", {}, codes=(422,), contient="INVENTAIRE-OUVERT")
+        c.refus("Choukri", "POST", f"/api/mouvements/{sortie['id_mouvement']}/contre-passer",
+                {"motif": "Essai du banc pendant l'inventaire"}, codes=(422,), contient="INVENTAIRE-OUVERT")
+        # La garantie est en base : une ligne greffee a un ancien en-tete de M, un ajustement
+        # qui se dirait de l'inventaire alors qu'il est en brouillon.
+        refus_sql(infra, "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg) "
+                         f"VALUES ('{sortie['id_mouvement']}', 99, '{REF}', 1)", "INVENTAIRE-OUVERT")
+        refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, "
+                         "code_motif, id_utilisateur, id_inventaire) SELECT 'banc-gel-1', 'MVT-BANC-GEL-1', "
+                         f"'AJUST_INV_POS', '{M}', 'INVENTAIRE', id_utilisateur, '{iid}' FROM utilisateur LIMIT 1",
+                  "INVENTAIRE-OUVERT")
+        verifier(abs(kg(infra, REF, M) - stock_m) < 1e-6, "le stock de M a bouge pendant l'inventaire")
+        # Le magasin voisin reste libre.
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 200, f"sortie sur le magasin voisin refusee : {code} {r}")
+
+        # --- Comptage : REF a 5 kg de moins, le reste au theorique ; validation par un autre compte.
+        lignes_inv = c.ok("Magasinie", "GET", f"/api/inventaires/{iid}/lignes")
+        cible = max((l for l in lignes_inv if l["code_reference"] == REF),
+                    key=lambda l: float(l["quantite_theorique_kg"]))
+        comptages = [{"code_reference": l["code_reference"], "code_magasin": M,
+                      "lot_fournisseur": l.get("lot_fournisseur"),
+                      "quantite_comptee_kg": float(l["quantite_theorique_kg"] or 0)}
+                     for l in lignes_inv if l is not cible]
+        comptages.append({"code_reference": REF, "code_magasin": M, "lot_fournisseur": cible.get("lot_fournisseur"),
+                          "quantite_comptee_kg": float(cible["quantite_theorique_kg"]) - 5,
+                          "motif_ecart": "Bobine abimee (banc du gel)"})
+        c.ok("Magasinie", "PUT", f"/api/inventaires/{iid}/lignes", {"comptages": comptages})
+        c.ok("Choukri", "POST", f"/api/inventaires/{iid}/valider")
+        # Valide, toujours gele. Un faux ajustement rattache (bon type, bon magasin) ne passe pas :
+        # sa ligne n'est pas un ecart de l'inventaire.
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 2)], mag=M,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 422 and "INVENTAIRE-OUVERT" in str(r), f"sortie sur M (inventaire valide) : {code} {r}")
+        refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, "
+                         "code_motif, id_utilisateur, id_inventaire) SELECT 'banc-gel-2', 'MVT-BANC-GEL-2', "
+                         f"'AJUST_INV_NEG', '{M}', 'INVENTAIRE', id_utilisateur, '{iid}' FROM utilisateur LIMIT 1; "
+                         "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg, "
+                         f"code_motif_ligne) VALUES ('banc-gel-2', 1, '{REF}', 7, 'R6')", "ne correspond")
+
+        # --- Cloture : ses ajustements passent, rattaches a l'inventaire.
+        c.ok("Choukri", "POST", f"/api/inventaires/{iid}/cloturer")
+        verifier(abs(kg(infra, REF, M) - (stock_m - 5)) < 1e-6, f"cloture : {kg(infra, REF, M)} au lieu de {stock_m - 5}")
+        n = int(infra.valeur(f"SELECT count(*) FROM mouvement WHERE id_inventaire = '{iid}' "
+                             "AND code_type_mvt = 'AJUST_INV_NEG'"))
+        verifier(n == 1, f"l'ajustement de cloture n'est pas rattache a l'inventaire ({n})")
+        # Clos : un ajustement rattache apres coup est refuse.
+        refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, "
+                         "code_motif, id_utilisateur, id_inventaire) SELECT 'banc-gel-3', 'MVT-BANC-GEL-3', "
+                         f"'AJUST_INV_POS', '{M}', 'INVENTAIRE', id_utilisateur, '{iid}' FROM utilisateur LIMIT 1",
+                  "INVENTAIRE-OUVERT")
+    finally:
+        if infra.valeur(f"SELECT statut FROM inventaire WHERE id_inventaire = '{iid}'") in ("BROUILLON", "VALIDE"):
+            c.appel("Choukri", "POST", f"/api/inventaires/{iid}/annuler", {"motif": "Fin du banc du gel (echec)"})
+
+    # --- Apres la cloture, tout repasse.
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+    c.ok("Magasinie", "POST", f"/api/transferts/{t_entrant['id_transfert']}/receptionner")
+    c.ok("Magasinie", "POST", f"/api/transferts/{t_sortant['id_transfert']}/expedier")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{fiche}/valider", {})
+    verifier(abs(kg(infra, REF, M) - (stock_m - 5 + 50 + 30 - 10)) < 1e-6, f"apres cloture : {kg(infra, REF, M)}")
+
+    # --- L'annulation degele aussi.
+    inv2 = c.ok("Choukri", "POST", "/api/inventaires", {"code_magasin": P, "type_inventaire": "CIBLE"})
+    try:
+        code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
+                            motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+        verifier(code == 422 and inv2["numero_inventaire"] in str(r), f"sortie sur P gele : {code} {r}")
+    finally:
+        c.ok("Choukri", "POST", f"/api/inventaires/{inv2['id_inventaire']}/annuler", {"motif": "Fin du banc du gel"})
+    code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(REF, 1)], mag=P,
+                        motif="HORS_MACHINE", motif_ligne="HM_ECHANTILLON")
+    verifier(code == 200, f"sortie apres annulation refusee : {code} {r}")
+    verifier(not c.ok("Magasinie", "GET", "/api/inventaires/ouverts"), "un inventaire reste ouvert apres le banc du gel")
+    verifier(controle(infra, "C11") == 0 and controle(infra, "C44") == 0, "C11 ou C44 apres le banc du gel")
+
+
 def scenario_colisage_signale(c, infra):
     """Un colisage absurde se signale (C43), il ne bloque pas (decision du 08/10)."""
     ref = infra.valeur("SELECT code_reference FROM reference WHERE poids_bobine_kg > 0 AND bobines_par_palette > 0 "
@@ -1743,8 +1890,9 @@ def scenario_controles_finaux(c, infra):
     # LE DERNIER CONTROLE, EN UN SEUL ENDROIT : a relever a chaque controle ajoute
     # (C55, cloture de periode, le 17/10/2026 ; C56, ligne d'import sans position tarifaire, le 19/10 ;
     # C59, prix confirme a la demande de prix, le 21/10 ; C60, meme reference sur deux lignes d'un bon,
-    # le 21/10 ; C61, OF cloture hors seuil, C62-C63 hors machine et voies, C64 OF au-dela du plan, le 22/10).
-    dernier = 64
+    # le 21/10 ; C61, OF cloture hors seuil, C62-C63 hors machine et voies, C64 OF au-dela du plan, le 22/10 ;
+    # C65, mouvement date de la periode de comptage d'un inventaire cloture, le 23/10).
+    dernier = 65
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
                              f"FROM generate_series(1, {dernier}) g EXCEPT SELECT code FROM v_controles) x")
     verifier(not manquants, f"controles absents de v_controles : {manquants}")
@@ -2253,7 +2401,9 @@ def scenario_machine(c, infra):
     def fiche(type_fiche, lignes, mag=MAG):
         f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
             "type_fiche": type_fiche, "code_machine": "BANC1", "code_emplacement": zone, "date_fiche": jour,
-            "code_magasin": mag if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes})
+            "code_magasin": mag if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes,
+            # La qualite que sert un chargement sans OF (2026-10-23b) : la fiche la donne a ses lignes.
+            "code_qualite": qualite_banc(infra)})
         return f["id_fiche"]
 
     # 1. Chargement : 100 bobines de 2,6 kg, pleines.
@@ -2332,7 +2482,8 @@ def scenario_machine_surplus(c, infra):
     def fiche(type_fiche, lignes):
         return c.ok("Magasinie", "POST", "/api/machines/fiches", {
             "type_fiche": type_fiche, "code_machine": "BANC2", "code_emplacement": zone, "date_fiche": jour,
-            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes})["id_fiche"]
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes,
+            "code_qualite": qualite_banc(infra)})["id_fiche"]
 
     # Ligne vide, 100 bobines de 2,6 kg chargees, 40 % declares : 156 kg « consommes » a l'instant.
     charge = {"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
@@ -2344,7 +2495,8 @@ def scenario_machine_surplus(c, infra):
     c.refus("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {"confirme_orange": True}, contient="raison")
     c.ok("Magasinie", "PUT", f"/api/machines/fiches/{f1}", {
         "type_fiche": "CHARGE", "code_machine": "BANC2", "code_emplacement": zone, "date_fiche": jour,
-        "code_magasin": MAG, "responsable": "Banc", "lignes": [dict(charge, motif_texte="Saisie décalée")]})
+        "code_magasin": MAG, "responsable": "Banc", "lignes": [dict(charge, motif_texte="Saisie décalée")],
+        "code_qualite": qualite_banc(infra)})
     c.refus("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {}, contient="ORANGE")
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/valider", {"confirme_orange": True})
     verifier(controle(infra, "C48") >= 1, "le chargement deja consomme n'est pas au controle C48")
@@ -2461,7 +2613,8 @@ def scenario_consommation_directe(c, infra):
              "un article neuf devrait etre en mode MACHINE")
     entree_stock(c, directe, 300)
     avant, cm = kg(infra, directe), cmup_magasin(infra, directe)
-    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 120)], numero_of="Plan semaine 43")
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 120)], numero_of="Plan semaine 43",
+                        code_qualite=qualite_banc(infra))
     verifier(code == 200, f"consommation directe de 120 kg refusee au magasinier : {code} {r}")
     id_mvt = r["id_mouvement"]
     verifier(abs(avant - kg(infra, directe) - 120) < 1e-6, f"stock apres la consommation : {kg(infra, directe)}")
@@ -2475,13 +2628,13 @@ def scenario_consommation_directe(c, infra):
                                f"WHERE code_reference = '{directe}'"))
     verifier(conso >= 120 - 1e-6, f"la consommation directe ne compte pas dans v_conso_reelle : {conso}")
     # Un article MACHINE : refuse par le service, avec un message clair...
-    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(machine, 10)])
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(machine, 10)], code_qualite=qualite_banc(infra))
     verifier(code == 422 and "fiches machine" in str(r), f"consommation directe d'un article MACHINE : {code} {r}")
     # ... et par la base, si un chemin contournait le service.
     refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif, "
-                     "id_utilisateur) "
-                     f"SELECT 'banc-cd', 'MVT-BANC-CD', 'CONSO_DIRECTE', '{MAG}', 'PRODUCTION', id_utilisateur "
-                     "FROM utilisateur WHERE login = 'Magasinie'; "
+                     "id_utilisateur, code_qualite) "
+                     f"SELECT 'banc-cd', 'MVT-BANC-CD', 'CONSO_DIRECTE', '{MAG}', 'PRODUCTION', id_utilisateur, "
+                     f"'{qualite_banc(infra)}' FROM utilisateur WHERE login = 'Magasinie'; "
                      "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg) "
                      f"VALUES ('banc-cd', 1, '{machine}', 1)", "CONSO-DIRECTE")
     # La sortie se contre-passe : le stock revient, elle ne compte plus comme consommation.
@@ -2494,6 +2647,12 @@ def scenario_consommation_directe(c, infra):
     code, r = mouvement(c, "Magasinie", "SORTIE_PROD", [(directe, 60)], numero_of="OF-BANC")
     verifier(code == 422 and "ce jour" in str(r), f"dechet de 60 kg accepte au magasinier : {code} {r}")
     verifier(controle(infra, "C11") == 0, "C11 apres la contre-passation")
+
+
+def qualite_banc(infra):
+    """La qualite que servent les chargements et consommations SANS OF du banc (2026-10-23b) : la premiere
+    qualite active, comme le scenario du gel des magasins."""
+    return infra.valeur("SELECT code_qualite FROM qualite WHERE statut = 'ACTIF' ORDER BY code_qualite LIMIT 1")
 
 
 def of_banc(infra, numero):
@@ -2604,7 +2763,7 @@ def scenario_fiche_hors_machine(c, infra):
     """LA FICHE HORS MACHINE (lot C, 22/10/2026) : la sortie (CONSO_DIRECTE) porte l'OF en lien ; le reste
     revient au magasin (RETOUR_CONSO) au CMUP, sans toucher le CMUP ; jamais plus que ce que l'OF a sorti
     (base) ; la sortie ne se contre-passe pas sous un retour ; la consommation reelle deduit le retour ; une
-    sortie sans OF passe, signalee (C62)."""
+    sortie sans OF nomme sa qualite (23/10/2026)."""
     directe, machine = REF, REF2
     c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(directe)}",
          V(infra, "reference", "code_reference", directe, {"mode_consommation": "DIRECTE"}))
@@ -2638,7 +2797,7 @@ def scenario_fiche_hors_machine(c, infra):
     code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 80)], motif="RETOUR_PROD", id_of=x)
     verifier(code == 422 and "RETOUR-CONSO" in str(r), f"retour au-dela de la sortie accepte : {code} {r}")
     code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 5)], motif="RETOUR_PROD")
-    verifier(code == 400 and "OF" in str(r), f"retour sans OF accepte : {code} {r}")
+    verifier(code == 422 and "QUALITE-OBLIGATOIRE" in str(r), f"retour sans OF ni qualite accepte : {code} {r}")
     code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(machine, 1)], motif="RETOUR_PROD", id_of=x)
     verifier(code == 422 and "MACHINE" in str(r), f"retour d'un article MACHINE accepte : {code} {r}")
     refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif, "
@@ -2650,11 +2809,14 @@ def scenario_fiche_hors_machine(c, infra):
     c.refus("Choukri", "POST", f"/api/mouvements/{sortie}/contre-passer", {"motif": "Essai du banc : sortie rendue"},
             contient="retour")
 
-    # 5. Une sortie sans OF passe, signalee (C62).
+    # 5. Une sortie sans OF nomme sa qualite (23/10/2026) : sans elle, refusee ; avec elle, elle passe et
+    #    n'est plus un signal (C62 ne compte que l'historique sans OF ni qualite).
     c62 = controle(infra, "C62")
     code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 5)])
-    verifier(code == 200, f"sortie sans OF refusee : {code} {r}")
-    verifier(controle(infra, "C62") == c62 + 1, f"C62 ne signale pas la sortie sans OF ({c62} -> {controle(infra, 'C62')})")
+    verifier(code == 422 and "QUALITE-OBLIGATOIRE" in str(r), f"sortie sans OF ni qualite acceptee : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 5)], code_qualite=qualite_banc(infra))
+    verifier(code == 200, f"sortie sans OF avec sa qualite refusee : {code} {r}")
+    verifier(controle(infra, "C62") == c62, f"C62 signale une sortie qui porte sa qualite ({c62} -> {controle(infra, 'C62')})")
     verifier(controle(infra, "C11") == 0, "C11 apres la fiche hors machine")
 
 
@@ -2749,6 +2911,261 @@ def scenario_of_semaine(c, infra):
     reste = float(infra.valeur(f"SELECT sum(kg) FROM machine_etat WHERE code_emplacement = '{zone}'"))
     verifier(abs(reste - (998.4 * 0.10 + 2496 * 0.60)) < 0.01, f"reste sur la machine : {reste}")
     verifier(controle(infra, "C11") == 0, "C11 apres la semaine")
+
+
+def scenario_lot_conditionnement(c, infra):
+    """CHAQUE LOT A SON CONDITIONNEMENT (decision du 23/10/2026). A la reception, le lot prend le poids
+    d'une bobine (kilos / bobines) et les bobines par palette (bobines / palettes) mesures ; une mesure a
+    plus de 50 % de la fiche est notee, non appliquee. Le lot se corrige (droit VALIDER sur les lots,
+    motif, journal immuable, audit) ; une correction n'est pas ecrasee par la reception suivante. Les
+    conversions palettes / bobines / kilos d'un mouvement sur ce lot prennent SON conditionnement, la
+    fiche machine aussi (poids nominal d'une ligne neuve)."""
+    ref, lot = "PP-1500 Dtex-Cream 2951-Hs", "LOT-COND-1"
+    jour = taux_usd_du_jour(infra)
+
+    def du_lot(l):
+        return infra.sql("SELECT poids_bobine_kg, bobines_par_palette, origine_poids_bobine, origine_bobines_palette, "
+                         "date_conditionnement IS NOT NULL FROM lot "
+                         f"WHERE code_reference = '{ref}' AND lot_fournisseur = '{l}'")
+
+    def journal(l):
+        return infra.sql("SELECT source, applique, poids_apres, bobines_palette_apres FROM lot_conditionnement_journal "
+                         f"WHERE code_reference = '{ref}' AND lot_fournisseur = '{l}' ORDER BY date_evenement")
+
+    # 1. La reception mesure le lot : 1 000 kg, 400 bobines, 2 palettes -> 2,5 kg et 200 bobines par palette.
+    id_bc, lignes = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [1000], lot_fournisseur=lot, nb_bobines=400, nb_palettes=2)
+    verifier(du_lot(lot) == [["2.5000", "200", "RECEPTION", "RECEPTION", "t"]], f"lot mesure a la reception : {du_lot(lot)}")
+    verifier(journal(lot)[-1][:2] == ["RECEPTION", "t"], f"journal de la mesure : {journal(lot)}")
+    lu = c.ok("Magasinie", "GET", f"/api/lots/conditionnement?code_reference={urllib.parse.quote(ref)}")
+    verifier(any(x["lot_fournisseur"] == lot and x["poids_bobine_kg"] == 2.5 and x["bobines_par_palette"] == 200
+                 for x in lu), f"conditionnement du lot illisible a l'ecran : {lu}")
+
+    # 2. Le garde-fou : 1 000 kg pour 100 bobines (10 kg la bobine) n'est pas un poids, c'est une faute de
+    #    saisie. Le lot garde la fiche article ; la mesure est notee, non appliquee.
+    fiche_poids = infra.valeur(f"SELECT round(poids_bobine_kg, 4) FROM reference WHERE code_reference = '{ref}'")
+    id_bc, lignes = bon_envoye(c, [(ref, 1000, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [1000], lot_fournisseur="LOT-COND-X", nb_bobines=100)
+    x = du_lot("LOT-COND-X")
+    verifier(x[0][0] == fiche_poids and x[0][2] == "FICHE_ARTICLE", f"mesure aberrante appliquee : {x} (fiche {fiche_poids})")
+    verifier(journal("LOT-COND-X")[-1][:2] == ["RECEPTION", "f"], f"mesure ecartee non journalisee : {journal('LOT-COND-X')}")
+
+    # 3. La correction : decision sur le lot (VALIDER), motif obligatoire, valeurs strictement positives.
+    corps = {"code_reference": ref, "lot_fournisseur": lot, "poids_bobine_kg": 2.4, "bobines_par_palette": 210,
+             "motif": "Pesee de controle du banc"}
+    c.refus("Magasinie", "POST", "/api/lots/conditionnement", corps, codes=(403,))
+    c.refus("Choukri", "POST", "/api/lots/conditionnement", dict(corps, motif=" "), codes=(400,))
+    c.refus("Choukri", "POST", "/api/lots/conditionnement", dict(corps, poids_bobine_kg=0), codes=(400,))
+    audit0 = int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'lot'"))
+    c.ok("Choukri", "POST", "/api/lots/conditionnement", corps)
+    verifier(du_lot(lot) == [["2.4000", "210", "CORRECTION", "CORRECTION", "t"]], f"lot corrige : {du_lot(lot)}")
+    verifier(journal(lot)[-1] == ["CORRECTION", "t", "2.4000", "210"], f"correction non journalisee : {journal(lot)}")
+    verifier(int(infra.valeur("SELECT count(*) FROM audit_log WHERE table_concernee = 'lot'")) > audit0,
+             "la correction du lot n'est pas au journal d'audit")
+    c.refus("Choukri", "POST", "/api/lots/conditionnement", corps, contient="rien a corriger")
+    refus_sql(infra, f"UPDATE lot_conditionnement_journal SET motif = 'x' WHERE lot_fournisseur = '{lot}'", "journal")
+
+    # 4. Les conversions sur CE lot : 1 palette = 210 x 2,4 = 504 kg (la fiche dirait autre chose) ;
+    #    10 bobines = 24 kg. Le facteur employe est garde sur la ligne.
+    fiche = infra.sql(f"SELECT poids_bobine_kg, bobines_par_palette FROM reference WHERE code_reference = '{ref}'")[0]
+    verifier(abs(float(fiche[0]) * float(fiche[1]) - 504) > 1, f"la fiche dit deja 504 kg la palette : {fiche}")
+    for unite, quantite, attendu in (("Palette", 1, 504.0), ("Bobine", 10, 24.0)):
+        code, r = c.appel("Choukri", "POST", "/api/mouvements", {
+            "code_type_mvt": "SORTIE_HORS_MACHINE", "code_magasin": MAG, "code_motif": "HORS_MACHINE",
+            "lignes": [{"code_reference": ref, "quantite_saisie": quantite, "unite_saisie": unite,
+                        "lot_fournisseur": lot, "code_motif_ligne": "HM_ESSAI"}]})
+        verifier(code == 200, f"sortie de {quantite} {unite} du lot refusee : {code} {r}")
+        l = infra.sql("SELECT quantite_kg, facteur_conversion FROM ligne_mouvement "
+                      f"WHERE id_mouvement = '{r['id_mouvement']}'")[0]
+        verifier(abs(float(l[0]) - attendu) < 1e-6 and abs(float(l[1]) * quantite - attendu) < 1e-6,
+                 f"{quantite} {unite} du lot : {l[0]} kg (facteur {l[1]}), {attendu} attendus")
+
+    # 5. Une nouvelle reception du MEME lot (2,5 kg mesures) n'ecrase pas la correction : notee, non appliquee.
+    id_bc, lignes = bon_envoye(c, [(ref, 500, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [500], lot_fournisseur=lot, nb_bobines=200, nb_palettes=1)
+    verifier(du_lot(lot)[0][:3] == ["2.4000", "210", "CORRECTION"], f"la reception a ecrase la correction : {du_lot(lot)}")
+    verifier(journal(lot)[-1][:2] == ["RECEPTION", "f"], f"mesure sur un lot corrige : {journal(lot)}")
+
+    # 6. La fiche machine : une ligne neuve sans poids declare prend le poids d'une bobine DU LOT.
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCCOND", "nom": "Machine du conditionnement",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+        "type_fiche": "CHARGE", "code_machine": "BANCCOND", "code_emplacement": "BANCCOND-E1", "date_fiche": jour,
+        "code_magasin": MAG, "responsable": "Banc", "code_qualite": qualite_banc(infra),
+        "lignes": [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 10,
+                    "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})["id_fiche"]
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/apercu", {})
+    l0 = ap["lignes"][0]
+    verifier(abs(l0["poids_nominal_kg"] - 2.4) < 1e-9 and abs(l0["kg_mouvementes"] - 24) < 1e-6,
+             f"la fiche machine ne prend pas le poids du lot : {l0['poids_nominal_kg']} / {l0['kg_mouvementes']}")
+    lue = c.ok("Magasinie", "GET", f"/api/machines/fiches/{f}")
+    verifier(abs(lue["lignes"][0].get("poids_lot_kg", 0) - 2.4) < 1e-9, f"poids du lot sur la fiche : {lue['lignes'][0]}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/annuler", {"motif": "Essai du banc"})
+    verifier(controle(infra, "C11") == 0, "C11 apres le conditionnement des lots")
+
+
+def scenario_qualite_hors_machine(c, infra):
+    """LA QUALITE EXPLICITE HORS MACHINE (decision du 23/10/2026). Avec un OF, la consommation directe porte la
+    qualite de l'OF (posee par la base, une autre est refusee) ; sans OF, la qualite est obligatoire (service
+    ET base). Le retour sans OF est borne par ce que la qualite a sorti sans OF ; la sortie ne se
+    contre-passe pas sous un retour ; une sortie ordinaire ne porte pas de qualite. Les statistiques par
+    qualite comptent la consommation sans OF ; C62 ne la signale plus."""
+    directe = REF
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(directe)}",
+         V(infra, "reference", "code_reference", directe, {"mode_consommation": "DIRECTE"}))
+    entree_stock(c, directe, 300)
+    q1, q2 = [l[0] for l in infra.sql("SELECT code_qualite FROM qualite WHERE statut = 'ACTIF' "
+                                      "ORDER BY code_qualite LIMIT 2")]
+    infra.sql(f"INSERT INTO ordre_fabrication (numero, code_qualite, metrage_m2) VALUES ('OF-BANC-QHM', '{q1}', 100) "
+              "ON CONFLICT (numero) DO NOTHING")
+    x = infra.valeur("SELECT id_of FROM ordre_fabrication WHERE numero = 'OF-BANC-QHM'")
+
+    def sans_of(q):
+        return float(infra.valeur(f"SELECT COALESCE(sum(kg_reel_sans_of), 0) FROM v_qualite_consommation "
+                                  f"WHERE code_qualite = '{q}'"))
+    stats0, c62 = sans_of(q2), controle(infra, "C62")
+    bilan0 = {b["code_reference"]: b for b in c.ok("Magasinie", "GET", f"/api/machines/qualites/{q2}/hors-machine")}
+
+    # 1. Avec l'OF : une autre qualite est refusee ; sans qualite dite, la base pose celle de l'OF.
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 30)], id_of=x, code_qualite=q2)
+    verifier(code == 422 and "QUALITE-OF" in str(r), f"qualite contraire a l'OF acceptee : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 30)], id_of=x)
+    verifier(code == 200, f"sortie sur l'OF refusee : {code} {r}")
+    verifier(infra.valeur(f"SELECT code_qualite FROM mouvement WHERE id_mouvement = '{r['id_mouvement']}'") == q1,
+             "la sortie sur l'OF ne porte pas la qualite de l'OF")
+    refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif, "
+                     f"id_utilisateur, id_of, code_qualite) SELECT 'banc-qof', 'MVT-BANC-QOF', 'CONSO_DIRECTE', '{MAG}', "
+                     f"'PRODUCTION', id_utilisateur, '{x}', '{q2}' FROM utilisateur WHERE login = 'Magasinie'",
+              "QUALITE-OF")
+
+    # 2. Sans OF : la qualite est obligatoire, au service et en base.
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 40)])
+    verifier(code == 422 and "QUALITE-OBLIGATOIRE" in str(r), f"sortie sans OF ni qualite acceptee : {code} {r}")
+    refus_sql(infra, "INSERT INTO mouvement (id_mouvement, numero_mouvement, code_type_mvt, code_magasin, code_motif, "
+                     f"id_utilisateur) SELECT 'banc-qob', 'MVT-BANC-QOB', 'CONSO_DIRECTE', '{MAG}', 'PRODUCTION', "
+                     "id_utilisateur FROM utilisateur WHERE login = 'Magasinie'", "QUALITE-OBLIGATOIRE")
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 40)], code_qualite=q2)
+    verifier(code == 200, f"sortie sans OF avec sa qualite refusee : {code} {r}")
+    sortie = r["id_mouvement"]
+    verifier(infra.sql(f"SELECT id_of, code_qualite FROM mouvement WHERE id_mouvement = '{sortie}'") == [["", q2]],
+             "la sortie sans OF ne garde pas sa qualite")
+
+    # 3. Le retour sans OF : borne par ce que la qualite a sorti sans OF ; une autre qualite n'a rien a rendre.
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 15)], motif="RETOUR_PROD", code_qualite=q2)
+    verifier(code == 200, f"retour sans OF de 15 kg refuse : {code} {r}")
+    reste = float(bilan0.get(directe, {}).get("reste_kg", 0)) + 25
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, reste + 1)], motif="RETOUR_PROD", code_qualite=q2)
+    verifier(code == 422 and "RETOUR-CONSO" in str(r), f"retour sans OF au-dela de la sortie accepte : {code} {r}")
+    bilan = {b["code_reference"]: b for b in c.ok("Magasinie", "GET", f"/api/machines/qualites/{q2}/hors-machine")}
+    verifier(abs(bilan[directe]["reste_kg"] - reste) < 1e-6, f"bilan de la qualite sans OF : {bilan.get(directe)}")
+    c.refus("Choukri", "POST", f"/api/mouvements/{sortie}/contre-passer", {"motif": "Essai du banc : sortie rendue"},
+            contient="retour")
+
+    # 4. Une sortie ordinaire (essai, atelier, pret) ne porte pas de qualite.
+    code, r = mouvement(c, "Choukri", "SORTIE_HORS_MACHINE", [(directe, 1)], motif="HORS_MACHINE",
+                        motif_ligne="HM_ESSAI", code_qualite=q2)
+    verifier(code == 400, f"une sortie hors machine ordinaire accepte une qualite : {code} {r}")
+
+    # 5. Les statistiques par qualite comptent le sans OF (sorti - rendu) ; C62 ne le signale pas.
+    verifier(abs(sans_of(q2) - stats0 - 25) < 1e-6, f"qualite {q2} sans OF : +{sans_of(q2) - stats0} au lieu de +25")
+    verifier(controle(infra, "C62") == c62, f"C62 signale une consommation qui porte sa qualite ({c62} -> {controle(infra, 'C62')})")
+    verifier(controle(infra, "C11") == 0, "C11 apres la qualite hors machine")
+
+
+def scenario_machine_qualite(c, infra):
+    """LA QUALITE SUR LA MACHINE, MEME FRONTIERE QUE L'OF (decision du 23/10/2026). Un chargement nomme sa
+    qualite (celle de l'OF, ou choisie sans OF) ; une qualite contraire a l'OF est bloquee (calcul et base).
+    La ligne de decision garde la qualite nouvelle ET celle de la periode : un constat qui passe a un OF d'une
+    autre qualite range l'ecart sous la qualite de la periode ; la devalidation rend la qualite d'avant. Les
+    statistiques par qualite comptent ces ecarts sans OF ; la part des OF y reste celle du 22/10/2026."""
+    ref, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-QUAL-1"
+    jour = taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 800, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [800], lot_fournisseur=lot, nb_bobines=300)
+    q1, q2 = [l[0] for l in infra.sql("SELECT code_qualite FROM qualite WHERE statut = 'ACTIF' "
+                                      "ORDER BY code_qualite LIMIT 2")]
+    infra.sql(f"INSERT INTO ordre_fabrication (numero, code_qualite, metrage_m2) VALUES ('OF-BANC-MQ', '{q2}', 100) "
+              "ON CONFLICT (numero) DO NOTHING")
+    x2 = infra.valeur("SELECT id_of FROM ordre_fabrication WHERE numero = 'OF-BANC-MQ'")
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCQUAL", "nom": "Machine des qualites",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    zone = "BANCQUAL-E1"
+
+    def fiche(type_fiche, lignes, id_of=None):
+        return c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANCQUAL", "code_emplacement": zone, "date_fiche": jour,
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "id_of": id_of,
+            "lignes": lignes})["id_fiche"]
+
+    def charge(**extra):
+        return dict({"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
+                     "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}, **extra)
+
+    def sans_of(q):
+        return float(infra.valeur(f"SELECT COALESCE(sum(kg_reel_sans_of), 0) FROM v_qualite_consommation "
+                                  f"WHERE code_qualite = '{q}'"))
+
+    # 1. Un chargement sans OF ni qualite est bloque ; une qualite contraire a l'OF aussi.
+    f = fiche("CHARGE", [charge()])
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/apercu", {})
+    verifier(any("qualite" in b for b in ap["blocages"]), f"chargement sans qualite non bloque : {ap['blocages']}")
+    c.refus("Magasinie", "POST", f"/api/machines/fiches/{f}/valider", {}, contient="qualite")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/annuler", {"motif": "Essai du banc"})
+    f = fiche("CHARGE", [charge(code_qualite=q1)], id_of=x2)
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/apercu", {})
+    verifier(any("ne correspond pas" in b for b in ap["blocages"]), f"qualite contraire a l'OF non bloquee : {ap['blocages']}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/annuler", {"motif": "Essai du banc"})
+
+    # 2. Le chargement sans OF, qualite Q1 : l'etage la porte ; pas d'ecart, pas de qualite de periode.
+    f = fiche("CHARGE", [charge(code_qualite=q1)])
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/valider", {})
+    verifier(infra.sql(f"SELECT id_of, code_qualite FROM machine_etat WHERE code_emplacement = '{zone}'") == [["", q1]],
+             "l'etage ne sert pas la qualite choisie")
+    stats0 = sans_of(q1)
+
+    # 3. Un constat sans OF : 70 % -> 78 kg d'ecart, sous la qualite Q1 (periode et nouvelle).
+    f = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
+                       "pourcentage": 70, "code_motif": "MJ_ORDINAIRE"}])
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/valider", {})
+    l = infra.sql("SELECT l.code_qualite, l.code_qualite_periode, l.id_of_periode, l.ecart_kg FROM machine_decision_ligne l "
+                  f"JOIN machine_decision d ON d.id_decision = l.id_decision WHERE d.id_fiche = '{f}'")[0]
+    verifier(l[:3] == [q1, q1, ""] and abs(float(l[3]) - 78) < 0.01, f"constat sans OF : {l}")
+    verifier(abs(sans_of(q1) - stats0 - 78) < 0.01, f"qualite {q1} sans OF : +{sans_of(q1) - stats0} au lieu de +78")
+
+    # 4. LA FRONTIERE : un constat qui passe a l'OF X2 (qualite Q2). 50 % -> 52 kg d'ecart : ils appartiennent a
+    #    la periode qui se termine (Q1, sans OF) ; l'etage sert ensuite X2 / Q2.
+    f4 = fiche("MAJ", [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
+                        "pourcentage": 50, "code_motif": "MJ_ORDINAIRE"}], id_of=x2)
+    ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/apercu", {})
+    l0 = ap["lignes"][0]
+    verifier(l0.get("code_qualite") == q2 and l0.get("code_qualite_periode") == q1,
+             f"apercu de la frontiere : nouvelle {l0.get('code_qualite')}, periode {l0.get('code_qualite_periode')}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/valider", {})
+    l = infra.sql("SELECT l.code_qualite, l.code_qualite_periode, l.id_of, l.id_of_periode, l.ecart_kg "
+                  "FROM machine_decision_ligne l JOIN machine_decision d ON d.id_decision = l.id_decision "
+                  f"WHERE d.id_fiche = '{f4}' AND d.statut = 'ACTIVE'")[0]
+    verifier(l[:4] == [q2, q1, x2, ""] and abs(float(l[4]) - 52) < 0.01, f"frontiere de qualite : {l}")
+    verifier(abs(sans_of(q1) - stats0 - 130) < 0.01, f"l'ecart de la periode n'est pas sous {q1} : +{sans_of(q1) - stats0}")
+    verifier(infra.sql(f"SELECT id_of, code_qualite FROM machine_etat WHERE code_emplacement = '{zone}'") == [[x2, q2]],
+             "apres le constat, l'etage ne sert pas X2 / Q2")
+    # La base refuse un etat qui contredirait son OF.
+    refus_sql(infra, f"UPDATE machine_etat SET code_qualite = '{q1}' WHERE code_emplacement = '{zone}'", "QUALITE-OF")
+
+    # 5. Devalider le constat : l'etage revient a Q1 sans OF ; l'ecart sort des statistiques.
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/devalider", {"motif": "Essai du banc : retour a Q1"})
+    verifier(infra.sql(f"SELECT id_of, code_qualite FROM machine_etat WHERE code_emplacement = '{zone}'") == [["", q1]],
+             "la devalidation n'a pas rendu la qualite d'avant")
+    verifier(abs(sans_of(q1) - stats0 - 78) < 0.01, f"ecart devalide encore compte : +{sans_of(q1) - stats0}")
+
+    # 6. LA PART DES OF EST CELLE DU 22/10/2026 : recalculee a l'ancienne (v_of_bilan par qualite et mois de
+    #    l'OF, annules exclus), elle vaut ce que la vue montre — sur tout ce que le banc a deja produit.
+    ancien = infra.sql("SELECT code_qualite, to_char(date_of, 'YYYY-MM'), count(*), round(sum(metrage_m2), 2), "
+                       "round(sum(kg_prevu), 4), round(sum(kg_reel), 4), round(sum(kg_reel) - sum(kg_prevu), 4) "
+                       "FROM v_of_bilan WHERE statut <> 'ANNULE' GROUP BY 1, 2 ORDER BY 1, 2")
+    nouveau = infra.sql("SELECT code_qualite, mois, nb_of, metrage_m2, kg_prevu, kg_reel_of, ecart_kg "
+                        "FROM v_qualite_consommation WHERE nb_of > 0 ORDER BY 1, 2")
+    verifier(ancien == nouveau and len(ancien) > 0, f"la part des OF a change :\n{ancien}\n{nouveau}")
+    verifier(controle(infra, "C11") == 0, "C11 apres la qualite sur la machine")
 
 
 def scenario_controle_reception(c, infra):
@@ -3031,7 +3448,7 @@ def scenario_derogation_bornee(c, infra):
     def fiche():
         f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
             "type_fiche": "CHARGE", "code_machine": "BANCD", "code_emplacement": "BANCD-E1", "date_fiche": jour,
-            "code_magasin": MAG, "responsable": "Banc",
+            "code_magasin": MAG, "responsable": "Banc", "code_qualite": qualite_banc(infra),
             "lignes": [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
                         "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})
         return f["id_fiche"], infra.valeur(f"SELECT numero_fiche FROM machine_fiche WHERE id_fiche = '{f['id_fiche']}'")
@@ -3082,7 +3499,8 @@ def scenario_machine_constat(c, infra):
     def valider(type_fiche, lignes):
         f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
             "type_fiche": type_fiche, "code_machine": "BANC3", "code_emplacement": zone, "date_fiche": jour,
-            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes})
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "lignes": lignes,
+            "code_qualite": qualite_banc(infra)})
         c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
 
     def date_de(lot):
@@ -3127,7 +3545,7 @@ def scenario_lots_vivants(c, infra):
                                               "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
     f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
         "type_fiche": "CHARGE", "code_machine": "BANCL", "code_emplacement": "BANCL-E1", "date_fiche": jour,
-        "code_magasin": MAG, "responsable": "Banc",
+        "code_magasin": MAG, "responsable": "Banc", "code_qualite": qualite_banc(infra),
         "lignes": [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 10,
                     "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
@@ -3964,6 +4382,7 @@ SCENARIOS = [
     scenario_stock_jamais_negatif,
     scenario_contre_passation,
     scenario_inventaire,
+    scenario_inventaire_gel,
     scenario_colisage_signale,
     scenario_verrou_optimiste,
     scenario_verrou_import,
@@ -3995,6 +4414,9 @@ SCENARIOS = [
     scenario_machine_of_voie,
     scenario_fiche_hors_machine,
     scenario_of_semaine,
+    scenario_lot_conditionnement,
+    scenario_qualite_hors_machine,
+    scenario_machine_qualite,
     scenario_controle_reception,
     scenario_retour_cloture_avoirs,
     scenario_taux_bon,

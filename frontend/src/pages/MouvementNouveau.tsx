@@ -24,7 +24,7 @@
  * ensemble : un mouvement a moitie enregistre n'aurait aucun sens au grand
  * livre, que R03 rend immuable.
  */
-import { type Dispatch, type SetStateAction, useMemo, useState } from 'react'
+import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Save } from 'lucide-react'
@@ -45,11 +45,14 @@ import {
 } from '../composants/GrilleLignes'
 import { Alerte, Bouton, Champ, Selecteur } from '../composants/ui/base'
 import { type Conditionnement, depuisKg, facteurVersKg, pourChamp, saisieExacte } from '../lib/conditionnement'
-import { ChoixOF } from '../composants/ChoixOF'
+import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts } from '../composants/ChoixOF'
+import { useLotsSurGrille } from '../hooks/useConditionnementLots'
 import { useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { PanneRequetes } from '../composants/PanneRequetes'
+import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
+import { phraseGel, useInventaireOuvert } from '../lib/inventairesOuverts'
 import { nouvelIdentifiant } from '../lib/identifiant'
 
 
@@ -233,6 +236,8 @@ export function MouvementNouveau() {
     numero_of: '',
     /** L'OF en lien d'une consommation directe (22/10/2026) ; `numero_of` reste le texte libre d'avant. */
     id_of: '',
+    /** LA QUALITE SERVIE (23/10/2026) : celle de l'OF quand il y en a un ; sans OF, obligatoire. */
+    code_qualite: '',
     /** L'usine du pret et de son retour. */
     tiers: '',
     observations_globales: '',
@@ -244,8 +249,15 @@ export function MouvementNouveau() {
   /* TOUTE ECRITURE DE LA GRILLE PASSE PAR LA REMISE EN ORDRE : unite permise,
      lot attache a sa reference. La grille ne connait pas ces regles ; elle
      n'a pas a les connaitre. */
-  const majLignes: Dispatch<SetStateAction<LigneSaisie[]>> = (action) =>
-    setLignes((prev) => (typeof action === 'function' ? action(prev) : action).map(normaliser))
+  const majLignes: Dispatch<SetStateAction<LigneSaisie[]>> = useCallback(
+    (action) => setLignes((prev) => (typeof action === 'function' ? action(prev) : action).map(normaliser)),
+    [],
+  )
+  /* CHAQUE LOT A SON CONDITIONNEMENT (23/10/2026) : des que le lot d'une ligne
+     est choisi, ses palettes, bobines et kilos se repondent avec le poids de
+     bobine et les bobines par palette DU LOT ; le serveur convertit de meme. */
+  useLotsSurGrille(lignes, majLignes)
+  const ofsOuverts = useOfOuverts()
 
   const qTypes = useQuery({
     queryKey: ['types-mouvement'],
@@ -641,6 +653,8 @@ export function MouvementNouveau() {
         reference_document: entete.reference_document.trim() || null,
         numero_of: entete.numero_of || null,
         id_of: consoDirecte && entete.id_of ? entete.id_of : null,
+        // Avec un OF, la base pose sa qualite ; sans OF, celle choisie (obligatoire).
+        code_qualite: consoDirecte && !entete.id_of && entete.code_qualite ? entete.code_qualite : null,
         tiers: entete.tiers.trim() || null,
         observations_globales: entete.observations_globales.trim() || null,
         lignes: utiles.map((l) => corpsMouvement(pourEnvoi(l))),
@@ -650,8 +664,15 @@ export function MouvementNouveau() {
       setErreur(e instanceof ErreurApi ? e.message : 'Enregistrement impossible.'),
   })
 
+  /* LE MAGASIN GELE PAR UN INVENTAIRE OUVERT (23/10/2026) : la base refuse,
+     l'ecran le dit avant la saisie. */
+  const gel = useInventaireOuvert(entete.code_magasin)
   const bloquant =
-    utiles.length === 0
+    gel.length > 0
+      ? phraseGel(gel)
+      : consoDirecte && !entete.id_of && !entete.code_qualite
+      ? 'Sans OF, choisissez la qualité que sert cette consommation directe.'
+      : utiles.length === 0
       ? 'Saisissez au moins une ligne.'
       : horsCatalogue.length > 0
         ? `Un mouvement ne porte que des références du catalogue : retirez la ligne « ${horsCatalogue[0].intitule} ».`
@@ -672,7 +693,7 @@ export function MouvementNouveau() {
     <>
       <EnTetePage
         titre="Saisir un mouvement"
-        sous_titre="La quantité est convertie en kilogrammes avant enregistrement, par les paramètres de la référence."
+        sous_titre="La quantité est convertie en kilogrammes avant enregistrement, par le conditionnement du lot choisi, sinon de la référence."
         actions={
           <Bouton variante="contour" onClick={() => quitter(() => naviguer('/mouvements'))}>
             <ArrowLeft />
@@ -681,6 +702,7 @@ export function MouvementNouveau() {
         }
       />
       <PanneRequetes requetes={[['Les types de mouvement', qTypes], ['Les magasins', qMag], ['Les motifs', qMotifs], ['Le stock du magasin', qStock]]} />
+      <AvisInventaireOuvert inventaires={gel} className="mb-3" />
       {/* LE FORMULAIRE NE PORTE QUE L'EN-TETE. Les boutons de la grille ne
           declarent pas de type : places dans un formulaire, chacun —
           valider une ligne, en ajouter une — l'aurait soumis. Le bouton du bas
@@ -778,15 +800,31 @@ export function MouvementNouveau() {
                 {typeActif?.exige_of === 1 && <span className="text-danger">*</span>}
               </label>
               {/* L'OF EN LIEN (22/10/2026) : la consommation directe se range sous un
-                  OF, donc sous une qualite. Sans OF elle passe, mais elle est
-                  signalee (C62) ; le texte libre reste pour l'ancien usage. */}
+                  OF, donc sous sa qualite. SANS OF, LA QUALITE SE DIT (23/10/2026) :
+                  obligatoire ; le texte libre reste pour l'ancien usage. */}
               {consoDirecte && (
                 <ChoixOF
                   valeur={entete.id_of}
-                  onChange={(id, numero) => setEntete({ ...entete, id_of: id, numero_of: id ? numero : '' })}
-                  vide="— aucun OF (signalé) —"
+                  onChange={(id, numero) =>
+                    setEntete({ ...entete, id_of: id, numero_of: id ? numero : '', code_qualite: id ? '' : entete.code_qualite })
+                  }
+                  vide="— aucun OF : choisir la qualité —"
                   className="mb-1 w-full"
                 />
+              )}
+              {consoDirecte && (
+                <div className="mb-1">
+                  <span className="mb-1 block text-[12px] text-attenue-texte">
+                    Qualité {!entete.id_of && <span className="text-danger">*</span>}
+                  </span>
+                  <ChoixQualite
+                    valeur={entete.code_qualite}
+                    onChange={(q) => setEntete({ ...entete, code_qualite: q })}
+                    imposee={entete.id_of ? (qualiteDeLOf(ofsOuverts.data, entete.id_of) ?? '…') : null}
+                    invalide={!entete.id_of && !entete.code_qualite}
+                    className="w-full"
+                  />
+                </div>
               )}
               {!(consoDirecte && entete.id_of) && (
                 <input id="mvt-4"

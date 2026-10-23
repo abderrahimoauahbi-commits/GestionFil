@@ -39,7 +39,7 @@
     },
     "CONSO_DIRECTE": {
       "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
-      "origine": "Consommation directe d'une matière qui ne va pas sur machine (jute, latex, SBR, plastique, simili cuir : fiche article en mode DIRECTE) ; ordre ou plan facultatif, en texte libre",
+      "origine": "Consommation directe d'une matière qui ne va pas sur machine (jute, latex, SBR, plastique, simili cuir : fiche article en mode DIRECTE) ; OF facultatif : avec lui, la qualité de l'OF ; sans lui, la qualité est obligatoire (23/10/2026)",
       "cmup": "Inchangé",
       "cout": "CMUP du magasin au moment de la sortie",
       "validation": "Droit ECRIRE du stock, sans seuil ; refusée par la base pour un article en mode MACHINE (le fil sort par les fiches machine)",
@@ -48,7 +48,7 @@
     },
     "RETOUR_CONSO": {
       "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 0, "interne": 0,
-      "origine": "Retour au magasin d'une matière hors machine (fiche article en mode DIRECTE) non consommée par l'OF qui l'avait sortie (fiche hors machine, 22/10/2026) ; consommation de l'OF = sorti − rendu",
+      "origine": "Retour au magasin d'une matière hors machine (fiche article en mode DIRECTE) non consommée par l'OF — ou, sans OF, la qualité (23/10/2026) — qui l'avait sortie (fiche hors machine, 22/10/2026) ; consommation = sorti − rendu",
       "cmup": "Inchangé (la matière revient au CMUP courant)",
       "cout": "Sans prix saisi : valorisé au CMUP du magasin",
       "validation": "Droit ECRIRE du stock ; l'OF (lien) est obligatoire ; refusé par la base pour un article en mode MACHINE et au-delà de ce que l'OF a sorti de cette référence, non encore rendu",

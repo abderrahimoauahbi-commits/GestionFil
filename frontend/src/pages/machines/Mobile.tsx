@@ -30,8 +30,10 @@ import {
 } from './noyau'
 import { useFiche } from './useFiche'
 import { ChampScan } from '../../composants/ChampScan'
+import { AvisInventaireOuvert } from '../../composants/AvisInventaireOuvert'
 import { useValiderFiche } from './Questions'
 import { DemandesDerogation } from './Derogation'
+import { ChoixQualite } from '../../composants/ChoixOF'
 
 interface Magasin {
   code_magasin: string
@@ -449,6 +451,7 @@ function FicheMobile({
   return (
     <div className="flex flex-col gap-3 pb-28 max-md:pb-56">
       <Fil titre={LIBELLE_TYPE[type]} sous={zone.libelle} retour={retour} />
+      {toucheMagasin && <AvisInventaireOuvert inventaires={f.gel} />}
 
       {/* --- L'entete ------------------------------------------------------ */}
       <div className="grid grid-cols-2 gap-2">
@@ -472,6 +475,19 @@ function FicheMobile({
               ))}
             </select>
           </label>
+        )}
+        {/* LA QUALITE EXPLICITE (23/10/2026) : un chargement sans OF nomme la
+            qualite qu'il sert. Une ligne qui sert deja un OF ou une qualite la garde. */}
+        {type === 'CHARGE' && (
+          <div className="col-span-2 flex flex-col gap-1">
+            <span className="text-[12px] text-attenue-texte">Qualité servie (sans OF)</span>
+            <ChoixQualite
+              valeur={f.entete.code_qualite}
+              onChange={(q) => f.setEntete({ ...f.entete, code_qualite: q })}
+              vide="— celle de la ligne, ou choisir —"
+              className="min-h-[48px] w-full text-[14px]"
+            />
+          </div>
         )}
       </div>
 

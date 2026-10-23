@@ -67,7 +67,8 @@ export interface OfListe extends Record<string, unknown> {
 }
 
 interface QualiteConso extends Record<string, unknown> {
-  code_qualite: string
+  /** Vide : « Non attribué » — l'historique consommé sans OF ni qualité (23/10/2026). */
+  code_qualite: string | null
   qualite_nom: string
   mois: string
   nb_of: number
@@ -81,8 +82,12 @@ interface QualiteConso extends Record<string, unknown> {
   kg_perte: number
   kg_casse: number
   kg_autre_ecart: number
-  ecart_kg: number
+  ecart_kg: number | null
   ecart_pct: number | null
+  /** La part des OF, et ce qui a été consommé sans OF sous cette qualité (23/10/2026). */
+  kg_reel_of?: number
+  kg_reel_sans_of?: number
+  attribue?: boolean
 }
 
 /** L'écart réel − prévu : signé, coloré seulement au-delà de 15 % (P_EcartOfPct par défaut). */
@@ -260,7 +265,18 @@ function ConsommationQualites() {
   })
 
   const colonnes: ColonneDT<QualiteConso>[] = [
-    { champ: 'code_qualite', entete: 'Qualité', rendu: (l) => <span title={l.qualite_nom}>{l.code_qualite}</span> },
+    {
+      champ: 'code_qualite',
+      entete: 'Qualité',
+      rendu: (l) =>
+        l.code_qualite ? (
+          <span title={l.qualite_nom}>{l.code_qualite}</span>
+        ) : (
+          <span className="italic text-attenue-texte" title="Consommé sans OF ni qualité : l’historique d’avant le 23/10/2026">
+            Non attribué
+          </span>
+        ),
+    },
     { champ: 'mois', entete: 'Mois', rendu: (l) => <span className="tabular-nums">{l.mois}</span> },
     { champ: 'nb_of', entete: 'OF', numerique: true, rendu: (l) => `${l.nb_of}${l.nb_of_clotures ? ` (${l.nb_of_clotures} clôt.)` : ''}` },
     { champ: 'metrage_m2', entete: 'Métrage (m²)', numerique: true, rendu: (l) => fmt.nombre(Number(l.metrage_m2), 0) },
@@ -270,8 +286,12 @@ function ConsommationQualites() {
       champ: 'ecart_kg',
       entete: 'Écart (kg)',
       numerique: true,
-      rendu: (l) => <Ecart kg={Number(l.ecart_kg)} pct={l.ecart_pct == null ? null : Number(l.ecart_pct)} />,
+      // L'écart ne compare que ce que les OF ont prévu à ce qu'ils ont consommé.
+      rendu: (l) =>
+        l.ecart_kg == null ? '—' : <Ecart kg={Number(l.ecart_kg)} pct={l.ecart_pct == null ? null : Number(l.ecart_pct)} />,
     },
+    { champ: 'kg_reel_of', entete: 'dont OF (kg)', secondaire: true, rendu: (l) => kg(l.kg_reel_of ?? 0) },
+    { champ: 'kg_reel_sans_of', entete: 'dont sans OF (kg)', secondaire: true, rendu: (l) => kg(l.kg_reel_sans_of ?? 0) },
     { champ: 'kg_conso_fil', entete: 'dont fil (kg)', secondaire: true, rendu: (l) => kg(l.kg_conso_fil) },
     { champ: 'kg_hors_machine', entete: 'dont hors machine (kg)', secondaire: true, rendu: (l) => kg(l.kg_hors_machine) },
     {
@@ -307,8 +327,10 @@ function ConsommationQualites() {
       </div>
       <p className="text-xs text-attenue-texte">
         Réel = écarts à effet consommation des machines, attribués à l’OF qui occupait la portion (corrections exclues),
-        plus les consommations directes portant l’OF, retours déduits. Prévu = métrage × recette, perte comprise : un
-        étalon, jamais la consommation. OF annulés exclus.
+        plus les consommations directes portant l’OF, retours déduits — au mois de l’OF. S’y ajoute ce qui a été
+        consommé SANS OF sous sa qualité (écarts machine sous la qualité de la période, consommations directes sans OF),
+        au mois du constat ou du mouvement ; sans qualité, l’historique est « Non attribué ». Prévu = métrage × recette,
+        perte comprise : un étalon, jamais la consommation, comparé aux seuls OF. OF annulés exclus.
       </p>
       <PanneRequetes requetes={[['La consommation par qualité', q]]} />
       {q.isLoading ? (
@@ -320,8 +342,8 @@ function ConsommationQualites() {
           module={MODULE_OF}
           colonnes={colonnes}
           lignes={q.data ?? []}
-          cle={(l) => `${l.code_qualite}|${l.mois}`}
-          titreCarte={(l) => `${l.code_qualite} — ${l.mois}`}
+          cle={(l) => `${l.code_qualite ?? '—'}|${l.mois}`}
+          titreCarte={(l) => `${l.code_qualite ?? 'Non attribué'} — ${l.mois}`}
           placeholderRecherche="Filtrer..."
           tailleParDefaut={25}
           videTitre="Aucune consommation"

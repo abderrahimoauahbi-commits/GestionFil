@@ -11,7 +11,6 @@ use axum::extract::{Path, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use super::stock::vers_kg;
 pub async fn lister_transferts(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -175,8 +174,15 @@ pub async fn creer_transfert(
                 l.code_reference
             )));
         }
-        let (kg, facteur) =
-            vers_kg(&state.db, &l.code_reference, l.quantite_saisie, &l.unite_saisie).await?;
+        // Le conditionnement DU LOT qui part (23/10/2026), sinon la fiche article.
+        let (kg, facteur) = super::stock::vers_kg_lot(
+            &state.db,
+            &l.code_reference,
+            l.lot_fournisseur.as_deref(),
+            l.quantite_saisie,
+            &l.unite_saisie,
+        )
+        .await?;
 
         sqlx::query(
             "INSERT INTO ligne_transfert
@@ -227,7 +233,8 @@ pub async fn ajouter_ligne_transfert(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, module::MOUVEMENTS, Action::Ecrire).await?;
     let (kg, facteur) =
-        vers_kg(&state.db, &l.code_reference, l.quantite_saisie, &l.unite_saisie).await?;
+        super::stock::vers_kg_lot(&state.db, &l.code_reference, l.lot_fournisseur.as_deref(), l.quantite_saisie, &l.unite_saisie)
+            .await?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -311,7 +318,8 @@ pub async fn modifier_transfert(
             )));
         }
         let (kg, facteur) =
-            vers_kg(&state.db, &l.code_reference, l.quantite_saisie, &l.unite_saisie).await?;
+            super::stock::vers_kg_lot(&state.db, &l.code_reference, l.lot_fournisseur.as_deref(), l.quantite_saisie, &l.unite_saisie)
+            .await?;
         converties.push((l, kg, facteur));
     }
 

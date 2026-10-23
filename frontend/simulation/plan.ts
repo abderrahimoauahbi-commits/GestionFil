@@ -106,12 +106,14 @@ export type Evenement =
   /** `of` : le numero de l'OF du mois de la machine — le constat et le chargement le portent. */
   | { id: string; date: string; type: 'MACHINE'; machine: string; zone: string; capacite: number; of?: string }
   /**
-   * `of` : par magasin, l'OF sur lequel sortent les matieres en mode DIRECTE (fiche
-   * hors machine) ; les autres matieres hors machine gardent la sortie d'atelier.
+   * `ofs` : les OF du mois. Chacun sort SES matieres en mode DIRECTE (fiche hors
+   * machine) : celles de la recette de sa qualite, a hauteur du prevu (metrage x
+   * kg/m2 x (1 + perte), a 10 % pres). Les autres matieres hors machine gardent
+   * la sortie d'atelier.
    */
-  | { id: string; date: string; type: 'SORTIE'; of?: Record<string, string> }
-  /** Le reste d'une sortie hors machine revient au magasin, sur le meme OF (RETOUR_CONSO). */
-  | { id: string; date: string; type: 'RETOUR_HM'; sortie: string; of: Record<string, string> }
+  | { id: string; date: string; type: 'SORTIE'; ofs?: string[] }
+  /** Un petit reste d'une sortie hors machine revient au magasin, sur le meme OF (RETOUR_CONSO). */
+  | { id: string; date: string; type: 'RETOUR_HM'; sortie: string; ofs: string[] }
   | { id: string; date: string; type: 'INVENTAIRE'; magasin: string }
 
 /**
@@ -370,27 +372,21 @@ export function construirePlan(
       }
     }
     // --- Les matieres hors machine sortent en fin de mois ------------------
-    // Celles en mode DIRECTE sur un OF du mois (fiche hors machine) ; les autres
-    // pour l'atelier, comme avant.
+    // Celles en mode DIRECTE, OF par OF, selon la recette de sa qualite (fiche
+    // hors machine) ; les autres pour l'atelier, comme avant.
     const jourSortie = ouvre(`${mois}-27`)
     if (jourSortie <= veille) {
       const id = `S-${jourSortie}`
-      let of: Record<string, string> | undefined
-      if (ofsDuMois.length) {
-        of = {}
-        for (const magasin of ['Polyfashions', 'Morocco']) {
-          of[magasin] = ho.parmi(ofsDuMois)
-          ofs.get(of[magasin])!.usages.push(id)
-        }
-      }
-      ev.push({ id, date: jourSortie, type: 'SORTIE', ...(of ? { of } : {}) })
-      // Deux fois sur cinq, une partie revient au magasin quelques jours apres.
-      if (of && ho.reel(0, 1) < 0.4) {
+      const lesOfs = ofsDuMois.length ? [...ofsDuMois] : undefined
+      for (const numero of lesOfs ?? []) ofs.get(numero)!.usages.push(id)
+      ev.push({ id, date: jourSortie, type: 'SORTIE', ...(lesOfs ? { ofs: lesOfs } : {}) })
+      // Deux fois sur cinq, un petit reste revient au magasin quelques jours apres.
+      if (lesOfs && ho.reel(0, 1) < 0.4) {
         const jourRetour = ouvre(ajouter(jourSortie, ho.entier(2, 4)))
         if (jourRetour <= veille) {
           const idR = `${id}-RHM`
-          ev.push({ id: idR, date: jourRetour, type: 'RETOUR_HM', sortie: id, of })
-          for (const numero of new Set(Object.values(of))) ofs.get(numero)!.usages.push(idR)
+          ev.push({ id: idR, date: jourRetour, type: 'RETOUR_HM', sortie: id, ofs: lesOfs })
+          for (const numero of lesOfs) ofs.get(numero)!.usages.push(idR)
         }
       }
     }

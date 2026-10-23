@@ -10,8 +10,8 @@
  * mois un OF par machine (/ordres-fabrication) ; les fiches machine le
  * CHOISISSENT (constat et chargement), une ligne sur deux sur sa voie quand la
  * largeur du metier est connue ; les matieres en mode DIRECTE sortent sur un OF
- * par la fiche hors machine (/fiche-hors-machine), et une partie revient parfois
- * au magasin ; la direction clot l'OF quand ses etages ont eu leur constat
+ * par la fiche hors machine (/fiche-hors-machine), chaque OF selon la recette de
+ * sa qualite, et un petit reste revient parfois au magasin ; la direction clot l'OF quand ses etages ont eu leur constat
  * suivant. La reprise repere un OF par son numero. Aucune ecriture ne
  * passe par l'API : l'API ne sert qu'a relire, comme un utilisateur relit
  * l'ecran.
@@ -831,28 +831,104 @@ async function sortieAtelier(date: string, magasin: string, of: string, lignes: 
 }
 
 /**
- * LES MATIERES HORS MACHINE, EN FIN DE MOIS. Celles en mode DIRECTE sortent sur
- * l'OF du plan (fiche hors machine, par le magasinier) ; les autres — et toutes,
- * si l'OF n'est pas ouvert — gardent la sortie d'atelier.
+ * LES MATIERES HORS MACHINE, EN FIN DE MOIS (calees sur l'OF, decision du 23/10/2026).
+ *
+ * Chaque OF du mois sort SES matieres en mode DIRECTE : celles de la recette de
+ * sa qualite, a hauteur de son prevu — metrage x kg/m2 x (1 + perte), tel que
+ * l'ecran de l'OF le donne par reference — a 10 % pres, moins ce que l'OF a deja
+ * sorti. Une matiere absente de la recette ne sort pas sur cet OF. Le magasin le
+ * mieux pourvu d'abord, lot le plus ancien d'abord ; le stock borne la sortie.
+ * Les autres matieres hors machine (mode MACHINE) — et toutes, si le plan n'a pas
+ * d'OF — gardent la sortie d'atelier.
  */
 async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
   const p = await session('Choukri')
   const alea = hasardDe(e.id)
   const responsable = RESPONSABLES[Math.floor(alea() * RESPONSABLES.length)]
   const bilan: string[] = []
-  for (const magasin of ['Polyfashions', 'Morocco']) {
-    const ofAtelier = `SIM-${e.date}-${magasin}`
-    const ofNumero = e.of?.[magasin]
-    const of = ofNumero ? (await ofsOuverts(p)).find((o) => o.numero === ofNumero) : undefined
-    const faitAtelier = (await documentsDu(p, e.date, 'SORTIE_HORS_MACHINE', magasin)).some((m) => (m.numero_of ?? '').startsWith(ofAtelier))
-    const faitOf = !!of && (await documentsDu(p, e.date, 'CONSO_DIRECTE', magasin)).some((m) => m.numero_of === of.numero)
-    if (faitAtelier && (faitOf || !of)) continue
-    const tous = (await lots(p, magasin)).filter((l) => MATIERES_HORS_MACHINE.includes(parCode.get(l.code_reference)?.code_categorie ?? ''))
+  const magasins = ['Polyfashions', 'Morocco']
+  const stockDe = async (magasin: string) => ({
+    magasin,
+    lots: (await lots(p, magasin)).filter((l) => MATIERES_HORS_MACHINE.includes(parCode.get(l.code_reference)?.code_categorie ?? '')),
     // LE STOCK DU MAGASIN fait foi pour une matiere non suivie au lot : une sortie
     // sans lot ne diminue pas les soldes par lot, qui la surestimeraient.
-    const magasinStock = (await lire<{ code_reference: string; quantite_kg: number }[]>(p, `/api/stock?code_magasin=${magasin}&limite=5000`))
-      .filter((x) => MATIERES_HORS_MACHINE.includes(parCode.get(x.code_reference)?.code_categorie ?? '') && Number(x.quantite_kg) > 0)
+    stock: (await lire<{ code_reference: string; quantite_kg: number }[]>(p, `/api/stock?code_magasin=${magasin}&limite=5000`))
+      .filter((x) => MATIERES_HORS_MACHINE.includes(parCode.get(x.code_reference)?.code_categorie ?? '') && Number(x.quantite_kg) > 0),
+  })
+
+  // 1. LES OF DU MOIS, chacun ses matieres.
+  const ouverts = e.ofs?.length ? await ofsOuverts(p) : []
+  const surOf = e.ofs?.length ? ouverts.filter((o) => e.ofs!.includes(o.numero)) : []
+  for (const of of surOf) {
+    // Ce que la recette prevoit (ecran de l'OF), et ce que l'OF a deja sorti.
+    const prevu = (await lire<{ code_reference: string; kg_prevu: number }[]>(p, `/api/ordres-fabrication/${of.id_of}/consommation`))
+      .filter((l) => directe(l.code_reference) && Number(l.kg_prevu) > 0)
+    if (!prevu.length) {
+      bilan.push(`${of.numero} : aucune matière hors machine dans la recette`)
+      continue
+    }
+    const deja = await lire<BilanHorsMachine[]>(p, `/api/machines/of-ouverts/${encodeURIComponent(of.id_of)}/hors-machine`)
+    const stocks = await Promise.all(magasins.map(stockDe))
+    const parMagasin = new Map<string, { r: string; lot?: string; kg: number }[]>()
+    for (const l of prevu) {
+      const bruit = hasardDe(`${e.id}|${of.numero}|${l.code_reference}`)
+      const sorti = Number(deja.find((d) => d.code_reference === l.code_reference)?.kg_sorti ?? 0)
+      let reste = Math.round((Number(l.kg_prevu) * (0.9 + bruit() * 0.2) - sorti) * 10) / 10
+      if (reste < 1) continue
+      const suivi = parCode.get(l.code_reference)?.suivi_lot === 1
+      // Le magasin le mieux pourvu de cette matiere d'abord.
+      const dispo = (s: (typeof stocks)[number]) =>
+        Number(s.stock.find((x) => x.code_reference === l.code_reference)?.quantite_kg ?? 0)
+      for (const s of [...stocks].sort((a, b) => dispo(b) - dispo(a))) {
+        if (reste < 1) break
+        const lignes = parMagasin.get(s.magasin) ?? []
+        if (suivi) {
+          const parAnciennete = s.lots
+            .filter((x) => x.code_reference === l.code_reference && x.lot_fournisseur !== SANS_LOT && x.quantite_kg > 0)
+            .sort((a, b) => a.date_premiere_entree.localeCompare(b.date_premiere_entree))
+          for (const lot of parAnciennete) {
+            const kg = Math.floor(Math.min(reste, lot.quantite_kg) * 10) / 10
+            if (kg < 1) continue
+            lignes.push({ r: l.code_reference, lot: lot.lot_fournisseur, kg })
+            lot.quantite_kg -= kg
+            reste -= kg
+            if (reste < 1) break
+          }
+        } else {
+          const kg = Math.floor(Math.min(reste, dispo(s)) * 10) / 10
+          if (kg >= 1) {
+            lignes.push({ r: l.code_reference, kg })
+            reste -= kg
+          }
+        }
+        if (lignes.length) parMagasin.set(s.magasin, lignes)
+      }
+    }
+    for (const [magasin, lignes] of parMagasin) {
+      if ((await documentsDu(p, e.date, 'CONSO_DIRECTE', magasin)).some((m) => m.numero_of === of.numero)) {
+        bilan.push(`${of.numero}, ${magasin} : déjà sorti`)
+        continue
+      }
+      await ficheHorsMachine('SORTIE', e.date, magasin, of, lignes, responsable)
+      // Pour le retour eventuel : l'OF, et ce qui est sorti de chaque reference (lot, kilos).
+      journal.ids[`${e.id}|${of.numero}`] = of.id_of
+      for (const l of lignes) {
+        const cle = `${e.id}|${of.numero}|${magasin}|${l.r}`
+        const avant = journal.ids[cle] ? (JSON.parse(journal.ids[cle]) as { lot: string; kg: number }) : undefined
+        journal.ids[cle] = JSON.stringify({ lot: avant?.lot || l.lot || '', kg: +((avant?.kg ?? 0) + l.kg).toFixed(1) })
+      }
+      sauver()
+      bilan.push(`${of.numero}, ${magasin} : ${lignes.map((l) => `${fr(l.kg, 1)} kg ${l.r}`).join(', ')}`)
+    }
+  }
+
+  // 2. L'ATELIER : les matieres hors machine qui ne sont pas DIRECTE (ou toutes, sans OF).
+  for (const magasin of magasins) {
+    const ofAtelier = `SIM-${e.date}-${magasin}`
+    if ((await documentsDu(p, e.date, 'SORTIE_HORS_MACHINE', magasin)).some((m) => (m.numero_of ?? '').startsWith(ofAtelier))) continue
+    const { lots: tous, stock: magasinStock } = await stockDe(magasin)
     const refs = [...new Set([...tous.map((l) => l.code_reference), ...magasinStock.map((x) => x.code_reference)])]
+      .filter((r) => !surOf.length || !directe(r))
     const lignes = refs
       .map((r) => {
         const suivi = parCode.get(r)?.suivi_lot === 1
@@ -862,20 +938,8 @@ async function sortir(e: Extract<Evenement, { type: 'SORTIE' }>) {
       })
       .filter((l) => l.kg >= 20)
     if (!lignes.length) continue
-    const surOf = of ? lignes.filter((l) => directe(l.r)) : []
-    const atelier = lignes.filter((l) => !surOf.includes(l))
-    if (surOf.length && !faitOf) {
-      await ficheHorsMachine('SORTIE', e.date, magasin, of!, surOf, responsable)
-      // Pour le retour eventuel : l'OF, et ce qui est sorti de chaque reference (lot, kilos).
-      journal.ids[`${e.id}|${magasin}`] = of!.id_of
-      for (const l of surOf) journal.ids[`${e.id}|${magasin}|${l.r}`] = JSON.stringify({ lot: l.lot ?? '', kg: l.kg })
-      sauver()
-      bilan.push(`${magasin}, OF ${of!.numero} : ${surOf.map((l) => `${l.kg} kg ${l.r}`).join(', ')}`)
-    }
-    if (atelier.length && !faitAtelier) {
-      await sortieAtelier(e.date, magasin, ofAtelier, atelier)
-      bilan.push(`${magasin}, atelier : ${atelier.map((l) => `${l.kg} kg ${l.r}`).join(', ')}`)
-    }
+    await sortieAtelier(e.date, magasin, ofAtelier, lignes)
+    bilan.push(`${magasin}, atelier : ${lignes.map((l) => `${l.kg} kg ${l.r}`).join(', ')}`)
   }
   return bilan.join(' ; ') || 'rien à sortir'
 }
@@ -887,39 +951,43 @@ interface BilanHorsMachine {
   reste_kg: number
 }
 
-/** LE RESTE REVIENT AU MAGASIN : une partie d'une reference sortie sur l'OF, sur le meme OF. */
+/**
+ * UN PETIT RESTE REVIENT AU MAGASIN (2 a 5 % d'une reference sortie), sur le meme
+ * OF et dans le magasin d'ou il est sorti — jamais plus que ce qui en est sorti.
+ */
 async function retourHm(e: Extract<Evenement, { type: 'RETOUR_HM' }>) {
   const p = await session('Magasinie')
   const alea = hasardDe(e.id)
   const responsable = RESPONSABLES[Math.floor(alea() * RESPONSABLES.length)]
   const bilan: string[] = []
-  for (const magasin of Object.keys(e.of).sort()) {
-    const idOf = journal.ids[`${e.sortie}|${magasin}`]
-    if (!idOf) continue // rien de DIRECTE n'est sorti sur l'OF dans ce magasin
+  for (const numero of e.ofs) {
+    const idOf = journal.ids[`${e.sortie}|${numero}`]
+    if (!idOf) continue // rien de DIRECTE n'est sorti sur cet OF
     const of = (await ofsOuverts(p)).find((o) => o.id_of === idOf)
     if (!of) {
-      bilan.push(`${magasin} : l'OF n'est plus ouvert, rien ne se rend`)
-      continue
-    }
-    if ((await documentsDu(p, e.date, 'RETOUR_CONSO', magasin)).some((m) => m.numero_of === of.numero)) {
-      bilan.push(`${magasin} : déjà rendu`)
+      bilan.push(`${numero} : l'OF n'est plus ouvert, rien ne se rend`)
       continue
     }
     const restes = await lire<BilanHorsMachine[]>(p, `/api/machines/of-ouverts/${encodeURIComponent(idOf)}/hors-machine`)
-    // Seules les references sorties de CE magasin s'y rendent, jamais plus que ce qui en est sorti.
-    const possibles = restes
-      .map((b) => {
-        const sortie = journal.ids[`${e.sortie}|${magasin}|${b.code_reference}`]
-        const s = sortie ? (JSON.parse(sortie) as { lot: string; kg: number }) : undefined
-        return { b, s, max: s ? Math.min(Number(b.reste_kg), s.kg) : 0 }
+    const possibles = Object.entries(journal.ids)
+      .filter(([cle]) => cle.startsWith(`${e.sortie}|${numero}|`))
+      .map(([cle, v]) => {
+        const [, , magasin, r] = cle.split('|')
+        const s = JSON.parse(v) as { lot: string; kg: number }
+        const b = restes.find((x) => x.code_reference === r)
+        return { magasin, r, s, max: Math.min(Number(b?.reste_kg ?? 0), s.kg) }
       })
-      .filter((x) => x.max >= 20)
+      .filter((x) => x.max >= 10)
     if (!possibles.length) continue
-    const { b, s, max } = possibles[Math.floor(alea() * possibles.length)]
-    const kg = Math.floor(max * (0.1 + alea() * 0.2))
-    if (kg < 2) continue
-    await ficheHorsMachine('RETOUR', e.date, magasin, of, [{ r: b.code_reference, lot: s?.lot || undefined, kg }], responsable)
-    bilan.push(`${magasin}, OF ${of.numero} : ${kg} kg ${b.code_reference} rendus`)
+    const { magasin, r, s, max } = possibles[Math.floor(alea() * possibles.length)]
+    if ((await documentsDu(p, e.date, 'RETOUR_CONSO', magasin)).some((m) => m.numero_of === of.numero)) {
+      bilan.push(`${numero}, ${magasin} : déjà rendu`)
+      continue
+    }
+    const kg = Math.round(max * (0.02 + alea() * 0.03) * 10) / 10
+    if (kg < 0.5) continue
+    await ficheHorsMachine('RETOUR', e.date, magasin, of, [{ r, lot: s.lot || undefined, kg }], responsable)
+    bilan.push(`${numero}, ${magasin} : ${fr(kg, 1)} kg ${r} rendus`)
   }
   return bilan.join(' ; ') || 'rien à rendre'
 }

@@ -17,6 +17,7 @@ import { useParamVue } from '../lib/navigation'
 import type { ChampDef } from '../components/Formulaire'
 import type { Colonne } from '../components/TableDroits'
 import { Etiquette, Message, fmt } from '../components/ui'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
    plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
@@ -61,10 +62,6 @@ export function Catalogue() {
   const qCat = useQuery({
     queryKey: ['categories', ''],
     queryFn: ({ signal }) => api.get<{ code_categorie: string; libelle: string }[]>('/api/categories?actif=1', { signal }),
-  })
-  const qFour = useQuery({
-    queryKey: ['fournisseurs', ''],
-    queryFn: ({ signal }) => api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1', { signal }),
   })
   const qDev = useQuery({
     queryKey: ['devises'],
@@ -251,9 +248,10 @@ export function Catalogue() {
     {
       champ: 'code_fournisseur',
       libelle: 'Fournisseur',
-      type: 'liste',
+      // CHERCHE, PLUS DEROULE (24/10/2026) : la liste des fournisseurs grandit.
+      type: 'choix',
+      choix: 'fournisseur',
       obligatoire: true,
-      options: qFour.data?.map((f) => ({ valeur: f.code_fournisseur, libelle: f.nom })),
       section: 'Général',
     },
     {
@@ -511,7 +509,6 @@ export function Catalogue() {
               valeurs={{ categorie, fournisseur, unite, actif }}
               definir={{ categorie: setCategorie, fournisseur: setFournisseur, unite: setUnite, actif: setActif }}
               categories={qCat.data ?? []}
-              fournisseurs={qFour.data ?? []}
             />
           }
           exportable="catalogue-references"
@@ -631,7 +628,6 @@ function BarreFiltres({
   valeurs,
   definir,
   categories,
-  fournisseurs,
 }: {
   valeurs: { categorie: string; fournisseur: string; unite: string; actif: string }
   definir: {
@@ -641,7 +637,6 @@ function BarreFiltres({
     actif: (v: string) => void
   }
   categories: { code_categorie: string; libelle: string }[]
-  fournisseurs: { code_fournisseur: string; nom: string }[]
 }) {
   const actifs = Object.entries(valeurs).filter(
     ([c, v]) => v !== '' && !(c === 'actif' && v === '1'),
@@ -688,18 +683,16 @@ function BarreFiltres({
       </Champ>
 
       <Champ libelle="Fournisseur">
-        <select
-          value={valeurs.fournisseur}
-          onChange={(e) => definir.fournisseur(e.target.value)}
-          className={CLASSE_CHAMP}
-        >
-          <option value="">Tous</option>
-          {fournisseurs.map((f) => (
-            <option key={f.code_fournisseur} value={f.code_fournisseur}>
-              {f.nom}
-            </option>
-          ))}
-        </select>
+        {/* Cherche au serveur : la liste des fournisseurs grandit (24/10/2026). */}
+        <ChoixRecherche
+          type="fournisseur"
+          ariaLabel="Fournisseur"
+          valeur={valeurs.fournisseur}
+          onChange={(v) => definir.fournisseur(v)}
+          vide="Tous"
+          className="w-full sm:w-56"
+          classeChamp="h-7 text-[12px]"
+        />
       </Champ>
 
       <Champ libelle="Unité">

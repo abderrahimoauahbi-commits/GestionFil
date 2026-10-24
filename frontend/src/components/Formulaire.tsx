@@ -33,8 +33,9 @@ import {
   Zone,
 } from '../composants/ui/base'
 import { Aide, Dialogue, DialogueContenu, Interrupteur } from '../composants/ui/surcouches'
+import { ChoixRecherche, type TypeChoix } from '../composants/ChoixRecherche'
 
-export type TypeChamp = 'texte' | 'nombre' | 'entier' | 'date' | 'booleen' | 'liste' | 'zone'
+export type TypeChamp = 'texte' | 'nombre' | 'entier' | 'date' | 'booleen' | 'liste' | 'zone' | 'choix'
 
 export interface Option {
   valeur: string
@@ -46,6 +47,11 @@ export interface ChampDef {
   libelle: string
   type?: TypeChamp
   options?: Option[]
+  /**
+   * `type: 'choix'` : la liste qui grandit (fournisseurs…) se CHERCHE au
+   * serveur au lieu de se derouler (24/10/2026).
+   */
+  choix?: TypeChoix
   obligatoire?: boolean
   /** Modifiable uniquement a la creation (identifiants). */
   cleCreation?: boolean
@@ -281,6 +287,16 @@ export function Formulaire({
                     </option>
                   ))}
                 </Selecteur>
+              ) : type === 'choix' && c.choix ? (
+                <ChoixRecherche
+                  type={c.choix}
+                  id={id}
+                  valeur={(valeur as string) ?? ''}
+                  onChange={(v) => maj(v)}
+                  vide={c.obligatoire ? undefined : '—'}
+                  desactive={!actif}
+                  invalide={manque}
+                />
               ) : type === 'zone' ? (
                 <Zone
                   id={id}

@@ -4658,6 +4658,123 @@ def scenario_besoin_of(c, infra):
         infra.sql(f"UPDATE reference SET mode_consommation = '{mode}' WHERE code_reference = '{REF}'")
 
 
+def scenario_recherche_referentiels(c, infra):
+    """LA RECHERCHE DES REFERENTIELS (24/10/2026) : `/api/recherche/{type}` rend au plus la
+    limite (plafonnee a 100), cherche chaque mot en ET, dit s'il en reste (`plus`, `total`),
+    suit le droit LIRE du module, ne sort ni ne cherche un champ masque ; la liste generique
+    coupee le dit par ses en-tetes (`X-Total-Count`, `X-Liste-Tronquee`)."""
+    import json
+    import urllib.parse
+    import urllib.request
+    types = {"fournisseur": ["FOURNISSEURS"], "reference": ["CATALOGUE"], "reference-en-stock": ["STOCK"],
+             "lot": ["STOCK"], "bc": ["BONS_COMMANDE"], "ligne-bc": ["BONS_COMMANDE"],
+             "of": ["PLANS", "MOUVEMENTS"], "qualite": ["QUALITES", "PLANS", "MOUVEMENTS"],
+             "reception": ["RECEPTIONS"], "type-frais": ["PARAMETRES"]}
+    # Chaque type repond, et dit son total.
+    for t in types:
+        r = c.ok("admin", "GET", f"/api/recherche/{t}?limite=5")
+        verifier(len(r["lignes"]) <= 5 and r["total"] >= len(r["lignes"]) and r["plus"] == (r["total"] > len(r["lignes"])),
+                 f"{t} : enveloppe incoherente {r}")
+
+    # La limite, et le signal « il en reste ».
+    nb_frs = int(infra.valeur("SELECT count(*) FROM fournisseur WHERE actif = 1"))
+    verifier(nb_frs >= 2, "le referentiel du banc devrait porter plusieurs fournisseurs")
+    r = c.ok("admin", "GET", "/api/recherche/fournisseur?limite=1")
+    verifier(len(r["lignes"]) == 1 and r["plus"] and r["total"] == nb_frs, f"limite 1 : {r}")
+    r = c.ok("admin", "GET", "/api/recherche/reference?limite=100000")
+    verifier(r["limite"] == 100 and len(r["lignes"]) <= 100, f"limite non plafonnee : {r['limite']}")
+
+    # Chaque mot en ET, dans n'importe quel ordre ; un mot absent vide la reponse.
+    ref, desig = infra.sql("SELECT code_reference, designation FROM reference WHERE actif = 1 "
+                           "AND designation ~ '\\S+\\s+\\S+' ORDER BY code_reference LIMIT 1")[0]
+    mots = desig.split()
+    q = urllib.parse.quote(f"{mots[-1]} {mots[0]}")
+    r = c.ok("admin", "GET", f"/api/recherche/reference?recherche={q}&limite=100")
+    verifier(any(l["code_reference"] == ref for l in r["lignes"]), f"« {mots[-1]} {mots[0]} » ne trouve pas {ref}")
+    q = urllib.parse.quote(f"{mots[0]} zzqqxx")
+    r = c.ok("admin", "GET", f"/api/recherche/reference?recherche={q}")
+    verifier(r["lignes"] == [] and r["total"] == 0 and not r["plus"], f"un mot absent devrait tout vider : {r}")
+    # Un joker tape se cherche tel quel.
+    r = c.ok("admin", "GET", "/api/recherche/reference?recherche=%25%25")
+    verifier(r["total"] == int(infra.valeur("SELECT count(*) FROM reference WHERE actif = 1 AND "
+                                            "(code_reference || coalesce(designation, '')) LIKE '%\\%\\%%'")),
+             f"« %% » devrait se chercher tel quel : {r['total']}")
+    # Relire une valeur : meme desactivee.
+    r = c.ok("admin", "GET", f"/api/recherche/reference?valeur={urllib.parse.quote(ref)}")
+    verifier([l["code_reference"] for l in r["lignes"]] == [ref], f"relecture : {r}")
+
+    # Refus propres : filtre inconnu, type inconnu.
+    c.refus("admin", "GET", "/api/recherche/bc?prix=1", codes=(400,), contient="filtre inconnu")
+    c.refus("admin", "GET", "/api/recherche/inconnu", codes=(404,))
+
+    # Les droits : LIRE l'un des modules du type suffit, sinon 403.
+    perms = {tuple(l) for l in infra.sql("SELECT code_role_user, module, action FROM permission WHERE actif = 1")}
+    comptes = dict(infra.sql("SELECT login, code_role_user FROM utilisateur "
+                             "WHERE login IN ('Assistante', 'Choukri', 'Magasinie')"))
+    ecarts = []
+    for login, role in comptes.items():
+        for t, modules in types.items():
+            lire = any((role, m, "LIRE") in perms for m in modules)
+            code, _ = c.appel(login, "GET", f"/api/recherche/{t}?limite=1")
+            if (lire and code != 200) or (not lire and code != 403):
+                ecarts.append(f"{login} {t} : {code}, LIRE {'oui' if lire else 'non'}")
+    verifier(not ecarts, "droits de la recherche : " + " ; ".join(ecarts))
+
+    # Le masquage : un champ masque ne sort pas, et ne se cherche pas.
+    login = "Magasinie"
+    role = comptes[login]
+    if (role, "CATALOGUE", "LIRE") in perms:
+        uid = infra.valeur(f"SELECT id_utilisateur FROM utilisateur WHERE login = '{login}'")
+        avant = infra.sql(f"SELECT niveau, origine FROM droit_champ WHERE id_utilisateur = '{uid}' "
+                          "AND module = 'CATALOGUE' AND champ = 'designation'")
+        # Un mot qui n'est QUE dans la designation d'une reference (base du banc, jetable ;
+        # la designation d'origine est remise a la fin).
+        mot = "Zorglubine"
+        desig_avant = infra.valeur(f"SELECT designation FROM reference WHERE code_reference = '{ref}'")
+        infra.sql(f"UPDATE reference SET designation = designation || ' {mot}' WHERE code_reference = '{ref}'")
+        verifier(c.ok(login, "GET", f"/api/recherche/reference?recherche={mot}")["total"] == 1,
+                 f"« {mot} » devrait se trouver dans la designation tant qu'elle est visible")
+        infra.sql(f"INSERT INTO droit_champ (id_utilisateur, module, champ, niveau) "
+                  f"VALUES ('{uid}', 'CATALOGUE', 'designation', 'MASQUE') "
+                  "ON CONFLICT (id_utilisateur, module, champ) DO UPDATE SET niveau = 'MASQUE'")
+        try:
+            r = c.ok(login, "GET", f"/api/recherche/reference?recherche={mot}")
+            verifier(r["total"] == 0, f"un champ masque se cherche encore : « {mot} » rend {r['total']}")
+            r = c.ok(login, "GET", "/api/recherche/reference?limite=5")
+            verifier(all("designation" not in l for l in r["lignes"]), "designation masquee livree")
+            # La meme regle pour la liste generique : on n'y cherche pas un champ masque.
+            r = c.ok(login, "GET", f"/api/catalogue?actif=1&recherche={mot}")
+            verifier(r == [], f"la liste generique cherche encore un champ masque : {len(r)} ligne(s)")
+        finally:
+            infra.sql(f"UPDATE reference SET designation = $${desig_avant}$$ WHERE code_reference = '{ref}'")
+            if avant:
+                infra.sql(f"UPDATE droit_champ SET niveau = '{avant[0][0]}' WHERE id_utilisateur = '{uid}' "
+                          "AND module = 'CATALOGUE' AND champ = 'designation'")
+            else:
+                infra.sql(f"DELETE FROM droit_champ WHERE id_utilisateur = '{uid}' "
+                          "AND module = 'CATALOGUE' AND champ = 'designation'")
+        # Les montants masques du catalogue ne sortent pas de la recherche non plus.
+        masques = [l[0] for l in infra.sql(
+            f"SELECT champ FROM droit_champ WHERE id_utilisateur = '{uid}' AND module = 'CATALOGUE' AND niveau = 'MASQUE'")]
+        r = c.ok(login, "GET", "/api/recherche/reference?limite=20")
+        fuites = sorted({k for l in r["lignes"] for k in masques if k in l})
+        verifier(not fuites, f"champs masques livres par la recherche : {fuites}")
+
+    # La liste generique coupee le dit, en en-tetes ; entiere, elle se tait.
+    c.ok("admin", "GET", "/api/magasins")  # le jeton
+    def entetes(chemin):
+        req = urllib.request.Request(c.base_url + chemin, headers={"Authorization": "Bearer " + c.jetons["admin"]})
+        with urllib.request.urlopen(req, timeout=30) as rep:
+            return json.loads(rep.read()), rep.headers
+    lignes, h = entetes("/api/fournisseurs?actif=1&limite=1")
+    verifier(len(lignes) == 1 and h.get("X-Total-Count") == str(nb_frs) and h.get("X-Liste-Tronquee") == "1",
+             f"coupe muette : {len(lignes)} ligne(s), en-tetes {dict(h)}")
+    lignes, h = entetes(f"/api/fournisseurs?actif=1&limite={nb_frs}")
+    verifier(len(lignes) == nb_frs and h.get("X-Total-Count") is None, "une liste complete ne doit rien signaler")
+    env, _ = entetes("/api/fournisseurs?actif=1&limite=1&offset=0")
+    verifier(env["total"] == nb_frs and env["plus"] is True and len(env["lignes"]) == 1, f"enveloppe : {env}")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -4732,6 +4849,7 @@ SCENARIOS = [
     scenario_securite,
     scenario_reception_date_du_fait,
     scenario_codes_erreur,
+    scenario_recherche_referentiels,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,
 ]

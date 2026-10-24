@@ -30,6 +30,7 @@ import {
   Selecteur,
 } from './ui/base'
 import { cn } from '../lib/utils'
+import { ChoixRecherche, type TypeChoix } from './ChoixRecherche'
 
 const th = 'px-2 py-2 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte'
 const td = 'px-2 py-1'
@@ -48,6 +49,13 @@ export interface ColonneDetail {
   obligatoire?: boolean
   /** Liste fermee : le champ devient un choix. */
   options?: { valeur: string; libelle: string }[]
+  /**
+   * LISTE QUI GRANDIT (24/10/2026) : le champ se CHERCHE au serveur (un
+   * fournisseur…) au lieu de se derouler. `libelleChoix` affiche la valeur
+   * d'une ligne existante sans la relire.
+   */
+  choix?: TypeChoix
+  libelleChoix?: (l: Ligne) => string | undefined
   placeholder?: string
   /** Non modifiable apres creation (une cle, par exemple). */
   cleCreation?: boolean
@@ -56,6 +64,12 @@ export interface ColonneDetail {
 /* UN ALIAS, PAS UNE INTERFACE VIDE. `interface X extends Y {}` ne dit rien de
    plus que `Y` et laisse croire qu'on ajoutera des membres un jour. */
 export type Ligne = Record<string, unknown>
+
+/** La liste paginee du serveur : ses lignes, et combien il y en a en tout. */
+interface Enveloppe {
+  lignes: Ligne[]
+  total: number
+}
 
 interface Props {
   titre: string
@@ -113,14 +127,23 @@ export function MaitreDetail({
   const [nouveauMaitre, setNouveauMaitre] = useState<Record<string, string>>({})
   const [filtre, setFiltre] = useState('')
 
+  /* LA LISTE COUPEE SE DIT (24/10/2026) : l'enveloppe paginee (`offset=0`)
+     porte le total ; au-dela de la limite, l'ecran l'annonce au lieu de taire
+     les lignes manquantes. */
   const qMaitre = useQuery({
-    queryKey: [maitre.route],
-    queryFn: ({ signal }) => api.get<Ligne[]>(`/api/${maitre.route}?actif=1&limite=500`, { signal }),
+    queryKey: [maitre.route, 'enveloppe'],
+    queryFn: ({ signal }) =>
+      api.get<Enveloppe>(`/api/${maitre.route}?actif=1&limite=500&offset=0`, { signal }),
   })
   const qDetail = useQuery({
-    queryKey: [detail.route],
-    queryFn: ({ signal }) => api.get<Ligne[]>(`/api/${detail.route}?limite=1000`, { signal }),
+    queryKey: [detail.route, 'enveloppe'],
+    queryFn: ({ signal }) => api.get<Enveloppe>(`/api/${detail.route}?limite=2000&offset=0`, { signal }),
   })
+  const maitres = qMaitre.data?.lignes
+  const details = qDetail.data?.lignes
+  const coupes = [qMaitre.data, qDetail.data].filter(
+    (e): e is Enveloppe => !!e && e.total > e.lignes.length,
+  )
 
   /*
    * LE PREMIER EST POINTE D'OFFICE. Sans cela l'ecran s'ouvre sur un grand
@@ -134,18 +157,18 @@ export function MaitreDetail({
     // ensemble : pointer d'office masquait la liste des l'ouverture, et l'on
     // arrivait sur une categorie qu'on n'avait pas choisie.
     if (!window.matchMedia('(min-width: 1024px)').matches) return
-    const premier = qMaitre.data?.[0]
+    const premier = maitres?.[0]
     if (premier) setPointe(String(premier[maitre.cle] ?? ''))
-  }, [qMaitre.data, pointe, maitre.cle])
+  }, [maitres, pointe, maitre.cle])
 
   const lignes = useMemo(() => {
-    const tout = qDetail.data ?? []
+    const tout = details ?? []
     return pointe === null ? [] : tout.filter((l) => String(l[detail.cleEtrangere] ?? '') === pointe)
-  }, [qDetail.data, pointe, detail.cleEtrangere])
+  }, [details, pointe, detail.cleEtrangere])
 
   const orphelines = useMemo(
-    () => (qDetail.data ?? []).filter((l) => !l[detail.cleEtrangere]),
-    [qDetail.data, detail.cleEtrangere],
+    () => (details ?? []).filter((l) => !l[detail.cleEtrangere]),
+    [details, detail.cleEtrangere],
   )
 
   const rafraichir = () => {
@@ -195,7 +218,7 @@ export function MaitreDetail({
 
   if (qMaitre.isLoading) return <Chargement texte={`Lecture des ${titre.toLowerCase()}…`} />
 
-  const tous = qMaitre.data ?? []
+  const tous = maitres ?? []
   const f = filtre.trim().toLowerCase()
   const visibles = f
     ? tous.filter((l) =>
@@ -210,6 +233,12 @@ export function MaitreDetail({
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      {coupes.length > 0 && (
+        <Alerte ton="alerte" className="lg:col-span-2">
+          {coupes.map((e) => `${e.lignes.length} premières lignes sur ${e.total}`).join(' · ')} : la liste
+          est coupée, les suivantes ne sont pas affichées.
+        </Alerte>
+      )}
       {/* ---- Le niveau du haut ------------------------------------------- */}
       <Carte className={cn('h-fit', pointe && 'hidden lg:block')}>
         <CarteEntete>
@@ -241,7 +270,7 @@ export function MaitreDetail({
             )}
             {visibles.map((l) => {
               const id = String(l[maitre.cle])
-              const nb = (qDetail.data ?? []).filter(
+              const nb = (details ?? []).filter(
                 (d) => String(d[detail.cleEtrangere] ?? '') === id,
               ).length
               return (
@@ -418,7 +447,20 @@ export function MaitreDetail({
                         <tr key={id} className="hover:bg-attenue/40">
                           {detail.colonnes.map((c) => (
                             <td key={c.champ} className={td}>
-                              {c.options ? (
+                              {c.choix ? (
+                                <ChoixRecherche
+                                  type={c.choix}
+                                  ariaLabel={c.entete}
+                                  valeur={String(l[c.champ] ?? '')}
+                                  libelle={c.libelleChoix?.(l)}
+                                  desactive={!ecrire || c.cleCreation}
+                                  classeChamp="h-7 text-[12.5px]"
+                                  onChange={(v) =>
+                                    v !== String(l[c.champ] ?? '') &&
+                                    modifier.mutate({ id, patch: { [c.champ]: v || null, version: l.version } })
+                                  }
+                                />
+                              ) : c.options ? (
                                 <Selecteur
                                   className={champLigne}
                                   aria-label={c.entete}
@@ -485,7 +527,15 @@ export function MaitreDetail({
                       <tr className="bg-primaire/[0.03]">
                         {detail.colonnes.map((c) => (
                           <td key={c.champ} className={td}>
-                            {c.options ? (
+                            {c.choix ? (
+                              <ChoixRecherche
+                                type={c.choix}
+                                ariaLabel={`${c.entete} (nouveau)`}
+                                valeur={nouvelle[c.champ] ?? ''}
+                                classeChamp="h-7 text-[12.5px]"
+                                onChange={(v) => setNouvelle((n) => ({ ...n, [c.champ]: v }))}
+                              />
+                            ) : c.options ? (
                               <Selecteur
                                 className={champ}
                                 aria-label={`${c.entete} (nouveau)`}

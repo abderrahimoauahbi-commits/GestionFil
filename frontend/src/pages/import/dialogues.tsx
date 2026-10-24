@@ -155,15 +155,16 @@ export function useEnregistrerTout() {
     setEnCours(true)
     const reussis: string[] = []
     const echecs: string[] = []
-    // Dans l'ordre : l'en-tete d'abord, il peut changer ce que lisent les autres.
-    for (const cle of ['informations', 'engagement', 'frais']) {
+    // Dans l'ordre : l'en-tete d'abord, il peut changer ce que lisent les autres ;
+    // la repartition en dernier, apres un frais qu'elle pourrait viser.
+    for (const cle of ['informations', 'engagement', 'frais', 'liquidation']) {
       const f = fonctions.current.get(cle)
       if (!f) continue
       try {
         await f()
         reussis.push(libelles[cle] ?? cle)
       } catch (e) {
-        echecs.push(`${libelles[cle] ?? cle} : ${e instanceof ErreurApi ? e.message : 'refusé'}`)
+        echecs.push(`${libelles[cle] ?? cle} : ${e instanceof Error ? e.message : 'refusé'}`)
       }
     }
     setEnCours(false)
@@ -309,7 +310,7 @@ export function CloturePanneau({
               <Tuile titre="Lignes hors ERP" valeur={`${fmt.nombre(a.frais_hors_erp_dhs, 2)} DH`} />
             </div>
             <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x rounded-[var(--radius)] border border-bordure focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-              <table className="w-full min-w-[40rem] text-[12.5px]">
+              <table className="w-full text-[12.5px]">
                 <thead>
                   <tr className="border-b border-bordure bg-attenue/40 text-[10.5px] uppercase tracking-wider text-attenue-texte">
                     <th className="px-2 py-1.5 text-left">Référence</th>

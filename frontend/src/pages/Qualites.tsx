@@ -45,6 +45,7 @@ import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { CelluleEditable } from '../composants/CelluleEditable'
 import { SelecteurReference } from '../composants/SelecteurReference'
 import { CoherenceRecettes } from '../composants/CoherenceRecettes'
+import { chercherChoix } from '../composants/ChoixRecherche'
 import {
   Alerte,
   Badge,
@@ -260,11 +261,6 @@ export function Qualites() {
     staleTime: 5 * 60_000,
   })
 
-  const qCatalogue = useQuery({
-    queryKey: ['catalogue'],
-    queryFn: ({ signal }) => api.get<RefCatalogue[]>('/api/catalogue', { signal }),
-    staleTime: 5 * 60_000,
-  })
 
   const qCategories = useQuery({
     queryKey: ['categories'],
@@ -498,10 +494,21 @@ export function Qualites() {
 
   // --- Composition -----------------------------------------------------------
 
-  const references = useMemo(
-    () => (qCatalogue.data ?? []).filter((r) => r.actif !== 0),
-    [qCatalogue.data],
+  /* LES SEULES REFERENCES DE LA COMPOSITION, relues par leur code (24/10/2026).
+     L'ecran chargeait le catalogue entier — coupe a 500 sans le dire — pour en
+     lire une dizaine ; le choix d'une matiere se cherche desormais au serveur. */
+  const codesCompo = useMemo(
+    () => [...new Set(composition.map((c) => c.code_reference).filter(Boolean))].sort(),
+    [composition],
   )
+  const qRefsCompo = useQuery({
+    queryKey: ['qualite-references', codesCompo],
+    queryFn: ({ signal }) => chercherChoix<RefCatalogue>('reference', { valeurs: codesCompo, signal }),
+    enabled: codesCompo.length > 0,
+    staleTime: 5 * 60_000,
+    placeholderData: (avant) => avant,
+  })
+  const references = useMemo(() => qRefsCompo.data?.lignes ?? [], [qRefsCompo.data])
   const designation = (code: string) =>
     references.find((r) => r.code_reference === code)?.designation ?? ''
 
@@ -527,7 +534,7 @@ export function Qualites() {
   const refCatalogue = (code: string) =>
     references.find((r) => r.code_reference === code)
 
-  function ajouterCompo() {
+  async function ajouterCompo() {
     // Le role vient des densites saisies : composer un role sans densite
     // produirait un besoin nul en silence, ce que le serveur refuse a
     // l'activation.
@@ -538,11 +545,21 @@ export function Qualites() {
     }
     // Une matiere ne figure qu'une fois dans la qualite : on amorce sur la
     // premiere encore libre, dans le domaine du role.
-    const prises = new Set(composition.map((c) => c.code_reference))
-    const domaine = categoriesDuRole(role)
-    const ref =
-      references.find((r) => domaine.has(r.code_categorie) && !prises.has(r.code_reference)) ??
-      references.find((r) => !prises.has(r.code_reference))
+    // Le serveur la cherche : la premiere active, dans l'ordre des codes.
+    const prises = [...new Set(composition.map((c) => c.code_reference))]
+    const domaine = [...categoriesDuRole(role)]
+    let ref: RefCatalogue | undefined
+    try {
+      if (domaine.length > 0) {
+        ref = (await chercherChoix<RefCatalogue>('reference', {
+          filtres: { code_categorie: domaine }, exclure: prises, limite: 1,
+        })).lignes[0]
+      }
+      ref ??= (await chercherChoix<RefCatalogue>('reference', { exclure: prises, limite: 1 })).lignes[0]
+    } catch (e) {
+      toast.error(e instanceof ErreurApi ? e.message : 'Lecture du catalogue impossible.')
+      return
+    }
     if (!ref) {
       toast.error('Toutes les références du catalogue sont déjà employées par cette qualité.')
       return
@@ -1570,7 +1587,6 @@ export function Qualites() {
           <SelecteurReference
             ouvert
             surOuvert={(o) => !o && setChoixMatiere(null)}
-            references={references}
             role={ligne.code_role}
             libelleRole={libelleRole(ligne.code_role)}
             categoriesDuRole={categoriesDuRole(ligne.code_role)}

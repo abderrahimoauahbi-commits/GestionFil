@@ -13,6 +13,12 @@
  * CLOTURE, TOUT EST EN LECTURE SEULE : un dossier clos a servi a corriger le
  * CUMP, le modifier ferait mentir le stock. Le serveur le refuserait de toute
  * facon ; l'ecran n'offre simplement plus les gestes.
+ *
+ * UNE SEULE BARRE D'ACTIONS, EN BAS ET COLLANTE (24/10/2026) : « Enregistrer
+ * tout » (informations, engagement, frais et repartition en cours), puis
+ * valider ou cloturer — ces deux-la attendent que rien ne reste a enregistrer.
+ * En haut, le seul retour. Aucune table n'impose de largeur minimale : le
+ * secondaire passe sous le principal (↳), jamais dans un defilement lateral.
  */
 import { CoutRevientReel } from './CoutRevientReel'
 import { Fragment, useEffect, useMemo, useState } from 'react'
@@ -39,6 +45,7 @@ import {
 import { Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn, fmt } from '../../lib/utils'
+import { useGardeSaisie } from '../../hooks/useGardeSaisie'
 import { Avancement, PastilleStatut } from './DossiersImport'
 import {
   CloturePanneau,
@@ -114,6 +121,10 @@ export function DossierImport() {
     onError: version.echec,
   })
 
+  // LA GARDE DE SAISIE : ce qui attend « Enregistrer tout » ne se perd pas d'un clic.
+  const aEnregistrer = tout.aEnregistrer.length > 0
+  const quitter = useGardeSaisie(aEnregistrer)
+
   if (q.isLoading) return <Chargement texte="Lecture du dossier…" />
   if (!q.data) return <Alerte ton="alerte">Dossier introuvable.</Alerte>
 
@@ -135,64 +146,10 @@ export function DossierImport() {
           </span>
         }
         actions={
-          <>
-            <Bouton variante="contour" onClick={() => ouvrir('/import')}>
-              <ArrowLeft />
-              Tous les dossiers
-            </Bouton>
-            {ecrire && (
-              <Bouton
-                disabled={tout.aEnregistrer.length === 0}
-                chargement={tout.enCours}
-                title={tout.aEnregistrer.length ? `À enregistrer : ${tout.aEnregistrer.join(', ')}` : 'Rien à enregistrer'}
-                onClick={() => void tout.toutEnregistrer()}
-              >
-                <Save />
-                Enregistrer tout
-                {tout.aEnregistrer.length > 0 && (
-                  <span className="rounded bg-primaire-texte/15 px-1 text-[10px]">{tout.aEnregistrer.length}</span>
-                )}
-              </Bouton>
-            )}
-            {droits.peutEcrire && dossier.statut === 'BROUILLON' && (
-              <Bouton
-                variante="contour"
-                className="text-danger hover:bg-danger/10"
-                onClick={() =>
-                  confirmation.demander({
-                    titre: `Supprimer le dossier ${dossier.numero} ?`,
-                    destructif: true,
-                    libelleConfirmer: 'Supprimer',
-                    description:
-                      'Un brouillon n’a rien fait entrer en stock : il est effacé avec ses factures, ses frais et ses engagements.',
-                    action: () => supprimer.mutate(),
-                  })
-                }
-              >
-                <Trash2 />
-                Supprimer le brouillon
-              </Bouton>
-            )}
-            {droits.peutValider && dossier.statut === 'BROUILLON' && (
-              <Bouton
-                chargement={valider.isPending}
-                disabled={d.factures.length === 0}
-                title={d.factures.length === 0 ? 'Ajoutez d’abord les factures du dossier' : undefined}
-                onClick={() => valider.mutate()}
-              >
-                <ShieldCheck />
-                Valider
-              </Bouton>
-            )}
-            {/* PLUS DE REOUVERTURE (regle 5, 09/10/2026) : un dossier clos est fige ;
-                une facture tardive s'ajoute en frais post-cloture, plus bas. */}
-            {droits.peutValider && dossier.statut === 'EN_COURS' && (
-              <Bouton onClick={() => setCloture(true)}>
-                <Lock />
-                Clôturer
-              </Bouton>
-            )}
-          </>
+          <Bouton variante="contour" onClick={() => quitter(() => ouvrir('/import'))}>
+            <ArrowLeft />
+            Tous les dossiers
+          </Bouton>
         }
       />
 
@@ -239,7 +196,7 @@ export function DossierImport() {
             ouvrirLiquidation={(idFrais) => { setFraisLiquide(idFrais); setOnglet('liquidation') }} />
         </OngletContenu>
         <OngletContenu value="liquidation" forceMount className="mt-3 data-[state=inactive]:hidden">
-          <LiquidationFrais d={d} ecrire={ecrire} choix={fraisLiquide} setChoix={setFraisLiquide} />
+          <LiquidationFrais d={d} ecrire={ecrire} choix={fraisLiquide} setChoix={setFraisLiquide} signaler={tout.signaler} />
           <DroitsDouane d={d} />
         </OngletContenu>
         <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
@@ -263,9 +220,148 @@ export function DossierImport() {
         </CarteCorps>
       </Carte>
 
+      <BarreDossier
+        statut={dossier.statut}
+        aEnregistrer={tout.aEnregistrer}
+        enCours={tout.enCours}
+        ecrire={ecrire}
+        peutEcrire={droits.peutEcrire}
+        peutValider={droits.peutValider}
+        nbFactures={d.factures.length}
+        valideEnCours={valider.isPending}
+        clotureOuverte={cloture}
+        surEnregistrer={() => void tout.toutEnregistrer()}
+        surValider={() => valider.mutate()}
+        surCloturer={() => setCloture(true)}
+        surSupprimer={() =>
+          confirmation.demander({
+            titre: `Supprimer le dossier ${dossier.numero} ?`,
+            destructif: true,
+            libelleConfirmer: 'Supprimer',
+            description:
+              'Un brouillon n’a rien fait entrer en stock : il est effacé avec ses factures, ses frais et ses engagements.',
+            action: () => supprimer.mutate(),
+          })
+        }
+      />
+
       {confirmation.element}
     </div>
     </FournirVersionDossier>
+  )
+}
+
+// ============================================================================
+// La barre d'actions, collante en bas
+// ============================================================================
+
+/**
+ * UNE SEULE ACTION PRINCIPALE A LA FOIS. Tant que quelque chose attend,
+ * c'est « Enregistrer tout » ; valider ou cloturer attendent, la raison ecrite.
+ * Rien a enregistrer : le bouton reste la, grise — on ne trouve pas un bouton
+ * qu'on n'a jamais vu — et l'etape suivante du dossier passe devant.
+ */
+function BarreDossier({
+  statut, aEnregistrer, enCours, ecrire, peutEcrire, peutValider, nbFactures, valideEnCours, clotureOuverte,
+  surEnregistrer, surValider, surCloturer, surSupprimer,
+}: {
+  statut: DossierComplet['dossier']['statut']
+  aEnregistrer: string[]
+  enCours: boolean
+  ecrire: boolean
+  peutEcrire: boolean
+  peutValider: boolean
+  nbFactures: number
+  valideEnCours: boolean
+  clotureOuverte: boolean
+  surEnregistrer: () => void
+  surValider: () => void
+  surCloturer: () => void
+  surSupprimer: () => void
+}) {
+  const enAttente = aEnregistrer.length > 0
+  const validable = peutValider && statut === 'BROUILLON'
+  // PLUS DE REOUVERTURE (regle 5, 09/10/2026) : un dossier clos est fige ;
+  // une facture tardive s'ajoute en frais post-cloture, dans l'onglet Frais.
+  const cloturable = peutValider && statut === 'EN_COURS'
+  const supprimable = peutEcrire && statut === 'BROUILLON'
+  if (!ecrire && !validable && !cloturable && !supprimable) return null
+  const raisonValider = enAttente
+    ? 'Enregistrez d’abord ce qui est en cours.'
+    : nbFactures === 0
+      ? 'Ajoutez d’abord les factures du dossier.'
+      : null
+  const raisonCloturer = enAttente ? 'Enregistrez d’abord ce qui est en cours.' : null
+  return (
+    <div
+      className={cn(
+        'sticky bottom-0 z-10 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
+        enAttente ? 'border-primaire' : 'border-bordure',
+      )}
+    >
+      <span className="min-w-0 text-[13px]">
+        {enAttente ? (
+          <>
+            <span className="font-medium">À enregistrer : {aEnregistrer.join(', ')}</span>
+            <span className="text-alerte"> — rien n’est encore enregistré.</span>
+          </>
+        ) : validable && raisonValider ? (
+          <span className="text-alerte">{raisonValider}</span>
+        ) : (
+          <span className="text-attenue-texte">
+            {statut === 'BROUILLON'
+              ? 'Brouillon : rien n’est entré en stock ; valider le met en cours.'
+              : statut === 'EN_COURS'
+                ? 'En cours : la clôture porte les frais au CUMP du stock présent.'
+                : 'Dossier clôturé : figé.'}
+          </span>
+        )}
+      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        {supprimable && (
+          <Bouton variante="discret" className="text-danger hover:bg-danger/10" onClick={surSupprimer}>
+            <Trash2 />
+            Supprimer le brouillon
+          </Bouton>
+        )}
+        {ecrire && (
+          <Bouton
+            variante={enAttente ? 'principal' : 'contour'}
+            disabled={!enAttente}
+            chargement={enCours}
+            title={enAttente ? `À enregistrer : ${aEnregistrer.join(', ')}` : 'Rien à enregistrer'}
+            onClick={surEnregistrer}
+          >
+            <Save />
+            Enregistrer tout
+            {enAttente && <span className="rounded bg-primaire-texte/15 px-1 text-[10px]">{aEnregistrer.length}</span>}
+          </Bouton>
+        )}
+        {validable && (
+          <Bouton
+            variante={enAttente ? 'contour' : 'principal'}
+            chargement={valideEnCours}
+            disabled={!!raisonValider}
+            title={raisonValider ?? undefined}
+            onClick={surValider}
+          >
+            <ShieldCheck />
+            Valider
+          </Bouton>
+        )}
+        {cloturable && (
+          <Bouton
+            variante={enAttente ? 'contour' : 'principal'}
+            disabled={!!raisonCloturer || clotureOuverte}
+            title={raisonCloturer ?? (clotureOuverte ? 'L’aperçu de la clôture est ouvert plus haut' : undefined)}
+            onClick={surCloturer}
+          >
+            <Lock />
+            Clôturer
+          </Bouton>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -360,12 +456,8 @@ function Informations({
     <Carte>
       <CarteEntete>
         <CarteTitre>Informations du dossier</CarteTitre>
-        {ecrire && (
-          <Bouton taille="sm" disabled={!modifie} chargement={enregistrer.isPending} onClick={() => enregistrer.mutate()}>
-            <Save />
-            Enregistrer
-          </Bouton>
-        )}
+        {/* Plus d'« Enregistrer » ici : il doublait « Enregistrer tout », en bas. */}
+        {modifie && ecrire && <span className="text-[11.5px] text-alerte">modifiées — à enregistrer</span>}
       </CarteEntete>
       <CarteCorps>
         {/* PAS DE DEVISE SUR LE DOSSIER (01/10/2026) : en groupage, chaque
@@ -383,7 +475,8 @@ function Informations({
             <Etiq htmlFor="ch-dossierimport-3">Conteneur(s)</Etiq>
             <Champ id="ch-dossierimport-3" value={f.conteneurs} onChange={maj('conteneurs')} disabled={!ecrire} />
           </div>
-          <div className="md:col-span-2">
+          {/* Sept champs sur UNE rangee des 1280 px ; les notes dessous. */}
+          <div className="md:col-span-2 xl:col-span-1">
             <Etiq htmlFor="ch-dossierimport-4">N° DUM</Etiq>
             <Champ id="ch-dossierimport-4"
               value={f.numero_dum}
@@ -591,27 +684,29 @@ function FraisDossier({
         </span>
       </CarteEntete>
       <CarteCorps className="p-0">
+        {/* SANS LARGEUR MINIMALE (24/10/2026) : la table tient la largeur de la
+            carte, menu ouvert a 1366 px ; la precision prend ce qui reste. */}
         <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-          <table className="w-full min-w-[60rem] text-[12.5px]">
+          <table className="w-full table-fixed text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
-                <th className={cn(th, 'w-52 text-left')}>Type de frais</th>
+                <th className={cn(th, 'w-44 text-left')}>Type de frais</th>
                 <th className={cn(th, 'text-left')}>Précision</th>
-                <th className={cn(th, 'w-28 text-left')}>N° pièce</th>
+                <th className={cn(th, 'w-24 text-left')}>N° pièce</th>
                 <th className={cn(th, 'w-28 text-left')}>Devise</th>
-                <th className={cn(th, 'w-24 text-right')}>Cours</th>
-                <th className={cn(th, 'w-28 text-right')}>Montant</th>
-                <th className={cn(th, 'w-28 text-right')}>Montant DH</th>
-                <th className={cn(th, 'w-36 text-left')}>Coût / répartition</th>
-                {ecrire && <th className={cn(th, 'w-24')} />}
+                <th className={cn(th, 'w-20 text-right')}>Cours</th>
+                <th className={cn(th, 'w-24 text-right')}>Montant</th>
+                <th className={cn(th, 'w-24 text-right')}>Montant DH</th>
+                <th className={cn(th, 'w-40 text-left')}>Coût / répartition</th>
+                {saisie && <th className={cn(th, 'w-24')} />}
               </tr>
             </thead>
             <tbody>
               {d.frais.map((f) => (
                 <tr key={f.id_ligne_frais} className={cn('border-b border-bordure/60', !f.inclus_dans_cout && 'text-attenue-texte')}>
                   <td className={cn(td, 'font-medium')}>{f.frais_libelle}</td>
-                  <td className={td}>{f.libelle ?? '—'}</td>
-                  <td className={cn(td, 'tabular-nums')}>{f.numero_piece ?? '—'}</td>
+                  <td className={cn(td, 'truncate')} title={f.libelle ?? undefined}>{f.libelle ?? '—'}</td>
+                  <td className={cn(td, 'truncate tabular-nums')} title={f.numero_piece ?? undefined}>{f.numero_piece ?? '—'}</td>
                   <td className={td}>{f.code_devise}</td>
                   <td className={cn(td, 'text-right tabular-nums')}>{f.code_devise === 'MAD' ? '—' : fmt.nombre(f.cours_change, 4)}</td>
                   <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(f.montant_devise, 2)}</td>
@@ -620,7 +715,7 @@ function FraisDossier({
                     {f.inclus_dans_cout ? (
                       <div className="space-y-0.5">
                         {ecrire ? (
-                          <Selecteur className="h-7 min-w-[12.5rem]" aria-label="Répartition du frais" value={f.methode_repartition}
+                          <Selecteur className="h-7 w-full" aria-label="Répartition du frais" value={f.methode_repartition}
                             onChange={(e) => changerMethode.mutate({ id: f.id_ligne_frais, methode: e.target.value === f.methode_type ? '' : e.target.value })}>
                             {([...new Set(['VALEUR', 'POIDS', f.methode_type, 'MANUEL'])] as MethodeRepartition[]).map((m) => (
                               <option key={m} value={m}>{METHODE_REPARTITION[m]}{m === f.methode_type ? ' (paramétrage)' : ''}</option>
@@ -638,8 +733,9 @@ function FraisDossier({
                       <Badge ton="neutre">hors coût</Badge>
                     )}
                   </td>
-                  {ecrire && (
+                  {saisie && (
                     <td className={td}>
+                      {ecrire && (
                       <div className="flex justify-end gap-0.5">
                         {f.inclus_dans_cout === 1 && (
                           <Bouton taille="icone-xs" variante="discret" title="Ouvrir sa liquidation : les factures visées et la répartition"
@@ -661,6 +757,7 @@ function FraisDossier({
                           <Trash2 />
                         </Bouton>
                       </div>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -671,7 +768,7 @@ function FraisDossier({
               {saisie && (
                 <tr className="border-b border-bordure/60 bg-attenue/25">
                   <td className={td}>
-                    <Selecteur className="h-7 w-full min-w-[13rem]" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
+                    <Selecteur className="h-7 w-full" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
                       <option value="">Nouveau frais…</option>
                       {groupes.map(([cat, liste]) => (
                         <optgroup key={cat} label={cat}>
@@ -688,10 +785,10 @@ function FraisDossier({
                       <div className="mt-0.5 text-[11px] text-attenue-texte">{typeChoisi.piece_justificative}</div>
                     )}
                   </td>
-                  <td className={td}><Champ className="h-7 min-w-[15rem]" aria-label="Libellé du frais" title={n.libelle || undefined} value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
+                  <td className={td}><Champ className="h-7 w-full" aria-label="Libellé du frais" title={n.libelle || undefined} value={n.libelle} onChange={maj('libelle')} placeholder="ESMATRANS…" /></td>
                   <td className={td}><Champ className="h-7" aria-label="N° de pièce" value={n.numero_piece} onChange={maj('numero_piece')} placeholder="F2610861" /></td>
                   <td className={td}>
-                    <Selecteur className="h-7 min-w-[6.5rem] pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>
+                    <Selecteur className="h-7 w-full pl-2 pr-6" aria-label="Devise du frais" value={n.code_devise} onChange={maj('code_devise')}>
                       {(qDevises.data ?? [{ code_devise: 'MAD' }]).map((x) => (
                         <option key={x.code_devise}>{x.code_devise}</option>
                       ))}
@@ -735,7 +832,7 @@ function FraisDossier({
               <tr className="bg-attenue/40 font-semibold">
                 <td className={td} colSpan={6}>Frais inclus dans le coût</td>
                 <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(inclus, 2)}</td>
-                <td className={cn(td, 'text-[11.5px] font-normal text-attenue-texte')} colSpan={ecrire ? 2 : 1}>
+                <td className={cn(td, 'text-[11.5px] font-normal text-attenue-texte')} colSpan={saisie ? 2 : 1}>
                   + {fmt.nombre(hors, 2)} DH hors coût (TVA)
                 </td>
               </tr>
@@ -788,8 +885,8 @@ function FraisDossier({
  * « non reparti » et la cloture le refuse.
  */
 function LiquidationFrais({
-  d, ecrire, choix, setChoix,
-}: { d: DossierComplet; ecrire: boolean; choix: string; setChoix: (idFrais: string) => void }) {
+  d, ecrire, choix, setChoix, signaler,
+}: { d: DossierComplet; ecrire: boolean; choix: string; setChoix: (idFrais: string) => void; signaler?: Signaler }) {
   const idDossier = d.dossier.id_dossier
   const rafraichir = useRafraichir(idDossier)
   const version = useVersionDossier()
@@ -884,6 +981,14 @@ function LiquidationFrais({
     onError: (e: unknown) =>
       e instanceof ErreurApi ? version.echec(e) : toast.error(e instanceof Error ? e.message : 'Opération impossible.'),
   })
+  // LA REPARTITION MODIFIEE PART AVEC « ENREGISTRER TOUT » (24/10/2026) : la
+  // carte n'a plus son propre bouton, une seule barre d'actions par dossier.
+  useEffect(() => {
+    signaler?.('liquidation', modifie && ecrire && frais
+      ? { libelle: `répartition « ${frais.frais_libelle} »`, enregistrer: () => enregistrer.mutateAsync() }
+      : null)
+  })
+  useEffect(() => () => signaler?.('liquidation', null), [signaler])
 
   if (!frais) {
     return <Alerte ton="info">Aucun frais inclus dans le coût : saisissez-les d’abord dans l’onglet Frais.</Alerte>
@@ -1019,13 +1124,10 @@ function LiquidationFrais({
           </tfoot>
         </table>
       </CarteCorps>
-      {ecrire && (
-        <CarteCorps className="flex flex-wrap justify-end gap-2 border-t border-bordure">
-          {modifie && <Bouton variante="contour" onClick={reinitialiser}>Annuler</Bouton>}
-          <Bouton disabled={!modifie} chargement={enregistrer.isPending} onClick={() => enregistrer.mutate()}>
-            <Save />
-            Enregistrer
-          </Bouton>
+      {ecrire && modifie && (
+        <CarteCorps className="flex flex-wrap items-center justify-end gap-2 border-t border-bordure">
+          <span className="text-[12px] text-alerte">Répartition modifiée : elle part avec « Enregistrer tout », en bas.</span>
+          <Bouton variante="contour" taille="sm" onClick={reinitialiser}>Annuler les changements</Bouton>
         </CarteCorps>
       )}
     </Carte>
@@ -1060,20 +1162,17 @@ function FacturesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) 
             Aucune facture. Un dossier peut regrouper les factures de plusieurs fournisseurs.
           </p>
         ) : (
+          /* SEPT COLONNES, PLUS DOUZE (24/10/2026) : numero, date et lignes passent
+             sous le fournisseur, palettes et bobines sous le poids (↳). */
           <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-            <table className="w-full min-w-[62rem] text-[12.5px]">
+            <table className="w-full text-[12.5px]">
               <thead>
                 <tr className="border-b border-bordure">
-                  <th className={cn(th, 'text-left')}>Fournisseur</th>
-                  <th className={cn(th, 'text-left')}>N° facture</th>
-                  <th className={cn(th, 'text-left')}>Date</th>
-                  <th className={cn(th, 'text-right')}>Lignes</th>
+                  <th className={cn(th, 'text-left')}>Fournisseur / facture</th>
                   <th className={cn(th, 'text-right')}>Montant devise</th>
                   <th className={cn(th, 'text-right')}>Valeur DH</th>
                   {coutVisible && <th className={cn(th, 'text-right')}>Frais alloués</th>}
-                  <th className={cn(th, 'text-right')}>Poids net</th>
-                  <th className={cn(th, 'text-right')}>Palettes</th>
-                  <th className={cn(th, 'text-right')}>Bobines</th>
+                  <th className={cn(th, 'text-right')}>Poids net kg</th>
                   <th className={cn(th, 'text-left')}>Réception</th>
                   <th className={cn(th, 'w-24')} />
                 </tr>
@@ -1085,10 +1184,12 @@ function FacturesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) 
                   return (
                     <tr key={f.id_facture} className="cursor-pointer border-b border-bordure/60 hover:bg-attenue/30"
                       onClick={() => ouvrir(`/import/${idDossier}/factures/${f.id_facture}`)}>
-                      <td className={cn(td, 'font-medium')}>{f.fournisseur_nom}</td>
-                      <td className={cn(td, 'tabular-nums')}>{f.numero_facture}</td>
-                      <td className={td}>{fmt.date(f.date_facture)}</td>
-                      <td className={cn(td, 'text-right tabular-nums')}>{f.nb_lignes}</td>
+                      <td className={td}>
+                        <div className="font-medium">{f.fournisseur_nom}</div>
+                        <div className="text-[11px] tabular-nums text-attenue-texte">
+                          ↳ {f.numero_facture} · {fmt.date(f.date_facture)} · {f.nb_lignes} ligne(s)
+                        </div>
+                      </td>
                       <td className={cn(td, 'text-right tabular-nums')}>
                         {fmt.nombre(f.montant_lignes_devise, 2)} {f.code_devise}
                         {ecart && <div className="text-[10.5px] text-alerte">imprimé {fmt.nombre(f.montant_devise, 2)}</div>}
@@ -1099,9 +1200,12 @@ function FacturesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) 
                           {fmt.nombre(lignes.reduce((t, l) => t + (l.frais_alloues_dhs ?? 0), 0), 2)}
                         </td>
                       )}
-                      <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(lignes.reduce((t, l) => t + (l.poids_net_kg ?? 0), 0), 2)}</td>
-                      <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(lignes.reduce((t, l) => t + l.nb_palettes, 0))}</td>
-                      <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(lignes.reduce((t, l) => t + l.nb_bobines, 0))}</td>
+                      <td className={cn(td, 'text-right tabular-nums')}>
+                        {fmt.nombre(lignes.reduce((t, l) => t + (l.poids_net_kg ?? 0), 0), 2)}
+                        <div className="text-[11px] text-attenue-texte">
+                          ↳ {fmt.entier(lignes.reduce((t, l) => t + l.nb_palettes, 0))} pal. · {fmt.entier(lignes.reduce((t, l) => t + l.nb_bobines, 0))} bob.
+                        </div>
+                      </td>
                       <td className={td}><Badge ton={TON_RECEPTION[f.statut_reception]}>{LIBELLE_RECEPTION[f.statut_reception]}</Badge></td>
                       <td className={cn(td, 'text-right')}>
                         <span className="inline-flex items-center gap-0.5 text-[12px] font-medium text-primaire">
@@ -1115,14 +1219,19 @@ function FacturesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolean }) 
               </tbody>
               <tfoot>
                 <tr className="bg-attenue/40 font-semibold">
-                  <td className={td} colSpan={3}>Total du dossier</td>
-                  <td className={cn(td, 'text-right tabular-nums')}>{d.lignes.length}</td>
+                  <td className={td}>
+                    Total du dossier
+                    <span className="ml-1 text-[11px] font-normal text-attenue-texte">· {d.lignes.length} ligne(s)</span>
+                  </td>
                   <td className={td} />
                   <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(somme((l) => l.valeur_achat_dhs), 2)}</td>
                   {coutVisible && <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(somme((l) => l.frais_alloues_dhs ?? 0), 2)}</td>}
-                  <td className={cn(td, 'text-right tabular-nums')}>{fmt.nombre(somme((l) => l.poids_net_kg ?? 0), 2)}</td>
-                  <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(somme((l) => l.nb_palettes))}</td>
-                  <td className={cn(td, 'text-right tabular-nums')}>{fmt.entier(somme((l) => l.nb_bobines))}</td>
+                  <td className={cn(td, 'text-right tabular-nums')}>
+                    {fmt.nombre(somme((l) => l.poids_net_kg ?? 0), 2)}
+                    <div className="text-[11px] font-normal text-attenue-texte">
+                      ↳ {fmt.entier(somme((l) => l.nb_palettes))} pal. · {fmt.entier(somme((l) => l.nb_bobines))} bob.
+                    </div>
+                  </td>
                   <td className={td} colSpan={2} />
                 </tr>
               </tfoot>
@@ -1146,7 +1255,7 @@ function JournalCloture({ d }: { d: DossierComplet }) {
       </CarteEntete>
       <CarteCorps className="p-0">
         <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-          <table className="w-full min-w-[36rem] text-[12.5px]">
+          <table className="w-full text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
                 <th className={cn(th, 'text-left')}>Origine</th>

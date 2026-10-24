@@ -60,14 +60,28 @@ fn filtre(params: HashMap<String, String>) -> Filtre {
     f
 }
 
+/// LA LISTE COUPEE LE DIT (24/10/2026). Le tableau nu reste un tableau — les
+/// ecrans l'attendent —, mais quand la limite l'a coupe, deux en-tetes le
+/// disent : `X-Total-Count` (combien il y en avait) et `X-Liste-Tronquee` (la
+/// limite appliquee). Un ecran qui veut l'afficher demande l'enveloppe paginee
+/// (`offset=0`), qui porte `total` et `plus`.
 pub async fn lister(
     State(state): State<AppState>,
     user: Utilisateur,
     Path(chemin): Path<String>,
     Query(params): Query<HashMap<String, String>>,
-) -> AppResult<Json<Value>> {
+) -> AppResult<axum::response::Response> {
+    use axum::response::IntoResponse;
     let e = crud::entite(&chemin)?;
-    Ok(Json(crud::lister(&state.db, &user, e, &filtre(params)).await?))
+    let liste = crud::lister(&state.db, &user, e, &filtre(params)).await?;
+    let mut reponse = Json(liste.valeur).into_response();
+    if let Some((total, limite)) = liste.coupee {
+        let entetes = reponse.headers_mut();
+        entetes.insert("x-total-count", axum::http::HeaderValue::from(total));
+        entetes.insert("x-liste-tronquee", axum::http::HeaderValue::from(limite));
+        tracing::debug!("liste {} coupee a {limite} sur {total}", e.chemin);
+    }
+    Ok(reponse)
 }
 
 /// LES REGLAGES QUI CHANGENT LE SENS D'UN MAGASIN (audit v4). Declarer un

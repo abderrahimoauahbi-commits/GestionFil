@@ -12,10 +12,17 @@
  * des que le role ne ramenait rien, ce qui donnait exactement l'inverse de ce
  * qu'on demandait. Ici, un role sans matiere le dit et propose de lever le
  * filtre.
+ *
+ * LA RECHERCHE SE FAIT AU SERVEUR (24/10/2026). Le panneau filtrait le catalogue
+ * entier, charge par l'ecran — et coupe a 500 references sans le dire, alors
+ * qu'il annoncait « sur {total} ». Le serveur cherche maintenant (memes mots en
+ * ET), compte, et le panneau dit combien il en montre sur combien.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Package, Search, X } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Check, Loader2, Package, Search, X } from 'lucide-react'
 import { cn, fmt } from '../lib/utils'
+import { chercherChoix, useLigneChoix } from './ChoixRecherche'
 import { Badge, Bouton, Champ } from './ui/base'
 import { Dialogue, DialogueContenu } from './ui/surcouches'
 
@@ -35,7 +42,6 @@ export interface RefChoisissable {
 interface Props {
   ouvert: boolean
   surOuvert: (o: boolean) => void
-  references: RefChoisissable[]
   /** Role BOM vise ; sert au filtre par defaut. */
   role: string
   libelleRole: string
@@ -50,10 +56,12 @@ interface Props {
   surChoisir: (code: string) => void
 }
 
+/** Combien le panneau en montre au plus ; au-dela, il invite a affiner. */
+const LIMITE = 50
+
 export function SelecteurReference({
   ouvert,
   surOuvert,
-  references,
   role,
   libelleRole,
   categoriesDuRole,
@@ -63,6 +71,7 @@ export function SelecteurReference({
   surChoisir,
 }: Props) {
   const [recherche, setRecherche] = useState('')
+  const [motif, setMotif] = useState('')
   const [limiterAuRole, setLimiterAuRole] = useState(true)
   const champRef = useRef<HTMLInputElement>(null)
 
@@ -71,48 +80,67 @@ export function SelecteurReference({
   useEffect(() => {
     if (!ouvert) return
     setRecherche('')
+    setMotif('')
     setLimiterAuRole(true)
     const t = setTimeout(() => champRef.current?.focus(), 50)
     return () => clearTimeout(t)
   }, [ouvert])
 
-  const { visibles, totalRole, totalCatalogue } = useMemo(() => {
-    const actives = references.filter((r) => r.actif !== 0)
-    const duRole = actives.filter((r) => categoriesDuRole.has(r.code_categorie))
-    const base = limiterAuRole ? duRole : actives
+  // La frappe est retenue 200 ms avant de partir au serveur.
+  useEffect(() => {
+    const t = setTimeout(() => setMotif(recherche.trim()), 200)
+    return () => clearTimeout(t)
+  }, [recherche])
 
-    const q = recherche.trim().toLowerCase()
-    const filtrees = !q
-      ? base
-      : base.filter((r) =>
-          [
-            r.code_reference,
-            r.designation,
-            r.categorie_libelle,
-            r.type_fil,
-            r.couleur,
-            r.fournisseur_nom,
-          ]
-            .filter(Boolean)
-            .some((v) => String(v).toLowerCase().includes(q)),
-        )
+  const categories = useMemo(() => [...categoriesDuRole].sort(), [categoriesDuRole])
+  const sansDomaine = categories.length === 0
 
-    // La selection courante reste toujours visible, meme si elle sort du filtre :
-    // sinon on ne verrait pas ce qu'on est en train de remplacer.
-    const avecCourante =
-      courante && !filtrees.some((r) => r.code_reference === courante)
-        ? [...actives.filter((r) => r.code_reference === courante), ...filtrees]
-        : filtrees
+  const qListe = useQuery({
+    queryKey: ['selecteur-reference', motif, limiterAuRole, categories],
+    queryFn: ({ signal }) =>
+      chercherChoix<RefChoisissable>('reference', {
+        recherche: motif,
+        filtres: limiterAuRole ? { code_categorie: categories } : undefined,
+        limite: LIMITE,
+        signal,
+      }),
+    enabled: ouvert && !(limiterAuRole && sansDomaine),
+    placeholderData: (avant) => avant,
+    staleTime: 30_000,
+  })
+  // Les deux compteurs du panneau : les matieres du role, et tout le catalogue.
+  const qTotalRole = useQuery({
+    queryKey: ['selecteur-reference-total', categories],
+    queryFn: ({ signal }) =>
+      chercherChoix('reference', { filtres: { code_categorie: categories }, limite: 1, signal }),
+    enabled: ouvert && !sansDomaine,
+    staleTime: 60_000,
+  })
+  const qTotalCatalogue = useQuery({
+    queryKey: ['selecteur-reference-total', 'tout'],
+    queryFn: ({ signal }) => chercherChoix('reference', { limite: 1, signal }),
+    enabled: ouvert,
+    staleTime: 60_000,
+  })
+  const qCourante = useLigneChoix('reference', ouvert ? courante : null)
 
-    return {
-      visibles: avecCourante.slice(0, 300),
-      totalRole: duRole.length,
-      totalCatalogue: actives.length,
-      totalFiltre: avecCourante.length,
-    }
-  }, [references, categoriesDuRole, limiterAuRole, recherche, courante])
+  const totalRole = sansDomaine ? 0 : (qTotalRole.data?.total ?? 0)
+  const totalCatalogue = qTotalCatalogue.data?.total ?? 0
+  const trouvees = useMemo(
+    () => (limiterAuRole && sansDomaine ? [] : (qListe.data?.lignes ?? [])),
+    [limiterAuRole, sansDomaine, qListe.data],
+  )
+  const totalFiltre = limiterAuRole && sansDomaine ? 0 : (qListe.data?.total ?? 0)
 
-  const tropNombreux = visibles.length >= 300
+  // La selection courante reste toujours visible, meme si elle sort du filtre :
+  // sinon on ne verrait pas ce qu'on est en train de remplacer.
+  const visibles = useMemo(() => {
+    const c = qCourante.data as RefChoisissable | null | undefined
+    return c && !trouvees.some((r) => r.code_reference === c.code_reference) ? [c, ...trouvees] : trouvees
+  }, [trouvees, qCourante.data])
+
+  const tropNombreux = totalFiltre > trouvees.length
+  const enCours = qListe.isFetching
 
   return (
     <Dialogue open={ouvert} onOpenChange={surOuvert}>
@@ -131,17 +159,22 @@ export function SelecteurReference({
               value={recherche}
               onChange={(e) => setRecherche(e.target.value)}
               placeholder="Code, désignation, type, couleur, fournisseur..."
+              aria-label="Chercher une matière"
               className="pl-7 pr-7"
             />
-            {recherche && (
-              <button
-                type="button"
-                onClick={() => setRecherche('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-attenue-texte hover:text-texte"
-                aria-label="Effacer"
-              >
-                <X className="size-3.5" />
-              </button>
+            {enCours ? (
+              <Loader2 className="absolute right-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-attenue-texte" />
+            ) : (
+              recherche && (
+                <button
+                  type="button"
+                  onClick={() => setRecherche('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-attenue-texte hover:text-texte"
+                  aria-label="Effacer"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )
             )}
           </div>
 
@@ -156,15 +189,15 @@ export function SelecteurReference({
               Matieres du role {libelleRole}
               <Badge ton="contour">{totalRole}</Badge>
             </label>
-            <span className="text-[11px] tabular-nums text-attenue-texte">
-              {visibles.length} affichee(s)
-              {!limiterAuRole && ` sur ${totalCatalogue}`}
+            <span className="text-[11px] tabular-nums text-attenue-texte" role="status">
+              {trouvees.length} affichee(s) sur {totalFiltre}
+              {!limiterAuRole && ` · ${totalCatalogue} au catalogue`}
             </span>
           </div>
         </div>
 
         {/* --- Liste ------------------------------------------------------ */}
-        {visibles.length === 0 ? (
+        {visibles.length === 0 && !qListe.isLoading ? (
           <div className="py-10 text-center">
             <Package className="mx-auto size-8 text-attenue-texte" />
             <p className="mt-2 text-[13px] font-medium">
@@ -234,8 +267,9 @@ export function SelecteurReference({
               )
             })}
             {tropNombreux && (
-              <p className="pt-1 text-center text-[11px] text-attenue-texte">
-                300 premières matières affichées — affinez la recherche pour voir les suivantes.
+              <p className="pt-1 text-center text-[11px] font-medium text-alerte" role="status">
+                {trouvees.length} premières matières sur {totalFiltre} — affinez la recherche pour voir les
+                suivantes.
               </p>
             )}
           </div>

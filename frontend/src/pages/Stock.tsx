@@ -238,7 +238,8 @@ const STATUTS = [
  */
 const CHAMPS_FILTRABLES: ChampFiltre<LigneProjete>[] = [
   { cle: 'statut', libelle: 'Statut', type: 'liste', valeur: (l) => l.statut },
-  { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', valeur: (l) => l.fournisseur_nom },
+  // Le fournisseur se filtre en tapant (24/10/2026) : sa liste grandit.
+  { cle: 'fournisseur', libelle: 'Fournisseur', type: 'liste', recherche: true, valeur: (l) => l.fournisseur_nom },
   { cle: 'classe', libelle: 'Classe ABC', type: 'liste', valeur: (l) => l.classe_abc },
   { cle: 'reference', libelle: 'Référence', type: 'texte', valeur: (l) => l.code_reference },
 ]

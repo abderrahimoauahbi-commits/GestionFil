@@ -22,11 +22,12 @@ import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { PanneRequetes } from '../composants/PanneRequetes'
-import { Alerte, Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Chargement, Etiq, Selecteur, Zone } from '../composants/ui/base'
+import { Alerte, Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Chargement, Etiq, Zone } from '../composants/ui/base'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { nouvelIdentifiant } from '../lib/identifiant'
 import { fmt } from '../lib/utils'
+import { ChoixRecherche, useLigneChoix } from '../composants/ChoixRecherche'
 import { Ecart, LIBELLE_STATUT_OF, MODULE_OF, TON_STATUT_OF, type OfListe } from './OrdresFabrication'
 
 interface EnTeteOf extends OfListe {
@@ -56,12 +57,6 @@ interface LigneConso extends Record<string, unknown> {
   ecart_pct: number | null
 }
 
-interface QualiteOf {
-  code_qualite: string
-  qualite_nom: string
-  a_recette: boolean
-}
-
 interface Saisie {
   numero: string
   date_of: string
@@ -81,28 +76,21 @@ export function OrdreFabrication() {
   return <DocumentOf key={id} id={id} />
 }
 
-function useQualites() {
-  return useQuery({
-    queryKey: ['of-qualites'],
-    queryFn: ({ signal }) => api.get<QualiteOf[]>('/api/ordres-fabrication/qualites', { signal }),
-  })
-}
-
 /** Les champs de l'en-tête, communs à la création et à la modification. */
 function ChampsEnTete({
   saisie,
   definir,
   modifiable,
-  qualites,
   creation,
 }: {
   saisie: Saisie
   definir: (s: Partial<Saisie>) => void
   modifiable: boolean
-  qualites: QualiteOf[]
   creation?: boolean
 }) {
-  const choisie = qualites.find((q) => q.code_qualite === saisie.code_qualite)
+  // LA QUALITE SE CHERCHE (24/10/2026) ; celle qui est choisie se relit, avec
+  // son drapeau de recette.
+  const choisie = useLigneChoix('qualite', saisie.code_qualite).data as { a_recette?: boolean } | null | undefined
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <div>
@@ -127,16 +115,15 @@ function ChampsEnTete({
       </div>
       <div>
         <Etiq htmlFor="of-qualite" obligatoire>Qualité</Etiq>
-        <Selecteur id="of-qualite" value={saisie.code_qualite} disabled={!modifiable}
-          onChange={(e) => definir({ code_qualite: e.target.value })}>
-          <option value="">Choisir…</option>
-          {qualites.map((q) => (
-            <option key={q.code_qualite} value={q.code_qualite}>
-              {q.code_qualite} — {q.qualite_nom}
-            </option>
-          ))}
-        </Selecteur>
-        {choisie && !choisie.a_recette && (
+        <ChoixRecherche
+          type="qualite"
+          id="of-qualite"
+          ariaLabel="Qualité"
+          valeur={saisie.code_qualite}
+          desactive={!modifiable}
+          onChange={(code) => definir({ code_qualite: code })}
+        />
+        {choisie && choisie.a_recette === false && (
           <p className="mt-1 text-[11px] text-alerte">Pas de recette active : le prévu ne se calculera pas.</p>
         )}
       </div>
@@ -171,7 +158,6 @@ function NouvelOf() {
   const droits = useDroits(MODULE_OF)
   const naviguer = useNavigate()
   const qc = useQueryClient()
-  const qQualites = useQualites()
   const [idDocument] = useState(nouvelIdentifiant)
   const [saisie, setSaisie] = useState<Saisie>({
     numero: '',
@@ -224,14 +210,12 @@ function NouvelOf() {
           </div>
         }
       />
-      <PanneRequetes requetes={[['Les qualités', qQualites]]} />
       <Carte>
         <CarteCorps className="pt-4">
           <ChampsEnTete
             saisie={saisie}
             definir={(s) => setSaisie((x) => ({ ...x, ...s }))}
             modifiable={droits.peutEcrire}
-            qualites={qQualites.data ?? []}
             creation
           />
         </CarteCorps>
@@ -260,7 +244,6 @@ function DocumentOf({ id }: { id: string }) {
   const naviguer = useNavigate()
   const qc = useQueryClient()
   const confirmation = useConfirmation()
-  const qQualites = useQualites()
   const qOf = useQuery({
     queryKey: ['ordre-fabrication', id],
     queryFn: ({ signal }) => api.get<EnTeteOf>(`/api/ordres-fabrication/${id}`, { signal }),
@@ -448,7 +431,6 @@ function DocumentOf({ id }: { id: string }) {
               saisie={saisie}
               definir={(s) => setBrouillon({ ...saisie, ...s })}
               modifiable={modifiable}
-              qualites={qQualites.data ?? []}
             />
             <p className="mt-3 text-xs text-attenue-texte">
               Créé le {fmt.dateHeure(of.date_creation)}

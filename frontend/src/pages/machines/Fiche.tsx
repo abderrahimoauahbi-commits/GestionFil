@@ -15,7 +15,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Eye, Loader2, Plus, RotateCcw, Trash2, XCircle } from 'lucide-react'
+import { ArrowLeft, Check, Eye, Loader2, MessageSquarePlus, Pencil, Plus, RotateCcw, Trash2, XCircle } from 'lucide-react'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { Alerte, Badge, Bouton, Chargement } from '../../composants/ui/base'
@@ -31,21 +31,19 @@ import { AvisInventaireOuvert } from '../../composants/AvisInventaireOuvert'
 import { SaisieNombre } from '../../composants/ui/base'
 import {
   bobinesVoie, cheminMachine, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, fmtInstant, LIBELLE_DESTINATION,
-  LIBELLE_EFFET, LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue,
-  type Apercu, type Destination, type Fiche, type FicheDetail, type LigneSaisie, type Machine,
+  LIBELLE_EFFET, LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue, signePct,
+  type Apercu, type Destination, type Fiche, type FicheDetail, type LigneSaisie, type Machine, type Motif,
   type TypeFiche, type Zone,
   RAISONS_SURPLUS, TON_ECART,
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
 import { DemandesDerogation } from './Derogation'
-import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts } from '../../composants/ChoixOF'
-
-interface RefCat {
-  code_reference: string
-  designation: string
-  poids_bobine_kg: number | null
-}
+import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts, type OfOuvert } from '../../composants/ChoixOF'
+import { ChampReference } from '../../composants/ChampReference'
+import { QualiteLigne } from './qualiteLigne'
+import { resumeQualite, useEcranLarge } from './ligneMachine'
+import { FicheMobile } from './Mobile'
 interface Magasin {
   code_magasin: string
   nom: string
@@ -76,10 +74,24 @@ export function NouvelleFicheMachine() {
   const { code = '', type = '', zone: codeZone = '' } = useParams()
   const ouvrir = useOuvrirVue()
   const { machine, zones, chargement } = useMachine(code)
+  const large = useEcranLarge()
   if (chargement) return <Chargement texte="Lecture de la machine…" />
   const zone = zones.find((z) => z.code_emplacement === codeZone)
   if (!machine || !zone || !TYPES.includes(type as TypeFiche)) {
     return <Alerte ton="danger" titre="Fiche introuvable">Machine, étage ou type de fiche inconnu.</Alerte>
+  }
+  /* SOUS 1024 PX, L'INTERFACE DE TERRAIN (24/10/2026) : le meme seuil que /machines ;
+     la meme saisie (useFiche), donc le meme corps envoye. */
+  if (!large) {
+    return (
+      <FicheMobile
+        key={`${codeZone}-${type}`}
+        machine={machine}
+        zone={zone}
+        type={type as TypeFiche}
+        retour={() => ouvrir(cheminMachine(code, codeZone))}
+      />
+    )
   }
   return (
     <div className="flex flex-col gap-3">
@@ -126,9 +138,26 @@ export function FicheMachine() {
 function BrouillonMachine({ d, machine, zones }: { d: FicheDetail; machine: Machine; zones: Zone[] }) {
   const ouvrir = useOuvrirVue()
   const [geste, setGeste] = useState<'annuler' | null>(null)
+  const large = useEcranLarge()
   const zone = zones.find((z) => z.code_emplacement === d.entete.code_emplacement)
   if (!zone) return <Chargement texte="Lecture des étages…" />
   const e = d.entete
+  if (!large) {
+    return (
+      <>
+        <FicheMobile
+          key={e.id_fiche}
+          machine={machine}
+          zone={zone}
+          type={e.type_fiche}
+          idFiche={e.id_fiche}
+          retour={() => ouvrir(cheminMachine(machine.code_machine, e.code_emplacement))}
+          annuler={() => setGeste('annuler')}
+        />
+        {geste && <GesteRetrait fiche={e} mode={geste} fermer={() => setGeste(null)} />}
+      </>
+    )
+  }
   return (
     <div className="flex flex-col gap-3">
       <EnTetePage
@@ -137,7 +166,7 @@ function BrouillonMachine({ d, machine, zones }: { d: FicheDetail; machine: Mach
           <span className="inline-flex items-center gap-2">
             {machine.nom} · {zone.libelle}
             <Badge ton="alerte">Brouillon</Badge>
-            {e.nb_validations > 0 && <span className="text-alerte">dévalidée — corrigez puis revalidez</span>}
+            {e.nb_validations > 0 && <span className="text-alerte">dévalidée</span>}
           </span>
         }
         actions={
@@ -153,15 +182,11 @@ function BrouillonMachine({ d, machine, zones }: { d: FicheDetail; machine: Mach
           </>
         }
       />
-      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
-        <Badge ton="alerte">Brouillon</Badge>
-        <span className="text-attenue-texte">{machine.nom} · {zone.libelle}</span>
-        {e.nb_validations > 0 && (
-          <span className="text-alerte">
-            Dévalidée : l’étage est revenu à son état précédent. Corrigez la saisie (l’étage aussi si besoin), puis revalidez.
-          </span>
-        )}
-      </div>
+      {e.nb_validations > 0 && (
+        <p className="text-[12.5px] text-alerte">
+          Dévalidée : l’étage est revenu à son état précédent. Corrigez la saisie (l’étage aussi si besoin), puis revalidez.
+        </p>
+      )}
       <FicheBureau
         key={e.id_fiche}
         machine={machine}
@@ -620,6 +645,42 @@ export function TableApercu({
 // LA SAISIE, EN GRILLE
 // =============================================================================
 
+type EtatFiche = ReturnType<typeof useFiche>
+
+/**
+ * UNE LIGNE MODIFIEE, pour l'ecran seulement : elle reste ouverte. Rien de ce
+ * qui part au serveur n'en depend — le corps est celui de `corpsFiche`.
+ */
+function modifiee(type: TypeFiche, l: LigneSaisie) {
+  if (type !== 'MAJ' && l.mouvementees > 0) return true
+  if (type === 'MAJ' && (l.presentes !== l.avant_bobines || l.pourcentage !== (l.avant_pourcentage ?? 100))) return true
+  return !!(l.id_of || l.code_qualite || l.motif_texte.trim() || l.effet_ecart)
+}
+
+/** Une ligne qui part au serveur et qu'il faut encore completer (motif, effet) : elle s'ouvre d'elle-meme. */
+function aCompleter(type: TypeFiche, l: LigneSaisie, m: Motif | undefined) {
+  if (type !== 'MAJ' && l.mouvementees === 0) return false
+  return !l.code_motif || (!!m && !m.effet_defaut && !l.effet_ecart)
+}
+
+const LIBELLE_NIVEAU: Record<string, string> = { VERT: 'vert', ORANGE: 'orange', ROUGE: 'rouge' }
+
+/* LES LARGEURS DE LA GRILLE (24/10/2026) : fixes, en table `fixed`, pour qu'elle
+   tienne dans la largeur sans defiler — 1 366 px avec la barre laterale laissent
+   ~1 090 px. La reference et son lot prennent le reste. */
+const COL = {
+  avant: 'w-[4.75rem]',
+  saisie: 'w-[5rem]',
+  poids: 'w-[4.75rem]',
+  apres: 'w-[4.5rem]',
+  ecart: 'w-[4.5rem]',
+  of: 'w-[9.75rem]',
+  motif: 'w-[8.75rem]',
+  geste: 'w-[4.25rem]',
+} as const
+
+const CHAMP = 'h-7 w-full min-w-0 rounded-[3px] border bg-fond px-1 text-[11px]'
+
 export function FicheBureau({
   machine, zones, zone, type, idFiche,
 }: {
@@ -634,157 +695,35 @@ export function FicheBureau({
   const ofs = useOfOuverts()
   const v = useValiderFiche(f)
   const [ajout, setAjout] = useState(false)
+  /** Les lignes ouvertes a la main (« Modifier ») ; les autres se lisent. */
+  const [ouvertes, setOuvertes] = useState<Set<string>>(() => new Set())
+  /** Les lignes dont on a demande la precision, quand elle ne tient pas sur la rangee. */
+  const [precisions, setPrecisions] = useState<Set<string>>(() => new Set())
   const tolerances = useTolerancesLot()
 
   const qMag = useQuery({
     queryKey: ['magasins', 'actifs'],
     queryFn: ({ signal }) => api.get<Magasin[]>('/api/magasins?actif=1', { signal }),
   })
-  const qCat = useQuery({
-    queryKey: ['catalogue-machine'],
-    queryFn: ({ signal }) => api.get<RefCat[]>('/api/catalogue?actif=1&limite=2000', { signal }),
-    enabled: ajout,
-  })
 
   const toucheMagasin = type === 'CHARGE' || type === 'DECHARGE'
   const designations = Object.fromEntries(f.lignes.map((l) => [l.code_reference, l.designation]))
-
-  /** Le motif d'une ligne, et ce qu'il demande en plus. Une fonction, pas un composant :
-      un composant declare ici serait recree a chaque frappe et ferait perdre le focus. */
-  const choixMotif = (l: LigneSaisie) => {
-    const m = f.motifDe(l.code_motif)
-    const effets = (m?.effets_permis ?? '').split(',').filter(Boolean)
-    return (
-      <div className="flex flex-col gap-1">
-        <select
-          value={l.code_motif}
-          onChange={(e) => f.majLigne(l.cle, 'code_motif', e.target.value)}
-          aria-label="Motif"
-          className={cn('min-h-[30px] w-40 rounded-[3px] border bg-fond px-1 text-[11.5px]', l.code_motif ? 'border-bordure' : 'border-danger')}
-        >
-          <option value="">Motif…</option>
-          {f.motifs.map((x) => (
-            <option key={x.code_motif} value={x.code_motif}>{x.libelle}</option>
-          ))}
-        </select>
-        {m && !m.effet_defaut && (
-          <select
-            value={l.effet_ecart}
-            onChange={(e) => f.majLigne(l.cle, 'effet_ecart', e.target.value)}
-            aria-label="L'écart compte comme"
-            className={cn('min-h-[28px] w-40 rounded-[3px] border bg-fond px-1 text-[11px]', l.effet_ecart ? 'border-bordure' : 'border-danger')}
-          >
-            <option value="">L’écart compte comme…</option>
-            {effets.map((e) => (
-              <option key={e} value={e}>{LIBELLE_EFFET[e] ?? e}</option>
-            ))}
-          </select>
-        )}
-        {/* LA RAISON D'UN SURPLUS AU CHARGEMENT (regle 2, 09/10/2026) : le serveur
-            attend l'une des trois de la liste ; le champ reste libre pour le
-            commentaire d'un ecart rouge. */}
-        <input
-          list="raisons-surplus"
-          value={l.motif_texte}
-          onChange={(e) => f.majLigne(l.cle, 'motif_texte', e.target.value)}
-          placeholder="Précision (obligatoire si l’écart est rouge)"
-          aria-label="Précision du motif"
-          className="min-h-[26px] w-40 rounded-[3px] border border-bordure bg-fond px-1.5 text-[11px]"
-        />
-        <datalist id="raisons-surplus">
-          {RAISONS_SURPLUS.map((r) => (
-            <option key={r} value={r} />
-          ))}
-        </datalist>
-      </div>
-    )
-  }
-
-  /** L'OF DE LA LIGNE ET SA VOIE (22/10/2026). Le nombre de bobines de la voie
-      est une AIDE au magasinier — jamais une consommation : il est propose au
-      chargement, et un depassement se signale sans bloquer. Une fonction, pas
-      un composant (le focus se perdrait a chaque frappe). */
-  /** LA QUALITE DE LA LIGNE (23/10/2026) : celle de son OF (de la ligne, de la
-      fiche, ou celui qu'elle sert deja), affichee ; sans OF, au chargement, elle
-      se choisit — obligatoire. Au dechargement et au constat, celle de l'etat. */
-  const qualiteLigne = (l: LigneSaisie) => {
-    const idOf = l.id_of || f.entete.id_of
-    const imposee = idOf
-      ? (qualiteDeLOf(ofs.data, idOf) ?? '…')
-      : l.avant_numero_of
-        ? (l.avant_qualite_nom ?? l.avant_code_qualite ?? '…')
-        : type !== 'CHARGE'
-          ? (l.avant_qualite_nom ?? l.avant_code_qualite ?? 'sans qualité')
-          : null
-    return (
-      <ChoixQualite
-        valeur={l.code_qualite ?? ''}
-        onChange={(q) => f.majLigne(l.cle, 'code_qualite', q)}
-        imposee={imposee}
-        vide={f.entete.code_qualite ? `qualité de la fiche (${f.entete.code_qualite})`
-          : l.avant_code_qualite ? `garde ${l.avant_qualite_nom ?? l.avant_code_qualite}` : 'Qualité (obligatoire)…'}
-        invalide={imposee == null && !l.code_qualite && !f.entete.code_qualite && !l.avant_code_qualite}
-        ariaLabel="Qualité de la ligne"
-        className="min-h-[28px] w-44 px-1 text-[11px]"
-      />
-    )
-  }
-
-  const ofEtVoie = (l: LigneSaisie, nbApres: number, touchee: boolean) => {
-    const cap = bobinesVoie(zone.capacite_bobines, machine.largeur_m, l.largeur_voie)
-    const depasse = cap != null && touchee && nbApres > cap
-    return (
-      <div className="flex w-44 flex-col gap-1">
-        <ChoixOF
-          valeur={l.id_of ?? ''}
-          onChange={(id) => f.majLigne(l.cle, 'id_of', id)}
-          vide={f.entete.id_of ? 'OF de la fiche' : l.avant_numero_of ? `garde ${l.avant_numero_of}` : '— aucun OF —'}
-          ariaLabel="OF de la ligne"
-          className="min-h-[28px] w-44 px-1 text-[11px]"
-        />
-        {qualiteLigne(l)}
-        <div className="flex items-center gap-1">
-          <SaisieNombre
-            min={0}
-            step={0.01}
-            value={l.largeur_voie || ''}
-            onChange={(ev) => f.majLigne(l.cle, 'largeur_voie', Math.max(0, Number(ev.target.value) || 0))}
-            placeholder="voie"
-            aria-label="Largeur de la voie (m)"
-            className="min-h-[26px] w-16 rounded-[3px] border border-bordure bg-fond px-1.5 text-right text-[11px] tabular-nums"
-          />
-          <span className="text-[10.5px] text-attenue-texte">m</span>
-          {type === 'CHARGE' && cap != null && cap > l.avant_bobines && l.mouvementees === 0 && (
-            <button
-              type="button"
-              onClick={() => f.majLigne(l.cle, 'mouvementees', cap - l.avant_bobines)}
-              className="text-[10.5px] font-medium text-primaire underline-offset-2 hover:underline"
-              title="Proposer de charger la voie jusqu’à sa capacité"
-            >
-              charger {cap - l.avant_bobines}
-            </button>
-          )}
-        </div>
-        {cap != null ? (
-          <div className={cn('text-[10.5px]', depasse ? 'text-alerte' : 'text-attenue-texte')}>
-            {cap} bobines pour cette voie{depasse && ` — ${nbApres} prévues, au-delà`}
-          </div>
-        ) : l.largeur_voie && !machine.largeur_m ? (
-          <div className="text-[10.5px] text-attenue-texte">largeur de la machine inconnue</div>
-        ) : null}
-      </div>
-    )
-  }
+  /** LE NIVEAU D'UN ECART est celui du serveur (seuils, effet, surplus) : il vient de l'apercu a jour. */
+  const niveauDe = (l: LigneSaisie) =>
+    f.apercu?.lignes.find((x) => x.code_reference === l.code_reference && x.lot_fournisseur === l.lot_fournisseur)?.niveau_ecart
+  const numeroOf = (id: string) => (ofs.data ?? []).find((o) => o.id_of === id)?.numero ?? '…'
+  const ajouterA = (s: Set<string>, cle: string) => new Set([...s, cle])
+  const nbColonnes = type === 'CHARGE' ? 10 : type === 'DECHARGE' ? 10 : 9
 
   return (
     <div className="flex flex-col gap-3">
       {toucheMagasin && <AvisInventaireOuvert inventaires={f.gel} />}
-      {/* --- L'entete ---------------------------------------------------- */}
-      <div className="grid grid-cols-2 gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3 lg:grid-cols-5">
-        {idFiche ? (
+      {/* --- L'entete, sur une rangee quand elle tient ----------------------- */}
+      <div className="flex flex-wrap items-end gap-2 rounded-[var(--radius)] border border-bordure bg-surface p-3">
+        {idFiche && (
           /* UNE FICHE REPRISE PEUT CHANGER D'ETAGE : c'est le cas de l'erreur
              d'emplacement. Le journal garde l'etage d'origine. */
-          <label className="flex flex-col gap-1">
+          <label className="flex w-[7rem] flex-col gap-1">
             <span className="text-[11px] text-attenue-texte">Étage</span>
             <select
               value={f.zone?.code_emplacement}
@@ -799,15 +738,10 @@ export function FicheBureau({
               ))}
             </select>
           </label>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] text-attenue-texte">Étage</span>
-            <span className="min-h-[34px] py-2 text-[13px]">{f.zone?.libelle}</span>
-          </div>
         )}
-        <Champ label="Date" type="date" v={f.entete.date} set={(v) => f.setEntete({ ...f.entete, date: v })} />
+        <Champ label="Date" type="date" className="w-[8.75rem]" v={f.entete.date} set={(x) => f.setEntete({ ...f.entete, date: x })} />
         {toucheMagasin && (
-          <label className="flex flex-col gap-1">
+          <label className="flex w-[9.5rem] flex-col gap-1">
             <span className="text-[11px] text-attenue-texte">
               {type === 'CHARGE' ? 'Magasin d’origine' : 'Magasin de retour'}
             </span>
@@ -826,7 +760,7 @@ export function FicheBureau({
         {/* L'OF EN LIEN (22/10/2026) : la fiche le choisit, il sert de defaut a ses
             lignes. Jamais impose par la machine. Le numero reste dans le texte
             d'historique. */}
-        <label className="flex flex-col gap-1">
+        <label className="flex min-w-[11rem] flex-1 flex-col gap-1">
           <span className="text-[11px] text-attenue-texte">Ordre de fabrication</span>
           <ChoixOF
             valeur={f.entete.id_of}
@@ -840,7 +774,7 @@ export function FicheBureau({
         {/* LA QUALITE DE LA FICHE (23/10/2026) : le defaut des lignes d'un
             chargement sans OF ; avec un OF, la sienne. */}
         {type === 'CHARGE' && (
-          <div className="flex flex-col gap-1">
+          <div className="flex w-[11rem] flex-col gap-1">
             <span className="text-[11px] text-attenue-texte">Qualité (sans OF)</span>
             <ChoixQualite
               valeur={f.entete.code_qualite}
@@ -850,220 +784,97 @@ export function FicheBureau({
             />
           </div>
         )}
-        <Champ label="Responsable" v={f.entete.responsable} set={(v) => f.setEntete({ ...f.entete, responsable: v })} />
+        <Champ label="Responsable" className="w-[9.5rem]" v={f.entete.responsable} set={(x) => f.setEntete({ ...f.entete, responsable: x })} />
+        {/* LES OBSERVATIONS partaient deja (corpsFiche) sans champ pour les dire (24/10/2026). */}
+        <Champ label="Observations" className="min-w-[10rem] flex-[1.3]" v={f.entete.observations}
+               set={(x) => f.setEntete({ ...f.entete, observations: x })} />
       </div>
 
-      {/* --- La grille de saisie : les colonnes du type de fiche ------------ */}
-      <div className="overflow-x-auto rounded-[var(--radius)] border border-bordure bg-surface">
-        <table className="w-full min-w-[66rem] text-[12px]">
+      {/* --- La grille : une rangee par ligne, sans defilement horizontal ----- */}
+      <div className="rounded-[var(--radius)] border border-bordure bg-surface">
+        <table data-grille-machine className="w-full table-fixed text-[12px]">
           <thead>
-            <tr className="bg-attenue text-[10px] uppercase tracking-wide text-attenue-texte">
-              <th className="px-2 py-1.5 text-left">Référence</th>
-              <th className="px-2 py-1.5 text-left">Lot</th>
-              <th className="px-2 py-1.5 text-left" title="L’OF que la ligne servira, sa qualité, et sa voie (largeur) : le nombre de bobines à manipuler">OF · qualité · voie</th>
-              <th className="px-2 py-1.5 text-right">Avant</th>
+            <tr className="whitespace-nowrap bg-attenue text-left text-[10px] uppercase tracking-wide text-attenue-texte">
+              <th className="px-1.5 py-1.5">Référence · lot</th>
+              <th className={cn(COL.avant, 'px-1 py-1.5 text-right')}>Avant</th>
               {type === 'CHARGE' && (
                 <>
-                  <th className="px-2 py-1.5 text-right">À charger</th>
-                  <th className="px-2 py-1.5 text-right">Poids/bob.</th>
-                  <th className="px-2 py-1.5 text-right">% ligne après</th>
+                  <th className={cn(COL.saisie, 'px-1 py-1.5 text-right')}>À charger</th>
+                  <th className={cn(COL.poids, 'px-1 py-1.5 text-right')}>Poids/bob.</th>
+                  <th className={cn(COL.saisie, 'px-1 py-1.5 text-right')} title="% de toute la ligne après le chargement">% après</th>
                 </>
               )}
               {type === 'DECHARGE' && (
                 <>
-                  <th className="px-2 py-1.5 text-right">À retirer</th>
-                  <th className="px-2 py-1.5 text-right">% retirées</th>
-                  <th className="px-2 py-1.5 text-left">Destination</th>
-                  <th className="px-2 py-1.5 text-right">% restantes</th>
+                  <th className={cn(COL.saisie, 'px-1 py-1.5 text-right')}>À retirer</th>
+                  <th className={cn(COL.saisie, 'px-1 py-1.5 text-right')} title="% des bobines retirées">% retirées</th>
+                  <th className={cn(COL.saisie, 'px-1 py-1.5 text-right')} title="% des bobines qui restent">% restantes</th>
                 </>
               )}
               {type === 'MAJ' && (
                 <>
-                  <th className="px-2 py-1.5 text-right">Présentes</th>
-                  <th className="px-2 py-1.5 text-right">% constaté</th>
+                  <th className={cn(COL.saisie, 'px-1 py-1.5 text-right')}>Présentes</th>
+                  <th className={cn(COL.saisie, 'px-1 py-1.5 text-right')}>% constaté</th>
                 </>
               )}
-              <th className="px-2 py-1.5 text-right">Après (estimé)</th>
-              <th className="px-2 py-1.5 text-right">Écart</th>
-              <th className="px-2 py-1.5 text-left">Motif</th>
-              <th className="w-8" />
+              <th className={cn(COL.apres, 'px-1 py-1.5 text-right')} title="Après la décision, estimé pendant la saisie">Après</th>
+              <th className={cn(COL.ecart, 'px-1 py-1.5 text-right')} title="Le niveau (vert, orange, rouge) vient de l’aperçu">Écart</th>
+              <th className={cn(COL.of, 'px-1 py-1.5')} title="L’OF que la ligne servira, sa qualité, et sa voie (largeur) : le nombre de bobines à manipuler">OF · qualité · voie</th>
+              <th className={cn(COL.motif, 'px-1 py-1.5')}>{type === 'DECHARGE' ? 'Motif · destination' : 'Motif'}</th>
+              <th className={cn(COL.geste, 'px-1 py-1.5')}><span className="sr-only">Geste</span></th>
             </tr>
           </thead>
           <tbody className="tabular-nums">
-            {f.lignes.map((l) => {
-              const e = estimer(type, l)
-              const touchee = type === 'MAJ' || l.mouvementees > 0
-              const destinations = destinationsDe(f.motifDe(l.code_motif))
-              const toutRetire = type === 'DECHARGE' && l.mouvementees >= l.avant_bobines && l.mouvementees > 0
-              return (
-                <tr key={l.cle} className={cn('border-t border-bordure align-top', !touchee && 'opacity-60')}>
-                  <td className="max-w-[15rem] truncate px-2 py-1 text-texte">{l.designation}</td>
-                  <td className="px-1 py-1">
-                    {type === 'CHARGE' && f.entete.magasin && l.avant_bobines === 0 ? (
-                      <ChampLot
-                        reference={l.code_reference}
-                        magasin={f.entete.magasin}
-                        valeur={l.lot_fournisseur}
-                        onChange={(v) => f.majLigne(l.cle, 'lot_fournisseur', v)}
-                        invalide={!l.lot_fournisseur}
-                        className="min-h-[30px] w-40 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
-                        proposerPlusAncien
-                      />
-                    ) : l.lot_fournisseur === SANS_LOT ? (
-                      <span className="inline-flex min-h-[30px] items-center px-1.5 text-[11px] italic text-attenue-texte">
-                        {libelleLot(l.lot_fournisseur)}
-                      </span>
-                    ) : l.avant_bobines > 0 ? (
-                      <span className="inline-flex min-h-[30px] items-center px-1.5 font-mono text-[11px]">{l.lot_fournisseur}</span>
-                    ) : (
-                      <input
-                        value={l.lot_fournisseur}
-                        onChange={(ev) => f.majLigne(l.cle, 'lot_fournisseur', ev.target.value)}
-                        aria-label="Lot fournisseur"
-                        className="min-h-[30px] w-28 rounded-[3px] border border-bordure bg-fond px-1.5 font-mono text-[11px]"
-                      />
-                    )}
-                  </td>
-                  <td className="px-1 py-1">{ofEtVoie(l, e.nbApres, touchee)}</td>
-                  <td className="whitespace-nowrap px-2 py-1 text-right text-attenue-texte">
-                    {l.avant_bobines} · {l.avant_pourcentage != null ? `${nb(l.avant_pourcentage, 1)} %` : '—'}
-                    <div className="text-[10.5px]">{nb(l.avant_kg, 1)} kg</div>
-                  </td>
-                  {type === 'CHARGE' && (
-                    <>
-                      <td className="px-1 py-1">
-                        <Case v={l.mouvementees} set={(n) => f.majLigne(l.cle, 'mouvementees', n)} />
-                      </td>
-                      <td className="px-1 py-1 text-right">
-                        <Case v={l.poids_retenu} pas={0.001} set={(n) => f.majLigne(l.cle, 'poids_retenu', n)} />
-                        {(() => {
-                          const rappel = rappelCatalogue({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue })
-                          if (!rappel) return null
-                          const c = couleurEcart(ecartPoidsBobine({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue }), tolerances)
-                          return (
-                            <div className={cn('mt-0.5 whitespace-nowrap text-[10.5px]', c ? CLASSE_ECART[c] : 'text-attenue-texte')}>
-                              {rappel}
-                            </div>
-                          )
-                        })()}
-                      </td>
-                      <td className="px-1 py-1 text-right">
-                        <Case v={l.pourcentage} pas={0.1} max={500} set={(n) => f.majLigne(l.cle, 'pourcentage', n)} />
-                        {touchee && e.theorique != null && (
-                          <div className="mt-0.5 whitespace-nowrap text-[10.5px] text-attenue-texte">théorique {nb(e.theorique, 1)} %</div>
-                        )}
-                      </td>
-                    </>
-                  )}
-                  {type === 'DECHARGE' && (
-                    <>
-                      <td className="px-1 py-1">
-                        <Case v={l.mouvementees} max={l.avant_bobines} set={(n) => f.majLigne(l.cle, 'mouvementees', n)} />
-                      </td>
-                      <td className="px-1 py-1">
-                        <Case v={l.pct_retirees} pas={0.1} max={500} set={(n) => f.majLigne(l.cle, 'pct_retirees', n)} />
-                      </td>
-                      <td className="px-1 py-1">
-                        {destinations.length === 1 ? (
-                          <span className="inline-flex min-h-[30px] items-center text-[11.5px]">{LIBELLE_DESTINATION[destinations[0]]}</span>
-                        ) : (
-                          <select
-                            value={l.destination}
-                            onChange={(ev) => f.majLigne(l.cle, 'destination', ev.target.value as Destination)}
-                            aria-label="Destination"
-                            className={cn('min-h-[30px] w-36 rounded-[3px] border bg-fond px-1 text-[11.5px]', touchee && !l.destination ? 'border-danger' : 'border-bordure')}
-                          >
-                            <option value="">Destination…</option>
-                            {destinations.map((d) => (
-                              <option key={d} value={d}>{LIBELLE_DESTINATION[d]}</option>
-                            ))}
-                          </select>
-                        )}
-                      </td>
-                      <td className="px-1 py-1">
-                        {toutRetire ? (
-                          <span className="inline-flex min-h-[30px] items-center text-[11px] text-attenue-texte">ligne vidée</span>
-                        ) : (
-                          <Case v={l.pourcentage} pas={0.1} max={500} set={(n) => f.majLigne(l.cle, 'pourcentage', n)} />
-                        )}
-                      </td>
-                    </>
-                  )}
-                  {type === 'MAJ' && (
-                    <>
-                      <td className="px-1 py-1">
-                        <Case v={l.presentes} set={(n) => f.majLigne(l.cle, 'presentes', n)} zero />
-                      </td>
-                      <td className="px-1 py-1">
-                        <Case v={l.pourcentage} pas={0.1} max={500} set={(n) => f.majLigne(l.cle, 'pourcentage', n)} zero />
-                      </td>
-                    </>
-                  )}
-                  <td className="whitespace-nowrap px-2 py-1 text-right">
-                    {touchee ? (
-                      <>
-                        {e.nbApres} bob.
-                        <div className="text-[10.5px] text-attenue-texte">{nb(e.kgApres, 1)} kg</div>
-                      </>
-                    ) : '—'}
-                  </td>
-                  <td className={cn('whitespace-nowrap px-2 py-1 text-right font-medium', e.ecart < -0.0005 && 'text-alerte')}>
-                    {touchee ? `${nb(e.ecart, 1)} kg` : '—'}
-                  </td>
-                  <td className="px-1 py-1">{touchee ? choixMotif(l) : null}</td>
-                  <td className="px-1 py-1">
-                    {l.avant_bobines === 0 && (
-                      <button type="button" onClick={() => f.retirer(l.cle)} className="text-attenue-texte hover:text-danger" aria-label="Retirer la ligne">
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
+            {f.lignes.map((l) => (
+              <LigneBureau
+                key={l.cle}
+                f={f}
+                l={l}
+                type={type}
+                machine={machine}
+                zone={zone}
+                ofs={ofs.data}
+                tolerances={tolerances}
+                ouverte={ouvertes.has(l.cle) || l.avant_bobines === 0 || modifiee(type, l) || aCompleter(type, l, f.motifDe(l.code_motif))}
+                ouvrir={() => setOuvertes((s) => ajouterA(s, l.cle))}
+                precisionDemandee={precisions.has(l.cle)}
+                demanderPrecision={() => setPrecisions((s) => ajouterA(s, l.cle))}
+                niveau={niveauDe(l)}
+                numeroOf={numeroOf}
+                nbColonnes={nbColonnes}
+              />
+            ))}
           </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-ink/20 bg-attenue font-semibold">
-              <td className="px-2 py-1.5" colSpan={type === 'DECHARGE' ? 8 : type === 'CHARGE' ? 7 : 6}>
-                Étage après : <span className={cn('tabular-nums', f.totaux.apres > f.totaux.places && 'text-danger')}>
-                  {f.totaux.apres} / {f.totaux.places} places
-                </span>
-                {f.totaux.apres < f.totaux.places && (
-                  <span className="ml-2 font-normal text-attenue-texte">({f.totaux.places - f.totaux.apres} libres)</span>
-                )}
-              </td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{nb(f.totaux.kgApres, 1)} kg</td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{nb(f.totaux.ecart, 1)} kg</td>
-              <td colSpan={2} />
-            </tr>
-          </tfoot>
         </table>
+        {/* LA RAISON D'UN SURPLUS AU CHARGEMENT (regle 2, 09/10/2026) : le serveur
+            attend l'une des trois de la liste ; le champ reste libre pour le
+            commentaire d'un ecart rouge. */}
+        <datalist id="raisons-surplus">
+          {RAISONS_SURPLUS.map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
       </div>
 
       {/* --- Ajouter une reference qui n'etait pas sur l'etage (chargement) -- */}
-      {type === 'CHARGE' && f.entete.magasin && (
-        <ChampScan surLecture={f.scanner} className="mb-2 max-w-md" />
-      )}
       {type === 'CHARGE' && (
-        <div>
+        <div className="flex flex-wrap items-start gap-2">
+          {f.entete.magasin && <ChampScan surLecture={f.scanner} className="w-full max-w-md" />}
           {ajout ? (
-            <div className="flex gap-2">
-              <select
-                onChange={(e) => {
-                  const r = (qCat.data ?? []).find((x) => x.code_reference === e.target.value)
-                  if (r) {
-                    f.ajouter(ligneNeuve(r.code_reference, r.designation, r.poids_bobine_kg ?? 0, r.poids_bobine_kg))
-                    setAjout(false)
-                  }
+            <div className="flex min-w-[18rem] flex-1 items-start gap-2">
+              {/* LA RECHERCHE SE FAIT AU SERVEUR (24/10/2026) : « code — désignation »,
+                  comme partout ; plus de liste du catalogue entier. */}
+              <ChampReference
+                valeur=""
+                autoFocus
+                placeholder="Tapez une référence à charger…"
+                ariaLabel="Ajouter une référence"
+                className="max-w-xl flex-1"
+                surChoix={(r) => {
+                  f.ajouter(ligneNeuve(r.code_reference, r.designation ?? r.code_reference, r.poids_bobine_kg ?? 0, r.poids_bobine_kg))
+                  setAjout(false)
                 }}
-                className="min-h-[34px] flex-1 rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[13px]"
-                defaultValue=""
-              >
-                <option value="">Choisir une référence…</option>
-                {(qCat.data ?? []).map((r) => (
-                  <option key={r.code_reference} value={r.code_reference}>{r.designation}</option>
-                ))}
-              </select>
+              />
               <button type="button" onClick={() => setAjout(false)} className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure px-3 text-[13px]">
                 Annuler
               </button>
@@ -1153,44 +964,426 @@ export function FicheBureau({
 
       {v.element}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={!f.pret || f.calculer.isPending}
-          onClick={() => f.calculer.mutate()}
-          className="inline-flex min-h-[40px] items-center gap-2 rounded-[var(--radius-sm)] border border-primaire px-4 text-[14px] font-semibold text-primaire disabled:opacity-40"
-        >
-          {f.calculer.isPending ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-          Aperçu
-        </button>
-        <button
-          type="button"
-          disabled={!f.peutValider || f.envoi.isPending}
-          onClick={v.valider}
-          className="inline-flex min-h-[40px] items-center gap-2 rounded-[var(--radius-sm)] bg-primaire px-4 text-[14px] font-semibold text-primaire-texte disabled:opacity-40"
-        >
-          {f.envoi.isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-          Valider la décision
-        </button>
-        <span className="text-[12px] text-attenue-texte">
-          {f.manque ?? (!f.apercu ? 'Faites l’aperçu, relisez-le, puis validez.' : '')}
-        </span>
+      {/* --- LA BARRE D'ACTIONS, COLLEE EN BAS (24/10/2026) : l'etage apres, l'ecart,
+          ce qui manque, l'apercu et la validation restent a portee pendant la saisie. */}
+      <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-[var(--radius)] border border-bordure bg-surface px-3 py-2 shadow-sm">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[13px] tabular-nums">
+          <span>
+            Étage après :{' '}
+            <span className={cn('font-semibold', f.totaux.apres > f.totaux.places && 'text-danger')}>
+              {f.totaux.apres} / {f.totaux.places} places
+            </span>
+            {f.totaux.apres < f.totaux.places && (
+              <span className="text-attenue-texte"> ({f.totaux.places - f.totaux.apres} libres)</span>
+            )}
+          </span>
+          <span className="text-attenue-texte">{nb(f.totaux.kgApres, 1)} kg</span>
+          <span>
+            écart <span className="font-semibold">{nb(f.totaux.ecart, 1)} kg</span>
+          </span>
+          <span className="text-[12px] text-attenue-texte">
+            {f.manque ?? (!f.apercu ? 'Faites l’aperçu, relisez-le, puis validez.' : '')}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            disabled={!f.pret || f.calculer.isPending}
+            onClick={() => f.calculer.mutate()}
+            className="inline-flex min-h-[38px] items-center gap-2 rounded-[var(--radius-sm)] border border-primaire px-4 text-[14px] font-semibold text-primaire disabled:opacity-40"
+          >
+            {f.calculer.isPending ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+            Aperçu
+          </button>
+          <button
+            type="button"
+            disabled={!f.peutValider || f.envoi.isPending}
+            onClick={v.valider}
+            className="inline-flex min-h-[38px] items-center gap-2 rounded-[var(--radius-sm)] bg-primaire px-4 text-[14px] font-semibold text-primaire-texte disabled:opacity-40"
+          >
+            {f.envoi.isPending ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            Valider la décision
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
-function Champ({
-  label, v, set, type = 'text',
-}: { label: string; v: string; set: (v: string) => void; type?: string }) {
+/**
+ * UNE LIGNE DE LA GRILLE. Fermee, elle se lit (aucune case) ; « Modifier »
+ * l'ouvre. Ouverte, tout tient sur une rangee ; la precision ne descend sur une
+ * rangee « ↳ » que si la colonne du motif est deja prise (effet a choisir,
+ * destination) et qu'elle est demandee ou necessaire (ecart orange ou rouge).
+ * Declaree au niveau du module : son identite ne change pas a chaque frappe.
+ */
+function LigneBureau({
+  f, l, type, machine, zone, ofs, tolerances, ouverte, ouvrir, precisionDemandee, demanderPrecision, niveau, numeroOf,
+  nbColonnes,
+}: {
+  f: EtatFiche
+  l: LigneSaisie
+  type: TypeFiche
+  machine: Machine
+  zone: Zone
+  ofs: OfOuvert[] | undefined
+  tolerances: ReturnType<typeof useTolerancesLot>
+  ouverte: boolean
+  ouvrir: () => void
+  precisionDemandee: boolean
+  demanderPrecision: () => void
+  niveau: string | undefined
+  numeroOf: (id: string) => string
+  nbColonnes: number
+}) {
+  const e = estimer(type, l)
+  // Comme avant : une ligne « touchee » part au serveur et montre son estimation.
+  const touchee = type === 'MAJ' || l.mouvementees > 0
+  const m = f.motifDe(l.code_motif)
+  const destinations = destinationsDe(m)
+  const effets = (m?.effets_permis ?? '').split(',').filter(Boolean)
+  const effetAChoisir = !!m && !m.effet_defaut
+  const toutRetire = type === 'DECHARGE' && l.mouvementees >= l.avant_bobines && l.mouvementees > 0
+  const maj = <K extends keyof LigneSaisie>(champ: K, x: LigneSaisie[K]) => f.majLigne(l.cle, champ, x)
+  const libelle = l.designation || l.code_reference
+  const cap = bobinesVoie(zone.capacite_bobines, machine.largeur_m, l.largeur_voie)
+  const depasse = cap != null && touchee && e.nbApres > cap
+
+  /* LA COLONNE DU MOTIF : le motif, puis UNE seconde commande — l'effet s'il est a
+     choisir, sinon la destination (dechargement), sinon la precision. */
+  const secondePrise = effetAChoisir || type === 'DECHARGE'
+  const niveauFort = niveau === 'ORANGE' || niveau === 'ROUGE'
+  const suite = ouverte && touchee && secondePrise && (precisionDemandee || !!l.motif_texte.trim() || niveauFort)
+
+  const champPrecision = (classe: string) => (
+    <input
+      list="raisons-surplus"
+      value={l.motif_texte}
+      onChange={(ev) => maj('motif_texte', ev.target.value)}
+      placeholder={niveauFort ? 'Précision (obligatoire si rouge)' : 'Précision…'}
+      title="Précision du motif : obligatoire si l’écart est rouge"
+      aria-label="Précision du motif"
+      className={cn(CHAMP, 'border-bordure', classe)}
+    />
+  )
+
+  const voie = cap != null ? (
+    type === 'CHARGE' && cap > l.avant_bobines && l.mouvementees === 0 ? (
+      <button
+        type="button"
+        onClick={() => maj('mouvementees', cap - l.avant_bobines)}
+        className="text-[10.5px] font-medium text-primaire underline-offset-2 hover:underline"
+        title={`Proposer de charger la voie jusqu’à sa capacité (${cap} bobines)`}
+      >
+        charger {cap - l.avant_bobines}
+      </button>
+    ) : (
+      <span className={cn('text-[10.5px]', depasse ? 'text-alerte' : 'text-attenue-texte')}
+            title={`${cap} bobines pour cette voie${depasse ? ` — ${e.nbApres} prévues, au-delà` : ''}`}>
+        voie {cap}{depasse && ' !'}
+      </span>
+    )
+  ) : l.largeur_voie && !machine.largeur_m ? (
+    <span className="text-[10.5px] text-attenue-texte" title="Largeur de la machine inconnue">voie ?</span>
+  ) : null
+
+  const lu = (x: React.ReactNode) => <span className="text-[11.5px] text-attenue-texte">{x}</span>
+
   return (
-    <label className="flex flex-col gap-1">
+    <>
+      <tr data-ligne={l.cle} className={cn('border-t border-bordure align-top', !ouverte && 'text-attenue-texte')}>
+        {/* Reference et lot, un seul bloc */}
+        <td className="min-w-0 px-1.5 py-1">
+          <div className={cn('truncate text-[12px]', ouverte ? 'text-texte' : '')} title={`${l.code_reference} — ${l.designation}`}>
+            {libelle}
+          </div>
+          <div className="mt-0.5">
+            {ouverte && type === 'CHARGE' && f.entete.magasin && l.avant_bobines === 0 ? (
+              <ChampLot
+                reference={l.code_reference}
+                magasin={f.entete.magasin}
+                valeur={l.lot_fournisseur}
+                onChange={(x) => maj('lot_fournisseur', x)}
+                invalide={!l.lot_fournisseur}
+                className="h-7 w-full max-w-[14rem] rounded-[3px] border border-bordure bg-fond px-1 font-mono text-[11px]"
+                proposerPlusAncien
+              />
+            ) : l.lot_fournisseur === SANS_LOT ? (
+              <span className="text-[11px] italic text-attenue-texte">{libelleLot(l.lot_fournisseur)}</span>
+            ) : l.avant_bobines > 0 || !ouverte ? (
+              <span className="font-mono text-[11px] text-attenue-texte">{l.lot_fournisseur || '—'}</span>
+            ) : (
+              <input
+                value={l.lot_fournisseur}
+                onChange={(ev) => maj('lot_fournisseur', ev.target.value)}
+                aria-label="Lot fournisseur"
+                placeholder="Lot fournisseur"
+                className={cn(CHAMP, 'max-w-[14rem] border-bordure font-mono')}
+              />
+            )}
+          </div>
+        </td>
+        <td className="whitespace-nowrap px-1 py-1 text-right text-[11px] text-attenue-texte">
+          {l.avant_bobines} · {l.avant_pourcentage != null ? `${nb(l.avant_pourcentage, 1)} %` : '—'}
+          <div>{nb(l.avant_kg, 1)} kg</div>
+        </td>
+
+        {type === 'CHARGE' && (ouverte ? (
+          <>
+            <td className="px-1 py-1 text-right">
+              <Case v={l.mouvementees} libelle={`À charger, ${libelle}`} set={(n) => maj('mouvementees', n)} />
+              {voie}
+            </td>
+            <td className="px-1 py-1 text-right">
+              <Case v={l.poids_retenu} pas={0.001} libelle={`Poids par bobine, ${libelle}`} set={(n) => maj('poids_retenu', n)} />
+              {(() => {
+                const rappel = rappelCatalogue({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue })
+                if (!rappel) return null
+                const pct = ecartPoidsBobine({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue })
+                const c = couleurEcart(pct, tolerances)
+                return (
+                  <div className={cn('whitespace-nowrap text-[10.5px]', c ? CLASSE_ECART[c] : 'text-attenue-texte')} title={rappel}>
+                    {pct != null ? `cat. ${signePct(pct)}` : rappel}
+                  </div>
+                )
+              })()}
+            </td>
+            <td className="px-1 py-1 text-right">
+              <Case v={l.pourcentage} pas={0.1} max={500} libelle={`% de la ligne après, ${libelle}`} set={(n) => maj('pourcentage', n)} />
+              {touchee && e.theorique != null && (
+                <div className="whitespace-nowrap text-[10.5px] text-attenue-texte" title="% théorique">th. {nb(e.theorique, 1)}</div>
+              )}
+            </td>
+          </>
+        ) : (
+          <>
+            <td className="px-1 py-1 text-right">{lu('—')}</td>
+            <td className="px-1 py-1 text-right">{lu(nb(l.poids_retenu, 3))}</td>
+            <td className="px-1 py-1 text-right">{lu(nb(l.pourcentage, 1))}</td>
+          </>
+        ))}
+
+        {type === 'DECHARGE' && (ouverte ? (
+          <>
+            <td className="px-1 py-1 text-right">
+              <Case v={l.mouvementees} max={l.avant_bobines} libelle={`À retirer, ${libelle}`} set={(n) => maj('mouvementees', n)} />
+              {voie}
+            </td>
+            <td className="px-1 py-1 text-right">
+              <Case v={l.pct_retirees} pas={0.1} max={500} libelle={`% des retirées, ${libelle}`} set={(n) => maj('pct_retirees', n)} />
+            </td>
+            <td className="px-1 py-1 text-right">
+              {toutRetire ? (
+                <span className="inline-flex h-7 items-center text-[11px] text-attenue-texte">vidée</span>
+              ) : (
+                <Case v={l.pourcentage} pas={0.1} max={500} libelle={`% des restantes, ${libelle}`} set={(n) => maj('pourcentage', n)} />
+              )}
+            </td>
+          </>
+        ) : (
+          <>
+            <td className="px-1 py-1 text-right">{lu('—')}</td>
+            <td className="px-1 py-1 text-right">{lu(nb(l.pct_retirees, 1))}</td>
+            <td className="px-1 py-1 text-right">{lu(nb(l.pourcentage, 1))}</td>
+          </>
+        ))}
+
+        {type === 'MAJ' && (ouverte ? (
+          <>
+            <td className="px-1 py-1 text-right">
+              <Case v={l.presentes} zero libelle={`Présentes, ${libelle}`} set={(n) => maj('presentes', n)} />
+              {voie}
+            </td>
+            <td className="px-1 py-1 text-right">
+              <Case v={l.pourcentage} pas={0.1} max={500} zero libelle={`% constaté, ${libelle}`} set={(n) => maj('pourcentage', n)} />
+            </td>
+          </>
+        ) : (
+          <>
+            <td className="px-1 py-1 text-right">{lu(l.presentes)}</td>
+            <td className="px-1 py-1 text-right">{lu(nb(l.pourcentage, 1))}</td>
+          </>
+        ))}
+
+        <td className="whitespace-nowrap px-1 py-1 text-right text-[11.5px]">
+          {touchee ? (
+            <>
+              {e.nbApres} bob.
+              <div className="text-[10.5px] text-attenue-texte">{nb(e.kgApres, 1)} kg</div>
+            </>
+          ) : '—'}
+        </td>
+        <td
+          className={cn(
+            'whitespace-nowrap px-1 py-1 text-right text-[11.5px] font-medium',
+            niveau && TON_ECART[niveau] ? TON_ECART[niveau] : touchee && e.ecart < -0.0005 && 'text-alerte',
+          )}
+          title={niveau && LIBELLE_NIVEAU[niveau] ? `Écart ${LIBELLE_NIVEAU[niveau]} (aperçu)` : 'Le niveau de l’écart vient de l’aperçu'}
+        >
+          {touchee ? `${nb(e.ecart, 1)} kg` : '—'}
+          {touchee && niveau && LIBELLE_NIVEAU[niveau] && (
+            <div className="text-[10px] font-normal">{LIBELLE_NIVEAU[niveau]}</div>
+          )}
+        </td>
+
+        {/* OF · qualite · voie */}
+        <td className="min-w-0 px-1 py-1">
+          {ouverte ? (
+            <div className="flex flex-col gap-1">
+              <ChoixOF
+                valeur={l.id_of ?? ''}
+                onChange={(id) => maj('id_of', id)}
+                vide={f.entete.id_of ? 'OF de la fiche' : l.avant_numero_of ? `garde ${l.avant_numero_of}` : '— aucun OF —'}
+                ariaLabel="OF de la ligne"
+                className="h-7 min-h-0 w-full min-w-0 px-1 text-[11px]"
+              />
+              <div className="flex min-w-0 items-center gap-1">
+                <QualiteLigne
+                  l={l}
+                  entete={f.entete}
+                  type={type}
+                  ofs={ofs}
+                  onChange={(q) => maj('code_qualite', q)}
+                  className="h-7 min-h-0 min-w-0 flex-1 px-1 text-[11px]"
+                />
+                <SaisieNombre
+                  min={0}
+                  step={0.01}
+                  value={l.largeur_voie || ''}
+                  onChange={(ev) => maj('largeur_voie', Math.max(0, Number(ev.target.value) || 0))}
+                  placeholder="voie"
+                  title="Largeur de la voie, en mètres"
+                  aria-label="Largeur de la voie (m)"
+                  className="h-7 w-11 shrink-0 rounded-[3px] border border-bordure bg-fond px-1 text-right text-[11px] tabular-nums"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="text-[11px] leading-tight">
+              <div className="truncate">
+                {l.id_of ? numeroOf(l.id_of) : f.entete.id_of ? 'OF de la fiche' : l.avant_numero_of ?? 'aucun OF'}
+              </div>
+              <div className="truncate">
+                {resumeQualite(l, f.entete, type, ofs)}
+                {!!l.largeur_voie && ` · voie ${nb(l.largeur_voie, 2)} m`}
+              </div>
+            </div>
+          )}
+        </td>
+
+        {/* Motif, et la seconde commande */}
+        <td className="min-w-0 px-1 py-1">
+          {ouverte && touchee ? (
+            <div className="flex flex-col gap-1">
+              <select
+                value={l.code_motif}
+                onChange={(ev) => maj('code_motif', ev.target.value)}
+                aria-label="Motif"
+                className={cn(CHAMP, l.code_motif ? 'border-bordure' : 'border-danger')}
+              >
+                <option value="">Motif…</option>
+                {f.motifs.map((x) => (
+                  <option key={x.code_motif} value={x.code_motif}>{x.libelle}</option>
+                ))}
+              </select>
+              {effetAChoisir ? (
+                <select
+                  value={l.effet_ecart}
+                  onChange={(ev) => maj('effet_ecart', ev.target.value)}
+                  aria-label="L'écart compte comme"
+                  className={cn(CHAMP, l.effet_ecart ? 'border-bordure' : 'border-danger')}
+                >
+                  <option value="">L’écart compte comme…</option>
+                  {effets.map((x) => (
+                    <option key={x} value={x}>{LIBELLE_EFFET[x] ?? x}</option>
+                  ))}
+                </select>
+              ) : type === 'DECHARGE' ? (
+                destinations.length === 1 ? (
+                  <span className="inline-flex h-7 items-center truncate text-[11px]">{LIBELLE_DESTINATION[destinations[0]]}</span>
+                ) : (
+                  <select
+                    value={l.destination}
+                    onChange={(ev) => maj('destination', ev.target.value as Destination)}
+                    aria-label="Destination"
+                    className={cn(CHAMP, !l.destination ? 'border-danger' : 'border-bordure')}
+                  >
+                    <option value="">Destination…</option>
+                    {destinations.map((d) => (
+                      <option key={d} value={d}>{LIBELLE_DESTINATION[d]}</option>
+                    ))}
+                  </select>
+                )
+              ) : (
+                champPrecision('')
+              )}
+            </div>
+          ) : touchee ? (
+            <div className="text-[11px] leading-tight">
+              <div className="truncate">{m?.libelle ?? '—'}</div>
+              {type === 'DECHARGE' && (l.destination || destinations.length === 1) && (
+                <div className="truncate">{LIBELLE_DESTINATION[(l.destination || destinations[0]) as Destination]}</div>
+              )}
+            </div>
+          ) : null}
+        </td>
+
+        <td className="px-1 py-1">
+          <div className="flex items-center justify-end gap-1.5">
+            {!ouverte ? (
+              <button
+                type="button"
+                onClick={ouvrir}
+                aria-label={`Modifier la ligne ${libelle} · ${l.lot_fournisseur}`}
+                className="inline-flex h-7 items-center gap-1 rounded-[3px] border border-bordure px-1.5 text-[11px] font-medium text-primaire hover:bg-attenue"
+              >
+                <Pencil className="size-3" />
+                Modifier
+              </button>
+            ) : (
+              <>
+                {touchee && secondePrise && !suite && (
+                  <button type="button" onClick={demanderPrecision} title="Ajouter une précision au motif"
+                          aria-label={`Ajouter une précision, ${libelle}`} className="text-attenue-texte hover:text-primaire">
+                    <MessageSquarePlus className="size-3.5" />
+                  </button>
+                )}
+                {l.avant_bobines === 0 && (
+                  <button type="button" onClick={() => f.retirer(l.cle)} className="text-attenue-texte hover:text-danger" aria-label="Retirer la ligne">
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+      {suite && (
+        <tr data-suite={l.cle} className="align-top">
+          <td colSpan={nbColonnes} className="px-1.5 pb-1.5 pt-0">
+            <div className="flex items-center gap-2 pl-3 text-[11px] text-attenue-texte">
+              <span aria-hidden>↳</span>
+              <span className="shrink-0">Précision du motif{niveauFort && niveau === 'ROUGE' ? ' (obligatoire : écart rouge)' : ''}</span>
+              {champPrecision('max-w-[28rem] flex-1')}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function Champ({
+  label, v, set, type = 'text', className,
+}: { label: string; v: string; set: (v: string) => void; type?: string; className?: string }) {
+  return (
+    <label className={cn('flex flex-col gap-1', className)}>
       <span className="text-[11px] text-attenue-texte">{label}</span>
       <input
         type={type}
         value={v}
         onChange={(e) => set(e.target.value)}
-        className="min-h-[34px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[13px]"
+        className="min-h-[34px] w-full min-w-0 rounded-[var(--radius-sm)] border border-bordure bg-fond px-2 text-[13px]"
       />
     </label>
   )
@@ -1198,17 +1391,18 @@ function Champ({
 
 /** Une case numerique. `zero` : afficher 0 plutot qu'une case vide. */
 function Case({
-  v, set, pas = 1, max, zero,
-}: { v: number; set: (v: number) => void; pas?: number; max?: number; zero?: boolean }) {
+  v, set, pas = 1, max, zero, libelle,
+}: { v: number; set: (v: number) => void; pas?: number; max?: number; zero?: boolean; libelle?: string }) {
   return (
     <SaisieNombre
       inputMode="decimal"
       step={pas}
       min={0}
       max={max}
+      aria-label={libelle}
       value={zero ? v : v || ''}
       onChange={(e) => set(Math.min(max ?? Infinity, Math.max(0, Number(e.target.value) || 0)))}
-      className="min-h-[30px] w-20 rounded-[3px] border border-bordure bg-fond px-1.5 text-right tabular-nums"
+      className="h-7 w-full min-w-0 rounded-[3px] border border-bordure bg-fond px-1 text-right text-[12px] tabular-nums"
     />
   )
 }

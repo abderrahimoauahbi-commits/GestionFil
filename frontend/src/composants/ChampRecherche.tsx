@@ -22,10 +22,10 @@
  * ferme. Une saisie de bon de commande se fait a deux mains sur le clavier,
  * avec le telephone coince sur l'epaule.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Search } from 'lucide-react'
+import { Loader2, Search, X } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 export interface Suggestion {
@@ -51,6 +51,20 @@ export interface Suggestion {
   charge?: unknown
 }
 
+/**
+ * CE QUE LE SERVEUR A DE PLUS (24/10/2026) : `chercher` peut rendre, au lieu
+ * d'un simple tableau, les suggestions ET le fait qu'il en reste. La liste le
+ * dit alors (« affinez la recherche ») au lieu de laisser croire qu'elle est
+ * complete.
+ */
+export interface Resultat {
+  suggestions: Suggestion[]
+  /** Le serveur en a d'autres que celles rendues. */
+  plus?: boolean
+  /** Combien en tout, quand le serveur l'a compte. */
+  total?: number
+}
+
 export function ChampRecherche({
   valeur,
   surChoix,
@@ -65,12 +79,18 @@ export function ChampRecherche({
   desactive,
   erreur,
   ariaLabel,
+  id,
+  messageAucun,
+  aideFrappe,
+  surEffacer,
+  libelleEffacer,
+  classeChamp,
 }: {
   /** Ce que porte le champ. Vide tant que rien n'est retenu. */
   valeur: string
   surChoix: (s: Suggestion) => void
   /** Interroge le serveur. Rend au plus une vingtaine de suggestions. */
-  chercher: (motif: string) => Promise<Suggestion[]>
+  chercher: (motif: string) => Promise<Suggestion[] | Resultat>
   /**
    * CE QUI DISTINGUE DEUX RECHERCHES DU MEME MOT.
    *
@@ -106,6 +126,17 @@ export function ChampRecherche({
   desactive?: boolean
   erreur?: boolean
   ariaLabel?: string
+  /** L'identifiant du champ de saisie : une etiquette `htmlFor` le designe. */
+  id?: string
+  /** Le message quand rien ne correspond : « Aucun fournisseur ne correspond ». */
+  messageAucun?: string
+  /** La ligne d'aide tant que la frappe est trop courte. */
+  aideFrappe?: string
+  /** Presente : un bouton vide le choix (un filtre « Tous », un choix facultatif). */
+  surEffacer?: () => void
+  libelleEffacer?: string
+  /** Hauteur, taille du texte du champ lui-meme (un ecran tactile le veut plus haut). */
+  classeChamp?: string
 }) {
   const [frappe, setFrappe] = useState('')
   const [ouvert, setOuvert] = useState(false)
@@ -147,7 +178,13 @@ export function ChampRecherche({
     staleTime: 30_000,
   })
 
-  const suggestions = useMemo(() => q.data ?? [], [q.data])
+  const resultat: Resultat | undefined = useMemo(
+    () => (q.data === undefined ? undefined : Array.isArray(q.data) ? { suggestions: q.data } : q.data),
+    [q.data],
+  )
+  const suggestions = useMemo(() => resultat?.suggestions ?? [], [resultat])
+  /** ACCESSIBLE : le champ designe la ligne pointee (aria-activedescendant). */
+  const idListe = `cr-${useId().replace(/:/g, '')}`
   // La hauteur de la liste change avec le nombre de suggestions : on la
   // replace a chaque fois, sinon elle chevauche la ligne suivante.
   const suggestionsLongueur = suggestions.length
@@ -166,7 +203,11 @@ export function ChampRecherche({
     if (!ouvert) return setCadre(null)
     const placer = () => {
       const r = boite.current?.getBoundingClientRect()
-      if (r) setCadre({ x: r.left, y: r.bottom + 2, l: Math.max(r.width, 320) })
+      if (!r) return
+      // La liste ne deborde jamais de l'ecran : sur telephone, un champ etroit
+      // a droite la poussait au-dela du bord, coupee.
+      const l = Math.min(Math.max(r.width, 320), window.innerWidth - 16)
+      setCadre({ x: Math.max(8, Math.min(r.left, window.innerWidth - l - 8)), y: r.bottom + 2, l })
     }
     placer()
     // La page peut defiler ou changer de largeur pendant que la liste est
@@ -182,7 +223,7 @@ export function ChampRecherche({
 
   // Le pointeur revient en tete a chaque nouvelle liste : sans cela il reste
   // sur un rang qui ne designe plus la meme ligne.
-  useEffect(() => setPointe(0), [motif])
+  useEffect(() => setPointe(0), [motif, suggestionsLongueur])
 
   // Un clic hors du champ referme la liste. Sans cela elle reste ouverte
   // par-dessus le reste de l'ecran, et l'on croit l'application bloquee.
@@ -230,7 +271,11 @@ export function ChampRecherche({
   }
 
   const assezTape = motif.length >= 2 || (!!chercherAVide && motif === '')
-  const rien = ouvert && motif.length >= 2 && !q.isFetching && suggestions.length === 0
+  // RIEN A PROPOSER se dit aussi a l'ouverture (champ vide) : sans cela, une
+  // boite vide s'ouvrait sous le champ, sans un mot.
+  const rien = ouvert && assezTape && !q.isFetching && q.data !== undefined && suggestions.length === 0
+  const pointee = ouvert ? choisissables[pointe] : undefined
+  const idOption = (s: Suggestion) => `${idListe}-${suggestions.indexOf(s)}`
 
   return (
     <div ref={boite} className={cn('relative', className)}>
@@ -247,18 +292,43 @@ export function ChampRecherche({
           placeholder={placeholder ?? 'Tapez une référence…'}
           disabled={desactive}
           autoFocus={autoFocus}
+          id={id}
+          autoComplete="off"
           aria-label={ariaLabel}
           aria-autocomplete="list"
           aria-expanded={ouvert}
+          aria-controls={ouvert ? idListe : undefined}
+          aria-activedescendant={pointee ? idOption(pointee) : undefined}
+          aria-invalid={erreur || undefined}
           role="combobox"
           className={cn(
-            'h-8 w-full rounded-[var(--radius)] border bg-surface pl-7 pr-2 text-[13px] outline-none',
+            'h-8 w-full rounded-[var(--radius)] border bg-surface pl-7 text-[13px] outline-none',
+            surEffacer && valeur ? 'pr-7' : 'pr-2',
             'focus:border-anneau disabled:opacity-50',
             erreur ? 'border-danger' : 'border-champ',
+            classeChamp,
           )}
         />
-        {q.isFetching && (
+        {q.isFetching ? (
           <Loader2 className="absolute right-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-attenue-texte" />
+        ) : (
+          surEffacer &&
+          valeur &&
+          !desactive && (
+            <button
+              type="button"
+              onClick={() => {
+                surEffacer()
+                setFrappe('')
+                setOuvert(false)
+              }}
+              aria-label={libelleEffacer ?? 'Effacer le choix'}
+              title={libelleEffacer ?? 'Effacer le choix'}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-attenue-texte hover:text-texte"
+            >
+              <X className="size-3.5" />
+            </button>
+          )
         )}
       </div>
 
@@ -268,7 +338,9 @@ export function ChampRecherche({
         createPortal(
         <div
           ref={panneau}
+          id={idListe}
           role="listbox"
+          aria-label={ariaLabel}
           /* `pointerEvents` N'EST PAS DECORATIF ICI.
              Une fenetre modale Radix pose `pointer-events: none` sur le corps
              du document et ne le rend qu'a son propre contenu. Notre liste vit
@@ -286,8 +358,8 @@ export function ChampRecherche({
         >
           {!assezTape && (
             <p className="px-3 py-2 text-[11px] text-attenue-texte">
-              Tapez au moins deux caractères — le code, un morceau de la désignation, ou la
-              couleur.
+              {aideFrappe ??
+                'Tapez au moins deux caractères — le code, un morceau de la désignation, ou la couleur.'}
             </p>
           )}
 
@@ -304,7 +376,9 @@ export function ChampRecherche({
             return (
               <button
                 key={s.valeur}
+                id={idOption(s)}
                 type="button"
+                tabIndex={-1}
                 role="option"
                 aria-selected={rang === pointe}
                 disabled={s.desactivee}
@@ -349,10 +423,28 @@ export function ChampRecherche({
           {rien && (
             <div className="px-3 py-2">
               <p className="text-[12px]">
-                Aucune référence ne correspond à <span className="font-medium">{motif}</span>.
+                {messageAucun ?? 'Aucune référence ne correspond'}
+                {motif && (
+                  <>
+                    {' '}à <span className="font-medium">{motif}</span>
+                  </>
+                )}
+                .
               </p>
-              {surAucun?.(motif)}
+              {motif.length >= 2 && surAucun?.(motif)}
             </div>
+          )}
+
+          {/* LA LISTE N'EST PAS COMPLETE, ET LE DIT. */}
+          {resultat?.plus && suggestions.length > 0 && (
+            <p
+              role="status"
+              className="border-t border-bordure/60 px-3 py-1.5 text-[11px] font-medium text-alerte"
+            >
+              {resultat.total
+                ? `${suggestions.length} premiers sur ${resultat.total} : affinez la recherche.`
+                : 'D’autres correspondent : affinez la recherche.'}
+            </p>
           )}
 
           {aide && suggestions.length > 0 && (

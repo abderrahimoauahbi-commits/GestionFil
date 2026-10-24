@@ -24,6 +24,10 @@ import { lireNombre } from '../../lib/nombres'
 import { cn, fmt } from '../../lib/utils'
 import { LIBELLE_STATUT_RETOUR, MODULE_RETOURS } from './commun'
 import { nouvelIdentifiant } from '../../lib/identifiant'
+import { ChoixRecherche } from '../../composants/ChoixRecherche'
+
+/** Le lot « sans lot » de la liste (la part du stock que les lots ne portent pas). */
+const SANS = '__sans_lot__'
 
 interface Disponible {
   code_reference: string
@@ -159,11 +163,6 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
   const etat = JSON.stringify({ fournisseur, date, motif, observations, l: lignes.map((x) => ({ ...x, cle: 0 })) })
   const [initial] = useState(etat)
 
-  const qFournisseurs = useQuery({
-    queryKey: ['fournisseurs-actifs'],
-    queryFn: ({ signal }) => api.get<{ code_fournisseur: string; nom: string }[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
-    enabled: ecrire,
-  })
   const qDispo = useQuery({
     queryKey: ['retours-disponible'],
     queryFn: ({ signal }) => api.get<Disponible[]>('/api/retours-fournisseur/disponible', { signal }),
@@ -334,12 +333,17 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
           <div className="xl:col-span-2">
             <Etiq obligatoire htmlFor="rfo-fournisseur">Fournisseur</Etiq>
             {ecrire ? (
-              <Selecteur id="rfo-fournisseur" className="w-full" value={fournisseur} onChange={(e) => setFournisseur(e.target.value)}>
-                <option value="">Choisir le fournisseur…</option>
-                {(qFournisseurs.data ?? []).map((f) => (
-                  <option key={f.code_fournisseur} value={f.code_fournisseur}>{f.nom}</option>
-                ))}
-              </Selecteur>
+              <ChoixRecherche
+                type="fournisseur"
+                id="rfo-fournisseur"
+                ariaLabel="Fournisseur"
+                className="w-full"
+                valeur={fournisseur}
+                libelle={fournisseur && fournisseur === doc?.retour.code_fournisseur
+                  ? `${fournisseur} — ${doc?.retour.fournisseur_nom ?? ''}` : undefined}
+                onChange={(code) => setFournisseur(code)}
+                placeholder="Tapez le fournisseur…"
+              />
             ) : (
               <div className="py-1.5 text-[13px]">{doc?.retour.fournisseur_nom}</div>
             )}
@@ -385,8 +389,8 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                 {lignes.map((l, i) => {
                   const lots = dispoDe(l)
                   const stock = ligneStock(l)
-                  const refs = [...new Map(dispo.filter((d) => d.code_magasin === l.code_magasin)
-                    .map((d) => [d.code_reference, d.designation])).entries()]
+                  const designation = dispo.find((d) => d.code_reference === l.code_reference)?.designation
+                  const sansLot = lots.find((d) => !d.lot_fournisseur)
                   const trop = !!stock && nombre(l.kg) > stock.quantite_kg + 0.0005
                   const aRelire = [['poids', l.kg], ['prix', l.prix], ['bobines', l.bobines]]
                     .filter(([, v]) => illisible(v)).map(([nom]) => nom)
@@ -405,22 +409,34 @@ function DocumentRetour({ id, doc }: { id?: string; doc?: RetourDoc }) {
                           leur libelle (constat e2e du 20/10/2026 : 221 px pour 307 demandes). */}
                       <div className="col-span-2 md:col-span-3 2xl:col-span-1">
                         {i === 0 && <Etiq>Référence</Etiq>}
-                        <Selecteur className="h-8 w-full" aria-label="Référence" value={l.code_reference} disabled={!l.code_magasin}
-                          onChange={(e) => choisirReference(l, e.target.value)}>
-                          <option value="">Référence en stock…</option>
-                          {refs.map(([c, d]) => <option key={c} value={c}>{c}{d ? ` — ${d}` : ''}</option>)}
-                        </Selecteur>
+                        <ChoixRecherche
+                          type="reference-en-stock"
+                          ariaLabel="Référence"
+                          className="w-full"
+                          valeur={l.code_reference}
+                          libelle={l.code_reference ? `${l.code_reference}${designation ? ` — ${designation}` : ''}` : undefined}
+                          filtres={{ code_magasin: l.code_magasin }}
+                          desactive={!l.code_magasin}
+                          placeholder={l.code_magasin ? 'Référence en stock…' : 'Choisir d’abord le magasin'}
+                          onChange={(code) => code !== l.code_reference && choisirReference(l, code)}
+                        />
                       </div>
                       <div className="col-span-2 2xl:col-span-1">
                         {i === 0 && <Etiq>Lot</Etiq>}
-                        <Selecteur className="h-8 w-full" aria-label="Lot" value={l.lot} disabled={lots.length === 0}
-                          onChange={(e) => maj(l.cle, { lot: e.target.value })}>
-                          {lots.map((d) => (
-                            <option key={d.lot_fournisseur ?? ''} value={d.lot_fournisseur ?? ''}>
-                              {d.lot_fournisseur ?? 'Sans lot'} ({fmt.nombre(d.quantite_kg, 2)} kg)
-                            </option>
-                          ))}
-                        </Selecteur>
+                        <ChoixRecherche
+                          type="lot"
+                          ariaLabel="Lot"
+                          className="w-full"
+                          valeur={l.code_reference ? (l.lot || SANS) : ''}
+                          libelle={!l.code_reference ? undefined : l.lot
+                            ? `${l.lot}${stock ? ` (${fmt.nombre(stock.quantite_kg, 2)} kg)` : ''}`
+                            : `Sans lot${sansLot ? ` (${fmt.nombre(sansLot.quantite_kg, 2)} kg)` : ''}`}
+                          filtres={{ code_reference: l.code_reference, code_magasin: l.code_magasin }}
+                          supplements={sansLot ? [{ valeur: SANS, libelle: 'Sans lot',
+                            info: `${fmt.nombre(sansLot.quantite_kg, 2)} kg hors lot` }] : []}
+                          desactive={lots.length === 0}
+                          onChange={(v) => maj(l.cle, { lot: v === SANS ? '' : v })}
+                        />
                       </div>
                       <div>
                         {i === 0 && <Etiq>Quantité kg</Etiq>}

@@ -59,18 +59,7 @@ interface Ligne extends Record<string, unknown> {
  * On le choisit desormais.
  */
 function EcranCouleurs() {
-  const qFrs = useQuery({
-    queryKey: ['fournisseurs-actifs'],
-    queryFn: () =>
-      api.get<{ code_fournisseur: string; nom: string }[]>(
-        '/api/fournisseurs?actif=1&limite=500',
-      ),
-  })
-  const fournisseurs = (qFrs.data ?? []).map((f) => ({
-    valeur: f.code_fournisseur,
-    libelle: `${f.nom} (${f.code_fournisseur})`,
-  }))
-
+  // Le fournisseur se CHERCHE (24/10/2026) : la liste des fournisseurs grandit.
   return (
     <MaitreDetail
       titre="Couleurs"
@@ -115,7 +104,9 @@ function EcranCouleurs() {
             entete: 'Fournisseur',
             obligatoire: true,
             largeur: 'w-52',
-            options: fournisseurs,
+            choix: 'fournisseur',
+            libelleChoix: (l) =>
+              l.code_fournisseur ? `${String(l.code_fournisseur)} — ${String(l.fournisseur_nom ?? '')}` : undefined,
           },
           {
             champ: 'code_couleur',

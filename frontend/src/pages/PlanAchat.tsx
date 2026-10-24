@@ -37,13 +37,13 @@ import {
   Champ,
   Chargement,
   Etiq,
-  Selecteur,
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { depuisBobines, depuisKg, depuisPalettes, pourChamp, type Conditionnement } from '../lib/conditionnement'
 import { DetailCalcul } from './PlanAchatDetail'
 import { useParametreNombre } from '../lib/parametres'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 const MODULE = 'PLAN_ACHAT'
 
@@ -1114,15 +1114,6 @@ function PanneauEquivalent({
   )
 }
 
-interface BcResume {
-  id_bc: string
-  numero_bc: string
-  code_fournisseur: string
-  statut: string
-  date_bc: string
-  nb_lignes: number
-}
-
 /**
  * LES LIGNES A COMMANDER — ce qu'on a coche dans les besoins, par fournisseur.
  *
@@ -1208,20 +1199,11 @@ function LignesACommander({
   /** Le montant en MAD : un prix en devise passe au taux de la proposition. */
   const montantLigne = (p: Proposition) =>
     nn(courant(p).qte) * nn(courant(p).prix) * (enDevise(p) ? (p.taux_devise || 1) : 1)
-  const qBc = useQuery({
-    queryKey: ['bons-commande'],
-    queryFn: ({ signal }) => api.get<BcResume[]>('/api/bons-commande', { signal }),
-  })
   const groupes = useMemo(() => {
     const m = new Map<string, Proposition[]>()
     for (const p of lignes) m.set(p.code_fournisseur, [...(m.get(p.code_fournisseur) ?? []), p])
     return [...m.entries()]
   }, [lignes])
-  const ouverts = (frs: string) =>
-    (qBc.data ?? []).filter(
-      // LE BROUILLON SEUL se complete (21/10/2026) : un bon soumis est fige.
-      (b) => b.code_fournisseur === frs && b.statut === 'BROUILLON',
-    )
 
   if (lignes.length === 0) {
     return (
@@ -1244,20 +1226,18 @@ function LignesACommander({
               <CarteTitre>{ls[0].fournisseur_nom || frs}</CarteTitre>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11.5px] text-attenue-texte">Envoyer vers</span>
-                <Selecteur
-                  className="h-8 w-80 max-w-full"
-                  value={cibles[frs] ?? ''}
-                  disabled={!ecrire}
-                  onChange={(e) => setCibles((c) => ({ ...c, [frs]: e.target.value }))}
-                  aria-label={`Bon de commande pour ${ls[0].fournisseur_nom || frs}`}
-                >
-                  <option value="">Un nouveau bon</option>
-                  {ouverts(frs).map((b) => (
-                    <option key={b.id_bc} value={b.id_bc}>
-                      {b.numero_bc} · {b.statut === 'BROUILLON' ? 'brouillon' : 'en attente'} · {b.nb_lignes} ligne(s)
-                    </option>
-                  ))}
-                </Selecteur>
+                {/* LE BROUILLON SEUL se complete (21/10/2026) : un bon soumis est fige.
+                    Cherche parmi les brouillons de CE fournisseur (24/10/2026). */}
+                <ChoixRecherche
+                  type="bc"
+                  filtres={{ code_fournisseur: frs, statut: 'BROUILLON' }}
+                  className="w-80 max-w-full"
+                  valeur={cibles[frs] ?? ''}
+                  desactive={!ecrire}
+                  vide="Un nouveau bon"
+                  onChange={(v) => setCibles((c) => ({ ...c, [frs]: v }))}
+                  ariaLabel={`Bon de commande pour ${ls[0].fournisseur_nom || frs}`}
+                />
               </div>
             </CarteEntete>
             <CarteCorps className="p-0">

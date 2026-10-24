@@ -73,6 +73,7 @@ import {
 } from '../composants/GrilleLignes'
 import { TotauxCommande } from '../composants/TotauxCommande'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
+import { ChoixRecherche, useLigneChoix } from '../composants/ChoixRecherche'
 import { nouvelIdentifiant } from '../lib/identifiant'
 
 const MODULE = 'BONS_COMMANDE'
@@ -165,11 +166,10 @@ export function BonCommandeNouveau() {
     enabled: !!refDemandee,
   })
 
-  const qFrs = useQuery({
-    queryKey: ['fournisseurs-actifs'],
-    queryFn: ({ signal }) => api.get<Fournisseur[]>('/api/fournisseurs?actif=1&limite=500', { signal }),
-  })
-  const fournisseur = qFrs.data?.find((f) => f.code_fournisseur === entete.code_fournisseur)
+  // LE FOURNISSEUR CHOISI, relu par sa cle (24/10/2026) : la liste entiere des
+  // fournisseurs n'est plus chargee — on la cherche en tapant.
+  const qFrs = useLigneChoix('fournisseur', entete.code_fournisseur)
+  const fournisseur = (qFrs.data ?? undefined) as Fournisseur | undefined
   const devise = entete.code_devise || fournisseur?.code_devise || 'MAD'
   const qDevises = useQuery({ queryKey: ['devises'], queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }) })
 
@@ -355,26 +355,21 @@ export function BonCommandeNouveau() {
                   propositions du plan en dépendent tous.
                 </Aide>
               </Etiq>
-              <Selecteur
+              <ChoixRecherche
+                type="fournisseur"
                 id="frs"
-                value={entete.code_fournisseur}
-                onChange={(e) => {
-                  const code = e.target.value
+                ariaLabel="Fournisseur"
+                valeur={entete.code_fournisseur}
+                onChange={(code, ligne) => {
+                  if (code === entete.code_fournisseur) return
                   setEntete({
                     ...entete,
                     code_fournisseur: code,
-                    code_devise: qFrs.data?.find((f) => f.code_fournisseur === code)?.code_devise ?? '',
+                    code_devise: String(ligne?.code_devise ?? ''),
                   })
                   setLignes([])
                 }}
-              >
-                <option value="">Choisir…</option>
-                {qFrs.data?.map((f) => (
-                  <option key={f.code_fournisseur} value={f.code_fournisseur}>
-                    {f.nom}
-                  </option>
-                ))}
-              </Selecteur>
+              />
             </div>
             <div>
               <Etiq htmlFor="datebc" obligatoire>

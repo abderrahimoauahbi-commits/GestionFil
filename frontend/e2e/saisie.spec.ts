@@ -9,7 +9,7 @@
  * receptionne.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { attendu, consigner, lireApi, mesurer, saisir, session, type Constat } from './outils'
+import { attendu, choisirRecherche, consigner, echapper, lireApi, mesurer, saisir, session, type Constat } from './outils'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -97,7 +97,7 @@ test('les formats de nombre tapés dans une quantité', async ({ browser }, info
   ]
   const { page } = await session(browser, info, 'Assistante')
   await page.goto('/bons-commande/nouveau')
-  await page.locator('#frs').selectOption('FRS-001')
+  await choisirRecherche(page, page.locator('#frs'), 'FRS-001', /^FRS-001 — /)
   await choisirReference(page, 'PP')
   const qte = champNombre(page, { name: 'Quantité en kilos' }).first()
   const constats: Constat[] = []
@@ -126,7 +126,7 @@ test('les formats de nombre tapés dans une quantité', async ({ browser }, info
 test('bon de commande : l’assistante le crée, au format français', async ({ browser }, info) => {
   const { page, veille } = await session(browser, info, 'Assistante')
   await page.goto('/bons-commande/nouveau')
-  await page.locator('#frs').selectOption('FRS-001')
+  await choisirRecherche(page, page.locator('#frs'), 'FRS-001', /^FRS-001 — /)
   await saisir(page.getByLabel('Observations'), 'Commande e2e : livraison en deux palettes, quai 3, avant 10 h.')
   // Une reference que les scenarios du banc ne sortent pas (regle des 50 kg par jour).
   await choisirReference(page, '6666')
@@ -331,7 +331,7 @@ test('référence : la direction crée une fiche, poids et prix au format franç
   await saisir(page.getByRole('textbox', { name: /^Référence(?! fournisseur)/ }), code)
   await saisir(page.getByRole('textbox', { name: /^(?:Designation|Désignation) \*$/ }), 'Polypropylène 1500 deniers texturé, beige sable, bobine conique 2,6 kg')
   await page.getByRole('combobox', { name: /^Catégorie mati[eè]re \*$/ }).selectOption({ index: 1 })
-  await page.getByRole('combobox', { name: 'Fournisseur *' }).selectOption('FRS-001')
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Fournisseur *' }), 'FRS-001', /^FRS-001 — /)
   await saisir(champNombre(page, { name: /^Densité/ }), '0,0125')
   await saisir(champNombre(page, { name: /^Poids par unité/ }), '2,597')
   await saisir(champNombre(page, { name: /^Unités par palette/ }), '240')
@@ -394,8 +394,8 @@ test('mouvement : le magasin sort 12,5 kg hors machine, avec un motif', async ({
   await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '12,5')
   await choisirOption(page.getByRole('combobox', { name: /^Motif/ }).first(), /Sortie hors machine/)
   await choisirOption(page.getByRole('combobox', { name: 'Motif de la ligne' }).first(), /chantillon/i)
-  const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: 'Choisir un lot' }) }).first()
-  if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))
+  // Le lot se cherche (24/10/2026) : le premier a sortir est propose d'office, on prend le notre.
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Lot fournisseur' }).first(), `LOT-E2E-${PASSAGE}`)
   const constats = [...veille.constats, ...(await mesurer(page))]
   await page.screenshot({ path: info.outputPath('mouvement.png'), fullPage: true })
   consigner(info, 'saisie : sortie hors machine', constats, info.outputPath('mouvement.png'))
@@ -429,8 +429,7 @@ test('transfert : le magasin expédie 120,5 kg, le fil est en route, puis récep
   await page.getByRole('button', { name: 'Ajouter une ligne' }).click()
   await choisirReference(page, refRecue)
   await saisir(champNombre(page, { name: 'Quantité en kilos' }).first(), '120,5')
-  const lot = page.locator('tbody select').filter({ has: page.locator('option', { hasText: /lot/i }) }).first()
-  if (await lot.count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`)).catch(() => undefined)
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Lot fournisseur' }).first(), `LOT-E2E-${PASSAGE}`)
   const constats = [...veille.constats, ...(await mesurer(page))]
   // La ligne se valide par son bouton ✓ ; en 1366, il est hors de l'ecran, a droite
   // du tableau coupe : on le signale, puis on fait defiler comme l'utilisateur.
@@ -592,12 +591,13 @@ test('retour fournisseur : la direction rend 10,5 kg, un autre compte valide', a
     Number((await lireApi<Record<string, unknown>[]>(page, '/api/catalogue?actif=1&limite=2000')).find((l) => l.code_reference === refRecue)!.stock_total_kg)
   const avant = await totalRef()
   await page.goto('/retours-fournisseur/nouveau')
-  await page.locator('#rfo-fournisseur').selectOption({ index: 1 })
+  // Le fournisseur se cherche (24/10/2026) : celui du bon recu.
+  await choisirRecherche(page, page.locator('#rfo-fournisseur'), 'FRS-001', /^FRS-001 — /)
   await saisir(page.locator('#rfo-motif'), 'Bobines tachées — e2e')
   await page.getByRole('combobox', { name: 'Magasin' }).first().selectOption('Morocco')
-  await page.getByRole('combobox', { name: 'Référence' }).first().selectOption(refRecue)
-  const lot = page.getByRole('combobox', { name: 'Lot' }).first()
-  if (await lot.locator('option', { hasText: `LOT-E2E-${PASSAGE}` }).count()) await choisirOption(lot, new RegExp(`LOT-E2E-${PASSAGE}`))
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Référence', exact: true }).first(), refRecue,
+    new RegExp(`^${echapper(refRecue)}(?: — |$)`))
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Lot', exact: true }).first(), `LOT-E2E-${PASSAGE}`)
   await saisir(page.getByRole('textbox', { name: 'Quantité kg' }).first(), '10,5')
   await page.getByRole('combobox', { name: 'Motif de la ligne' }).first().selectOption('R1')
   consigner(info, 'saisie : retour fournisseur', [...veille.constats, ...(await mesurer(page))])

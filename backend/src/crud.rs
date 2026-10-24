@@ -617,12 +617,20 @@ pub struct Filtre {
     pub sens: Option<String>,
 }
 
+/// Une liste lue, et la coupe qu'elle a subie.
+pub struct Liste {
+    pub valeur: Value,
+    /// `(total, limite)` quand le tableau nu a ete coupe a la limite ; `None`
+    /// quand il est complet (ou qu'il est pagine : l'enveloppe porte le total).
+    pub coupee: Option<(i64, i64)>,
+}
+
 pub async fn lister(
     db: &Db,
     user: &Utilisateur,
     e: &Entite,
     f: &Filtre,
-) -> AppResult<Value> {
+) -> AppResult<Liste> {
     user.exiger(db, e.module, Action::Lire).await?;
 
     // ON NE TRIE NI NE FILTRE SUR CE QU'ON NE VOIT PAS (audit v4) : trier les
@@ -678,13 +686,21 @@ pub async fn lister(
         // `ILIKE` ET NON `LIKE` : PostgreSQL distingue la casse. En `LIKE`,
         // taper « pes » ne trouvait jamais « PES-3000 Deniers » — le champ de
         // recherche paraissait casse alors qu'il obeissait a la lettre.
+        //
+        // ON NE CHERCHE PAS DANS UN CHAMP MASQUE (24/10/2026) : la reponse dirait
+        // ce que le champ contient. Rien de visible ou chercher : rien ne sort.
         let cibles: Vec<String> = ["libelle", "nom", "designation", "couleur", "type_fil"]
             .iter()
             .filter(|c| e.creation.contains(*c))
+            .copied()
+            .chain(std::iter::once(e.cle))
+            .filter(|c| !masque(c))
             .map(|c| format!("c.{c}"))
-            .chain(std::iter::once(format!("c.{}", e.cle)))
             .collect();
-        for mot in motif.split_whitespace() {
+        if cibles.is_empty() && !motif.trim().is_empty() {
+            conditions.push("FALSE".into());
+        }
+        for mot in motif.split_whitespace().filter(|_| !cibles.is_empty()) {
             valeurs.push(format!("%{mot}%"));
             let i = valeurs.len();
             conditions.push(format!(
@@ -719,6 +735,9 @@ pub async fn lister(
     let limite = f.limite.clamp(1, 5000);
     let offset = f.offset.unwrap_or(0).max(0);
 
+    /* UNE LIGNE DE PLUS que la limite, en tableau nu : c'est elle qui dit si la
+       liste a ete coupee (24/10/2026). Avant, la coupe a 500 etait muette — au
+       501e fournisseur, l'ecran n'en savait rien et la valeur n'existait plus. */
     let sql = format!(
         "SELECT {} FROM {} c {} {} ORDER BY {} LIMIT {} OFFSET {}",
         e.selection,
@@ -726,7 +745,7 @@ pub async fn lister(
         jointures(e.table),
         ou,
         tri,
-        limite,
+        if f.offset.is_none() { limite + 1 } else { limite },
         offset
     );
 
@@ -734,13 +753,17 @@ pub async fn lister(
     for v in &valeurs {
         q = q.bind(v);
     }
-    let rows = q.fetch_all(db).await?;
+    let mut rows = q.fetch_all(db).await?;
+    let coupee = f.offset.is_none() && rows.len() as i64 > limite;
+    if coupee {
+        rows.truncate(limite as usize);
+    }
 
     let mut valeur = lignes_en_json(&rows);
     user.masquer(db, e.module, &mut valeur).await?;
 
-    if f.offset.is_none() {
-        return Ok(valeur);
+    if f.offset.is_none() && !coupee {
+        return Ok(Liste { valeur, coupee: None });
     }
 
     /* Le total porte sur le filtre, pas sur la page : sans lui le client ne
@@ -759,7 +782,20 @@ pub async fn lister(
     }
     let total: i64 = qt.fetch_one(db).await?;
 
-    Ok(json!({ "lignes": valeur, "total": total, "limite": limite, "offset": offset }))
+    if f.offset.is_none() {
+        // Le tableau nu reste un tableau (les ecrans l'attendent) ; la coupe
+        // part en en-tetes, posees par la route.
+        return Ok(Liste { valeur, coupee: Some((total, limite)) });
+    }
+    let rendues = valeur.as_array().map_or(0, |a| a.len()) as i64;
+    Ok(Liste {
+        valeur: json!({
+            "lignes": valeur, "total": total, "limite": limite, "offset": offset,
+            // Il reste des lignes apres cette page : l'ecran le dit.
+            "plus": total > offset + rendues,
+        }),
+        coupee: None,
+    })
 }
 
 pub async fn lire(db: &Db, user: &Utilisateur, e: &Entite, id: &str) -> AppResult<Value> {

@@ -19,6 +19,7 @@ import { useDroits } from '../auth/AuthContext'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement, Selecteur } from '../composants/ui/base'
 import { fmt } from '../components/ui'
+import { chercherChoix, ChoixRecherche, useLigneChoix } from '../composants/ChoixRecherche'
 
 /** Le bandeau de choix, identique sur les quatre etats. */
 function Choix({
@@ -86,18 +87,17 @@ export function EtatReception() {
   const { id: idUrl } = useParams<{ id: string }>()
   const [id, setId] = useState('')
 
-  const qListe = useQuery({
-    queryKey: ['receptions'],
-    queryFn: ({ signal }) => api.get<Reception[]>('/api/receptions?limite=200', { signal }),
+  /* LA RECEPTION SE CHERCHE (24/10/2026). La liste des 200 dernieres coupait
+     les plus anciennes sans le dire : on n'imprimait plus le bon d'un camion
+     de l'an passe. Par defaut, la plus recente ; son en-tete se relit par son id. */
+  const qRecente = useQuery({
+    queryKey: ['etat-reception-recente'],
+    queryFn: ({ signal }) => chercherChoix<Reception>('reception', { limite: 1, signal }),
+    enabled: !idUrl && !id,
   })
-  const liste = useMemo(() => {
-    const d = qListe.data
-    const l = Array.isArray(d) ? d : ((d as unknown as { lignes?: Reception[] })?.lignes ?? [])
-    return [...l].sort((a, b) => (b.date_reception ?? '').localeCompare(a.date_reception ?? ''))
-  }, [qListe.data])
-
-  const choisi = idUrl || id || liste[0]?.id_reception || ''
-  const r = liste.find((x) => x.id_reception === choisi)
+  const choisi = idUrl || id || qRecente.data?.lignes[0]?.id_reception || ''
+  const qEntete = useLigneChoix('reception', choisi)
+  const r = (qEntete.data ?? undefined) as Reception | undefined
 
   const qLignes = useQuery({
     queryKey: ['lignes-reception', choisi],
@@ -105,8 +105,8 @@ export function EtatReception() {
     enabled: !!choisi,
   })
 
-  if (qListe.isLoading) return <Chargement texte="Chargement des réceptions…" />
-  if (!liste.length) return <Alerte ton="info">Aucune réception enregistree.</Alerte>
+  if (qRecente.isLoading || (choisi && qEntete.isLoading)) return <Chargement texte="Chargement des réceptions…" />
+  if (!choisi) return <Alerte ton="info">Aucune réception enregistree.</Alerte>
 
   const lignes = qLignes.data ?? []
   const totalBl = lignes.reduce((s, l) => s + (l.quantite_bl_kg ?? 0), 0)
@@ -115,15 +115,16 @@ export function EtatReception() {
   return (
     <div>
       {!idUrl && (
-      <Choix
-        libelle="Réception à imprimer :"
-        valeur={choisi}
-        surChangement={setId}
-        options={liste.map((x) => ({
-          valeur: x.id_reception,
-          libelle: `${x.numero_reception} — ${(x.date_reception ?? '').slice(0, 10)} — ${x.fournisseur_nom ?? '?'} (${x.statut})`,
-        }))}
-      />
+        <div className="sans-impression mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-attenue-texte">Réception à imprimer :</span>
+          <ChoixRecherche
+            type="reception"
+            ariaLabel="Réception à imprimer :"
+            valeur={choisi}
+            onChange={(v) => v && setId(v)}
+            className="w-[32rem] max-w-full"
+          />
+        </div>
       )}
 
       {!r ? null : (

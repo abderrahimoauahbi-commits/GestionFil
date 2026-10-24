@@ -5,10 +5,16 @@
  * la fiche hors machine et la consommation directe le choisissent parmi les OF
  * PREVUS ou LANCES. La machine ne l'impose jamais : c'est l'atelier qui dit quel
  * OF il sert. Le serveur reverifie le statut a l'enregistrement.
+ *
+ * AVEC RECHERCHE (24/10/2026) : la liste deroulante chargeait tous les OF
+ * ouverts ; on tape maintenant le numero ou la qualite, le serveur cherche
+ * (`ChoixRecherche`, type « of »). Les props n'ont pas change : les ecrans qui
+ * s'en servent n'ont rien a modifier.
  */
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { cn } from '../lib/utils'
+import { ChoixRecherche, classeDuChamp, classeEnveloppe, useLigneChoix } from './ChoixRecherche'
 
 export interface OfOuvert {
   id_of: string
@@ -46,30 +52,30 @@ export function ChoixOF({
   /** Le numero a montrer quand l'OF choisi n'est plus ouvert (cloture depuis). */
   inconnu?: string | null
 }) {
-  const q = useOfOuverts()
-  const liste = q.data ?? []
-  const absent = !!valeur && !liste.some((o) => o.id_of === valeur)
+  const ouverts = useOfOuverts()
+  const ouvert = valeur ? (ouverts.data ?? []).find((o) => o.id_of === valeur) : undefined
+  // Un OF qui n'est plus ouvert se relit par son id : on montre son numero, et
+  // qu'il n'est plus ouvert — jamais un identifiant brut.
+  const relu = useLigneChoix('of', valeur && ouverts.isSuccess && !ouvert ? valeur : null)
+  const libelle = !valeur
+    ? undefined
+    : ouvert
+      ? libelleOf(ouvert)
+      : ouverts.isSuccess && !relu.isLoading
+        ? `${(relu.data?.numero as string | undefined) ?? inconnu ?? valeur} (n’est plus ouvert)`
+        : (inconnu ?? undefined)
   return (
-    <select
-      value={valeur}
-      aria-label={ariaLabel}
-      aria-invalid={invalide || undefined}
-      onChange={(e) => {
-        const o = liste.find((x) => x.id_of === e.target.value)
-        onChange(o?.id_of ?? '', o?.numero ?? '')
-      }}
-      className={cn(
-        'min-h-[34px] rounded-[var(--radius-sm)] border bg-fond px-2 text-[13px]',
-        invalide ? 'border-danger' : 'border-bordure',
-        className,
-      )}
-    >
-      <option value="">{q.isLoading ? 'Lecture des OF…' : vide}</option>
-      {absent && <option value={valeur}>{inconnu ?? valeur} (n’est plus ouvert)</option>}
-      {liste.map((o) => (
-        <option key={o.id_of} value={o.id_of}>{libelleOf(o)}</option>
-      ))}
-    </select>
+    <ChoixRecherche
+      type="of"
+      valeur={valeur}
+      libelle={libelle}
+      onChange={(id, l) => onChange(id, l ? String(l.numero ?? '') : '')}
+      vide={vide}
+      ariaLabel={ariaLabel}
+      invalide={invalide}
+      className={cn('min-w-0', classeEnveloppe(className))}
+      classeChamp={classeDuChamp(className)}
+    />
   )
 }
 
@@ -92,6 +98,7 @@ export function useQualitesOuvertes() {
  * explicitement définir la qualité ». Avec un OF, c'est la sienne : affichée,
  * non modifiable (`imposee`). Sans OF, elle se choisit — obligatoire là où le
  * serveur et la base l'exigent (consommation directe, chargement machine).
+ * Avec recherche depuis le 24/10/2026 (type « qualite »), mêmes props.
  */
 export function ChoixQualite({
   valeur, onChange, imposee, vide = 'Choisir la qualité…', invalide, className, ariaLabel = 'Qualité',
@@ -105,7 +112,6 @@ export function ChoixQualite({
   className?: string
   ariaLabel?: string
 }) {
-  const q = useQualitesOuvertes()
   const base = 'min-h-[34px] rounded-[var(--radius-sm)] border bg-fond px-2 text-[13px]'
   if (imposee != null) {
     return (
@@ -118,23 +124,17 @@ export function ChoixQualite({
       </span>
     )
   }
-  const liste = q.data ?? []
   return (
-    <select
-      value={valeur}
-      aria-label={ariaLabel}
-      aria-invalid={invalide || undefined}
-      onChange={(e) => onChange(e.target.value)}
-      className={cn(base, invalide ? 'border-danger' : 'border-bordure', className)}
-    >
-      <option value="">{q.isLoading ? 'Lecture des qualités…' : vide}</option>
-      {!!valeur && !liste.some((x) => x.code_qualite === valeur) && <option value={valeur}>{valeur}</option>}
-      {liste.map((x) => (
-        <option key={x.code_qualite} value={x.code_qualite}>
-          {x.qualite_nom && x.qualite_nom !== x.code_qualite ? `${x.code_qualite} · ${x.qualite_nom}` : x.code_qualite}
-        </option>
-      ))}
-    </select>
+    <ChoixRecherche
+      type="qualite"
+      valeur={valeur}
+      onChange={(code) => onChange(code)}
+      vide={vide}
+      ariaLabel={ariaLabel}
+      invalide={invalide}
+      className={cn('min-w-0', classeEnveloppe(className))}
+      classeChamp={classeDuChamp(className)}
+    />
   )
 }
 

@@ -13,21 +13,17 @@
  * saisie, le lot qui va perimer passe devant. « Sans lot » reste possible — le stock d'avant le suivi —
  * et « Autre lot… » ouvre la saisie libre, pour un lot qui n'est pas encore en
  * stock (une entree, une regularisation).
+ *
+ * AVEC RECHERCHE (24/10/2026). La liste etait un `<select>` des 200 premiers
+ * lots, coupe sans le dire. On tape maintenant un morceau du numero ; le
+ * serveur cherche dans le stock du magasin (`/api/recherche/lot`, meme ordre
+ * FEFO) et dit s'il en reste. Les props n'ont pas change.
  */
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../api/client'
-import { trierPourSortie } from '../lib/fefo'
-import { libelleLot, SANS_LOT } from '../lib/lots'
-import { cn, fmt } from '../lib/utils'
-
-interface LotMagasin {
-  lot_fournisseur: string
-  quantite_kg: number
-  date_premiere_entree: string
-  /** Saisie a la reception, ou absente — le cas de tous les lots au 17/10/2026. */
-  date_peremption?: string | null
-}
+import { SANS_LOT } from '../lib/lots'
+import { cn } from '../lib/utils'
+import { chercherChoix, ChoixRecherche, classeDuChamp, classeEnveloppe, useLigneChoix } from './ChoixRecherche'
 
 const AUTRE = '__autre__'
 
@@ -57,25 +53,32 @@ export function ChampLot({
   proposerPlusAncien?: boolean
 }) {
   const [libre, setLibre] = useState(false)
-  const q = useQuery({
-    queryKey: ['lots-reference-magasin', reference, magasin],
-    queryFn: () =>
-      api.get<LotMagasin[]>(
-        `/api/stock/lots?code_reference=${encodeURIComponent(reference)}&code_magasin=${encodeURIComponent(magasin)}&limite=200`,
-      ),
-    enabled: !!reference && !!magasin,
+  const filtres = { code_reference: reference, code_magasin: magasin }
+  const avecListe = !!reference && !!magasin
+
+  // Le premier a sortir, dans l'ordre FEFO du serveur (le « Sans lot » exclu).
+  const qPremier = useQuery({
+    queryKey: ['lot-premier-a-sortir', reference, magasin],
+    queryFn: ({ signal }) =>
+      chercherChoix<{ lot_fournisseur: string }>('lot', { filtres, limite: 1, exclure: [SANS_LOT], signal }),
+    enabled: avecListe && !!proposerPlusAncien,
   })
-  // L'ordre de la vue `v_lot_fefo` : voir lib/fefo.ts, et son test.
-  const lots = trierPourSortie(q.data ?? [])
-  const plusAncien = lots.find((x) => x.lot_fournisseur !== SANS_LOT && x.quantite_kg > 0)?.lot_fournisseur
+  const plusAncien = qPremier.data?.lignes[0]?.lot_fournisseur
   useEffect(() => {
     if (proposerPlusAncien && valeur === '' && !libre && plusAncien) onChange(plusAncien)
   }, [proposerPlusAncien, valeur, libre, plusAncien, onChange])
-  const connu = valeur === '' || valeur === SANS_LOT || lots.some((x) => x.lot_fournisseur === valeur)
+
+  // UN LOT QUE LE MAGASIN NE CONNAIT PAS se saisit librement (une entree).
+  const relu = useLigneChoix(
+    'lot',
+    avecListe && valeur !== '' && valeur !== SANS_LOT ? valeur : null,
+    filtres,
+  )
+  const connu = valeur === '' || valeur === SANS_LOT || relu.isLoading || !!relu.data
   const style = cn(className, invalide && 'border-danger')
 
   // Sans magasin ou sans reference, pas de liste a proposer : la saisie libre.
-  if (!reference || !magasin || libre || !connu) {
+  if (!avecListe || libre || !connu) {
     return (
       <div className="flex items-center gap-1">
         <input
@@ -85,7 +88,7 @@ export function ChampLot({
           aria-label={ariaLabel}
           className={style}
         />
-        {reference && magasin && (libre || !connu) && (
+        {avecListe && (libre || !connu) && (
           <button
             type="button"
             onClick={() => {
@@ -103,27 +106,26 @@ export function ChampLot({
   }
 
   return (
-    <select
-      value={valeur}
-      aria-label={ariaLabel}
-      className={style}
-      onChange={(e) => {
-        if (e.target.value === AUTRE) {
+    <ChoixRecherche
+      type="lot"
+      valeur={valeur}
+      filtres={filtres}
+      exclure={[SANS_LOT]}
+      supplements={[
+        { valeur: SANS_LOT, libelle: 'Sans lot', info: 'le stock d’avant le suivi par lot' },
+        { valeur: AUTRE, libelle: 'Autre lot…', info: 'saisir un numéro qui n’est pas en stock ici' },
+      ]}
+      onChange={(v) => {
+        if (v === AUTRE) {
           setLibre(true)
           onChange('')
-        } else onChange(e.target.value)
+        } else onChange(v)
       }}
-    >
-      <option value="">{q.isLoading ? 'Lecture des lots…' : 'Choisir un lot…'}</option>
-      {lots.map((x, i) => (
-        <option key={x.lot_fournisseur} value={x.lot_fournisseur}>
-          {libelleLot(x.lot_fournisseur)} · {fmt.nombre(x.quantite_kg, 0)} kg · {fmt.date(x.date_premiere_entree)}
-          {x.date_peremption ? ` · périme le ${fmt.date(x.date_peremption)}` : ''}
-          {i === 0 && lots.length > 1 ? (x.date_peremption ? ' · à sortir en premier' : ' · le plus ancien') : ''}
-        </option>
-      ))}
-      {!lots.some((x) => x.lot_fournisseur === SANS_LOT) && <option value={SANS_LOT}>Sans lot</option>}
-      <option value={AUTRE}>Autre lot…</option>
-    </select>
+      vide="Choisir un lot…"
+      ariaLabel={ariaLabel}
+      invalide={invalide}
+      className={cn('min-w-0', classeEnveloppe(className))}
+      classeChamp={classeDuChamp(className)}
+    />
   )
 }

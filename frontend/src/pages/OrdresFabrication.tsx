@@ -24,10 +24,11 @@ import { EnTetePage } from '../composants/Coquille'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Badge, Bouton, Champ, Chargement, Etiq, Selecteur } from '../composants/ui/base'
+import { Badge, Bouton, Champ, Chargement, Etiq } from '../composants/ui/base'
 import { Onglet, OngletContenu, Onglets, OngletsListe } from '../composants/ui/surcouches'
 import { PanneRequetes } from '../composants/PanneRequetes'
 import { cn, fmt } from '../lib/utils'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 export const MODULE_OF = 'PLANS'
 
@@ -259,10 +260,6 @@ function ConsommationQualites() {
     queryFn: ({ signal }) =>
       api.get<QualiteConso[]>(`/api/ordres-fabrication/consommation-qualites?${params.toString()}`, { signal }),
   })
-  const qQualites = useQuery({
-    queryKey: ['of-qualites'],
-    queryFn: ({ signal }) => api.get<{ code_qualite: string; qualite_nom: string }[]>('/api/ordres-fabrication/qualites', { signal }),
-  })
 
   const colonnes: ColonneDT<QualiteConso>[] = [
     {
@@ -307,14 +304,15 @@ function ConsommationQualites() {
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-full sm:w-56">
           <Etiq htmlFor="cq-qualite">Qualité</Etiq>
-          <Selecteur id="cq-qualite" value={qualite} onChange={(e) => setQualite(e.target.value)}>
-            <option value="">Toutes</option>
-            {(qQualites.data ?? []).map((x) => (
-              <option key={x.code_qualite} value={x.code_qualite}>
-                {x.code_qualite} — {x.qualite_nom}
-              </option>
-            ))}
-          </Selecteur>
+          {/* La qualite se cherche (24/10/2026) : sa liste grandit. */}
+          <ChoixRecherche
+            type="qualite"
+            id="cq-qualite"
+            ariaLabel="Qualité"
+            valeur={qualite}
+            onChange={(v) => setQualite(v)}
+            vide="Toutes"
+          />
         </div>
         <div className="w-[calc(50%-0.375rem)] sm:w-40">
           <Etiq htmlFor="cq-du">Du mois</Etiq>

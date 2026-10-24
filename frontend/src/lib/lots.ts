@@ -65,12 +65,17 @@ export function useTolerancesColisage() {
  * reglage, 2 %, comme le serveur.
  */
 export function useToleranceFournisseur(code: string | null | undefined): number {
+  // LA FICHE DE CE FOURNISSEUR, ET ELLE SEULE (24/10/2026) : l'ecran chargeait
+  // mille fournisseurs pour lire une tolerance — et le millieme et unieme
+  // n'existait plus. Un champ masque revient absent : le parametre s'applique.
   const q = useQuery({
-    queryKey: ['fournisseurs-tolerance'],
-    queryFn: () =>
-      api.get<{ code_fournisseur: string; tolerance_pesee_pct?: number | string | null }[]>(
-        '/api/fournisseurs?limite=1000',
+    queryKey: ['fournisseur-tolerance', code ?? ''],
+    queryFn: ({ signal }) =>
+      api.get<{ code_fournisseur: string; tolerance_pesee_pct?: number | string | null }>(
+        `/api/fournisseurs/${encodeURIComponent(code!)}`,
+        { signal },
       ),
+    enabled: !!code,
     staleTime: 5 * 60_000,
     retry: false,
   })
@@ -85,7 +90,7 @@ export function useToleranceFournisseur(code: string | null | undefined): number
   // excedent passait au rouge « exige une derogation » que le serveur ne demandait pas.
   const p = Number(parametres.data?.find((x) => x.code_parametre === 'P_TolerEcartPesee')?.valeur_courante)
   const defaut = Number.isFinite(p) && p >= 0 ? p : 2
-  const brut = q.data?.find((f) => f.code_fournisseur === code)?.tolerance_pesee_pct
+  const brut = q.data?.tolerance_pesee_pct
   if (brut === null || brut === undefined || String(brut).trim() === '') return defaut
   const t = Number(brut)
   return Number.isFinite(t) && t >= 0 ? t : defaut

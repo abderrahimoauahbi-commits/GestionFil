@@ -14,6 +14,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { ChevronDown, Filter, FilterX } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { dansPeriode, SelecteurPeriode, type Periode } from './SelecteurPeriode'
+import { ChoixRecherche } from './ChoixRecherche'
 
 /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
    plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
@@ -38,6 +39,11 @@ export interface ChampFiltre<L> {
   valeur: (ligne: L) => string | null | undefined
   /** Libelle affiche pour une valeur, si different de la valeur elle-meme. */
   etiquette?: (valeur: string, ligne: L) => string
+  /**
+   * `liste` QUI GRANDIT (un fournisseur…) : les memes valeurs, mais filtrees en
+   * tapant au lieu d'un deroulant (24/10/2026). Les petites listes restent simples.
+   */
+  recherche?: boolean
 }
 
 type Valeurs = Record<string, string | Periode>
@@ -266,6 +272,26 @@ function UnChamp<L>({
           className={CLASSE}
         />
       </label>
+    )
+  }
+
+  if (c.recherche) {
+    return (
+      <div className={enveloppe}>
+        <span className="text-[10.5px] text-attenue-texte">
+          {c.libelle}
+          {options.length > 0 && <span className="ml-1 opacity-60">({options.length})</span>}
+        </span>
+        <ChoixRecherche
+          options={options}
+          valeur={(valeurs[c.cle] as string) ?? ''}
+          onChange={(v) => definir(c.cle, v)}
+          vide="Tous"
+          ariaLabel={c.libelle}
+          desactive={options.length === 0}
+          classeChamp="h-7 text-[12px]"
+        />
+      </div>
     )
   }
 

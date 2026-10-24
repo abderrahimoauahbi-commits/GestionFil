@@ -141,10 +141,61 @@ const champNombre = (page: Page | Locator, nom: string | RegExp) =>
   page.getByRole('textbox', { name: nom }).or(page.getByRole('spinbutton', { name: nom }))
 
 async function choisirOption(liste: Locator, motif: RegExp) {
+  // LA LISTE PEUT ARRIVER APRES L'ECRAN (les bons d'un fournisseur se lisent a part) :
+  // on attend qu'elle porte l'option, comme les tests de bout en bout.
+  await expect
+    .poll(async () => (await liste.locator('option').allTextContents()).some((l) => motif.test(l)), { timeout: 15_000 })
+    .toBe(true)
+    .catch(() => undefined)
   const libelles = await liste.locator('option').allTextContents()
   const libelle = libelles.find((l) => motif.test(l))
   if (!libelle) throw new Error(`aucune option ${motif} dans ${JSON.stringify(libelles).slice(0, 300)}`)
   await liste.selectOption({ label: libelle })
+}
+
+/** Un texte pris tel quel dans une expression reguliere. */
+const echapper = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * CHOISIR DANS UN CHAMP DE RECHERCHE (ChoixRecherche, 24/10/2026) : fournisseurs,
+ * lots, OF, qualites ne sont plus des `<select>`. On tape, le serveur cherche, on
+ * clique l'option dont le TITRE (« code — libellé ») est celui attendu : un texte
+ * exact, ou un motif. Sans titre, la premiere option proposee.
+ */
+async function choisirRecherche(p: Page, champ: Locator, texte: string, titre?: string | RegExp) {
+  await champ.click()
+  await champ.fill(texte)
+  const options = p.getByRole('listbox').getByRole('option')
+  const porte = titre === undefined ? undefined : typeof titre === 'string' ? p.getByText(titre, { exact: true }) : p.getByText(titre)
+  const o = (porte ? options.filter({ has: porte }) : options).first()
+  await expect(o, `aucune option ${String(titre ?? '')} après avoir tapé « ${texte} »`).toBeVisible({ timeout: 15_000 })
+  await o.click()
+  await expect(p.getByRole('listbox')).toHaveCount(0)
+}
+
+/** Le titre d'une option « code — libellé » (ou le code seul), par son code. */
+const titreCode = (code: string) => new RegExp(`^${echapper(code)}(?: — .*)?$`)
+
+/**
+ * LE LOT D'UNE LIGNE (ChampLot) : on le cherche ; un lot que le magasin n'a pas
+ * (epuise depuis) se tape par « Autre lot… ». « Sans lot » est un choix de la liste.
+ */
+async function choisirLot(p: Page, zone: Locator, lot: string) {
+  const champ = zone.getByRole('combobox', { name: 'Lot fournisseur' }).last()
+  const sans = lot === 'SANS-LOT'
+  await champ.click()
+  await champ.fill(sans ? '' : lot)
+  const options = p.getByRole('listbox').getByRole('option')
+  const bonne = options.filter({ has: p.getByText(sans ? 'Sans lot' : lot, { exact: true }) }).first()
+  const autre = options.filter({ has: p.getByText('Autre lot…', { exact: true }) }).first()
+  await expect(bonne.or(autre).first()).toBeVisible({ timeout: 15_000 })
+  // La frappe part au serveur apres 200 ms : « Autre lot… » peut venir de la liste
+  // d'avant. On laisse au lot le temps d'arriver avant de conclure qu'il manque.
+  if (await bonne.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true, () => false)) await bonne.click()
+  else {
+    await autre.click()
+    await zone.getByRole('textbox', { name: 'Lot fournisseur' }).last().fill(lot)
+  }
 }
 
 /** La reference d'une ligne, choisie dans la liste deroulante comme a la main. */
@@ -168,7 +219,9 @@ async function choisirReference(page: Page, code: string) {
 /** Une confirmation qui peut venir (ou non) apres un clic. */
 async function confirmerSi(page: Page, nom: string | RegExp, attente = 2_500) {
   const b = page.getByRole('alertdialog').or(page.getByRole('dialog')).getByRole('button', { name: nom })
-  if (await b.isVisible({ timeout: attente }).catch(() => false)) await b.click()
+  // `isVisible` n'attend pas (son delai est ignore par Playwright) : la confirmation
+  // qui suit une reponse du serveur passait inapercue. On l'attend vraiment.
+  if (await b.waitFor({ state: 'visible', timeout: attente }).then(() => true, () => false)) await b.click()
 }
 
 /** Attendre une valeur lue au serveur. */
@@ -271,7 +324,7 @@ async function creerBon(e: Extract<Evenement, { type: 'BC' }>) {
   let id = journal.ids[e.id]
   if (!id) {
     await aller(p, '/bons-commande/nouveau', login)
-    await p.locator('#frs').selectOption(e.fournisseur)
+    await choisirRecherche(p, p.locator('#frs'), e.fournisseur, titreCode(e.fournisseur))
     await p.locator('#datebc').fill(e.date)
     await p.locator('#livr').fill(e.livraison)
     await p.locator('#notes').fill(`Simulation ${e.id} — livraison attendue le ${jjmmaaaa(e.livraison)}.`)
@@ -506,16 +559,13 @@ async function validerFiche(p: Page) {
   return texte.match(/consommation ([\d\s ,]+) kg/)?.[1]?.trim() ?? '?'
 }
 
-const echapper = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
 /**
- * L'OF EN LIEN (22/10/2026) : on le CHOISIT dans la liste des OF prevus ou lances,
- * comme l'atelier (« OF-SIM-202609-CRM1 · 8F (lancé) »). Il ne se tape plus.
+ * L'OF EN LIEN (22/10/2026) : on le CHOISIT parmi les OF prevus ou lances, comme
+ * l'atelier. Depuis le 24/10/2026, on tape son numero et l'on prend l'option qui
+ * porte exactement ce numero (l'information en retrait dit sa qualite et son statut).
  */
 async function choisirOf(liste: Locator, numero: string) {
-  const motif = new RegExp(`^${echapper(numero)} ·`)
-  await expect(liste.locator('option').filter({ hasText: motif })).toHaveCount(1, { timeout: 15_000 })
-  await choisirOption(liste, motif)
+  await choisirRecherche(liste.page(), liste, numero, numero)
 }
 
 /** L'entete d'une fiche machine : date, magasin, OF (choisi) et responsable. */
@@ -563,7 +613,8 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
     await aller(p, `/machines/${e.machine}/fiche/MAJ/${e.zone}`, login)
     await entete(p, e.date, ofLien, responsable)
     const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'Présentes' }) })
-    const lignes = grille.locator('tbody tr')
+    // Les rangees de ligne (24/10/2026) : la rangee « ↳ » de la precision porte data-suite.
+    const lignes = grille.locator('tbody tr[data-ligne]')
     await expect(lignes).toHaveCount(etat.length, { timeout: 15_000 })
     // Une ligne sur l'etage reste entamee (30 a 45 %) ; les autres sont finies.
     // Seule une ligne encore bien pleine (40 % et plus) peut rester entamee ; elle
@@ -572,11 +623,24 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
     garde = pleines.length && (etat.length > 1 || alea() < 0.5) ? pleines[Math.floor(alea() * pleines.length)] : undefined
     for (let i = 0; i < etat.length; i++) {
       const ligne = lignes.nth(i)
-      const lot = ((await ligne.locator('td').nth(1).textContent()) ?? '').trim()
+      // Reference et lot dans la premiere cellule : le lot sur sa seconde ligne (« Sans lot » pour SANS-LOT).
+      const luLot = ((await ligne.locator('td').first().locator(':scope > div').nth(1).textContent()) ?? '').trim()
+      const lot = luLot === 'Sans lot' ? 'SANS-LOT' : luLot
+      // Une ligne non touchee se lit, sans case : « Modifier » l'ouvre.
+      const modifier = ligne.getByRole('button', { name: /^Modifier/ })
+      if (await modifier.count()) await modifier.click()
       const cases = casesDe(ligne)
+      await expect(cases.first()).toBeVisible()
       if (garde && lot === garde.lot_fournisseur) await taper(cases.nth(1), fr((garde.pourcentage ?? 100) * (0.35 + alea() * 0.25), 1))
       else await taper(cases.nth(0), '0')
-      await ligne.getByLabel('Précision du motif').fill('Constat de production')
+      // La precision est sur la rangee, ou sur sa rangee « ↳ » quand la colonne du motif est prise.
+      const cle = await ligne.getAttribute('data-ligne')
+      const zone = grille.locator(`tbody tr[data-ligne="${cle}"], tbody tr[data-suite="${cle}"]`)
+      if (!(await zone.getByLabel('Précision du motif').count())) {
+        const plus = ligne.getByRole('button', { name: /^Ajouter une précision/ })
+        if (await plus.count()) await plus.click()
+      }
+      await zone.getByLabel('Précision du motif').first().fill('Constat de production')
     }
     const conso = await validerFiche(p)
     compte.push(`constat ${conso} kg consommés${sortant && sortant !== ofLien ? ` (période de ${sortant})` : ''}`)
@@ -624,19 +688,18 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
       // UN CHARGEMENT SANS OF NOMME SA QUALITE (23/10/2026) : la premiere qualite ouverte,
       // la base refusant une ligne de chargement sans qualite.
       if (!ofLien) {
-        const liste = p.getByRole('combobox', { name: 'Qualité', exact: true })
-        const options = (await liste.locator('option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).filter(Boolean)
-        if (!options.length) throw new Error('aucune qualité ouverte : un chargement sans OF ne peut pas nommer sa qualité')
-        await liste.selectOption(options[0])
+        // La qualite se cherche (24/10/2026) : la premiere proposee, champ vide.
+        await choisirRecherche(p, p.getByRole('combobox', { name: 'Qualité', exact: true }), '').catch(() => {
+          throw new Error('aucune qualité ouverte : un chargement sans OF ne peut pas nommer sa qualité')
+        })
       }
       const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'À charger' }) })
       for (const c of choix) {
+        // La reference a charger se cherche au serveur (24/10/2026), « code — désignation ».
         await p.getByRole('button', { name: 'Ajouter une référence' }).click()
-        const liste = p.locator('select').filter({ has: p.locator('option', { hasText: 'Choisir une référence…' }) })
-        await expect(liste.locator(`option[value="${CSS_escape(c.r)}"]`)).toHaveCount(1, { timeout: 15_000 })
-        await liste.selectOption(c.r)
-        const ligne = grille.locator('tbody tr').last()
-        await ligne.getByRole('combobox', { name: 'Lot fournisseur' }).selectOption(c.lot)
+        await choisirRecherche(p, p.getByRole('combobox', { name: 'Ajouter une référence' }), c.r, c.r)
+        const ligne = grille.locator('tbody tr[data-ligne]').last()
+        await choisirLot(p, ligne, c.lot)
         if (c.voie) await taper(ligne.getByRole('textbox', { name: 'Largeur de la voie (m)' }), fr(c.voie, 2))
         await taper(casesDe(ligne).nth(0), String(c.bobines))
       }
@@ -694,8 +757,7 @@ async function creerOf(e: Extract<Evenement, { type: 'OF' }>) {
     await p.locator('#of-numero').fill(e.numero)
     await p.locator('#of-date').fill(e.date)
     await p.locator('#of-fin').fill(e.fin)
-    await expect(p.locator(`#of-qualite option[value="${CSS_escape(e.qualite)}"]`)).toHaveCount(1, { timeout: 15_000 })
-    await p.locator('#of-qualite').selectOption(e.qualite)
+    await choisirRecherche(p, p.locator('#of-qualite'), e.qualite, titreCode(e.qualite))
     await p.locator('#of-metrage').fill(String(e.metrage))
     await p.locator('#of-notes').fill(`Simulation : la production du mois sur ${e.machine}.`)
     await p.getByRole('button', { name: 'Créer', exact: true }).click()
@@ -781,13 +843,7 @@ async function ficheHorsMachine(
     await ref.selectOption(l.r)
     if (l.lot) {
       // La liste des lots du magasin ; un lot epuise depuis se tape (« Autre lot… »).
-      const liste = carte.getByRole('combobox', { name: 'Lot fournisseur' })
-      await expect(liste.locator('option').first()).not.toHaveText('Lecture des lots…', { timeout: 15_000 })
-      if (await liste.locator(`option[value="${CSS_escape(l.lot)}"]`).count()) await liste.selectOption(l.lot)
-      else {
-        await liste.selectOption('__autre__')
-        await carte.getByRole('textbox', { name: 'Lot fournisseur' }).fill(l.lot)
-      }
+      await choisirLot(p, carte, l.lot)
     }
     await taper(carte.getByRole('textbox', { name: 'Quantité (kg)' }), fr(l.kg, 1))
   }
@@ -827,8 +883,8 @@ async function sortieAtelier(date: string, magasin: string, of: string, lignes: 
     await taper(champNombre(p, 'Quantité en kilos').last(), String(l.kg))
     await choisirOption(p.getByRole('combobox', { name: 'Motif de la ligne' }).last(), /atelier/i)
     if (l.lot) {
-      const lot = p.locator('tbody select').filter({ has: p.locator('option', { hasText: 'Choisir un lot' }) }).last()
-      await choisirOption(lot, new RegExp(echapper(l.lot)))
+      // Le lot se cherche (24/10/2026) ; celui de la ligne en cours, la derniere.
+      await choisirLot(p, p.locator('body'), l.lot)
     }
     await p.getByRole('button', { name: 'Valider la ligne' }).last().click()
   }
@@ -1232,12 +1288,14 @@ async function retourner(e: Extract<Evenement, { type: 'RETOUR' }>) {
   if (!ligne || kg < 1) return `${l.ref} lot ${l.lot} déjà consommé : rien à rendre`
 
   await aller(p, '/retours-fournisseur/nouveau', login)
-  await p.locator('#rfo-fournisseur').selectOption(e.fournisseur)
+  // Fournisseur, reference en stock et lot se cherchent (24/10/2026).
+  await choisirRecherche(p, p.locator('#rfo-fournisseur'), e.fournisseur, titreCode(e.fournisseur))
   await p.locator('#rfo-date').fill(e.date)
   await p.locator('#rfo-motif').fill(`Non conforme au déballage ${marque}`)
   await p.getByRole('combobox', { name: 'Magasin' }).first().selectOption(l.magasin)
-  await p.getByRole('combobox', { name: 'Référence' }).first().selectOption(l.ref)
-  await p.getByRole('combobox', { name: 'Lot' }).first().selectOption(ligne.lot_fournisseur ?? '')
+  await choisirRecherche(p, p.getByRole('combobox', { name: 'Référence', exact: true }).first(), l.ref, titreCode(l.ref))
+  await choisirRecherche(p, p.getByRole('combobox', { name: 'Lot', exact: true }).first(),
+    ligne.lot_fournisseur ?? '', ligne.lot_fournisseur ?? 'Sans lot')
   await taper(p.getByRole('textbox', { name: 'Quantité kg' }).first(), String(kg))
   await p.getByRole('combobox', { name: 'Motif de la ligne' }).first().selectOption('R1')
   await p.getByRole('button', { name: 'Enregistrer', exact: true }).click()

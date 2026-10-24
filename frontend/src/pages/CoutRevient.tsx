@@ -40,6 +40,7 @@ import {
 import { EcartsPrix } from './EcartsPrix'
 import { fmt } from '../components/ui'
 import { cn } from '../lib/utils'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 const MODULE = 'VALORISATION'
 
@@ -353,22 +354,11 @@ function FormulaireFrais({
   })
   const [erreur, setErreur] = useState<string | null>(null)
 
-  const qRecept = useQuery({
-    queryKey: ['receptions'],
-    queryFn: ({ signal }) => api.get<{ id_reception: string; numero_reception: string; date_reception: string; fournisseur_nom: string | null; statut: string }[]>(
-      '/api/receptions?limite=200', { signal }
-    ),
-  })
   const qDevises = useQuery({
     queryKey: ['devises'],
     queryFn: ({ signal }) => api.get<{ code_devise: string }[]>('/api/devises', { signal }),
   })
 
-  const receptions = useMemo(() => {
-    const d = qRecept.data
-    const l = Array.isArray(d) ? d : ((d as unknown as { lignes?: typeof d })?.lignes ?? [])
-    return (l ?? []).filter((r) => r.statut === 'VALIDE')
-  }, [qRecept.data])
 
   const creer = useMutation({
     mutationFn: () =>
@@ -405,18 +395,17 @@ function FormulaireFrais({
 
           <div>
             <Etiq obligatoire htmlFor="ch-coutrevient-1">Réception</Etiq>
-            <Selecteur id="ch-coutrevient-1"
-              value={form.id_reception}
-              onChange={(e) => setForm({ ...form, id_reception: e.target.value })}
-            >
-              <option value="">— choisir —</option>
-              {receptions.map((r) => (
-                <option key={r.id_reception} value={r.id_reception}>
-                  {r.numero_reception} — {(r.date_reception ?? '').slice(0, 10)} —{' '}
-                  {r.fournisseur_nom ?? '?'}
-                </option>
-              ))}
-            </Selecteur>
+            {/* LES RECEPTIONS VALIDEES, CHERCHEES (24/10/2026) : la liste des
+                200 dernieres coupait les plus anciennes sans le dire. */}
+            <ChoixRecherche
+              type="reception"
+              id="ch-coutrevient-1"
+              ariaLabel="Réception"
+              filtres={{ statut: 'VALIDE' }}
+              valeur={form.id_reception}
+              onChange={(v) => setForm({ ...form, id_reception: v })}
+              placeholder="Tapez un numéro de réception ou un fournisseur…"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

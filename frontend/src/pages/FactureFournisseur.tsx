@@ -18,6 +18,12 @@
  * figee ; elle se corrige par un avoir ou une facture complementaire.
  *
  * Saisie sur la page, pas dans une fenetre : c'est un document qu'on relit.
+ *
+ * L'APERCU ET LA VALIDATION PORTENT SUR LA FACTURE ENREGISTREE (24/10/2026).
+ * Le serveur simule ce qui est en base, pas ce qui est a l'ecran : tant qu'un
+ * champ a change (en-tete, notes ou lignes), l'apercu affiche ne vaut plus et
+ * « Aperçu » comme « Valider » attendent l'enregistrement — la raison est
+ * ecrite dans la barre du bas.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -44,8 +50,21 @@ import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { lireNombre } from '../lib/nombres'
 import { nouvelIdentifiant } from '../lib/identifiant'
+import { useGardeSaisie } from '../hooks/useGardeSaisie'
 
 const MODULE = 'RECEPTIONS'
+
+/** Le statut se lit en mots, pas en code. */
+const LIBELLE_STATUT: Record<string, string> = {
+  BROUILLON: 'Brouillon',
+  VALIDEE: 'Validée',
+  ANNULEE: 'Annulée',
+}
+const TON_STATUT: Record<string, 'neutre' | 'succes' | 'danger'> = {
+  BROUILLON: 'neutre',
+  VALIDEE: 'succes',
+  ANNULEE: 'danger',
+}
 
 interface Candidate {
   id_ligne_reception: string
@@ -180,6 +199,13 @@ export function FactureFournisseur() {
   const lue = qFacture.data
   const statut = lue?.entete.statut ?? 'BROUILLON'
   const modifiable = statut === 'BROUILLON' && droits.peutEcrire
+  /* LA GARDE DE SAISIE : un brouillon commence ne se perd pas d'un clic. Une
+     facture nouvelle n'arme la garde qu'une fois quelque chose saisi. */
+  const sigCourante = signature(entete, choisies)
+  const touche = nouvelle
+    ? entete.numero_facture.trim() !== '' || entete.code_fournisseur !== '' || Object.keys(choisies).length > 0
+    : initiale !== null && sigCourante !== initiale
+  const quitter = useGardeSaisie(modifiable && touche)
 
   // L'en-tete relu entre dans la saisie, une fois.
   useEffect(() => {
@@ -404,6 +430,13 @@ export function FactureFournisseur() {
 
   // Rien a enregistrer tant que rien n'a bouge : le bouton ne s'offre pas.
   const modifie = initiale === null || signature(entete, choisies) !== initiale
+  // L'apercu decrit la facture ENREGISTREE : un changement a l'ecran le perime.
+  const apercuValable = modifie ? null : apercu
+  const raisonValidation = modifie
+    ? 'Enregistrez d’abord : l’aperçu et la validation portent sur la facture enregistrée.'
+    : !apercuValable
+      ? 'Faites d’abord l’aperçu.'
+      : null
 
   const complet =
     entete.numero_facture.trim() !== '' &&
@@ -424,8 +457,8 @@ export function FactureFournisseur() {
         }
         actions={
           <div className="flex items-center gap-2">
-            {!nouvelle && <Badge ton={statut === 'VALIDEE' ? 'succes' : 'neutre'}>{statut}</Badge>}
-            <Bouton variante="contour" onClick={() => naviguer('/factures-fournisseur')}>
+            {!nouvelle && <Badge ton={TON_STATUT[statut] ?? 'neutre'}>{LIBELLE_STATUT[statut] ?? statut}</Badge>}
+            <Bouton variante="contour" onClick={() => quitter(() => naviguer('/factures-fournisseur'))}>
               <ArrowLeft />
               Retour
             </Bouton>
@@ -569,6 +602,16 @@ export function FactureFournisseur() {
                 <option value="1">Facture nette (kilos gardés)</option>
                 <option value="0">Facture brute (avoir à venir)</option>
               </Selecteur>
+            </div>
+            <div className="sm:col-span-2 lg:col-span-4">
+              <Etiq htmlFor="f-notes">Notes</Etiq>
+              <Champ
+                id="f-notes"
+                value={entete.notes}
+                disabled={!modifiable}
+                placeholder="Ce qu’il faut savoir de cette facture"
+                onChange={(e) => setEntete({ ...entete, notes: e.target.value })}
+              />
             </div>
           </CarteCorps>
         </Carte>
@@ -776,16 +819,16 @@ export function FactureFournisseur() {
           )}
         </Carte>
 
-        {apercu && (
+        {apercuValable && (
           <Carte>
             <CarteEntete>
               <CarteTitre>Ce que la validation va faire</CarteTitre>
             </CarteEntete>
             <CarteCorps className="space-y-2">
-              {(apercu.avis?.length ?? 0) > 0 && (
+              {(apercuValable.avis?.length ?? 0) > 0 && (
                 <Alerte ton="alerte" titre="À vérifier avant de signer">
                   <ul className="list-inside list-disc">
-                    {apercu.avis!.map((a) => (
+                    {apercuValable.avis!.map((a) => (
                       <li key={a}>{a}</li>
                     ))}
                   </ul>
@@ -793,11 +836,11 @@ export function FactureFournisseur() {
               )}
               <dl className="grid gap-3 text-[13px] sm:grid-cols-2 lg:grid-cols-5">
                 {[
-                  ['Valeur provisoire', fmt.mad(apercu.valeur_provisoire_mad)],
-                  ['Valeur facturée', fmt.mad(apercu.valeur_definitive_mad)],
-                  ['Différence', signe(apercu.difference_mad)],
-                  ['Au stock (CMUP)', signe(apercu.au_stock_mad)],
-                  ['Écart de prix (tracé)', signe(apercu.ecart_prix_mad)],
+                  ['Valeur provisoire', fmt.mad(apercuValable.valeur_provisoire_mad)],
+                  ['Valeur facturée', fmt.mad(apercuValable.valeur_definitive_mad)],
+                  ['Différence', signe(apercuValable.difference_mad)],
+                  ['Au stock (CMUP)', signe(apercuValable.au_stock_mad)],
+                  ['Écart de prix (tracé)', signe(apercuValable.ecart_prix_mad)],
                 ].map(([k, v]) => (
                   <div key={k as string}>
                     <dt className="text-[11px] uppercase tracking-wider text-attenue-texte">{k}</dt>
@@ -805,9 +848,9 @@ export function FactureFournisseur() {
                   </div>
                 ))}
               </dl>
-              {(apercu.receptions?.length ?? 0) > 0 && (
+              {(apercuValable.receptions?.length ?? 0) > 0 && (
                 <p className="text-[12px] text-attenue-texte">
-                  {apercu.receptions!.map((r) => `${r.numero_reception} (${signe(r.difference_mad)}${r.cloturee ? ', clôturé' : ', reste à facturer'})`).join(' · ')}
+                  {apercuValable.receptions!.map((r) => `${r.numero_reception} (${signe(r.difference_mad)}${r.cloturee ? ', clôturé' : ', reste à facturer'})`).join(' · ')}
                 </p>
               )}
             </CarteCorps>
@@ -829,13 +872,15 @@ export function FactureFournisseur() {
         )}
         {!nouvelle && statut === 'BROUILLON' && droits.peutValider && (
           <>
-            <Bouton variante="contour" chargement={voir.isPending} onClick={() => voir.mutate()}>
+            <Bouton variante="contour" chargement={voir.isPending} disabled={modifie}
+              title={modifie ? (raisonValidation ?? undefined) : undefined} onClick={() => voir.mutate()}>
               <Eye />
               Aperçu
             </Bouton>
             <Bouton
-              disabled={!apercu}
-              title={!apercu ? 'Faites d’abord l’aperçu' : undefined}
+              variante={modifie ? 'contour' : 'principal'}
+              disabled={!!raisonValidation}
+              title={raisonValidation ?? undefined}
               chargement={valider.isPending}
               onClick={() =>
                 confirmation.demander({
@@ -870,6 +915,10 @@ export function FactureFournisseur() {
           </Bouton>
         )}
         <span className="ml-auto text-[12px] text-attenue-texte">
+          {/* LA RAISON D'UN BOUTON GRISE, ECRITE : on ne la cherche pas au survol. */}
+          {statut === 'BROUILLON' && !nouvelle && droits.peutValider && raisonValidation && (
+            <span className="text-alerte">{raisonValidation} </span>
+          )}
           {statut === 'BROUILLON'
             ? 'Brouillon : rien n’est au CMUP avant la validation.'
             : 'Document figé.'}

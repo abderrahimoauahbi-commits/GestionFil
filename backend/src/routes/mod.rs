@@ -31,6 +31,7 @@ mod inventaires;
 mod ordres_fabrication;
 pub(crate) mod bons_commande;
 mod receptions;
+mod recherche;
 mod telechargements;
 
 use crate::state::AppState;
@@ -95,6 +96,12 @@ pub fn router(state: AppState) -> Router {
         .allow_headers([
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
+        ])
+        // LA LISTE COUPEE SE DIT (24/10/2026) : un poste de bureau (autre origine)
+        // doit pouvoir lire ces en-tetes, sinon il ne sait pas qu'il manque des lignes.
+        .expose_headers([
+            axum::http::HeaderName::from_static("x-total-count"),
+            axum::http::HeaderName::from_static("x-liste-tronquee"),
         ]);
 
     // L'interface, quand elle est deployee a cote du serveur.
@@ -485,6 +492,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stock/besoin", get(consultation::besoin_reference))
         .route("/api/stock/dormant", get(consultation::stock_dormant))
         .route("/api/stock/lots", get(consultation::lots))
+        // LA RECHERCHE DES REFERENTIELS (24/10/2026) : le choix d'une valeur dans une
+        // liste qui grandit, cherche par le serveur, qui dit s'il en reste.
+        .route("/api/recherche/{type}", get(recherche::rechercher))
         // Le registre des lots (02/10/2026) : vues, fiche de vie, decisions.
         .route("/api/lots", get(lots::lister))
         .route("/api/lots/compteurs", get(lots::compteurs))

@@ -204,15 +204,15 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
             Aucune pièce. Déposez ici le scan du dossier : facture, DUM, quittance, factures de frais.
           </p>
         ) : (
+          /* SANS LARGEUR MINIMALE (24/10/2026) : taille et deposant passent sous
+             la date (↳). */
           <div tabIndex={0} role="region" aria-label="Zone défilante" className="defilement-x focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anneau">
-            <table className="w-full min-w-[48rem] text-[12.5px]">
+            <table className="w-full text-[12.5px]">
               <thead>
                 <tr className="border-b border-bordure">
                   <th className={cn(th, 'text-left')}>Document</th>
                   <th className={cn(th, 'w-52 text-left')}>Nature</th>
-                  <th className={cn(th, 'w-24 text-right')}>Taille</th>
-                  <th className={cn(th, 'w-32 text-left')}>Déposé le</th>
-                  <th className={cn(th, 'w-28 text-left')}>Par</th>
+                  <th className={cn(th, 'w-40 text-left')}>Déposé le</th>
                   <th className={cn(th, SAISIE_ASSISTEE_VISIBLE ? 'w-36' : 'w-24')} />
                 </tr>
               </thead>
@@ -233,9 +233,12 @@ export function PiecesDossier({ d, ecrire }: { d: DossierComplet; ecrire: boolea
                         {NATURE_PIECE[p.nature]}
                       </span>
                     </td>
-                    <td className={cn(td, 'text-right tabular-nums')}>{poids(p.taille_octets)}</td>
-                    <td className={td}>{fmt.date(p.date_depot)}</td>
-                    <td className={cn(td, 'text-attenue-texte')}>{p.depose_par ?? '—'}</td>
+                    <td className={td}>
+                      {fmt.date(p.date_depot)}
+                      <div className="text-[11px] tabular-nums text-attenue-texte">
+                        ↳ {p.depose_par ?? '—'} · {poids(p.taille_octets)}
+                      </div>
+                    </td>
                     <td className={td}>
                       <div className="flex justify-end gap-0.5">
                         <Bouton

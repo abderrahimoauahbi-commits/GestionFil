@@ -46,6 +46,7 @@ import {
 import { Aide, Onglet, OngletContenu, Onglets, OngletsListe } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { exporterCsv } from '../lib/export'
+import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
    plus bas, elle ne tenait que parce que ses lecteurs sont des composants,
@@ -597,19 +598,17 @@ export function Besoins() {
                     </option>
                   ))}
                 </select>
-                <select
-                  value={fournisseur}
-                  onChange={(e) => setFournisseur(e.target.value)}
-                  className={CLASSE_FILTRE + ' min-w-[10rem]'}
-                  aria-label="Fournisseur"
-                >
-                  <option value="">Tous fournisseurs</option>
-                  {axes.fournisseurs.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
+                {/* AVEC RECHERCHE (24/10/2026) : les fournisseurs du dossier, filtres en
+                    tapant ; seuls ceux qui y figurent sont proposes. */}
+                <ChoixRecherche
+                  options={axes.fournisseurs.map((f) => ({ valeur: f, libelle: f }))}
+                  valeur={fournisseur}
+                  onChange={(v) => setFournisseur(v)}
+                  vide="Tous fournisseurs"
+                  ariaLabel="Fournisseur"
+                  className="w-56 max-w-full"
+                  classeChamp="h-7 text-[12px]"
+                />
                 <SelecteurPeriode
                   mois={axes.mois}
                   valeur={periode}

@@ -2,7 +2,7 @@
  * PeseesMobile — la pesee d'une reception AU DOIGT, sous 768 px.
  *
  * POURQUOI UN ECRAN A PART. Au bureau, la pesee se tape dans une grille large
- * (`GrilleLignes`) : une ligne, dix colonnes, le ✓ a droite. Sur un telephone de
+ * (`receptions/GrilleReception`, 24/10/2026) : une ligne, le ✓ a droite. Sur un telephone de
  * quai cette grille deborde — c'est tout le probleme qu'on repare. Ici, chaque
  * ligne est une CARTE (ce qui identifie et ce qui se pese en tete, le reste en
  * ligne « ↳ »), et la saisie d'une ligne s'ouvre en FEUILLE PLEIN ECRAN, jamais
@@ -26,9 +26,13 @@ import {
   depuisReference,
   estPrete,
   kgDe,
+  unitesDe,
 } from '../../composants/GrilleLignes'
+import type { ChampColis } from '../../lib/conditionnement'
 import { Badge, Bouton, Champ, Etiq, Selecteur } from '../../composants/ui/base'
 import { lireNombre } from '../../lib/nombres'
+import { codesStatut, libelleStatut } from '../../lib/statuts'
+import { StatutBadge } from '../../composants/StatutBadge'
 import { cn, fmt } from '../../lib/utils'
 
 interface Magasin {
@@ -49,14 +53,43 @@ export interface PeseesMobileProps {
   tolerancePct: number
   /** La derogation ne se coche qu'en brouillon. */
   brouillon: boolean
+  /**
+   * AU CONTROLE, LA PESEE EST FIGEE (regle 4) : poids, unite, BL, colis,
+   * palettes, bobines, lot et derogation ne se changent plus, aucune ligne ne
+   * s'ajoute ni ne se retire — le serveur le refuserait. Restent la qualite,
+   * le magasin et les observations.
+   */
+  peseeFigee?: boolean
+  /** Relier pesee, palettes et bobines (conditionnement du lot, sinon la fiche). */
+  relier?: (l: LigneSaisie, source: ChampColis, valeur: string) => LigneSaisie
   surRetirer: (l: LigneSaisie) => void
 }
 
-const QUALITES: { valeur: string; libelle: string }[] = [
-  { valeur: 'CONFORME', libelle: 'Conforme' },
-  { valeur: 'QUARANTAINE', libelle: 'Quarantaine' },
-  { valeur: 'NON_CONFORME', libelle: 'Non conforme' },
-]
+/**
+ * DEUX PESEES DU MEME LOT S'ADDITIONNENT (21/10/2026) : poids, palettes,
+ * bobines, poids annonce et colis. Le serveur fait de meme.
+ */
+export function fondrePesee(garde: LigneSaisie, ajout: LigneSaisie): LigneSaisie {
+  const additionner = (a: string | undefined, b: string | undefined) => {
+    const x = lireNombre(a ?? '')
+    const y = lireNombre(b ?? '')
+    return x == null && y == null ? '' : String(Number(((x ?? 0) + (y ?? 0)).toFixed(4)))
+  }
+  return {
+    ...garde,
+    qte: additionner(garde.qte, ajout.qte),
+    palettes: additionner(garde.palettes, ajout.palettes),
+    bobines: additionner(garde.bobines, ajout.bobines),
+    extra: {
+      ...garde.extra,
+      bl: additionner(garde.extra?.bl, ajout.extra?.bl),
+      colis: additionner(garde.extra?.colis, ajout.extra?.colis),
+    },
+  }
+}
+
+/** Les statuts qualite, libelles de la table commune (lib/statuts). */
+const QUALITES = codesStatut('statut_qualite').map((valeur) => ({ valeur, libelle: libelleStatut('statut_qualite', valeur) }))
 
 /** Le depassement de l'attendu, en kilos et en %, ou null si pas comparable. */
 function ecartVsAttendu(l: LigneSaisie): { kg: number; pct: number } | null {
@@ -74,6 +107,8 @@ export function PeseesMobile({
   magasins,
   tolerancePct,
   brouillon,
+  peseeFigee = false,
+  relier,
   surRetirer,
 }: PeseesMobileProps) {
   /* La ligne en cours d'edition est une COPIE : on ne touche aux lignes du
@@ -97,10 +132,13 @@ export function PeseesMobile({
    */
   const attendues = useMemo(
     () =>
-      proposees.filter(
-        (p) => !lignes.some((l) => (l.extra?.id_ligne_bc ?? '') === (p.id_ligne_bc ?? '')),
-      ),
-    [proposees, lignes],
+      // AU CONTROLE, rien ne s'ajoute : les lignes attendues ne se proposent plus.
+      peseeFigee
+        ? []
+        : proposees.filter(
+            (p) => !lignes.some((l) => (l.extra?.id_ligne_bc ?? '') === (p.id_ligne_bc ?? '')),
+          ),
+    [proposees, lignes, peseeFigee],
   )
 
   const ouvrir = (l: LigneSaisie) => {
@@ -130,33 +168,12 @@ export function PeseesMobile({
    */
   const cleLot = (l: LigneSaisie) =>
     `${l.extra?.id_ligne_bc || l.code_reference}|${(l.extra?.lot ?? '').trim()}`
-  const additionner = (a: string | undefined, b: string | undefined) => {
-    const x = lireNombre(a ?? '')
-    const y = lireNombre(b ?? '')
-    return x == null && y == null ? '' : String(Number(((x ?? 0) + (y ?? 0)).toFixed(4)))
-  }
   const valider = () => {
     if (!edite) return
     const fige: LigneSaisie = { ...edite, valide: true }
     const meme = estNouvelle ? lignes.find((x) => cleLot(x) === cleLot(fige)) : undefined
     if (meme) {
-      setLignes((ls) =>
-        ls.map((x) =>
-          x.cle !== meme.cle
-            ? x
-            : {
-                ...x,
-                qte: additionner(x.qte, fige.qte),
-                palettes: additionner(x.palettes, fige.palettes),
-                bobines: additionner(x.bobines, fige.bobines),
-                extra: {
-                  ...x.extra,
-                  bl: additionner(x.extra?.bl, fige.extra?.bl),
-                  colis: additionner(x.extra?.colis, fige.extra?.colis),
-                },
-              },
-        ),
-      )
+      setLignes((ls) => ls.map((x) => (x.cle !== meme.cle ? x : fondrePesee(x, fige))))
       setFusion(
         `${fige.code_reference} : même lot que la ligne ${lignes.indexOf(meme) + 1}, la pesée s’y ajoute (une ligne par lot).`,
       )
@@ -175,6 +192,13 @@ export function PeseesMobile({
   }
 
   const poser = (patch: Partial<LigneSaisie>) => setEdite((e) => (e ? { ...e, ...patch } : e))
+  /* LE POIDS, LES PALETTES ET LES BOBINES SE REPONDENT, comme au bureau. */
+  const poserColis = (source: ChampColis, valeur: string) =>
+    setEdite((e) => {
+      if (!e) return e
+      if (relier) return relier(e, source, valeur)
+      return { ...e, [source === 'quantite' ? 'qte' : source]: valeur }
+    })
   const poserExtra = (cle: string, v: string) =>
     setEdite((e) => (e ? { ...e, extra: { ...e.extra, [cle]: v } } : e))
 
@@ -221,10 +245,12 @@ export function PeseesMobile({
         </ul>
       )}
 
-      <Bouton variante="contour" className="mt-3 w-full" onClick={() => setAjout(true)}>
-        <Plus />
-        Ajouter une ligne pesée
-      </Bouton>
+      {!peseeFigee && (
+        <Bouton variante="contour" className="mt-3 w-full" onClick={() => setAjout(true)}>
+          <Plus />
+          Ajouter une ligne pesée
+        </Bouton>
+      )}
 
       {ajout && (
         <FeuilleAjout
@@ -245,8 +271,10 @@ export function PeseesMobile({
           magasins={magasins}
           tolerancePct={tolerancePct}
           brouillon={brouillon}
+          peseeFigee={peseeFigee}
           estNouvelle={estNouvelle}
           poser={poser}
+          poserColis={poserColis}
           poserExtra={poserExtra}
           surValider={valider}
           surRetirer={retirer}
@@ -317,7 +345,10 @@ function CarteLigne({
   const ecart = ecartVsAttendu(ligne)
   const hors = ecart != null && ecart.pct > tolerancePct
   const prete = estPrete(ligne, true)
+  /* L'ATTENDU, L'ECART ET LE LOT SE LISENT SUR LA CARTE (24/10/2026) : un
+     telephone n'a pas de survol. */
   const secondaires = [
+    e.lot ? `Lot ${e.lot}` : 'Lot non relevé',
     e.magasin ? `Magasin ${e.magasin}` : null,
     e.colis ? `${e.colis} colis (BL)` : null,
     e.bl ? `${fmt.nombre(Number(e.bl), 2)} kg annoncés` : null,
@@ -395,10 +426,17 @@ function CarteLigne({
                 {fmt.nombre(Number(ligne.bobines), 0)} bob.
               </span>
             )}
-            {hors && ecart != null && (
-              <span className="text-[12px] font-medium text-danger tabular-nums">
+            {ecart != null && (
+              <span
+                className={cn(
+                  'text-[12px] tabular-nums',
+                  hors ? 'font-medium text-danger' : ecart.pct < -tolerancePct ? 'text-alerte' : 'text-succes',
+                )}
+              >
                 {ecart.kg > 0 ? '+' : ''}
-                {fmt.nombre(ecart.kg, 1)} kg · hors tolérance
+                {fmt.nombre(ecart.kg, 1)} kg ({ecart.pct > 0 ? '+' : ''}
+                {fmt.nombre(ecart.pct, 1)} %) ·{' '}
+                {hors ? 'hors tolérance' : ecart.pct < -tolerancePct ? 'partielle' : 'conforme'}
               </span>
             )}
           </div>
@@ -407,17 +445,7 @@ function CarteLigne({
             {secondaires.length > 0 && <div className="truncate">↳ {secondaires.join(' · ')}</div>}
             <div className="flex items-center gap-1.5">
               <span className="shrink-0">↳</span>
-              <Badge
-                ton={
-                  e.qualite === 'NON_CONFORME'
-                    ? 'danger'
-                    : e.qualite === 'QUARANTAINE'
-                      ? 'alerte'
-                      : 'succes'
-                }
-              >
-                {QUALITES.find((q) => q.valeur === (e.qualite ?? 'CONFORME'))?.libelle}
-              </Badge>
+              <StatutBadge entite="statut_qualite" code={e.qualite ?? 'CONFORME'} />
             </div>
           </div>
         </div>
@@ -480,8 +508,10 @@ function FeuilleEdition({
   magasins,
   tolerancePct,
   brouillon,
+  peseeFigee,
   estNouvelle,
   poser,
+  poserColis,
   poserExtra,
   surValider,
   surRetirer,
@@ -491,8 +521,10 @@ function FeuilleEdition({
   magasins: Magasin[]
   tolerancePct: number
   brouillon: boolean
+  peseeFigee: boolean
   estNouvelle: boolean
   poser: (patch: Partial<LigneSaisie>) => void
+  poserColis: (source: ChampColis, valeur: string) => void
   poserExtra: (cle: string, v: string) => void
   surValider: () => void
   surRetirer: () => void
@@ -503,6 +535,7 @@ function FeuilleEdition({
   const hors = ecart != null && ecart.pct > tolerancePct
   const prete = estPrete(ligne, true)
   const derog = e.derog === '1'
+  const unites = unitesDe(ligne)
 
   return (
     <FeuilleMobile
@@ -515,14 +548,17 @@ function FeuilleEdition({
       surFermer={surFermer}
       pied={
         <>
-          <Bouton
-            variante="contour"
-            className="text-danger hover:bg-danger/10"
-            onClick={surRetirer}
-          >
-            <Trash2 />
-            {estNouvelle ? 'Abandonner' : 'Retirer'}
-          </Bouton>
+          {/* Au controle, une ligne ne se retire pas : le serveur le refuse. */}
+          {(!peseeFigee || estNouvelle) && (
+            <Bouton
+              variante="contour"
+              className="text-danger hover:bg-danger/10"
+              onClick={surRetirer}
+            >
+              <Trash2 />
+              {estNouvelle ? 'Abandonner' : 'Retirer'}
+            </Bouton>
+          )}
           <Bouton className="ml-auto" disabled={!prete} onClick={surValider}>
             <Check />
             Valider la ligne
@@ -541,9 +577,10 @@ function FeuilleEdition({
             step="any"
             min="0"
             inputMode="decimal"
-            autoFocus
+            autoFocus={!peseeFigee}
+            disabled={peseeFigee}
             value={ligne.qte}
-            onChange={(ev) => poser({ qte: ev.target.value })}
+            onChange={(ev) => poserColis('quantite', ev.target.value)}
             className="h-14 text-right text-[22px] font-semibold tabular-nums"
             aria-label="Poids pesé en kilos"
           />
@@ -556,11 +593,75 @@ function FeuilleEdition({
           )}
         </div>
 
+        {/* PALETTES ET BOBINES, comptees au quai : elles se repondent avec le
+            poids tant que la ligne est liee (24/10/2026). */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Etiq htmlFor="pm-pal">Palettes</Etiq>
+            <Champ
+              id="pm-pal"
+              type="number"
+              min="0"
+              inputMode="decimal"
+              disabled={peseeFigee}
+              value={ligne.palettes}
+              onChange={(ev) => poserColis('palettes', ev.target.value)}
+              className="h-11 text-right text-[16px] tabular-nums"
+              aria-label="Nombre de palettes"
+            />
+          </div>
+          <div>
+            <Etiq htmlFor="pm-bob">Bobines</Etiq>
+            <Champ
+              id="pm-bob"
+              type="number"
+              min="0"
+              inputMode="numeric"
+              disabled={peseeFigee}
+              value={ligne.bobines}
+              onChange={(ev) => poserColis('bobines', ev.target.value)}
+              className="h-11 text-right text-[16px] tabular-nums"
+              aria-label="Nombre de bobines"
+            />
+          </div>
+          <label className="col-span-2 flex items-center gap-2 text-[12.5px] text-attenue-texte">
+            <input
+              type="checkbox"
+              checked={ligne.lie}
+              disabled={peseeFigee}
+              onChange={(ev) => poser({ lie: ev.target.checked })}
+              className="size-4"
+              aria-label={ligne.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+            />
+            Poids, palettes et bobines liés (décochez pour une palette entamée)
+          </label>
+          {unites.length > 0 && (
+            <div className="col-span-2">
+              <Etiq htmlFor="pm-unite">Unité d’archivage</Etiq>
+              <Selecteur
+                id="pm-unite"
+                value={ligne.unite}
+                disabled={peseeFigee}
+                onChange={(ev) => poser({ unite: ev.target.value })}
+                aria-label="Unité de saisie"
+              >
+                <option value="kg">kg</option>
+                {unites.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </Selecteur>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Etiq htmlFor="pm-lot">Lot fournisseur</Etiq>
             <Champ
               id="pm-lot"
+              disabled={peseeFigee}
               value={e.lot ?? ''}
               onChange={(ev) => poserExtra('lot', ev.target.value)}
               aria-label="Lot du fournisseur"
@@ -589,6 +690,7 @@ function FeuilleEdition({
               type="number"
               min="0"
               inputMode="numeric"
+              disabled={peseeFigee}
               value={e.colis ?? ''}
               onChange={(ev) => poserExtra('colis', ev.target.value)}
               className="text-right tabular-nums"
@@ -603,6 +705,7 @@ function FeuilleEdition({
               step="any"
               min="0"
               inputMode="decimal"
+              disabled={peseeFigee}
               value={e.bl ?? ''}
               onChange={(ev) => poserExtra('bl', ev.target.value)}
               className="text-right tabular-nums"
@@ -627,13 +730,24 @@ function FeuilleEdition({
           </Selecteur>
         </div>
 
+        <div>
+          <Etiq htmlFor="pm-notes">Observations</Etiq>
+          <Champ
+            id="pm-notes"
+            value={e.notes ?? ''}
+            onChange={(ev) => poserExtra('notes', ev.target.value)}
+            placeholder="Emballage abîmé, couleur douteuse…"
+            aria-label="Observations"
+          />
+        </div>
+
         {hors && (
           <label className="flex items-start gap-2 rounded-[var(--radius)] border border-danger/40 bg-danger/5 px-3 py-2 text-[13px]">
             <input
               type="checkbox"
               className="mt-0.5"
               checked={derog}
-              disabled={!brouillon}
+              disabled={!brouillon || peseeFigee}
               onChange={(ev) => poserExtra('derog', ev.target.checked ? '1' : '')}
               aria-label="Dérogation à l’écart de pesée"
             />
@@ -645,7 +759,7 @@ function FeuilleEdition({
                   onChange={(ev) => poserExtra('motif_derog', ev.target.value)}
                   placeholder="Motif de la dérogation"
                   className="mt-1.5 h-9"
-                  disabled={!brouillon}
+                  disabled={!brouillon || peseeFigee}
                   aria-label="Motif de la dérogation"
                 />
               )}

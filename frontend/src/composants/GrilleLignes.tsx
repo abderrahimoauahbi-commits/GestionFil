@@ -31,6 +31,7 @@ import { Badge, Bouton, Champ, Selecteur } from './ui/base'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { cn, fmt } from '../lib/utils'
 import { useEstMobile } from '../lib/mediaQuery'
+import { largeurDeClasse, repartirCases, useLargeurConteneur } from '../lib/rangeeAdaptative'
 import { GrilleLignesMobile } from './GrilleLignesMobile'
 import { couleurEcart } from '../lib/lots'
 import { AvisColisage } from './AvisColisage'
@@ -687,7 +688,36 @@ export function GrilleLignes(props: ProprietesGrille) {
   // large deborde sur un telephone de quai (constat e2e du 14/10). Meme etat,
   // memes regles, memes colonnes du document.
   const estMobile = useEstMobile()
-  if (estMobile) return <GrilleLignesMobile {...props} />
+  return estMobile ? <GrilleLignesMobile {...props} /> : <GrilleLignesBureau {...props} />
+}
+
+/** Une case facultative de la ligne : sur la rangee principale si elle y tient, sinon sur « ↳ ». */
+interface CaseLigne {
+  cle: string
+  entete: string
+  /** En pixels, rembourrage compris : ce que la case doit contenir, pas plus. */
+  largeur: number
+  alignement?: 'left' | 'right' | 'center'
+  rendu: (l: LigneSaisie) => ReactNode
+}
+
+/* LES LARGEURS DES CASES, en pixels (24/10/2026) : une quantite de 8 chiffres,
+   un compte de 5, un prix de 8. La reference prend le reste, jamais moins que
+   L_REFERENCE_MIN. */
+const L_NUMERO = 28
+const L_REFERENCE_MIN = 152
+const L_UNITE = 88
+const L_QTE = 100
+const L_PRIX = 92
+const L_TOTAL = 92
+const L_COLIS = 140
+const L_REMISE = 60
+const L_POIDS_BOBINE = 112
+const L_REF_FRS = 92
+const L_COULEUR = 80
+const L_CODE_COULEUR = 80
+
+function GrilleLignesBureau(props: ProprietesGrille) {
   const {
     codeFournisseur,
   devise,
@@ -806,6 +836,163 @@ export function GrilleLignes(props: ProprietesGrille) {
   const majUnite = (cle: string, unite: string) =>
     setLignes((ls) => ls.map((l) => (l.cle === cle ? { ...l, unite } : l)))
 
+  /*
+   * LES CASES FACULTATIVES DE LA LIGNE, dans l'ordre ou elles se placent sur la
+   * rangee principale tant qu'il y a la place (24/10/2026) : chacune a la
+   * largeur de ce qu'elle attend. Celles qui n'y tiennent plus passent sur la
+   * rangee « ↳ », avec leur titre.
+   */
+  const cases: CaseLigne[] = [
+    {
+      cle: 'colis',
+      entete: 'Pal. · bob.',
+      largeur: L_COLIS,
+      rendu: (l) =>
+        l.nature === 'MARCHANDISE' ? (
+          <div className="flex items-center gap-1">
+            <Champ
+              type="number"
+              min="0"
+              value={l.palettes}
+              onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
+              className="h-9 w-12 px-1.5 text-right tabular-nums"
+              placeholder="pal."
+              aria-label="Nombre de palettes"
+            />
+            <Champ
+              type="number"
+              min="0"
+              value={l.bobines}
+              onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
+              className="h-9 w-12 px-1.5 text-right tabular-nums"
+              placeholder="bob."
+              aria-label="Nombre de bobines"
+            />
+            {/* L'INTERRUPTEUR, AU PLUS PRES DES COLIS QU'IL RELIE. La ligne
+                arrive liee ; on la detache quand la realite s'ecarte de la
+                theorie — une palette entamee, un reliquat. */}
+            <button
+              type="button"
+              onClick={() => maj(l.cle, { lie: !l.lie })}
+              title={
+                l.lie
+                  ? 'Les trois se répondent — cliquez pour saisir chacun séparément'
+                  : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'
+              }
+              aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+              className={cn(
+                'shrink-0 rounded-[var(--radius)] p-1',
+                l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10',
+              )}
+            >
+              {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
+            </button>
+          </div>
+        ) : null,
+    },
+    ...(!sansPrix && avecRemise
+      ? [
+          {
+            cle: 'remise',
+            entete: 'Remise %',
+            largeur: L_REMISE,
+            alignement: 'right' as const,
+            rendu: (l: LigneSaisie) => (
+              <Champ
+                type="number"
+                step="any"
+                min="0"
+                max="99.99"
+                value={l.remise ?? ''}
+                onChange={(e) => maj(l.cle, { remise: e.target.value })}
+                className="h-9 px-1.5 text-right tabular-nums"
+                placeholder="0"
+                aria-label="Remise en pourcentage du prix brut"
+              />
+            ),
+          },
+        ]
+      : []),
+    ...colonnesSupplementaires.map((c) => ({
+      cle: `x:${c.cle}`,
+      entete: c.entete,
+      largeur: largeurDeClasse(c.largeur),
+      alignement: c.alignement,
+      rendu: (l: LigneSaisie) => (
+        <div className={cn('min-w-0 [&_input]:w-full [&_select]:w-full', c.alignement === 'right' && 'text-right')}>
+          {c.rendu(l, (valeur) => maj(l.cle, { extra: { ...(l.extra ?? {}), [c.cle]: valeur } }))}
+        </div>
+      ),
+    })),
+    ...(poidsBobine
+      ? [
+          {
+            cle: 'poids-bobine',
+            entete: 'Poids / bobine',
+            largeur: L_POIDS_BOBINE,
+            rendu: (l: LigneSaisie) => {
+              const kgL = kgDe(l)
+              const bob = Number(l.bobines)
+              const cat = Number(l.cond.poids_bobine_kg ?? 0)
+              if (l.nature !== 'MARCHANDISE' || kgL == null || !(bob > 0))
+                return <span className="block pt-2 text-[12px] text-attenue-texte">—</span>
+              const reel = kgL / bob
+              const pct = cat > 0 ? ((reel - cat) / cat) * 100 : null
+              const c = couleurEcart(pct, poidsBobine)
+              return (
+                <div
+                  className="pt-1 text-[12px] tabular-nums"
+                  title={cat > 0 ? `Catalogue : ${fmt.nombre(cat, 3)} kg` : 'Pas de poids de bobine au catalogue'}
+                >
+                  <div className="font-medium">{fmt.nombre(reel, 3)} kg</div>
+                  {pct != null && (
+                    <div className={cn('truncate text-[11px]', c === 'rouge' ? 'text-danger' : c === 'orange' ? 'text-alerte' : 'text-succes')}>
+                      {pct > 0 ? '+' : ''}{fmt.nombre(pct, 2)} % / cat. {fmt.nombre(cat, 3)}
+                    </div>
+                  )}
+                </div>
+              )
+            },
+          },
+        ]
+      : []),
+    ...(!sansFournisseur
+      ? (['reference_fournisseur', 'couleur', 'code_couleur'] as const).map((champ) => ({
+          cle: champ,
+          entete: champ === 'reference_fournisseur' ? 'Réf. frs' : champ === 'couleur' ? 'Couleur' : 'Code coul. frs',
+          largeur: champ === 'reference_fournisseur' ? L_REF_FRS : champ === 'couleur' ? L_COULEUR : L_CODE_COULEUR,
+          rendu: (l: LigneSaisie) =>
+            l.nature === 'MARCHANDISE' ? (
+              <Champ
+                value={l[champ]}
+                onChange={(e) => maj(l.cle, { [champ]: e.target.value })}
+                onBlur={(e) => {
+                  const v = e.target.value.trim()
+                  const initial = valeurOrigine?.(l.code_reference, champ) ?? ''
+                  if (v !== initial && l.code_reference && surCorrection) {
+                    surCorrection(l.code_reference, champ, v, l.version_reference)
+                  }
+                }}
+                className="h-9 px-1.5"
+                title={l[champ] || undefined}
+                placeholder={champ === 'reference_fournisseur' ? 'Ssl2279' : champ === 'couleur' ? 'Cream' : 'RED 7612'}
+                aria-label={
+                  champ === 'reference_fournisseur'
+                    ? 'Référence chez le fournisseur'
+                    : champ === 'couleur'
+                      ? 'Couleur'
+                      : 'Code couleur du fournisseur'
+                }
+              />
+            ) : null,
+        }))
+      : []),
+  ]
+  const lActions = 12 + 26 * (1 + (validationLocale ? 1 : 0) + (surEnregistrerLigne ? 1 : 0))
+  const fixe = L_NUMERO + L_REFERENCE_MIN + L_UNITE + L_QTE + (sansPrix ? 0 : L_PRIX + L_TOTAL) + lActions
+  const [refTableau, largeurTableau] = useLargeurConteneur<HTMLDivElement>()
+  const { enLigne: colonnesEnLigne, dessous: colonnesDessous } = repartirCases(fixe, cases, largeurTableau)
+  const nbColonnes = 5 + colonnesEnLigne.length + (sansPrix ? 0 : 2)
   const versSuggestion = (r: RefLigne): Suggestion => {
     const suggere = r.qte_a_commander_kg ?? 0
     const etranger = !!r.code_fournisseur && r.code_fournisseur !== codeFournisseur
@@ -862,7 +1049,7 @@ export function GrilleLignes(props: ProprietesGrille) {
   }
 
   return (
-    <div className="space-y-3">
+    <div ref={refTableau} className="space-y-3">
       {/* L'INTERRUPTEUR : ce que la liste deroulante propose. Il manquait
           entierement a l'ecran de modification, ou l'on ne pouvait ajouter que
           des references du fournisseur, sans jamais voir ce que le plan
@@ -897,30 +1084,55 @@ export function GrilleLignes(props: ProprietesGrille) {
 
       {lignes.length > 0 && (
         <div>
-          {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026, demande de l'utilisateur) :
-              la ligne principale porte reference, unite, quantite, prix, total et
-              actions ; le reste passe sur sa ligne complementaire, juste dessous.
-              A 1366 px, le tableau de 1 180 px debordait et le ✓ sortait de l'ecran. */}
-          <table className="w-full text-[13px]">
+          {/* UNE RANGEE QUAND ELLE TIENT (24/10/2026). Chaque case a la largeur de
+              ce qu'elle attend ; la reference prend le reste. Les cases
+              facultatives se placent sur la rangee principale tant que la
+              largeur MESUREE le permet ; les autres passent sur la rangee « ↳ »,
+              juste dessous. Jamais de defilement horizontal (10/10/2026). */}
+          <table className="w-full table-fixed text-[13px]">
+            <colgroup>
+              <col style={{ width: L_NUMERO }} />
+              <col />
+              <col style={{ width: L_UNITE }} />
+              <col style={{ width: L_QTE }} />
+              {colonnesEnLigne.map((c) => (
+                <col key={c.cle} style={{ width: c.largeur }} />
+              ))}
+              {!sansPrix && (
+                <>
+                  <col style={{ width: L_PRIX }} />
+                  <col style={{ width: L_TOTAL }} />
+                </>
+              )}
+              <col style={{ width: lActions }} />
+            </colgroup>
             <thead>
               <tr className="border-b border-bordure text-[11px] uppercase tracking-wider text-attenue-texte">
-                <th className="w-8 px-1 py-2 text-right">#</th>
+                <th className="px-1 py-2 text-right">#</th>
                 <th className="px-1.5 py-2 text-left">{libelles?.reference ?? 'Notre référence'}</th>
-                {/* L'UNITE NE COMMANDE PLUS LA SAISIE. Elle disait autrefois
-                    dans quoi la quantite etait exprimee, et devait donc etre
-                    choisie avant de taper. La quantite est maintenant toujours
-                    en kilos : l'unite ne decide plus que de ce qui sera imprime
-                    sur le bon et de la base de facturation. Elle reste en tete
-                    parce que c'est la qu'on l'a prise l'habitude de la lire. */}
-                <th className="w-32 px-1.5 py-2 text-left">{libelles?.unite ?? 'Unité au bon'}</th>
-                <th className="w-40 px-1.5 py-2 text-right">Quantité (kg)</th>
+                {/* L'UNITE NE COMMANDE PLUS LA SAISIE. La quantite est toujours
+                    en kilos : l'unite ne decide que de ce qui sera imprime sur le
+                    bon et de la base de facturation. */}
+                <th className="truncate px-1.5 py-2 text-left" title={libelles?.unite ?? 'Unité au bon'}>
+                  {libelles?.unite ?? 'Unité au bon'}
+                </th>
+                <th className="px-1.5 py-2 text-right">Qté (kg)</th>
+                {colonnesEnLigne.map((c) => (
+                  <th
+                    key={c.cle}
+                    className={cn('truncate px-1.5 py-2', c.alignement === 'right' ? 'text-right' : 'text-left')}
+                    title={c.entete}
+                  >
+                    {c.entete}
+                  </th>
+                ))}
                 {!sansPrix && (
                   <>
-                    <th className="w-36 px-1.5 py-2 text-right">Prix {devise}</th>
-                    <th className="w-32 px-1.5 py-2 text-right">Total</th>
+                    <th className="truncate px-1.5 py-2 text-right" title={`Prix ${devise} par kg`}>Prix {devise}</th>
+                    <th className="px-1.5 py-2 text-right">Total</th>
                   </>
                 )}
-                <th className="w-24 px-1 py-2"></th>
+                <th className="px-1 py-2"></th>
               </tr>
             </thead>
             <tbody>
@@ -931,12 +1143,10 @@ export function GrilleLignes(props: ProprietesGrille) {
                 // `inert` FIGE LES CELLULES, pas la ligne : le bouton d'action
                 // reste cliquable, sans quoi une ligne validee ne se rouvrirait plus.
                 const verrou = validationLocale && !!l.valide
-                // La ligne principale : #, reference, unite, quantite, [prix, total], actions.
-                const nbColonnes = 5 + (sansPrix ? 0 : 2)
                 return (
                   <Fragment key={l.cle}>
                   <tr className={cn(verrou && 'bg-succes/[0.05]')}>
-                    <td className="px-1 py-1 text-right tabular-nums text-attenue-texte">{i + 1}</td>
+                    <td className="px-1 py-1 pt-2.5 text-right tabular-nums text-attenue-texte">{i + 1}</td>
 
                     {/* LA LISTE DEROULANTE EST DANS LA LIGNE, a la place meme de
                         la reference : un champ d'ajout pose ailleurs oblige a un
@@ -946,10 +1156,13 @@ export function GrilleLignes(props: ProprietesGrille) {
                         <>
                           <div className="flex items-start gap-1.5">
                             <div className="min-w-0 flex-1">
-                              <div className="truncate font-medium">
+                              <div className="truncate font-medium" title={l.code_reference || l.intitule}>
                                 {l.code_reference || l.intitule}
                               </div>
-                              <div className="truncate text-[11px] text-attenue-texte">
+                              <div
+                                className="truncate text-[11px] text-attenue-texte"
+                                title={marchandise && l.intitule !== l.code_reference ? l.intitule : undefined}
+                              >
                                 {marchandise ? (
                                   <>
                                     {l.intitule !== l.code_reference && <span>{l.intitule} · </span>}
@@ -1004,7 +1217,12 @@ export function GrilleLignes(props: ProprietesGrille) {
                           valeur=""
                           chercher={chercher}
                           cleCache={[mode, codeFournisseur, prises.size]}
-                          chercherAVide
+                          // LA RECHERCHE VIDE, SEULEMENT LA OU ELLE NE COUTE RIEN (24/10/2026) :
+                          // le plan est deja en memoire, et un document de stock filtre ses
+                          // propositions sans appeler le serveur. En « tout le catalogue »,
+                          // elle partait avec la frappe et coutait autant qu'une vraie
+                          // recherche : on attend deux caracteres, comme ailleurs.
+                          chercherAVide={sansSource || mode === 'PLAN'}
                           surChoix={(s) => maj(l.cle, depuisReference(s.charge as RefLigne, l.cle))}
                           placeholder={
                             libelles?.recherche ??
@@ -1061,7 +1279,7 @@ export function GrilleLignes(props: ProprietesGrille) {
                       <Selecteur
                         value={l.unite}
                         onChange={(e) => majUnite(l.cle, e.target.value)}
-                        className="h-9"
+                        className="h-9 px-1 pr-5"
                         aria-label="Unité"
                       >
                         {marchandise ? (
@@ -1090,16 +1308,14 @@ export function GrilleLignes(props: ProprietesGrille) {
                         min="0.0001"
                         value={l.qte}
                         onChange={(e) => majColis(l.cle, 'quantite', e.target.value)}
-                        className="h-9 text-right text-[14px] tabular-nums"
+                        className="h-9 px-1.5 text-right text-[14px] tabular-nums"
                         aria-label={marchandise ? 'Quantité en kilos' : 'Quantité'}
                       />
-                      {/* CE QUE LE FOURNISSEUR LIRA. Le rappel disait avant
-                          « = N kg », ce qui n'apprend plus rien puisque le
-                          champ EST en kilos. Ce qu'on ne voit pas, en revanche,
-                          c'est la quantite telle qu'elle partira sur le bon
-                          quand il se commande a la palette ou au lot. */}
+                      {/* CE QUE LE FOURNISSEUR LIRA : la quantite telle qu'elle
+                          partira sur le bon quand il se commande a la palette ou
+                          au lot. */}
                       {marchandise && l.unite !== 'kg' && kg !== null && (
-                        <div className="mt-0.5 text-right text-[11px] tabular-nums text-attenue-texte">
+                        <div className="mt-0.5 truncate text-right text-[11px] tabular-nums text-attenue-texte">
                           {(() => {
                             const f = facteurVersKg(l.unite, l.cond)
                             return f ? (
@@ -1114,6 +1330,12 @@ export function GrilleLignes(props: ProprietesGrille) {
                       )}
                     </td>
 
+                    {colonnesEnLigne.map((c) => (
+                      <td key={c.cle} className={cellule} inert={verrou}>
+                        {c.rendu(l)}
+                      </td>
+                    ))}
+
                     {!sansPrix && (
                       <td className={cellule} inert={verrou}>
                         <Champ
@@ -1125,7 +1347,7 @@ export function GrilleLignes(props: ProprietesGrille) {
                           value={l.prix}
                           onChange={(e) => maj(l.cle, { prix: e.target.value })}
                           className={cn(
-                            'h-9 text-right text-[14px] tabular-nums',
+                            'h-9 px-1.5 text-right text-[14px] tabular-nums',
                             !(Number(l.prix) > 0) && estEbauche(l, sansPrix) && 'border-danger',
                           )}
                           aria-label={marchandise ? `Prix ${devise} par kg` : `Prix ${devise}`}
@@ -1137,15 +1359,12 @@ export function GrilleLignes(props: ProprietesGrille) {
                     )}
 
                     {!sansPrix && (
-                      <td className={cn(cellule, 'pt-2 text-right font-medium tabular-nums')}>
+                      <td className={cn(cellule, 'truncate pt-2.5 text-right font-medium tabular-nums')}>
                         {fmt.nombre(totalDe(l), 2)}
                       </td>
                     )}
 
-                    {/* LES ACTIONS DE LA LIGNE, SUR LA LIGNE. Enregistrer ne
-                        porte que sur elle : la voisine a moitie remplie ne
-                        bloque plus rien, et une ligne refusee par le serveur
-                        est la seule a rester en rouge. */}
+                    {/* LES ACTIONS DE LA LIGNE, SUR LA LIGNE. */}
                     <td className="whitespace-nowrap px-1 py-1">
                       {validationLocale && (
                         <Bouton
@@ -1222,154 +1441,27 @@ export function GrilleLignes(props: ProprietesGrille) {
                       </Bouton>
                     </td>
                   </tr>
-                  {/* LA LIGNE COMPLEMENTAIRE : ce qui ne tient pas sur la ligne principale,
-                      chaque champ avec son titre, retour a la ligne si l'ecran est etroit. */}
+                  {/* LA RANGEE « ↳ » : seulement ce qui ne tient pas sur la ligne
+                      principale, chaque champ avec son titre. Vide, elle ne prend
+                      aucune hauteur et ne garde que le filet qui separe les lignes. */}
                   <tr className={cn('border-b border-bordure/60', verrou && 'bg-succes/[0.05]')}>
-                    <td />
-                    <td colSpan={nbColonnes - 2} className="px-1.5 pb-2" inert={verrou}>
-                      <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-                        {marchandise && (
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Palettes / bobines</span>
-
-                      {marchandise ? (
-                        <div className="flex items-center gap-1">
-                          <Champ
-                            type="number"
-                            min="0"
-                            value={l.palettes}
-                            onChange={(e) => majColis(l.cle, 'palettes', e.target.value)}
-                            className="h-9 w-20 text-right tabular-nums"
-                            placeholder="pal."
-                            aria-label="Nombre de palettes"
-                          />
-                          <Champ
-                            type="number"
-                            min="0"
-                            value={l.bobines}
-                            onChange={(e) => majColis(l.cle, 'bobines', e.target.value)}
-                            className="h-9 w-20 text-right tabular-nums"
-                            placeholder="bob."
-                            aria-label="Nombre de bobines"
-                          />
-                          {/* L'INTERRUPTEUR, AU PLUS PRES DES COLIS QU'IL RELIE.
-                              On ne choisit plus avant de taper : la ligne arrive
-                              liee. On la detache quand la realite s’ecarte de la
-                              theorie — une palette entamee, un reliquat, un
-                              comptage qui ne suit pas le calcul. */}
-                          <button
-                            type="button"
-                            onClick={() => maj(l.cle, { lie: !l.lie })}
-                            title={
-                              l.lie
-                                ? 'Les trois se répondent — cliquez pour saisir chacun séparément'
-                                : 'Calcul détaché : chaque champ se saisit seul — cliquez pour relier'
-                            }
-                            aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                            className={cn(
-                              'shrink-0 rounded-[var(--radius)] p-1',
-                              l.lie
-                                ? 'text-primaire hover:bg-primaire/10'
-                                : 'text-alerte hover:bg-alerte/10',
-                            )}
-                          >
-                            {l.lie ? (
-                              <Link2 className="size-3.5" />
-                            ) : (
-                              <Unlink2 className="size-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      ) : null}
-                    
-                          </div>
-                        )}
-                        {poidsBobine && marchandise && (
-                          <div className="flex flex-col gap-0.5 text-[12px] tabular-nums">
-                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Poids / bobine</span>
-
-                        {(() => {
-                          const kgL = kgDe(l)
-                          const bob = Number(l.bobines)
-                          const cat = Number(l.cond.poids_bobine_kg ?? 0)
-                          if (!marchandise || kgL == null || !(bob > 0)) return <span className="text-attenue-texte">—</span>
-                          const reel = kgL / bob
-                          const pct = cat > 0 ? ((reel - cat) / cat) * 100 : null
-                          const c = couleurEcart(pct, poidsBobine)
-                          return (
-                            <div title={cat > 0 ? `Catalogue : ${fmt.nombre(cat, 3)} kg` : 'Pas de poids de bobine au catalogue'}>
-                              <div className="font-medium">{fmt.nombre(reel, 3)} kg</div>
-                              {pct != null && (
-                                <div className={cn('text-[11px]', c === 'rouge' ? 'text-danger' : c === 'orange' ? 'text-alerte' : 'text-succes')}>
-                                  {pct > 0 ? '+' : ''}{fmt.nombre(pct, 2)} % / cat. {fmt.nombre(cat, 3)}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })()}
-                      
-                          </div>
-                        )}
-                        {!sansPrix && avecRemise && (
-                          <div className="flex w-24 flex-col gap-0.5">
-                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Remise %</span>
-
-                        <Champ
-                          type="number"
-                          step="any"
-                          min="0"
-                          max="99.99"
-                          value={l.remise ?? ''}
-                          onChange={(e) => maj(l.cle, { remise: e.target.value })}
-                          className="h-9 text-right tabular-nums"
-                          placeholder="0"
-                          aria-label="Remise en pourcentage du prix brut"
-                        />
-                      
-                          </div>
-                        )}
-                        {!sansFournisseur && marchandise &&
-                          (['reference_fournisseur', 'couleur', 'code_couleur'] as const).map((champ) => (
-                            <div key={champ} className="flex w-36 flex-col gap-0.5">
-                              <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">
-                                {champ === 'reference_fournisseur' ? 'Réf. frs' : champ === 'couleur' ? 'Couleur' : 'Code coul. frs'}
-                              </span>
-                              <Champ
-                                value={l[champ]}
-                                onChange={(e) => maj(l.cle, { [champ]: e.target.value })}
-                                onBlur={(e) => {
-                                  const v = e.target.value.trim()
-                                  const initial = valeurOrigine?.(l.code_reference, champ) ?? ''
-                                  if (v !== initial && l.code_reference && surCorrection) {
-                                    surCorrection(l.code_reference, champ, v, l.version_reference)
-                                  }
-                                }}
-                                className="h-9"
-                                placeholder={champ === 'reference_fournisseur' ? 'Ssl2279' : champ === 'couleur' ? 'Cream' : 'RED 7612'}
-                                aria-label={
-                                  champ === 'reference_fournisseur'
-                                    ? 'Référence chez le fournisseur'
-                                    : champ === 'couleur'
-                                      ? 'Couleur'
-                                      : 'Code couleur du fournisseur'
-                                }
-                              />
-                            </div>
-                          ))}
-                        {colonnesSupplementaires.map((c) => (
-                          <div key={c.cle} className={cn('flex min-w-[14rem] flex-col gap-0.5 [&_input]:w-full [&_select]:w-full', c.alignement === 'right' && 'text-right')}>
-                            <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">{c.entete}</span>
-                            {c.rendu(l, (valeur) =>
-                              maj(l.cle, { extra: { ...(l.extra ?? {}), [c.cle]: valeur } }),
-                            )}
+                    <td className="p-0" />
+                    <td colSpan={nbColonnes - 1} className="p-0" inert={verrou}>
+                      <div className="flex flex-wrap items-start gap-x-4 gap-y-2 px-1.5 pb-2 empty:hidden">
+                        {colonnesDessous.map((c) => (
+                          <div key={c.cle} className="flex flex-col gap-0.5" style={{ width: c.largeur }}>
+                            <span className="truncate text-[10.5px] uppercase tracking-wider text-attenue-texte" title={c.entete}>
+                              {colonnesDessous[0]?.cle === c.cle ? '↳ ' : ''}
+                              {c.entete}
+                            </span>
+                            {c.rendu(l)}
                           </div>
                         ))}
+                        {controleColisage && marchandise && (
+                          <AvisColisage kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} className="mt-1 basis-full" />
+                        )}
                       </div>
-                      {controleColisage && marchandise && (
-                        <AvisColisage kg={kg} bobines={l.bobines} palettes={l.palettes} cond={l.cond} className="mt-1" />
-                      )}
                     </td>
-                    <td />
                   </tr>
 
                   </Fragment>

@@ -28,7 +28,7 @@ function champNombre(page: Page, options: { name: string | RegExp; exact?: boole
   return page.getByRole('textbox', options).or(page.getByRole('spinbutton', options))
 }
 
-/** Le statut d'une reception, lu au serveur (l'ecran affiche le code brut). */
+/** Le statut d'une reception, lu au serveur (l'ecran affiche son libelle). */
 async function statutReception(page: Page, id: string) {
   const liste = await lireApi<Record<string, unknown>[]>(page, '/api/receptions')
   return liste.find((r) => r.id_reception === id)?.statut
@@ -217,20 +217,19 @@ test('réception : le magasin reprend le bon, pèse au format français et soume
   test.skip(!numeroBc, 'pas de bon envoyé')
   const { page, veille } = await session(browser, info, 'Magasinie')
   await page.goto('/receptions/nouvelle')
-  await page.getByRole('combobox', { name: 'Fournisseur *' }).selectOption('FRS-001')
-  await saisir(page.getByLabel('Bon de livraison'), 'BL-E2E-0001')
-  await saisir(page.getByLabel('Transporteur'), 'Transports Atlas Tanger')
-  await saisir(champNombre(page, { name: 'Nombre de colis' }), '3')
-  await saisir(champNombre(page, { name: /^Poids brut/ }), '1 260,8')
-  const bons = page.getByRole('combobox', { name: 'Bon de commande' })
-  const option = bons.locator('option', { hasText: numeroBc })
-  await bons.selectOption({ label: (await option.textContent())!.trim() })
-  await page.getByRole('button', { name: 'Reprendre les lignes' }).click()
+  // Le fournisseur et le bon se cherchent (24/10/2026) ; choisir le bon reprend ses lignes.
+  await choisirRecherche(page, page.locator('#frs'), 'FRS-001', /^FRS-001 — /)
+  await saisir(page.locator('#bl'), 'BL-E2E-0001')
+  await saisir(page.locator('#tr'), 'Transports Atlas Tanger')
+  await saisir(page.locator('#colis'), '3')
+  await saisir(page.locator('#brut'), '1 260,8')
+  await choisirRecherche(page, page.getByRole('combobox', { name: 'Bon de commande' }), numeroBc)
 
+  // LA SAISIE SUR LA LIGNE (24/10/2026) : la ligne reprise se saisit dans la grille.
   const pesee = champNombre(page, { name: 'Quantité pesée, en kilos' }).first()
   await saisir(champNombre(page, { name: 'Quantité du bon de livraison, en kilos' }).first(), '1 234,5')
   await saisir(pesee, '1 230,25')
-  await saisir(page.getByLabel('Lot fournisseur').first(), `LOT-E2E-${PASSAGE}`)
+  await saisir(page.getByRole('textbox', { name: 'Lot fournisseur' }).first(), `LOT-E2E-${PASSAGE}`)
   // Les bobines comptees : pesee, palettes et bobines sont liees ; on verifie
   // que compter les bobines n'ecrase pas la pesee tapee juste avant.
   const bobines = champNombre(page, { name: 'Nombre de bobines' }).first()

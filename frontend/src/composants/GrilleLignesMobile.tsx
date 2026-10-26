@@ -34,7 +34,7 @@ import {
 } from './GrilleLignes'
 import { ChampRecherche, type Suggestion } from './ChampRecherche'
 import { AvisColisage } from './AvisColisage'
-import { couleurEcart } from '../lib/lots'
+import { classeNiveauEcart, couleurEcart } from '../lib/lots'
 import {
   depuisBobines,
   depuisKg,
@@ -472,7 +472,9 @@ function FeuilleLigne(p: {
               valeur=""
               chercher={p.chercher}
               cleCache={[p.mode, p.codeFournisseur, p.prises.size]}
-              chercherAVide
+              // Recherche vide : seulement la ou elle ne coute rien (plan en memoire,
+              // propositions d'un document de stock) — comme au bureau (24/10/2026).
+              chercherAVide={p.sansSource || p.mode === 'PLAN'}
               surChoix={p.surChoixRef}
               placeholder={
                 p.libelles?.recherche ??
@@ -631,7 +633,7 @@ function FeuilleLigne(p: {
                   <p className="mt-1 text-[11px] tabular-nums text-attenue-texte">
                     Poids/bobine {fmt.nombre(reel, 3)} kg
                     {pct != null && (
-                      <span className={cn('ml-1', c === 'rouge' ? 'text-danger' : c === 'orange' ? 'text-alerte' : 'text-succes')}>
+                      <span className={cn('ml-1', classeNiveauEcart(c) ?? 'text-succes')}>
                         ({pct > 0 ? '+' : ''}
                         {fmt.nombre(pct, 2)} % / cat. {fmt.nombre(cat, 3)})
                       </span>

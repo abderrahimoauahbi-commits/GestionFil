@@ -92,6 +92,9 @@ async function creerReceptionBrouillon(): Promise<string> {
 }
 
 test('pesée mobile : liste → fiche → pesée → ajout', async ({ page }, info) => {
+  // SOUS 768 PX SEULEMENT (24/10/2026) : au bureau, la reception se saisit dans
+  // la grille (receptions/GrilleReception), eprouvee par saisie.spec.
+  test.skip((page.viewportSize()?.width ?? 0) >= 768, 'PeseesMobile ne s’affiche que sous 768 px')
   const taille = info.project.name
   const dossier = `rapport-e2e/mobile`
   mkdirSync(dossier, { recursive: true })

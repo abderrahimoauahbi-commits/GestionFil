@@ -24,6 +24,7 @@ import { useAuth, useDroits } from '../auth/AuthContext'
 import { useToleranceFournisseur } from '../lib/lots'
 import { EnTetePage } from '../composants/Coquille'
 import { BoutonDevalider } from '../composants/BoutonDevalider'
+import { StatutBadge } from '../composants/StatutBadge'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
 import { phraseGel, useGelInventaire } from '../lib/inventairesOuverts'
 import { ClotureFacture, CorrectionFacture } from './ReceptionCloture'
@@ -31,13 +32,29 @@ import { DataTable, type ColonneDT } from '../composants/DataTable'
 import {
   type LigneSaisie,
   type RefLigne,
+  depuisReference,
+  unitesDe,
 } from '../composants/GrilleLignes'
+import { ChampRecherche, type Suggestion } from '../composants/ChampRecherche'
 import {
+  type ChampColis,
   type Conditionnement,
+  conditionnementDuLot,
+  depuisChamp,
   depuisKg,
   facteurVersKg,
   pourChamp,
 } from '../lib/conditionnement'
+import { useEstMobile } from '../lib/mediaQuery'
+import { useConditionnementsLots } from '../hooks/useConditionnementLots'
+import {
+  type ChampRec,
+  type VueLigneRec,
+  GrilleReception,
+  allerALaLigne,
+  ecartPct,
+} from './receptions/GrilleReception'
+import { BarreReception, type IndicateurRec, type MessageRec, texteEcartKg, tonEcartKg } from './receptions/BarreReception'
 import {
   Alerte,
   Badge,
@@ -52,7 +69,7 @@ import {
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
-import { PeseesMobile } from './receptions/PeseesMobile'
+import { PeseesMobile, fondrePesee } from './receptions/PeseesMobile'
 import { FraisApproche } from './receptions/FraisApproche'
 
 const MODULE = 'RECEPTIONS'
@@ -169,20 +186,6 @@ interface LigneAttendue extends Record<string, unknown> {
 }
 
 
-const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
-  BROUILLON: 'neutre',
-  A_CONTROLER: 'alerte',
-  VALIDE: 'succes',
-  CLOTURE: 'info',
-  ANNULE: 'danger',
-}
-
-const TON_QUALITE: Record<string, 'succes' | 'alerte' | 'danger'> = {
-  CONFORME: 'succes',
-  QUARANTAINE: 'alerte',
-  NON_CONFORME: 'danger',
-}
-
 /**
  * Une ligne deja pesee entre dans la grille — la MEME que celle du bon de
  * commande.
@@ -246,9 +249,57 @@ function depuisLigneReception(l: LigneRec): LigneSaisie {
       qualite: l.statut_qualite,
       derog: l.derogation_ecart === 1 ? '1' : '',
       motif_derog: l.motif_derogation ?? '',
+      // LES DATES ET LES OBSERVATIONS DE LA LIGNE (24/10/2026) : la route de
+      // correction les accepte, meme au controle ; l'ecran ne les relisait pas.
+      fabrication: jourDe(l.date_fabrication),
+      peremption: jourDe(l.date_peremption),
+      notes: typeof l.notes === 'string' ? l.notes : '',
+      // Pour l'ecran seul (bobines a compter) : ne part pas au serveur.
+      suivi_lot: l.suivi_lot === 1 ? '1' : '',
     },
   }
 }
+
+/** Une date relue (texte ISO ou jour), ramenee au jour pour un champ date. */
+function jourDe(v: unknown): string {
+  return typeof v === 'string' && v.length >= 10 ? v.slice(0, 10) : ''
+}
+
+/**
+ * KILOS, PALETTES ET BOBINES SE REPONDENT, sur une ligne liee : le champ tape
+ * commande, les deux autres suivent le conditionnement donne — celui du LOT
+ * s'il est connu (2026-10-23a), sinon la fiche article. Detachee, chaque champ
+ * se saisit seul. La pesee reste ce qu'on a tape : elle ne revient jamais
+ * arrondie par un compte.
+ */
+function lierColis(l: LigneSaisie, source: ChampColis, valeur: string, cond: Conditionnement): LigneSaisie {
+  const champ = source === 'quantite' ? 'qte' : source
+  if (!l.lie) return { ...l, [champ]: valeur }
+  const r = depuisChamp(source, valeur, cond)
+  return {
+    ...l,
+    saisiePar: source,
+    qte: source === 'quantite' ? valeur : pourChamp(r.kg, 3),
+    palettes: source === 'palettes' ? valeur : pourChamp(r.palettes),
+    bobines: source === 'bobines' ? valeur : pourChamp(r.bobines),
+  }
+}
+
+/** Ce que chaque case de la grille ecrit dans `extra`. */
+const EXTRA_DE: Partial<Record<ChampRec, string>> = {
+  qteBl: 'bl',
+  colis: 'colis',
+  lot: 'lot',
+  magasin: 'magasin',
+  qualite: 'qualite',
+  motifDerogation: 'motif_derog',
+  fabrication: 'fabrication',
+  peremption: 'peremption',
+  notes: 'notes',
+}
+
+/** Une ligne de la reception, reperee par son peg et son lot : deux pesees du meme lot s'additionnent. */
+const cleLot = (l: LigneSaisie) => `${l.extra?.id_ligne_bc || l.code_reference}|${(l.extra?.lot ?? '').trim()}`
 
 /**
  * Ce que le serveur attend pour UNE ligne de reception.
@@ -294,6 +345,11 @@ function corpsReception(l: LigneSaisie) {
     // « ajoutez la derogation » menait nulle part sur une reception existante.
     derogation_ecart: e.derog === '1',
     motif_derogation: e.derog === '1' ? e.motif_derog?.trim() || undefined : undefined,
+    // NOUVEAUX DANS LE CORPS (24/10/2026), seulement s'ils sont renseignes : la
+    // route garde l'ancienne valeur pour un champ absent.
+    date_fabrication: e.fabrication?.trim() || undefined,
+    date_peremption: e.peremption?.trim() || undefined,
+    notes: e.notes?.trim() || undefined,
   }
 }
 /**
@@ -496,6 +552,20 @@ export function Reception() {
       ),
   })
 
+  /* AU BUREAU, LA GRILLE ; SOUS 768 PX, LES CARTES ET LA FEUILLE (24/10/2026). */
+  const estMobile = useEstMobile()
+
+  /* LE CONDITIONNEMENT DU LOT relie pesee, palettes et bobines a la frappe ;
+     l'unite d'archivage reste convertie par la fiche article, comme au
+     serveur (`vers_kg`). */
+  const { condLot } = useConditionnementsLots(
+    nouvelles.filter((l) => (l.extra?.lot ?? '').trim()).map((l) => l.code_reference),
+  )
+  const condLiaison = (l: LigneSaisie) =>
+    conditionnementDuLot(l.cond, condLot(l.code_reference, l.extra?.lot ?? ''))
+  const relier = (l: LigneSaisie, source: ChampColis, valeur: string) =>
+    lierColis(l, source, valeur, condLiaison(l))
+
   /*
    * LES BONS DE COMMANDE DE CE CAMION (16/10/2026).
    *
@@ -555,6 +625,8 @@ export function Reception() {
           // et c’est presque toujours ce qui arrive.
           qte_a_commander_kg: a.quantite_restante_kg,
           prix_suggere_devise: a.prix_kg_devise,
+          // Pour l'ecran seul : une reference suivie au lot se compte en bobines.
+          suivi_lot: a.suivi_lot,
         })),
     [qAttendues.data, rec?.code_fournisseur, bonsRetenus],
   )
@@ -626,6 +698,90 @@ export function Reception() {
   const retirerLigne = (ligne: LigneSaisie) => {
     if (ligne.idExistant) setSupprimees((s) => [...s, ligne.idExistant as string])
     setNouvelles((ls) => ls.filter((x) => x.cle !== ligne.cle))
+  }
+
+  /* LA SAISIE SUR LA LIGNE, AU BUREAU (24/10/2026) : chaque case de la grille
+     ecrit ici, dans la meme `LigneSaisie` que la feuille du telephone. */
+  const poserLigne = (cle: string, champ: ChampRec, v: string | boolean) =>
+    setNouvelles((ls) =>
+      ls.map((l) => {
+        if (l.cle !== cle) return l
+        if (champ === 'qte') return relier(l, 'quantite', String(v))
+        if (champ === 'palettes' || champ === 'bobines') return relier(l, champ, String(v))
+        if (champ === 'unite') return { ...l, unite: String(v) }
+        if (champ === 'lie') return { ...l, lie: !!v }
+        if (champ === 'derogation') return { ...l, extra: { ...l.extra, derog: v ? '1' : '' } }
+        const k = EXTRA_DE[champ]
+        return k ? { ...l, extra: { ...l.extra, [k]: String(v) } } : l
+      }),
+    )
+
+  /* VALIDER UNE LIGNE A L'ECRAN, comme sur le bon (validation par ligne) : elle
+     se fige jusqu'au crayon. Une NOUVELLE pesee du meme lot qu'une ligne deja
+     la s'y additionne (une ligne par reference et par lot, 21/10/2026). */
+  const basculerValidation = (cle: string) => {
+    const l = nouvelles.find((x) => x.cle === cle)
+    if (!l) return
+    if (!l.valide && !l.idExistant) {
+      const meme = nouvelles.find((x) => x.cle !== cle && cleLot(x) === cleLot(l))
+      if (meme) {
+        setNouvelles((ls) =>
+          ls.filter((x) => x.cle !== cle).map((x) => (x.cle === meme.cle ? fondrePesee(x, l) : x)),
+        )
+        toast.info(
+          `${l.code_reference} : même lot que la ligne ${nouvelles.indexOf(meme) + 1}, la pesée s’y ajoute (une ligne par lot).`,
+        )
+        return
+      }
+    }
+    setNouvelles((ls) => ls.map((x) => (x.cle === cle ? { ...x, valide: !x.valide } : x)))
+  }
+
+  /* AJOUTER UNE LIGNE : ce que les bons attendent d'abord, puis tout le
+     catalogue (livraison hors commande). Meme ligne que sur le telephone :
+     magasin hors quarantaine par defaut, qualite conforme. */
+  const ajouterLigne = (ref: RefLigne) => {
+    const nl = depuisReference(ref)
+    const parDefaut = qMagasins.data?.find((m) => m.est_quarantaine !== 1)?.code_magasin ?? ''
+    setNouvelles((ls) => [
+      ...ls,
+      {
+        ...nl,
+        extra: { ...nl.extra, magasin: parDefaut, qualite: 'CONFORME', suivi_lot: ref.suivi_lot === 1 ? '1' : '' },
+      },
+    ])
+    setTimeout(() => allerALaLigne(nl.cle), 60)
+  }
+  const chercherAjout = async (motif: string): Promise<Suggestion[]> => {
+    const mots = motif.toLowerCase().split(/\s+/).filter(Boolean)
+    const pesees = new Set(nouvelles.map((l) => l.extra?.id_ligne_bc).filter(Boolean))
+    const attendues = proposees.filter((p) =>
+      mots.every((m) => `${p.code_reference} ${p.designation ?? ''} ${p.numero_bc ?? ''}`.toLowerCase().includes(m)),
+    )
+    const catalogue = motif.trim().length >= 2 ? await chercherCatalogue(motif) : []
+    const attenduesCodes = new Set(proposees.map((p) => p.code_reference))
+    return [
+      ...attendues.map((p) => ({
+        valeur: p.id_ligne_bc ?? p.code_reference,
+        titre: `${p.code_reference}${p.numero_bc ? ` · ${p.numero_bc}` : ''}`,
+        detail: p.designation,
+        mention: pesees.has(p.id_ligne_bc ?? '')
+          ? 'déjà pesée — même lot : s’ajoute'
+          : `reste ${fmt.nombre(p.qte_a_commander_kg ?? 0, 0)} kg`,
+        ton: (pesees.has(p.id_ligne_bc ?? '') ? 'alerte' : 'primaire') as Suggestion['ton'],
+        charge: p,
+      })),
+      ...catalogue
+        .filter((r) => !attenduesCodes.has(r.code_reference))
+        .map((r) => ({
+          valeur: r.code_reference,
+          titre: r.code_reference,
+          detail: r.designation,
+          mention: 'hors commande',
+          ton: 'neutre' as const,
+          charge: r,
+        })),
+    ]
   }
 
   const enteteModifie =
@@ -852,6 +1008,25 @@ export function Reception() {
         ),
     },
     {
+      // LES COLIS COMPTES AU QUAI (24/10/2026) : ils manquaient a la table de
+      // la reception validee, alors qu'ils entrent au stock avec le lot.
+      champ: 'nb_palettes',
+      entete: 'Pal. · bob.',
+      numerique: true,
+      largeur: '110px',
+      rendu: (l) =>
+        l.nb_palettes == null && l.nb_bobines == null ? (
+          <span className="text-attenue-texte">—</span>
+        ) : (
+          <div className="text-right tabular-nums">
+            <div>{l.nb_palettes == null ? '—' : fmt.nombre(l.nb_palettes, 2)} pal.</div>
+            <div className="text-[11px] text-attenue-texte">
+              {l.nb_bobines == null ? '—' : fmt.nombre(l.nb_bobines, 0)} bob.
+            </div>
+          </div>
+        ),
+    },
+    {
       champ: 'ecart_pct',
       entete: 'Écart',
       numerique: true,
@@ -922,7 +1097,7 @@ export function Reception() {
       entete: 'Qualité',
       largeur: '140px',
       rendu: (l) => (
-        <Badge ton={TON_QUALITE[l.statut_qualite] ?? 'neutre'}>{l.statut_qualite}</Badge>
+        <StatutBadge entite="statut_qualite" code={l.statut_qualite} />
       ),
     },
     {
@@ -965,11 +1140,235 @@ export function Reception() {
     ? rec.id_utilisateur_pesee === moi?.id
     : rec.receptionnaire === moi?.login
 
+  /* AU CONTROLE, LA PESEE EST FIGEE (regle 4, 09/10/2026) — c'est le serveur
+     qui le dit : la correction d'une ligne A_CONTROLER refuse tout changement
+     de quantite, d'unite, de BL, de colis, de palettes, de bobines, de lot ou
+     de derogation (PESEE_FIGEE) ; l'ajout et le retrait d'une ligne y sont
+     refuses. Restent la qualite, le magasin, les dates et les observations de
+     chaque ligne, et l'en-tete. L'ecran fige donc ce que le serveur fige. */
+  const peseeFigee = rec.statut === 'A_CONTROLER'
+  const enBrouillon = rec.statut === 'BROUILLON'
+
+  /* LE LOT INTERNE, ANNONCE AVANT D'ETRE POSE (01/10/2026). Une reference
+     suivie sans lot recoit a la validation un lot FOURNISSEUR-JJMMAA-NN
+     (domain/reception.rs). On fait confirmer : on peut encore saisir le vrai
+     lot a la place. */
+  const lancerValidation = () => {
+    const aGenerer = lignes.filter((l) => l.suivi_lot === 1 && !(l.lot_fournisseur ?? '').trim())
+    const [aa, mm, jj] = (rec.date_reception ?? '').slice(0, 10).split('-')
+    const prefixeLot = `${(rec.fournisseur_nom ?? '').trim().split(' ')[0].replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-${jj ?? ''}${mm ?? ''}${(aa ?? '').slice(2)}`
+    if (aGenerer.length === 0) return valider.mutate()
+    confirmation.demander({
+      titre: `${aGenerer.length} ligne(s) sans lot fournisseur`,
+      libelleConfirmer: 'Générer les lots et valider',
+      description: (
+        <>
+          Le fournisseur n’a pas mis de lot : chaque ligne recevra un lot interne, pour
+          que cette livraison ne se mélange pas aux autres.
+          <ul className="mt-2 space-y-0.5 font-mono text-[12px]">
+            {aGenerer.map((l) => (
+              <li key={l.id_ligne_reception}>
+                {l.code_reference} → {prefixeLot}-NN
+              </li>
+            ))}
+          </ul>
+          <span className="mt-2 block">Pour saisir le vrai lot à la place, annulez et corrigez la ligne.</span>
+        </>
+      ),
+      action: () => valider.mutate(),
+    })
+  }
+
+  /* LA GRILLE DU BUREAU : ce que montre chaque ligne, lu de la saisie. */
+  const attenduesParLigne = new Map((qAttendues.data ?? []).map((a) => [a.id_ligne_bc, a]))
+  const vues: VueLigneRec[] = nouvelles.map((l) => {
+    const e = l.extra ?? {}
+    // En lecture, pour le detail de la ligne : ce que son bon engage et promet.
+    const a = e.id_ligne_bc ? attenduesParLigne.get(e.id_ligne_bc) : undefined
+    return {
+      cle: l.cle,
+      code_reference: l.code_reference,
+      code_recu: l.code_reference,
+      designation: l.intitule,
+      numero_bc: e.numero_bc || null,
+      reste_kg: l.suggere_kg,
+      suivi_lot: e.suivi_lot === '1',
+      qteBl: e.bl ?? '',
+      qte: l.qte,
+      unite: l.unite,
+      unites: unitesDe(l),
+      convertible: l.unite === 'kg' || facteurVersKg(l.unite, l.cond) !== null,
+      palettes: l.palettes,
+      bobines: l.bobines,
+      lie: l.lie,
+      liaisonOfferte: true,
+      lot: e.lot ?? '',
+      magasin: e.magasin ?? '',
+      qualite: e.qualite ?? 'CONFORME',
+      derogation: e.derog === '1',
+      motifDerogation: e.motif_derog ?? '',
+      fabrication: e.fabrication ?? '',
+      peremption: e.peremption ?? '',
+      notes: e.notes ?? '',
+      colis: e.colis ?? '',
+      equivalents: [],
+      motif_substitution: '',
+      cond: condLiaison(l),
+      valide: !!l.valide,
+      devise: a?.code_devise ?? null,
+      // Sans la ligne attendue (pas encore lue), rien : une devise devinee tromperait.
+      prix_engage: a?.prix_kg_devise ?? null,
+      date_promise: a?.date_livraison_prevue ?? null,
+    }
+  })
+
+  /* LES INDICATEURS DE LA BARRE (24/10/2026), sur la saisie en cours — ou,
+     pour qui ne fait que valider, sur les lignes enregistrees. */
+  const saisie = modifiable ? nouvelles : lignesServeur.map(depuisLigneReception)
+  const nombreDe = (v?: string) => {
+    const x = Number(v)
+    return v != null && v.trim() !== '' && Number.isFinite(x) ? x : null
+  }
+  const kgL = (l: LigneSaisie) => nombreDe(l.qte) ?? 0
+  const avecBl = saisie.filter((l) => nombreDe(l.extra?.bl) != null)
+  const ecartBl = avecBl.reduce((s, l) => s + kgL(l) - (nombreDe(l.extra?.bl) ?? 0), 0)
+  const avecBc = saisie.filter((l) => l.suggere_kg != null)
+  const totalBc = avecBc.reduce((s, l) => s + (l.suggere_kg ?? 0), 0)
+  const ecartBc = avecBc.reduce((s, l) => s + kgL(l), 0) - totalBc
+  const palettesComptees = saisie.reduce((s, l) => s + (nombreDe(l.palettes) ?? 0), 0)
+  const bobinesComptees = saisie.reduce((s, l) => s + (nombreDe(l.bobines) ?? 0), 0)
+  const palettesAttendues = avecBc.reduce((s, l) => s + (depuisKg(l.suggere_kg, condLiaison(l)).palettes ?? 0), 0)
+  const bobinesAttendues = avecBc.reduce((s, l) => s + (depuisKg(l.suggere_kg, condLiaison(l)).bobines ?? 0), 0)
+  const aCompter = saisie.filter(
+    (l) => l.extra?.suivi_lot === '1' && Number(l.cond.poids_bobine_kg) > 0 && !(nombreDe(l.bobines) ?? 0),
+  )
+  const rangDe = (l: LigneSaisie) => saisie.findIndex((x) => x.cle === l.cle) + 1
+  const noms = (ls: LigneSaisie[]) => ls.map((l) => `L${rangDe(l)} ${l.code_reference}`).join(', ')
+  const lignesHors = saisie
+    .filter((l) => (ecartPct(l.qte, l.suggere_kg) ?? 0) > TOLERANCE_PCT)
+    .map((l) => ({
+      cle: l.cle,
+      rang: rangDe(l),
+      code: l.code_reference,
+      derogee: l.extra?.derog === '1' && !!(l.extra?.motif_derog ?? '').trim(),
+    }))
+  const indicateurs: IndicateurRec[] = [
+    { libelle: 'Lignes', valeur: saisie.length, mot: 'pesée(s)', ton: saisie.length ? 'neutre' : 'alerte' },
+    { libelle: 'Pesé', valeur: `${fmt.nombre(saisie.reduce((s, l) => s + kgL(l), 0), 2)} kg` },
+    ...(avecBl.length
+      ? [{
+          libelle: 'BL',
+          secondaire: true,
+          valeur: texteEcartKg(ecartBl),
+          mot: Math.abs(ecartBl) <= 0.001 ? 'conforme' : 'écart',
+          ton: tonEcartKg(ecartBl),
+          titre: 'Écart de la pesée à ce que le bon de livraison annonce (litige de transport)',
+        }]
+      : []),
+    ...(avecBc.length
+      ? [{
+          libelle: 'Bon',
+          secondaire: true,
+          valeur: `${fmt.nombre(totalBc, 2)} kg · ${texteEcartKg(ecartBc)}`,
+          mot: Math.abs(ecartBc) <= 0.001 ? 'soldé' : ecartBc < 0 ? 'reliquat' : 'excédent',
+          ton: tonEcartKg(ecartBc),
+          titre: 'Ce que les bons attendaient au moment de la pesée, et l’écart',
+        }]
+      : []),
+    {
+      libelle: 'Palettes',
+      secondaire: true,
+      valeur: `${fmt.nombre(palettesComptees, 2)} / ${fmt.nombre(palettesAttendues, 0)}`,
+      mot: palettesAttendues ? (Math.abs(palettesComptees - palettesAttendues) < 0.005 ? 'conforme' : 'écart') : 'comptées',
+      ton: palettesAttendues ? (Math.abs(palettesComptees - palettesAttendues) < 0.005 ? 'succes' : 'alerte') : 'neutre',
+      titre: 'Palettes comptées / attendues au bon (déduites de l’attendu par le conditionnement)',
+    },
+    {
+      libelle: 'Bobines',
+      secondaire: true,
+      valeur: `${fmt.nombre(bobinesComptees, 0)} / ${fmt.nombre(bobinesAttendues, 0)}`,
+      mot: aCompter.length
+        ? `${aCompter.length} à compter`
+        : bobinesAttendues
+          ? Math.abs(bobinesComptees - bobinesAttendues) < 0.5 ? 'conforme' : 'écart'
+          : 'comptées',
+      ton: aCompter.length
+        ? 'alerte'
+        : bobinesAttendues
+          ? Math.abs(bobinesComptees - bobinesAttendues) < 0.5 ? 'succes' : 'alerte'
+          : 'neutre',
+      titre: 'Bobines comptées / attendues au bon (déduites de l’attendu par le conditionnement)',
+    },
+  ]
+  const sansQte = saisie.filter((l) => !(Number(l.qte) > 0))
+  const sansDerogation = lignesHors.filter((h) => !h.derogee)
+  const blocages: MessageRec[] = [
+    ...(nonValidees.length
+      ? [{
+          texte: estMobile
+            ? `${nonValidees.length} ligne(s) à valider avec « Valider la ligne » avant d’enregistrer.`
+            : `${nonValidees.length} ligne(s) à valider avec le bouton ✓ de la ligne avant d’enregistrer.`,
+          cle: nonValidees[0].cle,
+        }]
+      : []),
+    ...(sansQte.length ? [{ texte: `quantité pesée manquante — ${noms(sansQte)}.`, cle: sansQte[0].cle }] : []),
+    ...(enBrouillon && !aEnregistrer && nouvelles.length === 0 ? [{ texte: 'aucune ligne pesée : rien à soumettre au contrôle.' }] : []),
+    ...(rec.statut === 'A_CONTROLER' && !aEnregistrer && droits.peutValider && estPeseur
+      ? [{ texte: 'B4 : vous avez pesé ou corrigé cette réception — un autre compte la valide.' }]
+      : []),
+    ...(rec.statut === 'A_CONTROLER' && !aEnregistrer && droits.peutValider && gel.length > 0
+      ? [{ texte: phraseGel(gel, true) ?? 'un inventaire ouvert gèle un magasin de destination.' }]
+      : []),
+  ]
+  const avis: MessageRec[] = [
+    ...(sansDerogation.length
+      ? [{
+          texte: `excédent au-delà de la tolérance (${fmt.nombre(TOLERANCE_PCT, 1)} %) sans dérogation motivée — ${sansDerogation.map((h) => `L${h.rang} ${h.code}`).join(', ')} : le serveur refusera la soumission.`,
+          cle: sansDerogation[0].cle,
+        }]
+      : []),
+    ...(aCompter.length
+      ? [{
+          texte: `${aCompter.length} ligne(s) suivie(s) au lot sans bobines comptées : à compter avant la soumission au contrôle — ${noms(aCompter)}.`,
+          cle: aCompter[0].cle,
+        }]
+      : []),
+    ...(aEnregistrer
+      ? [{
+          texte: `${[
+            enteteModifie ? 'en-tête modifié' : null,
+            aCreer.length ? `${aCreer.length} ligne(s) ajoutée(s)` : null,
+            aCorriger.length ? `${aCorriger.length} corrigée(s)` : null,
+            supprimees.length ? `${supprimees.length} retirée(s)` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')} — rien n’est encore enregistré.`,
+        }]
+      : []),
+  ]
+  const annulerModifications = () => {
+    setEntete({
+      num_bon_livraison: rec.num_bon_livraison ?? '',
+      numero_facture: rec.numero_facture ?? '',
+      transporteur: rec.transporteur ?? '',
+      nombre_colis: rec.nombre_colis?.toString() ?? '',
+      poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
+      date_reception: rec.date_reception?.slice(0, 10) ?? '',
+      id_dossier_import: rec.id_dossier_import ?? '',
+    })
+    setSupprimees([])
+    setNouvelles(lignesServeur.map(depuisLigneReception))
+  }
+  /* LA BARRE DU BAS : au brouillon et au controle, pour qui peut y agir. */
+  const avecBarre =
+    (enBrouillon && droits.peutEcrire) || (rec.statut === 'A_CONTROLER' && (droits.peutEcrire || droits.peutValider))
+  const modifs = aEnregistrer || nonValidees.length > 0
+
   return (
     <div>
       <EnTetePage
         titre={`${rec.numero_reception} — ${rec.fournisseur_nom}`}
-        description={`${fmt.date(rec.date_reception)}${rec.numero_bc ? ` · bon ${rec.numero_bc}` : ' · hors commande'}${rec.receptionnaire ? ` · pesee par ${rec.receptionnaire}` : ''}`}
+        description={`${fmt.date(rec.date_reception)}${rec.numero_bc ? ` · bon ${rec.numero_bc}` : ' · hors commande'}${rec.receptionnaire ? ` · pesée par ${rec.receptionnaire}` : ''}`}
         actions={
           <>
             <Bouton variante="contour" onClick={() => naviguer('/receptions')}>
@@ -987,77 +1386,6 @@ export function Reception() {
                 Étiquettes
               </Bouton>
             )}
-            {/* Le bouton « Peser des lignes » est parti avec son panneau : on
-                ajoute une ligne dans la grille, comme sur un bon de commande. */}
-            {droits.peutEcrire && rec.statut === 'BROUILLON' && (
-              <Bouton
-                variante="contour"
-                onClick={() => changerStatut.mutate({ statut: 'A_CONTROLER' })}
-                disabled={lignes.length === 0 || enteteModifie}
-                title={
-                  lignes.length === 0
-                    ? 'Aucune ligne pesee'
-                    : enteteModifie
-                      ? 'Enregistrez d’abord les modifications en cours'
-                      : undefined
-                }
-              >
-                <Send />
-                Soumettre au contrôle
-              </Bouton>
-            )}
-            {droits.peutValider && rec.statut === 'A_CONTROLER' && (
-              <Bouton
-                onClick={() => {
-                  /* LE LOT INTERNE, ANNONCE AVANT D'ETRE POSE (01/10/2026).
-                     Une reference suivie sans lot recoit a la validation un
-                     lot FOURNISSEUR-JJMMAA-NN (domain/reception.rs) — l'ecran
-                     annoncait a tort le numero de la reception. Le rang NN
-                     n'est connu qu'a la validation. On fait confirmer : on peut
-                     encore saisir le vrai lot a la place. */
-                  const aGenerer = lignes.filter((l) => l.suivi_lot === 1 && !(l.lot_fournisseur ?? '').trim())
-                  const [aa, mm, jj] = (rec.date_reception ?? '').slice(0, 10).split('-')
-                  const prefixeLot = `${(rec.fournisseur_nom ?? '').trim().split(' ')[0].replace(/[^A-Za-z0-9]/g, '').toUpperCase()}-${jj ?? ''}${mm ?? ''}${(aa ?? '').slice(2)}`
-                  if (aGenerer.length === 0) return valider.mutate()
-                  confirmation.demander({
-                    titre: `${aGenerer.length} ligne(s) sans lot fournisseur`,
-                    libelleConfirmer: 'Générer les lots et valider',
-                    description: (
-                      <>
-                        Le fournisseur n’a pas mis de lot : chaque ligne recevra un lot interne, pour
-                        que cette livraison ne se mélange pas aux autres.
-                        <ul className="mt-2 space-y-0.5 font-mono text-[12px]">
-                          {aGenerer.map((l) => (
-                            <li key={l.id_ligne_reception}>
-                              {l.code_reference} → {prefixeLot}-NN
-                            </li>
-                          ))}
-                        </ul>
-                        <span className="mt-2 block">Pour saisir le vrai lot à la place, annulez et corrigez la ligne.</span>
-                      </>
-                    ),
-                    action: () => valider.mutate(),
-                  })
-                }}
-                disabled={estPeseur || gel.length > 0}
-                title={
-                  gel.length > 0
-                    ? (phraseGel(gel, true) ?? undefined)
-                    : estPeseur
-                    ? 'B4 : vous avez pesé ou corrigé cette réception — un autre la valide'
-                    : 'Entree en stock, CMUP, archive et historique de prix'
-                }
-              >
-                <ShieldCheck />
-                Valider le contrôle
-              </Bouton>
-            )}
-            {droits.peutEcrire && rec.statut === 'A_CONTROLER' && renvoi === null && (
-              <Bouton variante="contour" onClick={() => setRenvoi('')}>
-                <ArrowLeft />
-                Renvoyer au magasinier
-              </Bouton>
-            )}
             {confirmation.element}
             {/* ROUVRIR LE CONTROLE. Le serveur refusera tant que les entrees de
                 stock nees de cette reception vivent encore : le papier ne
@@ -1067,7 +1395,7 @@ export function Reception() {
               id={id}
               statut={rec.statut}
               taille="md"
-              consequence="Les lignes redeviendront modifiables et devront être controlees a nouveau."
+              consequence="Les lignes redeviendront modifiables et devront être contrôlées à nouveau."
             />
           </>
         }
@@ -1112,17 +1440,20 @@ export function Reception() {
       )}
       {rec.statut === 'A_CONTROLER' && (
         <Alerte ton="info" className="mb-3">
-          Au contrôle, la pesée est figée : seuls la qualité, la destination et les notes se modifient. Une
-          erreur de pesée se renvoie au magasinier.
+          Au contrôle, la pesée est figée : quantités, bon de livraison, colis, palettes, bobines, lot
+          et dérogation restent ceux du magasinier, et aucune ligne ne s’ajoute ni ne se retire. Se
+          modifient encore : la qualité, le magasin, les dates de fabrication et de péremption et les
+          observations de chaque ligne, ainsi que l’en-tête. Une erreur de pesée se renvoie au
+          magasinier.
         </Alerte>
       )}
-      {!modifiable && !['ANNULE'].includes(rec.statut) && (
+      {!modifiable && !['ANNULE'].includes(rec.statut) && rec.statut !== 'A_CONTROLER' && (
         <Alerte ton={rec.statut === 'VALIDE' || rec.statut === 'CLOTURE' ? 'succes' : 'info'} className="mb-3">
           {rec.statut === 'CLOTURE'
-            ? `Reception cloturee avec la facture${rec.numero_facture ? ` ${rec.numero_facture}` : ''} : la valeur definitive est au stock. Une correction passe par un avoir.`
+            ? `Réception clôturée avec la facture${rec.numero_facture ? ` ${rec.numero_facture}` : ''} : la valeur définitive est au stock. Une correction passe par un avoir.`
             : rec.statut === 'VALIDE'
-              ? 'Réception validee au prix du bon (valeur provisoire) : le stock, le CMUP et l’historique de prix ont ete mis à jour. La facture la rendra definitive.'
-              : 'Réception figee.'}
+              ? 'Réception validée au prix du bon (valeur provisoire) : le stock, le CMUP et l’historique de prix ont été mis à jour. La facture la rendra définitive.'
+              : 'Réception figée.'}
         </Alerte>
       )}
       {/* LES FRAIS D'APPROCHE AVANT LA CLOTURE (ADR-003 phase C) : c'est elle
@@ -1148,7 +1479,7 @@ export function Reception() {
 
       {horsTolerance > 0 && (
         <Alerte ton="alerte" titre="Écart de pesée" className="mb-3">
-          {horsTolerance} ligne(s) depassent de plus de {TOLERANCE_PCT} % la quantite attendue.
+          {horsTolerance} ligne(s) dépassent de plus de {TOLERANCE_PCT} % la quantité attendue.
           Un tel excédent exige une dérogation motivée. Un manque dans la tolérance solde la ligne du bon ; au-delà,
           il laisse un reliquat à recevoir.
         </Alerte>
@@ -1164,8 +1495,8 @@ export function Reception() {
               }
             >
               {rec.on_time === 1 && rec.in_full !== 0 && rec.in_spec !== 0
-                ? 'OTIF respecte'
-                : 'OTIF manque'}
+                ? 'OTIF respecté'
+                : 'OTIF manqué'}
             </Badge>
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -1177,14 +1508,14 @@ export function Reception() {
               suffixe=" j"
               alerte={(rec.retard_jours ?? 0) > 0}
             />
-            <Critere libelle="A l'heure" ok={rec.on_time} />
+            <Critere libelle="À l'heure" ok={rec.on_time} />
             <Critere libelle="Complet" ok={rec.in_full} />
             <Critere libelle="Conforme" ok={rec.in_spec} />
           </CarteCorps>
           <CarteCorps className="pt-0">
             <p className="text-[11px] text-attenue-texte">
-              L'OTIF est le produit des trois criteres, pas leur moyenne : une livraison a l'heure
-              mais incomplete ne vaut rien pour l'atelier qui l'attend.
+              L'OTIF est le produit des trois critères, pas leur moyenne : une livraison à l'heure
+              mais incomplète ne vaut rien pour l'atelier qui l'attend.
             </p>
           </CarteCorps>
         </Carte>
@@ -1193,10 +1524,11 @@ export function Reception() {
       <div className="space-y-3">
         <Carte repliable="reception.1">
           <CarteEntete>
-            <CarteTitre>En-tete</CarteTitre>
-            <Badge ton={TON[rec.statut] ?? 'neutre'}>{rec.statut}</Badge>
+            <CarteTitre>En-tête</CarteTitre>
+            {/* LE STATUT EN LIBELLE, tire de la table commune (lib/statuts). */}
+            <StatutBadge entite="reception" code={rec.statut} />
           </CarteEntete>
-          <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
             <div>
               <Etiq htmlFor="bl">Bon de livraison</Etiq>
               <Champ
@@ -1209,7 +1541,7 @@ export function Reception() {
             <div>
               <Etiq htmlFor="fact">
                 N° de facture
-                <Aide>Souvent absente a la livraison : elle se saisit plus tard.</Aide>
+                <Aide>Souvent absente à la livraison : elle se saisit plus tard.</Aide>
               </Etiq>
               <Champ
                 id="fact"
@@ -1227,10 +1559,8 @@ export function Reception() {
                 onChange={(e) => setEntete({ ...entete, transporteur: e.target.value })}
               />
             </div>
-            {/* LA DATE DE RECEPTION MANQUAIT. La base la posait a l'instant de
-                la saisie ; or on saisit souvent le lendemain, et c'est la date
-                d'arrivee — pas celle de la frappe — que l'OTIF compare a la
-                livraison promise. */}
+            {/* LA DATE DE RECEPTION : celle de l'arrivee, que l'OTIF compare a
+                la livraison promise — pas celle de la frappe. */}
             <div>
               <Etiq htmlFor="date-reception">Date de réception</Etiq>
               <Champ
@@ -1257,7 +1587,7 @@ export function Reception() {
             <div>
               <Etiq htmlFor="brut">
                 Poids brut (kg)
-                <Aide>Releve au pont-bascule, emballage compris.</Aide>
+                <Aide>Relevé au pont-bascule, emballage compris.</Aide>
               </Etiq>
               <Champ
                 id="brut"
@@ -1284,11 +1614,7 @@ export function Reception() {
             )}
           </CarteCorps>
 
-          {/* LES BONS DU CAMION, HORS DE LA GRILLE A 4 COLONNES (16/10/2026).
-              Ces blocs n'ont pas la hauteur d'un champ. Une grille a qui on
-              demande d'aligner des contenus inegaux ne les aligne pas : c'est
-              ce qui donnait l'en-tete de travers. Ils ont donc leur propre
-              rangee, pleine largeur. */}
+          {/* LES BONS DU CAMION, sur leur propre rangee pleine largeur (16/10/2026). */}
           {bonsAttendus.length > 0 && (
             <CarteCorps className="border-t border-bordure pt-3">
               <Etiq>
@@ -1305,14 +1631,14 @@ export function Reception() {
                     <button
                       key={b.id_bc}
                       type="button"
-                      disabled={!modifiable}
+                      disabled={!modifiable || peseeFigee}
                       onClick={() => basculerBon(b.id_bc)}
                       className={cn(
                         'rounded-[var(--radius)] border px-3 py-2 text-left text-[13px] transition-colors',
                         retenu
                           ? 'border-primaire bg-primaire/10'
                           : 'border-bordure hover:bg-attenue/40',
-                        !modifiable && 'opacity-60',
+                        (!modifiable || peseeFigee) && 'opacity-60',
                       )}
                     >
                       <div className="font-medium">{b.numero_bc}</div>
@@ -1355,15 +1681,19 @@ export function Reception() {
 
         <Carte repliable="reception.2">
           <CarteEntete>
-            <CarteTitre>Pesees</CarteTitre>
+            <CarteTitre>Pesées</CarteTitre>
+            {modifiable && !estMobile && (
+              <span className="text-[11px] text-attenue-texte">
+                {peseeFigee
+                  ? 'Au contrôle : qualité, magasin, dates et observations se corrigent sur la ligne (crayon), puis « Enregistrer ».'
+                  : 'Chaque ligne se saisit sur place ; ✓ la valide, « Enregistrer » envoie l’en-tête et les lignes ensemble.'}
+              </span>
+            )}
           </CarteEntete>
           <CarteCorps className="p-0">
-            {modifiable ? (
-              /* SAISIE RECEPTION SIMPLE, bureau comme telephone (ADR-003, Phase A).
-                 La reception a son PROPRE geste — peser contre des lignes de bon
-                 de commande — distinct de la grille large du bon de commande.
-                 Lignes simples (cartes + feuille plein ecran) ; les colonnes
-                 BL/colis/lot/magasin/qualite vivent dans la feuille d'edition. */
+            {modifiable && estMobile ? (
+              /* SOUS 768 PX : cartes + feuille plein ecran (14/10/2026), meme etat
+                 que la grille du bureau. */
               <PeseesMobile
                 lignes={nouvelles}
                 setLignes={setNouvelles}
@@ -1371,113 +1701,152 @@ export function Reception() {
                 chercherCatalogue={chercherCatalogue}
                 magasins={qMagasins.data ?? []}
                 tolerancePct={TOLERANCE_PCT}
-                brouillon={rec.statut === 'BROUILLON'}
+                brouillon={enBrouillon}
+                peseeFigee={peseeFigee}
+                relier={relier}
                 surRetirer={retirerLigne}
               />
+            ) : modifiable ? (
+              <>
+                {/* AJOUTER UNE LIGNE (brouillon seulement : au controle, le
+                    serveur refuse tout ajout). La liste propose d'abord ce que
+                    les bons attendent, puis tout le catalogue. */}
+                {enBrouillon && (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-bordure px-3 py-2">
+                    <div className="min-w-0 max-w-xl flex-1">
+                      <ChampRecherche
+                        valeur=""
+                        chercher={chercherAjout}
+                        cleCache={['reception-ajout', id, bonsRetenus.join(','), nouvelles.length, proposees.length]}
+                        chercherAVide
+                        surChoix={(s) => ajouterLigne(s.charge as RefLigne)}
+                        placeholder="Ajouter une ligne — ce que les bons attendent, ou tout le catalogue…"
+                        aide="Flèches pour parcourir, Entrée pour retenir."
+                        ariaLabel="Ajouter une ligne pesée"
+                      />
+                    </div>
+                    <span className="text-[11px] text-attenue-texte">
+                      {proposees.length} ligne(s) attendue(s) sur les bons
+                      {bonsRetenus.length > 0 ? ' retenus' : ''}.
+                    </span>
+                  </div>
+                )}
+                {nouvelles.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-[13px] text-attenue-texte">
+                    Aucune ligne pesée. Ajoutez ce que le camion a livré, article par article.
+                  </div>
+                ) : (
+                  <GrilleReception
+                    lignes={vues}
+                    tolerancePct={TOLERANCE_PCT}
+                    magasins={qMagasins.data ?? []}
+                    poser={poserLigne}
+                    peseeFigee={peseeFigee}
+                    voitPrix={droits.visible('prix_kg_devise')}
+                    surBasculerValidation={basculerValidation}
+                    surRetirer={
+                      peseeFigee
+                        ? undefined
+                        : (cle) => {
+                            const l = nouvelles.find((x) => x.cle === cle)
+                            if (l) retirerLigne(l)
+                          }
+                    }
+                  />
+                )}
+              </>
             ) : (
-              <DataTable<LigneRec>
-                exportable="lignes-de-reception"
-                imprimable="Lignes de réception"
-                module={MODULE}
-                colonnes={colonnes}
-                lignes={lignesAffichees}
-                chargement={qLignes.isLoading}
-                erreur={qLignes.error}
-                cle={(l) => l.id_ligne_reception}
-                recherche={false}
-                pagination={false}
-                tailleParDefaut={500}
-                titreCarte={(l) => l.code_reference}
-                videTitre="Aucune pesée"
-                videDescription="Cette réception ne porte aucune ligne."
-              />
+              <>
+                <DataTable<LigneRec>
+                  exportable="lignes-de-reception"
+                  imprimable="Lignes de réception"
+                  module={MODULE}
+                  colonnes={colonnes}
+                  lignes={lignesAffichees}
+                  chargement={qLignes.isLoading}
+                  erreur={qLignes.error}
+                  cle={(l) => l.id_ligne_reception}
+                  recherche={false}
+                  pagination={false}
+                  tailleParDefaut={500}
+                  titreCarte={(l) => l.code_reference}
+                  videTitre="Aucune pesée"
+                  videDescription="Cette réception ne porte aucune ligne."
+                />
+                <TotauxReception lignes={lignesServeur.map(depuisLigneReception)} />
+              </>
             )}
-            <TotauxReception
-              lignes={modifiable ? nouvelles : lignesServeur.map(depuisLigneReception)}
-            />
           </CarteCorps>
         </Carte>
       </div>
 
-      {modifiable && (
-        <div
-          className={cn(
-            'sticky bottom-0 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border bg-surface px-3 py-2 shadow-sm',
-            aEnregistrer ? 'border-primaire' : 'border-bordure',
-          )}
-        >
-          <span className="text-[13px]">
-            {nonValidees.length > 0 ? (
-              <span className="text-alerte">
-                {nonValidees.length} ligne(s) à valider avec le bouton ✓ de la ligne avant
-                d’enregistrer.
-              </span>
-            ) : aEnregistrer ? (
+      {avecBarre && (
+        <BarreReception
+          indicateurs={indicateurs}
+          horsTolerance={lignesHors}
+          tolerancePct={TOLERANCE_PCT}
+          blocages={blocages}
+          avis={avis}
+          enAttente={aEnregistrer}
+          actions={
+            modifs ? (
+              /* DES MODIFICATIONS ATTENDENT : l'action principale est de les
+                 enregistrer (ou de les abandonner). */
               <>
-                <span className="font-medium">
-                  {[
-                    enteteModifie ? 'en-tête modifié' : null,
-                    aCreer.length ? `${aCreer.length} ligne(s) ajoutée(s)` : null,
-                    aCorriger.length ? `${aCorriger.length} corrigée(s)` : null,
-                    supprimees.length ? `${supprimees.length} retirée(s)` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-                <span className="text-alerte"> — rien n’est encore enregistré.</span>
+                <Bouton variante="contour" onClick={annulerModifications}>
+                  <Undo2 />
+                  Annuler les modifications
+                </Bouton>
+                <Bouton
+                  onClick={() => enregistrer.mutate()}
+                  chargement={enregistrer.isPending}
+                  disabled={!aEnregistrer || nonValidees.length > 0}
+                  title={blocages[0] ? `Bloquant : ${blocages[0].texte}` : undefined}
+                >
+                  <Save />
+                  Enregistrer
+                </Bouton>
               </>
+            ) : enBrouillon ? (
+              <Bouton
+                onClick={() => changerStatut.mutate({ statut: 'A_CONTROLER' })}
+                chargement={changerStatut.isPending}
+                disabled={lignes.length === 0 || enteteModifie}
+                title={lignes.length === 0 ? 'Aucune ligne pesée' : undefined}
+              >
+                <Send />
+                Soumettre au contrôle
+              </Bouton>
             ) : (
-              <span className="text-attenue-texte">
-                Validez chaque ligne avec son bouton ✓, puis enregistrez l’en-tête et les lignes
-                ensemble.
-              </span>
-            )}
-          </span>
-          <div className="flex items-center gap-2">
-            <Bouton
-              variante="contour"
-              disabled={!aEnregistrer && nonValidees.length === 0}
-              onClick={() => {
-                if (rec) {
-                  setEntete({
-                    num_bon_livraison: rec.num_bon_livraison ?? '',
-                    numero_facture: rec.numero_facture ?? '',
-                    transporteur: rec.transporteur ?? '',
-                    nombre_colis: rec.nombre_colis?.toString() ?? '',
-                    poids_total_brut_kg: rec.poids_total_brut_kg?.toString() ?? '',
-                    date_reception: rec.date_reception?.slice(0, 10) ?? '',
-                    id_dossier_import: rec.id_dossier_import ?? '',
-                  })
-                }
-                setSupprimees([])
-                setNouvelles(lignesServeur.map(depuisLigneReception))
-              }}
-            >
-              <Undo2 />
-              Annuler les modifications
-            </Bouton>
-            <Bouton
-              onClick={() => enregistrer.mutate()}
-              chargement={enregistrer.isPending}
-              disabled={!aEnregistrer || nonValidees.length > 0}
-              title={
-                nonValidees.length > 0
-                  ? 'Validez d’abord chaque ligne avec son bouton ✓'
-                  : undefined
-              }
-            >
-              <Save />
-              Enregistrer
-            </Bouton>
-          </div>
-        </div>
+              <>
+                {droits.peutEcrire && renvoi === null && (
+                  <Bouton variante="contour" onClick={() => setRenvoi('')}>
+                    <ArrowLeft />
+                    Renvoyer au magasinier
+                  </Bouton>
+                )}
+                {droits.peutValider && (
+                  <Bouton
+                    onClick={lancerValidation}
+                    chargement={valider.isPending}
+                    disabled={estPeseur || gel.length > 0}
+                    title={
+                      gel.length > 0
+                        ? (phraseGel(gel, true) ?? undefined)
+                        : estPeseur
+                          ? 'B4 : vous avez pesé ou corrigé cette réception — un autre la valide'
+                          : 'Entrée en stock, CMUP, archive et historique de prix'
+                    }
+                  >
+                    <ShieldCheck />
+                    Valider le contrôle
+                  </Bouton>
+                )}
+              </>
+            )
+          }
+        />
       )}
-
-
-      {/* LE PANNEAU « PESER » A DISPARU. Il ouvrait une fenetre pour choisir
-          des lignes attendues, alors que la grille propose exactement les
-          memes par son champ de recherche — deux chemins pour un seul geste,
-          et deux endroits ou corriger le jour ou la regle change. */}
     </div>
   )
 }

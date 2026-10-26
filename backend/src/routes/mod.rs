@@ -11,6 +11,7 @@ mod briefing;
 mod completion;
 pub(crate) mod auth_routes;
 mod consultation;
+mod couverture;
 mod devalidation;
 mod entites;
 mod factures;
@@ -447,6 +448,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/factures-fournisseur/{id}",
                get(factures::lire).patch(factures::modifier).delete(factures::supprimer))
         .route("/api/factures-fournisseur/{id}/valider", post(factures::valider))
+        // LA COUVERTURE DU PLAN (moteur du 26/10/2026, en parallele du plan d'achat) :
+        // le plan seul, le stock du jour, les arrivages dates, la proposition.
+        .route("/api/couverture", get(couverture::liste))
+        .route("/api/couverture/{reference}", get(couverture::detail))
         .route("/api/plan-achat", get(consultation::plan_achat))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))

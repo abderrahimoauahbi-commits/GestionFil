@@ -5002,6 +5002,213 @@ def scenario_recherche_referentiels(c, infra):
     verifier(env["total"] == nb_frs and env["plus"] is True and len(env["lignes"]) == 1, f"enveloppe : {env}")
 
 
+def scenario_couverture_moteur(c, infra):
+    """LE MOTEUR DE COUVERTURE (26/10/2026, etape 1) : GET /api/couverture et /api/couverture/{reference}.
+    Un cas monte par l'API : plan en service, stock recu (un lot libre, un reste, un lot bloque), fil
+    charge sur machine au constat ancien, bon envoye date par l'en-tete, bon date par la ligne, bon en
+    retard, bon non valide. Le reste et le fil sur machine (quel que soit l'age du constat) comptent ; le
+    bloque, le retard, le non valide non. La projection, les evenements et la premiere proposition se
+    recalculent ici depuis les jours rendus ; l'OF n'entre pas dans la demande ; les droits suivent
+    PLAN_ACHAT / LIRE."""
+    from datetime import date, timedelta
+    from urllib.parse import quote
+
+    # Un plan en service et sa photo MRP : celui du banc s'il existe, sinon le sien.
+    id_plan = infra.valeur("SELECT id_plan FROM plan_production WHERE statut = 'EN_COURS'")
+    if not id_plan:
+        qualite = infra.valeur("SELECT q.code_qualite FROM qualite q WHERE q.statut = 'ACTIF' "
+                               "AND EXISTS (SELECT 1 FROM v_recette_calculee r WHERE r.code_qualite = q.code_qualite "
+                               "AND r.kg_m2 > 0) ORDER BY 1 LIMIT 1")
+        mois0 = infra.valeur("SELECT to_char(current_date, 'YYYY-MM')")
+        plan = c.ok("Choukri", "PUT", "/api/plans", {
+            "libelle": "Plan du banc (couverture)", "date_debut": mois0, "mois_horizon": 12,
+            "croissance_annuelle_pct": 0,
+            "saisonnalite": [{"code_qualite": qualite, "mois": m, "coefficient": 1} for m in range(1, 13)],
+            "qualites": [{"code_qualite": qualite, "m2_base_mensuel": 20000}]})
+        id_plan = plan["id_plan"]
+        c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "SIMULATION"})
+        c.ok("Choukri", "POST", f"/api/plans/{id_plan}/figer-recettes", {})
+        c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "EN_COURS"})
+    c.ok("Choukri", "POST", f"/api/plans/{id_plan}/mrp", {})
+
+    # Une reference suivie par lot que le plan demande dans les mois a venir.
+    ref = infra.valeur(
+        "SELECT b.code_reference FROM besoin_mrp b JOIN reference r ON r.code_reference = b.code_reference "
+        f"WHERE b.id_plan = '{id_plan}' AND r.suivi_lot = 1 AND r.actif = 1 AND r.code_fournisseur IS NOT NULL "
+        "AND b.annee_mois > to_char(current_date, 'YYYY-MM') "
+        "GROUP BY 1 HAVING sum(b.quantite_kg) > 0 ORDER BY sum(b.quantite_kg) DESC, 1 LIMIT 1")
+    verifier(ref, "le plan du banc ne demande aucune reference suivie par lot : le scenario n'a rien a projeter")
+    frs = infra.valeur(f"SELECT code_fournisseur FROM reference WHERE code_reference = '{ref}'")
+    verifier(infra.valeur(f"SELECT inclure_mrp = 1 AND est_quarantaine = 0 FROM magasin WHERE code_magasin = '{MAG}'") == "t",
+             f"le magasin {MAG} n'est pas compte au plan : le scenario suppose le contraire")
+    taux_usd_du_jour(infra)
+    q_ref = quote(ref, safe="")
+
+    def liste():
+        tete = c.ok("Choukri", "GET", "/api/couverture")
+        return tete, next((x for x in tete["lignes"] if x["code_reference"] == ref), None)
+
+    tete, avant = liste()
+    verifier(tete["plan"] and tete["plan"]["id_plan"] == id_plan, f"la couverture ne lit pas le plan en service : {tete['plan']}")
+    verifier(len(tete["regles_provisoires"]) >= 5, "les regles provisoires des dates d'arrivage ne sont pas rendues")
+    verifier(avant is not None, f"{ref}, demandee par le plan, manque a la liste")
+    verifier(avant["plan_horizon_kg"] > 0, f"{ref} : aucun plan sur l'horizon")
+    auj = date.fromisoformat(tete["aujourdhui"])
+    jour = lambda n: (auj + timedelta(days=n)).isoformat()
+
+    # LE STOCK : un lot libre du projet (500), un reste (200), un lot bloque (100).
+    for lot, kg_lot in (("LOT-COUV-1", 500), ("LOT-COUV-2", 200), ("LOT-COUV-3", 100)):
+        id_bc, lignes = bon_envoye(c, [(ref, kg_lot, 2.0)], frs=frs)
+        reception_validee(c, id_bc, lignes, [kg_lot], lot_fournisseur=lot, nb_bobines=kg_lot // 5)
+    # Sous le seuil d'un etage, un lot nait en RESTES : le premier revient en Projet (geste motive),
+    # le deuxieme reste un reste.
+    c.ok("Choukri", "POST", "/api/lots/basculer", {"code_reference": ref, "lot_fournisseur": "LOT-COUV-1",
+                                                   "categorie": "PROJET", "motif": "Lot du projet, banc de couverture"})
+    verifier(infra.valeur(f"SELECT categorie FROM lot WHERE code_reference = '{ref}' AND lot_fournisseur = 'LOT-COUV-2'")
+             == "RESTES", "le lot de 200 kg n'est pas un reste")
+    c.ok("Choukri", "POST", "/api/lots/statut", {"code_reference": ref, "lot_fournisseur": "LOT-COUV-3",
+                                                 "action": "BLOQUER", "motif": "Blocage qualite du banc"})
+
+    # LE FIL SUR MACHINE : 20 bobines de 5 kg du lot libre, constat vieux de 90 jours.
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCCV", "nom": "Machine de la couverture",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+        "type_fiche": "CHARGE", "code_machine": "BANCCV", "code_emplacement": "BANCCV-E1", "date_fiche": jour(0),
+        "code_magasin": MAG, "responsable": "Banc", "code_qualite": qualite_banc(infra),
+        "lignes": [{"code_reference": ref, "lot_fournisseur": "LOT-COUV-1", "nb_bobines_mouvementees": 20,
+                    "poids_retenu_kg": 5, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}]})
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
+    infra.sql("UPDATE machine_etat SET date_constat = current_date - 90 WHERE code_emplacement = 'BANCCV-E1'")
+
+    # LES BONS : date par l'en-tete, date par la ligne (qui prime), en retard, non valide.
+    def bon(kg_bon, date_entete=None, date_ligne=None, valider=True):
+        ligne = {"code_reference": ref, "unite_commande": "kg", "quantite_commandee_unite": kg_bon,
+                 "prix_unitaire_devise": 2.0}
+        if date_ligne:
+            ligne["date_livraison_prevue"] = date_ligne
+        corps = {"code_fournisseur": frs, "lignes": [ligne]}
+        if date_entete:
+            corps["date_livraison_prevue"] = date_entete
+        id_bc = c.ok("Assistante", "POST", "/api/bons-commande", corps)["id_bc"]
+        if valider:
+            soumettre_bc(c, id_bc)
+            c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "VALIDE"})
+            c.ok("Choukri", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ENVOYE"})
+        return id_bc
+
+    bc_entete = bon(1000, date_entete=jour(20))
+    bc_ligne = bon(700, date_entete=jour(10), date_ligne=jour(40))
+    bc_retard = bon(300, date_entete=jour(-10))
+    bc_brouillon = bon(400, date_entete=jour(15), valider=False)
+
+    _, apres = liste()
+    ecart = lambda champ: round(apres[champ] - avant[champ], 4)
+    verifier(ecart("disponible_kg") == 700, f"disponible : +{ecart('disponible_kg')} au lieu de +700 "
+                                            "(500 libres dont 100 sur machine, 200 de reste ; le bloque exclu)")
+    verifier(ecart("magasin_kg") == 600 and ecart("machine_kg") == 100,
+             f"magasin +{ecart('magasin_kg')} (600 attendus), machine +{ecart('machine_kg')} (100 attendus, constat de 90 j)")
+    verifier(ecart("restes_kg") == 200, f"restes : +{ecart('restes_kg')} au lieu de +200 (comptes, affiches)")
+    verifier(ecart("bloque_kg") == 100, f"bloque : +{ecart('bloque_kg')} au lieu de +100 (affiche, non compte)")
+    verifier(ecart("en_retard_kg") == 300, f"en retard : +{ecart('en_retard_kg')} au lieu de +300")
+    verifier(abs(ecart("plan_horizon_kg")) < 1e-6, "le stock ou les bons changent la demande (le plan seul la fait)")
+
+    # LE DETAIL : chaque bon classe avec sa raison, la ligne qui prime sur l'en-tete.
+    d = c.ok("Choukri", "GET", f"/api/couverture/{q_ref}")
+    verifier(d["synthese"] == apres, "la synthese du detail differe de la ligne de la liste")
+    par_bc = {a.get("id_bc"): a for a in d["arrivages"] if a["origine"] == "BON"}
+    attendu = {bc_entete: ("DATE", True, jour(20), "en-tête", 1000), bc_ligne: ("DATE", True, jour(40), "ligne", 700),
+               bc_retard: ("EN_RETARD", False, jour(-10), "en-tête", 300),
+               bc_brouillon: ("NON_VALIDE", False, jour(15), "en-tête", 400)}
+    for id_bc, (cat, compte, dt, source, kg_bon) in attendu.items():
+        a = par_bc.get(id_bc)
+        verifier(a is not None, f"bon {id_bc} absent des arrivages du detail")
+        verifier((a["categorie"], a["compte"], a["date"], a["source_date"], a["kg"]) == (cat, compte, dt, source, kg_bon),
+                 f"bon {a.get('numero_bc')} : {a['categorie']} {a['compte']} {a['date']} {a['source_date']} {a['kg']}, "
+                 f"attendu {cat} {compte} {dt} {source} {kg_bon}")
+        verifier(a["raison"], f"bon {a.get('numero_bc')} sans raison")
+    machine = [m for m in d["ressources"]["machine"] if m["code_emplacement"] == "BANCCV-E1"]
+    verifier(machine and machine[0]["compte"] and machine[0]["age_constat_j"] >= 90,
+             f"le fil sur machine au constat ancien n'est pas compte : {machine}")
+    lots = {l["lot_fournisseur"]: l for l in d["ressources"]["lots"]}
+    verifier(lots.get("LOT-COUV-2", {}).get("compte") is True and lots.get("LOT-COUV-3", {}).get("compte") is False,
+             f"reste compte / bloque exclu : {lots}")
+
+    # LA PROJECTION SE REFAIT JOUR PAR JOUR depuis les jours rendus (le solde jamais sous zero, le
+    # deficit jamais reporte), et les arrivages comptes y tombent a leur date.
+    jours = d["jours"]
+    verifier(jours[0]["date"] == jour(0), f"la projection ne commence pas aujourd'hui : {jours[0]['date']}")
+    verifier(jours[-1]["date"] == tete["fin_horizon"], "la projection ne finit pas a la fin de l'horizon")
+    arr = {j["date"]: j["arrivee_kg"] for j in jours}
+    verifier(arr.get(jour(20), 0) >= 1000 and arr.get(jour(40), 0) >= 700,
+             f"arrivages mal dates : J+20 {arr.get(jour(20))}, J+40 {arr.get(jour(40))}")
+    solde = d["synthese"]["disponible_kg"]
+    for j in jours:
+        brut = solde + j["arrivee_kg"] - j["conso_prevue_kg"]
+        verifier(abs(max(0.0, brut) - j["solde_kg"]) < 0.05 and abs(max(0.0, -brut) - j["plan_non_couvert_kg"]) < 0.05,
+                 f"{j['date']} : solde {j['solde_kg']} / non couvert {j['plan_non_couvert_kg']}, recalcule {brut:.4f}")
+        solde = j["solde_kg"]
+    total = sum(e["conso_prevue_kg"] for e in d["evenements"])
+    verifier(abs(total - d["synthese"]["plan_horizon_kg"]) < 0.05,
+             f"les evenements rendent {total:.4f} kg de plan, l'horizon {d['synthese']['plan_horizon_kg']}")
+    verifier(d["evenements"][0]["date"] == jour(0) and "AUJOURDHUI" in d["evenements"][0]["natures"],
+             "le premier evenement n'est pas aujourd'hui")
+    verifier(abs(sum(j["plan_non_couvert_kg"] for j in jours) - d["synthese"]["plan_non_couvert_kg"]) < 0.05,
+             "le plan non couvert total ne retombe pas sur les jours")
+
+    # LA PREMIERE PROPOSITION SE REFAIT : D, S(D), besoin, jour determinant, minimum, date limite.
+    p = d["propositions"][0] if d["propositions"] else None
+    if p:
+        idx = {j["date"]: i for i, j in enumerate(jours)}
+        i_d, i_f = idx[p["date_disponibilite"]], idx.get(p["date_fin_fenetre"], len(jours))
+        delai = d["reglages"]["delai_j"]
+        sous = next(i for i, j in enumerate(jours) if j["solde_kg"] < j["securite_kg"] - 1e-6)
+        verifier(i_d == max(delai, sous), f"D = {p['date_disponibilite']}, attendu MAX(aujourd'hui + {delai}, {jours[sous]['date']})")
+        s_d = (jours[i_d - 1]["solde_kg"] if i_d else d["synthese"]["disponible_kg"]) + jours[i_d]["arrivee_kg"]
+        verifier(abs(s_d - p["solde_debut_d_kg"]) < 0.05, f"S(D) {p['solde_debut_d_kg']}, recalcule {s_d:.4f}")
+        plan_f = sum(j["conso_prevue_kg"] for j in jours[i_d:i_f])
+        secu = d["reglages"]["jours_securite"] * plan_f / (i_f - i_d)
+        verifier(abs(secu - p["securite_kg"]) < 0.05, f"securite {p['securite_kg']}, recalculee {secu:.4f}")
+        net, meilleur, determinant = 0.0, float("-inf"), None
+        for k, j in enumerate(jours[i_d:i_f]):
+            net += j["conso_prevue_kg"] - (j["arrivee_kg"] if k else 0.0)
+            if secu + net - s_d > meilleur + 1e-6:
+                meilleur, determinant = secu + net - s_d, j["date"]
+        verifier(abs(max(0.0, meilleur) - p["besoin_theorique_kg"]) < 0.1 and determinant == p["jour_determinant"],
+                 f"besoin {p['besoin_theorique_kg']} au {p['jour_determinant']}, recalcule {meilleur:.4f} au {determinant}")
+        moq = d["reglages"]["moq_kg"] or 0
+        verifier(p["quantite_proposee_kg"] >= max(p["besoin_theorique_kg"], moq) - 1e-6, f"quantite sous le besoin : {p}")
+        verifier(date.fromisoformat(p["date_limite_commande"]) == date.fromisoformat(p["date_disponibilite"]) - timedelta(days=delai),
+                 "date limite de commande differente de D - delai")
+        verifier(d["synthese"]["qte_a_commander_kg"] == p["quantite_proposee_kg"], "la liste ne rend pas la premiere proposition")
+    else:
+        verifier(d["motif_sans_proposition"], "ni proposition ni motif")
+
+    # L'OF N'ENTRE PAS DANS LA DEMANDE : un OF prevu enorme ne change ni le plan ni la projection.
+    q_of = infra.valeur(f"SELECT code_qualite FROM v_recette_calculee WHERE code_reference = '{ref}' AND kg_m2 > 0 "
+                        "ORDER BY 1 LIMIT 1")
+    if q_of:
+        id_of = infra.valeur(
+            "INSERT INTO ordre_fabrication (numero, date_of, date_fin_prevue, code_qualite, metrage_m2) "
+            f"VALUES ('OF-BANC-COUV', '{jour(1)}', '{jour(5)}', '{q_of}', 500000) RETURNING id_of")
+        _, avec_of = liste()
+        verifier(avec_of["plan_horizon_kg"] == apres["plan_horizon_kg"]
+                 and avec_of["qte_a_commander_kg"] == apres["qte_a_commander_kg"],
+                 f"un OF change la couverture : plan {apres['plan_horizon_kg']} -> {avec_of['plan_horizon_kg']}")
+        infra.sql(f"UPDATE ordre_fabrication SET statut = 'ANNULE' WHERE id_of = '{id_of}'")
+
+    # LES DROITS : PLAN_ACHAT / LIRE, sur les deux routes ; une reference inconnue est un 404.
+    c.ok("Magasinie", "GET", "/api/couverture")
+    infra.sql("UPDATE permission SET actif = 0 WHERE code_role_user = 'MAGASIN' AND module = 'PLAN_ACHAT' AND action = 'LIRE'")
+    try:
+        c.refus("Magasinie", "GET", "/api/couverture", codes=(403,))
+        c.refus("Magasinie", "GET", f"/api/couverture/{q_ref}", codes=(403,))
+    finally:
+        infra.sql("UPDATE permission SET actif = 1 WHERE code_role_user = 'MAGASIN' AND module = 'PLAN_ACHAT' AND action = 'LIRE'")
+    c.refus("Choukri", "GET", "/api/couverture/INCONNUE-XYZ", codes=(404,))
+    # Le bon brouillon ne reste pas ouvert pour les scenarios suivants.
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{bc_brouillon}/statut", {"statut": "ANNULE"})
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -5079,6 +5286,7 @@ SCENARIOS = [
     scenario_reception_date_du_fait,
     scenario_codes_erreur,
     scenario_recherche_referentiels,
+    scenario_couverture_moteur,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,
 ]

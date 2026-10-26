@@ -6,6 +6,7 @@
 
 pub mod classification;
 pub mod concurrence;
+pub mod couverture;
 pub mod cours_bam;
 pub mod decision_machine;
 pub mod facture_fournisseur;

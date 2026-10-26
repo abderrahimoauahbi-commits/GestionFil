@@ -277,9 +277,17 @@ pub async fn lire_dossier(
     .fetch_all(db)
     .await?;
 
+    // LE PRIX DU BON SUR CHAQUE LIGNE (24/10/2026) : celui de la ligne de bon
+    // liee, meme soldee — l'ecran ne connaissait que les lignes encore
+    // ouvertes, et l'ecart au bon disparaissait des que le bon etait servi.
+    // Lu tel quel, rien n'est recalcule. Meme nom que dans `lignes_bc_ouvertes`
+    // (`prix_kg_devise`) : le champ declare du module, masque selon les droits.
     let lignes = sqlx::query(
-        "SELECT * FROM v_import_cout_revient WHERE id_dossier = $1
-          ORDER BY numero_facture, ligne_numero",
+        "SELECT v.*, lb.prix_kg_devise::float8 AS prix_kg_devise, lb.code_devise AS devise_bc
+           FROM v_import_cout_revient v
+           LEFT JOIN ligne_bc lb ON lb.id_ligne_bc = v.id_ligne_bc
+          WHERE v.id_dossier = $1
+          ORDER BY v.numero_facture, v.ligne_numero",
     )
     .bind(&id)
     .fetch_all(db)

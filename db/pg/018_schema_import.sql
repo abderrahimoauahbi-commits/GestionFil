@@ -377,6 +377,43 @@ BEFORE INSERT OR UPDATE OF id_ligne_bc, code_reference ON import_facture_lignes
 FOR EACH ROW EXECUTE FUNCTION fn_trg_ifl_bc();
 
 
+-- UNE LIGNE RECUE EST FIGEE TOUT ENTIERE (2026-10-08f, etendue par 2026-10-24c) :
+-- elle est entree en stock a ce prix, sous ce lot, avec ce colisage. Seuls les
+-- compteurs que le serveur tient lui-meme bougent encore (quantite_recue_kg,
+-- pct_dossier, soldee / motif_solde). Le message nomme les colonnes touchees.
+CREATE OR REPLACE FUNCTION fn_trg_import_ligne_figee() RETURNS trigger AS $$
+DECLARE
+    v_colonnes text[] := ARRAY[]::text[];
+BEGIN
+    IF OLD.quantite_recue_kg > 0 THEN
+        IF NEW.code_reference       IS DISTINCT FROM OLD.code_reference       THEN v_colonnes := v_colonnes || 'référence'::text; END IF;
+        IF NEW.type_ligne           IS DISTINCT FROM OLD.type_ligne           THEN v_colonnes := v_colonnes || 'type'::text; END IF;
+        IF NEW.libelle              IS DISTINCT FROM OLD.libelle              THEN v_colonnes := v_colonnes || 'libellé'::text; END IF;
+        IF NEW.unite                IS DISTINCT FROM OLD.unite                THEN v_colonnes := v_colonnes || 'unité'::text; END IF;
+        IF NEW.quantite             IS DISTINCT FROM OLD.quantite             THEN v_colonnes := v_colonnes || 'quantité'::text; END IF;
+        IF NEW.poids_net_kg         IS DISTINCT FROM OLD.poids_net_kg         THEN v_colonnes := v_colonnes || 'poids net'::text; END IF;
+        IF NEW.prix_unitaire_devise IS DISTINCT FROM OLD.prix_unitaire_devise THEN v_colonnes := v_colonnes || 'prix'::text; END IF;
+        IF NEW.remise_pct           IS DISTINCT FROM OLD.remise_pct           THEN v_colonnes := v_colonnes || 'remise'::text; END IF;
+        IF NEW.id_ligne_bc          IS DISTINCT FROM OLD.id_ligne_bc          THEN v_colonnes := v_colonnes || 'ligne de bon'::text; END IF;
+        IF NEW.lot_fournisseur      IS DISTINCT FROM OLD.lot_fournisseur      THEN v_colonnes := v_colonnes || 'lot'::text; END IF;
+        IF NEW.code_couleur         IS DISTINCT FROM OLD.code_couleur         THEN v_colonnes := v_colonnes || 'code couleur'::text; END IF;
+        IF NEW.libelle_couleur      IS DISTINCT FROM OLD.libelle_couleur      THEN v_colonnes := v_colonnes || 'libellé couleur'::text; END IF;
+        IF NEW.nb_bobines           IS DISTINCT FROM OLD.nb_bobines           THEN v_colonnes := v_colonnes || 'bobines'::text; END IF;
+        IF NEW.nb_palettes          IS DISTINCT FROM OLD.nb_palettes          THEN v_colonnes := v_colonnes || 'palettes'::text; END IF;
+        IF cardinality(v_colonnes) > 0 THEN
+            RAISE EXCEPTION 'IMPORT-FIGEE : la ligne % de la facture est déjà reçue (% kg) : modification refusée (%). Une ligne reçue garde sa référence, son poids, son prix, son bon, son lot, sa couleur, ses bobines et ses palettes ; soldez-la, ou contre-passez la réception avant la DUM.',
+                COALESCE(OLD.code_reference, OLD.libelle), OLD.quantite_recue_kg,
+                array_to_string(v_colonnes, ', ') USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_import_ligne_figee BEFORE UPDATE ON import_facture_lignes
+FOR EACH ROW EXECUTE FUNCTION fn_trg_import_ligne_figee();
+
+
 -- UN DOSSIER CLOS NE BOUGE PLUS. Ses factures, ses lignes, ses frais et leur
 -- repartition sont ce qui a servi a corriger le CUMP : les modifier apres coup
 -- ferait mentir le stock sans le dire.

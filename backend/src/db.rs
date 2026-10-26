@@ -110,6 +110,14 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // La ligne de facture d'import recue figee tout entiere (24/10/2026) :
+        // lot, couleur, bobines, palettes et libelle refuses aussi (IMPORT-FIGEE).
+        "2026-10-24c_import_ligne_recue_figee.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_import_ligne_figee')
+            AND COALESCE(position('libelle_couleur' IN
+                    pg_get_functiondef(to_regproc('public.fn_trg_import_ligne_figee'))) > 0, false)",
+    ),
+    (
         // La liste d'un inventaire tournant ou cible (decision du 23/10/2026) :
         // inventaire_reference, proposition ABC du tournant (v_inventaire_candidat,
         // P_ComptageTournantA/B/C), lignes et gel limites aux references choisies.

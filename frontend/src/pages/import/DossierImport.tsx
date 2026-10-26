@@ -1,9 +1,12 @@
 /**
- * L'ecran d'un dossier d'importation — une seule page, de haut en bas :
+ * L'ecran d'un dossier d'importation — une seule page : en haut les
+ * informations du dossier ; dessous, six onglets (24/10/2026) :
  *
- *   1. les informations du dossier ;
+ *   1. les factures qui le composent — chacune s'ouvre sur son ecran ;
  *   2. ses frais (TVA, douane, fret, transitaire…), saisis dans le tableau ;
- *   3. les factures qui le composent — chacune s'ouvre sur son ecran.
+ *   3. leur liquidation (repartition) et les droits attendus ;
+ *   4. ses pieces ; 5. ses engagements d'importation ;
+ *   6. le recapitulatif — totaux, et ce que la cloture a fait au CUMP.
  *
  * Les receptions n'y sont pas : depuis le 14/10/2026 (ADR-003), la marchandise
  * importee entre par la RECEPTION UNIFIEE (/receptions), contre un bon de
@@ -73,6 +76,7 @@ import {
 } from './types'
 
 const MODULE = 'IMPORT'
+const ONGLETS_DOSSIER = ['factures', 'frais', 'liquidation', 'pieces', 'engagements', 'recap']
 const th = 'px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
 const td = 'px-2 py-1.5'
 
@@ -81,7 +85,9 @@ export function DossierImport() {
   // LE RETOUR D'UNE FACTURE ROUVRE LA LISTE DES FACTURES (12/10/2026) : ?onglet=factures.
   const [parametres] = useSearchParams()
   const ongletDemande = parametres.get('onglet') ?? ''
-  const ongletInitial = ['factures', 'engagements', 'liquidation'].includes(ongletDemande) ? ongletDemande : 'frais'
+  // LES ONGLETS, DANS L'ORDRE DU TRAVAIL (24/10/2026) : factures d'abord (ouvert
+  // par defaut), frais, liquidation, pieces, engagements, recapitulatif.
+  const ongletInitial = ONGLETS_DOSSIER.includes(ongletDemande) ? ongletDemande : 'factures'
   const [onglet, setOnglet] = useState(ongletInitial)
   // Le petit bouton d'une ligne de frais ouvre sa liquidation.
   const [fraisLiquide, setFraisLiquide] = useState('')
@@ -161,18 +167,22 @@ export function DossierImport() {
         </Alerte>
       )}
 
-      {/* DISPOSITION (demandes des 30/09 et 01/10/2026) : le dossier et sa
-          DUM en haut ; frais, factures et engagements dans leurs onglets —
-          les engagements par fournisseur, chaque facture sur le sien ; le
-          recapitulatif et les totaux en bas, dans leur cadre. */}
+      {/* DISPOSITION (demandes des 30/09, 01/10 et 24/10/2026) : le dossier et
+          sa DUM en haut ; dessous, six onglets dans l'ordre du travail —
+          factures, frais, liquidation, pieces, engagements, recapitulatif
+          (totaux et, s'il y en a, ce que la cloture a fait au CUMP). */}
       <CloturePanneau idDossier={id} ouvert={cloture} surFermer={() => setCloture(false)} />
       <Informations d={d} ecrire={ecrire} valider={droits.peutValider} signaler={tout.signaler} />
 
-      {/* LES TROIS ONGLETS RESTENT MONTES, seulement masques : une saisie
-          commencee dans l'un (un engagement, un frais) ne doit pas se perdre
-          quand on passe a l'autre avant « Enregistrer tout ». */}
+      {/* LES ONGLETS RESTENT MONTES, seulement masques : une saisie commencee
+          dans l'un (un engagement, un frais) ne doit pas se perdre quand on
+          passe a l'autre avant « Enregistrer tout ». */}
       <Onglets value={onglet} onValueChange={setOnglet}>
         <OngletsListe>
+          <Onglet value="factures">
+            Factures
+            <span className="text-[11px] tabular-nums text-attenue-texte">{d.factures.length}</span>
+          </Onglet>
           <Onglet value="frais">
             Frais
             <span className="text-[11px] tabular-nums text-attenue-texte">{d.frais.length}</span>
@@ -181,16 +191,22 @@ export function DossierImport() {
             Liquidation
             {d.frais.some(nonReparti) && <span className="size-1.5 rounded-full bg-alerte" title="Un frais n’est pas réparti" />}
           </Onglet>
-          <Onglet value="factures">
-            Factures
-            <span className="text-[11px] tabular-nums text-attenue-texte">{d.factures.length}</span>
+          <Onglet value="pieces">
+            Pièces
+            <span className="text-[11px] tabular-nums text-attenue-texte">{d.pieces.length}</span>
+            {(d.attendues ?? []).some((a) => a.manque > 0) && <span className="size-1.5 rounded-full bg-alerte" title="Pièce(s) manquante(s)" />}
           </Onglet>
           <Onglet value="engagements">
             Engagements
             <span className="text-[11px] tabular-nums text-attenue-texte">{(d.engagements ?? []).length}</span>
             {d.factures.some((f) => !f.id_engagement) && <span className="size-1.5 rounded-full bg-alerte" title="Facture(s) sans engagement" />}
           </Onglet>
+          <Onglet value="recap">Récap</Onglet>
         </OngletsListe>
+        <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
+          <FacturesDossier d={d} ecrire={ecrire} />
+          <CoutRevientReel idDossier={d.dossier.id_dossier} />
+        </OngletContenu>
         <OngletContenu value="frais" forceMount className="mt-3 data-[state=inactive]:hidden">
           <FraisDossier d={d} ecrire={ecrire} postCloture={clos && droits.peutValider} signaler={tout.signaler}
             ouvrirLiquidation={(idFrais) => { setFraisLiquide(idFrais); setOnglet('liquidation') }} />
@@ -199,26 +215,24 @@ export function DossierImport() {
           <LiquidationFrais d={d} ecrire={ecrire} choix={fraisLiquide} setChoix={setFraisLiquide} signaler={tout.signaler} />
           <DroitsDouane d={d} />
         </OngletContenu>
-        <OngletContenu value="factures" forceMount className="mt-3 data-[state=inactive]:hidden">
-          <FacturesDossier d={d} ecrire={ecrire} />
-          <CoutRevientReel idDossier={d.dossier.id_dossier} />
+        <OngletContenu value="pieces" forceMount className="mt-3 data-[state=inactive]:hidden">
+          <PiecesDossier d={d} ecrire={ecrire} />
         </OngletContenu>
         <OngletContenu value="engagements" forceMount className="mt-3 data-[state=inactive]:hidden">
           <EngagementsDossier d={d} ecrire={ecrire} signaler={tout.signaler} />
         </OngletContenu>
+        <OngletContenu value="recap" forceMount className="mt-3 space-y-3 data-[state=inactive]:hidden">
+          <Carte>
+            <CarteEntete>
+              <CarteTitre>Récapitulatif et totaux</CarteTitre>
+            </CarteEntete>
+            <CarteCorps>
+              <Synthese d={d} />
+            </CarteCorps>
+          </Carte>
+          {d.ajustements.length > 0 && <JournalCloture d={d} />}
+        </OngletContenu>
       </Onglets>
-
-      <PiecesDossier d={d} ecrire={ecrire} />
-      {d.ajustements.length > 0 && <JournalCloture d={d} />}
-
-      <Carte>
-        <CarteEntete>
-          <CarteTitre>Récapitulatif et totaux</CarteTitre>
-        </CarteEntete>
-        <CarteCorps>
-          <Synthese d={d} />
-        </CarteCorps>
-      </Carte>
 
       <BarreDossier
         statut={dossier.statut}
@@ -462,7 +476,10 @@ function Informations({
       <CarteCorps>
         {/* PAS DE DEVISE SUR LE DOSSIER (01/10/2026) : en groupage, chaque
             facture porte la sienne. LA DUM est celle du dossier, une seule. */}
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+        {/* HUIT COLONNES DES 1280 PX (24/10/2026) : la DUM en prend deux, pour
+            que « Bureau · régime · année · série » y tienne (125 px pour 162 a
+            1366 px) ; les sept champs restent sur une rangee. */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
           <div>
             <Etiq htmlFor="ch-dossierimport-1">Numéro</Etiq>
             <Champ id="ch-dossierimport-1" value={f.numero} onChange={maj('numero')} disabled={!ecrire} />
@@ -476,7 +493,7 @@ function Informations({
             <Champ id="ch-dossierimport-3" value={f.conteneurs} onChange={maj('conteneurs')} disabled={!ecrire} />
           </div>
           {/* Sept champs sur UNE rangee des 1280 px ; les notes dessous. */}
-          <div className="md:col-span-2 xl:col-span-1">
+          <div className="md:col-span-2 xl:col-span-2">
             <Etiq htmlFor="ch-dossierimport-4">N° DUM</Etiq>
             <Champ id="ch-dossierimport-4"
               value={f.numero_dum}
@@ -507,7 +524,7 @@ function Informations({
             <Etiq htmlFor="ch-dossierimport-7">Date d'arrivée</Etiq>
             <Champ id="ch-dossierimport-7" type="date" value={f.date_arrivee} onChange={maj('date_arrivee')} disabled={!ecrire} />
           </div>
-          <div className="col-span-2 md:col-span-4 xl:col-span-7">
+          <div className="col-span-2 md:col-span-4 xl:col-span-8">
             <Etiq htmlFor="ch-dossierimport-8">Notes</Etiq>
             <Champ id="ch-dossierimport-8" value={f.notes} onChange={maj('notes')} disabled={!ecrire} />
           </div>
@@ -690,14 +707,16 @@ function FraisDossier({
           <table className="w-full table-fixed text-[12.5px]">
             <thead>
               <tr className="border-b border-bordure">
-                <th className={cn(th, 'w-44 text-left')}>Type de frais</th>
+                {/* « Droits de douane (D.D.) » demande 126 px (24/10/2026). */}
+                <th className={cn(th, 'w-56 text-left')}>Type de frais</th>
                 <th className={cn(th, 'text-left')}>Précision</th>
                 <th className={cn(th, 'w-24 text-left')}>N° pièce</th>
                 <th className={cn(th, 'w-28 text-left')}>Devise</th>
                 <th className={cn(th, 'w-20 text-right')}>Cours</th>
                 <th className={cn(th, 'w-24 text-right')}>Montant</th>
                 <th className={cn(th, 'w-24 text-right')}>Montant DH</th>
-                <th className={cn(th, 'w-40 text-left')}>Coût / répartition</th>
+                {/* « À la valeur (paramétrage) » demande 136 px (24/10/2026). */}
+                <th className={cn(th, 'w-60 text-left')}>Coût / répartition</th>
                 {saisie && <th className={cn(th, 'w-24')} />}
               </tr>
             </thead>
@@ -768,7 +787,7 @@ function FraisDossier({
               {saisie && (
                 <tr className="border-b border-bordure/60 bg-attenue/25">
                   <td className={td}>
-                    <Selecteur className="h-7 w-full" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
+                    <Selecteur className="h-7 w-full pl-2 pr-6" aria-label="Type de frais" value={n.id_frais} onChange={maj('id_frais')}>
                       <option value="">Nouveau frais…</option>
                       {groupes.map(([cat, liste]) => (
                         <optgroup key={cat} label={cat}>
@@ -998,7 +1017,9 @@ function LiquidationFrais({
       <CarteEntete>
         <CarteTitre>Répartition d’un frais</CarteTitre>
       </CarteEntete>
-      <CarteCorps className="grid grid-cols-1 gap-3 border-b border-bordure md:grid-cols-3 xl:grid-cols-6">
+      {/* Sept colonnes des 1280 px : la repartition en prend deux, pour que
+          « À la valeur (paramétrage) » y tienne (24/10/2026). */}
+      <CarteCorps className="grid grid-cols-1 gap-3 border-b border-bordure md:grid-cols-3 xl:grid-cols-7">
         <div className="md:col-span-2">
           <Etiq htmlFor="liq-frais">Frais</Etiq>
           <Selecteur id="liq-frais" className="w-full" value={frais.id_ligne_frais}
@@ -1018,7 +1039,7 @@ function LiquidationFrais({
           <Etiq>Montant</Etiq>
           <div className="py-1.5 text-[13px] font-semibold tabular-nums">{fmt.nombre(frais.montant_dhs, 2)} DH</div>
         </div>
-        <div>
+        <div className="xl:col-span-2">
           <Etiq htmlFor="liq-methode">Répartition</Etiq>
           {ecrire ? (
             <Selecteur id="liq-methode" className="w-full" value={methodeAffichee}

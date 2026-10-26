@@ -15,13 +15,16 @@
  * lot, couleur, bobines et palettes aussi — sur une ligne liee, toucher les
  * bobines recalculait le poids net, que la base refuse (IMPORT-FIGEE).
  *
- * UNE LIGNE, UNE RANGEE (24/10/2026). La rangee principale porte reference,
- * bon, poids, prix, montant et le RAPPROCHEMENT de la ligne (prix contre le
- * bon, poids contre le recu). La rangee complementaire ↳ (lot, couleur,
- * unite, colis, remise, cout) ne s'ouvre d'elle-meme que pour une ligne en
- * saisie ou incomplete ; une ligne complete la replie et en garde le resume.
+ * UNE LIGNE, UNE RANGEE (24/10/2026). Quand la largeur mesuree du tableau le
+ * permet (1366 px barre laterale ouverte, et au-dela), TOUS les champs d'une
+ * ligne tiennent sur sa rangee : reference, bon, lot, couleur, unite, poids,
+ * bobines, palettes, prix, remise, montant et le RAPPROCHEMENT (prix contre le
+ * bon, poids contre le recu) ; chaque case a la largeur de son contenu, la
+ * reference prend le reste. Trop etroit seulement, la rangee complementaire ↳
+ * (lot, couleur, unite, colis, remise, cout) revient ; elle ne s'ouvre
+ * d'elle-meme que pour une ligne en saisie ou incomplete.
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -75,6 +78,42 @@ const MODULE = 'IMPORT'
 const th = 'px-1.5 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
 const td = 'px-1.5 py-1'
 const champ = 'h-7 px-1.5 text-[12.5px]'
+/* SUR UNE SEULE RANGEE (24/10/2026) : des cases a la largeur de leur contenu. */
+const th1 = 'px-1 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte'
+const td1 = 'px-1 py-1'
+const champ1 = 'h-7 px-1 text-[12px]'
+/**
+ * La largeur de chaque colonne, en pixels, rembourrage compris : poids et prix
+ * ~8 caracteres, bobines et palettes ~5, lot ~12, codes couleur courts, le bon
+ * par son numero. La reference prend le reste, jamais moins de REF_MIN.
+ */
+const COL = {
+  num: 24, bc: 124, lot: 104, codeCouleur: 48, couleur: 84, unite: 50, poids: 70,
+  bobines: 50, palettes: 42, prix: 64, remise: 44, montant: 80, controle: 76, actions: 54,
+}
+const REF_MIN = 150
+const SEUIL_UNE_RANGEE = Object.values(COL).reduce((t, x) => t + x, 0) + REF_MIN
+
+/**
+ * La largeur d'un element, suivie a chaque redimensionnement (fenetre, barre
+ * laterale). Par une ref-fonction : le tableau n'existe qu'une fois la facture
+ * lue, apres le premier rendu.
+ */
+function useLargeur() {
+  const [largeur, setLargeur] = useState(0)
+  const observateur = useRef<ResizeObserver | null>(null)
+  const ref = useCallback((el: HTMLElement | null) => {
+    observateur.current?.disconnect()
+    observateur.current = null
+    if (!el) return
+    setLargeur(el.clientWidth)
+    if (typeof ResizeObserver === 'undefined') return
+    const o = new ResizeObserver(() => setLargeur(el.clientWidth))
+    o.observe(el)
+    observateur.current = o
+  }, [])
+  return [ref, largeur] as const
+}
 
 interface RefCatalogue {
   code_reference: string
@@ -98,6 +137,12 @@ interface LigneBcOuverte {
   /** La devise du bon : le prix ne se compare qu'a devise egale. */
   code_devise?: string
 }
+
+/**
+ * Une ligne telle que le serveur la rend, avec le prix et la devise de sa
+ * ligne de bon, meme soldee (24/10/2026). Le prix est masque selon les droits.
+ */
+type LigneServeur = Ligne & { prix_kg_devise?: number | null; devise_bc?: string | null }
 
 /** Une ligne telle qu'on la saisit : des chaines, comme les champs. */
 interface LigneEdit {
@@ -252,6 +297,9 @@ export function FactureImport() {
   /** La rangee ↳ ouverte ou fermee a la main ; sans choix, elle suit la ligne. */
   const [deplies, setDeplies] = useState<Record<string, boolean>>({})
   const tolerances = useTolerancesColisage()
+  // UNE LIGNE, UNE RANGEE quand la largeur mesuree du tableau le permet.
+  const [refTableau, largeurTableau] = useLargeur()
+  const uneRangee = largeurTableau >= SEUIL_UNE_RANGEE
   useEffect(() => {
     if (!d) return
     setEntete(enteteInitial())
@@ -521,12 +569,20 @@ export function FactureImport() {
 
   /**
    * LE RAPPROCHEMENT DE LA LIGNE, sur sa rangee : le prix facture contre celui
-   * du bon (tant que la ligne de bon est ouverte, l'ecran le connait), le poids
-   * facture contre le poids recu (des qu'il y a une reception). Rien ne bloque :
-   * l'ecart se lit avant d'enregistrer, comme sur la facture fournisseur.
+   * du bon, le poids facture contre le poids recu (des qu'il y a une
+   * reception). Rien ne bloque : l'ecart se lit avant d'enregistrer, comme sur
+   * la facture fournisseur.
+   *
+   * LE PRIX DU BON VIENT DU SERVEUR (24/10/2026) : chaque ligne enregistree
+   * porte celui de sa ligne de bon, meme soldee — l'ecart ne disparait plus
+   * quand le bon est servi. Une ligne en saisie, ou rattachee a un autre bon
+   * que celui enregistre, le lit dans les lignes de bon ouvertes.
    */
-  const controleLigne = (l: LigneEdit, s?: Ligne) => {
-    const bc = l.id_ligne_bc ? qBc.data?.find((b) => b.id_ligne_bc === l.id_ligne_bc) : undefined
+  const controleLigne = (l: LigneEdit, s?: LigneServeur) => {
+    const duServeur = s && l.id_ligne_bc && s.id_ligne_bc === l.id_ligne_bc && typeof s.prix_kg_devise === 'number'
+      ? { prix_kg_devise: s.prix_kg_devise, code_devise: s.devise_bc ?? undefined }
+      : undefined
+    const bc = duServeur ?? (l.id_ligne_bc ? qBc.data?.find((b) => b.id_ligne_bc === l.id_ligne_bc) : undefined)
     const prix = nombre(l.prix_unitaire_devise)
     const memeDevise = !bc?.code_devise || bc.code_devise === entete.code_devise
     const prixBc = bc && typeof bc.prix_kg_devise === 'number' && l.unite === 'kg' && memeDevise ? bc.prix_kg_devise : null
@@ -687,22 +743,74 @@ export function FactureImport() {
           {!entete.code_fournisseur && (
             <p className="px-3 pt-2 text-[12px] text-alerte">Choisissez d'abord le fournisseur : il décide des références et des bons proposés.</p>
           )}
-          {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026) : la rangee principale
-              tient a 1366 px, menu ouvert ; aucune colonne n'impose de largeur
-              minimale. Le reste vit sur la rangee ↳, repliee pour une ligne
-              complete. */}
+          {/* PAS DE DEFILEMENT HORIZONTAL (10/10/2026). UNE LIGNE, UNE RANGEE
+              QUAND ELLE Y TIENT (24/10/2026) : chaque case a la largeur de ce
+              qu'elle attend, la reference prend le reste ; la largeur MESUREE
+              du tableau decide. Trop etroit : le secondaire passe sur la rangee
+              ↳, repliee pour une ligne complete. */}
+          <div ref={refTableau}>
           <table className="w-full table-fixed text-[12.5px]">
+            {uneRangee ? (
+              <colgroup>
+                <col style={{ width: COL.num }} />
+                <col />
+                <col style={{ width: COL.bc }} />
+                <col style={{ width: COL.lot }} />
+                <col style={{ width: COL.codeCouleur }} />
+                <col style={{ width: COL.couleur }} />
+                <col style={{ width: COL.unite }} />
+                <col style={{ width: COL.poids }} />
+                <col style={{ width: COL.bobines }} />
+                <col style={{ width: COL.palettes }} />
+                <col style={{ width: COL.prix }} />
+                <col style={{ width: COL.remise }} />
+                <col style={{ width: COL.montant }} />
+                <col style={{ width: COL.controle }} />
+                <col style={{ width: COL.actions }} />
+              </colgroup>
+            ) : (
+              <colgroup>
+                <col className="w-8" />
+                <col />
+                <col className="w-56" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-28" />
+                <col className="w-40" />
+                <col className="w-16" />
+              </colgroup>
+            )}
             <thead>
-              <tr className="border-b border-bordure">
-                <th className={cn(th, 'w-8 text-right')}>#</th>
-                <th className={cn(th, 'text-left')}>Référence / désignation</th>
-                <th className={cn(th, 'w-56 text-left')}>Bon de commande</th>
-                <th className={cn(th, 'w-24 text-right')}>Poids net kg</th>
-                <th className={cn(th, 'w-24 text-right')}>Prix unit.</th>
-                <th className={cn(th, 'w-28 text-right')}>Montant</th>
-                <th className={cn(th, 'w-40 text-left')} title="Prix facturé contre le bon ; poids facturé contre le reçu">Contrôle</th>
-                <th className={cn(th, 'w-16')} />
-              </tr>
+              {uneRangee ? (
+                <tr className="border-b border-bordure">
+                  <th className={cn(th1, 'text-right')}>#</th>
+                  <th className={cn(th1, 'text-left')}>Référence / désignation</th>
+                  <th className={cn(th1, 'text-left')}>Bon de commande</th>
+                  <th className={cn(th1, 'text-left')}>Lot</th>
+                  <th className={cn(th1, 'text-left')} title="Code couleur">Code</th>
+                  <th className={cn(th1, 'text-left')} title="Libellé couleur">Coul.</th>
+                  <th className={cn(th1, 'text-left')} title="Unité facturée">Unité</th>
+                  <th className={cn(th1, 'text-right')} title="Poids net en kg (et quantité facturée hors kg)">Poids kg</th>
+                  <th className={cn(th1, 'text-right')} title="Bobines">Bob.</th>
+                  <th className={cn(th1, 'text-right')} title="Palettes">Pal.</th>
+                  <th className={cn(th1, 'text-right')}>Prix unit.</th>
+                  <th className={cn(th1, 'text-right')} title="Remise du fournisseur, en %">Rem. %</th>
+                  <th className={cn(th1, 'text-right')}>Montant</th>
+                  <th className={cn(th1, 'text-left')} title="Prix facturé contre le bon ; poids facturé contre le reçu">Contrôle</th>
+                  <th className={th1} />
+                </tr>
+              ) : (
+                <tr className="border-b border-bordure">
+                  <th className={cn(th, 'text-right')}>#</th>
+                  <th className={cn(th, 'text-left')}>Référence / désignation</th>
+                  <th className={cn(th, 'text-left')}>Bon de commande</th>
+                  <th className={cn(th, 'text-right')}>Poids net kg</th>
+                  <th className={cn(th, 'text-right')}>Prix unit.</th>
+                  <th className={cn(th, 'text-right')}>Montant</th>
+                  <th className={cn(th, 'text-left')} title="Prix facturé contre le bon ; poids facturé contre le reçu">Contrôle</th>
+                  <th className={th} />
+                </tr>
+              )}
             </thead>
             <tbody>
               {lignes.map((l, i) => {
@@ -712,32 +820,103 @@ export function FactureImport() {
                 const erp = l.type_ligne === 'ERP'
                 const bcOptions = (qBc.data ?? []).filter((b) => !l.code_reference || b.code_reference === l.code_reference)
                 const bcConnu = !l.id_ligne_bc || bcOptions.some((b) => b.id_ligne_bc === l.id_ligne_bc)
+                const bcChoisi = bcOptions.find((b) => b.id_ligne_bc === l.id_ligne_bc)
                 const detail = ouverte === l.cle && s && coutVisible
                 const colis = controleColisage(l.poids_net_kg, l.nb_bobines, l.nb_palettes, condDe(l.code_reference), tolerances)
                 // LA RANGEE ↳ S'OUVRE D'ELLE-MEME pour une ligne en saisie, incomplete
                 // ou dont le colisage cloche ; le choix de l'utilisateur prime.
-                const deplie = deplies[l.cle] ?? (!fige && (!l.id_ligne || !ligneComplete(l) || colis.niveau !== 'ok'))
+                // Sur une seule rangee, il n'y en a plus.
+                const deplie = !uneRangee && (deplies[l.cle] ?? (!fige && (!l.id_ligne || !ligneComplete(l) || colis.niveau !== 'ok')))
                 const c = controleLigne(l, s)
-                const resume = [
+                const calcule = [
+                  s?.pct_dossier != null && `${fmt.nombre(s.pct_dossier, 2)} % du dossier`,
+                  coutVisible && s?.cout_revient_unitaire_dhs != null &&
+                    `revient ${fmt.nombre(s.cout_revient_unitaire_dhs, 4)} DH/${s.type_ligne === 'HORS_ERP' ? 'pce' : UNITE[s.unite]}`,
+                ]
+                const resume = (uneRangee ? calcule : [
                   l.lot_fournisseur && `lot ${l.lot_fournisseur}`,
                   [l.code_couleur, l.libelle_couleur].filter(Boolean).join(' '),
                   erp && l.unite !== 'kg' && `${l.quantite || '—'} ${UNITE[l.unite]}`,
                   (nombre(l.nb_bobines) > 0 || nombre(l.nb_palettes) > 0) &&
                     `${fmt.entier(nombre(l.nb_bobines))} bob. · ${fmt.entier(nombre(l.nb_palettes))} pal.`,
                   nombre(l.remise) > 0 && `remise ${fmt.nombre(nombre(l.remise), 2)} %`,
-                  s?.pct_dossier != null && `${fmt.nombre(s.pct_dossier, 2)} % du dossier`,
-                  coutVisible && s?.cout_revient_unitaire_dhs != null &&
-                    `revient ${fmt.nombre(s.cout_revient_unitaire_dhs, 4)} DH/${s.type_ligne === 'HORS_ERP' ? 'pce' : UNITE[s.unite]}`,
-                ].filter(Boolean) as string[]
+                  ...calcule,
+                ]).filter(Boolean) as string[]
+                const tdx = uneRangee ? td1 : td
+                const chp = uneRangee ? champ1 : champ
+
+                // ---- Les cases, une fois : sur la rangee principale ou sur ↳ ----
+                const caseLot = (
+                  <Champ className={chp} aria-label="Lot de la ligne" value={l.lot_fournisseur} disabled={fige}
+                    title={l.lot_fournisseur || undefined} onChange={(e) => majLigne(l.cle, { lot_fournisseur: e.target.value })} />
+                )
+                const caseCodeCouleur = (
+                  <Champ className={chp} aria-label="Code couleur de la ligne" value={l.code_couleur} disabled={fige || !erp} placeholder="7612"
+                    title={l.code_couleur || undefined} onChange={(e) => majLigne(l.cle, { code_couleur: e.target.value })} />
+                )
+                const caseCouleur = (
+                  <Champ className={chp} aria-label="Libellé couleur de la ligne" value={l.libelle_couleur} disabled={fige || !erp} placeholder="RED"
+                    title={l.libelle_couleur || undefined} onChange={(e) => majLigne(l.cle, { libelle_couleur: e.target.value })} />
+                )
+                const caseUnite = erp ? (
+                  <Selecteur className={chp} value={l.unite} disabled={fige} aria-label="Unité facturée"
+                    onChange={(e) => majLigne(l.cle, { unite: e.target.value as LigneEdit['unite'] })}>
+                    <option value="kg">kg</option>
+                    <option value="ml">{uneRangee ? 'm' : 'mètre'}</option>
+                    <option value="piece">{uneRangee ? 'pce' : 'pièce'}</option>
+                  </Selecteur>
+                ) : (
+                  <span className="block pt-1 text-[12px] text-attenue-texte">{uneRangee ? 'pce' : 'pièce'}</span>
+                )
+                const caseQuantite = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="decimal" aria-label="Quantité facturée" value={l.quantite} disabled={fige}
+                    placeholder={uneRangee && erp ? `qté ${UNITE[l.unite]}` : undefined}
+                    onChange={(e) => majLigne(l.cle, { quantite: e.target.value })} />
+                )
+                const casePoids = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="decimal" aria-label="Poids net en kilos" value={l.poids_net_kg} disabled={fige}
+                    onChange={(e) => majColis(l, 'poids', e.target.value)} />
+                )
+                const caseBobines = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="numeric" aria-label="Bobines de la ligne" value={l.nb_bobines} disabled={fige}
+                    onChange={(e) => majColis(l, 'bobines', e.target.value)} />
+                )
+                const casePalettes = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="numeric" aria-label="Palettes de la ligne" value={l.nb_palettes} disabled={fige}
+                    onChange={(e) => majColis(l, 'palettes', e.target.value)} />
+                )
+                const boutonLien = !fige && (
+                  <button type="button" onClick={() => majLigne(l.cle, { lie: !l.lie })}
+                    title={l.lie
+                      ? 'Poids, bobines et palettes se repondent — cliquez pour saisir chacun separement'
+                      : 'Calcul detache — cliquez pour relier les trois'}
+                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
+                    className={cn('shrink-0 rounded-[var(--radius)] p-1',
+                      l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
+                    {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
+                  </button>
+                )
+                const caseRemise = (
+                  <Champ className={cn(chp, 'text-right')} inputMode="decimal" value={l.remise} disabled={fige} placeholder="0"
+                    aria-label="Remise du fournisseur en pourcentage"
+                    onChange={(e) => majLigne(l.cle, { remise: e.target.value })} />
+                )
+                const boutonRetirer = ecrire && !l.recue && (
+                  <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
+                    onClick={() => (l.id_ligne ? majLigne(l.cle, { supprimee: true }) : setLignes((ls) => ls.filter((x) => x.cle !== l.cle)))}>
+                    <Trash2 />
+                  </Bouton>
+                )
+                const nbColonnes = uneRangee ? 15 : 8
                 return (
                   <Fragment key={l.cle}>
-                    <tr className={cn('align-top', !deplie && !detail && 'border-b border-bordure/60',
+                    <tr className={cn('align-top', !deplie && !detail && !(uneRangee && colis.niveau !== 'ok') && 'border-b border-bordure/60',
                       !ligneComplete(l) && (l.code_reference || l.libelle) && 'bg-alerte/5')}>
-                      <td className={cn(td, 'pt-2 text-right tabular-nums text-attenue-texte')}>
+                      <td className={cn(tdx, 'pt-2 text-right tabular-nums text-attenue-texte')}>
                         {i + 1}
                         {l.recue && <Lock className="ml-auto mt-1 size-3" aria-label="Déjà reçue" />}
                       </td>
-                      <td className={cn(td, 'min-w-0')}>
+                      <td className={cn(tdx, 'min-w-0')}>
                         {erp ? (
                           /* LES REFERENCES DU FOURNISSEUR D'ABORD : proposer
                              tout le catalogue pour une facture Hasirci, c'est
@@ -752,52 +931,80 @@ export function FactureImport() {
                             ariaLabel="Référence de la ligne"
                           />
                         ) : (
-                          <Champ className={champ} value={l.libelle} disabled={fige} placeholder="Hors ERP — pièce, autre…"
+                          <Champ className={chp} value={l.libelle} disabled={fige} placeholder="Hors ERP — pièce, autre…"
                             aria-label="Désignation de la ligne hors ERP"
                             onChange={(e) => majLigne(l.cle, { libelle: e.target.value })} />
                         )}
-                        {/* Repliee, la rangee ↳ laisse son resume sous la reference. */}
+                        {/* Repliee, la rangee ↳ laisse son resume sous la reference ;
+                            sur une seule rangee, il ne reste que le calcule. */}
                         {!deplie && resume.length > 0 && (
                           <div className="mt-0.5 truncate text-[11px] text-attenue-texte" title={resume.join(' · ')}>
-                            ↳ {resume.join(' · ')}
+                            {uneRangee ? '' : '↳ '}{resume.join(' · ')}
                           </div>
                         )}
                       </td>
-                      <td className={td}>
+                      <td className={tdx}>
                         {erp ? (
-                          <Selecteur className={cn(champ, 'w-full')} value={l.id_ligne_bc} disabled={fige} aria-label="Bon de commande de la ligne"
+                          <Selecteur className={cn(chp, 'w-full')} value={l.id_ligne_bc} disabled={fige} aria-label="Bon de commande de la ligne"
+                            title={bcChoisi ? `${bcChoisi.numero_bc} · ligne ${bcChoisi.ligne_numero} · reste ${fmt.nombre(bcChoisi.quantite_restante_kg, 0)} kg` : l.numero_bc || undefined}
                             onChange={(e) => choisirBc(l, e.target.value)}>
                             <option value="">Libre — sans BC</option>
                             {!bcConnu && <option value={l.id_ligne_bc}>{l.numero_bc || 'bon lié'}</option>}
                             {bcOptions.map((b) => (
                               <option key={b.id_ligne_bc} value={b.id_ligne_bc}>
-                                {b.numero_bc} · l.{b.ligne_numero} · reste {fmt.nombre(b.quantite_restante_kg, 0)} kg
+                                {/* Sur une rangee, le bon choisi ne montre que son numero
+                                    (le reste est dans la bulle) ; la liste garde le reste. */}
+                                {uneRangee && b.id_ligne_bc === l.id_ligne_bc
+                                  ? b.numero_bc
+                                  : `${b.numero_bc} · l.${b.ligne_numero} · reste ${fmt.nombre(b.quantite_restante_kg, 0)} kg`}
                               </option>
                             ))}
                           </Selecteur>
                         ) : (
-                          <span className="block pt-1.5 text-[11px] italic text-attenue-texte">porte sa part de frais</span>
+                          <span className="block pt-1.5 text-[11px] italic text-attenue-texte" title="Une ligne hors ERP porte sa part de frais">
+                            {uneRangee ? 'hors ERP' : 'porte sa part de frais'}
+                          </span>
                         )}
                       </td>
-                      <td className={td}>
+                      {uneRangee && (
+                        <>
+                          <td className={tdx}>{caseLot}</td>
+                          <td className={tdx}>{caseCodeCouleur}</td>
+                          <td className={tdx}>{caseCouleur}</td>
+                          <td className={tdx}>{caseUnite}</td>
+                        </>
+                      )}
+                      <td className={tdx}>
                         {erp ? (
-                          <Champ className={cn(champ, 'text-right')} inputMode="decimal" aria-label="Poids net en kilos" value={l.poids_net_kg} disabled={fige}
-                            onChange={(e) => majColis(l, 'poids', e.target.value)} />
-                        ) : <span className="block pt-1.5 text-right text-attenue-texte">—</span>}
+                          uneRangee && l.unite !== 'kg' ? (
+                            /* Facturee hors kg (rare) : le poids, puis la quantite facturee. */
+                            <div className="space-y-1">
+                              {casePoids}
+                              {caseQuantite}
+                            </div>
+                          ) : casePoids
+                        ) : uneRangee ? caseQuantite : <span className="block pt-1.5 text-right text-attenue-texte">—</span>}
                       </td>
-                      <td className={td}>
-                        <Champ className={cn(champ, 'text-right')} inputMode="decimal" aria-label="Prix unitaire en devise" value={l.prix_unitaire_devise} disabled={fige}
+                      {uneRangee && (
+                        <>
+                          <td className={tdx}>{caseBobines}</td>
+                          <td className={tdx}>{casePalettes}</td>
+                        </>
+                      )}
+                      <td className={tdx}>
+                        <Champ className={cn(chp, 'text-right')} inputMode="decimal" aria-label="Prix unitaire en devise" value={l.prix_unitaire_devise} disabled={fige}
                           onChange={(e) => majLigne(l.cle, { prix_unitaire_devise: e.target.value })} />
                       </td>
-                      <td className={cn(td, 'pt-2 text-right font-medium tabular-nums')}>{fmt.nombre(montantLigne(l), 2)}</td>
-                      <td className={cn(td, 'pt-1.5 text-[11px] leading-snug tabular-nums')}>
+                      {uneRangee && <td className={tdx}>{caseRemise}</td>}
+                      <td className={cn(tdx, 'pt-2 text-right font-medium tabular-nums')}>{fmt.nombre(montantLigne(l), 2)}</td>
+                      <td className={cn(tdx, 'pt-1.5 text-[11px] leading-snug tabular-nums')}>
                         {c.prixBc == null && c.recu == null ? (
                           <span className="text-attenue-texte">—</span>
                         ) : (
                           <>
                             {c.prixBc != null && (
                               <div title={`Prix du bon : ${fmt.nombre(c.prixBc, 4)} ${entete.code_devise}/kg`}>
-                                <span className="text-attenue-texte">prix / BC </span>
+                                <span className="text-attenue-texte">{uneRangee ? 'BC ' : 'prix / BC '}</span>
                                 {c.ecartPrix == null ? (
                                   <span className="text-attenue-texte">{fmt.nombre(c.prixBc, 4)}</span>
                                 ) : Math.abs(c.ecartPrix) < 0.005 ? (
@@ -811,7 +1018,7 @@ export function FactureImport() {
                             )}
                             {c.recu != null && c.ecartKg != null && (
                               <div title={`Reçu : ${fmt.nombre(c.recu, 2)} kg`}>
-                                <span className="text-attenue-texte">reçu {fmt.nombre(c.recu, 2)} </span>
+                                <span className="text-attenue-texte">reçu{uneRangee ? ' ' : ` ${fmt.nombre(c.recu, 2)} `}</span>
                                 {Math.abs(c.ecartKg) <= 0.001 ? (
                                   <span className="font-medium text-succes">=</span>
                                 ) : (
@@ -822,24 +1029,44 @@ export function FactureImport() {
                           </>
                         )}
                       </td>
-                      <td className={cn(td, 'pt-1')}>
+                      <td className={cn(tdx, 'pt-1')}>
                         <div className="flex justify-end gap-0.5">
-                          <Bouton taille="icone-xs" variante="discret" aria-expanded={deplie}
-                            aria-label={deplie ? 'Replier le détail de la ligne' : 'Déplier le détail de la ligne'}
-                            title={deplie ? 'Replier : lot, couleur, colis, remise' : 'Déplier : lot, couleur, colis, remise'}
-                            onClick={() => setDeplies((x) => ({ ...x, [l.cle]: !deplie }))}>
-                            {deplie ? <ChevronUp /> : <ChevronDown />}
-                          </Bouton>
-                          {ecrire && !l.recue && (
-                            <Bouton taille="icone-xs" variante="discret" className="text-danger hover:bg-danger/10" aria-label="Retirer la ligne"
-                              onClick={() => (l.id_ligne ? majLigne(l.cle, { supprimee: true }) : setLignes((ls) => ls.filter((x) => x.cle !== l.cle)))}>
-                              <Trash2 />
+                          {uneRangee ? (
+                            <>
+                              {erp && boutonLien}
+                              {s && coutVisible && (
+                                <Bouton taille="icone-xs" variante="discret" aria-expanded={!!detail}
+                                  aria-label={detail ? 'Replier la répartition des frais' : 'Voir la répartition des frais'}
+                                  title={`Frais ${fmt.nombre(s.frais_alloues_dhs ?? 0, 2)} DH — voir la répartition par frais`}
+                                  onClick={() => setOuverte(ouverte === l.cle ? null : l.cle)}>
+                                  {detail ? <ChevronDown /> : <ChevronRight />}
+                                </Bouton>
+                              )}
+                            </>
+                          ) : (
+                            <Bouton taille="icone-xs" variante="discret" aria-expanded={deplie}
+                              aria-label={deplie ? 'Replier le détail de la ligne' : 'Déplier le détail de la ligne'}
+                              title={deplie ? 'Replier : lot, couleur, colis, remise' : 'Déplier : lot, couleur, colis, remise'}
+                              onClick={() => setDeplies((x) => ({ ...x, [l.cle]: !deplie }))}>
+                              {deplie ? <ChevronUp /> : <ChevronDown />}
                             </Bouton>
                           )}
+                          {boutonRetirer}
                         </div>
                       </td>
                     </tr>
-                    {/* LA LIGNE COMPLEMENTAIRE de la ligne de facture. */}
+                    {/* SUR UNE RANGEE, l'avis de colisage seul passe dessous, et
+                        seulement quand il y a quelque chose a dire. */}
+                    {uneRangee && colis.niveau !== 'ok' && (
+                      <tr className={cn(!detail && 'border-b border-bordure/60')}>
+                        <td />
+                        <td colSpan={nbColonnes - 1} className={cn(tdx, 'pt-0 pb-1.5')}>
+                          <AvisColisage className="mt-0" kg={l.poids_net_kg} bobines={l.nb_bobines}
+                            palettes={l.nb_palettes} cond={condDe(l.code_reference)} />
+                        </td>
+                      </tr>
+                    )}
+                    {/* LA LIGNE COMPLEMENTAIRE de la ligne de facture, quand la rangee ne suffit pas. */}
                     {deplie && (
                       <tr className={cn('align-top', !detail && 'border-b border-bordure/60')}>
                         <td />
@@ -847,64 +1074,40 @@ export function FactureImport() {
                           <div className="flex flex-wrap items-start gap-x-2 gap-y-2">
                             <div className="flex w-28 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">↳ Lot</span>
-                              <Champ className={champ} aria-label="Lot de la ligne" value={l.lot_fournisseur} disabled={fige} onChange={(e) => majLigne(l.cle, { lot_fournisseur: e.target.value })} />
+                              {caseLot}
                             </div>
                             <div className="flex w-20 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Code coul.</span>
-                              <Champ className={champ} aria-label="Code couleur de la ligne" value={l.code_couleur} disabled={fige || !erp} placeholder="7612" onChange={(e) => majLigne(l.cle, { code_couleur: e.target.value })} />
+                              {caseCodeCouleur}
                             </div>
                             <div className="flex w-24 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Couleur</span>
-                              <Champ className={champ} aria-label="Libellé couleur de la ligne" value={l.libelle_couleur} disabled={fige || !erp} placeholder="RED" onChange={(e) => majLigne(l.cle, { libelle_couleur: e.target.value })} />
+                              {caseCouleur}
                             </div>
                             <div className="flex w-20 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Unité</span>
-                              {erp ? (
-                                <Selecteur className={champ} value={l.unite} disabled={fige} aria-label="Unité facturée"
-                                  onChange={(e) => majLigne(l.cle, { unite: e.target.value as LigneEdit['unite'] })}>
-                                  <option value="kg">kg</option>
-                                  <option value="ml">mètre</option>
-                                  <option value="piece">pièce</option>
-                                </Selecteur>
-                              ) : (
-                                <span className="pt-1 text-[12px] text-attenue-texte">pièce</span>
-                              )}
+                              {caseUnite}
                             </div>
                             <div className="flex w-16 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Qté</span>
                               {erp && l.unite === 'kg' ? (
                                 <span className="block pt-1 text-right tabular-nums text-attenue-texte">= poids</span>
-                              ) : (
-                                <Champ className={cn(champ, 'text-right')} inputMode="decimal" aria-label="Quantité facturée" value={l.quantite} disabled={fige}
-                                  onChange={(e) => majLigne(l.cle, { quantite: e.target.value })} />
-                              )}
+                              ) : caseQuantite}
                             </div>
                             <div className="flex w-16 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Bobines</span>
-                              <Champ className={cn(champ, 'text-right')} inputMode="numeric" aria-label="Bobines de la ligne" value={l.nb_bobines} disabled={fige} onChange={(e) => majColis(l, 'bobines', e.target.value)} />
+                              {caseBobines}
                             </div>
                             <div className="flex w-28 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Palettes</span>
                               <div className="flex items-center gap-1">
-                                <Champ className={cn(champ, 'text-right')} inputMode="numeric" aria-label="Palettes de la ligne" value={l.nb_palettes} disabled={fige} onChange={(e) => majColis(l, 'palettes', e.target.value)} />
-                                {!fige && (
-                                  <button type="button" onClick={() => majLigne(l.cle, { lie: !l.lie })}
-                                    title={l.lie
-                                      ? 'Poids, bobines et palettes se repondent — cliquez pour saisir chacun separement'
-                                      : 'Calcul detache — cliquez pour relier les trois'}
-                                    aria-label={l.lie ? 'Détacher le calcul' : 'Relier le calcul'}
-                                    className={cn('shrink-0 rounded-[var(--radius)] p-1',
-                                      l.lie ? 'text-primaire hover:bg-primaire/10' : 'text-alerte hover:bg-alerte/10')}>
-                                    {l.lie ? <Link2 className="size-3.5" /> : <Unlink2 className="size-3.5" />}
-                                  </button>
-                                )}
+                                {casePalettes}
+                                {boutonLien}
                               </div>
                             </div>
                             <div className="flex w-16 flex-col gap-0.5">
                               <span className="text-[10.5px] uppercase tracking-wider text-attenue-texte">Remise %</span>
-                              <Champ className={cn(champ, 'text-right')} inputMode="decimal" value={l.remise} disabled={fige} placeholder="0"
-                                aria-label="Remise du fournisseur en pourcentage"
-                                onChange={(e) => majLigne(l.cle, { remise: e.target.value })} />
+                              {caseRemise}
                             </div>
                             {/* Ce que le serveur a calcule : une ligne pas encore enregistree n'en a pas. */}
                             {s && !coutVisible && (
@@ -945,10 +1148,14 @@ export function FactureImport() {
                     {detail && (
                       <tr className="border-b border-bordure/60 bg-attenue/25">
                         <td />
-                        <td colSpan={7} className="px-2 py-2">
+                        <td colSpan={nbColonnes - 1} className="px-2 py-2">
                           <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]">
                             <span className="text-attenue-texte">
                               Valeur d'achat <strong className="text-texte tabular-nums">{fmt.nombre(s!.valeur_achat_dhs, 2)} DH</strong>
+                            </span>
+                            <span className="text-attenue-texte">
+                              Frais <strong className="text-texte tabular-nums">{fmt.nombre(s!.frais_alloues_dhs ?? 0, 2)} DH</strong>
+                              {s!.pct_dossier != null && <span className="tabular-nums"> ({fmt.nombre(s!.pct_dossier, 2)} % du dossier)</span>}
                             </span>
                             {fraisInclus.map((f) => {
                               const p = partDe(s!.id_ligne, f.id_ligne_frais)
@@ -972,6 +1179,7 @@ export function FactureImport() {
               })}
             </tbody>
           </table>
+          </div>
           {lignes.some((l) => l.recue) && (
             <p className="border-t border-bordure px-3 py-2 text-[11.5px] text-attenue-texte">
               <Lock className="mr-1 inline size-3" />

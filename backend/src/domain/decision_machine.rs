@@ -72,6 +72,56 @@ pub fn bobines_voie(capacite: i64, largeur_machine: Option<f64>, largeur_voie: O
     Some(((capacite as f64) * lv / lm + 1e-6).floor() as i64)
 }
 
+/// LA FIN D'UNE LIGNE PAR LE CONSTAT (decision du 26/10/2026) : un constat qui
+/// mesure 0 % FERME la ligne. Les bobines vides quittent l'etage (nombre de
+/// bobines -> 0, la ligne disparait de l'etat) et tout ce qui restait est
+/// l'ecart, que le motif qualifie (la consommation mesuree, d'ordinaire). C'est
+/// le SERVEUR qui pose 0 bobine : l'ecran peut envoyer le nombre de l'etat ou 0,
+/// le resultat est le meme. Un poids par bobine saisi l'emporte sur le % (comme
+/// au calcul) : il ne ferme pas la ligne. L'autre fin de ligne — le reste au
+/// rebut — est un dechargement vers le DECHET.
+pub fn ferme_au_constat(type_fiche: &str, s: &Saisie) -> bool {
+    type_fiche == "MAJ"
+        && s.poids_retenu.filter(|p| *p > 0.0).is_none()
+        && s.pourcentage.is_some_and(|p| p.abs() < 0.00005)
+}
+
+/// CE QUE SEUL LE CHARGEMENT DEFINIT (decision du 24/10/2026) : la voie d'une
+/// ligne et, au constat, son nombre de bobines. Le constat et le dechargement
+/// gardent la voie de l'etat ; le constat garde son nombre de bobines — il se
+/// change par un chargement ou un dechargement (vers le magasin, la perte, le
+/// dechet ou la casse). Une saisie contraire est refusee, en clair ; une saisie
+/// egale a l'etat (ou vide) passe. SEULE EXCEPTION (26/10/2026) : le constat a
+/// 0 % ferme la ligne (`ferme_au_constat`) ; il accepte alors le nombre de
+/// l'etat ou 0, et rien d'autre.
+pub fn hors_chargement(type_fiche: &str, s: &Saisie, e: Option<&EtatLigne>) -> Option<String> {
+    if type_fiche == "CHARGE" {
+        return None;
+    }
+    let voie_etat = e.and_then(|e| e.largeur_voie_m).filter(|v| *v > 0.0);
+    if let Some(v) = s.largeur_voie_m.filter(|v| *v > 0.0) {
+        if voie_etat.is_none_or(|x| (x - v).abs() > 0.0005) {
+            return Some(match voie_etat {
+                Some(x) => format!("la voie se definit au chargement : elle reste de {x} m (saisie : {v} m)"),
+                None => format!("la voie se definit au chargement : la ligne n'en a pas (saisie : {v} m)"),
+            });
+        }
+    }
+    if type_fiche == "MAJ" {
+        let nb = e.map(|e| e.nb_bobines).unwrap_or(0);
+        if ferme_au_constat(type_fiche, s) && s.nb_present == 0 {
+            return None;
+        }
+        if s.nb_present != nb {
+            return Some(format!(
+                "le constat ne change pas le nombre de bobines ({nb} sur l'etage, {} saisies) : il se change par un chargement ou un dechargement ; seul un constat a 0 % ferme la ligne",
+                s.nb_present
+            ));
+        }
+    }
+    None
+}
+
 /// Les raisons d'une consommation au-dela de ce que portait la ligne, a un
 /// chargement (regle 2, 09/10/2026) : la liste que l'ecran propose.
 pub const RAISONS_SURPLUS: &[&str] = &["Saisie décalée", "Oubli de constat précédent", "Erreur de report"];
@@ -423,6 +473,10 @@ pub async fn calculer(
         // constat qui ne dit rien de l'OF ne le change pas.
         let of_avant = e.and_then(|e| e.id_of.clone());
         let of_nouveau = s.id_of.clone().filter(|o| !o.is_empty()).or_else(|| of_avant.clone());
+        if let Some(m) = hors_chargement(&f.type_fiche, s, e) {
+            blocages.push(format!("{lib} : {m}"));
+            continue;
+        }
         let voie = s.largeur_voie_m.filter(|v| *v > 0.0).or_else(|| e.and_then(|e| e.largeur_voie_m));
         // LA QUALITE (23/10/2026). Avec un OF, la sienne : une autre saisie est
         // refusee. Sans OF : au chargement, celle que la ligne dit (a defaut, celle
@@ -572,8 +626,9 @@ pub async fn calculer(
                 calc.ecart_kg = arrondi_kg(kg_avant - calc.kg_mouvementes - calc.kg_apres);
             }
             _ => {
-                // CONSTAT : nb present, et % ou poids.
-                let n = s.nb_present;
+                // CONSTAT : nb present, et % ou poids. A 0 %, la ligne se ferme :
+                // ses bobines vides quittent l'etage (26/10/2026).
+                let n = if ferme_au_constat(&f.type_fiche, s) { 0 } else { s.nb_present };
                 if n < 0 {
                     blocages.push(format!("{lib} : le nombre present ne peut pas etre negatif"));
                     continue;
@@ -1824,7 +1879,7 @@ pub async fn journal_changement_etage(
 
 #[cfg(test)]
 mod tests {
-    use super::{bobines_voie, niveau_ecart, signaux_voies, EtatLigne, SeuilsEcart};
+    use super::{bobines_voie, ferme_au_constat, hors_chargement, niveau_ecart, signaux_voies, EtatLigne, Saisie, SeuilsEcart};
 
     fn ligne(of: &str, voie: f64, nb: i64) -> EtatLigne {
         EtatLigne {
@@ -1861,6 +1916,85 @@ mod tests {
         assert_eq!(signaux_voies(&trop, 1344, Some(4.20)).len(), 1);
         let large = vec![ligne("X1", 1.20, 10), ligne("X2", 3.10, 10)];
         assert_eq!(signaux_voies(&large, 1344, Some(4.20)).len(), 1);
+    }
+
+    fn saisie(nb_present: i64, voie: Option<f64>) -> Saisie {
+        Saisie {
+            reference: "R".into(),
+            lot: "L".into(),
+            nb_mouvementees: 0,
+            poids_retenu: None,
+            pct_retirees: None,
+            destination: None,
+            pourcentage: Some(50.0),
+            nb_present,
+            code_motif: Some("MJ_ORDINAIRE".into()),
+            motif_texte: None,
+            effet_ecart: None,
+            id_of: None,
+            largeur_voie_m: voie,
+            code_qualite: None,
+        }
+    }
+
+    #[test]
+    fn voie_et_bobines_se_definissent_au_chargement() {
+        // L'etage : 384 bobines sur une voie de 1,20 m.
+        let e = ligne("X1", 1.20, 384);
+        // Le constat garde la voie et le nombre : vides ou egaux, ils passent.
+        assert_eq!(hors_chargement("MAJ", &saisie(384, None), Some(&e)), None);
+        assert_eq!(hors_chargement("MAJ", &saisie(384, Some(1.20)), Some(&e)), None);
+        // Une autre voie, au constat comme au dechargement : refusee.
+        assert!(hors_chargement("MAJ", &saisie(384, Some(1.40)), Some(&e)).unwrap().contains("voie se definit au chargement"));
+        assert!(hors_chargement("DECHARGE", &saisie(0, Some(1.40)), Some(&e)).unwrap().contains("voie se definit au chargement"));
+        assert!(hors_chargement("MAJ", &saisie(0, Some(1.0)), None).unwrap().contains("n'en a pas"));
+        // Un autre nombre de bobines au constat (correction comprise) : refuse.
+        assert!(hors_chargement("MAJ", &saisie(0, None), Some(&e)).unwrap().contains("nombre de bobines"));
+        assert!(hors_chargement("MAJ", &saisie(400, None), Some(&e)).unwrap().contains("dechargement"));
+        // Le dechargement saisit ce qu'il retire, jamais les presentes ; le chargement definit tout.
+        assert_eq!(hors_chargement("DECHARGE", &saisie(0, None), Some(&e)), None);
+        assert_eq!(hors_chargement("CHARGE", &saisie(0, Some(3.0)), Some(&e)), None);
+        // Une ligne absente de l'etage, constatee a zero : rien a dire.
+        assert_eq!(hors_chargement("MAJ", &saisie(0, None), None), None);
+    }
+
+    fn a_pct(mut s: Saisie, pct: f64) -> Saisie {
+        s.pourcentage = Some(pct);
+        s
+    }
+
+    #[test]
+    fn constat_a_zero_pour_cent_ferme_la_ligne() {
+        // Decision du 26/10/2026 : 0 % mesure ferme la ligne, les bobines vides quittent l'etage.
+        let e = ligne("X1", 1.20, 384);
+        let zero = a_pct(saisie(0, None), 0.0);
+        assert!(ferme_au_constat("MAJ", &zero));
+        // L'ecran peut envoyer 0 ou le nombre de l'etat : les deux ferment.
+        assert_eq!(hors_chargement("MAJ", &zero, Some(&e)), None);
+        assert_eq!(hors_chargement("MAJ", &a_pct(saisie(384, None), 0.0), Some(&e)), None);
+        // A 0 %, un autre nombre que 0 ou celui de l'etat : refuse.
+        assert!(hors_chargement("MAJ", &a_pct(saisie(100, None), 0.0), Some(&e)).unwrap().contains("nombre de bobines"));
+        // A 30 %, un autre nombre reste refuse — 0 compris.
+        assert!(hors_chargement("MAJ", &a_pct(saisie(0, None), 30.0), Some(&e)).unwrap().contains("seul un constat a 0 %"));
+        assert!(hors_chargement("MAJ", &a_pct(saisie(200, None), 30.0), Some(&e)).is_some());
+        // Sans % du tout, 0 bobine ne ferme pas : refuse.
+        let mut sans = saisie(0, None);
+        sans.pourcentage = None;
+        assert!(!ferme_au_constat("MAJ", &sans));
+        assert!(hors_chargement("MAJ", &sans, Some(&e)).is_some());
+        // La correction a 0 % ferme aussi : la regle ne depend pas du motif (son
+        // ecart reste juge aux seuils, comme toute correction).
+        let mut corr = a_pct(saisie(0, None), 0.0);
+        corr.code_motif = Some("MJ_CORRECTION".into());
+        assert!(ferme_au_constat("MAJ", &corr));
+        assert_eq!(hors_chargement("MAJ", &corr, Some(&e)), None);
+        // Un poids par bobine saisi l'emporte sur le % : il ne ferme pas.
+        let mut pese = a_pct(saisie(0, None), 0.0);
+        pese.poids_retenu = Some(1.5);
+        assert!(!ferme_au_constat("MAJ", &pese));
+        // Ni le chargement ni le dechargement ne ferment par le %.
+        assert!(!ferme_au_constat("CHARGE", &zero));
+        assert!(!ferme_au_constat("DECHARGE", &zero));
     }
 
     fn seuils() -> SeuilsEcart {

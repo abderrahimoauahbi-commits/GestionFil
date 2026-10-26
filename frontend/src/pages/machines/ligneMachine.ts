@@ -7,31 +7,27 @@ import { useEffect, useState } from 'react'
 import { qualiteDeLOf, type OfOuvert } from '../../composants/ChoixOF'
 import type { LigneSaisie, TypeFiche } from './noyau'
 
-export interface EnteteQualite {
-  id_of: string
-  code_qualite: string
-}
-
-/** Ce que la ligne sert, en clair : sa qualite et d'ou elle vient. */
+/**
+ * Ce que la ligne sert, en clair : sa qualite et d'ou elle vient. Plus d'OF ni
+ * de qualite d'en-tete (24/10/2026) : celle de l'OF de la ligne, ou de l'OF
+ * qu'elle sert deja ; au dechargement et au constat sans OF, celle de l'etat.
+ */
 export function qualiteDeLaLigne(
   l: LigneSaisie,
-  entete: EnteteQualite,
   type: TypeFiche,
   ofs: OfOuvert[] | undefined,
 ): { imposee: string | null; source: 'OF' | 'LIGNE' | null } {
-  const idOf = l.id_of || entete.id_of
-  if (idOf) return { imposee: qualiteDeLOf(ofs, idOf) ?? '…', source: 'OF' }
+  if (l.id_of) return { imposee: qualiteDeLOf(ofs, l.id_of) ?? '…', source: 'OF' }
   if (l.avant_numero_of) return { imposee: l.avant_qualite_nom ?? l.avant_code_qualite ?? '…', source: 'OF' }
   if (type !== 'CHARGE') return { imposee: l.avant_qualite_nom ?? l.avant_code_qualite ?? 'sans qualité', source: 'LIGNE' }
   return { imposee: null, source: null }
 }
 
-/** Le texte court d'une ligne fermee : « 8F MOSQUEE », « qualité de la fiche (8F) »… */
-export function resumeQualite(l: LigneSaisie, entete: EnteteQualite, type: TypeFiche, ofs: OfOuvert[] | undefined) {
-  const q = qualiteDeLaLigne(l, entete, type, ofs)
+/** Le texte court d'une ligne fermee : « 8F MOSQUEE », « garde 8F »… */
+export function resumeQualite(l: LigneSaisie, type: TypeFiche, ofs: OfOuvert[] | undefined) {
+  const q = qualiteDeLaLigne(l, type, ofs)
   if (q.imposee != null) return q.imposee
   if (l.code_qualite) return l.code_qualite
-  if (entete.code_qualite) return `qualité de la fiche (${entete.code_qualite})`
   if (l.avant_code_qualite) return `garde ${l.avant_qualite_nom ?? l.avant_code_qualite}`
   return 'qualité à choisir'
 }

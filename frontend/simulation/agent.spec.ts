@@ -446,34 +446,32 @@ async function receptionner(e: Extract<Evenement, { type: 'RECEPTION' }>) {
     const b = (await bon(p, idBc))!
     if (b.statut !== 'ENVOYE' && b.statut !== 'PARTIELLEMENT_RECU') throw new Error(`bon ${b.numero_bc} en ${b.statut}`)
     await aller(p, '/receptions/nouvelle', login)
-    await p.getByRole('combobox', { name: 'Fournisseur *' }).selectOption(e.fournisseur)
+    // LE FOURNISSEUR SE CHERCHE (24/10/2026).
+    await choisirRecherche(p, p.locator('#frs'), e.fournisseur, titreCode(e.fournisseur))
     await p.locator('#date-rec').fill(e.date)
-    await p.getByLabel('Bon de livraison').fill(`BL-${e.date.replace(/-/g, '')}-${e.fournisseur.slice(-3)}`)
-    await p.getByLabel('Transporteur').fill(e.fournisseur === 'FRS-011' || e.fournisseur === 'FRS-012' ? 'Livraison fournisseur' : 'Transit Tanger Med')
+    await p.locator('#bl').fill(`BL-${e.date.replace(/-/g, '')}-${e.fournisseur.slice(-3)}`)
+    await p.locator('#tr').fill(e.fournisseur === 'FRS-011' || e.fournisseur === 'FRS-012' ? 'Livraison fournisseur' : 'Transit Tanger Med')
     const totalBl = e.lignes.reduce((s, l) => s + l.bl, 0)
     await taper(champNombre(p, 'Nombre de colis'), String(Math.max(1, Math.round(totalBl / 900))))
     await taper(champNombre(p, /^Poids brut/), fr(totalBl * 1.035, 1))
-    const bons = p.getByRole('combobox', { name: 'Bon de commande' })
-    await choisirOption(bons, new RegExp(b.numero_bc))
-    await p.getByRole('button', { name: 'Reprendre les lignes' }).click()
-    // LE TABLEAU DU HAUT SE LIT, LA SAISIE EST EN BAS (21/10/2026) : on pointe chaque
-    // ligne d'un clic, puis on saisit dans le detail de la ligne, sous le tableau.
-    const retenir = p.getByRole('checkbox', { name: /^Retenir / })
-    await expect(retenir).toHaveCount(e.lignes.length, { timeout: 15_000 })
+    // LE BON SE CHERCHE, ET LE CHOISIR REPREND SES LIGNES (24/10/2026).
+    await choisirRecherche(p, p.getByRole('combobox', { name: 'Bon de commande' }), b.numero_bc, b.numero_bc)
+    // LA SAISIE SUR LA LIGNE (24/10/2026) : chaque ligne se saisit dans la grille,
+    // rangee principale et rangee « ↳ » (ce qui n'y tient pas, selon la largeur).
+    const rangees = p.locator('tbody tr[id^="rec-ligne-"]')
+    await expect(rangees).toHaveCount(e.lignes.length, { timeout: 15_000 })
     for (const [i, l] of e.lignes.entries()) {
-      await retenir.nth(i).locator('xpath=ancestor::tr[1]/td[3]').click()
-      await p.getByRole('button', { name: 'Quantité', exact: true }).click()
+      const ligne = rangees.nth(i).locator('xpath=self::tr | following-sibling::tr[1]')
       // Peser et compter sont deux gestes : on detache le calcul, sinon compter
       // les bobines recalculerait la pesee (ou l'inverse).
-      const detacher = p.getByRole('button', { name: 'Détacher le calcul' }).first()
+      const detacher = ligne.getByRole('button', { name: 'Détacher le calcul' }).first()
       if (await detacher.isVisible().catch(() => false)) await detacher.click()
-      await taper(champNombre(p, 'Quantité du bon de livraison, en kilos'), fr(l.bl, 1))
-      await taper(champNombre(p, 'Quantité pesée, en kilos'), fr(l.pese, 2))
+      await taper(champNombre(ligne, 'Quantité du bon de livraison, en kilos').first(), fr(l.bl, 1))
+      await taper(champNombre(ligne, 'Quantité pesée, en kilos').first(), fr(l.pese, 2))
       const bob = bobinesComptees(l.ref, l.pese, e.id)
-      if (bob) await taper(champNombre(p, 'Nombre de bobines'), String(bob))
-      if (parCode.get(l.ref)?.suivi_lot === 1) await p.getByLabel('Lot fournisseur').fill(l.lot)
-      await p.getByRole('button', { name: 'Stockage', exact: true }).click()
-      await p.getByRole('combobox', { name: 'Magasin destinataire' }).selectOption(l.magasin)
+      if (bob) await taper(champNombre(ligne, 'Nombre de bobines').first(), String(bob))
+      if (parCode.get(l.ref)?.suivi_lot === 1) await ligne.getByLabel('Lot fournisseur').first().fill(l.lot)
+      await ligne.getByRole('combobox', { name: 'Magasin destinataire' }).first().selectOption(l.magasin)
     }
     await p.getByRole('button', { name: /^Enregistrer la r[ée]ception$/ }).click()
     await expect(p).toHaveURL(/\/receptions\/[0-9a-f-]{36}$/, { timeout: 30_000 }).catch(async () => {
@@ -568,11 +566,13 @@ async function choisirOf(liste: Locator, numero: string) {
   await choisirRecherche(liste.page(), liste, numero, numero)
 }
 
-/** L'entete d'une fiche machine : date, magasin, OF (choisi) et responsable. */
-async function entete(p: Page, date: string, of: string | undefined, responsable: string, magasin?: string) {
+/**
+ * L'entete d'une fiche machine : date, magasin et responsable. Plus d'OF ni de
+ * qualite d'en-tete (24/10/2026) : chaque ligne porte les siens.
+ */
+async function entete(p: Page, date: string, responsable: string, magasin?: string) {
   await p.getByLabel('Date', { exact: true }).fill(date)
   if (magasin) await p.getByLabel(/^Magasin d.origine/).selectOption(magasin)
-  if (of) await choisirOf(p.getByRole('combobox', { name: 'Ordre de fabrication', exact: true }), of)
   await p.getByLabel('Responsable').fill(responsable)
 }
 
@@ -602,16 +602,18 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
   if ((await fichesValidees(p, e.machine, e.zone)).some((x) => (x.date_fiche ?? '').slice(0, 10) > e.date))
     return `déjà fait (l'étage a des fiches postérieures au ${jjmmaaaa(e.date)})`
 
-  // 1. LE CONSTAT : ce qui reste sur l'etage depuis le dernier chargement. Il porte
-  //    l'OF du mois : au changement d'OF, c'est la frontiere, et le serveur range
-  //    l'ecart de la periode sous l'OF sortant.
+  // 1. LE CONSTAT : ce qui reste sur l'etage depuis le dernier chargement. Chaque
+  //    ligne porte l'OF du mois (choisi sur la ligne, 24/10/2026) : au changement
+  //    d'OF, c'est la frontiere, et le serveur range l'ecart de la periode sous
+  //    l'OF sortant. Une ligne finie se constate a 0 % : le constat la FERME, ses
+  //    bobines vides quittent l'etage (26/10/2026).
   let etat = (await lire<LigneEtage[]>(p, `/api/machines/${e.machine}/zones/${e.zone}`)).filter((l) => l.nb_bobines > 0)
   let garde: LigneEtage | undefined
   if (etat.length && !(await ficheFaite(p, e.machine, e.zone, 'MAJ', e.date, ofLien ?? ''))) {
     const sortant = [...new Set(etat.map((l) => l.numero_of).filter(Boolean))].join(', ')
     await exigerOfOuvert()
     await aller(p, `/machines/${e.machine}/fiche/MAJ/${e.zone}`, login)
-    await entete(p, e.date, ofLien, responsable)
+    await entete(p, e.date, responsable)
     const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'Présentes' }) })
     // Les rangees de ligne (24/10/2026) : la rangee « ↳ » de la precision porte data-suite.
     const lignes = grille.locator('tbody tr[data-ligne]')
@@ -629,10 +631,25 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
       // Une ligne non touchee se lit, sans case : « Modifier » l'ouvre.
       const modifier = ligne.getByRole('button', { name: /^Modifier/ })
       if (await modifier.count()) await modifier.click()
+      // L'OF DE LA LIGNE (24/10/2026) : celui du mois, s'il n'est pas deja le sien.
+      const surEtage = etat.find((x) => x.lot_fournisseur === lot)
+      if (ofLien && (surEtage?.numero_of ?? '') !== ofLien)
+        await choisirOf(ligne.getByRole('combobox', { name: 'OF de la ligne' }), ofLien)
+      // Le constat ne change pas le nombre de bobines : la seule case est le %.
+      // A 0 %, la ligne finie se ferme (26/10/2026).
       const cases = casesDe(ligne)
       await expect(cases.first()).toBeVisible()
-      if (garde && lot === garde.lot_fournisseur) await taper(cases.nth(1), fr((garde.pourcentage ?? 100) * (0.35 + alea() * 0.25), 1))
-      else await taper(cases.nth(0), '0')
+      if (garde && lot === garde.lot_fournisseur) await taper(cases.nth(0), fr((garde.pourcentage ?? 100) * (0.35 + alea() * 0.25), 1))
+      else {
+        await taper(cases.nth(0), '0')
+        await expect(ligne.getByText('fermée à ce constat')).toBeVisible()
+      }
+      // La tabulation qui suit le % entre dans le choix de l'OF de la ligne, qui
+      // s'ouvre : Echap le referme (sa liste couvrirait le bouton Apercu).
+      if (await p.getByRole('listbox').count()) {
+        await p.keyboard.press('Escape')
+        await expect(p.getByRole('listbox')).toHaveCount(0)
+      }
       // La precision est sur la rangee, ou sur sa rangee « ↳ » quand la colonne du motif est prise.
       const cle = await ligne.getAttribute('data-ligne')
       const zone = grille.locator(`tbody tr[data-ligne="${cle}"], tbody tr[data-suite="${cle}"]`)
@@ -684,15 +701,7 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
     else {
       await exigerOfOuvert()
       await aller(p, `/machines/${e.machine}/fiche/CHARGE/${e.zone}`, login)
-      await entete(p, e.date, ofLien, responsable, magasin)
-      // UN CHARGEMENT SANS OF NOMME SA QUALITE (23/10/2026) : la premiere qualite ouverte,
-      // la base refusant une ligne de chargement sans qualite.
-      if (!ofLien) {
-        // La qualite se cherche (24/10/2026) : la premiere proposee, champ vide.
-        await choisirRecherche(p, p.getByRole('combobox', { name: 'Qualité', exact: true }), '').catch(() => {
-          throw new Error('aucune qualité ouverte : un chargement sans OF ne peut pas nommer sa qualité')
-        })
-      }
+      await entete(p, e.date, responsable, magasin)
       const grille = p.locator('table').filter({ has: p.locator('th', { hasText: 'À charger' }) })
       for (const c of choix) {
         // La reference a charger se cherche au serveur (24/10/2026), « code — désignation ».
@@ -700,6 +709,18 @@ async function machine(e: Extract<Evenement, { type: 'MACHINE' }>) {
         await choisirRecherche(p, p.getByRole('combobox', { name: 'Ajouter une référence' }), c.r, c.r)
         const ligne = grille.locator('tbody tr[data-ligne]').last()
         await choisirLot(p, ligne, c.lot)
+        // L'OF DE LA LIGNE (24/10/2026) : celui du mois. Sans OF, la proposition
+        // (l'OF de la ligne d'avant ou de l'etage) s'efface, et la ligne nomme sa
+        // qualite (23/10/2026) : la premiere ouverte, la base refusant un
+        // chargement sans qualite.
+        if (ofLien) await choisirOf(ligne.getByRole('combobox', { name: 'OF de la ligne' }), ofLien)
+        else {
+          const effacer = ligne.getByRole('button', { name: 'Effacer : — aucun OF —' })
+          if (await effacer.count()) await effacer.click()
+          await choisirRecherche(p, ligne.getByRole('combobox', { name: 'Qualité de la ligne' }), '').catch(() => {
+            throw new Error('aucune qualité ouverte : un chargement sans OF ne peut pas nommer sa qualité')
+          })
+        }
         if (c.voie) await taper(ligne.getByRole('textbox', { name: 'Largeur de la voie (m)' }), fr(c.voie, 2))
         await taper(casesDe(ligne).nth(0), String(c.bobines))
       }

@@ -21,19 +21,19 @@ import {
 import { api } from '../../api/client'
 import { Alerte, Chargement, SaisieNombre } from '../../composants/ui/base'
 import { cn } from '../../lib/utils'
-import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
+import { classeNiveauEcart, couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import {
-  bobinesVoie, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, LIBELLE_DESTINATION, LIBELLE_EFFET,
+  bobinesVoie, destinationsDe, ecartPoidsBobine, estimer, fermeAuConstat, fmtDate, LIBELLE_DESTINATION, LIBELLE_EFFET,
   LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue, signePct,
   type Destination, type Machine, type TypeFiche, type Zone,
-  RAISONS_SURPLUS, TON_ECART,
+  RAISONS_SURPLUS,
 } from './noyau'
 import { useFiche } from './useFiche'
 import { ChampScan } from '../../composants/ChampScan'
 import { AvisInventaireOuvert } from '../../composants/AvisInventaireOuvert'
 import { useValiderFiche } from './Questions'
 import { DemandesDerogation } from './Derogation'
-import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts } from '../../composants/ChoixOF'
+import { ChoixOF, useOfOuverts } from '../../composants/ChoixOF'
 import { chercherCatalogue } from '../../composants/ChampReference'
 import { QualiteLigne } from './qualiteLigne'
 
@@ -301,7 +301,7 @@ function ZoneMobile({
                     v={`${nb(l.poids_unitaire_kg, 3)} kg`}
                     suffixe={
                       pct != null && c ? (
-                        <span className={cn('ml-1.5 font-medium', CLASSE_ECART[c])}>{signePct(pct)}</span>
+                        <span className={cn('ml-1.5 font-medium', classeNiveauEcart(c))}>{signePct(pct)}</span>
                       ) : null
                     }
                   />
@@ -488,34 +488,8 @@ export function FicheMobile({
             </select>
           </label>
         )}
-        {/* L'OF DE LA FICHE (22/10/2026), comme au bureau : le defaut des lignes. */}
-        <label className="col-span-2 flex flex-col gap-1">
-          <span className="text-[12px] text-attenue-texte">Ordre de fabrication</span>
-          <ChoixOF
-            valeur={f.entete.id_of}
-            inconnu={f.entete.of || null}
-            vide={f.entete.of && !f.entete.id_of ? `${f.entete.of} (texte ancien)` : '— l’OF de chaque ligne —'}
-            onChange={(id, numero) =>
-              f.setEntete({ ...f.entete, id_of: id, of: id ? numero : f.entete.of, code_qualite: id ? '' : f.entete.code_qualite })
-            }
-            className="min-h-[48px] w-full text-[14px]"
-          />
-        </label>
-        {/* LA QUALITE EXPLICITE (23/10/2026) : un chargement sans OF nomme la
-            qualite qu'il sert ; avec un OF, c'est la sienne. Une ligne qui sert
-            deja un OF ou une qualite la garde. */}
-        {type === 'CHARGE' && (
-          <div className="col-span-2 flex flex-col gap-1">
-            <span className="text-[12px] text-attenue-texte">Qualité servie (sans OF)</span>
-            <ChoixQualite
-              valeur={f.entete.code_qualite}
-              onChange={(q) => f.setEntete({ ...f.entete, code_qualite: q })}
-              imposee={f.entete.id_of ? (qualiteDeLOf(ofs.data, f.entete.id_of) ?? '…') : null}
-              vide="— celle de la ligne, ou choisir —"
-              className="min-h-[48px] w-full text-[14px]"
-            />
-          </div>
-        )}
+        {/* PLUS D'OF NI DE QUALITE D'EN-TETE (24/10/2026), comme au bureau : chaque
+            ligne porte son OF, qui dit sa qualite ; sans OF, elle se choisit sur la ligne. */}
         <div className="col-span-2">
           <ChampM label="Observations" v={f.entete.observations}
                   set={(x) => f.setEntete({ ...f.entete, observations: x })} />
@@ -615,7 +589,7 @@ export function FicheMobile({
                           const rappel = rappelCatalogue({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue })
                           if (!rappel) return 'Pas de poids de bobine au catalogue'
                           const c = couleurEcart(ecartPoidsBobine({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue }), tolerances)
-                          return <span className={cn('font-medium', c ? CLASSE_ECART[c] : 'text-attenue-texte')}>{rappel}</span>
+                          return <span className={cn('font-medium', classeNiveauEcart(c) ?? 'text-attenue-texte')}>{rappel}</span>
                         })()} />
               <ChampNum label="% de toute la ligne après le chargement" v={l.pourcentage} pas={0.1} max={500}
                         set={(x) => f.majLigne(l.cle, 'pourcentage', x)} grand />
@@ -635,9 +609,21 @@ export function FicheMobile({
           )}
           {type === 'MAJ' && (
             <>
-              <ChampNum label="Bobines présentes" v={l.presentes} set={(x) => f.majLigne(l.cle, 'presentes', x)} />
-              <ChampNum label="% constaté" v={l.pourcentage} pas={0.1} max={500}
-                        set={(x) => f.majLigne(l.cle, 'pourcentage', x)} grand />
+              {/* LE CONSTAT NE CHANGE PAS LE NOMBRE DE BOBINES (24/10/2026) : celui de l'etat. */}
+              <div className="flex items-baseline justify-between rounded-[var(--radius-sm)] border border-bordure bg-attenue px-2.5 py-2"
+                   title="Le nombre de bobines se change par un chargement ou un déchargement">
+                <span className="text-[12px] text-attenue-texte">Bobines présentes</span>
+                <span className="text-[14px] font-medium tabular-nums">{l.presentes}</span>
+              </div>
+              {/* LE CONSTAT A 0 % FERME LA LIGNE (26/10/2026) : les bobines vides
+                  quittent l'etage, tout ce qui restait est l'ecart. */}
+              <ChampNum label="% constaté" v={l.pourcentage} pas={0.1} max={500} zero
+                        set={(x) => f.majLigne(l.cle, 'pourcentage', x)} grand
+                        aide={fermeAuConstat(type, l) ? (
+                          <span className="font-medium text-alerte">
+                            0 % : la ligne est fermée à ce constat — ses {l.presentes} bobines quittent l’étage
+                          </span>
+                        ) : undefined} />
             </>
           )}
 
@@ -647,8 +633,8 @@ export function FicheMobile({
             <span className="text-[12px] text-attenue-texte">OF de la ligne</span>
             <ChoixOF
               valeur={l.id_of ?? ''}
-              onChange={(id) => f.majLigne(l.cle, 'id_of', id)}
-              vide={f.entete.id_of ? 'OF de la fiche' : l.avant_numero_of ? `garde ${l.avant_numero_of}` : '— aucun OF —'}
+              onChange={(id, numero) => f.choisirOf(l.cle, id, numero)}
+              vide={l.avant_numero_of ? `garde ${l.avant_numero_of}` : '— aucun OF —'}
               ariaLabel="OF de la ligne"
               className="min-h-[48px] w-full text-[14px]"
             />
@@ -657,7 +643,6 @@ export function FicheMobile({
             <span className="text-[12px] text-attenue-texte">Qualité de la ligne</span>
             <QualiteLigne
               l={l}
-              entete={f.entete}
               type={type}
               ofs={ofs.data}
               onChange={(q) => f.majLigne(l.cle, 'code_qualite', q)}
@@ -667,6 +652,24 @@ export function FicheMobile({
           {(() => {
             const cap = bobinesVoie(zone.capacite_bobines, machine.largeur_m, l.largeur_voie)
             const depasse = cap != null && (type === 'MAJ' || l.mouvementees > 0) && e.nbApres > cap
+            /* LA VOIE SE DEFINIT AU CHARGEMENT (24/10/2026) : le constat et le
+               dechargement la lisent, sans pouvoir la changer. */
+            if (type !== 'CHARGE') {
+              return (
+                <div className="flex flex-col gap-0.5 rounded-[var(--radius-sm)] border border-bordure bg-attenue px-2.5 py-2"
+                     title="La voie se définit au chargement : elle ne se change pas ici">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-[12px] text-attenue-texte">Voie</span>
+                    <span className="text-[14px] tabular-nums">{l.largeur_voie ? `${nb(l.largeur_voie, 2)} m` : 'sans voie'}</span>
+                  </div>
+                  {cap != null && (
+                    <span className={cn('text-[12px]', depasse ? 'font-medium text-alerte' : 'text-attenue-texte')}>
+                      {cap} bobines pour cette voie{depasse && ` — ${e.nbApres} prévues, au-delà`}
+                    </span>
+                  )}
+                </div>
+              )
+            }
             return (
               <ChampNum
                 label="Largeur de la voie (m)"
@@ -770,7 +773,8 @@ export function FicheMobile({
               <div key={l.ligne_numero}>
                 <span className="font-mono text-[11px]">{l.lot_fournisseur}</span>{' '}
                 {l.nb_avant} · {nb(l.kg_avant, 1)} → <strong>{l.nb_apres} · {nb(l.kg_apres, 1)} kg</strong>
-                <span className={TON_ECART[l.niveau_ecart ?? ''] ?? 'text-attenue-texte'}>
+                {type === 'MAJ' && l.nb_apres === 0 && l.nb_avant > 0 && <strong className="text-alerte"> · ligne fermée</strong>}
+                <span className={classeNiveauEcart(l.niveau_ecart) ?? 'text-attenue-texte'}>
                   {' '}· écart {nb(l.ecart_kg, 1)} kg{l.ecart_kg !== 0 && ` (${LIBELLE_EFFET[l.effet_ecart] ?? l.effet_ecart})`}
                 </span>
               </div>
@@ -860,7 +864,7 @@ function ChampM({
 }
 
 function ChampNum({
-  label, v, set, pas = 1, max, grand, aide,
+  label, v, set, pas = 1, max, grand, aide, zero,
 }: {
   label: string
   v: number
@@ -868,6 +872,8 @@ function ChampNum({
   pas?: number
   max?: number
   grand?: boolean
+  /** Montrer 0 plutot qu'un champ vide (le % constate : 0 ferme la ligne). */
+  zero?: boolean
   /** Une ligne de rappel sous le champ (le catalogue, par exemple). */
   aide?: ReactNode
 }) {
@@ -879,7 +885,7 @@ function ChampNum({
         step={pas}
         min={0}
         max={max}
-        value={v || ''}
+        value={zero ? v : v || ''}
         onChange={(e) => set(Math.min(max ?? Infinity, Math.max(0, Number(e.target.value) || 0)))}
         className={cn(
           'min-h-[48px] rounded-[var(--radius-sm)] border border-bordure bg-fond px-2.5 tabular-nums',

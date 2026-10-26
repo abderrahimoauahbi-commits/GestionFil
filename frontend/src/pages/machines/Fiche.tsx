@@ -24,22 +24,22 @@ import { ActionMotivee } from '../../composants/ActionMotivee'
 import { Onglet, OngletContenu, Onglets, OngletsListe } from '../../composants/ui/surcouches'
 import { useOuvrirVue } from '../../lib/navigation'
 import { cn } from '../../lib/utils'
-import { couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
+import { classeNiveauEcart, couleurEcart, libelleLot, SANS_LOT, useTolerancesLot } from '../../lib/lots'
 import { ChampLot } from '../../composants/ChampLot'
 import { ChampScan } from '../../composants/ChampScan'
 import { AvisInventaireOuvert } from '../../composants/AvisInventaireOuvert'
 import { SaisieNombre } from '../../composants/ui/base'
 import {
-  bobinesVoie, cheminMachine, CLASSE_ECART, destinationsDe, ecartPoidsBobine, estimer, fmtDate, fmtInstant, LIBELLE_DESTINATION,
+  bobinesVoie, cheminMachine, destinationsDe, ecartPoidsBobine, estimer, fermeAuConstat, fmtDate, fmtInstant, LIBELLE_DESTINATION,
   LIBELLE_EFFET, LIBELLE_TYPE, ligneNeuve, machinesApi, nb, rappelCatalogue, signePct,
   type Apercu, type Destination, type Fiche, type FicheDetail, type LigneSaisie, type Machine, type Motif,
   type TypeFiche, type Zone,
-  RAISONS_SURPLUS, TON_ECART,
+  RAISONS_SURPLUS,
 } from './noyau'
 import { useFiche } from './useFiche'
 import { useValiderFiche } from './Questions'
 import { DemandesDerogation } from './Derogation'
-import { ChoixOF, ChoixQualite, qualiteDeLOf, useOfOuverts, type OfOuvert } from '../../composants/ChoixOF'
+import { ChoixOF, useOfOuverts, type OfOuvert } from '../../composants/ChoixOF'
 import { ChampReference } from '../../composants/ChampReference'
 import { QualiteLigne } from './qualiteLigne'
 import { resumeQualite, useEcranLarge } from './ligneMachine'
@@ -607,10 +607,16 @@ export function TableApercu({
                   {l.destination && <div className="text-[10px] text-attenue-texte">{LIBELLE_DESTINATION[l.destination]}</div>}
                 </td>
               )}
-              <td className="py-1 pr-2 text-right">{l.nb_apres} · {nb(l.kg_apres, 1)} kg</td>
+              <td className="py-1 pr-2 text-right">
+                {l.nb_apres} · {nb(l.kg_apres, 1)} kg
+                {/* LE CONSTAT A 0 % FERME LA LIGNE (26/10/2026) : elle quitte l'etage. */}
+                {type === 'MAJ' && l.nb_apres === 0 && l.nb_avant > 0 && (
+                  <div className="text-[10px] font-medium text-alerte">ligne fermée</div>
+                )}
+              </td>
               <td className="py-1 pr-2 text-right">{l.pourcentage_apres != null ? `${nb(l.pourcentage_apres, 1)} %` : '—'}</td>
               <td className="py-1 pr-2 text-right text-attenue-texte">{l.pourcentage_theorique != null ? `${nb(l.pourcentage_theorique, 1)} %` : '—'}</td>
-              <td className={cn('py-1 pr-2 text-right font-medium', TON_ECART[l.niveau_ecart ?? ''] ?? (l.ecart_kg < -0.0005 && 'text-alerte'))}
+              <td className={cn('py-1 pr-2 text-right font-medium', classeNiveauEcart(l.niveau_ecart) ?? (l.ecart_kg < -0.0005 && 'text-alerte'))}
                 title={l.niveau_ecart && l.niveau_ecart !== 'AUCUN' ? `Écart ${l.niveau_ecart.toLowerCase()}` : undefined}>
                 {nb(l.ecart_kg, 1)} kg
               </td>
@@ -653,7 +659,7 @@ type EtatFiche = ReturnType<typeof useFiche>
  */
 function modifiee(type: TypeFiche, l: LigneSaisie) {
   if (type !== 'MAJ' && l.mouvementees > 0) return true
-  if (type === 'MAJ' && (l.presentes !== l.avant_bobines || l.pourcentage !== (l.avant_pourcentage ?? 100))) return true
+  if (type === 'MAJ' && l.pourcentage !== (l.avant_pourcentage ?? 100)) return true
   return !!(l.id_of || l.code_qualite || l.motif_texte.trim() || l.effet_ecart)
 }
 
@@ -757,33 +763,8 @@ export function FicheBureau({
             </select>
           </label>
         )}
-        {/* L'OF EN LIEN (22/10/2026) : la fiche le choisit, il sert de defaut a ses
-            lignes. Jamais impose par la machine. Le numero reste dans le texte
-            d'historique. */}
-        <label className="flex min-w-[11rem] flex-1 flex-col gap-1">
-          <span className="text-[11px] text-attenue-texte">Ordre de fabrication</span>
-          <ChoixOF
-            valeur={f.entete.id_of}
-            inconnu={f.entete.of || null}
-            vide={f.entete.of && !f.entete.id_of ? `${f.entete.of} (texte ancien)` : '— l’OF de chaque ligne —'}
-            onChange={(id, numero) =>
-              f.setEntete({ ...f.entete, id_of: id, of: id ? numero : f.entete.of, code_qualite: id ? '' : f.entete.code_qualite })
-            }
-          />
-        </label>
-        {/* LA QUALITE DE LA FICHE (23/10/2026) : le defaut des lignes d'un
-            chargement sans OF ; avec un OF, la sienne. */}
-        {type === 'CHARGE' && (
-          <div className="flex w-[11rem] flex-col gap-1">
-            <span className="text-[11px] text-attenue-texte">Qualité (sans OF)</span>
-            <ChoixQualite
-              valeur={f.entete.code_qualite}
-              onChange={(q) => f.setEntete({ ...f.entete, code_qualite: q })}
-              imposee={f.entete.id_of ? (qualiteDeLOf(ofs.data, f.entete.id_of) ?? '…') : null}
-              vide="— la qualité de chaque ligne —"
-            />
-          </div>
-        )}
+        {/* PLUS D'OF NI DE QUALITE D'EN-TETE (24/10/2026) : chaque ligne porte son
+            OF, qui dit sa qualite ; sans OF, la qualite se choisit sur la ligne. */}
         <Champ label="Responsable" className="w-[9.5rem]" v={f.entete.responsable} set={(x) => f.setEntete({ ...f.entete, responsable: x })} />
         {/* LES OBSERVATIONS partaient deja (corpsFiche) sans champ pour les dire (24/10/2026). */}
         <Champ label="Observations" className="min-w-[10rem] flex-[1.3]" v={f.entete.observations}
@@ -1142,7 +1123,7 @@ function LigneBureau({
                 const pct = ecartPoidsBobine({ poids: l.poids_retenu, poids_catalogue: l.poids_catalogue })
                 const c = couleurEcart(pct, tolerances)
                 return (
-                  <div className={cn('whitespace-nowrap text-[10.5px]', c ? CLASSE_ECART[c] : 'text-attenue-texte')} title={rappel}>
+                  <div className={cn('whitespace-nowrap text-[10.5px]', classeNiveauEcart(c) ?? 'text-attenue-texte')} title={rappel}>
                     {pct != null ? `cat. ${signePct(pct)}` : rappel}
                   </div>
                 )
@@ -1190,12 +1171,22 @@ function LigneBureau({
 
         {type === 'MAJ' && (ouverte ? (
           <>
-            <td className="px-1 py-1 text-right">
-              <Case v={l.presentes} zero libelle={`Présentes, ${libelle}`} set={(n) => maj('presentes', n)} />
+            {/* LE CONSTAT NE CHANGE PAS LE NOMBRE DE BOBINES (24/10/2026) : celui de
+                l'etat, donne par les chargements et les dechargements. */}
+            <td className="px-1 py-1 text-right" title="Le nombre de bobines se change par un chargement ou un déchargement">
+              <div className="flex h-7 items-center justify-end text-[11.5px]">{l.presentes}</div>
               {voie}
             </td>
             <td className="px-1 py-1 text-right">
               <Case v={l.pourcentage} pas={0.1} max={500} zero libelle={`% constaté, ${libelle}`} set={(n) => maj('pourcentage', n)} />
+              {/* LE CONSTAT A 0 % FERME LA LIGNE (26/10/2026) : les bobines vides
+                  quittent l'etage, tout ce qui restait est l'ecart. */}
+              {fermeAuConstat(type, l) && (
+                <div className="whitespace-nowrap text-[10.5px] font-medium text-alerte"
+                     title="0 % : la ligne est fermée à ce constat — ses bobines vides quittent l’étage, ce qui restait compte selon le motif">
+                  fermée à ce constat
+                </div>
+              )}
             </td>
           </>
         ) : (
@@ -1216,7 +1207,7 @@ function LigneBureau({
         <td
           className={cn(
             'whitespace-nowrap px-1 py-1 text-right text-[11.5px] font-medium',
-            niveau && TON_ECART[niveau] ? TON_ECART[niveau] : touchee && e.ecart < -0.0005 && 'text-alerte',
+            classeNiveauEcart(niveau) ?? (touchee && e.ecart < -0.0005 && 'text-alerte'),
           )}
           title={niveau && LIBELLE_NIVEAU[niveau] ? `Écart ${LIBELLE_NIVEAU[niveau]} (aperçu)` : 'Le niveau de l’écart vient de l’aperçu'}
         >
@@ -1232,39 +1223,49 @@ function LigneBureau({
             <div className="flex flex-col gap-1">
               <ChoixOF
                 valeur={l.id_of ?? ''}
-                onChange={(id) => maj('id_of', id)}
-                vide={f.entete.id_of ? 'OF de la fiche' : l.avant_numero_of ? `garde ${l.avant_numero_of}` : '— aucun OF —'}
+                onChange={(id, numero) => f.choisirOf(l.cle, id, numero)}
+                vide={l.avant_numero_of ? `garde ${l.avant_numero_of}` : '— aucun OF —'}
                 ariaLabel="OF de la ligne"
                 className="h-7 min-h-0 w-full min-w-0 px-1 text-[11px]"
               />
               <div className="flex min-w-0 items-center gap-1">
                 <QualiteLigne
                   l={l}
-                  entete={f.entete}
                   type={type}
                   ofs={ofs}
                   onChange={(q) => maj('code_qualite', q)}
                   className="h-7 min-h-0 min-w-0 flex-1 px-1 text-[11px]"
                 />
-                <SaisieNombre
-                  min={0}
-                  step={0.01}
-                  value={l.largeur_voie || ''}
-                  onChange={(ev) => maj('largeur_voie', Math.max(0, Number(ev.target.value) || 0))}
-                  placeholder="voie"
-                  title="Largeur de la voie, en mètres"
-                  aria-label="Largeur de la voie (m)"
-                  className="h-7 w-11 shrink-0 rounded-[3px] border border-bordure bg-fond px-1 text-right text-[11px] tabular-nums"
-                />
+                {/* LA VOIE SE DEFINIT AU CHARGEMENT (24/10/2026) : le constat et le
+                    dechargement la lisent, sans pouvoir la changer. */}
+                {type === 'CHARGE' ? (
+                  <SaisieNombre
+                    min={0}
+                    step={0.01}
+                    value={l.largeur_voie || ''}
+                    onChange={(ev) => maj('largeur_voie', Math.max(0, Number(ev.target.value) || 0))}
+                    placeholder="voie"
+                    title="Largeur de la voie, en mètres"
+                    aria-label="Largeur de la voie (m)"
+                    className="h-7 w-11 shrink-0 rounded-[3px] border border-bordure bg-fond px-1 text-right text-[11px] tabular-nums"
+                  />
+                ) : (
+                  <span
+                    title="La voie se définit au chargement : elle ne se change pas ici"
+                    className="shrink-0 whitespace-nowrap text-[10.5px] text-attenue-texte"
+                  >
+                    {l.largeur_voie ? `voie ${nb(l.largeur_voie, 2)} m` : 'sans voie'}
+                  </span>
+                )}
               </div>
             </div>
           ) : (
             <div className="text-[11px] leading-tight">
               <div className="truncate">
-                {l.id_of ? numeroOf(l.id_of) : f.entete.id_of ? 'OF de la fiche' : l.avant_numero_of ?? 'aucun OF'}
+                {l.id_of ? (l.numero_of || numeroOf(l.id_of)) : l.avant_numero_of ?? 'aucun OF'}
               </div>
               <div className="truncate">
-                {resumeQualite(l, f.entete, type, ofs)}
+                {resumeQualite(l, type, ofs)}
                 {!!l.largeur_voie && ` · voie ${nb(l.largeur_voie, 2)} m`}
               </div>
             </div>

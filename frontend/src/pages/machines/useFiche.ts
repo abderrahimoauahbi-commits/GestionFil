@@ -21,6 +21,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { SANS_LOT } from '../../lib/lots'
 import type { EtiquetteLue } from '../../composants/ChampScan'
 import { phraseGel, useGelInventaire } from '../../lib/inventairesOuverts'
+import { useOfOuverts } from '../../composants/ChoixOF'
 import {
   corpsFiche, depuisEtat, destinationsDe, estimer, ligneNeuve, lignesAEnvoyer, machinesApi,
   type Apercu, type LigneSaisie, type Motif, type TypeFiche, type Zone,
@@ -53,12 +54,13 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
   /* LE BROUILLON DEJA CREE : remplace a chaque apercu, jamais duplique. */
   const brouillon = useRef<string | null>(idFiche ?? null)
 
-  /* `id_of` : l'OF choisi (lien, 22/10/2026), defaut des lignes ; `of` garde son
-     numero (le texte d'avant, pour l'historique). */
-  /* `code_qualite` : la qualite par defaut des lignes quand la fiche ne sert pas d'OF (23/10/2026). */
+  /* PLUS D'OF NI DE QUALITE D'EN-TETE (24/10/2026) : chaque ligne porte son OF
+     (et sa qualite sans OF). `of` ne garde que le texte d'une fiche reprise
+     d'avant les OF en lien, pour l'historique. */
   const [entete, setEntete] = useState({
-    date: aujourdHui(), magasin: '', responsable: '', of: '', id_of: '', code_qualite: '', observations: '',
+    date: aujourdHui(), magasin: '', responsable: '', of: '', observations: '',
   })
+  const ofs = useOfOuverts()
   const [lignes, setLignes] = useState<LigneSaisie[]>([])
   const [amorcee, setAmorcee] = useState<string | null>(null)
 
@@ -73,13 +75,17 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     if (!idFiche && type === 'MAJ' && motifPose) for (const b of base) b.code_motif = motifPose
     if (idFiche && qFiche.data) {
       const f = qFiche.data
+      /* UNE FICHE REPRISE QUI PORTAIT UN OF OU UNE QUALITE D'EN-TETE : ils
+         descendent, visibles, sur ses lignes qui n'en disaient pas — le serveur
+         les leur donnait de meme. */
+      const ofFiche = f.entete.id_of || ''
+      const numeroFiche = ofFiche ? (f.entete.numero_of_lien ?? f.entete.numero_of ?? '') : ''
+      const qualiteFiche = ofFiche ? '' : (f.entete.code_qualite ?? '')
       setEntete({
         date: f.entete.date_fiche?.slice(0, 10) || aujourdHui(),
         magasin: f.entete.code_magasin ?? '',
         responsable: f.entete.responsable,
-        of: f.entete.numero_of ?? '',
-        id_of: f.entete.id_of ?? '',
-        code_qualite: f.entete.code_qualite ?? '',
+        of: ofFiche ? '' : (f.entete.numero_of ?? ''),
         observations: f.entete.observations ?? '',
       })
       for (const l of f.lignes) {
@@ -94,7 +100,8 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
             avant_kg: 0, avant_date: null,
           } as LigneSaisie),
           mouvementees: Number(l.nb_bobines_mouvementees ?? 0),
-          presentes: type === 'MAJ' ? Number(l.nb_bobines_presentes ?? 0) : (i >= 0 ? base[i].presentes : 0),
+          // Le constat ne change pas le nombre de bobines : celui de l'etat (24/10/2026).
+          presentes: i >= 0 ? base[i].presentes : 0,
           poids_retenu: Number(l.poids_retenu_kg ?? nominal),
           pourcentage: Number(l.pourcentage ?? 0),
           pourcentage_saisi: true,
@@ -103,9 +110,11 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
           code_motif: l.code_motif ?? '',
           motif_texte: l.motif_texte ?? '',
           effet_ecart: l.effet_ecart ?? '',
-          id_of: l.id_of ?? '',
-          largeur_voie: l.largeur_voie_m != null ? Number(l.largeur_voie_m) : (i >= 0 ? base[i].largeur_voie ?? 0 : 0),
-          code_qualite: l.code_qualite ?? '',
+          id_of: l.id_of || ofFiche,
+          numero_of: l.id_of ? (l.numero_of ?? '') : numeroFiche,
+          largeur_voie: type === 'CHARGE' && l.largeur_voie_m != null
+            ? Number(l.largeur_voie_m) : (i >= 0 ? base[i].largeur_voie ?? 0 : 0),
+          code_qualite: l.id_of || ofFiche ? '' : (l.code_qualite || qualiteFiche),
         }
         if (i >= 0) base[i] = repris
         else base.push(repris)
@@ -167,6 +176,34 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qLots.data, type])
 
+  /** L'OF DE LA LIGNE : son lien et son numero ; avec un OF, la qualite est la sienne. */
+  function choisirOf(cleLigne: string, id: string, numero: string) {
+    setLignes((ls) => ls.map((l) => (l.cle !== cleLigne ? l : {
+      ...l, id_of: id, numero_of: id ? numero : '', code_qualite: id ? '' : l.code_qualite,
+    })))
+  }
+
+  /**
+   * L'OF PROPOSE A UNE LIGNE NEUVE DU CHARGEMENT (24/10/2026) : celui de la
+   * ligne chargee juste avant, a defaut celui que l'etage sert (s'il n'en sert
+   * qu'un). Une proposition visible sur la ligne, qui se change ; jamais un OF
+   * ferme, que le serveur refuserait.
+   */
+  function ofPropose(ls: LigneSaisie[]): { id_of: string; numero_of: string } | null {
+    const ouvert = (id: string) => (ofs.data ?? []).some((o) => o.id_of === id)
+    const effectif = (l: LigneSaisie) =>
+      l.id_of ? { id_of: l.id_of, numero_of: l.numero_of ?? '' }
+        : l.avant_id_of ? { id_of: l.avant_id_of, numero_of: l.avant_numero_of ?? '' } : null
+    const chargees = ls.filter((l) => l.mouvementees > 0 || l.avant_bobines === 0)
+    if (chargees.length) {
+      const p = effectif(chargees[chargees.length - 1])
+      return p && ouvert(p.id_of) ? p : null
+    }
+    const etage = [...new Map(ls.filter((l) => l.avant_id_of)
+      .map((l) => [l.avant_id_of!, { id_of: l.avant_id_of!, numero_of: l.avant_numero_of ?? '' }])).values()]
+    return etage.length === 1 && ouvert(etage[0].id_of) ? etage[0] : null
+  }
+
   function majLigne<K extends keyof LigneSaisie>(cleLigne: string, champ: K, v: LigneSaisie[K]) {
     setLignes((ls) =>
       ls.map((l) => {
@@ -197,7 +234,10 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
   }
 
   function ajouter(l: LigneSaisie) {
-    setLignes((ls) => [...ls, { ...auPoidsDuLot(l), cle: `${l.code_reference}|${l.lot_fournisseur}|${ls.length}` }])
+    setLignes((ls) => {
+      const p = type === 'CHARGE' && !l.id_of ? ofPropose(ls) : null
+      return [...ls, { ...auPoidsDuLot(l), ...(p ?? {}), cle: `${l.code_reference}|${l.lot_fournisseur}|${ls.length}` }]
+    })
   }
 
   /**
@@ -335,14 +375,11 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
       if (m && !m.effet_defaut && !l.effet_ecart) return `Dites comment compte l’écart de ${qui} (${m.libelle}).`
       if (type === 'CHARGE' && !(l.poids_retenu > 0)) return `Indiquez le poids par bobine de ${qui}.`
       /* LA QUALITE EXPLICITE (23/10/2026) : un chargement sert la qualite de son OF
-         (celui de la ligne, de la fiche, ou celui que la ligne sert deja) ; sans OF,
-         elle se choisit. */
-      if (type === 'CHARGE' && !l.id_of && !entete.id_of && !l.avant_numero_of
-          && !l.code_qualite && !entete.code_qualite && !l.avant_code_qualite)
+         (celui de la ligne, ou celui qu'elle sert deja) ; sans OF, elle se choisit. */
+      if (type === 'CHARGE' && !l.id_of && !l.avant_numero_of && !l.code_qualite && !l.avant_code_qualite)
         return `Indiquez la qualité que sert ${qui} : sans OF, elle est obligatoire.`
       if (type === 'DECHARGE' && !l.destination && destinationsDe(m).length !== 1)
         return `Choisissez la destination de ${qui}.`
-      if (type === 'MAJ' && l.presentes < 0) return `Le nombre de bobines présentes de ${qui} est négatif.`
     }
     if (totaux.apres > totaux.places) return `L’étage déborde : ${totaux.apres} bobines pour ${totaux.places} places.`
     return null
@@ -394,7 +431,7 @@ export function useFiche(machine: string, zoneInitiale: Zone | null, type: TypeF
     zone, changerZone, motifs, motifDe,
     stockCourt, avertissements,
     etat: qEtat, entete, setEntete, lignes, setLignes, envoyees,
-    majLigne, retirer, ajouter, scanner, totaux,
+    majLigne, choisirOf, retirer, ajouter, scanner, totaux,
     calculer, apercu: apercuAJour ? apercu!.resultat : null, apercuPerime: !!apercu && !apercuAJour,
     envoi, pret, peutValider, manque, gel,
     reamorcer: () => setAmorcee(null),

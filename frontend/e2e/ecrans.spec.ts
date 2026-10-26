@@ -74,3 +74,28 @@ for (const route of ['', ...routes]) {
     expect.soft(html, 'défauts HTML / accessibilité').toEqual([])
   })
 }
+
+/* L'ONGLET « À COMMANDER » DU PLAN D'ACHAT (moteur de couverture, 26/10/2026) :
+   pas de route à lui, donc ouvert ici — l'onglet, puis le détail d'une ligne au
+   clic, sur la page. La liste peut être vide sur la base du banc : l'onglet doit
+   alors s'afficher sans erreur. */
+test('plan-achat : onglet À commander et le détail d’une ligne', async () => {
+  veille.vider()
+  await page.goto('/plan-achat')
+  await attendreEcran(page)
+  await page.getByRole('tab', { name: 'À commander', exact: true }).click()
+  await expect(page.getByText('Règles provisoires des dates d’arrivage', { exact: false })).toBeVisible()
+  await expect(page.getByText(/dette|à rattraper/i)).toHaveCount(0)
+  const lignes = page.locator('main tbody tr').filter({ has: page.locator('button[aria-expanded]') })
+  if ((await lignes.count()) > 0) {
+    await lignes.first().click()
+    await expect(page.getByText('Chronologie', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Solde projeté jour par jour', { exact: true }).first()).toBeVisible()
+    const deborde = await page.evaluate(() => {
+      const m = document.querySelector('main')
+      return m ? m.scrollWidth - m.clientWidth : 0
+    })
+    expect(deborde, 'défilement horizontal de la page').toBeLessThanOrEqual(1)
+  }
+  expect(veille.erreurs, 'erreurs JavaScript ou serveur').toEqual([])
+})

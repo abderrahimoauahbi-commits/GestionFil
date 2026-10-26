@@ -20,7 +20,7 @@
  */
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Ban, ChevronDown, ChevronRight, FileCheck2, Gauge, Link2, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, Unlink2, X } from 'lucide-react'
+import { ArrowRight, Ban, CalendarClock, ChevronDown, ChevronRight, FileCheck2, Gauge, Link2, ListChecks, RefreshCw, Repeat, ShoppingCart, Truck, Unlink2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
@@ -42,6 +42,7 @@ import { Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe
 import { cn, fmt } from '../lib/utils'
 import { depuisBobines, depuisKg, depuisPalettes, pourChamp, type Conditionnement } from '../lib/conditionnement'
 import { DetailCalcul } from './PlanAchatDetail'
+import { ACommander } from './PlanAchatCouverture'
 import { useParametreNombre } from '../lib/parametres'
 import { ChoixRecherche } from '../composants/ChoixRecherche'
 import { StatutBadge } from '../composants/StatutBadge'
@@ -578,7 +579,9 @@ export function PlanAchat() {
           au bon de commande — neuf ou deja ouvert. Repartition et situation
           restent a cote, pour lire. */}
       <Onglets value={onglet} onValueChange={setOnglet}>
-        <OngletsListe className="mb-3">
+        {/* Cinq onglets ne tiennent pas sur un téléphone : ils passent à la ligne
+            (comme sur l'écran Lots) plutôt que d'élargir la page. */}
+        <OngletsListe className="mb-3 h-auto max-w-full flex-wrap gap-y-0">
           <Onglet value="besoins">
             <ShoppingCart className="size-3.5" />
             Besoins
@@ -600,7 +603,16 @@ export function PlanAchat() {
             <Gauge className="size-3.5" />
             Situation
           </Onglet>
+          {/* LE MOTEUR DE COUVERTURE (26/10/2026), en parallèle de l'existant :
+              lecture seule, rien n'y est encore commandé (étape 4). */}
+          <Onglet value="a-commander">
+            <CalendarClock className="size-3.5" />
+            À commander
+          </Onglet>
         </OngletsListe>
+        <OngletContenu value="a-commander">
+          <ACommander />
+        </OngletContenu>
         <OngletContenu value="situation">
       {/* ---- KPI : les trois blocs de la feuille Plan_Achat -------------------
            Tout se lit dans le STOCK. Une reference apparait ici parce que son

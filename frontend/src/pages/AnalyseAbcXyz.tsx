@@ -26,8 +26,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EnTetePage } from '../components/Layout'
 import { TableDroits, type Colonne } from '../components/TableDroits'
 import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Chargement } from '../composants/ui/base'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'STOCK'
 

@@ -31,11 +31,11 @@ import { EnTetePage } from '../../composants/Coquille'
 import { TableauImprimable } from '../../composants/Etat'
 import { Bouton, Champ, EtatVide, Squelette } from '../../composants/ui/base'
 import { Onglet, Onglets, OngletsListe, useConfirmation } from '../../composants/ui/surcouches'
-import { libelleLot } from '../../lib/lots'
+import { classeNiveauEcart, libelleLot } from '../../lib/lots'
 import { cn } from '../../lib/utils'
 import { ChoixRecherche } from '../../composants/ChoixRecherche'
 import { ActionsLot, BadgeCategorie, BadgeStatut } from './commun'
-import { MODULE, ORIGINES, classeDerive, designationUtile, gereAuKilo, libelleSeuil, lienFiche, messageErreur, nb, signe, useApresDecision, type Compteurs, type Lot } from './modele'
+import { MODULE, ORIGINES, designationUtile, gereAuKilo, libelleSeuil, lienFiche, messageErreur, nb, signe, useApresDecision, type Compteurs, type Lot } from './modele'
 
 type Vue = 'comptable' | 'projet' | 'restes' | 'a_basculer' | 'dormants' | 'bloques' | 'derive'
 
@@ -403,7 +403,7 @@ export function Lots() {
                       {l.jours_sans_activite == null ? '—' : `${nb(l.jours_sans_activite)} j`}
                     </td>
                     <td
-                      className={cn('px-2 py-1.5 text-right', classeDerive(l.alerte_derive))}
+                      className={cn('px-2 py-1.5 text-right', classeNiveauEcart(l.alerte_derive, true) ?? 'text-attenue-texte')}
                       title={l.ecart_cumule_kg != null ? `${signe(l.ecart_cumule_kg, 1, ' kg')} sur la vie du lot` : 'Aucune pesée comparable'}
                     >
                       {signe(l.ecart_cumule_pct, 2, ' %')}

@@ -17,7 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ErreurApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
-import { Bouton, Chargement, Etiquette, Message, Vide } from '../components/ui'
+import { Alerte, Badge, Bouton, Chargement, EtatVide } from '../composants/ui/base'
 
 type Niveau = 'MASQUE' | 'LECTURE' | 'ECRITURE'
 
@@ -59,7 +59,7 @@ export function Droits() {
   const [module, setModule] = useState<string>('')
   const [recherche, setRecherche] = useState('')
   const [modifs, setModifs] = useState<Record<string, Niveau>>({})
-  const [retour, setRetour] = useState<{ ton: 'succes' | 'erreur'; texte: string } | null>(null)
+  const [retour, setRetour] = useState<{ ton: 'succes' | 'danger'; texte: string } | null>(null)
 
   const qUtilisateurs = useQuery({
     queryKey: ['utilisateurs'],
@@ -117,7 +117,7 @@ export function Droits() {
     },
     onError: (e) =>
       setRetour({
-        ton: 'erreur',
+        ton: 'danger',
         texte: e instanceof ErreurApi ? e.message : 'Enregistrement impossible.',
       }),
   })
@@ -138,7 +138,7 @@ export function Droits() {
     },
     onError: (e) =>
       setRetour({
-        ton: 'erreur',
+        ton: 'danger',
         texte: e instanceof ErreurApi ? e.message : 'Application impossible.',
       }),
   })
@@ -153,7 +153,7 @@ export function Droits() {
   }
 
   if (qDroits.isLoading || qUtilisateurs.isLoading) return <Chargement />
-  if (!utilisateur) return <Vide texte="Utilisateur introuvable." />
+  if (!utilisateur) return <EtatVide titre="Utilisateur introuvable." />
 
   return (
     <div>
@@ -170,7 +170,7 @@ export function Droits() {
             </Link>
             {peutEcrire && (
               <Bouton
-                variante="secondaire"
+                variante="contour"
                 onClick={() => appliquerModele.mutate()}
                 disabled={appliquerModele.isPending}
                 title={`Reinitialise le module ${moduleActif} depuis le modele du role ${utilisateur.code_role_user}`}
@@ -192,15 +192,15 @@ export function Droits() {
 
       {retour && (
         <div className="mb-4">
-          <Message ton={retour.ton}>{retour.texte}</Message>
+          <Alerte ton={retour.ton}>{retour.texte}</Alerte>
         </div>
       )}
 
       {!peutEcrire && (
         <div className="mb-4">
-          <Message ton="info">
+          <Alerte ton="info">
             Vous consultez cette grille en lecture seule.
-          </Message>
+          </Alerte>
         </div>
       )}
 
@@ -255,7 +255,7 @@ export function Droits() {
 
       {/* --- Grille ---------------------------------------------------------- */}
       {lignes.length === 0 ? (
-        <Vide texte="Aucun champ pour ce filtre." />
+        <EtatVide titre="Aucun champ pour ce filtre." />
       ) : (
         <div className="overflow-hidden rounded-lg border border-bordure bg-surface">
           <table className="w-full text-sm">
@@ -277,12 +277,12 @@ export function Droits() {
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-texte">{d.libelle}</span>
-                        {d.sensible === 1 && <Etiquette ton="ambre">sensible</Etiquette>}
-                        {!d.explicite && <Etiquette ton="gris">par defaut</Etiquette>}
+                        {d.sensible === 1 && <Badge ton="alerte">sensible</Badge>}
+                        {!d.explicite && <Badge ton="neutre">par defaut</Badge>}
                         {d.origine === 'MANUEL' && (
-                          <Etiquette ton="bleu" title="Réglé à la main : le modèle du rôle ne le change plus">
+                          <Badge ton="info" title="Réglé à la main : le modèle du rôle ne le change plus">
                             à la main
-                          </Etiquette>
+                          </Badge>
                         )}
                       </div>
                       <div className="text-xs text-attenue-texte lg:hidden">{d.champ}</div>

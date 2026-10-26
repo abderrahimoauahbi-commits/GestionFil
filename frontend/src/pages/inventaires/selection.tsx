@@ -19,8 +19,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ListPlus, RotateCcw, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { ChampReference } from '../../composants/ChampReference'
-import { Badge, Bouton, Selecteur } from '../../composants/ui/base'
+import { Alerte, Badge, Bouton, Selecteur } from '../../composants/ui/base'
 import { fmt } from '../../lib/utils'
+import { tonStatut } from '../../lib/statuts'
 
 /** Une référence en stock dans le magasin, telle que `v_inventaire_candidat` la décrit. */
 export interface Candidat {
@@ -75,8 +76,6 @@ export function empreinteListe(l: Choix[]): string {
     .sort()
     .join('\u0001')
 }
-
-const TON_CLASSE: Record<string, 'or' | 'info' | 'neutre'> = { A: 'or', B: 'info', C: 'neutre' }
 
 /**
  * LA LISTE, À CHOISIR OU À RETOUCHER. `liste` et `changer` appartiennent à la
@@ -134,7 +133,8 @@ export function SelectionReferences({
   return (
     <div className="space-y-3">
       {type === 'TOURNANT' && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-info/25 bg-info/5 px-3 py-2 text-[12.5px]">
+        <Alerte ton="info" className="px-3 py-2 text-[12.5px]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
           <span>
             {chargement ? (
               'Calcul de la proposition…'
@@ -157,7 +157,8 @@ export function SelectionReferences({
             <RotateCcw />
             Reprendre la proposition
           </Bouton>
-        </div>
+          </div>
+        </Alerte>
       )}
 
       {/* Ajouter : recherche, famille, catégorie. Tout passe à la ligne sur un écran étroit. */}
@@ -274,7 +275,7 @@ export function SelectionReferences({
                 <span className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-attenue-texte">
                   {c.famille_libelle && <span>{c.famille_libelle}</span>}
                   {c.classe_retenue && (
-                    <Badge ton={TON_CLASSE[c.classe_retenue] ?? 'neutre'} title={c.sans_classe ? 'Sans classe ABC : traitée comme C' : undefined}>
+                    <Badge ton={tonStatut('classe_abc', c.classe_retenue)} title={c.sans_classe ? 'Sans classe ABC : traitée comme C' : undefined}>
                       {c.sans_classe ? 'C (sans classe)' : `Classe ${c.classe_retenue}`}
                     </Badge>
                   )}

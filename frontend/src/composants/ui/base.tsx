@@ -523,7 +523,7 @@ export function EtatVide({
    donne le meme signal en un coup d'oeil, et le texte reste du texte. C'est la
    convention des consoles d'administration serieuses. */
 const varianteAlerte = cva(
-  'flex gap-3 rounded-[var(--radius)] border border-l-[3px] px-3.5 py-3 text-[13px] leading-relaxed',
+  'flex rounded-[var(--radius)] border',
   {
     variants: {
       ton: {
@@ -532,20 +532,43 @@ const varianteAlerte = cva(
         alerte: 'border-alerte/30 border-l-alerte bg-alerte/[0.09] text-texte',
         danger: 'border-danger/25 border-l-danger bg-danger/[0.07] text-texte',
       },
+      /* LA VARIANTE COMPACTE (24/10/2026) : le meme avis, a la taille d'une
+         ligne complementaire ↳ sous une ligne de saisie, ou un encadre de
+         douze pixels de marge pousserait la grille. Meme filet, memes tons. */
+      taille: {
+        normale: 'gap-3 border-l-[3px] px-3.5 py-3 text-[13px] leading-relaxed',
+        compacte: 'gap-1.5 border-l-2 px-2 py-1 text-[11px] leading-snug',
+      },
     },
-    defaultVariants: { ton: 'info' },
+    defaultVariants: { ton: 'info', taille: 'normale' },
   },
 )
 
 export function Alerte({
   className,
   ton,
+  taille,
   titre,
+  icone: Icone,
   children,
   ...props
-}: React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof varianteAlerte> & { titre?: string }) {
+}: React.HTMLAttributes<HTMLDivElement> &
+  VariantProps<typeof varianteAlerte> & {
+    titre?: string
+    /** Une icone posee devant le texte, a la couleur du ton. */
+    icone?: React.ComponentType<{ className?: string }>
+  }) {
   return (
-    <div role="status" className={cn(varianteAlerte({ ton }), className)} {...props}>
+    <div role="status" className={cn(varianteAlerte({ ton, taille }), className)} {...props}>
+      {Icone && (
+        <Icone
+          className={cn(
+            'shrink-0',
+            taille === 'compacte' ? 'mt-px size-3' : 'mt-0.5 size-4',
+            ton === 'succes' ? 'text-succes' : ton === 'alerte' ? 'text-alerte' : ton === 'danger' ? 'text-danger' : 'text-info',
+          )}
+        />
+      )}
       <div className="min-w-0 flex-1">
         {titre && <p className="font-semibold">{titre}</p>}
         <div className={titre ? 'mt-0.5' : undefined}>{children}</div>

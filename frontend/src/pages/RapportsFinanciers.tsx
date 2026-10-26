@@ -24,8 +24,7 @@ import { EnTetePage } from '../components/Layout'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Chargement, Selecteur } from '../composants/ui/base'
 import { exporterCsv } from '../lib/export'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 
 const MODULE = 'VALORISATION'
 

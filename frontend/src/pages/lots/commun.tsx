@@ -24,6 +24,7 @@ import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { libelleLot } from '../../lib/lots'
 import { cn } from '../../lib/utils'
 import { MODULE, MODULE_DECISION, libelleSeuil, lienFiche, messageErreur, nb, useApresDecision, useBasculerRestes, type Lot } from './modele'
+import { StatutBadge } from '../../composants/StatutBadge'
 
 export function LienLot({ reference, lot, className }: { reference: string; lot: string; className?: string }) {
   return (
@@ -33,10 +34,9 @@ export function LienLot({ reference, lot, className }: { reference: string; lot:
   )
 }
 
+/** Le statut d'un lot, lu dans la table des statuts (libre, bloqué, soldé). */
 export function BadgeStatut({ statut }: { statut: string }) {
-  if (statut === 'BLOQUE') return <Badge ton="danger">Bloqué</Badge>
-  if (statut === 'SOLDE') return <Badge ton="neutre">Soldé</Badge>
-  return <Badge ton="succes">Libre</Badge>
+  return <StatutBadge entite="lot" code={statut} />
 }
 
 export function BadgeCategorie({ categorie }: { categorie: string }) {

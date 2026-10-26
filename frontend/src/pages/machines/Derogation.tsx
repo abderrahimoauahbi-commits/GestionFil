@@ -14,7 +14,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { api, ErreurApi } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
-import { Bouton, Champ } from '../../composants/ui/base'
+import { Alerte, Bouton, Champ } from '../../composants/ui/base'
 import { fmt } from '../../lib/utils'
 
 export interface DerogationPossible {
@@ -56,7 +56,8 @@ export function DemandesDerogation({ derogations, surDemande }: { derogations: D
   }
 
   return (
-    <div className="mt-2 space-y-2 rounded-[var(--radius)] border border-alerte/40 bg-alerte/[0.06] p-2.5 text-[12.5px]">
+    <Alerte ton="alerte" className="mt-2 px-2.5 py-2.5 text-[12.5px]">
+      <div className="space-y-2">
       <p className="font-medium">
         Lot bloqué : une dérogation peut autoriser ce chargement, une fois, pour les kilos de la fiche.
       </p>
@@ -81,6 +82,7 @@ export function DemandesDerogation({ derogations, surDemande }: { derogations: D
           )}
         </div>
       ))}
-    </div>
+      </div>
+    </Alerte>
   )
 }

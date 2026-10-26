@@ -70,6 +70,8 @@ import {
 } from '../composants/ui/base'
 import { Aide, Dialogue, DialogueContenu, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 const MODULE = 'PLANS'
 
@@ -151,21 +153,6 @@ interface Entete {
   date_debut: string
   mois_horizon: number
   croissance_annuelle_pct: string
-}
-
-const TON_STATUT: Record<Statut, 'neutre' | 'info' | 'succes' | 'contour'> = {
-  BROUILLON: 'neutre',
-  SIMULATION: 'info',
-  EN_COURS: 'succes',
-  CLOTURE: 'contour',
-}
-
-/** Libelle lisible : le statut brut sert de cle, pas d'affichage. */
-const LIBELLE_STATUT: Record<Statut, string> = {
-  BROUILLON: 'Brouillon',
-  SIMULATION: 'Simulation',
-  EN_COURS: 'En cours',
-  CLOTURE: 'Cloture',
 }
 
 /** Statuts dans lesquels l'entete reste modifiable. */
@@ -341,7 +328,7 @@ export function Plans() {
     mutationFn: (v: { id: string; statut: Statut }) =>
       api.put(`/api/plans/${v.id}/statut`, { statut: v.statut }),
     onSuccess: (_r, v) => {
-      toast.success(`Plan passe en ${LIBELLE_STATUT[v.statut].toLowerCase()}`)
+      toast.success(`Plan passe en ${libelleStatut('plan_production', v.statut).toLowerCase()}`)
       void qc.invalidateQueries({ queryKey: ['plans'] })
     },
     onError: (e) => toast.error(e instanceof ErreurApi ? e.message : String(e)),
@@ -610,7 +597,7 @@ export function Plans() {
         filtre: 'liste',
         rendu: (p) => (
           <div className="flex items-center gap-1">
-            <Badge ton={TON_STATUT[p.statut]}>{LIBELLE_STATUT[p.statut]}</Badge>
+            <StatutBadge entite="plan_production" code={p.statut} />
             {p.statut === 'EN_COURS' && <Lock className="size-3 text-attenue-texte" />}
           </div>
         ),
@@ -843,7 +830,10 @@ export function Plans() {
                       Figer les recettes
                     </Bouton>
                     {droits.peutValider && (
+                      // Une seule action principale : « Enregistrer » tant que
+                      // l'en-tete ou la grille ont change, la validation ensuite.
                       <Bouton
+                        variante={sansChangement ? 'principal' : 'contour'}
                         onClick={() => transition.mutate({ id: courant.id_plan, statut: 'EN_COURS' })}
                       >
                         <ShieldCheck />
@@ -883,6 +873,7 @@ export function Plans() {
             )}
             {modifiable && (
               <Bouton
+                variante={sansChangement ? 'contour' : 'principal'}
                 onClick={() => enregistrement.mutate()}
                 chargement={enregistrement.isPending}
                 disabled={problemes.length > 0 || sansChangement}
@@ -946,7 +937,7 @@ export function Plans() {
                   <span className="text-bordure">|</span>
                 </>
               )}
-              <Badge ton={TON_STATUT[statut]}>{LIBELLE_STATUT[statut]}</Badge>
+              <StatutBadge entite="plan_production" code={statut} />
             </div>
           </CarteEntete>
 

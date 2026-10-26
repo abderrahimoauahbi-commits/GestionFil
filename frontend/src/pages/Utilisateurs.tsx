@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ErreurApi } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { EnTetePage } from '../components/Layout'
-import { Bouton, Chargement, Etiquette, Message, Vide, fmt } from '../components/ui'
-import { Champ, Etiq } from '../composants/ui/base'
+import { Alerte, Badge, Bouton, Champ, Chargement, Etiq, EtatVide } from '../composants/ui/base'
+import { fmt } from '../lib/utils'
 import { Dialogue, DialogueContenu } from '../composants/ui/surcouches'
 import { KeyRound } from 'lucide-react'
 
@@ -36,7 +36,7 @@ export function Utilisateurs() {
   const [creation, setCreation] = useState(false)
   /** Compte dont on redefinit le mot de passe. Null : aucun. */
   const [reinit, setReinit] = useState<Utilisateur | null>(null)
-  const [retour, setRetour] = useState<{ ton: 'succes' | 'erreur'; texte: string } | null>(null)
+  const [retour, setRetour] = useState<{ ton: 'succes' | 'danger'; texte: string } | null>(null)
 
   const qUsers = useQuery({
     queryKey: ['utilisateurs'],
@@ -56,7 +56,7 @@ export function Utilisateurs() {
     },
     onError: (e) =>
       setRetour({
-        ton: 'erreur',
+        ton: 'danger',
         texte: e instanceof ErreurApi ? e.message : 'Modification impossible.',
       }),
   })
@@ -91,21 +91,21 @@ export function Utilisateurs() {
 
       {retour && (
         <div className="mb-4">
-          <Message ton={retour.ton}>{retour.texte}</Message>
+          <Alerte ton={retour.ton}>{retour.texte}</Alerte>
         </div>
       )}
 
       {qUsers.data?.some((u) => u.mot_de_passe_a_definir === 1) && (
         <div className="mb-4">
-          <Message ton="attention" titre="Comptes sans mot de passe">
+          <Alerte ton="alerte" titre="Comptes sans mot de passe">
             Certains comptes ne peuvent pas se connecter tant qu'un mot de passe n'a pas ete
             defini.
-          </Message>
+          </Alerte>
         </div>
       )}
 
       {!qUsers.data?.length ? (
-        <Vide texte="Aucun utilisateur." />
+        <EtatVide titre="Aucun utilisateur." />
       ) : (
         <div className="space-y-2">
           {qUsers.data.map((u) => (
@@ -116,12 +116,12 @@ export function Utilisateurs() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-texte">{u.nom}</span>
-                  <Etiquette ton="bleu">{u.role_libelle}</Etiquette>
-                  {u.actif !== 1 && <Etiquette ton="rouge">desactive</Etiquette>}
+                  <Badge ton="info">{u.role_libelle}</Badge>
+                  {u.actif !== 1 && <Badge ton="danger">desactive</Badge>}
                   {u.mot_de_passe_a_definir === 1 && (
-                    <Etiquette ton="ambre">mot de passe a definir</Etiquette>
+                    <Badge ton="alerte">mot de passe a definir</Badge>
                   )}
-                  {u.id_utilisateur === moi?.id && <Etiquette>vous</Etiquette>}
+                  {u.id_utilisateur === moi?.id && <Badge>vous</Badge>}
                 </div>
                 <div className="mt-0.5 text-sm text-attenue-texte">
                   {u.login}
@@ -144,14 +144,14 @@ export function Utilisateurs() {
                     compte : un administrateur doit pouvoir changer son mot de
                     passe sans passer par la ligne de commande du serveur. */}
                 {peutEcrire && (
-                  <Bouton variante="secondaire" onClick={() => setReinit(u)}>
+                  <Bouton variante="contour" onClick={() => setReinit(u)}>
                     <KeyRound />
                     {u.mot_de_passe_a_definir === 1 ? 'Definir le mot de passe' : 'Reinitialiser'}
                   </Bouton>
                 )}
                 {peutEcrire && u.id_utilisateur !== moi?.id && (
                   <Bouton
-                    variante="secondaire"
+                    variante="contour"
                     onClick={() => basculerActif.mutate(u)}
                     disabled={basculerActif.isPending}
                   >
@@ -290,7 +290,7 @@ function FormulaireCreation({
             />
           </div>
 
-          {erreur && <Message ton="erreur">{erreur}</Message>}
+          {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 
           <p className="text-xs text-attenue-texte">
             La grille de droits sera initialisee depuis le modele du role choisi, puis reglable
@@ -298,7 +298,7 @@ function FormulaireCreation({
           </p>
 
           <div className="flex justify-end gap-2 pt-1">
-            <Bouton type="button" variante="secondaire" onClick={surFermeture}>
+            <Bouton type="button" variante="contour" onClick={surFermeture}>
               Annuler
             </Bouton>
             <Bouton type="submit" disabled={creer.isPending}>
@@ -369,7 +369,7 @@ function FormulaireMotDePasse({
             enregistrer.mutate()
           }}
         >
-          {erreur && <Message ton="erreur">{erreur}</Message>}
+          {erreur && <Alerte ton="danger">{erreur}</Alerte>}
 
           <div>
             <Etiq htmlFor="ch-utilisateurs-1">Nouveau mot de passe</Etiq>
@@ -411,7 +411,7 @@ function FormulaireMotDePasse({
           </p>
 
           <div className="flex justify-end gap-2">
-            <Bouton type="button" variante="secondaire" onClick={surFermeture}>
+            <Bouton type="button" variante="contour" onClick={surFermeture}>
               Annuler
             </Bouton>
             <Bouton type="submit" disabled={!pret || enregistrer.isPending}>

@@ -16,6 +16,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Chargement } from './ui/base'
 import { cn, fmt } from '../lib/utils'
+import { libelleStatut } from '../lib/statuts'
 
 interface Synthese {
   besoin_12m_kg: number
@@ -54,7 +55,6 @@ interface Reponse {
 
 const kg = (v: number | null | undefined) => fmt.nombre(v ?? 0, 0)
 
-const LIBELLE_STATUT: Record<string, string> = { PREVU: 'prévu', LANCE: 'lancé' }
 
 /** « 2026-11 » → « nov. 2026 ». */
 function libelleMois(am: string) {
@@ -155,7 +155,7 @@ export function BesoinReference({ reference, compact = false }: { reference: str
                   {o.numero}
                 </Link>
                 <span className="text-attenue-texte">
-                  {o.code_qualite} · {LIBELLE_STATUT[o.statut] ?? o.statut} · {fmt.nombre(o.metrage_m2, 0)} m²
+                  {o.code_qualite} · {libelleStatut('ordre_fabrication', o.statut).toLowerCase()} · {fmt.nombre(o.metrage_m2, 0)} m²
                   {o.date_of ? ` · ${fmt.date(o.date_of)}` : ''}
                   {o.date_fin_prevue ? ` → ${fmt.date(o.date_fin_prevue)}` : ''}
                 </span>

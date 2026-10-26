@@ -22,13 +22,15 @@ import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
 import { PanneRequetes } from '../composants/PanneRequetes'
-import { Alerte, Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Chargement, Etiq, Zone } from '../composants/ui/base'
+import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Champ, Chargement, Etiq, Zone } from '../composants/ui/base'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 import { nouvelIdentifiant } from '../lib/identifiant'
 import { fmt } from '../lib/utils'
 import { ChoixRecherche, useLigneChoix } from '../composants/ChoixRecherche'
-import { Ecart, LIBELLE_STATUT_OF, MODULE_OF, TON_STATUT_OF, type OfListe } from './OrdresFabrication'
+import { Ecart, MODULE_OF, type OfListe } from './OrdresFabrication'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 interface EnTeteOf extends OfListe {
   notes: string | null
@@ -293,7 +295,7 @@ function DocumentOf({ id }: { id: string }) {
   const cycle = useMutation({
     mutationFn: (statut: string) => api.put(`/api/ordres-fabrication/${id}/statut`, { statut, version: of!.version }),
     onSuccess: (_r, statut) => {
-      toast.success(`Ordre de fabrication ${LIBELLE_STATUT_OF[statut]?.toLowerCase() ?? statut}.`)
+      toast.success(`Ordre de fabrication ${libelleStatut('ordre_fabrication', statut).toLowerCase()}.`)
       rafraichir()
     },
     onError: echec,
@@ -357,7 +359,7 @@ function DocumentOf({ id }: { id: string }) {
         titre={`OF ${of.numero}`}
         description={
           <span className="inline-flex flex-wrap items-center gap-2">
-            <Badge ton={TON_STATUT_OF[of.statut] ?? 'neutre'}>{LIBELLE_STATUT_OF[of.statut] ?? of.statut}</Badge>
+            <StatutBadge entite="ordre_fabrication" code={of.statut} />
             <span>
               {of.code_qualite} — {of.qualite_nom} · {fmt.nombre(Number(of.metrage_m2), 0)} m²
             </span>

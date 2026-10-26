@@ -42,6 +42,29 @@ export type CouleurEcart = 'vert' | 'orange' | 'rouge'
 export const couleurEcart = (pct: number | null, t: { orange: number; rouge: number }): CouleurEcart | null =>
   pct == null || !Number.isFinite(pct) ? null : Math.abs(pct) > t.rouge ? 'rouge' : Math.abs(pct) > t.orange ? 'orange' : 'vert'
 
+/**
+ * LA COULEUR D'UN NIVEAU D'ÉCART, en classes du thème — la seule (24/10/2026 ;
+ * remplace `classeEcart`, `classeDerive`, `CLASSE_ECART` et `TON_ECART`).
+ *
+ * Le niveau vient de `couleurEcart` (vert, orange, rouge) ou de la base, en
+ * majuscules (`alerte_derive` d'un lot, `niveau_ecart` d'une ligne de fiche
+ * machine) : les deux se lisent ici. `gras` met orange et rouge en
+ * semi-gras (les fiches de lot). Un niveau absent ou inconnu rend `null` :
+ * l'appelant garde sa retombée (atténué, tiret, rien).
+ */
+export function classeNiveauEcart(niveau: string | null | undefined, gras = false): string | null {
+  switch ((niveau ?? '').toLowerCase()) {
+    case 'rouge':
+      return gras ? 'text-danger font-semibold' : 'text-danger'
+    case 'orange':
+      return gras ? 'text-alerte font-semibold' : 'text-alerte'
+    case 'vert':
+      return 'text-succes'
+    default:
+      return null
+  }
+}
+
 /** Les seuils du controle de colisage (parametres P_ColisageTol*). */
 export function useTolerancesColisage() {
   const q = useQuery({

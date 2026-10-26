@@ -16,21 +16,6 @@ import { type Conditionnement, conditionnementDuLot } from '../../lib/conditionn
 
 export const MODULE = 'INVENTAIRE'
 
-/** Brouillon (on compte), valide (comptage fige), cloture (ecarts au stock). */
-export const LIBELLE_STATUT: Record<string, string> = {
-  BROUILLON: 'Brouillon',
-  VALIDE: 'Validé',
-  CLOTURE: 'Clôturé',
-  ANNULE: 'Annulé',
-}
-
-export const TON: Record<string, 'neutre' | 'info' | 'succes' | 'danger'> = {
-  BROUILLON: 'neutre',
-  VALIDE: 'info',
-  CLOTURE: 'succes',
-  ANNULE: 'danger',
-}
-
 /** Une ligne telle que `GET /api/inventaires/:id/lignes` la renvoie. */
 export interface LigneInv extends Record<string, unknown> {
   id_ligne_inv: string

@@ -40,6 +40,7 @@ import {
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { libelleStatut, tonAlerte, tonStatut } from '../lib/statuts'
 
 const MODULE = 'CATALOGUE'
 
@@ -102,35 +103,12 @@ const ORDRE_QUALIF: Groupe['qualification'][] = [
   'MONO-REFERENCE',
 ]
 
-const LIBELLE_QUALIF: Record<Groupe['qualification'], string> = {
-  ALTERNATIF: 'Alternative réelle',
-  'MEME FOURNISSEUR': 'Même fournisseur',
-  HETEROGENE: 'Hétérogène',
-  'MONO-REFERENCE': 'Une seule réf.',
-}
-
 /** L'etat se lit a la pastille, et le libelle l'accompagne toujours quelque part. */
 const POINT_QUALIF: Record<Groupe['qualification'], string> = {
   ALTERNATIF: 'bg-succes',
   'MEME FOURNISSEUR': 'bg-alerte',
   HETEROGENE: 'bg-danger',
   'MONO-REFERENCE': 'bg-attenue-texte/45',
-}
-
-const TON_QUALIF: Record<Groupe['qualification'], 'succes' | 'alerte' | 'danger' | 'neutre'> = {
-  ALTERNATIF: 'succes',
-  'MONO-REFERENCE': 'neutre',
-  'MEME FOURNISSEUR': 'alerte',
-  HETEROGENE: 'danger',
-}
-
-/** Les bandeaux d'alerte n'ont pas de ton neutre : un groupe sans alternative
- *  s'annonce en information, pas en avertissement. */
-const TON_ALERTE: Record<Groupe['qualification'], 'succes' | 'alerte' | 'danger' | 'info'> = {
-  ALTERNATIF: 'succes',
-  'MONO-REFERENCE': 'info',
-  'MEME FOURNISSEUR': 'alerte',
-  HETEROGENE: 'danger',
 }
 
 const EXPLICATION: Record<Groupe['qualification'], string> = {
@@ -367,7 +345,7 @@ export function Equivalences() {
                   surClic={() => setQualif(qualif === q ? null : q)}
                 >
                   <span className={cn('size-2 rounded-full', POINT_QUALIF[q])} />
-                  {LIBELLE_QUALIF[q]} <span className="tabular-nums">{parQualif[q]}</span>
+                  {libelleStatut('qualification_equivalence', q)} <span className="tabular-nums">{parQualif[q]}</span>
                 </PuceFiltre>
               ))}
             </div>
@@ -393,7 +371,7 @@ export function Equivalences() {
                   >
                     <span
                       className={cn('mt-[7px] size-2 shrink-0 rounded-full', POINT_QUALIF[g.qualification])}
-                      title={LIBELLE_QUALIF[g.qualification]}
+                      title={libelleStatut('qualification_equivalence', g.qualification)}
                     />
                     <span className="min-w-0 flex-1">
                       {/* Le nom passe a la ligne plutot que d'etre coupe : deux
@@ -447,8 +425,8 @@ export function Equivalences() {
                 Tous les groupes
               </Bouton>
 
-              <Alerte ton={TON_ALERTE[groupe.qualification]}>
-                <strong>{groupe.qualification}</strong> — {EXPLICATION[groupe.qualification]}
+              <Alerte ton={tonAlerte(tonStatut('qualification_equivalence', groupe.qualification))}>
+                <strong>{libelleStatut('qualification_equivalence', groupe.qualification)}</strong> — {EXPLICATION[groupe.qualification]}
               </Alerte>
 
               <Carte repliable="equivalences.1">
@@ -682,9 +660,10 @@ function BilanGroupes({
         {total > 0 && (
           <BarreRepartition
             parts={ORDRE_QUALIF.map((q) => ({
-              libelle: LIBELLE_QUALIF[q],
+              libelle: libelleStatut('qualification_equivalence', q),
               valeur: parQualif[q],
-              ton: TON_QUALIF[q],
+              // Les tons d'une qualification (succes, neutre, alerte, danger) sont tous des tons de la barre.
+              ton: tonStatut('qualification_equivalence', q) as 'succes' | 'neutre' | 'alerte' | 'danger',
             }))}
           />
         )}
@@ -693,7 +672,7 @@ function BilanGroupes({
             <div key={q} className="relative min-w-0 pl-[1.125rem]">
               <dt className="text-[13px] font-medium">
                 <span aria-hidden className={cn('absolute left-0 top-[6px] size-2 rounded-full', POINT_QUALIF[q])} />
-                {LIBELLE_QUALIF[q]}{' '}
+                {libelleStatut('qualification_equivalence', q)}{' '}
                 <span className="font-normal tabular-nums text-attenue-texte">
                   {parQualif[q]}
                 </span>

@@ -178,14 +178,6 @@ export const designationUtile = (l: { code_reference: string; designation?: stri
 export const signe = (v: unknown, d = 1, unite = '') =>
   typeof v === 'number' && Number.isFinite(v) ? `${v > 0 ? '+' : ''}${nb(v, d)}${unite}` : '—'
 
-/** La couleur de la derive, en jetons du theme — jamais en dur. */
-export const classeDerive = (a: string | null | undefined) =>
-  a === 'ROUGE' ? 'text-danger font-semibold' : a === 'ORANGE' ? 'text-alerte font-semibold' : a === 'VERT' ? 'text-succes' : 'text-attenue-texte'
-
-/** Meme couleur, a partir de la couleur calculee par `couleurEcart`. */
-export const classeEcart = (c: 'vert' | 'orange' | 'rouge' | null) =>
-  c === 'rouge' ? 'text-danger font-semibold' : c === 'orange' ? 'text-alerte font-semibold' : c === 'vert' ? 'text-succes' : 'text-attenue-texte'
-
 export const lienFiche = (reference: string, lot: string) =>
   `/lots/fiche?reference=${encodeURIComponent(reference)}&lot=${encodeURIComponent(lot)}`
 

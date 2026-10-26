@@ -62,6 +62,7 @@ import {
 } from '../composants/ui/base'
 import { Aide, Onglet, OngletContenu, Onglets, OngletsListe, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'QUALITES'
 
@@ -204,12 +205,6 @@ const ENTETE_VIDE: Entete = {
   seuil_alerte_jours: '',
   seuil_critique_jours: '',
   stock_securite_jours: '',
-}
-
-const TON_STATUT: Record<Statut, 'neutre' | 'succes' | 'contour'> = {
-  BROUILLON: 'neutre',
-  ACTIF: 'succes',
-  CLOTURE: 'contour',
 }
 
 let compteur = 0
@@ -734,7 +729,7 @@ export function Qualites() {
         entete: 'Statut',
         largeur: '110px',
         filtre: 'liste',
-        rendu: (q) => <Badge ton={TON_STATUT[q.statut]}>{q.statut}</Badge>,
+        rendu: (q) => <StatutBadge entite="qualite" code={q.statut} />,
       },
       {
         champ: 'nb_roles',
@@ -1246,7 +1241,7 @@ export function Qualites() {
                     </span>
                   </>
                 )}
-                <Badge ton={TON_STATUT[entete.statut]}>{entete.statut}</Badge>
+                <StatutBadge entite="qualite" code={entete.statut} />
               </div>
             </CarteEntete>
 

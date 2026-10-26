@@ -20,7 +20,8 @@ import {
 } from '../composants/PanneauFiltres'
 
 import { TableDroits, type Colonne } from '../components/TableDroits'
-import { Bouton, Etiquette, fmt } from '../components/ui'
+import { Badge, Bouton } from '../composants/ui/base'
+import { fmt } from '../lib/utils'
 import { useEtatDepuisParam } from '../lib/navigation'
 
 const MODULE = 'MOUVEMENTS'
@@ -114,9 +115,9 @@ function ListeDocuments({ filtreRef }: { filtreRef: string }) {
       champ: 'code_type_mvt',
       entete: 'Type',
       rendu: (d) => (
-        <Etiquette ton={d.signe > 0 ? 'vert' : 'ambre'}>
+        <Badge ton={d.signe > 0 ? 'succes' : 'alerte'}>
           {d.signe > 0 ? '+' : '−'} {d.type_libelle ?? d.code_type_mvt}
-        </Etiquette>
+        </Badge>
       ),
     },
     { champ: 'magasin_nom', entete: 'Magasin', rendu: (d) => d.magasin_nom ?? d.code_magasin },
@@ -316,9 +317,9 @@ export function Mouvements() {
       champ: 'code_type_mvt',
       entete: 'Type',
       rendu: (l) => (
-        <Etiquette ton={l.signe > 0 ? 'vert' : 'ambre'}>
+        <Badge ton={l.signe > 0 ? 'succes' : 'alerte'}>
           {l.signe > 0 ? '+' : '−'} {l.code_type_mvt}
-        </Etiquette>
+        </Badge>
       ),
     },
     { champ: 'code_reference', entete: 'Référence' },

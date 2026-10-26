@@ -31,6 +31,7 @@ import {
 } from './noyau'
 import { GesteRetrait } from './Fiche'
 import { PanneRequetes } from '../../composants/PanneRequetes'
+import { StatutBadge } from '../../composants/StatutBadge'
 
 // =============================================================================
 // LA LISTE DES MACHINES
@@ -98,7 +99,7 @@ export function MachinesBureau() {
                       {m.bobines_presentes} / {m.capacite_bobines}
                     </td>
                     <td className="px-3 py-2"><Jauge part={part} /></td>
-                    <td className="px-3 py-2"><EtatMachine etat={m.etat} /></td>
+                    <td className="px-3 py-2"><StatutBadge entite="machine" code={m.etat} /></td>
                     <td className="px-3 py-2 text-right text-[12px] text-primaire">Ouvrir</td>
                   </tr>
                 )
@@ -132,19 +133,6 @@ function Jauge({ part }: { part: number }) {
         style={{ width: `${Math.min(100, part)}%` }}
       />
     </div>
-  )
-}
-
-function EtatMachine({ etat }: { etat: string }) {
-  return (
-    <span
-      className={cn(
-        'rounded-full border px-2 py-[1px] text-[10.5px]',
-        etat === 'ACTIVE' ? 'border-succes/30 bg-succes/10 text-succes' : 'border-alerte/30 bg-alerte/10 text-alerte',
-      )}
-    >
-      {etat}
-    </span>
   )
 }
 

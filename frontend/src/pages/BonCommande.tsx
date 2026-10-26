@@ -66,6 +66,8 @@ import { TotauxCommande } from '../composants/TotauxCommande'
 import { facteurVersKg } from '../lib/conditionnement'
 import { auCentime, cn, fmt } from '../lib/utils'
 import { lireNombre } from '../lib/nombres'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -140,30 +142,6 @@ interface LigneBc extends Record<string, unknown> {
   remise_pct_avant_demande?: number | null
   /** Quand la reponse du fournisseur a ete saisie sur la ligne. */
   date_reponse_prix?: string | null
-}
-
-const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
-  BROUILLON: 'neutre',
-  EN_CONTROLE: 'alerte',
-  DEMANDE_PRIX: 'info',
-  EN_ATTENTE_VALIDATION: 'alerte',
-  VALIDE: 'info',
-  ENVOYE: 'info',
-  LIVRE_PARTIEL: 'alerte',
-  CLOTURE: 'succes',
-  ANNULE: 'danger',
-}
-
-const LIBELLE: Record<string, string> = {
-  BROUILLON: 'Brouillon',
-  EN_CONTROLE: 'Au contrôle',
-  DEMANDE_PRIX: 'Demande de prix',
-  EN_ATTENTE_VALIDATION: 'En attente de validation',
-  VALIDE: 'Validé',
-  ENVOYE: 'Envoyé',
-  LIVRE_PARTIEL: 'Livré en partie',
-  CLOTURE: 'Clôturé',
-  ANNULE: 'Annulé',
 }
 
 /** Le prix NET d'une ligne (remise deduite) : celui que compare le controle C59. */
@@ -366,7 +344,7 @@ export function BonCommande() {
     ) => api.put(`/api/bons-commande/${id}/statut`, typeof c === 'string' ? { statut: c } : c),
     onSuccess: (_r, c) => {
       const statut = typeof c === 'string' ? c : c.statut
-      toast.success(`Bon passé en « ${(LIBELLE[statut] ?? statut).toLowerCase()} »`)
+      toast.success(`Bon passé en « ${libelleStatut('bon_commande', statut).toLowerCase()} »`)
       setValidation(null)
       setMotifAction(null)
       rafraichir()
@@ -1044,7 +1022,10 @@ export function BonCommande() {
                   <FileText />
                   Imprimer la demande de prix
                 </Bouton>
+                {/* UNE SEULE ACTION PRINCIPALE : tant qu'une reponse n'est pas
+                    enregistree, c'est « Enregistrer la reponse » ; ensuite, ceci. */}
                 <Bouton
+                  variante={reponsesModifiees.length > 0 ? 'contour' : 'principal'}
                   onClick={() => changerStatut.mutate('EN_ATTENTE_VALIDATION')}
                   disabled={reponsesModifiees.length > 0}
                   title={reponsesModifiees.length > 0 ? 'Enregistrez d’abord la réponse du fournisseur' : undefined}
@@ -1278,7 +1259,7 @@ export function BonCommande() {
       {!modifiable &&
         !['CLOTURE', 'ANNULE', 'EN_CONTROLE', 'DEMANDE_PRIX', 'EN_ATTENTE_VALIDATION'].includes(bc.statut) && (
         <Alerte ton="info" className="mb-3">
-          Bon {(LIBELLE[bc.statut] ?? bc.statut).toLowerCase()} : les lignes sont figees. Seules les
+          Bon {libelleStatut('bon_commande', bc.statut).toLowerCase()} : les lignes sont figees. Seules les
           receptions le font encore evoluer.
         </Alerte>
       )}
@@ -1395,6 +1376,7 @@ export function BonCommande() {
                     Annuler les modifications
                   </Bouton>
                   <Bouton
+                    variante={reponsesModifiees.length > 0 ? 'principal' : 'contour'}
                     chargement={enregistrerReponse.isPending}
                     disabled={reponsesModifiees.length === 0 || reponsesIllisibles.length > 0}
                     onClick={() => enregistrerReponse.mutate()}
@@ -1433,7 +1415,7 @@ export function BonCommande() {
         <Carte repliable="boncommande.1">
           <CarteEntete>
             <CarteTitre>En-tete</CarteTitre>
-            <Badge ton={TON[bc.statut] ?? 'neutre'}>{LIBELLE[bc.statut] ?? bc.statut}</Badge>
+            <StatutBadge entite="bon_commande" code={bc.statut} />
           </CarteEntete>
           <CarteCorps className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>

@@ -3,7 +3,8 @@ import { api } from '../api/client'
 import { EcranReferentiel } from '../components/EcranReferentiel'
 import type { ChampDef } from '../components/Formulaire'
 import type { Colonne } from '../components/TableDroits'
-import { Etiquette, fmt } from '../components/ui'
+import { Badge } from '../composants/ui/base'
+import { fmt } from '../lib/utils'
 
 const MODULE = 'FOURNISSEURS'
 
@@ -67,7 +68,7 @@ export function Fournisseurs() {
       champ: 'nb_references',
       entete: 'Références',
       numerique: true,
-      rendu: (f) => <Etiquette>{f.nb_references}</Etiquette>,
+      rendu: (f) => <Badge>{f.nb_references}</Badge>,
     },
   ]
 

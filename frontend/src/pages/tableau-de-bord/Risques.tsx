@@ -19,6 +19,8 @@ import { Colonnes, TON, compact } from '../../composants/graphiques/Visuels'
 import { cn, fmt } from '../../lib/utils'
 import { OngletsTableauDeBord } from './Onglets'
 import { Bloc, EnPanne, Marge, Vide, libelleMois, useFiles, type Domaine } from './commun'
+import { StatutBadge } from '../../composants/StatutBadge'
+import { tonStatut } from '../../lib/statuts'
 
 interface MoisRisque {
   annee_mois: string
@@ -225,7 +227,7 @@ export function Risques() {
                     <td className="max-w-60 px-4 py-1.5">
                       <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium text-texte">{r.code_reference}</span>
-                        {r.classe_abc && <Badge ton={r.classe_abc === 'A' ? 'danger' : 'neutre'}>{r.classe_abc}</Badge>}
+                        {r.classe_abc && <Badge ton={tonStatut('classe_abc', r.classe_abc)}>{r.classe_abc}</Badge>}
                       </div>
                       <div className="truncate text-[11px] text-attenue-texte">{r.fournisseur_nom ?? 'sans fournisseur'}</div>
                     </td>
@@ -314,7 +316,7 @@ export function Risques() {
                     <td className="px-3 py-1.5 text-right tabular-nums">{a.delai_livraison_jours ?? '—'}</td>
                     <td className="px-3 py-1.5 text-right font-medium tabular-nums">{a.qte_a_commander_kg == null ? '—' : fmt.nombre(a.qte_a_commander_kg, 0)}</td>
                     <td className="px-4 py-1.5">
-                      <Badge ton={a.statut === 'ATTENTION' ? 'alerte' : 'danger'}>{a.statut}</Badge>
+                      <StatutBadge entite="statut_stock" code={a.statut} />
                     </td>
                   </tr>
                 ))}

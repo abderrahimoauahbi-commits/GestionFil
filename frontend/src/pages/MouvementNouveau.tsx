@@ -1089,11 +1089,11 @@ function EquivalentsDispo({
   )
 
   return (
-    <div className="mt-1 rounded-lg border border-danger/40 bg-danger/[0.06] p-2">
-      <div className="text-[12px] font-medium text-danger">
-        Stock insuffisant dans le magasin : il manque {fmt.nombre(manque, 0)} kg.
-      </div>
-
+    <Alerte
+      ton="danger"
+      className="mt-1 px-2 py-2 text-[12px]"
+      titre={`Stock insuffisant dans le magasin : il manque ${fmt.nombre(manque, 0)} kg.`}
+    >
       {utiles.length === 0 ? (
         <div className="mt-1 text-[11px] text-attenue-texte">
           Aucune reference equivalente ne dispose de stock. La sortie sera refusee (R02) :
@@ -1123,6 +1123,6 @@ function EquivalentsDispo({
           </div>
         </>
       )}
-    </div>
+    </Alerte>
   )
 }

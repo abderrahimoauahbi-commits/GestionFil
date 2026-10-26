@@ -19,10 +19,11 @@ import { api, ErreurApi } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EnTetePage } from '../composants/Coquille'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Badge, Bouton } from '../composants/ui/base'
+import { Bouton } from '../composants/ui/base'
 import { useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
 import { SUPPRIMABLES } from '../lib/statuts'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'BONS_COMMANDE'
 
@@ -47,40 +48,6 @@ interface Bc extends Record<string, unknown> {
   date_envoi: string | null
   createur: string | null
   valideur: string | null
-}
-
-const TON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
-  BROUILLON: 'neutre',
-  EN_CONTROLE: 'alerte',
-  DEMANDE_PRIX: 'info',
-  EN_ATTENTE_VALIDATION: 'alerte',
-  VALIDE: 'info',
-  ENVOYE: 'info',
-  LIVRE_PARTIEL: 'alerte',
-  CLOTURE: 'succes',
-  ANNULE: 'danger',
-}
-
-/** L'etat de la livraison, distinct du statut du bon : un bon envoye peut etre
- *  deja en retard, et c'est ce que l'acheteur doit voir en premier. */
-const TON_LIVRAISON: Record<string, 'neutre' | 'info' | 'succes' | 'alerte' | 'danger'> = {
-  ATTENDU: 'info',
-  PARTIEL: 'alerte',
-  'PARTIEL EN RETARD': 'danger',
-  'EN RETARD': 'danger',
-  COMPLET: 'succes',
-}
-
-const LIBELLE: Record<string, string> = {
-  BROUILLON: 'Brouillon',
-  EN_CONTROLE: 'Au contrôle',
-  DEMANDE_PRIX: 'Demande de prix',
-  EN_ATTENTE_VALIDATION: 'En attente de validation',
-  VALIDE: 'Valide',
-  ENVOYE: 'Envoye',
-  LIVRE_PARTIEL: 'Livre partiel',
-  CLOTURE: 'Cloture',
-  ANNULE: 'Annule',
 }
 
 /**
@@ -174,7 +141,7 @@ export function BonsCommande() {
       entete: 'Statut',
       largeur: '130px',
       filtre: 'liste',
-      rendu: (b) => <Badge ton={TON[b.statut] ?? 'neutre'}>{LIBELLE[b.statut] ?? b.statut}</Badge>,
+      rendu: (b) => <StatutBadge entite="bon_commande" code={b.statut} />,
     },
     {
       champ: 'date_livraison_prevue',
@@ -268,7 +235,7 @@ export function BonsCommande() {
         !b.statut_livraison || b.statut_livraison === 'SANS OBJET' ? (
           <span className="text-attenue-texte">—</span>
         ) : (
-          <Badge ton={TON_LIVRAISON[b.statut_livraison] ?? 'neutre'}>{b.statut_livraison}</Badge>
+          <StatutBadge entite="livraison_bc" code={b.statut_livraison} />
         ),
     },
   ]
@@ -288,7 +255,7 @@ export function BonsCommande() {
       {filtreStatut && (
         <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
           <span className="text-attenue-texte">Filtré sur le statut</span>
-          <Badge ton={TON[filtreStatut] ?? 'neutre'}>{LIBELLE[filtreStatut] ?? filtreStatut}</Badge>
+          <StatutBadge entite="bon_commande" code={filtreStatut} />
           <Bouton
             variante="discret"
             taille="sm"

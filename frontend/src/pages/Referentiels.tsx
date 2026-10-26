@@ -28,6 +28,7 @@ import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLa
 import type { Colonne } from '../components/TableDroits'
 import {
   Alerte,
+  Badge,
   Bouton,
   Champ,
   Chargement,
@@ -35,7 +36,7 @@ import {
   Selecteur,
 } from '../composants/ui/base'
 import { Dialogue, DialogueContenu, useConfirmation } from '../composants/ui/surcouches'
-import { Etiquette, fmt } from '../components/ui'
+import { fmt } from '../lib/utils'
 
 interface Ligne extends Record<string, unknown> {
   actif: number
@@ -162,7 +163,7 @@ const compte = (champ: string, entete: string): Colonne<Ligne> => ({
   champ,
   entete,
   numerique: true,
-  rendu: (l) => <Etiquette>{String(l[champ] ?? 0)}</Etiquette>,
+  rendu: (l) => <Badge>{String(l[champ] ?? 0)}</Badge>,
 })
 
 /** Un 0/1 de la base, lu comme une reponse : oui, ou rien. */
@@ -170,7 +171,7 @@ const ouiNon = (champ: string, entete: string): Colonne<Ligne> => ({
   champ,
   entete,
   rendu: (l) =>
-    Number(l[champ]) === 1 ? <Etiquette>oui</Etiquette> : <span className="text-attenue-texte">non</span>,
+    Number(l[champ]) === 1 ? <Badge>oui</Badge> : <span className="text-attenue-texte">non</span>,
 })
 
 const METHODES_FRAIS = [
@@ -312,11 +313,11 @@ const ONGLETS: Onglet[] = [
         entete: 'Regime',
         rendu: (l) => (
           <div className="flex gap-1">
-            {l.est_quarantaine === 1 && <Etiquette ton="rouge">quarantaine</Etiquette>}
+            {l.est_quarantaine === 1 && <Badge ton="danger">quarantaine</Badge>}
             {l.inclure_mrp === 1 ? (
-              <Etiquette ton="vert">compte au MRP</Etiquette>
+              <Badge ton="succes">compte au MRP</Badge>
             ) : (
-              <Etiquette ton="gris">hors MRP</Etiquette>
+              <Badge ton="neutre">hors MRP</Badge>
             )}
           </div>
         ),
@@ -389,9 +390,9 @@ const ONGLETS: Onglet[] = [
         champ: 'signe',
         entete: 'Sens',
         rendu: (l) => (
-          <Etiquette ton={Number(l.signe) > 0 ? 'vert' : 'ambre'}>
+          <Badge ton={Number(l.signe) > 0 ? 'succes' : 'alerte'}>
             {Number(l.signe) > 0 ? 'entree' : 'sortie'}
-          </Etiquette>
+          </Badge>
         ),
       },
       { champ: 'exige_prix', entete: 'Prix exige', rendu: (l) => (l.exige_prix ? 'oui' : '—') },

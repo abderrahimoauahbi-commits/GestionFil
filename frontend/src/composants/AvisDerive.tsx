@@ -5,9 +5,11 @@
  * reels contre bobines x poids catalogue) et le classe vert, orange, rouge
  * selon P_LotTolOrangePct et P_LotTolRougePct. Il ne le disait qu'apres coup,
  * dans l'ecran des lots. Sur une ligne suivie au lot, l'avis le dit des que
- * poids et bobines sont saisis. Il n'empeche rien.
+ * poids et bobines sont saisis. Il n'empeche rien. C'est une Alerte compacte
+ * (24/10/2026), comme l'avis de colisage.
  */
 import { Scale } from 'lucide-react'
+import { Alerte } from './ui/base'
 import type { Conditionnement } from '../lib/conditionnement'
 import { couleurEcart, useTolerancesLot } from '../lib/lots'
 import { cn, fmt } from '../lib/utils'
@@ -32,16 +34,15 @@ export function AvisDerive({
   const c = couleurEcart(pct, t)
   if (c !== 'orange' && c !== 'rouge') return null
   return (
-    <div
-      role="status"
-      className={cn('mt-1 flex items-start gap-1 text-[11px] leading-snug', c === 'rouge' ? 'text-danger' : 'text-alerte', className)}
+    <Alerte
+      taille="compacte"
+      ton={c === 'rouge' ? 'danger' : 'alerte'}
+      icone={Scale}
+      className={cn('mt-1', className)}
     >
-      <Scale className="mt-px size-3 shrink-0" />
-      <span>
-        Dérive du lot : {fmt.nombre(k / b, 3)} kg par bobine pour {fmt.nombre(p, 3)} au catalogue (
-        {pct > 0 ? '+' : ''}
-        {fmt.nombre(pct, 1)} %, au-delà du seuil {c === 'rouge' ? `rouge de ${t.rouge}` : `orange de ${t.orange}`} %).
-      </span>
-    </div>
+      Dérive du lot : {fmt.nombre(k / b, 3)} kg par bobine pour {fmt.nombre(p, 3)} au catalogue (
+      {pct > 0 ? '+' : ''}
+      {fmt.nombre(pct, 1)} %, au-delà du seuil {c === 'rouge' ? `rouge de ${t.rouge}` : `orange de ${t.orange}`} %).
+    </Alerte>
   )
 }

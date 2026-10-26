@@ -16,7 +16,9 @@ import { EcranReferentiel } from '../components/EcranReferentiel'
 import { useParamVue } from '../lib/navigation'
 import type { ChampDef } from '../components/Formulaire'
 import type { Colonne } from '../components/TableDroits'
-import { Etiquette, Message, fmt } from '../components/ui'
+import { Alerte, Badge } from '../composants/ui/base'
+import { fmt } from '../lib/utils'
+import { tonStatut } from '../lib/statuts'
 import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 /* DECLAREE AVANT SES USAGES. `const` n’est pas remonte comme une fonction :
@@ -95,7 +97,7 @@ export function Catalogue() {
       rendu: (r) => (
         <div>
           <div className="font-medium text-texte">{r.code_reference}</div>
-          {r.actif === 0 && <Etiquette ton="rouge">desactivee</Etiquette>}
+          {r.actif === 0 && <Badge ton="danger">desactivee</Badge>}
         </div>
       ),
     },
@@ -197,10 +199,10 @@ export function Catalogue() {
       filtre: 'liste',
       rendu: (r) =>
         r.classe_abc ? (
-          <Etiquette ton={r.classe_abc === 'A' ? 'rouge' : r.classe_abc === 'B' ? 'ambre' : 'gris'}>
+          <Badge ton={tonStatut('classe_abc', r.classe_abc)}>
             {r.classe_abc}
             {r.classe_xyz ?? ''}
-          </Etiquette>
+          </Badge>
         ) : (
           '—'
         ),
@@ -495,7 +497,7 @@ export function Catalogue() {
     <>
       {!droits.visible('prix_catalogue') && (
         <div className="mb-4">
-          <Message ton="info">Les informations de prix sont masquees pour votre profil.</Message>
+          <Alerte ton="info">Les informations de prix sont masquees pour votre profil.</Alerte>
         </div>
       )}
 

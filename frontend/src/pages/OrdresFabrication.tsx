@@ -24,27 +24,14 @@ import { EnTetePage } from '../composants/Coquille'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Badge, Bouton, Champ, Chargement, Etiq } from '../composants/ui/base'
+import { Bouton, Champ, Chargement, Etiq } from '../composants/ui/base'
 import { Onglet, OngletContenu, Onglets, OngletsListe } from '../composants/ui/surcouches'
 import { PanneRequetes } from '../composants/PanneRequetes'
 import { cn, fmt } from '../lib/utils'
 import { ChoixRecherche } from '../composants/ChoixRecherche'
+import { StatutBadge } from '../composants/StatutBadge'
 
 export const MODULE_OF = 'PLANS'
-
-export const LIBELLE_STATUT_OF: Record<string, string> = {
-  PREVU: 'Prévu',
-  LANCE: 'Lancé',
-  CLOTURE: 'Clôturé',
-  ANNULE: 'Annulé',
-}
-
-export const TON_STATUT_OF: Record<string, 'neutre' | 'alerte' | 'succes' | 'danger'> = {
-  PREVU: 'neutre',
-  LANCE: 'alerte',
-  CLOTURE: 'succes',
-  ANNULE: 'neutre',
-}
 
 export interface OfListe extends Record<string, unknown> {
   id_of: string
@@ -169,7 +156,7 @@ function ListeOf() {
     {
       champ: 'statut',
       entete: 'Statut',
-      rendu: (o) => <Badge ton={TON_STATUT_OF[o.statut] ?? 'neutre'}>{LIBELLE_STATUT_OF[o.statut] ?? o.statut}</Badge>,
+      rendu: (o) => <StatutBadge entite="ordre_fabrication" code={o.statut} />,
     },
     { champ: 'kg_prevu', entete: 'Prévu (kg)', numerique: true, rendu: (o) => kg(o.kg_prevu) },
     { champ: 'kg_reel', entete: 'Réel (kg)', numerique: true, rendu: (o) => kg(o.kg_reel) },

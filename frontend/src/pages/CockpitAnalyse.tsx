@@ -23,9 +23,9 @@ import {
   type BarrePareto,
 } from '../composants/graphiques/Graphiques'
 import { Alerte, Carte, CarteCorps, CarteEntete, CarteTitre, Squelette } from '../composants/ui/base'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 import { couleurEcart, useTolerancesLot } from '../lib/lots'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'COCKPIT'
 
@@ -100,12 +100,6 @@ interface Analyse {
     valeur_dormante_mad?: number
     pct_valeur_dormante?: number | null
   }
-}
-
-const TON_STATUT: Record<string, string> = {
-  RUPTURE: 'bg-danger/15 text-danger',
-  CRITIQUE: 'bg-danger/10 text-danger',
-  ATTENTION: 'bg-alerte/15 text-alerte',
 }
 
 /** Un indicateur : sa valeur, son libelle, et le mot qui dit l'unite. */
@@ -319,9 +313,7 @@ export function CockpitAnalyse({ vue = 'situation' }: { vue?: VueCockpit }) {
                         {a.qte_a_commander_kg == null ? '—' : fmt.nombre(a.qte_a_commander_kg, 0)}
                       </td>
                       <td className="px-2.5 py-1">
-                        <span className={cn('rounded-[3px] px-1.5 py-px text-[11px] font-medium', TON_STATUT[a.statut])}>
-                          {a.statut}
-                        </span>
+                        <StatutBadge entite="statut_stock" code={a.statut} />
                       </td>
                     </tr>
                   ))}

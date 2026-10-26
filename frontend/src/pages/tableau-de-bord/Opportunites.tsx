@@ -11,11 +11,12 @@ import { api } from '../../api/client'
 import { useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
 import { CarteStat } from '../../composants/CarteStat'
-import { Badge, Squelette } from '../../composants/ui/base'
+import { Squelette } from '../../composants/ui/base'
 import { Anneau, BarresClassees, TON, compact } from '../../composants/graphiques/Visuels'
 import { cn, fmt } from '../../lib/utils'
 import { OngletsTableauDeBord } from './Onglets'
 import { Bloc, EnPanne, Vide } from './commun'
+import { StatutBadge } from '../../composants/StatutBadge'
 
 interface Analyse {
   economies: {
@@ -181,7 +182,7 @@ export function Opportunites() {
                           {m.jours_couverture == null ? '—' : `${fmt.nombre(m.jours_couverture, 0)} j`}
                         </td>
                         <td className="px-3 py-1.5">
-                          <Badge ton={m.statut === 'OK' ? 'succes' : m.statut === 'ATTENTION' ? 'alerte' : 'danger'}>{m.statut}</Badge>
+                          <StatutBadge entite="statut_stock" code={m.statut} />
                         </td>
                         {voit && <td className="px-4 py-1.5 text-right tabular-nums">{fmt.nombre(m.budget_annuel_mad, 0)}</td>}
                       </tr>

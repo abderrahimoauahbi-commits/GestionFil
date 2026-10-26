@@ -18,10 +18,11 @@ import { EnTetePage } from '../composants/Coquille'
 import { PageAvecRail, RailLateral, type GroupeRail } from '../composants/RailLateral'
 import { PanneauFiltres, useFiltres, type ChampFiltre } from '../composants/PanneauFiltres'
 import { DataTable, type ColonneDT } from '../composants/DataTable'
-import { Badge, Bouton, Chargement } from '../composants/ui/base'
+import { Bouton, Chargement } from '../composants/ui/base'
 import { fmt } from '../lib/utils'
 import { PanneRequetes } from '../composants/PanneRequetes'
-import { LIBELLE_STATUT, MODULE, TON } from './inventaires/comptage'
+import { MODULE } from './inventaires/comptage'
+import { StatutBadge } from '../composants/StatutBadge'
 
 export interface InventaireListe extends Record<string, unknown> {
   id_inventaire: string
@@ -71,7 +72,7 @@ export function Inventaires() {
     {
       champ: 'statut',
       entete: 'Statut',
-      rendu: (i) => <Badge ton={TON[i.statut] ?? 'neutre'}>{LIBELLE_STATUT[i.statut] ?? i.statut}</Badge>,
+      rendu: (i) => <StatutBadge entite="inventaire" code={i.statut} />,
     },
     {
       champ: 'quantite_theorique_kg',

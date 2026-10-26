@@ -29,6 +29,8 @@ import { Alerte, Badge, Chargement } from '../composants/ui/base'
 import { TableauImprimable } from '../composants/Etat'
 import { cn, fmt } from '../lib/utils'
 import { SANS_LOT } from '../lib/lots'
+import { StatutBadge } from '../composants/StatutBadge'
+import { libelleStatut } from '../lib/statuts'
 
 const MODULE = 'STOCK'
 
@@ -84,14 +86,6 @@ interface Magasin {
 
 const nb = (v: number | null | undefined, d = 0) =>
   v == null ? '—' : v.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d })
-
-/** Les quatre statuts, du plus grave au plus calme. */
-const TONS: Record<string, string> = {
-  RUPTURE: 'bg-danger/15 text-danger',
-  CRITIQUE: 'bg-alerte/20 text-alerte',
-  ATTENTION: 'bg-alerte/15 text-alerte',
-  OK: 'bg-succes/15 text-succes',
-}
 
 export function EtatStock() {
   const { peut } = useAuth()
@@ -379,7 +373,7 @@ export function EtatStock() {
                   : 'border border-bordure hover:bg-attenue',
               )}
             >
-              {s || 'Tous'}
+              {s ? libelleStatut('statut_stock', s) : 'Tous'}
             </button>
           ))}
         </div>
@@ -582,7 +576,7 @@ function TableauLarge({
               </td>
               <td className="px-2 py-1.5 text-center">
                 <div className="flex flex-col items-center gap-0.5">
-                  <Pastille statut={l.statut} />
+                  <StatutBadge entite="statut_stock" code={l.statut} />
                   {l.sous_minimum && (
                     <span className="rounded-full bg-alerte/20 px-1.5 py-0.5 text-[9px] font-medium text-alerte">
                       SOUS MIN
@@ -659,20 +653,6 @@ function TableauLarge({
   )
 }
 
-function Pastille({ statut }: { statut: string | null }) {
-  if (!statut) return <span className="text-attenue-texte">—</span>
-  return (
-    <span
-      className={cn(
-        'inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-        TONS[statut] ?? 'bg-attenue text-attenue-texte',
-      )}
-    >
-      {statut}
-    </span>
-  )
-}
-
 // =============================================================================
 // LA LISTE, SUR TELEPHONE
 // =============================================================================
@@ -706,7 +686,7 @@ function ListeTelephone({
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium text-texte">{l.designation}</div>
                 <div className="flex items-center gap-1.5 text-[11px] text-attenue-texte">
-                  <Pastille statut={l.statut} />
+                  <StatutBadge entite="statut_stock" code={l.statut} />
                   {l.sous_minimum && (
                     <span className="rounded-full bg-alerte/20 px-1.5 py-0.5 text-[10px] font-medium text-alerte">
                       sous min

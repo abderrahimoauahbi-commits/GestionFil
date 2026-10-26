@@ -18,8 +18,9 @@ import { api } from '../api/client'
 import { useDroits } from '../auth/AuthContext'
 import { EtatImprimable, TableEtat } from '../composants/Etat'
 import { Alerte, Chargement, Selecteur } from '../composants/ui/base'
-import { fmt } from '../components/ui'
+import { fmt } from '../lib/utils'
 import { chercherChoix, ChoixRecherche, useLigneChoix } from '../composants/ChoixRecherche'
+import { libelleStatut } from '../lib/statuts'
 
 /** Le bandeau de choix, identique sur les quatre etats. */
 function Choix({
@@ -131,7 +132,7 @@ export function EtatReception() {
         <EtatImprimable
           titre="Bon de réception"
           reference={r.numero_reception}
-          sousTitre={r.statut !== 'VALIDEE' ? `Statut : ${r.statut}` : undefined}
+          sousTitre={r.statut !== 'VALIDEE' ? `Statut : ${libelleStatut('reception', r.statut)}` : undefined}
           enTete={
             <div className="grid grid-cols-2 gap-x-8 gap-y-1">
               <div className="space-y-1">
@@ -313,7 +314,7 @@ export function EtatInventaire() {
         surChangement={setId}
         options={liste.map((x) => ({
           valeur: x.id_inventaire,
-          libelle: `${x.numero_inventaire} — ${(x.date_inventaire ?? '').slice(0, 10)} — ${x.code_magasin} (${x.statut})`,
+          libelle: `${x.numero_inventaire} — ${(x.date_inventaire ?? '').slice(0, 10)} — ${x.code_magasin} (${libelleStatut('inventaire', x.statut)})`,
         }))}
       />
       )}
@@ -330,7 +331,7 @@ export function EtatInventaire() {
         <EtatImprimable
           titre="Procès-verbal d’inventaire"
           reference={inv.numero_inventaire}
-          sousTitre={inv.statut !== 'CLOTURE' ? `Statut : ${inv.statut}` : undefined}
+          sousTitre={inv.statut !== 'CLOTURE' ? `Statut : ${libelleStatut('inventaire', inv.statut)}` : undefined}
           enTete={
             <div className="flex flex-wrap gap-x-8 gap-y-1">
               <span>
@@ -513,7 +514,7 @@ export function EtatPlanProduction() {
         surChangement={setId}
         options={liste.map((p) => ({
           valeur: p.id_plan,
-          libelle: `${p.libelle} — ${p.statut} — ${p.date_debut} au ${p.date_fin}`,
+          libelle: `${p.libelle} — ${libelleStatut('plan_production', p.statut)} — ${p.date_debut} au ${p.date_fin}`,
         }))}
       />
       )}
@@ -526,7 +527,7 @@ export function EtatPlanProduction() {
           <div className="flex flex-wrap gap-x-8 gap-y-1">
             <span>
               <span className="text-neutral-600">Statut : </span>
-              <span className="font-semibold">{plan.statut}</span>
+              <span className="font-semibold">{libelleStatut('plan_production', plan.statut)}</span>
             </span>
             <span>
               <span className="text-neutral-600">Horizon : </span>
@@ -652,7 +653,7 @@ export function EtatBesoins() {
         surChangement={setId}
         options={liste.map((p) => ({
           valeur: p.id_plan,
-          libelle: `${p.libelle} — ${p.statut}`,
+          libelle: `${p.libelle} — ${libelleStatut('plan_production', p.statut)}`,
         }))}
       />
       )}

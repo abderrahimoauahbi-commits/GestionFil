@@ -26,6 +26,7 @@ import { useConfirmation } from '../composants/ui/surcouches'
 import { fmt } from '../lib/utils'
 import { AvisInventaireOuvert } from '../composants/AvisInventaireOuvert'
 import { gelsTouches, phraseGel, useInventairesOuverts } from '../lib/inventairesOuverts'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'MOUVEMENTS'
 
@@ -47,21 +48,6 @@ interface Transfert extends Record<string, unknown> {
   references?: string[] | null
 }
 
-/**
- * Le libelle compte autant que le statut.
- *
- * « VALIDE » ne dit pas ou est la marchandise. « En transit » le dit : elle a
- * quitte le magasin source et n'est arrivee nulle part. C'est un etat reel, et
- * l'ecran doit le nommer pour que personne ne compte sur un stock qui roule
- * encore.
- */
-const LIBELLE: Record<string, string> = {
-  BROUILLON: 'En preparation',
-  VALIDE: 'En transit',
-  TERMINE: 'Recu',
-  ANNULE: 'Annule',
-}
-
 /* Des axes que l'on choisit, pas de comparateur a saisir : les valeurs
    des listes sortent des lignes affichees. */
 const CHAMPS_TRANSFERT: ChampFiltre<Transfert>[] = [
@@ -72,15 +58,6 @@ const CHAMPS_TRANSFERT: ChampFiltre<Transfert>[] = [
   { cle: 'auteur', libelle: 'Auteur', type: 'liste', valeur: (l) => l.auteur },
   { cle: 'numero', libelle: 'Numéro', type: 'texte', valeur: (l) => l.numero_transfert },
 ]
-
-const TON: Record<string, 'neutre' | 'info' | 'succes' | 'danger' | 'alerte'> = {
-  BROUILLON: 'neutre',
-  // En transit : ni ici ni la-bas. C'est le seul etat qui demande une action de
-  // quelqu'un d'AUTRE que celui qui l'a cree.
-  VALIDE: 'alerte',
-  TERMINE: 'succes',
-  ANNULE: 'danger',
-}
 
 export function Transferts() {
   const droits = useDroits(MODULE)
@@ -192,7 +169,7 @@ export function Transferts() {
       largeur: '190px',
       rendu: (t) => (
         <div>
-          <Badge ton={TON[t.statut] ?? 'neutre'}>{LIBELLE[t.statut] ?? t.statut}</Badge>
+          <StatutBadge entite="transfert" code={t.statut} />
           {t.statut === 'VALIDE' && (t.jours_en_transit ?? 0) > 0 && (
             <div className="mt-0.5 text-[11px] text-alerte">
               en route depuis {t.jours_en_transit} j
@@ -344,6 +321,7 @@ export function Transferts() {
               </Bouton>
               {droits.peutValider && (
                 <Bouton
+                  variante="contour"
                   taille="sm"
                   disabled={t.nb_lignes === 0 || !!gelDe(t.code_magasin_source, t.references)}
                   title={gelDe(t.code_magasin_source, t.references) ?? undefined}
@@ -378,6 +356,7 @@ export function Transferts() {
                 Bon de réception
               </Bouton>
               <Bouton
+              variante="contour"
               taille="sm"
               disabled={!!gelDe(t.code_magasin_dest, t.references)}
               title={gelDe(t.code_magasin_dest, t.references) ?? undefined}

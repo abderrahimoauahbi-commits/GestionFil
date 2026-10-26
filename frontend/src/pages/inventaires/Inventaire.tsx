@@ -25,7 +25,7 @@ import { useAuth, useDroits } from '../../auth/AuthContext'
 import { EnTetePage } from '../../composants/Coquille'
 import { ActionMotivee } from '../../composants/ActionMotivee'
 import { BoutonDevalider } from '../../composants/BoutonDevalider'
-import { Alerte, Badge, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Chargement, Etiq, Selecteur } from '../../composants/ui/base'
+import { Alerte, Bouton, Carte, CarteCorps, CarteEntete, CarteTitre, Chargement, Etiq, Selecteur } from '../../composants/ui/base'
 import { Aide, useConfirmation } from '../../composants/ui/surcouches'
 import { useGardeSaisie } from '../../hooks/useGardeSaisie'
 import { useOuvrirVue } from '../../lib/navigation'
@@ -33,10 +33,8 @@ import { cn, fmt } from '../../lib/utils'
 import { libelleLot } from '../../lib/lots'
 import { nouvelIdentifiant } from '../../lib/identifiant'
 import {
-  LIBELLE_STATUT,
   LotTrouve,
   MODULE,
-  TON,
   TableComptage,
   analyser,
   empreinte,
@@ -54,6 +52,8 @@ import {
   useCandidats,
   type Choix,
 } from './selection'
+import { StatutBadge } from '../../composants/StatutBadge'
+import { libelleStatut } from '../../lib/statuts'
 
 interface EnTeteInventaire {
   id_inventaire: string
@@ -293,7 +293,7 @@ function DocumentInventaire({ id }: { id: string }) {
         titre={`Inventaire ${inv.numero_inventaire}`}
         description={
           <span className="inline-flex flex-wrap items-center gap-2">
-            <Badge ton={TON[inv.statut] ?? 'neutre'}>{LIBELLE_STATUT[inv.statut] ?? inv.statut}</Badge>
+            <StatutBadge entite="inventaire" code={inv.statut} />
             <span>
               {inv.magasin_nom ?? inv.code_magasin} · {inv.type_inventaire.toLowerCase()}
             </span>
@@ -344,7 +344,10 @@ function DocumentInventaire({ id }: { id: string }) {
               consequence="L’inventaire redevient validé ; « Renvoyer au comptage » le rouvre si le comptage était faux."
             />
             {brouillonInv && droits.peutValider && inv.nb_lignes > 0 && (
+              // Une seule action principale : « Enregistrer le comptage » tant
+              // qu'une ligne modifiee n'est pas enregistree, la validation ensuite.
               <Bouton
+                variante={modifiees.length > 0 ? 'contour' : 'principal'}
                 chargement={valider.isPending}
                 disabled={!!bloqueValidation}
                 title={bloqueValidation ?? undefined}
@@ -400,7 +403,7 @@ function DocumentInventaire({ id }: { id: string }) {
             valeur={inv.valide_par ? `${inv.valide_par} · ${fmt.date(inv.date_validation)}` : '—'}
           />
           <Info libelle="Clôturé le" valeur={inv.date_cloture ? fmt.date(inv.date_cloture) : '—'} />
-          <Info libelle="Statut" valeur={LIBELLE_STATUT[inv.statut] ?? inv.statut} />
+          <Info libelle="Statut" valeur={libelleStatut('inventaire', inv.statut)} />
           {parListe && (
             <Info
               libelle="Liste validée"
@@ -580,6 +583,7 @@ function DocumentInventaire({ id }: { id: string }) {
               Annuler les modifications
             </Bouton>
             <Bouton
+              variante={modifiees.length > 0 ? 'principal' : 'contour'}
               disabled={modifiees.length === 0 || enErreur.length > 0}
               chargement={enregistrer.isPending}
               onClick={() => enregistrer.mutate(modifiees)}

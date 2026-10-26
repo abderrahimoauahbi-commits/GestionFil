@@ -33,7 +33,7 @@ import {
   type ChampFiltre,
 } from '../composants/PanneauFiltres'
 import { TableDroits, type Colonne } from '../components/TableDroits'
-import { Etiquette, fmt } from '../components/ui'
+import { fmt } from '../lib/utils'
 import {
   MenuContextuelElement,
   MenuContextuelSeparateur,
@@ -41,7 +41,8 @@ import {
 } from '../composants/ui/surcouches'
 import { useOuvrirVue } from '../lib/navigation'
 import { BesoinReference } from '../composants/BesoinOf'
-import { Bouton } from '../composants/ui/base'
+import { Badge, Bouton } from '../composants/ui/base'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'STOCK'
 
@@ -186,13 +187,6 @@ function JaugeCouverture({ ligne: l }: { ligne: LigneProjete }) {
       </span>
     </span>
   )
-}
-
-const TON: Record<string, 'rouge' | 'ambre' | 'vert' | 'neutre'> = {
-  RUPTURE: 'rouge',
-  CRITIQUE: 'rouge',
-  ATTENTION: 'ambre',
-  OK: 'vert',
 }
 
 /** Chaque statut, ce qu'il veut dire, et la couleur de son compteur. */
@@ -425,9 +419,9 @@ export function Stock() {
         const motif = motifAlerte(l)
         return (
           <div className="flex items-center gap-1.5 whitespace-nowrap" title={motif ?? undefined}>
-            <Etiquette ton={TON[l.statut] ?? 'neutre'}>{l.statut}</Etiquette>
-            {l.sur_stock === 1 && <Etiquette ton="neutre">sur-stock</Etiquette>}
-            {l.ecart_majeur === 1 && <Etiquette ton="ambre">ecart a vérifier</Etiquette>}
+            <StatutBadge entite="statut_stock" code={l.statut} />
+            {l.sur_stock === 1 && <Badge ton="neutre">sur-stock</Badge>}
+            {l.ecart_majeur === 1 && <Badge ton="alerte">ecart a vérifier</Badge>}
             {motif && <span className="max-w-[11rem] truncate text-[11px] text-attenue-texte">{motif}</span>}
           </div>
         )

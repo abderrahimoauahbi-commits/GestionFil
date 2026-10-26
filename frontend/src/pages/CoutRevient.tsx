@@ -38,8 +38,7 @@ import {
   Selecteur,
 } from '../composants/ui/base'
 import { EcartsPrix } from './EcartsPrix'
-import { fmt } from '../components/ui'
-import { cn } from '../lib/utils'
+import { cn, fmt } from '../lib/utils'
 import { ChoixRecherche } from '../composants/ChoixRecherche'
 
 const MODULE = 'VALORISATION'

@@ -44,6 +44,7 @@ import { depuisBobines, depuisKg, depuisPalettes, pourChamp, type Conditionnemen
 import { DetailCalcul } from './PlanAchatDetail'
 import { useParametreNombre } from '../lib/parametres'
 import { ChoixRecherche } from '../composants/ChoixRecherche'
+import { StatutBadge } from '../composants/StatutBadge'
 
 const MODULE = 'PLAN_ACHAT'
 
@@ -157,29 +158,6 @@ interface Kpi {
     nb_tier1: number
     nb_ruptures: number
   }[]
-}
-
-const TON_URGENCE: Record<string, 'danger' | 'alerte' | 'info' | 'neutre'> = {
-  'TIER 1': 'danger',
-  'TIER 2': 'alerte',
-  'TIER 3': 'info',
-  'TIER 4': 'neutre',
-}
-
-const TON_STATUT: Record<string, 'neutre' | 'info' | 'succes' | 'contour'> = {
-  PROPOSE: 'info',
-  EN_REVISION: 'info',
-  VALIDE: 'info',
-  COMMANDE: 'succes',
-  IGNORE: 'contour',
-}
-
-const LIBELLE_STATUT: Record<string, string> = {
-  PROPOSE: 'Proposee',
-  EN_REVISION: 'En revision',
-  VALIDE: 'Validee',
-  COMMANDE: 'Commandee',
-  IGNORE: 'Ecartee',
 }
 
 /** Une proposition n'est convertible que tant qu'elle n'engage rien. */
@@ -402,7 +380,7 @@ export function PlanAchat() {
       entete: 'Urgence',
       largeur: '90px',
       filtre: 'liste',
-      rendu: (p) => <Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge>,
+      rendu: (p) => <StatutBadge entite="urgence_achat" code={p.urgence} />,
     },
     {
       champ: 'code_reference',
@@ -445,9 +423,7 @@ export function PlanAchat() {
       filtre: 'liste',
       rendu: (p) => (
         <div className="flex flex-wrap items-center gap-1">
-          <Badge ton={TON_STATUT[p.statut] ?? 'neutre'}>
-            {LIBELLE_STATUT[p.statut] ?? p.statut}
-          </Badge>
+          <StatutBadge entite="plan_achat" code={p.statut} />
           {p.numero_bc && (
             <span className="text-[11px] text-attenue-texte">{p.numero_bc}</span>
           )}
@@ -675,7 +651,7 @@ export function PlanAchat() {
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
                 {(qKpi.data?.tiering ?? []).map((t) => (
                   <Fragment key={t.tier}>
-                    <span><Badge ton={TON_URGENCE[t.tier] ?? 'neutre'}>{t.tier}</Badge></span>
+                    <span><StatutBadge entite="urgence_achat" code={t.tier} /></span>
                     <span className="text-right tabular-nums">{t.nb} · {fmt.mad(t.montant_mad)}</span>
                   </Fragment>
                 ))}
@@ -1266,7 +1242,7 @@ function LignesACommander({
                         <td className="px-2 py-1.5">
                           <div className="font-medium">{p.code_reference}</div>
                           {p.designation && <div className="text-[11px] text-attenue-texte">{p.designation}</div>}
-                          <Badge ton={TON_URGENCE[p.urgence] ?? 'neutre'}>{p.urgence}</Badge>
+                          <StatutBadge entite="urgence_achat" code={p.urgence} />
                         </td>
                         <td className="px-2 py-1.5">
                           <div className="flex items-center gap-1">

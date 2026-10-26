@@ -262,7 +262,10 @@ export function EngagementsDossier({ d, ecrire, signaler }: { d: DossierComplet;
             <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-attenue-texte">Nouvel engagement</div>
             {/* DES ETIQUETTES VISIBLES (24/10/2026) : un champ rempli perdait
                 son invite, et l'on ne savait plus ce qu'on avait tape ou. */}
-            <div className="grid grid-cols-2 items-end gap-2 md:grid-cols-4 xl:grid-cols-8">
+            {/* LE N° D'ENGAGEMENT (20 chiffres) a sa piste au large, prise sur la
+                devise (trois lettres) : en huit colonnes egales, il n'avait que
+                107 px pour 124 a 1366 px. Toujours huit pistes, aucun defilement. */}
+            <div className="grid grid-cols-2 items-end gap-2 md:grid-cols-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(8.5rem,1.3fr)_minmax(0,0.8fr)_repeat(4,minmax(0,1fr))]">
               <div className="xl:col-span-2">
                 <Etiq obligatoire htmlFor="eng-fournisseur">Fournisseur</Etiq>
                 <Selecteur id="eng-fournisseur" className={cn(champ, 'w-full')} value={n.code_fournisseur} aria-label="Fournisseur de l’engagement"

@@ -48,7 +48,7 @@ import {
 } from '../composants/ui/base'
 import { Aide, useConfirmation } from '../composants/ui/surcouches'
 import { cn, fmt } from '../lib/utils'
-import { lireNombre } from '../lib/nombres'
+import { lireNombre, versSaisie } from '../lib/nombres'
 import { nouvelIdentifiant } from '../lib/identifiant'
 import { useGardeSaisie } from '../hooks/useGardeSaisie'
 
@@ -369,9 +369,9 @@ export function FactureFournisseur() {
       code_fournisseur: e.code_fournisseur,
       date_facture: e.date_facture?.slice(0, 10) ?? '',
       code_devise: e.code_devise,
-      taux: String(e.taux_change ?? ''),
-      montant: e.montant_devise != null ? String(e.montant_devise) : '',
-      frais: e.frais_devise ? String(e.frais_devise) : '',
+      taux: versSaisie(e.taux_change),
+      montant: versSaisie(e.montant_devise),
+      frais: e.frais_devise ? versSaisie(e.frais_devise) : '',
       nette: e.facture_nette == null ? '' : e.facture_nette === 1 ? '1' : '0',
       notes: e.notes ?? '',
     })
@@ -379,9 +379,9 @@ export function FactureFournisseur() {
       lue.lignes.map((l) => [
         l.id_ligne_reception,
         {
-          qte: String(l.quantite_facturee_kg),
-          prix: l.prix_kg_devise != null ? String(l.prix_kg_devise) : '',
-          remise: l.remise_pct ? String(l.remise_pct) : '',
+          qte: versSaisie(l.quantite_facturee_kg),
+          prix: versSaisie(l.prix_kg_devise),
+          remise: l.remise_pct ? versSaisie(l.remise_pct) : '',
         },
       ]),
     )
@@ -393,9 +393,9 @@ export function FactureFournisseur() {
           code_fournisseur: e.code_fournisseur,
           date_facture: e.date_facture?.slice(0, 10) ?? '',
           code_devise: e.code_devise,
-          taux: String(e.taux_change ?? ''),
-          montant: e.montant_devise != null ? String(e.montant_devise) : '',
-          frais: e.frais_devise ? String(e.frais_devise) : '',
+          taux: versSaisie(e.taux_change),
+          montant: versSaisie(e.montant_devise),
+          frais: e.frais_devise ? versSaisie(e.frais_devise) : '',
           nette: e.facture_nette == null ? '' : e.facture_nette === 1 ? '1' : '0',
           notes: e.notes ?? '',
         },
@@ -438,7 +438,7 @@ export function FactureFournisseur() {
   })
   useEffect(() => {
     if (enDevise && !entete.taux && qTaux.data?.reference) {
-      setEntete((e) => ({ ...e, taux: String(qTaux.data!.reference) }))
+      setEntete((e) => ({ ...e, taux: versSaisie(qTaux.data!.reference) }))
     }
   }, [qTaux.data?.reference, enDevise, entete.taux])
 
@@ -585,8 +585,8 @@ export function FactureFournisseur() {
         copie[c.id_ligne_reception] = {
           // CE QUI EST ATTENDU SERT DE DEPART : les kilos peses et le prix
           // engage. On ne corrige que ce que le papier dit autrement.
-          qte: String(c.quantite_stock_kg),
-          prix: c.prix_kg_devise != null ? String(c.prix_kg_devise) : '',
+          qte: versSaisie(c.quantite_stock_kg),
+          prix: versSaisie(c.prix_kg_devise),
           remise: '',
         }
       setApercu(null)

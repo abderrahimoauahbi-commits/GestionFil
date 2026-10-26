@@ -132,7 +132,7 @@ export function EtatReception() {
         <EtatImprimable
           titre="Bon de réception"
           reference={r.numero_reception}
-          sousTitre={r.statut !== 'VALIDEE' ? `Statut : ${libelleStatut('reception', r.statut)}` : undefined}
+          sousTitre={r.statut !== 'VALIDE' ? `Statut : ${libelleStatut('reception', r.statut)}` : undefined}
           enTete={
             <div className="grid grid-cols-2 gap-x-8 gap-y-1">
               <div className="space-y-1">

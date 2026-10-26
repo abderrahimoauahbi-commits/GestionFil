@@ -202,6 +202,16 @@ primitives (Radix + CVA). Couleurs en jetons de thème, jamais en teintes figée
 - Règles de gestion validées le 08/10/2026 : migrations `db/pg/migrations/2026-10-08_regles_p1.sql` (sections 1 à 14) puis `2026-10-08b_audit_v4.sql` (corrections de l'audit v4), les deux exigées au démarrage ; `seed_006_regles_2026_10.sql` en porte les référentiels pour une base neuve. Le colisage incohérent se SIGNALE, il ne bloque jamais.
 - Arbitrages du 09/10/2026 (audit v5) : `docs/ADR-002` section « Arbitrages du 09/10/2026 » (A1–A11) ; migrations `2026-10-09a` à `2026-10-09za`, puis `2026-10-10a` (A1 et A11 tranchés le 10/10 : prêt toujours rendu, jamais d'acompte avant dédouanement → C53), toutes exigées au démarrage. Une migration déjà appliquée corrigée après coup se déclare dans `EMPREINTES_REMPLACEES` (`db/pg/migrer.py`), sinon `--verifier` arrête la publication.
 - `deploiement/README.md` — serveur, migrations en production, sauvegardes, assistant.
+- Interface, vague 2 (24–26/10/2026) : **statuts** en une seule table (`lib/statuts.ts`, codes tirés des CHECK de la
+  base, libellés et tons ; `composants/StatutBadge.tsx`) — l'ancienne couche `components/ui.tsx` est supprimée ;
+  **fiche machine** : ni OF ni qualité en en-tête (OF par ligne, qualité lue de l'OF sinon choisie sur la ligne) ; hors
+  chargement, la voie et (au constat) le nombre de bobines ne changent pas — garanti par `decision_machine.rs`
+  (`hors_chargement`) — sauf **un constat à 0 % qui ferme la ligne** (`ferme_au_constat`) ; le rebut = déchargement vers
+  DÉCHET ; **import** : une ligne de facture reçue est figée en base tout entière (`2026-10-24c`, exigée au démarrage),
+  le prix du bon revient sur chaque ligne ; **réception** saisie sur la ligne (`receptions/GrilleReception.tsx`,
+  `BarreReception.tsx`), dates de fabrication / péremption dans un détail au clic ; **facture fournisseur** : un seul
+  tableau, la case cochée active la saisie. La migration `2026-10-24d` (mémo du besoin des OF) est **abandonnée** :
+  l'OF sort du besoin MRP (décision du 26/10, `docs/A-DECIDER-of-supply-chain.md`).
 - `docs/A-DECIDER-of-supply-chain.md` — **l'OF Supply Chain, livré le 22/10** (`2026-10-22a` à `22d`, exigées au
   démarrage) : l'ordre de fabrication (date, qualité, métrage, PRÉVU → LANCÉ → CLÔTURÉ / ANNULÉ) **prévoit, oriente et
   analyse, il ne déplace jamais le stock**. Les fiches machine portent l'OF (fiche, ligne, état de l'étage) et une voie

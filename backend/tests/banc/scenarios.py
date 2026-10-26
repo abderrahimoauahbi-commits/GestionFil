@@ -2668,6 +2668,88 @@ def scenario_import_coherence(c, infra):
     # Plus rien de recu : la facture se corrige de nouveau.
     c.ok("Choukri", "PATCH", f"/api/import/factures/{id_facture}", VF(infra, id_facture, {"montant_devise": 2100}))
 
+def scenario_import_ligne_recue_figee(c, infra):
+    """UNE LIGNE DE FACTURE D'IMPORT RECUE EST FIGEE TOUT ENTIERE (decision du 24/10/2026,
+    2026-10-24c) : apres l'entree en stock, son lot, sa couleur (code et libelle), ses bobines et
+    ses palettes se refusent aussi (IMPORT-FIGEE, la colonne nommee) — par la route comme en base.
+    Une ligne non recue de la meme facture reste modifiable. Et chaque ligne rend LE PRIX DE SON BON,
+    meme quand la ligne de bon est soldee (elle ne figure plus parmi les lignes ouvertes)."""
+    import json
+    ref, ref_libre = "PP FRZ-2900 Dtex-D.Green 5463-Hs", "PP FRZ-2900 Dtex-Beige 44360-Hs"
+    jour = taux_usd_du_jour(infra)
+    cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=USD&date={jour}")["reference"]
+
+    _id_bc, lignes = bon_envoye(c, [(ref, 500, 2.0)], frs="FRS-001")
+    lb = lignes[0]["id_ligne_bc"]
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/FIGEE", "code_devise": "USD"})
+    id_dossier = d.get("id_dossier") or d.get("id")
+    fac = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures", VD(infra, id_dossier, {
+        "code_fournisseur": "FRS-001", "numero_facture": "FB-FIGEE", "date_facture": jour,
+        "code_devise": "USD", "taux_change": cours}))
+    id_facture = fac.get("id_facture") or fac.get("id")
+    # Facturee 2,10 pour un bon a 2,00 : l'ecart au bon doit rester lisible apres le solde.
+    recue = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
+        "type_ligne": "ERP", "code_reference": ref, "unite": "kg", "quantite": 500,
+        "poids_net_kg": 500, "prix_unitaire_devise": 2.1, "lot_fournisseur": "LOT-FIGEE",
+        "code_couleur": "5463", "libelle_couleur": "D.GREEN", "nb_bobines": 159, "nb_palettes": 1,
+        "id_ligne_bc": lb}))
+    id_recue = recue.get("id_ligne") or recue.get("id")
+    libre = c.ok("Choukri", "POST", f"/api/import/factures/{id_facture}/lignes", VF(infra, id_facture, {
+        "type_ligne": "ERP", "code_reference": ref_libre, "unite": "kg", "quantite": 300,
+        "poids_net_kg": 300, "prix_unitaire_devise": 2.5, "lot_fournisseur": "LOT-LIBRE"}))
+    id_libre = libre.get("id_ligne") or libre.get("id")
+
+    # L'arrivage sert toute la ligne de bon.
+    r = c.ok("Magasinie", "POST", "/api/receptions", {
+        "code_fournisseur": "FRS-001", "num_bon_livraison": "BL-FIGEE", "id_dossier_import": id_dossier,
+        "lignes": [{"code_reference": ref, "id_ligne_bc": lb, "unite_saisie": "kg",
+                    "quantite_pesee_unite": 500, "code_magasin_dest": MAG,
+                    "lot_fournisseur": "LOT-FIGEE", "nb_bobines": 159}]})
+    rid = r["id_reception"]
+    c.ok("Magasinie", "PUT", f"/api/receptions/{rid}/statut", {"statut": "A_CONTROLER"})
+    c.ok("Choukri", "POST", f"/api/receptions/{rid}/valider")
+    verifier(float(infra.valeur(f"SELECT quantite_recue_kg FROM import_facture_lignes WHERE id_ligne = '{id_recue}'")) > 0,
+             "la ligne de facture ne se dit pas recue apres l'arrivage")
+
+    # ---- 1. LA LIGNE RECUE : lot, couleur, colis refuses, la colonne nommee ----
+    for champ, valeur, nom in [("lot_fournisseur", "LOT-AUTRE", "lot"), ("code_couleur", "9999", "code couleur"),
+                               ("libelle_couleur", "VERT", "libellé couleur"), ("nb_bobines", 160, "bobines"),
+                               ("nb_palettes", 2, "palettes")]:
+        r = c.refus("Choukri", "PATCH", f"/api/import/lignes/{id_recue}", VF(infra, id_facture, {champ: valeur}),
+                    contient="IMPORT-FIGEE")
+        verifier(f"refusée ({nom})" in json.dumps(r, ensure_ascii=False),
+                 f"le refus ne nomme pas la colonne {champ} : {r}")
+    # EN BASE, pas seulement par la route : un UPDATE direct est refuse de meme.
+    refus_sql(infra, f"UPDATE import_facture_lignes SET nb_palettes = 3, lot_fournisseur = 'X' "
+                     f"WHERE id_ligne = '{id_recue}'", "IMPORT-FIGEE")
+    verifier(infra.valeur(f"SELECT lot_fournisseur FROM import_facture_lignes WHERE id_ligne = '{id_recue}'") == "LOT-FIGEE",
+             "le lot de la ligne recue a change")
+    # Ce que le serveur tient lui-meme bouge encore : la repartition, le solde.
+    infra.sql(f"UPDATE import_facture_lignes SET pct_dossier = pct_dossier WHERE id_ligne = '{id_recue}'")
+
+    # ---- 2. LA LIGNE NON RECUE reste modifiable --------------------------------
+    c.ok("Choukri", "PATCH", f"/api/import/lignes/{id_libre}", VF(infra, id_facture, {
+        "lot_fournisseur": "LOT-LIBRE-2", "code_couleur": "4436", "libelle_couleur": "BEIGE",
+        "nb_bobines": 95, "nb_palettes": 1}))
+    verifier(infra.valeur(f"SELECT lot_fournisseur FROM import_facture_lignes WHERE id_ligne = '{id_libre}'") == "LOT-LIBRE-2",
+             "la ligne non recue ne s'est pas modifiee")
+
+    # ---- 3. LE PRIX DU BON SUR LA LIGNE, MEME LE BON SOLDE ---------------------
+    statut_lb = infra.valeur(f"SELECT statut FROM ligne_bc WHERE id_ligne_bc = '{lb}'")
+    verifier(statut_lb == "SOLDE", f"la ligne de bon servie en entier devrait etre soldee, elle est {statut_lb}")
+    ouvertes = c.ok("Choukri", "GET", "/api/import/lignes-bc?fournisseur=FRS-001")
+    verifier(all(o["id_ligne_bc"] != lb for o in ouvertes), "la ligne de bon soldee figure encore parmi les ouvertes")
+    dossier = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
+    par_id = {l["id_ligne"]: l for l in dossier["lignes"]}
+    lr, ll = par_id[id_recue], par_id[id_libre]
+    verifier(lr.get("prix_kg_devise") is not None and abs(float(lr["prix_kg_devise"]) - 2.0) < 1e-9
+             and lr.get("devise_bc") == "USD",
+             f"la ligne ne rend pas le prix de son bon solde : {lr.get('prix_kg_devise')} {lr.get('devise_bc')}")
+    verifier(abs(float(lr["prix_unitaire_devise"]) - 2.1) < 1e-9, "le prix facture a change")
+    verifier(ll.get("prix_kg_devise") is None and ll.get("devise_bc") is None,
+             "une ligne sans bon rend un prix de bon")
+
+
 def taux_usd_du_jour(infra):
     jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
     if infra.valeur(f"SELECT count(*) FROM taux_change WHERE code_devise = 'USD' AND substr(date_debut, 1, 10) = '{jour}'") == "0":
@@ -3049,6 +3131,152 @@ def scenario_machine_of_voie(c, infra):
              f"premier chargement avec ecart : periode {l0.get('numero_of_periode')}, ecart {l0.get('ecart_kg')}")
     c.ok("Magasinie", "POST", f"/api/machines/fiches/{f4}/annuler", {"motif": "Essai du banc"})
     verifier(controle(infra, "C11") == 0, "C11 apres le parcours OF et voie")
+
+
+def scenario_machine_voie_fixe(c, infra):
+    """CE QUE SEUL LE CHARGEMENT DEFINIT (decision du 24/10/2026) : la voie d'une ligne, et au constat son
+    nombre de bobines. Une voie autre que celle de l'etat, au constat comme au dechargement, est refusee ;
+    un constat (correction comprise) qui change le nombre de bobines aussi ; le dechargement saisit ce qu'il
+    retire, les restantes se calculent. ET LA FICHE SANS OF D'EN-TETE : l'OF choisi sur chaque ligne donne
+    le meme etage, les memes lignes de decision et le meme numero d'OF que l'OF d'en-tete (ancien geste).
+    LA FIN DE LIGNE (26/10/2026) : un constat a 0 % ferme la ligne (seule exception au nombre fixe) --
+    elle quitte l'etage, tout ce qui restait est la consommation ; devalider ou annuler ce constat la
+    rend. Le reste jete au rebut sort par un dechargement vers le DECHET."""
+    ref = "PP-1500 Dtex-L.Beige 44377-Hs"
+    jour = taux_usd_du_jour(infra)
+    for lot in ("LOT-VF-A", "LOT-VF-B"):
+        id_bc, lignes = bon_envoye(c, [(ref, 300, 2.0)], frs="FRS-001")
+        reception_validee(c, id_bc, lignes, [300], lot_fournisseur=lot, nb_bobines=110)
+    q1, q2 = [l[0] for l in infra.sql("SELECT code_qualite FROM qualite WHERE statut = 'ACTIF' "
+                                      "ORDER BY code_qualite LIMIT 2")]
+    for numero, q in (("OF-BANC-VF1", q1), ("OF-BANC-VF2", q2)):
+        infra.sql(f"INSERT INTO ordre_fabrication (numero, code_qualite, metrage_m2) VALUES ('{numero}', '{q}', 100) "
+                  "ON CONFLICT (numero) DO NOTHING")
+    x1 = infra.valeur("SELECT id_of FROM ordre_fabrication WHERE numero = 'OF-BANC-VF1'")
+    x2 = infra.valeur("SELECT id_of FROM ordre_fabrication WHERE numero = 'OF-BANC-VF2'")
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCVF", "nom": "Machine de la voie fixe", "largeur_m": 4.2,
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300},
+                                                        {"role": "ETAGE", "numero_etage": 2, "capacite_bobines": 300}]})
+    ancien, nouveau = "BANCVF-E1", "BANCVF-E2"
+
+    def fiche(zone, type_fiche, lignes, id_of=None, numero_of=None):
+        return c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANCVF", "code_emplacement": zone, "date_fiche": jour,
+            "code_magasin": MAG if type_fiche != "MAJ" else None, "responsable": "Banc", "id_of": id_of,
+            "numero_of": numero_of, "lignes": lignes})["id_fiche"]
+
+    def valider(f):
+        ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/apercu", {})
+        verifier(not ap["blocages"], f"fiche bloquee : {ap['blocages']}")
+        c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/valider", {})
+
+    def etat(zone):
+        return infra.sql("SELECT nb_bobines, kg, id_of, code_qualite, largeur_voie_m FROM machine_etat "
+                         f"WHERE code_emplacement = '{zone}'")
+
+    def trace(f):
+        lignes = infra.sql("SELECT l.id_of, l.id_of_periode, l.code_qualite, l.code_qualite_periode, l.ecart_kg, "
+                           "l.largeur_voie_m, l.nb_apres FROM machine_decision_ligne l JOIN machine_decision d "
+                           f"ON d.id_decision = l.id_decision WHERE d.id_fiche = '{f}' AND d.statut = 'ACTIVE'")
+        texte = infra.sql("SELECT f.numero_of, (SELECT string_agg(COALESCE(m.numero_of, ''), ',') FROM mouvement m "
+                          "JOIN machine_decision d ON d.id_decision = m.id_decision_machine WHERE d.id_fiche = f.id_fiche) "
+                          f"FROM machine_fiche f WHERE f.id_fiche = '{f}'")
+        return lignes, texte
+
+    # 1. LE MEME CHARGEMENT, PAR LES DEUX GESTES : l'OF d'en-tete (ancien) ; l'OF sur la ligne, l'en-tete vide et
+    #    le numero d'OF en texte d'historique (nouveau, ce que l'ecran envoie depuis le 24/10/2026).
+    charge = {"code_reference": ref, "nb_bobines_mouvementees": 100, "poids_retenu_kg": 2.6, "pourcentage": 100,
+              "code_motif": "CH_PRODUCTION", "largeur_voie_m": 1.2}
+    fa = fiche(ancien, "CHARGE", [dict(charge, lot_fournisseur="LOT-VF-A")], id_of=x1)
+    fn = fiche(nouveau, "CHARGE", [dict(charge, lot_fournisseur="LOT-VF-B", id_of=x1)], numero_of="OF-BANC-VF1")
+    valider(fa)
+    valider(fn)
+    verifier(etat(ancien) == etat(nouveau) == [["100", "260.0000", x1, q1, "1.200"]],
+             f"chargement : etage ancien {etat(ancien)}, nouveau {etat(nouveau)}")
+    verifier(trace(fa) == trace(fn), f"chargement : traces differentes\n{trace(fa)}\n{trace(fn)}")
+    verifier(trace(fn)[1] == [["OF-BANC-VF1", "OF-BANC-VF1"]], f"numero d'OF de la fiche et du mouvement : {trace(fn)[1]}")
+
+    # 2. LA FRONTIERE PAR LES DEUX GESTES : un constat qui passe a X2 (qualite Q2). L'ecart reste a X1 / Q1.
+    constat = {"code_reference": ref, "nb_bobines_presentes": 100, "pourcentage": 50, "code_motif": "MJ_ORDINAIRE"}
+    fa = fiche(ancien, "MAJ", [dict(constat, lot_fournisseur="LOT-VF-A")], id_of=x2)
+    fn = fiche(nouveau, "MAJ", [dict(constat, lot_fournisseur="LOT-VF-B", id_of=x2)], numero_of="OF-BANC-VF2")
+    valider(fa)
+    valider(fn)
+    verifier(etat(ancien) == etat(nouveau) == [["100", "130.0000", x2, q2, "1.200"]],
+             f"constat : etage ancien {etat(ancien)}, nouveau {etat(nouveau)}")
+    verifier(trace(fa) == trace(fn), f"constat : traces differentes\n{trace(fa)}\n{trace(fn)}")
+    verifier(trace(fn)[0] == [[x2, x1, q2, q1, "130.0000", "1.200", "100"]], f"frontiere : {trace(fn)[0]}")
+
+    # 3. LE CONSTAT NE CHANGE PAS LE NOMBRE DE BOBINES, ni par un constat ordinaire, ni par une correction --
+    #    0 bobine compris, tant que le % constate n'est pas 0 (26/10/2026).
+    for lignes in ([dict(constat, lot_fournisseur="LOT-VF-B", nb_bobines_presentes=99)],
+                   [dict(constat, lot_fournisseur="LOT-VF-B", nb_bobines_presentes=0, pourcentage=30,
+                         code_motif="MJ_CORRECTION", effet_ecart="ERREUR_SAISIE", motif_texte="essai du banc")]):
+        f = fiche(nouveau, "MAJ", lignes)
+        ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/apercu", {})
+        verifier(any("nombre de bobines" in b and "dechargement" in b for b in ap["blocages"]),
+                 f"constat qui change le nombre de bobines non bloque : {ap['blocages']}")
+        c.refus("Magasinie", "POST", f"/api/machines/fiches/{f}/valider", {"confirme_orange": True}, contient="nombre de bobines")
+        c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/annuler", {"motif": "Essai du banc"})
+
+    # 4. LA VOIE SE DEFINIT AU CHARGEMENT : une autre voie, au constat comme au dechargement, est refusee.
+    retrait = {"code_reference": ref, "lot_fournisseur": "LOT-VF-B", "nb_bobines_mouvementees": 10, "pct_retirees": 50,
+               "pourcentage": 50, "destination": "MAGASIN", "code_motif": "DE_CHGT_PROD"}
+    for type_fiche, ligne in (("MAJ", dict(constat, lot_fournisseur="LOT-VF-B", largeur_voie_m=1.4)),
+                              ("DECHARGE", dict(retrait, largeur_voie_m=1.4))):
+        f = fiche(nouveau, type_fiche, [ligne])
+        ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/apercu", {})
+        verifier(any("voie se definit au chargement" in b for b in ap["blocages"]),
+                 f"{type_fiche} qui change la voie non bloque : {ap['blocages']}")
+        c.refus("Magasinie", "POST", f"/api/machines/fiches/{f}/valider", {}, contient="voie")
+        c.ok("Magasinie", "POST", f"/api/machines/fiches/{f}/annuler", {"motif": "Essai du banc"})
+
+    # 5. Le dechargement saisit ce qu'il retire (la voie de l'etat, ou rien) : 90 bobines restent, la voie aussi ;
+    #    un constat au nombre de l'etat passe.
+    valider(fiche(nouveau, "DECHARGE", [dict(retrait, largeur_voie_m=1.2)]))
+    verifier(etat(nouveau) == [["90", "117.0000", x2, q2, "1.200"]], f"apres le dechargement : {etat(nouveau)}")
+    valider(fiche(nouveau, "MAJ", [dict(constat, lot_fournisseur="LOT-VF-B", nb_bobines_presentes=90)]))
+    verifier(etat(nouveau)[0][0] == "90" and etat(nouveau)[0][4] == "1.200", f"apres le constat : {etat(nouveau)}")
+    plein = [["90", "117.0000", x2, q2, "1.200"]]
+    verifier(etat(nouveau) == plein, f"avant la fin de ligne : {etat(nouveau)}")
+    nb_mvt = lambda: infra.valeur("SELECT count(*) FROM mouvement m JOIN machine_decision d "
+                                  "ON d.id_decision = m.id_decision_machine WHERE d.code_emplacement = 'BANCVF-E2'")
+    mvt0 = nb_mvt()
+
+    def decision(f):
+        return infra.sql("SELECT l.nb_avant, l.nb_apres, l.kg_apres, l.ecart_kg, l.effet_ecart, l.id_of_periode "
+                         "FROM machine_decision_ligne l JOIN machine_decision d ON d.id_decision = l.id_decision "
+                         f"WHERE d.id_fiche = '{f}' AND d.statut = 'ACTIVE'")
+
+    # 6. LA FIN DE LIGNE PAR LE CONSTAT (26/10/2026) : 0 % ferme la ligne. L'ecran envoie le nombre de l'etat (ou
+    #    0) : le serveur pose 0 bobine, la ligne quitte l'etage, les 117 kg qui restaient sont la consommation
+    #    mesuree, rangee sous l'OF de la periode -- sans mouvement de magasin.
+    f0 = fiche(nouveau, "MAJ", [dict(constat, lot_fournisseur="LOT-VF-B", nb_bobines_presentes=90, pourcentage=0)])
+    valider(f0)
+    verifier(etat(nouveau) == [], f"le constat a 0 % ne ferme pas la ligne : {etat(nouveau)}")
+    verifier(decision(f0) == [["90", "0", "0.0000", "117.0000", "CONSOMMATION", x2]], f"constat a 0 % : {decision(f0)}")
+    verifier(nb_mvt() == mvt0, "le constat a 0 % a ecrit un mouvement de magasin")
+    # La devalidation rend la ligne fermee, telle qu'elle etait (OF, qualite, voie compris).
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f0}/devalider", {"motif": "Essai du banc"})
+    verifier(etat(nouveau) == plein, f"la devalidation ne rend pas la ligne fermee : {etat(nouveau)}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f0}/annuler", {"motif": "Essai du banc"})
+    # Meme fin, 0 bobine envoye ; l'annulation de la fiche validee rend la ligne de meme.
+    f1 = fiche(nouveau, "MAJ", [dict(constat, lot_fournisseur="LOT-VF-B", nb_bobines_presentes=0, pourcentage=0)])
+    valider(f1)
+    verifier(etat(nouveau) == [] and decision(f1)[0][1:5] == ["0", "0.0000", "117.0000", "CONSOMMATION"],
+             f"constat a 0 % (0 envoye) : {etat(nouveau)} {decision(f1)}")
+    c.ok("Magasinie", "POST", f"/api/machines/fiches/{f1}/annuler", {"motif": "Essai du banc"})
+    verifier(etat(nouveau) == plein, f"l'annulation ne rend pas la ligne fermee : {etat(nouveau)}")
+    # 7. LE REBUT : le reste sort par un dechargement vers le DECHET -- la ligne quitte l'etage, sans magasin.
+    fr = fiche(nouveau, "DECHARGE", [dict(retrait, nb_bobines_mouvementees=90, pct_retirees=50, destination="DECHET",
+                                          code_motif="DE_DECHET")])
+    valider(fr)
+    verifier(etat(nouveau) == [], f"le rebut laisse la ligne sur l'etage : {etat(nouveau)}")
+    verifier(infra.sql("SELECT l.kg_mouvementes, l.destination, l.ecart_kg FROM machine_decision_ligne l JOIN machine_decision d "
+                       f"ON d.id_decision = l.id_decision WHERE d.id_fiche = '{fr}' AND d.statut = 'ACTIVE'")
+             == [["117.0000", "DECHET", "0.0000"]], "le rebut ne porte pas les 117 kg au dechet")
+    verifier(nb_mvt() == mvt0, "le rebut a ecrit un mouvement de magasin")
+    verifier(controle(infra, "C11") == 0, "C11 apres la voie fixe")
 
 
 def scenario_fiche_hors_machine(c, infra):
@@ -4657,7 +4885,6 @@ def scenario_besoin_of(c, infra):
         infra.sql(f"UPDATE ordre_fabrication SET statut = 'ANNULE' WHERE id_of = '{id_of3}'")
         infra.sql(f"UPDATE reference SET mode_consommation = '{mode}' WHERE code_reference = '{REF}'")
 
-
 def scenario_recherche_referentiels(c, infra):
     """LA RECHERCHE DES REFERENTIELS (24/10/2026) : `/api/recherche/{type}` rend au plus la
     limite (plafonnee a 100), cherche chaque mot en ET, dit s'il en reste (`plus`, `total`),
@@ -4810,6 +5037,7 @@ SCENARIOS = [
     scenario_colisage_ecran_et_base,
     scenario_import,
     scenario_import_coherence,
+    scenario_import_ligne_recue_figee,
     scenario_import_sur_arrivage,
     scenario_lots_autorisations,
     scenario_machine,
@@ -4824,6 +5052,7 @@ SCENARIOS = [
     scenario_consommation_directe,
     scenario_of_cycle,
     scenario_machine_of_voie,
+    scenario_machine_voie_fixe,
     scenario_fiche_hors_machine,
     scenario_of_semaine,
     scenario_lot_conditionnement,

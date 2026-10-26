@@ -436,6 +436,9 @@ export function Coquille() {
     enabled: peut('COCKPIT', 'LIRE'),
     refetchInterval: 5 * 60_000,
     staleTime: 60_000,
+    // Pas au retour sur la fenetre : la requete coute des secondes, et les
+    // cinq minutes suffisent a des alertes sur l'etat des donnees.
+    refetchOnWindowFocus: false,
   })
 
   const alertes = (qControles.data ?? []).filter((c) => c.anomalies > 0)

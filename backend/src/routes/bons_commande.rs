@@ -1664,24 +1664,35 @@ pub async fn references_commandables(
                 -- Sans cette colonne, elle se noie dans « les autres references
                 -- du fournisseur » et personne ne fait le lien au moment ou il
                 -- serait le plus utile — celui de la saisie.
-                (SELECT e.code_reference FROM v_equivalence e
-                   WHERE e.equivalent_reference = r.code_reference
-                     AND e.interchangeable = 1
-                     AND COALESCE(e.stock_projete_kg, 0) < COALESCE(e.besoin_12m_kg, 0)
-                   ORDER BY COALESCE(e.stock_projete_kg, 0) - COALESCE(e.besoin_12m_kg, 0)
-                   LIMIT 1)                                        AS equivalent_de,
-                (SELECT ROUND(COALESCE(e.besoin_12m_kg, 0), 3) FROM v_equivalence e
-                   WHERE e.equivalent_reference = r.code_reference
-                     AND e.interchangeable = 1
-                     AND COALESCE(e.stock_projete_kg, 0) < COALESCE(e.besoin_12m_kg, 0)
-                   ORDER BY COALESCE(e.stock_projete_kg, 0) - COALESCE(e.besoin_12m_kg, 0)
-                   LIMIT 1)                                        AS besoin_equivalent_kg,
-                (SELECT COUNT(*) FROM v_equivalence e
-                   WHERE e.code_reference = r.code_reference)      AS nb_equivalents
+                --
+                -- UNE LECTURE DE v_equivalence, PAS DEUX (24/10/2026) : la
+                -- reference en tension et son besoin viennent de la meme ligne
+                -- (jointure LATERAL plus bas). Chaque sous-requete depliait la
+                -- vue, donc le stock projete et le besoin, une fois de plus.
+                eq.equivalent_de, eq.besoin_equivalent_kg,
+                -- Le nombre d'equivalents ne depend que des groupes : les lignes
+                -- de v_equivalence ou `code_reference` est cette reference, sans
+                -- ses jointures de stock (une ligne au plus par reference, elles
+                -- ne changent pas le compte).
+                (SELECT COUNT(*) FROM reference_groupe_equiv q1
+                   JOIN groupe_equiv qg ON qg.code_groupe_equiv = q1.code_groupe_equiv AND qg.actif = 1
+                   JOIN reference_groupe_equiv q2 ON q2.code_groupe_equiv = q1.code_groupe_equiv
+                                                 AND q2.code_reference <> q1.code_reference AND q2.actif = 1
+                   JOIN reference qr ON qr.code_reference = q2.code_reference AND qr.actif = 1
+                  WHERE q1.code_reference = r.code_reference AND q1.actif = 1 AND r.actif = 1) AS nb_equivalents
            FROM reference r
            JOIN fournisseur f ON f.code_fournisseur = r.code_fournisseur
            LEFT JOIN v_stock_projete sp ON sp.code_reference = r.code_reference
            LEFT JOIN v_plan_achat    pa ON pa.code_reference = r.code_reference
+           LEFT JOIN LATERAL (
+                SELECT e.code_reference AS equivalent_de,
+                       ROUND(COALESCE(e.besoin_12m_kg, 0), 3) AS besoin_equivalent_kg
+                  FROM v_equivalence e
+                 WHERE e.equivalent_reference = r.code_reference
+                   AND e.interchangeable = 1
+                   AND COALESCE(e.stock_projete_kg, 0) < COALESCE(e.besoin_12m_kg, 0)
+                 ORDER BY COALESCE(e.stock_projete_kg, 0) - COALESCE(e.besoin_12m_kg, 0)
+                 LIMIT 1) eq ON true
           WHERE r.actif = 1 AND ($4 = 1 OR r.code_fournisseur = $2){filtre_recherche}
           -- CE QUE LE PLAN RECLAME D'ABORD, puis ce qui est en tension. Quand on
           -- cherche a la frappe, les premieres lignes doivent etre celles qu'on

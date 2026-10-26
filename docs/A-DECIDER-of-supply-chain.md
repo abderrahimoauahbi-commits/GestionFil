@@ -185,6 +185,18 @@ borné par la qualité ; au déchargement et au constat, la qualité vient de l'
 correction du conditionnement au droit VALIDER des lots ; une mesure de réception n'écrase jamais une
 correction manuelle ; garde-fou de 50 % comme pour la fiche article.
 
+## 6 quinquies-bis. Migration 2026-10-24d abandonnée (26/10/2026)
+
+La migration `2026-10-24d_memo_besoin_of.sql` mettait en mémoire, une fois par instantané,
+le résultat de `fn_besoin_of_mois()` (le besoin ajusté par les OF), qui était recalculé des
+dizaines de fois par requête et ralentissait la recherche de référence des bons, les contrôles
+et le briefing. **Elle est abandonnée, jamais commitée ni appliquée** : la direction a décidé le
+26/10 que **l'OF ne fait pas partie du besoin MRP** (le besoin repose sur le plan seul ; l'OF est
+du court terme, au plus une semaine, et sert la production et les statistiques). Le calcul
+qu'elle accélérait va donc disparaître ; elle n'aurait été qu'une dépendance temporaire au
+démarrage. On garde la réécriture de la requête des références commandables
+(`routes/bons_commande.rs` : une seule lecture de `v_equivalence`), indépendante de l'OF.
+
 ## 7. Ce que les données existantes donnent déjà (preuves, base de saisie, 22/10/2026)
 
 | Fait | Preuve |

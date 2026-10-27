@@ -611,6 +611,34 @@ Les 42 références sans plan ne changent pas.
    remplacent les trois états actuels. Le cockpit, le briefing, l'assistant et les contrôles C05 et
    C25 suivent, puisqu'ils lisent tous `couverture::etats()`.
 
+### 15.9 bis Décisions du 27/10/2026 (soir) : GO spécification → tests → implémentation
+
+1. **Cible obligatoire seulement pour les articles soumis au MRP.** Il n'existe pas de drapeau
+   « MRP » sur l'article, et on n'en ajoute pas. Un article est soumis au MRP s'il est actif et
+   présent dans le besoin du plan en service. Sans cible : signal `CIBLE_NON_DEFINIE`
+   (configuration incomplète) et aucune proposition. Aucun blocage à la saisie de la fiche.
+2. **Une seule proposition consolidée quand la cible est déjà en retard.** Les propositions
+   successives qui arrivent toutes à aujourd'hui + L sont fusionnées en une seule, dont la
+   quantité est la somme des Q0 de chaque fenêtre (plus X et l'arrondi, appliqués une fois). La
+   formule de Q0 ne change pas. Au cas 4a : une proposition de 765 + 450 = 1 215 kg à J+30, puis la
+   suivante à J+61.
+3. **X protège le cycle suivant ; le signal traite le creux immédiat** (accélérer, avancer
+   l'arrivage existant).
+4. `stock_min_kg` est le garde-fou (signal seulement). `couverture_min_mois` est renommée
+   **`couverture_cible_mois`** et devient la cible MRP. `marge_securite_pct` de l'article est
+   supprimée ; celle de la qualité, défaut du plan de production, reste. L'écran
+   « stocks minimums à revoir », jamais monté, et sa route sont retirés.
+5. **Les états sont séparés des signaux** (§ 15.4).
+6. **L'impact sur les 125 références se calcule avant toute modification des cibles.** Le tableau
+   de comparaison, ancien moteur contre v2 aux cibles actuelles, est produit sur une copie et remis
+   à l'utilisateur. La v2 ne va pas sur la base de saisie avant sa validation.
+7. **Taux de la facture d'import** : le taux de la facture s'il est saisi, sinon celui du dossier
+   (même devise), sinon blocage si une conversion est nécessaire. C'est le comportement livré le
+   27/10 (`2026-10-27k`).
+
+**La formule de Q0 démontrée au § 15.6 ne se modifie plus.** On passe à la formalisation et aux
+tests de régression.
+
 ### 15.10 Ce qui ne change pas
 
 - Le stock compté, le classement des arrivages, la quarantaine, les restes et le fil sur machine.

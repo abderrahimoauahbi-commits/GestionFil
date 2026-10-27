@@ -474,8 +474,7 @@ export const FICHES_IMPORTATION: Sujet[] = [
       {
         nom: 'Taux de change',
         description:
-          'Dirhams pour une unité de devise. Proposé au cours BAM de la date (à défaut le taux de l’ERP). Le taux 1 en devise est refusé ; plus de 3 % d’écart se confirme. Figé une fois la facture reçue.',
-        obligatoire: true,
+          'Dirhams pour une unité de devise. Proposé au cours BAM de la date (à défaut le taux de l’ERP). Laissé vide, il reprend le taux du dossier s’il en a un dans la même devise ; sans l’un ni l’autre, une facture en devise est refusée. Le taux 1 en devise est refusé ; plus de 3 % d’écart se confirme. Figé une fois la facture reçue.',
         valeurs: '4 décimales, ex. 9,2224',
       },
       {
@@ -547,7 +546,7 @@ export const FICHES_IMPORTATION: Sujet[] = [
       { nom: 'Coût de revient (DH)', description: 'Valeur d’achat + frais alloués.' },
     ],
     regles: [
-      'Chaque facture porte sa devise et son taux ; le taux ne se replie plus sur celui du dossier.',
+      'Chaque facture porte sa devise et son taux ; une facture sans taux ne reprend que le taux réel du dossier, dans la même devise ; sans l’un ni l’autre, elle est refusée.',
       'Une ligne déjà reçue est figée tout entière (cadenas) : référence, bon, poids, prix, lot, couleur, bobines, palettes. Elle ne se retire pas.',
       'Une facture qui a fait entrer de la marchandise garde son fournisseur, sa devise, son taux et son montant ; elle ne se supprime plus.',
       'Le prix du bon revient sur chaque ligne enregistrée, même quand la ligne de bon est soldée : l’écart de prix reste lisible.',
@@ -558,7 +557,7 @@ export const FICHES_IMPORTATION: Sujet[] = [
     ],
     messages: [
       { message: 'facture en … au taux 1 : c’est le taux du dirham, pas celui du …', cause: 'Taux 1 sur une facture en devise.' },
-      { message: 'facture en … : le taux de change est obligatoire', cause: 'Taux vide ou nul.' },
+      { message: 'facture en … : le taux de change est obligatoire', cause: 'Taux vide ou nul, et aucun taux sur le dossier dans cette devise.' },
       { message: 'TAUX-ECART : le taux saisi … s’ecarte de … % du …', cause: 'Plus de 3 % d’écart avec la référence, non confirmé.' },
       {
         message: 'IMPORT-FIGEE : la facture … a deja fait entrer de la marchandise : son fournisseur, sa devise, son taux et son montant ne bougent plus.',
@@ -662,14 +661,13 @@ export const FICHES_IMPORTATION: Sujet[] = [
       { nom: "Date d'arrivée", description: 'La date d’arrivée au port.' },
       {
         nom: 'Devise',
-        description: 'Gardée sur le dossier comme simple repli : chaque facture saisie ensuite porte sa propre devise.',
+        description: 'Gardée sur le dossier comme simple proposition : chaque facture saisie ensuite porte sa propre devise.',
         defaut: 'USD',
       },
       {
         nom: 'Taux de change',
         description:
-          'Exigé par l’assistant pour créer le dossier. Il ne reste sur le dossier qu’en repli : chaque facture porte son propre taux, proposé au cours BAM de sa date.',
-        obligatoire: true,
+          'Facultatif : il ne convertit aucune facture. En devise, laissé vide s’il n’est pas connu (jamais 1 : c’est le taux du dirham) ; en MAD, 1. Chaque facture porte son propre taux, exigé à sa saisie et proposé au cours BAM de sa date ; une facture sans taux reprend celui du dossier s’il en a un, dans la même devise.',
         valeurs: 'nombre décimal, ex. 9,2224',
       },
       { nom: 'Notes', description: 'Texte libre sur le dossier.' },

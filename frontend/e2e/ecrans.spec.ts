@@ -84,7 +84,7 @@ test('plan-achat : onglet À commander et le détail d’une ligne', async () =>
   await page.goto('/plan-achat')
   await attendreEcran(page)
   await page.getByRole('tab', { name: 'À commander', exact: true }).click()
-  await expect(page.getByText('Règles provisoires des dates d’arrivage', { exact: false })).toBeVisible()
+  await expect(page.getByText('Règles des dates d’arrivage', { exact: false })).toBeVisible()
   await expect(page.getByText(/dette|à rattraper/i)).toHaveCount(0)
   const lignes = page.locator('main tbody tr').filter({ has: page.locator('button[aria-expanded]') })
   if ((await lignes.count()) > 0) {

@@ -49,6 +49,7 @@ import { cn } from '../lib/utils'
 import { exporterCsv } from '../lib/export'
 import { TableauImprimable } from './Etat'
 import { Badge, Bouton, Champ, Chargement, EtatVide, Selecteur, Squelette } from './ui/base'
+import { IndiceChamp } from './ui/Indice'
 import { Menu, MenuContenu, MenuDeclencheur, MenuElement, MenuTitre } from './ui/surcouches'
 import {
   MenuContextuel,
@@ -704,6 +705,7 @@ export function DataTable<L extends Record<string, unknown>>({
                       return (
                         <th
                           key={entete.id}
+                          data-indice-gere=""
                           style={m.largeur ? { width: m.largeur } : undefined}
                           className={cn(
                             'bg-attenue px-2.5 py-2 text-left',
@@ -734,6 +736,11 @@ export function DataTable<L extends Record<string, unknown>>({
                             </button>
                           ) : (
                             flexRender(entete.column.columnDef.header, entete.getContext())
+                          )}
+                          {/* L'INDICE DE LA COLONNE (27/10/2026), hors du bouton de tri :
+                              il s'ouvre sans trier. Rien si l'aide de l'écran ne la décrit pas. */}
+                          {typeof entete.column.columnDef.header === 'string' && (
+                            <IndiceChamp intitule={entete.column.columnDef.header} className="ml-0.5" />
                           )}
                         </th>
                       )

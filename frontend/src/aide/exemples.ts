@@ -6,7 +6,7 @@
  * PP FRZ-2900 Grey du plan d'achat), pour qu'on puisse suivre un cas de bout
  * en bout. Ils s'attachent a la fiche de leur ecran par sa route.
  */
-import type { Exemple } from './types'
+import type { Exemple } from './types.ts'
 
 export const EXEMPLES: Record<string, Exemple[]> = {
   /* --------------------------------------------------------- Fiches de base */
@@ -32,25 +32,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
         ['1 230,25 kg', '1 230,25 kg'],
       ],
       conclusion: 'Sans poids de bobine, une saisie en bobines est refusée : aucun facteur n’est deviné.',
-    },
-  ],
-  '/catalogue/completer': [
-    {
-      titre: 'compléter depuis le code',
-      situation: 'La référence PP-1500 Dtex-Bleu 6666-Hs n’a ni famille ni couleur interne.',
-      calcul: [
-        ['Famille proposée', '1500 Dtex'],
-        ['Couleur proposée', 'Bleu'],
-        ['Référence fournisseur proposée', '6666'],
-      ],
-      conclusion: 'On accepte ou on corrige ; la référence devient alors commandable et compte dans les besoins.',
-    },
-  ],
-  '/categories': [
-    {
-      titre: 'une famille sous sa catégorie',
-      situation: 'La famille « 2900 Dtex FRZ » se crée sous la catégorie Polypropylène.',
-      conclusion: 'Elle n’a de sens que sous sa catégorie : une famille sans catégorie est refusée.',
     },
   ],
   '/referentiels': [
@@ -89,39 +70,8 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       ],
     },
   ],
-  '/roles-bom': [
-    {
-      titre: 'une densité convertit les m² en kilos',
-      situation: 'Rôle Velours de la qualité Shaggy : 1,80 kg/m².',
-      calcul: [['10 000 m² planifiés', '10 000 × 1,80 = 18 000 kg de velours, avant perte']],
-    },
-  ],
 
   /* ------------------------------------------------------------- Production */
-  '/qualites': [
-    {
-      titre: 'traduire des m² en kilos',
-      situation: 'Qualité Shaggy, perte 5 % : velours 1,80 kg/m², trame 0,35 kg/m², latex 0,90 kg/m².',
-      calcul: [
-        ['Velours, 10 000 m²', '10 000 × 1,80 × 1,05 = 18 900 kg'],
-        ['Trame', '10 000 × 0,35 × 1,05 = 3 675 kg'],
-        ['Latex', '10 000 × 0,90 × 1,05 = 9 450 kg'],
-      ],
-      conclusion: 'Une référence en mètres linéaires exige sa densité (kg/ml), sinon le kg/m² ne se calcule pas.',
-    },
-  ],
-  '/recettes': [
-    {
-      titre: 'deux couleurs pour un rôle',
-      situation: 'Velours de la qualité Shaggy : 60 % PP-1500 Grey, 40 % PP-1500 Beige.',
-      calcul: [
-        ['PP-1500 Grey', '18 900 × 60 % = 11 340 kg'],
-        ['PP-1500 Beige', '18 900 × 40 % = 7 560 kg'],
-        ['Somme du rôle', '100 %'],
-      ],
-      conclusion: 'Pour chaque rôle, les parts font 100 % : 99 % ou 101 % est refusé.',
-    },
-  ],
   '/plans': [
     {
       titre: 'du plan aux besoins',
@@ -177,19 +127,7 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'La ligne est servie, le bon se solde. Une ligne de transport sans référence ne compte pas dans le solde.',
     },
   ],
-  '/bons-commande/nouveau': [
-    {
-      titre: 'commande et taux',
-      situation: '1 000 kg de PP-1500 Bleu à 2,50 USD/kg, validé au cours BAM du jour.',
-      calcul: [
-        ['Cours BAM proposé', '9,7068'],
-        ['Prix au kilo figé', '2,50 × 9,7068 = 24,267 MAD'],
-        ['Taux 10,05 saisi à la place', '+3,5 % : à confirmer'],
-      ],
-      conclusion: 'Celui qui saisit le bon ne le valide pas.',
-    },
-  ],
-  '/receptions': [
+  '/receptions/:id': [
     {
       titre: 'pesée et tolérance',
       situation: '1 000 kg attendus, tolérance 2 %.',
@@ -211,14 +149,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Clôturée, la réception ne se dévalide plus : on corrige par un avoir ou une facture complémentaire.',
     },
   ],
-  '/receptions/nouvelle': [
-    {
-      titre: 'compter les bobines',
-      situation: '474 bobines comptées pour 1 230 kg pesés.',
-      calcul: [['Poids réel par bobine', '1 230 ÷ 474 = 2,595 kg (+3,8 % sur 2,500)']],
-      conclusion: 'Au-delà de 3 %, la dérive du lot s’affiche ; la réception n’est pas bloquée.',
-    },
-  ],
 
   /* ----------------------------------------------------------- Importation */
   '/import/assistant': [
@@ -226,29 +156,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       titre: 'un dossier depuis le scan',
       situation: 'Liasse PDF : facture, connaissement, DUM. Le numéro est laissé vide.',
       conclusion: 'L’outil donne le rang suivant de l’année (ex. 19/26) et dépose les documents dans le dossier.',
-    },
-  ],
-  '/import': [
-    {
-      titre: 'répartir les frais',
-      situation: 'Dossier 19/26 : A 4 000 kg = 77 600 MAD, B 2 000 kg = 48 500 MAD.',
-      calcul: [
-        ['Douane 6 000 MAD, à la valeur', 'A 3 692,31 · B 2 307,69'],
-        ['Transit 2 300 MAD, au poids', 'A 1 533,33 · B 766,67'],
-        ['Transport 1 500 MAD, manuel', 'A 1 000,00 · B 500,00'],
-        ['Total des frais', 'A 6 225,64 (8,02 %) · B 3 574,36 (7,37 %)'],
-      ],
-      conclusion: 'Onglet Liquidation : corriger un montant passe le frais en manuel ; un total plus petit reste « non réparti ».',
-    },
-    {
-      titre: 'la clôture porte les frais',
-      situation: 'Ligne A : 4 010 kg reçus à 19,40 MAD/kg, 1 000 kg déjà sortis.',
-      calcul: [
-        ['Au CMUP (3 010 kg)', '6 225,64 × 3 010 ÷ 4 010 = 4 673,13 MAD'],
-        ['En écart (1 000 kg sortis)', '1 552,51 MAD'],
-        ['Nouveau CMUP de A', '19,40 + 4 673,13 ÷ 3 010 = 20,95 MAD/kg'],
-      ],
-      conclusion: 'La clôture est refusée tant qu’un frais est non réparti.',
     },
   ],
   '/retours-fournisseur': [
@@ -275,13 +182,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
         ['Contre-passation', 'Direction, avec un motif'],
       ],
       conclusion: 'Un mouvement validé ne se corrige pas : son inverse est posté, les deux restent.',
-    },
-  ],
-  '/mouvements/nouveau': [
-    {
-      titre: 'une sortie hors machine',
-      situation: '12,5 kg de colle pour l’atelier, sur l’OF 2026-118, motif « atelier ».',
-      conclusion: 'La sortie part au CMUP du magasin ; un fil qui se charge sur machine passe par sa fiche, pas par ici.',
     },
   ],
   '/transferts': [
@@ -365,13 +265,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Accordée par un autre responsable, elle sert une fois, pour ce lot et cette fiche.',
     },
   ],
-  '/etat-stock': [
-    {
-      titre: 'un état daté',
-      situation: 'État du stock du magasin Morocco au 30/09.',
-      conclusion: 'L’état porte sa date et ses filtres en en-tête ; les prix disparaissent pour un rôle qui ne les voit pas.',
-    },
-  ],
 
   /* ------------------------------------------------- Analyses et finance */
   '/valorisation': [
@@ -385,14 +278,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       ],
     },
   ],
-  '/landed-cost': [
-    {
-      titre: 'coût de revient d’une ligne d’import',
-      situation: 'Ligne A du dossier 19/26 : 77 600 MAD d’achat, 6 225,64 MAD de frais.',
-      calcul: [['Coefficient de frais', '6 225,64 ÷ 77 600 = 8,02 %']],
-      conclusion: 'Les écarts de prix listent ce que le CMUP n’a pas porté : positif = surcoût, négatif = gain.',
-    },
-  ],
   '/classification': [
     {
       titre: 'lire « AY »',
@@ -401,20 +286,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
         ['Y', 'consommation variable (25 % à 50 %)'],
       ],
       conclusion: 'Une référence AY se suit de près ; deux sources si possible.',
-    },
-  ],
-  '/rapports': [
-    {
-      titre: 'où va l’argent',
-      situation: 'Sur le trimestre : achats, consommation, valeur du stock, classement ABC.',
-      conclusion: 'Les montants sont masqués à qui n’a pas le droit de les voir.',
-    },
-  ],
-  '/matrice-prix': [
-    {
-      titre: 'comparer deux fournisseurs',
-      situation: 'PP-1500 Grey : 2,30 USD chez l’un, 2,45 USD chez l’autre.',
-      conclusion: 'L’écart de 0,15 USD/kg sur 10 000 kg fait 1 500 USD : l’arbitrage se lit d’un coup d’œil.',
     },
   ],
   '/historique-prix': [
@@ -438,19 +309,6 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Un clic ouvre ces 3 réceptions, locales et import comptées ensemble.',
     },
   ],
-  '/': [
-    {
-      titre: 'ce que vous voyez',
-      situation: 'Un magasinier voit Réceptions, Mouvements, Inventaire, Machines ; pas la Valorisation.',
-      conclusion: 'Les raccourcis suivent les droits du compte, comme le menu.',
-    },
-  ],
-  '/etats': [
-    {
-      titre: 'imprimer un bon',
-      situation: 'Le bon de sortie d’un transfert part avec le camion ; le bon de réception revient signé.',
-    },
-  ],
 
   /* ---------------------------------------------- Paramètres et sécurité */
   '/configuration': [
@@ -460,33 +318,11 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion: 'Sur 1 000 kg attendus, 1 030 kg passent alors sans dérogation. La modification est journalisée.',
     },
   ],
-  '/parametres': [
-    {
-      titre: 'où régler',
-      situation: 'Les seuils (tolérances, TIER, ABC) se règlent dans Configuration.',
-    },
-  ],
   '/utilisateurs': [
     {
       titre: 'masquer un champ',
       situation: 'Pour le magasinier, le CMUP est « masqué ».',
       conclusion: 'Le serveur ne l’envoie pas : il n’apparaît ni à l’écran, ni à l’impression, ni à l’export.',
-    },
-  ],
-  '/roles': [
-    {
-      titre: 'le modèle suit, le réglage à la main reste',
-      situation: 'Le rôle Magasinier passe le champ « Fil sur machine » de Lecture à Masqué. Ahmed et Karim sont magasiniers ; pour Karim, ce champ avait été réglé à la main en Écriture.',
-      calcul: [
-        ['Ahmed (suit le modèle)', 'Lecture → Masqué'],
-        ['Karim (réglé à la main)', 'reste Écriture'],
-      ],
-      conclusion: 'Pour remettre Karim au modèle : sa grille de droits → Appliquer le modèle du rôle.',
-    },
-    {
-      titre: 'supprimer un rôle',
-      situation: 'Le rôle « Acheteur » a encore 2 utilisateurs.',
-      conclusion: 'La suppression est refusée ; réaffectez les 2 comptes à un autre rôle, puis supprimez.',
     },
   ],
   '/audit': [

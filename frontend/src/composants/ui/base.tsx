@@ -12,6 +12,8 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { lireNombre, versCanonique, versSaisie } from '../../lib/nombres'
+import { texteDe } from '../../aide/indice'
+import { IndiceChamp } from './Indice'
 
 // ============================================================================
 // Bouton
@@ -229,14 +231,30 @@ export const Selecteur = React.forwardRef<
 ))
 Selecteur.displayName = 'Selecteur'
 
+/**
+ * L'INDICE SE POSE TOUT SEUL (27/10/2026). Une étiquette dont l'intitulé est
+ * décrit au catalogue d'aide de l'écran (`aide/`) reçoit son ⓘ ; les autres
+ * n'affichent rien. `indice` force l'intitulé cherché (quand le texte affiché
+ * varie), `indice={false}` le retire.
+ */
+type ProprietesIndice = { indice?: string | false }
+
+function intituleCherche(indice: string | false | undefined, enfants: React.ReactNode): string {
+  if (indice === false) return ''
+  return indice ?? texteDe(enfants)
+}
+
 export function Etiq({
   className,
   obligatoire,
   children,
+  indice,
   ...props
-}: React.LabelHTMLAttributes<HTMLLabelElement> & { obligatoire?: boolean }) {
+}: React.LabelHTMLAttributes<HTMLLabelElement> & { obligatoire?: boolean } & ProprietesIndice) {
+  const intitule = intituleCherche(indice, children)
   return (
     <label
+      data-indice-gere=""
       className={cn(
         'mb-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-attenue-texte',
         className,
@@ -245,6 +263,26 @@ export function Etiq({
     >
       {children}
       {obligatoire && <span className="text-danger">*</span>}
+      {intitule && <IndiceChamp intitule={intitule} />}
+    </label>
+  )
+}
+
+/**
+ * Une étiquette SANS apparence imposée, qui porte l'indice de son champ :
+ * pour les écrans qui dessinent leurs libellés eux-mêmes. L'icône suit le
+ * texte, sur la même ligne.
+ */
+export function Libelle({
+  children,
+  indice,
+  ...props
+}: React.LabelHTMLAttributes<HTMLLabelElement> & ProprietesIndice) {
+  const intitule = intituleCherche(indice, children)
+  return (
+    <label data-indice-gere="" {...props}>
+      {children}
+      {intitule && <IndiceChamp intitule={intitule} className="ml-1" />}
     </label>
   )
 }

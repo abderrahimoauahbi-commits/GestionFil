@@ -7,27 +7,34 @@ Serveur : **192.168.1.140**, Ubuntu 26.04 LTS, PostgreSQL 18.6.
 ## Ce qui tourne où
 
 ```
-                    ┌─────────────────────────────────────────┐
-   Postes du        │  192.168.1.140                          │
-   réseau           │                                         │
-   ─────────        │   ┌───────────────┐   127.0.0.1:5432    │
-   navigateur ──────┼──▶│  gestionfil   │◀──────┐             │
-   application ─────┼──▶│  :8080        │       │             │
-   bureau           │   │  API + web    │  ┌────┴─────────┐   │
-   mobile      ─────┼──▶└───────────────┘  │ PostgreSQL 18│   │
-                    │                      │  gestionfil  │   │
-                    │                      └──────────────┘   │
-                    └─────────────────────────────────────────┘
+                    ┌──────────────────────────────────────────────────────────┐
+   Postes du        │  192.168.1.140                                           │
+   réseau           │                                                          │
+   ─────────        │  ┌─────────┐   ┌───────────────────┐   127.0.0.1:5432    │
+   navigateur ──────┼─▶│  nginx  │──▶│  gestionfil       │◀──────┐             │
+   application ─────┼─▶│ 80 → 443│   │  127.0.0.1:8080   │       │             │
+   bureau           │  │  (TLS)  │   │  API + web        │  ┌────┴─────────┐   │
+   mobile      ─────┼─▶└─────────┘   └───────────────────┘  │ PostgreSQL 18│   │
+                    │                                       │  gestionfil  │   │
+                    │                                       └──────────────┘   │
+                    └──────────────────────────────────────────────────────────┘
 ```
 
-**Un seul port est exposé : 8080.** PostgreSQL n'écoute que sur la boucle
-locale — il n'est joignable que par le service, sur la même machine. C'est ce
-qui fait qu'une faille du réseau ne donne pas directement accès aux prix
-d'achat, à la valorisation et aux empreintes de mots de passe.
+**Seul nginx est exposé (80, redirigé vers 443, TLS 1.2/1.3).** L'application
+écoute sur `127.0.0.1:8080` (`BIND_ADDR`, posé par `02-installer-serveur.sh`) ;
+le pare-feu garde 8080 fermé. PostgreSQL n'écoute que sur la boucle locale — il
+n'est joignable que par le service, sur la même machine. C'est ce qui fait
+qu'une faille du réseau ne donne pas directement accès aux prix d'achat, à la
+valorisation et aux empreintes de mots de passe. Le détail (en-têtes, HSTS,
+pare-feu) est dans « Sécurité — l'état des lieux ».
+
+nginx limite aussi le débit (`nginx-gestionfil.conf`, audit P1) : 50 requêtes/s
+sur `/api/` (rafale de 100), 20 par minute sur `/api/auth/connexion` (rafale de
+20) ; au-delà, il répond **429**.
 
 Le même processus sert **l'API et l'interface web**. Les deux sont donc sur la
-même origine : pas de CORS, pas de proxy, rien à installer sur les postes qui
-se contentent d'un navigateur.
+même origine : pas de CORS, rien à installer sur les postes qui se contentent
+d'un navigateur.
 
 ---
 
@@ -144,7 +151,10 @@ sudo bash /chemin/vers/03-publier.sh ~/gestionfil-pret.tar.gz
    la sauvegarde échoue) et retient le nom du fichier ;
 3. **joue les migrations** que le journal n'a pas, par `migrer.py`, dans l'ordre
    des noms, et s'arrête à la première qui échoue — le service reste alors arrêté
-   avec l'ancien binaire, et la migration fautive n'a rien écrit ;
+   avec l'ancien binaire, et la migration fautive n'a rien écrit ; puis
+   `migrer.py --verifier` : un fichier modifié après son application (et non
+   déclaré dans `EMPREINTES_REMPLACEES`) arrête la publication (« JOURNAL
+   INCOHÉRENT ») ;
 4. installe binaires, interface et unité systemd (si elle a changé) ;
 5. redémarre et **vérifie que `/api/sante` répond** ;
 6. note la publication dans `journaux/publications.log` (avec ou sans tests).

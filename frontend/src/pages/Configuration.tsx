@@ -57,6 +57,7 @@ import {
   Etiq,
 } from '../composants/ui/base'
 import { Aide, Infobulle } from '../composants/ui/surcouches'
+import { IndiceChamp } from '../composants/ui/Indice'
 import { cn, fmt } from '../lib/utils'
 import { Audit } from './Audit'
 import { ReglageApparence } from '../composants/ReglageApparence'
@@ -651,7 +652,9 @@ function LigneReglage({
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[13px] font-medium">{p.libelle}</span>
+          <span className="text-[13px] font-medium" data-indice-gere="">{p.libelle}</span>
+          {/* L'indice du réglage, tiré du catalogue d'aide (27/10/2026). */}
+          <IndiceChamp intitule={p.libelle} />
           <Infobulle contenu={`Code technique : ${p.code_parametre}`}>
             <span className="font-mono text-[10px] text-attenue-texte">{p.code_parametre}</span>
           </Infobulle>

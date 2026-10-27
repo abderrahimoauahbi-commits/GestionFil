@@ -31,6 +31,7 @@ import { BoutonRafraichir, useEcranCalcule } from './BoutonRafraichir'
 import { NavigationEntete } from './NavigationEntete'
 import { PanneauApparence } from './PanneauApparence'
 import { AideEcran } from './AideEcran'
+import { IndicesAutomatiques } from './ui/Indice'
 import { BandeauMiseAJour } from './BandeauMiseAJour'
 import { MiseAJourAuto } from './MiseAJourAuto'
 import { RobotConnexion } from './RobotConnexion'
@@ -255,7 +256,7 @@ export const NAVIGATION: EntreeNav[] = ([
     module: '',
     Icone: BookOpen,
     section: 'AIDE',
-    resume: 'Documentation complète pour utiliser l\'ERP',
+    resume: 'Le cycle complet, pas à pas, par rôle',
   },
 
 
@@ -838,6 +839,9 @@ export function Coquille() {
           </BarriereErreur>
           {/* La question de la garde de saisie, une pour toute l'application. */}
           <ConfirmationQuitter />
+          {/* LES INDICES DES LIBELLÉS DESSINÉS À LA MAIN (27/10/2026) : un seul
+              filet pour toute l'application, voir `ui/Indice.tsx`. */}
+          <IndicesAutomatiques />
         </div>
       </main>
 

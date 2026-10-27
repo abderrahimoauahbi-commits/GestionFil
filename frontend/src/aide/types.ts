@@ -24,6 +24,12 @@
 export interface ChampAide {
   /** L'intitule EXACTEMENT tel qu'il est ecrit a l'ecran. */
   nom: string
+  /**
+   * Les autres intitules du meme champ, quand l'ecran le nomme selon le cas
+   * (« Ordre de fabrication » / « Numéro d’ordre de fabrication »). L'indice
+   * a l'ecran se trouve par `nom` OU par l'un d'eux (voir `indice.ts`).
+   */
+  alias?: string[]
   description: string
   /** Vrai quand l'enregistrement est refuse sans lui. */
   obligatoire?: boolean
@@ -81,4 +87,49 @@ export interface Sujet {
   messages?: MessageAide[]
   /** Les ecrans ou l'on va avant, ou apres. */
   liens?: { route: string; libelle: string }[]
+}
+
+/* ========================================================== TUTORIEL ===== */
+
+/**
+ * LE TUTORIEL (27/10/2026) : le cycle complet, pas à pas, dans l'ordre où le
+ * fil le parcourt — référentiel, plan, besoins, bon, réception, contrôle,
+ * facture, mouvements, machine, inventaire, états. Il dit OÙ cliquer et CE
+ * QU'ON OBTIENT ; il ne redit pas ce qu'attend chaque case : il NOMME les
+ * champs, et leur description reste dans la fiche de l'écran (un seul texte,
+ * corrigé une fois). Le test `tests/aide.test.ts` vérifie que chaque champ
+ * nommé existe bien dans la fiche de son écran.
+ */
+export type RoleTutoriel = 'Acheteur' | 'Magasinier' | 'Responsable' | 'Direction'
+
+export interface EtapeTutoriel {
+  titre: string
+  /** Qui fait ce geste. */
+  role: RoleTutoriel
+  /** L'écran : c'est par cette route que l'étape renvoie à sa fiche. */
+  route: string
+  /** Comment on y arrive : le menu, ou le bouton de l'écran précédent. */
+  acces: string
+  /** Les gestes, dans l'ordre : où cliquer, quoi choisir. */
+  gestes: string[]
+  /** Les champs à remplir, par leur intitulé EXACT — décrits dans la fiche de l'écran. */
+  champs?: string[]
+  /** Ce qu'on voit une fois l'étape finie. */
+  resultat: string
+  /** L'erreur qu'on fait le plus souvent ici, et comment s'en sortir. */
+  erreur?: string
+}
+
+export interface PartieTutoriel {
+  titre: string
+  introduction?: string
+  etapes: EtapeTutoriel[]
+}
+
+export interface Tutoriel {
+  titre: string
+  introduction: string
+  /** Les rôles, leur mission dans le cycle, et le droit qui la permet. */
+  roles: { role: RoleTutoriel; mission: string; droits: string }[]
+  parties: PartieTutoriel[]
 }

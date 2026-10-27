@@ -31,6 +31,7 @@ import {
 } from './ui/base'
 import { cn } from '../lib/utils'
 import { ChoixRecherche, type TypeChoix } from './ChoixRecherche'
+import { IndiceChamp } from './ui/Indice'
 
 const th = 'px-2 py-2 text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte'
 const td = 'px-2 py-1'
@@ -385,8 +386,11 @@ export function MaitreDetail({
             {maitre.champs && (
               <CarteCorps className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 border-b border-bordure bg-attenue/25">
                 {maitre.champs.filter((c) => !c.cleCreation).map((c) => (
-                  <label key={c.champ} className="flex flex-col gap-1 text-[11px] font-medium text-attenue-texte">
-                    {c.entete}
+                  <label key={c.champ} data-indice-gere="" className="flex flex-col gap-1 text-[11px] font-medium text-attenue-texte">
+                    <span className="inline-flex items-center gap-1">
+                      {c.entete}
+                      <IndiceChamp intitule={c.entete} />
+                    </span>
                     {c.options ? (
                       <Selecteur
                         className={cn(champ, 'h-8 w-full')}

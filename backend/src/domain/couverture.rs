@@ -471,6 +471,90 @@ pub fn calculer(stock_initial: f64, plan: &[MoisPlan], arrivees: &[Arrivee], r: 
     }
 }
 
+// ============================================================================
+// Lectures AU PLAN, tirées du moteur (« deux chiffres séparés », 27/10/2026)
+// ============================================================================
+//
+// Le « plus grand des deux » (max(réel, plan moyen)) est supprimé : ce qui
+// REGARDE L'AVENIR lit le moteur (plan / mois, première rupture, sécurité du
+// jour) ; ce qui CONSTATE le passé lit le grand livre de la consommation.
+
+/// « TROP TARD POUR COMMANDER » : la première rupture du plan tombe avant qu'une
+/// commande passée aujourd'hui puisse arriver (aujourd'hui + délai fournisseur).
+/// Commander ne suffit plus : il faut une autre solution (équivalent, transfert,
+/// report). C'est le sens d'origine de la tuile du tableau de bord.
+pub fn trop_tard_pour_commander(premiere_rupture: Option<NaiveDate>, aujourdhui: NaiveDate, delai_j: i64) -> bool {
+    premiere_rupture.is_some_and(|r| r < aujourdhui + Duration::days(delai_j.max(0)))
+}
+
+/// LA COUVERTURE DU STOCK, au moteur : la moyenne des jours couverts (jusqu'à la
+/// première rupture ; `None` = couvert sur tout l'horizon, compté pour
+/// `horizon_j`), pondérée par la valeur en stock de chaque référence. Les poids
+/// nuls ou négatifs ne comptent pas ; sans poids, pas de chiffre (`None`). Une
+/// moyenne pondérée, pas une division du stock par une consommation.
+pub fn couverture_ponderee(lignes: &[(Option<i64>, f64)], horizon_j: i64) -> Option<f64> {
+    let (mut somme, mut poids) = (0.0_f64, 0.0_f64);
+    for (jours, p) in lignes {
+        if *p > 0.0 {
+            somme += jours.unwrap_or(horizon_j).max(0) as f64 * p;
+            poids += p;
+        }
+    }
+    (poids > 0.0).then(|| (somme / poids * 10.0).round() / 10.0)
+}
+
+/// L'ÉCONOMIE AU PLAN d'une référence : l'écart entre son prix et le moins cher
+/// de son groupe d'équivalence, appliqué au plan des douze prochains mois (plan /
+/// mois du moteur × 12). Une projection : une borne haute, jamais un constat.
+/// Rend (kg sur 12 mois, économie en MAD), 0 sans écart positif ni plan.
+pub fn economie_au_plan(prix_actuel: f64, prix_min: f64, plan_mois_kg: f64) -> (f64, f64) {
+    let kg = (plan_mois_kg.max(0.0) * 12.0 * 10_000.0).round() / 10_000.0;
+    let ecart = (prix_actuel - prix_min).max(0.0);
+    (kg + 0.0, (ecart * kg * 100.0).round() / 100.0 + 0.0)
+}
+
+#[cfg(test)]
+mod tests_au_plan {
+    use super::*;
+
+    fn d(j: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, j).unwrap()
+    }
+
+    #[test]
+    fn trop_tard_quand_la_rupture_precede_l_arrivee_possible() {
+        // Aujourd'hui le 1er, délai 10 jours : une commande arrive le 11.
+        assert!(trop_tard_pour_commander(Some(d(5)), d(1), 10));
+        assert!(trop_tard_pour_commander(Some(d(10)), d(1), 10));
+        // La rupture le jour même de l'arrivée possible : il est encore temps.
+        assert!(!trop_tard_pour_commander(Some(d(11)), d(1), 10));
+        assert!(!trop_tard_pour_commander(Some(d(20)), d(1), 10));
+        // Sans rupture, jamais trop tard ; délai négatif = 0.
+        assert!(!trop_tard_pour_commander(None, d(1), 10));
+        assert!(!trop_tard_pour_commander(Some(d(1)), d(1), -3));
+        assert!(trop_tard_pour_commander(Some(d(1)), d(2), -3));
+    }
+
+    #[test]
+    fn couverture_ponderee_par_la_valeur() {
+        // 10 j pour 1 000 MAD, tout l'horizon (100 j) pour 3 000 MAD : (10 + 300) / 4 = 77,5.
+        assert_eq!(couverture_ponderee(&[(Some(10), 1000.0), (None, 3000.0)], 100), Some(77.5));
+        // Les poids nuls ne comptent pas ; aucun poids : aucun chiffre.
+        assert_eq!(couverture_ponderee(&[(Some(10), 1000.0), (Some(500), 0.0)], 100), Some(10.0));
+        assert_eq!(couverture_ponderee(&[(Some(10), 0.0)], 100), None);
+        assert_eq!(couverture_ponderee(&[], 100), None);
+    }
+
+    #[test]
+    fn economie_au_plan_des_douze_mois() {
+        // 2 MAD d'écart, 100 kg / mois au plan : 1 200 kg, 2 400 MAD.
+        assert_eq!(economie_au_plan(12.0, 10.0, 100.0), (1200.0, 2400.0));
+        // Déjà au meilleur prix, ou sans plan : rien.
+        assert_eq!(economie_au_plan(10.0, 10.0, 100.0), (1200.0, 0.0));
+        assert_eq!(economie_au_plan(12.0, 10.0, 0.0), (0.0, 0.0));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

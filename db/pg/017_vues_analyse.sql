@@ -33,14 +33,14 @@ WITH valeur AS (
     SELECT sp.code_reference,
            sp.designation,
            sp.fournisseur_nom,
-           sp.conso_mensuelle_kg,
+           sp.reel_mois_kg,
            sp.cmup_mad,
            sp.valeur_totale_mad,
            r.classe_abc,
            r.classe_xyz,
            r.date_dernier_abc,
-           ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-                 * COALESCE(sp.cmup_mad, 0), 2)                AS valeur_conso_annuelle_mad
+           -- Le REEL des 12 mois pleins, valeur au livre (27/10/2026).
+           ROUND(sp.valeur_reel_12m_mad, 2)                    AS valeur_conso_annuelle_mad
       FROM v_stock_reference sp
       JOIN reference r ON r.code_reference = sp.code_reference
      WHERE r.actif = 1

@@ -110,6 +110,29 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Le grand livre de la consommation (27/10/2026, lots L0 et L1) : une seule
+        // source du reel (v_consommation_fait), 12 mois pleins, machine datee a la
+        // fiche ; le « plus grand des deux » (v_conso_retenue) et le minimum qui le
+        // lisait sont retires ; v_stock_reference porte reel_mois_kg ; C67.
+        "2026-10-27g_grand_livre_consommation.sql",
+        "SELECT to_regclass('public.v_consommation_fait') IS NOT NULL
+            AND to_regclass('public.v_conso_reelle_mois') IS NOT NULL
+            AND to_regclass('public.v_conso_retenue') IS NULL
+            AND to_regclass('public.v_ctl_c67') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'v_stock_reference' AND column_name = 'valeur_reel_12m_mad')",
+    ),
+    (
+        // La proposition se clot avec son bon annule (decision du 27/10/2026) :
+        // statut ANNULE_BC, liee au bon, etat final (PA-ANNULE-BC) ; l'annulation
+        // d'un bon l'ecrit, et sans ce statut elle echouerait sur le CHECK.
+        "2026-10-27f_proposition_bon_annule.sql",
+        "SELECT EXISTS (SELECT 1 FROM pg_constraint
+                         WHERE conname = 'plan_achat_statut_check'
+                           AND pg_get_constraintdef(oid) LIKE '%ANNULE_BC%')
+            AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_achat_annule_bc_final')",
+    ),
+    (
         // UNE SEULE SOURCE DE VERITE (27/10/2026) : l'ancien calcul du besoin et de
         // la projection est retire (v_stock_projete, v_plan_achat, v_encours_fiable,
         // v_besoin_horizon, v_risque_*, v_cockpit_stock…), les vues qui le lisaient

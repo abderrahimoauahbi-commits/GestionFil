@@ -58,10 +58,10 @@ interface LigneAbc {
 type Rapport = 'synthese' | 'abc' | 'fournisseurs' | 'mensuel'
 
 const RAPPORTS: { cle: Rapport; libelle: string; resume: string }[] = [
-  { cle: 'synthese', libelle: 'Synthese patrimoniale', resume: 'Valeur du stock, coût matière, cycle de trésorerie' },
+  { cle: 'synthese', libelle: 'Synthese patrimoniale', resume: 'Valeur du stock, coût matière réel, cycle de trésorerie' },
   { cle: 'abc', libelle: 'Concentration de la valeur', resume: 'Répartition par classe ABC et poids des références' },
-  { cle: 'fournisseurs', libelle: 'Engagement par fournisseur', resume: 'Budget annuel et dépendance' },
-  { cle: 'mensuel', libelle: 'Coût matière mensuel', resume: 'Ce que le plan engage, mois par mois' },
+  { cle: 'fournisseurs', libelle: 'Engagement par fournisseur', resume: 'Dépense réelle des 12 mois pleins et dépendance' },
+  { cle: 'mensuel', libelle: 'Coût matière mensuel', resume: 'Au plan : ce que le plan engage, mois par mois' },
 ]
 
 function Chiffre({
@@ -190,17 +190,17 @@ export function RapportsFinanciers() {
                 unite="M MAD"
               />
               <Chiffre
-                libelle="Coût matière annuel"
+                libelle="Coût matière (réel 12 mois)"
                 valeur={fmt.nombre(t.cout_matiere_annuel_mad / 1e6, 2)}
                 unite="M MAD"
-                aide="Besoin du plan en service, valorise au CMUP."
+                aide="Réel des 12 mois pleins : consommation et rebut du grand livre, retours déduits, valeur au livre."
               />
               <Chiffre
                 libelle="Rotation du stock"
                 valeur={fmt.nombre(t.rotation_annuelle, 2)}
                 unite="fois / an"
                 ton={t.rotation_annuelle < 1 ? 'alerte' : undefined}
-                aide="Sous 1, le stock represente plus d’une année de consommation."
+                aide="Consommation réelle des 12 mois pleins ÷ valeur du stock. Sous 1, le stock représente plus d’une année de consommation."
               />
               <Chiffre
                 libelle="Cycle de conversion"
@@ -214,7 +214,7 @@ export function RapportsFinanciers() {
               Le DSO retenu ({fmt.nombre(t.dso_jours, 0)} jours) vient du parametre
               {' '}<span className="font-mono">P_DSODefaut</span> : sans module de vente, l ERP ne
               peut pas le mesurer. Le DIO ({fmt.nombre(t.dio_jours, 0)} j) et le DPO
-              ({fmt.nombre(t.dpo_jours, 0)} j) sont calcules.
+              ({fmt.nombre(t.dpo_jours, 0)} j) sont calculés sur le réel des 12 mois pleins (grand livre de la consommation).
             </Alerte>
           </>
         )}
@@ -233,7 +233,7 @@ export function RapportsFinanciers() {
                   <tr className="bg-attenue">
                     <th className="px-2.5 py-1.5 text-left font-semibold">Classe</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Références</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Consommation annuelle</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Réel 12 mois</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Part conso</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Stock immobilisé</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Part stock</th>
@@ -283,7 +283,7 @@ export function RapportsFinanciers() {
                   <tr className="bg-attenue">
                     <th className="px-2.5 py-1.5 text-left font-semibold">Fournisseur</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Références</th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">Budget annuel</th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">Réel 12 mois</th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">Part</th>
                   </tr>
                 </thead>
@@ -330,7 +330,7 @@ export function RapportsFinanciers() {
             <CarteEntete>
               <CarteTitre className="flex items-center gap-1.5">
                 <TrendingUp className="size-3.5" />
-                Coût matière par mois
+                Coût matière du plan, par mois
               </CarteTitre>
             </CarteEntete>
             <CarteCorps className="p-0">
@@ -379,14 +379,14 @@ export function RapportsFinanciers() {
                 exporterCsv('rapport-classes', [
                   { champ: 'classe', entete: 'Classe' },
                   { champ: 'n', entete: 'Références', numerique: true },
-                  { champ: 'conso', entete: 'Consommation annuelle MAD', numerique: true },
+                  { champ: 'conso', entete: 'Reel 12 mois pleins MAD', numerique: true },
                   { champ: 'stock', entete: 'Stock immobilise MAD', numerique: true },
                 ], parClasse.map(([k, c]) => ({ classe: k, ...c })))
               } else if (rapport === 'fournisseurs' && d) {
                 exporterCsv('rapport-fournisseurs', [
                   { champ: 'fournisseur_nom', entete: 'Fournisseur' },
                   { champ: 'nb_references', entete: 'Références', numerique: true },
-                  { champ: 'budget_annuel_mad', entete: 'Budget annuel MAD', numerique: true },
+                  { champ: 'budget_annuel_mad', entete: 'Reel 12 mois pleins MAD', numerique: true },
                 ], d.fournisseurs)
               } else if (rapport === 'mensuel' && d) {
                 exporterCsv('rapport-cout-mensuel', [
@@ -401,7 +401,7 @@ export function RapportsFinanciers() {
                   { champ: 'unite', entete: 'Unité' },
                 ], [
                   { indicateur: 'Stock immobilise', valeur: t.valeur_stock_mad, unite: 'MAD' },
-                  { indicateur: 'Coût matière annuel', valeur: t.cout_matiere_annuel_mad, unite: 'MAD' },
+                  { indicateur: 'Coût matière (réel 12 mois pleins)', valeur: t.cout_matiere_annuel_mad, unite: 'MAD' },
                   { indicateur: 'Rotation du stock', valeur: t.rotation_annuelle, unite: 'fois/an' },
                   { indicateur: 'DIO', valeur: t.dio_jours, unite: 'jours' },
                   { indicateur: 'DSO (paramètre)', valeur: t.dso_jours, unite: 'jours' },
@@ -435,7 +435,7 @@ export function RapportsFinanciers() {
                 ]}
                 lignes={[
                   { i: 'Stock immobilise', v: `${fmt.nombre(t.valeur_stock_mad, 2)} MAD` },
-                  { i: 'Cout matière annuel', v: `${fmt.nombre(t.cout_matiere_annuel_mad, 2)} MAD` },
+                  { i: 'Coût matière (réel 12 mois pleins)', v: `${fmt.nombre(t.cout_matiere_annuel_mad, 2)} MAD` },
                   { i: 'Rotation du stock', v: `${fmt.nombre(t.rotation_annuelle, 2)} fois/an` },
                   { i: 'Stock en jours (DIO)', v: `${fmt.nombre(t.dio_jours, 0)} j` },
                   { i: 'Délai client (DSO, paramètre)', v: `${fmt.nombre(t.dso_jours, 0)} j` },
@@ -453,7 +453,7 @@ export function RapportsFinanciers() {
             colonnes={[
               { entete: 'Classe', valeur: ([k]) => (k === '?' ? 'Non classees' : k) },
               { entete: 'Références', numerique: true, valeur: ([, c]) => c.n },
-              { entete: 'Conso annuelle', numerique: true, valeur: ([, c]) => fmt.nombre(c.conso, 0) },
+              { entete: 'Réel 12 mois', numerique: true, valeur: ([, c]) => fmt.nombre(c.conso, 0) },
               { entete: 'Stock', numerique: true, valeur: ([, c]) => fmt.nombre(c.stock, 0) },
             ]}
             lignes={parClasse}
@@ -469,7 +469,7 @@ export function RapportsFinanciers() {
                   { entete: 'Fournisseur', valeur: (f) => f.fournisseur_nom },
                   { entete: 'Références', numerique: true, valeur: (f) => f.nb_references },
                   {
-                    entete: 'Budget annuel MAD',
+                    entete: 'Réel 12 mois MAD',
                     numerique: true,
                     valeur: (f) => fmt.nombre(f.budget_annuel_mad, 0),
                   },
@@ -478,7 +478,7 @@ export function RapportsFinanciers() {
               />
 
               <h3 className="mb-1 mt-5 border-b border-neutral-400 pb-0.5 text-[10px] font-bold uppercase tracking-wide">
-                Coût matière par mois
+                Coût matière du plan, par mois
               </h3>
               <TableEtat<(typeof d.cout_mensuel)[number]>
                 colonnes={[

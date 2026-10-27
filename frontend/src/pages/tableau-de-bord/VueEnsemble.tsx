@@ -213,8 +213,9 @@ export function VueEnsemble() {
             libelle="Couverture du stock"
             valeur={ind?.couverture_ponderee_jours == null ? '—' : fmt.nombre(ind.couverture_ponderee_jours, 0)}
             unite="jours"
-            precision="pondérée par la consommation"
+            precision="au plan — moteur de couverture, pondérée par la valeur du stock"
             ton={ind?.couverture_ponderee_jours != null && ind.couverture_ponderee_jours < 30 ? 'alerte' : 'succes'}
+            aide="Jours couverts par le moteur de couverture (jusqu’à la 1re rupture du plan, sinon tout l’horizon), pondérés par la valeur en stock de chaque référence au plan."
           />
           <CarteStat
             Icone={PackageX}
@@ -231,7 +232,7 @@ export function VueEnsemble() {
             libelle="Économies identifiées"
             valeur={ind?.economies_total_mad == null ? '—' : compact(ind.economies_total_mad)}
             unite="MAD/an"
-            precision={`${ind?.nb_opportunites ?? 0} opportunités à qualité égale`}
+            precision={`${ind?.nb_opportunites ?? 0} opportunités à qualité égale · au plan`}
             ton="succes"
           />
         </div>
@@ -445,7 +446,7 @@ export function VueEnsemble() {
 
       {/* ---- 5. Devises | Classes ABC | Cohérence ------------------------------ */}
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <Bloc titre="Exposition aux devises" sousTitre="Part des achats par devise de facturation" lien={{ vers: '/tableau-de-bord/analyse', libelle: 'Analyse' }}>
+        <Bloc titre="Exposition aux devises" sousTitre="Part de la consommation réelle des 12 mois pleins, par devise de facturation" lien={{ vers: '/tableau-de-bord/analyse', libelle: 'Analyse' }}>
           {qAna.isError ? (
             <EnPanne />
           ) : qAna.isLoading ? (

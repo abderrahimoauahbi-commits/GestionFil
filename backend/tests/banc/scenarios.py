@@ -2189,11 +2189,12 @@ def scenario_controles_finaux(c, infra):
     # C59, prix confirme a la demande de prix, le 21/10 ; C60, meme reference sur deux lignes d'un bon,
     # le 21/10 ; C61, OF cloture hors seuil, C62-C63 hors machine et voies, C64 OF au-dela du plan, le 22/10 ;
     # C65, mouvement date de la periode de comptage d'un inventaire cloture, le 23/10 ; C66, transfert en
-    # route sans date prevue de disponibilite, le 27/10).
+    # route sans date prevue de disponibilite, le 27/10 ; C67, rapprochement machine / grand livre de la
+    # consommation, le 27/10).
     # UNE SEULE SOURCE DE VERITE (27/10/2026) : C05 et C25 dependent du moteur de couverture (Rust) et
     # quittent v_controles pour /api/controles ; C27 et C49 n'ont plus de sens (ni seuils de jours ni
     # prolongation du plan) et sont retires.
-    dernier = 66
+    dernier = 67
     moteur, retires = ("C05", "C25"), ("C27", "C49")
     hors_sql = "', '".join(moteur + retires)
     manquants = infra.valeur("SELECT string_agg(c, ', ') FROM (SELECT 'C' || lpad(g::text, 2, '0') AS c "
@@ -3019,9 +3020,9 @@ def scenario_consommation_directe(c, infra):
     verifier(infra.valeur(f"SELECT numero_of FROM mouvement WHERE id_mouvement = '{id_mvt}'") == "Plan semaine 43",
              "l'ordre / plan n'est pas garde")
     verifier(controle(infra, "C11") == 0, "C11 apres la consommation directe")
-    conso = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle "
-                               f"WHERE code_reference = '{directe}'"))
-    verifier(conso >= 120 - 1e-6, f"la consommation directe ne compte pas dans v_conso_reelle : {conso}")
+    conso = float(infra.valeur(f"SELECT COALESCE(sum(kg), 0) FROM v_consommation_fait "
+                               f"WHERE dans_reel AND code_reference = '{directe}'"))
+    verifier(conso >= 120 - 1e-6, f"la consommation directe ne compte pas dans le grand livre de la consommation : {conso}")
     # Un article MACHINE : refuse par le service, avec un message clair...
     code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(machine, 10)], code_qualite=qualite_banc(infra))
     verifier(code == 422 and "fiches machine" in str(r), f"consommation directe d'un article MACHINE : {code} {r}")
@@ -3035,8 +3036,8 @@ def scenario_consommation_directe(c, infra):
     # La sortie se contre-passe : le stock revient, elle ne compte plus comme consommation.
     c.ok("Choukri", "POST", f"/api/mouvements/{id_mvt}/contre-passer", {"motif": "Erreur de saisie du banc"})
     verifier(abs(kg(infra, directe) - avant) < 1e-6, "le stock n'est pas revenu apres la contre-passation")
-    apres = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle "
-                               f"WHERE code_reference = '{directe}'"))
+    apres = float(infra.valeur(f"SELECT COALESCE(sum(kg), 0) FROM v_consommation_fait "
+                               f"WHERE dans_reel AND code_reference = '{directe}'"))
     verifier(abs(conso - apres - 120) < 1e-6, f"la consommation contre-passee compte encore : {conso} -> {apres}")
     # Le dechet garde son seuil, meme sur un article DIRECTE.
     code, r = mouvement(c, "Magasinie", "SORTIE_PROD", [(directe, 60)], numero_of="OF-BANC")
@@ -3311,7 +3312,7 @@ def scenario_fiche_hors_machine(c, infra):
     entree_stock(c, directe, 300)
     x = of_banc(infra, "OF-BANC-HM")
     numero = "OF-BANC-HM"
-    conso0 = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle WHERE code_reference = '{directe}'"))
+    conso0 = float(infra.valeur(f"SELECT COALESCE(sum(kg), 0) FROM v_consommation_fait WHERE dans_reel AND code_reference = '{directe}'"))
 
     # 1. La sortie sur l'OF : le lien, et son numero dans le texte d'historique.
     code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 100)], id_of=x)
@@ -3331,7 +3332,7 @@ def scenario_fiche_hors_machine(c, infra):
     bilan = c.ok("Magasinie", "GET", f"/api/machines/of-ouverts/{x}/hors-machine")
     verifier([(b["kg_sorti"], b["kg_rendu"], b["reste_kg"]) for b in bilan] == [(100, 30, 70)],
              f"bilan de l'OF : {bilan}")
-    conso1 = float(infra.valeur(f"SELECT COALESCE(sum(sorties_prod_kg), 0) FROM v_conso_reelle WHERE code_reference = '{directe}'"))
+    conso1 = float(infra.valeur(f"SELECT COALESCE(sum(kg), 0) FROM v_consommation_fait WHERE dans_reel AND code_reference = '{directe}'"))
     verifier(abs(conso1 - conso0 - 70) < 1e-6, f"la consommation reelle ne deduit pas le retour : {conso0} -> {conso1}")
 
     # 3. Ce que la base refuse : rendre plus que sorti ; un retour sans OF ; un article MACHINE.
@@ -4226,10 +4227,12 @@ def scenario_migrations_rejouables(c, infra):
             raise Echec(f"{f.name} ne se rejoue pas : {str(e)[-300:]}")
     # Rejouee seule, une migration ancienne peut remettre ses vues d'alors ; celles qui les ont redefinies
     # depuis se rejouent apres elle, dans l'ordre, comme migrer.py les jouerait. 22c et 27b (le besoin des
-    # OF, puis le plan seul) touchaient v_stock_projete, retiree par 27e : elles ne se rejouent plus ; 27e
-    # se rejoue et remet l'etat final (l'ancien calcul retire, les vues sans projection).
+    # OF, puis le plan seul) touchaient v_stock_projete, retiree par 27e : elles ne se rejouent plus. 27e
+    # lisait le « plus grand des deux » (v_conso_retenue, v_stock_min_dynamique), que 27g retire (le grand
+    # livre de la consommation, 27/10/2026) : passee 27g, elle ne se rejoue plus, par decision (27g la
+    # remplace pour ces vues) ; 27g se rejoue et remet l'etat final.
     for nom in ("2026-10-27c_commande_couverture.sql", "2026-10-27d_transit_date_disponibilite.sql",
-                "2026-10-27e_source_unique_moteur.sql"):
+                "2026-10-27f_proposition_bon_annule.sql", "2026-10-27g_grand_livre_consommation.sql"):
         try:
             infra.psql(infra.base, "-q", "-f", str(dossier / nom))
         except RuntimeError as e:
@@ -5356,6 +5359,90 @@ def scenario_couverture_moteur(c, infra):
     c.ok("Assistante", "PUT", f"/api/bons-commande/{bc_brouillon}/statut", {"statut": "ANNULE"})
 
 
+def scenario_proposition_bon_annule(c, infra):
+    """LA PROPOSITION SE CLOT AVEC SON BON ANNULE (decision du 27/10/2026, migration 2026-10-27f).
+    « Commander » : la proposition du moteur devient un bon ; le bon annule, elle passe a ANNULE_BC
+    (« Annulee avec le bon ») au lieu de se rouvrir, liee au bon et designee par sa ligne. La regeneration
+    (une reference, puis tout le plan) passe sans erreur — elle butait en 400 sur la ligne du bon annule
+    qui designait une proposition rouverte — et cree une proposition NEUVE ; l'ancienne reste intacte.
+    ANNULE_BC est un etat final (PA-ANNULE-BC) qui ne se fige pas. La reprise de 27f clot une proposition
+    deja rouverte par l'ancienne annulation."""
+    from pathlib import Path
+    from urllib.parse import quote
+
+    # Une reference que le moteur propose et que « Commander » accepte (ni bon en cours, ni ecart).
+    ref = id_prop = None
+    for x in sorted(c.ok("Choukri", "GET", "/api/couverture")["lignes"], key=lambda x: x["code_reference"]):
+        if not x.get("qte_a_commander_kg"):
+            continue
+        code, r = c.appel("Choukri", "POST",
+                          f"/api/plan-achat/generer?reference={quote(x['code_reference'], safe='')}", {})
+        if code == 200 and r.get("id_proposition"):
+            ref, id_prop = x["code_reference"], r["id_proposition"]
+            break
+    verifier(ref, "le moteur ne propose aucune reference commandable : le scenario n'a rien a annuler")
+    q_ref = quote(ref, safe="")
+
+    def proposition(id_p):
+        return tuple(infra.sql("SELECT statut, COALESCE(id_bc_genere, ''), quantite_suggeree_kg, date_generation, "
+                               f"code_fournisseur FROM plan_achat WHERE id_proposition = '{id_p}'")[0])
+
+    def ouvertes():
+        return [r[0] for r in infra.sql(f"SELECT id_proposition FROM plan_achat WHERE code_reference = '{ref}' "
+                                        "AND statut IN ('PROPOSE','EN_REVISION','VALIDE')")]
+
+    # « Commander » : la proposition devient un bon brouillon, la ligne la designe.
+    c.ok("Choukri", "POST", "/api/plan-achat/commander", {"propositions": [id_prop]})
+    st, id_bc, qte, generee, frs = proposition(id_prop)
+    ligne = infra.valeur(f"SELECT id_ligne_bc FROM ligne_bc WHERE id_proposition = '{id_prop}'")
+    verifier(st == "COMMANDE" and id_bc and ligne, f"conversion : {st}, bon {id_bc}, ligne {ligne}")
+
+    # Le bon annule : la proposition se clot avec lui, liee a lui, sans se rouvrir.
+    c.ok("Assistante", "PUT", f"/api/bons-commande/{id_bc}/statut", {"statut": "ANNULE"})
+    verifier(proposition(id_prop) == ("ANNULE_BC", id_bc, qte, generee, frs),
+             f"apres l'annulation du bon : {proposition(id_prop)} (ANNULE_BC, lie a {id_bc}, attendu)")
+    verifier(infra.valeur(f"SELECT id_proposition FROM ligne_bc WHERE id_ligne_bc = '{ligne}'") == id_prop,
+             "la ligne du bon annule ne designe plus sa proposition")
+    verifier(ouvertes() == [], f"une proposition de {ref} est encore ouverte apres l'annulation : {ouvertes()}")
+    liste = {p["id_proposition"]: p for p in c.ok("Choukri", "GET", "/api/plan-achat/propositions")}
+    verifier(id_prop in liste and liste[id_prop]["statut"] == "ANNULE_BC" and liste[id_prop]["statut_bc"] == "ANNULE",
+             f"la proposition close n'apparait pas a l'historique avec son bon annule : {liste.get(id_prop)}")
+
+    # La regeneration : une reference (« Commander »), puis tout le plan — sans erreur, une proposition NEUVE.
+    neuve = c.ok("Choukri", "POST", f"/api/plan-achat/generer?reference={q_ref}", {}).get("id_proposition")
+    verifier(neuve and neuve != id_prop, f"« Commander » apres l'annulation : {neuve} (une proposition neuve attendue)")
+    c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
+    verifier(len(ouvertes()) == 1 and id_prop not in ouvertes(), f"apres la regeneration complete : {ouvertes()}")
+    verifier(proposition(id_prop) == ("ANNULE_BC", id_bc, qte, generee, frs),
+             f"la regeneration a touche la proposition close : {proposition(id_prop)}")
+
+    # Un etat final : ni rouverte, ni ecartee, ni figee — par l'API comme par la base.
+    c.refus("Choukri", "POST", f"/api/plan-achat/propositions/{id_prop}/ignorer", {}, contient="PA-ANNULE-BC")
+    refus_sql(infra, f"UPDATE plan_achat SET statut = 'PROPOSE' WHERE id_proposition = '{id_prop}'", "PA-ANNULE-BC")
+    refus_sql(infra, "UPDATE plan_achat SET figee = 1, date_figement = now(), id_utilisateur_figement = "
+                     f"(SELECT id_utilisateur FROM utilisateur ORDER BY 1 LIMIT 1) WHERE id_proposition = '{id_prop}'",
+              "Figement refuse")
+
+    # LA REPRISE DE 27f : l'ancienne annulation rouvrait la proposition (PROPOSE, lien au bon efface) ; la
+    # ligne du bon annule la designait encore, et la regeneration butait dessus. La migration la clot.
+    for autre in ouvertes():
+        infra.sql(f"DELETE FROM plan_achat WHERE id_proposition = '{autre}'")
+    infra.sql("ALTER TABLE plan_achat DISABLE TRIGGER trg_plan_achat_annule_bc_final")
+    try:
+        infra.sql(f"UPDATE plan_achat SET statut = 'PROPOSE', id_bc_genere = NULL WHERE id_proposition = '{id_prop}'")
+    finally:
+        infra.sql("ALTER TABLE plan_achat ENABLE TRIGGER trg_plan_achat_annule_bc_final")
+    migration = Path(__file__).resolve().parents[3] / "db" / "pg" / "migrations" / "2026-10-27f_proposition_bon_annule.sql"
+    try:
+        infra.psql(infra.base, "-q", "-f", str(migration))
+    except RuntimeError as e:
+        raise Echec(f"2026-10-27f ne se rejoue pas : {str(e)[-300:]}")
+    verifier(proposition(id_prop)[:2] == ("ANNULE_BC", id_bc),
+             f"la reprise de 27f ne clot pas la proposition rouverte : {proposition(id_prop)}")
+    neuve2 = c.ok("Choukri", "POST", f"/api/plan-achat/generer?reference={q_ref}", {}).get("id_proposition")
+    verifier(neuve2 and neuve2 != id_prop, f"regeneration apres la reprise : {neuve2}")
+
+
 def scenario_transit_moteur(c, infra):
     """LE FIL EN ROUTE EST UN ARRIVAGE (arbitrage du 27/10/2026). Un transfert expedie porte une date
     prevue de disponibilite, OBLIGATOIRE a l'expedition (TRF-DATE, en base) et REVISABLE tant qu'il roule
@@ -5554,6 +5641,199 @@ def scenario_source_unique(c, infra):
             infra.sql(f"UPDATE reference SET classe_abc = '{cible['classe_abc']}' WHERE code_reference = '{code}'")
 
 
+def scenario_grand_livre_consommation(c, infra):
+    """LE GRAND LIVRE DE LA CONSOMMATION (decisions du 27/10/2026, lots L0 et L1) : un fait machine est
+    date au jour de la FICHE meme valide bien plus tard ; le reel compte les 12 MOIS PLEINS glissants (ni
+    avant, ni le mois en cours) ; le rebut y entre ; un retour se deduit au jour du retour ; un ajustement
+    d'inventaire reste hors reel ; le grand livre est la somme exacte des agregats D1 a D5 ; C67 rapproche
+    charge, decharge et etat machine du grand livre ; plus personne ne lit le « plus grand des deux »."""
+    import io
+    import os
+    import re
+    from datetime import date, timedelta
+
+    # ---- 0. Plus de « plus grand des deux » : ni en base, ni dans le code du serveur ----------------
+    verifier(infra.valeur("SELECT to_regclass('public.v_conso_retenue') IS NULL "
+                          "AND to_regclass('public.v_stock_min_dynamique') IS NULL "
+                          "AND to_regclass('public.v_machine_consommation') IS NULL") == "t",
+             "v_conso_retenue, v_stock_min_dynamique ou v_machine_consommation existe encore")
+    lecteurs = infra.valeur(
+        "SELECT string_agg(n, ', ') FROM (SELECT viewname AS n FROM pg_views WHERE schemaname = 'public' "
+        "AND definition ~ 'v_conso_retenue|v_stock_min_dynamique|source_conso' "
+        "UNION SELECT p.proname FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace "
+        "WHERE s.nspname = 'public' AND p.prosrc ~ 'v_conso_retenue|v_stock_min_dynamique') x")
+    verifier(not lecteurs, f"des objets lisent encore le plus grand des deux : {lecteurs}")
+    dependants = infra.valeur(
+        "SELECT count(*) FROM pg_depend d JOIN pg_rewrite w ON w.oid = d.objid "
+        "JOIN pg_class c ON c.oid = d.refobjid WHERE c.relname IN ('v_conso_retenue', 'v_stock_min_dynamique')")
+    verifier(dependants == "0", f"pg_depend : {dependants} vue(s) dependent encore du plus grand des deux")
+    racine = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
+    fautifs = []
+    for dossier, _, fichiers in os.walk(racine):
+        for f in fichiers:
+            if f.endswith(".rs"):
+                texte = io.open(os.path.join(dossier, f), encoding="utf-8").read()
+                for l in texte.splitlines():
+                    code = l.split("//")[0]
+                    if re.search(r"v_conso_retenue|v_stock_min_dynamique|conso_mensuelle_kg", code) and "IS NULL" not in code:
+                        fautifs.append(f"{f}: {l.strip()[:80]}")
+    verifier(not fautifs, f"le serveur lit encore une consommation generique : {fautifs}")
+
+    # ---- Les dates : la fenetre des 12 mois pleins ----------------------------------------------------
+    debut, fin = infra.sql("SELECT debut::text, fin::text FROM v_conso_fenetre")[0]
+    debut, fin = date.fromisoformat(debut), date.fromisoformat(fin)
+    aujourdhui = date.fromisoformat(infra.valeur("SELECT ((now() AT TIME ZONE 'Africa/Casablanca')::date)::text"))
+    verifier(fin == aujourdhui.replace(day=1) and debut == fin.replace(year=fin.year - 1),
+             f"fenetre {debut} -> {fin} : pas les 12 mois pleins avant le mois en cours ({aujourdhui})")
+    d_charge, d_avant = debut - timedelta(days=10), debut - timedelta(days=5)
+    d_dans, d_rebut = debut + timedelta(days=40), debut + timedelta(days=45)
+
+    def reel(ref):
+        r = infra.sql(f"SELECT sorties_cumulees_kg, rebut_12m_kg, autres_ecarts_12m_kg, conso_machine_kg, "
+                      f"sorties_prod_kg FROM v_conso_reelle WHERE code_reference = '{ref}'")
+        return [float(x) for x in r[0]] if r else [0.0] * 5
+
+    # ---- 1. Machine : fiches datees du passe, validees aujourd'hui ------------------------------------
+    ref, lot = "PP-1500 Dtex-L.Beige 44377-Hs", "LOT-GL-1"
+    jour = taux_usd_du_jour(infra)
+    id_bc, lignes = bon_envoye(c, [(ref, 520, 2.0)], frs="FRS-001")
+    reception_validee(c, id_bc, lignes, [520], lot_fournisseur=lot, nb_bobines=200)
+    c.ok("Choukri", "POST", "/api/machines", {"code_machine": "BANCGL", "nom": "Machine du grand livre",
+                                              "zones": [{"role": "ETAGE", "numero_etage": 1, "capacite_bobines": 300}]})
+    zone = "BANCGL-E1"
+    avant = reel(ref)
+
+    def fiche(type_fiche, quand, lignes):
+        f = c.ok("Magasinie", "POST", "/api/machines/fiches", {
+            "type_fiche": type_fiche, "code_machine": "BANCGL", "code_emplacement": zone,
+            "date_fiche": quand.isoformat(), "code_magasin": MAG if type_fiche != "MAJ" else None,
+            "responsable": "Banc", "lignes": lignes, "code_qualite": qualite_banc(infra)})
+        ap = c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/apercu", {})
+        verifier(not ap["blocages"], f"fiche {type_fiche} du {quand} bloquee : {ap['blocages']}")
+        c.ok("Magasinie", "POST", f"/api/machines/fiches/{f['id_fiche']}/valider", {})
+        return f["id_fiche"]
+
+    fiche("CHARGE", d_charge, [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 100,
+                                "poids_retenu_kg": 2.6, "pourcentage": 100, "code_motif": "CH_PRODUCTION"}])
+    f_avant = fiche("MAJ", d_avant, [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
+                                      "pourcentage": 80, "code_motif": "MJ_ORDINAIRE"}])
+    f_dans = fiche("MAJ", d_dans, [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 100,
+                                    "pourcentage": 50, "code_motif": "MJ_ORDINAIRE"}])
+    f_rebut = fiche("DECHARGE", d_rebut, [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_mouvementees": 10,
+                                           "pct_retirees": 50, "pourcentage": 50, "destination": "DECHET",
+                                           "code_motif": "DE_DECHET"}])
+    f_jour = fiche("MAJ", aujourdhui, [{"code_reference": ref, "lot_fournisseur": lot, "nb_bobines_presentes": 90,
+                                        "pourcentage": 40, "code_motif": "MJ_ORDINAIRE"}])
+
+    def faits(id_fiche):
+        return infra.sql("SELECT g.date_fait::text, g.nature, g.kg::float8 FROM v_consommation_fait g "
+                         "JOIN machine_decision d ON d.id_decision = g.id_source "
+                         f"WHERE g.source = 'DECISION' AND d.id_fiche = '{id_fiche}' ORDER BY g.nature")
+
+    # Le jour de la FICHE, jamais celui de la validation (aujourd'hui).
+    for id_fiche, quand in ((f_avant, d_avant), (f_dans, d_dans), (f_rebut, d_rebut), (f_jour, aujourdhui)):
+        fs = faits(id_fiche)
+        verifier(fs and all(f[0] == quand.isoformat() for f in fs),
+                 f"fiche du {quand} validee aujourd'hui : faits dates {[(f[0], f[1]) for f in fs]}")
+    conso_avant = sum(float(f[2]) for f in faits(f_avant))
+    verifier(abs(conso_avant - 52) < 0.01, f"constat a 80 % : 52 kg attendus, {conso_avant}")
+    rebut = [f for f in faits(f_rebut) if f[1] == "REBUT_DECHET"]
+    verifier(len(rebut) == 1 and abs(float(rebut[0][2]) - 13) < 0.01, f"dechargement au dechet : {faits(f_rebut)}")
+    dans = sum(float(f[2]) for f in faits(f_dans)) + sum(float(f[2]) for f in faits(f_rebut))
+    du_mois = sum(float(f[2]) for f in faits(f_jour))
+    verifier(dans > 0 and du_mois > 0, f"faits de la fenetre {dans}, du mois en cours {du_mois}")
+
+    # Les 12 mois pleins : ni le fait d'avant la fenetre, ni celui du mois en cours ; le rebut compte.
+    apres = reel(ref)
+    verifier(abs((apres[0] - avant[0]) - dans) < 0.01,
+             f"reel 12 mois : +{apres[0] - avant[0]:.4f} kg, {dans:.4f} attendus (ni {conso_avant} d'avant, ni {du_mois} du mois)")
+    verifier(abs((apres[1] - avant[1]) - 13) < 0.01, f"le rebut ne compte pas dans le reel : +{apres[1] - avant[1]}")
+    verifier(abs((apres[3] - avant[3]) - dans) < 0.01, "la part machine du reel ne suit pas le grand livre")
+    mois = infra.valeur(f"SELECT COALESCE(sum(kg_reel), 0) FROM v_conso_reelle_mois WHERE code_reference = '{ref}' "
+                        f"AND mois = '{aujourdhui.strftime('%Y-%m')}'")
+    verifier(float(mois) == 0, f"le mois en cours entre dans la fenetre : {mois}")
+
+    # ---- 2. Hors machine : sortie dans la fenetre, retour au jour du retour, ajustement hors reel -----
+    directe = REF
+    c.ok("Choukri", "PATCH", f"/api/catalogue/{urllib.parse.quote(directe)}",
+         V(infra, "reference", "code_reference", directe, {"mode_consommation": "DIRECTE"}))
+    entree_stock(c, directe, 300)
+    avant_d = reel(directe)
+    q = qualite_banc(infra)
+    code, r = mouvement(c, "Magasinie", "CONSO_DIRECTE", [(directe, 100)], code_qualite=q, date_mouvement=d_dans.isoformat())
+    verifier(code == 200, f"consommation directe datee de la fenetre refusee : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 20)], motif="RETOUR_PROD", code_qualite=q,
+                        date_mouvement=d_rebut.isoformat())
+    verifier(code == 200, f"retour date de la fenetre refuse : {code} {r}")
+    code, r = mouvement(c, "Magasinie", "RETOUR_CONSO", [(directe, 30)], motif="RETOUR_PROD", code_qualite=q)
+    verifier(code == 200, f"retour du jour refuse : {code} {r}")
+    retour_jour = infra.sql(f"SELECT date_fait::text, kg::float8 FROM v_consommation_fait "
+                            f"WHERE source = 'MOUVEMENT' AND id_source = '{r['id_mouvement']}'")
+    verifier(len(retour_jour) == 1 and retour_jour[0][0] == aujourdhui.isoformat() and float(retour_jour[0][1]) == -30,
+             f"le retour n'est pas deduit au jour du retour : {retour_jour}")
+    code, r = mouvement(c, "Choukri", "AJUST_INV_NEG", [(directe, 7)], motif="INVENTAIRE", motif_ligne="R6",
+                        date_mouvement=d_dans.isoformat())
+    verifier(code == 200, f"ajustement d'inventaire refuse : {code} {r}")
+    apres_d = reel(directe)
+    verifier(abs((apres_d[0] - avant_d[0]) - 80) < 0.01,
+             f"reel hors machine : +{apres_d[0] - avant_d[0]} kg, 80 attendus (100 sortis - 20 rendus ; le retour du jour hors fenetre)")
+    verifier(abs((apres_d[2] - avant_d[2]) - 7) < 0.01, f"l'ajustement n'est pas montre a part : {apres_d[2] - avant_d[2]}")
+    hors = infra.valeur(f"SELECT nature || '/' || categorie_ecart || '/' || dans_reel::text FROM v_consommation_fait "
+                        f"WHERE source = 'MOUVEMENT' AND id_source = '{r['id_mouvement']}'")
+    verifier(hors == "AUTRE_ECART/AJUSTEMENT_INVENTAIRE/false", f"ajustement d'inventaire dans le reel : {hors}")
+
+    # ---- 3. Le grand livre est la somme exacte des agregats D1 a D5 -----------------------------------
+    sommes = infra.sql(
+        "SELECT (SELECT COALESCE(sum(kg), 0) FROM v_consommation_fait CROSS JOIN v_conso_fenetre f "
+        "         WHERE dans_reel AND date_fait >= f.debut AND date_fait < f.fin)::float8, "
+        "       (SELECT COALESCE(sum(sorties_cumulees_kg), 0) FROM v_conso_reelle)::float8, "
+        "       (SELECT COALESCE(sum(kg_reel), 0) FROM v_conso_reelle_mois)::float8, "
+        # D5 (ecran machine) ne lit que les decisions de fiche : une fiche de depart n'a pas de ligne (le
+        # scenario of_cycle en pose, declencheurs suspendus, pour l'OF ; elles restent hors D5).
+        "       (SELECT COALESCE(sum(g.kg), 0) FROM v_consommation_fait g JOIN machine_decision d "
+        "         ON d.id_decision = g.id_source WHERE g.nature = 'CONSOMMATION_MACHINE' AND d.nature <> 'DEPART')::float8, "
+        "       (SELECT COALESCE(sum(consommation_kg), 0) FROM f_machine_consommation(NULL, NULL, NULL))::float8, "
+        "       (SELECT COALESCE(sum(kg), 0) FROM v_consommation_fait WHERE id_of IS NOT NULL "
+        "         AND nature IN ('CONSOMMATION_MACHINE', 'CONSOMMATION_DIRECTE', 'HORS_MACHINE', 'RETOUR_CONSO'))::float8, "
+        "       (SELECT COALESCE(sum(kg_reel), 0) FROM v_of_consommation)::float8, "
+        "       (SELECT COALESCE(sum(kg), 0) FROM v_consommation_fait WHERE nature IN "
+        "         ('CONSOMMATION_MACHINE', 'CONSOMMATION_DIRECTE', 'HORS_MACHINE', 'RETOUR_CONSO'))::float8, "
+        "       (SELECT COALESCE(sum(kg_reel_sans_of), 0) + COALESCE(sum(kg_reel_of), 0) FROM v_qualite_consommation)::float8, "
+        "       (SELECT COALESCE(sum(kg_reel), 0) FROM v_of_bilan b WHERE b.statut = 'ANNULE')::float8")[0]
+        # (la part OF d'un OF ANNULE n'entre pas dans la vue par qualite)
+    g12, d1, d2, gm, d5, gof, d3, gr, d4, annules = [float(x) for x in sommes]
+    verifier(abs(g12 - d1) < 0.01 and abs(g12 - d2) < 0.01, f"D1 {d1} / D2 {d2} face au grand livre 12 mois {g12}")
+    verifier(abs(gm - d5) < 0.01, f"D5 (machines) {d5} face au grand livre {gm}")
+    verifier(abs(gof - d3) < 0.01, f"D3 (OF) {d3} face au grand livre {gof}")
+    verifier(abs(gr - annules - d4) < 0.01, f"D4 (qualites) {d4} face au grand livre {gr} (OF annules {annules})")
+
+    # ---- 4. C67 : le rapprochement machine ------------------------------------------------------------
+    # (Le scenario of_cycle pose des decisions sans mouvement, declencheurs suspendus : C67 les voit, a
+    # juste titre. On juge donc la reference de ce scenario, et la variation du compte.)
+    c67 = controle(infra, "C67")
+    verifier(infra.valeur(f"SELECT count(*) FROM v_ctl_c67 WHERE code_reference = '{ref}'") == "0",
+             f"C67 signale une machine juste : {infra.sql('SELECT * FROM v_ctl_c67')}")
+    infra.sql(f"UPDATE machine_etat SET kg = kg + 5 WHERE code_emplacement = '{zone}' AND lot_fournisseur = '{lot}'")
+    try:
+        verifier(controle(infra, "C67") == c67 + 1, "C67 ne voit pas un etat machine qui derive du grand livre")
+        diff = float(infra.valeur(f"SELECT difference_kg FROM v_ctl_c67 WHERE code_reference = '{ref}'"))
+        verifier(abs(diff + 5) < 0.01, f"C67 : difference {diff}, -5 attendus")
+    finally:
+        infra.sql(f"UPDATE machine_etat SET kg = kg - 5 WHERE code_emplacement = '{zone}' AND lot_fournisseur = '{lot}'")
+    verifier(controle(infra, "C67") == c67, "C67 apres retour a l'etat juste")
+
+    # ---- 5. Les ecrans : le reel et le plan, chacun nomme ---------------------------------------------
+    ab = [x for x in c.ok("Choukri", "GET", "/api/analyse-abc-xyz") if x["code_reference"] == ref]
+    verifier(ab and "reel_mois_kg" in ab[0] and "conso_mensuelle_kg" not in ab[0], f"analyse ABC : {ab[:1]}")
+    verifier(abs(float(ab[0]["reel_mois_kg"]) - apres[0] / 12) < 0.01, "le reel / mois n'est pas le reel des 12 mois / 12")
+    es = [x for x in c.ok("Choukri", "GET", f"/api/etat-stock?code_reference={urllib.parse.quote(ref)}")]
+    verifier(es and "stock_min_kg" in es[0] and "sous_minimum" in es[0], f"etat des stocks : {es[:1]}")
+    cockpit = c.ok("Choukri", "GET", "/api/cockpit")
+    verifier(isinstance(cockpit.get("nb_trop_tard"), int), f"compteur « trop tard » absent : {cockpit.get('nb_trop_tard')}")
+    ctl = {x["code"]: x["anomalies"] for x in c.ok("Choukri", "GET", "/api/controles")}
+    verifier("C67" in ctl, "C67 absent de /api/controles")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -5632,8 +5912,10 @@ SCENARIOS = [
     scenario_codes_erreur,
     scenario_recherche_referentiels,
     scenario_couverture_moteur,
+    scenario_proposition_bon_annule,
     scenario_transit_moteur,
     scenario_source_unique,
+    scenario_grand_livre_consommation,
     scenario_sauvegarde_restaurable,
     scenario_controles_finaux,
 ]

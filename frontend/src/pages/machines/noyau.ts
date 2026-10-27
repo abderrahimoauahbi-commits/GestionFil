@@ -215,6 +215,8 @@ export interface LigneConso {
   non_qualifie_kg: number
   regularisation_kg: number
   erreur_saisie_kg: number
+  /** La correction (MJ_CORRECTION) : hors consommation, montrée à part (27/10/2026). */
+  correction_kg?: number
 }
 
 /** Le detail d'une fiche : ses lignes, ses decisions, son journal. */

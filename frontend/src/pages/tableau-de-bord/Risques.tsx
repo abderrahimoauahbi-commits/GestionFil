@@ -83,7 +83,10 @@ export function Risques() {
 
   const risques = useMemo(() => qRisques.data ?? [], [qRisques.data])
   const colonnes = useMemo(() => risques[0]?.mois?.map((m) => m.annee_mois) ?? [], [risques])
-  const tropTard = risques.filter((r) => (r.marge_decision_jours ?? 0) < 0).length
+  // « Trop tard pour commander » (27/10/2026) : la 1re rupture du moteur tombe avant
+  // qu'une commande passée aujourd'hui puisse arriver (aujourd'hui + délai). Le compteur
+  // vient du serveur, sur toutes les références suivies (le mur n'en montre que 60).
+  const tropTard = nn('nb_trop_tard')
   const monoSource = risques.filter((r) => r.risque_sourcing === 'MONO-SOURCE').length
   const parMois = useMemo(
     () => ({
@@ -124,7 +127,7 @@ export function Risques() {
         <CarteStat Icone={Flame} libelle="À commander aujourd’hui" valeur={String(nn('nb_a_commander_aujourdhui'))} precision={`${nn('nb_sous_securite')} sous la sécurité, sans rupture`} ton="grave" />
         <CarteStat Icone={ShoppingCart} libelle="À commander" valeur={String(nn('nb_refs_a_commander'))} unite="réf." precision={`${nn('nb_propositions_a_traiter')} propositions à arbitrer`} ton="alerte" />
         <CarteStat Icone={CircleDollarSign} libelle="Budget à engager" valeur={n('budget_a_engager_mad') == null ? '—' : compact(nn('budget_a_engager_mad'))} unite="MAD" precision="pour couvrir le plan" ton="primaire" />
-        <CarteStat Icone={Timer} libelle="Trop tard pour commander" valeur={String(tropTard)} unite="réf." precision="marge de décision déjà négative" ton={tropTard > 0 ? 'danger' : 'succes'} />
+        <CarteStat Icone={Timer} libelle="Trop tard pour commander" valeur={String(tropTard)} unite="réf." precision="1re rupture avant qu’une commande passée aujourd’hui arrive" ton={tropTard > 0 ? 'danger' : 'succes'} aide="Moteur de couverture : la 1re rupture du plan tombe avant aujourd’hui + délai fournisseur. Commander ne suffit plus : il faut une autre solution (équivalent, transfert, report)." />
         <CarteStat Icone={TriangleAlert} libelle="Mono-source à risque" valeur={String(monoSource)} unite="réf." precision={`sur ${risques.length} références en risque`} ton={monoSource > 0 ? 'alerte' : 'succes'} jauge={risques.length ? (monoSource / risques.length) * 100 : undefined} />
       </div>
 

@@ -650,7 +650,7 @@ function MouvementsMachine({ machine, etage }: { machine: Machine; etage: string
 function TableConso({ lignes }: { lignes: LigneConso[] }) {
   const total = (k: keyof LigneConso) => lignes.reduce((s, l) => s + Number(l[k] ?? 0), 0)
   const enTete = ['Zone', 'Référence', 'Lot', 'Départ', 'Chargé', 'Retour magasin', 'Sorti (perte, déchet…)', 'Fin',
-                  'Consommé', 'Déchet / perte / casse', 'Non qualifié', 'Régularisation', 'Erreur de saisie']
+                  'Consommé', 'Déchet / perte / casse', 'Correction', 'Non qualifié', 'Régularisation', 'Erreur de saisie']
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-[12px]">
@@ -676,6 +676,7 @@ function TableConso({ lignes }: { lignes: LigneConso[] }) {
                 {nb(l.consommation_kg)}
               </td>
               <td className="px-2 py-1.5 text-right">{nb(l.dechet_perte_casse_kg)}</td>
+              <td className={cn('px-2 py-1.5 text-right', l.correction_kg ? 'text-alerte' : '')}>{nb(l.correction_kg ?? 0)}</td>
               <td className={cn('px-2 py-1.5 text-right', l.non_qualifie_kg ? 'text-alerte' : '')}>{nb(l.non_qualifie_kg)}</td>
               <td className={cn('px-2 py-1.5 text-right', l.regularisation_kg ? 'text-alerte' : '')}>{nb(l.regularisation_kg)}</td>
               <td className="px-2 py-1.5 text-right">{nb(l.erreur_saisie_kg)}</td>
@@ -683,7 +684,7 @@ function TableConso({ lignes }: { lignes: LigneConso[] }) {
           ))}
           {lignes.length === 0 && (
             <tr>
-              <td colSpan={13} className="px-2 py-6 text-center text-attenue-texte">
+              <td colSpan={14} className="px-2 py-6 text-center text-attenue-texte">
                 Aucune décision enregistrée depuis la fiche de départ.
               </td>
             </tr>
@@ -695,6 +696,7 @@ function TableConso({ lignes }: { lignes: LigneConso[] }) {
               <td className="px-2 py-1.5" colSpan={8}>Total</td>
               <td className="px-2 py-1.5 text-right">{nb(total('consommation_kg'))}</td>
               <td className="px-2 py-1.5 text-right">{nb(total('dechet_perte_casse_kg'))}</td>
+              <td className="px-2 py-1.5 text-right">{nb(total('correction_kg'))}</td>
               <td className="px-2 py-1.5 text-right">{nb(total('non_qualifie_kg'))}</td>
               <td className="px-2 py-1.5 text-right">{nb(total('regularisation_kg'))}</td>
               <td className="px-2 py-1.5 text-right">{nb(total('erreur_saisie_kg'))}</td>

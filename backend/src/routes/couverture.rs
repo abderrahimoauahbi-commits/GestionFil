@@ -38,6 +38,7 @@ use crate::auth::{rbac::module, rbac::Action, Utilisateur};
 use crate::db::{arrondi_kg, Db};
 use crate::domain::couverture::{
     self, jours_du_mois, Arrivee, Couverture, MoisPlan, Reglages, Source, MAX_PROPOSITIONS,
+    trop_tard_pour_commander,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -950,6 +951,13 @@ pub struct Etat {
     pub a_commander_aujourdhui: bool,
     pub delai_j: i64,
     pub defaut_donnees: Option<String>,
+    /// LA SÉCURITÉ DU JOUR (27/10/2026) : la ligne de sécurité du moteur aujourd'hui
+    /// (jours de sécurité de la classe ABC × plan à venir) — le « stock minimum »
+    /// affiché, un seuil d'avenir, au plan.
+    pub securite_aujourdhui_kg: f64,
+    /// « Trop tard pour commander » : 1re rupture avant aujourd'hui + délai
+    /// (`domain::couverture::trop_tard_pour_commander`).
+    pub trop_tard: bool,
     /// La ligne complète de la liste « À commander » (mêmes champs).
     pub ligne: Value,
     pub mois: Vec<MoisFrise>,
@@ -973,6 +981,7 @@ impl Etat {
             "date_limite_commande": self.date_limite_commande,
             "a_commander_aujourdhui": self.a_commander_aujourdhui,
             "defaut_donnees": self.defaut_donnees,
+            "trop_tard": self.trop_tard,
         });
         match v {
             Value::Object(m) => m,
@@ -1040,7 +1049,8 @@ impl Etats {
 
     /// Les compteurs du moteur (cockpit, briefing, Situation du plan d'achat).
     pub fn compteurs(&self) -> Value {
-        let (mut total, mut pnc, mut sous, mut couvert, mut aujourdhui, mut classe_a) = (0, 0, 0, 0, 0, 0);
+        let (mut total, mut pnc, mut sous, mut couvert, mut aujourdhui, mut classe_a, mut trop_tard) =
+            (0, 0, 0, 0, 0, 0, 0);
         for e in self.suivies() {
             total += 1;
             match e.statut {
@@ -1054,6 +1064,9 @@ impl Etats {
             if e.classe_a_en_rupture() {
                 classe_a += 1;
             }
+            if e.trop_tard {
+                trop_tard += 1;
+            }
         }
         json!({
             "nb_references": total,
@@ -1062,6 +1075,7 @@ impl Etats {
             "nb_couvert": couvert,
             "nb_a_commander_aujourdhui": aujourdhui,
             "nb_classe_a_en_rupture": classe_a,
+            "nb_trop_tard": trop_tard,
         })
     }
 
@@ -1107,7 +1121,7 @@ impl Etat {
         &[
             "statut", "jours_couverture", "premiere_rupture", "couvert_jusqu_au", "premier_passage_securite",
             "plan_horizon_kg", "plan_mois_kg", "plan_non_couvert_kg", "arrivages_comptes_kg", "qte_a_commander_kg",
-            "date_limite_commande", "a_commander_aujourdhui", "defaut_donnees",
+            "date_limite_commande", "a_commander_aujourdhui", "defaut_donnees", "trop_tard",
         ]
     }
 }
@@ -1181,6 +1195,8 @@ fn etat_de(a: &Analyse) -> Etat {
         a_commander_aujourdhui: a.a_commander_aujourdhui(),
         delai_j: a.reglages.delai_j,
         defaut_donnees: a.defaut_donnees.clone(),
+        securite_aujourdhui_kg: r.jours.first().map(|j| j.securite_kg).unwrap_or(0.0),
+        trop_tard: trop_tard_pour_commander(r.premiere_rupture, a.reglages.aujourdhui, a.reglages.delai_j),
         ligne: ligne(a),
         mois: frise(r),
     }

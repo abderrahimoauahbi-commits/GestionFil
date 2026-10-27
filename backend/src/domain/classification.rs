@@ -5,6 +5,10 @@
 //!       GLISSANTS — c'est la correction N4 du 11/06/2026, que le CDC enonce
 //!       mais que ses vues n'appliquaient pas (elles agregeaient par numero de
 //!       mois, toutes annees confondues).
+//!
+//! 27/10/2026 : ABC et XYZ lisent la MEME source, le grand livre de la
+//! consommation, sur la MEME fenetre (12 mois pleins glissants), rebut compris ;
+//! le plan n'y entre plus (« deux chiffres separes »).
 
 use crate::auth::Utilisateur;
 use crate::db::{maintenant, Db};
@@ -48,102 +52,42 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     let seuil_x: f64 = lire_param(&mut tx, "P_SeuilXYZ_X").await?;
     let seuil_y: f64 = lire_param(&mut tx, "P_SeuilXYZ_Y").await?;
 
-    // ---- ABC : valeur de consommation annuelle ------------------------------
+    // ---- ABC : la valeur REELLE des 12 mois pleins ---------------------------
     //
-    // DEUX CORRECTIONS PAR RAPPORT A LA PREMIERE VERSION, toutes deux constatees
-    // en confrontant le resultat au classeur.
+    // LE REEL CORRIGE (decisions du 27/10/2026, Q1, Q2, Q5, Q6, Q11). La valeur
+    // annuelle est celle du GRAND LIVRE DE LA CONSOMMATION (`v_consommation_fait`,
+    // agrege par `v_conso_reelle`) : les 12 MOIS PLEINS glissants (les 12 mois
+    // calendaires complets avant le mois en cours), consommation machine datee au
+    // jour de la FICHE, consommation directe et hors machine, REBUT COMPRIS,
+    // retours deduits, corrections et ajustements HORS reel ; valorisee au livre
+    // (prix de sortie du mouvement ; un fait machine au CMUP du jour du fait).
     //
-    // LE REPLI SUR LE BESOIN PLANIFIE. La version precedente ne lisait que les
-    // sorties reelles du grand livre. Tant que la production n'y ecrit pas, la
-    // requete ne rend rien et la classification annonce « 124 references sans
-    // historique » — ce qu'elle a fait pendant des mois sans que personne
-    // s'en apercoive, les colonnes restant a NULL.
-    //
-    // Le reste de l'ERP applique deja la bonne regle : `v_conso_retenue` retient
-    // le MAXIMUM entre consommation constatee et besoin planifie. Une reference
-    // qu'on n'a pas encore consommee mais que le plan reclame n'est pas une
-    // reference sans demande. On reprend donc `conso_mensuelle_kg` de cette vue
-    // (lue par la lecture neutre `v_stock_reference`, 27/10/2026 : l'ancienne
-    // projection `v_stock_projete` est retiree) plutot que de refaire un calcul
-    // qui divergerait du sien.
-    //
-    // LA CONVERSION DE DEVISE. `prix_catalogue_kg` ne convertit que l'UNITE, pas
-    // la monnaie : pour 107 references sur 119 il porte des dollars. Le
-    // multiplier par une quantite donnait une « valeur MAD » neuf fois trop
-    // basse, et faussait le rang de toute reference sans CMUP.
-    //
-    // LE PRIX : le CMUP de la fiche, qui vaut le prix catalogue au taux en
-    // vigueur tant qu'aucun achat ne l'a fixe (2026-09-17h). Plus de repli sur un
-    // taux de 1, qui classait un fil en dollars comme s'il etait en dirhams.
-    let mut consos: Vec<ConsoAnnuelle> = sqlx::query_as(
-        "SELECT sp.code_reference,
-                (sp.conso_mensuelle_kg * 12
-                  * COALESCE(r.cmup_mad, fn_prix_catalogue_mad(r.code_reference), 0))::float8
-                  AS valeur_mad
-           FROM v_stock_reference sp
-           JOIN reference r ON r.code_reference = sp.code_reference
-          WHERE sp.conso_mensuelle_kg IS NOT NULL
-          ORDER BY valeur_mad DESC",
+    // LE « PLUS GRAND DES DEUX » EST SUPPRIME. L'ABC lisait `v_conso_retenue`,
+    // max(reel, plan moyen) : une reference que le plan reclame mais qu'on n'a pas
+    // consommee prenait le poids du plan, et une consommation machine datee au jour
+    // de validation pesait vingt-neuf mois en un. Le plan regarde l'avenir (moteur
+    // de couverture) ; l'ABC constate le passe. Une reference sans consommation
+    // reelle sur la fenetre est rangee en C (zero pour cent de la depense).
+    let consos: Vec<ConsoAnnuelle> = sqlx::query_as(
+        "SELECT c.code_reference, c.valeur_12m_mad::float8 AS valeur_mad
+           FROM v_conso_reelle c
+           JOIN reference r ON r.code_reference = c.code_reference AND r.actif = 1
+          WHERE c.valeur_12m_mad > 0
+          ORDER BY c.valeur_12m_mad DESC, c.code_reference",
     )
     .fetch_all(&mut *tx)
     .await?;
 
-    consos.retain(|c| c.valeur_mad > 0.0);
-    let total: f64 = consos.iter().map(|c| c.valeur_mad).sum();
+    let valeurs: Vec<(String, f64)> = consos.into_iter().map(|c| (c.code_reference, c.valeur_mad)).collect();
+    let (classes_abc, (na, nb, mut nc)) = classer_abc(&valeurs, seuil_a, seuil_b);
 
-    let mut classes_abc: HashMap<String, &str> = HashMap::new();
-    let mut cumul = 0.0_f64;
-    let (mut na, mut nb, mut nc) = (0usize, 0usize, 0usize);
-
-    for c in &consos {
-        cumul += c.valeur_mad;
-        let pct = if total > 0.0 { cumul / total * 100.0 } else { 100.0 };
-        let classe = if pct <= seuil_a {
-            na += 1;
-            "A"
-        } else if pct <= seuil_b {
-            nb += 1;
-            "B"
-        } else {
-            nc += 1;
-            "C"
-        };
-        classes_abc.insert(c.code_reference.clone(), classe);
-    }
-
-    // ---- XYZ : coefficient de variation sur 12 mois glissants ---------------
-    // Meme repli pour la regularite : les sorties reelles quand il y en a, le
-    // besoin planifie sinon. UNION ALL puis MAX par mois — une reference qui a
-    // les deux garde la plus forte des deux valeurs, comme pour la moyenne.
+    // ---- XYZ : coefficient de variation, MEME SOURCE ET MEME FENETRE ----------
+    // Les 12 mois pleins du grand livre (`v_conso_reelle_mois`, reel d'achat :
+    // machine comprise, rebut compris, retours deduits). Le plan n'y entre plus :
+    // la regularite se mesure sur ce qui a ete consomme.
     let mensuelles: Vec<ConsoMensuelle> = sqlx::query_as(
-        // `datetime('now','-12 months')` etait du SQLite : PostgreSQL le refusait
-        // et le bouton « Calculer la classification » repondait par une erreur.
-        "SELECT code_reference, mois, MAX(quantite_kg)::float8 AS quantite_kg
-           FROM (
-             SELECT lm.code_reference,
-                    substr(m.date_mouvement, 1, 7) AS mois,
-                    SUM(lm.quantite_kg)                 AS quantite_kg
-               FROM ligne_mouvement lm
-               JOIN mouvement      m  ON m.id_mouvement   = lm.id_mouvement
-               JOIN type_mouvement tm ON tm.code_type_mvt = m.code_type_mvt
-              WHERE tm.signe = -1
-                -- LES MEMES SORTIES QUE v_conso_reelle, qui sert l'ABC : dechets,
-                -- consommation directe (21/10/2026), sorties hors machine sauf le
-                -- pret ; une sortie contre-passee n'a pas eu lieu.
-                AND (m.code_type_mvt IN ('SORTIE_PROD', 'CONSO_DIRECTE')
-                     OR (m.code_type_mvt = 'SORTIE_HORS_MACHINE'
-                         AND COALESCE(lm.code_motif_ligne, '') <> 'HM_PRET'))
-                AND NOT EXISTS (SELECT 1 FROM mouvement c WHERE c.id_mouvement_contrepasse = m.id_mouvement)
-                AND m.date_mouvement >= ((now() AT TIME ZONE 'Africa/Casablanca') - interval '12 months')::date
-              GROUP BY lm.code_reference, mois
-             UNION ALL
-             SELECT bm.code_reference, bm.annee_mois, SUM(bm.quantite_kg)
-               FROM besoin_mrp bm
-               JOIN plan_production pp ON pp.id_plan = bm.id_plan
-                                      AND pp.statut  = 'EN_COURS'
-              GROUP BY bm.code_reference, bm.annee_mois
-           )
-          GROUP BY code_reference, mois",
+        "SELECT code_reference, mois, kg_reel::float8 AS quantite_kg
+           FROM v_conso_reelle_mois",
     )
     .fetch_all(&mut *tx)
     .await?;
@@ -157,22 +101,12 @@ pub async fn classifier(db: &Db, user: &Utilisateur) -> AppResult<ResultatClassi
     let (mut nx, mut ny, mut nz) = (0usize, 0usize, 0usize);
 
     for (code, valeurs) in &series {
-        // Les mois sans sortie comptent comme zero : c'est ce qui distingue une
-        // consommation reguliere d'une consommation erratique.
-        let mut serie = valeurs.clone();
-        serie.resize(12, 0.0);
-
-        if let Some(cv) = coefficient_variation(&serie) {
-            let classe = if cv < seuil_x {
-                nx += 1;
-                "X"
-            } else if cv < seuil_y {
-                ny += 1;
-                "Y"
-            } else {
-                nz += 1;
-                "Z"
-            };
+        if let Some(classe) = classe_xyz(valeurs, seuil_x, seuil_y) {
+            match classe {
+                "X" => nx += 1,
+                "Y" => ny += 1,
+                _ => nz += 1,
+            }
             classes_xyz.insert(code.clone(), classe);
         }
     }
@@ -238,6 +172,56 @@ async fn lire_param(tx: &mut sqlx::PgConnection, code: &str) -> AppResult<f64> {
     Ok(v)
 }
 
+/// Le classement ABC par cumul de valeur : les references triees de la plus forte
+/// a la plus faible ; A jusqu'a `seuil_a` % du total cumule, B jusqu'a `seuil_b` %,
+/// C au-dela. Une valeur nulle ou negative n'est pas classee. Rend les classes et
+/// les effectifs (A, B, C).
+pub fn classer_abc(
+    valeurs: &[(String, f64)],
+    seuil_a: f64,
+    seuil_b: f64,
+) -> (HashMap<String, &'static str>, (usize, usize, usize)) {
+    let mut triees: Vec<&(String, f64)> = valeurs.iter().filter(|(_, v)| *v > 0.0).collect();
+    triees.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let total: f64 = triees.iter().map(|(_, v)| v).sum();
+    let mut classes = HashMap::new();
+    let (mut na, mut nb, mut nc) = (0usize, 0usize, 0usize);
+    let mut cumul = 0.0_f64;
+    for (code, v) in triees {
+        cumul += v;
+        let pct = if total > 0.0 { cumul / total * 100.0 } else { 100.0 };
+        let classe = if pct <= seuil_a {
+            na += 1;
+            "A"
+        } else if pct <= seuil_b {
+            nb += 1;
+            "B"
+        } else {
+            nc += 1;
+            "C"
+        };
+        classes.insert(code.clone(), classe);
+    }
+    (classes, (na, nb, nc))
+}
+
+/// La classe XYZ d'une serie mensuelle sur les 12 mois pleins : les mois absents
+/// (sans consommation) comptent pour zero — c'est ce qui distingue une
+/// consommation reguliere d'une consommation erratique. `None` sans consommation.
+pub fn classe_xyz(mois: &[f64], seuil_x: f64, seuil_y: f64) -> Option<&'static str> {
+    let mut serie = mois.to_vec();
+    serie.resize(serie.len().max(12), 0.0);
+    coefficient_variation(&serie).map(|cv| {
+        if cv < seuil_x {
+            "X"
+        } else if cv < seuil_y {
+            "Y"
+        } else {
+            "Z"
+        }
+    })
+}
+
 /// Ecart-type / moyenne. `None` si la moyenne est nulle (aucune consommation).
 fn coefficient_variation(serie: &[f64]) -> Option<f64> {
     if serie.is_empty() {
@@ -268,6 +252,37 @@ mod tests {
         serie[0] = 1200.0; // tout consomme en un seul mois
         let cv = coefficient_variation(&serie).unwrap();
         assert!(cv > 0.5, "serie erratique attendue en classe Z, CV = {cv}");
+    }
+
+    #[test]
+    fn abc_par_cumul_de_valeur() {
+        let v = vec![
+            ("a".to_string(), 700.0),
+            ("b".to_string(), 200.0),
+            ("c".to_string(), 60.0),
+            ("d".to_string(), 40.0),
+            ("zero".to_string(), 0.0),
+        ];
+        let (classes, (na, nb, nc)) = classer_abc(&v, 80.0, 95.0);
+        // 70 % -> A ; 90 % -> B ; 96 % et 100 % -> C ; la valeur nulle n'est pas classee.
+        assert_eq!(classes.get("a"), Some(&"A"));
+        assert_eq!(classes.get("b"), Some(&"B"));
+        assert_eq!(classes.get("c"), Some(&"C"));
+        assert_eq!(classes.get("d"), Some(&"C"));
+        assert_eq!(classes.get("zero"), None);
+        assert_eq!((na, nb, nc), (1, 1, 2));
+    }
+
+    #[test]
+    fn xyz_sur_douze_mois_pleins_mois_vides_a_zero() {
+        // Douze mois egaux : X.
+        assert_eq!(classe_xyz(&[100.0; 12], 0.25, 0.5), Some("X"));
+        // Six mois a 100, six mois sans consommation : CV = 1 -> Z.
+        assert_eq!(classe_xyz(&[100.0; 6], 0.25, 0.5), Some("Z"));
+        // Aucune consommation : pas de classe.
+        assert_eq!(classe_xyz(&[], 0.25, 0.5), None);
+        // Un retour qui annule la sortie du mois : moyenne nulle, pas de classe.
+        assert_eq!(classe_xyz(&[0.0, 0.0], 0.25, 0.5), None);
     }
 
     #[test]

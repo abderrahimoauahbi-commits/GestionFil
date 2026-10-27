@@ -72,16 +72,16 @@ export function Opportunites() {
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-            <CarteStat Icone={PiggyBank} libelle="Économies identifiées" valeur={voit ? compact(total) : '—'} unite="MAD/an" precision="à qualité égale, en changeant de fournisseur" ton="succes" />
+            <CarteStat Icone={PiggyBank} libelle="Économies identifiées" valeur={voit ? compact(total) : '—'} unite="MAD/an" precision="au plan : écart de prix × plan / mois du moteur × 12" ton="succes" aide="À qualité égale, en changeant de fournisseur. Une projection : l’écart de prix appliqué au plan des 12 prochains mois (plan / mois du moteur de couverture × 12)." />
             <CarteStat Icone={Sparkles} libelle="Opportunités" valeur={String(d.indicateurs?.nb_opportunites ?? d.economies.length)} unite="réf." precision="dans un groupe d'équivalence" ton="primaire" />
             <CarteStat Icone={TrendingDown} libelle="La plus forte" valeur={voit ? compact(meilleure) : '—'} unite="MAD/an" precision={d.economies[0]?.code_reference ?? '—'} ton="succes" />
             <CarteStat Icone={Link2} libelle="Mono-source" valeur={String(d.mono_source.length)} unite="réf." precision="un seul fournisseur possible" ton={d.mono_source.length ? 'alerte' : 'succes'} />
-            <CarteStat Icone={Coins} libelle="Budget mono-source" valeur={voit ? compact(budgetMono) : '—'} unite="MAD/an" precision="exposé à une seule source" ton="alerte" />
-            <CarteStat Icone={Globe2} libelle="Achats en devises" valeur={voitParts ? fmt.nombre(partEtrangere, 0) : '—'} unite="%" precision="exposés au cours de change" ton={partEtrangere > 50 ? 'alerte' : 'neutre'} jauge={voitParts ? partEtrangere : undefined} />
+            <CarteStat Icone={Coins} libelle="Budget mono-source" valeur={voit ? compact(budgetMono) : '—'} unite="MAD/an" precision="réel 12 mois, exposé à une seule source" ton="alerte" />
+            <CarteStat Icone={Globe2} libelle="Achats en devises" valeur={voitParts ? fmt.nombre(partEtrangere, 0) : '—'} unite="%" precision="réel 12 mois, exposé au cours de change" ton={partEtrangere > 50 ? 'alerte' : 'neutre'} jauge={voitParts ? partEtrangere : undefined} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-3">
-            <Bloc className="xl:col-span-2" titre="Les plus fortes économies" sousTitre="Économie annuelle en passant au fournisseur le moins cher du groupe" lien={{ vers: '/equivalences', libelle: 'Équivalences' }}>
+            <Bloc className="xl:col-span-2" titre="Les plus fortes économies" sousTitre="Au plan : économie sur les 12 prochains mois en passant au fournisseur le moins cher du groupe" lien={{ vers: '/equivalences', libelle: 'Équivalences' }}>
               {d.economies.length === 0 ? (
                 <Vide texte="Aucune économie identifiée : chaque référence est déjà au meilleur prix de son groupe." ok />
               ) : !voit ? (
@@ -99,7 +99,7 @@ export function Opportunites() {
                 />
               )}
             </Bloc>
-            <Bloc titre="Exposition aux devises" sousTitre={voit ? 'Part des achats par devise de facturation' : 'Références par devise de facturation'}>
+            <Bloc titre="Exposition aux devises" sousTitre={voit ? 'Part de la consommation réelle des 12 mois pleins, par devise de facturation' : 'Références par devise de facturation'}>
               {/* La devise elle-meme est masquee a qui ne voit pas les prix. */}
               {d.devises.some((x) => x.code_devise) ? (
                 <Anneau
@@ -156,7 +156,7 @@ export function Opportunites() {
           </Bloc>
           )}
 
-          <Bloc titre="Dépendances à un seul fournisseur" sousTitre="Références sans équivalent chez un autre fournisseur, par budget" lien={{ vers: '/fournisseurs', libelle: 'Fournisseurs' }} corpsSansMarge>
+          <Bloc titre="Dépendances à un seul fournisseur" sousTitre="Références sans équivalent chez un autre fournisseur, par dépense réelle des 12 mois pleins" lien={{ vers: '/fournisseurs', libelle: 'Fournisseurs' }} corpsSansMarge>
             {d.mono_source.length === 0 ? (
               <Vide texte="Aucune dépendance à une seule source." ok />
             ) : (
@@ -169,7 +169,7 @@ export function Opportunites() {
                       <th className="px-3 py-2 text-right font-medium">Délai</th>
                       <th className="px-3 py-2 text-right font-medium">Couverture</th>
                       <th className="px-3 py-2 font-medium">Statut</th>
-                      {voit && <th className="px-4 py-2 text-right font-medium">Budget / an</th>}
+                      {voit && <th className="px-4 py-2 text-right font-medium">Réel 12 mois</th>}
                     </tr>
                   </thead>
                   <tbody>

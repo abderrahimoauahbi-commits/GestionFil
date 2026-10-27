@@ -859,10 +859,14 @@ pub async fn supervision(
         l if l % 2 == 1 => Some(jours[l / 2] as f64),
         l => Some(((jours[l / 2 - 1] + jours[l / 2]) as f64 / 2.0).round()),
     };
+    // Les economies identifiees sont AU PLAN du moteur (27/10/2026) : la vue les
+    // laisse vides, la route les calcule (meme regle que le tableau de bord).
+    let (economies, nb_opportunites) = total_economies(&economies_au_plan(&state.db, &etats).await?);
     let du_moteur = [
         ("taux_rupture", part(&|e| e.statut == super::couverture::statut::PLAN_NON_COUVERT)),
         ("taux_disponibilite", part(&|e| e.statut == super::couverture::statut::COUVERT)),
         ("couverture_mediane", mediane),
+        ("economies", (nb_opportunites > 0).then_some(economies)),
     ];
     if let Some(lignes) = v.as_array_mut() {
         for l in lignes.iter_mut() {
@@ -1024,6 +1028,27 @@ pub async fn etat_stock(
     let mut valeur = lignes_en_json(&rows);
     let etats = super::couverture::etats(&state.db).await?;
     etats.enrichir(&mut valeur, "statut");
+    // LE MINIMUM AFFICHE EST UN SEUIL D'AVENIR, AU PLAN (27/10/2026) : la securite du
+    // jour du moteur (jours de securite de la classe ABC x plan a venir). L'ancien
+    // minimum dynamique lisait le « plus grand » du reel et du plan : il est
+    // supprime. « Sous le minimum » = le disponible compte par le moteur sous cette
+    // securite, aujourd'hui.
+    if let Some(a) = valeur.as_array_mut() {
+        for l in a.iter_mut() {
+            let code = l["code_reference"].as_str().unwrap_or_default().to_string();
+            if let Some(o) = l.as_object_mut() {
+                let (min, sous) = match etats.get(&code) {
+                    Some(e) => (
+                        json!(e.securite_aujourdhui_kg),
+                        json!(e.securite_aujourdhui_kg > 0.0 && e.disponible_kg < e.securite_aujourdhui_kg - 1e-6),
+                    ),
+                    None => (Value::Null, json!(false)),
+                };
+                o.insert("stock_min_kg".into(), min);
+                o.insert("sous_minimum".into(), sous);
+            }
+        }
+    }
     trier_par_etat(&mut valeur, "designation");
     tronquer(&mut valeur, f.limite());
     user.masquer(&state.db, module::STOCK, &mut valeur).await?;
@@ -1761,11 +1786,12 @@ pub async fn cockpit_analyse(
         .map(|e| e.code_reference.clone())
         .collect();
 
+    let economies = economies_au_plan(&state.db, &etats).await?;
     let mut sortie = serde_json::json!({
         "couverture":   couverture,
         "cout_mensuel": bloc(&state.db, "SELECT * FROM v_cockpit_cout_mensuel ORDER BY annee_mois").await?,
-        "economies":    bloc(&state.db,
-            "SELECT * FROM v_cockpit_economies ORDER BY economie_annuelle_mad DESC LIMIT 20").await?,
+        // Les economies : une PROJECTION, au plan du moteur (27/10/2026).
+        "economies":    Value::Array(economies.iter().take(20).cloned().collect()),
         "devises":      bloc(&state.db, "SELECT * FROM v_cockpit_devise ORDER BY montant_mad DESC").await?,
         "mono_source":  mono_source,
         // Le Pareto ne montre que le haut de la courbe : au-dela de trente
@@ -1774,8 +1800,9 @@ pub async fn cockpit_analyse(
         "fournisseurs": bloc(&state.db,
             "SELECT f.nom AS fournisseur_nom,
                     COUNT(*) AS nb_references,
-                    ROUND(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-                              * COALESCE(sp.cmup_mad, 0)), 2) AS budget_annuel_mad
+                    -- La depense REELLE des 12 mois pleins (grand livre, valeur au
+                    -- livre, 27/10/2026) : un constat de la concentration.
+                    ROUND(SUM(sp.valeur_reel_12m_mad), 2) AS budget_annuel_mad
                FROM v_stock_reference sp
                JOIN fournisseur f ON f.code_fournisseur = sp.code_fournisseur
               GROUP BY f.nom
@@ -1783,8 +1810,7 @@ pub async fn cockpit_analyse(
               -- HAVING s'evalue AVANT la projection, donc avant que l'alias
               -- existe. SQLite l'admettait, la norme SQL non. `ORDER BY`, lui,
               -- s'evalue APRES : l'alias y est legitime.
-              HAVING SUM(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-                         * COALESCE(sp.cmup_mad, 0)) > 0
+              HAVING SUM(sp.valeur_reel_12m_mad) > 0
               ORDER BY budget_annuel_mad DESC
               LIMIT 10").await?,
         "abc_statut":   abc_statut,
@@ -1793,9 +1819,9 @@ pub async fn cockpit_analyse(
 
     // LES INDICATEURS DE LA ZONE 5 DU CLASSEUR qui manquaient. Une seule ligne.
     //
-    // La couverture ponderee valeur se lit sur le stock PHYSIQUE : le projete de
-    // l'ERP retranche douze mois de besoins et serait negatif presque partout.
-    // Les economies sont sommees sur TOUTES les opportunites — l'ecran n'en
+    // La couverture du stock est celle du MOTEUR (27/10/2026), ponderee par la
+    // valeur du stock physique (couverture_du_stock) : plus une division.
+    // Les economies (AU PLAN) sont sommees sur TOUTES les opportunites — l'ecran n'en
     // montre que cinq, et en additionnait vingt — une reference presente dans
     // deux groupes d'equivalence ne compte qu'une fois, a sa meilleure economie.
     let ind = sqlx::query(
@@ -1804,15 +1830,8 @@ pub async fn cockpit_analyse(
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'B')      AS nb_classe_b,
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc = 'C')      AS nb_classe_c,
            (SELECT COUNT(*) FROM reference WHERE actif = 1 AND classe_abc IS NULL)    AS nb_non_classees,
-           (SELECT ROUND(SUM(GREATEST(sp.stock_physique_net_kg, 0) * sp.cmup_mad)
-                         / NULLIF(SUM(COALESCE(sp.conso_mensuelle_kg, 0) * sp.cmup_mad) / 30.0, 0), 1)
-              FROM v_stock_reference sp)                                              AS couverture_ponderee_jours,
            (SELECT ROUND(AVG(ABS(ecart_pct)), 2) FROM v_archive_reception_courante
              WHERE ecart_pct IS NOT NULL)                                             AS ecart_pesee_moyen_pct,
-           (SELECT ROUND(COALESCE(SUM(e), 0), 2) FROM (
-                SELECT MAX(economie_annuelle_mad) AS e FROM v_cockpit_economies
-                 GROUP BY code_reference) x)                                          AS economies_total_mad,
-           (SELECT COUNT(DISTINCT code_reference) FROM v_cockpit_economies)          AS nb_opportunites,
            -- Le budget des propositions ouvertes des references au plan non
            -- couvert (moteur de couverture, 27/10/2026).
            (SELECT ROUND(COALESCE(SUM(COALESCE(montant_total_mad, quantite_suggeree_kg * prix_estime_mad)), 0), 2)
@@ -1830,6 +1849,10 @@ pub async fn cockpit_analyse(
     if let Some(mut ligne) = lignes_en_json(&ind).as_array().and_then(|a| a.first()).cloned() {
         if let Some(o) = ligne.as_object_mut() {
             o.insert("nb_refs_en_alerte".into(), json!(etats.suivies().filter(|e| e.en_tension()).count()));
+            o.insert("couverture_ponderee_jours".into(), json!(couverture_du_stock(&state.db, &etats).await?));
+            let (total, nb) = total_economies(&economies);
+            o.insert("economies_total_mad".into(), json!(total));
+            o.insert("nb_opportunites".into(), json!(nb));
         }
         sortie["indicateurs"] = ligne;
     }
@@ -1851,11 +1874,14 @@ pub async fn cockpit_analyse(
         // qui porte 40 % des achats pese plus qu'un fournisseur de plastique.
         "SELECT
            (SELECT ROUND(COALESCE(SUM(valeur_mad), 0), 2) FROM stock_magasin)::float8,
-           ROUND(COALESCE(SUM(sp.conso_mensuelle_kg * 12 * sp.cmup_mad), 0), 2)::float8,
+           -- LE COUT MATIERE est le REEL des 12 mois pleins (grand livre : consommation
+           -- et rebut, retours deduits, valeur au livre ; 27/10/2026) : DIO, rotation et
+           -- DPO sont des constats, ils ne lisent plus le « plus grand » du reel et du plan.
+           ROUND(COALESCE(SUM(sp.valeur_reel_12m_mad), 0), 2)::float8,
            ROUND(COALESCE(
-               SUM(f.delai_paiement_jours * COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0))
+               SUM(f.delai_paiement_jours * sp.valeur_reel_12m_mad)
                / NULLIF(SUM(CASE WHEN f.delai_paiement_jours IS NOT NULL
-                                 THEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0) END), 0),
+                                 THEN sp.valeur_reel_12m_mad END), 0),
                AVG(f.delai_paiement_jours), 0), 1)::float8,
            (SELECT CAST(valeur_courante AS numeric)::float8 FROM parametre
              WHERE code_parametre = 'P_DSODefaut'),
@@ -1886,6 +1912,81 @@ pub async fn cockpit_analyse(
 
     user.masquer(&state.db, module::COCKPIT, &mut sortie).await?;
     Ok(Json(sortie))
+}
+
+/// LES ECONOMIES IDENTIFIEES, AU PLAN (27/10/2026) : une projection — l'ecart entre
+/// le prix d'une reference et le moins cher de son groupe d'equivalence, applique
+/// au plan des douze prochains mois (plan / mois du moteur x 12). La vue
+/// `v_cockpit_economies` rend les prix ; le moteur, le plan. Triees, la plus forte
+/// d'abord ; une reference sans plan n'a pas d'economie a faire.
+pub async fn economies_au_plan(db: &crate::db::Db, etats: &super::couverture::Etats) -> AppResult<Vec<Value>> {
+    let lignes = lignes_en_json(&sqlx::query("SELECT * FROM v_cockpit_economies").fetch_all(db).await?);
+    let mut sortie: Vec<Value> = Vec::new();
+    for mut l in lignes.as_array().cloned().unwrap_or_default() {
+        let code = l["code_reference"].as_str().unwrap_or_default().to_string();
+        let plan_mois = etats.get(&code).map(|e| e.plan_mois_kg).unwrap_or(0.0);
+        let (kg, economie) = crate::domain::couverture::economie_au_plan(
+            l["prix_actuel_mad"].as_f64().unwrap_or(0.0),
+            l["prix_min_mad"].as_f64().unwrap_or(0.0),
+            plan_mois,
+        );
+        if economie <= 0.0 {
+            continue;
+        }
+        if let Some(o) = l.as_object_mut() {
+            o.insert("plan_mois_kg".into(), json!(plan_mois));
+            o.insert("conso_annuelle_kg".into(), json!(kg));
+            o.insert("economie_annuelle_mad".into(), json!(economie));
+        }
+        sortie.push(l);
+    }
+    sortie.sort_by(|a, b| {
+        b["economie_annuelle_mad"]
+            .as_f64()
+            .unwrap_or(0.0)
+            .total_cmp(&a["economie_annuelle_mad"].as_f64().unwrap_or(0.0))
+    });
+    Ok(sortie)
+}
+
+/// Le total des economies et le nombre de references : une reference presente
+/// dans deux groupes d'equivalence ne compte qu'une fois, a sa meilleure economie.
+pub fn total_economies(economies: &[Value]) -> (f64, usize) {
+    let mut par_ref: HashMap<String, f64> = HashMap::new();
+    for e in economies {
+        let code = e["code_reference"].as_str().unwrap_or_default().to_string();
+        let v = e["economie_annuelle_mad"].as_f64().unwrap_or(0.0);
+        let m = par_ref.entry(code).or_insert(0.0);
+        if v > *m {
+            *m = v;
+        }
+    }
+    let total: f64 = par_ref.values().sum();
+    ((total * 100.0).round() / 100.0, par_ref.len())
+}
+
+/// LA COUVERTURE DU STOCK, AU MOTEUR (27/10/2026) : les jours couverts par le
+/// moteur (jusqu'a la 1re rupture, sinon tout l'horizon), en moyenne ponderee par
+/// la valeur en stock (physique net x CMUP) des references au plan. Plus une
+/// division du stock par une consommation « retenue ».
+async fn couverture_du_stock(db: &crate::db::Db, etats: &super::couverture::Etats) -> AppResult<Option<f64>> {
+    let poids: Vec<(String, f64)> = sqlx::query_as(
+        "SELECT code_reference, (GREATEST(stock_physique_net_kg, 0) * COALESCE(cmup_mad, 0))::float8
+           FROM v_stock_reference",
+    )
+    .fetch_all(db)
+    .await?;
+    let horizon_j = etats.fin_horizon.map(|f| (f - etats.aujourdhui).num_days() + 1).unwrap_or(0);
+    let lignes: Vec<(Option<i64>, f64)> = poids
+        .into_iter()
+        .filter_map(|(code, p)| {
+            etats
+                .get(&code)
+                .filter(|e| e.suivie && e.plan_horizon_kg > 0.0)
+                .map(|e| (e.jours_couverture, p))
+        })
+        .collect();
+    Ok(crate::domain::couverture::couverture_ponderee(&lignes, horizon_j))
 }
 
 /// Une requete a un parametre tableau de textes, rendue en JSON.

@@ -57,6 +57,10 @@ SELECT bm.annee_mois,
 -- groupe. L'economie annuelle est l'ecart multiplie par la consommation de
 -- l'annee.
 --
+-- 27/10/2026 (« deux chiffres separes ») : l'economie est une PROJECTION, AU PLAN
+-- du moteur de couverture. La vue ne rend plus que les prix ; la route
+-- (consultation::economies_au_plan) multiplie l'ecart par le plan / mois x 12.
+--
 -- CE CHIFFRE EST UNE BORNE HAUTE, ET L'ECRAN DOIT LE DIRE. Il suppose que
 -- l'equivalent tient la meme qualite, que le fournisseur suit le volume et que
 -- le delai ne se degrade pas — trois hypotheses qu'un acheteur verifie avant de
@@ -87,15 +91,11 @@ SELECT sp.code_reference,
           JOIN v_stock_reference sp2 ON sp2.code_reference = g2.code_reference
          WHERE g2.code_groupe_equiv = g.code_groupe_equiv
            AND sp2.cmup_mad = m.prix_min_mad
-         LIMIT 1)                                           AS fournisseur_alternatif,
-       ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12, 4)    AS conso_annuelle_kg,
-       ROUND((sp.cmup_mad - m.prix_min_mad)
-             * COALESCE(sp.conso_mensuelle_kg, 0) * 12, 2)  AS economie_annuelle_mad
+         LIMIT 1)                                           AS fournisseur_alternatif
   FROM v_stock_reference sp
   JOIN groupes g ON g.code_reference = sp.code_reference
   JOIN mini    m ON m.code_groupe_equiv = g.code_groupe_equiv
- WHERE sp.cmup_mad > m.prix_min_mad
-   AND COALESCE(sp.conso_mensuelle_kg, 0) > 0;
+ WHERE sp.cmup_mad > m.prix_min_mad;
 
 
 -- -----------------------------------------------------------------------------
@@ -109,8 +109,8 @@ CREATE VIEW v_cockpit_devise AS
 WITH budget AS (
     SELECT r.code_devise_catalogue AS code_devise,
            COUNT(*)                AS nb_references,
-           SUM(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-               * COALESCE(sp.cmup_mad, 0)) AS montant_mad
+           -- Le REEL des 12 mois pleins, valeur au livre (27/10/2026).
+           SUM(sp.valeur_reel_12m_mad) AS montant_mad
       FROM reference r
       JOIN v_stock_reference sp ON sp.code_reference = r.code_reference
      WHERE r.actif = 1
@@ -140,8 +140,8 @@ SELECT sp.code_reference,
        sp.designation,
        sp.fournisseur_nom,
        sp.delai_livraison_jours,
-       ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-             * COALESCE(sp.cmup_mad, 0), 2) AS budget_annuel_mad
+       -- Le REEL des 12 mois pleins, valeur au livre (27/10/2026).
+       ROUND(sp.valeur_reel_12m_mad, 2) AS budget_annuel_mad
   FROM v_stock_reference sp
  WHERE NOT EXISTS (
          SELECT 1
@@ -170,8 +170,8 @@ WITH valeur AS (
            sp.designation,
            r.classe_abc,
            r.classe_xyz,
-           ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-                 * COALESCE(sp.cmup_mad, 0), 2) AS valeur_conso_annuelle_mad
+           -- Le REEL des 12 mois pleins, valeur au livre (27/10/2026).
+           ROUND(sp.valeur_reel_12m_mad, 2) AS valeur_conso_annuelle_mad
       FROM v_stock_reference sp
       JOIN reference r ON r.code_reference = sp.code_reference
      WHERE r.actif = 1

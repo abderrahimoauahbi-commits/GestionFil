@@ -70,7 +70,10 @@ EMPREINTES_REMPLACEES: dict[str, set[str]] = {
     # elles lisent desormais date_mouvement / date_bc en texte (::text), ce qui vaut
     # avant comme apres la conversion de type.
     "2026-10-09b_supervision_rejouee.sql": {"c765b9b45e73a8e86d900c30dc1bd1d571082b9df001c41ca06f94807b957d86"},
-    "2026-10-09d_sortie_hors_machine.sql": {"ff584388a8635bde5e288364114c24c0ef36f3c765fe40997cef470db01c774a"},
+    # 27/10/2026 (2026-10-27g, grand livre de la consommation) : 09d se rejoue sur une
+    # v_conso_reelle devenue agregat du grand livre (elle compte deja ces sorties).
+    "2026-10-09d_sortie_hors_machine.sql": {"ff584388a8635bde5e288364114c24c0ef36f3c765fe40997cef470db01c774a",
+                                            "1129872ddd7cce9cea25d8aa2f0411ac2d11fb649bffcfb11ac73638ae658026"},
     "2026-10-09j_prix_plan_achat.sql": {"913cd8bce990de61598722b6d65d50018cac7e0c4a7bce9c5f9a15cb058c5ef9"},
     "2026-10-09l_taux_bon_commande.sql": {"20dd13614760b9016716f0d1a75d284ae4df827a162642a998b0e239c9d2277b"},
     "2026-10-09m_cout_revient_reel.sql": {"a3b0ebadd29528df5ceb8a57ba55a56cd74057017635388fabea9836f084c63a"},

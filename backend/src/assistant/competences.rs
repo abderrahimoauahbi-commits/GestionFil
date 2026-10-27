@@ -473,7 +473,9 @@ pub async fn executer(
             let rows = sqlx::query(
                 "SELECT code_reference, designation,
                         ROUND(stock_physique_net_kg, 2)::float8 AS stock_kg,
-                        ROUND(conso_mensuelle_kg, 2)::float8     AS conso_mensuelle_kg,
+                        -- Le REEL des 12 mois pleins (grand livre, 27/10/2026) ; le plan
+                        -- / mois vient du moteur (enrichir).
+                        ROUND(reel_mois_kg, 2)::float8           AS reel_mois_kg,
                         delai_livraison_jours, fournisseur_nom
                    FROM v_stock_reference
                   WHERE code_reference = $1",
@@ -592,7 +594,7 @@ pub async fn executer(
                    FROM plan_achat p
                    LEFT JOIN reference   r ON r.code_reference   = p.code_reference
                    LEFT JOIN fournisseur f ON f.code_fournisseur = p.code_fournisseur
-                  WHERE p.statut NOT IN ('COMMANDE', 'ABANDONNE')
+                  WHERE p.statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')
                   ORDER BY p.quantite_suggeree_kg DESC
                   LIMIT $1",
             )
@@ -889,7 +891,7 @@ pub async fn executer(
                    JOIN plan_achat  p ON p.code_fournisseur = f.code_fournisseur
                    LEFT JOIN reference r ON r.code_reference = p.code_reference
                   WHERE (f.nom ILIKE $1 OR f.code_fournisseur ILIKE $1)
-                    AND p.statut NOT IN ('COMMANDE', 'ABANDONNE')
+                    AND p.statut IN ('PROPOSE', 'EN_REVISION', 'VALIDE')
                   ORDER BY p.quantite_suggeree_kg DESC
                   LIMIT 40",
             )

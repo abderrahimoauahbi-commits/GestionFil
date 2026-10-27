@@ -117,8 +117,9 @@ SELECT sp.code_reference,
        r.classe_abc,
        r.classe_xyz,
        sp.delai_livraison_jours,
-       ROUND(COALESCE(sp.conso_mensuelle_kg, 0) * 12
-             * COALESCE(sp.cmup_mad, 0), 2)                       AS budget_annuel_mad,
+       -- Budget et palier au REEL des 12 mois pleins (27/10/2026), meme assiette
+       -- que l'ABC : un poids constate.
+       ROUND(sp.valeur_reel_12m_mad, 2)                           AS budget_annuel_mad,
        COALESCE(a.nb_sources, 1)                                  AS nb_sources,
        CASE
            WHEN COALESCE(a.nb_sources, 1) <= 1 THEN 'MONO_SOURCE'
@@ -126,13 +127,13 @@ SELECT sp.code_reference,
        END                                                        AS risque_source,
        -- Le palier de montant, lu des parametres et non ecrit en dur.
        CASE
-           WHEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0)
+           WHEN sp.valeur_reel_12m_mad
                 >= (SELECT CAST(valeur_courante AS numeric) FROM parametre
                      WHERE code_parametre = 'P_SeuilTier1') THEN 'TIER_1'
-           WHEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0)
+           WHEN sp.valeur_reel_12m_mad
                 >= (SELECT CAST(valeur_courante AS numeric) FROM parametre
                      WHERE code_parametre = 'P_SeuilTier2') THEN 'TIER_2'
-           WHEN COALESCE(sp.conso_mensuelle_kg, 0) * 12 * COALESCE(sp.cmup_mad, 0)
+           WHEN sp.valeur_reel_12m_mad
                 >= (SELECT CAST(valeur_courante AS numeric) FROM parametre
                      WHERE code_parametre = 'P_SeuilTier3') THEN 'TIER_3'
            ELSE 'TIER_4'

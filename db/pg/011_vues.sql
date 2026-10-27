@@ -236,99 +236,164 @@ WHERE bc.statut IN ('VALIDE','ENVOYE','LIVRE_PARTIEL')
 GROUP BY lb.code_reference;
 
 -- -----------------------------------------------------------------------------
--- v_conso_reelle
--- Consommation mensuelle REELLE, conformement a la correction N4 du 11/06/2026 :
---     Conso_Mensuelle = Sorties_Cumulees / nb_mois_reellement_ecoules
--- La vue I1 du CDC utilisait SUM(besoin_mrp)/12, c'est-a-dire la consommation
--- PREVISIONNELLE : la correction N4 n'avait pas ete reportee dans le SQL.
+-- LE GRAND LIVRE DE LA CONSOMMATION (27/10/2026, migration
+-- 2026-10-27g_grand_livre_consommation.sql ; decisions Q1, Q2, Q5 a Q9, Q11 de
+-- docs/A-DECIDER-analyse-consommation.md)
+--
+-- UNE SOURCE DU REEL : une ligne par FAIT, posee sur les registres immuables —
+-- les decisions machine ACTIVES (datees au jour de la FICHE, jamais a la
+-- validation) et les mouvements non contre-passes. Natures :
+-- CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO (negatif, au jour du
+-- retour), HORS_MACHINE (sortie hors machine, sauf le pret), REBUT_DECHET /
+-- PERTE / CASSE (ecarts et dechargements au rebut, sortie production),
+-- AUTRE_ECART (corrections, non qualifies, regularisations, erreurs de saisie,
+-- ajustements d'inventaire : HORS reel, montres a part). Valeur : le prix de
+-- sortie du mouvement ; un fait machine au CMUP du jour du fait, reconstitue par
+-- la derniere sortie de la reference datee au plus tard ce jour-la (aucun
+-- historique du CMUP n'existe), a defaut le CMUP actuel (`prix_source`).
+--
+-- FICHIERS D'ORIGINE SANS MACHINES, SANS OF NI CONTRE-PASSATION. La definition
+-- en service (voir socle/schema.sql et la migration) lit `machine_decision`,
+-- `ordre_fabrication`, `mouvement.id_of`, `mouvement.code_qualite` et
+-- `mouvement.id_mouvement_contrepasse`, absents de 001-018 : la part machine y
+-- est absente et ces colonnes y valent NULL, avec leur nom et leur place.
 -- -----------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_conso_fenetre CASCADE;
+CREATE VIEW v_conso_fenetre AS
+SELECT (date_trunc('month', (now() AT TIME ZONE 'Africa/Casablanca')::date) - interval '12 months')::date AS debut,
+       date_trunc('month', (now() AT TIME ZONE 'Africa/Casablanca')::date)::date                           AS fin,
+       12::bigint                                                                                            AS nb_mois;
+
+DROP VIEW IF EXISTS v_consommation_fait CASCADE;
+CREATE VIEW v_consommation_fait AS
+WITH sorties AS (
+    SELECT lm.code_reference, (m.date_mouvement)::date AS date_mouvement, m.date_creation,
+           lm.ligne_numero, lm.prix_kg_mad
+      FROM ligne_mouvement lm
+      JOIN mouvement m       ON m.id_mouvement = lm.id_mouvement
+      JOIN type_mouvement t  ON t.code_type_mvt = m.code_type_mvt
+     WHERE t.signe = -1 AND lm.prix_kg_mad > 0
+),
+mvt AS (
+    SELECT m.id_mouvement, m.numero_mouvement, (m.date_mouvement)::date AS date_mouvement, m.code_type_mvt,
+           m.code_motif, m.responsable, lm.ligne_numero, lm.code_reference, lm.lot_fournisseur, lm.quantite_kg,
+           NULLIF(lm.prix_kg_mad, 0) AS prix_mouvement, lm.code_motif_ligne, lm.mode_pesee,
+           r.cmup_mad AS cmup_actuel
+      FROM mouvement m
+      JOIN ligne_mouvement lm ON lm.id_mouvement = m.id_mouvement
+      JOIN reference r        ON r.code_reference = lm.code_reference
+     WHERE m.code_type_mvt IN ('CONSO_DIRECTE', 'RETOUR_CONSO', 'SORTIE_PROD', 'AJUST_INV_NEG', 'AJUST_INV_POS')
+        OR (m.code_type_mvt = 'SORTIE_HORS_MACHINE' AND COALESCE(lm.code_motif_ligne, '') <> 'HM_PRET')
+),
+mvt_prix AS (
+    SELECT DISTINCT ON (x.id_mouvement, x.ligne_numero)
+           x.*, s.prix_kg_mad AS cmup_du_jour
+      FROM mvt x
+      LEFT JOIN sorties s ON x.prix_mouvement IS NULL
+                         AND s.code_reference = x.code_reference
+                         AND s.date_mouvement <= x.date_mouvement
+     ORDER BY x.id_mouvement, x.ligne_numero,
+              s.date_mouvement DESC NULLS LAST, s.date_creation DESC NULLS LAST, s.ligne_numero DESC NULLS LAST
+),
+faits AS (
+    SELECT 'MOUVEMENT'::text AS source, x.id_mouvement AS id_source, x.ligne_numero, 'MOUVEMENT'::text AS composante,
+           x.numero_mouvement AS numero_document, x.date_mouvement AS date_fait,
+           CASE x.code_type_mvt
+                WHEN 'CONSO_DIRECTE'       THEN 'CONSOMMATION_DIRECTE'
+                WHEN 'RETOUR_CONSO'        THEN 'RETOUR_CONSO'
+                WHEN 'SORTIE_HORS_MACHINE' THEN 'HORS_MACHINE'
+                WHEN 'SORTIE_PROD'         THEN 'REBUT_DECHET'
+                ELSE 'AUTRE_ECART' END AS nature,
+           CASE WHEN x.code_type_mvt IN ('AJUST_INV_NEG', 'AJUST_INV_POS') THEN 'AJUSTEMENT_INVENTAIRE' END AS categorie_ecart,
+           CASE WHEN x.code_type_mvt IN ('RETOUR_CONSO', 'AJUST_INV_POS') THEN -x.quantite_kg ELSE x.quantite_kg END AS kg,
+           COALESCE(x.prix_mouvement, x.cmup_du_jour, x.cmup_actuel) AS prix_kg_mad,
+           CASE WHEN x.prix_mouvement IS NOT NULL THEN 'MOUVEMENT'
+                WHEN x.cmup_du_jour IS NOT NULL THEN 'SORTIE_DU_JOUR'
+                WHEN x.cmup_actuel IS NOT NULL THEN 'CMUP_ACTUEL' END AS prix_source,
+           x.code_reference, x.lot_fournisseur, x.code_type_mvt,
+           NULL::text AS code_machine, NULL::text AS code_emplacement,
+           COALESCE(x.code_motif_ligne, x.code_motif) AS code_motif, x.responsable,
+           NULL::text AS id_of, NULL::text AS code_qualite, 'NON_ATTRIBUE'::text AS attribution,
+           x.mode_pesee AS mode_mesure
+      FROM mvt_prix x
+)
+SELECT g.source, g.id_source, g.ligne_numero, g.composante, g.numero_document, g.date_fait,
+       to_char(g.date_fait, 'YYYY-MM')                     AS mois,
+       g.nature, g.categorie_ecart,
+       (g.nature <> 'AUTRE_ECART')                         AS dans_reel,
+       ROUND(g.kg, 4)                                      AS kg,
+       ROUND(g.prix_kg_mad, 4)                             AS prix_kg_mad,
+       ROUND(g.kg * g.prix_kg_mad, 2)                      AS valeur_mad,
+       g.prix_source, g.code_reference, g.lot_fournisseur, g.code_type_mvt,
+       g.code_machine, g.code_emplacement, g.code_motif, g.responsable,
+       g.id_of, g.code_qualite, 'Non attribué'::text AS qualite_libelle, g.attribution, g.mode_mesure
+  FROM faits g;
+
+-- Le reel par mois, dans la fenetre des 12 mois pleins (XYZ, rotation).
+DROP VIEW IF EXISTS v_conso_reelle_mois CASCADE;
+CREATE VIEW v_conso_reelle_mois AS
+SELECT g.code_reference,
+       g.mois,
+       ROUND(COALESCE(SUM(g.kg) FILTER (WHERE g.dans_reel), 0), 4)                   AS kg_reel,
+       ROUND(COALESCE(SUM(g.kg) FILTER (WHERE g.nature LIKE 'REBUT\_%'), 0), 4)       AS kg_rebut,
+       ROUND(COALESCE(SUM(g.kg) FILTER (WHERE NOT g.dans_reel), 0), 4)               AS kg_autres_ecarts,
+       ROUND(COALESCE(SUM(g.valeur_mad) FILTER (WHERE g.dans_reel), 0), 2)           AS valeur_mad
+  FROM v_consommation_fait g
+  CROSS JOIN v_conso_fenetre f
+ WHERE g.date_fait >= f.debut AND g.date_fait < f.fin
+ GROUP BY g.code_reference, g.mois;
+
+-- -----------------------------------------------------------------------------
+-- v_conso_reelle — LE « REEL / MOIS » (27/10/2026)
+-- Le reel d'achat des 12 MOIS PLEINS GLISSANTS (les 12 mois calendaires complets
+-- qui precedent le mois en cours ; un mois sans consommation compte zero) :
+-- consommation + rebut - retours, autres ecarts exclus. conso_mensuelle_kg = ce
+-- reel / 12. Remplace la moyenne « depuis l'origine », qui datait la machine au
+-- jour de validation (etude, defaut n° 1).
+--
+-- L'ANCIEN « PLUS GRAND DES DEUX » (v_conso_retenue = max(reel, plan moyen)) EST
+-- SUPPRIME, et le minimum dynamique (v_stock_min_dynamique) qui le lisait : le
+-- « Plan / mois » vient du moteur de couverture (plan_mois_kg), la securite du
+-- jour aussi ; le reel vient d'ici. Chaque ecran dit lequel il lit.
+-- -----------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_conso_retenue CASCADE;
+DROP VIEW IF EXISTS v_stock_min_dynamique CASCADE;
 DROP VIEW IF EXISTS v_conso_reelle CASCADE;
 CREATE VIEW v_conso_reelle AS
-SELECT
-    lm.code_reference,
-    ROUND(SUM(lm.quantite_kg), 4) AS sorties_cumulees_kg,
-    GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS bigint)) AS nb_mois_ecoules,
-    ROUND(SUM(lm.quantite_kg)
-          / GREATEST(1, CAST(((current_date - (min(m.date_mouvement))::date)) / 30.44 AS bigint)), 4) AS conso_mensuelle_kg,
-    min(m.date_mouvement) AS premiere_sortie,
-    max(m.date_mouvement) AS derniere_sortie
-FROM ligne_mouvement lm
-JOIN mouvement       m  ON m.id_mouvement  = lm.id_mouvement
-JOIN type_mouvement  tm ON tm.code_type_mvt = m.code_type_mvt
-WHERE tm.signe = -1
-  AND m.code_type_mvt = 'SORTIE_PROD'
-GROUP BY lm.code_reference;
-
--- -----------------------------------------------------------------------------
--- v_conso_retenue
--- Consommation de reference du pilotage. Le repli sur la prevision MRP quand
--- aucun historique de sortie n'existe est AUTORISE mais TRACE (source_conso),
--- au lieu du COALESCE(..., 1) silencieux de la vue I1 du CDC — qui contredisait
--- frontalement B2/R01 "jamais de fallback silencieux".
--- -----------------------------------------------------------------------------
--- FIX P1 (feuille GESTION FIL, mai 2026) : c'est le MAXIMUM des deux sources,
--- pas la premiere disponible.
---
--- Retenir l'historique des qu'il existe, comme le faisait un COALESCE, sous-
--- estime la consommation chaque fois que le plan est plus ambitieux que le passe
--- — c'est-a-dire precisement quand la production monte. La couverture s'en
--- trouve surevaluee, et l'alerte reste verte pendant que le besoin croit.
---
--- Le maximum protege dans les deux sens : un demarrage sans historique prend le
--- previsionnel, une consommation reelle superieure au plan prend le reel.
-DROP VIEW IF EXISTS v_conso_retenue CASCADE;
-CREATE VIEW v_conso_retenue AS
-SELECT
-    r.code_reference,
-    -- max() scalaire de SQLite propage les NULL : chaque terme est COALESCE, et
-    -- le zero final redevient NULL pour distinguer « aucune donnee » de « zero ».
-    NULLIF(GREATEST(COALESCE(cr.conso_mensuelle_kg, 0), COALESCE(b.besoin_mensuel_moyen_kg, 0)), 0)   AS conso_mensuelle_kg,
-    ROUND(COALESCE(cr.conso_mensuelle_kg, 0), 4)             AS conso_reelle_kg,
-    ROUND(COALESCE(b.besoin_mensuel_moyen_kg, 0), 4)         AS conso_previsionnelle_kg,
-    CASE
-        WHEN cr.conso_mensuelle_kg IS NULL AND b.besoin_mensuel_moyen_kg IS NULL
-             THEN 'INDETERMINEE'
-        WHEN COALESCE(cr.conso_mensuelle_kg, 0) >= COALESCE(b.besoin_mensuel_moyen_kg, 0)
-             THEN 'REELLE'
-        ELSE 'PREVISIONNELLE_MRP'
-    END AS source_conso,
-    cr.nb_mois_ecoules
-FROM reference r
-LEFT JOIN v_conso_reelle cr ON cr.code_reference = r.code_reference
-LEFT JOIN v_besoin_12m   b  ON b.code_reference  = r.code_reference
-WHERE r.actif = 1;
-
--- -----------------------------------------------------------------------------
--- v_stock_min_dynamique
--- Formule F3 (MAX de 4 securites), absente des vues du CDC qui n'utilisaient que
--- le stock_min_kg saisi au catalogue.
--- Rappel SQLite : max() scalaire propage les NULL -> chaque terme est COALESCE.
--- -----------------------------------------------------------------------------
-DROP VIEW IF EXISTS v_stock_min_dynamique CASCADE;
-CREATE VIEW v_stock_min_dynamique AS
-SELECT
-    r.code_reference,
-    COALESCE(r.stock_min_kg, 0)                                              AS terme1_catalogue_kg,
-    ROUND(COALESCE(r.couverture_min_mois, p_couv.v) * COALESCE(cr.conso_mensuelle_kg, 0)
-          * (1 + COALESCE(r.marge_securite_pct, p_marge.v) / 100.0), 4)      AS terme2_couverture_kg,
-    ROUND(COALESCE(cr.conso_mensuelle_kg, 0)
-          * COALESCE(f.delai_livraison_jours, p_delai.v) / 30.0, 4)          AS terme3_delai_kg,
-    ROUND(COALESCE(cr.conso_mensuelle_kg, 0)
-          * CASE r.classe_abc WHEN 'A' THEN p_seca.v WHEN 'B' THEN p_secb.v ELSE p_secc.v END
-          / 30.0, 4)                                                         AS terme4_securite_abc_kg,
-    ROUND(GREATEST(COALESCE(r.stock_min_kg, 0), COALESCE(r.couverture_min_mois, p_couv.v) * COALESCE(cr.conso_mensuelle_kg, 0)
-            * (1 + COALESCE(r.marge_securite_pct, p_marge.v) / 100.0), COALESCE(cr.conso_mensuelle_kg, 0) * COALESCE(f.delai_livraison_jours, p_delai.v) / 30.0, COALESCE(cr.conso_mensuelle_kg, 0)
-            * CASE r.classe_abc WHEN 'A' THEN p_seca.v WHEN 'B' THEN p_secb.v ELSE p_secc.v END / 30.0), 4)                                                                    AS stock_min_kg
-FROM reference r
-LEFT JOIN fournisseur     f  ON f.code_fournisseur = r.code_fournisseur
-LEFT JOIN v_conso_retenue cr ON cr.code_reference  = r.code_reference
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_CouvMinMois')  p_couv
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_MargeSecurite') p_marge
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_DelaiDefaut')   p_delai
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_SecuriteA')     p_seca
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_SecuriteB')     p_secb
-CROSS JOIN (SELECT CAST(valeur_courante AS numeric) v FROM parametre WHERE code_parametre = 'P_SecuriteC')     p_secc
-WHERE r.actif = 1;
+WITH f AS (SELECT debut, fin FROM v_conso_fenetre),
+agg AS (
+    SELECT g.code_reference,
+           SUM(g.kg) FILTER (WHERE g.dans_reel AND g.date_fait >= f.debut AND g.date_fait < f.fin)                       AS reel_kg,
+           SUM(g.kg) FILTER (WHERE g.dans_reel AND g.source = 'MOUVEMENT' AND g.date_fait >= f.debut AND g.date_fait < f.fin) AS reel_mvt_kg,
+           SUM(g.kg) FILTER (WHERE g.dans_reel AND g.source = 'DECISION'  AND g.date_fait >= f.debut AND g.date_fait < f.fin) AS reel_machine_kg,
+           SUM(g.valeur_mad) FILTER (WHERE g.dans_reel AND g.date_fait >= f.debut AND g.date_fait < f.fin)               AS valeur_mad,
+           SUM(g.kg) FILTER (WHERE g.nature LIKE 'REBUT\_%' AND g.date_fait >= f.debut AND g.date_fait < f.fin)          AS rebut_kg,
+           SUM(g.kg) FILTER (WHERE NOT g.dans_reel AND g.date_fait >= f.debut AND g.date_fait < f.fin)                   AS autres_kg,
+           MIN(g.date_fait) AS premier,
+           MAX(g.date_fait) AS dernier,
+           MAX(f.debut) AS debut,
+           MAX(f.fin) AS fin
+      FROM v_consommation_fait g
+      CROSS JOIN f
+     GROUP BY g.code_reference
+)
+SELECT a.code_reference,
+       ROUND(COALESCE(a.reel_kg, 0), 4)                                         AS sorties_cumulees_kg,
+       GREATEST(0, LEAST(12, (EXTRACT(YEAR FROM age(a.fin, date_trunc('month', a.premier)::date)) * 12
+                              + EXTRACT(MONTH FROM age(a.fin, date_trunc('month', a.premier)::date)))))::bigint
+                                                                                AS nb_mois_ecoules,
+       ROUND(COALESCE(a.reel_kg, 0) / 12.0, 4)                                  AS conso_mensuelle_kg,
+       to_char(a.premier, 'YYYY-MM-DD')                                         AS premiere_sortie,
+       to_char(a.dernier, 'YYYY-MM-DD')                                         AS derniere_sortie,
+       ROUND(COALESCE(a.reel_mvt_kg, 0), 4)                                     AS sorties_prod_kg,
+       ROUND(COALESCE(a.reel_machine_kg, 0), 4)                                 AS conso_machine_kg,
+       ROUND(COALESCE(a.reel_kg, 0), 4)                                         AS reel_12m_kg,
+       ROUND(COALESCE(a.valeur_mad, 0), 2)                                      AS valeur_12m_mad,
+       ROUND(COALESCE(a.rebut_kg, 0), 4)                                        AS rebut_12m_kg,
+       ROUND(COALESCE(a.autres_kg, 0), 4)                                       AS autres_ecarts_12m_kg,
+       a.debut                                                                  AS fenetre_debut,
+       a.fin                                                                    AS fenetre_fin
+  FROM agg a;
 
 -- -----------------------------------------------------------------------------
 -- v_stock_physique   —   LA REALITE, sans projection
@@ -401,8 +466,9 @@ GROUP BY r.code_reference;
 -- Cette vue remplace v_stock_projete comme socle des vues d'etat, d'analyse et
 -- de cockpit, SANS projection ni statut : ce qui se lit sans calcul de besoin —
 -- fournisseur et delai, classes, stock (disponible au MRP, total, physique net,
--- quarantaine, mis de cote, machine, transit), consommation retenue et minimum
--- recalcule (un seuil affiche, il n'entre plus dans aucun besoin). Le statut,
+-- quarantaine, mis de cote, machine, transit), le REEL des 12 mois pleins (par
+-- mois et en valeur, grand livre ; 27/10/2026 : plus de consommation « retenue »
+-- ni de minimum recalcule). La securite du jour, le statut,
 -- les jours couverts, la 1re rupture et la quantite a commander viennent du
 -- moteur (backend/src/domain/couverture.rs) : la route qui sert l'ecran les
 -- ajoute.
@@ -431,15 +497,14 @@ SELECT
     ph.stock_machine_kg,
     ph.stock_transit_kg,
 
-    cr.conso_mensuelle_kg,
-    cr.source_conso,
-    sm.stock_min_kg
+    -- Le REEL des 12 mois pleins (grand livre, 27/10/2026) : par mois et en valeur.
+    cr.conso_mensuelle_kg                        AS reel_mois_kg,
+    COALESCE(cr.valeur_12m_mad, 0)               AS valeur_reel_12m_mad
 FROM reference r
 JOIN      v_stock_disponible    sd ON sd.code_reference   = r.code_reference
 JOIN      v_stock_physique      ph ON ph.code_reference   = r.code_reference
-JOIN      v_stock_min_dynamique sm ON sm.code_reference   = r.code_reference
 LEFT JOIN fournisseur            f ON f.code_fournisseur  = r.code_fournisseur
-LEFT JOIN v_conso_retenue       cr ON cr.code_reference   = r.code_reference
+LEFT JOIN v_conso_reelle        cr ON cr.code_reference   = r.code_reference
 CROSS JOIN (SELECT valeur_courante v FROM parametre WHERE code_parametre = 'P_DelaiDefaut') p_delai
 WHERE r.actif = 1;
 

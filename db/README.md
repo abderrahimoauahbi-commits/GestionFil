@@ -79,7 +79,7 @@ db/pg/
 ├── 010b_declencheurs_logique.sql solde, CMUP, capacité machine
 ├── 011_vues.sql                  vues de pilotage
 ├── 012_controles.sql             contrôles métier C01–C37 (sauf C05, C25, C27), C43, C44, C66
-│                                 (C38–C42, C45–C65 sauf C49 : migrations ; C05, C25 : moteur)
+│                                 (C38–C42, C45–C65 sauf C49, C67 : migrations ; C05, C25 : moteur)
 ├── 013_vues_cockpit.sql          le cockpit : Pareto, économies, devises, mono-source
 ├── 014_audit_operations.sql      journal d'audit des opérations
 ├── seed_*.sql                    référentiels, sécurité, qualités, comptes réels
@@ -132,12 +132,13 @@ Un rôle BOM sans densité sur la qualité **bloque la validation de la recette*
 |---|---|
 | `v_ligne_recette_calculee` | kg/m² par ligne de recette (gère kg/m² et ml/m²) |
 | `v_besoin_mrp_calcule` | besoins MRP agrégés par référence, taux de perte appliqué |
-| `v_conso_reelle` / `v_conso_retenue` | consommation réelle (correction N4) et sa provenance |
+| `v_consommation_fait` | **le grand livre de la consommation** (27/10/2026, 27g) : une ligne par fait — décisions machine actives datées au jour de la fiche, mouvements non contre-passés ; natures CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO, HORS_MACHINE, REBUT_DECHET/PERTE/CASSE, AUTRE_ECART (hors réel : corrections, non qualifiés, régularisations, erreurs, ajustements d'inventaire) ; kg signés, valeur au livre (fait machine : CMUP du jour reconstitué, `prix_source`), OF, qualité (« Non attribué »), attribution, mode de mesure, clé du détail |
+| `v_conso_fenetre` / `v_conso_reelle_mois` | les 12 mois pleins glissants (mois calendaires complets avant le mois en cours) ; le réel par référence et par mois dans la fenêtre (XYZ, rotation) |
+| `v_conso_reelle` | le **Réel / mois** : réel d'achat des 12 mois pleins (consommation + rebut − retours) ÷ 12, valeur, rebut, autres écarts (27g) ; `v_conso_retenue` (le « plus grand » du réel et du plan) est **supprimée** |
 | `v_stock_disponible` | stock agrégé par référence, hors magasins `inclure_mrp = 0` |
 | `v_encours_bc` | reliquat des BC envoyés |
-| `v_stock_min_dynamique` | stock minimum F3 (max de 4 sécurités) — un seuil affiché, il n'entre plus dans aucun besoin (27e) |
 | `v_stock_physique` | ce qu'il y a dans les allées, sans projection : utilisable, quarantaine, mis de côté (restes, lots bloqués), fil sur machine au dernier constat, fil en route vers un magasin compté (`stock_transit_kg`) ; `stock_mrp_net_kg` retirée le 27/10/2026 |
-| `v_stock_reference` | **la lecture neutre d'une référence** (27/10/2026, 27e) : fournisseur et délai, classes, stock (MRP, total, physique net, quarantaine, mis de côté, machine, transit), consommation retenue, minimum — sans projection ni statut ; socle des vues d'état, d'analyse et de cockpit, à la place de `v_stock_projete` |
+| `v_stock_reference` | **la lecture neutre d'une référence** (27/10/2026, 27e) : fournisseur et délai, classes, stock (MRP, total, physique net, quarantaine, mis de côté, machine, transit), réel / mois et valeur réelle des 12 mois pleins (27g) — sans projection ni statut ; socle des vues d'état, d'analyse et de cockpit, à la place de `v_stock_projete` |
 | `v_substitution_dispo` | substituts d'un groupe d'équivalence qui ont du stock net ; l'état de la principale vient du moteur de couverture (27e) |
 | `v_stock_transit_reference` | le fil en route (transfert expédié, pas encore reçu) par référence et magasin d'arrivée, compté dans la valeur du stock et la couverture (10b) |
 | `v_facture_rapprochement` | le rapprochement 3-way d'une facture fournisseur, ligne par ligne : commandé (ligne de bon), pesé (ligne de réception), facturé, écarts de quantité et de prix (ADR-003 phase B, 14d) |
@@ -165,14 +166,22 @@ gardaient un statut ou une projection pour l'afficher (`v_equivalence`, `v_etat_
 ajoute les colonnes du moteur (statut, jours couverts, 1re rupture, quantité à commander).
 `snapshot_mrp` prend le solde et l'état du moteur (`PLAN_NON_COUVERT`, `SOUS_SECURITE`, `COUVERT`,
 les anciens états restant admis). Gardées parce qu'elles ne calculent ni besoin ni projection :
-`v_besoin_mrp_calcule`, `v_besoin_12m`, `v_besoin_mois`, `v_conso_retenue`,
-`v_stock_min_dynamique`, `v_stock_disponible`.
+`v_besoin_mrp_calcule`, `v_besoin_12m`, `v_besoin_mois`, `v_stock_disponible` (`v_conso_retenue` et
+`v_stock_min_dynamique` sont retirées par 27g : « deux chiffres séparés », réel du grand livre et plan
+du moteur ; le minimum affiché est la sécurité du jour du moteur).
 
 Le **transfert en route** porte une date prévue de disponibilité au magasin destinataire
 (`transfert.date_disponibilite_prevue`, migration `2026-10-27d`) : obligatoire à l'expédition,
 révisable tant qu'il est en route, figée après (déclencheur `trg_transfert_date_disponibilite`,
 `TRF-DATE` ; chaque révision journalisée par `trg_audit_transfert_date`). Le moteur le compte comme
 un arrivage à cette date ; sans date, C66 le signale.
+
+La **proposition d'achat se clôt avec son bon annulé** (décision du 27/10/2026, migration
+`2026-10-27f`) : annuler le bon qu'une proposition a produit la fait passer à `ANNULE_BC`
+(« Annulée avec le bon ») au lieu de la rouvrir. Elle reste liée au bon (`id_bc_genere`, et la ligne
+du bon qui la désigne), n'est plus ouverte (ni purgée par la régénération, ni comptée, hors de
+`ux_plan_achat_ouvert`) ; c'est un état final (`trg_plan_achat_annule_bc_final`, `PA-ANNULE-BC`). La
+régénération suivante crée une proposition neuve si le moteur en propose une.
 
 ---
 
@@ -224,6 +233,7 @@ Les migrations du 09/10/2026 (audit v5) et du 10/10 ajoutent, tous en **signal**
 | C64 | qualité et mois où les OF retenus (PRÉVU, LANCÉ) dépassent le plan de production en service : un simple signal que la direction garde : depuis 27b, le besoin vient du plan seul et l'excédent des OF n'y entre plus ; on le montre (`v_ctl_c64` : m² du plan, des OF, au-delà, les OF) | 22c |
 | C65 | mouvement d'un magasin daté de la période de comptage (du jour d'ouverture au jour de clôture) d'un inventaire clôturé, saisi après son ouverture : passé pendant le comptage avant le gel du 23/10/2026, ou antidaté après la clôture — le comptage ne l'a pas vu (ajustements de l'inventaire et leurs contre-passations exclus). Même étendue que le gel (24a) : pour un tournant ou un ciblé, seul compte un mouvement dont une ligne porte une référence de l'inventaire (sa liste, ou ses lignes avant 24b) | 23g, 24a, 24b |
 | C66 | transfert en route (`VALIDE`) sans date prévue de disponibilité : le moteur de couverture le liste « sans date » et ne le compte pas, jusqu'à ce qu'une date soit saisie | 27d, 27e |
+| C67 | rapprochement machine, par référence : chargé (CHARGE_MACHINE − ANNUL) − déchargé au magasin (RETOUR_MACHINE − ANNUL) − variation de l'état machine (actuel − départ) ≠ faits machine du grand livre de la consommation (consommation, rebut, autres écarts), au-delà de 0,01 kg (seuil technique d'arrondi). Un signal | 27g |
 
 **Le 27/10/2026 (migration 27e, une seule source de vérité : le moteur de couverture).** **C05**
 (plan non couvert sur l'horizon, ex-« stock projeté négatif ») et **C25** (stock mobilisable face à
@@ -237,7 +247,7 @@ minimum) et **C49** sont **retirés** — le moteur n'a ni seuils de jours ni pr
 `P_RetardBCJours`, un libellé fixe (`P_EncoursRetardInclus` n'a plus de lecteur). **C66** naît
 (transfert en route sans date prévue). C31, C32 et le coût de revient gardent les réceptions
 clôturées ; C35 et C36 lisent l'état des machines (`machine_etat`). `v_controles` porte donc
-C01–C66 moins C05, C25, C27 et C49.
+C01–C67 moins C05, C25, C27 et C49.
 
 **C11 est le contrôle central** : il compare le solde de `stock_magasin` au grand livre. `stock_magasin` n'est qu'un cache ; `ligne_mouvement` fait foi. Toute divergence signale un bug applicatif, et le solde est reconstructible.
 

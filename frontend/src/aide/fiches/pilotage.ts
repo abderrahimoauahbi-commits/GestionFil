@@ -142,7 +142,8 @@ export const FICHES_PILOTAGE: Sujet[] = [
       },
       {
         nom: 'Économies identifiées',
-        description: 'L’économie annuelle possible en passant, à qualité égale, au fournisseur le moins cher d’un groupe d’équivalence ; le détail est à la page Opportunités.',
+        description:
+          'L’économie possible sur un an en passant, à qualité égale, au fournisseur le moins cher d’un groupe d’équivalence — AU PLAN : l’écart de prix appliqué au plan / mois du moteur de couverture × 12 (une projection, une borne haute) ; le détail est à la page Opportunités.',
         valeurs: 'MAD/an',
       },
       {
@@ -252,13 +253,18 @@ export const FICHES_PILOTAGE: Sujet[] = [
         valeurs: 'kg',
       },
       {
+        nom: 'Trop tard pour commander',
+        description:
+          'Tuile : les références dont la PREMIÈRE RUPTURE du moteur de couverture tombe avant aujourd’hui + délai fournisseur — une commande passée aujourd’hui arriverait après. Commander ne suffit plus : il faut une autre solution (équivalent, transfert, report de production).',
+      },
+      {
         nom: 'Mono-source à risque',
         description: 'Parmi les références en risque, celles qui n’ont aucun équivalent chez un autre fournisseur.',
       },
       {
         nom: 'Mur de risques',
         description:
-          'Une ligne par référence en tension (60 au plus), triée par marge de décision : une case par mois de l’horizon — rouge, plan non couvert ; orange, sous la sécurité ; vert pâle, couvert.',
+          'Une ligne par référence en tension (60 au plus), triée par MARGE DE DÉCISION — les jours qui restent avant la date limite de commande de la première proposition du moteur (négative : déjà dépassée) ; sans proposition, avant le premier passage sous la sécurité, délai fournisseur déduit —, puis classe ABC, puis nombre de mois au plan non couvert. Une case par mois de l’horizon : rouge, plan non couvert ; orange, sous la sécurité ; vert pâle, couvert.',
       },
       { nom: 'Référence', description: 'La référence (avec sa classe ABC et son fournisseur dans le mur).' },
       { nom: 'Sourcing', description: '« mono » : aucun équivalent chez un autre fournisseur ; « multi » sinon.' },
@@ -304,7 +310,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
       { nom: 'Alternative', description: 'Opportunités : le fournisseur le moins cher du groupe d’équivalence.' },
       { nom: 'Meilleur prix', description: 'Opportunités : le prix au kilo de l’alternative, en MAD.', valeurs: 'MAD/kg' },
       { nom: 'Écart', description: 'Opportunités : la baisse de prix en %.', valeurs: '%' },
-      { nom: 'Économie / an', description: 'Opportunités : l’économie annuelle à qualité égale.', valeurs: 'MAD' },
+      { nom: 'Économie / an', description: 'Opportunités : l’économie sur un an à qualité égale, AU PLAN (écart de prix × plan / mois du moteur × 12) — une projection, pas un constat.', valeurs: 'MAD' },
     ],
     regles: [
       'Une adresse inconnue (/tableau-de-bord/…) ramène à la vue d’ensemble.',
@@ -399,7 +405,11 @@ export const FICHES_PILOTAGE: Sujet[] = [
       { nom: 'Sorties', description: 'Les kilos sortis du stock, par référence ou par famille.', valeurs: 'kg' },
       { nom: 'Flux', description: 'Entrées plus sorties de la référence, en barre proportionnelle à la référence qui a le plus bougé.' },
       { nom: 'Stock', description: 'Le stock actuel, en kilos (référence, famille ou catégorie).', valeurs: 'kg' },
-      { nom: 'Rotation', description: 'Les sorties rapportées au stock actuel. C’est une approximation : l’outil ne garde pas l’historique du stock.' },
+      {
+        nom: 'Rotation',
+        description:
+          'Les sorties de la référence enregistrées au journal des mouvements (toutes, sans borne de dates), rapportées au stock actuel. Une approximation : l’outil ne garde pas l’historique du stock. Ce n’est pas la rotation du stock des rapports financiers, qui lit le réel des 12 mois pleins du grand livre de la consommation.',
+      },
       {
         nom: 'Immobile',
         description: 'Le nombre de jours depuis le dernier mouvement de la référence ; « jamais » si elle n’a jamais bougé. En orange au-delà de 180 jours.',
@@ -643,9 +653,9 @@ export const FICHES_PILOTAGE: Sujet[] = [
     exemples: [
       {
         titre: 'la dépendance à un fournisseur',
-        situation: 'Engagement par fournisseur : un fournisseur porte 34 % du budget annuel.',
+        situation: 'Engagement par fournisseur : un fournisseur porte 34 % du réel des 12 mois pleins.',
         calcul: [
-          ['Budget annuel', 'consommation mensuelle × 12 × CMUP, sommé sur ses références'],
+          ['Réel 12 mois', 'la consommation réelle des 12 mois pleins (grand livre : consommation et rebut, retours déduits), à sa valeur au livre, sommée sur ses références'],
           ['Part', 'son budget ÷ le total des fournisseurs affichés'],
         ],
         conclusion: 'Au-delà de 30 %, la part est surlignée : une défaillance toucherait un tiers de l’approvisionnement.',
@@ -663,31 +673,41 @@ export const FICHES_PILOTAGE: Sujet[] = [
         description: 'La valeur du stock de tous les magasins, chacun à son CMUP (en millions de dirhams dans la synthèse) ; par classe ABC dans la concentration.',
         valeurs: 'MAD',
       },
-      { nom: 'Coût matière annuel', description: 'La consommation mensuelle × 12, valorisée au CMUP, sur toutes les références.', valeurs: 'MAD' },
+      {
+        nom: 'Coût matière (réel 12 mois)',
+        description:
+          'Le RÉEL des 12 mois pleins glissants, sur toutes les références : consommation et rebut du grand livre de la consommation, retours déduits, à la valeur au livre (prix de sortie de chaque mouvement ; CMUP du jour du fait pour la machine). Plus « consommation mensuelle × 12 × CMUP ».',
+        valeurs: 'MAD',
+      },
       {
         nom: 'Rotation du stock',
-        description: 'Coût matière annuel ÷ valeur du stock. Sous 1 (en orange), le stock représente plus d’une année de consommation.',
+        description:
+          'Coût matière réel des 12 mois pleins ÷ valeur du stock. Sous 1 (en orange), le stock représente plus d’une année de consommation réelle.',
         valeurs: 'fois / an',
       },
       {
         nom: 'Cycle de conversion',
         description:
-          'DIO + DSO − DPO. Le DIO (jours de stock) et le DPO (délai de paiement fournisseur, pondéré par le budget) sont calculés ; le DSO vient du paramètre P_DSODefaut, faute de module de vente. Négatif, le fournisseur finance le cycle.',
+          'DIO + DSO − DPO. Le DIO (jours de stock : valeur du stock ÷ coût matière réel × 365) et le DPO (délai de paiement fournisseur, pondéré par le réel 12 mois de chaque fournisseur) sont calculés sur le réel des 12 mois pleins ; le DSO vient du paramètre P_DSODefaut, faute de module de vente. Négatif, le fournisseur finance le cycle.',
         valeurs: 'jours',
       },
       { nom: 'Classe', description: 'La classe ABC ; « Non classées » pour les références sans classe.' },
       { nom: 'Références', description: 'Le nombre de références de la classe ou du fournisseur.' },
-      { nom: 'Consommation annuelle', description: 'La valeur consommée en un an par la classe.', valeurs: 'MAD' },
+      {
+        nom: 'Réel 12 mois',
+        description:
+          'La consommation réelle des 12 mois pleins (grand livre : consommation et rebut, retours déduits), à sa valeur au livre — de la classe (concentration de la valeur) ou du fournisseur (engagement par fournisseur).',
+        valeurs: 'MAD',
+      },
       {
         nom: 'Part conso',
         description:
-          'La part de la classe dans la consommation. À comparer à la part du stock : une classe qui pèse plus dans le stock que dans la consommation immobilise du capital.',
+          'La part de la classe dans le réel des 12 mois pleins. À comparer à la part du stock : une classe qui pèse plus dans le stock que dans la consommation réelle immobilise du capital.',
         valeurs: '%',
       },
       { nom: 'Part stock', description: 'La part de la classe dans la valeur du stock.', valeurs: '%' },
-      { nom: 'Fournisseur', description: 'Les 10 fournisseurs au plus gros budget annuel.' },
-      { nom: 'Budget annuel', description: 'La consommation mensuelle × 12 × CMUP des références du fournisseur.', valeurs: 'MAD' },
-      { nom: 'Part', description: 'La part du fournisseur dans le budget des fournisseurs affichés ; surlignée au-delà de 30 %.', valeurs: '%' },
+      { nom: 'Fournisseur', description: 'Les 10 fournisseurs au plus gros réel des 12 mois pleins.' },
+      { nom: 'Part', description: 'La part du fournisseur dans le réel 12 mois des fournisseurs affichés ; surlignée au-delà de 30 %.', valeurs: '%' },
       { nom: 'Mois', description: 'Le mois du coût matière.' },
       { nom: 'Quantité (kg)', description: 'Les kilos de matière du mois.', valeurs: 'kg' },
       { nom: 'Coût (MAD)', description: 'Le coût matière du mois, ce que le plan engage.', valeurs: 'MAD' },
@@ -862,11 +882,17 @@ export const FICHES_PILOTAGE: Sujet[] = [
       {
         nom: 'Couverture minimale cible',
         description:
-          'La couverture visée quand la référence n’en déclare pas : elle entre dans le stock minimum (couverture × consommation mensuelle, majorée de la marge de sécurité).',
+          'La valeur recopiée par défaut dans la couverture minimale d’une nouvelle qualité ou d’un nouveau plan de production. Elle n’entre plus dans aucun stock minimum : le minimum dynamique est supprimé (27/10/2026) et le plan d’achat suit le plan seul (décision du 10/10/2026). Le stock projeté l’affiche comme une ALERTE quand la fiche n’a pas de couverture minimale.',
         valeurs: 'mois',
         defaut: '2',
       },
-      { nom: 'Marge de sécurité sur couverture', description: 'La majoration appliquée à la couverture minimale quand la référence n’en déclare pas.', valeurs: '%', defaut: '20' },
+      {
+        nom: 'Marge de sécurité sur couverture',
+        description:
+          'La valeur recopiée par défaut dans la marge de sécurité d’une nouvelle qualité ou d’un nouveau plan. Elle ne majore plus aucun stock minimum : la sécurité du calcul est celle des jours de sécurité de la classe ABC.',
+        valeurs: '%',
+        defaut: '20',
+      },
       { nom: 'Délai fournisseur par défaut', description: 'Le délai retenu quand le fournisseur n’en déclare aucun.', valeurs: 'jours', defaut: '60' },
       {
         nom: 'Marge en jours sur date de besoin',

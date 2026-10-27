@@ -460,6 +460,8 @@ pub fn router(state: AppState) -> Router {
         // `/api/plan-achat/detail`, v_plan_achat) est retire.
         .route("/api/couverture", get(couverture::liste))
         .route("/api/couverture/{reference}", get(couverture::detail))
+        // L'espace « Simulation » (27/10/2026) : un POST qui ne fait que LIRE.
+        .route("/api/couverture/{reference}/simulation", post(couverture::simulation))
         .route("/api/plan-achat/generer", post(operations::generer_plan_achat))
         .route("/api/plan-achat/commander", post(operations::convertir_plan_achat))
         .route("/api/plan-achat/kpi", get(consultation::kpi_plan_achat))

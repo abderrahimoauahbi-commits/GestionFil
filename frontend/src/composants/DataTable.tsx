@@ -160,6 +160,13 @@ interface Props<L> {
    * plutot qu'un etat separe qu'il faudrait re-parametrer.
    */
   imprimable?: string
+  /**
+   * LES EN-TÊTES SUR DEUX LIGNES (27/10/2026, stock projeté) : un intitulé long
+   * (« Besoin jusqu’à livraison ») passe à la ligne au lieu d'élargir sa colonne
+   * de chiffres courts. Sans lui, la colonne tombait sur la ligne ↳ alors que
+   * ses valeurs tenaient. Défaut : sur une ligne, comme partout.
+   */
+  entetesRepliables?: boolean
 }
 
 export function DataTable<L extends Record<string, unknown>>({
@@ -198,6 +205,7 @@ export function DataTable<L extends Record<string, unknown>>({
   exportable,
   imprimable,
   serveur,
+  entetesRepliables = false,
 }: Props<L>) {
   const droits = useDroits(module)
   const [tri, setTri] = React.useState<SortingState>([])
@@ -709,7 +717,8 @@ export function DataTable<L extends Record<string, unknown>>({
                           style={m.largeur ? { width: m.largeur } : undefined}
                           className={cn(
                             'bg-attenue px-2.5 py-2 text-left',
-                            'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte whitespace-nowrap',
+                            'text-[11px] font-medium uppercase tracking-[0.05em] text-attenue-texte',
+                            entetesRepliables ? 'whitespace-normal align-bottom leading-tight' : 'whitespace-nowrap',
                             m.numerique && 'text-right',
                           )}
                         >

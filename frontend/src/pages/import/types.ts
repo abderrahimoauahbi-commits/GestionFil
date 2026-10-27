@@ -14,7 +14,8 @@ export interface DossierResume extends Record<string, unknown> {
   numero_bl: string | null
   conteneurs: string | null
   code_devise: string
-  taux_change: number
+  /** Facultatif (27/10/2026) : null pour une devise sans taux ; il ne convertit rien. */
+  taux_change: number | null
   date_arrivee: string | null
   statut: StatutDossier
   date_creation: string
@@ -39,7 +40,8 @@ export interface Dossier {
   numero_bl: string | null
   conteneurs: string | null
   code_devise: string
-  taux_change: number
+  /** Facultatif (27/10/2026) : null pour une devise sans taux ; il ne convertit rien. */
+  taux_change: number | null
   date_arrivee: string | null
   statut: StatutDossier
   notes: string | null

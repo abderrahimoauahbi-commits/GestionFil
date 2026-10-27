@@ -136,19 +136,9 @@ INSERT INTO motif_ligne (code_motif_ligne, libelle, categorie) VALUES
 INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, unite, categorie, modifiable_par, verrouille) VALUES
     ('P_SeuilAlerte',      'Seuil d''alerte (statut ATTENTION)',        '90',    'ENTIER',  'jours', 'STOCK',   'DIRECTION', 0),
     ('P_SeuilCritique',    'Seuil critique (statut CRITIQUE)',          '60',    'ENTIER',  'jours', 'STOCK',   'DIRECTION', 0),
-    -- ---- ALERTE A DOUBLE DECLENCHEUR ------------------------------------------
-    -- Les deux seuils ci-dessous ne raisonnent pas : ils regardent ce qu'il y a
-    -- dans les allees. Le plus exigeant des deux fait plancher. Ils existent
-    -- parce qu'une couverture de 90 jours peut coexister avec un magasin vide :
-    -- camion bloque en douane, lot en quarantaine, consommation exceptionnelle
-    -- que le MRP n'a pas encore integree.
-
-    -- Passe ce retard, la quantite commandee sort du calcul de couverture : un
-    -- camion qu'on n'attend plus ne doit pas continuer a rassurer.
-    ('P_RetardBCJours',    'Retard au-dela duquel une commande ne compte plus', '5', 'ENTIER', 'jours', 'ACHAT', 'DIRECTION', 0),
-    -- Au-dela de cette couverture annoncee, un stock physique sous le minimum
-    -- ne s'explique plus par la planification : c'est un ecart de donnees.
-    ('P_EcartCouvertureJours','Couverture au-dela de laquelle un stock bas est un ecart','60','ENTIER','jours','STOCK','DIRECTION', 0),
+    -- P_RetardBCJours et P_EcartCouvertureJours (l'ancienne alerte a double
+    -- declencheur) sont supprimes le 27/10/2026 (2026-10-27j) : sans lecteur depuis
+    -- que le moteur de couverture remplace l'ancien calcul (2026-10-27e).
     ('P_DelaiDefaut',      'Delai fournisseur par defaut',              '60',    'ENTIER',  'jours', 'ACHAT',   'DIRECTION', 0),
     ('P_MargeSecurite',    'Marge de securite sur couverture',          '20',    'DECIMAL', '%',     'STOCK',   'DIRECTION', 0),
     ('P_MargeJours',       'Marge en jours sur date de besoin',         '30',    'ENTIER',  'jours', 'ACHAT',   'DIRECTION', 0),

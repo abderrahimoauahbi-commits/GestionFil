@@ -133,9 +133,8 @@ INSERT INTO parametre (code_parametre, libelle, valeur_courante, type_donnee, un
   ('P_DateCreationERP', 'Date de mise en service', '2026-04-18', 'DATE', NULL, 'Debut de l''historique exploitable : avant cette date, les donnees viennent de la reprise.', 'ENTREPRISE', 'DIRECTION', 0, '2026-08-13T16:31:38.480Z', NULL, NULL, 1),
   ('P_DSODefaut', 'Delai de paiement par defaut', '60', 'ENTIER', 'jours', 'Applique quand le fournisseur n''en declare aucun. Sert au previsionnel de tresorerie.', 'ACHAT', 'DAF', 0, '2026-08-13T16:31:38.480Z', NULL, NULL, 1),
   ('P_SeuilBCGroupe', 'Seuil de regroupement des commandes', '100000', 'ENTIER', 'MAD', 'En dessous, il est preferable de regrouper avec une autre commande du meme fournisseur plutot que d''emettre un bon isole.', 'ACHAT', 'DIRECTION', 0, '2026-08-13T16:31:38.480Z', NULL, NULL, 1),
-  ('P_DateRefKPI', 'Date de reference des indicateurs', '2026-07-18', 'DATE', NULL, 'Point de depart des cumuls et des comparaisons annuelles.', 'ANALYSE', 'DAF', 0, '2026-08-13T16:31:38.480Z', NULL, NULL, 1),
-  ('P_RetardBCJours', 'Retard au-dela duquel une commande ne compte plus', '5', 'ENTIER', 'jours', NULL, 'ACHAT', 'DIRECTION', 0, '2026-08-15T13:59:42.665Z', NULL, NULL, 1),
-  ('P_EcartCouvertureJours', 'Couverture au-dela de laquelle un stock bas est un ecart', '60', 'ENTIER', 'jours', NULL, 'STOCK', 'DIRECTION', 0, '2026-08-15T13:59:42.665Z', NULL, NULL, 1)
+  ('P_DateRefKPI', 'Date de reference des indicateurs', '2026-07-18', 'DATE', NULL, 'Point de depart des cumuls et des comparaisons annuelles.', 'ANALYSE', 'DAF', 0, '2026-08-13T16:31:38.480Z', NULL, NULL, 1)
+  -- P_RetardBCJours et P_EcartCouvertureJours : supprimes le 27/10/2026 (2026-10-27j), sans lecteur.
 ON CONFLICT (code_parametre) DO UPDATE SET
   libelle = excluded.libelle,
   valeur_courante = excluded.valeur_courante,

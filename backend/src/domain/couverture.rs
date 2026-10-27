@@ -49,6 +49,10 @@ pub enum Source {
     Fournisseur,
     #[serde(rename = "paramètre global")]
     ParametreGlobal,
+    /// Une hypothèse de l'espace « Simulation » (27/10/2026) : saisie à l'écran,
+    /// jamais enregistrée.
+    #[serde(rename = "simulation")]
+    Simulation,
 }
 
 /// Un mois du plan pour une référence : les kilos de la photo `besoin_mrp`.
@@ -205,6 +209,17 @@ pub fn cle_tri(c: &Couverture) -> (NaiveDate, NaiveDate) {
         c.premiere_rupture.unwrap_or(NaiveDate::MAX),
         c.propositions.first().map(|p| p.date_limite_commande).unwrap_or(NaiveDate::MAX),
     )
+}
+
+/// LE PLAN DES `jours` PREMIERS JOURS de la projection — [aujourd'hui,
+/// aujourd'hui + jours[ — lu sur les jours du moteur, sans autre formule
+/// (27/10/2026) : avec le délai fournisseur, c'est le « besoin jusqu'à
+/// livraison », ce que le stock d'aujourd'hui doit servir avant qu'une commande
+/// passée ce jour puisse arriver (le jour d'arrivée est exclu : l'arrivage du
+/// jour D compte dans S(D), avant la consommation de D). Borné à l'horizon.
+pub fn plan_des_premiers_jours(c: &Couverture, jours: i64) -> f64 {
+    let k = (jours.max(0) as usize).min(c.jours.len());
+    r4(c.jours[..k].iter().map(|j| j.conso_prevue_kg).sum())
 }
 
 /// Nombre de jours réels d'un mois.
@@ -869,6 +884,17 @@ mod tests {
         // voir `arrivage_pile_a_d_compte_dans_s_de_d`.)
         // La ligne de sécurité d'un jour t se calcule sur la même fenêtre [t, t + 30[.
         assert!(proche(c.jours[15].securite_kg, p.securite_kg));
+    }
+
+    #[test]
+    fn plan_des_premiers_jours_jusqu_a_la_livraison() {
+        // 100 kg/j, délai 10 j : le plan de J1 à J10 (le jour d'arrivée J11 exclu).
+        let c = calculer(2000.0, &plan_100(), &[], &reglages());
+        assert!(proche(plan_des_premiers_jours(&c, 10), 1000.0));
+        assert!(proche(plan_des_premiers_jours(&c, 0), 0.0));
+        assert!(proche(plan_des_premiers_jours(&c, -5), 0.0), "délai négatif = 0");
+        // Au-delà de l'horizon : tout le plan de l'horizon, pas plus.
+        assert!(proche(plan_des_premiers_jours(&c, 10_000), c.plan_horizon_kg));
     }
 
     #[test]

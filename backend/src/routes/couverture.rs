@@ -45,6 +45,7 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::Json;
 use chrono::{Datelike, NaiveDate};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::collections::{BTreeMap, HashMap};
@@ -79,12 +80,14 @@ pub mod statut {
 // Ce qui se lit
 // ============================================================================
 
+#[derive(Clone)]
 struct Parametres {
     securite: [f64; 3],
     delai_defaut: i64,
     marge_jours: i64,
 }
 
+#[derive(Clone)]
 struct PlanEnService {
     id_plan: String,
     libelle: Option<String>,
@@ -94,6 +97,7 @@ struct PlanEnService {
     fin_horizon: NaiveDate,
 }
 
+#[derive(Clone)]
 struct Fiche {
     code_reference: String,
     designation: Option<String>,
@@ -110,6 +114,7 @@ struct Fiche {
     bobines_par_palette: Option<i64>,
 }
 
+#[derive(Clone)]
 struct LigneMagasin {
     code_magasin: String,
     nom: Option<String>,
@@ -120,6 +125,7 @@ struct LigneMagasin {
     restes_kg: f64,
 }
 
+#[derive(Clone)]
 struct LigneMachine {
     code_emplacement: String,
     lot_fournisseur: Option<String>,
@@ -130,6 +136,7 @@ struct LigneMachine {
     reste: bool,
 }
 
+#[derive(Clone)]
 struct LigneBon {
     id_bc: String,
     numero_bc: Option<String>,
@@ -140,8 +147,12 @@ struct LigneBon {
     reste_kg: f64,
     date_ligne: Option<NaiveDate>,
     date_entete: Option<NaiveDate>,
+    /// Une ligne née d'une hypothèse de l'espace « Simulation » (« arrivage
+    /// ajouté », « commande simulée ») : jamais lue de la base, jamais écrite.
+    hypothese: Option<&'static str>,
 }
 
+#[derive(Clone)]
 struct LignePort {
     id_dossier: String,
     numero_dossier: Option<String>,
@@ -152,8 +163,10 @@ struct LignePort {
     date_arrivee: Option<NaiveDate>,
 }
 
+#[derive(Clone)]
 struct LigneTransit {
     id_transfert: String,
+    id_ligne_transfert: String,
     numero_transfert: Option<String>,
     code_magasin_source: Option<String>,
     code_magasin_dest: Option<String>,
@@ -162,8 +175,11 @@ struct LigneTransit {
     date_expedition: Option<NaiveDate>,
     /// La date prévue de disponibilité au magasin destinataire (27/10/2026).
     date_prevue: Option<NaiveDate>,
+    /// Modifié par une hypothèse de la simulation (jamais lu de la base).
+    hypothese: Option<&'static str>,
 }
 
+#[derive(Clone)]
 struct Donnees {
     aujourdhui: NaiveDate,
     parametres: Parametres,
@@ -398,6 +414,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
             reste_kg: l.try_get("reste_kg")?,
             date_ligne: l.try_get("date_ligne")?,
             date_entete: l.try_get("date_entete")?,
+            hypothese: None,
         });
     }
 
@@ -433,7 +450,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
     // v_stock_physique), avec leur date prévue de disponibilité (27/10/2026).
     let mut transits: HashMap<String, Vec<LigneTransit>> = HashMap::new();
     for l in sqlx::query(
-        "SELECT lt.code_reference, t.id_transfert, t.numero_transfert, t.code_magasin_source, t.code_magasin_dest,
+        "SELECT lt.code_reference, t.id_transfert, lt.id_ligne_transfert, t.numero_transfert, t.code_magasin_source, t.code_magasin_dest,
                 lt.lot_fournisseur, lt.quantite_kg::float8 AS kg,
                 COALESCE(t.date_sortie::date, t.date_transfert) AS date_expedition,
                 t.date_disponibilite_prevue AS date_prevue
@@ -450,6 +467,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
     {
         transits.entry(l.try_get("code_reference")?).or_default().push(LigneTransit {
             id_transfert: l.try_get("id_transfert")?,
+            id_ligne_transfert: l.try_get("id_ligne_transfert")?,
             numero_transfert: l.try_get("numero_transfert")?,
             code_magasin_source: l.try_get("code_magasin_source")?,
             code_magasin_dest: l.try_get("code_magasin_dest")?,
@@ -457,6 +475,7 @@ async fn charger(db: &Db, filtre: Option<&str>) -> AppResult<Donnees> {
             kg: l.try_get("kg")?,
             date_expedition: l.try_get("date_expedition")?,
             date_prevue: l.try_get("date_prevue")?,
+            hypothese: None,
         });
     }
 
@@ -496,6 +515,13 @@ struct Analyse<'a> {
     magasin_compte_kg: f64,
     machine_compte_kg: f64,
     restes_kg: f64,
+    /// LES RESTES COMPTÉS, par où ils sont (27/10/2026, stock projeté) : la part
+    /// de `magasin_compte_kg` et la part de `machine_compte_kg` qui sont des
+    /// restes. Le stock projeté les montre dans une colonne « Restant » ; les
+    /// colonnes « disponible » et « sur machine » les retirent, et la somme des
+    /// trois rend exactement le disponible du moteur (aucun double comptage).
+    restes_magasin_kg: f64,
+    restes_machine_kg: f64,
     quarantaine_kg: f64,
     bloque_kg: f64,
     hors_plan_kg: f64,
@@ -555,6 +581,41 @@ impl Analyse<'_> {
     fn arrivages_comptes_kg(&self) -> f64 {
         arrondi_kg(self.arrivages.iter().filter(|a| a.compte).map(|a| a.kg).sum::<f64>()) + 0.0
     }
+    /// LES COLONNES DU STOCK PROJETÉ (27/10/2026), tirées de ce que le moteur
+    /// compte, sans autre règle : disponible en magasin hors restes, sur machine
+    /// hors restes, restant (les restes comptés), arrivages comptés, et leur
+    /// somme — le stock d'aujourd'hui du moteur plus ses arrivages comptés.
+    fn colonnes_stock_projete(&self) -> [(&'static str, f64); 4] {
+        let magasin = (self.magasin_compte_kg - self.restes_magasin_kg).max(0.0);
+        let machine = (self.machine_compte_kg - self.restes_machine_kg).max(0.0);
+        let restant = self.restes_magasin_kg + self.restes_machine_kg;
+        let arrivages: f64 = self.arrivages.iter().filter(|a| a.compte).map(|a| a.kg).sum();
+        [
+            ("magasin_hors_restes_kg", arrondi_kg(magasin) + 0.0),
+            ("machine_hors_restes_kg", arrondi_kg(machine) + 0.0),
+            ("restant_kg", arrondi_kg(restant) + 0.0),
+            ("stock_total_projete_kg", arrondi_kg(magasin + machine + restant + arrivages) + 0.0),
+        ]
+    }
+    /// LE BESOIN JUSQU'À LIVRAISON : le plan des jours [aujourd'hui, aujourd'hui
+    /// + délai[, lu sur la projection du moteur.
+    fn besoin_jusqu_livraison_kg(&self) -> f64 {
+        arrondi_kg(couverture::plan_des_premiers_jours(&self.resultat, self.reglages.delai_j)) + 0.0
+    }
+}
+
+/// LES HYPOTHÈSES DE RÉGLAGE de l'espace « Simulation » (27/10/2026) : elles
+/// remplacent, en mémoire, une entrée que le moteur reçoit déjà — jamais une
+/// règle. `None` : la valeur de la fiche, du fournisseur ou des paramètres.
+#[derive(Debug, Default, Clone)]
+struct Surcharges {
+    delai_j: Option<i64>,
+    couverture_j: Option<i64>,
+    jours_securite: Option<f64>,
+    /// 0 = aucun minimum.
+    moq_kg: Option<f64>,
+    /// 0 = pas d'arrondi.
+    multiple_kg: Option<f64>,
 }
 
 /// L'état d'une référence au sens du moteur : une rupture prévue sur l'horizon
@@ -570,20 +631,29 @@ fn statut_de(c: &Couverture) -> &'static str {
 }
 
 fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
+    analyser_avec(d, fiche, &Surcharges::default())
+}
+
+/// L'analyse d'une référence, avec les hypothèses de réglage de la simulation
+/// (aucune, d'ordinaire). Les arrivages simulés passent, eux, par `Donnees` :
+/// ils sont classés par les mêmes règles que les vrais.
+fn analyser_avec<'a>(d: &'a Donnees, fiche: &'a Fiche, s: &Surcharges) -> Analyse<'a> {
     let code = fiche.code_reference.as_str();
     let auj = d.aujourdhui;
     let fin = d.plan.as_ref().map_or(auj, |p| p.fin_horizon.max(auj));
     let p = &d.parametres;
 
     // Délai et couverture : le fournisseur, sinon le paramètre global (source affichée).
-    let (delai_j, source_delai) = match fiche.delai_fournisseur.filter(|x| *x >= 0) {
-        Some(x) => (x, Source::Fournisseur),
-        None => (p.delai_defaut, Source::ParametreGlobal),
+    let (delai_j, source_delai) = match (s.delai_j, fiche.delai_fournisseur.filter(|x| *x >= 0)) {
+        (Some(x), _) => (x, Source::Simulation),
+        (None, Some(x)) => (x, Source::Fournisseur),
+        (None, None) => (p.delai_defaut, Source::ParametreGlobal),
     };
     // Une couverture de 0 jour ne couvrirait rien : elle vaut « non renseignée ».
-    let (couverture_j, source_couverture) = match fiche.couverture_fournisseur.filter(|x| *x > 0) {
-        Some(x) => (x, Source::Fournisseur),
-        None => (p.marge_jours, Source::ParametreGlobal),
+    let (couverture_j, source_couverture) = match (s.couverture_j, fiche.couverture_fournisseur.filter(|x| *x > 0)) {
+        (Some(x), _) => (x, Source::Simulation),
+        (None, Some(x)) => (x, Source::Fournisseur),
+        (None, None) => (p.marge_jours, Source::ParametreGlobal),
     };
     // Les jours de sécurité de la classe ABC ; sans classe, la plus prudente des
     // trois (décision du 27/10/2026 : on la garde), et le défaut de données est
@@ -615,13 +685,27 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
         None if fiche.arrondi_palette => (None, "arrondi à la palette demandé, palette inconnue de la fiche : pas d'arrondi"),
         None => (None, "aucun multiple sur la fiche : kg"),
     };
+    // Les hypothèses de la simulation remplacent l'entrée, et la source le dit.
+    let (jours_securite, source_securite) = match s.jours_securite {
+        Some(j) => (j, "simulation".to_string()),
+        None => (jours_securite, source_securite),
+    };
+    let (multiple_kg, source_multiple) = match s.multiple_kg {
+        Some(m) if m > 0.0 => (Some(m), "simulation : multiple saisi"),
+        Some(_) => (None, "simulation : sans arrondi (kg)"),
+        None => (multiple_kg, source_multiple),
+    };
+    let moq_kg = match s.moq_kg {
+        Some(m) => Some(m).filter(|m| *m > 0.0),
+        None => fiche.moq_kg.filter(|m| *m > 0.0),
+    };
     let reglages = Reglages {
         aujourdhui: auj,
         fin_horizon: fin,
         delai_j,
         couverture_j,
         jours_securite,
-        moq_kg: fiche.moq_kg.filter(|m| *m > 0.0),
+        moq_kg,
         multiple_kg,
         kg_palette,
         max_propositions: MAX_PROPOSITIONS,
@@ -630,15 +714,19 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
     // ---- Les ressources d'aujourd'hui -----------------------------------------
     let (mut magasin_compte_kg, mut quarantaine_kg, mut bloque_kg, mut hors_plan_kg, mut restes_kg) =
         (0.0, 0.0, 0.0, 0.0, 0.0);
+    let (mut restes_magasin_kg, mut restes_machine_kg) = (0.0, 0.0);
     for m in d.magasins.get(code).into_iter().flatten() {
         if m.quarantaine {
             quarantaine_kg += m.quantite_kg;
         } else if !m.inclure_mrp {
             hors_plan_kg += m.quantite_kg;
         } else {
-            magasin_compte_kg += (m.quantite_kg - m.bloque_kg).max(0.0);
+            let compte = (m.quantite_kg - m.bloque_kg).max(0.0);
+            magasin_compte_kg += compte;
             bloque_kg += m.bloque_kg;
             restes_kg += m.restes_kg;
+            // Jamais plus de restes que de kilos comptés dans ce magasin.
+            restes_magasin_kg += m.restes_kg.clamp(0.0, compte);
         }
     }
     let mut machine_compte_kg = 0.0;
@@ -649,6 +737,7 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
             machine_compte_kg += e.kg;
             if e.reste {
                 restes_kg += e.kg;
+                restes_machine_kg += e.kg;
             }
         }
     }
@@ -680,6 +769,8 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
         arrivages.push(ArrivageClasse {
             detail: json!({
                 "origine": "BON",
+                "cle": format!("BON:{}", b.id_ligne_bc),
+                "hypothese": b.hypothese,
                 "id_bc": b.id_bc, "numero_bc": b.numero_bc, "statut_bc": b.statut_bc,
                 "code_fournisseur": b.code_fournisseur,
                 "id_ligne_bc": b.id_ligne_bc, "ligne_numero": b.ligne_numero,
@@ -698,6 +789,8 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
         arrivages.push(ArrivageClasse {
             detail: json!({
                 "origine": "IMPORT_SANS_BON",
+                "cle": format!("IMPORT:{}:{}:{}", l.id_dossier, l.numero_facture.as_deref().unwrap_or(""),
+                               l.lot_fournisseur.as_deref().unwrap_or("")),
                 "id_dossier": l.id_dossier, "numero_dossier": l.numero_dossier,
                 "statut_dossier": l.statut_dossier, "numero_facture": l.numero_facture,
                 "lot_fournisseur": l.lot_fournisseur,
@@ -736,6 +829,8 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
         arrivages.push(ArrivageClasse {
             detail: json!({
                 "origine": "TRANSFERT",
+                "cle": format!("TRANSFERT:{}", t.id_ligne_transfert),
+                "hypothese": t.hypothese,
                 "id_transfert": t.id_transfert, "numero_transfert": t.numero_transfert,
                 "code_magasin_source": t.code_magasin_source, "code_magasin_dest": t.code_magasin_dest,
                 "lot_fournisseur": t.lot_fournisseur,
@@ -772,6 +867,8 @@ fn analyser<'a>(d: &'a Donnees, fiche: &'a Fiche) -> Analyse<'a> {
         magasin_compte_kg,
         machine_compte_kg,
         restes_kg,
+        restes_magasin_kg,
+        restes_machine_kg,
         quarantaine_kg,
         bloque_kg,
         hors_plan_kg,
@@ -834,6 +931,15 @@ fn ligne(a: &Analyse) -> Value {
         o.insert("arrivages_comptes_kg".into(), json!(a.arrivages_comptes_kg()));
         o.insert("plan_mois_kg".into(), json!(a.plan_mois_kg()));
         o.insert("defaut_donnees".into(), json!(a.defaut_donnees));
+        // LE STOCK PROJETÉ (27/10/2026) : ses colonnes, tirées du moteur.
+        for (cle, kg) in a.colonnes_stock_projete() {
+            o.insert(cle.into(), json!(kg));
+        }
+        o.insert("besoin_jusqu_livraison_kg".into(), json!(a.besoin_jusqu_livraison_kg()));
+        o.insert(
+            "securite_aujourdhui_kg".into(),
+            json!(r.jours.first().map(|j| j.securite_kg).unwrap_or(0.0)),
+        );
     }
     v
 }
@@ -1401,10 +1507,70 @@ pub async fn liste(State(state): State<AppState>, user: Utilisateur) -> AppResul
     Ok(Json(v))
 }
 
+/// LA VUE D'UNE ANALYSE : ce que le détail et la simulation rendent de la même
+/// façon — réglages et leur source, synthèse (la ligne de la liste), arrivages
+/// classés, événements, propositions avec toutes leurs étapes, projection jour
+/// par jour. Un seul texte : le « avant » d'une simulation est le détail.
+fn vue_analyse(a: &Analyse) -> Value {
+    let r = &a.resultat;
+    json!({
+        "reglages": {
+            "delai_j": a.reglages.delai_j, "source_delai": a.source_delai,
+            "couverture_commande_j": a.reglages.couverture_j, "source_couverture": a.source_couverture,
+            "jours_securite": a.reglages.jours_securite, "source_securite": a.source_securite,
+            "moq_kg": a.reglages.moq_kg,
+            "multiple_kg": a.reglages.multiple_kg, "source_multiple": a.source_multiple,
+            "kg_palette": a.reglages.kg_palette,
+            "defaut_donnees": a.defaut_donnees,
+        },
+        "synthese": ligne(a),
+        "arrivages": a.arrivages.iter().map(|x| x.detail.clone()).collect::<Vec<_>>(),
+        "evenements": serde_json::to_value(&r.evenements).unwrap_or(Value::Null),
+        "propositions": serde_json::to_value(&r.propositions).unwrap_or(Value::Null),
+        "propositions_plafonnees": r.propositions_plafonnees,
+        "motif_sans_proposition": r.motif_sans_proposition,
+        "jours": serde_json::to_value(&r.jours).unwrap_or(Value::Null),
+    })
+}
+
+/// Après le masquage : la quantité à commander masquée l'est aussi dans les
+/// étapes du calcul et dans le montant. Le masquage se fait par nom de champ, et
+/// les propositions portent la même quantité sous d'autres noms (audit du
+/// 27/10/2026).
+fn retirer_quantites_masquees(v: &mut Value) {
+    if v["synthese"].get("qte_a_commander_kg").is_some() {
+        return;
+    }
+    if let Some(props) = v["propositions"].as_array_mut() {
+        for p in props.iter_mut().filter_map(Value::as_object_mut) {
+            for champ in ["besoin_theorique_kg", "apres_minimum_kg", "quantite_proposee_kg", "palettes_equivalentes"] {
+                p.remove(champ);
+            }
+        }
+    }
+    if let Some(achat) = v.get_mut("achat").and_then(Value::as_object_mut) {
+        achat.remove("montant_estime_mad");
+    }
+}
+
+fn json_reference(f: &Fiche) -> Value {
+    json!({
+        "code_reference": f.code_reference, "designation": f.designation,
+        "classe_abc": f.classe_abc, "actif": f.actif,
+        "code_fournisseur": f.code_fournisseur, "fournisseur_nom": f.fournisseur_nom,
+        "moq_kg": f.moq_kg, "multiple_achat_kg": f.multiple_achat_kg,
+        "arrondi_palette": f.arrondi_palette, "poids_bobine_kg": f.poids_bobine_kg,
+        "bobines_par_palette": f.bobines_par_palette,
+    })
+}
+
 /// `GET /api/couverture/{reference}` — le détail : ressources, arrivages comptés
 /// et non comptés avec leur raison, événements, propositions avec toutes leurs
 /// étapes, plan mois par mois (et par qualité, selon les recettes actuelles),
-/// et la projection jour par jour pour la courbe.
+/// et la projection jour par jour pour la courbe. Depuis le 27/10/2026, aussi ce
+/// que la fenêtre du stock projeté montre en plus : le prix et le montant de la
+/// proposition (le prix du plan d'achat), et les réglages de la fiche qui ne sont
+/// que des ALERTES (stock minimum, couverture minimale, seuil d'alerte).
 pub async fn detail(
     State(state): State<AppState>,
     user: Utilisateur,
@@ -1540,29 +1706,58 @@ pub async fn detail(
     })
     .collect::<AppResult<_>>()?;
 
+    // LE PRIX ET LE MONTANT (27/10/2026) : le prix que la proposition du plan
+    // d'achat retiendrait (`domain::plan_achat::PRIX_MAD_SQL`), × la quantité de
+    // la première proposition du moteur.
+    let (prix_mad, source_prix) = crate::domain::plan_achat::prix_estimes(&state.db, Some(reference))
+        .await?
+        .remove(reference)
+        .unwrap_or((None, "AUCUN".into()));
+    let qte = r.propositions.first().map(|p| p.quantite_proposee_kg);
+    // LES RÉGLAGES DE LA FICHE QUI NE SONT QUE DES ALERTES (décision du
+    // 10/10/2026 : le plan d'achat suit le plan seul) : affichés, jamais des
+    // termes du calcul. Et le réel du grand livre, pour le distinguer du plan.
+    let fiche_alertes = sqlx::query(
+        "SELECT r.stock_min_kg::float8 AS stock_min_kg, r.couverture_min_mois::float8 AS couverture_min_mois,
+                r.marge_securite_pct::float8 AS marge_securite_pct, r.unite_catalogue,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_CouvMinMois') AS couv_min_param,
+                (SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_SeuilAlerte') AS seuil_alerte,
+                (SELECT s.reel_mois_kg::float8 FROM v_stock_reference s WHERE s.code_reference = r.code_reference)
+                    AS reel_mois_kg
+           FROM reference r
+          WHERE r.code_reference = $1",
+    )
+    .bind(reference)
+    .fetch_optional(&state.db)
+    .await?;
+    let nombre = |s: Option<String>| s.and_then(|x| x.trim().replace(',', ".").parse::<f64>().ok());
+    let approvisionnement = match fiche_alertes {
+        Some(l) => json!({
+            "stock_min_fiche_kg": l.try_get::<Option<f64>, _>("stock_min_kg")?,
+            "couverture_min_fiche_mois": l.try_get::<Option<f64>, _>("couverture_min_mois")?,
+            "couverture_min_parametre_mois": nombre(l.try_get("couv_min_param")?),
+            "marge_securite_fiche_pct": l.try_get::<Option<f64>, _>("marge_securite_pct")?,
+            "seuil_alerte_j": nombre(l.try_get("seuil_alerte")?),
+            "unite_catalogue": l.try_get::<Option<String>, _>("unite_catalogue")?,
+            "reel_mois_kg": l.try_get::<Option<f64>, _>("reel_mois_kg")?,
+        }),
+        None => Value::Null,
+    };
+
     let mut v = entete(&d);
-    v["reference"] = json!({
-        "code_reference": fiche.code_reference, "designation": fiche.designation,
-        "classe_abc": fiche.classe_abc, "actif": fiche.actif,
-        "code_fournisseur": fiche.code_fournisseur, "fournisseur_nom": fiche.fournisseur_nom,
-        "moq_kg": fiche.moq_kg, "multiple_achat_kg": fiche.multiple_achat_kg,
-        "arrondi_palette": fiche.arrondi_palette, "poids_bobine_kg": fiche.poids_bobine_kg,
-        "bobines_par_palette": fiche.bobines_par_palette,
-    });
-    v["reglages"] = json!({
-        "delai_j": a.reglages.delai_j, "source_delai": a.source_delai,
-        "couverture_commande_j": a.reglages.couverture_j, "source_couverture": a.source_couverture,
-        "jours_securite": a.reglages.jours_securite, "source_securite": a.source_securite,
-        "moq_kg": a.reglages.moq_kg,
-        "multiple_kg": a.reglages.multiple_kg, "source_multiple": a.source_multiple,
-        "kg_palette": a.reglages.kg_palette,
-        "defaut_donnees": a.defaut_donnees,
-    });
-    v["synthese"] = ligne(&a);
+    v["reference"] = json_reference(fiche);
+    if let (Some(o), Value::Object(vue)) = (v.as_object_mut(), vue_analyse(&a)) {
+        o.extend(vue);
+    }
     v["ressources"] = json!({
         "compte_kg": arrondi_kg(a.magasin_compte_kg + a.machine_compte_kg),
         "magasin_kg": arrondi_kg(a.magasin_compte_kg),
         "machine_kg": arrondi_kg(a.machine_compte_kg),
+        // Tout le stock physique de la référence, compté ou non (quarantaine,
+        // bloqué, magasins hors plan compris) : pour situer le disponible.
+        "stock_physique_kg": arrondi_kg(
+            a.magasin_compte_kg + a.machine_compte_kg + a.quarantaine_kg + a.bloque_kg + a.hors_plan_kg
+        ),
         "magasins": magasins,
         "machine": machine,
         "lots": lots,
@@ -1573,25 +1768,578 @@ pub async fn detail(
             "hors_plan_kg": arrondi_kg(a.hors_plan_kg),
         },
     });
-    v["arrivages"] = Value::Array(a.arrivages.iter().map(|x| x.detail.clone()).collect());
-    v["evenements"] = serde_json::to_value(&r.evenements).unwrap_or(Value::Null);
-    v["propositions"] = serde_json::to_value(&r.propositions).unwrap_or(Value::Null);
-    v["propositions_plafonnees"] = json!(r.propositions_plafonnees);
-    v["motif_sans_proposition"] = json!(r.motif_sans_proposition);
     v["plan_mois"] = Value::Array(plan_mois);
-    v["jours"] = serde_json::to_value(&r.jours).unwrap_or(Value::Null);
+    v["achat"] = json!({
+        "prix_estime_mad": prix_mad,
+        "source_prix": source_prix,
+        "montant_estime_mad": crate::domain::plan_achat::montant_estime(qte, prix_mad),
+    });
+    v["approvisionnement"] = approvisionnement;
     user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
-    // La quantité à commander masquée l'est aussi dans les étapes du calcul : le
-    // masquage se fait par nom de champ, et les propositions portent la même
-    // quantité sous d'autres noms (audit du 27/10/2026).
-    if v["synthese"].get("qte_a_commander_kg").is_none() {
-        if let Some(props) = v["propositions"].as_array_mut() {
-            for p in props.iter_mut().filter_map(Value::as_object_mut) {
-                for champ in ["besoin_theorique_kg", "apres_minimum_kg", "quantite_proposee_kg", "palettes_equivalentes"] {
-                    p.remove(champ);
+    user.masquer_prix_au_cmup(&state.db, &mut v["achat"]).await?;
+    retirer_quantites_masquees(&mut v);
+    Ok(Json(v))
+}
+
+// ============================================================================
+// La simulation (27/10/2026) : « et si », en mémoire, jamais enregistrée
+// ============================================================================
+
+/// Au plus tant d'hypothèses d'arrivage par simulation.
+const MAX_HYPOTHESES: usize = 50;
+/// Une hypothèse de date reste dans dix ans autour d'aujourd'hui.
+const PORTEE_DATES_J: i64 = 3660;
+
+/// Un arrivage ajouté, ou une commande simulée : une date, des kilos.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArriveeSimulee {
+    pub date: NaiveDate,
+    pub kg: f64,
+}
+
+/// Un arrivage existant (sa `cle`, rendue par le détail) que l'hypothèse date
+/// autrement, change de kilos ou retire.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModificationArrivage {
+    pub cle: String,
+    #[serde(default)]
+    pub date: Option<NaiveDate>,
+    #[serde(default)]
+    pub kg: Option<f64>,
+    #[serde(default)]
+    pub retirer: bool,
+}
+
+/// LES HYPOTHÈSES D'UNE SIMULATION : rien que des entrées que le moteur reçoit
+/// déjà (arrivages datés, délai, couverture d'une commande, jours de sécurité,
+/// minimum, multiple). Aucune règle nouvelle : un arrivage simulé est classé
+/// par les règles des vrais (daté dans l'horizon : compté ; date passée : en
+/// retard, hors couverture).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Hypotheses {
+    #[serde(default)]
+    pub arrivages_ajoutes: Vec<ArriveeSimulee>,
+    #[serde(default)]
+    pub commandes: Vec<ArriveeSimulee>,
+    #[serde(default)]
+    pub arrivages_modifies: Vec<ModificationArrivage>,
+    #[serde(default)]
+    pub delai_j: Option<i64>,
+    #[serde(default)]
+    pub couverture_j: Option<i64>,
+    #[serde(default)]
+    pub jours_securite: Option<f64>,
+    #[serde(default)]
+    pub moq_kg: Option<f64>,
+    #[serde(default)]
+    pub multiple_kg: Option<f64>,
+}
+
+fn kg_lisible(kg: f64) -> String {
+    let k = (kg * 100.0).round() / 100.0;
+    if (k - k.round()).abs() < 1e-9 {
+        format!("{} kg", k.round() as i64)
+    } else {
+        format!("{} kg", format!("{k:.2}").replace('.', ","))
+    }
+}
+
+/// APPLIQUE LES HYPOTHÈSES EN MÉMOIRE, sur une copie des données lues : les
+/// arrivages ajoutés deviennent des lignes de bon VALIDÉ datées (classées par les
+/// mêmes règles que les vraies), les modifications changent la date ou les
+/// kilos d'un arrivage lu, les réglages passent par `Surcharges`. Rend les
+/// surcharges et, pour l'écran, une phrase par hypothèse appliquée. Une
+/// hypothèse illisible ou hors bornes est refusée en entier (rien n'est appliqué
+/// à moitié). Ne lit ni n'écrit la base.
+fn appliquer_hypotheses(d: &mut Donnees, code: &str, h: &Hypotheses) -> AppResult<(Surcharges, Vec<String>)> {
+    let auj = d.aujourdhui;
+    let mut dites = Vec::new();
+    let nb = h.arrivages_ajoutes.len() + h.commandes.len() + h.arrivages_modifies.len();
+    if nb > MAX_HYPOTHESES {
+        return Err(AppError::Invalide(format!(
+            "{nb} hypothèses d'arrivage : {MAX_HYPOTHESES} au plus par simulation."
+        )));
+    }
+    let date_ok = |x: NaiveDate| (x - auj).num_days().abs() <= PORTEE_DATES_J;
+    let kg_ok = |k: f64| k.is_finite() && (0.0..=1e9).contains(&k);
+
+    for m in &h.arrivages_modifies {
+        let cle = m.cle.trim();
+        if m.date.is_none() && m.kg.is_none() && !m.retirer {
+            return Err(AppError::Invalide(format!("arrivage {cle} : rien à modifier (date, kilos ou retrait).")));
+        }
+        if let Some(x) = m.date.filter(|x| !date_ok(*x)) {
+            return Err(AppError::Invalide(format!("arrivage {cle} : date {x} hors de portée.")));
+        }
+        if let Some(k) = m.kg.filter(|k| !kg_ok(*k)) {
+            return Err(AppError::Invalide(format!("arrivage {cle} : {k} kg n'est pas une quantité.")));
+        }
+        let (origine, id) = cle.split_once(':').unwrap_or((cle, ""));
+        match origine {
+            "BON" => {
+                let lignes = d.bons.entry(code.to_string()).or_default();
+                let Some(i) = lignes.iter().position(|b| b.id_ligne_bc == id && !b.id_ligne_bc.starts_with("SIMULATION"))
+                else {
+                    return Err(AppError::Invalide(format!("arrivage {cle} inconnu pour {code}.")));
+                };
+                let nom = format!(
+                    "bon {}{}",
+                    lignes[i].numero_bc.as_deref().unwrap_or("?"),
+                    lignes[i].ligne_numero.map(|n| format!(", ligne {n}")).unwrap_or_default()
+                );
+                if m.retirer {
+                    let b = lignes.remove(i);
+                    dites.push(format!("Retiré : {nom} ({}).", kg_lisible(b.reste_kg)));
+                    continue;
+                }
+                let b = &mut lignes[i];
+                b.hypothese = Some("modifié par l'hypothèse");
+                if let Some(x) = m.date {
+                    b.date_ligne = Some(x);
+                    dites.push(format!("Date de {nom} : {}.", x.format("%d/%m/%Y")));
+                }
+                if let Some(k) = m.kg {
+                    b.reste_kg = k;
+                    dites.push(format!("Kilos de {nom} : {}.", kg_lisible(k)));
                 }
             }
+            "TRANSFERT" => {
+                let lignes = d.transits.entry(code.to_string()).or_default();
+                let Some(i) = lignes.iter().position(|t| t.id_ligne_transfert == id) else {
+                    return Err(AppError::Invalide(format!("arrivage {cle} inconnu pour {code}.")));
+                };
+                let nom = format!("transfert {}", lignes[i].numero_transfert.as_deref().unwrap_or("?"));
+                if m.retirer {
+                    let t = lignes.remove(i);
+                    dites.push(format!("Retiré : {nom} ({}).", kg_lisible(t.kg)));
+                    continue;
+                }
+                let t = &mut lignes[i];
+                t.hypothese = Some("modifié par l'hypothèse");
+                if let Some(x) = m.date {
+                    t.date_prevue = Some(x);
+                    dites.push(format!("Disponibilité de {nom} : {}.", x.format("%d/%m/%Y")));
+                }
+                if let Some(k) = m.kg {
+                    t.kg = k;
+                    dites.push(format!("Kilos de {nom} : {}.", kg_lisible(k)));
+                }
+            }
+            "IMPORT" => {
+                return Err(AppError::Invalide(
+                    "l'import en route sans bon n'a pas de date fiable : la règle le laisse hors couverture, \
+                     une hypothèse ne le date pas. Simulez plutôt un arrivage."
+                        .into(),
+                ))
+            }
+            _ => return Err(AppError::Invalide(format!("arrivage {cle} : clé illisible."))),
         }
     }
+
+    for (liste, nature) in [(&h.arrivages_ajoutes, "arrivage ajouté"), (&h.commandes, "commande simulée")] {
+        for (n, a) in liste.iter().enumerate() {
+            if !date_ok(a.date) {
+                return Err(AppError::Invalide(format!("{nature} : date {} hors de portée.", a.date)));
+            }
+            if !kg_ok(a.kg) || a.kg <= 0.0 {
+                return Err(AppError::Invalide(format!("{nature} : {} kg n'est pas une quantité positive.", a.kg)));
+            }
+            let rang = n + 1;
+            d.bons.entry(code.to_string()).or_default().push(LigneBon {
+                id_bc: format!("SIMULATION-{nature}-{rang}"),
+                numero_bc: Some(format!("{} {rang}", if nature == "commande simulée" { "Commande simulée" } else { "Arrivage ajouté" })),
+                statut_bc: "VALIDE".into(),
+                code_fournisseur: None,
+                id_ligne_bc: format!("SIMULATION-{nature}-{rang}"),
+                ligne_numero: None,
+                reste_kg: a.kg,
+                date_ligne: Some(a.date),
+                date_entete: None,
+                hypothese: Some(if nature == "commande simulée" { "commande simulée" } else { "arrivage ajouté" }),
+            });
+            let premier = nature.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+            dites.push(format!(
+                "{premier}{} : {} le {}.",
+                &nature[1..],
+                kg_lisible(a.kg),
+                a.date.format("%d/%m/%Y")
+            ));
+        }
+    }
+
+    let mut s = Surcharges::default();
+    if let Some(x) = h.delai_j {
+        if !(0..=730).contains(&x) {
+            return Err(AppError::Invalide(format!("délai de {x} j : entre 0 et 730 jours.")));
+        }
+        s.delai_j = Some(x);
+        dites.push(format!("Délai fournisseur : {x} j."));
+    }
+    if let Some(x) = h.couverture_j {
+        if !(1..=730).contains(&x) {
+            return Err(AppError::Invalide(format!("couverture de {x} j : entre 1 et 730 jours.")));
+        }
+        s.couverture_j = Some(x);
+        dites.push(format!("Couverture d'une commande : {x} j."));
+    }
+    if let Some(x) = h.jours_securite {
+        if !x.is_finite() || !(0.0..=365.0).contains(&x) {
+            return Err(AppError::Invalide(format!("sécurité de {x} j : entre 0 et 365 jours.")));
+        }
+        s.jours_securite = Some(x);
+        dites.push(format!("Sécurité : {x} j."));
+    }
+    if let Some(x) = h.moq_kg {
+        if !kg_ok(x) {
+            return Err(AppError::Invalide(format!("minimum de commande de {x} kg : une quantité positive ou nulle.")));
+        }
+        s.moq_kg = Some(x);
+        dites.push(if x > 0.0 { format!("Minimum de commande : {}.", kg_lisible(x)) } else { "Sans minimum de commande.".into() });
+    }
+    if let Some(x) = h.multiple_kg {
+        if !kg_ok(x) {
+            return Err(AppError::Invalide(format!("multiple de {x} kg : une quantité positive ou nulle.")));
+        }
+        s.multiple_kg = Some(x);
+        dites.push(if x > 0.0 { format!("Arrondi au multiple de {}.", kg_lisible(x)) } else { "Sans arrondi (kg).".into() });
+    }
+    Ok((s, dites))
+}
+
+/// `POST /api/couverture/{reference}/simulation` — L'ESPACE « ET SI »
+/// (27/10/2026). Il LIT comme le détail, applique les hypothèses du corps EN
+/// MÉMOIRE et appelle le même moteur : la situation réelle et la situation
+/// simulée, côte à côte. Rien n'est enregistré : ni transaction, ni écriture, ni
+/// journal — un POST seulement parce que les hypothèses sont un corps. Droit :
+/// PLAN_ACHAT / LIRE, comme le détail.
+pub async fn simulation(
+    State(state): State<AppState>,
+    user: Utilisateur,
+    Path(reference): Path<String>,
+    Json(corps): Json<Value>,
+) -> AppResult<Json<Value>> {
+    user.exiger(&state.db, module::PLAN_ACHAT, Action::Lire).await?;
+    let h: Hypotheses = serde_json::from_value(corps)
+        .map_err(|e| AppError::Invalide(format!("hypothèses illisibles : {e}")))?;
+    let reference = reference.trim();
+    let d = charger(&state.db, Some(reference)).await?;
+    let fiche = d
+        .fiches
+        .get(reference)
+        .ok_or_else(|| AppError::Introuvable(format!("référence {reference}")))?;
+    let mut d_simulee = d.clone();
+    let (surcharges, dites) = appliquer_hypotheses(&mut d_simulee, reference, &h)?;
+    let reelle = analyser(&d, fiche);
+    let simulee = analyser_avec(&d_simulee, fiche, &surcharges);
+
+    let mut v = entete(&d);
+    v["simulation"] = json!(true);
+    v["avertissement"] = json!("Simulation — rien n'est enregistré");
+    v["reference"] = json_reference(fiche);
+    v["hypotheses"] = json!(dites);
+    v["reelle"] = vue_analyse(&reelle);
+    v["simulee"] = vue_analyse(&simulee);
+    user.masquer(&state.db, module::PLAN_ACHAT, &mut v).await?;
+    retirer_quantites_masquees(&mut v["reelle"]);
+    retirer_quantites_masquees(&mut v["simulee"]);
     Ok(Json(v))
+}
+
+#[cfg(test)]
+mod tests_simulation {
+    use super::*;
+    use chrono::Duration;
+
+    /// J1 = aujourd'hui = 01/01/2026, horizon jusqu'au 30/06/2026.
+    fn j(n: i64) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 1, 1).unwrap() + Duration::days(n - 1)
+    }
+
+    /// Une référence REF : 2 000 kg comptés, plan de 100 kg par jour, délai 10 j,
+    /// couverture 30 j, sécurité de la classe A à 5 j ; un bon validé de 800 kg à
+    /// J25, un transfert en route de 300 kg à J70, un import sans bon de 50 kg.
+    fn donnees() -> Donnees {
+        let code = "REF".to_string();
+        let mut fiches = BTreeMap::new();
+        fiches.insert(
+            code.clone(),
+            Fiche {
+                code_reference: code.clone(),
+                designation: Some("Fil d'essai".into()),
+                classe_abc: Some("A".into()),
+                actif: true,
+                code_fournisseur: Some("FRS".into()),
+                fournisseur_nom: Some("Fournisseur".into()),
+                delai_fournisseur: Some(10),
+                couverture_fournisseur: Some(30),
+                moq_kg: None,
+                multiple_achat_kg: None,
+                arrondi_palette: false,
+                poids_bobine_kg: None,
+                bobines_par_palette: None,
+            },
+        );
+        let besoin = HashMap::from([(
+            code.clone(),
+            (1..=6)
+                .map(|m| {
+                    (
+                        format!("2026-{m:02}"),
+                        MoisPlan { annee: 2026, mois: m, kg: 100.0 * jours_du_mois(2026, m) as f64 },
+                    )
+                })
+                .collect(),
+        )]);
+        let magasins = HashMap::from([(
+            code.clone(),
+            vec![LigneMagasin {
+                code_magasin: "MP".into(),
+                nom: None,
+                inclure_mrp: true,
+                quarantaine: false,
+                quantite_kg: 2000.0,
+                bloque_kg: 0.0,
+                restes_kg: 150.0,
+            }],
+        )]);
+        let bons = HashMap::from([(
+            code.clone(),
+            vec![LigneBon {
+                id_bc: "BC1".into(),
+                numero_bc: Some("BC-1".into()),
+                statut_bc: "ENVOYE".into(),
+                code_fournisseur: Some("FRS".into()),
+                id_ligne_bc: "L1".into(),
+                ligne_numero: Some(1),
+                reste_kg: 800.0,
+                date_ligne: Some(j(25)),
+                date_entete: None,
+                hypothese: None,
+            }],
+        )]);
+        let transits = HashMap::from([(
+            code.clone(),
+            vec![LigneTransit {
+                id_transfert: "T1".into(),
+                id_ligne_transfert: "LT1".into(),
+                numero_transfert: Some("TR-1".into()),
+                code_magasin_source: Some("A".into()),
+                code_magasin_dest: Some("MP".into()),
+                lot_fournisseur: None,
+                kg: 300.0,
+                date_expedition: Some(j(1)),
+                date_prevue: Some(j(70)),
+                hypothese: None,
+            }],
+        )]);
+        let port = HashMap::from([(
+            code.clone(),
+            vec![LignePort {
+                id_dossier: "D1".into(),
+                numero_dossier: Some("IMP-1".into()),
+                statut_dossier: Some("EN_ROUTE".into()),
+                numero_facture: Some("F1".into()),
+                lot_fournisseur: None,
+                reste_kg: 50.0,
+                date_arrivee: None,
+            }],
+        )]);
+        Donnees {
+            aujourdhui: j(1),
+            parametres: Parametres { securite: [5.0, 5.0, 5.0], delai_defaut: 60, marge_jours: 30 },
+            plan: Some(PlanEnService {
+                id_plan: "P1".into(),
+                libelle: None,
+                date_debut: None,
+                date_fin: None,
+                date_photo: None,
+                fin_horizon: NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+            }),
+            fiches,
+            besoin,
+            magasins,
+            machine: HashMap::new(),
+            bons,
+            port,
+            transits,
+        }
+    }
+
+    fn premiere(a: &Analyse) -> f64 {
+        a.resultat.propositions[0].quantite_proposee_kg
+    }
+
+    fn simuler(h: &Hypotheses) -> AppResult<(Donnees, Surcharges, Vec<String>)> {
+        let mut d = donnees();
+        let (s, dites) = appliquer_hypotheses(&mut d, "REF", h)?;
+        Ok((d, s, dites))
+    }
+
+    #[test]
+    fn sans_hypothese_la_simulation_rend_le_detail() {
+        let d = donnees();
+        let fiche = &d.fiches["REF"];
+        let (ds, s, dites) = simuler(&Hypotheses::default()).unwrap();
+        assert!(dites.is_empty());
+        assert_eq!(vue_analyse(&analyser(&d, fiche)), vue_analyse(&analyser_avec(&ds, fiche, &s)));
+        // L'exemple validé n° 1 : D = J16, 2 200 kg (le bon de 800 kg à J25 dans la fenêtre).
+        let a = analyser(&d, fiche);
+        assert_eq!(a.resultat.propositions[0].date_disponibilite, j(16));
+        assert!((premiere(&a) - 2200.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn un_arrivage_dans_la_fenetre_reduit_la_proposition_d_autant() {
+        let d = donnees();
+        let fiche = &d.fiches["REF"];
+        let avant = premiere(&analyser(&d, fiche));
+        let h = Hypotheses {
+            arrivages_ajoutes: vec![ArriveeSimulee { date: j(30), kg: 400.0 }],
+            ..Default::default()
+        };
+        let (ds, s, dites) = simuler(&h).unwrap();
+        let apres = analyser_avec(&ds, fiche, &s);
+        assert!((avant - premiere(&apres) - 400.0).abs() < 1e-6, "{avant} → {}", premiere(&apres));
+        assert_eq!(dites.len(), 1);
+        // L'arrivage simulé est classé comme un vrai : compté à sa date, et dit.
+        let simule = apres.arrivages.iter().find(|a| a.detail["hypothese"] == "arrivage ajouté").unwrap();
+        assert!(simule.compte);
+        // Les données lues ne bougent pas : le réel reste ce qu'il était.
+        assert!((premiere(&analyser(&d, fiche)) - avant).abs() < 1e-6);
+    }
+
+    #[test]
+    fn une_commande_simulee_a_d_couvre_la_proposition() {
+        let d = donnees();
+        let fiche = &d.fiches["REF"];
+        let p = analyser(&d, fiche).resultat.propositions[0].clone();
+        let h = Hypotheses {
+            commandes: vec![ArriveeSimulee { date: p.date_disponibilite, kg: p.quantite_proposee_kg }],
+            ..Default::default()
+        };
+        let (ds, s, _) = simuler(&h).unwrap();
+        let apres = analyser_avec(&ds, fiche, &s);
+        // La première proposition commandée : la suivante devient la première.
+        assert!(apres.resultat.propositions[0].date_disponibilite > p.date_disponibilite);
+    }
+
+    #[test]
+    fn un_arrivage_au_passe_est_en_retard_comme_un_vrai() {
+        let d = donnees();
+        let fiche = &d.fiches["REF"];
+        let h = Hypotheses { arrivages_ajoutes: vec![ArriveeSimulee { date: j(1) - Duration::days(3), kg: 900.0 }], ..Default::default() };
+        let (ds, s, _) = simuler(&h).unwrap();
+        let apres = analyser_avec(&ds, fiche, &s);
+        let simule = apres.arrivages.iter().find(|a| a.detail["hypothese"] == "arrivage ajouté").unwrap();
+        assert_eq!(simule.categorie, "EN_RETARD");
+        assert!(!simule.compte);
+        assert!((premiere(&apres) - premiere(&analyser(&d, fiche))).abs() < 1e-6);
+    }
+
+    #[test]
+    fn modifier_date_kilos_ou_retirer_un_arrivage() {
+        let d = donnees();
+        let fiche = &d.fiches["REF"];
+        let sans_bon = 3000.0; // sans l'arrivage de 800 kg : exemple « propositions enchaînées »
+        // Retiré : la proposition reprend les 800 kg.
+        let retirer = Hypotheses {
+            arrivages_modifies: vec![ModificationArrivage { cle: "BON:L1".into(), date: None, kg: None, retirer: true }],
+            ..Default::default()
+        };
+        let (ds, s, _) = simuler(&retirer).unwrap();
+        assert!((premiere(&analyser_avec(&ds, fiche, &s)) - sans_bon).abs() < 1e-6);
+        // Daté hors de la fenêtre [J16, J46[ : il ne réduit plus le besoin.
+        let tard = Hypotheses {
+            arrivages_modifies: vec![ModificationArrivage { cle: "BON:L1".into(), date: Some(j(50)), kg: None, retirer: false }],
+            ..Default::default()
+        };
+        let (ds, s, dites) = simuler(&tard).unwrap();
+        assert!((premiere(&analyser_avec(&ds, fiche, &s)) - sans_bon).abs() < 1e-6);
+        assert!(dites[0].contains("BC-1"));
+        // 500 kg au lieu de 800 : 300 kg de plus à commander.
+        let moins = Hypotheses {
+            arrivages_modifies: vec![ModificationArrivage { cle: "BON:L1".into(), date: None, kg: Some(500.0), retirer: false }],
+            ..Default::default()
+        };
+        let (ds, s, _) = simuler(&moins).unwrap();
+        assert!((premiere(&analyser_avec(&ds, fiche, &s)) - 2500.0).abs() < 1e-6);
+        // Le transfert ramené à J20 : compté plus tôt, la proposition baisse de 300 kg.
+        let transfert = Hypotheses {
+            arrivages_modifies: vec![ModificationArrivage { cle: "TRANSFERT:LT1".into(), date: Some(j(20)), kg: None, retirer: false }],
+            ..Default::default()
+        };
+        let (ds, s, _) = simuler(&transfert).unwrap();
+        assert!((premiere(&analyser_avec(&ds, fiche, &s)) - 1900.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reglages_simules_avec_leur_source() {
+        let d = donnees();
+        let fiche = &d.fiches["REF"];
+        let h = Hypotheses { delai_j: Some(20), moq_kg: Some(2500.0), multiple_kg: Some(1000.0), ..Default::default() };
+        let (ds, s, dites) = simuler(&h).unwrap();
+        let a = analyser_avec(&ds, fiche, &s);
+        assert_eq!(a.reglages.delai_j, 20);
+        assert_eq!(a.source_delai, Source::Simulation);
+        assert_eq!(a.resultat.propositions[0].date_disponibilite, j(21), "D = aujourd'hui + 20 j");
+        assert_eq!(a.resultat.propositions[0].quantite_proposee_kg % 1000.0, 0.0, "arrondi au multiple simulé");
+        assert!(a.resultat.propositions[0].quantite_proposee_kg >= 2500.0, "minimum simulé");
+        assert_eq!(dites.len(), 3);
+        // Un minimum ou un multiple à 0 : aucun.
+        let h0 = Hypotheses { multiple_kg: Some(0.0), ..Default::default() };
+        let (ds, s, _) = simuler(&h0).unwrap();
+        assert_eq!(analyser_avec(&ds, fiche, &s).reglages.multiple_kg, None);
+    }
+
+    #[test]
+    fn hypotheses_refusees() {
+        let refus = |h: Hypotheses| simuler(&h).is_err();
+        let m = |cle: &str| ModificationArrivage { cle: cle.into(), date: Some(j(20)), kg: None, retirer: false };
+        assert!(refus(Hypotheses { arrivages_modifies: vec![m("IMPORT:D1:F1:")], ..Default::default() }), "import sans bon");
+        assert!(refus(Hypotheses { arrivages_modifies: vec![m("BON:INCONNUE")], ..Default::default() }));
+        assert!(refus(Hypotheses { arrivages_modifies: vec![m("n'importe quoi")], ..Default::default() }));
+        assert!(refus(Hypotheses {
+            arrivages_modifies: vec![ModificationArrivage { cle: "BON:L1".into(), date: None, kg: None, retirer: false }],
+            ..Default::default()
+        }));
+        assert!(refus(Hypotheses { arrivages_ajoutes: vec![ArriveeSimulee { date: j(10), kg: -5.0 }], ..Default::default() }));
+        assert!(refus(Hypotheses { arrivages_ajoutes: vec![ArriveeSimulee { date: j(10), kg: f64::NAN }], ..Default::default() }));
+        assert!(refus(Hypotheses { commandes: vec![ArriveeSimulee { date: j(10), kg: 0.0 }], ..Default::default() }));
+        assert!(refus(Hypotheses { arrivages_ajoutes: vec![ArriveeSimulee { date: j(1) + Duration::days(5000), kg: 5.0 }], ..Default::default() }));
+        assert!(refus(Hypotheses { delai_j: Some(-1), ..Default::default() }));
+        assert!(refus(Hypotheses { couverture_j: Some(0), ..Default::default() }));
+        assert!(refus(Hypotheses { jours_securite: Some(400.0), ..Default::default() }));
+        assert!(refus(Hypotheses {
+            arrivages_ajoutes: vec![ArriveeSimulee { date: j(10), kg: 1.0 }; MAX_HYPOTHESES + 1],
+            ..Default::default()
+        }));
+        // Un champ inconnu dans le corps est refusé, pas ignoré.
+        assert!(serde_json::from_value::<Hypotheses>(json!({ "delai": 5 })).is_err());
+        assert!(serde_json::from_value::<Hypotheses>(json!({ "delai_j": 5, "commandes": [{ "date": "2026-02-01", "kg": 10 }] })).is_ok());
+    }
+
+    #[test]
+    fn colonnes_du_stock_projete_sans_double_comptage() {
+        let d = donnees();
+        let a = analyser(&d, &d.fiches["REF"]);
+        let l = ligne(&a);
+        let somme = l["magasin_hors_restes_kg"].as_f64().unwrap()
+            + l["machine_hors_restes_kg"].as_f64().unwrap()
+            + l["restant_kg"].as_f64().unwrap();
+        assert!((somme - l["disponible_kg"].as_f64().unwrap()).abs() < 1e-6, "{l}");
+        assert!((l["restant_kg"].as_f64().unwrap() - 150.0).abs() < 1e-6);
+        assert!(
+            (l["stock_total_projete_kg"].as_f64().unwrap() - (2000.0 + l["arrivages_comptes_kg"].as_f64().unwrap())).abs()
+                < 1e-6
+        );
+        // Bon de 800 (J25) et transfert de 300 (J70) comptés ; l'import sans bon, non.
+        assert!((l["arrivages_comptes_kg"].as_f64().unwrap() - 1100.0).abs() < 1e-6);
+        // Le besoin jusqu'à livraison : 10 jours de plan à 100 kg.
+        assert!((l["besoin_jusqu_livraison_kg"].as_f64().unwrap() - 1000.0).abs() < 1e-6);
+        // La sécurité du jour : 5 j × 100 kg/j.
+        assert!((l["securite_aujourdhui_kg"].as_f64().unwrap() - 500.0).abs() < 1e-6);
+    }
 }

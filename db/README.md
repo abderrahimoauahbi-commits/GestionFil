@@ -132,7 +132,7 @@ Un rôle BOM sans densité sur la qualité **bloque la validation de la recette*
 |---|---|
 | `v_ligne_recette_calculee` | kg/m² par ligne de recette (gère kg/m² et ml/m²) |
 | `v_besoin_mrp_calcule` | besoins MRP agrégés par référence, taux de perte appliqué |
-| `v_consommation_fait` | **le grand livre de la consommation** (27/10/2026, 27g) : une ligne par fait — décisions machine actives datées au jour de la fiche, mouvements non contre-passés ; natures CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO, HORS_MACHINE, REBUT_DECHET/PERTE/CASSE, AUTRE_ECART (hors réel : corrections, non qualifiés, régularisations, erreurs, ajustements d'inventaire) ; kg signés, valeur au livre (fait machine : CMUP du jour reconstitué, `prix_source`), OF, qualité (« Non attribué »), attribution, mode de mesure, clé du détail |
+| `v_consommation_fait` | **le grand livre de la consommation** (27/10/2026, 27g) : une ligne par fait — décisions machine actives datées au jour de la fiche, mouvements non contre-passés ; natures CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO, RETOUR_PROD (retour depuis l'atelier, déduit du réel au jour du retour : 27i), HORS_MACHINE, REBUT_DECHET/PERTE/CASSE, AUTRE_ECART (hors réel : corrections, non qualifiés, régularisations, erreurs, ajustements d'inventaire) ; kg signés, valeur au livre (fait machine : CMUP du jour reconstitué, `prix_source`), OF, qualité (« Non attribué »), attribution, mode de mesure, clé du détail |
 | `v_conso_fenetre` / `v_conso_reelle_mois` | les 12 mois pleins glissants (mois calendaires complets avant le mois en cours) ; le réel par référence et par mois dans la fenêtre (XYZ, rotation) |
 | `v_conso_reelle` | le **Réel / mois** : réel d'achat des 12 mois pleins (consommation + rebut − retours) ÷ 12, valeur, rebut, autres écarts (27g) ; `v_conso_retenue` (le « plus grand » du réel et du plan) est **supprimée** |
 | `v_stock_disponible` | stock agrégé par référence, hors magasins `inclure_mrp = 0` |
@@ -244,7 +244,8 @@ aux autres (`tous_les_controles`). **C27** (écart majeur : couverture confortab
 minimum) et **C49** sont **retirés** — le moteur n'a ni seuils de jours ni prolongation. **C28**
 (commande en retard) est **rebranché** sur la règle du moteur : une ligne de bon validé dont la date
 (de la ligne, sinon de l'en-tête) est dépassée est en retard et hors couverture — plus de tolérance
-`P_RetardBCJours`, un libellé fixe (`P_EncoursRetardInclus` n'a plus de lecteur). **C66** naît
+`P_RetardBCJours`, un libellé fixe ; `P_RetardBCJours`, `P_EncoursRetardInclus`, `P_HorizonProlonge`
+et `P_EcartCouvertureJours`, sans lecteur, sont supprimés par `2026-10-27j`. **C66** naît
 (transfert en route sans date prévue). C31, C32 et le coût de revient gardent les réceptions
 clôturées ; C35 et C36 lisent l'état des machines (`machine_etat`). `v_controles` porte donc
 C01–C67 moins C05, C25, C27 et C49.

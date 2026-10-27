@@ -57,12 +57,12 @@
     },
     "RETOUR_PROD": {
       "signe": 1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,
-      "origine": "Retour depuis l'atelier",
+      "origine": "Retour depuis l'atelier ; au grand livre de la consommation, déduit du réel au jour du retour (nature RETOUR_PROD, arbitrage du 27/10/2026)",
       "cmup": "Inchangé (le fil revient au CMUP courant)",
       "cout": "Sans prix : valorisé au CMUP du magasin",
       "validation": "Droit ECRIRE du stock",
       "reversibilite": "Contre-passation",
-      "banc": ["saisie_libre"]
+      "banc": ["saisie_libre", "retour_prod_grand_livre"]
     },
     "SORTIE_HORS_MACHINE": {
       "signe": -1, "impacte_cmup": 0, "exige_prix": 0, "exige_of": 0, "exige_motif_ligne": 1, "interne": 0,

@@ -99,13 +99,13 @@ des besoins, pour son magasin de destination.
 
 ### `RETOUR_PROD`
 
-- **Origine** : Retour depuis l'atelier
+- **Origine** : Retour depuis l'atelier ; au grand livre de la consommation, déduit du réel au jour du retour (nature RETOUR_PROD, arbitrage du 27/10/2026)
 - **Sens** : entrée (+) dans le magasin du mouvement ; le stock du lot suit
 - **CMUP** : Inchangé (le fil revient au CMUP courant)
 - **Coût de la ligne** : Sans prix : valorisé au CMUP du magasin
 - **Validation** : Droit ECRIRE du stock
 - **Réversibilité** : Contre-passation
-- **Prouvé par le banc** : `saisie_libre`
+- **Prouvé par le banc** : `saisie_libre`, `retour_prod_grand_livre`
 
 ### `SORTIE_HORS_MACHINE`
 

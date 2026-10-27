@@ -78,8 +78,12 @@ CREATE TABLE import_dossiers (
     numero_bl           text,
     conteneurs          text,
     -- Devise et taux GLOBAUX : proposes par defaut a chaque facture du dossier.
+    -- Le taux est FACULTATIF (27/10/2026, migration 2026-10-27k) : NULL pour une
+    -- devise sans taux, 1 pour le dirham. Il ne convertit rien : chaque facture
+    -- porte le sien, controle a sa saisie, et ne reprend celui du dossier que
+    -- s'il existe, dans la meme devise.
     code_devise         text    NOT NULL REFERENCES devise(code_devise),
-    taux_change         numeric(9,4)  NOT NULL CHECK (taux_change > 0),
+    taux_change         numeric(9,4)  CHECK (taux_change > 0),
     date_arrivee        text,
     statut              text    NOT NULL DEFAULT 'BROUILLON'
                                 CHECK (statut IN ('BROUILLON','EN_COURS','CLOTURE')),

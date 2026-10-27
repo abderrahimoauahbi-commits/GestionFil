@@ -3844,7 +3844,7 @@ def scenario_plan_detail(c, infra):
     MOTEUR DE COUVERTURE (`/api/couverture/{ref}`), l'ancien detail (`/api/plan-achat/detail`,
     v_plan_achat, v_encours_fiable) est retire ; un import engage sans bon se lit dans les arrivages du
     moteur (sans date fiable, hors couverture) ; C28 suit la regle du moteur (date depassee = en retard,
-    hors couverture), quel que soit P_EncoursRetardInclus."""
+    hors couverture)."""
     ref = "PP-1500 Dtex-Cream 2951-Hs"
     from urllib.parse import quote
     # LE PLAN D'ACHAT SUIT LE PLAN DE PRODUCTION, ET LUI SEUL (10/10/2026) : sans plan en
@@ -3910,12 +3910,10 @@ def scenario_plan_detail(c, infra):
              f"l'import sans bon est compte : {port}")
 
     # C28 : la regle du moteur (date depassee = hors couverture), le reglage n'y change rien.
-    libelles = set()
-    for v in ("1", "0", "1"):
-        infra.sql(f"UPDATE parametre SET valeur_courante = '{v}' WHERE code_parametre = 'P_EncoursRetardInclus'")
-        libelles.add(infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'"))
+    # (P_EncoursRetardInclus est supprime par 2026-10-27j : plus de reglage a faire varier.)
+    libelles = {infra.valeur("SELECT controle FROM v_controles WHERE code = 'C28'")}
     verifier(len(libelles) == 1 and "hors couverture" in next(iter(libelles)),
-             f"C28 ne dit pas la regle du moteur, ou suit encore le reglage : {libelles}")
+             f"C28 ne dit pas la regle du moteur : {libelles}")
 
     # T10 (09/10) : deux calculs du plan d'achat ; la purge du second se resume en une ligne
     # d'audit, au lieu d'une par proposition remplacee.
@@ -4198,7 +4196,7 @@ def scenario_import_bon_envoye(c, infra):
 def scenario_parametres_types(c, infra):
     """T15 (09/10) : un parametre garde son type (entier, nombre au point, date) ; la base refuse le reste."""
     refus_sql(infra, "UPDATE parametre SET valeur_courante = '2,5' WHERE code_parametre = 'P_TolerEcartPesee'", "PARAMETRE")
-    refus_sql(infra, "UPDATE parametre SET valeur_courante = '10 j' WHERE code_parametre = 'P_RetardBCJours'", "PARAMETRE")
+    refus_sql(infra, "UPDATE parametre SET valeur_courante = '10 j' WHERE code_parametre = 'P_DelaiDefaut'", "PARAMETRE")
     refus_sql(infra, "UPDATE parametre SET valeur_courante = '2026-02-30' WHERE code_parametre = 'P_DateRefKPI'", "PARAMETRE")
     infra.sql("UPDATE parametre SET valeur_courante = ' 2.5 ' WHERE code_parametre = 'P_TolerEcartPesee'")
     verifier(infra.valeur("SELECT valeur_courante FROM parametre WHERE code_parametre = 'P_TolerEcartPesee'") == "2.5",
@@ -5359,6 +5357,139 @@ def scenario_couverture_moteur(c, infra):
     c.ok("Assistante", "PUT", f"/api/bons-commande/{bc_brouillon}/statut", {"statut": "ANNULE"})
 
 
+def scenario_couverture_simulation(c, infra):
+    """L'ESPACE « SIMULATION » DU STOCK PROJETE (decision du 27/10/2026) : POST
+    /api/couverture/{ref}/simulation LIT comme le detail, applique les hypotheses EN MEMOIRE et appelle le
+    meme moteur. (1) Rien n'est ecrit : les lignes des tables qui comptent (audit compris) sont les memes
+    avant et apres. (2) Sans hypothese, le reel et le simule sont identiques, et identiques au detail.
+    (3) Un arrivage simule dans la fenetre ]D, F[ de la premiere proposition la reduit d'autant (minimum et
+    multiple neutralises par hypothese, l'arrivage pris sous la marge du jour D). (4) Les droits sont ceux
+    du detail (PLAN_ACHAT / LIRE) ; une hypothese illisible est refusee. Le stock projete porte ses
+    colonnes sans double comptage, et le montant au prix du plan d'achat."""
+    from datetime import date, timedelta
+    from urllib.parse import quote
+
+    # Un plan en service (celui du banc, sinon le sien) et sa photo MRP.
+    id_plan = infra.valeur("SELECT id_plan FROM plan_production WHERE statut = 'EN_COURS'")
+    if not id_plan:
+        qualite = infra.valeur("SELECT q.code_qualite FROM qualite q WHERE q.statut = 'ACTIF' "
+                               "AND EXISTS (SELECT 1 FROM v_recette_calculee r WHERE r.code_qualite = q.code_qualite "
+                               "AND r.kg_m2 > 0) ORDER BY 1 LIMIT 1")
+        mois0 = infra.valeur("SELECT to_char(current_date, 'YYYY-MM')")
+        plan = c.ok("Choukri", "PUT", "/api/plans", {
+            "libelle": "Plan du banc (simulation)", "date_debut": mois0, "mois_horizon": 12,
+            "croissance_annuelle_pct": 0,
+            "saisonnalite": [{"code_qualite": qualite, "mois": m, "coefficient": 1} for m in range(1, 13)],
+            "qualites": [{"code_qualite": qualite, "m2_base_mensuel": 20000}]})
+        id_plan = plan["id_plan"]
+        c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "SIMULATION"})
+        c.ok("Choukri", "POST", f"/api/plans/{id_plan}/figer-recettes", {})
+        c.ok("Choukri", "PUT", f"/api/plans/{id_plan}/statut", {"statut": "EN_COURS"})
+        c.ok("Choukri", "POST", f"/api/plans/{id_plan}/mrp", {})
+
+    tete = c.ok("Choukri", "GET", "/api/couverture")
+    # Une reference avec une premiere proposition dont la fenetre laisse un jour apres D.
+    choisie = None
+    for ligne in tete["lignes"]:
+        if not ligne.get("qte_a_commander_kg"):
+            continue
+        d = c.ok("Choukri", "GET", f"/api/couverture/{quote(ligne['code_reference'], safe='')}")
+        p = d["propositions"][0]
+        if (date.fromisoformat(p["date_fin_fenetre"]) - date.fromisoformat(p["date_disponibilite"])).days >= 2:
+            choisie = (ligne["code_reference"], d)
+            break
+    verifier(choisie, "aucune reference n'a de proposition : la simulation n'a rien a reduire")
+    ref, detail = choisie
+    q_ref = quote(ref, safe="")
+    route = f"/api/couverture/{q_ref}/simulation"
+
+    # (1) LES LIGNES QUI COMPTENT, avant toute simulation.
+    temoin = ("SELECT (SELECT count(*) FROM audit_log), (SELECT count(*) FROM mouvement), "
+              "(SELECT count(*) FROM ligne_mouvement), (SELECT count(*) FROM bon_commande), "
+              "(SELECT count(*) FROM ligne_bc), (SELECT count(*) FROM plan_achat), "
+              "(SELECT count(*) FROM transfert), (SELECT COALESCE(sum(quantite_kg), 0) FROM stock_magasin), "
+              "(SELECT COALESCE(sum(quantite_restante_kg), 0) FROM ligne_bc), "
+              "(SELECT COALESCE(max(date_generation)::text, '') FROM plan_achat)")
+
+    # (4) DROITS ET REFUS, d'abord : le changement de droit s'ecrit (et se journalise) en
+    # SQL ; il est fait et rendu AVANT le temoin.
+    c.refus("Choukri", "POST", route, {"delai": 3}, codes=(400,), contient="illisibles")
+    c.refus("Choukri", "POST", route, {"arrivages_ajoutes": [{"date": tete["aujourdhui"], "kg": -5}]}, codes=(400,))
+    c.refus("Choukri", "POST", route, {"arrivages_modifies": [{"cle": "BON:INCONNUE", "retirer": True}]}, codes=(400,))
+    c.refus("Choukri", "POST", "/api/couverture/INCONNUE-XYZ/simulation", {}, codes=(404,))
+    c.ok("Magasinie", "POST", route, {})
+    infra.sql("UPDATE permission SET actif = 0 WHERE code_role_user = 'MAGASIN' AND module = 'PLAN_ACHAT' AND action = 'LIRE'")
+    try:
+        c.refus("Magasinie", "POST", route, {}, codes=(403,))
+    finally:
+        infra.sql("UPDATE permission SET actif = 1 WHERE code_role_user = 'MAGASIN' AND module = 'PLAN_ACHAT' AND action = 'LIRE'")
+    c.ok("Magasinie", "POST", route, {})
+
+    avant = infra.sql(temoin)
+
+    # (2) SANS HYPOTHESE : le reel, le simule et le detail disent la meme chose.
+    s0 = c.ok("Choukri", "POST", route, {})
+    verifier(s0.get("simulation") is True and "rien n'est enregistré" in s0.get("avertissement", ""),
+             f"la reponse ne se dit pas simulation : {s0.get('avertissement')}")
+    verifier(s0["hypotheses"] == [], f"hypotheses sans hypothese : {s0['hypotheses']}")
+    for cle in ("synthese", "propositions", "jours", "evenements", "arrivages", "reglages"):
+        verifier(s0["reelle"][cle] == s0["simulee"][cle], f"sans hypothese, le simule differe du reel ({cle})")
+        verifier(s0["reelle"][cle] == detail[cle], f"le reel de la simulation differe du detail ({cle})")
+
+    # (3) UN ARRIVAGE DANS LA FENETRE REDUIT LA PROPOSITION D'AUTANT.
+    neutre = {"moq_kg": 0, "multiple_kg": 0}
+    s1 = c.ok("Choukri", "POST", route, neutre)
+    p1 = s1["simulee"]["propositions"][0]
+    jours = s1["simulee"]["jours"]
+    idx = {j["date"]: i for i, j in enumerate(jours)}
+    i_d = idx[p1["date_disponibilite"]]
+    verifier(s1["simulee"]["reglages"]["source_multiple"].startswith("simulation"),
+             f"la source du multiple ne dit pas la simulation : {s1['simulee']['reglages']['source_multiple']}")
+    # La marge du jour D : le besoin ne se reduit d'autant que si le jour determinant reste apres D.
+    valeur_d = p1["securite_kg"] + jours[i_d]["conso_prevue_kg"] - p1["solde_debut_d_kg"]
+    marge = p1["besoin_theorique_kg"] - max(valeur_d, 0.0)
+    kg_arr = round(min(100.0, marge / 2, p1["besoin_theorique_kg"] / 2), 2)
+    verifier(kg_arr > 0.5, f"{ref} : pas de marge au jour D ({marge:.2f} kg) pour un arrivage dans la fenetre")
+    jour_arr = (date.fromisoformat(p1["date_disponibilite"]) + timedelta(days=1)).isoformat()
+    s2 = c.ok("Choukri", "POST", route, dict(neutre, arrivages_ajoutes=[{"date": jour_arr, "kg": kg_arr}]))
+    p2 = s2["simulee"]["propositions"][0]
+    verifier(p2["date_disponibilite"] == p1["date_disponibilite"], f"D a bouge : {p1['date_disponibilite']} -> {p2['date_disponibilite']}")
+    verifier(abs((p1["quantite_proposee_kg"] - p2["quantite_proposee_kg"]) - kg_arr) < 0.01,
+             f"arrivage de {kg_arr} kg le {jour_arr} : {p1['quantite_proposee_kg']} -> {p2['quantite_proposee_kg']} kg")
+    verifier(any(a.get("hypothese") == "arrivage ajouté" and a["compte"] for a in s2["simulee"]["arrivages"]),
+             "l'arrivage simule n'est pas compte comme un vrai")
+    verifier(s2["reelle"]["propositions"] == detail["propositions"], "le reel bouge avec l'hypothese")
+    # Un delai simule : la source le dit, D suit.
+    s3 = c.ok("Choukri", "POST", route, {"delai_j": 3})
+    verifier(s3["simulee"]["reglages"]["source_delai"] == "simulation" and s3["simulee"]["reglages"]["delai_j"] == 3,
+             f"delai simule : {s3['simulee']['reglages']}")
+
+    # (1) RIEN N'A ETE ECRIT par les simulations (et la lecture du magasin).
+    c.ok("Magasinie", "POST", route, {"commandes": [{"date": jour_arr, "kg": 10}]})
+    apres = infra.sql(temoin)
+    verifier(avant == apres, f"la simulation a ecrit : avant {avant}, apres {apres}")
+
+    # LE STOCK PROJETE : ses colonnes s'additionnent sans recouvrement ; le montant suit le prix du plan d'achat.
+    lignes = c.ok("Choukri", "GET", "/api/stock/projete?limite=2000")
+    for l in lignes:
+        somme = l["magasin_hors_restes_kg"] + l["machine_hors_restes_kg"] + l["restant_kg"]
+        verifier(abs(somme - l["disponible_kg"]) < 0.001,
+                 f"{l['code_reference']} : disponible {l['disponible_kg']} != {somme} (magasin + machine + restant)")
+        verifier(abs(l["stock_total_projete_kg"] - l["disponible_kg"] - l["arrivages_comptes_kg"]) < 0.001,
+                 f"{l['code_reference']} : stock total projete {l['stock_total_projete_kg']}")
+        if l.get("qte_a_commander_kg") and l.get("prix_estime_mad"):
+            verifier(abs(l["montant_estime_mad"] - round(l["qte_a_commander_kg"] * l["prix_estime_mad"], 2)) < 0.011,
+                     f"{l['code_reference']} : montant {l['montant_estime_mad']}")
+    ligne = next(l for l in lignes if l["code_reference"] == ref)
+    plan_livraison = sum(j["conso_prevue_kg"] for j in detail["jours"][:detail["reglages"]["delai_j"]])
+    verifier(abs(ligne["besoin_jusqu_livraison_kg"] - plan_livraison) < 0.01,
+             f"besoin jusqu'a livraison {ligne['besoin_jusqu_livraison_kg']}, jours du moteur {plan_livraison:.4f}")
+    # Le montant au stock projete est masque a qui ne voit pas les prix du plan d'achat (le magasin).
+    vu = next((l for l in c.ok("Magasinie", "GET", "/api/stock/projete?limite=2000") if l["code_reference"] == ref), {})
+    verifier("montant_estime_mad" not in vu and "prix_estime_mad" not in vu,
+             f"le magasin voit le montant ou le prix : {vu.get('montant_estime_mad')} / {vu.get('prix_estime_mad')}")
+
+
 def scenario_proposition_bon_annule(c, infra):
     """LA PROPOSITION SE CLOT AVEC SON BON ANNULE (decision du 27/10/2026, migration 2026-10-27f).
     « Commander » : la proposition du moteur devient un bon ; le bon annule, elle passe a ANNULE_BC
@@ -5834,6 +5965,152 @@ def scenario_grand_livre_consommation(c, infra):
     verifier("C67" in ctl, "C67 absent de /api/controles")
 
 
+def scenario_retour_prod_grand_livre(c, infra):
+    """LE RETOUR DE PRODUCTION SE DEDUIT DU REEL (arbitrage du 27/10/2026, migration 2026-10-27i) :
+    un RETOUR_PROD (fil revenu de l'atelier au magasin) est au grand livre de la consommation sous sa
+    propre nature, en kg NEGATIF, DANS le reel, au jour du retour, valorise au prix du mouvement ; le reel
+    du mois de sa date baisse d'autant ; contre-passe, il disparait ; C67 (faits machine) n'en voit rien.
+    La saisie libre ne le propose plus (regle 12) : le banc l'ecrit en base, comme l'historique."""
+    from datetime import date, timedelta
+
+    debut = date.fromisoformat(infra.valeur("SELECT debut::text FROM v_conso_fenetre"))
+    jour = debut + timedelta(days=40)
+    mois = jour.strftime("%Y-%m")
+    entree_stock(c, REF, 50)
+    prix = float(infra.valeur(f"SELECT cmup_mad FROM stock_magasin WHERE code_reference = '{REF}' AND code_magasin = '{MAG}'"))
+
+    def reel():
+        m = infra.valeur(f"SELECT COALESCE(sum(kg_reel), 0) FROM v_conso_reelle_mois "
+                         f"WHERE code_reference = '{REF}' AND mois = '{mois}'")
+        d1 = infra.valeur(f"SELECT COALESCE(sum(sorties_cumulees_kg), 0) FROM v_conso_reelle WHERE code_reference = '{REF}'")
+        return float(m), float(d1)
+
+    avant_mois, avant_12m = reel()
+    c67 = controle(infra, "C67")
+    infra.sql("INSERT INTO mouvement (id_mouvement, numero_mouvement, date_mouvement, code_type_mvt, code_magasin, "
+              "code_motif, id_utilisateur, responsable) "
+              f"SELECT 'banc-rp', 'MVT-BANC-RP', '{jour.isoformat()}', 'RETOUR_PROD', '{MAG}', 'RETOUR_PROD', "
+              "id_utilisateur, 'Banc' FROM utilisateur WHERE login = 'Magasinie'; "
+              "INSERT INTO ligne_mouvement (id_mouvement, ligne_numero, code_reference, quantite_kg, prix_kg_mad, "
+              f"code_motif_ligne) VALUES ('banc-rp', 1, '{REF}', 12, {prix}, 'R3')")
+
+    faits = infra.sql("SELECT nature, kg::float8, dans_reel::text, date_fait::text, valeur_mad::float8, prix_source "
+                      "FROM v_consommation_fait WHERE source = 'MOUVEMENT' AND id_source = 'banc-rp'")
+    verifier(len(faits) == 1, f"le retour de production n'est pas au grand livre : {faits}")
+    nature, kg, dans_reel, date_fait, valeur, source = faits[0]
+    verifier(nature == "RETOUR_PROD" and float(kg) == -12 and dans_reel == "true",
+             f"retour de production : nature {nature}, kg {kg}, dans le reel {dans_reel} (RETOUR_PROD, -12, true attendus)")
+    verifier(date_fait == jour.isoformat(), f"le retour n'est pas date au jour du retour : {date_fait} ({jour})")
+    verifier(source == "MOUVEMENT" and abs(float(valeur) + round(12 * prix, 2)) < 0.01,
+             f"valeur du retour : {valeur} ({source}), {-12 * prix:.2f} attendus au prix du mouvement")
+
+    apres_mois, apres_12m = reel()
+    verifier(abs((avant_mois - apres_mois) - 12) < 0.01,
+             f"le reel du mois {mois} ne baisse pas de 12 kg : {avant_mois} -> {apres_mois}")
+    verifier(abs((avant_12m - apres_12m) - 12) < 0.01,
+             f"le reel des 12 mois pleins ne baisse pas de 12 kg : {avant_12m} -> {apres_12m}")
+    verifier(controle(infra, "C67") == c67, "C67 bouge pour un retour de production (ce n'est pas un fait machine)")
+
+    # Contre-passe, il n'a pas eu lieu : ni lui ni sa contre-passation au grand livre.
+    c.ok("Choukri", "POST", "/api/mouvements/banc-rp/contre-passer", {"motif": "Essai du banc : retour de production"})
+    reste = infra.valeur("SELECT count(*) FROM v_consommation_fait g JOIN mouvement m ON m.id_mouvement = g.id_source "
+                         "WHERE g.source = 'MOUVEMENT' AND (m.id_mouvement = 'banc-rp' OR m.id_mouvement_contrepasse = 'banc-rp')")
+    verifier(reste == "0", f"retour de production contre-passe encore au grand livre : {reste} ligne(s)")
+    verifier(abs(reel()[0] - avant_mois) < 0.01, f"le reel du mois {mois} ne revient pas apres la contre-passation")
+
+
+def scenario_parametres_mrp_orphelins(c, infra):
+    """PARAMETRES MRP SANS LECTEUR (arbitrage du 27/10/2026, 2026-10-27j) : P_RetardBCJours,
+    P_EncoursRetardInclus, P_HorizonProlonge et P_EcartCouvertureJours, laisses par l'ancien calcul, sont
+    supprimes ; ceux que lit le moteur de couverture ou qui font le defaut d'une qualite restent ; aucune
+    vue ni fonction ne lit un parametre supprime ; le moteur et la generation du plan d'achat repondent."""
+    supprimes = ("P_RetardBCJours", "P_EncoursRetardInclus", "P_HorizonProlonge", "P_EcartCouvertureJours")
+    liste = ", ".join(f"'{p}'" for p in supprimes)
+    restes = infra.valeur(f"SELECT string_agg(code_parametre, ', ') FROM parametre WHERE code_parametre IN ({liste})")
+    verifier(not restes, f"des parametres MRP sans lecteur existent encore : {restes}")
+    motif = "|".join(supprimes)
+    lecteurs = infra.valeur(
+        "SELECT string_agg(n, ', ') FROM (SELECT viewname AS n FROM pg_views WHERE schemaname = 'public' "
+        f"AND definition ~ '{motif}' "
+        "UNION SELECT p.proname FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace "
+        f"WHERE s.nspname = 'public' AND p.prosrc ~ '{motif}') x")
+    verifier(not lecteurs, f"des objets lisent encore un parametre supprime : {lecteurs}")
+    # Gardes : lus par le moteur (securite, delai, marge en jours), par le plan d'achat (duree d'un
+    # ecart), ou defauts d'une qualite et du plan de production (NOT NULL au plan).
+    gardes = ("P_SecuriteA", "P_SecuriteB", "P_SecuriteC", "P_DelaiDefaut", "P_MargeJours", "P_DureeEcartJours",
+              "P_SeuilAlerte", "P_SeuilCritique", "P_MargeSecurite", "P_CouvMinMois", "P_TauxPerte")
+    liste = ", ".join(f"'{p}'" for p in gardes)
+    presents = int(infra.valeur(f"SELECT count(*) FROM parametre WHERE code_parametre IN ({liste})"))
+    verifier(presents == len(gardes), f"un parametre encore lu a disparu : {presents} sur {len(gardes)}")
+    # Le moteur et la generation du plan d'achat repondent (200).
+    lignes = c.ok("Choukri", "GET", "/api/couverture")["lignes"]
+    verifier(isinstance(lignes, list), "le moteur de couverture ne rend pas de liste")
+    c.ok("Choukri", "POST", "/api/plan-achat/generer", {})
+    verifier(int(infra.valeur(f"SELECT count(*) FROM parametre WHERE code_parametre IN ({', '.join(repr(p) for p in supprimes)})")) == 0,
+             "la generation du plan d'achat a recree un parametre supprime")
+
+
+def scenario_import_taux_dossier_facultatif(c, infra):
+    """Arbitrage du 27/10/2026 : le taux d'un dossier d'import est FACULTATIF. Un dossier en EUR sans
+    taux s'enregistre avec un taux VIDE (jamais 1 invente) ; une facture en EUR sans taux, sur un dossier
+    qui n'en a pas, est refusee (rien pour la convertir) ; au cours de reference elle passe ; au taux 1
+    elle est refusee. Un dossier qui porte un taux le propose a ses factures de la meme devise."""
+    jour = infra.valeur("SELECT to_char(current_date, 'YYYY-MM-DD')")
+    if infra.valeur("SELECT count(*) FROM taux_change WHERE code_devise = 'EUR' "
+                    f"AND substr(date_debut, 1, 10) = '{jour}'") == "0":
+        infra.sql(f"UPDATE taux_change SET date_fin = '{jour}' WHERE code_devise = 'EUR' AND date_fin IS NULL")
+        infra.sql("INSERT INTO taux_change (id_taux, code_devise, taux, date_debut, source) "
+                  f"VALUES (gen_random_uuid()::text, 'EUR', 10.85, '{jour}', 'banc')")
+    cours = c.ok("Choukri", "GET", f"/api/import/taux-reference?devise=EUR&date={jour}")["reference"]
+    verifier(cours and cours > 1, f"pas de cours de reference pour l'EUR : {cours}")
+
+    # Le dossier en EUR sans taux : admis, taux vide (et non 1).
+    d = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/TXD", "code_devise": "EUR"})
+    id_dossier = d.get("id_dossier") or d.get("id")
+    verifier(infra.valeur("SELECT COALESCE(taux_change::text, 'NULL') FROM import_dossiers "
+                          f"WHERE id_dossier = '{id_dossier}'") == "NULL",
+             "un dossier en EUR sans taux a recu un taux invente")
+    lu = c.ok("Choukri", "GET", f"/api/import/dossiers/{id_dossier}")
+    verifier(lu["dossier"].get("taux_change") is None,
+             f"le dossier relu rend un taux : {lu['dossier'].get('taux_change')}")
+    # Le taux 1 pour une devise est refuse sur le dossier aussi ; le dirham garde 1.
+    c.refus("Choukri", "POST", "/api/import/dossiers",
+            {"numero": "BANC/TXD-1", "code_devise": "EUR", "taux_change": 1}, codes=(422,), contient="taux 1")
+    m = c.ok("Choukri", "POST", "/api/import/dossiers", {"numero": "BANC/TXD-MAD", "code_devise": "MAD"})
+    verifier(infra.valeur("SELECT taux_change::float8 FROM import_dossiers "
+                          f"WHERE id_dossier = '{m.get('id_dossier') or m.get('id')}'") == "1",
+             "un dossier en MAD n'est pas au taux 1")
+
+    entete = {"code_fournisseur": "FRS-001", "date_facture": jour, "code_devise": "EUR", "montant_devise": 1000}
+    # Facture en EUR sans taux, dossier sans taux : rien pour convertir -> refus metier.
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures",
+            VD(infra, id_dossier, dict(entete, numero_facture="BANC-TXD-0")),
+            codes=(422,), contient="taux de change est obligatoire")
+    # Au taux 1 : refusee.
+    c.refus("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures",
+            VD(infra, id_dossier, dict(entete, numero_facture="BANC-TXD-1", taux_change=1)),
+            codes=(422,), contient="taux 1")
+    # Au cours de reference : admise, a ce taux.
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures",
+             VD(infra, id_dossier, dict(entete, numero_facture="BANC-TXD-2", taux_change=cours)))
+    tx = float(infra.valeur("SELECT taux_change FROM import_factures "
+                            f"WHERE id_facture = '{f.get('id_facture') or f.get('id')}'"))
+    verifier(abs(tx - cours) < 1e-4, f"la facture n'a pas le taux saisi : {tx} au lieu de {cours}")
+
+    # Le dossier recoit un taux : une facture sans taux propre le reprend (meme devise).
+    c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", VD(infra, id_dossier, {"taux_change": cours}))
+    f = c.ok("Choukri", "POST", f"/api/import/dossiers/{id_dossier}/factures",
+             VD(infra, id_dossier, dict(entete, numero_facture="BANC-TXD-3")))
+    tx = float(infra.valeur("SELECT taux_change FROM import_factures "
+                            f"WHERE id_facture = '{f.get('id_facture') or f.get('id')}'"))
+    verifier(abs(tx - cours) < 1e-4, f"la facture n'a pas repris le taux du dossier : {tx}")
+    # Changer de devise sans taux vide le taux : celui de l'EUR ne suit pas en USD.
+    c.ok("Choukri", "PATCH", f"/api/import/dossiers/{id_dossier}", VD(infra, id_dossier, {"code_devise": "USD"}))
+    verifier(infra.valeur("SELECT COALESCE(taux_change::text, 'NULL') FROM import_dossiers "
+                          f"WHERE id_dossier = '{id_dossier}'") == "NULL",
+             "le taux de l'EUR a suivi le dossier passe en USD")
+
+
 SCENARIOS = [
     scenario_bon_segregation,
     scenario_bon_demande_prix,
@@ -5912,10 +6189,14 @@ SCENARIOS = [
     scenario_codes_erreur,
     scenario_recherche_referentiels,
     scenario_couverture_moteur,
+    scenario_couverture_simulation,
     scenario_proposition_bon_annule,
     scenario_transit_moteur,
     scenario_source_unique,
     scenario_grand_livre_consommation,
+    scenario_retour_prod_grand_livre,
+    scenario_parametres_mrp_orphelins,
     scenario_sauvegarde_restaurable,
+    scenario_import_taux_dossier_facultatif,
     scenario_controles_finaux,
 ]

@@ -209,16 +209,18 @@ export const FICHES_CATALOGUE: Sujet[] = [
         nom: 'Stock minimum (kg)',
         alias: ['Stock min.'],
         description:
-          'Le seuil sous lequel la référence est signalée « SOUS MIN » à l’état des stocks. C’est une information : depuis le 27/10/2026, il n’entre ni dans l’état du moteur de couverture (plan non couvert, sous la sécurité, couvert) ni dans aucune proposition d’achat. Vide : un minimum calculé (formule F3, à partir de la couverture minimale, de la consommation, de la marge et du délai) ; la liste affiche alors « dynamique ».',
+          'Le stock minimum saisi sur la fiche : une ALERTE, jamais un terme du calcul (décision du 10/10/2026 : le plan d’achat suit le plan de production seul). Il n’entre ni dans l’état du moteur de couverture ni dans aucune proposition d’achat ; le stock projeté l’affiche comme alerte dans sa fenêtre de détail. Le seuil « SOUS SÉCU. » de l’état des stocks est la SÉCURITÉ DU JOUR du moteur (jours de sécurité de la classe ABC × plan à venir), pas ce minimum. Vide : aucun minimum — le minimum calculé (formule F3) n’existe plus depuis le 27/10/2026.',
         valeurs: 'kg',
       },
       {
         nom: 'Couverture minimale (mois)',
-        description: 'Le nombre de mois de consommation que le minimum calculé (F3) doit couvrir. Vide : le paramètre général.',
+        description:
+          'La couverture minimale visée, en mois : une alerte affichée au stock projeté (vide : le paramètre P_CouvMinMois). Le minimum calculé (F3) qui la lisait n’existe plus (27/10/2026) : elle n’entre dans aucun calcul.',
       },
       {
         nom: 'Marge de sécurité (%)',
-        description: 'Majore le stock minimum calculé de cette référence. Vide : la valeur générale des paramètres s’applique.',
+        description:
+          'L’ancienne majoration du minimum calculé (F3), qui n’existe plus depuis le 27/10/2026 : gardée sur la fiche, elle n’entre dans aucun calcul. La sécurité du moteur vient des jours de sécurité de la classe ABC.',
         valeurs: 'pourcentage',
       },
       {
@@ -867,7 +869,7 @@ export const FICHES_CATALOGUE: Sujet[] = [
         nom: 'Délai de livraison (jours)',
         alias: ['Délai'],
         description:
-          'Les jours entre la commande et l’arrivée. Le moteur de couverture en déduit la date limite de commande, et il entre dans le stock minimum calculé (F3).',
+          'Les jours entre la commande et l’arrivée. Le moteur de couverture en déduit la date au plus tôt d’une commande (aujourd’hui + délai), la date limite de commande (D − délai) et le besoin jusqu’à livraison du stock projeté.',
         valeurs: 'jours, au moins 1',
       },
       { nom: 'Transporteur', description: 'Le transporteur habituel.' },

@@ -110,6 +110,15 @@ pub fn delai_env(nom: &str, defaut: u64) -> u64 {
 /// migration dont le binaire depend.
 const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     (
+        // Le taux d'un dossier d'import est facultatif (arbitrage du 27/10/2026) :
+        // le serveur l'ecrit NULL pour une devise sans taux, au lieu d'inventer 1.
+        // Sans elle, la creation d'un tel dossier echouerait sur NOT NULL.
+        "2026-10-27k_import_taux_dossier_facultatif.sql",
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'import_dossiers'
+                           AND column_name = 'taux_change' AND is_nullable = 'YES')",
+    ),
+    (
         // Le grand livre de la consommation (27/10/2026, lots L0 et L1) : une seule
         // source du reel (v_consommation_fait), 12 mois pleins, machine datee a la
         // fiche ; le « plus grand des deux » (v_conso_retenue) et le minimum qui le
@@ -605,9 +614,13 @@ const MIGRATIONS_REQUISES: &[(&str, &str)] = &[
     ),
     (
         // L'en-cours complet et l'horizon prolonge du plan d'achat.
+        // L'ancien calcul qui les lisait est retire par 2026-10-27e (le moteur de
+        // couverture) et les deux parametres, sans lecteur, sont supprimes par
+        // 2026-10-27j : passee 27e, ils ne temoignent plus.
         "2026-10-08h_planification_encours.sql",
-        "SELECT EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_HorizonProlonge')
-            AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus')",
+        "SELECT to_regclass('public.v_stock_reference') IS NOT NULL
+             OR (EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_HorizonProlonge')
+                 AND EXISTS (SELECT 1 FROM parametre WHERE code_parametre = 'P_EncoursRetardInclus'))",
     ),
     (
         // Dates vides, tolerance au droit VALIDER, modele de droits, mouvement

@@ -51,10 +51,33 @@ pub struct ResultatPlanAchat {
     pub id_proposition: Option<String>,
 }
 
+/// LE PRIX D'ACHAT ESTIME d'une reference `r` (alias SQL), en MAD au kilo : le
+/// dernier achat chez le fournisseur de la fiche, puis le catalogue converti au
+/// taux du jour `tc`, puis le CMUP — memes formules et meme ordre que
+/// `v_plan_achat`. UNE SEULE ECRITURE (27/10/2026) : la generation du plan
+/// d'achat et le montant affiche au stock projete lisent ce meme texte, ils ne
+/// peuvent pas diverger.
+pub(crate) const PRIX_MAD_SQL: &str = "COALESCE(fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur),
+                        round(r.prix_catalogue_kg * tc.taux, 4), r.cmup_mad)";
+
+/// D'ou vient ce prix (propage jusque dans la table `plan_achat`).
+pub(crate) const SOURCE_PRIX_SQL: &str = "CASE WHEN fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur) IS NOT NULL THEN 'DERNIER_ACHAT'
+                    WHEN r.prix_catalogue_kg IS NOT NULL AND tc.taux IS NOT NULL THEN 'CATALOGUE'
+                    WHEN r.cmup_mad IS NOT NULL THEN 'CMUP'
+                    ELSE 'AUCUN' END";
+
+/// Le taux du jour de la devise du catalogue : UN seul (le plus recent en
+/// vigueur), la ou la jointure de la vue en aurait pris plusieurs.
+pub(crate) const TAUX_DU_JOUR_SQL: &str = "LEFT JOIN LATERAL (
+                SELECT t.taux FROM taux_change t
+                 WHERE t.code_devise = r.code_devise_catalogue
+                   AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut::text, 1, 10)
+                   AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin::text, 1, 10))
+                 ORDER BY t.date_debut DESC LIMIT 1) tc ON true";
+
 /// Les references proposees par le moteur, avec ce que la fiche donne pour les
-/// acheter : prix (memes formules et meme ordre que `v_plan_achat`), devise,
-/// unite, fournisseur. Les cinq tableaux du moteur sont les parametres `$n` a
-/// `$n+4`.
+/// acheter : prix (`PRIX_MAD_SQL`), devise, unite, fournisseur. Les cinq
+/// tableaux du moteur sont les parametres `$n` a `$n+4`.
 fn source_moteur(n: usize) -> String {
     format!(
         "WITH moteur AS (
@@ -65,29 +88,50 @@ fn source_moteur(n: usize) -> String {
         SELECT m.code_reference, m.qte_kg, m.date_d, m.date_limite, m.complement_kg,
                r.code_fournisseur, r.unite_catalogue, r.facteur_kg,
                r.code_devise_catalogue AS devise, r.prix_catalogue_kg, tc.taux,
-               COALESCE(fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur),
-                        round(r.prix_catalogue_kg * tc.taux, 4), r.cmup_mad) AS prix_mad,
-               CASE WHEN fn_dernier_prix_achat_mad(r.code_reference, r.code_fournisseur) IS NOT NULL THEN 'DERNIER_ACHAT'
-                    WHEN r.prix_catalogue_kg IS NOT NULL AND tc.taux IS NOT NULL THEN 'CATALOGUE'
-                    WHEN r.cmup_mad IS NOT NULL THEN 'CMUP'
-                    ELSE 'AUCUN' END AS source_prix
+               {prix} AS prix_mad,
+               {source} AS source_prix
           FROM moteur m
           JOIN reference r ON r.code_reference = m.code_reference
-          -- Le taux du jour de la devise du catalogue : UN seul (le plus recent en
-          -- vigueur), la ou la jointure de la vue en aurait pris plusieurs.
-          LEFT JOIN LATERAL (
-                SELECT t.taux FROM taux_change t
-                 WHERE t.code_devise = r.code_devise_catalogue
-                   AND to_char(current_date, 'YYYY-MM-DD') >= substr(t.date_debut::text, 1, 10)
-                   AND (t.date_fin IS NULL OR to_char(current_date, 'YYYY-MM-DD') < substr(t.date_fin::text, 1, 10))
-                 ORDER BY t.date_debut DESC LIMIT 1) tc ON true
+          {taux}
     )",
         n,
         n + 1,
         n + 2,
         n + 3,
-        n + 4
+        n + 4,
+        prix = PRIX_MAD_SQL,
+        source = SOURCE_PRIX_SQL,
+        taux = TAUX_DU_JOUR_SQL,
     )
+}
+
+/// Le prix d'achat estime (MAD/kg) et sa source, par reference — toutes, ou la
+/// seule demandee : LE MEME PRIX que la proposition que la generation
+/// enregistrerait (`PRIX_MAD_SQL`). Lecture seule. Le montant d'une commande au
+/// stock projete en part (quantite du moteur x ce prix).
+pub async fn prix_estimes(
+    db: &Db,
+    reference: Option<&str>,
+) -> AppResult<std::collections::HashMap<String, (Option<f64>, String)>> {
+    let sql = format!(
+        "SELECT r.code_reference, ({prix})::float8 AS prix_mad, {source} AS source_prix
+           FROM reference r
+           {taux}
+          WHERE ($1::text IS NULL OR r.code_reference = $1)",
+        prix = PRIX_MAD_SQL,
+        source = SOURCE_PRIX_SQL,
+        taux = TAUX_DU_JOUR_SQL,
+    );
+    let lignes: Vec<(String, Option<f64>, String)> = sqlx::query_as(&sql).bind(reference).fetch_all(db).await?;
+    Ok(lignes.into_iter().map(|(code, prix, source)| (code, (prix, source))).collect())
+}
+
+/// Le montant estime d'une commande : quantite x prix, arrondi aux centimes.
+pub fn montant_estime(quantite_kg: Option<f64>, prix_mad: Option<f64>) -> Option<f64> {
+    match (quantite_kg, prix_mad) {
+        (Some(q), Some(p)) if q > 0.0 && p > 0.0 => Some((q * p * 100.0).round() / 100.0),
+        _ => None,
+    }
 }
 
 /// Regenere les propositions d'achat, toutes (`reference = None`) ou celle d'une

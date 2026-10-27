@@ -1093,7 +1093,7 @@ pub async fn stock_projete(
     let complements = lignes_en_json(
         &sqlx::query(
             "SELECT s.code_reference, s.classe_xyz, s.unite_catalogue, s.cmup_mad, s.valeur_totale_mad,
-                    s.stock_physique_net_kg, s.stock_total_kg,
+                    s.stock_physique_net_kg, s.stock_total_kg, s.reel_mois_kg,
                     COALESCE(m.kg_sur_machine, 0) AS kg_sur_machine
                FROM v_stock_reference s
                LEFT JOIN v_stock_machine m ON m.code_reference = s.code_reference",
@@ -1109,6 +1109,11 @@ pub async fn stock_projete(
                 .collect()
         })
         .unwrap_or_default();
+    // LE MONTANT D'UNE COMMANDE (27/10/2026) : la quantite de la premiere
+    // proposition du moteur x LE MEME PRIX que la proposition du plan d'achat
+    // (`domain::plan_achat::PRIX_MAD_SQL`). Masque selon la grille, comme les
+    // autres montants ; au CMUP, masque a qui ne voit pas le CMUP.
+    let prix = crate::domain::plan_achat::prix_estimes(&state.db, None).await?;
     let filtre = f.statut.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let mut lignes: Vec<Value> = etats
         .suivies()
@@ -1119,6 +1124,15 @@ pub async fn stock_projete(
                 for (k, v) in c {
                     o.entry(k.clone()).or_insert_with(|| v.clone());
                 }
+            }
+            if let Some(o) = l.as_object_mut() {
+                let (p, source) = prix.get(&e.code_reference).cloned().unwrap_or((None, "AUCUN".into()));
+                o.insert("prix_estime_mad".into(), json!(p));
+                o.insert("source_prix".into(), json!(source));
+                o.insert(
+                    "montant_estime_mad".into(),
+                    json!(crate::domain::plan_achat::montant_estime(e.qte_a_commander_kg, p)),
+                );
             }
             l
         })
@@ -1133,6 +1147,13 @@ pub async fn stock_projete(
     let mut valeur = Value::Array(lignes);
     tronquer(&mut valeur, f.limite());
     user.masquer(&state.db, module::STOCK, &mut valeur).await?;
+    user.masquer_prix_au_cmup(&state.db, &mut valeur).await?;
+    // Une quantite masquee ne se lit pas non plus par le montant.
+    for l in valeur.as_array_mut().into_iter().flatten().filter_map(Value::as_object_mut) {
+        if !l.contains_key("qte_a_commander_kg") {
+            l.remove("montant_estime_mad");
+        }
+    }
     Ok(Json(valeur))
 }
 

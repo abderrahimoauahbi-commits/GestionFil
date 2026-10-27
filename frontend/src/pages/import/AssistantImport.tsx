@@ -120,7 +120,8 @@ export function AssistantImport() {
           numero_bl: f.numero_bl.trim() || null,
           conteneurs: f.conteneurs.trim() || null,
           code_devise: f.code_devise,
-          taux_change: (lireNombre(f.taux_change) ?? 0),
+          // Vide : le serveur laisse le taux du dossier vide (arbitrage du 27/10).
+          taux_change: lireNombre(f.taux_change),
           date_arrivee: f.date_arrivee || null,
           notes: f.notes.trim() || null,
         },
@@ -162,7 +163,22 @@ export function AssistantImport() {
   const maj = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF((x) => ({ ...x, [k]: e.target.value }))
 
-  const tauxValide = (lireNombre(f.taux_change) ?? 0) > 0
+  // LE TAUX DU DOSSIER EST FACULTATIF (27/10/2026) : l'écran ne pré-valide que
+  // ce que le serveur refuse (`taux_du_dossier`) — un nombre illisible, le taux
+  // 1 pour une devise, un autre taux que 1 pour le dirham. Le taux exigé est
+  // celui de chaque facture en devise, contrôlé à sa saisie.
+  const tauxLu = lireNombre(f.taux_change)
+  const tauxRefus =
+    tauxLu === null
+      ? null
+      : !Number.isFinite(tauxLu) || tauxLu < 0
+        ? 'Taux illisible : un nombre décimal, par exemple 9,2224.'
+        : f.code_devise === 'MAD' && tauxLu > 0 && Math.abs(tauxLu - 1) > 1e-9
+          ? 'Un dossier en MAD se passe au taux 1 : laissez le taux vide.'
+          : f.code_devise !== 'MAD' && Math.abs(tauxLu - 1) < 1e-9
+            ? `Le taux 1 est celui du dirham, pas celui du ${f.code_devise} : laissez le taux vide.`
+            : null
+  const tauxValide = tauxRefus === null
   const doc = documents[pointe]
 
   const manquants = useMemo(() => {
@@ -368,7 +384,7 @@ export function AssistantImport() {
                     <Champ id="ch-assistantimport-6"
                       value={f.taux_change}
                       onChange={maj('taux_change')}
-                      placeholder="9,2224"
+                      placeholder="facultatif"
                       inputMode="decimal"
                     />
                   </div>
@@ -378,15 +394,18 @@ export function AssistantImport() {
                   <Champ id="ch-assistantimport-7" value={f.notes} onChange={maj('notes')} />
                 </div>
 
-                {!tauxValide && (
-                  <Alerte ton="info">
-                    Saisissez un taux pour créer le dossier. Il ne convertit aucune facture : ce
-                    n’est qu’un repli. Chaque facture porte sa devise (celle du fournisseur par
-                    défaut) et son propre taux, contrôlé à sa saisie : le cours Bank Al-Maghrib du
-                    jour de la facture (à défaut le dernier publié, sinon le taux de l’ERP) est
-                    proposé, un écart de plus de 3 % doit être confirmé, et le taux 1 est refusé
-                    pour une devise.
-                  </Alerte>
+                {tauxRefus ? (
+                  <Alerte ton="danger">{tauxRefus}</Alerte>
+                ) : (
+                  tauxLu === null && f.code_devise !== 'MAD' && (
+                    <Alerte ton="info">
+                      Le taux du dossier est facultatif : il ne convertit aucune facture. Chaque
+                      facture porte sa devise (celle du fournisseur par défaut) et son propre taux,
+                      exigé à sa saisie : le cours Bank Al-Maghrib du jour de la facture (à défaut
+                      le dernier publié, sinon le taux de l’ERP) est proposé, un écart de plus de
+                      3 % doit être confirmé, et le taux 1 est refusé pour une devise.
+                    </Alerte>
+                  )
                 )}
 
                 <div className="flex justify-between gap-2">

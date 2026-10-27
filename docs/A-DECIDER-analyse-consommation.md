@@ -13,6 +13,7 @@
 | Q5 Date d'une consommation machine | **Date de la fiche** |
 | Q6 Période des moyennes | **12 mois pleins glissants** |
 | Q7 Retour de consommation | **Déduit au jour du retour** |
+| Q7 bis Retour de production (RETOUR_PROD) | **Déduit du réel**, comme RETOUR_CONSO : nature RETOUR_PROD, kg négatif, au jour du retour, au prix du mouvement (arbitrage du 27/10/2026, migration `2026-10-27i`). C'est bien un retour de matière au stock (entrée, « Retour depuis atelier », CMUP inchangé) ; retiré de la saisie libre depuis la règle 12, il ne vit que dans l'historique. Hors D3 (OF) et D4 (qualité), qui choisissent leurs natures ; hors C67 (faits machine seuls) |
 | Q8 Corrections, non qualifiés, régularisations, ajustements d'inventaire | **Hors réel, montrés à part** |
 | Q9 Historique sans qualité | **« Non attribué »**, jamais réparti |
 | Q10 Unité | **kg** partout + **kg/m² apparent** sur les OF clôturés, marqué comme tel |
@@ -196,7 +197,7 @@ mouvements).
 |---|---|
 | `date_fait` | date de la fiche machine (jamais la validation) ; date du mouvement |
 | `source`, `id_source`, `ligne` | DECISION (id_decision, ligne_numero) / MOUVEMENT (id_mouvement, ligne) — le drill-down |
-| `nature` | CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO (négatif), HORS_MACHINE_HISTORIQUE, REBUT_DECHET, REBUT_PERTE, REBUT_CASSE, AUTRE_ECART (correction, non qualifié, régularisation, erreur de saisie) |
+| `nature` | CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO (négatif), RETOUR_PROD (négatif, Q7 bis), HORS_MACHINE_HISTORIQUE, REBUT_DECHET, REBUT_PERTE, REBUT_CASSE, AUTRE_ECART (correction, non qualifié, régularisation, erreur de saisie) |
 | `kg` | signé (retour négatif ; un écart négatif garde son signe) |
 | `valeur_mad` | kg × prix de sortie (à décider, Q11) |
 | `code_reference`, `lot_fournisseur` | + famille, couleur, catégorie, fournisseur par jointure |
@@ -440,7 +441,7 @@ Ce qui reste POSSIBLE dès maintenant, sans m² réels :
 
 | # | Indicateur | Formule | Utilisable aujourd'hui ? |
 |---|---|---|---|
-| I1 | Consommation réelle (kg) | Σ F.kg où nature ∈ {CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO, HORS_MACHINE_HISTORIQUE} | oui |
+| I1 | Consommation réelle (kg) | Σ F.kg où nature ∈ {CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO, RETOUR_PROD, HORS_MACHINE_HISTORIQUE} | oui |
 | I2 | Rebut (kg) | Σ F.kg où nature ∈ REBUT_* (écarts DÉCHET/PERTE/CASSE + déchargements vers DÉCHET/PERTE/CASSE + SORTIE_PROD) | oui (0 dans la base de saisie) |
 | I3 | Consommation matière totale (kg) | I1 + I2 — **mesure de l'achat** (ABC, XYZ, couverture au rythme réel, C50) | oui |
 | I4 | Taux de rebut (%) | I2 / I3 × 100 | oui |

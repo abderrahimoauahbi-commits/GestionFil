@@ -639,7 +639,7 @@ export const FICHES_PLANIFICATION: Sujet[] = [
           'Une ligne par référence qui a une demande au plan, du stock ou un arrivage. L’ordre : la première rupture la plus proche d’abord (une rupture aujourd’hui en tête, sans rupture en dernier), puis la date limite de commande.',
           'Resserrez avec les filtres Fournisseur, Proposition (avec / sans) et Plan non couvert (avant ou après aujourd’hui + délai, ou couvert sur l’horizon), ou la recherche (référence, désignation, fournisseur).',
           'La ligne ↳ sous une référence dit ce qui est compté à part (fil sur métiers, restes, fil en route à sa date), ce qui n’est pas compté (quarantaine, bloqué, magasins hors plan) et ce qui est hors couverture (en retard, sans date, bons non validés, après l’horizon).',
-          'Cliquez la ligne (ou son chevron) : le détail se déplie dessous — la courbe du solde jour par jour, le calcul de la première proposition étape par étape, les ressources et arrivages avec leur raison, la chronologie et le plan mois par mois par qualité.',
+          'Cliquez la ligne (ou l’icône ⤢ devant la référence) : le détail s’ouvre dans une GRANDE FENÊTRE (titre : la référence et sa désignation), qui défile en hauteur — les réglages et leur source, la courbe du solde jour par jour, le calcul de la première proposition étape par étape, les propositions suivantes, les ressources et arrivages avec leur raison, la chronologie et les besoins du plan mois par mois par qualité. Échap ou la croix la ferment ; « Commander » reste sur la ligne.',
           '« Règles des dates d’arrivage, de la fenêtre et des réglages par défaut » (au-dessus de la liste) déplie les règles appliquées.',
         ],
         resultat: 'Vous savez jusqu’à quel jour le plan est couvert, combien commander et avant quelle date.',
@@ -681,7 +681,7 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       {
         nom: 'Référence',
         description:
-          'La référence, sa désignation (quand elle ne répète pas le code) et son fournisseur. Dans « À commander », le chevron ou un clic sur la ligne déplie le détail du calcul ; dans « Besoins », la flèche en tête de ligne fait de même ; dans « Lignes à commander », la ligne rappelle l’urgence, la livraison prévue (D) et la date limite de commande.',
+          'La référence, sa désignation (quand elle ne répète pas le code) et son fournisseur. Dans « À commander », un clic sur la ligne (ou l’icône ⤢) ouvre le détail du calcul dans une grande fenêtre ; dans « Besoins », la flèche en tête de ligne le déplie sous la proposition ; dans « Lignes à commander », la ligne rappelle l’urgence, la livraison prévue (D) et la date limite de commande.',
       },
       {
         nom: 'Disponible',
@@ -734,7 +734,7 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       {
         nom: 'Solde projeté jour par jour',
         description:
-          'La courbe du solde projeté (trait plein), la ligne de sécurité (tirets), les arrivages comptés (triangles), le jour D de la première proposition et, sous zéro, les jours où le plan n’est pas couvert. Survolez un jour pour son solde, sa sécurité, sa consommation prévue et ses arrivages.',
+          'La courbe du solde projeté (trait plein), la ligne de sécurité (tirets), les arrivages comptés (triangles), le jour D de la première proposition et, sous zéro, les jours où le plan n’est pas couvert. Survolez un jour pour son solde, sa sécurité, son besoin planifié (le plan du jour) et ses arrivages.',
       },
       {
         nom: 'À commander — le calcul',
@@ -754,12 +754,23 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       { nom: 'Date', description: 'Chronologie : le jour de l’événement.', valeurs: 'date' },
       { nom: 'Événement', description: 'Chronologie : ce qui arrive ce jour-là (plusieurs natures possibles le même jour).' },
       {
-        nom: 'Conso prévue',
-        description: 'Chronologie : le plan consommé depuis la ligne précédente (kg du mois ÷ jours réels du mois, jour par jour).',
+        nom: 'Besoin planifié',
+        description:
+          'Chronologie : le PLAN DATÉ depuis la ligne précédente (kg du mois du plan ÷ jours réels du mois, jour par jour) — un besoin au plan, jamais une consommation réelle.',
         valeurs: 'kg',
       },
       { nom: 'Arrivée', description: 'Chronologie : les arrivages comptés depuis la ligne précédente.', valeurs: 'kg' },
       { nom: 'Solde après', description: 'Chronologie : le solde projeté en fin de journée, jamais négatif.', valeurs: 'kg' },
+      {
+        nom: 'Ressources d’aujourd’hui',
+        description:
+          'Fenêtre de détail : chaque magasin et chaque étage de machine qui porte la référence, compté ou non, avec sa raison ; les restes (comptés) et les lots bloqués (non comptés).',
+      },
+      {
+        nom: 'Besoins du plan mois par mois, par qualité',
+        description:
+          'Fenêtre de détail : les kilos de chaque mois de la photo du besoin du plan en service, leur moyenne par jour, la part qui tombe dans l’horizon (le mois en cours depuis aujourd’hui) et la répartition par qualité selon les recettes actuelles.',
+      },
       /* --- Onglet « Besoins » : les propositions ----------------------------- */
       {
         nom: 'ABC',
@@ -907,6 +918,8 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       'Une référence inactive se lit mais ne se commande pas : pas de bouton « Commander », pas de proposition à la génération.',
       'LA CONVERSION ouvre un bon BROUILLON par fournisseur (ou complète le brouillon choisi) : rien n’est engagé avant sa validation. Une référence déjà sur le bon visé voit sa ligne augmentée, au prix de cette ligne. La quantité, le prix et le colisage envoyés font foi ; la date de besoin D devient la livraison prévue.',
       '« Situation » et « Par fournisseur » sont figés à la génération du plan : régénérez pour les remettre à jour.',
+      'LE DÉTAIL S’OUVRE EN GRANDE FENÊTRE (décision du 27/10/2026) : le même tableau et la même fenêtre servent le volet « Surveillance / Alertes » du stock projeté (composants partagés), qui lit le même moteur.',
+      'LES MOTS DU BESOIN (27/10/2026) : « Plan / mois » (le plan de l’horizon ramené à 30 jours), « Réel / mois » (la consommation réelle du grand livre, 12 mois pleins), « Besoin jusqu’à livraison » (le plan d’aujourd’hui à aujourd’hui + délai), « Besoin de couverture » (le plan sur la fenêtre [D, F[), « Besoin de réapprovisionnement » (le besoin théorique). Le moteur ne lit que le PLAN DATÉ ; jamais « conso / mois » pour un besoin.',
     ],
     messages: [
       {

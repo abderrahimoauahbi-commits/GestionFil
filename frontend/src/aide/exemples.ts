@@ -141,6 +141,33 @@ export const EXEMPLES: Record<string, Exemple[]> = {
       conclusion:
         'L’état se lit sans la commande : la référence reste « plan non couvert » tant que le bon des 2 200 kg n’est pas validé et daté. Ce sont les chiffres de l’onglet « À commander » du plan d’achat.',
     },
+    {
+      titre: 'les colonnes du stock projeté, sans double comptage',
+      situation:
+        'Aujourd’hui 01/01/2026. Magasin compté 2 000 kg dont un reste de 150 kg ; rien sur machine ; un bon validé de 800 kg le 25/01 ; délai fournisseur 10 j ; plan 100 kg par jour.',
+      calcul: [
+        ['Disponible (hors restes)', '2 000 − 150 = 1 850 kg'],
+        ['Sur machine', '0 kg'],
+        ['Restant', '150 kg (le reste, compté une fois)'],
+        ['Arrivages', '800 kg'],
+        ['Stock total projeté', '1 850 + 0 + 150 + 800 = 2 800 kg'],
+        ['Besoin jusqu’à livraison', 'plan du 01/01 au 10/01 inclus : 10 j × 100 = 1 000 kg'],
+      ],
+      conclusion:
+        'Le jour d’arrivée d’une commande passée aujourd’hui (le 11/01) n’est pas dans le besoin jusqu’à livraison : son arrivage compte avant son plan.',
+    },
+    {
+      titre: 'une hypothèse dans la simulation',
+      situation:
+        'Même référence : la première proposition est disponible le 16/01 (D), fenêtre [16/01, 15/02[, 2 200 kg. Hypothèse : un arrivage de 400 kg le 30/01.',
+      calcul: [
+        ['Besoin de réapprovisionnement réel', 'sécurité 500 + plan du 16/01 au 14/02 3 000 − S(D) 500 − arrivages après D 800 = 2 200 kg'],
+        ['Avec l’hypothèse', '500 + 3 000 − 500 − (800 + 400) = 1 800 kg'],
+        ['Quantité à commander', '2 200 → 1 800 kg (sans minimum ni multiple)'],
+      ],
+      conclusion:
+        'Un arrivage dans la fenêtre réduit la proposition d’autant. Rien n’est enregistré : en quittant la page, l’hypothèse disparaît.',
+    },
   ],
 
   /* ---------------------------------------------------------------- Achats */

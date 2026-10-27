@@ -195,6 +195,54 @@ async fn prochain_numero(tx: &mut sqlx::PgConnection) -> AppResult<String> {
     Ok(format!("{rang:02}/{annee}"))
 }
 
+// =============================================================================
+// LE TAUX DU DOSSIER EST FACULTATIF (arbitrage du 27/10/2026)
+// =============================================================================
+//
+// Le dossier ne convertit rien : chaque facture porte sa devise et son taux,
+// controle a sa saisie (`controler_taux`). Un dossier en devise sans taux est
+// donc admissible, et son taux reste VIDE — jamais 1 invente : c'est ce repli
+// qui avait fait entrer des factures a 1 DH l'euro (05/10/2026). Le taux ne
+// devient obligatoire que la ou une conversion a lieu : sur la facture.
+
+/// Le taux a enregistrer sur un dossier, ou le refus a afficher.
+///
+/// - MAD : toujours 1 (le taux trivial) ; un autre taux est refuse, comme sur
+///   la facture.
+/// - Autre devise : le taux saisi, ou rien (NULL) s'il manque ; le taux 1 est
+///   refuse — c'est celui du dirham.
+pub(crate) fn taux_du_dossier(devise: &str, saisi: Option<f64>) -> Result<Option<f64>, String> {
+    let saisi = saisi.filter(|t| *t > 0.0);
+    if devise == "MAD" {
+        if saisi.is_some_and(|t| (t - 1.0).abs() > 1e-9) {
+            return Err("Dossier en MAD : il se passe au taux 1.".into());
+        }
+        return Ok(Some(1.0));
+    }
+    if saisi.is_some_and(|t| (t - 1.0).abs() < 1e-9) {
+        return Err(format!(
+            "Dossier en {devise} au taux 1 : c'est le taux du dirham, pas celui du {devise}. \
+             Laissez le taux vide : chaque facture porte le sien."
+        ));
+    }
+    Ok(saisi)
+}
+
+/// Le taux qu'une facture SANS taux propre reprend du dossier : seulement si le
+/// dossier en porte un, dans la meme devise. Pour le dirham, rien a reprendre
+/// (`controler_taux` pose 1). Le taux repris passe ensuite par `controler_taux`
+/// comme un taux saisi : ecart au cours BAM, taux 1 refuse.
+pub(crate) fn taux_herite_du_dossier(
+    devise_facture: &str,
+    devise_dossier: &str,
+    taux_dossier: Option<f64>,
+) -> Option<f64> {
+    if devise_facture == "MAD" || devise_facture != devise_dossier {
+        return None;
+    }
+    taux_dossier.filter(|t| *t > 0.0 && (t - 1.0).abs() > 1e-9)
+}
+
 /// `POST /api/import/dossiers`
 pub async fn creer_dossier(
     State(state): State<AppState>,
@@ -203,9 +251,10 @@ pub async fn creer_dossier(
 ) -> AppResult<Json<Value>> {
     user.exiger(&state.db, IMPORT, Action::Ecrire).await?;
     // LA DEVISE EST CELLE DE CHAQUE FACTURE (groupage, 01/10/2026). Le dossier
-    // ne garde devise et taux que comme repli : MAD au taux 1 s'ils manquent.
+    // ne garde devise et taux que comme proposition : MAD par defaut, et un
+    // taux VIDE pour une devise qui n'en dit pas (voir `taux_du_dossier`).
     let code_devise = d.code_devise.unwrap_or_else(|| "MAD".into());
-    let taux = d.taux_change.filter(|t| *t > 0.0).unwrap_or(1.0);
+    let taux = taux_du_dossier(&code_devise, d.taux_change).map_err(AppError::RegleMetier)?;
 
     let mut tx = state.db.begin().await?;
     user.poser_contexte(&mut tx).await?;
@@ -419,12 +468,15 @@ pub async fn modifier_dossier(
     // notes s'ecrivent). Une DUM saisie ne s'efface pas et ne se corrige qu'au
     // droit de valider, avec un motif : l'effacer rouvrait la contre-passation
     // apres dedouanement.
-    let (statut, dum_actuelle): (String, Option<String>) =
-        sqlx::query_as("SELECT statut, numero_dum FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE")
-            .bind(&id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| AppError::Introuvable(format!("dossier {id}")))?;
+    let (statut, dum_actuelle, devise_av, taux_av): (String, Option<String>, String, Option<f64>) =
+        sqlx::query_as(
+            "SELECT statut, numero_dum, code_devise, taux_change::float8
+               FROM import_dossiers WHERE id_dossier = $1 FOR UPDATE",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::Introuvable(format!("dossier {id}")))?;
     // Clos : seules les notes s'ecrivent ; une DUM changee est refusee, le reste
     // de l'en-tete garde sa valeur (le formulaire renvoie tout).
     let clos = statut == "CLOTURE";
@@ -455,11 +507,24 @@ pub async fn modifier_dossier(
             }
         }
     }
+    // LE TAUX SUIT LA DEVISE (27/10/2026) : il ne se recalcule que si la devise
+    // ou le taux sont envoyes. Une devise qui change sans taux le laisse vide
+    // (MAD : 1) ; l'ancien taux, d'une autre devise, ne la suit pas.
+    let (taux_touche, taux) = match garde(&d.code_devise).filter(|s| !s.trim().is_empty()) {
+        _ if clos => (false, None),
+        None if d.taux_change.is_none() => (false, None),
+        devise => {
+            let devise = devise.unwrap_or_else(|| devise_av.clone());
+            let saisi = d.taux_change.or(if devise == devise_av { taux_av } else { None });
+            (true, taux_du_dossier(&devise, saisi).map_err(AppError::RegleMetier)?)
+        }
+    };
     let n = sqlx::query(
         "UPDATE import_dossiers
             SET numero = COALESCE($2, numero), numero_bl = COALESCE($3, numero_bl),
                 conteneurs = COALESCE($4, conteneurs), code_devise = COALESCE($5, code_devise),
-                taux_change = COALESCE($6, taux_change), date_arrivee = COALESCE(fn_jour_casablanca($7), date_arrivee),
+                taux_change = CASE WHEN $12::bool THEN $6::numeric ELSE taux_change END,
+                date_arrivee = COALESCE(fn_jour_casablanca($7), date_arrivee),
                 notes = COALESCE($8, notes), numero_dum = COALESCE($9, numero_dum),
                 regime_douanier = COALESCE($10, regime_douanier), date_dum = COALESCE(fn_jour_casablanca($11), date_dum)
           WHERE id_dossier = $1",
@@ -469,12 +534,13 @@ pub async fn modifier_dossier(
     .bind(garde(&d.numero_bl))
     .bind(garde(&d.conteneurs))
     .bind(garde(&d.code_devise))
-    .bind(if clos { None } else { d.taux_change })
+    .bind(taux)
     .bind(garde(&d.date_arrivee))
     .bind(&d.notes)
     .bind(garde(&d.numero_dum))
     .bind(garde(&d.regime_douanier))
     .bind(garde(&d.date_dum))
+    .bind(taux_touche)
     .execute(&mut *tx)
     .await?
     .rows_affected();
@@ -712,8 +778,10 @@ pub async fn creer_facture(
     metier::prendre_dossier(&mut tx, &id_dossier, Some(version)).await?;
 
     // La devise de la fiche fournisseur par defaut, celle du dossier en repli.
-    // Le TAUX, lui, ne se replie plus sur celui du dossier : 1 par defaut, il
-    // faisait entrer une facture en devise au cours du dirham.
+    // Le TAUX ne se replie sur celui du dossier que si le dossier en porte un,
+    // dans la meme devise (`taux_herite_du_dossier`) : le dossier n'a plus de
+    // taux 1 invente (27/10/2026). Sans l'un ni l'autre, une facture en devise
+    // est refusee par `controler_taux` : c'est ici que le taux devient exige.
     let devise = match f.code_devise.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => d.to_uppercase(),
         None => sqlx::query_scalar::<_, Option<String>>(
@@ -726,7 +794,20 @@ pub async fn creer_facture(
         .await?
         .unwrap_or_else(|| "MAD".into()),
     };
-    let taux = controler_taux(&mut tx, "facture", &devise, f.taux_change, &date,
+    let taux_saisi = match f.taux_change.filter(|t| *t > 0.0) {
+        Some(t) => Some(t),
+        None => {
+            let (devise_dossier, taux_dossier): (String, Option<f64>) = sqlx::query_as(
+                "SELECT code_devise, taux_change::float8 FROM import_dossiers WHERE id_dossier = $1",
+            )
+            .bind(&id_dossier)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Introuvable(format!("dossier {id_dossier}")))?;
+            taux_herite_du_dossier(&devise, &devise_dossier, taux_dossier)
+        }
+    };
+    let taux = controler_taux(&mut tx, "facture", &devise, taux_saisi, &date,
                               f.taux_confirme.unwrap_or(false)).await?;
 
     let id: String = sqlx::query_scalar(
@@ -1897,4 +1978,39 @@ pub async fn supprimer_engagement(
     let version = metier::version_dossier(&mut tx, &id_dossier).await?;
     tx.commit().await?;
     Ok(Json(json!({ "supprime": id, "version": version })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{taux_du_dossier, taux_herite_du_dossier};
+
+    #[test]
+    fn dossier_en_devise_sans_taux_reste_vide() {
+        assert_eq!(taux_du_dossier("EUR", None), Ok(None));
+        assert_eq!(taux_du_dossier("EUR", Some(0.0)), Ok(None));
+        assert_eq!(taux_du_dossier("EUR", Some(10.85)), Ok(Some(10.85)));
+    }
+
+    #[test]
+    fn dossier_en_devise_au_taux_1_refuse() {
+        assert!(taux_du_dossier("USD", Some(1.0)).unwrap_err().contains("taux du dirham"));
+    }
+
+    #[test]
+    fn dossier_en_dirham_au_taux_1() {
+        assert_eq!(taux_du_dossier("MAD", None), Ok(Some(1.0)));
+        assert_eq!(taux_du_dossier("MAD", Some(1.0)), Ok(Some(1.0)));
+        assert!(taux_du_dossier("MAD", Some(10.8)).is_err());
+    }
+
+    #[test]
+    fn facture_reprend_le_taux_du_dossier_seulement_s_il_existe() {
+        assert_eq!(taux_herite_du_dossier("EUR", "EUR", Some(10.85)), Some(10.85));
+        assert_eq!(taux_herite_du_dossier("EUR", "EUR", None), None);
+        // Le taux 1 d'avant l'arbitrage n'est jamais repris pour une devise.
+        assert_eq!(taux_herite_du_dossier("EUR", "EUR", Some(1.0)), None);
+        // Un taux d'une autre devise ne convertit pas la facture.
+        assert_eq!(taux_herite_du_dossier("EUR", "USD", Some(9.3)), None);
+        assert_eq!(taux_herite_du_dossier("MAD", "MAD", Some(1.0)), None);
+    }
 }

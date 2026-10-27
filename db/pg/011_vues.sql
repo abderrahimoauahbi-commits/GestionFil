@@ -244,7 +244,8 @@ GROUP BY lb.code_reference;
 -- les decisions machine ACTIVES (datees au jour de la FICHE, jamais a la
 -- validation) et les mouvements non contre-passes. Natures :
 -- CONSOMMATION_MACHINE, CONSOMMATION_DIRECTE, RETOUR_CONSO (negatif, au jour du
--- retour), HORS_MACHINE (sortie hors machine, sauf le pret), REBUT_DECHET /
+-- retour), RETOUR_PROD (retour depuis l'atelier, idem : arbitrage du 27/10/2026,
+-- 2026-10-27i), HORS_MACHINE (sortie hors machine, sauf le pret), REBUT_DECHET /
 -- PERTE / CASSE (ecarts et dechargements au rebut, sortie production),
 -- AUTRE_ECART (corrections, non qualifies, regularisations, erreurs de saisie,
 -- ajustements d'inventaire : HORS reel, montres a part). Valeur : le prix de
@@ -282,7 +283,7 @@ mvt AS (
       FROM mouvement m
       JOIN ligne_mouvement lm ON lm.id_mouvement = m.id_mouvement
       JOIN reference r        ON r.code_reference = lm.code_reference
-     WHERE m.code_type_mvt IN ('CONSO_DIRECTE', 'RETOUR_CONSO', 'SORTIE_PROD', 'AJUST_INV_NEG', 'AJUST_INV_POS')
+     WHERE m.code_type_mvt IN ('CONSO_DIRECTE', 'RETOUR_CONSO', 'RETOUR_PROD', 'SORTIE_PROD', 'AJUST_INV_NEG', 'AJUST_INV_POS')
         OR (m.code_type_mvt = 'SORTIE_HORS_MACHINE' AND COALESCE(lm.code_motif_ligne, '') <> 'HM_PRET')
 ),
 mvt_prix AS (
@@ -301,11 +302,12 @@ faits AS (
            CASE x.code_type_mvt
                 WHEN 'CONSO_DIRECTE'       THEN 'CONSOMMATION_DIRECTE'
                 WHEN 'RETOUR_CONSO'        THEN 'RETOUR_CONSO'
+                WHEN 'RETOUR_PROD'         THEN 'RETOUR_PROD'
                 WHEN 'SORTIE_HORS_MACHINE' THEN 'HORS_MACHINE'
                 WHEN 'SORTIE_PROD'         THEN 'REBUT_DECHET'
                 ELSE 'AUTRE_ECART' END AS nature,
            CASE WHEN x.code_type_mvt IN ('AJUST_INV_NEG', 'AJUST_INV_POS') THEN 'AJUSTEMENT_INVENTAIRE' END AS categorie_ecart,
-           CASE WHEN x.code_type_mvt IN ('RETOUR_CONSO', 'AJUST_INV_POS') THEN -x.quantite_kg ELSE x.quantite_kg END AS kg,
+           CASE WHEN x.code_type_mvt IN ('RETOUR_CONSO', 'RETOUR_PROD', 'AJUST_INV_POS') THEN -x.quantite_kg ELSE x.quantite_kg END AS kg,
            COALESCE(x.prix_mouvement, x.cmup_du_jour, x.cmup_actuel) AS prix_kg_mad,
            CASE WHEN x.prix_mouvement IS NOT NULL THEN 'MOUVEMENT'
                 WHEN x.cmup_du_jour IS NOT NULL THEN 'SORTIE_DU_JOUR'

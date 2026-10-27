@@ -186,8 +186,8 @@ export function Catalogue() {
       secondaire: true,
       rendu: (r) =>
         r.stock_min_kg == null ? (
-          <span className="text-attenue-texte" title="Calcule dynamiquement (formule F3)">
-            dynamique
+          <span className="text-attenue-texte" title="Aucun minimum : le minimum calculé (F3) n’existe plus ; le stock minimum n’est qu’une alerte">
+            —
           </span>
         ) : (
           fmt.nombre(r.stock_min_kg, 0)
@@ -429,7 +429,7 @@ export function Catalogue() {
       champ: 'stock_min_kg',
       libelle: 'Stock minimum (kg)',
       type: 'nombre',
-      aide: 'Laisser vide pour un minimum calcule dynamiquement (formule F3).',
+      aide: 'Une alerte seulement : le plan d’achat suit le plan de production, le calcul ne lit pas ce minimum. Vide : aucun minimum.',
       section: 'Conditionnement et stockage',
     },
     { champ: 'couverture_min_mois', libelle: 'Couverture minimale (mois)', type: 'nombre', section: 'Conditionnement et stockage' },
@@ -438,8 +438,7 @@ export function Catalogue() {
       libelle: 'Marge de sécurité (%)',
       type: 'nombre',
       aide:
-        'Majore le stock minimum de cette référence. Vide : la valeur générale des paramètres ' +
-        's applique.',
+        'Ancienne majoration du minimum calculé, qui n’existe plus : gardée sur la fiche, elle n’entre dans aucun calcul.',
       section: 'Conditionnement et stockage',
     },
     /* --- Achat ------------------------------------------------------- */

@@ -455,7 +455,7 @@ export const FICHES_MACHINES: Sujet[] = [
           'Touchez « Aperçu » : il montre ce que la validation enregistrera, ou ce qui la bloque.',
           'Touchez « Valider ».',
         ],
-        resultat: '« Décision validée » : le numéro de validation, le mouvement de magasin éventuel et la consommation retenue. « Retour à la zone » ramène à l’étage.',
+        resultat: '« Décision validée » : le numéro de validation, le mouvement de magasin éventuel et la consommation de la décision (ses écarts qualifiés « consommation » ; ceux d’un constat « Correction » n’entrent pas au grand livre de la consommation). « Retour à la zone » ramène à l’étage.',
       },
       {
         titre: 'Ajouter une référence à charger (terrain)',
@@ -590,10 +590,17 @@ export const FICHES_MACHINES: Sujet[] = [
       { nom: 'Fin', description: 'Les kilos de la ligne à la dernière décision.', valeurs: 'kg' },
       {
         nom: 'Consommé',
-        description: 'La consommation : la somme des écarts qualifiés « consommation » des décisions actives. En rouge si elle est négative.',
+        description:
+          'La consommation réelle : la somme des écarts qualifiés « consommation » des décisions actives, HORS constats au motif « Correction » (colonne « Correction »). En rouge si elle est négative.',
         valeurs: 'kg',
       },
       { nom: 'Déchet / perte / casse', description: 'Les écarts qualifiés déchet, perte ou casse : du fil qui n’a pas été tissé.', valeurs: 'kg' },
+      {
+        nom: 'Correction',
+        description:
+          'Les écarts « consommation » des constats au motif « Correction » (MJ_CORRECTION) : ils corrigent une saisie, ils ne sont pas une consommation — hors réel au grand livre de la consommation (décision du 27/10/2026, Q8), montrés à part. En orange quand il y en a.',
+        valeurs: 'kg',
+      },
       { nom: 'Non qualifié', description: 'Les écarts sans qualification, à revoir.', valeurs: 'kg' },
       { nom: 'Régularisation', description: 'Les écarts négatifs : plus de fil constaté qu’attendu.', valeurs: 'kg' },
       { nom: 'Erreur de saisie', description: 'Les écarts d’une Correction déclarés erreur de saisie : hors consommation.', valeurs: 'kg' },
@@ -601,7 +608,7 @@ export const FICHES_MACHINES: Sujet[] = [
     ],
     regles: [
       'L’étage choisi filtre les quatre onglets ; les étages vides figurent dans « Étages » : c’est là qu’on charge.',
-      'La consommation est la somme des écarts qualifiés « consommation » des décisions actives ; pertes, déchets, casses, écarts non qualifiés, régularisations et erreurs de saisie sont montrés à part.',
+      'La consommation est la somme des écarts qualifiés « consommation » des décisions actives, hors constats « Correction » ; corrections, pertes, déchets, casses, écarts non qualifiés, régularisations et erreurs de saisie sont montrés à part.',
       ...REGLES_RETRAIT,
     ],
     messages: MESSAGES_RETRAIT,
@@ -758,7 +765,7 @@ export const FICHES_MACHINES: Sujet[] = [
       {
         titre: 'Lire une fiche validée ou annulée',
         etapes: [
-          'L’en-tête : statut, machine et étage, date, responsable, magasin, OF, validation, consommation retenue.',
+          'L’en-tête : statut, machine et étage, date, responsable, magasin, OF, validation, et la consommation de la décision (« Consommation retenue »).',
           'Le bloc de la décision : ce qu’elle a enregistré, ligne par ligne.',
           'Les onglets : l’étage avant / après, les validations, le journal.',
         ],
@@ -785,7 +792,12 @@ export const FICHES_MACHINES: Sujet[] = [
       { nom: 'Date de la fiche', description: 'La date du fait.' },
       { nom: 'Ordre de fabrication', description: 'Le numéro d’OF que la fiche garde pour l’historique quand toutes ses lignes servaient le même ; « — » sinon. L’OF de chaque ligne est dans la décision.' },
       { nom: 'Validée le', description: 'L’instant de la validation active, et son auteur.' },
-      { nom: 'Consommation retenue', description: 'La somme des écarts « consommation » des lignes de la décision.', valeurs: 'kg' },
+      {
+        nom: 'Consommation retenue',
+        description:
+          'La somme des écarts que la décision a qualifiés « consommation », ligne par ligne. Au grand livre de la consommation (le réel, 27/10/2026), l’écart d’un constat au motif « Correction » n’est pas une consommation : il est rangé à part, en « Correction » (décision Q8).',
+        valeurs: 'kg',
+      },
       { nom: 'Motif d’annulation', description: 'La raison donnée à l’annulation de la fiche.' },
       { nom: 'Référence', description: 'Avant / après : la désignation de la ligne.' },
       { nom: 'Bobines', description: 'Avant / après : le nombre de bobines de la ligne.' },

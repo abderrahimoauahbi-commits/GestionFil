@@ -919,8 +919,15 @@ EXECUTE FUNCTION fn_refuser('Figement refuse : une proposition figee doit porter
 
 CREATE TRIGGER trg_plan_achat_figement_statut
 BEFORE UPDATE OF figee ON plan_achat FOR EACH ROW
-WHEN (NEW.figee = 1 AND NEW.statut IN ('COMMANDE','IGNORE'))
-EXECUTE FUNCTION fn_refuser('Figement refuse : cette proposition est deja commandee ou ecartee.');
+WHEN (NEW.figee = 1 AND NEW.statut IN ('COMMANDE','IGNORE','ANNULE_BC'))
+EXECUTE FUNCTION fn_refuser('Figement refuse : cette proposition est deja commandee, ecartee ou annulee avec son bon.');
+
+-- ANNULEE AVEC LE BON (decision du 27/10/2026, 2026-10-27f) : un etat final. La
+-- proposition reste liee au bon annule ; la regeneration en cree une neuve.
+CREATE TRIGGER trg_plan_achat_annule_bc_final
+BEFORE UPDATE OF statut ON plan_achat FOR EACH ROW
+WHEN (OLD.statut = 'ANNULE_BC' AND NEW.statut IS DISTINCT FROM 'ANNULE_BC')
+EXECUTE FUNCTION fn_refuser('PA-ANNULE-BC : cette proposition a ete annulee avec son bon ; elle reste a l''historique. Regenerez le plan d''achat : le moteur en proposera une neuve s''il le faut.');
 
 -- Portes a la main :
 -- trg_lmvt_appliquer : porte a la main (010b_declencheurs_logique.sql)

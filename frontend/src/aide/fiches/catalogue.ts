@@ -209,7 +209,7 @@ export const FICHES_CATALOGUE: Sujet[] = [
         nom: 'Stock minimum (kg)',
         alias: ['Stock min.'],
         description:
-          'Le seuil sous lequel la référence est signalée CRITIQUE dans la situation du stock. Vide : un minimum calculé (formule F3, à partir de la couverture minimale, de la consommation, de la marge et du délai) ; la liste affiche alors « dynamique ».',
+          'Le seuil sous lequel la référence est signalée « SOUS MIN » à l’état des stocks. C’est une information : depuis le 27/10/2026, il n’entre ni dans l’état du moteur de couverture (plan non couvert, sous la sécurité, couvert) ni dans aucune proposition d’achat. Vide : un minimum calculé (formule F3, à partir de la couverture minimale, de la consommation, de la marge et du délai) ; la liste affiche alors « dynamique ».',
         valeurs: 'kg',
       },
       {

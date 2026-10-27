@@ -297,7 +297,7 @@ const CATALOGUE: &[Question] = &[
                           AS montant,
                         COUNT(*) FILTER (WHERE figee = 1) AS figees
                  FROM plan_achat
-                 WHERE statut NOT IN ('COMMANDE','IGNOREE')",
+                 WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')",
         detail: Some(
             "SELECT code_reference, code_fournisseur, statut, urgence,
                     ROUND(quantite_suggeree_kg) AS quantite_kg,
@@ -305,7 +305,7 @@ const CATALOGUE: &[Question] = &[
                     ROUND(quantite_suggeree_kg * COALESCE(prix_estime_mad, 0)) AS montant_mad,
                     date_besoin_prevue
              FROM plan_achat
-             WHERE statut NOT IN ('COMMANDE','IGNOREE')
+             WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
              ORDER BY montant_mad DESC
              LIMIT 30",
         ),

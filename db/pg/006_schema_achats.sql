@@ -230,8 +230,10 @@ CREATE TABLE plan_achat (
     risque_identifie    text,
     action_recommandee  text,
 
+    -- ANNULE_BC : la proposition close avec son bon annule (decision du
+    -- 27/10/2026, 2026-10-27f) — liee a lui, plus ouverte, etat final.
     statut              text    NOT NULL DEFAULT 'PROPOSE'
-                                CHECK (statut IN ('PROPOSE','EN_REVISION','VALIDE','COMMANDE','IGNORE')),
+                                CHECK (statut IN ('PROPOSE','EN_REVISION','VALIDE','COMMANDE','IGNORE','ANNULE_BC')),
     id_bc_genere        text    REFERENCES bon_commande(id_bc),
     id_utilisateur_validation text REFERENCES utilisateur(id_utilisateur),
     date_validation     text,

@@ -380,8 +380,12 @@ export function AssistantImport() {
 
                 {!tauxValide && (
                   <Alerte ton="info">
-                    Le taux de change est obligatoire : c'est lui qui convertit toutes les
-                    factures du dossier en dirhams.
+                    Saisissez un taux pour créer le dossier. Il ne convertit aucune facture : ce
+                    n’est qu’un repli. Chaque facture porte sa devise (celle du fournisseur par
+                    défaut) et son propre taux, contrôlé à sa saisie : le cours Bank Al-Maghrib du
+                    jour de la facture (à défaut le dernier publié, sinon le taux de l’ERP) est
+                    proposé, un écart de plus de 3 % doit être confirmé, et le taux 1 est refusé
+                    pour une devise.
                   </Alerte>
                 )}
 

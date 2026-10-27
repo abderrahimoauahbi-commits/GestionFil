@@ -1,6 +1,6 @@
 /**
  * FICHES D'AIDE — STOCK : MOUVEMENTS, FICHE HORS MACHINE, INVENTAIRES, LOTS,
- * AUTORISATIONS, ÉTAT DES STOCKS, ANALYSE ABC / XYZ.
+ * AUTORISATIONS, ÉTAT DES STOCKS, ANALYSE ABC / XYZ, STOCK PROJETÉ, TRANSFERTS.
  *
  * Une partie du catalogue : `../contenu.ts` les assemble, `../types.ts` donne
  * la forme d'une fiche. Chaque `champs[].nom` est l'intitulé EXACT de l'écran :
@@ -9,9 +9,153 @@
  * Réécrites le 27/10/2026 d'après le code des écrans (pages/Mouvements.tsx,
  * MouvementNouveau.tsx, BonMouvement.tsx, FicheHorsMachine.tsx, Inventaires.tsx,
  * inventaires/*, lots/*, EtatStock.tsx, AnalyseAbcXyz.tsx) et les refus du
- * serveur et de la base.
+ * serveur et de la base. Stock projeté et transferts (Stock.tsx, Transferts.tsx,
+ * TransfertNouveau.tsx, BonTransfert.tsx) écrits le 27/10/2026 sur le moteur de
+ * couverture et la date prévue de disponibilité du fil en route.
  */
-import type { Sujet } from '../types.ts'
+import type { ChampAide, MessageAide, Procedure, Sujet } from '../types.ts'
+
+/* ==========================================================================
+ * LE DOCUMENT DE TRANSFERT : un seul écran (pages/TransfertNouveau.tsx) pour la
+ * création (/transferts/nouveau) et la reprise (/transferts/:id/modifier). Ses
+ * champs se décrivent une fois et servent aux deux fiches. Réécrites le
+ * 27/10/2026 (date prévue de disponibilité, migration 2026-10-27d).
+ * ======================================================================== */
+const PROCEDURES_TRANSFERT: Procedure[] = [
+  {
+    titre: 'Préparer un transfert',
+    etapes: [
+      'Choisissez le « Magasin source » : seules ses références en stock pourront être chargées (le changer vide les lignes).',
+      'Choisissez le « Magasin destinataire », différent du premier.',
+      'Saisissez « Disponible au magasin destinataire le » si vous la connaissez : facultative en préparation, elle sera exigée à l’expédition.',
+      'Ajoutez une ligne, tapez la référence (la liste ne propose que le stock du magasin source), choisissez le lot pour une référence suivie au lot, puis la quantité en kilos — ou en palettes et bobines, liées aux kilos.',
+      'Lisez « Dispo » : ce que le magasin source (ou le lot choisi) détient ; « dépassé » en rouge si le document en demande plus.',
+      'Validez chaque ligne avec son bouton ✓, puis « Enregistrer le transfert ». La barre du bas dit ce qui bloque encore (ligne à valider, lot obligatoire, au-delà du stock disponible).',
+    ],
+    resultat:
+      'Le transfert est « En préparation » dans la liste, avec son numéro : rien n’a bougé. On l’expédie depuis la liste des transferts.',
+  },
+]
+
+const CHAMPS_TRANSFERT: ChampAide[] = [
+  {
+    nom: 'Magasin source',
+    description:
+      'D’où la matière part. LE CHANGER VIDE LES LIGNES ET RECHARGE LA LISTE DES RÉFÉRENCES : on ne transfère que ce qui est réellement là.',
+    obligatoire: true,
+  },
+  {
+    nom: 'Magasin destinataire',
+    description: 'Où elle va. Il doit différer du magasin source (« Source et destination doivent différer. »).',
+    obligatoire: true,
+  },
+  {
+    nom: 'Date du document',
+    description:
+      'La date du transfert. La date de sortie sera celle de l’expédition, la date d’arrivée celle de la réception.',
+    valeurs: 'date',
+    defaut: 'aujourd’hui',
+  },
+  {
+    nom: 'Disponible au magasin destinataire le',
+    description:
+      'La date prévue de disponibilité au magasin destinataire : le plan d’achat compte le fil en route CE jour-là. Facultative en préparation, OBLIGATOIRE À L’EXPÉDITION (TRF-DATE), pas avant la date du document. Une fois le transfert parti, elle se révise depuis la liste des transferts (« Réviser la date ») tant qu’il est en route ; reçu, elle ne se révise plus.',
+    valeurs: 'date',
+  },
+  { nom: 'Responsable', description: 'Qui répond de la marchandise en route. Le nom s’imprime sur les deux bons.' },
+  {
+    nom: 'Transporteur',
+    description: 'Qui emporte la marchandise. Il s’imprime sur le bon de sortie et signe les deux bons.',
+  },
+  { nom: 'Observations', description: 'Une note libre, reprise sur les bons imprimés.' },
+  {
+    nom: 'Référence',
+    description:
+      'Ce qu’on déplace, cherché à la frappe parmi ce que le MAGASIN SOURCE détient (avec ses kilos en stock). Une même référence peut revenir sur plusieurs lignes : un lot par ligne.',
+    obligatoire: true,
+  },
+  {
+    nom: 'Unité',
+    description:
+      'L’unité dans laquelle la ligne est archivée : kg, Bobine, Palette ou ml (jamais le lot). La quantité se saisit toujours en kilos ; l’unité ne change que l’expression enregistrée.',
+    defaut: 'kg',
+  },
+  {
+    nom: 'Qté (kg)',
+    description: 'Les kilos transférés. Liés, kilos, palettes et bobines se recalculent ensemble, au conditionnement du lot s’il est connu, sinon de la fiche article.',
+    obligatoire: true,
+    valeurs: 'kg, plus de 0',
+  },
+  {
+    nom: 'Pal. · bob.',
+    alias: ['Palettes / bobines'],
+    description:
+      'Les palettes et les bobines réellement chargées — c’est ce décompte que le destinataire vérifiera. Liés (maillon), les trois champs se répondent ; détachés, chacun se saisit seul (une palette entamée, quatre bobines isolées). Il faut que le lot ou la fiche porte son poids de bobine et ses bobines par palette.',
+  },
+  {
+    nom: 'Lot',
+    description:
+      'Le lot qui part, choisi parmi ceux du magasin source, le plus ancien d’abord. OBLIGATOIRE pour une référence suivie au lot : le lot voyage avec la matière.',
+  },
+  {
+    nom: 'Dispo',
+    description:
+      'Ce que le magasin SOURCE détient de la référence — ou du lot choisi, avec ses bobines —, face à ce que le document en demande (au survol). « dépassé » en rouge : le document demande plus ; « lot absent de la source » : ce lot n’y est pas. Ce n’est pas le stock de la maison.',
+    valeurs: 'kg',
+  },
+  {
+    nom: 'Poids / bobine',
+    description:
+      'Les kilos de la ligne ÷ ses bobines, comparés au poids de bobine du catalogue : un écart hors tolérance se colore (orange, rouge). « — » : pas de bobines saisies.',
+    valeurs: 'kg',
+  },
+  { nom: 'Poids chargé', description: 'Le total des kilos des lignes remplies.', valeurs: 'kg' },
+  { nom: 'Palettes', description: 'Le total des palettes déclarées sur les lignes.' },
+  { nom: 'Bobines', description: 'Le total des bobines déclarées sur les lignes.' },
+]
+
+const REGLES_TRANSFERT: string[] = [
+  'LE DOCUMENT NE BOUGE AUCUN STOCK : c’est l’expédition, depuis la liste des transferts, qui sort la marchandise du magasin source ; la réception l’entre au destinataire.',
+  'LA DATE PRÉVUE DE DISPONIBILITÉ est exigée à l’expédition (TRF-DATE, garanti par la base) : sans elle, le fil en route ne couvrirait aucun besoin du plan d’achat. Saisie dès la préparation, elle part telle quelle à l’expédition.',
+  'La conversion ne DEVINE JAMAIS un facteur manquant : sans poids de bobine ou bobines par palette, la ligne ne se saisit qu’en kilos.',
+  'Le disponible est celui du MAGASIN SOURCE seul — sommer les magasins ferait croire à une matière présente ailleurs. Une ligne au-delà du stock disponible bloque l’enregistrement.',
+  'Une référence suivie au lot se transfère lot par lot : c’est la traçabilité du bain qui l’exige.',
+  'Un inventaire ouvert sur l’un des deux magasins n’empêche pas d’enregistrer le document, mais l’expédition ou la réception attendront sa clôture (avis en tête de l’écran).',
+  'Rien ne part au serveur avant « Enregistrer le transfert » ; un second envoi du même formulaire rend le même document.',
+]
+
+const MESSAGES_TRANSFERT: MessageAide[] = [
+  { message: 'Source et destination doivent différer.', cause: 'Le même magasin est choisi des deux côtés.' },
+  { message: 'lot obligatoire : …', cause: 'Une référence suivie au lot n’a pas de lot sur sa ligne.' },
+  { message: 'au-dela du stock disponible : …', cause: 'Le document demande plus que le magasin source (ou le lot) n’en détient.' },
+  { message: '… : la quantite doit etre strictement positive', cause: 'Une ligne à zéro kilo.' },
+]
+
+/* Les deux bons imprimés (pages/BonTransfert.tsx) : même en-tête, mêmes lignes. */
+const CHAMPS_BON_TRANSFERT: ChampAide[] = [
+  { nom: 'Magasin expediteur', description: 'Le magasin source, son nom et son code.' },
+  { nom: 'Magasin destinataire', description: 'Le magasin d’arrivée, son nom et son code.' },
+  { nom: 'Date du document', description: 'La date du transfert.', valeurs: 'date' },
+  { nom: 'Date de sortie', description: 'Le jour de l’expédition ; « — non expédié — » tant qu’il n’est pas parti.', valeurs: 'date' },
+  { nom: 'Responsable', description: 'Qui répond de la marchandise en route.' },
+  { nom: 'Expédié par', description: 'Le compte qui a créé et expédié le transfert.' },
+  { nom: 'Reçu par', description: 'Le compte qui a constaté l’arrivée ; « — a constater — » tant qu’elle ne l’est pas.' },
+  {
+    nom: 'Disponible à destination le',
+    description:
+      'La date prévue de disponibilité au magasin destinataire, « — en retard de N j » si elle est dépassée alors que le transfert roule encore ; « — sans date — » pour un transfert en route expédié avant la règle ; « — à fixer à l’expédition — » en préparation.',
+  },
+  { nom: 'Référence / designation', description: 'La référence, sa désignation et sa couleur.' },
+  { nom: 'Lot', description: 'Le lot transféré.' },
+  { nom: 'Bob.', description: 'Les bobines de la ligne (total en pied).' },
+  { nom: 'Pal.', description: 'Les palettes de la ligne (total en pied).' },
+  { nom: 'Poids (kg)', description: 'Les kilos de la ligne (total en pied).', valeurs: 'kg' },
+]
+
+const REGLES_BON_TRANSFERT: string[] = [
+  'Le bon de sortie part avec le camion, le bon de réception revient signé : ce sont les deux moitiés d’un même transfert.',
+  'Le pied du document porte le numéro, le statut et, une fois arrivé, les jours de transit. La barre d’actions ne s’imprime pas.',
+]
 
 export const FICHES_STOCK: Sujet[] = [
   // ==========================================================================
@@ -949,21 +1093,41 @@ export const FICHES_STOCK: Sujet[] = [
       { nom: 'Palettes', description: 'Le stock global exprimé en palettes, au conditionnement de la fiche article. « — » : poids de bobine ou bobines par palette inconnus.' },
       { nom: 'Bobines', description: 'Le stock global exprimé en bobines (fiche article) ; dans le détail par lot, les bobines du lot.' },
       { nom: 'Min', description: 'Le stock minimum de la référence.', valeurs: 'kg' },
-      { nom: 'Couv. j', description: 'La couverture en jours : stock face à la consommation mensuelle.', valeurs: 'jours' },
+      {
+        nom: 'Couv. j',
+        description:
+          'Les jours couverts au moteur de couverture : d’aujourd’hui à la veille de la première rupture du plan. « horizon » : aucune rupture jusqu’à la fin du plan en service.',
+        valeurs: 'jours',
+      },
       {
         nom: 'Statut',
         description:
-          'Le statut du stock projeté : Rupture (stock physique nul, ou stock et commandes en cours ne couvrant pas le besoin du délai), Critique (sous le minimum, ou couverture sous le seuil critique), Attention, OK. « SOUS MIN » : stock sous le minimum.',
-        valeurs: 'Rupture · Critique · Attention · OK',
+          'L’état au moteur de couverture (le même que le stock projeté et le plan d’achat) : Plan non couvert (une rupture est prévue sur l’horizon du plan), Sous la sécurité (le solde projeté passe sous la sécurité, sans rupture), Couvert. « SOUS MIN » : le stock est sous le minimum de la fiche — une information, qui n’entre pas dans l’état.',
+        valeurs: 'Plan non couvert · Sous la sécurité · Couvert',
       },
       { nom: 'CMUP', description: 'Le coût moyen unitaire pondéré.', valeurs: 'MAD/kg' },
       { nom: 'Valeur MAD', description: 'Stock × CMUP.' },
-      { nom: 'A cder kg', description: 'Stock minimum − stock projeté, quand c’est positif.', valeurs: 'kg' },
+      {
+        nom: 'A cder kg',
+        description:
+          'La quantité de la première proposition du moteur de couverture (celle de l’onglet « À commander » du plan d’achat) ; en rouge quand sa date limite de commande est atteinte. Vide : rien à commander.',
+        valeurs: 'kg',
+      },
       { nom: 'Disponible', description: 'Téléphone : le stock physique net (hors quarantaine).', valeurs: 'kg' },
       { nom: 'Stock minimum', description: 'Téléphone : le stock minimum.', valeurs: 'kg' },
-      { nom: 'Couverture', description: 'Téléphone : la couverture en jours.' },
-      { nom: 'Conso mensuelle', description: 'Téléphone : la consommation mensuelle moyenne.', valeurs: 'kg' },
-      { nom: 'En commande', description: 'Téléphone : les kilos commandés pas encore reçus.', valeurs: 'kg' },
+      { nom: 'Couverture', description: 'Téléphone : comme « Couv. j » — les jours couverts, ou « tout l’horizon ».' },
+      {
+        nom: 'Plan / mois',
+        description: 'Téléphone : le plan de l’horizon ramené à un mois de 30 jours, tel que le moteur de couverture le consomme.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Arrivages comptés',
+        description:
+          'Téléphone : les arrivages que le moteur compte à leur date (bons validés datés, fil en route à sa date prévue de disponibilité).',
+        valeurs: 'kg',
+      },
+      { nom: 'Plan non couvert', description: 'Téléphone : les kilos du plan que le solde ne couvre pas sur l’horizon.', valeurs: 'kg' },
       { nom: 'A commander', description: 'Téléphone : comme « A cder kg ».', valeurs: 'kg' },
       { nom: 'Sans mouvement', description: 'Téléphone : jours depuis le dernier mouvement.' },
       { nom: 'Equivalents', description: 'Téléphone : le nombre de références équivalentes actives.' },
@@ -1032,5 +1196,339 @@ export const FICHES_STOCK: Sujet[] = [
       'C’est le croisement des deux lettres qui commande la politique : une AZ ne se gère pas comme une AX. La classe ABC sert aussi au tournant des inventaires.',
     ],
     liens: [{ route: '/inventaires', libelle: 'Inventaires (tournant)' }],
+  },
+
+  // ==========================================================================
+  // STOCK PROJETÉ — une vue du moteur de couverture
+  // ==========================================================================
+  {
+    route: '/stock',
+    titre: 'Stock projeté et alertes',
+    chemin: 'Planification → Stock projeté et alertes',
+    objectif:
+      'Voir, pour chaque référence suivie, l’état que lui donne le moteur de couverture — plan non couvert, sous la sécurité, couvert —, jusqu’où le plan est couvert et ce qu’il faut commander, avant quelle date.',
+    prerequis: [
+      'Un plan de production en service dont le MRP est calculé : c’est sa demande, jour par jour, que le moteur projette.',
+    ],
+    droits:
+      'Lecture du module Stock. Les colonnes que votre grille masque ne sont ni affichées ni envoyées.',
+    procedures: [
+      {
+        titre: 'Trouver ce qui demande une décision',
+        etapes: [
+          'Dans le rail de gauche, choisissez un état (Plan non couvert, Sous la sécurité, Couvert), « À commander aujourd’hui » ou une classe ABC : chaque entrée porte le nombre de références derrière elle.',
+          'Cherchez une référence, une désignation ou un fournisseur dans le champ du rail ; affinez avec les filtres État, Fournisseur, Classe ABC, Référence.',
+          'Lisez la colonne État : la cause s’y écrit en une date (« rupture le … », « sous la sécurité le … »), le badge « à commander » si la date limite est atteinte, « donnée » si la fiche a un défaut (pas de classe ABC).',
+          'Cliquez une ligne : « Besoin de … » s’ouvre en haut de la liste — le plan sur l’horizon, le disponible compté, les arrivages comptés, le plan non couvert, la date de couverture, et le plan mois par mois.',
+          'Clic droit sur une ligne : commander la référence (nouveau bon), ouvrir sa fiche, son historique de mouvements, chercher un équivalent, lancer un inventaire.',
+        ],
+        resultat: 'Vous savez quelles références menacent le plan, depuis quand, et ce qu’il faut commander.',
+      },
+    ],
+    champs: [
+      {
+        nom: 'Référence',
+        description: 'Le code de la référence. Comme filtre, une recherche sur le code.',
+      },
+      {
+        nom: 'État',
+        description:
+          'L’état au moteur de couverture, avec sa cause en une date. PLAN NON COUVERT : une rupture est prévue sur l’horizon du plan (« rupture le …, N kg non couverts ») ; SOUS LA SÉCURITÉ : le solde projeté passe sous la sécurité, sans rupture (« sous la sécurité le … ») ; COUVERT : ni l’un ni l’autre. Badge « à commander » : la date limite de commande est atteinte ou dépassée ; « donnée » : un défaut de la fiche a imposé un réglage par défaut (au survol).',
+        valeurs: 'Plan non couvert · Sous la sécurité · Couvert',
+      },
+      {
+        nom: 'Disponible (kg)',
+        description:
+          'Ce qui couvre le plan aujourd’hui : magasins comptés au plan (hors quarantaine, lots bloqués exclus, restes compris) + fil sur les métiers au dernier constat. Au survol, la part en magasins et la part sur métiers.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Couvert jusqu’au',
+        description:
+          'La veille de la première rupture, et le nombre de jours couverts depuis aujourd’hui. « tout l’horizon » : pas de rupture jusqu’à la fin du plan en service ; « rupture aujourd’hui » : rien ne couvre déjà le plan du jour.',
+      },
+      {
+        nom: 'Plan non couvert (kg)',
+        description:
+          'Les kilos du plan que le solde projeté ne peut pas servir sur l’horizon, perdus jour par jour : ni reportés, ni rattrapés. « — » : tout est couvert.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'À commander',
+        description:
+          'La quantité de la première proposition du moteur et sa date limite de commande (« avant le … »), en rouge quand cette date est atteinte. La même que dans l’onglet « À commander » du plan d’achat.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Plan sur l’horizon (kg)',
+        description: 'Ce que le plan en service consomme d’aujourd’hui à la fin de son horizon (le mois en cours à partir d’aujourd’hui).',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Arrivages comptés (kg)',
+        description:
+          'Les arrivages que le moteur compte à leur date : lignes de bon validé, envoyé ou livré partiellement, et fil en route à sa date prévue de disponibilité. Au survol, le prochain. Un bon ou un transfert en retard ou sans date n’y est pas.',
+        valeurs: 'kg',
+      },
+      { nom: 'Fournisseur', description: 'Le fournisseur de la fiche article. Comme filtre, la liste se cherche à la frappe.' },
+      { nom: 'ABC / XYZ', description: 'La classe ABC puis XYZ de la fiche article. La classe ABC fixe les jours de sécurité du moteur.' },
+      { nom: 'Classe ABC', description: 'Filtre : la classe ABC de la fiche article.' },
+      {
+        nom: 'Délai (j)',
+        description: 'Le délai de livraison retenu (celui du fournisseur, sinon P_DelaiDefaut) : D − délai donne la date limite de commande.',
+        valeurs: 'jours',
+      },
+      {
+        nom: 'Besoin du plan de production',
+        description:
+          'Le panneau ouvert d’un clic sur la ligne : plan sur l’horizon (jusqu’à sa fin), disponible aujourd’hui (compté), arrivages comptés à leur date, plan non couvert et « Couvert jusqu’au », avec le délai et la couverture d’une commande retenus. Les ordres de fabrication n’entrent pas dans ce besoin.',
+      },
+      { nom: 'Mois', description: 'Besoin d’une référence : le mois du plan.' },
+      { nom: 'Plan (kg)', description: 'Besoin d’une référence : les kilos du mois au plan en service, mois entier.', valeurs: 'kg' },
+      {
+        nom: 'Dans l’horizon',
+        description: 'Besoin d’une référence : la part du mois qui reste à couvrir — pour le mois en cours, à partir d’aujourd’hui seulement.',
+        valeurs: 'kg',
+      },
+    ],
+    regles: [
+      'LE STOCK PROJETÉ EST UNE VUE DU MOTEUR DE COUVERTURE (27/10/2026) : les mêmes chiffres que l’onglet « À commander » du plan d’achat. Il n’y a plus de « stock + en-cours − besoins » ni d’échelle Rupture / Critique / Attention / OK, ni de seuils de jours.',
+      'La projection se fait jour par jour sur l’horizon du plan en service ; le solde ne descend jamais sous zéro. L’état se calcule SANS les propositions d’achat : une référence reste « plan non couvert » tant que la commande n’est pas validée et datée.',
+      'Le fil en route compte à sa date prévue de disponibilité au magasin destinataire ; en retard ou sans date (contrôle C66), il ne compte pas. Un bon en retard ne compte pas non plus (contrôle C28).',
+      'Sont suivies les références qui ont une demande au plan, du stock ou un arrivage, même hors couverture.',
+    ],
+    liens: [
+      { route: '/plan-achat', libelle: 'Plan d’achat (onglet À commander)' },
+      { route: '/etat-stock', libelle: 'État des stocks' },
+      { route: '/etats/stock', libelle: 'État des stocks imprimé' },
+      { route: '/transferts', libelle: 'Transferts' },
+    ],
+  },
+
+  // ==========================================================================
+  // TRANSFERTS — la liste : expédier, dater, réceptionner
+  // ==========================================================================
+  {
+    route: '/transferts',
+    titre: 'Transferts entre magasins',
+    chemin: 'Stock → Transferts',
+    objectif:
+      'Suivre la matière qui passe d’un magasin à l’autre : la préparer, l’expédier avec sa date prévue de disponibilité, réviser cette date en route, constater l’arrivée, et imprimer les bons qui accompagnent le camion.',
+    droits:
+      'Lecture du module Mouvements. Écriture pour créer, modifier, abandonner un transfert en préparation et réviser la date prévue ; VALIDER pour expédier, imprimer le bon de réception et réceptionner.',
+    procedures: [
+      {
+        titre: 'Expédier un transfert',
+        etapes: [
+          'Préparez-le d’abord (bouton « + », Nouveau transfert) : il est « En préparation », rien n’a bougé.',
+          'Sur sa ligne, « Bon » imprime le bon de sortie à joindre au chargement.',
+          '« Expédier » : si la date prévue de disponibilité est déjà sur le transfert, confirmez ; sinon la saisie s’ouvre SOUS LA LIGNE — « Disponible au magasin destinataire (…) le » —, puis « Expédier avec cette date ».',
+          'Confirmez : les lignes quittent le magasin source (mouvement de sortie, immuable).',
+        ],
+        resultat:
+          'Le transfert est « En transit » : la marchandise n’est comptée dans aucun magasin ; le plan d’achat la compte à sa date prévue de disponibilité.',
+      },
+      {
+        titre: 'Réviser la date en route',
+        etapes: [
+          'Sur un transfert « En transit », cliquez « Réviser la date ».',
+          'Saisissez la nouvelle date sous la ligne (aujourd’hui au plus tôt), puis « Enregistrer la date ».',
+        ],
+        resultat: 'La couverture du plan d’achat compte ce fil à la nouvelle date ; l’ancienne et la nouvelle restent au journal d’audit.',
+      },
+      {
+        titre: 'Constater l’arrivée',
+        etapes: [
+          '« Bon de réception » imprime le bon à remplir au déchargement (colonne « Reçu » vide).',
+          'Une fois la marchandise vue sur place : « Réceptionner », puis « Constater la réception ».',
+        ],
+        resultat: 'Les lignes entrent en stock au magasin destinataire, valorisées au CMUP figé au départ ; le transfert est « Reçu ».',
+      },
+    ],
+    champs: [
+      { nom: 'Numéro', description: 'Le numéro du transfert, attribué à la création et jamais réutilisé. Comme filtre, une recherche sur ce numéro.' },
+      { nom: 'Date', description: 'La date du document.', valeurs: 'date' },
+      { nom: 'Trajet', description: 'Le magasin source → le magasin destinataire.' },
+      { nom: 'Contenu', description: 'Le nombre de lignes et le poids total du transfert.', valeurs: 'kg' },
+      {
+        nom: 'Ou est la marchandise',
+        description:
+          'Le statut, dit du point de vue de la marchandise : En préparation (rien n’a bougé), En transit (partie, arrivée non constatée ; « en route depuis N j »), Reçu (entrée en stock à destination), Annulé.',
+        valeurs: 'En préparation · En transit · Reçu · Annulé',
+      },
+      {
+        nom: 'Disponible le',
+        description:
+          'La date prévue de disponibilité au magasin destinataire : le plan d’achat compte le fil en route CE jour-là. « en retard de N j » : la date est dépassée, le fil ne couvre plus le plan tant qu’une nouvelle date n’est pas saisie (« Réviser la date »). « sans date » : expédié avant la règle du 27/10/2026, il ne couvre rien (contrôle C66).',
+        valeurs: 'date',
+      },
+      {
+        nom: 'Disponible au magasin destinataire le',
+        description:
+          'La saisie ouverte sous la ligne : à l’expédition d’un transfert qui n’a pas encore de date (obligatoire), ou pour la réviser tant qu’il est en route. Pas avant aujourd’hui ; en route, elle se révise, elle ne s’efface pas.',
+        obligatoire: true,
+        valeurs: 'date',
+      },
+      {
+        nom: 'Expédié / reçu par',
+        description: 'Qui a créé et expédié le transfert ; dessous, qui a constaté l’arrivée et quand, ou « arrivee non constatee ».',
+      },
+      { nom: 'Période', description: 'Filtre : les transferts datés de cette période.' },
+      { nom: 'Statut', description: 'Filtre : le statut du transfert (le rail de gauche fait de même, avec le nombre de transferts par statut).' },
+      { nom: 'Magasin source', description: 'Filtre : les transferts qui partent de ce magasin.' },
+      { nom: 'Magasin destinataire', description: 'Filtre : les transferts qui vont vers ce magasin.' },
+      { nom: 'Auteur', description: 'Filtre : qui a créé le transfert.' },
+    ],
+    regles: [
+      'Un transfert se valide DEUX FOIS, sur deux sites : l’expédition au magasin source (le mouvement de sortie), la réception au magasin destinataire (le mouvement d’entrée). Entre les deux, la marchandise est EN TRANSIT : comptée dans aucun magasin.',
+      'LA DATE PRÉVUE DE DISPONIBILITÉ EST OBLIGATOIRE À L’EXPÉDITION, garantie par la base (TRF-DATE). Elle se révise tant que le transfert est en route, jamais après sa réception ni sur un transfert abandonné ; chaque changement est journalisé.',
+      'LE FIL EN ROUTE EST UN ARRIVAGE pour le moteur de couverture : compté à sa date prévue de disponibilité vers un magasin compté au plan ; date dépassée sans nouvelle date = en retard, hors couverture ; sans date = hors couverture et signalé par le contrôle C66, jusqu’à ce qu’une date soit saisie. Jamais une date déduite d’autre chose.',
+      'La valeur voyage avec la marchandise : l’entrée est valorisée au CMUP du magasin source figé au départ, pas à celui du jour de l’arrivée. En route, le fil compte dans la valeur du stock.',
+      'Un inventaire ouvert gèle le magasin (ou ses seules références pour un tournant ou un ciblé) : ni départ de la source ni arrivée à destination tant qu’il n’est pas clôturé (INVENTAIRE-OUVERT).',
+      'Seul un transfert en préparation se modifie ou s’abandonne ; parti, il doit arriver quelque part — le recevoir, ou le faire revenir par un transfert inverse. Un écart constaté à l’arrivée se régularise par un inventaire.',
+      'Le contrôle C54 signale un transfert expédié et toujours pas réceptionné au-delà du délai réglé.',
+    ],
+    messages: [
+      {
+        message: 'TRF-DATE : le transfert … ne part pas sans date prévue de disponibilité au magasin destinataire. Saisissez-la avant d’expédier.',
+        cause: 'Expédition sans date : la saisie s’ouvre sous la ligne.',
+      },
+      {
+        message: 'TRF-DATE : le transfert … est …, sa date prévue de disponibilité ne se révise plus (seulement tant qu’il est en route).',
+        cause: 'Le transfert est reçu ou annulé.',
+      },
+      {
+        message: 'TRF-DATE : le transfert … est en route : sa date prévue de disponibilité se révise, elle ne s’efface pas.',
+        cause: 'Une date vide a été envoyée pour un transfert en transit.',
+      },
+      {
+        message: 'Seul un transfert au statut … peut etre … (statut actuel : …).',
+        cause: 'Un autre poste l’a expédié ou reçu entre-temps : la liste se relit.',
+      },
+      { message: 'R02 : stock insuffisant…', cause: 'Le magasin source n’a plus ces kilos (de la référence ou du lot) au moment de l’expédition.' },
+      { message: 'INVENTAIRE-OUVERT…', cause: 'Un inventaire ouvert gèle le magasin source ou destinataire.' },
+    ],
+    liens: [
+      { route: '/transferts/nouveau', libelle: 'Nouveau transfert' },
+      { route: '/plan-achat', libelle: 'Plan d’achat (couverture)' },
+      { route: '/stock', libelle: 'Stock projeté' },
+      { route: '/controles', libelle: 'Contrôles (C54, C66)' },
+    ],
+  },
+
+  // ==========================================================================
+  // TRANSFERTS — le document (création et reprise d’un brouillon)
+  // ==========================================================================
+  {
+    route: '/transferts/nouveau',
+    titre: 'Nouveau transfert',
+    chemin: 'Stock → Transferts → « + » (Nouveau transfert)',
+    objectif:
+      'Préparer le document d’un transfert — deux magasins, une date, la date prévue de disponibilité au destinataire, et ce qu’on charge — sans bouger aucun stock : c’est l’expédition qui sort la marchandise.',
+    prerequis: [
+      'Les deux magasins actifs.',
+      'La matière en stock au magasin source : la grille ne propose que lui.',
+    ],
+    droits: 'Écriture du module Mouvements.',
+    procedures: PROCEDURES_TRANSFERT,
+    champs: CHAMPS_TRANSFERT,
+    regles: REGLES_TRANSFERT,
+    messages: MESSAGES_TRANSFERT,
+    liens: [
+      { route: '/transferts', libelle: 'Transferts (expédier, réceptionner)' },
+      { route: '/stock', libelle: 'Stock projeté' },
+    ],
+  },
+  {
+    route: '/transferts/:id/modifier',
+    titre: 'Modifier un transfert',
+    chemin: 'Stock → Transferts → « Modifier » sur un transfert en préparation',
+    objectif:
+      'Reprendre un transfert en préparation — en-tête et lignes — tant que rien n’est parti ; une fois expédié, le même écran ne fait plus que le montrer.',
+    droits: 'Écriture du module Mouvements ; sans elle, ou une fois le transfert parti, l’écran est en lecture seule.',
+    procedures: [
+      ...PROCEDURES_TRANSFERT,
+      {
+        titre: 'Abandonner un transfert en préparation',
+        etapes: ['Cliquez « Abandonner », puis confirmez.'],
+        resultat: 'Le document reste, marqué « Annulé » ; aucun stock n’a bougé, rien n’est à rattraper.',
+      },
+    ],
+    champs: CHAMPS_TRANSFERT,
+    regles: [
+      ...REGLES_TRANSFERT,
+      '« Enregistrer le transfert » ne s’active qu’après un changement ; la modification remplace TOUTES les lignes par celles de l’écran.',
+      'Expédié, le document est figé (« Document figé ») : ses mouvements sont au grand livre, que R03 rend immuable. La date prévue se révise alors depuis la liste des transferts (« Réviser la date »).',
+    ],
+    messages: [
+      ...MESSAGES_TRANSFERT,
+      {
+        message: 'Un transfert deja expedie ne se modifie plus : ses mouvements sont au grand livre, que R03 rend immuable.',
+        cause: 'Le transfert a été expédié pendant la saisie.',
+      },
+      {
+        message: 'Seul un transfert en preparation s’abandonne.',
+        cause: 'Une fois partie, la marchandise doit arriver quelque part : la recevoir, ou la faire revenir par un transfert inverse.',
+      },
+    ],
+    liens: [{ route: '/transferts', libelle: 'Transferts' }],
+  },
+
+  // ==========================================================================
+  // TRANSFERTS — les deux bons imprimés
+  // ==========================================================================
+  {
+    route: '/transferts/:id/bon-sortie',
+    titre: 'Bon de sortie d’un transfert',
+    chemin: 'Stock → Transferts → « Bon » (en préparation) ou « Bon de sortie » (reçu)',
+    objectif: 'Imprimer le bon qui part avec le camion : ce qui quitte le magasin source, signé par l’expéditeur et le transporteur.',
+    droits: 'Lecture du module Mouvements.',
+    procedures: [
+      {
+        titre: 'Imprimer le bon de sortie',
+        etapes: ['Relisez l’en-tête et les lignes.', 'Cliquez « Imprimer » (ou enregistrez en PDF) ; « Retour » ramène à la liste.'],
+        resultat: 'Une feuille A4 avec deux signatures : responsable de l’expédition, chauffeur / transporteur.',
+      },
+    ],
+    champs: [...CHAMPS_BON_TRANSFERT, { nom: 'Transporteur', description: 'Qui emporte la marchandise, tel que saisi sur le transfert.' }],
+    regles: REGLES_BON_TRANSFERT,
+    liens: [
+      { route: '/transferts', libelle: 'Transferts' },
+      { route: '/transferts/:id/bon-reception', libelle: 'Bon de réception' },
+    ],
+  },
+  {
+    route: '/transferts/:id/bon-reception',
+    titre: 'Bon de réception d’un transfert',
+    chemin: 'Stock → Transferts → « Bon de réception » (transfert en transit)',
+    objectif:
+      'Imprimer le bon à remplir au déchargement : on y porte ce qu’on compte réellement, avant de constater la réception dans l’application.',
+    droits: 'Lecture du module Mouvements ; le bouton de la liste s’affiche à qui a le droit VALIDER.',
+    procedures: [
+      {
+        titre: 'Recevoir avec le bon',
+        etapes: [
+          'Imprimez le bon ; au déchargement, écrivez dans « Recu (kg) » ce que vous comptez, sans regarder le poids annoncé.',
+          'Signalez tout écart avant de cliquer « Réceptionner » dans la liste des transferts.',
+        ],
+        resultat: 'Une feuille signée par le chauffeur / transporteur et le responsable de la réception.',
+      },
+    ],
+    champs: [
+      ...CHAMPS_BON_TRANSFERT,
+      { nom: "Date d'arrivee", description: 'Le jour où l’arrivée a été constatée ; « — a constater — » tant qu’elle ne l’est pas.', valeurs: 'date' },
+      {
+        nom: 'Recu (kg)',
+        description:
+          'Colonne VOLONTAIREMENT vide, à remplir à la main : c’est en comptant sur place, sans voir le chiffre attendu, qu’on découvre un manque.',
+        valeurs: 'kg',
+      },
+    ],
+    regles: [
+      ...REGLES_BON_TRANSFERT,
+      'Imprimé avant l’expédition, le bon le dit : rien n’est encore parti du magasin source.',
+      'Un écart constaté à l’arrivée se signale avant de réceptionner ; il se régularise ensuite par un inventaire, jamais en retouchant le transfert.',
+    ],
+    liens: [{ route: '/transferts', libelle: 'Transferts (Réceptionner)' }],
   },
 ]

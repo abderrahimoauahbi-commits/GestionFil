@@ -8,9 +8,10 @@
  * description reste dans la fiche de l'écran (`fiches/*.ts`), seule source.
  * `tests/aide.test.ts` refuse un intitulé qui n'existe pas dans la fiche.
  *
- * Les étapes « Plan d'achat » et « Transfert » restent courtes : ces écrans
- * changent en ce moment (moteur de couverture, date de disponibilité des
- * transferts) ; leurs fiches seront réécrites avec eux.
+ * Les étapes « Décider quoi commander » et « Transférer entre magasins » suivent
+ * le moteur de couverture et la date prévue de disponibilité du fil en route
+ * (27/10/2026) ; leurs champs sont décrits dans fiches/planification.ts et
+ * fiches/stock.ts.
  */
 import type { Tutoriel } from './types.ts'
 
@@ -157,14 +158,17 @@ export const TUTORIEL: Tutoriel = {
           route: '/plan-achat',
           acces: 'Menu Planification → Plans d’achat, onglet « À commander ».',
           gestes: [
-            'L’onglet « À commander » liste les références dont le plan n’est plus couvert, la première rupture en tête, puis la date limite de commande.',
-            'Cliquez une ligne pour lire le détail jour par jour.',
-            '« Commander » : la proposition de la référence est recalculée et part dans les lignes à commander, où l’on choisit kilos ou palettes.',
-            'La conversion ouvre un bon de commande en brouillon : rien n’est encore engagé.',
+            'L’onglet « À commander » liste chaque référence du plan avec ce qui la couvre : la première rupture la plus proche en tête, puis la date limite de commande.',
+            'Lisez « Couvert jusqu’au », « 1re rupture », la « Proposition » du moteur et « Avant le » ; la ligne ↳ dit ce qui n’est pas compté (bon en retard, transfert sans date…).',
+            'Cliquez la ligne : le détail montre la courbe du solde, le calcul étape par étape (D, F, sécurité, S(D), besoin théorique, minimum, arrondi) et la chronologie.',
+            '« Commander » : la proposition de la référence est régénérée et s’ouvre, cochée, dans « Lignes à commander ».',
+            'Choisissez « Envoyer vers » (un nouveau bon ou un brouillon du même fournisseur), ajustez kilos, prix, palettes ou bobines, puis « Envoyer au bon de commande ».',
           ],
-          resultat: 'Un bon de commande brouillon existe pour le fournisseur de la référence.',
+          champs: ['Couvert jusqu’au', '1re rupture', 'Proposition', 'Avant le', 'Envoyer vers', 'Qté (kg)', 'Prix / kg', 'Palettes'],
+          resultat:
+            'Un bon de commande BROUILLON existe pour le fournisseur ; la proposition est « Commandée », et la date de besoin D est devenue la livraison prévue de la ligne.',
           erreur:
-            'Croire que la proposition est une commande : c’est un calcul ; la décision reste à la personne qui commande, et le bon doit encore passer le contrôle et la validation.',
+            'Croire que la proposition est une commande : c’est un calcul ; le bon doit encore passer le contrôle et la validation, et la référence reste « plan non couvert » tant qu’il n’est pas validé et daté. Si ce bon est annulé, la proposition passe « Annulée avec le bon » et la régénération suivante en propose une neuve.',
         },
       ],
     },
@@ -323,14 +327,20 @@ export const TUTORIEL: Tutoriel = {
         {
           titre: 'Transférer entre magasins',
           role: 'Magasinier',
-          route: '/transferts',
-          acces: 'Menu Stock → Transferts, bouton « + » (Nouveau transfert).',
+          route: '/transferts/nouveau',
+          acces: 'Menu Stock → Transferts, bouton « + » (Nouveau transfert) ; l’expédition et la réception se font ensuite dans la liste des transferts.',
           gestes: [
-            'Le magasin de départ expédie (bon de sortie), le magasin d’arrivée réceptionne (bon de réception).',
-            'Entre les deux, le fil est « en route » : il compte dans la valeur du stock et dans la couverture.',
+            'Choisissez le magasin source, puis le magasin destinataire ; saisissez la date prévue de disponibilité au destinataire si vous la connaissez.',
+            'Ajoutez les lignes : la référence parmi le stock de la source, le lot, les kilos (ou palettes et bobines, liés) ; « Dispo » dit ce que la source détient. « Enregistrer le transfert ».',
+            'Dans la liste : « Bon » imprime le bon de sortie ; « Expédier » demande la date prévue de disponibilité si elle manque (obligatoire), puis sort la marchandise du magasin source.',
+            'En route, le fil compte dans la valeur du stock, et dans la couverture du plan d’achat à sa date prévue de disponibilité ; « Réviser la date » la déplace tant qu’il roule.',
+            'À l’arrivée : « Bon de réception », comptage, puis « Réceptionner » (droit VALIDER).',
           ],
-          resultat: 'Le stock a changé de magasin ; les deux bons s’impriment depuis le transfert.',
-          erreur: 'Oublier de réceptionner : le fil reste en route et le magasin d’arrivée ne le voit pas.',
+          champs: ['Magasin source', 'Magasin destinataire', 'Disponible au magasin destinataire le', 'Référence', 'Lot', 'Qté (kg)', 'Pal. · bob.', 'Dispo'],
+          resultat:
+            'Le stock a changé de magasin, valorisé au CMUP figé au départ ; les deux bons s’impriment depuis le transfert.',
+          erreur:
+            'Expédier sans date prévue : refusé (« TRF-DATE »), la saisie s’ouvre sous la ligne. Laisser la date dépasser sans la réviser : le fil sort de la couverture du plan d’achat. Oublier de réceptionner : le fil reste en route et le magasin d’arrivée ne le voit pas.',
         },
         {
           titre: 'Charger une machine',

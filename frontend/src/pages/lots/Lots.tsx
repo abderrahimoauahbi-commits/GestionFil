@@ -35,7 +35,7 @@ import { classeNiveauEcart, libelleLot } from '../../lib/lots'
 import { cn } from '../../lib/utils'
 import { ChoixRecherche } from '../../composants/ChoixRecherche'
 import { ActionsLot, BadgeCategorie, BadgeStatut } from './commun'
-import { MODULE, ORIGINES, designationUtile, gereAuKilo, libelleSeuil, lienFiche, messageErreur, nb, signe, useApresDecision, type Compteurs, type Lot } from './modele'
+import { MODULE, MODULE_DECISION, ORIGINES, designationUtile, gereAuKilo, libelleSeuil, lienFiche, messageErreur, nb, signe, useApresDecision, type Compteurs, type Lot } from './modele'
 
 type Vue = 'comptable' | 'projet' | 'restes' | 'a_basculer' | 'dormants' | 'bloques' | 'derive'
 
@@ -204,7 +204,7 @@ export function Lots() {
     </th>
   )
 
-  const peutBasculer = peut(MODULE, 'ECRIRE')
+  const peutBasculer = peut(MODULE_DECISION, 'ECRIRE') // POST /api/lots/basculer : LOTS, ECRIRE
 
   return (
     <div className="flex flex-col gap-3">

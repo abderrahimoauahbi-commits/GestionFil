@@ -196,7 +196,7 @@ function NouvelOf() {
     <div>
       <EnTetePage
         titre="Nouvel ordre de fabrication"
-        description="Il naît PRÉVU : il compte dans le besoin, il ne touche pas le stock."
+        description="Il naît PRÉVU : il oriente la production et les statistiques par qualité, il ne touche pas le stock. Le besoin d’achat vient du plan de production seul."
         actions={
           <div className="flex gap-2">
             <Bouton variante="contour" onClick={() => quitter(() => naviguer('/ordres-fabrication'))}>
@@ -389,7 +389,7 @@ function DocumentOf({ id }: { id: string }) {
                 onClick={() =>
                   confirmation.demander({
                     titre: `Clôturer l’OF ${of.numero} ?`,
-                    description: 'La consommation de l’OF est arrêtée et son en-tête figé. Il ne compte plus dans le besoin.',
+                    description: 'La consommation de l’OF est arrêtée et son en-tête figé. Il n’est plus comparé au plan de production (C64) ; son bilan reste dans les statistiques par qualité.',
                     libelleConfirmer: 'Clôturer',
                     action: () => cycle.mutate('CLOTURE'),
                   })
@@ -406,7 +406,7 @@ function DocumentOf({ id }: { id: string }) {
                 onClick={() =>
                   confirmation.demander({
                     titre: `Annuler l’OF ${of.numero} ?`,
-                    description: 'L’OF sort du besoin et des statistiques par qualité. Ce qui a été consommé reste dans les mouvements et les constats.',
+                    description: 'L’OF sort des statistiques par qualité et n’est plus comparé au plan de production (C64). Ce qui a été consommé reste dans les mouvements et les constats.',
                     libelleConfirmer: 'Annuler l’OF',
                     destructif: true,
                     action: () => cycle.mutate('ANNULE'),

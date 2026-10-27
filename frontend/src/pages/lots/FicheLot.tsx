@@ -30,6 +30,7 @@ import { ConditionnementLot, type MesureConditionnement } from './Conditionnemen
 import {
   EVENEMENTS,
   MODULE,
+  MODULE_DECISION,
   ORIGINES,
   TYPES_DEMANDE,
   designationUtile,
@@ -165,7 +166,7 @@ export function FicheLot() {
   }
 
   const { lot, magasins, machines, evenements } = q.data
-  const peutBasculer = peut(MODULE, 'ECRIRE')
+  const peutBasculer = peut(MODULE_DECISION, 'ECRIRE') // POST /api/lots/basculer : LOTS, ECRIRE
   const auKilo = gereAuKilo(lot)
   const ecartPoids =
     lot.poids_reel_moyen_bobine_kg != null && lot.poids_catalogue_bobine_kg

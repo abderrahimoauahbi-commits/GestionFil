@@ -91,31 +91,55 @@ export const EXEMPLES: Record<string, Exemple[]> = {
   /* --------------------------------------------------------- Planification */
   '/plan-achat': [
     {
-      titre: 'PP FRZ-2900 Dtex-Grey 10575-Hs',
-      situation: 'HASIRCI, délai 65 jours, couverture 60 jours, aucun stock, aucun bon en cours.',
+      titre: 'la première proposition du moteur, pas à pas',
+      situation:
+        'Aujourd’hui 01/01/2026. Disponible 2 000 kg ; plan 100 kg par jour jusqu’au 30/06/2026 ; un bon validé de 800 kg livré le 25/01. Délai du fournisseur 10 jours, couverture d’une commande 30 jours, sécurité 5 jours ; ni minimum ni multiple.',
       calcul: [
-        ['Stock + machine + bons à l’heure', '0 kg'],
-        ['− Demande pendant le délai', '6 919 kg'],
-        ['= Stock projeté à l’arrivée', '−6 919 → compté 0'],
-        ['Sorties de la couverture', '6 703 kg'],
-        ['+ Sécurité', '3 351 kg'],
-        ['= À commander', '10 054 kg (14 palettes)'],
-        ['Montant', '10 054 × 2,670 USD = 26 844 USD = 244 634 MAD'],
+        ['Sécurité', '5 j × 100 kg/j = 500 kg'],
+        ['Le solde passe sous la sécurité', 'fin du 16/01 : 400 kg < 500 kg'],
+        ['Aujourd’hui + délai', '11/01'],
+        ['D = le plus tard des deux', '16/01 (motif « sécurité »)'],
+        ['F = D + 30 j, exclue', '15/02 : fenêtre [16/01, 15/02[, dernier jour couvert 14/02'],
+        ['Plan sur la fenêtre', '30 j × 100 = 3 000 kg'],
+        ['+ Sécurité', '500 kg'],
+        ['− S(D), solde au début du 16/01', '500 kg'],
+        ['− Arrivages après D dans la fenêtre', '800 kg (le 25/01)'],
+        ['= Besoin théorique', '2 200 kg (jour déterminant : 14/02)'],
+        ['Quantité proposée', '2 200 kg'],
+        ['À commander avant le', 'D − délai = 06/01 → TIER 2 (dans les 7 jours)'],
       ],
       conclusion:
-        'TIER 1 (rupture), mono-source : « Commander et qualifier une seconde source ». Les 6 919 kg consommés avant l’arrivée ne sont pas couverts.',
+        'Avec un minimum de commande de 2 500 kg et un multiple de 1 000 kg, la proposition monte à 3 000 kg. Avec l’arrondi à la palette de 450 kg (5 kg × 90 bobines), elle devient 2 250 kg = 5 palettes, et les 50 kg ajoutés s’affichent en complément de palette. Un arrivage le 15/02 (jour F) ne réduirait pas le besoin ; le 14/02 (F − 1), il compterait.',
+    },
+    {
+      titre: 'quand la rupture tombe avant la première arrivée possible',
+      situation: 'Même référence, mais 300 kg seulement aujourd’hui (01/01/2026) et aucun arrivage.',
+      calcul: [
+        ['Première rupture', '04/01 (couvert jusqu’au 03/01)'],
+        ['D = aujourd’hui + délai', '11/01 (motif « délai »)'],
+        ['S(D)', '0 kg : jamais négatif'],
+        ['Besoin théorique', '500 + 3 000 − 0 = 3 500 kg'],
+        ['Plan non couvert du 04/01 au 10/01', '7 × 100 = 700 kg, perdus'],
+        ['À commander avant le', '01/01, aujourd’hui → TIER 1'],
+      ],
+      conclusion:
+        'Le déficit d’avant D n’est ni reporté ni rattrapé : la commande couvre la fenêtre [11/01, 10/02[ et sa sécurité, pas les 700 kg déjà perdus. Pour eux, il reste l’arbitrage : un équivalent en stock, ou décaler la production.',
     },
   ],
   '/stock': [
     {
-      titre: 'le projeté, pas le physique',
+      titre: 'lire une ligne du stock projeté',
+      situation:
+        'Aujourd’hui 01/01/2026. Disponible 2 000 kg ; plan 100 kg par jour jusqu’au 30/06/2026 (18 100 kg) ; un bon validé de 800 kg livré le 25/01.',
       calcul: [
-        ['Physique', '1 200 kg'],
-        ['+ En-cours', '2 000 kg'],
-        ['− Besoins de l’horizon', '4 500 kg'],
-        ['= Projeté', '−1 300 kg → Rupture'],
+        ['Couvert jusqu’au', '20/01/2026 · 20 j (les 2 000 kg servent 20 jours)'],
+        ['État', 'Plan non couvert — rupture le 21/01'],
+        ['Arrivages comptés', '800 kg (le 25/01 : la couverture reprend 8 jours)'],
+        ['Plan non couvert', '18 100 − 2 000 − 800 = 15 300 kg sur l’horizon'],
+        ['À commander', '2 200 kg · avant le 06/01'],
       ],
-      conclusion: 'Une couverture d’un mois pour un délai de deux mois est le vrai signal.',
+      conclusion:
+        'L’état se lit sans la commande : la référence reste « plan non couvert » tant que le bon des 2 200 kg n’est pas validé et daté. Ce sont les chiffres de l’onglet « À commander » du plan d’achat.',
     },
   ],
 
@@ -186,20 +210,26 @@ export const EXEMPLES: Record<string, Exemple[]> = {
   ],
   '/transferts': [
     {
-      titre: 'du fil en route',
-      situation: '120,5 kg de Morocco vers Polyfashions.',
+      titre: 'du fil en route, à sa date',
+      situation:
+        '120,5 kg partent de Morocco vers Polyfashions le 27/10, attendus le 30/10 (« Disponible au magasin destinataire le »).',
       calcul: [
-        ['À l’expédition', 'Morocco −120,5 kg, en route +120,5 kg'],
-        ['À la réception', 'en route −120,5 kg, Polyfashions +120,5 kg'],
+        ['À l’expédition', 'Morocco −120,5 kg ; en route +120,5 kg, comptés dans la valeur du stock'],
+        ['Plan d’achat', 'les 120,5 kg arrivent dans la couverture le 30/10'],
+        ['Le 02/11, toujours en route', '« en retard de 3 j » : hors couverture'],
+        ['« Réviser la date » au 05/11', 'comptés de nouveau, le 05/11'],
+        ['À la réception', 'en route −120,5 kg ; Polyfashions +120,5 kg au CMUP figé au départ'],
       ],
-      conclusion: 'En route, le fil compte dans la valeur et dans les besoins.',
+      conclusion:
+        'Sans date (expédié avant la règle du 27/10/2026), le transfert ne couvre rien et le contrôle C66 le signale jusqu’à ce qu’une date soit saisie.',
     },
   ],
   '/transferts/nouveau': [
     {
       titre: 'le disponible du magasin source',
       situation: 'Morocco porte 300 kg de la référence ; on tente d’en transférer 350.',
-      conclusion: 'Refusé : le disponible est celui du seul magasin source, jamais la somme des magasins.',
+      conclusion:
+        '« Dispo » passe en rouge (« dépassé ») et « Enregistrer le transfert » reste grisé : le disponible est celui du seul magasin source, jamais la somme des magasins.',
     },
   ],
   '/machines': [
@@ -304,9 +334,9 @@ export const EXEMPLES: Record<string, Exemple[]> = {
   ],
   '/tableau-de-bord': [
     {
-      titre: 'une tuile mène à sa liste',
-      situation: 'La tuile « Réceptions à contrôler » affiche 3.',
-      conclusion: 'Un clic ouvre ces 3 réceptions, locales et import comptées ensemble.',
+      titre: 'une file mène à sa liste',
+      situation: 'Sous « À traiter », la file « Réceptions à contrôler » affiche 3.',
+      conclusion: 'Un clic ouvre la liste des réceptions, où ces 3 attendent le contrôle d’un autre compte.',
     },
   ],
 

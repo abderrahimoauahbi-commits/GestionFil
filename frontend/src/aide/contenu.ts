@@ -12,7 +12,6 @@
 import { EXEMPLES } from './exemples.ts'
 import { sujetDans } from './indice.ts'
 import type { Sujet } from './types.ts'
-import { FICHES_RESERVEES } from './fiches/reserve.ts'
 import { FICHES_CATALOGUE } from './fiches/catalogue.ts'
 import { FICHES_PLANIFICATION } from './fiches/planification.ts'
 import { FICHES_ACHATS } from './fiches/achats.ts'
@@ -31,7 +30,6 @@ export const SUJETS: Sujet[] = [
   ...FICHES_STOCK,
   ...FICHES_MACHINES,
   ...FICHES_PILOTAGE,
-  ...FICHES_RESERVEES,
 ]
 
 // LES EXEMPLES CHIFFRÉS (13/10/2026) s'attachent à la fiche de leur écran.

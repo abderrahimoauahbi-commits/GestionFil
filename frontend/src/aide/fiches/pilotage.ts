@@ -7,7 +7,8 @@
  *
  * Réécrites le 27/10/2026 d'après le code des écrans (Accueil, Statistiques,
  * Valorisation, Rapports, Audit, Contrôles, Configuration, Utilisateurs,
- * Droits, Rôles, États, Télécharger, Assistant). La fiche « /parametres » est
+ * Droits, Rôles, États, Télécharger, Assistant). Tableau de bord, état des stocks
+ * imprimé et plan d’achat imprimé : écrits sur le moteur de couverture (27/10/2026). La fiche « /parametres » est
  * retirée : l'adresse redirige vers /configuration, qui a sa propre fiche.
  */
 import type { Sujet } from '../types.ts'
@@ -91,6 +92,230 @@ export const FICHES_PILOTAGE: Sujet[] = [
     liens: [
       { route: '/tableau-de-bord', libelle: 'Tableau de bord' },
       { route: '/configuration?section=devises', libelle: 'Devises et taux' },
+    ],
+  },
+
+  /* ======================================================================= */
+  /* Tableau de bord — la vue d’ensemble                                       */
+  /* ======================================================================= */
+  {
+    route: '/tableau-de-bord',
+    titre: 'Tableau de bord — vue d’ensemble',
+    chemin: 'Tableaux de bord → Tableau de bord',
+    objectif:
+      'Voir d’un coup d’œil les chiffres qui comptent, ce qui attend votre décision, le risque de rupture mois par mois et les décisions d’achat les plus urgentes ; chaque bloc mène à l’écran où l’on agit.',
+    droits:
+      'Lecture du module Cockpit. Les montants n’apparaissent qu’à qui voit la valeur du stock ; une file « À traiter » n’apparaît que si votre rôle peut voir son compteur ET agir dessus ; le flux de matière est réservé aux rôles qui lisent les mouvements.',
+    procedures: [
+      {
+        titre: 'Lire le tableau de bord',
+        etapes: [
+          'Les onglets mènent aux autres pages : Vue d’ensemble, Risques et files, Analyse, Opportunités, Matière.',
+          'Un bandeau rouge « Les alertes reposent sur des besoins périmés » dit que le plan, une recette ou une densité a changé depuis le dernier calcul MRP : relancez-le avant de décider.',
+          'Les chiffres clés en tête ; dessous, le flux de matière, ce qui attend une décision, le risque de rupture mois par mois et la santé du catalogue, puis les décisions les plus urgentes.',
+          'Cliquez une file de « À traiter », ou le lien d’un bloc, pour ouvrir la liste qu’il compte.',
+        ],
+        resultat: 'Vous êtes sur l’écran où se traite ce que le tableau de bord signale.',
+      },
+    ],
+    champs: [
+      {
+        nom: 'Valeur du stock',
+        description: 'La valeur du stock au CMUP, fil en route compris, avec le nombre de références ; la courbe montre la valeur des entrées des derniers mois.',
+        valeurs: 'MAD',
+      },
+      {
+        nom: 'Engagé chez les fournisseurs',
+        description: 'Le montant des bons de commande validés, envoyés ou livrés partiellement, et leur nombre.',
+        valeurs: 'MAD',
+      },
+      {
+        nom: 'Reste à engager',
+        description:
+          'Le montant des propositions d’achat ouvertes (proposées, en révision, validées) et le nombre de références à commander : ce que le plan d’achat propose et qui n’est pas encore sur un bon.',
+        valeurs: 'MAD',
+      },
+      {
+        nom: 'Plan non couvert',
+        description:
+          'Le nombre de références dont une rupture est prévue sur l’horizon du plan, sur les références suivies par le moteur de couverture ; dessous, celles « à commander aujourd’hui » (date limite atteinte) et celles « sous la sécurité ». Les barres : les références au plan non couvert, mois par mois. Dans les graphiques, la même couleur rouge.',
+      },
+      {
+        nom: 'Économies identifiées',
+        description: 'L’économie annuelle possible en passant, à qualité égale, au fournisseur le moins cher d’un groupe d’équivalence ; le détail est à la page Opportunités.',
+        valeurs: 'MAD/an',
+      },
+      {
+        nom: 'À traiter',
+        description:
+          'Les files qui attendent une décision de VOTRE rôle — propositions à arbitrer, bons à valider ou à envoyer, livraisons en retard, réceptions à contrôler ou à régulariser, lignes non conformes, lots à basculer, dormants, bloqués ou en dérive, autorisations à donner, contrôles bloquants —, les plus graves d’abord. Un clic ouvre la liste.',
+      },
+      {
+        nom: 'Risque de rupture, mois par mois',
+        description:
+          'Combien de références, chaque mois de l’horizon, ont un plan non couvert (rouge) ou passent sous la sécurité (orange), au moteur de couverture.',
+      },
+      {
+        nom: 'Santé du catalogue',
+        description: 'Les références suivies réparties par état du moteur : Couvert, Sous la sécurité, Plan non couvert.',
+      },
+      {
+        nom: 'Les décisions les plus urgentes',
+        description:
+          'Les références en tension, triées par la marge qui reste pour commander à temps. Le lien mène au plan d’achat.',
+      },
+      { nom: 'Référence', description: 'La référence, sa classe ABC et son fournisseur.' },
+      {
+        nom: 'Sourcing',
+        description: '« mono-source » : aucun équivalent actif chez un autre fournisseur ; « multi » sinon.',
+      },
+      { nom: 'Délai', description: 'Le délai de livraison retenu par le moteur (fournisseur, sinon P_DelaiDefaut).', valeurs: 'jours' },
+      {
+        nom: 'À risque dès',
+        description: 'Le premier mois où la référence n’est plus couverte, ou passe sous la sécurité.',
+      },
+      {
+        nom: 'Équivalent',
+        description: 'Le stock disponible d’une référence équivalente (au survol, laquelle) : une bascule possible. « aucun » sinon.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Marge',
+        description:
+          'Les jours qui restent avant la date limite de commande de la première proposition du moteur ; sans proposition, avant le premier passage sous la sécurité, délai fournisseur déduit. Négative (rouge) : la date est déjà dépassée — il reste à arbitrer, substituer ou décaler la production. Orange sous 15 jours.',
+        valeurs: 'jours',
+      },
+    ],
+    regles: [
+      'Chaque bloc dit d’où vient son chiffre et mène à l’écran où l’on agit : on vient ici pour voir, on va là-bas pour faire.',
+      'Plan non couvert, sous la sécurité, couvert, à commander aujourd’hui : ce sont les états du moteur de couverture, les mêmes qu’au plan d’achat et au stock projeté.',
+      '« Réceptions à contrôler » compte les réceptions soumises au contrôle ; un clic ouvre la liste des réceptions.',
+      'Une panne du serveur s’affiche (« Chiffres clés indisponibles ») : un compteur absent n’est jamais montré comme un zéro.',
+    ],
+    liens: [
+      { route: '/tableau-de-bord/situation', libelle: 'Risques et files' },
+      { route: '/plan-achat', libelle: 'Plan d’achat' },
+      { route: '/stock', libelle: 'Stock projeté et alertes' },
+      { route: '/controles', libelle: 'Contrôles' },
+    ],
+  },
+
+  /* ======================================================================= */
+  /* Tableau de bord — les pages : risques et files, analyse, opportunités,    */
+  /* matière                                                                   */
+  /* ======================================================================= */
+  {
+    route: '/tableau-de-bord/:vue',
+    titre: 'Tableau de bord — risques, analyse, opportunités, matière',
+    chemin: 'Tableaux de bord → Risques et files · Analyse · Opportunités · Matière',
+    objectif:
+      'Le détail du tableau de bord, une page par domaine : ce qui attend une décision et ce qui menace le plan (Risques et files), où va l’argent (Analyse), ce qu’on pourrait gagner (Opportunités), où est la matière (Matière).',
+    droits:
+      'Lecture du module Cockpit. Les montants n’apparaissent qu’à qui voit la valeur du stock ; une file n’apparaît que si votre rôle peut agir dessus.',
+    procedures: [
+      {
+        titre: 'Risques et files',
+        etapes: [
+          'Les chiffres clés : Plan non couvert, À commander aujourd’hui, À commander, Budget à engager, et le sourcing des références en risque.',
+          '« À traiter — Achats / Stock / Qualité » : les files de votre rôle, par domaine ; un clic ouvre la liste.',
+          '« Références en risque, mois par mois » : combien de références passent sous la sécurité ou ont un plan non couvert, chaque mois.',
+          '« Mur de risques » : une ligne par référence en tension, une case par mois — survolez une case pour le plan du mois, les arrivages, le solde de fin de mois et la sécurité.',
+          '« Références en alerte, les plus urgentes d’abord » : la liste ; le lien mène au stock projeté.',
+        ],
+      },
+      {
+        titre: 'Analyse, Opportunités, Matière',
+        etapes: [
+          'Analyse : où va l’argent, comment tourne le stock, ce que coûte la matière.',
+          'Opportunités : les économies possibles à qualité égale dans un groupe d’équivalence, et les dépendances à un seul fournisseur.',
+          'Matière : où est le stock par catégorie et par famille, ce qui entre et sort, ce que consomment les qualités.',
+        ],
+      },
+    ],
+    champs: [
+      {
+        nom: 'Plan non couvert',
+        description:
+          'Le nombre de références suivies dont une rupture est prévue sur l’horizon du plan (moteur de couverture) ; les barres, mois par mois. Dans les graphiques et le mur, la couleur rouge.',
+      },
+      {
+        nom: 'À commander aujourd’hui',
+        description: 'Les références dont la date limite de commande est atteinte ou dépassée ; dessous, le nombre de références sous la sécurité sans rupture.',
+      },
+      {
+        nom: 'À commander',
+        description: 'Tuile : le nombre de propositions d’achat ouvertes, et celles à arbitrer.',
+      },
+      {
+        nom: 'À commander (kg)',
+        description: 'Liste des alertes : la quantité de la première proposition du moteur de couverture.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Mono-source à risque',
+        description: 'Parmi les références en risque, celles qui n’ont aucun équivalent chez un autre fournisseur.',
+      },
+      {
+        nom: 'Mur de risques',
+        description:
+          'Une ligne par référence en tension (60 au plus), triée par marge de décision : une case par mois de l’horizon — rouge, plan non couvert ; orange, sous la sécurité ; vert pâle, couvert.',
+      },
+      { nom: 'Référence', description: 'La référence (avec sa classe ABC et son fournisseur dans le mur).' },
+      { nom: 'Sourcing', description: '« mono » : aucun équivalent chez un autre fournisseur ; « multi » sinon.' },
+      { nom: 'Délai', description: 'Le délai de livraison retenu (fournisseur, sinon P_DelaiDefaut).', valeurs: 'jours' },
+      {
+        nom: 'Équivalent',
+        description: 'Le stock disponible d’une référence équivalente (au survol, laquelle) ; « aucun » sinon.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Marge',
+        description:
+          'Les jours qui restent avant la date limite de commande de la première proposition ; sans proposition, avant le premier passage sous la sécurité, délai déduit. Négative : la date est dépassée.',
+        valeurs: 'jours',
+      },
+      { nom: 'Catégorie', description: 'La catégorie de matière de la référence.' },
+      { nom: 'Couleur', description: 'La couleur de la référence.' },
+      { nom: 'Fournisseur', description: 'Le fournisseur de la fiche article.' },
+      { nom: 'Stock (kg)', description: 'Le stock physique net de la référence.', valeurs: 'kg' },
+      {
+        nom: 'Plan / mois',
+        description: 'Le plan de l’horizon ramené à un mois de 30 jours, tel que le moteur de couverture le consomme.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Couv. (j)',
+        description: 'Les jours couverts au moteur : d’aujourd’hui à la veille de la première rupture ; « horizon » sans rupture.',
+        valeurs: 'jours',
+      },
+      { nom: 'Délai (j)', description: 'Le délai de livraison du fournisseur.', valeurs: 'jours' },
+      {
+        nom: 'Statut',
+        description: 'L’état au moteur de couverture.',
+        valeurs: 'Plan non couvert · Sous la sécurité · Couvert',
+      },
+      {
+        nom: 'Couverture',
+        description: 'Dépendances à un seul fournisseur : les jours couverts au moteur ; « horizon » sans rupture, en rouge sous 30 jours.',
+        valeurs: 'jours',
+      },
+      { nom: 'Fournisseur actuel', description: 'Opportunités : le fournisseur de la fiche.' },
+      { nom: 'Prix actuel', description: 'Opportunités : son prix au kilo, en MAD.', valeurs: 'MAD/kg' },
+      { nom: 'Alternative', description: 'Opportunités : le fournisseur le moins cher du groupe d’équivalence.' },
+      { nom: 'Meilleur prix', description: 'Opportunités : le prix au kilo de l’alternative, en MAD.', valeurs: 'MAD/kg' },
+      { nom: 'Écart', description: 'Opportunités : la baisse de prix en %.', valeurs: '%' },
+      { nom: 'Économie / an', description: 'Opportunités : l’économie annuelle à qualité égale.', valeurs: 'MAD' },
+    ],
+    regles: [
+      'Une adresse inconnue (/tableau-de-bord/…) ramène à la vue d’ensemble.',
+      'Plan non couvert, sous la sécurité, couvert : les états du moteur de couverture, les mêmes partout. Le mur de risques groupe par mois les jours que le moteur projette, arrivages comptés à leur date.',
+      'Un bandeau « Anomalies bloquantes » apparaît quand un contrôle bloquant est en anomalie : il se traite avant tout le reste.',
+    ],
+    liens: [
+      { route: '/tableau-de-bord', libelle: 'Vue d’ensemble' },
+      { route: '/plan-achat', libelle: 'Plan d’achat' },
+      { route: '/stock', libelle: 'Stock projeté et alertes' },
+      { route: '/equivalences', libelle: 'Équivalences' },
     ],
   },
 
@@ -526,7 +751,8 @@ export const FICHES_PILOTAGE: Sujet[] = [
     route: '/controles',
     titre: 'Contrôles de cohérence',
     chemin: 'Analyses → Contrôles de cohérence',
-    objectif: 'Voir ce que la base vérifie sur elle-même (contrôles C01 à C65), lesquels sont en anomalie, et les lignes fautives de chacun.',
+    objectif:
+      'Voir ce que la base et le moteur de couverture vérifient (contrôles C01 à C66), lesquels sont en anomalie, et les lignes fautives de chacun.',
     droits: 'Lecture du module Cockpit.',
     procedures: [
       {
@@ -550,18 +776,22 @@ export const FICHES_PILOTAGE: Sujet[] = [
       {
         nom: 'Critiques',
         description:
-          'Une situation métier qui demande une décision, pas une correction technique (ex. C05 stock projeté négatif, C10 écart de pesée sans dérogation, C38 consommation machine négative, C44 deux inventaires en cours, C45).',
+          'Une situation métier qui demande une décision, pas une correction technique (ex. C05 plan non couvert sur l’horizon, calculé par le moteur de couverture ; C10 écart de pesée sans dérogation ; C38 consommation machine négative ; C44 deux inventaires en cours ; C45).',
       },
       {
         nom: 'Attention',
-        description: 'Un signal à examiner, qui ne bloque rien : il peut être normal ou annoncer un oubli (ex. C43 colisage incohérent, C46 à C65).',
+        description:
+          'Un signal à examiner, qui ne bloque rien : il peut être normal ou annoncer un oubli (ex. C25 stock mobilisable face à un équivalent en tension, C28 commande en retard, C43 colisage incohérent, C46 à C65, C66 transfert en route sans date prévue de disponibilité).',
       },
     ],
     regles: [
       'L’écran ne juge pas : la criticité et le décompte viennent de la base. Tri : par niveau, puis les anomalies avant les contrôles au vert, puis par code.',
       'Les contrôles se recalculent à chaque lecture (et toutes les 5 minutes) : ils n’ont pas de mémoire, rien ne dit depuis quand une anomalie dure.',
       'C11 compare le cache du stock au grand livre des mouvements, qui fait foi : il doit rester à zéro, et se traite avant tout le reste.',
-      'Les contrôles C46 à C65 sont des signaux : ils montrent, ils n’empêchent jamais une saisie.',
+      'Les contrôles C46 à C66 sont des signaux : ils montrent, ils n’empêchent jamais une saisie.',
+      'C05 (« Plan non couvert sur l’horizon ») et C25 (« Stock mobilisable face à un équivalent en tension ») sont calculés par le moteur de couverture, la même source que le plan d’achat et le stock projeté, et servis sous leurs codes à côté des autres. C27 et C49 sont retirés depuis le 27/10/2026 : le moteur n’a ni seuils de jours ni prolongation du plan.',
+      'C28 (« Commande en retard : hors couverture tant qu’aucune nouvelle date n’existe ») compte les lignes de bon validé dont la date de livraison prévue — celle de la ligne, sinon de l’en-tête — est dépassée : le moteur ne les compte plus. Une nouvelle date sur le bon les fait revenir.',
+      'C66 (« Transfert en route sans date prevue de disponibilite (hors couverture) », ATTENTION) : un transfert expédié avant que la date ne devienne obligatoire n’en a pas ; le moteur le liste « sans date » et ne le compte pas, jusqu’à ce qu’une date soit saisie (« Réviser la date » dans la liste des transferts).',
       'C64 signale un OF qui va au-delà du plan de production pour une qualité et un mois : le besoin d’achat vient du plan seul, l’OF n’y ajoute rien.',
       'C55 signale un document non validé daté d’une période close ; C65 un mouvement daté de la période de comptage d’un inventaire clôturé.',
     ],
@@ -615,8 +845,20 @@ export const FICHES_PILOTAGE: Sujet[] = [
       },
     ],
     champs: [
-      { nom: 'Seuil d’alerte (statut ATTENTION)', description: 'En dessous de ce nombre de jours de couverture, une référence passe en ATTENTION.', valeurs: 'jours', defaut: '90' },
-      { nom: 'Seuil critique (statut CRITIQUE)', description: 'En dessous de ce nombre de jours de couverture, une référence passe en CRITIQUE.', valeurs: 'jours', defaut: '60' },
+      {
+        nom: 'Seuil d’alerte (statut ATTENTION)',
+        description:
+          'La valeur recopiée par défaut dans le seuil d’alerte (jours) d’une nouvelle qualité ou d’un nouveau plan de production. Depuis le 27/10/2026, l’état d’une référence vient du moteur de couverture (plan non couvert, sous la sécurité, couvert), sans seuil de jours : ce réglage ne classe plus aucune référence.',
+        valeurs: 'jours',
+        defaut: '90',
+      },
+      {
+        nom: 'Seuil critique (statut CRITIQUE)',
+        description:
+          'La valeur recopiée par défaut dans le seuil critique (jours) d’une nouvelle qualité ou d’un nouveau plan de production. Comme le seuil d’alerte, il ne classe plus aucune référence depuis que le moteur de couverture donne l’état.',
+        valeurs: 'jours',
+        defaut: '60',
+      },
       {
         nom: 'Couverture minimale cible',
         description:
@@ -626,7 +868,13 @@ export const FICHES_PILOTAGE: Sujet[] = [
       },
       { nom: 'Marge de sécurité sur couverture', description: 'La majoration appliquée à la couverture minimale quand la référence n’en déclare pas.', valeurs: '%', defaut: '20' },
       { nom: 'Délai fournisseur par défaut', description: 'Le délai retenu quand le fournisseur n’en déclare aucun.', valeurs: 'jours', defaut: '60' },
-      { nom: 'Marge en jours sur date de besoin', description: 'La marge gardée avant la date de besoin pour placer une commande.', valeurs: 'jours', defaut: '30' },
+      {
+        nom: 'Marge en jours sur date de besoin',
+        description:
+          'La couverture d’une commande quand le fournisseur n’en déclare pas : la fenêtre [D, F[ d’une proposition du moteur de couverture dure ce nombre de jours pleins (F = D + couverture).',
+        valeurs: 'jours',
+        defaut: '30',
+      },
       { nom: 'Taux de perte production', description: 'La perte de matière qui majore chaque besoin calculé par le MRP.', valeurs: '%', defaut: '2' },
       {
         nom: 'Tolérance sur la somme des % d’une recette',
@@ -637,7 +885,8 @@ export const FICHES_PILOTAGE: Sujet[] = [
       {
         nom: 'Stock de sécurité classe A',
         alias: ['Stock de sécurité classe B', 'Stock de sécurité classe C'],
-        description: 'Le matelas gardé en plus, en jours de consommation, selon la classe ABC de la référence. Il entre dans le stock minimum.',
+        description:
+          'Les jours de sécurité du moteur de couverture selon la classe ABC de la référence : sécurité = ces jours × consommation moyenne prévue du plan sur la fenêtre de la commande. Une référence sans classe prend la plus longue des trois.',
         valeurs: 'jours',
         defaut: '30',
       },
@@ -709,19 +958,22 @@ export const FICHES_PILOTAGE: Sujet[] = [
       },
       {
         nom: 'Retard au-delà duquel une commande ne compte plus',
-        description: 'Au-delà de ce retard, une ligne de bon cesse de compter comme attendue.',
+        description:
+          'Sans effet depuis le 27/10/2026 (gardé, en attente de décision) : le moteur de couverture ne compte jamais une ligne de bon dont la date de livraison prévue est dépassée, dès le premier jour (contrôle C28).',
         valeurs: 'jours',
         defaut: '5',
       },
       {
         nom: 'Compter les commandes en retard dans l’en-cours',
-        description: '1 : une ligne de bon en retard reste comptée dans l’en-cours (le retard se relance) ; 0 : elle en sort et le besoin est reproposé.',
+        description:
+          'Sans effet depuis le 27/10/2026 (gardé, en attente de décision) : une ligne de bon en retard est toujours hors couverture, jusqu’à ce qu’une nouvelle date existe.',
         valeurs: '0 ou 1',
         defaut: '1',
       },
       {
         nom: 'Prolonger la demande au-delà du plan',
-        description: '1 : au-delà du dernier mois du plan en service, la demande se prolonge à la moyenne mensuelle du plan ; 0 : elle est nulle.',
+        description:
+          'Sans effet depuis le 27/10/2026 (gardé, en attente de décision) : le moteur de couverture s’arrête à la fin de l’horizon du plan en service et ne prolonge pas la demande.',
         valeurs: '0 ou 1',
         defaut: '1',
       },
@@ -739,7 +991,8 @@ export const FICHES_PILOTAGE: Sujet[] = [
       },
       {
         nom: 'Couverture au-delà de laquelle un stock bas est un écart',
-        description: 'Une référence sous son minimum en magasin mais au-delà de cette couverture est signalée en écart (contrôle C27).',
+        description:
+          'Sans effet depuis le 27/10/2026 (gardé, en attente de décision) : il réglait le contrôle C27, retiré avec l’ancien calcul du stock projeté.',
         valeurs: 'jours',
         defaut: '60',
       },
@@ -1162,6 +1415,7 @@ export const FICHES_PILOTAGE: Sujet[] = [
     ],
     liens: [
       { route: '/etats/stock', libelle: 'État des stocks' },
+      { route: '/etats/plan-achat', libelle: 'Plan d’achat à engager' },
       { route: '/etats/comptage', libelle: 'Feuille de comptage' },
       { route: '/etats/lots', libelle: 'États des lots' },
       { route: '/etats/mouvements', libelle: 'Grand livre des mouvements' },
@@ -1173,13 +1427,14 @@ export const FICHES_PILOTAGE: Sujet[] = [
     route: '/etats/stock',
     titre: 'État des stocks (imprimé)',
     chemin: 'États imprimables → Stock → État des stocks',
-    objectif: 'Imprimer la photo du jour : par référence, le stock physique, le stock projeté, le minimum, la couverture et le statut.',
-    droits: 'Lecture du module Stock. La colonne Valeur MAD n’apparaît qu’à qui voit la valeur du stock.',
+    objectif:
+      'Imprimer la photo du jour : par référence, le stock physique, le disponible compté par le moteur de couverture, jusqu’où le plan est couvert, ce qui ne l’est pas, l’état et la valeur.',
+    droits: 'Lecture du module Stock. La colonne Valeur MAD et la valeur totale n’apparaissent qu’à qui voit la valeur du stock.',
     procedures: [
       {
         titre: 'Imprimer l’état des stocks',
         etapes: [
-          'Choisissez au besoin un statut dans « Restreindre à un statut ».',
+          'Choisissez au besoin un état dans « Restreindre à un état » (ce choix ne s’imprime pas ; le sous-titre de la feuille le rappelle).',
           'Relisez l’en-tête : le nombre de références et, si vous la voyez, la valeur totale.',
           'Cliquez « Imprimer ».',
         ],
@@ -1187,19 +1442,87 @@ export const FICHES_PILOTAGE: Sujet[] = [
     ],
     champs: [
       {
-        nom: 'Restreindre à un statut',
-        description: 'Ne garder que les références d’un statut ; le sous-titre de la feuille le rappelle.',
-        valeurs: 'Toutes les références · Ruptures · Critiques · Attention · Au vert',
+        nom: 'Restreindre à un état',
+        description: 'Ne garder que les références d’un état du moteur de couverture ; le sous-titre de la feuille le rappelle.',
+        valeurs: 'Toutes les références · Plan non couvert · Sous la sécurité · Couvert',
         defaut: 'Toutes les références',
       },
-      { nom: 'Physique kg', description: 'Le stock physique net de la référence.', valeurs: 'kg' },
-      { nom: 'Projeté kg', description: 'Le stock projeté, tel que le calcule l’écran Stock projeté et alertes.', valeurs: 'kg' },
-      { nom: 'Minimum kg', description: 'Le stock minimum de la référence.', valeurs: 'kg' },
-      { nom: 'Couv. j', description: 'La couverture en jours de consommation.', valeurs: 'jours' },
-      { nom: 'Statut', description: 'RUPTURE, CRITIQUE, ATTENTION ou OK, selon la couverture et les seuils réglés dans Paramètres.' },
-      { nom: 'Valeur MAD', description: 'La valeur du stock de la référence.', valeurs: 'MAD' },
+      { nom: 'Référence', description: 'Le code et la désignation.' },
+      { nom: 'Fournisseur', description: 'Le fournisseur de la fiche article.' },
+      { nom: 'Physique kg', description: 'Le stock physique net de la référence, dans les magasins.', valeurs: 'kg' },
+      {
+        nom: 'Disponible kg',
+        description:
+          'Ce que le moteur de couverture compte aujourd’hui : magasins comptés au plan (hors quarantaine, lots bloqués exclus) + fil sur les métiers au dernier constat.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Couvert jusqu’au',
+        description: 'La veille de la première rupture du plan ; « tout l’horizon » sans rupture ; « rupture » si le plan n’est déjà plus couvert aujourd’hui.',
+      },
+      { nom: 'Non couvert kg', description: 'Les kilos du plan que le solde ne couvre pas sur l’horizon (ni reportés ni rattrapés).', valeurs: 'kg' },
+      {
+        nom: 'État',
+        description:
+          'L’état au moteur de couverture : Plan non couvert (une rupture est prévue sur l’horizon), Sous la sécurité (le solde passe sous la sécurité, sans rupture), Couvert.',
+        valeurs: 'Plan non couvert · Sous la sécurité · Couvert',
+      },
+      { nom: 'Valeur MAD', description: 'La valeur du stock de la référence, au CMUP.', valeurs: 'MAD' },
     ],
-    liens: [{ route: '/etat-stock', libelle: 'État des stocks (écran)' }],
+    regles: [
+      'Les chiffres sont ceux de l’écran Stock projeté et alertes, calculés à l’ouverture par le moteur de couverture : l’état imprimé est celui du moment.',
+    ],
+    liens: [
+      { route: '/stock', libelle: 'Stock projeté et alertes' },
+      { route: '/etat-stock', libelle: 'État des stocks (écran)' },
+    ],
+  },
+  {
+    route: '/etats/plan-achat',
+    titre: 'Plan d’achat à engager (imprimé)',
+    chemin: 'États imprimables → Achats → Plan d’achat à engager',
+    objectif:
+      'Imprimer les propositions d’achat groupées par fournisseur, avec leurs quantités, leur urgence et leur montant estimé : le document de la revue d’achats.',
+    droits:
+      'Lecture du module Plan d’achat. Les colonnes de prix et de montant, et le montant estimé de l’en-tête, n’apparaissent qu’à qui voit le prix estimé.',
+    prerequis: ['Des propositions générées dans le plan d’achat (« Régénérer » ou « Commander »).'],
+    procedures: [
+      {
+        titre: 'Imprimer le plan d’achat',
+        etapes: [
+          'Ouvrez l’état depuis le centre des états imprimables (famille Achats).',
+          'Relisez l’en-tête : le nombre de fournisseurs, de propositions et, si vous le voyez, le montant estimé.',
+          'Cliquez « Imprimer » : un bloc par fournisseur, qui se détache pour être donné à traiter.',
+        ],
+      },
+    ],
+    champs: [
+      { nom: 'Fournisseurs', description: 'En-tête : le nombre de fournisseurs qui ont au moins une proposition.' },
+      { nom: 'Propositions', description: 'En-tête : le nombre de propositions imprimées.' },
+      { nom: 'Montant estime', description: 'En-tête : Σ quantité × prix estimé de toutes les propositions imprimées.', valeurs: 'MAD' },
+      { nom: 'Référence', description: 'Le code de la référence et sa désignation.' },
+      {
+        nom: 'Quantité',
+        description: 'La quantité proposée par le moteur de couverture, dans l’unité d’achat quand elle n’est pas le kilo, sinon en kilos.',
+      },
+      {
+        nom: 'Couv. j',
+        description:
+          'Les jours de couverture que la proposition porte. Les propositions du moteur de couverture n’en portent pas : la colonne affiche « — » ; la date limite de commande se lit à l’écran du plan d’achat.',
+        valeurs: 'jours',
+      },
+      {
+        nom: 'Urgence',
+        description: 'Déduite de la date limite de commande : TIER 1 (atteinte ou dépassée), TIER 2 (sous 7 jours), TIER 3 (sous 30 jours), TIER 4.',
+      },
+      { nom: 'Prix MAD/kg', description: 'Le prix estimé au kilo (dernier achat, catalogue converti, ou CMUP).', valeurs: 'MAD/kg' },
+      { nom: 'Montant MAD', description: 'Quantité × prix estimé.', valeurs: 'MAD' },
+    ],
+    regles: [
+      'L’état reprend TOUTES les propositions enregistrées, quel que soit leur statut — y compris celles déjà commandées ou écartées : relisez le statut à l’écran avant d’engager.',
+      'Les montants sont estimés à partir du dernier prix connu. Ils servent à arbitrer, pas à engager : le prix ferme se fixe au bon de commande.',
+    ],
+    liens: [{ route: '/plan-achat', libelle: 'Plan d’achat' }],
   },
   {
     route: '/etats/comptage',

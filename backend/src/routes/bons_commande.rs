@@ -1289,49 +1289,52 @@ pub async fn changer_statut_bc(
         .execute(&mut *tx)
         .await?;
 
-        // Un bon annule n'engage plus rien : ses propositions retournent au pool
-        // et redeviennent regenerables. Sans ce retour, la reference resterait
-        // marquee COMMANDE et le MRP ne la reproposerait jamais — un besoin
-        // disparaitrait pour une commande qui n'existe plus.
+        // Un bon annule n'engage plus rien : la reference redevient regenerable.
+        //
+        // LA PROPOSITION SE CLOT AVEC LE BON (decision du 27/10/2026, migration
+        // 2026-10-27f). Elle ne retourne plus au pool : rouverte (PROPOSE), elle
+        // restait designee par la ligne du bon annule, et la regeneration, qui
+        // purge les propositions ouvertes, butait sur fk_ligne_bc_id_proposition
+        // (400). Elle passe a ANNULE_BC (« Annulee avec le bon »), garde son lien
+        // au bon (id_bc_genere, et la ligne qui la designe) — l'historique est
+        // intact —, n'est plus ouverte (ni purgee, ni comptee, hors de l'index
+        // ux_plan_achat_ouvert), et la regeneration suivante en cree une NEUVE si
+        // le moteur de couverture en propose une. C'est un etat final, garanti en
+        // base (PA-ANNULE-BC).
         if s.statut == "ANNULE" {
-            // Le lien passe par les LIGNES : c'est la granularite a laquelle une
-            // proposition est engagee. Annuler le bon annule donc chacune de ses
-            // lignes, une par une, et non le bon en bloc.
-            //
-            // UNE SEULE PROPOSITION OUVERTE PAR REFERENCE (08/10/2026). Depuis
-            // le 06/10, une reference commandee se repropose : quand le bon
-            // s'annule, une proposition plus recente est souvent deja ouverte
-            // pour elle, calculee en deduisant ce bon. Rouvrir l'ancienne
-            // heurtait l'index ux_plan_achat_ouvert, et l'annulation echouait
-            // en « conflit ». La recente, recalculable, part — le generateur la
-            // refait a chaque passage, sans le bon cette fois ; une proposition
-            // figee ou arbitree, decision humaine, reste, et l'ancienne garde
-            // alors sa trace COMMANDE.
+            // UNE PROPOSITION OUVERTE CALCULEE AVEC CE BON (08/10/2026). Depuis le
+            // 06/10, une reference commandee se repropose : quand le bon s'annule,
+            // une proposition plus recente est souvent deja ouverte pour elle,
+            // calculee en deduisant ce bon, qui n'existe plus. La recente,
+            // recalculable, part — le generateur la refait a chaque passage, sans
+            // le bon cette fois ; une proposition figee ou arbitree, decision
+            // humaine, reste.
             sqlx::query(
                 "DELETE FROM plan_achat
                   WHERE statut IN ('PROPOSE','EN_REVISION','VALIDE')
                     AND figee = 0 AND code_reference_origine IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM ligne_bc l0 WHERE l0.id_proposition = plan_achat.id_proposition)
                     AND code_reference IN (
                         SELECT pa.code_reference FROM plan_achat pa
-                          JOIN ligne_bc l ON l.id_proposition = pa.id_proposition
-                         WHERE l.id_bc = $1 AND pa.statut = 'COMMANDE')",
+                         WHERE pa.statut = 'COMMANDE'
+                           AND (pa.id_bc_genere = $1
+                                OR pa.id_proposition IN (SELECT l.id_proposition FROM ligne_bc l
+                                                          WHERE l.id_bc = $1 AND l.id_proposition IS NOT NULL)))",
             )
             .bind(&id)
             .execute(&mut *tx)
             .await?;
+            // Le lien passe par les LIGNES (la granularite a laquelle une
+            // proposition est engagee) et par id_bc_genere (une proposition
+            // fondue dans une ligne qui en portait deja une autre n'est designee
+            // que par lui).
             sqlx::query(
-                "UPDATE plan_achat pa SET statut = 'PROPOSE', id_bc_genere = NULL
-                  WHERE pa.statut = 'COMMANDE'
-                    AND pa.id_proposition IN (SELECT id_proposition FROM ligne_bc
-                                               WHERE id_bc = $1 AND id_proposition IS NOT NULL)
-                    AND NOT EXISTS (SELECT 1 FROM plan_achat o
-                                     WHERE o.code_reference = pa.code_reference
-                                       AND o.statut IN ('PROPOSE','EN_REVISION','VALIDE'))
-                    -- Deux lignes du bon sur la meme reference : une seule rouvre.
-                    AND pa.id_proposition = (SELECT min(p2.id_proposition) FROM plan_achat p2
-                                               JOIN ligne_bc l2 ON l2.id_proposition = p2.id_proposition
-                                              WHERE l2.id_bc = $1 AND p2.statut = 'COMMANDE'
-                                                AND p2.code_reference = pa.code_reference)",
+                "UPDATE plan_achat SET statut = 'ANNULE_BC', id_bc_genere = $1
+                  WHERE statut = 'COMMANDE'
+                    AND (id_bc_genere = $1
+                         OR (id_bc_genere IS NULL
+                             AND id_proposition IN (SELECT id_proposition FROM ligne_bc
+                                                     WHERE id_bc = $1 AND id_proposition IS NOT NULL)))",
             )
             .bind(&id)
             .execute(&mut *tx)

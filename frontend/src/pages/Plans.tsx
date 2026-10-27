@@ -171,6 +171,9 @@ const enteteVide = (): Entete => ({
 
 export function Plans() {
   const droits = useDroits(MODULE)
+  // Le calcul du MRP et son archivage relèvent du module MRP côté serveur
+  // (routes/operations.rs, calculer_mrp / snapshot_mrp : MRP, ECRIRE).
+  const droitsMrp = useDroits('MRP')
   const ouvrirEtat = useOuvrirVue()
   const qc = useQueryClient()
   const confirmation = useConfirmation()
@@ -698,7 +701,7 @@ export function Plans() {
               >
                 <Pencil />
               </Bouton>
-              {droits.peutEcrire && p.statut !== 'CLOTURE' && (
+              {droits.peutValider && p.statut !== 'CLOTURE' && (
                 <Bouton
                   variante="discret"
                   taille="icone-xs"
@@ -851,24 +854,24 @@ export function Plans() {
                   taille="md"
                   consequence="Les besoins calcules restent, mais devront être recalculés après correction."
                 />
-                {statut === 'EN_COURS' && (
-                  <>
-                    <Bouton
-                      variante="contour"
-                      onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'mrp' })}
-                    >
-                      <Calculator />
-                      Calculer le MRP
-                    </Bouton>
-                    <Bouton
-                      variante="contour"
-                      onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'snapshot' })}
-                    >
-                      <Camera />
-                      Archiver
-                    </Bouton>
-                  </>
-                )}
+              </>
+            )}
+            {courant && statut === 'EN_COURS' && droitsMrp.peutEcrire && (
+              <>
+                <Bouton
+                  variante="contour"
+                  onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'mrp' })}
+                >
+                  <Calculator />
+                  Calculer le MRP
+                </Bouton>
+                <Bouton
+                  variante="contour"
+                  onClick={() => etape.mutate({ id: courant.id_plan, chemin: 'snapshot' })}
+                >
+                  <Camera />
+                  Archiver
+                </Bouton>
               </>
             )}
             {modifiable && (

@@ -1,5 +1,6 @@
 /**
- * FICHES D'AIDE — PLANIFICATION : PLANS DE PRODUCTION, ORDRES DE FABRICATION, BESOINS.
+ * FICHES D'AIDE — PLANIFICATION : PLANS DE PRODUCTION, ORDRES DE FABRICATION, BESOINS,
+ * PLAN D'ACHAT (moteur de couverture, propositions, conversion en bon).
  *
  * Une partie du catalogue : `../contenu.ts` les assemble, `../types.ts` donne
  * la forme d'une fiche. Chaque `champs[].nom` est l'intitulé EXACT de l'écran :
@@ -180,7 +181,7 @@ export const FICHES_PLANIFICATION: Sujet[] = [
           'Ouvrez le plan en brouillon : « Passer en simulation » (impossible tant que le plan a quelque chose à corriger).',
           'En simulation : « Figer les recettes » vérifie que chaque qualité planifiée figure dans l’en-tête et est encore active.',
           '« Valider » (droit de validation) met le plan EN COURS. Un seul plan peut être en cours : clôturez d’abord l’ancien.',
-          'Plan en cours : « Calculer le MRP » produit ses besoins de matière ; « Archiver » en garde une photo datée, avec le stock projeté.',
+          'Plan en cours : « Calculer le MRP » produit ses besoins de matière ; « Archiver » en garde une photo datée, avec le solde et l’état du moteur de couverture.',
         ],
         resultat: 'Le plan alimente le MRP et le plan d’achat ; son en-tête et sa grille ne se modifient plus.',
       },
@@ -610,6 +611,341 @@ export const FICHES_PLANIFICATION: Sujet[] = [
       { route: '/machines', libelle: 'Machines' },
       { route: '/fiche-hors-machine', libelle: 'Fiche hors machine' },
       { route: '/plans', libelle: 'Plans de production' },
+    ],
+  },
+
+  // ==========================================================================
+  // /plan-achat — Plans d’achat : le moteur de couverture et les propositions
+  // ==========================================================================
+  {
+    route: '/plan-achat',
+    titre: 'Plan d’achat',
+    chemin: 'Planification → Plans d’achat',
+    objectif:
+      'Savoir, référence par référence, jusqu’où le plan de production est couvert et quoi commander avant quelle date (onglet « À commander », le moteur de couverture), puis arbitrer les propositions et les envoyer en bon de commande.',
+    prerequis: [
+      'Un plan de production EN COURS dont le MRP est calculé : c’est sa photo du besoin, mois par mois, qui fait toute la demande. Sans plan en service, rien ne se projette.',
+      'Des références actives avec leur fournisseur et un prix (dernier achat, catalogue ou CMUP) : sans eux, la référence est calculée mais ne devient pas une proposition.',
+      'Des fournisseurs dont le délai de livraison et la couverture d’une commande sont à jour : à défaut, les paramètres P_DelaiDefaut (60 j) et P_MargeJours (30 j) s’appliquent, et l’écran le dit.',
+      'Une classe ABC sur chaque fiche : elle fixe les jours de sécurité. Sans classe, la plus longue des trois sécurités s’applique et la ligne signale le défaut de données.',
+    ],
+    droits:
+      'Lecture du module Plan d’achat pour consulter. Écriture du module Plan d’achat pour Régénérer, Commander, Écarter et basculer sur un équivalent ; « Envoyer au bon de commande » exige en plus l’écriture du module Bons de commande.',
+    procedures: [
+      {
+        titre: 'Lire la couverture (onglet « À commander »)',
+        etapes: [
+          'Le bandeau rappelle le plan en service, la fin de son horizon, la date de la photo du besoin et le jour d’où part la projection (aujourd’hui).',
+          'Une ligne par référence qui a une demande au plan, du stock ou un arrivage. L’ordre : la première rupture la plus proche d’abord (une rupture aujourd’hui en tête, sans rupture en dernier), puis la date limite de commande.',
+          'Resserrez avec les filtres Fournisseur, Proposition (avec / sans) et Plan non couvert (avant ou après aujourd’hui + délai, ou couvert sur l’horizon), ou la recherche (référence, désignation, fournisseur).',
+          'La ligne ↳ sous une référence dit ce qui est compté à part (fil sur métiers, restes, fil en route à sa date), ce qui n’est pas compté (quarantaine, bloqué, magasins hors plan) et ce qui est hors couverture (en retard, sans date, bons non validés, après l’horizon).',
+          'Cliquez la ligne (ou son chevron) : le détail se déplie dessous — la courbe du solde jour par jour, le calcul de la première proposition étape par étape, les ressources et arrivages avec leur raison, la chronologie et le plan mois par mois par qualité.',
+          '« Règles des dates d’arrivage, de la fenêtre et des réglages par défaut » (au-dessus de la liste) déplie les règles appliquées.',
+        ],
+        resultat: 'Vous savez jusqu’à quel jour le plan est couvert, combien commander et avant quelle date.',
+      },
+      {
+        titre: 'Commander une référence depuis « À commander »',
+        etapes: [
+          'Sur la ligne, cliquez « Commander » (l’icône seule sur un écran étroit). Le bouton n’apparaît que si le moteur propose une quantité et si la référence est active.',
+          'La proposition de CETTE référence est régénérée depuis le moteur (une proposition figée ou arbitrée reste telle quelle), puis s’ouvre, cochée, dans l’onglet « Lignes à commander ».',
+          'Continuez avec « Envoyer au bon de commande » ci-dessous.',
+        ],
+        resultat: 'La proposition attend dans les lignes à commander ; rien n’est encore engagé.',
+      },
+      {
+        titre: 'Régénérer et arbitrer les propositions (onglet « Besoins »)',
+        etapes: [
+          '« Régénérer » (confirmation demandée) : les propositions ouvertes sont remplacées par la première proposition du moteur pour chaque référence. Le message donne le nombre de propositions, le budget, les TIER 1, ce qui a été conservé (protégées, arbitrées) et les références non proposées (sans fournisseur ou sans prix).',
+          'Lisez les propositions, la plus urgente d’abord ; la flèche en tête de ligne déplie le calcul du moteur pour cette référence.',
+          'Écartez ce qui n’est pas à commander (icône ⊘) : la référence n’est plus reproposée pendant P_DureeEcartJours (90 jours).',
+          'Pour couvrir le besoin par un équivalent (icône ⇄) : choisissez la référence du groupe d’équivalence, écrivez le « Motif de la bascule », puis « Basculer le besoin ».',
+          'Cochez les propositions à commander (ou « Tout cocher »), puis « Lignes à commander ».',
+        ],
+        resultat: 'Les propositions retenues sont cochées ; la barre « Sélection » donne leur montant et le nombre de fournisseurs.',
+      },
+      {
+        titre: 'Envoyer au bon de commande (onglet « Lignes à commander »)',
+        etapes: [
+          'Les lignes cochées sont groupées par fournisseur. Pour chaque fournisseur, « Envoyer vers » : « Un nouveau bon », ou un bon BROUILLON du même fournisseur à compléter.',
+          'Ajustez au besoin la quantité en kilos, le prix au kilo (dans la devise de la proposition, sinon en MAD), les palettes et les bobines : liés (maillon), les trois se recalculent ensemble ; détachés, chacun se saisit seul.',
+          'Retirez une ligne (×) : elle redevient une simple proposition.',
+          'Cliquez « Envoyer au bon de commande ».',
+        ],
+        resultat:
+          'Un bon de commande BROUILLON par fournisseur (ou le brouillon choisi, complété) ; les propositions passent « Commandée » et pointent leur bon. La date de besoin D devient la livraison prévue de la ligne. Le bon doit encore être contrôlé et validé.',
+      },
+    ],
+    champs: [
+      /* --- Onglet « À commander » : la liste du moteur ---------------------- */
+      {
+        nom: 'Référence',
+        description:
+          'La référence, sa désignation (quand elle ne répète pas le code) et son fournisseur. Dans « À commander », le chevron ou un clic sur la ligne déplie le détail du calcul ; dans « Besoins », la flèche en tête de ligne fait de même ; dans « Lignes à commander », la ligne rappelle l’urgence, la livraison prévue (D) et la date limite de commande.',
+      },
+      {
+        nom: 'Disponible',
+        description:
+          'Ce qui couvre le plan aujourd’hui : le stock des magasins comptés au plan (hors quarantaine et magasins exclus du plan, lots bloqués retirés, restes compris) plus le fil sur les métiers au dernier constat, quel que soit son âge.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Couvert jusqu’au',
+        description:
+          'Le dernier jour où le solde projeté couvre le plan, la veille de la première rupture. « tout l’horizon » : aucune rupture jusqu’à la fin du plan en service. « non couvert » : la rupture est dès aujourd’hui.',
+        valeurs: 'date',
+      },
+      {
+        nom: 'Prochain arrivage',
+        description:
+          'Le premier arrivage COMPTÉ et ses kilos : une ligne de bon validé, envoyé ou livré partiellement, à sa date de livraison prévue ; un transfert en route, à sa date prévue de disponibilité. Un arrivage en retard, sans date ou d’un bon non validé n’y figure pas (voir la ligne ↳).',
+      },
+      {
+        nom: '1re rupture',
+        description:
+          'Le premier jour où le plan n’est plus couvert. En rouge quand il tombe avant aujourd’hui + délai : une commande passée maintenant arrivera trop tard pour l’éviter.',
+        valeurs: 'date',
+      },
+      {
+        nom: 'Plan non couvert',
+        description:
+          'Les kilos du plan que le solde ne peut pas servir sur l’horizon. Un déficit n’est jamais une dette : il est perdu jour par jour, ni reporté ni rattrapé — le solde projeté ne descend pas sous zéro. Le même mot est un filtre (avant ou après aujourd’hui + délai, couvert sur l’horizon), une colonne de « Par fournisseur » (le nombre de ses références au plan non couvert) et un compteur de « Situation » (les références dont une rupture est prévue sur l’horizon).',
+        valeurs: 'kg (liste) · nombre de références (Par fournisseur, Situation)',
+      },
+      {
+        nom: 'Délai',
+        description:
+          'Le délai de livraison du fournisseur, en jours (au survol : sa source, fournisseur ou paramètre global P_DelaiDefaut). Il place la date au plus tôt d’une commande (aujourd’hui + délai) et la date limite de commande (D − délai).',
+        valeurs: 'jours',
+      },
+      {
+        nom: 'Proposition',
+        description:
+          'La quantité de la première proposition du moteur, et son équivalent en palettes ordinaires de la fiche (pour information). « rien » : aucune proposition — au survol, la raison (aucun passage sous la sécurité sur l’horizon, ou aujourd’hui + délai au-delà de l’horizon). Comme filtre : « Avec proposition » / « Sans proposition ».',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Avant le',
+        description:
+          'La date limite de commande de la première proposition : D − délai fournisseur. En rouge une fois dépassée, en orange à 7 jours ou moins ; au survol, le nombre de jours qui restent.',
+        valeurs: 'date',
+      },
+      /* --- Le détail d’une référence ---------------------------------------- */
+      {
+        nom: 'Solde projeté jour par jour',
+        description:
+          'La courbe du solde projeté (trait plein), la ligne de sécurité (tirets), les arrivages comptés (triangles), le jour D de la première proposition et, sous zéro, les jours où le plan n’est pas couvert. Survolez un jour pour son solde, sa sécurité, sa consommation prévue et ses arrivages.',
+      },
+      {
+        nom: 'À commander — le calcul',
+        description:
+          'Le calcul de la première proposition, étape par étape : D (disponibilité de la commande) et pourquoi, F (fin de la fenêtre, exclue), plan sur la fenêtre, + sécurité, − S(D), − arrivages après D, = besoin théorique (avec son jour déterminant), + minimum de commande, arrondi vers le haut, = quantité proposée, et « À commander avant le ». Dessous, les propositions suivantes, indicatives : elles supposent les précédentes commandées (douze au plus).',
+      },
+      {
+        nom: 'Arrivages',
+        description:
+          'Chaque bon, import sans bon et transfert en route de la référence, avec ses kilos, sa date (de la ligne, de l’en-tête, ou date prévue de disponibilité), « compté » ou « non compté » et la raison : en retard, sans date, non validé, après l’horizon.',
+      },
+      {
+        nom: 'Chronologie',
+        description:
+          'Les événements de la projection — aujourd’hui, arrivage, plan non couvert à partir de ce jour, couverture reprise, passage sous la sécurité, aujourd’hui + délai, fins de mois, fin de l’horizon — avec ce qui s’est passé depuis la ligne précédente.',
+      },
+      { nom: 'Date', description: 'Chronologie : le jour de l’événement.', valeurs: 'date' },
+      { nom: 'Événement', description: 'Chronologie : ce qui arrive ce jour-là (plusieurs natures possibles le même jour).' },
+      {
+        nom: 'Conso prévue',
+        description: 'Chronologie : le plan consommé depuis la ligne précédente (kg du mois ÷ jours réels du mois, jour par jour).',
+        valeurs: 'kg',
+      },
+      { nom: 'Arrivée', description: 'Chronologie : les arrivages comptés depuis la ligne précédente.', valeurs: 'kg' },
+      { nom: 'Solde après', description: 'Chronologie : le solde projeté en fin de journée, jamais négatif.', valeurs: 'kg' },
+      /* --- Onglet « Besoins » : les propositions ----------------------------- */
+      {
+        nom: 'ABC',
+        description: 'La classe ABC (et XYZ) de la fiche article. Elle fixe les jours de sécurité du moteur (P_SecuriteA, B, C).',
+      },
+      {
+        nom: 'Action',
+        description:
+          'L’action recommandée, déduite de l’urgence : « Commander immediatement » (TIER 1), « Commander sous 7 jours » (TIER 2), « Planifier la commande » (TIER 3), « Reapprovisionnement normal » (TIER 4).',
+      },
+      {
+        nom: 'Urgence',
+        description:
+          'Déduite de la date limite de commande : atteinte ou dépassée = TIER 1 ; dans les 7 jours = TIER 2 ; dans les 30 jours = TIER 3 ; au-delà = TIER 4. Dans « Situation », le bloc Urgence compte les propositions ouvertes et leur montant par tier.',
+        valeurs: 'Tier 1 · Tier 2 · Tier 3 · Tier 4',
+      },
+      {
+        nom: 'Fournisseur',
+        description:
+          'Le fournisseur de la fiche article, et son pays : la commande se passe chez lui (un bon par fournisseur). Filtrable ; dans « À commander », filtre de la liste du moteur ; dans « Par fournisseur », une ligne par fournisseur.',
+      },
+      {
+        nom: 'Statut',
+        description:
+          'Où en est la proposition, avec le numéro du bon qu’elle a produit. « Annulée avec le bon » (ANNULE_BC) : le bon créé par « Commander » ou la conversion a été annulé ; la proposition reste liée à ce bon (l’historique est intact), elle n’est plus ouverte — ni purgée à la régénération, ni comptée dans les indicateurs — et la régénération suivante crée une proposition NEUVE si le moteur en propose une.',
+        valeurs: 'Proposée · En révision · Validée · Commandée · Écartée · Annulée avec le bon',
+      },
+      {
+        nom: 'A commander',
+        description:
+          'Colonne de « Besoins » : la quantité proposée en kilos (et dans l’unité du catalogue quand ce n’est pas le kilo), en lecture seule — elle s’ajuste dans les lignes à commander, pas ici. Bloc de « Situation » : le budget, la quantité et le nombre de références des propositions ouvertes.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Prix MAD/kg',
+        description:
+          'Le prix estimé au kilo, et sa source : « dernier achat » chez ce fournisseur, sinon « catalogue » converti au taux du jour, sinon « coût moyen » (CMUP). « prix à saisir » : le prix viendrait du CMUP que votre compte ne voit pas. Hors kilo, le même prix dans l’unité d’achat.',
+        valeurs: 'MAD/kg',
+      },
+      { nom: 'Prix devise', description: 'Le prix catalogue dans la devise du fournisseur : celui qu’on négocie et qui partira sur le bon.' },
+      { nom: 'Montant devise', description: 'Quantité × prix devise, dans la devise du fournisseur.' },
+      {
+        nom: 'Montant MAD',
+        description:
+          'La valeur en dirhams : quantité × prix estimé (Besoins), la somme du fournisseur (Par fournisseur), ou quantité × prix saisi, au taux de la proposition pour un prix en devise (Lignes à commander). Elle sert au budget, pas à la négociation.',
+        valeurs: 'MAD',
+      },
+      {
+        nom: 'Palettes',
+        description:
+          'Besoins : les palettes de la proposition, sinon « ≈ » l’équivalent en palettes ordinaires de la fiche, pour information — jamais une palette pleine imposée. Lignes à commander : le nombre de palettes confirmé, lié aux kilos et aux bobines tant que le maillon est fermé ; « + N kg palette » signale le complément de palette.',
+      },
+      {
+        nom: 'Complément palette',
+        description:
+          'Ce que l’arrondi au multiple de la fiche (multiple d’achat, ou palette pleine si « Arrondi à la palette pleine » est coché) a ajouté au besoin après le minimum de commande : commandé pour la logistique, pas pour produire. « — » : aucun arrondi.',
+        valeurs: 'kg',
+      },
+      {
+        nom: 'Besoin le',
+        description:
+          'D, la date de disponibilité de la commande calculée par le moteur. À la conversion, elle devient la date de livraison prévue de la ligne de bon.',
+        valeurs: 'date',
+      },
+      {
+        nom: 'Commander avant le',
+        description: 'La date limite de commande du moteur : D − délai fournisseur. C’est d’elle que se déduit l’urgence.',
+        valeurs: 'date',
+      },
+      {
+        nom: 'Motif de la bascule',
+        description:
+          'Pourquoi le besoin passe sur une référence équivalente : stock dormant, délai plus court, rupture chez le fournisseur… La référence d’origine reste tracée sur la proposition ; si une proposition est déjà ouverte sur la cible, les quantités sont fusionnées.',
+        obligatoire: true,
+      },
+      /* --- Onglet « Lignes à commander » ------------------------------------ */
+      {
+        nom: 'Envoyer vers',
+        description:
+          'Pour chaque fournisseur : « Un nouveau bon », ou un bon du MÊME fournisseur encore en BROUILLON, cherché parmi les siens. Un bon au contrôle, en demande de prix ou en attente de validation est figé : il ne se complète plus.',
+        defaut: 'Un nouveau bon',
+      },
+      {
+        nom: 'Qté (kg)',
+        description:
+          'Les kilos à commander, pré-remplis par la proposition. Ce que vous envoyez fait foi sur le bon. Liés (maillon), kilos, palettes et bobines se recalculent ensemble.',
+        valeurs: 'kg',
+        defaut: 'la quantité proposée',
+      },
+      {
+        nom: 'Prix / kg',
+        description:
+          'Le prix au kilo, dans la devise de la proposition (USD/kg, EUR/kg…) quand elle en a une, sinon en MAD/kg. Il part tel quel sur la ligne du bon. Une référence déjà présente sur le bon visé garde le prix de cette ligne.',
+        defaut: 'le prix de la proposition',
+      },
+      { nom: 'Bobines', description: 'Le nombre de bobines confirmé, lié aux kilos et aux palettes tant que le maillon est fermé ; une bobine ne se coupe pas.' },
+      /* --- Onglet « Par fournisseur » ---------------------------------------- */
+      { nom: 'Pays', description: 'Le pays du fournisseur.' },
+      { nom: 'Devise', description: 'La devise du fournisseur : celle du bon qui sera créé.' },
+      { nom: 'Refs', description: 'Le nombre de références proposées chez ce fournisseur.' },
+      { nom: 'Quantité', description: 'Les kilos proposés chez ce fournisseur.', valeurs: 'kg' },
+      { nom: '% budget', description: 'La part du fournisseur dans le montant total des propositions.', valeurs: '%' },
+      { nom: 'TIER 1', description: 'Le nombre de ses propositions à commander immédiatement (date limite atteinte ou dépassée).' },
+      { nom: 'Contact', description: 'Le contact principal du fournisseur.' },
+      /* --- Onglet « Situation » ---------------------------------------------- */
+      {
+        nom: 'Situation du stock',
+        description:
+          'Les références suivies (actives, avec un plan, du stock ou un arrivage) comptées par état du moteur de couverture, telles qu’à la dernière génération du plan (« calculée le … »).',
+      },
+      { nom: 'Références suivies', description: 'Les références actives que le moteur suit : une demande au plan, du stock ou un arrivage.' },
+      { nom: 'Sous la sécurité', description: 'Les références dont le solde projeté passe sous la sécurité, sans rupture sur l’horizon.' },
+      { nom: 'Couvert', description: 'Les références sans rupture ni passage sous la sécurité sur l’horizon.' },
+      {
+        nom: 'À commander aujourd’hui',
+        description: 'Les références dont la date limite de commande de la première proposition est atteinte ou dépassée.',
+      },
+      { nom: 'Classe A au plan non couvert', description: 'Les références de classe A dont une rupture est prévue sur l’horizon.' },
+      { nom: 'Budget total', description: 'Le montant des propositions ouvertes (proposées, en révision, validées).', valeurs: 'MAD' },
+      { nom: 'Quantité totale', description: 'Les kilos des propositions ouvertes.', valeurs: 'kg' },
+      { nom: 'Références', description: 'Le nombre de propositions ouvertes, une par référence.' },
+      {
+        nom: 'Risques identifies',
+        description: 'Les propositions ouvertes par risque de sourcing : MONO-SOURCE (aucun équivalent chez un autre fournisseur) ou MULTI-SOURCE, avec leur montant.',
+      },
+    ],
+    regles: [
+      'UNE SEULE SOURCE DE VÉRITÉ (27/10/2026) : tout ce qui dit d’une référence qu’elle est couverte, sous la sécurité ou à commander vient du moteur de couverture — cet écran, le stock projeté, le tableau de bord, l’état des stocks, les contrôles C05 et C25.',
+      'LA DEMANDE EST LE PLAN SEUL : la photo du besoin du plan en service, mois par mois. Consommation prévue d’un jour = kg du mois ÷ nombre de jours réels du mois. Le mois en cours ne compte qu’à partir d’aujourd’hui : le plan des jours passés est perdu, jamais reporté. Les ordres de fabrication n’y entrent pas.',
+      'L’HORIZON est celui du plan en service : sa date de fin, ou la fin de son dernier mois de besoin si elle va plus loin.',
+      'LA PROJECTION SE FAIT JOUR PAR JOUR : solde du jour = solde de la veille + arrivages comptés du jour − consommation prévue du jour. Le solde ne descend jamais sous zéro : un déficit est un « plan non couvert », ni reporté ni rattrapé.',
+      'CE QUI EST COMPTÉ : le stock des magasins comptés au plan (hors quarantaine), lots libres — restes et dormants compris —, lots bloqués exclus ; le fil sur les machines au dernier constat, quel que soit son âge ; les lignes de bon VALIDÉ, ENVOYÉ ou LIVRÉ PARTIEL à la date de livraison prévue de la ligne, sinon de l’en-tête ; le fil en route (transfert expédié) à sa date prévue de disponibilité.',
+      'CE QUI N’EST PAS COMPTÉ, mais montré : quarantaine, bloqué, magasins hors plan ; un bon dont la date est dépassée (en retard, contrôle C28) ou sans date ; un transfert en route en retard ou sans date (contrôle C66) ; un bon non validé (brouillon, contrôle, demande de prix, attente de validation) ; l’import en route sans bon ; ce qui arrive après l’horizon.',
+      'LA SÉCURITÉ est une ligne distincte de la rupture : jours de sécurité de la classe ABC (P_SecuriteA, B, C) × consommation moyenne prévue du plan sur la fenêtre. Sans classe ABC, la plus longue des trois, et le défaut de données est signalé sur la ligne.',
+      'D, LA DATE DE DISPONIBILITÉ = MAX(aujourd’hui + délai ; premier jour où le solde passe sous la sécurité). Motif « délai » quand D tombe sur aujourd’hui + délai (même si la sécurité est franchie ce jour-là ou avant), « sécurité » sinon.',
+      'LA FENÊTRE EST [D, F[ : D inclus, F exclu, F = D + couverture d’une commande (celle du fournisseur, sinon P_MargeJours : 30 jours pleins), bornée à la fin de l’horizon. Le dernier jour couvert est F − 1 ; un arrivage le jour F est hors de la fenêtre.',
+      'S(D) = le solde au début de D, arrivages du jour D compris, jamais négatif. BESOIN THÉORIQUE = MAX(0 ; le plus fort, sur chaque jour t de [D, F[, de sécurité + plan de D à t − arrivages après D jusqu’à t − S(D)). Le jour où ce maximum est atteint est le jour déterminant.',
+      'PUIS le minimum de commande de la fiche (MOQ), puis l’arrondi VERS LE HAUT au multiple : le multiple d’achat de la fiche, sinon la palette de la fiche si « Arrondi à la palette pleine » est coché ; sinon pas d’arrondi. Un besoin déjà multiple ne prend pas un multiple de plus.',
+      'DATE LIMITE DE COMMANDE = D − délai. Les propositions suivantes ajoutent la précédente aux arrivages à son D et recommencent, jusqu’à la fin de l’horizon, douze au plus ; seule la PREMIÈRE devient une proposition d’achat.',
+      'Les ÉTATS d’une référence : PLAN NON COUVERT (une rupture est prévue sur l’horizon), SOUS LA SÉCURITÉ (le solde passe sous la sécurité, sans rupture), COUVERT (ni l’un ni l’autre). Ils se calculent sans les propositions : une référence reste « plan non couvert » tant que la commande n’est pas validée et datée.',
+      'RÉGÉNÉRER remplace les propositions ouvertes qui n’engagent rien. Restent telles quelles : les commandées, les écartées, les protégées (retouchées) et les arbitrées (basculées sur un équivalent), ainsi que celles annulées avec leur bon. Une écartée masque la référence pendant P_DureeEcartJours (90 j), puis expire : le besoin est reproposé.',
+      'Une référence déjà sur un bon pas encore validé (brouillon, contrôle, demande de prix, attente de validation) n’est pas reproposée : complétez ce bon. Un bon validé, envoyé ou livré partiellement est un arrivage du moteur : ce qui reste proposé est un vrai besoin.',
+      'QUAND LE BON EST ANNULÉ (décision du 27/10/2026) : la proposition qu’il portait passe « Annulée avec le bon » (ANNULE_BC), reste liée au bon annulé, n’est plus ouverte, n’est ni purgée ni comptée dans les indicateurs ; la régénération suivante crée une proposition neuve si le moteur en propose une.',
+      'Le calcul ne MUTUALISE PAS les équivalents : l’équivalent disponible est affiché, la bascule reste un geste explicite, motivé et tracé ; une unité, une densité ou une catégorie différentes la font refuser.',
+      'Une référence inactive se lit mais ne se commande pas : pas de bouton « Commander », pas de proposition à la génération.',
+      'LA CONVERSION ouvre un bon BROUILLON par fournisseur (ou complète le brouillon choisi) : rien n’est engagé avant sa validation. Une référence déjà sur le bon visé voit sa ligne augmentée, au prix de cette ligne. La quantité, le prix et le colisage envoyés font foi ; la date de besoin D devient la livraison prévue.',
+      '« Situation » et « Par fournisseur » sont figés à la génération du plan : régénérez pour les remettre à jour.',
+    ],
+    messages: [
+      {
+        message: 'Le moteur de couverture ne propose rien pour … aujourd’hui (couverture suffisante, ou référence inactive). Rafraîchissez l’onglet À commander.',
+        cause: '« Commander » sur une référence que le moteur ne propose plus : la liste affichée était plus ancienne que le calcul.',
+      },
+      {
+        message: '… est déjà sur le bon … (…), pas encore validé : complétez ce bon plutôt que d’en préparer un second.',
+        cause: 'Un bon non validé porte déjà la référence : la proposition n’est pas recréée.',
+      },
+      {
+        message: 'La proposition de … a été écartée le … : elle ne se repropose pas avant P_DureeEcartJours.',
+        cause: 'La référence a été écartée il y a moins de 90 jours.',
+      },
+      {
+        message: 'Aucune proposition possible pour … (sans fournisseur sur la fiche) / (sans prix : ni dernier achat, ni catalogue, ni CMUP).',
+        cause: 'Le moteur propose une quantité, mais la fiche ne permet pas de l’acheter : complétez le fournisseur ou le prix.',
+      },
+      {
+        message: 'R-PROP : deja commandee(s) par un autre bon : … Rafraichissez le plan d’achat.',
+        cause: 'Un autre poste a converti la même proposition entre-temps.',
+      },
+      {
+        message: 'Le bon … est … : il ne se complete plus. Choisissez un brouillon ou un nouveau bon.',
+        cause: 'Le bon choisi dans « Envoyer vers » n’est plus en brouillon.',
+      },
+      {
+        message: 'Le bon … est d’un autre fournisseur (…) : il ne recoit pas les lignes de ….',
+        cause: 'Un bon ne reçoit que les lignes de son fournisseur.',
+      },
+      { message: 'Aucun taux de change en vigueur pour ….', cause: 'Ouvrez le taux de la devise dans Paramètres → Devises et taux.' },
+      { message: 'Aucune proposition ouverte a convertir.', cause: 'Les propositions cochées ont été commandées, écartées ou régénérées entre-temps.' },
+    ],
+    liens: [
+      { route: '/besoins', libelle: 'Besoins (MRP)' },
+      { route: '/stock', libelle: 'Stock projeté et alertes' },
+      { route: '/bons-commande', libelle: 'Bons de commande' },
+      { route: '/equivalences', libelle: 'Équivalences' },
+      { route: '/etats/plan-achat', libelle: 'Plan d’achat à engager (imprimé)' },
     ],
   },
 ]

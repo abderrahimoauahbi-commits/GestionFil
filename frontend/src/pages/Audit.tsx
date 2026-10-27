@@ -4,11 +4,12 @@
  * Reserve a la Direction et a la DAF : le serveur refuse `/api/audit` aux
  * autres roles, l'ecran ne fait que refleter cette regle.
  *
- * Un avertissement est affiche en tete, et il n'est pas decoratif : ce journal
- * enregistre les changements de **statut et de referentiel**, pas les
- * quantites ni les montants. Le jour ou quinze tonnes manqueront, il dira qui a
- * modifie un libelle. Le presenter comme une piste d'audit complete serait
- * trompeur, et c'est le genre de promesse qui fait cesser de verifier.
+ * Le bandeau de tete dit ce que le journal contient vraiment (PostgreSQL,
+ * `audit_log`) : statuts, referentiels et suppressions (014, 2026-09-19), les
+ * montants depuis 2026-10-08d (lignes de bon, factures, frais, lots, cours,
+ * propositions d'achat), cours BAM et comptages depuis 2026-10-09y, avec
+ * l'ancienne et la nouvelle valeur. Les mouvements de stock n'y sont pas : le
+ * grand livre (`ligne_mouvement`) est immuable et fait foi par lui-meme.
  */
 import { useMemo, useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -78,14 +79,15 @@ export function Audit() {
     <div className="flex flex-col gap-3">
       <EnTetePage
         titre="Journal d'audit"
-        description={`${(q.data ?? []).length} entrees les plus recentes`}
+        description={`${(q.data ?? []).length} entrées les plus récentes`}
       />
 
-      <Alerte ton="alerte" titre="Ce journal ne trace pas les valeurs">
-        Il enregistre les changements de statut et de referentiel, avec leur auteur et leur date.
-        Il ne contient <strong>ni quantité, ni prix, ni mouvement de stock</strong> : ce n'est pas
-        une piste d'audit complete au sens comptable. L'etendre aux valeurs est un prealable a
-        tout audit externe.
+      <Alerte ton="info" titre="Ce que ce journal contient">
+        Les changements de statut et de référentiel, les suppressions, et les valeurs d’argent
+        (lignes de bon de commande, factures, frais, lots, cours de change, propositions d’achat)
+        ainsi que les comptages d’inventaire : chaque fois l’auteur, la date, l’ancienne et la
+        nouvelle valeur. Les <strong>mouvements de stock n’y sont pas</strong> : ils sont
+        immuables et se lisent dans le grand livre des mouvements, qui fait foi.
       </Alerte>
 
       <div className="flex flex-wrap items-center gap-2">

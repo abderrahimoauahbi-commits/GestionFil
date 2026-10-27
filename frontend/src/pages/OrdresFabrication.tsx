@@ -1,8 +1,10 @@
 /**
  * LES ORDRES DE FABRICATION (22/10/2026, docs/A-DECIDER-of-supply-chain.md).
  *
- * L'OF — date, qualité, métrage — PRÉVOIT le besoin, ORIENTE les machines et
- * ANALYSE la réalité ; il ne déplace jamais le stock. Deux onglets :
+ * L'OF — date, qualité, métrage — PRÉVOIT la consommation, ORIENTE les machines
+ * et ANALYSE la réalité ; il ne déplace jamais le stock. Il n'entre pas dans le
+ * besoin d'achat (le plan de production seul, 2026-10-27b) ; C64 signale un OF
+ * au-delà du plan du mois. Deux onglets :
  *
  *   Ordres de fabrication   la liste, filtrée par statut (barre de droite),
  *                           qualité, période ; chaque OF s'ouvre sur sa page ;
@@ -189,7 +191,7 @@ function ListeOf() {
     {
       titre: 'Par statut',
       entrees: [
-        { cle: 'PREVU', libelle: 'Prévu', resume: 'Compte dans le besoin', compte: comptes.PREVU ?? 0, ton: 'neutre' as const },
+        { cle: 'PREVU', libelle: 'Prévu', resume: 'À lancer', compte: comptes.PREVU ?? 0, ton: 'neutre' as const },
         { cle: 'LANCE', libelle: 'Lancé', resume: 'En production', compte: comptes.LANCE ?? 0, ton: 'alerte' as const },
         { cle: 'CLOTURE', libelle: 'Clôturé', resume: 'Consommation arrêtée', compte: comptes.CLOTURE ?? 0, ton: 'succes' as const },
         { cle: 'ANNULE', libelle: 'Annulé', compte: comptes.ANNULE ?? 0, ton: 'neutre' as const },

@@ -200,6 +200,8 @@ export const STATUTS = {
     VALIDE: d('Validée', 'succes'),
     COMMANDE: d('Commandée', 'neutre'),
     IGNORE: d('Écartée', 'neutre'),
+    /** Close avec son bon annulé (décision du 27/10/2026) : liée à lui, plus ouverte, état final. */
+    ANNULE_BC: d('Annulée avec le bon', 'danger'),
   },
   /** plan_achat.urgence */
   urgence_achat: {

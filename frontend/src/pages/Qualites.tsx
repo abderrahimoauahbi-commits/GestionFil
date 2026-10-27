@@ -1338,7 +1338,7 @@ export function Qualites() {
                 <div className="grid grid-cols-2 gap-2">
                   {PARAMETRES_GENERAUX.map(({ champ, libelle, code }) => (
                     <div key={champ}>
-                      <Etiq htmlFor="ch-qualites-5">
+                      <Etiq htmlFor={`ch-qualites-param-${champ}`}>
                         {libelle}
                         {enCreation && (
                           <Aide>
@@ -1346,7 +1346,7 @@ export function Qualites() {
                           </Aide>
                         )}
                       </Etiq>
-                      <Champ id="ch-qualites-5"
+                      <Champ id={`ch-qualites-param-${champ}`}
                         type="number"
                         step="any"
                         min={0}

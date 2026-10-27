@@ -23,7 +23,7 @@ import { Badge, Bouton } from '../../composants/ui/base'
 import { Dialogue, DialogueContenu } from '../../composants/ui/surcouches'
 import { libelleLot } from '../../lib/lots'
 import { cn } from '../../lib/utils'
-import { MODULE, MODULE_DECISION, libelleSeuil, lienFiche, messageErreur, nb, useApresDecision, useBasculerRestes, type Lot } from './modele'
+import { MODULE_DECISION, libelleSeuil, lienFiche, messageErreur, nb, useApresDecision, useBasculerRestes, type Lot } from './modele'
 import { StatutBadge } from '../../composants/StatutBadge'
 
 export function LienLot({ reference, lot, className }: { reference: string; lot: string; className?: string }) {
@@ -196,12 +196,13 @@ type Geste = 'bloquer' | 'debloquer' | 'projet' | 'restes' | 'dormant'
  * un bouton qui ne peut que refuser apprend seulement a ne plus cliquer.
  *
  * Droits (regle 5) : bloquer, debloquer et trancher un dormant demandent
- * VALIDER du module LOTS, ou la Direction ; basculer demande ECRIRE.
+ * VALIDER du module LOTS, ou la Direction ; basculer demande ECRIRE du module LOTS.
  */
 export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boolean }) {
   const { peut } = useAuth()
   const peutValider = peut(MODULE_DECISION, 'VALIDER')
-  const peutEcrire = peut(MODULE, 'ECRIRE')
+  // POST /api/lots/basculer exige ECRIRE du module LOTS (routes/lots.rs, basculer).
+  const peutBasculer = peut(MODULE_DECISION, 'ECRIRE')
   const [geste, setGeste] = useState<Geste | null>(null)
   const apres = useApresDecision()
   const basculer = useBasculerRestes()
@@ -219,7 +220,7 @@ export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boole
   const taille = complet ? 'sm' : 'xs'
   const boutons: React.ReactNode[] = []
 
-  if (actif && lot.a_basculer && peutEcrire) {
+  if (actif && lot.a_basculer && peutBasculer) {
     boutons.push(
       <Bouton
         key="restes"
@@ -236,7 +237,7 @@ export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boole
         Basculer en Restes
       </Bouton>,
     )
-  } else if (complet && actif && lot.categorie === 'PROJET' && lot.statut === 'LIBRE' && peutEcrire) {
+  } else if (complet && actif && lot.categorie === 'PROJET' && lot.statut === 'LIBRE' && peutBasculer) {
     boutons.push(
       <Bouton key="restes" taille={taille} variante="contour" onClick={() => setGeste('restes')}>
         <ArrowDownToLine />
@@ -244,7 +245,7 @@ export function ActionsLot({ lot, complet = false }: { lot: Lot; complet?: boole
       </Bouton>,
     )
   }
-  if (complet && actif && lot.categorie === 'RESTES' && peutEcrire) {
+  if (complet && actif && lot.categorie === 'RESTES' && peutBasculer) {
     boutons.push(
       <Bouton key="projet" taille={taille} variante="contour" onClick={() => setGeste('projet')}>
         <ArrowUpFromLine />

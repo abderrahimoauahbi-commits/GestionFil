@@ -387,10 +387,12 @@ function BulleIndice({ champ, className }: { champ: ChampAide; className?: strin
           type="button"
           tabIndex={-1}
           data-indice=""
-          aria-label={`Indice : ${champ.nom}`}
-          aria-expanded={ouvert}
-          aria-controls={ouvert ? idContenu : undefined}
-          aria-haspopup="dialog"
+          // HORS DE L'ARBRE D'ACCESSIBILITÉ (27/10/2026) : logée dans l'étiquette,
+          // l'icône nommée « Indice : X » s'ajoutait au nom du champ (« X Indice :
+          // X ») et répondait elle-même à « l'étiquette X ». Elle sert la souris et
+          // le toucher ; au clavier, F1 dans le champ ouvre la bulle, qui porte son
+          // propre nom et prend le focus.
+          aria-hidden="true"
           {...survol}
           onClick={(e) => {
             // Ni le tri d'une colonne, ni l'activation de l'étiquette, ni le
